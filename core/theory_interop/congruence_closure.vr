@@ -2,48 +2,60 @@
 // core.theory_interop.congruence_closure — Nieuwenhuis-Oliveras (VVA-2 V1)
 // =============================================================================
 //
+
 // Algorithmic core of the canonicalize pipeline shipped at
 // core/theory_interop/bridges/oc_dc_bridge.vr per Theorem 16.10
 // (round-trip property). Implements the **Nieuwenhuis-Oliveras 2007**
 // congruence-closure procedure with explicit anti-Knuth-Bendix
 // discipline:
 //
-//   • The closure terminates on every input set of equations because
-//     the iteration reduces the number of equivalence classes; the
-//     ground-term universe is finite by construction (only sub-terms
-//     of the input axiom set appear).
+
+//  • The closure terminates on every input set of equations because
+//  the iteration reduces the number of equivalence classes; the
+//  ground-term universe is finite by construction (only sub-terms
+//  of the input axiom set appear).
 //
-//   • Knuth-Bendix completion is **NOT** used: it does not always
-//     terminate even for strongly-typed first-order axiom sets.
-//     Verum's pipeline rejects the KB approach explicitly per
-//     VVA §2.2 and routes through Nieuwenhuis-Oliveras.
+
+//  • Knuth-Bendix completion is **NOT** used: it does not always
+//  terminate even for strongly-typed first-order axiom sets.
+//  Verum's pipeline rejects the KB approach explicitly per
+//  VVA §2.2 and routes through Nieuwenhuis-Oliveras.
 //
-//   • Subsumption-detection (the second-order step) is built on top
-//     of the closure via the standard "find all merges" callback.
+
+//  • Subsumption-detection (the second-order step) is built on top
+//  of the closure via the standard "find all merges" callback.
 //
+
 // Surface:
 //
-//   • `Term` — a small ADT over the ground-term universe used by
-//     canonicalisation (function symbols + argument lists, indexed
-//     by integer identifiers so the union-find primitive can drive
-//     the closure).
+
+//  • `Term` — a small ADT over the ground-term universe used by
+//  canonicalisation (function symbols + argument lists, indexed
+//  by integer identifiers so the union-find primitive can drive
+//  the closure).
 //
-//   • `EquationSet` — the collection of input equations to close.
+
+//  • `EquationSet` — the collection of input equations to close.
 //
-//   • `congruence_close(eqs) -> CongruenceClosure` — runs the
-//     iteration to fixed point and returns the result.
+
+//  • `congruence_close(eqs) -> CongruenceClosure` — runs the
+//  iteration to fixed point and returns the result.
 //
-//   • `CongruenceClosure.representative(t)` — the canonical
-//     representative of `t`'s equivalence class.
+
+//  • `CongruenceClosure.representative(t)` — the canonical
+//  representative of `t`'s equivalence class.
 //
-//   • `CongruenceClosure.merged(t1, t2)` — true iff `t1` and `t2`
-//     ended up in the same class.
+
+//  • `CongruenceClosure.merged(t1, t2)` — true iff `t1` and `t2`
+//  ended up in the same class.
 //
+
 // V1 (this file) ships the closure operating on integer-keyed terms.
 // V1.5 will add an Articulation→Term reflection helper so the
 // closure can drive the full canonicalize-on-Articulation pipeline
 // per oc_dc_bridge.
 //
+
 // Asymptotic: O(n α(n)) per equation processed, where α is inverse
 // Ackermann. The full closure runs in O(N · α(N)) where N is the
 // number of distinct ground sub-terms in the input.
@@ -61,6 +73,7 @@ mount core.collections.map.{Map};
 /// registered exactly once (the user keeps the registration table);
 /// the closure operates on the integer indices.
 ///
+
 /// The `arity` field is redundant with `args.len()` but the
 /// algorithm uses it as a fast-path so we materialise it once.
 @derive(Clone)
@@ -210,6 +223,7 @@ public fn closure_representative(c: &mut CongruenceClosure, t_id: Int) -> Int {
 /// the congruence axiom: same symbol applied to args in the same
 /// classes ⇒ same class.
 ///
+
 /// Cost: O(arity · log n) per call (amortised); the dominant work
 /// is `Text.from_int` on each argument's class id. This is the
 /// V1.5 replacement for V1's pairwise-args scan, which cost O(arity)
@@ -235,6 +249,7 @@ fn term_signature(t: &Term, uf: &mut UnionFindInt) -> Text {
 /// signature-collision merge the colliding terms' classes. Returns
 /// `true` iff any new merge happened.
 ///
+
 /// Cost: O(n · α(n) · arity_avg) per round — each of n terms is
 /// signed (O(arity · log n)) and probed once into the map. This is
 /// strictly better than V1's O(n² · α) per-round pairwise scan.
@@ -267,25 +282,28 @@ fn one_congruence_round(eqs: &EquationSet, uf: &mut UnionFindInt) -> Bool {
 /// Run the Nieuwenhuis-Oliveras congruence-closure procedure to
 /// fixed point on the input equation set.
 ///
+
 /// The procedure (V1.5 — signature-table replacement of V1's
 /// pairwise scan):
-///   1. Seed the union-find with the input equations.
-///   2. Repeatedly run `one_congruence_round` (signature-keyed walk
-///      over all non-constant terms; collisions merge classes)
-///      until no more merges happen.
-///   3. Return the final union-find + iteration count.
+///  1. Seed the union-find with the input equations.
+///  2. Repeatedly run `one_congruence_round` (signature-keyed walk
+///  over all non-constant terms; collisions merge classes)
+///  until no more merges happen.
+///  3. Return the final union-find + iteration count.
 ///
+
 /// Termination: the iteration strictly reduces the number of
 /// equivalence classes; the term universe is finite, so the
 /// iteration converges in at most O(|terms|) rounds.
 ///
+
 /// Asymptotic cost: O(|terms|² · α(|terms|) · arity_avg · log|terms|)
 /// in the worst case (O(|terms|) rounds × O(|terms| · α · arity · log)
 /// per round). V1 was O(|terms|³ · α) — V1.5 saves a factor of
 /// |terms| / log|terms|. The Downey-Sethi-Tarjan use-list version,
 /// which would replace the per-round full re-scan with incremental
 /// re-signing of only the dependents of the just-merged classes, is
-/// V2 work tracked under the same task.
+/// future work tracked under the same task.
 public fn congruence_close(eqs: EquationSet) -> CongruenceClosure {
     let n: Int = eqs.terms.len() as Int;
     let mut uf: UnionFindInt = UnionFindInt.new(n as Int);
@@ -323,6 +341,7 @@ public fn congruence_close(eqs: EquationSet) -> CongruenceClosure {
 /// reflexive (x ≡ x always holds, regardless of whether the closure
 /// computation produced any non-trivial merges).
 ///
+
 /// The reflexivity observation is the canonical witness that the
 /// closure value EXISTS and is queryable: only a constructed
 /// `&CongruenceClosure` can answer `closure_merged`, so a successful
@@ -384,6 +403,7 @@ public axiom congruence_close_complete(
 /// (round-trip property) and Theorem 16.7 (general undecidability
 /// via Novikov-Boone) sit on top of.
 ///
+
 /// V3 form: witness-parameterised over the EquationSet — for any
 /// well-formed input, the merger predicate is total (decidable).
 @framework(diakrisis, "Theorem 16.5 (gauge decidability via congruence closure)")

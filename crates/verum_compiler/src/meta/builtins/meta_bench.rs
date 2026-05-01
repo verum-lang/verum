@@ -1,39 +1,50 @@
 //! Meta Benchmarking Intrinsics (Tier 1 - Requires MetaBench)
 //!
+
 //! Provides compile-time benchmarking and profiling for meta functions.
 //! All functions require the `MetaBench` context.
 //!
+
 //! ## Timing
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `bench_start(name)` | `(Text) -> Int` | Start timer, return nanos |
 //! | `bench_now_ns()` | `() -> Int` | Current monotonic nanos |
 //! | `bench_report(name, ns)` | `(Text, Int) -> ()` | Store benchmark result |
 //!
+
 //! ## Memory
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `bench_memory_usage()` | `() -> Int` | Current memory usage (bytes) |
 //! | `bench_peak_memory()` | `() -> Int` | Peak memory usage (bytes) |
 //!
+
 //! ## Counters
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `bench_count(name)` | `(Text) -> ()` | Increment counter by 1 |
 //! | `bench_count_by(name, n)` | `(Text, Int) -> ()` | Increment counter by N |
 //! | `bench_get_count(name)` | `(Text) -> Int` | Read counter value |
 //!
+
 //! ## Results
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `bench_all_results()` | `() -> List<(Text, List<BenchResult>)>` | All results |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [MetaBench]` context.
 
 use std::time::Instant;
@@ -46,6 +57,7 @@ use crate::meta::BenchResult;
 
 /// Monotonic reference point for bench_now_ns / bench_start
 ///
+
 /// Uses `std::time::Instant::now()` at first call to establish a baseline.
 /// All subsequent calls compute elapsed nanos from this point.
 fn monotonic_nanos() -> i128 {
@@ -233,6 +245,7 @@ fn meta_bench_report(
 
 /// Get current estimated memory usage in bytes
 ///
+
 /// This returns the tracked `memory_used` field from the meta context.
 /// For a more accurate measurement, the compiler pipeline should update
 /// this field periodically.

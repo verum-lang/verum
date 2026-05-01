@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_expanded_sql.
 //
+
 // Integers and reals render as decimal digits; text renders inside
 // single quotes with `'` doubled; blobs render as `X'…hex…'`; NULL
 // renders as the bareword NULL.
@@ -112,7 +113,7 @@ public fn render_literal(dst: &mut Text, l: &RenderLiteral) {
         RlInt(n)  => push_int64(dst, *n),
         RlReal(_) => {
             // Real formatting isn't byte-exact across platforms; emit a
-            // placeholder.  Embedders that need byte-exact output pass
+            // placeholder. Embedders that need byte-exact output pass
             // RlText(format_real_locally) instead.
             dst.push_str(&"REAL?".clone());
         }

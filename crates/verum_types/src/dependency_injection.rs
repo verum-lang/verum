@@ -1,36 +1,43 @@
 //! Dependency Injection Type Checking
 //!
+
 //! Type-level string operations for compile-time text manipulation
 //!
+
 //! This module implements the complete 5-phase type-checking algorithm for
 //! injectable types in Verum's Two-Level Context Model:
 //!
+
 //! 1. **Registration**: Parse @injectable types, validate scopes
 //! 2. **Dependency Analysis**: Build dependency graph from @inject constructors
 //! 3. **Cycle Detection**: Verify acyclicity using DFS
 //! 4. **Protocol Resolution**: Resolve `&impl Protocol` dependencies
 //! 5. **Constructor Validation**: Verify @inject constructor constraints
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! @injectable(Scope.Singleton)
 //! type DatabaseService is {
-//!     config: Config,
-//!     pool: ConnectionPool,
+//!  config: Config,
+//!  pool: ConnectionPool,
 //! };
 //!
+
 //! @injectable(Scope.Request)
 //! type UserService is {
-//!     db: &DatabaseService,  // Dependency reference
-//!     cache: &CacheService,
+//!  db: &DatabaseService, // Dependency reference
+//!  cache: &CacheService,
 //! };
 //!
+
 //! implement UserService {
-//!     @inject
-//!     fn new(db: &DatabaseService, cache: &CacheService) -> Self {
-//!         Self { db: db.clone(), cache: cache.clone() }
-//!     }
+//!  @inject
+//!  fn new(db: &DatabaseService, cache: &CacheService) -> Self {
+//!  Self { db: db.clone(), cache: cache.clone() }
+//!  }
 //! }
 //! ```
 
@@ -71,6 +78,7 @@ impl Scope {
 
     /// Check if this scope is compatible with dependent scope
     ///
+
     /// Rule: Can only depend on longer or equal lifetimes
     /// Singleton < Request < Transient
     pub fn can_depend_on(&self, dependency: Scope) -> bool {
@@ -374,14 +382,17 @@ impl DITypeChecker {
 
     /// Phase 4: Resolve protocol dependencies
     ///
+
     /// This phase resolves protocol-based dependencies by:
     /// 1. Finding all DependencyRef::Protocol entries in constructors
     /// 2. Looking up types that implement each protocol
     /// 3. Verifying exactly one injectable type implements each protocol
     /// 4. Adding edges to the dependency graph for protocol dependencies
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if:
     /// - No injectable type implements a required protocol
     /// - Multiple injectable types implement the same protocol (ambiguity)
@@ -494,11 +505,13 @@ impl DITypeChecker {
 
     /// Phase 6: Validate scope thread-safety constraints
     ///
+
     /// Singleton-scoped providers are shared across threads, so they must be
     /// thread-safe (Send + Sync). This phase checks:
     /// - Singleton providers do not contain known non-Send/non-Sync fields
     /// - Request-scoped providers are warned if they hold non-Send resources
     ///
+
     /// The actual Send/Sync check is structural: known non-thread-safe types
     /// (RawPtr, Cell, RefCell, UnsafeCell, Rc) produce hard errors when found
     /// in Singleton-scoped injectables.

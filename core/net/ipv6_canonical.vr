@@ -5,6 +5,7 @@
 // Dependencies: core, core.collections, core.net.addr
 // =============================================================================
 //
+
 // RFC 5952 — the one-true-spelling for IPv6 addresses. Without a
 // shared canonicaliser, the same address surfaces under a dozen
 // equivalent strings (`2001:0db8.1` / `2001:DB8.1` /
@@ -12,29 +13,36 @@
 // log-dedup, firewall-rule, and allowlist implementation ends up
 // with a pile of near-duplicates.
 //
+
 // # Canonical form (§4)
 //
-//   * Leading zeros suppressed in each group (`0001` → `1`).
-//   * The longest run of consecutive all-zero groups is compressed
-//     with `::`. Ties → leftmost run wins (§4.2.3).
-//   * Runs of a single zero group are NOT compressed (§4.2.2).
-//   * All hex digits in lowercase (§4.3).
-//   * IPv4-mapped form (`::ffff:a.b.c.d`, §5) preserved on input,
-//     emitted with dotted-quad tail.
+
+//  * Leading zeros suppressed in each group (`0001` → `1`).
+//  * The longest run of consecutive all-zero groups is compressed
+//  with `::`. Ties → leftmost run wins (§4.2.3).
+//  * Runs of a single zero group are NOT compressed (§4.2.2).
+//  * All hex digits in lowercase (§4.3).
+//  * IPv4-mapped form (`::ffff:a.b.c.d`, §5) preserved on input,
+//  emitted with dotted-quad tail.
 //
+
 // # API
 //
+
 // ```
 // let canon: Text = ipv6_canonical.format_ipv6(&ipv6_addr);
 //
+
 // let parsed: Ipv6Addr = ipv6_canonical.parse(&Text.from("2001:0DB8:0:0:0:0:0:1"))?;
-// let canon = ipv6_canonical.format_ipv6(&parsed);   // "2001:db8.1"
+// let canon = ipv6_canonical.format_ipv6(&parsed); // "2001:db8.1"
 // ```
 //
+
 // `parse` is a thin wrapper over `Ipv6Addr.parse` — the only
 // value-add is returning the caller's input in canonical form via
 // `canonicalize(text)`.
 //
+
 // =============================================================================
 
 module core.net.ipv6_canonical;
@@ -168,7 +176,7 @@ fn longest_zero_run(groups: &[UInt16; 8]) -> (Int, Int) {
 }
 
 fn is_ipv4_mapped(groups: &[UInt16; 8]) -> Bool {
-    // ::ffff:a.b.c.d  →  [0,0,0,0,0,0xFFFF,xxxx,yyyy]
+    // ::ffff:a.b.c.d → [0,0,0,0,0,0xFFFF,xxxx,yyyy]
     if groups[0] != 0_u16 { return false; }
     if groups[1] != 0_u16 { return false; }
     if groups[2] != 0_u16 { return false; }

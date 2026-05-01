@@ -1,14 +1,17 @@
 //! Well-known Verum stdlib type names.
 //!
+
 //! Centralizes the string constants used throughout the compiler to identify
 //! stdlib types (List, Map, Text, Channel, etc.), replacing hundreds of scattered
 //! string literals with a single enum.
 //!
+
 //! This module lives in `verum_common` so all compiler crates can use it without
 //! cross-crate dependency issues.
 
 /// Well-known Verum standard library types referenced during compilation.
 ///
+
 /// These are the types that the compiler needs special handling for — collection
 /// types, wrapper types, concurrency primitives, etc. Using this enum instead of
 /// raw string comparisons prevents typos and makes the set of special types explicit.
@@ -211,6 +214,7 @@ impl WellKnownType {
 
 /// Well-known variant constructor tags used by stdlib sum types.
 ///
+
 /// These are the constructor names that the compiler may need to recognize
 /// when doing pattern matching or value construction in the meta system.
 /// Centralizes strings like "Some", "None", "Ok", "Err" that were previously
@@ -451,6 +455,7 @@ pub mod type_names {
 
 /// Well-known Verum protocols that the compiler may need special handling for.
 ///
+
 /// This centralizes protocol name strings, replacing scattered hardcoded comparisons
 /// like `"Clone"`, `"Eq"`, `"Hash"` across the compiler. The compiler still needs to
 /// know about these protocols for codegen (e.g., vtable layout, dynamic dispatch),
@@ -554,6 +559,7 @@ impl WellKnownProtocol {
     /// Returns true if this protocol requires a fat reference (vtable pointer)
     /// when used as a dynamic dispatch target (protocol object / existential).
     ///
+
     /// This is the centralized definition of which protocols produce fat refs,
     /// replacing scattered `matches!()` lists throughout codegen.
     pub fn requires_fat_ref(self) -> bool {
@@ -575,9 +581,11 @@ impl WellKnownProtocol {
 /// Resolve a method name to its defining protocol (if the method is a well-known
 /// protocol method).
 ///
+
 /// This enables "dyn:Protocol.method" dispatch at the LLVM level when
 /// monomorphization hasn't resolved the concrete type.
 ///
+
 /// This centralizes the mapping that was previously hardcoded in
 /// `verum_vbc/src/codegen/expressions.rs`.
 pub fn method_to_protocol(method_name: &str) -> Option<WellKnownProtocol> {
@@ -603,10 +611,12 @@ pub fn method_to_protocol(method_name: &str) -> Option<WellKnownProtocol> {
 
 /// Check if a primitive type name implements a given protocol.
 ///
+
 /// This centralizes the knowledge of which built-in/primitive types automatically
 /// satisfy which protocols. Previously this was scattered across
 /// `verum_types/src/specialization_selection.rs` in hardcoded match arms.
 ///
+
 /// Note: This is intentionally hardcoded because primitive types are part of the
 /// language definition, not the standard library. Their protocol implementations
 /// cannot be discovered from source -- they are axioms of the type system.

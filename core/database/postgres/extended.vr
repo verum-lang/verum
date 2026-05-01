@@ -3,13 +3,16 @@
 // =============================================================================
 // Spec: internal/specs/database.md §6.1, postgresql.org/docs/16/protocol-flow.html
 //
+
 // Extended protocol per Sync round:
 //
-//   client →  Parse + Bind + Describe + Execute + Sync          (one shot)
-//   client →  [Parse +] Bind + Execute + ... [+ Bind + Execute] + Sync   (pipelined)
-//   server ←  ParseComplete + BindComplete + RowDescription +
-//             DataRow* + CommandComplete + ReadyForQuery
+
+//  client → Parse + Bind + Describe + Execute + Sync (one shot)
+//  client → [Parse +] Bind + Execute + ... [+ Bind + Execute] + Sync (pipelined)
+//  server ← ParseComplete + BindComplete + RowDescription +
+//  DataRow* + CommandComplete + ReadyForQuery
 //
+
 // On a hit in `StmtCache` we skip Parse and emit only Bind + Execute
 // + Sync. The Spindle pipelining model is implicit — `pipeline` lets
 // the caller queue a batch of (sql, params) pairs and flushes them

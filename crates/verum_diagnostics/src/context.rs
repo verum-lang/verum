@@ -1,5 +1,6 @@
 //! Error context and chaining for propagating diagnostic information.
 //!
+
 //! This module provides types for building error chains and maintaining context
 //! as errors propagate through the compiler.
 
@@ -300,9 +301,11 @@ impl Backtrace {
 
     /// Capture the current call stack.
     ///
+
     /// This uses std::backtrace::Backtrace to capture the current call stack
     /// and converts each frame into our StackFrame representation.
     ///
+
     /// Note: Backtrace capture respects the RUST_BACKTRACE environment variable.
     /// Set RUST_BACKTRACE=1 to enable backtrace capture.
     pub fn capture() -> Self {
@@ -334,8 +337,8 @@ impl Backtrace {
             }
 
             // Parse lines like:
-            // "   0: std::backtrace::Backtrace::capture"
-            // "             at /rustc/.../src/backtrace.rs:234:18"
+            // " 0: std::backtrace::Backtrace::capture"
+            // " at /rustc/.../src/backtrace.rs:234:18"
             if let Some(stripped) = line.strip_prefix("at ") {
                 // This is a location line, update the last frame if exists
                 if let Some(last_frame) = frames.last_mut() {
@@ -347,7 +350,7 @@ impl Backtrace {
                     }
                 }
             } else if let Some(idx_end) = line.find(':') {
-                // This is a frame line like "   0: function_name"
+                // This is a frame line like " 0: function_name"
                 let function_part = &line[idx_end + 1..].trim();
 
                 // Extract module and function name
@@ -376,6 +379,7 @@ impl Backtrace {
 
     /// Capture backtrace using the backtrace crate (when feature enabled)
     ///
+
     /// This provides more detailed backtrace information than the standard library
     /// implementation, including inlined frames and symbol resolution.
     #[cfg(feature = "backtrace")]

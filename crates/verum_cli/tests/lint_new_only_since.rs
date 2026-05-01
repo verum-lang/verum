@@ -1,5 +1,6 @@
 //! `verum lint --new-only-since GIT_REF` contract tests.
 //!
+
 //! Set up a temporary git repo, commit a state with a baseline of
 //! issues, add a NEW issue on top, and verify only the new one is
 //! reported.

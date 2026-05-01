@@ -51,8 +51,8 @@ public fn fsyncs_master_journal(m: &SyncMode) -> Bool {
 }
 
 // Recommended default per journal mode:
-//   Rollback journal  →  FULL
-//   WAL               →  NORMAL
+//  Rollback journal → FULL
+//  WAL → NORMAL
 public fn recommended_default_wal() -> SyncMode { SmNormal }
 public fn recommended_default_rollback() -> SyncMode { SmFull }
 

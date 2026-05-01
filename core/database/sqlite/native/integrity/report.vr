@@ -3,13 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §10.7
 //
+
 // Aggregates errors observed during a check run. Three derived
 // metrics:
 //
-//   * `error_count`            — total errors recorded
-//   * `error_count_by_class`   — per-ErrorClass tally
-//   * `is_clean`               — no errors at all
+
+//  * `error_count` — total errors recorded
+//  * `error_count_by_class` — per-ErrorClass tally
+//  * `is_clean` — no errors at all
 //
+
 // `summary()` renders one line suitable for log output, mimicking
 // the C-SQLite CLI's `ok` / `*** in database … ***` style.
 // =============================================================================

@@ -3,21 +3,24 @@
 // =============================================================================
 // Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_caching_sha2_authentication_exchanges.html
 //
+
 // Algorithm (fast-path):
 //
-//   A = SHA-256(password)
-//   B = SHA-256(SHA-256(SHA-256(password)))
-//   C = SHA-256(B || nonce_20_bytes)
-//   response = A XOR C
+
+//  A = SHA-256(password)
+//  B = SHA-256(SHA-256(SHA-256(password)))
+//  C = SHA-256(B || nonce_20_bytes)
+//  response = A XOR C
 //
+
 // The server answers with a single byte:
-//   * 0x03  → fast auth done; OK packet follows
-//   * 0x04  → full auth required; over TLS the password is sent in
-//             cleartext (terminated by NUL); without TLS the client
-//             must perform RSA exchange first. Spindle v0.1 only
-//             implements the fast path; full-auth returns
-//             CsFullAuthRequired so the connection layer surfaces a
-//             typed error rather than a silent pause.
+//  * 0x03 → fast auth done; OK packet follows
+//  * 0x04 → full auth required; over TLS the password is sent in
+//  cleartext (terminated by NUL); without TLS the client
+//  must perform RSA exchange first. Spindle v0.1 only
+//  implements the fast path; full-auth returns
+//  CsFullAuthRequired so the connection layer surfaces a
+//  typed error rather than a silent pause.
 // =============================================================================
 
 module core.database.mysql.auth.caching_sha2;
@@ -36,6 +39,7 @@ mount core.security.hash.sha256.Sha256;
 /// is the 20-byte challenge from the server's Initial Handshake
 /// `auth_plugin_data`.
 ///
+
 /// Returns a 32-byte response. An empty password yields an empty
 /// response (0 bytes) — matching the official client behaviour, and
 /// the caller's length-encoded wrapper handles the zero-length case.
@@ -49,7 +53,7 @@ public fn scramble_caching_sha2(password: &[Byte], nonce: &[Byte]) -> List<Byte>
     h_a.update(password);
     let a_arr = h_a.finalize();
 
-    // B = SHA-256(SHA-256(SHA-256(password)))  — but the docs actually
+    // B = SHA-256(SHA-256(SHA-256(password))) — but the docs actually
     // say `B = SHA-256(A)` then `C = SHA-256(B || nonce)`. The triple
     // hash is for `mysql_native_password`. We follow the reference
     // implementation: B = SHA-256(SHA-256(password)), C = SHA-256(B || nonce).

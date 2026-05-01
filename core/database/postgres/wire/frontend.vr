@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: postgresql.org/docs/16/protocol-message-formats.html
 //
+
 // Pure encoders — every function returns the wire bytes ready to be
 // shipped to the socket. The closure-based `frame` helper takes care
 // of length-self-adjustment, so every payload builder writes only
@@ -28,11 +29,13 @@ mount core.database.postgres.wire.types.{
 // Startup message — untagged, length-prefixed.
 // -----------------------------------------------------------------------------
 //
+
 // Body layout:
-//   * 4-byte BE protocol version (PROTO_V3_0 = 196608)
-//   * sequence of NUL-terminated `key`, NUL-terminated `value` pairs
-//   * trailing NUL byte (empty key) terminates the parameter list
+//  * 4-byte BE protocol version (PROTO_V3_0 = 196608)
+//  * sequence of NUL-terminated `key`, NUL-terminated `value` pairs
+//  * trailing NUL byte (empty key) terminates the parameter list
 //
+
 // Mandatory parameters: `user`. Optional: `database`, `application_name`,
 // `client_encoding`, `replication`. Spindle defaults `client_encoding` to
 // `UTF8` and `application_name` to `verum-spindle`.
@@ -168,9 +171,10 @@ public fn flush() -> List<Byte> {
 // COPY frames — bulk-streaming protocol (database.md §6.1.6)
 // -----------------------------------------------------------------------------
 //
+
 // After the server emits CopyInResponse, the client streams payload
 // in `CopyData` frames followed by a single `CopyDone` (success) or
-// `CopyFail` (abort with error message).  Each CopyData carries an
+// `CopyFail` (abort with error message). Each CopyData carries an
 // arbitrary chunk; the server resyncs at row boundaries internally
 // so the chunk size is purely a transport choice.
 
@@ -236,6 +240,7 @@ public fn sasl_response(client_message: &[Byte]) -> List<Byte> {
 // Extended protocol — Parse / Bind / Describe / Execute / Close
 // -----------------------------------------------------------------------------
 //
+
 // The extended-query path lets the client cache a parsed statement on
 // the server (Parse), bind parameters by reference (Bind), describe
 // the result-set shape (Describe), and run it (Execute). A Sync at
@@ -243,6 +248,7 @@ public fn sasl_response(client_message: &[Byte]) -> List<Byte> {
 // flush its responses; pipelining runs many round-trips before that
 // barrier.
 //
+
 // Naming convention for portal / statement names: Spindle uses the
 // 16-hex-char `s<fingerprint_hex>` slot from `PreparedQuery::server_
 // name()`; an empty Text means "use the unnamed default slot" and is
@@ -268,16 +274,16 @@ public fn parse(name: &Text, sql: &Text, param_oids: &[Int]) -> List<Byte> {
 }
 
 /// Bind — bind values to a previously-parsed statement.
-///   * `portal`   — destination portal name; "" = unnamed default
-///   * `stmt_name` — source statement name; "" = unnamed default
-///   * `param_formats` — per-parameter wire format (0 text, 1 binary).
-///                       Pass an empty slice to default every param to
-///                       text; pass length-1 to apply one format to
-///                       all; pass length-N to vary per param.
-///   * `params` — the parameter values; each entry is an
-///                already-encoded byte slice or `None` for SQL NULL.
-///   * `result_formats` — per-column result format. Same length-N
-///                        rules as `param_formats`.
+///  * `portal` — destination portal name; "" = unnamed default
+///  * `stmt_name` — source statement name; "" = unnamed default
+///  * `param_formats` — per-parameter wire format (0 text, 1 binary).
+///  Pass an empty slice to default every param to
+///  text; pass length-1 to apply one format to
+///  all; pass length-N to vary per param.
+///  * `params` — the parameter values; each entry is an
+///  already-encoded byte slice or `None` for SQL NULL.
+///  * `result_formats` — per-column result format. Same length-N
+///  rules as `param_formats`.
 public fn bind(
     portal: &Text,
     stmt_name: &Text,

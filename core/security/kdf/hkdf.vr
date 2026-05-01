@@ -6,35 +6,44 @@
 // Reference: RFC 5869, NIST SP 800-56C Rev.2
 // =============================================================================
 //
+
 // Two-stage HMAC-based key-derivation function:
 //
-//   1. `hkdf_extract_*(salt, ikm)` — compresses low-entropy input
-//      keying material (IKM) into a fixed-length pseudorandom key
-//      (PRK). `salt` can be empty (treated as an all-zeros HashLen
-//      salt per RFC 5869 §2.2).
+
+//  1. `hkdf_extract_*(salt, ikm)` — compresses low-entropy input
+//  keying material (IKM) into a fixed-length pseudorandom key
+//  (PRK). `salt` can be empty (treated as an all-zeros HashLen
+//  salt per RFC 5869 §2.2).
 //
-//   2. `hkdf_expand_*(prk, info, length, out)` — expands the PRK into
-//      `length` bytes of output keyed by the optional `info` context
-//      string. Up to 255 × HashLen bytes total.
+
+//  2. `hkdf_expand_*(prk, info, length, out)` — expands the PRK into
+//  `length` bytes of output keyed by the optional `info` context
+//  string. Up to 255 × HashLen bytes total.
 //
+
 // # Three variants, one algorithm
 //
+
 // The algorithm is identical across hash primitives; only the HashLen
 // output size varies. We ship explicit entry-points per variant
 // because call-sites benefit from the fixed-size return type of the
 // `extract` stage:
 //
-//   | Hash     | HashLen | hkdf_extract_* | Extract return    |
-//   |----------|---------|----------------|-------------------|
-//   | SHA-256  | 32      | _sha256        | [Byte; 32]        |
-//   | SHA-384  | 48      | _sha384        | [Byte; 48]        |
-//   | SHA-512  | 64      | _sha512        | [Byte; 64]        |
+
+//  | Hash | HashLen | hkdf_extract_* | Extract return |
+//  |----------|---------|----------------|-------------------|
+//  | SHA-256 | 32 | _sha256 | [Byte; 32] |
+//  | SHA-384 | 48 | _sha384 | [Byte; 48] |
+//  | SHA-512 | 64 | _sha512 | [Byte; 64] |
 //
+
 // `expand` consumes the PRK by slice + writes to `List<Byte>`, so it
 // is variant-aware only through its `HashLen` constant.
 //
+
 // # TLS 1.3 + QUIC HKDF-Expand-Label
 //
+
 // Both protocols layer a "HKDF-Expand-Label" macro on top of
 // `hkdf_expand` — a fixed label-schema that gets hashed with the
 // context to form the `info` parameter. That macro lives in
@@ -42,6 +51,7 @@
 // because the label set is protocol-specific; this file keeps the
 // primitive pure.
 //
+
 // =============================================================================
 
 module core.security.kdf.hkdf;
@@ -64,7 +74,7 @@ public type HkdfError is
     | InvalidPrk { len: Int };
 
 // Display + Debug + Eq for HkdfError — standard stdlib
-// protocol impls.  Pre-fix had no impls.
+// protocol impls. Pre-fix had no impls.
 
 implement Display for HkdfError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

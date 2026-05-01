@@ -1,26 +1,29 @@
 //! Bytecode format compatibility tests (#175 step E).
 //!
+
 //! Each test pins one slice of the migration policy:
 //!
-//!   * round_trip_preserves_header — `serialize_module` then
-//!     `deserialize_module` round-trip must reproduce the same magic /
-//!     version / hashes that went in.
-//!   * tampered_magic_rejected — flipping any byte of the on-wire
-//!     magic must surface as `VbcError::InvalidMagic`. A reader that
-//!     accepts wrong-magic archives is broken.
-//!   * tampered_higher_major_rejected — bumping the on-wire
-//!     `version_major` past the consumer's `VERSION_MAJOR` must surface
-//!     as `VbcError::UnsupportedVersion`. A reader that accepts a
-//!     higher major would silently miscompute layouts.
-//!   * tampered_lower_major_rejected — same for a strictly lower
-//!     major. The migration policy says majors are exact-match; old
-//!     archives can't be read by new consumers either.
-//!   * tampered_higher_minor_rejected — same-major but higher-minor
-//!     must be rejected; the consumer doesn't know the new opcodes.
-//!   * tampered_same_or_lower_minor_round_trips — same-major +
-//!     equal-or-lower minor must remain readable (additive minor
-//!     contract).
+
+//!  * round_trip_preserves_header — `serialize_module` then
+//!  `deserialize_module` round-trip must reproduce the same magic /
+//!  version / hashes that went in.
+//!  * tampered_magic_rejected — flipping any byte of the on-wire
+//!  magic must surface as `VbcError::InvalidMagic`. A reader that
+//!  accepts wrong-magic archives is broken.
+//!  * tampered_higher_major_rejected — bumping the on-wire
+//!  `version_major` past the consumer's `VERSION_MAJOR` must surface
+//!  as `VbcError::UnsupportedVersion`. A reader that accepts a
+//!  higher major would silently miscompute layouts.
+//!  * tampered_lower_major_rejected — same for a strictly lower
+//!  major. The migration policy says majors are exact-match; old
+//!  archives can't be read by new consumers either.
+//!  * tampered_higher_minor_rejected — same-major but higher-minor
+//!  must be rejected; the consumer doesn't know the new opcodes.
+//!  * tampered_same_or_lower_minor_round_trips — same-major +
+//!  equal-or-lower minor must remain readable (additive minor
+//!  contract).
 //!
+
 //! These complement the unit-level rejection guardrails in
 //! `format::tests::test_rejects_*` (commit 34de051f) by exercising the
 //! full serialize → byte-tamper → deserialize pipeline rather than the

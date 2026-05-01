@@ -5,9 +5,11 @@
 // Dependencies: core.sys, core.io
 // =============================================================================
 //
+
 // Raw terminal control: termios (POSIX), Console API (Windows), ANSI escape
 // writer, capability detection, alternate screen, terminal size queries.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 4
 // =============================================================================
 

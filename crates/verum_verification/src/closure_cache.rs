@@ -1,50 +1,60 @@
 //! Per-theorem closure-hash incremental verification cache.
 //!
+
 //! ## Goal
 //!
+
 //! For corpora with hundreds of theorems (MSFS = 30, Diakrisis = 142,
 //! Mathlib-class = thousands), full re-check on every save is
-//! unacceptable.  This module provides closure-hash incremental
+//! unacceptable. This module provides closure-hash incremental
 //! verification per #79's contract:
 //!
-//!   * Per-theorem [`ClosureFingerprint`] = blake3 over signature +
-//!     proof body + transitive @framework citations + kernel version.
-//!   * Cache key MUST include `verum_kernel::VVA_VERSION` so any
-//!     kernel-rule edit invalidates ALL cached verdicts.
-//!   * Cached `Ok` verdict + matching fingerprint ⇒ **skip** the
-//!     kernel re-check entirely.
+
+//!  * Per-theorem [`ClosureFingerprint`] = blake3 over signature +
+//!  proof body + transitive @framework citations + kernel version.
+//!  * Cache key MUST include `verum_kernel::VVA_VERSION` so any
+//!  kernel-rule edit invalidates ALL cached verdicts.
+//!  * Cached `Ok` verdict + matching fingerprint ⇒ **skip** the
+//!  kernel re-check entirely.
 //!
+
 //! ## Architectural pattern
 //!
+
 //! Same single-trait-boundary pattern as ladder_dispatch /
 //! tactic_combinator / proof_repair:
 //!
-//!   * [`IncrementalCacheStore`] — single dispatch interface.
-//!   * [`MemoryCacheStore`] — V0 reference impl (in-process map).
-//!   * [`FilesystemCacheStore`] — V0 disk-backed impl (one JSON file
-//!     per theorem under `target/.verum_cache/closure-hashes/`).
-//!   * Future adapters (S3-backed for distributed CI cache, see
-//!     `--distributed-cache` flag plumbing in
-//!     `verum_cli::commands::verify::ProfileConfig`) plug in via the
-//!     same trait without touching consumer call-sites.
+
+//!  * [`IncrementalCacheStore`] — single dispatch interface.
+//!  * [`MemoryCacheStore`] — V0 reference impl (in-process map).
+//!  * [`FilesystemCacheStore`] — V0 disk-backed impl (one JSON file
+//!  per theorem under `target/.verum_cache/closure-hashes/`).
+//!  * Future adapters (S3-backed for distributed CI cache, see
+//!  `--distributed-cache` flag plumbing in
+//!  `verum_cli::commands::verify::ProfileConfig`) plug in via the
+//!  same trait without touching consumer call-sites.
 //!
+
 //! ## Decision model
 //!
+
 //! Callers don't ask the cache "do I have this entry?" — they ask
 //! [`decide`]: given a theorem name + its current
-//! [`ClosureFingerprint`], should I skip the recheck or run it?  The
+//! [`ClosureFingerprint`], should I skip the recheck or run it? The
 //! answer is a typed [`CacheDecision`] with a [`RecheckReason`]
-//! cause attached when recheck is required.  This avoids the silent-
+//! cause attached when recheck is required. This avoids the silent-
 //! fall-through anti-pattern: every recheck is *traceable* to a
 //! specific cause (no entry / hash drift / kernel-version drift /
 //! previous failure).
 //!
+
 //! ## Foundation-neutral
 //!
+
 //! The module knows nothing about the kernel verification pipeline —
 //! callers compute the fingerprint themselves from the elaborated
 //! theorem (signature hash from CoreType, body hash from CoreTerm,
-//! citations hash from the @framework attribute set).  The cache is
+//! citations hash from the @framework attribute set). The cache is
 //! the storage + decision layer; kernel re-check is the operational
 //! layer.
 
@@ -56,7 +66,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
 
-/// The kernel version stamped into every cache fingerprint.  Re-export
+/// The kernel version stamped into every cache fingerprint. Re-export
 /// so consumer crates that don't depend on `verum_kernel` directly can
 /// still reach the canonical value through the verification crate.
 pub use verum_kernel::VVA_VERSION as KERNEL_VERSION;
@@ -65,26 +75,26 @@ pub use verum_kernel::VVA_VERSION as KERNEL_VERSION;
 // ClosureFingerprint — the cache key
 // =============================================================================
 
-/// Composite fingerprint of a theorem's verification closure.  Two
+/// Composite fingerprint of a theorem's verification closure. Two
 /// theorems with the same fingerprint are operationally equivalent
 /// from the kernel's standpoint — a cached Ok-verdict for one is
 /// reusable for the other.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ClosureFingerprint {
     /// `verum_kernel::VVA_VERSION` at the time the fingerprint was
-    /// computed.  Cache entries from a different kernel version are
+    /// computed. Cache entries from a different kernel version are
     /// invalidated unconditionally — any kernel-rule edit changes
     /// the trust boundary.
     pub kernel_version: Text,
     /// Blake3 of the theorem's elaborated signature (return type +
-    /// hypothesis types).  Hex-encoded for storage portability.
+    /// hypothesis types). Hex-encoded for storage portability.
     pub signature_hash: Text,
     /// Blake3 of the theorem's elaborated proof body / obligation
-    /// term.  Hex-encoded.
+    /// term. Hex-encoded.
     pub body_hash: Text,
     /// Blake3 of the *sorted, deduplicated* set of @framework
     /// citation strings reachable via this theorem's proof.
-    /// Hex-encoded.  Sorting + dedup are mandatory: two theorems
+    /// Hex-encoded. Sorting + dedup are mandatory: two theorems
     /// citing `[A, B]` and `[B, A]` MUST collide.
     pub citations_hash: Text,
 }
@@ -114,7 +124,7 @@ impl ClosureFingerprint {
     }
 
     /// Top-level closure hash — folds all four components into a
-    /// single 64-char hex string.  Used as the cache-file basename
+    /// single 64-char hex string. Used as the cache-file basename
     /// + the audit-trail identifier.
     pub fn closure_hash(&self) -> Text {
         let mut hasher = blake3::Hasher::new();
@@ -149,7 +159,7 @@ pub enum CachedVerdict {
         /// Wall time consumed during the recorded check (ms).
         elapsed_ms: u64,
     },
-    /// Kernel rejected the theorem.  Stored so the cache can short-
+    /// Kernel rejected the theorem. Stored so the cache can short-
     /// circuit obviously-broken obligations under
     /// `--no-revert-failed` mode without re-running the kernel.
     Failed {
@@ -189,7 +199,7 @@ pub enum CacheDecision {
     /// authoritative for this fingerprint.
     Skip { cached: CacheEntry },
     /// Run the kernel re-check; the carried [`RecheckReason`] cites
-    /// the specific cause.  Callers should record the new verdict
+    /// the specific cause. Callers should record the new verdict
     /// via [`IncrementalCacheStore::put`] after the recheck completes.
     Recheck { reason: RecheckReason },
 }
@@ -232,7 +242,8 @@ impl RecheckReason {
 
 /// Decide whether the cache lets us skip the recheck.
 ///
-/// Pure function — no I/O.  `current_fp.kernel_version` MUST be the
+
+/// Pure function — no I/O. `current_fp.kernel_version` MUST be the
 /// running kernel's `VVA_VERSION`; any drift between that and the
 /// cached entry's kernel-version is treated as
 /// [`RecheckReason::KernelVersionChanged`].
@@ -288,7 +299,7 @@ pub fn decide(
 // cached_check — high-level orchestration helper
 // =============================================================================
 
-/// Outcome reported by [`cached_check`].  Distinguishes the cache-hit
+/// Outcome reported by [`cached_check`]. Distinguishes the cache-hit
 /// path (cached verdict served verbatim) from the cache-miss path
 /// (verdict freshly computed AND persisted).
 #[derive(Debug, Clone, PartialEq)]
@@ -308,7 +319,7 @@ pub enum CachedCheckOutcome {
         /// Why the cache missed (NoCacheEntry / FingerprintMismatch /
         /// KernelVersionChanged / PreviousVerdictFailed).
         recheck_reason: RecheckReason,
-        /// Storage write error, if any.  `None` means the new verdict
+        /// Storage write error, if any. `None` means the new verdict
         /// was persisted successfully.
         persist_error: Option<Text>,
     },
@@ -332,21 +343,24 @@ impl CachedCheckOutcome {
 
 /// Cache-aware verification orchestration.
 ///
+
 /// Glues `decide` + the user's verify closure + `put` into a single
-/// call.  The verify closure is invoked **only when the cache misses**
+/// call. The verify closure is invoked **only when the cache misses**
 /// (NoCacheEntry / FingerprintMismatch / KernelVersionChanged /
-/// PreviousVerdictFailed).  On miss, the freshly-computed verdict is
+/// PreviousVerdictFailed). On miss, the freshly-computed verdict is
 /// persisted to the store before returning.
 ///
+
 /// This is the pipeline-side entry point: production callers
 /// (`verum_compiler::pipeline::verify_theorem_proofs`) hand the cache
 /// + a closure that runs the actual kernel re-check, and get back a
-/// typed [`CachedCheckOutcome`].  Hit → skip the kernel call entirely;
+/// typed [`CachedCheckOutcome`]. Hit → skip the kernel call entirely;
 /// Miss → the kernel ran and the result is now cached for next time.
 ///
+
 /// **Persist failures do not poison the verdict**: a cache write
 /// error is recorded in `Miss::persist_error` but the verify-closure's
-/// verdict is still returned authoritatively.  This matches the
+/// verdict is still returned authoritatively. This matches the
 /// "cache is optimisation, not source of truth" contract.
 pub fn cached_check<F>(
     store: &dyn IncrementalCacheStore,
@@ -394,19 +408,22 @@ fn now_secs() -> u64 {
 // IncrementalCacheStore — the trait boundary
 // =============================================================================
 
-/// Per-theorem cache store.  Implementations may be in-memory
+/// Per-theorem cache store. Implementations may be in-memory
 /// (test / playbook) or disk-backed (production), and may layer
 /// (in-memory L1 in front of disk L2).
 ///
+
 /// Contract:
 ///
-///   * `get(name)` returns `Some(entry)` only for previously-`put`
-///     names; never fabricates entries.
-///   * `put(entry)` overwrites any existing entry for the same
-///     `theorem_name` (last writer wins).
-///   * `clear()` removes every entry; returns the count cleared.
-///   * `stats()` reflects the current state of the store.
+
+///  * `get(name)` returns `Some(entry)` only for previously-`put`
+///  names; never fabricates entries.
+///  * `put(entry)` overwrites any existing entry for the same
+///  `theorem_name` (last writer wins).
+///  * `clear()` removes every entry; returns the count cleared.
+///  * `stats()` reflects the current state of the store.
 ///
+
 /// Errors are reported via [`CacheError`] — disk I/O failures
 /// surface here rather than panicking; callers can choose to
 /// degrade to "always recheck" when storage is unavailable.
@@ -415,7 +432,7 @@ pub trait IncrementalCacheStore: std::fmt::Debug + Send + Sync {
     fn put(&self, entry: &CacheEntry) -> Result<(), CacheError>;
     fn clear(&self) -> Result<usize, CacheError>;
     fn stats(&self) -> CacheStats;
-    /// Enumerate the theorem names currently cached.  Used by `verum
+    /// Enumerate the theorem names currently cached. Used by `verum
     /// cache-closure list`.
     fn names(&self) -> Vec<Text>;
 }
@@ -456,7 +473,7 @@ pub struct CacheStats {
 }
 
 impl CacheStats {
-    /// Hit ratio in [0, 1].  Returns 0.0 when there are no decisions yet.
+    /// Hit ratio in [0, 1]. Returns 0.0 when there are no decisions yet.
     pub fn hit_ratio(&self) -> f64 {
         let total = self.hits + self.misses;
         if total == 0 {
@@ -470,7 +487,7 @@ impl CacheStats {
 // MemoryCacheStore — V0 in-memory reference
 // =============================================================================
 
-/// In-memory store.  Used by tests and the LSP-backed playbook (no
+/// In-memory store. Used by tests and the LSP-backed playbook (no
 /// disk persistence needed for live editing).
 #[derive(Debug, Default)]
 pub struct MemoryCacheStore {
@@ -485,7 +502,7 @@ impl MemoryCacheStore {
     }
 
     /// Record a hit (call from a higher-level wrapper that drives
-    /// `decide`).  Exposed so disjoint store impls share the
+    /// `decide`). Exposed so disjoint store impls share the
     /// same telemetry shape.
     pub fn record_hit(&self) {
         self.hits.fetch_add(1, AtomicOrdering::Relaxed);
@@ -547,8 +564,8 @@ impl IncrementalCacheStore for MemoryCacheStore {
 // FilesystemCacheStore — V0 disk-backed reference
 // =============================================================================
 
-/// Disk-backed store.  One JSON file per theorem under
-/// `<root>/<sanitized_name>.json`.  The root is typically
+/// Disk-backed store. One JSON file per theorem under
+/// `<root>/<sanitized_name>.json`. The root is typically
 /// `target/.verum_cache/closure-hashes/`.
 #[derive(Debug)]
 pub struct FilesystemCacheStore {
@@ -576,7 +593,7 @@ impl FilesystemCacheStore {
         })
     }
 
-    /// Map a theorem name to the canonical cache-file path.  The
+    /// Map a theorem name to the canonical cache-file path. The
     /// name is sanitised to a filesystem-safe form (alphanumeric +
     /// dot + dash + underscore preserved; everything else replaced
     /// with `_`) so collision-resistant blake3 of the original name
@@ -1172,7 +1189,7 @@ mod tests {
     #[test]
     fn cached_check_persists_failed_verdict_so_subsequent_calls_skip_kernel_when_unchanged() {
         // Failed verdicts MUST trigger a re-run on the next call (the
-        // PreviousVerdictFailed reason).  Pin that contract through
+        // PreviousVerdictFailed reason). Pin that contract through
         // the helper.
         let s = MemoryCacheStore::new();
         let fp = fp_v("2.6.0");
@@ -1247,7 +1264,7 @@ mod tests {
     #[test]
     fn task_79_skip_only_for_ok_verdicts() {
         // #79 §2: skip-mode only fires when the cached verdict was
-        // OK.  PreviousVerdictFailed surfaces the reason.
+        // OK. PreviousVerdictFailed surfaces the reason.
         let s = MemoryCacheStore::new();
         let fp = fp_v("2.6.0");
         s.put(&CacheEntry {

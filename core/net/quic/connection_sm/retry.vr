@@ -5,29 +5,35 @@
 // Dependencies: core, collections, quic.{crypto.retry, connection_id}
 // =============================================================================
 //
+
 // RFC 9000 §17.2.5: a server may respond to a client's first Initial
 // with a Retry packet instead of proceeding with the handshake —
 // typically to validate the client's source-address before committing
 // any state (DoS-resistant bootstrap). The client MUST:
 //
-//   1. Verify the Retry Integrity Tag (RFC 9001 §5.8).
-//   2. Discard every Initial packet it has sent so far (their PNs
-//      and AEAD state).
-//   3. Reset the Initial crypto stream: the server's initial
-//      secret derivation input becomes the NEW Source QuicConnection ID
-//      from the Retry packet.
-//   4. Re-emit ClientHello carrying the Retry Token.
+
+//  1. Verify the Retry Integrity Tag (RFC 9001 §5.8).
+//  2. Discard every Initial packet it has sent so far (their PNs
+//  and AEAD state).
+//  3. Reset the Initial crypto stream: the server's initial
+//  secret derivation input becomes the NEW Source QuicConnection ID
+//  from the Retry packet.
+//  4. Re-emit ClientHello carrying the Retry Token.
 //
+
 // Additionally (§7.3), the TLS transport-parameters block on the
 // server MUST include:
 //
-//   * original_destination_connection_id = the DCID from the client's
-//     original Initial
-//   * retry_source_connection_id         = the SCID from the Retry
+
+//  * original_destination_connection_id = the DCID from the client's
+//  original Initial
+//  * retry_source_connection_id = the SCID from the Retry
 //
+
 // Client verifies these match to prevent a man-in-the-middle from
 // forging a Retry that steers the connection through a hostile path.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.retry;
@@ -173,13 +179,14 @@ public fn accept_retry(
 /// validation before committing any state (RFC 9000 §8.1.2). Caller
 /// supplies:
 ///
-///   * client_dcid — the client's DCID from their first Initial
-///     (RFC 9001 §5.8 "original destination connection ID"). We
-///     echo it as the Retry.destination_id.
-///   * retry_scid — the fresh SCID the server picks for this Retry
-///     (becomes the client's new peer-DCID when it retries).
-///   * token — server-chosen retry token (opaque blob; server
-///     re-validates on the retried Initial).
+
+///  * client_dcid — the client's DCID from their first Initial
+///  (RFC 9001 §5.8 "original destination connection ID"). We
+///  echo it as the Retry.destination_id.
+///  * retry_scid — the fresh SCID the server picks for this Retry
+///  (becomes the client's new peer-DCID when it retries).
+///  * token — server-chosen retry token (opaque blob; server
+///  re-validates on the retried Initial).
 public fn build_server_retry(
     version:      UInt32,
     client_dcid:  &ConnectionId,
@@ -224,9 +231,10 @@ public fn build_server_retry(
 
 /// Client-side check: after the peer's `quic_transport_parameters`
 /// TLS extension arrives, the client MUST verify:
-///   original_destination_connection_id == the ODCID we sent
-///   retry_source_connection_id        == the SCID from the Retry (if any)
+///  original_destination_connection_id == the ODCID we sent
+///  retry_source_connection_id == the SCID from the Retry (if any)
 ///
+
 /// Returns `Ok(())` when the transport-parameters match, `Err` on
 /// forgery / mismatch — caller aborts with TRANSPORT_PARAMETER_ERROR.
 public fn verify_tp_retry_sentinels(

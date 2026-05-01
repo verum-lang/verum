@@ -14,13 +14,15 @@
 )]
 //! Tests for const declarations inside implement blocks.
 //!
+
 //! This module tests parsing of const declarations within impl blocks,
 //! supporting the syntax:
 //! ```verum
 //! implement Duration {
-//!     pub const ZERO: Duration = Duration { secs: 0, nanos: 0 };
+//!  pub const ZERO: Duration = Duration { secs: 0, nanos: 0 };
 //!
-//!     pub fn new(secs: Int) -> Duration { ... }
+
+//!  pub fn new(secs: Int) -> Duration { ... }
 //! }
 //! ```
 

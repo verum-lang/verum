@@ -1,5 +1,6 @@
 // core.proof.tactics.basic — elementary single-step tactics.
 //
+
 // These tactics close trivial obligations without invoking the
 // SMT backend — they're the cheapest step in the dispatch ladder
 // and should be tried first. Every tactic here is pure structural
@@ -8,6 +9,7 @@
 
 // Prove `x == x` by syntactic reflexivity.
 //
+
 // Accepts any expression whose head is a reflexive relation:
 // `==` (Eq), `<=` / `>=` when the two sides are the same term,
 // `Path<A>(a, a)` in cubical mode. Fails if the two sides differ
@@ -18,6 +20,7 @@ tactic refl() { refl }
 // Close the current goal by citing a hypothesis whose type
 // matches the goal.
 //
+
 // Searches the local hypothesis list in reverse declaration
 // order (most-recent first) and applies the first match. Fails
 // if no hypothesis has the goal's type — unlike `exact(h)`, this
@@ -31,6 +34,7 @@ tactic trivial() { first { refl; assumption; simp } }
 
 // Close the current goal by citing an exact proof term.
 //
+
 // `exact(t)` takes a fully-elaborated term `t` whose type matches
 // the goal. The kernel checks the match structurally — mismatched
 // types fail. Use `exact` when you know the precise proof and
@@ -39,6 +43,7 @@ tactic exact(term: Expr) { exact(term) }
 
 // Close the goal by citing an axiom-registered fact.
 //
+
 // `by_axiom(name)` looks up `name` in the current
 // `AxiomRegistry` and applies it. Fails if the name isn't
 // registered. The axiom's framework attribution rides along so

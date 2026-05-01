@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // A sqlite3_value is a tagged union plus a handful of flags.
 // =============================================================================
 
@@ -29,10 +30,10 @@ public fn payload_byte_len(p: &ValuePayload) -> Int {
 
 public type SqliteApiValue is {
     payload: ValuePayload,
-    /// Subtype byte 0..255 (sqlite3_value_subtype).  0 = default.
+    /// Subtype byte 0..255 (sqlite3_value_subtype). 0 = default.
     subtype: Int,
     /// True iff this value was bound via sqlite3_bind_* (vs from a
-    /// literal in the SQL source text).  Matches sqlite3_value_frombind.
+    /// literal in the SQL source text). Matches sqlite3_value_frombind.
     from_bind: Bool,
     /// UPDATE-optimisation hint (sqlite3_value_nochange).
     nochange: Bool,

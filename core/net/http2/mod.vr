@@ -4,60 +4,68 @@
 // Layer: 5 (Network)
 // Dependencies: core, core.net.http (Method, StatusCode), core.net.http_parser
 // Spec: https://datatracker.ietf.org/doc/html/rfc7540 (HTTP/2)
-//       https://datatracker.ietf.org/doc/html/rfc7541 (HPACK)
+//  https://datatracker.ietf.org/doc/html/rfc7541 (HPACK)
 // =============================================================================
 //
+
 // Covers:
 // - Frame format (§4.1) with all 10 frame types
 // - HPACK codec (RFC 7541) — static table + dynamic table +
-//   Huffman + integer encoding
+//  Huffman + integer encoding
 // - Stream state machine (§5.1)
 // - SETTINGS / GOAWAY / error codes
 // - Connection preface ("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
 //
+
 // Deferred (tracked as residual):
 // - Full flow-control accounting (WINDOW_UPDATE semantics for apps)
 // - Stream prioritisation / dependency tree (§5.3) — advisory, deprecated
 // - ALPN negotiation glue (lives in core.net.tls)
 //
+
 // # Module layout
 //
+
 // ```
 // core.net.http2
-// ├── mod.vr           — this file (re-exports)
-// ├── error.vr         — Http2Error + ErrorCode (RFC 7540 §7)
-// ├── frame.vr         — FrameHeader, Frame, encode / decode
-// ├── settings.vr      — SETTINGS identifiers + default values
-// ├── huffman.vr       — HPACK Huffman table (RFC 7541 §B)
-// ├── static_table.vr  — HPACK static table (RFC 7541 §A)
-// ├── hpack.vr         — HPACK encoder + decoder
-// └── stream.vr        — stream state machine
+// ├── mod.vr — this file (re-exports)
+// ├── error.vr — Http2Error + ErrorCode (RFC 7540 §7)
+// ├── frame.vr — FrameHeader, Frame, encode / decode
+// ├── settings.vr — SETTINGS identifiers + default values
+// ├── huffman.vr — HPACK Huffman table (RFC 7541 §B)
+// ├── static_table.vr — HPACK static table (RFC 7541 §A)
+// ├── hpack.vr — HPACK encoder + decoder
+// └── stream.vr — stream state machine
 // ```
 //
+
 // # Minimal usage
 //
+
 // ```verum
 // mount core.net.http2.*;
 //
+
 // // Read connection preface
 // let preface = read_exact(&mut stream, 24).await?;
 // if preface != PREFACE { return Err(Http2Error.BadClientPreface); }
 //
+
 // // Frame loop
 // loop {
-//     let header = FrameHeader.read(&mut stream).await?;
-//     let frame = Frame.decode(&header, &mut stream).await?;
-//     match frame {
-//         Frame.Headers { stream_id, block_fragment, end_stream, .. } => {
-//             let headers = hpack_decoder.decode(&block_fragment)?;
-//             dispatch(stream_id, headers, end_stream);
-//         }
-//         Frame.Data { stream_id, data, end_stream, .. } => { ... }
-//         Frame.Settings(s) => apply_settings(s),
-//         Frame.Ping(p) => send_pong(p),
-//         Frame.GoAway(g) => return shutdown(g),
-//         _ => {}
-//     }
+//  let header = FrameHeader.read(&mut stream).await?;
+//  let frame = Frame.decode(&header, &mut stream).await?;
+//  match frame {
+//  Frame.Headers { stream_id, block_fragment, end_stream, .. } => {
+//  let headers = hpack_decoder.decode(&block_fragment)?;
+//  dispatch(stream_id, headers, end_stream);
+//  }
+//  Frame.Data { stream_id, data, end_stream, .. } => { ... }
+//  Frame.Settings(s) => apply_settings(s),
+//  Frame.Ping(p) => send_pong(p),
+//  Frame.GoAway(g) => return shutdown(g),
+//  _ => {}
+//  }
 // }
 // ```
 // =============================================================================

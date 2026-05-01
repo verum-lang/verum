@@ -2,6 +2,7 @@
 // owl2_to_htt — canonical bridge owl2_fs → lurie_htt (VVA §21.7 / C7b)
 // =============================================================================
 //
+
 // Phase 3b extension: every OWL 2 Direct-Semantics operator from the
 // `core.math.frameworks.owl2_fs` package gets a canonical image in the
 // Lurie HTT (∞,1)-categorical machinery. The bridge enables queries
@@ -9,6 +10,7 @@
 // terms" via a single `core.theory_interop.translate(owl2_ontology,
 // lurie_htt_target)` invocation.
 //
+
 // V2 (V8.1 #196): every axiom is now annotated with the typed
 // `@framework_translate(owl2_fs, lurie_htt, "<bridge-image>")`
 // attribute (verum_ast.attr.FrameworkTranslateAttr), making the
@@ -18,61 +20,66 @@
 // enumerate the boundary; the typed attribute additionally tags it as
 // a CROSS-FRAMEWORK axiom for downstream tooling.
 //
-// V2 ships 30 trusted-boundary translation markers covering the OWL 2
+
+// ships 30 trusted-boundary translation markers covering the OWL 2
 // surface from Shkotin 2019 Tables 1–10 and OWL 2 W3C Recommendation
 // §6 (Class Expressions) + §9 (Object Property Axioms). Coverage:
 //
-//   Tier 1 — class-level structure                      5 axioms
-//   Tier 2 — object-property structure                  6 axioms
-//   Tier 3 — characteristic flags                       8 axioms (+1: HasSelf)
-//   Tier 4 — class-expression constructors              7 axioms (+3: ObjectComplementOf, ObjectHasValue, ObjectMaxCardinality)
-//   Tier 5 — individual axioms                          2 axioms (NEW SameIndividual / DifferentIndividuals)
-//   Tier 6 — data-property bridge                       2 axioms (NEW DataProperty / DataSomeValuesFrom)
+
+//  Tier 1 — class-level structure 5 axioms
+//  Tier 2 — object-property structure 6 axioms
+//  Tier 3 — characteristic flags 8 axioms (+1: HasSelf)
+//  Tier 4 — class-expression constructors 7 axioms (+3: ObjectComplementOf, ObjectHasValue, ObjectMaxCardinality)
+//  Tier 5 — individual axioms 2 axioms (NEW SameIndividual / DifferentIndividuals)
+//  Tier 6 — data-property bridge 2 axioms (NEW DataProperty / DataSomeValuesFrom)
 //
+
 // ─────────────────────────────────────────────────────────────────────────
 // Bridge mapping table
 // ─────────────────────────────────────────────────────────────────────────
 //
-//   OWL 2 operator                    HTT categorical image
-//   ───────────────────────────────   ───────────────────────────────────────
-//   Class                             Presheaf on the discrete category of
-//                                     individuals (HTT 1.2.1 — y_T : T → PSh(T))
-//   NamedIndividual                   Object of the underlying category Δ_O
-//   ObjectProperty                    Functor F : Cls × Cls → Bool between
-//                                     class-presheaves
-//   SubClassOf(C, D)                  Monomorphism C ↪ D in PSh (HTT 1.2.5)
-//   EquivalentClasses(C, D)           Isomorphism C ≅ D
-//   DisjointClasses(C, D)             Pullback C ×_⊥ D ≅ ⊥ (initial)
-//   ObjectPropertyChain(P_1...P_n)    Functor composition F_1 ∘ ... ∘ F_n
-//   HasKey(C; p_1, ..., p_n)          Representable-presheaf condition (HTT 5.1):
-//                                     joint product of p_1, ..., p_n is
-//                                     representable as a discrete fibration
-//   ObjectIntersectionOf(C_1...C_n)   Limit (pullback) in PSh
-//   ObjectUnionOf(C_1...C_n)          Colimit (pushout) in PSh
-//   ObjectComplementOf(C)             Lex-coreflexive complement
-//                                     (universe minus the C-presheaf)
-//   ObjectSomeValuesFrom(P, C)        Image presheaf ∃_P(C) — left-adjoint to
-//                                     base-change along P
-//   ObjectAllValuesFrom(P, C)         Right-adjoint Π_P(C) — universal
-//                                     quantification along P
-//   ObjectHasValue(P, a)              Slice presheaf P/_a (HTT 1.2.9)
-//   ObjectMaxCardinality(n, P, C)     Bounded-fibre condition: ∀x. |P(x) ∩ C| ≤ n
-//   SymmetricObjectProperty(P)        Self-inverse functor: P^{-1} ≃ P
-//   TransitiveObjectProperty(P)       Idempotent composition: P ∘ P → P
-//                                     factoring through P
-//   AsymmetricObjectProperty(P)       P ∩ P^{-1} ≅ ∅
-//   FunctionalObjectProperty(P)       Monomorphism in the functor category
-//   InverseFunctionalObjectProperty(P) Epimorphism in the functor category
-//   ReflexiveObjectProperty(P)        Identity-natural-transformation factor:
-//                                     η_P : Id_Cls ⇒ P
-//   IrreflexiveObjectProperty(P)      Empty-diagonal: Δ_Cls ↪ P^c
-//   HasSelf(P)                        Diagonal-factoring NT: Δ_Cls ⇒ P
-//   InverseObjectProperties(P, Q)     Adjoint pair P ⊣ Q in PSh
-//   SameIndividual(a, b)              Equalizer eq(y_a, y_b) ≅ y_a in PSh
-//   DifferentIndividuals(a, b)        Coproduct y_a ⊔ y_b with empty pullback
-//   DataProperty(P)                   Enriched-functor F: Cls × Lit → Bool
-//   DataSomeValuesFrom(P, D)          Image presheaf ∃_P(D) for literal-typed P
+
+//  OWL 2 operator HTT categorical image
+//  ─────────────────────────────── ───────────────────────────────────────
+//  Class Presheaf on the discrete category of
+//  individuals (HTT 1.2.1 — y_T : T → PSh(T))
+//  NamedIndividual Object of the underlying category Δ_O
+//  ObjectProperty Functor F : Cls × Cls → Bool between
+//  class-presheaves
+//  SubClassOf(C, D) Monomorphism C ↪ D in PSh (HTT 1.2.5)
+//  EquivalentClasses(C, D) Isomorphism C ≅ D
+//  DisjointClasses(C, D) Pullback C ×_⊥ D ≅ ⊥ (initial)
+//  ObjectPropertyChain(P_1...P_n) Functor composition F_1 ∘ ... ∘ F_n
+//  HasKey(C; p_1, ..., p_n) Representable-presheaf condition (HTT 5.1):
+//  joint product of p_1, ..., p_n is
+//  representable as a discrete fibration
+//  ObjectIntersectionOf(C_1...C_n) Limit (pullback) in PSh
+//  ObjectUnionOf(C_1...C_n) Colimit (pushout) in PSh
+//  ObjectComplementOf(C) Lex-coreflexive complement
+//  (universe minus the C-presheaf)
+//  ObjectSomeValuesFrom(P, C) Image presheaf ∃_P(C) — left-adjoint to
+//  base-change along P
+//  ObjectAllValuesFrom(P, C) Right-adjoint Π_P(C) — universal
+//  quantification along P
+//  ObjectHasValue(P, a) Slice presheaf P/_a (HTT 1.2.9)
+//  ObjectMaxCardinality(n, P, C) Bounded-fibre condition: ∀x. |P(x) ∩ C| ≤ n
+//  SymmetricObjectProperty(P) Self-inverse functor: P^{-1} ≃ P
+//  TransitiveObjectProperty(P) Idempotent composition: P ∘ P → P
+//  factoring through P
+//  AsymmetricObjectProperty(P) P ∩ P^{-1} ≅ ∅
+//  FunctionalObjectProperty(P) Monomorphism in the functor category
+//  InverseFunctionalObjectProperty(P) Epimorphism in the functor category
+//  ReflexiveObjectProperty(P) Identity-natural-transformation factor:
+//  η_P : Id_Cls ⇒ P
+//  IrreflexiveObjectProperty(P) Empty-diagonal: Δ_Cls ↪ P^c
+//  HasSelf(P) Diagonal-factoring NT: Δ_Cls ⇒ P
+//  InverseObjectProperties(P, Q) Adjoint pair P ⊣ Q in PSh
+//  SameIndividual(a, b) Equalizer eq(y_a, y_b) ≅ y_a in PSh
+//  DifferentIndividuals(a, b) Coproduct y_a ⊔ y_b with empty pullback
+//  DataProperty(P) Enriched-functor F: Cls × Lit → Bool
+//  DataSomeValuesFrom(P, D) Image presheaf ∃_P(D) for literal-typed P
 //
+
 // =============================================================================
 
 mount core.math.frameworks.owl2_fs.types.{
@@ -84,7 +91,8 @@ mount core.math.frameworks.owl2_fs.types.{
 // V3 NOTE — witness-parameterised translation bridges
 // ─────────────────────────────────────────────────────────────────────────
 //
-// Pre-V3 every bridge axiom had shape `() -> Bool ensures true` — a
+
+// Previously, every bridge axiom had shape `() -> Bool ensures true` — a
 // tautology asserting NOTHING beyond the @framework_translate citation.
 // V3 (this commit) witness-parameterises every bridge over its OWL 2
 // source types + Interpretation gate, with ensures clauses that route
@@ -94,20 +102,24 @@ mount core.math.frameworks.owl2_fs.types.{
 // kernel-checkable Bool-valued claim about the source under the
 // supplied interpretation.
 //
+
 // **Bridge axioms remain `axiom`**, not `@theorem` — cross-framework
 // translations cannot be derived inside Verum's kernel (they are
 // MEANING-PRESERVATION CLAIMS imported as part of using
 // @framework_translate). The V3 promotion makes the claim:
-//   (a) ∀-quantified over the source category (typed parameters),
-//   (b) gated by the interpretation (semantic anchor),
-//   (c) decidable by the kernel under the gating predicate.
+//  (a) ∀-quantified over the source category (typed parameters),
+//  (b) gated by the interpretation (semantic anchor),
+//  (c) decidable by the kernel under the gating predicate.
 //
+
 // External proof-assistant standard analogue (Lean 4):
 //
-//   axiom class_to_presheaf : ∀ (I : Interpretation) (c : ClassExpression)
-//                                (a : Individual),
-//     I.class_member c a = I.class_member c a   -- purity / determinism
+
+//  axiom class_to_presheaf : ∀ (I : Interpretation) (c : ClassExpression)
+//  (a : Individual),
+//  I.class_member c a = I.class_member c a -- purity / determinism
 //
+
 // Verum's V3 form produces an equivalent shape using the language's
 // witness-parameter syntax.
 

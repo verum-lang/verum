@@ -1,9 +1,11 @@
 //! Comprehensive tensor operation benchmarks for VBC interpreter.
 //!
+
 //! Benchmarks CPU (scalar, NEON/AVX2) and Metal GPU backends.
 //! Covers all tensor operations: creation, binop, unop, reduce, matmul,
 //! broadcasting, shape operations, neural network ops, and more.
 //!
+
 //! Run with: cargo bench -p verum_vbc --features metal
 
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};

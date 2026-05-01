@@ -5,9 +5,11 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Provides SpawnConfig builder for fine-grained control over spawned tasks.
 // Implements spec: docs/detailed/10-concurrency-model.md Section 3.5
 //
+
 // =============================================================================
 
 module spawn_config;
@@ -112,16 +114,18 @@ public type Priority is
 
 /// Configuration for spawning tasks with fine-grained control.
 ///
+
 /// Usage:
-///   let config = SpawnConfig.new()
-///       .with_recovery(Retry(RetryConfig.default()))
-///       .with_restart(Transient)
-///       .with_priority(High)
-///       .with_timeout_ms(5000);
+///  let config = SpawnConfig.new()
+///  .with_recovery(Retry(RetryConfig.default()))
+///  .with_restart(Transient)
+///  .with_priority(High)
+///  .with_timeout_ms(5000);
 ///
-///   spawn_with(config) {
-///       do_work()
-///   };
+
+///  spawn_with(config) {
+///  do_work()
+///  };
 public type SpawnConfig is {
     recovery: RecoveryStrategy,
     restart: RestartPolicy,
@@ -183,6 +187,7 @@ implement SpawnConfig {
 
 /// Spawn a future with a specific `SpawnConfig`.
 ///
+
 /// Current Tier 0 interpretation ignores `config`'s knobs (priority,
 /// isolation, recovery, restart policy, timeout, instrumentation) and
 /// simply defers to the standard `spawn()`; the config is retained and

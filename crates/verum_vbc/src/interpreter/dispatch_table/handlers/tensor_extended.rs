@@ -14,6 +14,7 @@ use super::super::alloc_list_from_values;
 
 /// Handler for TensorExtended opcode (0xFC).
 ///
+
 /// This dispatches to tensor operations based on the sub-opcode byte.
 /// Uses the tensor.rs module for actual tensor computations.
 pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -3915,6 +3916,7 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                 // PermissionDenied message that catch frames can
                 // intercept as a typed exception.
                 //
+
                 // Auto-emitted by codegen before tagged-intrinsic
                 // calls so the gate is mandatory at the bytecode
                 // level — opt-in invocations of check_permission

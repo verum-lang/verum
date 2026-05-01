@@ -1,48 +1,60 @@
 //! # cvc5-sys — Low-Level FFI Bindings for CVC5
 //!
+
 //! This crate provides raw, unsafe FFI bindings to the [CVC5 SMT solver's
 //! C API](https://cvc5.github.io/doc/cvc5-main/c/). It is intended to be used
 //! by higher-level safe wrappers (like `verum_smt::cvc5_backend`) rather than
 //! directly by end-user code.
 //!
+
 //! ## Build Modes
 //!
+
 //! The crate supports three distinct linking strategies, controlled by feature
 //! flags (see `Cargo.toml`):
 //!
-//! | Feature        | Behavior                                              |
+
+//! | Feature | Behavior |
 //! |----------------|-------------------------------------------------------|
-//! | `vendored`     | Build CVC5 from source (static lib in binary)         |
-//! | `static`       | Alias for `vendored`                                  |
-//! | `system`       | Link against system-installed `libcvc5`               |
-//! | *(none)*       | Provide stub bindings only — `init()` returns `false` |
+//! | `vendored` | Build CVC5 from source (static lib in binary) |
+//! | `static` | Alias for `vendored` |
+//! | `system` | Link against system-installed `libcvc5` |
+//! | *(none)* | Provide stub bindings only — `init()` returns `false` |
 //!
+
 //! For the Verum project, the recommended configuration is `vendored`, which
 //! produces a self-contained binary with no external runtime dependencies.
 //!
+
 //! ## Safety
 //!
+
 //! All functions in this crate are `unsafe`. Callers must uphold:
 //! - Pointers returned from CVC5 are valid only until the owning solver/term
-//!   manager is destroyed.
+//!  manager is destroyed.
 //! - Passing null pointers where non-null is expected is undefined behavior.
 //! - As of CVC5 1.3.0, `TermManager` instances can be shared across threads,
-//!   but they are **not thread-safe** and must be protected from concurrent
-//!   access (e.g., with a `Mutex`). Each `Solver` should still be used from
-//!   a single thread; separate solvers on separate term managers may run in
-//!   parallel (this is what the portfolio executor does).
+//!  but they are **not thread-safe** and must be protected from concurrent
+//!  access (e.g., with a `Mutex`). Each `Solver` should still be used from
+//!  a single thread; separate solvers on separate term managers may run in
+//!  parallel (this is what the portfolio executor does).
 //!
+
 //! ## Versioning
 //!
+
 //! This crate targets CVC5 version **1.3.3+**. ABI stability is not guaranteed
 //! across CVC5 releases, so this crate's major version tracks CVC5 compatibility.
 //!
+
 //! ## Example (via safe wrapper)
 //!
+
 //! ```rust,ignore
 //! // Do NOT use these bindings directly. Use `verum_smt::Cvc5Backend` instead.
 //! use verum_smt::Cvc5Backend;
 //!
+
 //! let mut backend = Cvc5Backend::new()?;
 //! backend.set_logic("QF_LIA")?;
 //! backend.assert("(> x 0)")?;
@@ -65,6 +77,7 @@ use std::os::raw::c_void;
 
 /// True if CVC5 was actually linked into this binary.
 ///
+
 /// When false, all FFI functions return default/null values and `init()`
 /// returns `false`. This allows downstream crates to compile and run even
 /// without CVC5 available, with the trade-off that `Cvc5Backend::new()`
@@ -77,6 +90,7 @@ pub const CVC5_LINKED: bool = cfg!(any(
 
 /// The CVC5 version this crate was built against.
 ///
+
 /// Format: `"MAJOR.MINOR.PATCH"`.
 pub const CVC5_VERSION: &str = "1.3.3";
 
@@ -84,6 +98,7 @@ pub const CVC5_VERSION: &str = "1.3.3";
 // Opaque types
 // ============================================================================
 //
+
 // These mirror the opaque pointer types in `cvc5/c/cvc5.h`. CVC5's C API
 // uses these handles to manage solver state without exposing C++ internals
 // to the caller.
@@ -121,6 +136,7 @@ pub type cvc5_proof = *mut c_void;
 
 /// Result of a satisfiability check.
 ///
+
 /// Matches CVC5's `cvc5_result_t` enum:
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +151,7 @@ pub enum Cvc5Result {
 
 /// Term kinds — the 200+ operations CVC5 supports.
 ///
+
 /// This enum is a selection of the most commonly used kinds. The full list is
 /// in `cvc5/cvc5_kind.h`. Values match the CVC5 C API exactly.
 #[repr(C)]
@@ -316,6 +333,7 @@ unsafe extern "C" {
 
     // --- Assertion inspection ---
     //
+
     // Returns a pointer to a contiguous array of `*size`
     // asserted terms. The pointer is only valid until the
     // next call to `cvc5_get_assertions` on the same
@@ -352,10 +370,12 @@ unsafe extern "C" {
 
     // --- Proofs ---
     //
+
     // As of CVC5 1.3.0, proofs use the Cooperating Proof Calculus (CPC) format
     // by default, which has significantly broader theory coverage than the
     // legacy proof format. CPC proofs are checkable by Ethos 0.2.0+.
     //
+
     // The `get-proof` SMT-LIB command (and this API) respects the
     // `--proof-format` option: "cpc" (default), "alethe", "lfsc", "dot", "none".
 
@@ -364,6 +384,7 @@ unsafe extern "C" {
 
     /// Get the proof in a specific format (CVC5 1.3.0+).
     ///
+
     /// `format`: one of `"cpc"`, `"alethe"`, `"lfsc"`, `"dot"`.
     pub fn cvc5_solver_get_proof_format(
         solver: cvc5_solver,
@@ -439,6 +460,7 @@ unsafe extern "C" {
 // Stub mode: fake cvc5_version for safe accessors
 // ============================================================================
 //
+
 // When CVC5 is not linked (no features enabled), the `version()` safe accessor
 // still needs *something* to call. We provide a Rust-level stub that mirrors
 // what the FFI would do. The full FFI surface is only declared behind feature
@@ -453,6 +475,7 @@ unsafe extern "C" {
 
 /// Initialize CVC5 backend. Returns `true` on success, `false` if unavailable.
 ///
+
 /// This function is safe to call from multiple threads but only returns `true`
 /// if CVC5 was statically or dynamically linked at build time.
 pub fn init() -> bool {

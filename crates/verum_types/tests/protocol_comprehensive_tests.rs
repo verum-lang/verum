@@ -14,8 +14,10 @@
 )]
 // Comprehensive protocol system tests
 //
+
 // Unification: Robinson's algorithm extended with row polymorphism, refinement subtyping, and type class constraints — .3
 //
+
 // Tests the protocol system including:
 // - Protocol registration and lookup
 // - Protocol implementation validation
@@ -80,10 +82,12 @@ fn test_register_custom_protocol() {
     // The current API design focuses on checking protocol implementations rather than
     // exposing the protocol registry directly.
     //
+
     // To test custom protocols, register an implementation instead:
     // checker.register_impl(make_simple_impl("Monoid", Type::int()));
     // assert!(checker.implements(&Type::int(), &make_path("Monoid")));
     //
+
     // This follows the principle of checking what types implement, not what protocols exist.
     // Future API may expose protocol registration if needed for extensibility.
 }

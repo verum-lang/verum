@@ -1,44 +1,53 @@
 //! `kernel_v0` bootstrap-meta-theory manifest (#154 / Phase 3 of
 //! Milawa-style trust-base shrinkage).
 //!
+
 //! # Architectural role
 //!
+
 //! Verum's trusted base shrinks across stages:
 //!
+
 //! ```text
-//!   Pre-#157:  10K LOC `verum_kernel` Rust + 38 rules / 34 admits
-//!   Post-#157:  796 LOC `proof_checker.rs` Rust + 7 rules
-//!   Phase 3 :   500 LOC Verum + 10 rules  (this manifest's target)
-//!   Phase 3 ✓:  100 LOC bootstrap shim (Rust interpreter of kernel_v0)
+//!  Pre-#157: 10K LOC `verum_kernel` Rust + 38 rules / 34 admits
+//!  Post-#157: 796 LOC `proof_checker.rs` Rust + 7 rules
+//!  Phase 3 : 500 LOC Verum + 10 rules (this manifest's target)
+//!  Phase 3 ✓: 100 LOC bootstrap shim (Rust interpreter of kernel_v0)
 //! ```
 //!
+
 //! The Verum-side mirror lives at
 //! [`core/verify/kernel_v0/`](https://github.com/oldman/verum/tree/main/core/verify/kernel_v0).
 //! It carries one file per kernel rule (`rules/k_*.vr`) plus
 //! supporting infrastructure (`core_term.vr`, `context.vr`,
 //! `judgment.vr`, `soundness.vr`).
 //!
+
 //! This manifest is the **Rust-side static record** of that
-//! directory's structure.  It serves three load-bearing purposes:
+//! directory's structure. It serves three load-bearing purposes:
 //!
+
 //! 1. **Drift gate**: if `proof_checker.rs` adds a kernel rule
-//!    that `kernel_v0/rules/` doesn't mirror, the audit fails.
-//!    Symmetric: a rule file under `kernel_v0/rules/` that has no
-//!    counterpart in the manifest also fails.
+//!  that `kernel_v0/rules/` doesn't mirror, the audit fails.
+//!  Symmetric: a rule file under `kernel_v0/rules/` that has no
+//!  counterpart in the manifest also fails.
 //! 2. **Roster surface**: `verum audit --kernel-v0-roster` walks
-//!    this manifest + checks the corresponding `.vr` files exist
-//!    on disk + classifies each rule's discharge status.
+//!  this manifest + checks the corresponding `.vr` files exist
+//!  on disk + classifies each rule's discharge status.
 //! 3. **Bootstrap claim**: third-party reviewers ask "what do I
-//!    need to trust?" — this manifest is the canonical answer for
-//!    the Verum-side trusted-base contents.
+//!  need to trust?" — this manifest is the canonical answer for
+//!  the Verum-side trusted-base contents.
 //!
+
 //! ## What this manifest is NOT
 //!
+
 //! It's not the kernel logic itself — that lives in the .vr files
-//! and (currently) in `proof_checker.rs`.  The manifest is a
+//! and (currently) in `proof_checker.rs`. The manifest is a
 //! cross-cutting record that lets audit gates verify the Rust ↔
 //! Verum mirror invariant without parsing the .vr files.
 //!
+
 //! Once the Verum compiler matures enough that `kernel_v0/` is
 //! fully self-checking (the parse errors at
 //! `kernel_v0/soundness.vr` are tracked separately), this manifest
@@ -54,7 +63,7 @@ use serde::{Deserialize, Serialize};
 // KernelV0Status — discharge classification
 // =============================================================================
 
-/// Discharge status for one bootstrap-meta-theory rule.  Mirrors
+/// Discharge status for one bootstrap-meta-theory rule. Mirrors
 /// [`super::LemmaStatus`] but is **manifest-local**: pre-this-module
 /// the canonical-rules roster lived only in
 /// [`super::canonical_rules`] (38 rules of the broader kernel),
@@ -100,14 +109,14 @@ impl std::fmt::Display for KernelV0Status {
 // =============================================================================
 
 /// One bootstrap-meta-theory rule + its file location + its
-/// discharge status.  The `file_path` is RELATIVE to a Verum project
+/// discharge status. The `file_path` is RELATIVE to a Verum project
 /// root (e.g., `core/verify/kernel_v0/rules/k_var.vr`); the audit
 /// gate joins it with the project's `manifest_dir` to verify
 /// existence on disk.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KernelV0Rule {
     /// Stable rule identifier — `"K-Var"` / `"K-Univ"` / `"K-Pi-Form"`
-    /// / etc.  Matches the rule-name column in
+    /// / etc. Matches the rule-name column in
     /// [`super::canonical_rules`].
     pub name: String,
     /// Verum-side soundness-lemma symbol — what `kernel_v0/soundness.vr`
@@ -127,26 +136,29 @@ pub struct KernelV0Rule {
 // Manifest
 // =============================================================================
 
-/// The canonical 10-rule kernel_v0 manifest.  Mirrors
+/// The canonical 10-rule kernel_v0 manifest. Mirrors
 /// `core/verify/kernel_v0/README.md`'s "10 minimal rules" table.
 ///
+
 /// **Stable contract**: this list is the single source of truth for
-/// the Rust ↔ Verum bootstrap-mirror invariant.  Adding a rule
+/// the Rust ↔ Verum bootstrap-mirror invariant. Adding a rule
 /// requires:
 ///
-///   1. Creating `core/verify/kernel_v0/rules/k_<name>.vr` with the
-///      `introduce_<name>` constructor + `k_<name>_sound` soundness
-///      lemma.
-///   2. Adding the rule to `proof_checker.rs` (or another suitable
-///      Rust-side trusted base).
-///   3. Adding the entry to this manifest.
+
+///  1. Creating `core/verify/kernel_v0/rules/k_<name>.vr` with the
+///  `introduce_<name>` constructor + `k_<name>_sound` soundness
+///  lemma.
+///  2. Adding the rule to `proof_checker.rs` (or another suitable
+///  Rust-side trusted base).
+///  3. Adding the entry to this manifest.
 ///
+
 /// Drift across these three sites is the audit failure mode.
 pub fn manifest() -> Vec<KernelV0Rule> {
     // Path relative to the Verum project root (the directory
-    // containing `verum.toml`).  For the canonical Verum stdlib
+    // containing `verum.toml`). For the canonical Verum stdlib
     // project, that's `core/`, and the kernel_v0 tree lives at
-    // `verify/kernel_v0/rules/` underneath it.  The audit gate
+    // `verify/kernel_v0/rules/` underneath it. The audit gate
     // joins this against `Manifest::find_manifest_dir()`.
     let rules_dir = PathBuf::from("verify/kernel_v0/rules");
     vec![
@@ -233,7 +245,7 @@ pub fn manifest() -> Vec<KernelV0Rule> {
     ]
 }
 
-/// Canonical count of bootstrap-meta-theory rules.  Matches the
+/// Canonical count of bootstrap-meta-theory rules. Matches the
 /// "10 minimal rules" table in `core/verify/kernel_v0/README.md`.
 pub const KERNEL_V0_RULE_COUNT: usize = 10;
 
@@ -261,7 +273,7 @@ pub fn admitted_count() -> usize {
 /// One issue found by the manifest-verification pass.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ManifestIssue {
-    /// The manifest names a file that doesn't exist on disk.  Either
+    /// The manifest names a file that doesn't exist on disk. Either
     /// the rule was deleted without updating the manifest, or the
     /// manifest entry has the wrong path.
     MissingSourceFile {
@@ -271,7 +283,7 @@ pub enum ManifestIssue {
         expected_path: PathBuf,
     },
     /// A `kernel_v0/rules/k_*.vr` file exists on disk but no manifest
-    /// entry references it.  Either a new rule was added without
+    /// entry references it. Either a new rule was added without
     /// updating the manifest, or the file is stale.
     OrphanSourceFile {
         /// Path of the orphan file.
@@ -280,12 +292,13 @@ pub enum ManifestIssue {
 }
 
 /// Walk the project's `core/verify/kernel_v0/rules/` directory and
-/// cross-reference against the manifest.  Returns one
-/// [`ManifestIssue`] per drift point detected.  An empty result
+/// cross-reference against the manifest. Returns one
+/// [`ManifestIssue`] per drift point detected. An empty result
 /// means the Rust ↔ Verum mirror is consistent.
 ///
+
 /// `project_root` should be the project's `manifest_dir` — the
-/// directory containing `verum.toml`.  The function joins
+/// directory containing `verum.toml`. The function joins
 /// project-relative paths in the manifest against this root.
 pub fn verify_manifest(project_root: &Path) -> Vec<ManifestIssue> {
     let mut issues = Vec::new();
@@ -303,7 +316,7 @@ pub fn verify_manifest(project_root: &Path) -> Vec<ManifestIssue> {
     }
 
     // Pass 2: every k_*.vr file under kernel_v0/rules/ must be in
-    // the manifest.  Surfaces orphans that drifted out of the
+    // the manifest. Surfaces orphans that drifted out of the
     // bootstrap chain without a manifest update.
     let rules_dir = project_root.join("verify/kernel_v0/rules");
     if let Ok(entries) = std::fs::read_dir(&rules_dir) {
@@ -469,7 +482,7 @@ mod tests {
 
     #[test]
     fn proved_rules_match_canonical_set() {
-        // The 4 structurally-proved rules.  Mirrors the README's
+        // The 4 structurally-proved rules. Mirrors the README's
         // "Proved" rows and `verum_kernel::proof_checker`'s
         // hand-audit set.
         let proved: std::collections::BTreeSet<_> = manifest()
@@ -489,7 +502,7 @@ mod tests {
     fn verify_manifest_against_real_project_finds_no_missing_files() {
         // Locate the canonical Verum project root (`<workspace>/core`,
         // where `verum.toml` lives) and verify the manifest against
-        // the live `verify/kernel_v0/` tree.  This is the drift
+        // the live `verify/kernel_v0/` tree. This is the drift
         // gate: if a rule was deleted or moved without updating the
         // manifest, this test fails.
         let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

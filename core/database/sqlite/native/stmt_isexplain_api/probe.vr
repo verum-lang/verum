@@ -45,7 +45,7 @@ public fn is_query_plan(m: &StmtIsexplainMode) -> Bool {
     match m { MQueryPlan => true, _ => false }
 }
 
-// Number of result columns each mode emits.  EXPLAIN: 8 cols; EQP: 4 cols.
+// Number of result columns each mode emits. EXPLAIN: 8 cols; EQP: 4 cols.
 public fn result_column_count(m: &StmtIsexplainMode) -> Int {
     match m {
         MNotExplain => 0,    // depends on the underlying SELECT — not fixed

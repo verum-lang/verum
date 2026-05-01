@@ -1,5 +1,6 @@
 //! Bindings to LLVM's C API.
 //!
+
 //! Refer to the [LLVM documentation](http://llvm.org/docs/) for more
 //! information.
 
@@ -75,6 +76,7 @@ pub enum LLVMOpaqueDbgRecord {}
 
 /// Core types used throughout LLVM.
 ///
+
 /// In most cases you will want to `use llvm::prelude::*`.
 pub mod prelude {
     pub type LLVMBool = ::libc::c_int;
@@ -486,6 +488,7 @@ pub type LLVMAttributeIndex = ::libc::c_uint;
 
 /// Tail call kind for LLVMSetTailCallKind and LLVMGetTailCallKind.
 ///
+
 /// Note that `musttail` implies `tail`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -514,6 +517,7 @@ pub const LLVMFastMathAll: ::libc::c_uint = LLVMFastMathAllowReassoc
 
 /// Flags to indicate what fast-math-style optimizations are allowed on operations.
 ///
+
 /// See <https://llvm.org/docs/LangRef.html#fast-math-flags>
 pub type LLVMFastMathFlags = ::libc::c_uint;
 

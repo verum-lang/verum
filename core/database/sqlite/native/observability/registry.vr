@@ -3,17 +3,20 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
+
 // `MetricRegistry` is the central catalogue every layer (pager,
 // vdbe, planner, ext) writes into. Each metric is stored by name;
 // re-fetching by the same name returns the existing instance so
 // counters accumulate across the connection's lifetime.
 //
+
 // Built-in metrics for every Connection (set up in `register_defaults`):
 //
-//   counters:   queries_total, queries_failed, rows_read, rows_written,
-//               cache_hits, cache_misses
-//   gauges:     open_cursors, prepared_statements, txn_depth
-//   histograms: query_latency_ns, txn_latency_ns
+
+//  counters: queries_total, queries_failed, rows_read, rows_written,
+//  cache_hits, cache_misses
+//  gauges: open_cursors, prepared_statements, txn_depth
+//  histograms: query_latency_ns, txn_latency_ns
 // =============================================================================
 
 module core.database.sqlite.native.observability.registry;

@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_config(op, …).
 //
-// These must be set before sqlite3_initialize().  We model the
+
+// These must be set before sqlite3_initialize(). We model the
 // documented subset as a variant; unknown codes pass through via
 // `CgUnknown(code)`.
 // =============================================================================

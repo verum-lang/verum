@@ -4,41 +4,51 @@
 // Layer: 2 (Collections)
 // Dependencies: core, core.base.random
 // Reference: Walker, "An Efficient Method for Generating Discrete Random
-//            Variables with General Distributions" (1977)
+//  Variables with General Distributions" (1977)
 // =============================================================================
 //
+
 // Walker's alias method — draws from a discrete distribution with
 // non-uniform weights in O(1) per sample after O(N) build. The
 // standard production choice for weighted random selection:
 //
-//   * Weighted round-robin load balancers (Envoy WRR, HAProxy).
-//   * A/B test bucket assignment.
-//   * Monte Carlo sampling in ML training pipelines.
-//   * Kafka partitioners with non-uniform weights.
-//   * Weighted retry-target selection in service meshes.
+
+//  * Weighted round-robin load balancers (Envoy WRR, HAProxy).
+//  * A/B test bucket assignment.
+//  * Monte Carlo sampling in ML training pipelines.
+//  * Kafka partitioners with non-uniform weights.
+//  * Weighted retry-target selection in service meshes.
 //
+
 // # Algorithm
 //
+
 // Given weights `w_1..w_N`, build two tables (`probability`,
 // `alias`) such that `draw()`:
 //
-//   1. Picks a column uniformly at random: `i ~ Uniform(0..N-1)`.
-//   2. Flips a biased coin with P(heads) = `probability[i]`.
-//   3. Returns `i` on heads, `alias[i]` on tails.
+
+//  1. Picks a column uniformly at random: `i ~ Uniform(0..N-1)`.
+//  2. Flips a biased coin with P(heads) = `probability[i]`.
+//  3. Returns `i` on heads, `alias[i]` on tails.
 //
+
 // Each draw costs one uniform-int draw + one uniform-float draw +
 // one table lookup. Build is O(N) via Vose's improved algorithm.
 //
+
 // # Usage
 //
+
 // ```
 // let weights: [Float; 4] = [1.0, 3.0, 2.0, 4.0];
 // let sampler = AliasSampler.from_weights(&weights[..])?;
 //
-// let idx: Int = sampler.sample();            // 0..3, weighted
+
+// let idx: Int = sampler.sample(); // 0..3, weighted
 // let choice = &items[sampler.sample()];
 // ```
 //
+
 // =============================================================================
 
 module core.collections.alias_sampler;

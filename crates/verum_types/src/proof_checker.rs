@@ -1,11 +1,13 @@
 //! Proof type checker for Verum's formal proof system.
 //!
+
 //! This module implements type checking for theorem/proof constructs:
 //! - Validates theorem propositions are well-typed
 //! - Tracks hypothesis contexts during proof checking
 //! - Validates that proof bodies match propositions
 //! - Integrates with existing InferenceContext
 //!
+
 //! Formal proof system (future v2.0+): machine-checkable proofs with tactics (simp, ring, omega, blast, induction), theorem/lemma/corollary statements
 
 use crate::context::{TypeContext, TypeScheme};
@@ -26,6 +28,7 @@ use verum_common::ToText;
 
 /// Proof checker for validating theorems and proofs.
 ///
+
 /// This integrates with the main type checker to provide proof-specific
 /// validation including hypothesis tracking and tactic type checking.
 pub struct ProofChecker {
@@ -49,12 +52,14 @@ impl ProofChecker {
 
     /// Check a theorem declaration.
     ///
+
     /// Validates:
     /// 1. Proposition is well-typed and evaluates to Bool or Prop
     /// 2. Generic parameters are valid
     /// 3. Parameters are well-typed
     /// 4. If proof is present, it validates the proposition
     ///
+
     /// Theorem statements: "theorem name(params): proposition { proof_term }", with lemma and corollary variants
     pub fn check_theorem(
         &mut self,
@@ -104,13 +109,16 @@ impl ProofChecker {
 
     /// Check an axiom declaration.
     ///
+
     /// Validates:
     /// 1. Proposition is well-typed and evaluates to Bool or Prop
     /// 2. Generic parameters are valid
     /// 3. Parameters are well-typed
     ///
+
     /// Axioms have no proof body (they are assumed true).
     ///
+
     /// Theorem statements: "theorem name(params): proposition { proof_term }", with lemma and corollary variants
     pub fn check_axiom(
         &mut self,
@@ -154,6 +162,7 @@ impl ProofChecker {
 
     /// Check a proof body validates the given proposition.
     ///
+
     /// Proof terms: first-class proof values, modus ponens, case analysis, proof by contradiction
     pub(crate) fn check_proof_body(
         &mut self,
@@ -199,8 +208,10 @@ impl ProofChecker {
 
     /// Check a structured proof.
     ///
+
     /// Validates each proof step and ensures the final conclusion matches the goal.
     ///
+
     /// Proof tactics: simp (simplification), ring (ring normalization), omega (linear arithmetic), blast (tableau prover), induction
     fn check_proof_structure(
         &mut self,
@@ -230,6 +241,7 @@ impl ProofChecker {
 
     /// Check a single proof step.
     ///
+
     /// Proof tactics: simp (simplification), ring (ring normalization), omega (linear arithmetic), blast (tableau prover), induction
     fn check_proof_step(
         &mut self,
@@ -380,6 +392,7 @@ impl ProofChecker {
 
     /// Check a calculation chain (equational reasoning).
     ///
+
     /// Mathematical structures: algebraic protocols (Group, Ring, Field) with laws as theorem requirements — .1
     fn check_calculation_chain(
         &mut self,
@@ -448,6 +461,7 @@ impl ProofChecker {
 
     /// Check a proof by method (induction, cases, contradiction).
     ///
+
     /// Proof terms: first-class proof values, modus ponens, case analysis, proof by contradiction
     fn check_proof_method(
         &mut self,
@@ -553,10 +567,12 @@ impl ProofChecker {
 
     /// Check a tactic validates the goal.
     ///
+
     /// For now, this is a simplified check that accepts tactics
     /// that syntactically make sense. A full implementation would
     /// execute tactics symbolically.
     ///
+
     /// Proof tactics: simp (simplification), ring (ring normalization), omega (linear arithmetic), blast (tableau prover), induction
     pub(crate) fn check_tactic(
         &mut self,
@@ -877,6 +893,7 @@ impl ProofChecker {
                 // Stream pattern: stream[first, second, ...rest]
                 // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 18.3 - Stream Pattern Matching
                 //
+
                 // Bind each head pattern element to a fresh type variable (element type)
                 // and optionally bind the rest identifier to the iterator type
                 let elem_ty = Type::Var(TypeVar::fresh());
@@ -896,6 +913,7 @@ impl ProofChecker {
                 // Guard pattern: (pattern if expr)
                 // Spec: Rust RFC 3637 - Guard Patterns
                 //
+
                 // Bind the inner pattern; guard expression is handled separately
                 self.bind_pattern(pattern, ty, ctx, type_checker, span)
             }

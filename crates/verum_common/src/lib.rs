@@ -7,33 +7,41 @@
 
 //! Verum Core - Foundation types without dependencies
 //!
+
 //! This crate provides the core semantic types used throughout Verum.
 //! It has NO dependencies on verum_cbgr or stdlib, breaking circular deps.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! verum_common (foundation)
-//!   ├─ Core types: List, Text, Map, Set, Maybe, Result, Heap
-//!   ├─ No dependencies on other verum crates
-//!   └─ Foundation layer
+//!  ├─ Core types: List, Text, Map, Set, Maybe, Result, Heap
+//!  ├─ No dependencies on other verum crates
+//!  └─ Foundation layer
 //!
+
 //! verum_cbgr
-//!   ├─ Depends on: verum_common (for types)
-//!   ├─ Provides: ThinRef, FatRef, CheckedRef, UnsafeRef
-//!   └─ No circular dependency
+//!  ├─ Depends on: verum_common (for types)
+//!  ├─ Provides: ThinRef, FatRef, CheckedRef, UnsafeRef
+//!  └─ No circular dependency
 //!
+
 //! stdlib
-//!   ├─ Depends on: verum_common, verum_cbgr
-//!   ├─ Re-exports: All verum_common types
-//!   ├─ Adds: Async runtime, network, crypto, etc.
-//!   └─ Can use CBGR types freely!
+//!  ├─ Depends on: verum_common, verum_cbgr
+//!  ├─ Re-exports: All verum_common types
+//!  ├─ Adds: Async runtime, network, crypto, etc.
+//!  └─ Can use CBGR types freely!
 //! ```
 //!
+
 //! # MANDATORY SEMANTIC TYPES (v6.0-BALANCED)
 //!
+
 //! **ALL Verum crates MUST use these semantic types instead of Rust std types:**
 //!
+
 //! | Verum Type | Rust Type | Usage |
 //! |------------|-----------|-------|
 //! | `List<T>` | `List<T>` | Dynamic arrays |
@@ -46,32 +54,38 @@
 //! | `OrderedMap<K,V>` | `BTreeMap<K,V>` | Ordered maps |
 //! | `OrderedSet<T>` | `BTreeSet<T>` | Ordered sets |
 //!
+
 //! **FORBIDDEN in all crates except verum_common:**
 //! - Direct use of `Vec`, `Text`, `HashMap`, `HashSet`
 //! - Aliasing std types (e.g., `HashMap as StdHashMap`)
 //! - Importing from std::collections or std::vec
 //!
+
 //! **CORRECT usage:**
 //! ```rust
 //! use verum_common::{List, Text, Map, Set};
 //!
+
 //! fn process_items(items: List<Text>) -> Map<Text, i32> {
-//!     let mut result = Map::new();
-//!     // ...
-//!     result
+//!  let mut result = Map::new();
+//!  // ...
+//!  result
 //! }
 //! ```
 //!
+
 //! **INCORRECT usage:**
 //! ```rust,ignore
-//! use std::collections::HashMap;  // ❌ FORBIDDEN
-//! use stdlib::core::List;               // ❌ FORBIDDEN
+//! use std::collections::HashMap; // ❌ FORBIDDEN
+//! use stdlib::core::List; // ❌ FORBIDDEN
 //!
+
 //! fn bad_function(items: List<Text>) -> HashMap<Text, i32> {
-//!     // ❌ SPECIFICATION VIOLATION
+//!  // ❌ SPECIFICATION VIOLATION
 //! }
 //! ```
 //!
+
 //! All Verum crates MUST use semantic types (List, Text, Map, Set, Maybe, Heap)
 //! instead of Rust std types (Vec, String, HashMap, HashSet, Option, Box).
 
@@ -79,11 +93,14 @@
 // SEMANTIC TYPES - v6.0-BALANCED
 // =============================================================================
 //
+
 // These are newtype wrappers providing semantic naming and rich APIs.
 // Re-exported from the semantic_types module where full implementations live.
 //
+
 // MANDATORY: Use these types instead of Rust std types in all Verum code.
 //
+
 // Semantic type wrappers: meaningful names (List, Text, Map) over implementation names (Vec, String, HashMap)
 
 // Re-export newtype wrapper implementations from semantic_types module
@@ -97,51 +114,63 @@ pub use well_known_types::{
 
 /// Maybe type - Semantic name for optional values
 ///
+
 /// **MANDATORY**: Use `Maybe<T>` instead of `Option<T>` in all Verum code.
 ///
+
 /// # Examples
 /// ```
 /// use verum_common::{Maybe, Text};
 ///
+
 /// fn find_item(id: i32) -> Maybe<Text> {
-///     if id > 0 {
-///         Some(Text::from("Found"))
-///     } else {
-///         None
-///     }
+///  if id > 0 {
+///  Some(Text::from("Found"))
+///  } else {
+///  None
+///  }
 /// }
 /// ```
 ///
+
 /// Verum semantic type — mandatory in all Verum code
 pub type Maybe<T> = Option<T>;
 
 /// Result type - Semantic name for error handling
 ///
+
 /// Re-export of std::result::Result with semantic naming context.
 ///
+
 /// # Examples
 /// ```
 /// use verum_common::{Result, Text};
 ///
+
 /// fn parse_number(s: &str) -> Result<i32, Text> {
-///     s.parse().map_err(|e| Text::from(format!("Parse error: {}", e)))
+///  s.parse().map_err(|e| Text::from(format!("Parse error: {}", e)))
 /// }
 /// ```
 ///
+
 /// Verum semantic type — mandatory in all Verum code
 pub type Result<T, E> = std::result::Result<T, E>;
 
 /// Heap type - Semantic name for heap-allocated values
 ///
+
 /// **MANDATORY**: Use `Heap<T>` instead of `Box<T>` in all Verum code.
 ///
+
 /// # Examples
 /// ```
 /// use verum_common::Heap;
 ///
+
 /// let boxed: Heap<i32> = Heap::new(42);
 /// ```
 ///
+
 /// Verum semantic type — mandatory in all Verum code
 #[allow(clippy::disallowed_types)]
 pub type Heap<T> = Box<T>;

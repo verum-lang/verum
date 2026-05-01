@@ -35,6 +35,7 @@ fn is_ident_body(b: u8) -> Bool {
 
 // Parse a u32 starting at `i`; returns (value, next_i).
 //
+
 // Used to read the optional `(N)` / `(N,M)` width/precision in
 // declared types like `VARCHAR(255)` / `DECIMAL(10, 2)`. The input
 // `bs` is the user's CREATE TABLE column-type declaration; a digit

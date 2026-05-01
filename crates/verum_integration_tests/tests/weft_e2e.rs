@@ -1,28 +1,33 @@
 //! Weft net-framework end-to-end probes.
 //!
+
 //! Anchors three KВИ (CVE) acceptance gates for `core/net/weft/*`,
 //! pinned by direct invocation of the on-disk `verum` binary against
 //! a freshly-authored hello-world `.vr` source. Each probe is a
 //! single `#[test]` so the failure mode is explicit in CI:
 //!
-//!   * `check_passes_for_weft_hello_world`
-//!     CVE axis В — `verum check` must accept a router + handler
-//!     program that mounts every umbrella `core.net.weft.*` symbol.
-//!     Currently passes.
+
+//!  * `check_passes_for_weft_hello_world`
+//!  CVE axis В — `verum check` must accept a router + handler
+//!  program that mounts every umbrella `core.net.weft.*` symbol.
+//!  Currently passes.
 //!
-//!   * `interpreter_runs_weft_hello_world_without_bind`
-//!     CVE axis И (smoke) — `verum run` (Tier 0 interpreter) must
-//!     execute a program that constructs a `Router` + `WeftApp` but
-//!     does NOT call `.bind()`. Currently passes.
+
+//!  * `interpreter_runs_weft_hello_world_without_bind`
+//!  CVE axis И (smoke) — `verum run` (Tier 0 interpreter) must
+//!  execute a program that constructs a `Router` + `WeftApp` but
+//!  does NOT call `.bind()`. Currently passes.
 //!
-//!   * `aot_runs_weft_hello_world_without_bind`
-//!     CVE axis И (Tier 1) — `verum run --aot` should produce a
-//!     native executable that prints HELLO_OK. Currently *does not*
-//!     pass deterministically: even without `.bind()`, the AOT
-//!     binary segfaults because the lowering skips `env_ctx_*` /
-//!     `os_mmap` / `os_alloc_segment` (see task #13). The test is
-//!     gated behind `WEFT_RUN_BIND_PROBES=1` until that lands.
+
+//!  * `aot_runs_weft_hello_world_without_bind`
+//!  CVE axis И (Tier 1) — `verum run --aot` should produce a
+//!  native executable that prints HELLO_OK. Currently *does not*
+//!  pass deterministically: even without `.bind()`, the AOT
+//!  binary segfaults because the lowering skips `env_ctx_*` /
+//!  `os_mmap` / `os_alloc_segment` (see task #13). The test is
+//!  gated behind `WEFT_RUN_BIND_PROBES=1` until that lands.
 //!
+
 //! Two known-failure probes capture the foundational gaps surfaced
 //! during the 2026-04-30 audit. They are gated behind
 //! `WEFT_RUN_BIND_PROBES=1` so CI does not red-flag them while the
@@ -30,15 +35,17 @@
 //! #13). When the gate flips green, drop the env-guard and let the
 //! failures regress the bug-fix landings.
 //!
-//!   * `interpreter_bind_panics_with_known_message` —
-//!     `Result.map_err` is not resolved by the VBC interpreter's
-//!     method-dispatch path when `TcpListener.bind` invokes it.
+
+//!  * `interpreter_bind_panics_with_known_message` —
+//!  `Result.map_err` is not resolved by the VBC interpreter's
+//!  method-dispatch path when `TcpListener.bind` invokes it.
 //!
-//!   * `aot_bind_segfaults_until_runtime_helpers_landed` —
-//!     `env_ctx_*`, `os_mmap`, `os_alloc_segment`, `swap`,
-//!     `get_thread_id` are skipped during VBC→LLVM lowering with
-//!     `undefined variable: CONTEXT_SLOT_COUNT`; the binary jumps
-//!     to a missing function and dies with SIGSEGV.
+
+//!  * `aot_bind_segfaults_until_runtime_helpers_landed` —
+//!  `env_ctx_*`, `os_mmap`, `os_alloc_segment`, `swap`,
+//!  `get_thread_id` are skipped during VBC→LLVM lowering with
+//!  `undefined variable: CONTEXT_SLOT_COUNT`; the binary jumps
+//!  to a missing function and dies with SIGSEGV.
 
 use std::process::Command;
 
@@ -188,12 +195,14 @@ fn aot_runs_weft_hello_world_without_bind() {
 /// Direct probe for the native Result combinator dispatch
 /// (task #12, fundamental fix in `vbc/interpreter`).
 ///
+
 /// Pre-fix the interpreter panicked with
 /// `Panic: method 'Result.map_err' not found on value` from
 /// `core/net/tcp.vr:321`. Post-fix `dispatch_variant_method`
 /// handles `map` / `map_err` / `and_then` / `or_else` natively
 /// (commits d7bc4628 + ad85fc4d), monomorphisation-free.
 ///
+
 /// Probe avoids OS dependencies — pure Result variant + closure
 /// work — so it is a clean acceptance gate for the dispatch path
 /// independent of any later runtime issues (#17).
@@ -282,6 +291,7 @@ fn interpreter_bind_pinned_known_failure() {
 
 /// Pinned regression for task #13 (AOT runtime helpers).
 ///
+
 /// Today the AOT path skips `env_ctx_*`, `os_mmap`,
 /// `os_alloc_segment`, `swap`, `get_thread_id` during VBC→LLVM
 /// lowering and the resulting binary segfaults (exit 139). Gated

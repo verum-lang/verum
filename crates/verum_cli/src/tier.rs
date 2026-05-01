@@ -1,11 +1,13 @@
 //! Shared execution-tier resolver used by `run`, `test` and `bench`.
 //!
+
 //! Keeps the flag semantics identical across commands:
-//!   * `--interp`          → Tier::Interpret
-//!   * `--aot`             → Tier::Aot
-//!   * `--tier <name>`     → resolved via `LanguageFeatureOverrides::tier`
-//!   * otherwise           → caller-supplied default
+//!  * `--interp` → Tier::Interpret
+//!  * `--aot` → Tier::Aot
+//!  * `--tier <name>` → resolved via `LanguageFeatureOverrides::tier`
+//!  * otherwise → caller-supplied default
 //!
+
 //! `--interp` and `--aot` are mutually exclusive in the clap definition;
 //! the resolver additionally reports a clean error if the `--tier` value
 //! is unknown, and lets each command pin its own default (e.g. `run` and
@@ -46,12 +48,14 @@ pub struct ResolvedTier {
 
 /// Resolve execution tier from CLI inputs.
 ///
+
 /// Precedence (highest → lowest):
-///   1. `explicit_interp` / `explicit_aot` shortcut flags
-///   2. `--tier <NAME>` long form (accepted values: `interpret`,
-///      `interpreter`, `aot`)
-///   3. `default`
+///  1. `explicit_interp` / `explicit_aot` shortcut flags
+///  2. `--tier <NAME>` long form (accepted values: `interpret`,
+///  `interpreter`, `aot`)
+///  3. `default`
 ///
+
 /// Returns an error for unknown values or `"check"` (which is a build
 /// mode, not an execution tier).
 pub fn resolve(

@@ -130,6 +130,7 @@ impl SecurityScanner {
 
     /// Install the audit log-level filter.
     ///
+
     /// Wired from `EnterpriseConfig.audit.log_level` —
     /// `SecurityScanner::log_action` consults this to skip recording
     /// entries that don't match the configured level. Closes the
@@ -438,6 +439,7 @@ impl SecurityScanner {
     /// `0` is a sentinel meaning "never evict" — preserves entries
     /// indefinitely. Returns the number of entries evicted.
     ///
+
     /// Called by `CogManager::new` after `load_audit_log` so the
     /// in-memory log starts within the retention window even if
     /// the on-disk file accumulated stale entries between runs.

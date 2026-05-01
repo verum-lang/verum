@@ -6,6 +6,7 @@ module core.database.sqlite.native.l1_pager.journal.writer;
 // Layer: 1 (Pager — WAL writer)
 // Spec: sqlite-native.md §8.3, sqlite.org/walformat.html
 //
+
 // Wraps the existing serialisation surface in `journal/wal.vr` with
 // the actual file-I/O pathway: header pwrite → frame-prefix pwrite →
 // frame-body pwrite → conditional `full_fsync` on commit. Every disk
@@ -15,6 +16,7 @@ module core.database.sqlite.native.l1_pager.journal.writer;
 // checksum no longer matches and which recovery rejects (the WAL
 // "torn-tail" invariant).
 //
+
 // `WalWriter` is sync — the L1 actor that wraps it (`l1_pager/actor.vr`)
 // makes that async via `core.async.task::block_on_io`. Direct callers
 // in tests can use this surface as-is.
@@ -185,6 +187,7 @@ implement WalWriter {
     /// place before we return. Returns the 0-based index of the
     /// newly-written frame.
     ///
+
     /// Atomicity: header and body are pwrite'd at distinct offsets;
     /// a crash between them leaves a torn frame whose recomputed
     /// checksum will not match the stored one, so recovery discards

@@ -2,6 +2,7 @@
 // Modified work Copyright 2023 Daan Vanoverloop
 // See the COPYRIGHT file at the top-level directory of this distribution.
 //
+
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
@@ -11,64 +12,77 @@
 //! This crate provides raw bindings and a safe wrapper for [TableGen](https://llvm.org/docs/TableGen/),
 //! a domain-specific language used by the [LLVM project](https://llvm.org/).
 //!
+
 //! The goal of this crate is to enable users to develop custom [TableGen backends](https://llvm.org/docs/TableGen/BackGuide.html)
 //! in Rust. Hence the primary use case of this crate are procedural macros that
 //! generate Rust code from TableGen description files.
 //!
+
 //! # Safety
 //!
+
 //! This crate aims to be completely safe.
 //!
+
 //! # Supported LLVM Versions
 //!
+
 //! An installation of LLVM is required to use this crate.
 //! The versions of LLVM currently supported are 16.x.x, 17.x.x, 18.x.x,
 //! 19.x.x, 20.x.x, and 21.x.x. Different LLVM version can be selected using
 //! features flags (e.g., `llvm16-0` or `llvm17-0`).
 //!
+
 //! The `TABLEGEN_<version>_PREFIX` environment variable can be used to specify
 //! a custom directory of the LLVM installation.
 //!
+
 //! # Examples
 //!
+
 //! The following example parse simple TableGen code provided as a `&str` and
 //! iterates over classes and defs defined in this file.
 //!
+
 //! ```rust
 //! use verum_tblgen::{RecordKeeper, TableGenParser};
 //!
+
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let keeper: RecordKeeper = TableGenParser::new()
-//!     .add_source(
-//!         r#"
-//!         class A;
-//!         def D: A;
-//!         "#,
-//!     )?
-//!     .parse()?;
+//!  .add_source(
+//!  r#"
+//!  class A;
+//!  def D: A;
+//!  "#,
+//!  )?
+//!  .parse()?;
 //! assert_eq!(keeper.classes().next().unwrap().0, Ok("A"));
 //! assert_eq!(keeper.defs().next().unwrap().0, Ok("D"));
 //! assert_eq!(
-//!     keeper.all_derived_definitions("A").next().unwrap().name(),
-//!     Ok("D")
+//!  keeper.all_derived_definitions("A").next().unwrap().name(),
+//!  Ok("D")
 //! );
 //! # Ok(())
 //! # }
 //! ```
 //!
+
 //! By adding include paths, external TableGen files can be included.
 //!
+
 //! ```rust,ignore
 //! use verum_tblgen::{RecordKeeper, TableGenParser};
 //!
+
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let keeper: RecordKeeper = TableGenParser::new()
-//!     .add_source(r#"include "mlir/IR/OpBase.td""#)?
-//!     .add_include_directory(&format!(
-//!         "{}/include",
-//!         std::env::var("VERUM_LLVM_DIR")?
-//!     ))
-//!     .parse()?;
+//!  .add_source(r#"include "mlir/IR/OpBase.td""#)?
+//!  .add_include_directory(&format!(
+//!  "{}/include",
+//!  std::env::var("VERUM_LLVM_DIR")?
+//!  ))
+//!  .parse()?;
 //! let i32_def = keeper.def("I32").expect("has I32 def");
 //! assert!(i32_def.subclass_of("I"));
 //! assert_eq!(i32_def.int_value("bitwidth"), Ok(32));
@@ -76,19 +90,22 @@
 //! # }
 //! ```
 //!
+
 //! You can also pass an included filename directly.
 //!
+
 //! ```rust,ignore
 //! use verum_tblgen::{RecordKeeper, TableGenParser};
 //!
+
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let keeper: RecordKeeper = TableGenParser::new()
-//!     .add_source_file("mlir/IR/OpBase.td")
-//!     .add_include_directory(&format!(
-//!         "{}/include",
-//!         std::env::var("VERUM_LLVM_DIR")?
-//!     ))
-//!     .parse()?;
+//!  .add_source_file("mlir/IR/OpBase.td")
+//!  .add_include_directory(&format!(
+//!  "{}/include",
+//!  std::env::var("VERUM_LLVM_DIR")?
+//!  ))
+//!  .parse()?;
 //! let i32_def = keeper.def("I32").expect("has I32 def");
 //! assert!(i32_def.subclass_of("I"));
 //! assert_eq!(i32_def.int_value("bitwidth"), Ok(32));
@@ -96,8 +113,10 @@
 //! # }
 //! ```
 //!
+
 //! # API Stability
 //!
+
 //! LLVM does not provide a stable C API for TableGen, and the C API provided by
 //! this crate is not stable. Furthermore, the safe wrapper does not provide a
 //! stable interface either, since this crate is still in early development.
@@ -182,6 +201,7 @@ impl<'s> TableGenParser<'s> {
 
     /// Adds the given TableGen source string.
     ///
+
     /// The string must be null-terminated and is not copied, hence it is
     /// required to live until the source code is parsed.
     pub fn add_source_raw(self, source: &'s CStr) -> Result<Self, Error> {
@@ -194,6 +214,7 @@ impl<'s> TableGenParser<'s> {
 
     /// Adds the given TableGen source string.
     ///
+
     /// The string is copied into a null-terminated [`CString`].
     pub fn add_source(mut self, source: &str) -> Result<Self, Error> {
         let string = CString::new(source).map_err(TableGenError::from)?;
@@ -216,6 +237,7 @@ impl<'s> TableGenParser<'s> {
 
     /// Parses the TableGen source files and returns a [`RecordKeeper`].
     ///
+
     /// Due to limitations of TableGen, parsing TableGen is not thread-safe.
     /// In order to provide thread-safety, this method ensures that any
     /// concurrent parse operations are executed sequentially.
@@ -244,6 +266,7 @@ impl Drop for TableGenParser<'_> {
 
 /// Reference to TableGen source file.
 ///
+
 /// See [`TableGenParser::source_info`](TableGenParser::source_info) and
 /// [`RecordKeeper::source_info`](RecordKeeper::source_info).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

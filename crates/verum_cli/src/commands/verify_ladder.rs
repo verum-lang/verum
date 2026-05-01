@@ -2,38 +2,46 @@
 //! `verum_verification::ladder_dispatch::DefaultLadderDispatcher` into the
 //! CLI verify command path.
 //!
+
 //! Walks every `.vr` file in the project, projects every
 //! `@verify(<strategy>)` annotation onto a typed
 //! [`LadderObligation`](verum_verification::ladder_dispatch::LadderObligation),
 //! routes through [`LadderDispatcher::dispatch`](verum_verification::ladder_dispatch::LadderDispatcher::dispatch),
 //! and emits the per-theorem [`LadderVerdict`](verum_verification::ladder_dispatch::LadderVerdict).
 //!
+
 //! ## Why this is the integration that #71 was missing
 //!
+
 //! Before this command, the dispatcher trait surface was unit-tested but
 //! never invoked from the CLI — meaning the typed-strategy contract was
-//! a closed module with no production consumer.  This wires it through
+//! a closed module with no production consumer. This wires it through
 //! the same architectural pattern as the proof-draft integration:
 //!
-//!   * single trait boundary (`LadderDispatcher`)
-//!   * reference V0 impl (`DefaultLadderDispatcher`)
-//!   * future LLM / portfolio / cross-format adapters slot in without
-//!     touching the command handler
+
+//!  * single trait boundary (`LadderDispatcher`)
+//!  * reference V0 impl (`DefaultLadderDispatcher`)
+//!  * future LLM / portfolio / cross-format adapters slot in without
+//!  touching the command handler
 //!
+
 //! ## Exit status
 //!
-//!   * `0`  — every dispatched obligation is Closed or DispatchPending.
-//!   * `non-zero` — at least one obligation is Open or Timeout (a *real*
-//!     verification failure, distinct from "not yet implemented").
-//!     DispatchPending is treated as advisory rather than failure
-//!     because the V0 ladder has 11 strategy slots whose backends ship
-//!     in V1+; failing the build on every annotated `@verify(formal)`
-//!     would be louder than useful at this stage.
+
+//!  * `0` — every dispatched obligation is Closed or DispatchPending.
+//!  * `non-zero` — at least one obligation is Open or Timeout (a *real*
+//!  verification failure, distinct from "not yet implemented").
+//!  DispatchPending is treated as advisory rather than failure
+//!  because the V0 ladder has 11 strategy slots whose backends ship
+//!  in V1+; failing the build on every annotated `@verify(formal)`
+//!  would be louder than useful at this stage.
 //!
+
 //! ## Output formats
 //!
-//!   * `plain` — human-readable verdict table + summary.
-//!   * `json`  — LSP / CI-friendly structured payload.
+
+//!  * `plain` — human-readable verdict table + summary.
+//!  * `json` — LSP / CI-friendly structured payload.
 
 use crate::error::{CliError, Result};
 use crate::ui;
@@ -48,7 +56,7 @@ use verum_verification::ladder_dispatch::{
 use super::audit::{discover_vr_files, parse_file_for_audit, strictest_verify_strategy};
 
 /// True iff `strategy` is on the kernel-attestation tier of the
-/// backbone (Proof or stricter).  Only these strata benefit from a
+/// backbone (Proof or stricter). Only these strata benefit from a
 /// pre-computed `KernelRecheck::recheck_theorem` outcome — the
 /// lower strata (Runtime/Static/Fast/CT/Formal) admit through
 /// SMT/dataflow paths that don't consult the kernel attestation.
@@ -66,10 +74,12 @@ fn requires_kernel_recheck(strategy: LadderStrategy) -> bool {
 /// item and project the result list to a single dispatcher-facing
 /// `KernelRecheckOutcome`.
 ///
+
 /// Recognises:
-///   * Theorem / Lemma / Corollary → `recheck_theorem` (#118)
-///   * Axiom                        → `recheck_axiom`   (#119)
+///  * Theorem / Lemma / Corollary → `recheck_theorem` (#118)
+///  * Axiom → `recheck_axiom` (#119)
 ///
+
 /// Returns `None` for kinds that don't carry refinement-type
 /// leakage at this layer (definitions / functions / types are
 /// covered by other verification phases).
@@ -139,14 +149,14 @@ impl VerdictTotals {
         self.closed + self.open + self.pending + self.timeout
     }
 
-    /// Hard failure ⇒ Open or Timeout.  DispatchPending is advisory.
+    /// Hard failure ⇒ Open or Timeout. DispatchPending is advisory.
     fn has_hard_failure(&self) -> bool {
         self.open > 0 || self.timeout > 0
     }
 }
 
 /// Run the ladder-verify command on the project rooted at the current
-/// manifest.  Format must be `"plain"` or `"json"`.
+/// manifest. Format must be `"plain"` or `"json"`.
 pub fn run_verify_ladder(format: &str) -> Result<()> {
     if format != "plain" && format != "json" {
         return Err(CliError::InvalidArgument(format!(
@@ -240,8 +250,8 @@ pub fn run_verify_ladder(format: &str) -> Result<()> {
             // the backbone) AND the item is theorem-shaped, run
             // `KernelRecheck::recheck_theorem` and stash the
             // outcome so the dispatcher can admit / reject on
-            // kernel attestation directly.  The other strategies
-            // continue through the trivial-decider for V0 surface.
+            // kernel attestation directly. The other strategies
+            // continue through the trivial-decider for current surface.
             let mut obligation = LadderObligation::text(
                 item_name.clone(),
                 typed_strategy,

@@ -4,6 +4,7 @@
 // Layer: cross-cutting (V axis from §21)
 // Spec: sqlite-native.md §21
 //
+
 // Loom-side `@verify`-annotated invariants. Each module here states
 // the invariant, the operations after which it must re-hold, and a
 // reference proof sketch. The actual Z3 obligations are emitted by
@@ -11,16 +12,17 @@
 // loom guarantees, in Verum syntax (so the obligations stay in sync
 // with the implementation).
 //
+
 // Strata:
-//   * file_format_invariants — DatabaseHeader, page-layout
-//     refinements (mostly type-encoded, listed for documentation).
-//   * btree_invariants       — sorted, balanced, parent_pointers,
-//     no_orphans, no_overflow_loops.
-//   * wal_invariants         — wal_consistent, checkpoint_idempotent,
-//     recovery_preserves_commits.
-//   * vdbe_register_consistency — register-type SSA-form consistency.
-//   * sql_semantics          — join cardinality bounds, filter
-//     monotonicity, result-shape match.
+//  * file_format_invariants — DatabaseHeader, page-layout
+//  refinements (mostly type-encoded, listed for documentation).
+//  * btree_invariants — sorted, balanced, parent_pointers,
+//  no_orphans, no_overflow_loops.
+//  * wal_invariants — wal_consistent, checkpoint_idempotent,
+//  recovery_preserves_commits.
+//  * vdbe_register_consistency — register-type SSA-form consistency.
+//  * sql_semantics — join cardinality bounds, filter
+//  monotonicity, result-shape match.
 // =============================================================================
 
 module core.database.sqlite.native.verify;

@@ -1,5 +1,6 @@
 //! Deep selection range support
 //!
+
 //! Provides nested selection ranges by walking the AST to find
 //! the innermost expression containing the cursor and building
 //! a chain from innermost to outermost scope.

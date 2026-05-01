@@ -3,11 +3,13 @@
 // =============================================================================
 // Identifier quoting — SQLite accepts four styles:
 //
-//   bare         my_col
-//   "dquote"     "MyColumn"          — SQL-92 standard
-//   [bracket]    [MyColumn]          — MSSQL compatibility
-//   `backtick`   `MyColumn`          — MySQL compatibility
+
+//  bare my_col
+//  "dquote" "MyColumn" — SQL-92 standard
+//  [bracket] [MyColumn] — MSSQL compatibility
+//  `backtick` `MyColumn` — MySQL compatibility
 //
+
 // Single quotes are NOT identifier quotes (they always denote string literals).
 // =============================================================================
 

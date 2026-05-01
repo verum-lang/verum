@@ -14,8 +14,10 @@
 )]
 //! Comprehensive tests for the Context System (Dependency Injection)
 //!
+
 //! Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context System (Capability-based Dependency Injection)
 //!
+
 //! This test suite validates all aspects of the Context System implementation:
 //! - Context declarations
 //! - Context requirements

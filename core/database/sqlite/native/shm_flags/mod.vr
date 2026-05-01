@@ -4,12 +4,14 @@
 // Layer: 0 (façade — SQLITE_SHM_* flags)
 // Spec: SQLite C API — xShmLock / xShmMap.
 //
-//   SQLITE_SHM_UNLOCK    = 1
-//   SQLITE_SHM_LOCK      = 2
-//   SQLITE_SHM_SHARED    = 4
-//   SQLITE_SHM_EXCLUSIVE = 8
+
+//  SQLITE_SHM_UNLOCK = 1
+//  SQLITE_SHM_LOCK = 2
+//  SQLITE_SHM_SHARED = 4
+//  SQLITE_SHM_EXCLUSIVE = 8
 //
-// The shm region (wal-index) has 8 lock slots.  Valid operations OR
+
+// The shm region (wal-index) has 8 lock slots. Valid operations OR
 // one of UNLOCK/LOCK with one of SHARED/EXCLUSIVE.
 // =============================================================================
 

@@ -1,8 +1,10 @@
 //! Low-level FFI bindings for MLIR C API.
 //!
+
 //! This crate provides raw bindings to the MLIR C API, built against the local
 //! LLVM installation in `llvm/install/`.
 //!
+
 //! For a safe, ergonomic API, use the `verum_mlir` crate instead.
 
 #![allow(non_upper_case_globals)]

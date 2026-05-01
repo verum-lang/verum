@@ -1,21 +1,26 @@
 //! Error recovery strategies for fast parser resilience.
 //!
+
 //! Error recovery uses synchronization-point strategy: after a parse error,
 //! skip tokens until reaching a semicolon (statement boundary), closing brace
 //! (block end), declaration keyword like `fn`/`type`/`let` (new item), or EOF.
 //! Missing delimiters are auto-inserted when the paired opener exists.
 //! Grammar: error_recovery ::= synchronize_on_semicolon | synchronize_on_brace
-//!          | synchronize_on_keyword | insert_missing_delimiter
+//!  | synchronize_on_keyword | insert_missing_delimiter
 //!
+
 //! This module implements error recovery techniques for the compiler:
 //!
+
 //! - **Synchronization**: Skip to known safe points (semicolons, braces, keywords)
 //! - **Delimiter matching**: Auto-insert missing delimiters
 //! - **Error productions**: Parse common mistakes explicitly
 //! - **Multiple errors**: Continue parsing after errors
 //!
+
 //! # Error Recovery Philosophy
 //!
+
 //! The goal is to report ALL errors in a single pass while maintaining
 //! a valid AST structure for downstream compilation.
 
@@ -373,8 +378,10 @@ pub fn skip_until(tokens: &[Token], start: usize, sync: SyncPoint) -> usize {
 /// Apply a recovery strategy to advance the parser state.
 /// Returns the new position and an optional synthetic token to insert.
 ///
+
 /// # Arguments
 ///
+
 /// * `strategy` - The recovery strategy to apply
 /// * `tokens` - The token slice being parsed
 /// * `error_pos` - The position where the error occurred

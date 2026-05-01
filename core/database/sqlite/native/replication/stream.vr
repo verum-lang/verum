@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
 //
+
 // `StreamProducer` runs on the primary: every commit pushes a
 // `FrameBatch` into the producer's outbox, batched per-replica.
 // Replicas pull batches via `next_batch(replica_id)` and ack
 // per-frame.
 //
+
 // `StreamConsumer` runs on the replica: receives `FrameBatch`,
 // validates frame chain (epoch monotonic, seq strictly-increasing
 // within epoch), and applies them via the supplied closure.

@@ -5,8 +5,10 @@
 // Dependencies: core, text
 // =============================================================================
 //
+
 // The collections module provides data structures:
 //
+
 // - slice.vr: Slice utilities and operations
 // - list.vr: Dynamic array (List<T>)
 // - map.vr: Hash map (Map<K, V>)
@@ -15,6 +17,7 @@
 // - heap.vr: Binary heap (priority queue)
 // - btree.vr: B-tree map and set (BTreeMap, BTreeSet)
 //
+
 // =============================================================================
 
 module collections;

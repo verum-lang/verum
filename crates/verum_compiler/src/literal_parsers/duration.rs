@@ -1,12 +1,15 @@
 //! Duration literal parser
 //!
+
 //! Parses and validates duration strings at compile-time.
 //!
+
 //! # Formats
 //! - Simple: `5s`, `100ms`, `1h`, `30m`
 //! - Combined: `1h30m`, `2h30m45s`, `1d12h`
 //! - ISO 8601: `P1DT2H30M` (partial support)
 //!
+
 //! # Units
 //! - `ns` - nanoseconds
 //! - `us` or `μs` - microseconds
@@ -17,12 +20,14 @@
 //! - `d` - days
 //! - `w` - weeks
 //!
+
 //! # Example
 //! ```verum
 //! let timeout = duration#"5s"
 //! let long_timeout = duration#"1h30m"
 //! ```
 //!
+
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 
@@ -41,13 +46,16 @@ const NS_PER_W: u64 = 7 * NS_PER_D;
 
 /// Parse a duration string at compile-time
 ///
+
 /// # Arguments
 /// * `content` - The duration string to parse
 /// * `span` - Source location for error reporting
 ///
+
 /// # Returns
 /// The duration in nanoseconds
 ///
+
 /// # Errors
 /// Returns a diagnostic if the duration format is invalid
 pub fn parse_duration(

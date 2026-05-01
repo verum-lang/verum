@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // GLOB: byte-exact, case-sensitive:
-//   *  — zero or more characters
-//   ?  — exactly one character
+//  * — zero or more characters
+//  ? — exactly one character
 //
+
 // Uses an iterative two-pointer walk with a single saved "last-star"
 // position — no recursion.
 // =============================================================================

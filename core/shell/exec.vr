@@ -5,29 +5,34 @@
 // Dependencies: core, io.process, time, async.cancellation, shell.{escape, result, context}
 // =============================================================================
 //
+
 // Two layered APIs:
 //
-//   * `run(program, args)` — direct exec without shell interpretation. The
-//     argv is built explicitly; nothing the caller passes is interpreted as
-//     shell metacharacters. Equivalent to `execvp` / `CreateProcessA`.
-//   * `sh(cmd_text)` — shell dispatch via `<shell> -c "<cmd>"`. The caller's
-//     command text is fed to the shell and *will* be parsed; auto-escape
-//     in `sh#"..."` literals lifts user data through `ShellEscape` so
-//     interpolations are individual safe tokens.
+
+//  * `run(program, args)` — direct exec without shell interpretation. The
+//  argv is built explicitly; nothing the caller passes is interpreted as
+//  shell metacharacters. Equivalent to `execvp` / `CreateProcessA`.
+//  * `sh(cmd_text)` — shell dispatch via `<shell> -c "<cmd>"`. The caller's
+//  command text is fed to the shell and *will* be parsed; auto-escape
+//  in `sh#"..."` literals lifts user data through `ShellEscape` so
+//  interpolations are individual safe tokens.
 //
+
 // Both functions:
-//   * apply the active `ShellContext` (cwd, env, flavour, permissions)
-//   * intercept through `ShellContext.mock` when set — no real spawn
-//   * record the dispatched line for diagnostics
-//   * measure wall-clock duration
-//   * surface failure as a typed `ShellError`
+//  * apply the active `ShellContext` (cwd, env, flavour, permissions)
+//  * intercept through `ShellContext.mock` when set — no real spawn
+//  * record the dispatched line for diagnostics
+//  * measure wall-clock duration
+//  * surface failure as a typed `ShellError`
 //
+
 // Execution is implemented synchronously for the interpreter path (Tier 0)
 // and as `async fn` returning a Future in compiled paths so it composes with
 // nursery / select / cancellation. The async surface is what callers should
 // always reach for; the sync path falls out automatically when the runtime
 // ticks the future to completion.
 //
+
 // =============================================================================
 
 module exec;
@@ -49,6 +54,7 @@ mount core.shell.context.{ShellContext, MockResponse, PermissionSet};
 /// Executes `program` with `args` and returns the captured result.
 /// Honours the active `ShellContext` (cwd, env, permissions, mock).
 ///
+
 /// This is the *recommended primitive* for programmatic dispatch — the
 /// argv structure is preserved, no shell parsing happens between the
 /// caller and the kernel exec.
@@ -115,6 +121,7 @@ public async fn run(program: &Text, args: List<Text>)
 /// by the shell — auto-escape in `sh#"..."` literals already lifted any
 /// embedded values into safe tokens, so this is the standard path.
 ///
+
 /// Returns a `ShellResult` regardless of exit status; call `.ok()?` on
 /// the result to convert non-zero exits into `Err`.
 public async fn sh(cmd_text: &Text) -> ShellResult {
@@ -189,6 +196,7 @@ public async fn sh_check(cmd_text: &Text)
 /// cancel, the child is sent SIGTERM, given `grace` to exit, then SIGKILL.
 /// Returns `Err(Cancelled)` carrying the reason from the token.
 ///
+
 /// `grace` defaults to 5 seconds when `Duration.from_millis(0)` is passed.
 public async fn run_with_cancel(
     program: &Text,

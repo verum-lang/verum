@@ -6,25 +6,29 @@ module core.database.sqlite.native.l5_sql.parser.dml;
 // Layer: 5
 // Spec: sqlite.org/lang_{insert,update,delete}.html
 //
+
 // Grammar (minus the long tail of SQLite-specific niceties that land
 // once planner+codegen can honour them):
 //
-//   insert-stmt = INSERT [OR conflict-action] INTO qualified-name
-//                  [ ( col {, col} ) ]
-//                  ( VALUES ( expr {, expr} ) {, ( expr ... )}
-//                    | select-stmt
-//                    | DEFAULT VALUES )
-//                  [ RETURNING result-col {, result-col} ]
+
+//  insert-stmt = INSERT [OR conflict-action] INTO qualified-name
+//  [ ( col {, col} ) ]
+//  ( VALUES ( expr {, expr} ) {, ( expr ... )}
+//  | select-stmt
+//  | DEFAULT VALUES )
+//  [ RETURNING result-col {, result-col} ]
 //
-//   update-stmt = UPDATE [OR conflict-action] qualified-name
-//                  SET column '=' expr {, column '=' expr}
-//                  [ FROM from-clause ]
-//                  [ WHERE expr ]
-//                  [ RETURNING result-col {, result-col} ]
+
+//  update-stmt = UPDATE [OR conflict-action] qualified-name
+//  SET column '=' expr {, column '=' expr}
+//  [ FROM from-clause ]
+//  [ WHERE expr ]
+//  [ RETURNING result-col {, result-col} ]
 //
-//   delete-stmt = DELETE FROM qualified-name
-//                  [ WHERE expr ]
-//                  [ RETURNING result-col {, result-col} ]
+
+//  delete-stmt = DELETE FROM qualified-name
+//  [ WHERE expr ]
+//  [ RETURNING result-col {, result-col} ]
 // =============================================================================
 
 mount core.*;
@@ -129,9 +133,9 @@ fn parse_insert_source(ts: &mut SqlTokenStream) -> Result<InsertSource, ParseErr
         }
         return Ok(IsValues(rows));
     }
-    // INSERT ... SELECT — delegates to parse_select.  Wraps the parsed
-    // SELECT statement in IsSelect(Heap.new(...)).  Bulk-load idiom:
-    //   INSERT INTO archive (id, payload) SELECT id, payload FROM live;
+    // INSERT ... SELECT — delegates to parse_select. Wraps the parsed
+    // SELECT statement in IsSelect(Heap.new(...)). Bulk-load idiom:
+    //  INSERT INTO archive (id, payload) SELECT id, payload FROM live;
     if ts.check_keyword(KwSelect) {
         let sel = match parse_select(ts) {
             Ok(s)  => s,

@@ -1,82 +1,86 @@
 //! Verum MLIR Dialect - Industrial-Grade Implementation.
 //!
+
 //! This module defines the comprehensive Verum-specific MLIR dialect with custom types
 //! and operations for:
 //!
+
 //! - **CBGR (Three-Tier Reference System)**: Complete memory safety with
-//!   generation-based validation, borrow scopes, and tier promotion/demotion
+//!  generation-based validation, borrow scopes, and tier promotion/demotion
 //! - **Context System**: Full dependency injection with scoping, requirements,
-//!   monomorphization support, and stack management
+//!  monomorphization support, and stack management
 //! - **Async/Await**: State machine-based async compilation with await points,
-//!   live variable analysis, polling, and waker support
+//!  live variable analysis, polling, and waker support
 //! - **Closures**: Capture analysis, environment management, and indirect calls
 //! - **Pattern Matching**: Decision tree compilation for efficient matching
 //! - **Collections**: `verum.list_*`, `verum.map_*`, `verum.set_*`
 //! - **Refinement Types**: `verum.refinement_check` with predicate propagation
 //!
+
 //! # Dialect Structure
 //!
+
 //! ```text
 //! Verum Dialect ("verum")
 //! ├── Types
-//! │   ├── RefType<T, tier>     - Three-tier reference with CBGR tracking
-//! │   ├── ListType<T>          - List collection
-//! │   ├── MapType<K, V>        - Map collection
-//! │   ├── SetType<T>           - Set collection
-//! │   ├── TextType             - Text string
-//! │   ├── MaybeType<T>         - Optional value
-//! │   ├── FutureType<T>        - Async future
-//! │   ├── ContextType          - Context value for DI
-//! │   ├── ClosureType          - Closure with captures
-//! │   └── StateMachineType     - Async state machine
+//! │ ├── RefType<T, tier> - Three-tier reference with CBGR tracking
+//! │ ├── ListType<T> - List collection
+//! │ ├── MapType<K, V> - Map collection
+//! │ ├── SetType<T> - Set collection
+//! │ ├── TextType - Text string
+//! │ ├── MaybeType<T> - Optional value
+//! │ ├── FutureType<T> - Async future
+//! │ ├── ContextType - Context value for DI
+//! │ ├── ClosureType - Closure with captures
+//! │ └── StateMachineType - Async state machine
 //! │
 //! └── Operations
-//!     ├── CBGR (Enhanced - 12 operations)
-//!     │   ├── verum.cbgr_alloc     - Allocate with tracking
-//!     │   ├── verum.cbgr_check     - Validate generation
-//!     │   ├── verum.cbgr_deref     - Dereference with validation
-//!     │   ├── verum.cbgr_store     - Store with mutation tracking
-//!     │   ├── verum.cbgr_drop      - Drop with cleanup
-//!     │   ├── verum.cbgr_borrow_scope  - Borrow scope management
-//!     │   ├── verum.cbgr_promote   - Tier promotion
-//!     │   ├── verum.cbgr_demote    - Tier demotion
-//!     │   └── ... (escape annotations, generation ops)
-//!     │
-//!     ├── Context (Enhanced - 12 operations)
-//!     │   ├── verum.context_get    - Get with resolution strategy
-//!     │   ├── verum.context_provide - Provide with lifetime
-//!     │   ├── verum.context_scope  - Scoped provision
-//!     │   ├── verum.context_require - Assert availability
-//!     │   ├── verum.context_with   - Transform context
-//!     │   └── ... (stack management, monomorphization)
-//!     │
-//!     ├── Async (Enhanced - 20 operations)
-//!     │   ├── verum.async_spawn    - Spawn task
-//!     │   ├── verum.async_join     - Join task
-//!     │   ├── verum.async_select   - Select first ready
-//!     │   ├── verum.async_poll     - Poll future
-//!     │   ├── verum.async_state_machine_create
-//!     │   └── ... (state management, wakers)
-//!     │
-//!     ├── Closures (8 operations)
-//!     │   ├── verum.closure_create - Create closure
-//!     │   ├── verum.closure_call   - Call closure
-//!     │   ├── verum.closure_env_load/store
-//!     │   └── ... (environment management)
-//!     │
-//!     ├── Pattern Matching (6 operations)
-//!     │   ├── verum.tuple_extract
-//!     │   ├── verum.struct_extract
-//!     │   ├── verum.variant_payload
-//!     │   └── ... (destructuring ops)
-//!     │
-//!     ├── Collections
-//!     │   ├── verum.list_new/push/get/...
-//!     │   ├── verum.map_new/insert/get/...
-//!     │   └── verum.set_new/insert/...
-//!     │
-//!     └── Refinements
-//!         └── verum.refinement_check
+//!  ├── CBGR (Enhanced - 12 operations)
+//!  │ ├── verum.cbgr_alloc - Allocate with tracking
+//!  │ ├── verum.cbgr_check - Validate generation
+//!  │ ├── verum.cbgr_deref - Dereference with validation
+//!  │ ├── verum.cbgr_store - Store with mutation tracking
+//!  │ ├── verum.cbgr_drop - Drop with cleanup
+//!  │ ├── verum.cbgr_borrow_scope - Borrow scope management
+//!  │ ├── verum.cbgr_promote - Tier promotion
+//!  │ ├── verum.cbgr_demote - Tier demotion
+//!  │ └── ... (escape annotations, generation ops)
+//!  │
+//!  ├── Context (Enhanced - 12 operations)
+//!  │ ├── verum.context_get - Get with resolution strategy
+//!  │ ├── verum.context_provide - Provide with lifetime
+//!  │ ├── verum.context_scope - Scoped provision
+//!  │ ├── verum.context_require - Assert availability
+//!  │ ├── verum.context_with - Transform context
+//!  │ └── ... (stack management, monomorphization)
+//!  │
+//!  ├── Async (Enhanced - 20 operations)
+//!  │ ├── verum.async_spawn - Spawn task
+//!  │ ├── verum.async_join - Join task
+//!  │ ├── verum.async_select - Select first ready
+//!  │ ├── verum.async_poll - Poll future
+//!  │ ├── verum.async_state_machine_create
+//!  │ └── ... (state management, wakers)
+//!  │
+//!  ├── Closures (8 operations)
+//!  │ ├── verum.closure_create - Create closure
+//!  │ ├── verum.closure_call - Call closure
+//!  │ ├── verum.closure_env_load/store
+//!  │ └── ... (environment management)
+//!  │
+//!  ├── Pattern Matching (6 operations)
+//!  │ ├── verum.tuple_extract
+//!  │ ├── verum.struct_extract
+//!  │ ├── verum.variant_payload
+//!  │ └── ... (destructuring ops)
+//!  │
+//!  ├── Collections
+//!  │ ├── verum.list_new/push/get/...
+//!  │ ├── verum.map_new/insert/get/...
+//!  │ └── verum.set_new/insert/...
+//!  │
+//!  └── Refinements
+//!  └── verum.refinement_check
 //! ```
 
 pub mod types;
@@ -127,6 +131,7 @@ pub use async_state::{
 
 /// The Verum MLIR dialect.
 ///
+
 /// This dialect provides Verum-specific operations and types that cannot
 /// be directly represented in standard MLIR dialects.
 pub struct VerumDialect {
@@ -152,6 +157,7 @@ impl VerumDialect {
 
     /// Register the dialect with an MLIR context.
     ///
+
     /// Note: Since we're using existing MLIR dialects for lowering,
     /// we don't need to register a custom dialect. The Verum operations
     /// are represented using standard MLIR constructs with special
@@ -164,6 +170,7 @@ impl VerumDialect {
         // - memref dialect for memory operations
         // - llvm dialect for final lowering
         //
+
         // Custom Verum semantics are captured through:
         // - Operation names with "verum." prefix
         // - Custom attributes for CBGR metadata

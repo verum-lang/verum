@@ -14,11 +14,13 @@
 )]
 //! Comprehensive Tests for Closure Escape Analysis
 //!
+
 //! Validates closure escape analysis for CBGR. Closures that capture references
 //! may extend reference lifetimes beyond their defining scope, requiring CBGR
 //! generation tracking (&T). Non-escaping closures (immediate call, local-only)
 //! can have their captured references promoted to &checked T (0ns).
 //!
+
 //! Tests cover:
 //! 1. Closure creation detection
 //! 2. Capture set extraction

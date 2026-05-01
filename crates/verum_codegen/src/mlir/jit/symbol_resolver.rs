@@ -1,51 +1,61 @@
 //! Industrial-grade Symbol Resolution for JIT compilation.
 //!
+
 //! Provides comprehensive symbol resolution for verum_std FFI functions
 //! and other runtime dependencies with:
 //!
+
 //! - Dynamic library loading (cross-platform)
 //! - Lazy symbol binding with caching
 //! - Symbol validation and type checking
 //! - Error recovery and fallback mechanisms
 //! - Statistics and diagnostics
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────┐
-//! │                    Symbol Resolution Pipeline                        │
+//! │ Symbol Resolution Pipeline │
 //! └─────────────────────────────────────────────────────────────────────┘
 //!
-//!   JIT-compiled code
-//!         │
-//!         ▼
-//! ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-//! │  Symbol Lookup  │───▶│   Cache Check   │───▶│  Library Load   │
-//! │                 │    │                 │    │  (lazy binding) │
-//! └─────────────────┘    └─────────────────┘    └─────────────────┘
-//!         │                      │                      │
-//!         │               Cache hit              Library loaded
-//!         │                      │                      │
-//!         ▼                      ▼                      ▼
+
+//!  JIT-compiled code
+//!  │
+//!  ▼
+//! ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+//! │ Symbol Lookup │───▶│ Cache Check │───▶│ Library Load │
+//! │ │ │ │ │ (lazy binding) │
+//! └─────────────────┘ └─────────────────┘ └─────────────────┘
+//!  │ │ │
+//!  │ Cache hit Library loaded
+//!  │ │ │
+//!  ▼ ▼ ▼
 //! ┌─────────────────────────────────────────────────────────────────┐
-//! │                      Symbol Address Cache                        │
-//! │  HashMap<SymbolName, (Address, Metadata)>                       │
+//! │ Symbol Address Cache │
+//! │ HashMap<SymbolName, (Address, Metadata)> │
 //! └─────────────────────────────────────────────────────────────────┘
-//!         │
-//!         ▼
-//!   Native call
+//!  │
+//!  ▼
+//!  Native call
 //! ```
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use crate::mlir::jit::{SymbolResolver, SymbolInfo};
 //!
+
 //! let mut resolver = SymbolResolver::new();
 //!
+
 //! // Load verum_std dynamically
 //! resolver.load_library("libverum_std.so")?;
 //!
+
 //! // Resolve a symbol
 //! let info = resolver.resolve("verum_std_list_i64_new")?;
 //! println!("Symbol at: {:p}", info.address);
@@ -164,7 +174,7 @@ pub struct SymbolInfo {
 // SAFETY: SymbolInfo can be sent/shared across threads because:
 // - `address` is a raw pointer to a symbol in a loaded shared library
 // - The library remains loaded (and thus the symbol address valid) for the
-//   lifetime of the SymbolResolver that owns the LoadedLibrary
+//  lifetime of the SymbolResolver that owns the LoadedLibrary
 // - SymbolInfo is read-only after construction (no mutation of the pointer)
 unsafe impl Send for SymbolInfo {}
 unsafe impl Sync for SymbolInfo {}
@@ -187,9 +197,9 @@ struct LoadedLibrary {
 
 // SAFETY: LoadedLibrary can be sent/shared across threads because:
 // - The `library` (libloading::Library) handle is safe to share; symbol lookups
-//   are thread-safe on all supported platforms (dlsym is thread-safe per POSIX)
+//  are thread-safe on all supported platforms (dlsym is thread-safe per POSIX)
 // - Libraries are never unloaded while the SymbolResolver is alive, so all
-//   symbol pointers derived from them remain valid
+//  symbol pointers derived from them remain valid
 // - `path` and `symbols` are plain data with no thread-safety concerns
 unsafe impl Send for LoadedLibrary {}
 unsafe impl Sync for LoadedLibrary {}
@@ -266,6 +276,7 @@ impl SymbolResolverStats {
 
 /// Industrial-grade symbol resolver for JIT.
 ///
+
 /// Provides comprehensive symbol resolution with:
 /// - Dynamic library loading
 /// - Lazy binding and caching
@@ -608,8 +619,10 @@ impl SymbolResolver {
 
     /// Register a symbol manually.
     ///
+
     /// # Safety
     ///
+
     /// The pointer must be valid for the lifetime of the resolver.
     pub unsafe fn register(&self, name: impl Into<Text>, ptr: *mut ()) {
         self.registered.insert(name.into(), ptr);
@@ -617,8 +630,10 @@ impl SymbolResolver {
 
     /// Register a symbol with metadata.
     ///
+
     /// # Safety
     ///
+
     /// The pointer must be valid for the lifetime of the resolver.
     pub unsafe fn register_with_metadata(
         &self,

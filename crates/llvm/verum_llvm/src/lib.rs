@@ -1,5 +1,6 @@
 //! verum_llvm - Safe LLVM bindings for Verum compiler
 //!
+
 //! This crate provides safe Rust wrappers around LLVM C API for code generation.
 //! Simplified from inkwell for LLVM 21 only (no version conditionals).
 
@@ -56,13 +57,16 @@ use std::convert::TryFrom;
 
 /// Defines the address space in which a global will be inserted.
 ///
+
 /// The default address space is number zero. An address space can always be created from a [`u16`]:
 /// ```ignore
 /// verum_llvm::AddressSpace::from(1u16);
 /// ```
 ///
+
 /// An address space is a 24-bit number. To convert from a [`u32`], use the [`TryFrom`] implementation:
 ///
+
 /// ```ignore
 /// verum_llvm::AddressSpace::try_from(42u32).expect("fits in 24-bit unsigned int");
 /// ```

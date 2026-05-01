@@ -1,25 +1,28 @@
 //! Shared helpers for the `stdlib_*` integration tests.
 //!
+
 //! Each of `stdlib_lenient_skip_baseline`, `stdlib_simple_variant_alias_preservation`,
 //! and `stdlib_arity_disambiguation` runs the workspace's `vtest` binary
 //! against a `.vr` fixture and inspects the captured stderr/stdout for a
-//! specific class of diagnostic.  The boilerplate they share — locating
+//! specific class of diagnostic. The boilerplate they share — locating
 //! the workspace root, locating the built `vtest` binary, capturing a
-//! subprocess output — is identical across the three tests.  Centralising
+//! subprocess output — is identical across the three tests. Centralising
 //! it here removes ~60 lines of copy-paste and ensures every test agrees
 //! on the binary-discovery contract.
 //!
+
 //! Why a dedicated `tests/stdlib_support/mod.rs` rather than `tests/common/`:
 //! the helpers are tightly coupled to the stdlib-loading vtest invocation
 //! pattern (always `vtest run <spec>`, always `RUST_LOG=warn`, always
-//! capturing both streams).  Other integration tests in this crate have
+//! capturing both streams). Other integration tests in this crate have
 //! different needs (compilation-only, in-process compiler invocation,
 //! etc.) so a generic `common/` module would have to grow conflicting
-//! abstractions.  Scoping the module name to `stdlib_*` makes its surface
+//! abstractions. Scoping the module name to `stdlib_*` makes its surface
 //! and intended use site explicit.
 //!
+
 //! Visibility: every helper here is `pub(crate)`-equivalent (`pub`
-//! within this integration-test crate).  Items are exposed even when
+//! within this integration-test crate). Items are exposed even when
 //! a particular test file doesn't use all of them — `#[allow(dead_code)]`
 //! at the module level prevents per-test `unused` warnings since
 //! cargo compiles each test file as a separate crate that pulls this
@@ -31,7 +34,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// Locate the workspace root (directory containing `Cargo.lock` and
-/// the `core/` stdlib).  Walks up from this crate's manifest dir.
+/// the `core/` stdlib). Walks up from this crate's manifest dir.
 pub fn workspace_root() -> PathBuf {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for ancestor in crate_dir.ancestors() {
@@ -45,8 +48,8 @@ pub fn workspace_root() -> PathBuf {
     );
 }
 
-/// Locate a built `vtest` binary under the workspace root.  Prefers
-/// the release build (used in CI) and falls back to debug.  Panics
+/// Locate a built `vtest` binary under the workspace root. Prefers
+/// the release build (used in CI) and falls back to debug. Panics
 /// with a clear message when neither exists — the caller is expected
 /// to be a `#[ignore]`-gated test that the user is opting into via
 /// `cargo test -- --ignored`, so requiring the build is acceptable.
@@ -70,10 +73,11 @@ pub fn locate_vtest(root: &std::path::Path) -> PathBuf {
 /// code (or `None` if the process was signalled) plus the merged
 /// stderr/stdout content as one string per stream.
 ///
+
 /// vtest's tracing subscriber lands warn-level lines on stdout when
 /// stderr is a pipe (because the test executor relays subprocess
 /// output through stdout for per-test reporting), even though
-/// `tracing_subscriber::fmt::layer()` defaults to stderr.  Callers
+/// `tracing_subscriber::fmt::layer()` defaults to stderr. Callers
 /// scanning for log lines should therefore consider both streams.
 pub fn vtest_run_capture(target_path: &std::path::Path) -> VtestOutput {
     let root = workspace_root();
@@ -91,7 +95,7 @@ pub fn vtest_run_capture(target_path: &std::path::Path) -> VtestOutput {
     }
 }
 
-/// Captured output from a vtest subprocess.  See `vtest_run_capture`
+/// Captured output from a vtest subprocess. See `vtest_run_capture`
 /// for why both `stderr` and `stdout` are exposed.
 pub struct VtestOutput {
     pub exit_code: Option<i32>,
@@ -107,7 +111,7 @@ impl VtestOutput {
     }
 
     /// Collect every merged log line that matches `pred` into a
-    /// `Vec<String>`.  Callers use this to build assertion messages
+    /// `Vec<String>`. Callers use this to build assertion messages
     /// listing offending lines verbatim.
     pub fn lines_matching(&self, pred: impl Fn(&str) -> bool) -> Vec<String> {
         self.merged_lines()

@@ -14,9 +14,11 @@
 )]
 //! Tests for Higher-Kinded Type (HKT) parsing.
 //!
+
 //! Tests for higher-kinded type syntax in grammar
 //! higher_kinded_type = path , '<' , '_' , '>' ;
 //!
+
 //! Examples:
 //! - List<_>
 //! - Maybe<_>
@@ -120,7 +122,7 @@ fn test_parse_type_param_with_underscore() {
     // Test parsing generic parameter with underscore placeholder
     // This is used in protocol definitions like:
     // protocol Functor {
-    //     type F<_>
+    //  type F<_>
     // }
     let ty = parse_type("F<_>");
 

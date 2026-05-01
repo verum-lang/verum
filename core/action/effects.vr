@@ -2,37 +2,43 @@
 // core.action.effects — Kleisli-category effect catalogue (Theorem 17.T1)
 // =============================================================================
 //
+
 // Effects in Verum are postulated as projections of the linear-articulation
 // 2-category Perf(α_linear) per Theorem 17.T1: every classical effect
 // monad embeds into the Kleisli category of α_linear, and Verum's
 // effect annotations are exactly that embedding read off in syntax.
 //
+
 // The catalogue below ships:
 //
-//   • A canonical Monad protocol with `pure` / `bind`.
-//   • A StrongMonad protocol extending Monad with `strength`.
-//   • A `Commutative` marker protocol (no extra methods) gating the
-//     concurrent-coherence theorem (Theorem 17.C2).
-//   • Eight standard effects with their classifications:
+
+//  • A canonical Monad protocol with `pure` / `bind`.
+//  • A StrongMonad protocol extending Monad with `strength`.
+//  • A `Commutative` marker protocol (no extra methods) gating the
+//  concurrent-coherence theorem (Theorem 17.C2).
+//  • Eight standard effects with their classifications:
 //
-//     ┌──────────────────────────┬──────────────┬────────────────┐
-//     │ Effect                   │ Classification│ ε-coordinate   │
-//     ├──────────────────────────┼──────────────┼────────────────┤
-//     │ Pure                     │ commutative  │ 0              │
-//     │ Reader<R>                │ commutative  │ ω              │
-//     │ Writer<W: Monoid>        │ commutative  │ ω              │
-//     │ Probability<A>           │ commutative  │ ω              │
-//     │ List<A>                  │ commutative  │ ω              │
-//     │ State<S>                 │ NON-commute  │ ω + 1          │
-//     │ Exception<E>             │ NON-commute  │ ω + 1          │
-//     │ Io<A>                    │ NON-commute  │ ω + 1          │
-//     └──────────────────────────┴──────────────┴────────────────┘
+
+//  ┌──────────────────────────┬──────────────┬────────────────┐
+//  │ Effect │ Classification│ ε-coordinate │
+//  ├──────────────────────────┼──────────────┼────────────────┤
+//  │ Pure │ commutative │ 0 │
+//  │ Reader<R> │ commutative │ ω │
+//  │ Writer<W: Monoid> │ commutative │ ω │
+//  │ Probability<A> │ commutative │ ω │
+//  │ List<A> │ commutative │ ω │
+//  │ State<S> │ NON-commute │ ω + 1 │
+//  │ Exception<E> │ NON-commute │ ω + 1 │
+//  │ Io<A> │ NON-commute │ ω + 1 │
+//  └──────────────────────────┴──────────────┴────────────────┘
 //
-//   • Concurrent coherence theorem: parallel composition of
-//     commutative-monad-only programs preserves the @verify(coherent)
-//     verdict (Corollary 17.C2). Non-commutative effects require
-//     explicit synchronization to retain coherence.
+
+//  • Concurrent coherence theorem: parallel composition of
+//  commutative-monad-only programs preserves the @verify(coherent)
+//  verdict (Corollary 17.C2). Non-commutative effects require
+//  explicit synchronization to retain coherence.
 //
+
 // V0 (this file) ships the protocol surface + 8 effect declarations;
 // each effect has `pure` / `bind` signatures, with bodies as trusted-
 // boundary placeholders. V1 wires concrete monad implementations
@@ -201,10 +207,12 @@ public theorem effect_io_is_not_commutative() -> Bool
 /// commutative effects, then `parallel(p1, p2) |> verify(coherent)
 /// == OK`.
 ///
+
 /// Non-commutative effects break this invariant: `parallel(state_op_1,
 /// state_op_2)` may have observable race conditions even when each
 /// individual op verifies.
 ///
+
 /// V2 form (this commit): structural theorem routing through
 /// `parallel_coherent` — the runtime classifier gate that the
 /// V1 axiom referenced indirectly. The theorem asserts: if every
@@ -229,6 +237,7 @@ public theorem concurrent_coherence_under_commutativity(kinds: List<EffectKind>)
 // =============================================================================
 // V8 (#244) — runtime-queryable effect classifier surface
 //
+
 // The eight axioms above record each effect's commutativity +
 // ε-coordinate classification per Theorem 17.T1. Pre-#244 those
 // classifications were trapped inside axiom *names* — user code
@@ -259,6 +268,7 @@ public type EffectKind is
 /// tensor) / List (under cartesian product) all commute;
 /// State / Exception / Io do not.
 ///
+
 /// This is the gate for Corollary 17.C2 — parallel composition
 /// preserves @verify(coherent) iff every effect in either branch
 /// satisfies this predicate.
@@ -350,14 +360,14 @@ implement Display for EffectKind {
     /// Renders the effect with its algebraic family name in
     /// lowercase, suitable for audit logs and verify(coherent)
     /// diagnostic surfaces:
-    ///   `PureEffect`        → `pure`
-    ///   `ReaderEffect`      → `reader`
-    ///   `WriterEffect`      → `writer`
-    ///   `ProbabilityEffect` → `probability`
-    ///   `ListEffect`        → `list`
-    ///   `StateEffect`       → `state`
-    ///   `ExceptionEffect`   → `exception`
-    ///   `IoEffect`          → `io`
+    ///  `PureEffect` → `pure`
+    ///  `ReaderEffect` → `reader`
+    ///  `WriterEffect` → `writer`
+    ///  `ProbabilityEffect` → `probability`
+    ///  `ListEffect` → `list`
+    ///  `StateEffect` → `state`
+    ///  `ExceptionEffect` → `exception`
+    ///  `IoEffect` → `io`
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             EffectKind.PureEffect        => f.write_str("pure"),

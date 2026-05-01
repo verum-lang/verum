@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
 //
+
 // Pure encoders / decoders. Network I/O layered above.
 // =============================================================================
 

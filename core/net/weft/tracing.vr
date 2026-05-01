@@ -2,28 +2,34 @@
 // core/net/weft/tracing.vr — TracingLayer
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §7.1, §7.7 (OTLP)
+// Spec: internal/specs/net-framework.md §7.1, §7.7 (OTLP)
 // =============================================================================
 //
+
 // Minimal request-scoped tracing. Phase-1 goals:
 //
-//   1. Generate a `trace_id` (W3C Trace Context format) per request,
-//      propagating an inbound `traceparent` header when present.
-//   2. Attach the trace fields to every log line emitted during the
-//      request via the `core.base.logger` context.
-//   3. Record a single SPAN_ROOT_START / SPAN_ROOT_END event pair for
-//      the request (method, path, status, duration_ms).
+
+//  1. Generate a `trace_id` (W3C Trace Context format) per request,
+//  propagating an inbound `traceparent` header when present.
+//  2. Attach the trace fields to every log line emitted during the
+//  request via the `core.base.logger` context.
+//  3. Record a single SPAN_ROOT_START / SPAN_ROOT_END event pair for
+//  the request (method, path, status, duration_ms).
 //
+
 // Out of scope for phase 1 (tracked in §7.7 / follow-up):
 //
-//   * OTLP export (wire format, grpc channel, batching).
-//   * Exemplar-linked metrics.
-//   * Tail-based sampling / continuous profiler.
+
+//  * OTLP export (wire format, grpc channel, batching).
+//  * Exemplar-linked metrics.
+//  * Tail-based sampling / continuous profiler.
 //
+
 // The span format used here is forward-compatible with OTLP: the fields
 // emitted by `LogSpan` can be dumped straight into an OTLP Span proto
 // without re-keying.
 //
+
 // =============================================================================
 
 module core.net.weft.tracing;

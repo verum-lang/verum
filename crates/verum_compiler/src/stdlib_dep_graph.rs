@@ -1,34 +1,43 @@
 //! Pre-computed `mount` dependency graph over the embedded stdlib.
 //!
+
 //! The build script (`build.rs`) scans every `core/*.vr` for `mount …;`
 //! statements and emits a compact archive listing, for each stdlib
 //! module, the set of other module paths it depends on. The archive is
 //! embedded in the binary alongside the source archive.
 //!
+
 //! At runtime, this graph is the keystone for **on-demand stdlib
 //! loading**: instead of registering all 2266 stdlib modules upfront,
 //! the compiler computes the **transitive closure of modules reachable
 //! from the user entry point's mount set** and loads only those.
 //!
+
 //! Reachability is conservative — a module is included whenever any
 //! of these is true:
 //!
-//!   * It appears as a `mount path` target (or its parent does).
-//!   * It is the source of a `mount path.*` glob.
-//!   * It is named in a `mount path.{a, b}` nested mount.
-//!   * It is a transitive dependency of an already-included module.
+
+//!  * It appears as a `mount path` target (or its parent does).
+//!  * It is the source of a `mount path.*` glob.
+//!  * It is named in a `mount path.{a, b}` nested mount.
+//!  * It is a transitive dependency of an already-included module.
 //!
+
 //! This guarantees we never miss a dependency required for type-check
 //! correctness, while typically pruning 90 %+ of the stdlib.
 //!
+
 //! # Performance contract
 //!
+
 //! - Decompress + parse: ~5 ms (~50 KB compressed graph).
 //! - BFS reachability for a typical entry point: <1 ms.
 //! - Memory: ~2 MB after deserialisation (sparse adjacency list).
 //!
+
 //! # Threading
 //!
+
 //! Singleton `OnceLock`. First reader builds the graph; subsequent
 //! readers see the populated value. No mutation after build.
 
@@ -138,6 +147,7 @@ impl DepGraph {
     /// set via mount edges. Conservative — includes every endpoint of
     /// every edge kind.
     ///
+
     /// `glob_expander` is invoked for every glob edge `prefix.*`; it
     /// should return all stdlib modules whose path starts with `prefix.`
     /// (typically backed by `StdlibModuleIndex::all_modules()`).

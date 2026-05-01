@@ -1,17 +1,20 @@
 //! Whole-program type-table consistency tests (#170).
 //!
+
 //! Compiles real stdlib `.vr` files via the production
 //! `compile_module_with_mounts` path and asserts that the resulting
 //! whole-program type table satisfies the cross-module hygiene
 //! invariants:
 //!
-//!   * No two `TypeDescriptor`s share a single `TypeId.0`.
-//!   * No two `TypeDescriptor`s share a name with conflicting ids.
-//!   * Within every sum type, variant tags form a dense
-//!     `0..variants.len()` set with no gaps and no duplicates.
+
+//!  * No two `TypeDescriptor`s share a single `TypeId.0`.
+//!  * No two `TypeDescriptor`s share a name with conflicting ids.
+//!  * Within every sum type, variant tags form a dense
+//!  `0..variants.len()` set with no gaps and no duplicates.
 //!
+
 //! These invariants are the cross-module analogue of #146's per-module
-//! `verify_type_layout_invariants`.  When a stdlib refactor introduces
+//! `verify_type_layout_invariants`. When a stdlib refactor introduces
 //! a name collision (most commonly: two unrelated modules both declare
 //! `public type Counter`) the offending build silently merges them
 //! into a single `TypeId` slot and dispatch becomes wrong-variant —
@@ -19,6 +22,7 @@
 //! exceeds object data size K`, `null pointer dereference`) that this
 //! check is designed to surface at compile time.
 //!
+
 //! The test suite uses small, focused stdlib subgraphs so a regression
 //! pinpoints the introduced violation rather than burying it in a
 //! whole-stdlib reload.
@@ -32,7 +36,7 @@ fn core_root() -> String {
 }
 
 /// Compile a stdlib `.vr` file with full mount resolution and return
-/// the resulting codegen so the caller can interrogate it.  Panics
+/// the resulting codegen so the caller can interrogate it. Panics
 /// on compile failure — these tests don't try to validate compile
 /// errors, only the type-table invariants of *successful* builds.
 fn compile_stdlib_subgraph(rel_path: &str) -> VbcCodegen {
@@ -61,7 +65,7 @@ fn compile_stdlib_subgraph(rel_path: &str) -> VbcCodegen {
     codegen
 }
 
-/// Format a health-report failure for the test panic message.  Lists
+/// Format a health-report failure for the test panic message. Lists
 /// every category in a stable order so a CI diff identifies the
 /// regression class precisely.
 fn format_report_failure(
@@ -109,7 +113,7 @@ fn format_report_failure(
 }
 
 /// Asserts the unified type table built by compiling `rel_path`
-/// satisfies the global-consistency invariants.  Since
+/// satisfies the global-consistency invariants. Since
 /// `push_type_dedupe` now drops second-wins descriptors at the
 /// same id (handling the well-known PTR alias case),
 /// `report.is_clean()` is the correct strict check — no special-
@@ -126,7 +130,7 @@ fn assert_type_table_clean(rel_path: &str) {
 
 /// Smallest meaningful stdlib subgraph: `core/base/maybe.vr` brings
 /// in the `Maybe<T>` sum type and a handful of method impls but no
-/// platform-specific mounts.  A regression that breaks the global
+/// platform-specific mounts. A regression that breaks the global
 /// invariant on this file points at a fundamental codegen bug
 /// rather than at any specific stdlib module.
 #[test]
@@ -140,39 +144,42 @@ fn global_type_table_clean_for_maybe() {
 /// As of #170/#187 close-out this fixture exposes ZERO cross-module
 /// hygiene findings (down from 14 across multiple follow-ups):
 ///
-///   1. Added `Channel`/`Deque`/`Tuple`/`Array` to the well-known
-///      type-name map (14 → 15, briefly worse — exposed a separate
-///      collision class).
-///   2. Routed user TypeId allocation through `alloc_user_type_id`
-///      so the auto-allocator skips the reserved 256..260 and
-///      512..1024 ranges (15 → 13).
-///   3. Honoured per-item `@cfg` gates on `mount` declarations
-///      inside `resolve_mounts_recursive` (13 → 10).
-///   4. Walked `TypeDecl.attributes` from `should_compile_item` —
-///      the parser places type-decl `@cfg` attributes on the inner
-///      `TypeDecl`, not on `Item` (10 → 7).
-///   5. Renamed `RuntimeConfig` → `AsyncRuntimeConfig` in
-///      `core/async/executor.vr` (the protocol vs record collision
-///      with `core/runtime/config.vr`) (7 → 6).
-///   6. Renamed `Task`/`TaskHandle` → `RuntimeTask`/`RuntimeTaskHandle`
-///      in `core/runtime/config.vr` (the internal vs public
-///      collision with `core/async/{task,nursery}.vr`) (6 → 4).
-///   7. Renamed internal `AtomicBool` → `RuntimeAtomicBool` in
-///      `core/runtime/config.vr` (the internal AtomicU32-backed
-///      version vs the public `core/sync/atomic.vr` version) (4 → 3).
-///   8. Renamed internal `YieldNow` → `SelectYieldNow` in
-///      `core/async/select.vr`; renamed internal `CallbackEntry` →
-///      `CancellationCallback` in `core/async/cancellation.vr`
-///      (3 → 1).
+
+///  1. Added `Channel`/`Deque`/`Tuple`/`Array` to the well-known
+///  type-name map (14 → 15, briefly worse — exposed a separate
+///  collision class).
+///  2. Routed user TypeId allocation through `alloc_user_type_id`
+///  so the auto-allocator skips the reserved 256..260 and
+///  512..1024 ranges (15 → 13).
+///  3. Honoured per-item `@cfg` gates on `mount` declarations
+///  inside `resolve_mounts_recursive` (13 → 10).
+///  4. Walked `TypeDecl.attributes` from `should_compile_item` —
+///  the parser places type-decl `@cfg` attributes on the inner
+///  `TypeDecl`, not on `Item` (10 → 7).
+///  5. Renamed `RuntimeConfig` → `AsyncRuntimeConfig` in
+///  `core/async/executor.vr` (the protocol vs record collision
+///  with `core/runtime/config.vr`) (7 → 6).
+///  6. Renamed `Task`/`TaskHandle` → `RuntimeTask`/`RuntimeTaskHandle`
+///  in `core/runtime/config.vr` (the internal vs public
+///  collision with `core/async/{task,nursery}.vr`) (6 → 4).
+///  7. Renamed internal `AtomicBool` → `RuntimeAtomicBool` in
+///  `core/runtime/config.vr` (the internal AtomicU32-backed
+///  version vs the public `core/sync/atomic.vr` version) (4 → 3).
+///  8. Renamed internal `YieldNow` → `SelectYieldNow` in
+///  `core/async/select.vr`; renamed internal `CallbackEntry` →
+///  `CancellationCallback` in `core/async/cancellation.vr`
+///  (3 → 1).
 ///
+
 /// The previously-remaining `Heap` / `Shared` pair both pointing at
 /// `TypeId::PTR (14)` is now eliminated by `push_type_dedupe`:
 /// the second descriptor pushed at the same id is dropped (first-
-/// wins).  Function-table registrations for the dropped type's
+/// wins). Function-table registrations for the dropped type's
 /// variants and methods still happen via independent code paths,
 /// so callers of either name resolve correctly through the same
 /// underlying TypeId.
 ///
+
 /// This test is a *ratchet*: the count must not rise, and must
 /// match exactly when it falls (so any improvement gets pinned).
 /// When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to lock
@@ -211,7 +218,7 @@ fn global_type_table_baseline_for_result() {
 }
 
 /// `core/collections/list.vr` is the largest single-file collection
-/// type with a rich variant + method surface.  Picks up most of the
+/// type with a rich variant + method surface. Picks up most of the
 /// generic-type-instantiation paths under one fixture.
 #[test]
 fn global_type_table_clean_for_list() {
@@ -219,8 +226,8 @@ fn global_type_table_clean_for_list() {
 }
 
 /// `core/collections/map.vr` exercises the typed-OOM resize +
-/// hash-table layout paths.  Different mount-closure shape than
-/// list.vr (pulls in hashing infrastructure).  Pinned clean to
+/// hash-table layout paths. Different mount-closure shape than
+/// list.vr (pulls in hashing infrastructure). Pinned clean to
 /// catch regressions that would surface only on map-flavoured
 /// type-table paths.
 #[test]
@@ -229,8 +236,8 @@ fn global_type_table_clean_for_map() {
 }
 
 /// `core/text/text.vr` exercises the UTF-8 + intrinsic-heavy stdlib
-/// surface.  Different mount closure than the collection fixtures
-/// (pulls in `core.intrinsics.runtime.text`).  Pinned clean to
+/// surface. Different mount closure than the collection fixtures
+/// (pulls in `core.intrinsics.runtime.text`). Pinned clean to
 /// catch regressions in the intrinsics-bridge paths.
 #[test]
 fn global_type_table_clean_for_text() {
@@ -239,7 +246,7 @@ fn global_type_table_clean_for_text() {
 
 /// `core/sync/atomic.vr` declares the canonical public `AtomicBool`
 /// (#187 close-out renamed the runtime-internal collider to
-/// `RuntimeAtomicBool`).  Pinned clean to catch any future re-
+/// `RuntimeAtomicBool`). Pinned clean to catch any future re-
 /// introduction of a colliding `AtomicBool` declaration.
 #[test]
 fn global_type_table_clean_for_sync_atomic() {
@@ -260,11 +267,12 @@ fn orphan_make_variants_dump_for_result() {
 // === Strict-codegen end-to-end test (#166) ============================
 
 /// Verify that `strict_codegen` mode actually halts the build when
-/// a bug-class skip would otherwise fire silently.  Uses a synthetic
+/// a bug-class skip would otherwise fire silently. Uses a synthetic
 /// module declaring a function whose body references an undefined
 /// symbol — the lenient path warns and continues, the strict path
 /// returns `Err(CodegenError)` from the call.
 ///
+
 /// This pins the contract that `with_strict_codegen()` isn't just
 /// a config flag with no observable effect.
 #[test]
@@ -321,7 +329,7 @@ fn strict_codegen_halts_on_bug_class_skip() {
 
 /// Print the current findings on result.vr — useful for diagnostic
 /// runs (`cargo test -p verum_vbc --features codegen
-/// global_type_table_dump_for_result -- --nocapture`).  Always
+/// global_type_table_dump_for_result -- --nocapture`). Always
 /// passes; the assertion is purely informational.
 #[test]
 fn global_type_table_dump_for_result() {
@@ -353,7 +361,7 @@ fn global_type_table_dump_for_result() {
     }
 }
 
-/// Sanity check: an empty codegen has a clean health report.  Pins
+/// Sanity check: an empty codegen has a clean health report. Pins
 /// the "no false positives on a fresh codegen" baseline — important
 /// because the per-module verifier is invoked unconditionally during
 /// `finalize_module`.
@@ -373,13 +381,15 @@ fn global_type_table_clean_for_fresh_codegen() {
 
 /// Ratchet test for `find_orphan_make_variants`.
 ///
+
 /// At a single-module-with-mounts granularity most "orphans" are
 /// legitimate — they reference variants whose declaring module
-/// wasn't fully transitively loaded by the test harness.  But the
+/// wasn't fully transitively loaded by the test harness. But the
 /// COUNT itself is a useful regression signal: if a codegen change
 /// introduces NEW orphans (instructions that the runtime can't
 /// resolve), the count rises and this ratchet trips.
 ///
+
 /// When a fix lands that resolves orphans (better mount transitive
 /// closure, MakeVariantTyped from #167 Phase 3, etc.), lower
 /// `RESULT_ORPHAN_BASELINE` to lock the gain.

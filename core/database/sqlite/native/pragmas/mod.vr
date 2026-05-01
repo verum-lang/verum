@@ -4,13 +4,16 @@
 // Layer: 6 (Connection-mode dispatch) / 5 (parser visibility)
 // Spec: sqlite-native.md §18, Appendix F
 //
+
 // PRAGMA dispatch catalogue. Every supported PRAGMA carries:
 //
-//   * `kind`           — `PragmaKind` enum value
-//   * `scope`          — connection / database / read-only
-//   * `is_settable`    — write form (`PRAGMA name = value`) accepted
-//   * `effect_phase`   — when a write becomes visible (immediate / on next txn / on next open)
+
+//  * `kind` — `PragmaKind` enum value
+//  * `scope` — connection / database / read-only
+//  * `is_settable` — write form (`PRAGMA name = value`) accepted
+//  * `effect_phase` — when a write becomes visible (immediate / on next txn / on next open)
 //
+
 // The L5 codegen translates `PRAGMA …` AST into a call to
 // `pragma_dispatch.execute`, threading the per-connection
 // `PragmaConfig` through the pipeline.

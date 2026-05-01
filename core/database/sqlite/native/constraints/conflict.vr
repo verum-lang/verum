@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §17.7
 //
+
 // `OnConflict` mirrors SQLite's 5 conflict-handling modes plus the
 // row-level decision the interpreter must take.
 // =============================================================================

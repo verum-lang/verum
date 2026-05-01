@@ -5,37 +5,45 @@
 // Dependencies: mem/capability
 // =============================================================================
 //
+
 // This module defines the AllocationHeader structure prepended to every
 // heap allocation in the CBGR system.
 //
+
 // # Memory Layout (32 bytes, cache-line optimized)
 //
+
 // ```
-// Offset  Size  Field           Description
+// Offset Size Field Description
 // ──────────────────────────────────────────────────────────────────────
-// 0       4     generation      Current generation counter (atomic) — HOT
-// 4       4     epoch_and_caps  Packed: epoch (i16) + capabilities (i16)
-// 8       4     size            Allocation size in bytes (excluding header)
-// 12      4     alignment       Alignment requirement
-// 16      4     type_id         Runtime type identifier
-// 20      4     flags           Allocation state flags
-// 24      4     ref_count       Reference count (atomic)
-// 28      4     reserved        Reserved for future use
+// 0 4 generation Current generation counter (atomic) — HOT
+// 4 4 epoch_and_caps Packed: epoch (i16) + capabilities (i16)
+// 8 4 size Allocation size in bytes (excluding header)
+// 12 4 alignment Alignment requirement
+// 16 4 type_id Runtime type identifier
+// 20 4 flags Allocation state flags
+// 24 4 ref_count Reference count (atomic)
+// 28 4 reserved Reserved for future use
 // ──────────────────────────────────────────────────────────────────────
 // Total: 32 bytes (half cache line, 32-byte aligned)
 // ```
 //
+
 // # Thread Safety
 //
+
 // The generation, epoch_and_caps, and ref_count fields are atomic and
 // can be safely accessed from multiple threads.
 //
+
 // # Performance
 //
+
 // Hot path optimization: generation is at offset 0 for cache-line-aligned
 // first access. Generation + epoch_and_caps form the first 8 bytes,
 // enabling combined 64-bit atomic load for ~15ns validation.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 6.1
 // =============================================================================
 
@@ -54,7 +62,7 @@ mount core.intrinsics.atomic.{
 };
 
 // Audit-log writers — emit a CapEvent on every successful CBGR state
-// transition.  When `cap_audit_is_enabled()` returns false (default
+// transition. When `cap_audit_is_enabled()` returns false (default
 // production state), each helper short-circuits with a relaxed-load +
 // branch (~1-2 ns) and the CBGR hot path stays within budget.
 mount super.cap_audit.{
@@ -161,6 +169,7 @@ implement AllocationFlags {
 
 /// Allocation header prepended to every heap allocation.
 ///
+
 /// This structure is 32 bytes, cache-line optimized for half cache line
 /// alignment on most architectures.
 
@@ -265,8 +274,9 @@ implement AllocationHeader {
 
     /// Create header for a typed allocation.
     ///
+
     /// SOUNDNESS: validates that T's static size / alignment fit in
-    /// UInt32 (the on-disk header field type).  A type whose size
+    /// UInt32 (the on-disk header field type). A type whose size
     /// exceeds 4 GiB silently truncating to UInt32 would mis-sized
     /// the allocation and corrupt subsequent CBGR validation
     /// (the size field gates pointer-derivation bounds).
@@ -301,24 +311,26 @@ implement AllocationHeader {
     }
 
     /// Revoke the allocation iff the current generation matches
-    /// `expected_gen`.  This is the load-bearing primitive for
+    /// `expected_gen`. This is the load-bearing primitive for
     /// `ThinRef.revoke`-style APIs: the verify-then-increment is
     /// performed as a single CAS so two concurrent revokers can't
     /// both succeed, and a stale revoker can't double-bump the
     /// generation past a successor's freshly-issued reference.
     ///
+
     /// Returns:
-    ///   - `Some(new_gen)` if this thread successfully revoked.
-    ///   - `None` if the generation no longer matches
-    ///     `expected_gen` (someone else revoked first; caller
-    ///     should report `already_revoked`).
+    ///  - `Some(new_gen)` if this thread successfully revoked.
+    ///  - `None` if the generation no longer matches
+    ///  `expected_gen` (someone else revoked first; caller
+    ///  should report `already_revoked`).
     ///
+
     /// Wraparound is handled identically to `increment_generation`:
     /// after a successful CAS that lands at GEN_MAX, the epoch is
     /// CAS-bumped and the generation is reset to GEN_INITIAL.
-    /// Stable allocation identity as UInt64.  Used by audit-log
+    /// Stable allocation identity as UInt64. Used by audit-log
     /// callers to correlate CapEvent records back to specific
-    /// allocations.  The address is the AllocationHeader's own
+    /// allocations. The address is the AllocationHeader's own
     /// position in memory; the user data starts HEADER_SIZE bytes
     /// later, but observers grouping events by allocation just need
     /// any stable, unique-per-allocation identifier.
@@ -332,7 +344,7 @@ implement AllocationHeader {
         let new_gen = if expected_gen >= GEN_MAX - 1 {
             // Wraparound boundary — caller's expected_gen is already
             // saturated; any further increment must go through the
-            // wraparound path.  CAS to GEN_INITIAL directly here.
+            // wraparound path. CAS to GEN_INITIAL directly here.
             GEN_INITIAL
         } else {
             expected_gen + 1
@@ -351,7 +363,7 @@ implement AllocationHeader {
         }
 
         // If we crossed the wraparound boundary, bump the epoch
-        // exactly once.  Mirrors the wraparound branch of
+        // exactly once. Mirrors the wraparound branch of
         // `increment_generation`.
         if expected_gen >= GEN_MAX - 1 {
             loop {
@@ -375,7 +387,7 @@ implement AllocationHeader {
             super.epoch.GLOBAL_EPOCH.on_wraparound();
         }
 
-        // Emit audit event after the revoke is fully committed.  The
+        // Emit audit event after the revoke is fully committed. The
         // runtime gate (`cap_audit_is_enabled`) keeps this O(1) when
         // audit is off; observers never see speculative or torn state.
         let caps = self.load_capabilities();
@@ -387,6 +399,7 @@ implement AllocationHeader {
     /// Increment generation and return old value.
     /// Handles wraparound by incrementing epoch.
     ///
+
     /// Concurrency contract: under contention, multiple threads
     /// may simultaneously hit the wraparound branch. Earlier
     /// revisions performed a non-atomic load+store on
@@ -395,14 +408,15 @@ implement AllocationHeader {
     /// epoch-increment path — double-incrementing the epoch and
     /// double-resetting the generation. The fix uses:
     ///
-    ///   * a CAS-loop on `epoch_and_caps` that retries until the
-    ///     epoch increment commits exactly once;
-    ///   * a CAS reset of `generation` from `GEN_MAX` (or higher
-    ///     if multiple wraparounds ran) back to `GEN_INITIAL`,
-    ///     so concurrent threads observe a single net reset;
-    ///   * a hard panic on `UInt16` epoch overflow — silently
-    ///     wrapping past 65535 would create ABA aliasing of
-    ///     reference identities.
+
+    ///  * a CAS-loop on `epoch_and_caps` that retries until the
+    ///  epoch increment commits exactly once;
+    ///  * a CAS reset of `generation` from `GEN_MAX` (or higher
+    ///  if multiple wraparounds ran) back to `GEN_INITIAL`,
+    ///  so concurrent threads observe a single net reset;
+    ///  * a hard panic on `UInt16` epoch overflow — silently
+    ///  wrapping past 65535 would create ABA aliasing of
+    ///  reference identities.
     @inline
     public fn increment_generation(&mut self) -> UInt32 {
         let old_gen = atomic_fetch_add_u32(&mut self.generation, 1, ORDERING_ACQ_REL);
@@ -449,7 +463,7 @@ implement AllocationHeader {
                 // typically 1.
             }
 
-            // Reset generation back to GEN_INITIAL.  Use CAS so
+            // Reset generation back to GEN_INITIAL. Use CAS so
             // late-arriving fetch_adds from concurrent threads
             // don't accidentally reset a freshly-stamped
             // post-wraparound generation back to INITIAL again.
@@ -473,7 +487,7 @@ implement AllocationHeader {
             super.epoch.GLOBAL_EPOCH.on_wraparound();
         }
 
-        // Audit-log the generation bump.  Note: `old_gen` is the value
+        // Audit-log the generation bump. Note: `old_gen` is the value
         // *before* fetch_add, so the post-bump value is `old_gen + 1`
         // (wraparound resets to GEN_INITIAL — we record what the caller
         // sees, the new generation after the transition).
@@ -493,14 +507,15 @@ implement AllocationHeader {
 
     /// Store epoch counter atomically (preserves capabilities in upper 16 bits).
     ///
+
     /// SOUNDNESS: this MUST be a CAS-loop, not a load-then-store.
     /// Earlier revisions did `let p = load(); let new = (p & caps_mask) | epoch; store(new)`
     /// — which races with `attenuate_capabilities` / `store_capabilities`
-    /// running on another thread.  If the two stores interleave, the
+    /// running on another thread. If the two stores interleave, the
     /// epoch-store overwrites the capability-attenuation, silently
-    /// RESTORING capabilities that the attenuator just removed.  That
+    /// RESTORING capabilities that the attenuator just removed. That
     /// is a security violation: capability removal must be monotone
-    /// from the caller's perspective.  The CAS-loop guarantees the
+    /// from the caller's perspective. The CAS-loop guarantees the
     /// two halves see a consistent transition.
     @inline
     public fn store_epoch(&mut self, epoch: UInt16) {
@@ -557,11 +572,13 @@ implement AllocationHeader {
 
     /// Store capabilities atomically (preserves epoch in lower 16 bits).
     ///
+
     /// SOUNDNESS: CAS-loop for the same race-with-store_epoch /
     /// fetch_add(generation-wraparound) reason as `store_epoch`.
     ///
+
     /// SECURITY: this method should be used sparingly — it can
-    /// REPLACE the capabilities mask (granting access).  Prefer
+    /// REPLACE the capabilities mask (granting access). Prefer
     /// `attenuate_capabilities` for the common case of removing
     /// rights, since attenuation is monotone and cannot
     /// accidentally re-grant.
@@ -591,8 +608,8 @@ implement AllocationHeader {
         let old_packed = atomic_fetch_and_u32(&mut self.epoch_and_caps, u32_mask, ORDERING_ACQ_REL);
         let caps_before = ((old_packed >> 16) & 0xFFFF) as UInt16;
 
-        // Audit-log the attenuation.  caps_after = caps_before AND mask
-        // (monotonic narrowing).  Generation is unaffected.
+        // Audit-log the attenuation. caps_after = caps_before AND mask
+        // (monotonic narrowing). Generation is unaffected.
         let caps_after = caps_before & mask;
         let gen = self.load_generation();
         record_attenuate(self.address(), gen, caps_before, caps_after, 0);
@@ -614,11 +631,12 @@ implement AllocationHeader {
 
     /// Increment reference count and return old value.
     ///
-    /// SOUNDNESS: hard panic on overflow.  A naive `fetch_add(1)` would
+
+    /// SOUNDNESS: hard panic on overflow. A naive `fetch_add(1)` would
     /// silently wrap from UInt32.MAX to 0, after which a subsequent
     /// drop would race the dealloc through 0 → UInt32.MAX → 0 again,
     /// or worse — drop the live object while another thread still
-    /// holds a clone.  Reaching UInt32.MAX requires ~4 billion live
+    /// holds a clone. Reaching UInt32.MAX requires ~4 billion live
     /// clones; in practice this is unreachable, but loud failure is
     /// the right behaviour if it ever occurs.
     @inline
@@ -627,9 +645,9 @@ implement AllocationHeader {
         if old == 0xFFFF_FFFF {
             panic("AllocationHeader.increment_ref_count overflow — ref_count exceeded UInt32.MAX; allocation has too many concurrent owners (clone leak likely)");
         }
-        // Audit-log the ref_count increment.  Slow path only — fast-
+        // Audit-log the ref_count increment. Slow path only — fast-
         // path `&checked` borrows do not touch ref_count and are not
-        // audited.  The runtime gate keeps this O(1) when off.
+        // audited. The runtime gate keeps this O(1) when off.
         let gen = self.load_generation();
         let caps = self.load_capabilities();
         record_ref_incr(self.address(), gen, caps, 0);
@@ -639,6 +657,7 @@ implement AllocationHeader {
     /// Decrement reference count and return new value.
     /// Caller must handle deallocation when this returns 0.
     ///
+
     /// Panics on underflow (ref_count was already 0). Earlier
     /// revisions used `atomic_fetch_add_u32(0xFFFF_FFFF)` (i.e.
     /// `+= -1` via wrapping) and returned `old - 1`; if a buggy
@@ -646,7 +665,7 @@ implement AllocationHeader {
     /// silently wrapped to `UInt32.MAX`, preventing every
     /// subsequent dealloc from firing — a permanent leak that's
     /// hard to diagnose because the count appears huge instead
-    /// of negative.  Detecting the underflow loudly means leaks
+    /// of negative. Detecting the underflow loudly means leaks
     /// surface at the actual misuse site instead of as a far-
     /// removed OOM.
     @inline

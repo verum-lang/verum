@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — dump / restore)
 //
+
 // Drives the `.schema` and the schema-half of `.dump`. Input is
 // the abstract `SchemaObject` which the L6 SchemaCache exposes
 // (or any host-side adapter).
 //
+
 // Output is a `;`-terminated DDL stream identical to what
 // SQLite's CLI emits — round-trippable by feeding into a
 // fresh Database.execute().

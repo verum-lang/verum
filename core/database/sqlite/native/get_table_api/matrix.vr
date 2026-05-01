@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The classical layout flattens the matrix into a single array of
-// (nRow + 1) * nColumn strings, row 0 being the header.  Our
+// (nRow + 1) * nColumn strings, row 0 being the header. Our
 // catalogue keeps the header explicit for type-checkability.
 // =============================================================================
 

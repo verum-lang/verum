@@ -3,11 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API — rbu.h
 //
-//   SQLITE_RBU_STATE_OAL       = 1   -- applying updates to OAL
-//   SQLITE_RBU_STATE_MOVE      = 2   -- moving the OAL to WAL
-//   SQLITE_RBU_STATE_CHECKPOINT = 3  -- checkpointing WAL
-//   SQLITE_RBU_STATE_DONE      = 4
-//   SQLITE_RBU_STATE_ERROR     = 5
+
+//  SQLITE_RBU_STATE_OAL = 1 -- applying updates to OAL
+//  SQLITE_RBU_STATE_MOVE = 2 -- moving the OAL to WAL
+//  SQLITE_RBU_STATE_CHECKPOINT = 3 -- checkpointing WAL
+//  SQLITE_RBU_STATE_DONE = 4
+//  SQLITE_RBU_STATE_ERROR = 5
 // =============================================================================
 
 module core.database.sqlite.native.rbu.stage;

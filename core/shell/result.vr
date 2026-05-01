@@ -5,20 +5,23 @@
 // Dependencies: core, io.process, time
 // =============================================================================
 //
+
 // Standard return-and-error types for shell-command execution. Provides:
-//   * `ShellResult` — successful or terminating capture of a child process,
-//     bundling stdout/stderr bytes, exit status, the dispatched command and
-//     wall-clock duration. Methods for re-decoding output as Text/JSON/YAML/
-//     CSV/TSV/lines, plus pipeline/iteration ergonomics.
-//   * `ShellError` — sum of every failure mode the shell layer can report:
-//     non-zero exit, spawn failure, timeout, permission denial, parse failure
-//     of post-execution decoding, cancellation.
+//  * `ShellResult` — successful or terminating capture of a child process,
+//  bundling stdout/stderr bytes, exit status, the dispatched command and
+//  wall-clock duration. Methods for re-decoding output as Text/JSON/YAML/
+//  CSV/TSV/lines, plus pipeline/iteration ergonomics.
+//  * `ShellError` — sum of every failure mode the shell layer can report:
+//  non-zero exit, spawn failure, timeout, permission denial, parse failure
+//  of post-execution decoding, cancellation.
 //
+
 // `ShellResult` is intentionally a *byte-precise* container. UTF-8 decoding
 // is opt-in via `text()`, never enforced — many shell pipelines (binary tools
 // like `jq` over base64 streams, image manipulation, hashes) pass through
 // non-UTF-8 bytes and conflating that with text would lose information.
 //
+
 // =============================================================================
 
 module result;
@@ -206,6 +209,7 @@ implement Iterator for ShellLinesIter {
 // ShellError — structured failure modes
 // =============================================================================
 //
+
 // The variants are total: every reachable failure path in the shell layer
 // must surface as one of these. Adding a new variant is a breaking change
 // (callers may have exhaustive `match` on this type) and must be motivated

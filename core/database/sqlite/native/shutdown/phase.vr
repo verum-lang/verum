@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Three top-level phases:
 //
-//   * `SpInit`              — initial state
-//   * `SpDraining(sub)`     — waiting for `sub` to drain pending work
-//   * `SpClosing(sub)`      — actively releasing `sub`'s resources
-//   * `SpDone`
-//   * `SpFailed(reason)`
+
+//  * `SpInit` — initial state
+//  * `SpDraining(sub)` — waiting for `sub` to drain pending work
+//  * `SpClosing(sub)` — actively releasing `sub`'s resources
+//  * `SpDone`
+//  * `SpFailed(reason)`
 // =============================================================================
 
 module core.database.sqlite.native.shutdown.phase;

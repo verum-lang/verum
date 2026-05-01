@@ -14,15 +14,18 @@
 )]
 //! Regression tests for the refinement-type canonicalisation.
 //!
+
 //! Per the three surface forms for refinement types all collapse onto
 //! a single AST node — `TypeKind::Refined { base, predicate }` — where the
 //! optional `predicate.binding` identifies the binder (when one exists):
 //!
+
 //! * Inline form `T{pred}` — `predicate.binding = None` (implicit `it`).
 //! * Declarative form `T where predicate_name` — `predicate.binding = None`,
-//!   `predicate.expr = Path("predicate_name")`.
+//!  `predicate.expr = Path("predicate_name")`.
 //! * Sigma form `x: T where P(x)` — `predicate.binding = Some("x")`.
 //!
+
 //! These tests pin that collapse down — after removing `TypeKind::Sigma` from
 //! the AST (previously a separate variant), the three surface forms must all
 //! produce structurally the same outer variant.

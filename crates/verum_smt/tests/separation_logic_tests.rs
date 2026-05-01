@@ -1,5 +1,6 @@
 //! Comprehensive tests for separation logic verification
 //!
+
 //! Tests cover:
 //! - Separating conjunction encoding
 //! - Magic wand operator
@@ -932,6 +933,7 @@ fn test_wand_elimination_failure() {
 // UnfoldingConfig wiring tests
 // =============================================================================
 //
+
 // Pin: every `UnfoldingConfig` field reaches a meaningful
 // consumer at the `UnfoldingState` API. Pre-fix all four fields
 // were stored on state but no code read them — the public
@@ -1048,6 +1050,7 @@ mod unfolding_config_wiring {
 // SepLogicEncoder::encode_assertion routing wire-up
 // =============================================================================
 //
+
 // Pin: when `UnfoldingConfig.lazy_unfolding` is enabled (the
 // documented default), `encode_assertion` for ListSegment / Tree
 // assertions routes through `encode_with_unfolding` so the depth

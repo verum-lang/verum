@@ -5,38 +5,46 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // String-distance helpers for "did you mean X?" suggestions, typo
 // correction, record-linkage dedup, fuzzy search, and command-line
 // nearest-match hints (Git / Cargo / rustup all ship one).
 //
+
 // # Algorithms
 //
-//   * Levenshtein — edit distance (insert / delete / substitute);
-//     O(m·n) time, O(min(m,n)) space via rolling window.
-//   * Levenshtein bounded — early-terminating variant that aborts
-//     when distance exceeds a threshold; O(threshold · min(m,n))
-//     average.
-//   * Jaro — position-and-match similarity in [0, 1].
-//   * Jaro-Winkler — Jaro with a common-prefix boost; the
-//     record-linkage default (U.S. Census Bureau dedup).
+
+//  * Levenshtein — edit distance (insert / delete / substitute);
+//  O(m·n) time, O(min(m,n)) space via rolling window.
+//  * Levenshtein bounded — early-terminating variant that aborts
+//  when distance exceeds a threshold; O(threshold · min(m,n))
+//  average.
+//  * Jaro — position-and-match similarity in [0, 1].
+//  * Jaro-Winkler — Jaro with a common-prefix boost; the
+//  record-linkage default (U.S. Census Bureau dedup).
 //
+
 // All operate on byte slices (UTF-8 bytes) for simplicity.
 // Grapheme-cluster-aware versions can layer on top once the
 // stdlib exposes a `Text.graphemes()` iterator.
 //
+
 // # API
 //
+
 // ```
-// let d: Int = string_distance.levenshtein(b"kitten", b"sitting");           // 3
-// let sim: Float = string_distance.jaro_winkler(b"martha", b"marhta");       // ~0.961
+// let d: Int = string_distance.levenshtein(b"kitten", b"sitting"); // 3
+// let sim: Float = string_distance.jaro_winkler(b"martha", b"marhta"); // ~0.961
 //
+
 // // "did you mean" with a distance cap.
 // match string_distance.closest(b"cmmit", &[b"commit", b"branch", b"checkout"], 2) {
-//     Some((hint, d)) => print(f"did you mean '{hint}'? ({d} edits)"),
-//     None            => print("no close match"),
+//  Some((hint, d)) => print(f"did you mean '{hint}'? ({d} edits)"),
+//  None => print("no close match"),
 // }
 // ```
 //
+
 // =============================================================================
 
 module core.base.string_distance;

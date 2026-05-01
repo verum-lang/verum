@@ -25,8 +25,10 @@ pub struct Pass {
 impl Pass {
     /// Creates a pass from a raw function.
     ///
+
     /// # Safety
     ///
+
     /// A raw function must be valid.
     pub unsafe fn from_raw_fn(create_raw: unsafe extern "C" fn() -> MlirPass) -> Self {
         Self {
@@ -36,8 +38,10 @@ impl Pass {
 
     /// Creates a pass from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub const unsafe fn from_raw(raw: MlirPass) -> Self {
         Self { raw }

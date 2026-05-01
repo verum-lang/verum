@@ -2,22 +2,27 @@
 // cubical.vr — Cubical Type Theory Surface Module
 // =============================================================================
 //
+
 // Layer: Standard Library / Mathematics
 //
+
 // This module exposes the cubical type theory surface for direct use.
 // The canonical definitions live in core/math/hott.vr; this module
 // provides additional cubical-specific utilities and re-exports.
 //
+
 // The compiler's cubical normalizer (verum_types.cubical) provides
 // 8 reduction rules for computational content. These fire automatically
 // during type-checking when Path terms appear.
 //
+
 // Design: Verum's "semantic honesty" principle:
-//   * No new keywords (only let, fn, is are reserved)
-//   * No new operators (path application is regular function call)
-//   * Path types via Path<A>(a, b) type expression (grammar/verum.ebnf)
-//   * cubical dispatch via `proof by cubical` tactic
+//  * No new keywords (only let, fn, is are reserved)
+//  * No new operators (path application is regular function call)
+//  * Path types via Path<A>(a, b) type expression (grammar/verum.ebnf)
+//  * cubical dispatch via `proof by cubical` tactic
 //
+
 // =============================================================================
 
 module core.math.cubical;
@@ -35,24 +40,24 @@ mount core.math.hott.{
 // =============================================================================
 
 /// Interval reversal: 1 - i. Swaps i0 ↔ i1.
-///   rev(i0) = i1
-///   rev(i1) = i0
+///  rev(i0) = i1
+///  rev(i1) = i0
 public fn rev(i: I) -> I {
     @builtin_interval_rev(i)
 }
 
 /// Interval meet (minimum): i ∧ j.
-///   i0 ∧ j = i0
-///   i1 ∧ j = j
-///   i ∧ j = j ∧ i
+///  i0 ∧ j = i0
+///  i1 ∧ j = j
+///  i ∧ j = j ∧ i
 public fn meet(i: I, j: I) -> I {
     @builtin_interval_meet(i, j)
 }
 
 /// Interval join (maximum): i ∨ j.
-///   i0 ∨ j = j
-///   i1 ∨ j = i1
-///   i ∨ j = j ∨ i
+///  i0 ∨ j = j
+///  i1 ∨ j = i1
+///  i ∨ j = j ∨ i
 public fn join(i: I, j: I) -> I {
     @builtin_interval_join(i, j)
 }
@@ -84,12 +89,14 @@ public type Face is
 /// the endpoint values of its `IsZero` / `IsOne` leaves and the
 /// boolean structure of its `And` / `Or` connectives.
 ///
+
 /// Full multi-dimensional cube evaluation (face formulas containing
 /// free interval variables that need a per-dimension valuation) is
 /// the kernel's responsibility — see `@builtin_face_eval` in
 /// `verum_types.cubical`. This Verum-side helper covers the
 /// endpoint-resolved case used for debug / shape checks.
 ///
+
 /// The previous signature took an unused `i: I` argument that was
 /// threaded through the recursive arms but never consulted — a
 /// vestige from an earlier multi-dim sketch that this surface
@@ -113,8 +120,10 @@ public fn eval_face(f: &Face) -> Bool {
 /// Given a line of types A : I → Type, a partial element on faces,
 /// and a base of type A(i0), produce an element of A(i1).
 ///
-///   comp(A, φ, walls, base) : A(i1)
+
+///  comp(A, φ, walls, base) : A(i1)
 ///
+
 /// This is the heterogeneous version of hcomp. When A is constant,
 /// comp reduces to hcomp.
 public fn comp<A: fn(I) -> Type>(
@@ -129,11 +138,13 @@ public fn comp<A: fn(I) -> Type>(
 
 /// Glue types: the key ingredient for computational univalence.
 ///
+
 /// Given a type A, a face φ, and for each face an equivalence to A,
 /// Glue assembles a type that is A on the interior but the equivalent
 /// types on the faces.
 ///
-///   Glue(A, φ, T, e) where T : φ → Type, e : (i : φ) → Equiv<T(i), A>
+
+///  Glue(A, φ, T, e) where T : φ → Type, e : (i : φ) → Equiv<T(i), A>
 public type Glue<A>(phi: I, T: fn(I) -> Type, e: fn(i: I) -> Equiv<T(i), A>) is @builtin_glue;
 
 /// Unglue: extract the underlying A value from a Glue type.
@@ -148,11 +159,12 @@ public fn unglue<A>(phi: I, T: fn(I) -> Type, e: fn(i: I) -> Equiv<T(i), A>, g: 
 /// Connection along a path: given p : Path<A>(a, b) and dimension
 /// variables i, j, produces a square filler.
 ///
+
 /// The "and" connection: p(i ∧ j) gives a square with:
-///   - Bottom face: constant a
-///   - Left face: constant a
-///   - Right face: p
-///   - Top face: p
+///  - Bottom face: constant a
+///  - Left face: constant a
+///  - Right face: p
+///  - Top face: p
 public fn connection_and<A>(a: A, b: A, p: Path<A>(a, b), i: I, j: I) -> A {
     @builtin_path_app(p, meet(i, j))
 }

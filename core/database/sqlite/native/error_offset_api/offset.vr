@@ -60,7 +60,7 @@ public fn validity_name(v: &Validity) -> Text {
 }
 
 // Compute the inclusive lo/hi byte range of a "snippet window" centred on
-// `off` with the given radius, clipped to [0, sql_len].  Callers slice the
+// `off` with the given radius, clipped to [0, sql_len]. Callers slice the
 // SQL text themselves (Verum stdlib doesn't surface a substring helper here).
 public type Window is { lo: Int, hi: Int };
 

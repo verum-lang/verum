@@ -1,5 +1,6 @@
 //! Symbol attribute handling for LLVM codegen.
 //!
+
 //! This module provides support for linker-level symbol attributes:
 //! - `@alias(target)` - Symbol aliasing
 //! - `@weak` - Weak symbol linkage
@@ -8,8 +9,10 @@
 //! - `@section(name)` - Section placement
 //! - `@export(abi)` - Export with ABI
 //!
+
 //! # LLVM Mapping
 //!
+
 //! | Verum Attribute | LLVM Feature |
 //! |-----------------|--------------|
 //! | `@alias(target)` | `llvm.global.alias` |
@@ -25,6 +28,7 @@
 //! | `@section(name)` | Function/GlobalVar section attribute |
 //! | `@export("C")` | External linkage + C calling convention |
 //!
+
 //! Verum provides unified linker control through attributes:
 //! - `@link_section(".text.hot")` places functions/data in specific ELF/Mach-O/PE sections
 //! - `@no_mangle` / `@export` control symbol visibility and naming
@@ -217,6 +221,7 @@ pub fn visibility_to_llvm(vis: SymbolVisibility) -> GlobalVisibility {
 
 /// Create a symbol alias via `LLVMAddAlias2`.
 ///
+
 /// Looks up the target function or global in the module and creates
 /// an LLVM GlobalAlias pointing to it. Falls back to a debug log
 /// if the target cannot be found (e.g., not yet defined).
@@ -265,13 +270,16 @@ pub const DEFAULT_CTOR_DTOR_PRIORITY: u32 = 65535;
 
 /// Add a single function to the global constructors list with the given priority.
 ///
+
 /// This creates an `llvm.global_ctors` entry with `appending` linkage.
 /// On ELF platforms, entries are placed in the `.init_array` section.
 /// On Mach-O, they go into `__mod_init_func`. On PE/COFF, `.CRT$XCU`.
 ///
+
 /// Lower priority values run first. Priorities 0-100 are reserved for system use.
 /// The standard default is 65535.
 ///
+
 /// Each call appends a separate `llvm.global_ctors` global; LLVM's linker will
 /// merge all such globals with `appending` linkage into a single array.
 pub fn add_global_ctor<'ctx>(
@@ -290,9 +298,11 @@ pub fn add_global_ctor<'ctx>(
 
 /// Add a single function to the global destructors list with the given priority.
 ///
+
 /// This creates an `llvm.global_dtors` entry with `appending` linkage.
 /// On ELF platforms, entries are placed in the `.fini_array` section.
 ///
+
 /// Lower priority values run first (so for destructors, lower priority = runs first
 /// during teardown).
 pub fn add_global_dtor<'ctx>(
@@ -311,10 +321,12 @@ pub fn add_global_dtor<'ctx>(
 
 /// Emit multiple global constructors at once.
 ///
+
 /// More efficient than calling `add_global_ctor` in a loop because it creates a single
 /// `llvm.global_ctors` array global with all entries. Each entry is a
 /// `(FunctionValue, priority)` pair.
 ///
+
 /// If `entries` is empty, this is a no-op.
 pub fn emit_global_ctors<'ctx>(
     module: &verum_llvm::module::Module<'ctx>,
@@ -330,10 +342,12 @@ pub fn emit_global_ctors<'ctx>(
 
 /// Emit multiple global destructors at once.
 ///
+
 /// More efficient than calling `add_global_dtor` in a loop because it creates a single
 /// `llvm.global_dtors` array global with all entries. Each entry is a
 /// `(FunctionValue, priority)` pair.
 ///
+
 /// If `entries` is empty, this is a no-op.
 pub fn emit_global_dtors<'ctx>(
     module: &verum_llvm::module::Module<'ctx>,
@@ -349,15 +363,18 @@ pub fn emit_global_dtors<'ctx>(
 
 /// Create an `llvm.global_ctors` or `llvm.global_dtors` array global.
 ///
+
 /// The LLVM specification requires these globals to have:
 /// - Type: `[N x { i32, ptr, ptr }]`
 /// - Linkage: `appending`
 ///
+
 /// Each element is a struct `{ i32 priority, ptr function, ptr data }` where:
 /// - `priority`: Lower values run first (0-100 reserved for system)
 /// - `function`: Pointer to a `void()` function
 /// - `data`: Associated data pointer (always null for Verum constructors/destructors)
 ///
+
 /// When multiple modules define the same named global with `appending` linkage,
 /// the LLVM linker concatenates all arrays into one.
 fn emit_global_ctor_dtor_array<'ctx>(

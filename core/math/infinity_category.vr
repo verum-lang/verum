@@ -4,17 +4,21 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: Lurie "Higher Topos Theory" §1, Joyal "Notes on Quasi-categories"
 //
+
 // Builds the ∞-category foundation on top of:
 //
-//   * core/math/simplicial.vr — SimplicialSet, Horn, KanComplex
-//   * core/math/category.vr    — Category, Functor, NaturalTransformation
-//   * core/math/hott.vr        — Equiv, IsContr, truncation levels
+
+//  * core/math/simplicial.vr — SimplicialSet, Horn, KanComplex
+//  * core/math/category.vr — Category, Functor, NaturalTransformation
+//  * core/math/hott.vr — Equiv, IsContr, truncation levels
 //
+
 // In Joyal's quasi-category model, an ∞-category is a simplicial set in
 // which every **inner** horn (Λ^n_k for 0 < k < n) has a filler. This
 // weakens the Kan complex condition (which requires all horns to fill)
 // and recovers composition up to coherent homotopy.
 //
+
 // As with the other Phase B/C stdlib modules, this file is a thin layer
 // exposing the mathematical shape as Verum protocols. Composition
 // witnesses, horn fillers, and higher-coherence proofs are surfaced as
@@ -37,6 +41,7 @@ mount core.math.category.{Category};
 /// composition is witnessed by 2-simplex fillers of inner horns Λ^2_1,
 /// and higher coherences are witnessed by higher-dimensional fillers.
 ///
+
 /// Every Kan complex is a quasi-category (Kan complexes fill *all*
 /// horns); the converse fails — quasi-categories need not have
 /// inverses for their 1-morphisms.

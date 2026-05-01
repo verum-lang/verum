@@ -1,6 +1,7 @@
 //! Phase 2 proof-tree replay foundation for Z3 `(proof …)` and
 //! CVC5 ALETHE format.
 //!
+
 //! The kernel's Phase 1 replay (`replay_smt_cert`) accepts
 //! single-byte trust-tag certificates — a minimal shape the SMT
 //! layer emits when a goal closes via the
@@ -11,31 +12,38 @@
 //! certificate fails the structural check before producing a
 //! term the kernel admits.
 //!
+
 //! This module lands the parser + rule-catalogue foundation.
 //! Individual rule → `CoreTerm` mappings for each backend
 //! arrive in dedicated follow-up patches (Z3's ~35 rules +
 //! CVC5 ALETHE's ~70 rules are too many to review in one
 //! commit).
 //!
+
 //! # Supported formats
 //!
+
 //! * **Z3**: `(proof
-//!     (step-name premise_1 premise_2 …)
-//!     (step-name' …))`
-//!   — S-expression tree, rule names are Z3-specific
-//!   (`mp`, `asserted`, `refl`, `trans`, etc.).
+//!  (step-name premise_1 premise_2 …)
+//!  (step-name' …))`
+//!  — S-expression tree, rule names are Z3-specific
+//!  (`mp`, `asserted`, `refl`, `trans`, etc.).
 //!
+
 //! * **CVC5 ALETHE**: `(assume a0 …) (step t1 :rule <name>
-//!     :premises (a0) :args (…) :conclusion …)`
-//!   — linear sequence of steps with named premises.
+//!  :premises (a0) :args (…) :conclusion …)`
+//!  — linear sequence of steps with named premises.
 //!
+
 //! Both formats share the S-expression lexical shape — this
 //! module parses into a common `ProofNode` tree and dispatches
 //! to the backend-specific rule table by inspecting the trace's
 //! first atom.
 //!
+
 //! # Trust contract
 //!
+
 //! `replay_tree(backend, trace)` validates that every rule name
 //! in the tree is in the backend's allowlist. Unknown rules
 //! fail with `KernelError::UnknownRule` so a backend update
@@ -47,6 +55,7 @@ use verum_common::{List, Maybe, Text};
 
 /// A single node in the parsed proof tree.
 ///
+
 /// Nodes are either atoms (identifiers / literals) or lists
 /// (S-expressions). Every backend's native trace serialises
 /// into this common shape before the rule-table dispatch runs.
@@ -61,6 +70,7 @@ pub enum ProofNode {
 impl ProofNode {
     /// Is this node a List with the given head atom?
     ///
+
     /// Used by the rule-catalogue dispatch: a Z3 proof step
     /// always begins with a rule-name atom, so the caller
     /// matches on the first element to route.
@@ -112,19 +122,24 @@ pub enum ParseError {
 
 /// Parse an S-expression string into a `ProofNode` tree.
 ///
+
 /// Accepts:
 ///
-///   * Atoms separated by whitespace
-///   * `(...)` lists
-///   * `;`-to-end-of-line comments (stripped)
-///   * Quoted strings `"..."` are treated as single atoms
-///     (including the quotes)
+
+///  * Atoms separated by whitespace
+///  * `(...)` lists
+///  * `;`-to-end-of-line comments (stripped)
+///  * Quoted strings `"..."` are treated as single atoms
+///  (including the quotes)
 ///
+
 /// Does NOT support:
 ///
-///   * Dotted pairs — not used by either Z3 or CVC5 ALETHE
-///   * Character literals — same.
+
+///  * Dotted pairs — not used by either Z3 or CVC5 ALETHE
+///  * Character literals — same.
 ///
+
 /// The parser is deliberately minimal: the kernel should not
 /// be linking to a full S-expr crate whose surface is
 /// dominated by features neither backend uses. Keeping this
@@ -246,6 +261,7 @@ impl<'a> Parser<'a> {
 /// backend update that ships a new rule doesn't silently pass
 /// the TCB.
 ///
+
 /// Source: Z3's `ProofStep` enum in the Z3 source tree
 /// (`src/api/api_ast.cpp`). Restricted here to the rules Verum
 /// actually emits when running in proof-production mode.
@@ -317,6 +333,7 @@ pub const CVC5_ALETHE_KNOWN_RULES: &[&str] = &[
 
 /// Is the given rule name in the specified backend's allowlist?
 ///
+
 /// Backend is one of `"z3"` / `"cvc5"` / `"aletha"`. Unknown
 /// backends return `false` — the caller should surface
 /// `KernelError::UnknownBackend` for those.
@@ -332,6 +349,7 @@ pub fn is_known_rule(backend: &str, rule: &str) -> bool {
 
 /// Collect every rule name that appears in the given tree.
 ///
+
 /// Used by `replay_tree` to validate the entire tree against
 /// the backend's allowlist before any replay begins — so a
 /// tree containing even one unknown rule fails fast, before
@@ -364,11 +382,13 @@ use crate::{CoreTerm, FrameworkId, KernelError};
 
 /// Replay a Z3 proof-tree node into a `CoreTerm` witness.
 ///
+
 /// The node must be a `List` whose head atom is in
 /// `Z3_KNOWN_RULES`. This function walks the node's children,
 /// recursively replays each sub-proof, and constructs the
 /// witness `CoreTerm` that the rule justifies.
 ///
+
 /// Trust contract: the whole tree is validated against the
 /// allowlist before any replay begins (via
 /// `collect_rule_names` + `is_known_rule`), so `replay_z3_tree`
@@ -376,23 +396,28 @@ use crate::{CoreTerm, FrameworkId, KernelError};
 /// slip through (e.g. inside an expression argument) surface
 /// as `KernelError::UnknownRule`.
 ///
+
 /// # Current coverage
 ///
+
 /// This first batch implements the 6 most common Z3 rules
 /// that close obligations in Verum's SMT pipeline:
 ///
-///   asserted    — a hypothesis from the assertion list
-///   refl        — `a = a`
-///   symm        — `a = b` from `b = a`
-///   trans       — `a = c` from `a = b` and `b = c`
-///   mp          — modus ponens
-///   hypothesis  — local-scope assumption
+
+///  asserted — a hypothesis from the assertion list
+///  refl — `a = a`
+///  symm — `a = b` from `b = a`
+///  trans — `a = c` from `a = b` and `b = c`
+///  mp — modus ponens
+///  hypothesis — local-scope assumption
 ///
+
 /// The remaining 22 rules in `Z3_KNOWN_RULES` surface as
 /// `KernelError::NotImplemented` with the rule name; a
 /// follow-up patch adds them in one commit per rule-family
 /// cluster (rewrite / monotonicity / quant / th-lemma).
 ///
+
 /// Every rule produces an `Axiom` node tagged with the rule
 /// name so `verum audit --framework-axioms` enumerates the
 /// exact set of Z3 inference rules each proof used.
@@ -432,13 +457,16 @@ pub fn replay_z3_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
 
 /// Construct the `CoreTerm` witness for a Z3 rule.
 ///
+
 /// Witnesses are `Axiom` nodes whose `framework` field tags the
 /// specific Z3 rule. `Inductive("Bool")` is the carrier type
 /// — matches the type assigned to Phase 1 trust-tag
 /// certificates so downstream consumers see a consistent shape.
 ///
+
 /// # Structural recursion on children
 ///
+
 /// Children of the proof node that are themselves Lists (nested
 /// rule applications) are recursively replayed via
 /// `replay_z3_tree`, and the resulting witnesses are composed
@@ -458,14 +486,15 @@ fn construct_witness_for_rule(
     // (the child replays validate the rule's structural
     // preconditions), not what the witness looks like.
     //
+
     // Cluster 1 (c6a0388f): core closure rules.
     // Cluster 2 (this commit): rewrite family — definitional
-    //   manipulations that preserve equality.
+    //  manipulations that preserve equality.
     // Cluster 3: monotonicity / quantifier — structural
-    //   congruence + binder manipulation.
+    //  congruence + binder manipulation.
     // Cluster 4: boolean — propositional simplification rules.
     // Cluster 5: theory + meta — th-lemma, unit-resolution,
-    //   lemma, goal, modus-ponens.
+    //  lemma, goal, modus-ponens.
     let implemented = matches!(
         rule,
         // Cluster 1 — core closure
@@ -503,6 +532,7 @@ fn construct_witness_for_rule(
     // children are expression leaves that we don't replay
     // (they're the rule's argument terms, not sub-proofs).
     //
+
     // The first child is the rule name atom (we already
     // matched on it), so skip it.
     let mut witness = rule_axiom;
@@ -551,10 +581,12 @@ fn build_witness(backend: &str, rule: &str, citation: &str) -> CoreTerm {
 /// Replay a CVC5 ALETHE proof-tree node into a `CoreTerm`
 /// witness.
 ///
+
 /// Parallel to `replay_z3_tree`: walks the tree's root (must be
 /// a List), validates the head against
 /// `CVC5_ALETHE_KNOWN_RULES`, constructs the witness.
 ///
+
 /// The ALETHE format uses step-by-step linear reasoning
 /// (`step t1 :rule <name> :premises (…) :args (…) :conclusion
 /// …`), but the S-expr parser normalises every step into a
@@ -564,6 +596,7 @@ fn build_witness(backend: &str, rule: &str, citation: &str) -> CoreTerm {
 /// "named rule producing a Bool witness" so the same witness
 /// shape carries across both backends.
 ///
+
 /// Full ALETHE-specific step-structure parsing (:premises,
 /// :args, :conclusion keyword parsing) arrives with the
 /// witness-type-specialisation follow-up.
@@ -667,21 +700,24 @@ use verum_common::Heap;
 // Kernel-rule typed proof-graph surface
 // =============================================================================
 //
+
 // The S-expression-based ProofNode above models *backend* proof
 // trees (Z3, CVC5 ALETHE). introduces a parallel,
 // typed surface that captures the kernel's OWN inference-rule
 // applications when typing a CoreTerm — the typing-derivation
 // graph that feeds:
 //
-//   • verum audit --proof-trace (TCB enumeration per theorem)
-//   • Certificate export to Lean/Coq/Agda (trace-to-tactic-script
-//     reconstruction)
-//   • IDE step-debugger (interactive proof exploration)
-//   • Cross-tool replay matrix (#90)
+
+//  • verum audit --proof-trace (TCB enumeration per theorem)
+//  • Certificate export to Lean/Coq/Agda (trace-to-tactic-script
+//  reconstruction)
+//  • IDE step-debugger (interactive proof exploration)
+//  • Cross-tool replay matrix (#90)
 
 /// kernel inference rule taxonomy. One variant per
 /// shipped typing rule per `verification-architecture.md` §4.4a.
 ///
+
 /// The `Display` representation is the canonical short name
 /// (`"K-App"`, `"K-Refine-omega"`, etc.) used by audit output and
 /// certificate-export targets.
@@ -759,7 +795,7 @@ pub enum KernelRule {
     /// round-trip (Theorem 108.T / Theorem 16.10). Premise:
     /// `α : Articulation` and `α.is_finitely_axiomatized()`;
     /// conclusion: `RoundTripCert{α} : Type` is admissible.
-    /// V0 ships the kernel-taxonomy entry without the algorithmic
+    /// ships the kernel-taxonomy entry without the algorithmic
     /// canonicalize check; V1 adds the
     /// `canonicalize(inverse(translate(α))) = canonicalize(α)`
     /// equality check.
@@ -861,6 +897,7 @@ impl KernelRule {
 
     /// Abstract semantic category this rule belongs to.
     ///
+
     /// Returns a short, generic label naming the *kind* of rule
     /// (e.g. `"Quotient types"`, `"Cohesive modalities"`,
     /// `"Higher inductive types"`) without reference to any
@@ -868,6 +905,7 @@ impl KernelRule {
     /// `verum audit --kernel-rules` to group rules by domain in
     /// the audit report.
     ///
+
     /// Returns `None` for rules that fit no specific category
     /// (e.g. variable-binding rules that are universal across
     /// every dependent type theory).
@@ -941,18 +979,20 @@ impl std::fmt::Display for KernelRule {
 
 /// one node in the kernel-rule proof graph.
 ///
+
 /// Each node records:
-///   • The **rule** that justified the inference (e.g.
-///     `KernelRule::KAppElim`).
-///   • The **conclusion** — the CoreTerm asserted as well-typed
-///     under the rule.
-///   • The **inferred type** — what the kernel computed for the
-///     conclusion under that rule.
-///   • The **premises** — sub-derivations of the rule's
-///     hypothesis terms.
-///   • A **citation** when the rule references an external
-///     framework (K-FwAx pulls in the FrameworkId).
+///  • The **rule** that justified the inference (e.g.
+///  `KernelRule::KAppElim`).
+///  • The **conclusion** — the CoreTerm asserted as well-typed
+///  under the rule.
+///  • The **inferred type** — what the kernel computed for the
+///  conclusion under that rule.
+///  • The **premises** — sub-derivations of the rule's
+///  hypothesis terms.
+///  • A **citation** when the rule references an external
+///  framework (K-FwAx pulls in the FrameworkId).
 ///
+
 /// Together these form an LCF-style proof tree: a closed,
 /// re-checkable representation of the typing derivation.
 #[derive(Debug, Clone, PartialEq)]
@@ -1063,19 +1103,22 @@ impl Ord for KernelRule {
 /// walking its CoreTerm structure and synthesising the
 /// inference-rule applications post-hoc.
 ///
+
 /// This is a **best-effort** typing-derivation tracer:
 ///
-///   • Every CoreTerm constructor maps to a unique
-///     [`KernelRule`] (by spec §4.4a's 1-to-1 correspondence).
-///   • For composite constructors (App / Pair / Refl / etc.)
-///     the function recurses to build premise sub-trees.
-///   • The conclusion is the term being typed; the inferred_ty
-///     is the result of [`crate::infer`] on it.
-///   • If `infer` fails for the term or any sub-term, the
-///     reconstruction returns `None` rather than a partial
-///     tree (the caller can re-run `infer` to get the precise
-///     error).
+
+///  • Every CoreTerm constructor maps to a unique
+///  [`KernelRule`] (by spec §4.4a's 1-to-1 correspondence).
+///  • For composite constructors (App / Pair / Refl / etc.)
+///  the function recurses to build premise sub-trees.
+///  • The conclusion is the term being typed; the inferred_ty
+///  is the result of [`crate::infer`] on it.
+///  • If `infer` fails for the term or any sub-term, the
+///  reconstruction returns `None` rather than a partial
+///  tree (the caller can re-run `infer` to get the precise
+///  error).
 ///
+
 /// Spec coverage in V1: every rule in §4.4a maps to a node.
 /// Refinement-of-refinement-of-X recursively generates K-Refine
 /// nested premises, faithfully recording the typing path.
@@ -1860,7 +1903,7 @@ mod tests {
 
     #[test]
     fn round_trip_rule_registered_with_abstract_category() {
-        // K-Round-Trip is registered with V0 stage and the
+        // K-Round-Trip is registered with current stage and the
         // abstract semantic category "OC / DC translation
         // round-trip" — no internal-spec ticket leakage.
         assert_eq!(KernelRule::KRoundTrip.name(), "K-Round-Trip");

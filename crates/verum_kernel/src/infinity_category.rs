@@ -1,68 +1,80 @@
-//! Native (∞,n)-categorical kernel infrastructure — V0 surface.
+//! Native (∞,n)-categorical kernel infrastructure — current surface.
 //!
+
 //! ## Why this is a novel contribution
 //!
+
 //! No mainstream proof assistant carries native first-class (∞,n)-cat
-//! reasoning in its kernel.  Coq mathcomp / Lean mathlib4 / Agda
+//! reasoning in its kernel. Coq mathcomp / Lean mathlib4 / Agda
 //! cubical-stdlib all proxy ∞-categorical content through opaque
-//! `Univ`-typed structures + library-level definitions.  The kernel
+//! `Univ`-typed structures + library-level definitions. The kernel
 //! treats them as black boxes and admits all higher-coherence content
 //! as user-level axioms.
 //!
+
 //! Verum's approach (this module): the kernel's [`CoreTerm`] gains
 //! native constructors for ∞-categorical objects, and the kernel
 //! itself ships decidable rules for the basic equivalence /
-//! composition / Whitehead-criterion machinery.  This means a
+//! composition / Whitehead-criterion machinery. This means a
 //! result like "id_X is an (∞,n)-equivalence" — which in MSFS
 //! Theorem 5.1 is admitted via `msfs_id_x_violates_pi_4` framework
 //! axiom — becomes mechanically derivable inside the kernel for
 //! every concrete `n: Ordinal`.
 //!
+
 //! ## V0 design decisions
 //!
-//! 1. **Hybrid syntactic/semantic representation.**  An
-//!    [`InfinityCategory`] carries both (a) a syntactic skeleton
-//!    naming objects + 1-morphisms + higher cells abstractly, and
-//!    (b) a semantic anchor — the universe level + accessibility
-//!    witness — so the kernel can dispatch on the algebraic shape.
+
+//! 1. **Hybrid syntactic/semantic representation.** An
+//!  [`InfinityCategory`] carries both (a) a syntactic skeleton
+//!  naming objects + 1-morphisms + higher cells abstractly, and
+//!  (b) a semantic anchor — the universe level + accessibility
+//!  witness — so the kernel can dispatch on the algebraic shape.
 //!
-//! 2. **Levelled equivalence checker.**  [`is_equivalence_at`]
-//!    decides whether `f: A → B` is an (∞,n)-equivalence by
-//!    checking the Whitehead criterion at every truncation level
-//!    `k ≤ n`.  Decidable for `n: Ordinal::Finite(_)`; admits a
-//!    `BridgeAudit` entry for limit `n` (e.g. `n = ω` requires
-//!    Theorem A.7 stabilisation).
+
+//! 2. **Levelled equivalence checker.** [`is_equivalence_at`]
+//!  decides whether `f: A → B` is an (∞,n)-equivalence by
+//!  checking the Whitehead criterion at every truncation level
+//!  `k ≤ n`. Decidable for `n: Ordinal::Finite(_)`; admits a
+//!  `BridgeAudit` entry for limit `n` (e.g. `n = ω` requires
+//!  Theorem A.7 stabilisation).
 //!
-//! 3. **Identity is always an equivalence.**  The fundamental
-//!    structural fact MSFS Theorem 5.1 needs is `id_X` is an
-//!    `(∞,n)`-equivalence onto its image for any `X` and any `n`.
-//!    This is the canonical axiom of identity-equivalence in
-//!    higher-cat theory; this module's [`identity_is_equivalence`]
-//!    rule discharges it constructively (the identity functor's
-//!    kernel-recheck is trivial — every cell pairs with itself).
+
+//! 3. **Identity is always an equivalence.** The fundamental
+//!  structural fact MSFS Theorem 5.1 needs is `id_X` is an
+//!  `(∞,n)`-equivalence onto its image for any `X` and any `n`.
+//!  This is the canonical axiom of identity-equivalence in
+//!  higher-cat theory; this module's [`identity_is_equivalence`]
+//!  rule discharges it constructively (the identity functor's
+//!  kernel-recheck is trivial — every cell pairs with itself).
 //!
-//! 4. **Composition + associator coherence.**  Native composition
-//!    `compose(g, f)` with the kernel checking strict associativity
-//!    at level 0, weak associativity at higher levels via explicit
-//!    associator 2-morphisms.
+
+//! 4. **Composition + associator coherence.** Native composition
+//!  `compose(g, f)` with the kernel checking strict associativity
+//!  at level 0, weak associativity at higher levels via explicit
+//!  associator 2-morphisms.
 //!
+
 //! ## What this enables in MSFS
 //!
+
 //!  - Theorem 5.1's "id_X is (∞,n)-equivalence onto its image"
-//!    becomes derivable in-kernel rather than admitted.
+//!  becomes derivable in-kernel rather than admitted.
 //!  - Theorem 7.4 lateral axis (alt orderings → (∞,n)-Cat Morita)
-//!    can route through native equivalence-decision rather than
-//!    framework-axiom citation.
+//!  can route through native equivalence-decision rather than
+//!  framework-axiom citation.
 //!  - Theorem 9.3 Step 5 (lift to (∞,∞) via Whitehead criterion)
-//!    gets a kernel-level discharge for Finite(n) levels.
+//!  gets a kernel-level discharge for Finite(n) levels.
 //!
-//! ## V1+ promotion paths
+
+//! ## Future-work promotion paths
 //!
+
 //!  - V1: full composition coherence at ω-bounded levels via
-//!    explicit associator/pentagonal-coherence cells.
+//!  explicit associator/pentagonal-coherence cells.
 //!  - V2: Cartesian fibration kernel rule + straightening (HTT 3.2).
 //!  - V3: Yoneda for ∞-categories (HTT 1.2.1) + ∞-Kan extensions
-//!    (HTT 4.3.3.7).
+//!  (HTT 4.3.3.7).
 //!  - V4: full HTT 5.1.4 Grothendieck construction as kernel rule.
 
 use serde::{Deserialize, Serialize};
@@ -80,7 +92,7 @@ pub enum CellLevel {
     Morphism,
     /// 2-cell — a 2-morphism between 1-morphisms (a "homotopy" / "equivalence").
     TwoCell,
-    /// k-cell for k ≥ 3.  The level is captured as an ordinal so we
+    /// k-cell for k ≥ 3. The level is captured as an ordinal so we
     /// can reach ω-cells (transfinite homotopy / equivalence).
     HigherCell(Ordinal),
 }
@@ -105,26 +117,26 @@ impl CellLevel {
     }
 }
 
-/// An ∞-categorical structure at level `n`.  V0 surface — carries
+/// An ∞-categorical structure at level `n`. current surface — carries
 /// the syntactic shape + universe-accessibility witness; concrete
 /// structural data lives in downstream typed implementations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InfinityCategory {
     /// Human-readable identifier (e.g. "Set", "Cat", "(∞,1)-Cat").
     pub name: Text,
-    /// The categorical level `n`.  `Finite(0)` is a class (set);
+    /// The categorical level `n`. `Finite(0)` is a class (set);
     /// `Finite(1)` is a 1-category; `Finite(2)` is a 2-category;
     /// `Omega` is an (∞,ω)-category; `Kappa(1)` is the universe of
     /// κ_1-presentable categories.
     pub level: Ordinal,
-    /// The universe level the category lives in.  Distinct from
+    /// The universe level the category lives in. Distinct from
     /// `level` — `level` is the categorical depth, `universe` is the
     /// Grothendieck-universe size.
     pub universe: Ordinal,
 }
 
 impl InfinityCategory {
-    /// Build an n-category at the canonical universe.  Convention:
+    /// Build an n-category at the canonical universe. Convention:
     /// finite-n categories live in κ_1, ω-categories in κ_2.
     pub fn at_canonical_universe(name: impl Into<Text>, level: Ordinal) -> Self {
         let universe = if level.lt(&Ordinal::Omega) {
@@ -149,7 +161,7 @@ impl InfinityCategory {
     }
 }
 
-/// A morphism in an ∞-category.  V0 surface: carries source/target
+/// A morphism in an ∞-category. current surface: carries source/target
 /// objects + the level at which the morphism lives + a name handle
 /// for diagnostic / kernel-recheck purposes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -185,7 +197,7 @@ impl InfinityMorphism {
 }
 
 /// An (∞,n)-equivalence — a 1-morphism that admits homotopy-coherent
-/// inverses at every level up to n.  V0 surface: a Bool flag plus
+/// inverses at every level up to n. current surface: a Bool flag plus
 /// the Whitehead-criterion witness data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InfinityEquivalence {
@@ -194,7 +206,7 @@ pub struct InfinityEquivalence {
     /// The categorical level at which the equivalence claim holds.
     pub level: Ordinal,
     /// Witness flag: every truncation `τ_{≤k}(morphism)` for `k ≤ level`
-    /// is a `k`-equivalence.  The kernel checks this via
+    /// is a `k`-equivalence. The kernel checks this via
     /// [`is_equivalence_at`] when the equivalence is invoked.
     pub whitehead_witness: bool,
 }
@@ -202,20 +214,23 @@ pub struct InfinityEquivalence {
 /// The fundamental kernel rule: identity morphisms are always
 /// (∞,n)-equivalences for any `n: Ordinal`.
 ///
-/// **Mathematical content.**  Every identity functor `id_X : X → X`
-/// has trivial homotopy-coherent inverse (itself).  Whitehead
+
+/// **Mathematical content.** Every identity functor `id_X : X → X`
+/// has trivial homotopy-coherent inverse (itself). Whitehead
 /// criterion: at every truncation level `k`, `τ_{≤k}(id_X)` is the
 /// identity functor `id_X` again, which is a `k`-equivalence
 /// trivially (every cell pairs with itself).
 ///
-/// **Why this matters for MSFS.**  Theorem 5.1's `id_X violates
+
+/// **Why this matters for MSFS.** Theorem 5.1's `id_X violates
 /// (Π_4, S, n)` step rests precisely on this fact: `id_X` is an
-/// `(∞, n)`-equivalence onto its image for every `n`.  Pre-this-
+/// `(∞, n)`-equivalence onto its image for every `n`. Pre-this-
 /// module the step was admitted via `msfs_id_x_violates_pi_4`
 /// framework axiom; with this rule the step becomes derivable
 /// in-kernel.
 ///
-/// **Decidability.**  Decidable for any `Ordinal` level (no
+
+/// **Decidability.** Decidable for any `Ordinal` level (no
 /// preprint admits, no bridge invocation).
 pub fn identity_is_equivalence(
     object_name: impl Into<Text>,
@@ -231,16 +246,19 @@ pub fn identity_is_equivalence(
 /// V0 equivalence-decision rule: decide whether the supplied
 /// morphism is an `(∞, n)`-equivalence at level `n`.
 ///
+
 /// **Decidable cases (no bridge admit):**
-///   1. Identity morphisms (always equivalences at every level).
-///   2. Composition of equivalences (preserved under composition).
+///  1. Identity morphisms (always equivalences at every level).
+///  2. Composition of equivalences (preserved under composition).
 ///
+
 /// **Admit cases (bridge admit recorded):**
-///   - Limit-level claims (`n = ω`, `n = κ_1`) require Theorem A.7
-///     stabilisation; admitted via
-///     [`BridgeId::CohesiveAdjunctionUnitCounit`] (the cohesive-
-///     stabilisation bridge that gates A.7's three-source citation).
+///  - Limit-level claims (`n = ω`, `n = κ_1`) require Theorem A.7
+///  stabilisation; admitted via
+///  [`BridgeId::CohesiveAdjunctionUnitCounit`] (the cohesive-
+///  stabilisation bridge that gates A.7's three-source citation).
 ///
+
 /// Returns `true` (with optional bridge admit recorded in `audit`)
 /// when the morphism is an equivalence at level `n`; returns `false`
 /// when it provably isn't (the kernel surfaces a separating
@@ -277,7 +295,7 @@ pub fn is_equivalence_at(
 
     // V0 default: structurally distinct source/target morphism's
     // equivalence claim is conservatively true at finite levels
-    // pending V1's full Whitehead-criterion algorithm.  This
+    // pending V1's full Whitehead-criterion algorithm. This
     // matches MSFS's needs (Theorem 5.1 only ever invokes for
     // identity morphisms) without over-claiming for V1.
     audit.record(
@@ -288,8 +306,8 @@ pub fn is_equivalence_at(
 }
 
 /// Compose two morphisms `g ∘ f : a → c`, given `f: a → b` and
-/// `g: b → c`.  V0 strict-composition rule: types must match
-/// (g.source == f.target).  The result inherits the higher of the
+/// `g: b → c`. V0 strict-composition rule: types must match
+/// (g.source == f.target). The result inherits the higher of the
 /// two cell levels.
 pub fn compose(
     f: &InfinityMorphism,
@@ -312,10 +330,10 @@ pub fn compose(
 }
 
 /// V0 associativity witness: composition is strictly associative at
-/// the 1-categorical level.  Returns `true` when `(h ∘ g) ∘ f` and
-/// `h ∘ (g ∘ f)` agree as morphisms.  At higher levels (>= 2),
+/// the 1-categorical level. Returns `true` when `(h ∘ g) ∘ f` and
+/// `h ∘ (g ∘ f)` agree as morphisms. At higher levels (>= 2),
 /// associativity holds up to canonical 2-cell (the associator);
-/// V1 will surface the associator as an explicit
+/// Future work will surface the associator as an explicit
 /// [`InfinityMorphism`] at the appropriate level.
 pub fn compose_is_associative(
     f: &InfinityMorphism,
@@ -559,7 +577,7 @@ mod tests {
     #[test]
     fn id_x_is_equivalence_at_every_level_no_bridge_admits() {
         // The MSFS-critical fact: id_X is an (∞,n)-equivalence for
-        // every n.  Discharged in-kernel with an EMPTY bridge audit
+        // every n. Discharged in-kernel with an EMPTY bridge audit
         // — no preprint admits needed.
         let levels = vec![
             Ordinal::Finite(0),

@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for completion module
 //!
+
 //! Tests the code completion functionality including:
 //! - Trigger context detection
 //! - Keyword completions

@@ -3,14 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The runtime hands a FunctionContext to every xFunc / xStep / xFinal
-// invocation.  It carries:
-//   * db_handle id           (sqlite3_context_db_handle)
-//   * user_data pointer      (sqlite3_user_data)
-//   * aggregate context size (sqlite3_aggregate_context)
-//   * aux registry           (sqlite3_get/set_auxdata)
-//   * the emitted result     (sqlite3_result_*)
-//   * a subtype flag         (sqlite3_result_subtype)
+// invocation. It carries:
+//  * db_handle id (sqlite3_context_db_handle)
+//  * user_data pointer (sqlite3_user_data)
+//  * aggregate context size (sqlite3_aggregate_context)
+//  * aux registry (sqlite3_get/set_auxdata)
+//  * the emitted result (sqlite3_result_*)
+//  * a subtype flag (sqlite3_result_subtype)
 // =============================================================================
 
 module core.database.sqlite.native.context_api.context;
@@ -53,7 +54,7 @@ implement FunctionContext {
 
     /// Matches sqlite3_aggregate_context(ctx, N): calling with N > 0
     /// allocates (or returns an existing) zero-initialised slab of N
-    /// bytes.  N == 0 returns the current size without allocating.
+    /// bytes. N == 0 returns the current size without allocating.
     pub fn sqlite3_aggregate_context(&mut self, n: Int) -> Int {
         if n > 0 {
             if self.aggregate_bytes == 0 { self.aggregate_bytes = n; }

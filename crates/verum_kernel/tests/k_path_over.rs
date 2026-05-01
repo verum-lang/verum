@@ -1,19 +1,21 @@
 //! PathOver kernel-level tests.
 //!
+
 //! `PathOver(motive, p, lhs, rhs)` is the dependent path-over
 //! constructor needed when a HIT path-constructor's endpoints have
 //! distinct motive images. This file pins:
 //!
-//!   • PathOver typing rule (K-PathOver-Form): motive must be a Pi
-//!     B → U, path must be a PathTy, endpoints must type-check;
-//!     result inhabits the same universe as motive's codomain.
-//!   • Degenerate-case reduction: PathOver(motive, p, lhs, rhs)
-//!     where `p`'s endpoints coincide structurally collapses to
-//!     homogeneous PathTy(motive(b₀), lhs, rhs).
-//!   • Substitution + free-vars compatibility under PathOver.
-//!   • Eliminator integration: heterogeneous-endpoint HITs (Susp,
-//!     Interval) emit PathOver branches; closed-loop HITs (S¹)
-//!     emit PathTy branches.
+
+//!  • PathOver typing rule (K-PathOver-Form): motive must be a Pi
+//!  B → U, path must be a PathTy, endpoints must type-check;
+//!  result inhabits the same universe as motive's codomain.
+//!  • Degenerate-case reduction: PathOver(motive, p, lhs, rhs)
+//!  where `p`'s endpoints coincide structurally collapses to
+//!  homogeneous PathTy(motive(b₀), lhs, rhs).
+//!  • Substitution + free-vars compatibility under PathOver.
+//!  • Eliminator integration: heterogeneous-endpoint HITs (Susp,
+//!  Interval) emit PathOver branches; closed-loop HITs (S¹)
+//!  emit PathTy branches.
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
@@ -142,7 +144,7 @@ fn pathover_typing_admits_arbitrary_path_shape_in_v3_0() {
 #[test]
 fn pathover_normalize_collapses_closed_loop_to_pathty() {
     // PathOver(motive, PathTy(B, base, base), lhs, rhs)
-    //   ↦ PathTy(motive(base), lhs, rhs)
+    //  ↦ PathTy(motive(base), lhs, rhs)
     let motive = var("M");
     let term = CoreTerm::PathOver {
         motive: Heap::new(motive.clone()),
@@ -217,7 +219,7 @@ fn pathover_collapse_works_under_inductive_aware_normaliser() {
 #[test]
 fn pathover_substitute_walks_all_components() {
     // PathOver(M, PathTy(B, x, x), x, x) [x := y]
-    //   = PathOver(M, PathTy(B, y, y), y, y)
+    //  = PathOver(M, PathTy(B, y, y), y, y)
     let term = CoreTerm::PathOver {
         motive: Heap::new(var("M")),
         path: Heap::new(CoreTerm::PathTy {

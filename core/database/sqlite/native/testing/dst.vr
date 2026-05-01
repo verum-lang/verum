@@ -3,14 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.5
 //
+
 // Three protocols + a stitched runner give a DST suite the three
 // degrees of freedom it needs to reproduce production state under
 // adversarial scheduling:
 //
-//   * `MockClock`     — caller-controlled monotonic time
-//   * `MockScheduler` — deterministic task-priority + interleave
-//   * `FaultInjector` — hooks for power-loss, partial-write, fsync-loss
+
+//  * `MockClock` — caller-controlled monotonic time
+//  * `MockScheduler` — deterministic task-priority + interleave
+//  * `FaultInjector` — hooks for power-loss, partial-write, fsync-loss
 //
+
 // Each is its own protocol so a DST author can swap one piece at a
 // time. The default `RngClock + RoundRobin + NoFaults` triple
 // reproduces a lossless serial run.
@@ -50,6 +53,7 @@ implement MockClock for StepClock {
 // MockScheduler — deterministic interleaving choice
 // -----------------------------------------------------------------------------
 //
+
 // `next_choice(n_runnable)` returns which runnable task to schedule
 // next (0..n_runnable). `RoundRobin` cycles through tasks; `Seeded`
 // uses a deterministic permutation; `WorstCaseAdversary` always

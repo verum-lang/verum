@@ -5,14 +5,18 @@
 // Dependencies: None
 // =============================================================================
 //
+
 // Pure Verum implementations of all math functions. Zero libc dependency.
 // These compile through VBC → LLVM and also work in the interpreter.
 //
+
 // For AOT: LLVM can optimize these to hardware instructions where available
 // (e.g., sqrtsd on x86, fsqrt on ARM).
 //
+
 // Precision: IEEE 754 double precision (~15-16 significant digits).
 //
+
 // =============================================================================
 
 module libm;
@@ -44,6 +48,7 @@ public fn abs(x: Float) -> Float {
 
 /// Integer absolute value.
 ///
+
 /// `iabs(Int.MIN)` is unrepresentable in signed Int (|Int.MIN| =
 /// 2^63 = Int.MAX + 1), so the historical `-x` for `x == Int.MIN`
 /// wrapped back to Int.MIN — a silent contract violation. Saturate
@@ -344,6 +349,7 @@ public fn pow(x: Float, y: Float) -> Float {
 
 /// Integer power: x^n using repeated squaring.
 ///
+
 /// Int.MIN-safe magnitude: the historical `-n` for `n == Int.MIN`
 /// wrapped back to Int.MIN, leaving `exp` negative; the squaring
 /// loop never entered and the function returned 1.0 (or 1.0 for

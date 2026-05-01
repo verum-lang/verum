@@ -1,11 +1,13 @@
 //! Schema contract for `verum lint --format json`.
 //!
+
 //! External consumers (CI gate scripts, dashboards, custom report
 //! converters) parse this stream as NDJSON. The rule that protects
 //! them: every line is one well-formed JSON object carrying a
 //! `schema_version` field, and every documented field is present
 //! and well-typed.
 //!
+
 //! When the schema_version bumps, this test file changes in lockstep
 //! and consumers see the version field flip — that's the
 //! deprecation signal. Adding fields without bumping the version is

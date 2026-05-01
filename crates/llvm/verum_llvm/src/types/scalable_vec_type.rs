@@ -19,6 +19,7 @@ pub struct ScalableVectorType<'ctx> {
 impl<'ctx> ScalableVectorType<'ctx> {
     /// Create `ScalableVectorType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't scalable vector type
     pub unsafe fn new(scalable_vector_type: LLVMTypeRef) -> Self {
@@ -32,11 +33,14 @@ impl<'ctx> ScalableVectorType<'ctx> {
     /// Gets the size of this `ScalableVectorType`. Value may vary depending on the target architecture.
     /// Note: Behavior is undefined if the element type contains opaque structs (LLVM limitation).
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vec_type = f32_type.scalable_vec_type(3);
@@ -48,15 +52,19 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Gets the size of this `ScalableVectorType`.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vector_type = f32_type.scalable_vec_type(3);
     ///
+
     /// assert_eq!(f32_scalable_vector_type.get_size(), 3);
     /// assert_eq!(f32_scalable_vector_type.get_element_type().into_float_type(), f32_type);
     /// ```
@@ -66,11 +74,14 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Creates a constant zero value of this `ScalableVectorType`.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vec_type = f32_type.scalable_vec_type(7);
@@ -87,16 +98,19 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Creates an undefined instance of a `ScalableVectorType`.
     ///
+
     /// # Example
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vec_type = f32_type.scalable_vec_type(3);
     /// let f32_scalable_vec_undef = f32_scalable_vec_type.get_undef();
     ///
+
     /// assert!(f32_scalable_vec_undef.is_undef());
     /// ```
     pub fn get_undef(self) -> ScalableVectorValue<'ctx> {
@@ -105,16 +119,19 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Creates a poison instance of a `ScalableVectorType`.
     ///
+
     /// # Example
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vec_type = f32_type.scalable_vec_type(3);
     /// let f32_scalable_vec_poison = f32_scalable_vec_type.get_undef();
     ///
+
     /// assert!(f32_scalable_vec_poison.is_undef());
     /// ```
     pub fn get_poison(self) -> ScalableVectorValue<'ctx> {
@@ -124,15 +141,19 @@ impl<'ctx> ScalableVectorType<'ctx> {
     // SubType: ScalableVectorType<BT> -> BT?
     /// Gets the element type of this `ScalableVectorType`.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vector_type = f32_type.scalable_vec_type(3);
     ///
+
     /// assert_eq!(f32_scalable_vector_type.get_size(), 3);
     /// assert_eq!(f32_scalable_vector_type.get_element_type().into_float_type(), f32_type);
     /// ```
@@ -142,17 +163,21 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Creates a `PointerType` with this `ScalableVectorType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vec_type = f32_type.scalable_vec_type(3);
     /// let f32_scalable_vec_ptr_type = f32_scalable_vec_type.ptr_type(AddressSpace::default());
     ///
+
     /// assert_eq!(f32_scalable_vec_ptr_type.get_element_type().into_scalable_vector_type(), f32_scalable_vec_type);
     /// ```
     #[deprecated(note = "LLVM 21 uses opaque pointers. Use Context::ptr_type instead.")]
@@ -162,11 +187,14 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Creates a `FunctionType` with this `ScalableVectorType` for its return type.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vec_type = f32_type.scalable_vec_type(3);
@@ -178,16 +206,20 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Creates an `ArrayType` with this `ScalableVectorType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vec_type = f32_type.scalable_vec_type(3);
     /// let f32_scalable_vec_array_type = f32_scalable_vec_type.array_type(3);
     ///
+
     /// assert_eq!(f32_scalable_vec_array_type.len(), 3);
     /// assert_eq!(f32_scalable_vec_array_type.get_element_type().into_scalable_vector_type(), f32_scalable_vec_type);
     /// ```
@@ -197,11 +229,13 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Creates a constant `ArrayValue`.
     ///
+
     /// # Example
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::ScalableVectorType;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_val = f32_type.const_float(0.);
@@ -210,6 +244,7 @@ impl<'ctx> ScalableVectorType<'ctx> {
     /// let f32_scalable_vec_val = f32_scalable_vec_type.const_zero();
     /// let f32_array = f32_scalable_vec_type.const_array(&[f32_scalable_vec_val, f32_scalable_vec_val]);
     ///
+
     /// assert!(f32_array.is_const());
     /// ```
     pub fn const_array(self, values: &[ScalableVectorValue<'ctx>]) -> ArrayValue<'ctx> {
@@ -218,15 +253,19 @@ impl<'ctx> ScalableVectorType<'ctx> {
 
     /// Gets a reference to the `Context` this `ScalableVectorType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vec_type = f32_type.scalable_vec_type(7);
     ///
+
     /// assert_eq!(f32_scalable_vec_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {

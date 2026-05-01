@@ -5,6 +5,7 @@
 // PASSIVE checkpoint on commit.
 // Spec §18.4 — wal_autocheckpoint.
 //
+
 // Default: 1000 frames. 0 disables auto-checkpointing.
 // =============================================================================
 

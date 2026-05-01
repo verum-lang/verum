@@ -15,14 +15,17 @@
 )]
 //! Tests for type inference placeholder fixes
 //!
+
 //! These tests verify that the type inference system properly handles
 //! edge cases that previously fell back to placeholder expressions:
 //!
+
 //! 1. Type argument to expression conversion
 //! 2. Tuple indexing with compile-time constant evaluation
 //! 3. Fin type symbolic value generation
 //! 4. Tensor shape evaluation with meta parameters
 //!
+
 //! Core type system + dependent types + tensor type validation
 
 use verum_ast::{

@@ -15,6 +15,7 @@
 )]
 //! Comprehensive test suite for the type system.
 //!
+
 //! This module contains ~100+ integration tests covering:
 //! - Bidirectional type checking
 //! - Type inference
@@ -23,6 +24,7 @@
 //! - Protocol system
 //! - Context tracking
 //!
+
 //! Target: ~1000 tests total (including unit tests in each module)
 
 use verum_ast::{expr::*, literal::*, pattern::Pattern, span::Span, stmt::*, ty::Ident};
@@ -1047,11 +1049,11 @@ fn test_factorial_function() {
     let _span = Span::dummy();
 
     // fn factorial(n: Int) -> Int {
-    //     if n <= 1 {
-    //         1
-    //     } else {
-    //         n * factorial(n - 1)
-    //     }
+    //  if n <= 1 {
+    //  1
+    //  } else {
+    //  n * factorial(n - 1)
+    //  }
     // }
 
     // For now, just test the structure would type check

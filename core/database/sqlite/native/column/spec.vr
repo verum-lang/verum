@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `ColumnSpec` mirrors what sqlite3_column_name + decltype + database/
 // table/origin_name expose. Most planners produce this from the L5
 // resolved AST during prepare; the L7 façade serves it up via the C

@@ -4,13 +4,16 @@
 // A processor sits between the Tracer and the Exporter. Two in-tree
 // variants:
 //
+
 // - SimpleProcessor: forwards each SpanData synchronously on end().
-//   Lowest latency, no back-pressure, 0 allocation. Good for dev.
+//  Lowest latency, no back-pressure, 0 allocation. Good for dev.
 //
+
 // - BatchProcessor: buffers SpanData in a bounded queue, flushes on
-//   (a) queue fills to max_export_batch_size, (b) scheduled_delay
-//   elapses, (c) explicit force_flush(). Good for production.
+//  (a) queue fills to max_export_batch_size, (b) scheduled_delay
+//  elapses, (c) explicit force_flush(). Good for production.
 //
+
 // Spec: https://opentelemetry.io/docs/specs/otel/trace/sdk/#span-processor
 // =============================================================================
 
@@ -81,12 +84,14 @@ implement SpanProcessor for SimpleProcessor {
 // BatchProcessor — buffered + worker-task export
 // =============================================================================
 //
+
 // Configuration:
-//   max_queue_size          — bounded channel capacity (default 2048)
-//   scheduled_delay         — flush interval (default 5s)
-//   max_export_batch_size   — size at which to export early (default 512)
-//   export_timeout          — per-export timeout (default 30s)
+//  max_queue_size — bounded channel capacity (default 2048)
+//  scheduled_delay — flush interval (default 5s)
+//  max_export_batch_size — size at which to export early (default 512)
+//  export_timeout — per-export timeout (default 30s)
 //
+
 // Architecture: producer (caller of on_end) sends SpanData over a bounded
 // channel. Single consumer task drains, batches, invokes exporter. On
 // queue-full we drop (per OTel SDK default policy).

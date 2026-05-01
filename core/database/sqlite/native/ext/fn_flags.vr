@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §19.1
 //
+
 // `FnFlags` is a small lattice of independent boolean facets stored as
 // a single record. The planner queries individual facets at lookup
 // time, so the record form (rather than a packed bitset) keeps each

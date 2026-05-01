@@ -1,25 +1,31 @@
 //! Production-Grade Refinement Type System
 //!
+
 //! Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — Refinement Types
 //!
+
 //! This module implements Verum's complete refinement type system with:
 //! - Three subsumption modes (syntactic, SMT-based, user proof)
 //! - Full SMT integration via Z3
 //! - High-quality error messages with counterexamples
 //! - Performance optimization through proof caching
 //!
+
 //! # Architecture
 //!
+
 //! ## Core Data Structures
 //! - `RefinementPredicate`: AST representation of refinement predicates
 //! - `RefinementType`: Base type + predicate constraint
 //! - `VerificationCondition`: SMT queries to verify
 //!
+
 //! ## Checker Modes
 //! 1. **Syntactic**: Fast pattern matching for obvious cases (~1ms)
 //! 2. **SMT-Based**: Z3 solver for complex predicates (10-500ms)
 //! 3. **User Proof**: Cached proof terms (0ms) [future]
 //!
+
 //! ## Performance Targets
 //! - Syntactic checks: < 1ms
 //! - SMT queries: < 100ms (with timeout)
@@ -49,8 +55,10 @@ use crate::ty::Type;
 
 /// Binding context for refinement predicates
 ///
+
 /// Five refinement binding rules: (1) Inline T{pred} with implicit "it", (2) Lambda-style "where |x| pred", (3) Sigma-type "x: T where P(x)", (4) Named predicate "where pred_name", (5) Bare "where pred" (deprecated) — Five Binding Rules
 ///
+
 /// The spec defines 5 different binding rules for refinement types:
 /// 1. Inline refinement with implicit 'it': `Int{> 0}`
 /// 2. Lambda-style with explicit binding: `Int where |x| x > 0`
@@ -82,9 +90,11 @@ pub enum RefinementBinding {
 
 /// A refinement predicate with full semantic information
 ///
+
 /// Represents a boolean predicate that constrains values of a type.
 /// Example: `x > 0` for positive integers, `len(s) > 5` for non-empty strings
 ///
+
 /// Five refinement binding rules: (1) Inline T{pred} with implicit "it", (2) Lambda-style "where |x| pred", (3) Sigma-type "x: T where P(x)", (4) Named predicate "where pred_name", (5) Bare "where pred" (deprecated)
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefinementPredicate {
@@ -253,6 +263,7 @@ impl Display for RefinementPredicate {
 
 /// A refinement type: base type + predicate
 ///
+
 /// Example: `{ x: Int | x > 0 }` - integers greater than zero
 #[derive(Debug, Clone)]
 pub struct RefinementType {
@@ -291,6 +302,7 @@ impl RefinementType {
 
 /// Named refinement predicate for reusability
 ///
+
 /// Five refinement binding rules: (1) Inline T{pred} with implicit "it", (2) Lambda-style "where |x| pred", (3) Sigma-type "x: T where P(x)", (4) Named predicate "where pred_name", (5) Bare "where pred" (deprecated) — Rule 4
 #[derive(Debug, Clone)]
 pub struct NamedPredicate {
@@ -302,6 +314,7 @@ pub struct NamedPredicate {
 
 /// Verification condition for SMT solver
 ///
+
 /// Generated during type checking to verify refinement constraints
 #[derive(Debug, Clone)]
 pub struct VerificationCondition {
@@ -341,6 +354,7 @@ impl VerificationCondition {
 
 /// Counterexample for failed verification
 ///
+
 /// Shows concrete values that violate a refinement constraint
 #[derive(Debug, Clone)]
 pub struct CounterExample {
@@ -467,6 +481,7 @@ pub enum SmtResult {
 
 /// SMT backend trait for pluggable solvers
 ///
+
 /// Primary implementation: Z3 via verum_smt crate
 pub trait SmtBackend: Send + Sync {
     /// Check satisfiability of an expression
@@ -499,6 +514,7 @@ pub trait SmtBackend: Send + Sync {
 
 /// Refinement error with location and diagnostic information
 ///
+
 /// Refinement type diagnostics: error messages for failed refinement checks with source location and predicate details — 8.3
 #[derive(Debug, Clone)]
 pub struct RefinementError {
@@ -556,6 +572,7 @@ impl std::error::Error for RefinementError {}
 
 /// High-quality error message generator
 ///
+
 /// Refinement type diagnostics: error messages for failed refinement checks with source location and predicate details — 8.3
 pub struct RefinementErrorGenerator {
     /// Whether to include suggestions
@@ -574,6 +591,7 @@ impl RefinementErrorGenerator {
 
     /// Generate error for failed refinement check with enhanced diagnostics
     ///
+
     /// Protocol method dispatch resolution across module boundaries-13196, 13246-13262
     pub fn refinement_failed(
         &self,
@@ -666,6 +684,7 @@ impl RefinementErrorGenerator {
 
     /// Format an expression as human-readable text for error messages.
     ///
+
     /// Provides a complete pretty-printer for refinement predicates,
     /// supporting all common expression forms including:
     /// - Binary operations (arithmetic, comparison, logical)
@@ -944,6 +963,7 @@ impl Default for RefinementConfig {
 
 /// Main refinement type checker
 ///
+
 /// Implements three subsumption modes:
 /// 1. Syntactic (fast, conservative)
 /// 2. SMT-based (accurate, slower)
@@ -969,6 +989,7 @@ pub struct RefinementChecker {
 impl RefinementChecker {
     /// Create a new refinement checker.
     ///
+
     /// Historical note: this constructor used to auto-wire an SMT backend
     /// (`Z3Backend` from `verum_types::smt_backend`) and a dependent-type
     /// checker (`SmtDependentTypeChecker` from
@@ -976,6 +997,7 @@ impl RefinementChecker {
     /// was true. Both concrete implementations now live in `verum_smt` to
     /// break the `verum_types ↔ verum_smt` circular dependency.
     ///
+
     /// Callers that want the SMT path must inject backends via
     /// `.with_smt_backend(...)` and `.with_dependent_checker(...)` /
     /// `.set_dependent_checker(...)`. `verum_compiler::pipeline`
@@ -1005,6 +1027,7 @@ impl RefinementChecker {
 
     /// Check if value satisfies refinement type
     ///
+
     /// This is the main entry point for refinement checking.
     /// Strategy:
     /// 1. Try syntactic check (fast, ~1ms)
@@ -1171,8 +1194,10 @@ impl RefinementChecker {
 
     /// Check refinement subsumption: T1 <: T2
     ///
+
     /// Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1
     ///
+
     /// Returns true if φ1 => φ2 (predicate implication holds)
     pub fn check_subsumption(
         &mut self,
@@ -1273,6 +1298,7 @@ impl RefinementChecker {
     ) -> Result<VerificationCondition, RefinementError> {
         // Substitute bound variable with actual value.
         //
+
         // The canonical bound-variable name is `predicate.bound_variable()`
         // (default "it"), but users commonly write refinements with `self`
         // too: `Int{self != 0}`. The AST layer stores the predicate body
@@ -1293,16 +1319,20 @@ impl RefinementChecker {
 
     /// Production-grade capture-avoiding substitution
     ///
+
     /// Substitutes `value` for `var` in `expr` while avoiding variable capture.
     /// Implements proper alpha-conversion when needed to preserve semantics.
     ///
+
     /// # Correctness Properties
     /// - Preserves free variables: FV(subst(e, x, v)) = (FV(e) - {x}) ∪ FV(v)
     /// - Avoids capture: If y ∈ FV(v) and y is bound in e, perform alpha-renaming
     /// - Preserves semantics: [[subst(e, x, v)]] = [[e]][x ↦ [[v]]]
     ///
+
     /// # Visibility note
     ///
+
     /// Exposed at `pub(crate)` so that `infer.rs` can substitute earlier
     /// function arguments into subsequent parameters' refinement
     /// predicates at call sites. This enables dependent refinement
@@ -1311,6 +1341,7 @@ impl RefinementChecker {
     /// predicate `i < len` before checking `10`, producing `10 < 5` which
     /// the refinement checker correctly rejects.
     ///
+
     /// See `crates/verum_types/src/infer.rs` call-site loop around line
     /// 10558 and `crates/verum_compiler/tests/dependent_patterns_regression.rs`
     /// for the regression tests.
@@ -1890,6 +1921,7 @@ impl RefinementChecker {
 
     /// Try syntactic subsumption check (Mode 1)
     ///
+
     /// Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 Mode 1
     /// Fast pattern matching for common cases
     fn try_syntactic_subsumption(
@@ -2249,6 +2281,7 @@ impl RefinementChecker {
 
     /// Check with SMT solver (Mode 2)
     ///
+
     /// Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 Mode 2
     fn check_with_smt(
         &self,
@@ -2337,6 +2370,7 @@ impl RefinementChecker {
 
     /// Compute cache key for verification condition using structural hashing.
     ///
+
     /// This provides a stable hash based on the actual AST structure rather than
     /// pointer addresses, enabling proper cache hits for equivalent predicates.
     fn compute_cache_key(&self, vc: &VerificationCondition) -> u64 {
@@ -2366,6 +2400,7 @@ impl RefinementChecker {
 
     /// Hash an expression structurally for cache key computation.
     ///
+
     /// This traverses the AST and hashes each node to produce a stable hash
     /// that represents the expression's structure rather than its memory location.
     fn hash_expr<H: std::hash::Hasher>(expr: &Expr, hasher: &mut H) {
@@ -2551,6 +2586,7 @@ impl RefinementChecker {
 
     /// Get verification statistics
     ///
+
     /// Returns a copy of the current verification statistics.
     /// Handles lock poisoning gracefully by recovering the data.
     pub fn stats(&self) -> VerificationStats {
@@ -2562,6 +2598,7 @@ impl RefinementChecker {
 
     /// Clear cache
     ///
+
     /// Removes all cached verification results.
     /// Handles lock poisoning gracefully by recovering and clearing.
     pub fn clear_cache(&mut self) {
@@ -2576,31 +2613,39 @@ impl RefinementChecker {
 
     /// Check refinement with path evidence (flow-sensitive assumptions)
     ///
+
     /// This method enables the type checker to provide learned predicates
     /// (path conditions) that should be assumed true when verifying refinements.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// fn process(data: List<Int>) -> Int {
-    ///     if data.is_empty() { return 0; }
-    ///     // Evidence: !data.is_empty() holds here
-    ///     first(data)  // With evidence, this verifies correctly
+    ///  if data.is_empty() { return 0; }
+    ///  // Evidence: !data.is_empty() holds here
+    ///  first(data) // With evidence, this verifies correctly
     /// }
     /// ```
     ///
+
     /// # Arguments
     ///
+
     /// * `value` - The expression being checked
     /// * `refinement` - The refinement type to check against
     /// * `path_evidence` - Predicates known to be true on current path
     /// * `ctx` - Type context for variable resolution
     ///
+
     /// # Returns
     ///
+
     /// `VerificationResult::Valid` if the value satisfies the refinement
     /// given the path evidence, or `Invalid`/`Unknown` otherwise.
     ///
+
     /// Syntactic-only refinement check (no SMT).
     /// Returns Some(result) if the syntactic evaluator can determine the outcome,
     /// None if it cannot (complex predicates like modulo, string ops, etc.).
@@ -2774,6 +2819,7 @@ impl RefinementChecker {
 
     /// Syntactic subsumption check with assumptions
     ///
+
     /// Checks if the condition is syntactically provable given the assumptions.
     /// This extends the basic syntactic check to consider path conditions.
     fn try_syntactic_check_with_assumptions(
@@ -2798,6 +2844,7 @@ impl RefinementChecker {
 
     /// Check if an assumption syntactically implies a condition
     ///
+
     /// Handles common patterns like:
     /// - `!x.is_empty()` implies `x.len() > 0`
     /// - `x > 0` implies `x >= 0`
@@ -3075,6 +3122,7 @@ impl RefinementChecker {
 
     /// SMT check with assumptions
     ///
+
     /// Checks: assumptions => condition
     /// Which is equivalent to: ¬(assumptions ∧ ¬condition) is UNSAT
     fn check_with_smt_and_assumptions(

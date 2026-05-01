@@ -1,5 +1,6 @@
 //! Tensor output rendering.
 //!
+
 //! Provides rich visualization for tensor data including:
 //! - Shape and dtype display
 //! - Statistical summaries (mean, std, min, max)

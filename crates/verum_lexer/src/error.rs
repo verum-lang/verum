@@ -1,5 +1,6 @@
 //! Error types for the lexer.
 //!
+
 //! This module re-exports the unified error types from verum_common and provides
 //! domain-specific helper functions for lexical analysis errors.
 

@@ -1,10 +1,13 @@
 //! # Verify Strategy Extraction
 //!
+
 //! Translates the `@verify(...)` attribute argument from a Verum function/type
 //! declaration into a concrete verification dispatch strategy.
 //!
+
 //! ## Design Principle: Solver Abstraction
 //!
+
 //! This module is the USER-FACING API for verification. It deliberately
 //! exposes only **semantic strategies** (describing intent: "fast",
 //! "thorough", "certified") — never specific solver backends. This keeps
@@ -12,37 +15,44 @@
 //! compiler swap implementations (e.g., migrate from Z3+CVC5 to a custom
 //! solver) without breaking any existing annotations.
 //!
+
 //! Backend selection happens internally based on:
 //! - The strategy's intent (fast ↔ thorough tradeoff)
 //! - The goal's theory signature (routed via `capability_router`)
 //! - The set of linked solvers and their capabilities
 //!
+
 //! ## Grammar (verum.ebnf)
 //!
+
 //! ```ebnf
 //! verify_attribute = 'verify' , '(' ,
-//!     ( 'runtime' | 'static' | 'formal' | 'proof'
-//!     | 'fast' | 'thorough' | 'reliable'
-//!     | 'certified' | 'synthesize' ) ,
-//!     ')' ;
+//!  ( 'runtime' | 'static' | 'formal' | 'proof'
+//!  | 'fast' | 'thorough' | 'reliable'
+//!  | 'certified' | 'synthesize' ) ,
+//!  ')' ;
 //! ```
 //!
+
 //! ## Strategy Semantics
 //!
-//! | Attribute     | Intent                                          | Performance         |
+
+//! | Attribute | Intent | Performance |
 //! |---------------|-------------------------------------------------|---------------------|
-//! | `runtime`     | Runtime assertion (no formal proof)             | Fastest, unverified |
-//! | `static`      | Static type-level check (no SMT)                | Fast, partial       |
-//! | `formal`      | Formal verification with default strategy       | Balanced            |
-//! | `proof`       | Alias of `formal`                               | Balanced            |
-//! | `fast`        | Optimize for speed; may be incomplete on hard   | Fastest verify      |
-//! | `thorough`    | Maximum completeness; race multiple strategies  | Slower, robust      |
-//! | `reliable`    | Alias of `thorough`                             | Slower, robust      |
-//! | `certified`   | Independent cross-verification; for certs       | Slowest, strongest  |
-//! | `synthesize`  | Generate a term from a specification            | Variable            |
+//! | `runtime` | Runtime assertion (no formal proof) | Fastest, unverified |
+//! | `static` | Static type-level check (no SMT) | Fast, partial |
+//! | `formal` | Formal verification with default strategy | Balanced |
+//! | `proof` | Alias of `formal` | Balanced |
+//! | `fast` | Optimize for speed; may be incomplete on hard | Fastest verify |
+//! | `thorough` | Maximum completeness; race multiple strategies | Slower, robust |
+//! | `reliable` | Alias of `thorough` | Slower, robust |
+//! | `certified` | Independent cross-verification; for certs | Slowest, strongest |
+//! | `synthesize` | Generate a term from a specification | Variable |
 //!
+
 //! ## Usage
 //!
+
 //! Callers invoke `VerifyStrategy::from_attribute_value()` with the attribute
 //! argument string, then pass the returned strategy to `BackendSwitcher::
 //! solve_with_strategy()`. The switcher translates semantic strategies into
@@ -55,20 +65,25 @@ use crate::backend_switcher::BackendChoice;
 
 /// The semantic verification strategy from a `@verify(...)` attribute.
 ///
+
 /// ## User-Facing API
 ///
+
 /// This enum is the public interface for verification intent. Each variant
 /// describes WHAT the user wants (speed, thoroughness, certification) —
 /// NOT which specific solver or algorithm should be used. The compiler
 /// maps these strategies to internal dispatch decisions.
 ///
+
 /// ## Migration Stability
 ///
+
 /// When the Verum compiler migrates to a custom in-house solver, existing
 /// user annotations remain valid without modification. Only the internal
 /// dispatch logic in `BackendSwitcher` changes.
 /// The nine-strategy verification ladder.
 ///
+
 /// Each variant is SOUND; they differ in completeness and cost. The
 /// ordering forms a monotone lift: a function that passes
 /// `@verify(reliable)` also passes `@verify(formal)` / `@verify(fast)`
@@ -93,7 +108,7 @@ pub enum VerifyStrategy {
     Fast,
 
     /// `@verify(complexity_typed)` — bounded-arithmetic verification
-    /// (Bounded-arithmetic (V0)). Polynomial-time obligations discharged through the
+    /// (Bounded-arithmetic ). Polynomial-time obligations discharged through the
     /// V_0 / V_1 / S^1_2 / V_NP / V_PH / IΔ_0 stratum chosen at the
     /// pragma level; CI budget ≤ 30 s; UNKNOWN → conservative accept.
     /// ν = 3 (strictly between `Fast` and `Formal`).
@@ -240,7 +255,7 @@ impl std::fmt::Display for NuOrdinal {
 impl VerifyStrategy {
     /// All thirteen strategies in monotone-lift order (`Synthesize`
     /// last, orthogonal). Useful for diagnostics and iteration. Per
-    /// Coherent verification + Bounded-arithmetic (V0) the ladder grew from 9 → 13 entries with
+    /// Coherent verification + Bounded-arithmetic the ladder grew from 9 → 13 entries with
     /// `ComplexityTyped` (ν = 3) inserted between `Fast` and `Formal`,
     /// and the three coherent variants (`CoherentStatic`,
     /// `CoherentRuntime`, `Coherent`) inserted between `Certified`
@@ -263,6 +278,7 @@ impl VerifyStrategy {
 
     /// Parse a verify-attribute argument string into a strategy.
     ///
+
     /// Returns `None` for unrecognized values. Case-insensitive match.
     /// Legacy aliases (`quick`/`rapid`, `robust`, `cross_validate`,
     /// `synthesis`/`synth`) are preserved so existing `.vr` sources
@@ -339,6 +355,7 @@ impl VerifyStrategy {
     /// MUST also pass every rank `< k` (the compiler enforces this
     /// by construction — any strategy implies all weaker ones).
     ///
+
     /// `Synthesize` is ranked at the top of the ordering for
     /// convenience; use [`Self::is_synthesis`] when the orthogonal
     /// semantics matter.
@@ -369,6 +386,7 @@ impl VerifyStrategy {
 
     /// Map the strategy to an internal `BackendChoice` for the switcher.
     ///
+
     /// Returns `None` for strategies that don't require formal proof
     /// infrastructure (`Runtime`, `Static`, `Proof` — the last is
     /// user-supplied and bypasses SMT).
@@ -507,7 +525,7 @@ impl VerifyStrategy {
 
     /// Recommended timeout multiplier for this strategy. The base
     /// is `Formal` at 1.0× (5 s). Bounded-arithmetic and the coherent
-    /// variants get longer budgets per Coherent verification/Bounded-arithmetic (V0).
+    /// variants get longer budgets per Coherent verification/Bounded-arithmetic .
     pub fn timeout_multiplier(&self) -> f64 {
         match self {
             Self::Runtime | Self::Static | Self::Proof => 0.0, // no SMT timeout
@@ -527,17 +545,19 @@ impl VerifyStrategy {
     /// timeout semantics
     /// for this strategy. Three layers:
     ///
+
     /// * **WallClock (default)** — real elapsed time matching user
-    ///   expectations ("verify must complete in X seconds").
-    ///   Non-deterministic on CI under load; simple to reason about.
+    ///  expectations ("verify must complete in X seconds").
+    ///  Non-deterministic on CI under load; simple to reason about.
     /// * **SolverResourceCounter** — solver-internal operation count
-    ///   (Z3: `rlimit`, CVC5: `--rlimit`). Deterministic across runs;
-    ///   harder to translate to user-facing budget. Selected when
-    ///   `VERUM_DETERMINISTIC_TIMEOUT=1` or `--deterministic-timeout`.
+    ///  (Z3: `rlimit`, CVC5: `--rlimit`). Deterministic across runs;
+    ///  harder to translate to user-facing budget. Selected when
+    ///  `VERUM_DETERMINISTIC_TIMEOUT=1` or `--deterministic-timeout`.
     /// * **Cooperative** — signal-based abort. Always layered on
-    ///   top so partial results can be inspected post-mortem
-    ///   regardless of the primary semantics.
+    ///  top so partial results can be inspected post-mortem
+    ///  regardless of the primary semantics.
     ///
+
     /// `Runtime` / `Static` / `Proof` never time out (they don't
     /// invoke an SMT solver) — return `TimeoutSemantics::None`.
     pub fn timeout_semantics(&self) -> TimeoutSemantics {
@@ -601,30 +621,35 @@ impl std::fmt::Display for VerifyStrategy {
 
 /// Extract the verify strategy from a Verum AST attribute list.
 ///
+
 /// Scans for `@verify(...)` attributes and parses their argument. Returns:
 /// - `Some(strategy)` if a `@verify(...)` attribute was found with a
-///   recognized argument.
+///  recognized argument.
 /// - `None` if no `@verify` attribute is present OR the argument is
-///   unrecognized (caller should emit a diagnostic).
+///  unrecognized (caller should emit a diagnostic).
 ///
+
 /// This is the primary entry point used by the compilation pipeline to
 /// convert AST attributes into a concrete dispatch strategy.
 ///
+
 /// ## Example usage (from compiler)
 ///
+
 /// ```rust,ignore
 /// use verum_smt::verify_strategy::{extract_from_attributes, VerifyStrategy};
 ///
+
 /// match extract_from_attributes(&func.attributes) {
-///     Some(strategy) => {
-///         if strategy.requires_smt() {
-///             let result = switcher.solve_with_strategy(&assertions, &strategy);
-///             // ... handle result ...
-///         }
-///     }
-///     None => {
-///         // Use the compiler's default verification mode.
-///     }
+///  Some(strategy) => {
+///  if strategy.requires_smt() {
+///  let result = switcher.solve_with_strategy(&assertions, &strategy);
+///  // ... handle result ...
+///  }
+///  }
+///  None => {
+///  // Use the compiler's default verification mode.
+///  }
 /// }
 /// ```
 pub fn extract_from_attributes(
@@ -646,6 +671,7 @@ pub fn extract_from_attributes(
 
 /// Try to parse a VerifyStrategy from a single AST expression.
 ///
+
 /// Recognizes:
 /// - `ExprKind::Path` with a single identifier: `@verify(formal)`, `@verify(z3)`, etc.
 /// - `ExprKind::Literal(Text(...))` for quoted forms: `@verify("portfolio")`.
@@ -908,7 +934,7 @@ mod tests {
 
     #[test]
     fn nu_ordinals_strictly_monotone_through_ladder() {
-        // Per Coherent verification + Bounded-arithmetic (V0): the 13-strategy LADDER must keep its
+        // Per Coherent verification + Bounded-arithmetic : the 13-strategy LADDER must keep its
         // strict-monotone ν-invariant. For each adjacent pair, rank is
         // strictly increasing.
         let ranks: Vec<u8> =

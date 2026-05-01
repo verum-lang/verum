@@ -16,11 +16,14 @@
 #![cfg(test)]
 
 //!
+
 //! This test suite validates complete VJP backward pass generation for
 //! @differentiable functions with numerical gradient checking.
 //!
+
 //! # Test Coverage
 //!
+
 //! 1. **Basic Operations**: Add, Sub, Mul, Div, Neg
 //! 2. **Mathematical Functions**: Sin, Cos, Tan, Exp, Log, Sqrt
 //! 3. **Advanced Functions**: Tanh, Sigmoid, Pow
@@ -32,6 +35,7 @@
 //! 9. **Type Checking**: Verify generated VJP function signatures
 //! 10. **Numerical Validation**: Compare against finite differences
 //!
+
 //! Phase 4a: Automatic differentiation compilation. Parses @differentiable(wrt = "params")
 //! attribute, builds computational graph from function body, generates VJP (Vector-Jacobian
 //! Product) functions for reverse-mode AD. Supports custom_vjp for user-provided gradients.

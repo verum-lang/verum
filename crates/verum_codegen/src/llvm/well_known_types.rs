@@ -1,5 +1,6 @@
 //! Well-known Verum stdlib type names for LLVM lowering.
 //!
+
 //! Re-exports `WellKnownType` from `verum_common` and extends it with
 //! VBC TypeId integration and LLVM-specific register marking helpers.
 

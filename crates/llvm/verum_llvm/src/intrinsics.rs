@@ -12,10 +12,12 @@ pub struct Intrinsic {
 
 /// A wrapper around LLVM intrinsic id
 ///
+
 /// To call it you would need to create a declaration inside a module using [`Self::get_declaration()`].
 impl Intrinsic {
     /// Create an Intrinsic object from raw LLVM intrinsic id
     ///
+
     /// SAFETY: the id is a valid LLVM intrinsic ID
     pub(crate) unsafe fn new(id: u32) -> Self {
         Self { id }
@@ -23,12 +25,15 @@ impl Intrinsic {
 
     /// Find llvm intrinsic id from name
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::{intrinsics::Intrinsic, context::Context};
     ///
+
     /// let trap_intrinsic = Intrinsic::find("llvm.trap").unwrap();
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("trap");
     /// let builder = context.create_builder();
@@ -37,8 +42,10 @@ impl Intrinsic {
     /// let fn_value = module.add_function("trap", fn_type, None);
     /// let entry = context.append_basic_block(fn_value, "entry");
     ///
+
     /// let trap_function = trap_intrinsic.get_declaration(&module, &[]).unwrap();
     ///
+
     /// builder.position_at_end(entry);
     /// builder.build_call(trap_function, &[], "trap_call");
     /// ```
@@ -54,6 +61,7 @@ impl Intrinsic {
 
     /// Check if specified intrinsic is overloaded
     ///
+
     /// Overloaded intrinsics need some argument types to be specified to declare them
     pub fn is_overloaded(&self) -> bool {
         unsafe { LLVMIntrinsicIsOverloaded(self.id) != 0 }
@@ -61,14 +69,18 @@ impl Intrinsic {
 
     /// Create or insert the declaration of an intrinsic.
     ///
+
     /// For overloaded intrinsics, parameter types must be provided to uniquely identify an overload.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::{intrinsics::Intrinsic, context::Context};
     ///
+
     /// let trap_intrinsic = Intrinsic::find("llvm.trap").unwrap();
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("trap");
     /// let builder = context.create_builder();
@@ -77,8 +89,10 @@ impl Intrinsic {
     /// let fn_value = module.add_function("trap", fn_type, None);
     /// let entry = context.append_basic_block(fn_value, "entry");
     ///
+
     /// let trap_function = trap_intrinsic.get_declaration(&module, &[]).unwrap();
     ///
+
     /// builder.position_at_end(entry);
     /// builder.build_call(trap_function, &[], "trap_call");
     /// ```

@@ -4,26 +4,33 @@
 // Layer: 5 (Network — HTTP/3 / QPACK)
 // =============================================================================
 //
+
 // Minimal encoder covering the subset negotiated when
 // QPACK_MAX_TABLE_CAPACITY = 0:
 //
-//   * Required Insert Count = 0
-//   * Delta Base            = 0 (sign = 0)
+
+//  * Required Insert Count = 0
+//  * Delta Base = 0 (sign = 0)
 //
+
 // Each header is encoded as:
 //
-//   1. Look up (name, value) in the static table — if found, emit
-//      "Indexed Field Line, static (1Txxxxxx)".
-//   2. Else look up name — if found, emit "Literal Field Line with
-//      Name Reference, static (01NTxxxx)" + Huffman-encoded value.
-//   3. Else emit "Literal Field Line with Literal Name (001NHxxx)"
-//      with Huffman-encoded name + value.
+
+//  1. Look up (name, value) in the static table — if found, emit
+//  "Indexed Field Line, static (1Txxxxxx)".
+//  2. Else look up name — if found, emit "Literal Field Line with
+//  Name Reference, static (01NTxxxx)" + Huffman-encoded value.
+//  3. Else emit "Literal Field Line with Literal Name (001NHxxx)"
+//  with Huffman-encoded name + value.
 //
+
 // Huffman encoding is always-on for strings ≥ 3 bytes when the
 // encoded form is shorter than raw. Otherwise emit raw.
 //
+
 // Dynamic-table insertions are deferred to v1.1 per spec §12 Phase 6.
 //
+
 // =============================================================================
 
 module core.net.h3.qpack.encoder;
@@ -83,8 +90,8 @@ fn emit_header(h: &QpackHeaderField, out: &mut List<Byte>) {
     // Literal Field Line with Literal Name — opcode `0010` in high bits
     // (never-indexed = 0). The first byte has a 3-bit length prefix
     // for the name with a Huffman bit in the 4th-from-high position:
-    //   0 0 1 0 N H x x x   where xxx = 3-bit length prefix.
-    //   N = never-indexed (0 here), H = Huffman flag.
+    //  0 0 1 0 N H x x x where xxx = 3-bit length prefix.
+    //  N = never-indexed (0 here), H = Huffman flag.
     encode_literal_name(out, h.name.as_bytes());
     encode_string(out, h.value.as_bytes());
 }
@@ -108,8 +115,8 @@ fn encode_string(out: &mut List<Byte>, s: &[Byte]) {
 /// length prefix is 3 bits.
 fn encode_literal_name(out: &mut List<Byte>, s: &[Byte]) {
     // Opcode base: 0010 in high nibble, N=0, H decided below.
-    //   raw:     0010 0xxx  (0x20)
-    //   huffman: 0010 1xxx  (0x28)
+    //  raw: 0010 0xxx (0x20)
+    //  huffman: 0010 1xxx (0x28)
     let huff_bytes = huff.encoded_byte_length(s);
     if huff_bytes < s.len() {
         int_encode(out, 3, 0x28_u8, huff_bytes as UInt64);

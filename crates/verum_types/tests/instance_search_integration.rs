@@ -1,6 +1,7 @@
 //! Integration tests for the protocol instance search + coherence
 //! checker (Phase D.4).
 //!
+
 //! These tests exercise realistic scenarios that mirror what the
 //! type-checker encounters when resolving `implement P for T`
 //! blocks across a multi-module project.

@@ -14,6 +14,7 @@
 )]
 // Edge Cases and Boundary Condition Tests
 //
+
 // Comprehensive tests for extreme inputs and boundary conditions:
 // - Very large numbers and overflow scenarios
 // - Very long strings (>10KB)
@@ -25,6 +26,7 @@
 // - Minimum representable values
 // - Special Unicode ranges
 //
+
 // Tests lexer behavior at boundaries of the Verum lexical grammar.
 
 use verum_ast::span::FileId;
@@ -601,7 +603,7 @@ fn test_alternating_delimiters() {
     let source = "([{<>}])";
     let tokens = tokenize(source);
 
-    // (  [  {  <  >  }  ]  )
+    // ( [ { < > } ] )
     assert!(tokens.len() >= 6);
 }
 

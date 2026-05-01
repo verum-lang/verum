@@ -1,5 +1,6 @@
 //! Integration tests for `KernelRecheckPass` (#187 V0).
 //!
+
 //! End-to-end pipeline tests: build a `Module` with one or more
 //! `FunctionDecl`s, run the default `VerificationPipeline`, and
 //! inspect the kernel-recheck pass's outcome via the per-pass
@@ -124,11 +125,11 @@ fn module_with(functions: Vec<FunctionDecl>) -> Module {
 #[test]
 fn static_analysis_pipeline_includes_kernel_recheck() {
     // The static-analysis pipeline now runs 5 passes:
-    //   [0] LevelInferencePass
-    //   [1] KernelRecheckPass
-    //   [2] HygieneRecheckPass        (#190)
-    //   [3] BoundaryDetectionPass
-    //   [4] TransitionRecommendationPass
+    //  [0] LevelInferencePass
+    //  [1] KernelRecheckPass
+    //  [2] HygieneRecheckPass (#190)
+    //  [3] BoundaryDetectionPass
+    //  [4] TransitionRecommendationPass
     let module = module_with(vec![make_function(
         "id",
         vec![Type::int(span())],
@@ -320,7 +321,7 @@ fn impl_block(for_type: Type, items: Vec<verum_ast::decl::ImplItem>) -> verum_as
 #[test]
 fn kernel_recheck_pass_descends_into_impl_block_methods() {
     // implement Foo {
-    //     fn impl_method(x: Int{p.box().box()}) -> Int { ... }
+    //  fn impl_method(x: Int{p.box().box()}) -> Int { ... }
     // }
     // Modal-overshoot in an impl-method param must be caught.
     let p = path_expr("p");

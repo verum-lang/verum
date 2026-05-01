@@ -19,9 +19,9 @@ public fn level_name(l: &SqliteIsolationLevel) -> Text {
 }
 
 // Read-anomaly permissibility (per ANSI-SQL):
-//   ReadCommitted:    allows non-repeatable reads + phantoms
-//   RepeatableRead:   allows phantoms, blocks non-repeatable reads
-//   Serializable:     blocks all three
+//  ReadCommitted: allows non-repeatable reads + phantoms
+//  RepeatableRead: allows phantoms, blocks non-repeatable reads
+//  Serializable: blocks all three
 public fn allows_nonrepeatable_read(l: &SqliteIsolationLevel) -> Bool {
     match l { IlReadCommitted => true, _ => false }
 }

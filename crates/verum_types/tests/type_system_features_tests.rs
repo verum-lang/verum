@@ -622,8 +622,8 @@ mod gats {
     #[test]
     fn test_protocol_with_gat() {
         // protocol Container {
-        //     type Item<T>;
-        //     fn get{T}(self: &Self, key: T) -> Self.Item<T>;
+        //  type Item<T>;
+        //  fn get{T}(self: &Self, key: T) -> Self.Item<T>;
         // }
         let mut associated_types = Map::new();
         associated_types.insert(

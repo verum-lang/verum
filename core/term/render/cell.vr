@@ -61,15 +61,17 @@ implement RenderCell {
 
 /// Display width of a grapheme cluster in terminal columns.
 ///
+
 /// Iterates every codepoint in the cluster and folds a maximum-width rule:
-///   * combining marks, ZWJ, variation selectors, and format characters
-///     contribute 0 columns;
-///   * East Asian Wide/Fullwidth and emoji base characters contribute 2;
-///   * presence of VS16 (U+FE0F) on a pictographic base forces width 2
-///     (canonical emoji presentation);
-///   * Regional Indicator pairs (two flag code points) together take 2;
-///   * everything else contributes 1.
+///  * combining marks, ZWJ, variation selectors, and format characters
+///  contribute 0 columns;
+///  * East Asian Wide/Fullwidth and emoji base characters contribute 2;
+///  * presence of VS16 (U+FE0F) on a pictographic base forces width 2
+///  (canonical emoji presentation);
+///  * Regional Indicator pairs (two flag code points) together take 2;
+///  * everything else contributes 1.
 ///
+
 /// This is an approximation of UAX #11 + UTS #51 + the grapheme cluster
 /// segmentation rules of UAX #29, suitable for a terminal without ICU.
 public fn grapheme_width(s: &Text) -> Int {

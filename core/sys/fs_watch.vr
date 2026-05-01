@@ -5,20 +5,24 @@
 // Dependencies: sys.{darwin,linux,windows}, base.memory
 // =============================================================================
 //
+
 // Platform-native event-driven filesystem monitoring. Provides a uniform
 // `FsWatcher` over:
 //
-//   * macOS — kqueue / EVFILT_VNODE
-//   * Linux — inotify (raw inotify_init1 + inotify_add_watch syscalls)
-//   * Windows — ReadDirectoryChangesW (overlapped + WaitForMultipleObjects;
-//     parses FILE_NOTIFY_INFORMATION records out of a per-watch 4 KiB
-//     buffer; subtree watching enabled, full filter mask covering
-//     name/dir/write/attribute/size/creation changes)
+
+//  * macOS — kqueue / EVFILT_VNODE
+//  * Linux — inotify (raw inotify_init1 + inotify_add_watch syscalls)
+//  * Windows — ReadDirectoryChangesW (overlapped + WaitForMultipleObjects;
+//  parses FILE_NOTIFY_INFORMATION records out of a per-watch 4 KiB
+//  buffer; subtree watching enabled, full filter mask covering
+//  name/dir/write/attribute/size/creation changes)
 //
+
 // Sub-millisecond latency, kernel-driven; no polling overhead. Each
 // `FsEvent` carries the affected path plus the kind of change (created,
 // modified, deleted, renamed, attribute-changed).
 //
+
 // =============================================================================
 
 module core.sys.fs_watch;
@@ -263,6 +267,7 @@ implement Drop for KqueueBackend {
 // Linux — inotify
 // =============================================================================
 //
+
 // The inotify_init1 / inotify_add_watch / inotify_rm_watch syscalls aren't
 // pre-exported in `core.sys.linux.arch`, so we issue them through the raw
 // syscall6 intrinsic with arch-conditional numbers.
@@ -438,9 +443,10 @@ fn nul_terminate(t: &Text) -> List<Byte> {
 // Windows — ReadDirectoryChangesW
 // =============================================================================
 //
-// One Handle per watched directory plus an Overlapped + buffer.  Events
+
+// One Handle per watched directory plus an Overlapped + buffer. Events
 // arrive as a packed FILE_NOTIFY_INFORMATION list inside the buffer; we
-// parse it into FsEvent records.  Wait timeouts are honoured via
+// parse it into FsEvent records. Wait timeouts are honoured via
 // WaitForMultipleObjects across the per-directory event handles.
 
 @cfg(target_os = "windows")
@@ -456,7 +462,7 @@ mount core.sys.windows.kernel32.{
     FILE_ACTION_RENAMED_OLD_NAME, FILE_ACTION_RENAMED_NEW_NAME,
 };
 
-// Minimal flags for the watch open.  GENERIC_READ = 0x80000000;
+// Minimal flags for the watch open. GENERIC_READ = 0x80000000;
 // FILE_LIST_DIRECTORY = 0x0001 — we use the full FILE_LIST_DIRECTORY
 // access right which is the canonical RDCW handle requirement.
 @cfg(target_os = "windows") public const WIN_FILE_LIST_DIRECTORY: UInt32 = 0x00000001;
@@ -519,7 +525,7 @@ implement RdcwBackend {
     public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
         let mut events: List<FsEvent> = [];
         // Issue a synchronous ReadDirectoryChangesW per watch with the
-        // requested timeout.  For simplicity we serialise — small N
+        // requested timeout. For simplicity we serialise — small N
         // (typically O(10) watches) makes this acceptable.
         let timeout: UInt32 = if timeout_ms < 0 { WIN_INFINITE } else { timeout_ms as UInt32 };
         for w in self.watches.iter_mut() {
@@ -567,11 +573,12 @@ implement Drop for RdcwBackend {
 }
 
 // FILE_NOTIFY_INFORMATION layout:
-//   DWORD NextEntryOffset;
-//   DWORD Action;
-//   DWORD FileNameLength;     // bytes (UTF-16, len = bytes/2 chars)
-//   WCHAR FileName[1];        // not NUL-terminated
+//  DWORD NextEntryOffset;
+//  DWORD Action;
+//  DWORD FileNameLength; // bytes (UTF-16, len = bytes/2 chars)
+//  WCHAR FileName[1]; // not NUL-terminated
 //
+
 // Records are packed; NextEntryOffset is relative to the current record's start.
 @cfg(target_os = "windows")
 fn parse_fni_buffer(
@@ -613,11 +620,11 @@ fn read_u32_le(buf: &List<Byte>, off: Int) -> Int {
 
 @cfg(target_os = "windows")
 fn decode_utf16_le(buf: &List<Byte>, off: Int, byte_len: Int) -> Text {
-    // Full UTF-16LE → Text transcoder.  Handles BMP (one 16-bit
+    // Full UTF-16LE → Text transcoder. Handles BMP (one 16-bit
     // unit) and supplementary planes (a high-surrogate D800..DBFF
     // followed by a low-surrogate DC00..DFFF that combine into a
-    // 21-bit code point).  Lone / mismatched surrogates fall through
-    // as U+FFFD per Unicode §3.9 substitution.  Works for any
+    // 21-bit code point). Lone / mismatched surrogates fall through
+    // as U+FFFD per Unicode §3.9 substitution. Works for any
     // legal Windows filename.
     let mut out = Text.with_capacity((byte_len / 2) as usize);
     let mut i: Int = 0;

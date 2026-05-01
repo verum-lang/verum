@@ -1,25 +1,32 @@
 /// # RuntimeConfig Protocol and Configurations
 ///
+
 /// Spec: docs/architecture/new-arch-spec.md#10-modular-runtime-architecture
 ///
+
 /// Provides pluggable runtime configurations for diverse target platforms:
 ///
-/// | Configuration      | Async | Heap  | Threads | IO Driver | Target                     |
+
+/// | Configuration | Async | Heap | Threads | IO Driver | Target |
 /// |--------------------|-------|-------|---------|-----------|----------------------------|
-/// | FullRuntime        | ✓     | ✓     | ✓       | Completion| Desktop/Server             |
-/// | SingleThreadRuntime| ✓     | ✓     | ✗       | Poll      | WASM, Single-core embedded |
-/// | SyncRuntime        | ✗     | ✓     | ✓       | Blocking  | Legacy, Simple utilities   |
-/// | EmbeddedRuntime    | ✗     | ✗     | ✗       | None      | Microcontrollers (Cortex-M)|
+/// | FullRuntime | ✓ | ✓ | ✓ | Completion| Desktop/Server |
+/// | SingleThreadRuntime| ✓ | ✓ | ✗ | Poll | WASM, Single-core embedded |
+/// | SyncRuntime | ✗ | ✓ | ✓ | Blocking | Legacy, Simple utilities |
+/// | EmbeddedRuntime | ✗ | ✗ | ✗ | None | Microcontrollers (Cortex-M)|
 ///
+
 /// ## Zero-Overhead Principle
 ///
+
 /// Each runtime configuration compiles to exactly what's needed:
 /// - Unused features are completely eliminated (no dead code)
 /// - Conditional compilation removes overhead at compile-time
 /// - VBC intrinsics provide direct syscall access
 ///
+
 /// ## VBC Opcode Integration
 ///
+
 /// System operations map directly to VBC opcodes:
 /// - 0xF0: syscall (direct kernel call)
 /// - 0xF1: mmap/munmap (memory operations)
@@ -126,17 +133,22 @@ implement Eq for RuntimeInitError {
 
 /// Runtime configuration protocol
 ///
+
 /// Defines the interface for pluggable runtime configurations.
 /// Each implementation provides its own allocator, executor, and I/O driver.
 ///
+
 /// ## Associated Types
 ///
+
 /// - `Allocator`: Memory allocation strategy
 /// - `Executor`: RuntimeTask scheduling strategy (async runtimes only)
 /// - `IoDriver`: I/O completion strategy
 ///
+
 /// ## Implementation Contract
 ///
+
 /// Implementations must:
 /// 1. Initialize TLS on main thread via `sys.common.init_runtime()`
 /// 2. Initialize all components in dependency order
@@ -154,18 +166,21 @@ public type RuntimeConfig is protocol {
 
     /// Initialize the runtime
     ///
+
     /// # Initialization Order
     /// 1. TLS bootstrap (thread-local context slots)
     /// 2. Allocator initialization
     /// 3. I/O driver initialization
     /// 4. Executor initialization
     ///
+
     /// # Errors
     /// Returns RuntimeInitError if any component fails to initialize.
     fn init() -> Result<Self, RuntimeInitError>;
 
     /// Shutdown the runtime and release all resources
     ///
+
     /// # Shutdown Order (reverse of init)
     /// 1. Stop executor (wait for tasks to complete)
     /// 2. Shutdown I/O driver
@@ -190,6 +205,7 @@ public type RuntimeConfig is protocol {
 
 /// Async executor protocol
 ///
+
 /// Provides task scheduling for async runtimes.
 /// Implementations must support spawning, blocking, and shutdown.
 public type AsyncExecutor is protocol {
@@ -239,6 +255,7 @@ implement AsyncExecutor for NoopExecutor {
 
 /// I/O engine protocol for completion-based or blocking I/O
 ///
+
 /// Spec: docs/architecture/new-arch-spec.md#7-async-runtime-verum-native
 public type RuntimeIoDriver is protocol {
     /// Submit I/O operation
@@ -374,14 +391,17 @@ implement RuntimeIoDriver for NoopDriver {
 
 /// Full runtime with all features enabled
 ///
+
 /// Target: Linux/Windows/macOS desktop and server applications
 ///
+
 /// Features:
 /// - Work-stealing async executor with multiple workers
 /// - Tiered allocator (thread-local + global pools)
 /// - Completion-based I/O (io_uring/kqueue/IOCP)
 /// - Full CBGR memory safety
 ///
+
 /// Performance:
 /// - RuntimeTask spawn: ~150ns
 /// - Context switch: ~50ns
@@ -461,14 +481,17 @@ implement RuntimeConfig for FullRuntime {
 
 /// Single-threaded async runtime
 ///
+
 /// Target: WASM, single-core embedded systems
 ///
+
 /// Features:
 /// - Single-threaded async executor
 /// - Simple allocator (bump + freelist)
 /// - Poll-based I/O (for WASM) or completion (for native)
 /// - CBGR with simplified threading model
 ///
+
 /// Performance:
 /// - RuntimeTask spawn: ~100ns (no work-stealing)
 /// - Context switch: ~30ns (no thread sync)
@@ -541,14 +564,17 @@ implement RuntimeConfig for SingleThreadRuntime {
 
 /// Synchronous runtime without async
 ///
+
 /// Target: Legacy code, simple utilities, scripts
 ///
+
 /// Features:
 /// - Thread pool for parallel work
 /// - Tiered allocator
 /// - Blocking I/O
 /// - Full CBGR safety
 ///
+
 /// Note: Async code is automatically transformed to blocking calls.
 @cfg(runtime = "no_async")
 public type SyncRuntime is {
@@ -610,8 +636,10 @@ implement RuntimeConfig for SyncRuntime {
 
 /// Minimal embedded runtime
 ///
+
 /// Target: Microcontrollers (ARM Cortex-M, RISC-V)
 ///
+
 /// Features:
 /// - Stack-only allocation (no heap)
 /// - No async (synchronous only)
@@ -619,6 +647,7 @@ implement RuntimeConfig for SyncRuntime {
 /// - No I/O driver (direct peripheral access)
 /// - Minimal CBGR (generation-only or unchecked)
 ///
+
 /// Memory footprint: ~256 bytes runtime overhead
 @cfg(any(runtime = "no_heap", runtime = "embedded"))
 public type EmbeddedRuntime is {
@@ -668,19 +697,24 @@ implement RuntimeConfig for EmbeddedRuntime {
 
 /// Custom runtime with user-provided components
 ///
+
 /// Allows users to plug in their own allocator, executor, and I/O driver.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// type MyRuntime is CustomRuntime<MyAllocator, MyExecutor, MyDriver>;
 ///
+
 /// implement RuntimeConfig for MyRuntime {
-///     // ...
+///  // ...
 /// }
 ///
+
 /// fn main() using [MyRuntime] {
-///     // Uses custom runtime via context injection
+///  // Uses custom runtime via context injection
 /// }
 /// ```
 public type CustomRuntime<A: Alloc, E: AsyncExecutor, D: RuntimeIoDriver> is {
@@ -695,28 +729,31 @@ public type CustomRuntime<A: Alloc, E: AsyncExecutor, D: RuntimeIoDriver> is {
 
 /// Work-stealing executor for multi-threaded async
 ///
+
 /// Implements Chase-Lev work-stealing deques for optimal task distribution.
 ///
+
 /// ## Architecture
 ///
+
 /// ```
 /// ┌─────────────────────────────────────────────────────────────────────┐
-/// │                    WORK-STEALING EXECUTOR                           │
+/// │ WORK-STEALING EXECUTOR │
 /// ├─────────────────────────────────────────────────────────────────────┤
-/// │                                                                     │
-/// │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐               │
-/// │  │ Worker0 │  │ Worker1 │  │ Worker2 │  │ Worker3 │  ...          │
-/// │  │ ┌─────┐ │  │ ┌─────┐ │  │ ┌─────┐ │  │ ┌─────┐ │               │
-/// │  │ │Deque│ │  │ │Deque│ │  │ │Deque│ │  │ │Deque│ │               │
-/// │  │ └─────┘ │  │ └─────┘ │  │ └─────┘ │  │ └─────┘ │               │
-/// │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘               │
-/// │       │ steal      │ steal      │ steal      │                     │
-/// │       └────────────┴────────────┴────────────┘                     │
-/// │                         │                                          │
-/// │                         ▼                                          │
-/// │                  ┌───────────┐                                     │
-/// │                  │Global Queue│ (overflow)                         │
-/// │                  └───────────┘                                     │
+/// │ │
+/// │ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ │
+/// │ │ Worker0 │ │ Worker1 │ │ Worker2 │ │ Worker3 │ ... │
+/// │ │ ┌─────┐ │ │ ┌─────┐ │ │ ┌─────┐ │ │ ┌─────┐ │ │
+/// │ │ │Deque│ │ │ │Deque│ │ │ │Deque│ │ │ │Deque│ │ │
+/// │ │ └─────┘ │ │ └─────┘ │ │ └─────┘ │ │ └─────┘ │ │
+/// │ └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ │
+/// │ │ steal │ steal │ steal │ │
+/// │ └────────────┴────────────┴────────────┘ │
+/// │ │ │
+/// │ ▼ │
+/// │ ┌───────────┐ │
+/// │ │Global Queue│ (overflow) │
+/// │ └───────────┘ │
 /// └─────────────────────────────────────────────────────────────────────┘
 /// ```
 @cfg(runtime = "full")
@@ -825,6 +862,7 @@ implement AsyncExecutor for SingleThreadExecutor {
 
 /// Platform-specific I/O engine
 ///
+
 /// Selects optimal completion-based I/O for each platform:
 /// - Linux: io_uring (kernel 5.1+)
 /// - macOS: kqueue
@@ -899,6 +937,7 @@ implement RuntimeConfigThreadPool {
 
 /// Worker thread for the work-stealing executor.
 ///
+
 /// Each worker owns a local deque for tasks, a handle to the OS thread,
 /// and a reference to the global queue for work stealing.
 type Worker is {
@@ -931,6 +970,7 @@ implement Worker {
 
 /// Bounded multi-producer multi-consumer task queue.
 ///
+
 /// Backed by a ring buffer with atomic head/tail pointers.
 /// Capacity: 4096 tasks (power-of-two for efficient masking).
 type TaskQueue is {
@@ -981,6 +1021,7 @@ implement TaskQueue {
 
 /// Async task wrapper.
 ///
+
 /// Encapsulates a future with its execution state and waker.
 type RuntimeTask is {
     /// Pointer to the boxed future (type-erased)
@@ -1006,6 +1047,7 @@ implement RuntimeTask {
 
 /// Handle to a spawned async task, used to await the result.
 ///
+
 /// Generic over T — the return type of the future.
 type RuntimeTaskHandle<T> is {
     /// Pointer to the task's result slot
@@ -1045,6 +1087,7 @@ implement Thread {
 
 /// Bounded job queue for the synchronous thread pool.
 ///
+
 /// Similar to TaskQueue but for blocking jobs (FnOnce closures).
 type JobQueue is {
     /// Ring buffer of jobs
@@ -1093,6 +1136,7 @@ implement Job {
 
 /// Poll file descriptor for poll-based I/O.
 ///
+
 /// Matches the POSIX `struct pollfd` layout.
 @repr(C)
 type PollFd is {
@@ -1106,6 +1150,7 @@ type PollFd is {
 
 /// Atomic boolean flag.
 ///
+
 /// Backed by an atomic 32-bit integer (0=false, 1=true).
 type RuntimeAtomicBool is {
     value: AtomicU32,

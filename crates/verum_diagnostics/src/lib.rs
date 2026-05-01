@@ -1,19 +1,25 @@
 #![allow(unexpected_cfgs)]
 //! Verum Diagnostics System
 //!
+
 //! A comprehensive diagnostics system providing world-class error messages for the Verum compiler.
 //! This system emphasizes clarity, actionability, and especially excels at refinement type errors.
 //!
+
 //! # Separation of Concerns
 //!
+
 //! **verum_diagnostics** focuses exclusively on **compiler diagnostics** - beautiful error messages,
 //! source spans, suggestions, and rendering for the Verum compiler itself.
 //!
+
 //! For **runtime error handling** (Result types, error contexts, recovery strategies), see the
 //! **verum_error** crate which implements the 5-Level Error Defense Architecture.
 //!
+
 //! # Features
 //!
+
 //! - **Rich Error Messages**: Beautiful, colored output with source context
 //! - **Refinement Type Specialization**: Shows actual values and constraints that failed
 //! - **Actionable Suggestions**: Multiple fix options with code examples
@@ -23,19 +29,22 @@
 //! - **Lint System**: Configurable warnings with allow/warn/deny/forbid levels
 //! - **LSP Integration**: Full IDE support with code actions and hover
 //!
+
 //! # Example
 //!
+
 //! ```rust
 //! use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity, Span};
 //!
+
 //! let diagnostic = DiagnosticBuilder::error()
-//!     .code("E0308")
-//!     .message("refinement constraint not satisfied")
-//!     .span(Span::new("main.vr", 3, 12, 13))
-//!     .label("value `-5` fails constraint `i > 0`")
-//!     .help("wrap in runtime check: `PositiveInt::try_from(x)?`")
-//!     .help("or use compile-time proof: `@verify x > 0`")
-//!     .build();
+//!  .code("E0308")
+//!  .message("refinement constraint not satisfied")
+//!  .span(Span::new("main.vr", 3, 12, 13))
+//!  .label("value `-5` fails constraint `i > 0`")
+//!  .help("wrap in runtime check: `PositiveInt::try_from(x)?`")
+//!  .help("or use compile-time proof: `@verify x > 0`")
+//!  .build();
 //! ```
 
 #![allow(unused_variables)]
@@ -134,11 +143,12 @@ pub use try_operator_errors::{
 
 /// Error code constants for quick reference
 ///
+
 /// For full error code information with explanations, use the `error_codes` module:
 /// ```rust,ignore
 /// use verum_diagnostics::error_codes::lookup_error;
 /// if let Some(info) = lookup_error("E0312") {
-///     println!("{}", info.explanation);
+///  println!("{}", info.explanation);
 /// }
 /// ```
 pub mod codes {

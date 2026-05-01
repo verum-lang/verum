@@ -4,11 +4,14 @@
 // Layer: 6
 // Spec: sqlite-native.md §16.4
 //
+
 // Built-in table-valued function exposing an integer sequence:
 //
-//   SELECT value FROM generate_series(1, 10);          -- 1..10
-//   SELECT value FROM generate_series(0, 100, 5);      -- 0,5,...,100
+
+//  SELECT value FROM generate_series(1, 10); -- 1..10
+//  SELECT value FROM generate_series(0, 100, 5); -- 0,5,...,100
 //
+
 // The columns are (value, start, stop, step). `value` is the only
 // column the user normally selects; the others are HIDDEN and
 // double as constraint sources for the planner.

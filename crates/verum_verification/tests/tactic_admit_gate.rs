@@ -3,6 +3,7 @@
 //! was documented as "Allow admit/sorry tactics" with default
 //! `true`, but no code path consulted it.
 //!
+
 //! With the wiring in place, a verification run that sets
 //! `allow_admits = false` will reject any goal that the user
 //! tries to discharge via `admit` or `sorry`. This is the

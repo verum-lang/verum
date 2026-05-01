@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.4
 //
+
 // Pairs (`loom_result`, `c_result`) under a `CaseMode` and emits one
 // of a small finite set of `DiffOutcome`s. The mode chooses the
 // strictness; the comparator is the same.

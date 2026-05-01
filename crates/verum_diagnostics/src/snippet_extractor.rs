@@ -1,5 +1,6 @@
 //! Code snippet extraction from source files.
 //!
+
 //! Extracts relevant source code snippets with context for diagnostic rendering.
 //! Supports:
 //! - Multi-line spans

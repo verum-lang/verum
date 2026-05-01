@@ -1,5 +1,6 @@
 //! Comprehensive CBGR (Compile-time Borrow and Generation-based Reference) dialect operations.
 //!
+
 //! This module implements the full CBGR memory safety system for Verum, providing:
 //! - Three-tier reference system (Managed/Checked/Unsafe)
 //! - Generation-based validity tracking
@@ -7,20 +8,24 @@
 //! - Escape analysis annotations
 //! - Borrow scope management
 //!
+
 //! # CBGR Reference Layout
 //!
+
 //! ```text
 //! ThinRef<T>: { ptr: *mut T, generation: u32, epoch_caps: u32 } = 16 bytes
-//! FatRef<T>:  { ptr: *mut T, generation: u32, epoch_caps: u32, metadata: u64 } = 24 bytes
+//! FatRef<T>: { ptr: *mut T, generation: u32, epoch_caps: u32, metadata: u64 } = 24 bytes
 //! ```
 //!
+
 //! # Reference Tiers
 //!
-//! | Tier | Name    | Overhead | Validation |
+
+//! | Tier | Name | Overhead | Validation |
 //! |------|---------|----------|------------|
-//! | 0    | Managed | ~15ns    | Full CBGR checks |
-//! | 1    | Checked | 0ns      | Compile-time proven safe |
-//! | 2    | Unsafe  | 0ns      | Manual safety proof required |
+//! | 0 | Managed | ~15ns | Full CBGR checks |
+//! | 1 | Checked | 0ns | Compile-time proven safe |
+//! | 2 | Unsafe | 0ns | Manual safety proof required |
 
 use verum_mlir::{
     Context,
@@ -148,14 +153,16 @@ impl EscapeCategory {
 
 /// CBGR allocation operation.
 ///
+
 /// Allocates memory with CBGR tracking (generation + epoch).
 ///
+
 /// ```mlir
 /// %ref = verum.cbgr_alloc %value {
-///     tier = 0 : i32,
-///     initial_gen = 1 : i32,
-///     caps = 3 : i32,  // Read | Write
-///     layout = "thin"
+///  tier = 0 : i32,
+///  initial_gen = 1 : i32,
+///  caps = 3 : i32, // Read | Write
+///  layout = "thin"
 /// } : T -> !llvm.struct<(ptr, i32, i32)>
 /// ```
 pub struct CbgrAllocOp;
@@ -220,8 +227,10 @@ impl CbgrAllocOp {
 
 /// CBGR reallocation operation.
 ///
+
 /// Reallocates a CBGR reference with a new value, preserving generation.
 ///
+
 /// ```mlir
 /// %new_ref = verum.cbgr_realloc %ref, %new_value : !llvm.struct<(ptr, i32, i32)>
 /// ```
@@ -249,10 +258,11 @@ impl CbgrReallocOp {
 
 /// CBGR check operation - validates reference validity.
 ///
+
 /// ```mlir
 /// %valid = verum.cbgr_check %ref, %expected_gen {
-///     check_caps = true,
-///     expected_caps = 3 : i32
+///  check_caps = true,
+///  expected_caps = 3 : i32
 /// } : i1
 /// ```
 pub struct CbgrCheckOp;
@@ -303,6 +313,7 @@ impl CbgrCheckOp {
 
 /// CBGR generation extraction operation.
 ///
+
 /// ```mlir
 /// %gen = verum.cbgr_get_gen %ref : i32
 /// ```
@@ -326,6 +337,7 @@ impl CbgrGetGenOp {
 
 /// CBGR increment generation operation.
 ///
+
 /// ```mlir
 /// %new_ref = verum.cbgr_inc_gen %ref : !llvm.struct<(ptr, i32, i32)>
 /// ```
@@ -352,10 +364,11 @@ impl CbgrIncGenOp {
 
 /// CBGR dereference operation with validation.
 ///
+
 /// ```mlir
 /// %value = verum.cbgr_deref %ref {
-///     validate = true,
-///     tier = 0 : i32
+///  validate = true,
+///  tier = 0 : i32
 /// } : !llvm.struct<(ptr, i32, i32)> -> T
 /// ```
 pub struct CbgrDerefOp;
@@ -404,6 +417,7 @@ impl CbgrDerefOp {
 
 /// CBGR unchecked dereference - for Checked/Unsafe tiers.
 ///
+
 /// ```mlir
 /// %value = verum.cbgr_deref_unchecked %ref : !llvm.ptr -> T
 /// ```
@@ -430,10 +444,11 @@ impl CbgrDerefUncheckedOp {
 
 /// CBGR store operation with mutation tracking.
 ///
+
 /// ```mlir
 /// verum.cbgr_store %ref, %value {
-///     validate = true,
-///     inc_gen = true
+///  validate = true,
+///  inc_gen = true
 /// } : !llvm.struct<(ptr, i32, i32)>, T
 /// ```
 pub struct CbgrStoreOp;
@@ -472,10 +487,11 @@ impl CbgrStoreOp {
 
 /// CBGR drop operation with optional invalidation.
 ///
+
 /// ```mlir
 /// verum.cbgr_drop %ref {
-///     invalidate = true,
-///     run_destructor = true
+///  invalidate = true,
+///  run_destructor = true
 /// }
 /// ```
 pub struct CbgrDropOp;
@@ -522,12 +538,13 @@ impl CbgrDropOp {
 
 /// CBGR borrow scope - tracks exclusive/shared borrows.
 ///
+
 /// ```mlir
 /// %result = verum.cbgr_borrow_scope {
-///     borrow_kind = "exclusive"
+///  borrow_kind = "exclusive"
 /// } {
-///     // scope body
-///     verum.cbgr_borrow_yield %value : T
+///  // scope body
+///  verum.cbgr_borrow_yield %value : T
 /// } : T
 /// ```
 pub struct CbgrBorrowScopeOp;
@@ -589,11 +606,12 @@ impl CbgrBorrowYieldOp {
 
 /// CBGR promote operation - promotes to a higher tier.
 ///
+
 /// ```mlir
 /// %checked_ref = verum.cbgr_promote %managed_ref {
-///     from_tier = 0 : i32,
-///     to_tier = 1 : i32,
-///     escape_category = 0 : i32  // NoEscape
+///  from_tier = 0 : i32,
+///  to_tier = 1 : i32,
+///  escape_category = 0 : i32 // NoEscape
 /// } : !llvm.struct<(ptr, i32, i32)> -> !llvm.ptr
 /// ```
 pub struct CbgrPromoteOp;
@@ -670,10 +688,11 @@ impl CbgrDemoteOp {
 
 /// CBGR escape annotation - marks escape analysis results.
 ///
+
 /// ```mlir
 /// %annotated = verum.cbgr_escape_annotate %ref {
-///     escape_category = 0 : i32,  // NoEscape
-///     proven = true
+///  escape_category = 0 : i32, // NoEscape
+///  proven = true
 /// } : T -> T
 /// ```
 pub struct CbgrEscapeAnnotateOp;

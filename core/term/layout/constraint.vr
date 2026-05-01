@@ -5,6 +5,7 @@
 // min/max bounds, percentages, ratios, and weighted fill. The solver uses a
 // greedy 5-pass algorithm with priority: Length > Min/Max > Percentage > Ratio > Fill.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#8.2
 // =============================================================================
 

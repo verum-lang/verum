@@ -6,36 +6,43 @@ module core.database.sqlite.native.l1_pager.page_cache;
 // Layer: 1
 // Spec: sqlite-native.md §4.3 + §8.2
 //
+
 // The pager's hot path passes through this cache. Design principles:
 //
-//   1. **Generation bumps for O(1) mass invalidation**. At checkpoint
-//      time the cache owner calls `bump_generation()`; every frame
-//      carrying a stale generation is logically invalidated without
-//      touching individual entries. Matches SQLite's per-txn cache
-//      sweeping but without the O(N) iteration.
+
+//  1. **Generation bumps for O(1) mass invalidation**. At checkpoint
+//  time the cache owner calls `bump_generation()`; every frame
+//  carrying a stale generation is logically invalidated without
+//  touching individual entries. Matches SQLite's per-txn cache
+//  sweeping but without the O(N) iteration.
 //
-//   2. **LRU eviction**. Frames are evicted in least-recently-used
-//      order, but only if `pin_count == 0`. A pinned frame cannot be
-//      evicted (would break pager correctness if its bytes are about
-//      to be written to WAL).
+
+//  2. **LRU eviction**. Frames are evicted in least-recently-used
+//  order, but only if `pin_count == 0`. A pinned frame cannot be
+//  evicted (would break pager correctness if its bytes are about
+//  to be written to WAL).
 //
-//   3. **Cap by count, not bytes**. The pager calls `configure(max)`
-//      with a count derived from `PRAGMA cache_size`; the cache
-//      enforces it. Byte accounting adds no safety and costs on the
-//      hot path.
+
+//  3. **Cap by count, not bytes**. The pager calls `configure(max)`
+//  with a count derived from `PRAGMA cache_size`; the cache
+//  enforces it. Byte accounting adds no safety and costs on the
+//  hot path.
 //
-//   4. **Pluggable arena**. The current body uses a plain `Map` backing
-//      store. The production CBGR-arena version (§8.2) drops in
-//      behind the same API once `core.mem.arena.bump_generation` is
-//      exposed as a first-class method; callers don't change.
+
+//  4. **Pluggable arena**. The current body uses a plain `Map` backing
+//  store. The production CBGR-arena version (§8.2) drops in
+//  behind the same API once `core.mem.arena.bump_generation` is
+//  exposed as a first-class method; callers don't change.
 //
+
 // Invariants (enforced by tests):
 //
-//   * A frame returned by `get` is either freshly loaded (miss) or
-//     was in the cache at cache generation ≥ `current_gen` (hit).
-//   * After `bump_generation`, a subsequent `get(page_no)` misses on
-//     entries whose last-touch gen was below the new gen.
-//   * `unpin` after `pin` decrements by 1 and never goes negative.
+
+//  * A frame returned by `get` is either freshly loaded (miss) or
+//  was in the cache at cache generation ≥ `current_gen` (hit).
+//  * After `bump_generation`, a subsequent `get(page_no)` misses on
+//  entries whose last-touch gen was below the new gen.
+//  * `unpin` after `pin` decrements by 1 and never goes negative.
 // =============================================================================
 
 mount core.*;
@@ -64,6 +71,7 @@ public type CachedFrame is {
 
 /// Bounded LRU cache. Caller invariant: `max_frames > 0`.
 ///
+
 /// `page_nos` mirrors the resident `frames` keys to support O(N)
 /// iteration without going through `Map.keys()` — the in-tree iterator
 /// dispatch has a known monomorphisation gap on `MapKeys<Int, _>` that
@@ -83,7 +91,7 @@ public type PageCache is {
     misses: Int,
     evictions: Int,
     /// Peak frame count — survives `reset_stats` until cleared via
-    /// `clear`.  Used by capacity-tuning helpers in PRAGMA
+    /// `clear`. Used by capacity-tuning helpers in PRAGMA
     /// cache_size auto-adjust experiments.
     peak_size: Int,
 };
@@ -129,7 +137,8 @@ implement PageCache {
     /// but stale" — both return `None` so the caller can fetch from
     /// the backing store. `Some`-return increments the hit counter.
     ///
-    /// HOT PATH.  `Map.get` returns `V` by value (a copy), so the
+
+    /// HOT PATH. `Map.get` returns `V` by value (a copy), so the
     /// owned `existing` we read here can be moved into the
     /// re-insert without an explicit `.data.clone()` — saves one
     /// page-sized List<Byte> copy per cache hit (4KB-32KB / hit).
@@ -146,7 +155,7 @@ implement PageCache {
             self.misses = self.misses + 1;
             return None;
         }
-        // Refresh access-tick.  `existing` is already an owned copy
+        // Refresh access-tick. `existing` is already an owned copy
         // so we move its `data` into the new frame instead of
         // cloning — the old map slot will be overwritten by insert.
         let tick = self.next_tick;
@@ -200,8 +209,8 @@ implement PageCache {
     // Pinning
     // =========================================================================
 
-    /// Pin a frame so LRU eviction skips it.  Returns false if not
-    /// present.  HOT PATH — moves `existing.data` rather than
+    /// Pin a frame so LRU eviction skips it. Returns false if not
+    /// present. HOT PATH — moves `existing.data` rather than
     /// cloning (the old map slot is overwritten by insert).
     public fn pin(&mut self, page_no: Int) -> Bool {
         if !self.frames.contains_key(page_no) { return false; }
@@ -218,7 +227,7 @@ implement PageCache {
         true
     }
 
-    /// Release one pin reference.  Returns false if not present or
+    /// Release one pin reference. Returns false if not present or
     /// already at zero (caller bug).
     public fn unpin(&mut self, page_no: Int) -> Bool {
         if !self.frames.contains_key(page_no) { return false; }
@@ -253,16 +262,16 @@ implement PageCache {
         true
     }
 
-    /// Probe the dirty flag without bumping the LRU tick.  Used by
+    /// Probe the dirty flag without bumping the LRU tick. Used by
     /// the checkpointer to filter clean pages out of its writeback
-    /// loop.  O(1).
+    /// loop. O(1).
     public fn is_dirty(&self, page_no: Int) -> Bool {
         if !self.frames.contains_key(page_no) { return false; }
         self.frames.get(page_no).dirty
     }
 
-    /// Probe the pin count without bumping the LRU tick.  Used by
-    /// tests + assertion paths.  O(1).
+    /// Probe the pin count without bumping the LRU tick. Used by
+    /// tests + assertion paths. O(1).
     public fn pin_count_of(&self, page_no: Int) -> Int {
         if !self.frames.contains_key(page_no) { return 0; }
         self.frames.get(page_no).pin_count
@@ -314,7 +323,7 @@ implement PageCache {
         self.current_gen = self.current_gen + 1;
     }
 
-    /// Remove `pn` from the parallel `page_nos` index.  Linear scan
+    /// Remove `pn` from the parallel `page_nos` index. Linear scan
     /// + swap-remove preserves O(N) worst-case without disturbing
     /// the LRU access order tracking (which lives on the frame, not
     /// the index).
@@ -345,9 +354,9 @@ implement PageCache {
     public fn eviction_count(&self) -> Int { self.evictions }
     public fn peak_occupancy(&self) -> Int { self.peak_size }
 
-    /// Cache hit rate in basis points (0..10000).  Avoids floating
+    /// Cache hit rate in basis points (0..10000). Avoids floating
     /// point on the hot stats path; PRAGMA cache_stats divides by
-    /// 100 for percent.  Returns 0 if no probes have happened yet.
+    /// 100 for percent. Returns 0 if no probes have happened yet.
     public fn hit_rate_bps(&self) -> Int {
         let total = self.hits + self.misses;
         if total <= 0 { return 0; }
@@ -356,7 +365,7 @@ implement PageCache {
 
     /// Reset hit / miss / eviction counters — typically called after
     /// a checkpoint to distinguish per-segment cache behaviour from
-    /// the cumulative running total.  Peak occupancy resets to the
+    /// the cumulative running total. Peak occupancy resets to the
     /// current frame count rather than zero (it's a high-water mark
     /// for tuning, and the live working set should remain visible).
     public fn reset_stats(&mut self) {
@@ -366,9 +375,9 @@ implement PageCache {
         self.peak_size = self.frames.len();
     }
 
-    /// Enumerate every dirty frame at the current generation.  Used
+    /// Enumerate every dirty frame at the current generation. Used
     /// by the checkpointer to drain pending writes before bumping
-    /// the generation.  Returns owned page numbers so the caller
+    /// the generation. Returns owned page numbers so the caller
     /// can iterate without holding a borrow on the map.
     public fn dirty_pages(&self) -> List<Int> {
         let mut out: List<Int> = List.new();
@@ -384,8 +393,8 @@ implement PageCache {
         out
     }
 
-    /// Total bytes held across all cached frames.  Diagnostic only —
-    /// the cap is per-frame-count, not bytes.  O(N) walk; intended
+    /// Total bytes held across all cached frames. Diagnostic only —
+    /// the cap is per-frame-count, not bytes. O(N) walk; intended
     /// for `PRAGMA cache_stats` reporting and tuning UIs.
     public fn total_bytes(&self) -> Int {
         let mut total: Int = 0;

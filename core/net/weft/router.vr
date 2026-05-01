@@ -2,7 +2,7 @@
 // core/net/weft/router.vr — Radix-tree HTTP router
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §5.4
+// Spec: internal/specs/net-framework.md §5.4
 // =============================================================================
 
 module core.net.weft.router;
@@ -152,6 +152,7 @@ implement Router {
     /// sub-router in registration order; falls through to `fallback`
     /// otherwise.
     ///
+
     /// Requests whose path starts with `prefix + "/"` have that prefix
     /// stripped before being handed to the inner router, so a sub-router
     /// registered under `/api/v1` sees paths like `/users/42` in its own
@@ -200,7 +201,7 @@ implement Router {
         }
 
         // 2. Nested sub-routers in registration order. The first
-        //    prefix that matches wins; we strip the prefix and dispatch.
+        //  prefix that matches wins; we strip the prefix and dispatch.
         for entry in self.nested.iter() {
             match strip_prefix(&req.path, &entry.prefix) {
                 None => continue,

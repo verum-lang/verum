@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // "file:/tmp/x.db?cache=shared&mode=rwc" → three keyed parameters.
 // sqlite3_uri_boolean treats "1" / "yes" / "true" / "on" as true and
 // "0" / "no" / "false" / "off" as false; anything else falls through

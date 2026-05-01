@@ -1,58 +1,69 @@
 //! Hot Code Replacement for JIT.
 //!
+
 //! Enables live code updates without restarting the application.
 //! Functions can be replaced at runtime while maintaining state.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                     Hot Code Replacement Pipeline                            │
+//! │ Hot Code Replacement Pipeline │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!
-//!   Updated Source
-//!         │
-//!         ▼
-//! ┌─────────────────┐    ┌─────────────────┐
-//! │  Change Detect  │───▶│   Validation    │  Type compatibility check
-//! │  (file watch)   │    │   (signature)   │
-//! └─────────────────┘    └────────┬────────┘
-//!                                 │
-//!                                 ▼
-//!                        ┌─────────────────┐
-//!                        │  Compile New    │  JIT compile new version
-//!                        │  Version        │
-//!                        └────────┬────────┘
-//!                                 │
-//!                    ┌────────────┼────────────┐
-//!                    │            │            │
-//!              ┌─────▼─────┐ ┌────▼────┐ ┌─────▼─────┐
-//!              │  Suspend  │ │  Swap   │ │  Resume   │
-//!              │  Callers  │ │  Ptr    │ │  Callers  │
-//!              └───────────┘ └─────────┘ └───────────┘
+
+//!  Updated Source
+//!  │
+//!  ▼
+//! ┌─────────────────┐ ┌─────────────────┐
+//! │ Change Detect │───▶│ Validation │ Type compatibility check
+//! │ (file watch) │ │ (signature) │
+//! └─────────────────┘ └────────┬────────┘
+//!  │
+//!  ▼
+//!  ┌─────────────────┐
+//!  │ Compile New │ JIT compile new version
+//!  │ Version │
+//!  └────────┬────────┘
+//!  │
+//!  ┌────────────┼────────────┐
+//!  │ │ │
+//!  ┌─────▼─────┐ ┌────▼────┐ ┌─────▼─────┐
+//!  │ Suspend │ │ Swap │ │ Resume │
+//!  │ Callers │ │ Ptr │ │ Callers │
+//!  └───────────┘ └─────────┘ └───────────┘
 //! ```
 //!
+
 //! # Safety
 //!
+
 //! Hot code replacement is inherently unsafe. The system provides:
 //! - Signature validation (parameter/return type checking)
 //! - Version tracking
 //! - Rollback capability
 //! - State migration hooks
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use crate::mlir::jit::{HotReloader, HotReloadConfig};
 //!
+
 //! let mut reloader = HotReloader::new(engine, HotReloadConfig::default())?;
 //!
+
 //! // Replace a function
 //! reloader.replace_function("process", new_module)?;
 //!
+
 //! // Rollback if needed
 //! if something_wrong {
-//!     reloader.rollback("process")?;
+//!  reloader.rollback("process")?;
 //! }
 //! ```
 
@@ -256,8 +267,10 @@ unsafe impl Sync for HotFunction {}
 impl HotFunction {
     /// Create a new hot function entry.
     ///
+
     /// # Safety
     ///
+
     /// The address must point to valid JIT-compiled code.
     pub unsafe fn new(name: impl Into<Text>, initial_address: *mut (), signature_hash: u64) -> Self {
         let version = FunctionVersion::new(0, initial_address, signature_hash, [0u8; 32]);
@@ -288,8 +301,10 @@ impl HotFunction {
 
     /// Replace with new version.
     ///
+
     /// # Safety
     ///
+
     /// The new address must point to valid JIT-compiled code.
     pub unsafe fn replace(&mut self, new_address: *mut (), signature_hash: u64, source_hash: [u8; 32]) -> Result<()> {
         // Mark as replacing
@@ -547,8 +562,10 @@ impl HotReloader {
 
     /// Register a function for hot reloading.
     ///
+
     /// # Safety
     ///
+
     /// The address must point to valid JIT-compiled code.
     pub unsafe fn register(
         &self,
@@ -568,6 +585,7 @@ impl HotReloader {
 
     /// Get indirection pointer for a function.
     ///
+
     /// Callers should use this pointer for all calls to support hot reloading.
     pub fn get_indirection(&self, name: &str) -> Option<*const AtomicPtr<()>> {
         self.functions
@@ -582,8 +600,10 @@ impl HotReloader {
 
     /// Replace a function with new implementation.
     ///
+
     /// # Safety
     ///
+
     /// The new address must point to valid JIT-compiled code that is
     /// compatible with the existing signature.
     pub unsafe fn replace(
@@ -740,6 +760,7 @@ impl HotReloader {
 
     /// Register a migration callback.
     ///
+
     /// Honours `HotReloadConfig.enable_migration`: when `false`,
     /// the registration is rejected with a structured error so
     /// callers can detect the policy and fall back to a different
@@ -778,6 +799,7 @@ impl HotReloader {
 
     /// Call wrapper that tracks active calls.
     ///
+
     /// Use this to wrap calls to hot-reloadable functions.
     pub fn with_tracking<F, R>(&self, name: &str, f: F) -> Option<R>
     where
@@ -817,6 +839,7 @@ impl HotReloader {
     /// `register_migration` but no production code path ever
     /// invoked it, so the field was a write-only side channel.
     ///
+
     /// The function chains callbacks: if the user registered
     /// `1 → 2` and `2 → 3` migrations, calling `migrate_state(name, 1, 3, state)`
     /// applies them in order. When no chain reaches the target
@@ -825,16 +848,19 @@ impl HotReloader {
     /// `false` the lookup returns `None` even for registered
     /// callbacks (matching the registration-time gate).
     ///
+
     /// # Arguments
     ///
+
     /// * `name` — the hot function the migrations were
-    ///   registered for
+    ///  registered for
     /// * `from_version` — the version stamp on the input `state`
     /// * `to_version` — the version stamp the caller wants to
-    ///   reach (must be ≥ `from_version`; descending chains are
-    ///   not supported)
+    ///  reach (must be ≥ `from_version`; descending chains are
+    ///  not supported)
     /// * `state` — the serialised state to transform
     ///
+
     /// Returns `Some(transformed)` when a contiguous chain of
     /// callbacks from `from_version` to `to_version` exists,
     /// `None` otherwise.
@@ -1078,6 +1104,7 @@ mod tests {
     // MigrationConfig.migrate wiring tests
     // =========================================================================
     //
+
     // Pin: `MigrationConfig.migrate` reaches a public consumer via
     // `migrate_state`. Pre-wire the callback was registered via
     // `register_migration` but no production code path ever invoked

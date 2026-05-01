@@ -4,17 +4,21 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // QUIC version number is a 32-bit integer on the wire (big-endian).
 // RFC 9000 defines:
 //
-//   * Version 0x00000000         — reserved for Version Negotiation packets.
-//   * Version 0x00000001         — QUIC v1 (current IETF standard).
-//   * Version 0x6b3343cf         — QUIC v2 (RFC 9369).
-//   * Versions matching pattern 0x?a?a?a?a (reserved for greasing).
+
+//  * Version 0x00000000 — reserved for Version Negotiation packets.
+//  * Version 0x00000001 — QUIC v1 (current IETF standard).
+//  * Version 0x6b3343cf — QUIC v2 (RFC 9369).
+//  * Versions matching pattern 0x?a?a?a?a (reserved for greasing).
 //
+
 // Warp ships only QUIC v1 in v1.0; the v2 constant is defined for
 // version-negotiation parsing and future migration.
 //
+
 // =============================================================================
 
 module core.net.quic.version;

@@ -3,22 +3,26 @@
 // =============================================================================
 // Spec: internal/specs/database.md §6.1, postgresql.org/docs/16/protocol.html
 //
+
 // Holds an open TcpStream (TLS lands when channel-binding wires up)
 // and drives the v3 protocol forward:
 //
-//   1. Build & send Startup with PgConfig parameters.
-//   2. Loop reading backend frames until ReadyForQuery:
-//        AuthRequest(SASL)         → drive SCRAM-SHA-256 client
-//        AuthRequest(SaslContinue) → continue SCRAM (server-first)
-//        AuthRequest(SaslFinal)    → verify SCRAM (server-final)
-//        AuthRequest(Ok)           → auth done; awaiting ParameterStatus...
-//        ParameterStatus           → record server parameter
-//        BackendKeyData            → record (pid, secret) for cancel
-//        ReadyForQuery             → connection ready; return success
-//        Error                     → translate + return DbError
+
+//  1. Build & send Startup with PgConfig parameters.
+//  2. Loop reading backend frames until ReadyForQuery:
+//  AuthRequest(SASL) → drive SCRAM-SHA-256 client
+//  AuthRequest(SaslContinue) → continue SCRAM (server-first)
+//  AuthRequest(SaslFinal) → verify SCRAM (server-final)
+//  AuthRequest(Ok) → auth done; awaiting ParameterStatus...
+//  ParameterStatus → record server parameter
+//  BackendKeyData → record (pid, secret) for cancel
+//  ReadyForQuery → connection ready; return success
+//  Error → translate + return DbError
 //
-//   3. simple_query(sql) drives Q → loop until ReadyForQuery.
+
+//  3. simple_query(sql) drives Q → loop until ReadyForQuery.
 //
+
 // The connection is sync — like sqlite, this matches the existing
 // core.net.tcp shape; the L4 actor wraps it in async at a later
 // step. PgConfig.connect_timeout_ms is honoured at the TCP-connect
@@ -91,9 +95,9 @@ public type PgConnection is {
     /// used by parse_data_row to interpret each value's bytes.
     last_formats: List<Int>,
     /// FIFO buffer of LISTEN/NOTIFY async events received between
-    /// query rounds.  `read_message` appends here whenever it sees
+    /// query rounds. `read_message` appends here whenever it sees
     /// a `BmNotification(...)` frame; user code drains via
-    /// `take_notifications()`.  Spec database.md §6.1.7.
+    /// `take_notifications()`. Spec database.md §6.1.7.
     notifications: List<NotificationResponse>,
 };
 
@@ -283,7 +287,7 @@ implement PgConnection {
 
     /// Read the (process_id, secret_key) pair captured at startup.
     /// Used by `cancel_running_query` and any external CancelRequest
-    /// driver.  Returns `None` if the connection never reached Ready
+    /// driver. Returns `None` if the connection never reached Ready
     /// (server didn't emit BackendKeyData yet).
     public fn backend_key_view(&self) -> Maybe<(Int, Int)> { self.backend_key }
 
@@ -291,13 +295,14 @@ implement PgConnection {
     // COPY FROM / TO — bulk-streaming protocol (spec §6.1.6)
     // -------------------------------------------------------------------------
     //
-    // Drives the protocol's COPY sub-state-machine end-to-end.  See
+
+    // Drives the protocol's COPY sub-state-machine end-to-end. See
     // `core.database.postgres.copy` for fluent builder helpers; the
     // raw drivers here are what those builders forward to.
 
     /// COPY FROM STDIN — issue `sql` (must be a `COPY ... FROM STDIN`
     /// statement), pump each pre-formatted row body as a CopyData
-    /// frame, terminate with CopyDone.  Returns the server-reported
+    /// frame, terminate with CopyDone. Returns the server-reported
     /// row count from the trailing CommandComplete.
     public fn copy_in_bytes(
         &mut self,
@@ -386,7 +391,7 @@ implement PgConnection {
     }
 
     /// Convenience: send each row as a UTF-8 line, ensuring trailing
-    /// newline.  Equivalent to `copy_in_bytes` after newline
+    /// newline. Equivalent to `copy_in_bytes` after newline
     /// normalisation; the canonical entry point for TEXT-mode COPY.
     public fn copy_in_text_lines(
         &mut self,
@@ -410,10 +415,10 @@ implement PgConnection {
         self.copy_in_bytes(sql, &bytes_rows)
     }
 
-    /// Abort an in-flight COPY FROM with a CopyFail message.  The
+    /// Abort an in-flight COPY FROM with a CopyFail message. The
     /// server logs `reason` and emits ErrorResponse on the existing
     /// socket; this method drives the round-trip back to Ready and
-    /// returns the wrapped error.  Useful in client-side validation
+    /// returns the wrapped error. Useful in client-side validation
     /// failures mid-stream.
     public fn copy_fail_in(&mut self, reason: &Text) -> Result<(), DbError> {
         let frame = copy_fail(reason);
@@ -423,7 +428,7 @@ implement PgConnection {
     }
 
     /// COPY TO STDOUT — issue `sql` (must be `COPY ... TO STDOUT`),
-    /// collect every CopyData chunk, return them.  For TEXT mode
+    /// collect every CopyData chunk, return them. For TEXT mode
     /// each chunk is typically one row; the caller concatenates and
     /// splits on newline to recover the row stream.
     public fn copy_out_bytes(
@@ -480,12 +485,13 @@ implement PgConnection {
     // LISTEN / NOTIFY — async event surface (spec §6.1.7)
     // -------------------------------------------------------------------------
     //
+
     // Postgres NotificationResponse messages may arrive at any time
-    // the server is allowed to push.  `read_message` demuxes them
+    // the server is allowed to push. `read_message` demuxes them
     // into `conn.notifications`; the methods below are the public
     // drain / subscribe interface.
 
-    /// Subscribe to `channel`.  Issues `LISTEN <channel>`; subsequent
+    /// Subscribe to `channel`. Issues `LISTEN <channel>`; subsequent
     /// `NOTIFY` calls (from this or any other connection) deliver
     /// `NotificationResponse` frames that accumulate in this
     /// connection's notification buffer.
@@ -508,8 +514,8 @@ implement PgConnection {
         }
     }
 
-    /// Send a notification on `channel` with optional `payload`.  An
-    /// empty payload omits the second argument.  Listeners on this
+    /// Send a notification on `channel` with optional `payload`. An
+    /// empty payload omits the second argument. Listeners on this
     /// channel — including this connection itself — receive a
     /// `NotificationResponse` after the surrounding tx commits
     /// (NOTIFY is transactional in Postgres).
@@ -519,7 +525,7 @@ implement PgConnection {
         if payload.len() > 0 {
             sql.push_str(&", ".clone());
             // Quote the payload — Postgres NOTIFY payloads are SQL
-            // string literals.  Use single-quote-doubling for any
+            // string literals. Use single-quote-doubling for any
             // embedded apostrophe.
             sql.push_str(&"'".clone());
             sql.push_str(&escape_single_quote(payload));
@@ -531,8 +537,8 @@ implement PgConnection {
         }
     }
 
-    /// Drain and return all pending notifications.  After this call
-    /// the buffer is empty until the next backend frame.  Most callers
+    /// Drain and return all pending notifications. After this call
+    /// the buffer is empty until the next backend frame. Most callers
     /// pair this with `wait_for_notification` for blocking subscribe
     /// loops, or with the connection's own `simple_query` /
     /// `execute` for opportunistic poll.
@@ -542,23 +548,23 @@ implement PgConnection {
         out
     }
 
-    /// Whether the buffer currently holds any notifications.  O(1).
+    /// Whether the buffer currently holds any notifications. O(1).
     public fn has_notifications(&self) -> Bool {
         self.notifications.len() > 0
     }
 
     /// Block until at least one notification is available, then
-    /// return all pending.  Sends a no-op `SELECT 1` round-trip if
+    /// return all pending. Sends a no-op `SELECT 1` round-trip if
     /// the buffer is empty — Postgres flushes pending NOTIFICATION
     /// frames into the next response, so the round-trip is sufficient
-    /// to surface them.  For a true server-push wait the caller would
+    /// to surface them. For a true server-push wait the caller would
     /// need to poll the underlying socket; v1 keeps this simple.
     public fn wait_for_notification(&mut self) -> Result<List<NotificationResponse>, DbError> {
         if self.has_notifications() {
             return Ok(self.take_notifications());
         }
         // No-op probe — flushes any pending async frames into the
-        // response stream.  Discard the (empty) result; notifications
+        // response stream. Discard the (empty) result; notifications
         // arrived alongside it and are now in the buffer.
         match self.execute(&"SELECT 1".clone()) {
             Ok(_)  => Ok(self.take_notifications()),
@@ -566,24 +572,27 @@ implement PgConnection {
         }
     }
 
-    /// Issue a CancelRequest against this connection's backend.  Per
+    /// Issue a CancelRequest against this connection's backend. Per
     /// Postgres protocol §6.1.7 the cancel must travel on a SEPARATE
     /// TCP connection (the in-flight query holds the original socket
-    /// busy).  The destination host/port + (pid, secret_key) come
+    /// busy). The destination host/port + (pid, secret_key) come
     /// from the connection's startup state.
     ///
+
     /// This call:
-    ///   1. Opens a fresh TCP socket to `host`:`port`.
-    ///   2. Sends one CancelRequest frame.
-    ///   3. Closes the cancel socket (the server does not respond).
+    ///  1. Opens a fresh TCP socket to `host`:`port`.
+    ///  2. Sends one CancelRequest frame.
+    ///  3. Closes the cancel socket (the server does not respond).
     ///
+
     /// The original connection is unaffected — the in-flight query
     /// will surface as `ErrorResponse { sql_state: "57014" }`
     /// (query_canceled) on its existing socket and then return to
-    /// Ready state.  Race notes: if the server completes the query
+    /// Ready state. Race notes: if the server completes the query
     /// before the cancel arrives, the cancel is silently ignored —
     /// matches Postgres semantics.
     ///
+
     /// The connection itself is NOT mutated by this call; the caller
     /// can keep using `self` for further queries after the cancel
     /// reply lands on it.
@@ -623,12 +632,13 @@ implement PgConnection {
 // Standalone CancelRequest driver
 // -----------------------------------------------------------------------------
 //
+
 // Module-level so callers that hold the (host, port, pid, secret_key)
 // tuple in some non-PgConnection form (logged from a worker, fetched
 // from a pool reservation, etc.) can issue a cancel without
 // reconstructing a full PgConnection value.
 
-/// Open a fresh TCP socket, write one CancelRequest, close.  The
+/// Open a fresh TCP socket, write one CancelRequest, close. The
 /// server never sends a reply — closing immediately after the write
 /// is the protocol-correct behaviour.
 public fn cancel_running_query_at(
@@ -946,8 +956,8 @@ fn drain_to_ready(conn: &mut PgConnection) -> Result<(), DbError> {
     }
 }
 
-/// Extract row count from a COPY CommandComplete tag.  Postgres
-/// emits "COPY N" where N is the integer row count.  Returns 0 on
+/// Extract row count from a COPY CommandComplete tag. Postgres
+/// emits "COPY N" where N is the integer row count. Returns 0 on
 /// malformed tag (unrecognised; safer than panicking).
 fn parse_copy_command_count(tag: &Text) -> Int {
     let raw = tag.as_bytes();
@@ -973,7 +983,7 @@ fn parse_copy_command_count(tag: &Text) -> Int {
 }
 
 /// Escape single quotes in a payload literal — `'` becomes `''` per
-/// SQL string syntax.  Used by `notify` to embed payloads inline.
+/// SQL string syntax. Used by `notify` to embed payloads inline.
 /// The caller must NOT pass anything that could already contain
 /// shell-injection characters; this is a pure SQL-string escape, not
 /// a general-purpose sanitizer.

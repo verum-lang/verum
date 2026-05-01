@@ -1,19 +1,21 @@
 //! Public dispatch entry points (single-file run / check / parse).
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 16). Houses the
 //! single-source entry points that the CLI tier-selection logic
 //! routes to:
 //!
-//!   * `run` — unified dispatch based on `CompilerOptions`
-//!     flags; routes to `run_check_only` (Checked) or
-//!     `run_native_compilation` (Built).
-//!   * `run_full_compilation` — run all phases (parse → typecheck
-//!     → verify → cbgr → interpret).
-//!   * `run_check_only` — type-check-only flow for IDEs / CI.
-//!   * `run_parse_only` — parse-only flow for VCS parse-pass tests.
-//!   * `run_compiled_vbc` — execute a pre-compiled VBC module
-//!     directly (script-mode persistent-cache hit path).
-//!   * `run_interpreter` — interpreter dispatch with args.
+
+//!  * `run` — unified dispatch based on `CompilerOptions`
+//!  flags; routes to `run_check_only` (Checked) or
+//!  `run_native_compilation` (Built).
+//!  * `run_full_compilation` — run all phases (parse → typecheck
+//!  → verify → cbgr → interpret).
+//!  * `run_check_only` — type-check-only flow for IDEs / CI.
+//!  * `run_parse_only` — parse-only flow for VCS parse-pass tests.
+//!  * `run_compiled_vbc` — execute a pre-compiled VBC module
+//!  directly (script-mode persistent-cache hit path).
+//!  * `run_interpreter` — interpreter dispatch with args.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -31,10 +33,10 @@ use super::{CompilationPipeline, RunResult};
 impl<'s> CompilationPipeline<'s> {
     /// Unified dispatch entry-point: routes to the appropriate
     /// internal `run_*` method based on the session's
-    /// `CompilerOptions`.  Centralises tier selection in one place
+    /// `CompilerOptions`. Centralises tier selection in one place
     /// so future tiers (Tier-0 interpret, MLIR JIT, MLIR AOT) extend
     /// the dispatch by adding a new arm rather than touching every
-    /// caller.  The matched [`RunResult`] tells the caller whether
+    /// caller. The matched [`RunResult`] tells the caller whether
     /// codegen produced a binary (`Built(path)`) or was skipped
     /// because `check_only=true` (`Checked`).
     pub fn run(&mut self) -> Result<RunResult> {
@@ -84,6 +86,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run type checking only (no execution)
     ///
+
     /// Note: For complex type checking scenarios, ensure RUST_MIN_STACK is set
     /// appropriately (e.g., 16MB) in the build/test environment.
     pub fn run_check_only(&mut self) -> Result<()> {
@@ -182,12 +185,14 @@ impl<'s> CompilationPipeline<'s> {
     /// Run interpreter mode
     /// Execute a pre-compiled VBC module against the given args.
     ///
+
     /// Used by the script-mode persistent cache: on a cache hit the
     /// runner deserialises the stored VBC bytes into a `VbcModule` and
     /// calls this method, skipping every front-end phase (parse,
     /// typecheck, verify, codegen) for a sub-millisecond cold start
     /// of unchanged scripts.
     ///
+
     /// Behaviour matches `phase_interpret_with_args` post-compile —
     /// builds a `VbcInterpreter`, resolves the entry function (`main`
     /// with `__verum_script_main` fallback), executes with or without

@@ -1,16 +1,20 @@
 //! Graceful Fallback System
 //!
+
 //! Verum uses a two-tier execution model:
 //! - Interpreter: VBC bytecode for development/debugging
 //! - Aot: Native code via LLVM for production
 //!
+
 //! The fallback system ensures the compiler can always make progress:
 //! - LLVM unavailable → Interpreter
 //! - AOT compilation failure → Interpreter
 //!
+
 //! Note: JIT infrastructure is preserved as an internal component of the
 //! AOT pipeline for REPL, incremental compilation, and hot reload.
 //!
+
 //! Graceful Fallback Guarantee: The compiler always produces a runnable result.
 //! If AOT compilation fails (e.g., LLVM unavailable or codegen error), the
 //! compiler falls back to VBC interpretation. This ensures developers always
@@ -92,8 +96,8 @@ impl GracefulFallback {
         #[cfg(feature = "llvm-codegen")]
         {
             // #308: use AtomicBool + Once instead of `static mut +
-            // 3 unsafe blocks`.  Same once-init semantics, zero
-            // unsafe.  Relaxed ordering is sufficient because the
+            // 3 unsafe blocks`. Same once-init semantics, zero
+            // unsafe. Relaxed ordering is sufficient because the
             // Once already provides happens-before between the
             // initialiser and every subsequent load.
             use std::sync::Once;

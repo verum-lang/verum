@@ -14,6 +14,7 @@
 )]
 //! Tests for capability tracking in the type system
 //!
+
 //! Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0
 
 use verum_common::Text;

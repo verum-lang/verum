@@ -1,37 +1,43 @@
 //! VBC → LLVM IR lowering entry point.
 //!
+
 //! This module provides the main entry point for lowering VBC (Verum Bytecode)
 //! modules to LLVM IR for the CPU compilation path.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! VBC Module
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────────────────────┐
-//! │                  VbcToLlvmLowering                       │
-//! │  - Forward declare all functions                        │
-//! │  - Lower function bodies (instruction by instruction)   │
-//! │  - Apply CBGR tier-aware optimizations                  │
+//! │ VbcToLlvmLowering │
+//! │ - Forward declare all functions │
+//! │ - Lower function bodies (instruction by instruction) │
+//! │ - Apply CBGR tier-aware optimizations │
 //! └─────────────────────────────────────────────────────────┘
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! LLVM Module
-//!     │
-//!     ├────────────────┐
-//!     ▼                ▼
-//! ┌─────────┐    ┌─────────┐
-//! │   JIT   │    │   AOT   │
-//! │ (Tier1/2│    │ (Tier3) │
-//! └─────────┘    └─────────┘
+//!  │
+//!  ├────────────────┐
+//!  ▼ ▼
+//! ┌─────────┐ ┌─────────┐
+//! │ JIT │ │ AOT │
+//! │ (Tier1/2│ │ (Tier3) │
+//! └─────────┘ └─────────┘
 //! ```
 //!
+
 //! # CBGR Tier Awareness
 //!
+
 //! The lowering process is tier-aware, generating different code based on
 //! the CBGR tier:
 //!
+
 //! - **Tier 0**: Full runtime checks (~15ns overhead per check)
 //! - **Tier 1**: Compiler-proven safe (zero overhead)
 //! - **Tier 2**: Manually marked unsafe (zero overhead)
@@ -62,37 +68,41 @@ use verum_common::well_known_types::type_names as tn;
 
 /// Panic-handling strategy for the AOT runtime.
 ///
-/// Mirrors the `[runtime].panic` Verum.toml field.  Threaded from
+
+/// Mirrors the `[runtime].panic` Verum.toml field. Threaded from
 /// `CompilerOptions` through `LoweringConfig` to `PlatformIR::
 /// emit_panic_ir`, which selects between two body shapes for the
 /// `verum_panic` runtime function:
 ///
-///   - **Unwind** (default): route the panic through
-///     `verum_exception_throw`, which longjmps to the topmost
-///     installed exception handler if one exists, falling through
-///     to `_exit(134)` (SIGABRT-equivalent) when no handler is on
-///     the stack.  Defers between the panic site and the catch
-///     point run via `verum_defer_run_to`.  Matches the documented
-///     "panic = unwind" semantic where caller-side `try { … }
-///     catch { … }` blocks intercept panics.
+
+///  - **Unwind** (default): route the panic through
+///  `verum_exception_throw`, which longjmps to the topmost
+///  installed exception handler if one exists, falling through
+///  to `_exit(134)` (SIGABRT-equivalent) when no handler is on
+///  the stack. Defers between the panic site and the catch
+///  point run via `verum_defer_run_to`. Matches the documented
+///  "panic = unwind" semantic where caller-side `try { … }
+///  catch { … }` blocks intercept panics.
 ///
-///   - **Abort**: skip the exception infrastructure entirely;
-///     emit "PANIC: …" to stderr and call `_exit(1)`.  Defers do
-///     NOT run.  Use when the binary doesn't carry exception
-///     tables (smaller footprint, faster panic emission), or when
-///     the deployment policy mandates immediate process death on
-///     any panic.
+
+///  - **Abort**: skip the exception infrastructure entirely;
+///  emit "PANIC: …" to stderr and call `_exit(1)`. Defers do
+///  NOT run. Use when the binary doesn't carry exception
+///  tables (smaller footprint, faster panic emission), or when
+///  the deployment policy mandates immediate process death on
+///  any panic.
 ///
+
 /// Pre-fix `[runtime].panic` was tracing-only at session.rs:390
 /// — manifest setting had zero effect on the emitted runtime
 /// function, which always took the abort path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanicStrategy {
     /// Route panics through verum_exception_throw (longjmp /
-    /// _exit(134)).  Matches the documented Verum.toml default.
+    /// _exit(134)). Matches the documented Verum.toml default.
     Unwind,
     /// Hard-abort on panic via _exit(1); skip defer execution and
-    /// the exception handler stack walk.  No-throw codegen.
+    /// the exception handler stack walk. No-throw codegen.
     Abort,
 }
 
@@ -148,28 +158,29 @@ pub struct LoweringConfig {
     /// the interpreter's allow-all default when no script policy is
     /// installed on the Session.
     pub permission_policy: Option<super::permissions::AotPermissionPolicy>,
-    /// Panic-handling strategy.  Selects the body shape for
+    /// Panic-handling strategy. Selects the body shape for
     /// `verum_panic` — Unwind routes through `verum_exception_throw`
     /// (longjmp / _exit(134)); Abort emits stderr + _exit(1).
     /// Threaded from `[runtime].panic` in Verum.toml.
     pub panic_strategy: PanicStrategy,
     /// Whether LLVM is allowed to perform tail-call optimisation
-    /// on emitted functions.  When `false`, every emitted function
+    /// on emitted functions. When `false`, every emitted function
     /// receives the `disable-tail-calls=true` LLVM string attribute,
     /// which suppresses TCO + tail-merging across the function's
     /// returns (matters for stack-trace fidelity in panics, debug
     /// builds, profiling, and recursion-depth diagnostics).
     /// Threaded from `[codegen].tail_call_optimization` in
-    /// Verum.toml.  Default `true` (TCO enabled — matches the
+    /// Verum.toml. Default `true` (TCO enabled — matches the
     /// documented manifest default).
     pub tail_call_optimization: bool,
     /// Whether LLVM is allowed to autovectorize loops in emitted
-    /// functions.  When `false`, every emitted function receives
+    /// functions. When `false`, every emitted function receives
     /// the `no-loop-vectorize` + `no-slp-vectorize` LLVM string
     /// attributes, which suppresses both LLVM's loop-vectorize
     /// and SLP-vectorize passes for the function regardless of
     /// opt level.
     ///
+
     /// Matters for projects that want predictable codegen — a
     /// loop that LLVM autovectorises at -O2 produces different
     /// generated code than the same loop at -O0 / -Os, which
@@ -177,6 +188,7 @@ pub struct LoweringConfig {
     /// channel resistance, and complicate review of emitted
     /// assembly for security-sensitive paths.
     ///
+
     /// Threaded from `[codegen].vectorize` in Verum.toml.
     /// Default `true` (vectorization enabled — matches the
     /// documented manifest default + LLVM's own default at
@@ -184,32 +196,35 @@ pub struct LoweringConfig {
     pub vectorize: bool,
     /// Manifest-driven runtime-bridge values that flow through to
     /// `__verum_runtime_*` LLVM globals + getter functions
-    /// (architectural prerequisite #261).  Each non-zero field
+    /// (architectural prerequisite #261). Each non-zero field
     /// overrides the corresponding stdlib runtime-side default at
     /// `AsyncRuntime::with_config` / `thread::Builder::new()
     /// .stack_size(...)`.
     ///
+
     /// Default all-zero — the stdlib falls through to its
     /// historical defaults (`num_cpus::get()`, platform stack
-    /// size).  Threaded from `pipeline/native_codegen.rs`.
+    /// size). Threaded from `pipeline/native_codegen.rs`.
     pub runtime_bridge: super::platform_ir::RuntimeBridgeValues,
     /// Manifest-driven `[codegen].inline_depth` (default 3,
-    /// validated ≤ 16 by `LanguageFeatures::validate`).  Maps to
+    /// validated ≤ 16 by `LanguageFeatures::validate`). Maps to
     /// LLVM's per-function `"inline-threshold"` string attribute,
     /// which overrides the inliner's default 225 cost-unit budget
     /// for callees considered when inlining INTO this function.
     ///
+
     /// Mapping: `threshold = inline_depth * 75`.
-    ///   - 0  → 0    (effectively suppresses inlining)
-    ///   - 1  → 75   (very conservative)
-    ///   - 2  → 150  (conservative)
-    ///   - 3  → 225  (LLVM default — emits no IR attribute,
-    ///                bit-identical to pre-wire builds)
-    ///   - 16 → 1200 (very aggressive)
+    ///  - 0 → 0 (effectively suppresses inlining)
+    ///  - 1 → 75 (very conservative)
+    ///  - 2 → 150 (conservative)
+    ///  - 3 → 225 (LLVM default — emits no IR attribute,
+    ///  bit-identical to pre-wire builds)
+    ///  - 16 → 1200 (very aggressive)
     ///
+
     /// At the default `inline_depth = 3`, the attribute is
     /// suppressed so default builds produce identical IR to
-    /// pre-wire output.  Closes the inert-defense pattern at
+    /// pre-wire output. Closes the inert-defense pattern at
     /// session.rs:448.
     pub inline_depth: u32,
     /// Manifest-driven `[runtime].futures` (#262-AOT, task #281).
@@ -305,7 +320,7 @@ impl LoweringConfig {
         self
     }
 
-    /// Set the panic strategy.  Drives the body shape of
+    /// Set the panic strategy. Drives the body shape of
     /// `verum_panic` in the emitted runtime IR — see [`PanicStrategy`].
     /// Threaded from `[runtime].panic` in Verum.toml at the codegen
     /// entry point.
@@ -315,8 +330,8 @@ impl LoweringConfig {
     }
 
     /// Set whether LLVM tail-call optimisation runs on emitted
-    /// functions.  Threaded from `[codegen].tail_call_optimization`
-    /// in Verum.toml.  When false, every emitted function receives
+    /// functions. Threaded from `[codegen].tail_call_optimization`
+    /// in Verum.toml. When false, every emitted function receives
     /// the `disable-tail-calls=true` string attribute.
     pub fn with_tail_call_optimization(mut self, enabled: bool) -> Self {
         self.tail_call_optimization = enabled;
@@ -324,8 +339,8 @@ impl LoweringConfig {
     }
 
     /// Set whether LLVM autovectorization runs on emitted
-    /// functions.  Threaded from `[codegen].vectorize` in
-    /// Verum.toml.  When false, every emitted function receives
+    /// functions. Threaded from `[codegen].vectorize` in
+    /// Verum.toml. When false, every emitted function receives
     /// the `no-loop-vectorize` + `no-slp-vectorize` string
     /// attributes.
     pub fn with_vectorize(mut self, enabled: bool) -> Self {
@@ -334,7 +349,7 @@ impl LoweringConfig {
     }
 
     /// Install manifest-driven runtime-bridge values
-    /// (architectural prerequisite #261).  Threaded from
+    /// (architectural prerequisite #261). Threaded from
     /// `pipeline/native_codegen.rs::language_features.runtime`.
     /// Each non-zero field flows into a `__verum_runtime_*` LLVM
     /// global at codegen time and reaches stdlib code through
@@ -347,10 +362,10 @@ impl LoweringConfig {
         self
     }
 
-    /// Install manifest-driven `[codegen].inline_depth`.  Maps to
+    /// Install manifest-driven `[codegen].inline_depth`. Maps to
     /// per-function `"inline-threshold"` LLVM string attribute.
     /// Threaded from `pipeline/native_codegen.rs::language_
-    /// features.codegen.inline_depth`.  At the default 3 the
+    /// features.codegen.inline_depth`. At the default 3 the
     /// attribute is suppressed (LLVM uses its built-in 225
     /// threshold), so default builds emit IR bit-identical to
     /// pre-wire output.
@@ -549,9 +564,10 @@ pub struct VbcToLlvmLowering<'ctx> {
 /// Coerce any `BasicValueEnum` to an LLVM `i1` boolean suitable for
 /// conditional branches (`JmpNot`, `JmpIf`).
 ///
+
 /// The VBC compiler may place comparison results in registers that hold
 /// pointer values (e.g. from C runtime string-comparison calls) or float
-/// values.  Calling `into_int_value()` on those panics, so we handle every
+/// values. Calling `into_int_value()` on those panics, so we handle every
 /// possible LLVM value kind explicitly.
 fn coerce_to_bool<'ctx>(
     ctx: &FunctionContext<'_, 'ctx>,
@@ -566,7 +582,7 @@ fn coerce_to_bool<'ctx>(
             if bw == 1 {
                 Ok(iv)
             } else {
-                // Non-zero → true.  Truncate to i1 (keeps the LSB which is
+                // Non-zero → true. Truncate to i1 (keeps the LSB which is
                 // the boolean value for well-formed VBC).
                 ctx.builder()
                     .build_int_truncate(iv, bool_type, name)
@@ -783,6 +799,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Set VBC-level CBGR escape analysis results.
     ///
+
     /// When set, tier decisions from the escape analysis are applied to each
     /// function during LLVM lowering. References that the escape analysis
     /// proves non-escaping are promoted from Tier 0 (~15ns) to Tier 1 (0ns).
@@ -824,6 +841,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Lower a complete VBC module to LLVM IR.
     ///
+
     /// This is the main entry point for lowering. It processes the module in phases:
     /// 1. Forward declare all functions
     /// 2. Lower function bodies
@@ -871,6 +889,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // function (e.g., stdlib and user both define `execute_with_retry`).
         // The LAST body wins (user code overrides stdlib).
         //
+
         // Dedupe key is (raw_name, arity). Different-arity overloads of the
         // same name (e.g. user `fn main()` 0-arity and stdlib
         // `darwin_entry::main(argc, argv)` 2-arity) map to DIFFERENT LLVM
@@ -948,35 +967,37 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     tracing::warn!("Skipping function '{}': {:?}", func_name, e);
 
                     // **Extern-function preservation gate** (#15 Failure 2
-                    // closure).  Pre-fix the skipped_entry fallback below
+                    // closure). Pre-fix the skipped_entry fallback below
                     // indiscriminately wrapped EVERY bodyless declaration
-                    // with a `mov w0, #0; ret`-shaped local stub.  For
+                    // with a `mov w0, #0; ret`-shaped local stub. For
                     // genuine `extern fn` declarations (Verum-side
                     // `extern fn pthread_threadid_np(...)`) this poisoned
                     // the link: the linker stopped looking for the dylib
                     // symbol and bound calls to the synthetic local stub,
                     // turning every libc call that lower_vbc_function
                     // happened to fail through into a zero-returning
-                    // no-op.  Live evidence: `verum_sys_gettid` called
+                    // no-op. Live evidence: `verum_sys_gettid` called
                     // `pthread_threadid_np` which the binary's `nm -m`
                     // showed at `(__TEXT,__text) non-external` — local
                     // stub, not the system dylib's symbol.
                     //
+
                     // Detection: `func_desc.instructions` is `None` for
                     // extern declarations (no Verum bytecode body) and
-                    // `Some(_)` for regular Verum functions.  Skip the
+                    // `Some(_)` for regular Verum functions. Skip the
                     // skipped_entry synthesis for extern declarations —
                     // the LLVM function stays bodyless, the linker
                     // resolves the call to the real dylib symbol.
                     //
+
                     // Trade-off: extern declarations whose lowering
                     // genuinely fails (rare — they're just declarations,
                     // little to lower) miss the SIGSEGV-graceful
-                    // skipped_entry safety net.  But the SIGSEGV
+                    // skipped_entry safety net. But the SIGSEGV
                     // scenario was about CALL sites resolving to null
                     // function pointers at dyld init — extern
                     // declarations don't have that issue because the
-                    // linker DOES resolve them at link time.  Net win.
+                    // linker DOES resolve them at link time. Net win.
                     if func_desc.instructions.is_none() {
                         if is_tracked {
                             tracing::debug!(
@@ -991,6 +1012,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // to any blocks missing them. Without this, GlobalDCE can't remove
                     // the function if it's referenced, causing module verification failure.
                     //
+
                     // Phase-A fallback (#106): if `lower_vbc_function` failed
                     // BEFORE emitting any block (e.g. early validation fail),
                     // the function is left as a bodyless declaration — callers
@@ -1146,15 +1168,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // emit phases, synthesise a default-return entry block. This
         // catches functions that:
         //
-        //   * Were declared by Call sites that never matched a
-        //     recognised runtime helper (so no emit_*_functions phase
-        //     wrote a body).
-        //   * Were declared as "extern" by user code intending to link
-        //     against a C library that isn't actually wired in this
-        //     build configuration.
-        //   * Were skipped during VBC lowering AFTER any other phase
-        //     could observe them.
+
+        //  * Were declared by Call sites that never matched a
+        //  recognised runtime helper (so no emit_*_functions phase
+        //  wrote a body).
+        //  * Were declared as "extern" by user code intending to link
+        //  against a C library that isn't actually wired in this
+        //  build configuration.
+        //  * Were skipped during VBC lowering AFTER any other phase
+        //  could observe them.
         //
+
         // Without this pass, dyld resolves the bodyless declarations
         // to a null function pointer at process startup; static
         // initializers (e.g. `static NEVER_FLAG: ... = ...` at
@@ -1163,6 +1187,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // gracefully — process boots, downstream code sees a default
         // value where it expected real init.
         //
+
         // Tracked under #106. Once Path B / C land (fix the underlying
         // skipping causes / wrap static initializers in Lazy<T>) this
         // safety net should rarely fire; until then it's the
@@ -1179,6 +1204,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // of this safety net patched everything indiscriminately;
             // exit/abort/malloc were caught and broke their semantics.
             //
+
             // Conservative allow-list of libc symbols that MUST be
             // resolved by ld at link time, not stubbed here.
             fn is_libc_extern(name: &str) -> bool {
@@ -1436,6 +1462,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Lower a list of pre-decoded VBC functions.
     ///
+
     /// Use this when you have already decoded the VBC functions.
     pub fn lower_functions(
         &mut self,
@@ -1517,6 +1544,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // Also normalize parameter types: user-defined types → i64, UNIT → i64
             // (UNIT params happen for `self` in methods where the type isn't resolved)
             //
+
             // Spawn functions ($spawn$) receive all args as i64 from verum_thread_spawn,
             // so force ALL their params to INT regardless of semantic type. The original
             // type info in func_desc.params is still used for register marking below.
@@ -1563,6 +1591,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // param count already exists, LLVMAddFunction returns a bitcast wrapper to
             // the existing function — silently corrupting the new function's signature.
             //
+
             // Fix: detect the collision and create the new function with a unique name.
             // The Call handler uses resolve_llvm_function() which tries suffixed names
             // to find the correct arity match.
@@ -1583,6 +1612,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // this name. Actually — the issue is the ORIGINAL declaration maps
                     // a DIFFERENT func_id. We need to skip that func_id's body.
                     //
+
                     // Simple approach: skip body lowering for ANY function whose LLVM
                     // function name doesn't match the expected name.
                     self.module.add_function(&unique_name, fn_type, None)
@@ -1659,6 +1689,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Apply optimization hints as LLVM function attributes.
     ///
+
     /// Maps VBC OptimizationHints to LLVM IR attributes:
     /// - @inline(always) -> `alwaysinline`
     /// - @inline(never) -> `noinline`
@@ -1864,14 +1895,15 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         }
 
         // Honour `[codegen].tail_call_optimization = false` from
-        // Verum.toml.  Emit the LLVM `disable-tail-calls=true`
+        // Verum.toml. Emit the LLVM `disable-tail-calls=true`
         // string attribute on every function so the backend
         // suppresses TCO + tail-merging across the function's
-        // returns.  Pre-fix the manifest field was tracing-only at
+        // returns. Pre-fix the manifest field was tracing-only at
         // session.rs:432; setting it false had zero effect on
-        // generated code.  When the default `true` is in effect, no
+        // generated code. When the default `true` is in effect, no
         // attribute is emitted and LLVM's TCO runs normally.
         //
+
         // The attribute survives LTO and applies to BOTH the
         // function's call sites and any tail-call replacement that
         // would otherwise materialise during ISel — see LLVM's
@@ -1892,12 +1924,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // emits scalar-only code regardless of opt level.
         // Pre-fix the manifest field was tracing-only at
         // session.rs:432; setting it false had zero effect on
-        // generated code.  When the default `true` is in effect,
+        // generated code. When the default `true` is in effect,
         // no attributes are emitted and LLVM's autovectorizer
         // runs normally (the `-O2+` default).
         //
+
         // Performance: zero overhead in the default path (no
-        // attribute emission, no extra IR).  When disabled,
+        // attribute emission, no extra IR). When disabled,
         // LLVM's pass manager still runs the vectorizer on
         // OTHER functions in the module — only this function is
         // gated, which is the correct granularity (function-
@@ -1914,30 +1947,32 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             llvm_fn.add_attribute(AttributeLoc::Function, no_slp);
         }
 
-        // Honour `[codegen].inline_depth` from Verum.toml.  Maps to
+        // Honour `[codegen].inline_depth` from Verum.toml. Maps to
         // LLVM's per-function `"inline-threshold"` string attribute
         // — overrides the inliner's default 225 cost-unit budget for
         // callees considered when inlining INTO this function.
         // Mapping: `threshold = inline_depth * 75` (so the default 3
-        // produces 225 = LLVM's built-in default).  Pre-fix the
+        // produces 225 = LLVM's built-in default). Pre-fix the
         // manifest field was tracing-only at session.rs:448; setting
         // it had zero effect on generated code.
         //
+
         // Performance: zero overhead in the default path
         // (`inline_depth = 3` → emit no attribute, IR
-        // bit-identical to pre-wire).  Only non-default values
+        // bit-identical to pre-wire). Only non-default values
         // emit the string attribute, and even then the cost is one
         // attribute per function (decimal int formatting) at
         // codegen time only — runtime is unchanged.
         //
+
         // The attribute survives ThinLTO and applies module-wide
         // through the LLVM legacy + new pass manager
         // (`InlineCost::getCallSiteCost` reads it via
-        // `Attribute::getValueAsString`).  Edge cases:
-        //   * `inline_depth = 0` → threshold = 0, suppresses all
-        //     inlining into this function.
-        //   * `inline_depth = 16` (validate cap) → threshold = 1200,
-        //     5.3× more aggressive than default.
+        // `Attribute::getValueAsString`). Edge cases:
+        //  * `inline_depth = 0` → threshold = 0, suppresses all
+        //  inlining into this function.
+        //  * `inline_depth = 16` (validate cap) → threshold = 1200,
+        //  5.3× more aggressive than default.
         if self.config.inline_depth != 3 {
             let threshold = self.config.inline_depth.saturating_mul(75);
             let attr = self
@@ -2301,7 +2336,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
             // Mark closure user-parameter registers based on VBC type info.
             // descriptor.params: [env_ptr, user_arg0, user_arg1, ...]
-            // VBC registers:     [cap0..capN-1, user_arg0, user_arg1, ...]
+            // VBC registers: [cap0..capN-1, user_arg0, user_arg1, ...]
             // User param at descriptor index (j+1) → VBC register (capture_count + j)
             for (j, p) in vbc_func.descriptor.params.iter().skip(1).enumerate() {
                 let reg = (capture_count + j) as u16;
@@ -3267,16 +3302,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
                     // Declare setjmp(jmp_buf*) -> i32.
                     //
+
                     // Cross-compilation-correct: dispatch on the LLVM
-                    // module's TARGET triple (not host `cfg!`).  On
+                    // module's TARGET triple (not host `cfg!`). On
                     // macOS ARM64 use `_setjmp` (non-signal-saving
                     // variant from libSystem — acceptable per the
-                    // no-libc rule).  On Linux / other Unix use
+                    // no-libc rule). On Linux / other Unix use
                     // `verum_internal_setjmp` — a Verum-emitted
                     // wrapper that traps to LLVM's
                     // `llvm.eh.sjlj.setjmp` intrinsic (libc-free; the
                     // intrinsic lowers to inline asm in the LLVM
-                    // backend, no libc symbol reference).  Currently
+                    // backend, no libc symbol reference). Currently
                     // the wrapper is declared but lacks a body — see
                     // `docs/architecture/no-libc-architecture.md` for
                     // the open punch-list item.
@@ -3400,6 +3436,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Remove LLVM functions that fail per-function verification.
     ///
+
     /// When compiling stdlib modules leniently, some functions may produce
     /// invalid LLVM IR (block structure issues, type mismatches from complex
     /// control flow). This pass verifies each function individually and removes
@@ -3445,6 +3482,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Declare POSIX/libc functions used by compiled stdlib modules.
     ///
+
     /// Compiled .vr modules (Mutex.vr, Condvar.vr, Thread.vr, Once.vr) call
     /// pthread functions directly. These must be declared in the LLVM module
     /// before VBC lowering (Phase 2) so the calls resolve correctly.
@@ -3530,6 +3568,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // `unreachable` gives LLVM a valid (if trivially dead)
         // function body that all passes can safely handle.
         //
+
         // We can't delete these functions because other code may
         // reference them as call targets — the linker resolves them
         // to C runtime stubs.
@@ -3592,6 +3631,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Remove compiled stdlib functions that use @cfg(target_os=...) dispatch.
     ///
+
     /// When compiled .vr code uses @cfg to dispatch to platform-specific modules,
     /// the @cfg is not evaluated at compile time. This produces functions that call
     /// themselves (infinite recursion). Remove them so calls fall through to C runtime.
@@ -3637,6 +3677,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // because the wrappers are only for linking, not for
         // optimization.
         //
+
         // This also skips verification for modules where
         // `skip_body_func_ids` is non-empty, as those functions have
         // mismatched signatures that would fail verification.
@@ -3684,6 +3725,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Emit global constructors and destructors from VBC module metadata.
     ///
+
     /// Static variable initializers are wrapped in a single `__verum_static_init` function
     /// that calls each init function in order. This function is registered as a global
     /// constructor so it runs before main().
@@ -3820,9 +3862,10 @@ mod tests {
     // ============================================================
     // [codegen].inline_depth wire-up pins (task #267).
     //
+
     // Pre-fix the manifest field was tracing-only at session.rs:448
     // and `LoweringConfig.inline_threshold` was a separate
-    // forward-looking knob neither field actually drove.  These
+    // forward-looking knob neither field actually drove. These
     // tests verify the new `LoweringConfig.inline_depth` is plumbed
     // through default + builder, and the cost-mapping is correct.
     // ============================================================
@@ -3830,7 +3873,7 @@ mod tests {
     #[test]
     fn inline_depth_default_is_three() {
         // Pin: documented Verum.toml default + LLVM default 225 cost
-        // budget (3 * 75 = 225).  At default value, the lowering
+        // budget (3 * 75 = 225). At default value, the lowering
         // emits no `"inline-threshold"` attribute, keeping IR
         // bit-identical to pre-wire builds.
         let config = LoweringConfig::default();
@@ -3856,9 +3899,9 @@ mod tests {
     #[test]
     fn inline_depth_cost_unit_mapping() {
         // Pin: the documented mapping `threshold = inline_depth * 75`
-        // is what the lowering emits.  Default 3 → 225 (matches
+        // is what the lowering emits. Default 3 → 225 (matches
         // LLVM's built-in default), 16 → 1200 (5.3× more
-        // aggressive), 0 → 0 (suppresses inlining).  This test pins
+        // aggressive), 0 → 0 (suppresses inlining). This test pins
         // the arithmetic so a future refactor can't silently shift
         // the cost-unit scale without also updating session.rs's
         // documentation block.
@@ -3871,7 +3914,7 @@ mod tests {
 
     #[test]
     fn inline_depth_does_not_overflow_at_u32_max() {
-        // Pin: even adversarial inputs must not panic.  The
+        // Pin: even adversarial inputs must not panic. The
         // language_features::validate gate caps at 16, so this is
         // defence-in-depth — `saturating_mul` guards the codegen
         // emission against any caller bypassing manifest validation.
@@ -3888,7 +3931,7 @@ mod tests {
     #[test]
     fn futures_enabled_default_is_true() {
         // Pin: documented Verum.toml default — async fn / spawn(...)
-        // works out of the box.  Default builds emit Spawn IR
+        // works out of the box. Default builds emit Spawn IR
         // unconditionally, matching pre-wire behaviour.
         let config = LoweringConfig::default();
         assert!(config.futures_enabled, "default must be true");
@@ -3929,7 +3972,7 @@ mod tests {
     #[test]
     fn futures_and_nurseries_independent_axes() {
         // Pin: the two flags are independent — setting one does not
-        // affect the other.  A user could plausibly disable
+        // affect the other. A user could plausibly disable
         // nurseries but keep raw spawn() (uncommon but legal).
         let config = LoweringConfig::new("t")
             .with_futures_enabled(true)

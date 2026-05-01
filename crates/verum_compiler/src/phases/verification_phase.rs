@@ -1,8 +1,10 @@
 //! Verification Pipeline Integration Phase (MIR-Based)
 //!
+
 //! This phase integrates verum_verification into the compilation pipeline,
 //! providing full verification capabilities including:
 //!
+
 //! - Level inference (Runtime/Static/Proof)
 //! - Boundary detection and proof obligation generation
 //! - SMT-based verification of contracts and refinements
@@ -10,9 +12,11 @@
 //! - CBGR escape analysis for reference optimization on MIR CFG
 //! - Transition recommendations for verification level upgrades
 //!
+
 //! **Critical**: This phase works at the MIR level (Phase 6) where we have
 //! full CFG information with explicit BoundsCheck/GenerationCheck statements.
 //!
+
 //! Verification system: three levels — runtime (CBGR checks), static (dataflow
 //! analysis), proof (SMT solver Z3/CVC5). Safety checks either proven
 //! unnecessary or executed at runtime. Never speculates on safety.
@@ -275,21 +279,21 @@ impl VerificationPhase {
         // the inert-defense pattern around six
         // VerificationPhaseConfig fields that landed on the
         // config but had no consumer in `verify_module`:
-        //   default_level                       — applies only
-        //                                         when functions
-        //                                         lack @verify
-        //   enable_smt_verification             — SMT phase not
-        //                                         in this entry
-        //                                         point
-        //   enable_transition_recommendations   — recommendations
-        //                                         engine isn't
-        //                                         driven from here
-        //   transition_strategy                 — feeds the
-        //                                         recommendations
-        //                                         engine
-        //   smt_timeout_ms                      — SMT solver
-        //                                         budget
-        //   generate_proofs                     — proof emission
+        //  default_level — applies only
+        //  when functions
+        //  lack @verify
+        //  enable_smt_verification — SMT phase not
+        //  in this entry
+        //  point
+        //  enable_transition_recommendations — recommendations
+        //  engine isn't
+        //  driven from here
+        //  transition_strategy — feeds the
+        //  recommendations
+        //  engine
+        //  smt_timeout_ms — SMT solver
+        //  budget
+        //  generate_proofs — proof emission
         debug!(
             "verify_module config: default_level={:?}, smt_verification={}, \
              transition_recommendations={}, transition_strategy={:?}, \

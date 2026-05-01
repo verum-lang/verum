@@ -4,42 +4,50 @@
 // Layer: 3 (X.509 subsystem)
 // =============================================================================
 //
+
 // X509Certificate ::= SEQUENCE { ... extensions [3] EXPLICIT Extensions OPTIONAL }
 // Extensions ::= SEQUENCE SIZE (1..MAX) OF Extension
 // Extension ::= SEQUENCE {
-//     extnID    OBJECT IDENTIFIER,
-//     critical  BOOLEAN DEFAULT FALSE,
-//     extnValue OCTET STRING
+//  extnID OBJECT IDENTIFIER,
+//  critical BOOLEAN DEFAULT FALSE,
+//  extnValue OCTET STRING
 // }
 //
+
 // Each extension's extnValue is DER-encoded according to the OID. We
 // model extensions as a discriminated union so downstream verify code
 // pattern-matches instead of re-parsing.
 //
+
 // # Critical extensions
 //
+
 // RFC 5280 §4.2 ("A certificate-using system MUST reject the
 // certificate if it encounters a critical extension it does not
 // recognize or a critical extension that contains information that
 // it cannot process."). We preserve the `critical` flag on every
 // parsed extension so the chain validator can enforce this rule.
 //
+
 // # WebPKI coverage
 //
+
 // The mandatory-to-process set for a TLS 1.3 cert validator:
 //
-//   - basicConstraints      (critical on CAs)
-//   - keyUsage              (critical on CAs)
-//   - subjectAltName        (critical on EE with no CN — SAN is the
-//                            sole hostname source per RFC 6125)
-//   - extendedKeyUsage      (critical on EE for serverAuth/clientAuth)
-//   - nameConstraints       (critical when CA constrains its subtree)
-//   - authorityKeyIdentifier (non-critical; helps chain build)
-//   - subjectKeyIdentifier  (non-critical; helps chain build)
-//   - certificatePolicies   (critical in some CA policies)
-//   - cRLDistributionPoints (optional; we parse but don't pull CRLs v1)
-//   - authorityInfoAccess   (optional; carries OCSP + caIssuers URIs)
+
+//  - basicConstraints (critical on CAs)
+//  - keyUsage (critical on CAs)
+//  - subjectAltName (critical on EE with no CN — SAN is the
+//  sole hostname source per RFC 6125)
+//  - extendedKeyUsage (critical on EE for serverAuth/clientAuth)
+//  - nameConstraints (critical when CA constrains its subtree)
+//  - authorityKeyIdentifier (non-critical; helps chain build)
+//  - subjectKeyIdentifier (non-critical; helps chain build)
+//  - certificatePolicies (critical in some CA policies)
+//  - cRLDistributionPoints (optional; we parse but don't pull CRLs v1)
+//  - authorityInfoAccess (optional; carries OCSP + caIssuers URIs)
 //
+
 // =============================================================================
 
 module core.security.x509.ext;
@@ -180,9 +188,10 @@ fn dispatch(ext: RawExtension, out: &mut ExtensionSet) -> Result<(), DerError> {
 // =============================================================================
 
 /// AKI ::= SEQUENCE { keyIdentifier [0] IMPLICIT OCTET STRING OPTIONAL,
-///                    authorityCertIssuer [1] IMPLICIT GeneralNames OPTIONAL,
-///                    authorityCertSerialNumber [2] IMPLICIT INTEGER OPTIONAL }
+///  authorityCertIssuer [1] IMPLICIT GeneralNames OPTIONAL,
+///  authorityCertSerialNumber [2] IMPLICIT INTEGER OPTIONAL }
 ///
+
 /// We extract only the keyIdentifier — sufficient for chain building.
 fn parse_aki_key_id(value: &[Byte]) -> Result<List<Byte>, DerError> {
     let mut r = DerReader.new(value);

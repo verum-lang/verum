@@ -5,21 +5,25 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Platform-native async I/O engine:
-//   - macOS: kqueue
-//   - Linux: epoll
-//   - Windows: IOCP (via sys/windows/io.vr IocpDriver)
+//  - macOS: kqueue
+//  - Linux: epoll
+//  - Windows: IOCP (via sys/windows/io.vr IocpDriver)
 //
+
 // The IoEngine allows registering file descriptors for readiness
 // notification, polling for events, and performing async socket operations.
 //
+
 // Usage:
-//   let engine = IoEngine.new();
-//   engine.register(fd, IoEvent.Read);    // Watch for readability
-//   let n = engine.poll(64, 5_000_000);   // Poll with 5ms timeout
-//   engine.deregister(fd);
-//   engine.destroy();
+//  let engine = IoEngine.new();
+//  engine.register(fd, IoEvent.Read); // Watch for readability
+//  let n = engine.poll(64, 5_000_000); // Poll with 5ms timeout
+//  engine.deregister(fd);
+//  engine.destroy();
 //
+
 // =============================================================================
 
 module engine;
@@ -52,6 +56,7 @@ implement IoEvent {
 
 /// Platform-native async I/O multiplexer.
 ///
+
 /// Wraps kqueue (macOS), epoll (Linux), or IOCP (Windows).
 /// Zero-allocation polling with bounded event buffers.
 public type IoEngine is {
@@ -99,10 +104,11 @@ implement IoEngine {
 
     /// Create with a custom event-buffer capacity.
     ///
+
     /// Out-of-range capacity (≤ 0 or > IO_ENGINE_MAX_CAPACITY) is clamped
     /// rather than failed, since this is a perf knob, not a contract:
-    ///   - capacity ≤ 0 → use the default (256)
-    ///   - capacity > IO_ENGINE_MAX_CAPACITY → cap at the maximum
+    ///  - capacity ≤ 0 → use the default (256)
+    ///  - capacity > IO_ENGINE_MAX_CAPACITY → cap at the maximum
     public fn with_capacity(capacity: Int) -> IoEngine {
         let cap = if capacity <= 0 {
             IO_ENGINE_DEFAULT_CAPACITY
@@ -142,6 +148,7 @@ implement IoEngine {
 
     /// Poll for ready events.
     ///
+
     /// max: maximum number of events to return (clamped to
     /// `IO_ENGINE_MAX_POLL_EVENTS`).
     /// timeout_ns: timeout in nanoseconds (-1 = block forever, 0 = non-blocking).

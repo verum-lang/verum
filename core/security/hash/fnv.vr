@@ -6,34 +6,44 @@
 // Reference: http://www.isthe.com/chongo/tech/comp/fnv/
 // =============================================================================
 //
+
 // FNV — the tiniest useful non-crypto hash. Single multiply-XOR loop,
 // no tables, no vectorisation, no startup cost. Popular for:
 //
-//   * HashMap internals where cache-friendliness beats avalanche
-//     quality (Python's dict used FNV through 3.3).
-//   * Fast fingerprints for short strings (DNS labels, log tags).
-//   * Tiny embedded targets where even XXH64's tables are too much.
+
+//  * HashMap internals where cache-friendliness beats avalanche
+//  quality (Python's dict used FNV through 3.3).
+//  * Fast fingerprints for short strings (DNS labels, log tags).
+//  * Tiny embedded targets where even XXH64's tables are too much.
 //
+
 // # Variants
 //
-//   FNV-1    — hash = hash × prime; hash = hash ^ byte
-//   FNV-1a   — hash = hash ^ byte; hash = hash × prime     (preferred)
+
+//  FNV-1 — hash = hash × prime; hash = hash ^ byte
+//  FNV-1a — hash = hash ^ byte; hash = hash × prime (preferred)
 //
+
 // FNV-1a has marginally better avalanche than FNV-1; modern code
 // universally uses it. We expose both for byte-exact compatibility
 // with legacy artefacts (e.g. DNSSEC NSEC3 historical records).
 //
+
 // # Widths
 //
-//   32-bit: FNV_OFFSET_32  = 0x811C9DC5;   FNV_PRIME_32 = 0x01000193
-//   64-bit: FNV_OFFSET_64  = 0xCBF29CE484222325; FNV_PRIME_64 = 0x100000001B3
+
+//  32-bit: FNV_OFFSET_32 = 0x811C9DC5; FNV_PRIME_32 = 0x01000193
+//  64-bit: FNV_OFFSET_64 = 0xCBF29CE484222325; FNV_PRIME_64 = 0x100000001B3
 //
+
 // # NOT cryptographic
 //
+
 // Same caveat as XXH64 / MurmurHash3 — adversarial inputs trivially
 // collide. Use Sha256 / Blake2b for integrity against untrusted
 // peers.
 //
+
 // =============================================================================
 
 module core.security.hash.fnv;

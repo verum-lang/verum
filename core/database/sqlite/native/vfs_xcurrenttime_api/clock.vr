@@ -21,7 +21,7 @@ public fn is_deprecated(m: &VfsCurrentTimeMethod) -> Bool {
 }
 
 // Constants the engine uses internally.
-//   Unix epoch = JD 2440587.5 (midnight 1970-01-01 UTC).
+//  Unix epoch = JD 2440587.5 (midnight 1970-01-01 UTC).
 public fn unix_epoch_julian_x10000() -> Int64 {
     // 2440587.5 stored as integer ×1e4 to avoid float dependency.
     24_405_875_000 as Int64

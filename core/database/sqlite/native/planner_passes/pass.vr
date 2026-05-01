@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.5
 //
+
 // Same shape as `optimizer/pass.vr` but operating on `PvNode` trees
 // rather than opcode streams. The runner repeats the pipeline until
 // no pass reports an edit OR `max_iterations` is reached.

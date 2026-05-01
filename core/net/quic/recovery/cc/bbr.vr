@@ -5,55 +5,65 @@
 // Dependencies: core, core.time
 // =============================================================================
 //
+
 // BBR (Bottleneck Bandwidth and Round-trip propagation time) is a
 // model-based congestion controller developed by Google that operates
 // directly on two primary signals:
 //
-//   bottleneck_bw — windowed max-filter of delivery rate over recent
-//                   packets (10-RTT window).
-//   min_rtt       — windowed min-filter of RTT samples over the last
-//                   10 seconds.
+
+//  bottleneck_bw — windowed max-filter of delivery rate over recent
+//  packets (10-RTT window).
+//  min_rtt — windowed min-filter of RTT samples over the last
+//  10 seconds.
 //
+
 // BDP (bandwidth-delay product) = bottleneck_bw × min_rtt drives both
 // pacing rate (= pacing_gain × bottleneck_bw) and cwnd (= cwnd_gain
 // × BDP).
 //
+
 // Unlike loss-based controllers (NewReno, CUBIC), BBR keeps the
 // bottleneck at full utilisation without filling buffers — it
 // deliberately refuses to overshoot BDP except during controlled
 // probe phases. This gives ~10× lower median RTT and ~5× higher
 // throughput than CUBIC on typical cellular / transoceanic paths.
 //
+
 // # State machine
 //
-//   Startup   — exponential bandwidth discovery. pacing_gain =
-//               cwnd_gain = 2/ln(2) ≈ 2.89. Exits when three
-//               consecutive RTTs show < 25% growth in measured
-//               bandwidth (bottleneck reached).
-//   Drain     — one-time flush of queues built during Startup.
-//               pacing_gain = 1/2.89 ≈ 0.35; stays until in-flight
-//               ≤ BDP. Then promotes to ProbeBW.
-//   ProbeBW   — steady-state operation. 8-phase gain cycle over 8
-//               RTTs: one RTT at 1.25× gain (probe up), one RTT at
-//               0.75× gain (drain), six RTTs at 1.0× gain (cruise).
-//               Cycle rotates randomly on entry + on each min-RTT
-//               expiry to avoid synchronised probing across flows.
-//   ProbeRTT  — every 10s, drop cwnd to 4 × MSS for 200 ms to
-//               re-measure min_rtt (detects route change / any
-//               buffer drain event); returns to ProbeBW.
+
+//  Startup — exponential bandwidth discovery. pacing_gain =
+//  cwnd_gain = 2/ln(2) ≈ 2.89. Exits when three
+//  consecutive RTTs show < 25% growth in measured
+//  bandwidth (bottleneck reached).
+//  Drain — one-time flush of queues built during Startup.
+//  pacing_gain = 1/2.89 ≈ 0.35; stays until in-flight
+//  ≤ BDP. Then promotes to ProbeBW.
+//  ProbeBW — steady-state operation. 8-phase gain cycle over 8
+//  RTTs: one RTT at 1.25× gain (probe up), one RTT at
+//  0.75× gain (drain), six RTTs at 1.0× gain (cruise).
+//  Cycle rotates randomly on entry + on each min-RTT
+//  expiry to avoid synchronised probing across flows.
+//  ProbeRTT — every 10s, drop cwnd to 4 × MSS for 200 ms to
+//  re-measure min_rtt (detects route change / any
+//  buffer drain event); returns to ProbeBW.
 //
+
 // # BBRv2 additions over BBRv1
 //
-//   * ECN-CE response — treat ECN marks as loss signals, cap
-//     inflight at `inflight_hi` from recent-RTT bw estimates.
-//   * Loss response — BBRv1 ignored loss; v2 cuts inflight_hi when
-//     lost-bytes-per-RTT exceeds `LossThreshold = 2%`.
-//   * MaxBwFilter mode switching between ProbeBW_Down / Cruise /
-//     Refill / Up phases for tighter convergence.
+
+//  * ECN-CE response — treat ECN marks as loss signals, cap
+//  inflight at `inflight_hi` from recent-RTT bw estimates.
+//  * Loss response — BBRv1 ignored loss; v2 cuts inflight_hi when
+//  lost-bytes-per-RTT exceeds `LossThreshold = 2%`.
+//  * MaxBwFilter mode switching between ProbeBW_Down / Cruise /
+//  Refill / Up phases for tighter convergence.
 //
+
 // This implementation ships the v1 core cycle plus v2 loss/ECN
 // additions behind the existing `CongestionCtrl` protocol.
 //
+
 // =============================================================================
 
 module core.net.quic.recovery.cc.bbr;
@@ -114,10 +124,12 @@ public type ProbeBwPhase is Up | Down | Cruise(UInt32);
 // Bandwidth filter — windowed max
 // =============================================================================
 //
+
 // Classic Three-Wide Max Filter (Kathleen Nichols) bounded at 10
 // samples. Runs O(1) per update under "windowed max" semantics via
 // three rotating accumulators.
 //
+
 // =============================================================================
 
 type BandwidthFilter is {

@@ -5,74 +5,83 @@
 // Dependencies: core.security.{kdf, hash}, core.net.tls13.cipher_suite
 // =============================================================================
 //
-//                  0
-//                  |
-//                  v
-//   PSK ->  HKDF-Extract = Early Secret
-//                  |
-//                  +-----> Derive-Secret(., "ext binder" | "res binder", "")
-//                  |                     = binder_key
-//                  |
-//                  +-----> Derive-Secret(., "c e traffic", ClientHello)
-//                  |                     = client_early_traffic_secret
-//                  |
-//                  +-----> Derive-Secret(., "e exp master", ClientHello)
-//                  |                     = early_exporter_master_secret
-//                  v
-//            Derive-Secret(., "derived", "")
-//                  |
-//                  v
-//    (EC)DHE -> HKDF-Extract = Handshake Secret
-//                  |
-//                  +-----> Derive-Secret(., "c hs traffic", ClientHello..ServerHello)
-//                  |                     = client_handshake_traffic_secret
-//                  |
-//                  +-----> Derive-Secret(., "s hs traffic", ClientHello..ServerHello)
-//                  |                     = server_handshake_traffic_secret
-//                  v
-//            Derive-Secret(., "derived", "")
-//                  |
-//                  v
-//    0 -> HKDF-Extract = Master Secret
-//                  |
-//                  +-----> Derive-Secret(., "c ap traffic", ClientHello..server Finished)
-//                  |                     = client_application_traffic_secret_0
-//                  |
-//                  +-----> Derive-Secret(., "s ap traffic", ClientHello..server Finished)
-//                  |                     = server_application_traffic_secret_0
-//                  |
-//                  +-----> Derive-Secret(., "exp master", ClientHello..server Finished)
-//                  |                     = exporter_master_secret
-//                  |
-//                  +-----> Derive-Secret(., "res master", ClientHello..client Finished)
-//                                        = resumption_master_secret
+
+//  0
+//  |
+//  v
+//  PSK -> HKDF-Extract = Early Secret
+//  |
+//  +-----> Derive-Secret(., "ext binder" | "res binder", "")
+//  | = binder_key
+//  |
+//  +-----> Derive-Secret(., "c e traffic", ClientHello)
+//  | = client_early_traffic_secret
+//  |
+//  +-----> Derive-Secret(., "e exp master", ClientHello)
+//  | = early_exporter_master_secret
+//  v
+//  Derive-Secret(., "derived", "")
+//  |
+//  v
+//  (EC)DHE -> HKDF-Extract = Handshake Secret
+//  |
+//  +-----> Derive-Secret(., "c hs traffic", ClientHello..ServerHello)
+//  | = client_handshake_traffic_secret
+//  |
+//  +-----> Derive-Secret(., "s hs traffic", ClientHello..ServerHello)
+//  | = server_handshake_traffic_secret
+//  v
+//  Derive-Secret(., "derived", "")
+//  |
+//  v
+//  0 -> HKDF-Extract = Master Secret
+//  |
+//  +-----> Derive-Secret(., "c ap traffic", ClientHello..server Finished)
+//  | = client_application_traffic_secret_0
+//  |
+//  +-----> Derive-Secret(., "s ap traffic", ClientHello..server Finished)
+//  | = server_application_traffic_secret_0
+//  |
+//  +-----> Derive-Secret(., "exp master", ClientHello..server Finished)
+//  | = exporter_master_secret
+//  |
+//  +-----> Derive-Secret(., "res master", ClientHello..client Finished)
+//  = resumption_master_secret
 //
+
 // Two helpers underlie the whole schedule:
 //
-//   HKDF-Expand-Label(Secret, Label, Context, Length) =
-//       HKDF-Expand(Secret, HkdfLabel, Length)
-//   where HkdfLabel encodes:
-//       struct {
-//           uint16 length = Length;
-//           opaque label<7..255> = "tls13 " + Label;
-//           opaque context<0..255> = Context;
-//       }
+
+//  HKDF-Expand-Label(Secret, Label, Context, Length) =
+//  HKDF-Expand(Secret, HkdfLabel, Length)
+//  where HkdfLabel encodes:
+//  struct {
+//  uint16 length = Length;
+//  opaque label<7..255> = "tls13 " + Label;
+//  opaque context<0..255> = Context;
+//  }
 //
-//   Derive-Secret(Secret, Label, Messages) =
-//       HKDF-Expand-Label(Secret, Label, Transcript-Hash(Messages), Hash.length)
+
+//  Derive-Secret(Secret, Label, Messages) =
+//  HKDF-Expand-Label(Secret, Label, Transcript-Hash(Messages), Hash.length)
 //
+
 // All secrets land as `SecretBytes` (zeroise-on-drop). Per-flight keys
 // (AEAD key + IV) are derived via HKDF-Expand-Label from a traffic
 // secret:
 //
-//   key = HKDF-Expand-Label(secret, "key", "", key_length)
-//   iv  = HKDF-Expand-Label(secret, "iv",  "", iv_length)
+
+//  key = HKDF-Expand-Label(secret, "key", "", key_length)
+//  iv = HKDF-Expand-Label(secret, "iv", "", iv_length)
 //
+
 // Key update (RFC 8446 §4.6.3):
 //
-//   application_traffic_secret_N+1 =
-//       HKDF-Expand-Label(application_traffic_secret_N, "traffic upd", "", Hash.length)
+
+//  application_traffic_secret_N+1 =
+//  HKDF-Expand-Label(application_traffic_secret_N, "traffic upd", "", Hash.length)
 //
+
 // =============================================================================
 
 module core.net.tls13.keyschedule;

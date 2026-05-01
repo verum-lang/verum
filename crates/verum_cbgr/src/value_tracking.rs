@@ -1,46 +1,58 @@
 //! Value Tracking for Concrete Value Analysis
 //!
+
 //! Tracks concrete values (constants, ranges, symbolic expressions) through the CFG
 //! to refine escape decisions. When a branch condition is known to be always-true or
 //! always-false, infeasible paths are pruned, reducing false escapes.
 //!
+
 //! This module implements concrete value tracking through control flow graphs
 //! to enable more precise escape analysis. By tracking constant propagation,
 //! range analysis, and symbolic execution, we can refine escape decisions
 //! based on actual runtime values.
 //!
+
 //! # Core Algorithm
 //!
+
 //! Value tracking operates in three phases:
 //!
+
 //! 1. **Value Extraction**: Extract concrete values from assignments and constants
 //! 2. **Value Propagation**: Propagate values through CFG using dataflow analysis
 //! 3. **Predicate Evaluation**: Evaluate path predicates with concrete values
 //!
+
 //! # Key Benefits
 //!
+
 //! - **Precise Range Analysis**: Prove array bounds never escape
 //! - **Constant Folding**: Evaluate conditions at compile-time
 //! - **Path Pruning**: Eliminate infeasible paths early
 //! - **Symbolic Tracking**: Handle complex expressions
 //!
+
 //! # Performance Target
 //!
+
 //! - Typical function: < 200μs
 //! - With Z3 integration: < 1ms
 //! - Overhead vs basic analysis: < 10%
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! fn conditional_escape(flag: bool, size: usize) {
-//!     let data = vec![0; size];
+//!  let data = vec![0; size];
 //!
-//!     if size < 100 {  // Value tracking: size ∈ [0, 99]
-//!         process(&data);  // ✅ Small allocation, can prove no escape
-//!     } else {
-//!         store(&data);    // ❌ Large allocation, may escape
-//!     }
+
+//!  if size < 100 { // Value tracking: size ∈ [0, 99]
+//!  process(&data); // ✅ Small allocation, can prove no escape
+//!  } else {
+//!  store(&data); // ❌ Large allocation, may escape
+//!  }
 //! }
 //! ```
 
@@ -55,9 +67,11 @@ use crate::analysis::BlockId;
 
 /// Concrete value representation
 ///
+
 /// Represents known constant values that can be tracked through the CFG.
 /// Used for constant propagation and concrete value analysis.
 ///
+
 /// Known constant values tracked through CFG for constant propagation.
 /// Enables pruning of infeasible paths in escape analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -102,13 +116,14 @@ impl ConcreteValue {
 
     /// Merge two concrete values (lattice join)
     ///
+
     /// # Lattice Structure
     /// ```text
-    ///        Top (all values)
-    ///       /   \
-    ///   const1  const2 ...
-    ///       \   /
-    ///      Unknown (no values)
+    ///  Top (all values)
+    ///  / \
+    ///  const1 const2 ...
+    ///  \ /
+    ///  Unknown (no values)
     /// ```
     #[must_use]
     pub fn merge(&self, other: &ConcreteValue) -> ConcreteValue {
@@ -220,10 +235,12 @@ pub enum BinaryOp {
 
 /// Range of possible values for integers
 ///
+
 /// Used for proving bounds constraints and refining escape analysis.
 /// For example, if we know size ∈ [0, 99], we can prove small allocations
 /// don't escape.
 ///
+
 /// Integer range [min, max] for proving bounds constraints. Example: if
 /// size is in [0, 99], the allocation is bounded and may qualify for
 /// stack promotion (NoEscape).
@@ -351,9 +368,11 @@ impl fmt::Display for ValueRange {
 
 /// Symbolic value for complex expressions
 ///
+
 /// Represents values that aren't known concretely but can be expressed
 /// symbolically for constraint solving.
 ///
+
 /// Values not known concretely but expressible symbolically for constraint solving.
 /// Used to track relationships like `x = y + 1` through the CFG.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -475,9 +494,11 @@ impl fmt::Display for SymbolicValue {
 
 /// Value state at a program point
 ///
+
 /// Maps SSA versions to their known values (concrete or range).
 /// Maintained via dataflow analysis through the CFG.
 ///
+
 /// Maps SSA versions to concrete values and range constraints at a program point.
 /// Updated via forward dataflow through the CFG, merged at join points.
 #[derive(Debug, Clone)]
@@ -583,6 +604,7 @@ impl ValueState {
 
     /// Refine state with path condition
     ///
+
     /// When we know a predicate is true/false on a path, refine the value state.
     /// For example: if (x < 10) -> refine x to [MIN, 9]
     #[must_use]
@@ -654,18 +676,21 @@ pub struct PropagationStats {
 
 /// Value propagator through CFG
 ///
+
 /// Implements dataflow analysis to propagate values through the control
 /// flow graph. Computes value state at each program point.
 ///
+
 /// # Algorithm
 /// 1. Initialize entry block with parameter values
 /// 2. Iterate CFG in topological order
 /// 3. For each block:
-///    - Merge incoming states from predecessors
-///    - Apply transfer function (evaluate operations)
-///    - Propagate to successors
+///  - Merge incoming states from predecessors
+///  - Apply transfer function (evaluate operations)
+///  - Propagate to successors
 /// 4. Fixed point reached when no changes occur
 ///
+
 /// Forward dataflow propagation engine: iterates CFG in topological order,
 /// merges incoming states at join points, applies transfer functions (evaluate
 /// operations), and propagates to successors until fixpoint.
@@ -700,17 +725,19 @@ impl ValuePropagator {
 
     /// Create a propagator with a custom configuration.
     ///
+
     /// The active configuration controls which value-tracking
     /// domains run when transfer functions execute:
     ///
+
     ///  * `enable_constant_propagation` — gates the concrete-value
-    ///    set in `propagate_constant` and the constant fast-path
-    ///    inside `propagate_binop`.
+    ///  set in `propagate_constant` and the constant fast-path
+    ///  inside `propagate_binop`.
     ///  * `enable_range_analysis` — gates the range-refinement
-    ///    branch inside `propagate_binop`.
+    ///  branch inside `propagate_binop`.
     ///  * `enable_symbolic_execution` — gates the symbolic-value
-    ///    construction in `propagate_constant`, `propagate_binop`,
-    ///    and `propagate_phi`.
+    ///  construction in `propagate_constant`, `propagate_binop`,
+    ///  and `propagate_phi`.
     #[must_use]
     pub fn with_config(config: ValueTrackingConfig) -> Self {
         Self {
@@ -902,6 +929,7 @@ impl Default for ValuePropagator {
 
 /// Path predicate for conditional branches
 ///
+
 /// Represents a boolean condition that determines which path is taken.
 /// Used to refine value states and prove path feasibility.
 #[derive(Debug, Clone)]

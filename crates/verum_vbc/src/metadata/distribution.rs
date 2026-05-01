@@ -1,24 +1,27 @@
 //! Distribution metadata for distributed tensor operations.
 //!
+
 //! Supports Monarch-inspired single-controller semantics with:
 //! - N-dimensional mesh topology
 //! - Tensor sharding specifications
 //! - Collective operations
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
-//! │                     DISTRIBUTION METADATA                                │
+//! │ DISTRIBUTION METADATA │
 //! ├─────────────────────────────────────────────────────────────────────────┤
-//! │  MeshTopology:                                                          │
-//! │    dims: [("hosts", 32), ("gpus", 8)]  // 256 total devices             │
-//! │                                                                         │
-//! │  ShardingSpec per tensor:                                               │
-//! │    tensor_dims: [None, Some("gpus")]  // Shard dim 1 across GPUs        │
-//! │                                                                         │
-//! │  CollectiveOps:                                                         │
-//! │    AllReduce, AllGather, ReduceScatter, Broadcast                       │
+//! │ MeshTopology: │
+//! │ dims: [("hosts", 32), ("gpus", 8)] // 256 total devices │
+//! │ │
+//! │ ShardingSpec per tensor: │
+//! │ tensor_dims: [None, Some("gpus")] // Shard dim 1 across GPUs │
+//! │ │
+//! │ CollectiveOps: │
+//! │ AllReduce, AllGather, ReduceScatter, Broadcast │
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 
@@ -45,6 +48,7 @@ impl MeshDim {
 
 /// N-dimensional mesh topology.
 ///
+
 /// Defines the shape of the device mesh for distributed execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeshTopology {
@@ -112,6 +116,7 @@ impl Default for MeshTopology {
 
 /// Sharding specification for a tensor.
 ///
+
 /// Maps tensor dimensions to mesh dimensions for distribution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardingSpec {

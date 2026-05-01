@@ -3,19 +3,22 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
 //
+
 // Where `OpStat` aggregates by VDBE opcode, `NodeStat` aggregates
 // by L5 plan-node identity. The L4 interpreter is wired with a
 // "current plan node" stack (managed by the codegen → it knows
 // which range of opcodes corresponds to which node), and the
 // profiler bumps the active node on each row materialised.
 //
+
 // Final output:
 //
-//   PlanNode                        Estimated  Actual    ms
-//   -------------------------------- --------- -------- -----
-//   PnTableScan(users)                  1000      9821    12
-//   └── PnFilter(active = 1)            500       4233     7
-//       └── PnSort(name)                500       4233     2
+
+//  PlanNode Estimated Actual ms
+//  -------------------------------- --------- -------- -----
+//  PnTableScan(users) 1000 9821 12
+//  └── PnFilter(active = 1) 500 4233 7
+//  └── PnSort(name) 500 4233 2
 // =============================================================================
 
 module core.database.sqlite.native.profiler.nodestat;

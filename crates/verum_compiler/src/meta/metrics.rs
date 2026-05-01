@@ -1,16 +1,20 @@
 //! Meta Evaluation Metrics
 //!
+
 //! This module provides metrics tracking for meta-programming execution,
 //! enabling performance monitoring, debugging, and optimization.
 //!
+
 //! ## Tracked Metrics
 //!
+
 //! - Builtin call counts and durations
 //! - Cache hit/miss rates for type lookups
 //! - Memory usage estimates
 //! - Recursion depth tracking
 //! - Pattern matching statistics
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

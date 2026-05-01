@@ -1,31 +1,37 @@
 //! SIMD Type Validation
 //!
+
 //! SIMD type validation: verifying SIMD vector types match hardware capabilities and element type constraints — SIMD Vector Types
 //! SIMD and tensor system: unified Tensor<T, Shape> type with compile-time shape validation, SIMD acceleration (SSE/AVX/NEON), auto-differentiation — Tensor Type System
 //!
+
 //! This module provides compile-time validation for SIMD operations including:
 //! - `Vec<T, N>` type validation (T: SimdElement, N: power of 2)
 //! - `Mask<N>` type validation for masked operations
 //! - SIMD intrinsic operand validation
 //! - @multiversion attribute validation for runtime CPU dispatch
 //!
+
 //! # SIMD Type Hierarchy
 //!
+
 //! ```text
 //! Vec<T: SimdElement, N: meta USize>
 //! │
 //! ├── 128-bit (SSE/NEON): Vec4f, Vec2d, Vec4i, Vec2l
-//! ├── 256-bit (AVX):      Vec8f, Vec4d, Vec8i, Vec4l
-//! └── 512-bit (AVX-512):  Vec16f, Vec8d, Vec16i, Vec8l
+//! ├── 256-bit (AVX): Vec8f, Vec4d, Vec8i, Vec4l
+//! └── 512-bit (AVX-512): Vec16f, Vec8d, Vec16i, Vec8l
 //! ```
 //!
+
 //! # Platform Support
 //!
-//! | Platform  | 128-bit | 256-bit | 512-bit |
+
+//! | Platform | 128-bit | 256-bit | 512-bit |
 //! |-----------|---------|---------|---------|
-//! | x86_64    | SSE4.2  | AVX2    | AVX-512 |
-//! | aarch64   | NEON    | -       | SVE     |
-//! | riscv64   | V ext   | V ext   | V ext   |
+//! | x86_64 | SSE4.2 | AVX2 | AVX-512 |
+//! | aarch64 | NEON | - | SVE |
+//! | riscv64 | V ext | V ext | V ext |
 
 use verum_ast::span::Span;
 use verum_common::{List, Map, Text};
@@ -101,6 +107,7 @@ impl std::error::Error for SimdTypeError {}
 
 /// Valid SIMD element types.
 ///
+
 /// These are the types that can be used as elements in Vec<T, N>.
 /// Each type has a known bit width used for lane count calculations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -318,6 +325,7 @@ impl SimdTargetFeature {
 
 /// SIMD type validation checker
 ///
+
 /// Provides compile-time validation for SIMD operations ensuring:
 /// - Element types implement SimdElement protocol
 /// - Lane counts are valid powers of 2
@@ -422,6 +430,7 @@ impl SimdTypeChecker {
 
     /// Validate a Vec<T, N> type.
     ///
+
     /// Checks:
     /// - T is a valid SimdElement type
     /// - N is a power of 2
@@ -512,6 +521,7 @@ impl SimdTypeChecker {
 
     /// Validate a Mask<N> type.
     ///
+
     /// Checks:
     /// - N is a power of 2
     /// - N is a valid lane count for some SIMD width
@@ -557,6 +567,7 @@ impl SimdTypeChecker {
 
     /// Validate a SIMD intrinsic call.
     ///
+
     /// Checks operand types match and operation is valid for element type.
     pub fn validate_intrinsic(
         &mut self,
@@ -769,6 +780,7 @@ impl SimdTypeChecker {
 
     /// Validate @multiversion attribute configuration.
     ///
+
     /// Checks:
     /// - All target features are valid
     /// - Features are supported on target platform

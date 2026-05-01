@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.1
 //
+
 // Three pre-canned policies; users can plug in custom ones via the
 // `EvictionPolicy` protocol.
 //
-//   * `Lru`     — evict the entry with the oldest `last_used_ns`
-//   * `Lfu`     — evict the entry with the smallest `use_count`,
-//                 ties broken by oldest `last_used_ns`
-//   * `Fifo`    — evict the entry that was inserted earliest
+
+//  * `Lru` — evict the entry with the oldest `last_used_ns`
+//  * `Lfu` — evict the entry with the smallest `use_count`,
+//  ties broken by oldest `last_used_ns`
+//  * `Fifo` — evict the entry that was inserted earliest
 // =============================================================================
 
 module core.database.sqlite.native.stmt_cache.policy;

@@ -1,5 +1,6 @@
 //! LLVM Pass Infrastructure
 //!
+
 //! LLVM 17+ removed the legacy pass manager. This module provides the new pass builder API.
 
 use verum_llvm_sys::core::{
@@ -62,6 +63,7 @@ impl<'ctx> PassManagerSubType for FunctionValue<'ctx> {
 
 /// A manager for running optimization and simplification passes.
 ///
+
 /// Note: In LLVM 17+, the legacy pass manager was removed. Use `PassBuilderOptions`
 /// with `Module::run_passes` for the new pass pipeline.
 #[derive(Debug)]
@@ -117,36 +119,43 @@ impl<T> Drop for PassManager<T> {
 
 /// Options for the new pass builder (LLVM 13+).
 ///
+
 /// This is the recommended way to run optimization passes in LLVM 17+.
 /// Use with `Module::run_passes()`.
 ///
+
 /// # Example
 ///
+
 /// ```no_run
 /// use verum_llvm::context::Context;
 /// use verum_llvm::passes::PassBuilderOptions;
 /// use verum_llvm::targets::{CodeModel, RelocMode, Target, TargetMachine, TargetTriple, InitializationConfig};
 /// use verum_llvm::OptimizationLevel;
 ///
+
 /// let context = Context::create();
 /// let module = context.create_module("my_module");
 ///
+
 /// Target::initialize_native(&InitializationConfig::default()).unwrap();
 /// let triple = TargetMachine::get_default_triple();
 /// let target = Target::from_triple(&triple).unwrap();
 /// let target_machine = target.create_target_machine(
-///     &triple,
-///     "generic",
-///     "",
-///     OptimizationLevel::Default,
-///     RelocMode::Default,
-///     CodeModel::Default,
+///  &triple,
+///  "generic",
+///  "",
+///  OptimizationLevel::Default,
+///  RelocMode::Default,
+///  CodeModel::Default,
 /// ).unwrap();
 ///
+
 /// let options = PassBuilderOptions::create();
 /// options.set_verify_each(true);
 /// options.set_loop_vectorization(true);
 ///
+
 /// // Run optimization passes
 /// module.run_passes("default<O2>", &target_machine, options).unwrap();
 /// ```

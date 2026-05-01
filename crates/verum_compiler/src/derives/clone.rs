@@ -1,7 +1,9 @@
 //! Clone derive macro implementation
 //!
+
 //! Generates `implement Clone for Type { fn clone(&self) -> Self }`
 //!
+
 //! For record types: clones each field recursively via field.clone().
 //! For sum types: matches each variant and clones payload fields.
 //! Generated code has identical performance to hand-written Clone implementations.
@@ -130,12 +132,13 @@ impl DeriveClone {
 
     /// Generate clone body for enum types
     ///
+
     /// Generates a match expression that handles each variant:
     /// ```verum
     /// match self {
-    ///     Self::Variant1 => Self::Variant1,
-    ///     Self::Variant2(a) => Self::Variant2(a.clone()),
-    ///     Self::Variant3 { x, y } => Self::Variant3 { x: x.clone(), y: y.clone() },
+    ///  Self::Variant1 => Self::Variant1,
+    ///  Self::Variant2(a) => Self::Variant2(a.clone()),
+    ///  Self::Variant3 { x, y } => Self::Variant3 { x: x.clone(), y: y.clone() },
     /// }
     /// ```
     fn generate_enum_clone(

@@ -3,17 +3,20 @@
 // =============================================================================
 // Spec: internal/specs/database.md §6.1 (extended-query protocol)
 //
+
 // Postgres caches a parsed plan keyed by named statement on the
 // server. Spindle keeps a parallel client-side cache of which
 // fingerprints we've already Parsed on this connection, so subsequent
 // Bind / Execute can skip Parse.
 //
+
 // Eviction is LRU at a fixed cap (default 256 entries — matches
 // asyncpg / pgx defaults). We keep the entries in insertion order in
 // a List and walk linearly on lookup; for a 256-entry hot cache that
 // is single-digit microseconds and avoids the Map churn for a small
 // table.
 //
+
 // On schema-version-bump (received via `parameter_status: schema_version`
 // or detected by InvalidSchema error class) the cache is cleared so
 // stale plans are not reused.

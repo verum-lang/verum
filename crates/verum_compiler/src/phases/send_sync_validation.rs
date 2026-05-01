@@ -1,16 +1,20 @@
 //! Phase 4d: Send/Sync Compile-Time Enforcement
 //!
+
 //! Validates thread-safety bounds at concurrency boundaries:
 //! - All variables captured by `spawn` closures must be Send
 //! - Borrowed captures in non-move spawn closures must be Sync
 //! - Channel.send() arguments must be Send
 //! - Shared<T> construction requires T: Send + Sync
 //!
+
 //! ## Enforcement Level
 //!
+
 //! - **Errors** for known !Send/!Sync types (RawPtr, Cell, RefCell, UnsafeCell, Rc)
 //! - **Warnings** for suspicious patterns that can't be fully verified without type info
 //!
+
 //! Uses deny-list approach: known !Send/!Sync types produce hard errors.
 //! User-defined types auto-derive Send/Sync structurally (see send_sync.rs).
 

@@ -14,21 +14,26 @@
 )]
 // Comprehensive tests for refinement type subsumption checking
 //
+
 // Refinement Type Subsumption: T{phi1} <: T{phi2} iff phi1 logically implies phi2.
 //
+
 // Formal rule: Gamma |- phi1 => phi2 (in SMT logic) / Gamma |- T{phi1} <: T{phi2}
 //
+
 // Three-tier checking algorithm:
 // - Mode 1 (Syntactic, <1ms, ~70% coverage): Pattern-based implication for simple
-//   predicates. E.g., > 0 implies >= 0; >= 10 implies >= 0; > 5 implies != 0.
-//   Conservative: rejects complex predicates even if they hold.
+//  predicates. E.g., > 0 implies >= 0; >= 10 implies >= 0; > 5 implies != 0.
+//  Conservative: rejects complex predicates even if they hold.
 // - Mode 2 (SMT, 10-500ms, ~95%): Precise checking via Z3. Constructs query
-//   assert(not(=> phi1 phi2)), checks sat. UNSAT = valid. SAT = counterexample.
-//   Timeout (default 100ms) treated as conservative rejection.
+//  assert(not(=> phi1 phi2)), checks sat. UNSAT = valid. SAT = counterexample.
+//  Timeout (default 100ms) treated as conservative rejection.
 // - Mode 3 (User proof, future): Explicit proof terms cached at 0ms, 100% accuracy.
 //
+
 // Subsumption variance: contravariant in function parameters, covariant in returns.
 //
+
 // Tests cover all three modes, counterexample extraction, and performance.
 
 use verum_ast::expr::{BinOp, Expr, ExprKind};

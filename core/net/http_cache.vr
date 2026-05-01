@@ -5,31 +5,38 @@
 // Dependencies: core, core.collections, core.time
 // =============================================================================
 //
+
 // RFC 9111 — the correctness layer every HTTP cache / proxy / CDN /
 // browser implements. Without a shared helper, every codebase
 // reinvents Cache-Control parsing with subtly different semantics
 // around `s-maxage`, `stale-while-revalidate`, `must-revalidate`,
 // `no-cache` vs `no-store`, etc.
 //
+
 // This module covers the request-side + response-side parsing, age
 // calculation, and the freshness / staleness decision tree (§4).
 //
+
 // # Scope
 //
-//   * Parse `Cache-Control` into typed `CacheControl` directives.
-//   * Compute response age from `Date` / `Age` headers (§4.2.3).
-//   * Compute freshness lifetime from `s-maxage` / `max-age` /
-//     `Expires` (§4.2.1).
-//   * `CacheDecision` — the cacheability + freshness judgement
-//     (fresh / stale / must-revalidate / must-not-cache).
+
+//  * Parse `Cache-Control` into typed `CacheControl` directives.
+//  * Compute response age from `Date` / `Age` headers (§4.2.3).
+//  * Compute freshness lifetime from `s-maxage` / `max-age` /
+//  `Expires` (§4.2.1).
+//  * `CacheDecision` — the cacheability + freshness judgement
+//  (fresh / stale / must-revalidate / must-not-cache).
 //
+
 // # Out of scope
 //
-//   * Varying-cache-key calculation (`Vary` header) — the caller's
-//     storage layer decides which fields go into the cache key.
-//   * Conditional revalidation (If-None-Match / If-Modified-Since
-//     exchange) — this is transport, handled by the HTTP client.
+
+//  * Varying-cache-key calculation (`Vary` header) — the caller's
+//  storage layer decides which fields go into the cache key.
+//  * Conditional revalidation (If-None-Match / If-Modified-Since
+//  exchange) — this is transport, handled by the HTTP client.
 //
+
 // =============================================================================
 
 module core.net.http_cache;
@@ -229,6 +236,7 @@ public fn current_age(ai: &AgeInputs) -> UInt64 {
 /// Freshness lifetime (§4.2.1). s-maxage takes precedence over
 /// max-age for shared caches; max-age wins over Expires.
 ///
+
 /// `shared_cache = true` for a proxy/CDN, false for a browser.
 public fn freshness_lifetime_sec(
     resp_cc:       &CacheControl,

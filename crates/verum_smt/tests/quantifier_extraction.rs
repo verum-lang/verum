@@ -1,22 +1,26 @@
 //! Locks the quantifier-aware lemma instantiation in
 //! `HintsDatabase::instantiate_lemma`.
 //!
+
 //! Pre-fix `extract_quantifiers` was a stub:
 //!
+
 //! ```ignore
 //! fn extract_quantifiers(expr: &Expr) -> (List<Text>, Expr) {
-//!     let mut vars = List::new();
-//!     let mut current = expr;
-//!     // For now, we don't have explicit forall syntax in ExprKind
-//!     (vars, current.clone())
+//!  let mut vars = List::new();
+//!  let mut current = expr;
+//!  // For now, we don't have explicit forall syntax in ExprKind
+//!  (vars, current.clone())
 //! }
 //! ```
 //!
+
 //! The comment was stale: `verum_ast::ExprKind` HAS Forall and Exists
 //! variants. The stub returned an empty variable list, so
 //! `instantiate_lemma(forall_expr, [t])` errored with "expects 0
 //! arguments" — quantified lemmas were unusable.
 //!
+
 //! Post-fix the function walks Forall/Exists chains and collects
 //! every binding-pattern's identifier, producing a real variable list
 //! that matches the lemma's arity.

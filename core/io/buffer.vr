@@ -5,20 +5,25 @@
 // Dependencies: core, collections, io/protocols
 // =============================================================================
 //
+
 // This module provides buffered wrappers for Read and Write operations:
 //
+
 // - BufReader<R>: Buffered reader wrapper
 // - BufWriter<W>: Buffered writer wrapper
 // - LineWriter<W>: Line-buffered writer
 // - BufferCursor<T>: In-memory buffer with Read/Write/Seek
 //
+
 // Buffering significantly improves performance by reducing system calls.
 //
+
 // Performance characteristics:
 // - Default buffer: 8KB (optimal for most file systems)
 // - Reduces syscalls by ~100x for byte-by-byte operations
 // - Automatic flushing on Drop for writers
 //
+
 // =============================================================================
 
 module buffer;
@@ -42,18 +47,22 @@ public const MIN_BUF_CAPACITY: Int = 64;
 
 /// Buffered wrapper for Read types.
 ///
+
 /// BufReader wraps any type implementing Read and provides buffering,
 /// significantly reducing the number of system calls for small reads.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let file = File.open("data.txt")?;
 /// let reader = BufReader.new(file);
 ///
+
 /// // Read line by line efficiently
 /// for line in reader.lines() {
-///     println(line?);
+///  println(line?);
 /// }
 /// ```
 public type BufReader<R: Read> is {
@@ -97,6 +106,7 @@ implement<R: Read> BufReader<R> {
 
     /// Consume the BufReader && return the underlying reader.
     ///
+
     /// Note: Any data remaining in the buffer will be lost.
     public fn into_inner(self) -> R {
         self.inner
@@ -170,21 +180,23 @@ implement<R: Read> BufRead for BufReader<R> {
     /// Advance the read cursor by `amt` bytes after a `fill_buf()`
     /// observation.
     ///
+
     /// SOUNDNESS: previous revision did `if self.pos + amt > self.filled
-    /// { saturate } else { advance }`.  If a buggy caller passed
+    /// { saturate } else { advance }`. If a buggy caller passed
     /// `amt < 0`, `self.pos + amt < self.pos < self.filled`, the
     /// over-cap check failed, and the cursor was REWOUND silently.
     /// Subsequent reads re-emitted already-consumed bytes (e.g. a
     /// parser would re-tokenise the same input), corrupting the
     /// stream's logical position.
     ///
+
     /// The fix:
-    ///   * `amt < 0`            — clamped to 0 (no-op; consume only
-    ///                            advances).
-    ///   * `amt > buffer_len()` — clamped to the available bytes
-    ///                            (caller wrote a stale `amt` after
-    ///                            another fill cycle); preserves the
-    ///                            previous saturating behaviour.
+    ///  * `amt < 0` — clamped to 0 (no-op; consume only
+    ///  advances).
+    ///  * `amt > buffer_len()` — clamped to the available bytes
+    ///  (caller wrote a stale `amt` after
+    ///  another fill cycle); preserves the
+    ///  previous saturating behaviour.
     fn consume(&mut self, amt: Int) {
         if amt <= 0 {
             return;
@@ -199,11 +211,13 @@ implement<R: Read> BufRead for BufReader<R> {
 // FdReader — Read impl over a raw OS file descriptor
 // =============================================================================
 //
+
 // Wraps an integer fd / handle. The shell layer (`core.shell.stream`) needs
 // to read from process stdout pipes; without a Read impl over raw fds it
 // would have to use the synchronous `wait_with_output` blocking aggregator,
 // which can't yield streams.
 //
+
 // This is a thin adapter — the actual read syscall is funnelled through
 // `__fd_read_chunk_raw` which is intercepted by the runtime. Owns the fd
 // only when constructed via `from_owned_fd`; the borrowed form leaves
@@ -336,21 +350,26 @@ implement<R: Read> BufReader<R> {
 
 /// Buffered wrapper for Write types.
 ///
+
 /// BufWriter wraps any type implementing Write && provides buffering,
 /// significantly reducing the number of system calls for small writes.
 ///
+
 /// The buffer is automatically flushed when it becomes full && when
 /// the BufWriter is dropped.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let file = File.create("output.txt")?;
 /// let mut writer = BufWriter.new(file);
 ///
+
 /// // Many small writes are buffered
 /// for i in 0..1000 {
-///     writer.write(f"{i}\n".as_bytes())?;
+///  writer.write(f"{i}\n".as_bytes())?;
 /// }
 /// // Explicit flush (also happens on drop)
 /// writer.flush()?;
@@ -388,6 +407,7 @@ implement<W: Write> BufWriter<W> {
 
     /// Consume the BufWriter && return the underlying writer.
     ///
+
     /// The buffer is flushed before returning. If flushing fails,
     /// the data may be lost.
     public fn into_inner(mut self) -> Result<W, IntoInnerError<W>> {
@@ -500,12 +520,15 @@ implement<W: Write> Display for IntoInnerError<W> {
 
 /// Line-buffered wrapper for Write types.
 ///
+
 /// LineWriter wraps a writer && flushes the buffer whenever a newline
 /// is written. This is useful for interactive output where lines should
 /// appear immediately.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let stdout = LineWriter.new(stdout());
 /// // Each line is flushed immediately
@@ -590,20 +613,26 @@ implement<W: Write> Write for LineWriter<W> {
 
 /// In-memory buffer with Read, Write, && Seek capabilities.
 ///
+
 /// BufferCursor wraps an in-memory buffer (typically List<Byte>) && provides
 /// file-like semantics for reading && writing.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let mut cursor = BufferCursor.new(List.new());
 ///
+
 /// // Write data
 /// cursor.write("Hello, World!".as_bytes())?;
 ///
+
 /// // Seek to beginning
 /// cursor.seek(SeekFrom.Start(0))?;
 ///
+
 /// // Read it back
 /// let mut buf = List.from_elem(0, 13);
 /// cursor.read(&mut buf)?;
@@ -734,10 +763,13 @@ implement BufRead for BufferCursor<List<Byte>> {
 
 /// Copy all data from a reader to a writer.
 ///
+
 /// Returns the total number of bytes copied.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let mut source = File.open("input.txt")?;
 /// let mut dest = File.create("output.txt")?;
@@ -761,8 +793,10 @@ public fn copy<R: Read, W: Write>(reader: &mut R, writer: &mut W) -> IoResult<In
 
 /// Read all data from a reader into a List<Byte>.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let mut file = File.open("data.bin")?;
 /// let data = read_all(&mut file)?;

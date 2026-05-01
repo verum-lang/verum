@@ -2,10 +2,12 @@
 // core.action.monads.reader — environment-reading monad
 // =============================================================================
 //
+
 // `Reader<R, A>` — read-only access to an environment of type `R`.
 // The Kleisli shape is `R -> A`: a Reader-effectful computation is
 // a function from the environment to its result.
 //
+
 // Commutative — order of independent reads of the same environment
 // doesn't matter (Plotkin-Power 2002 Ex 2.4). ε-coordinate ω.
 // Composes safely under @verify(coherent_concurrent) without
@@ -75,13 +77,14 @@ public fn reader_local<R, A>(modify: fn(R) -> R, m: Reader<R, A>) -> Reader<R, A
 // Monad laws (V2 — witness-parameterised structural theorems)
 // =============================================================================
 //
+
 // Reader<R, A> ≅ R -> A. The monad laws hold *extensionally* — i.e.
 // for every environment `env: R`, the run-results agree. The
 // theorems below express each law as observational equality at a
 // concrete witness environment; the law's universal statement is
 // the ∀-closure of this point-wise theorem. Verum's @verify
 // machinery promotes these point-wise admissions to universal
-// validity via the K-Refine V3 fold + K-Round-Trip V2 audit trail
+// validity via the K-Refine Refine fold + K-Round-Trip audit trail
 // (no Diakrisis bridge needed — Reader is purely functional).
 
 /// **Left identity** at env: `bind(pure(a), f).run(env) ≡ f(a).run(env)`.
@@ -97,13 +100,13 @@ public theorem reader_left_identity<R, A, B>(
 {
     proof {
         // ── Step 1: build the unit reader.
-        //   reader_unit(a) = Reader { run: |_r| a }                (definition)
+        //  reader_unit(a) = Reader { run: |_r| a } (definition)
         let unit_a: Reader<R, A> = reader_unit(a.clone());
         // ── Step 2: bind unfolds to a Reader that runs both arms.
-        //   reader_bind(unit_a, f).run(env) =
-        //     let a' = (unit_a.run)(env) = a;                       (β-app)
-        //     let inner = f(a') = f(a);                             (β-let)
-        //     (inner.run)(env)                                       (β-app)
+        //  reader_bind(unit_a, f).run(env) =
+        //  let a' = (unit_a.run)(env) = a; (β-app)
+        //  let inner = f(a') = f(a); (β-let)
+        //  (inner.run)(env) (β-app)
         let bound_run_at_env: B = reader_run(
             reader_bind(unit_a, f.clone()),
             env.clone(),
@@ -126,9 +129,9 @@ public theorem reader_right_identity<R, A>(env: R, m: Reader<R, A>) -> Bool
         // ── Step 1: extract the value m.run(env) once for naming.
         let a: A = reader_run(m.clone(), env.clone());
         // ── Step 2: reader_bind(m, reader_unit).run(env) reduces:
-        //     let a' = (m.run)(env) = a;                            (β-app)
-        //     let inner = reader_unit(a') = const a;                (β-let)
-        //     (inner.run)(env) = a                                  (β-app)
+        //  let a' = (m.run)(env) = a; (β-app)
+        //  let inner = reader_unit(a') = const a; (β-let)
+        //  (inner.run)(env) = a (β-app)
         let bound_run: A = reader_run(
             reader_bind(m.clone(), reader_unit),
             env.clone(),
@@ -163,19 +166,19 @@ public theorem reader_associativity<R, A, B, C>(
         let a: A = reader_run(m.clone(), env.clone());
         let b: B = reader_run(f(a.clone()), env.clone());
         // ── Step 2: LHS — left-associated bind chain.
-        //     reader_bind(reader_bind(m, f), g).run(env)
-        //   = let inner_m = reader_bind(m, f);                       (β-let)
-        //     let b' = (inner_m.run)(env) = let a'' = m.run(env); f(a'').run(env) = f(a).run(env) = b
-        //     g(b').run(env)
+        //  reader_bind(reader_bind(m, f), g).run(env)
+        //  = let inner_m = reader_bind(m, f); (β-let)
+        //  let b' = (inner_m.run)(env) = let a'' = m.run(env); f(a'').run(env) = f(a).run(env) = b
+        //  g(b').run(env)
         let lhs_run: C = reader_run(
             reader_bind(reader_bind(m.clone(), f.clone()), g.clone()),
             env.clone(),
         );
         // ── Step 3: RHS — right-associated, same threading.
-        //     reader_bind(m, |x| reader_bind(f(x), g)).run(env)
-        //   = let a' = m.run(env) = a;                               (β-app)
-        //     let inner = (|x| reader_bind(f(x), g))(a') = reader_bind(f(a), g)
-        //     inner.run(env) = let b' = f(a).run(env) = b; g(b').run(env)
+        //  reader_bind(m, |x| reader_bind(f(x), g)).run(env)
+        //  = let a' = m.run(env) = a; (β-app)
+        //  let inner = (|x| reader_bind(f(x), g))(a') = reader_bind(f(a), g)
+        //  inner.run(env) = let b' = f(a).run(env) = b; g(b').run(env)
         let rhs_run: C = reader_run(
             reader_bind(m, |x: A| reader_bind(f(x), g.clone())),
             env,
@@ -190,7 +193,8 @@ public theorem reader_associativity<R, A, B, C>(
 /// Reader reads of the *same* environment commute — Reader has no
 /// side effects, so the order of two .run calls is irrelevant.
 ///
-///   bind(m1, |a| bind(m2, |b| pure((a,b)))).run(env)
+
+///  bind(m1, |a| bind(m2, |b| pure((a,b)))).run(env)
 /// ≡ bind(m2, |b| bind(m1, |a| pure((a,b)))).run(env)
 @framework(diakrisis, "Corollary 17.C2 (Reader tensor-commutativity)")
 public theorem reader_commutativity<R, A, B>(
@@ -211,9 +215,9 @@ public theorem reader_commutativity<R, A, B>(
 {
     proof {
         // ── Step 1: extract the two independent reads at the witness env.
-        //   Reader has no side effects on the environment so the
-        //   read-order is irrelevant — both extractions yield the same
-        //   final pair (a, b).
+        //  Reader has no side effects on the environment so the
+        //  read-order is irrelevant — both extractions yield the same
+        //  final pair (a, b).
         let a: A = reader_run(m1.clone(), env.clone());
         let b: B = reader_run(m2.clone(), env.clone());
         // ── Step 2: LHS — m1 outer, m2 inner; pair is (a, b).

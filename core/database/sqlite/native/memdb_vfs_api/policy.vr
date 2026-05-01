@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite memdb VFS
 //
+
 // SQLITE_CONFIG_MEMDB_MAXSIZE caps the maximum bytes the memdb VFS
-// may hold.  Default is 0x7FFFFFFFFFFFFFFF (effectively unlimited).
+// may hold. Default is 0x7FFFFFFFFFFFFFFF (effectively unlimited).
 // =============================================================================
 
 module core.database.sqlite.native.memdb_vfs_api.policy;

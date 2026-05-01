@@ -1,8 +1,10 @@
 //! Matrix literal parser
 //!
+
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
+
 //! Parses matrix literals in row-major order:
 //! - mat#"[[1, 2], [3, 4]]"
 //! - mat#"[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]"
@@ -15,23 +17,28 @@ use crate::literal_registry::ParsedLiteral;
 
 /// Parse matrix literal at compile-time
 ///
+
 /// Composite literal: `mat#"[[1, 2], [3, 4]]"` is compile-time validated matrix.
 /// Validates consistent row dimensions. Produces type Matrix<R, C, T> with
 /// compile-time known dimensions. Data stored in row-major order.
 ///
+
 /// # Arguments
 /// - `content`: The matrix string (e.g., "[[1, 2], [3, 4]]")
 /// - `span`: Source location for error reporting
 ///
+
 /// # Returns
 /// Parsed matrix with dimensions and data in row-major order
 ///
+
 /// # Examples
 /// ```ignore
 /// use verum_compiler::literal_parsers::parse_matrix;
 /// use verum_ast::Span;
 /// use verum_common::Text;
 ///
+
 /// let span = Span::new(0, 10, verum_ast::FileId::new(0));
 /// let result = parse_matrix(&Text::from("[[1, 2], [3, 4]]"), span);
 /// assert!(result.is_ok());

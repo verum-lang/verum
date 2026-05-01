@@ -14,14 +14,17 @@
 )]
 //! Comprehensive tests for dependent types system
 //!
+
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking
 //!
+
 //! This test suite covers:
 //! - Pi types (dependent functions): (x: A) -> B(x)
 //! - Sigma types (dependent pairs): (x: A, B(x))
 //! - Equality types: Eq<A, x, y>
 //! - Type-level computation
 //!
+
 //! All examples are from the specification and cover both success
 //! and error cases for comprehensive validation.
 
@@ -521,7 +524,7 @@ fn test_sigma_type_with_tuple() {
 #[test]
 fn test_sigma_type_existential_quantification() {
     // Sigma types are used for existential quantification
-    // ∃(x: Int). P(x)  ≅  (x: Int, Proof(P(x)))
+    // ∃(x: Int). P(x) ≅ (x: Int, Proof(P(x)))
     let sigma = Type::sigma(
         Text::from("x"),
         Type::Int,
@@ -1101,7 +1104,7 @@ fn test_type_level_computation_refinement() {
 #[test]
 fn test_type_level_split_at() {
     // Test split_at type: split_at<T>(xs: List<T, n>, i: Fin<n+1>)
-    //   -> (List<T, i>, List<T, n-i>)
+    //  -> (List<T, i>, List<T, n-i>)
 
     // Return type is a dependent pair
     let result = Type::Tuple(

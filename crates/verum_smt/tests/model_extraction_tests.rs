@@ -14,11 +14,14 @@
 )]
 //! Model Extraction and Verification Tests
 //!
+
 //! Per CLAUDE.md standards: Tests in tests/ directory
 //!
+
 //! IMPORTANT: Uses deprecated Z3 API (z3-rs < 0.19). See comprehensive_tests.rs
 //! for detailed explanation of required changes.
 //!
+
 //! **ESTIMATED EFFORT**: 8-10 hours to rewrite
 //! Requires Z3 API migration: z3_context() method, Context params (~8-10 hours to rewrite).
 

@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §11, §21.5
 //
+
 // VDBE programs are not yet typed at the SSA-register level — the
 // runtime register file is dynamically tagged. To narrow the gap, we
 // supply a *static abstract interpretation* per program that tracks
 // the inferred-tag set per register at each instruction. The
 // invariant is then:
 //
-//   For every Use(reg, expected_kinds) instruction at PC,
-//   the abstract tag-set for `reg` at `PC` ⊆ expected_kinds.
+
+//  For every Use(reg, expected_kinds) instruction at PC,
+//  the abstract tag-set for `reg` at `PC` ⊆ expected_kinds.
 //
+
 // This file declares the abstract domain + the consistency check.
 // The actual abstract-eval pass is run from `l4_vdbe.optimizer`
 // before peephole optimisation.

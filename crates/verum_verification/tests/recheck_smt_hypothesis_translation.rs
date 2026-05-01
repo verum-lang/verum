@@ -1,6 +1,7 @@
 //! Soundness regression: `recheck_with_smt` must translate hypothesis
 //! propositions, not bind them as opaque fresh booleans.
 //!
+
 //! Pre-fix the loop bound a `Bool::new_const(name)` for each
 //! hypothesis and discarded the actual `prop` expression. Z3 thus saw
 //! every hypothesis as a vacuous `h0 := true` regardless of whether
@@ -9,6 +10,7 @@
 //! counterexample (because the assumed hypotheses don't actually
 //! entail the conclusion) silently passed.
 //!
+
 //! Post-fix the loop translates `prop` to a Z3 Bool and asserts it.
 //! When the prop carries the actual claim `x = 0`, the rechecker now
 //! sees that constraint and correctly disproves `x > 0`.
@@ -74,6 +76,7 @@ fn recheck_accepts_formulas_entailed_by_hypothesis() {
     // (vacuously, for the wrong reason). Post-fix the test pins that
     // we still accept genuinely-entailed formulas.
     //
+
     // Hypothesis: x = 5, formula: x > 0 — entailed.
     let mut validator = ProofValidator::new();
     let x_eq_five = binary(BinOp::Eq, ident_expr("x"), int_lit(5));

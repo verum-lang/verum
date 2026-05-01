@@ -5,6 +5,7 @@
 // adapt_color() automatically downgrades colors to match the profile.
 // Utility functions for color manipulation: darken, lighten, lerp, gradient.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
 // =============================================================================
 
@@ -19,11 +20,12 @@ mount super.convert.{rgb_to_hsl, hsl_to_rgb};
 
 /// ColorProfile represents the maximum color fidelity the terminal supports.
 ///
+
 /// Levels (ordered by capability):
-///   NoColor   — monochrome, no color escape sequences
-///   Base16    — 16 standard ANSI colors (SGR 30-37, 90-97)
-///   Ansi256   — 256-color palette (SGR 38;5;N)
-///   TrueColor — 24-bit color (SGR 38;2;R;G;B)
+///  NoColor — monochrome, no color escape sequences
+///  Base16 — 16 standard ANSI colors (SGR 30-37, 90-97)
+///  Ansi256 — 256-color palette (SGR 38;5;N)
+///  TrueColor — 24-bit color (SGR 38;2;R;G;B)
 public type ColorProfile is
     | NoColor
     | Base16
@@ -38,11 +40,12 @@ public type ColorProfile is
 /// True Color terminals pass through unchanged. Lower profiles get the
 /// perceptually closest match via CIELAB distance.
 ///
+
 /// Examples:
-///   adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), TrueColor) -> Rgb(255,128,0)
-///   adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), Ansi256)   -> Ansi256(208)
-///   adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), Base16)    -> Color.Red
-///   adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), NoColor)   -> Color.Reset
+///  adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), TrueColor) -> Rgb(255,128,0)
+///  adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), Ansi256) -> Ansi256(208)
+///  adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), Base16) -> Color.Red
+///  adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), NoColor) -> Color.Reset
 public fn adapt_color(color: Color, profile: ColorProfile) -> Color {
     match (color, profile) {
         // True color: no changes needed

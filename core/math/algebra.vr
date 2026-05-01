@@ -4,15 +4,17 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: docs/detailed/13-formal-proofs.md
 //
+
 // Defines the algebraic hierarchy from magmas to fields, modules to algebras,
 // and lattices to Boolean algebras. Each structure is specified as a protocol
 // with required operations and axiom statements verified by the proof engine.
 //
+
 // Hierarchy:
-//   Magma -> Semigroup -> Monoid -> Group -> AbelianGroup
-//   Ring -> CommutativeRing -> IntegralDomain -> Field
-//   Module -> VectorSpace -> Algebra
-//   Lattice -> DistributiveLattice -> BooleanAlgebra
+//  Magma -> Semigroup -> Monoid -> Group -> AbelianGroup
+//  Ring -> CommutativeRing -> IntegralDomain -> Field
+//  Module -> VectorSpace -> Algebra
+//  Lattice -> DistributiveLattice -> BooleanAlgebra
 // =============================================================================
 
 module core.math.algebra;
@@ -299,17 +301,21 @@ public type BooleanAlgebra is protocol extends ComplementedLattice + Distributiv
 // 4b. Orthomodular lattices (quantum logic)
 // =============================================================================
 //
+
 // Orthomodular lattices are the lattice-theoretic model of quantum
 // logic. They generalise Boolean algebras by keeping the
 // complementation operator `ortho(a)` (usually written `a^⊥`) but
 // **weakening distributivity** to the *orthomodular law*:
 //
-//     a ≤ b  ⇒  b = a ∨ (a^⊥ ∧ b)
+
+//  a ≤ b ⇒ b = a ∨ (a^⊥ ∧ b)
 //
+
 // Concretely, the lattice of closed subspaces of a Hilbert space,
 // ordered by inclusion with `ortho(V) = V^⊥`, is orthomodular but
 // NOT distributive — it is the prototype quantum-logic lattice.
 //
+
 // This structure is the substrate for epistemic / quantum modal
 // logics (Birkhoff–von Neumann 1936, Varadarajan "Geometry of
 // Quantum Theory"). See `core/math/linalg.vr` for the related
@@ -328,7 +334,7 @@ public type OrthomodularLattice is protocol extends BoundedLattice {
     @verify(formal)
     fn involution(&self) -> Bool;
 
-    /// **Antitonicity**: `a ≤ b  ⇒  b^⊥ ≤ a^⊥`.
+    /// **Antitonicity**: `a ≤ b ⇒ b^⊥ ≤ a^⊥`.
     @verify(formal)
     fn antitonicity(&self, other: &Self) -> Bool;
 
@@ -336,7 +342,7 @@ public type OrthomodularLattice is protocol extends BoundedLattice {
     @verify(formal)
     fn complement_laws(&self) -> Bool;
 
-    /// **Orthomodular law**: `a ≤ b  ⇒  b = a ∨ (a^⊥ ∧ b)`.
+    /// **Orthomodular law**: `a ≤ b ⇒ b = a ∨ (a^⊥ ∧ b)`.
     /// This is the weakening of full distributivity that
     /// characterises quantum logic.
     @verify(formal)
@@ -443,6 +449,7 @@ public type Congruence<G: Group> is protocol extends EquivalenceRelation<G> {
 // 16. Proven structural facts (SMT-discharged theorems)
 // =============================================================================
 //
+
 // These theorems lock in the `protocol extends` chain of the algebraic
 // hierarchy. Each one is a corollary of the protocol inheritance
 // structure; they serve as regression guards that catch accidental

@@ -1,59 +1,71 @@
-//! HTT 5.1.4 ∞-Grothendieck construction — V0 algorithmic kernel rule.
+//! HTT 5.1.4 ∞-Grothendieck construction — algorithmic kernel rule.
 //!
+
 //! ## What this delivers
 //!
+
 //! The Grothendieck construction is the load-bearing technical pivot
 //! of MSFS Lemma 3.4 (and therefore all of AFN-T):
 //!
+
 //! > Given an `S`-indexed diagram `D : λ → cF` of foundations, the
 //! > total Cartesian fibration `∫D = { (b, x) : b ∈ B, x ∈ D(b) }`
 //! > is itself an S-definable object in `S_S^global`.
 //!
-//! Lurie HTT §5.1.4 proves the result for ∞-categories.  Pre-this-
+
+//! Lurie HTT §5.1.4 proves the result for ∞-categories. Pre-this-
 //! module this fact is admitted as `lurie_htt_5_1_4_syn_is_grothendieck`
 //! framework axiom — the kernel sees only an opaque assertion.
 //!
+
 //! ## V0 algorithmic surface
 //!
+
 //! This module ships the **algorithmic skeleton** of the Grothendieck
 //! construction:
 //!
-//!   1. [`SIndexedDiagram`] — input data carrying base category, fibre
-//!      function, and `S` accessibility witness.
-//!   2. [`GrothendieckConstruction`] — output structure carrying
-//!      total category + projection to base + Cartesian-lift function.
-//!   3. [`build_grothendieck`] — the algorithm itself; given a diagram
-//!      it produces the construction in finite time, with explicit
-//!      Cartesian-fibration property witnessing.
+
+//!  1. [`SIndexedDiagram`] — input data carrying base category, fibre
+//!  function, and `S` accessibility witness.
+//!  2. [`GrothendieckConstruction`] — output structure carrying
+//!  total category + projection to base + Cartesian-lift function.
+//!  3. [`build_grothendieck`] — the algorithm itself; given a diagram
+//!  it produces the construction in finite time, with explicit
+//!  Cartesian-fibration property witnessing.
 //!
+
 //! V0 doesn't yet derive the (∞,1)-categorical content of the
 //! construction — that requires native ∞-cat composition + coherence
-//! cells, which lands in #43 V1 promotion.  V0 instead ships the
+//! cells, which lands in #43 V1 promotion. V0 instead ships the
 //! 1-categorical skeleton + structural witnesses that everything
 //! AFN-T needs:
 //!
-//!   - The total category exists (kernel-checkable via `Some(_)` return).
-//!   - The projection `p : ∫D → B` is defined and well-typed.
-//!   - The Cartesian-lift property: for every `f : b → b'` and `x' ∈
-//!     D(b')`, there exists a unique-up-to-iso lift `f̄ : (b, f^*x') → (b', x')`.
+
+//!  - The total category exists (kernel-checkable via `Some(_)` return).
+//!  - The projection `p : ∫D → B` is defined and well-typed.
+//!  - The Cartesian-lift property: for every `f : b → b'` and `x' ∈
+//!  D(b')`, there exists a unique-up-to-iso lift `f̄ : (b, f^*x') → (b', x')`.
 //!
+
 //! This is **enough for Lemma 3.4**: the lemma uses the construction
 //! to embed `Syn(F)` into the meta-classifier 2-stack, and the
-//! 1-categorical skeleton suffices for that embedding.  Higher-cell
-//! coherence enters at Theorem 9.3 Step 1, which V1 will support.
+//! 1-categorical skeleton suffices for that embedding. Higher-cell
+//! coherence enters at Theorem 9.3 Step 1, which Future work will support.
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - **Lemma 3.4** (`msfs_lemma_3_4_s_definability`) — currently a
-//!     framework axiom citing HTT 5.1.4.  Promotion path: the
-//!     `lurie_htt_5_1_4_syn_is_grothendieck` axiom becomes a
-//!     `@theorem` whose proof body invokes `build_grothendieck`.
-//!   - **MSFS §6.1 β-part Step 3** — `cS_S^global` closed under
-//!     Grothendieck constructions.  The closure is now
-//!     algorithmically checkable.
-//!   - **Theorem 9.3 Step 1** (canonical maximal classifier
-//!     construction) — uses Grothendieck-straightening of the
-//!     classification 2-functor.
+
+//!  - **Lemma 3.4** (`msfs_lemma_3_4_s_definability`) — currently a
+//!  framework axiom citing HTT 5.1.4. Promotion path: the
+//!  `lurie_htt_5_1_4_syn_is_grothendieck` axiom becomes a
+//!  `@theorem` whose proof body invokes `build_grothendieck`.
+//!  - **MSFS §6.1 β-part Step 3** — `cS_S^global` closed under
+//!  Grothendieck constructions. The closure is now
+//!  algorithmically checkable.
+//!  - **Theorem 9.3 Step 1** (canonical maximal classifier
+//!  construction) — uses Grothendieck-straightening of the
+//!  classification 2-functor.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -61,7 +73,7 @@ use verum_common::Text;
 use crate::ordinal::Ordinal;
 
 /// An `S`-indexed diagram `D : λ → cF` — the input to the
-/// Grothendieck construction.  V0 surface: carries the base category
+/// Grothendieck construction. current surface: carries the base category
 /// name, the fibre-name function, and the κ-accessibility witness.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SIndexedDiagram {
@@ -70,8 +82,8 @@ pub struct SIndexedDiagram {
     /// The base category B's identifier.
     pub base: Text,
     /// The fibre-naming function: given an object name `b`, returns
-    /// the fibre `D(b)`.  Stored as a list of (b, fibre_name) pairs
-    /// for V0 finitary surface; V1 will admit infinite diagrams via
+    /// the fibre `D(b)`. Stored as a list of (b, fibre_name) pairs
+    /// for V0 finitary surface; Future work will admit infinite diagrams via
     /// a closure-style fibre function.
     pub fibres: Vec<(Text, Text)>,
     /// The accessibility level of the diagram — the smallest κ such
@@ -96,11 +108,11 @@ impl SIndexedDiagram {
     }
 
     /// True iff every fibre `D(b)` is at the same κ-accessibility level
-    /// as the diagram's declared `accessibility_level`.  V0 invariant
+    /// as the diagram's declared `accessibility_level`. V0 invariant
     /// that the kernel checks before invoking the construction.
     pub fn fibres_uniformly_accessible(&self) -> bool {
-        // V0: trust the declared level.  V1 will inspect each fibre's
-        // protocol-witness method.  For finite diagrams the uniformity
+        // V0: trust the declared level. Future work will inspect each fibre's
+        // protocol-witness method. For finite diagrams the uniformity
         // is structurally trivial — every fibre name maps to a single
         // category whose accessibility is the diagram's.
         !self.fibres.is_empty()
@@ -114,16 +126,16 @@ pub struct GrothendieckConstruction {
     /// Diagnostic name (e.g. "∫D").
     pub name: Text,
     /// The total category — pairs `(b, x)` with `b ∈ B`, `x ∈ D(b)`.
-    /// Stored as a list of `(b_name, x_name)` pairs at the V0 surface.
+    /// Stored as a list of `(b_name, x_name)` pairs at the current surface.
     pub total_objects: Vec<(Text, Text)>,
     /// The projection `p : ∫D → B` — sends `(b, x) ↦ b`.
     pub projection_target: Text,
-    /// The accessibility level of the resulting fibration.  By HTT
+    /// The accessibility level of the resulting fibration. By HTT
     /// 5.1.4 + AR 1.26, the accessibility is preserved from the input
     /// diagram.
     pub accessibility_level: Ordinal,
     /// Number of Cartesian lifts produced — one per (b, b', x', f)
-    /// quadruple in the diagram's hom-data.  For V0 finitary surface
+    /// quadruple in the diagram's hom-data. For V0 finitary surface
     /// this is the count of (b, fibre, b', fibre') 1-cell pairs.
     pub cartesian_lift_count: u32,
 }
@@ -131,17 +143,18 @@ pub struct GrothendieckConstruction {
 impl GrothendieckConstruction {
     /// True iff the construction satisfies the Cartesian-fibration
     /// property: every base morphism `b → b'` has a unique
-    /// (up-to-iso) lift.  V0 surface: structurally true when the
+    /// (up-to-iso) lift. current surface: structurally true when the
     /// `cartesian_lift_count` matches the expected lift cardinality
     /// (= number of base 1-cells × number of fibre objects).
     ///
+
     /// HTT 5.1.4 proves this property holds for any
     /// `SIndexedDiagram` whose fibres are uniformly accessible.
     pub fn is_cartesian_fibration(&self) -> bool {
         // V0 trust-then-verify: the construction's `is_cartesian_fibration`
         // is true by virtue of the algorithm's correctness — every
         // GrothendieckConstruction produced by `build_grothendieck`
-        // satisfies the property structurally.  External constructions
+        // satisfies the property structurally. External constructions
         // (someone manually crafting a `GrothendieckConstruction`
         // value) bypass this guarantee — but the kernel only ever
         // produces them via `build_grothendieck`.
@@ -151,22 +164,26 @@ impl GrothendieckConstruction {
 
 /// Build the Grothendieck construction `∫D` from an S-indexed diagram.
 ///
+
 /// **Algorithm (HTT 5.1.4 V0 finitary surface):**
 ///
-///   1. **Preconditions check**: diagram has uniformly accessible fibres.
-///   2. **Total objects**: enumerate `(b, x)` pairs by walking the
-///      diagram's `(b, fibre)` data and treating each fibre as a
-///      single-object category at V0 (the fibre name IS the object).
-///   3. **Projection**: `(b, x) ↦ b` is implicit in the pair structure.
-///   4. **Cartesian lifts**: for each pair of base-objects `(b, b')`
-///      there is one structural Cartesian lift per fibre-pair — V0
-///      finitary count is `|fibres|^2`.
-///   5. **Accessibility preservation**: the result inherits
-///      `D.accessibility_level` per AR 1.26.
+
+///  1. **Preconditions check**: diagram has uniformly accessible fibres.
+///  2. **Total objects**: enumerate `(b, x)` pairs by walking the
+///  diagram's `(b, fibre)` data and treating each fibre as a
+///  single-object category at V0 (the fibre name IS the object).
+///  3. **Projection**: `(b, x) ↦ b` is implicit in the pair structure.
+///  4. **Cartesian lifts**: for each pair of base-objects `(b, b')`
+///  there is one structural Cartesian lift per fibre-pair — V0
+///  finitary count is `|fibres|^2`.
+///  5. **Accessibility preservation**: the result inherits
+///  `D.accessibility_level` per AR 1.26.
 ///
+
 /// Returns `None` if the diagram fails preconditions (empty fibres
 /// or non-uniform accessibility).
 ///
+
 /// **Soundness**: matches HTT 5.1.4's structural construction
 /// modulo V1's ∞-categorical higher-cell content.
 pub fn build_grothendieck(
@@ -183,7 +200,7 @@ pub fn build_grothendieck(
         .map(|(b, fibre)| (b.clone(), fibre.clone()))
         .collect();
 
-    // Step 2: count Cartesian lifts.  V0 finitary: |fibres|^2 lifts
+    // Step 2: count Cartesian lifts. V0 finitary: |fibres|^2 lifts
     // (one per (b, b') pair in the base + one fibre-action per pair).
     let n = diagram.fibres.len() as u32;
     let cartesian_lift_count = n.saturating_mul(n);
@@ -201,8 +218,9 @@ pub fn build_grothendieck(
 /// Verify that a Grothendieck construction preserves accessibility
 /// from its input diagram (HTT 5.1.4 + AR 1.26).
 ///
+
 /// Returns `true` iff the construction's `accessibility_level`
-/// matches the input diagram's.  Used by Lemma 3.4 to discharge the
+/// matches the input diagram's. Used by Lemma 3.4 to discharge the
 /// "S_S^global ⊇ ∫D when D is S-indexed" claim.
 pub fn preserves_accessibility(
     diagram: &SIndexedDiagram,

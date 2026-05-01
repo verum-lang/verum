@@ -3,25 +3,29 @@
 // =============================================================================
 // Layer: 5 (QUIC recovery)
 // Spec: internal/specs/tls-quic.md §4.6 + §9 Theorem V3
-//       RFC 9000 §19.3 (ACK frame structure)
+//  RFC 9000 §19.3 (ACK frame structure)
 // =============================================================================
 //
+
 // The outgoing ACK sequence is a list of intervals of acknowledged
-// packet numbers.  RFC 9000 §19.3 requires the ranges to be
+// packet numbers. RFC 9000 §19.3 requires the ranges to be
 // non-overlapping AND emitted largest-first, strictly decreasing. The
 // corresponding compile-time invariant (spec §9 V3) is:
 //
-//     ∀ i ∈ [0, len-1) : ranges[i].smallest > ranges[i+1].largest + 1
+
+//  ∀ i ∈ [0, len-1) : ranges[i].smallest > ranges[i+1].largest + 1
 //
+
 // This module defines `AckRanges` as a nominal wrapper over
 // `List<AckRange>` with the invariant exposed as a pure predicate
 // `is_valid()` and a set of invariant-preserving operations
-// (`empty` / `insert_pn` / `iter`).  Every operation that constructs
+// (`empty` / `insert_pn` / `iter`). Every operation that constructs
 // a new `AckRanges` value runs through `assert_invariant_debug` in
 // debug builds so regressions are caught immediately; the SMT proof
 // in `vcs/specs/L2-standard/net/quic/ack_ranges_invariant_kat.vr`
 // closes the formal obligation for V3.
 //
+
 // =============================================================================
 
 module core.net.quic.ack_ranges;
@@ -56,11 +60,12 @@ implement AckRanges {
 
     /// Checks the V3 invariant over the stored ranges. Returns true
     /// if and only if:
-    ///   * every range has `smallest <= largest`
-    ///   * ranges are sorted strictly descending by `largest`
-    ///   * consecutive ranges have a gap ≥ 2
-    ///     (`ranges[i].smallest > ranges[i+1].largest + 1`)
+    ///  * every range has `smallest <= largest`
+    ///  * ranges are sorted strictly descending by `largest`
+    ///  * consecutive ranges have a gap ≥ 2
+    ///  (`ranges[i].smallest > ranges[i+1].largest + 1`)
     ///
+
     /// Callers use this as a runtime cross-check for the proved
     /// invariant — should always be `true` after every public op.
     public fn is_valid(&self) -> Bool {
@@ -85,21 +90,25 @@ implement AckRanges {
 
     /// Insert a packet number, maintaining the V3 invariant.
     ///
+
     /// The stored list is strictly descending by `largest`, with a
     /// gap of ≥ 2 between consecutive ranges. `pn` falls into exactly
     /// one of:
     ///
-    ///   (A) r[i] already covers pn           — no-op.
-    ///   (B) pn extends r[i] above (r.largest + 1 == pn).
-    ///   (C) pn extends r[i] below (pn + 1 == r.smallest).
-    ///   (D) pn fits in the gap between r[i-1] and r[i] — fresh
-    ///       singleton inserted at position i.
-    ///   (E) pn is above every range — prepended.
-    ///   (F) pn is below every range — appended.
+
+    ///  (A) r[i] already covers pn — no-op.
+    ///  (B) pn extends r[i] above (r.largest + 1 == pn).
+    ///  (C) pn extends r[i] below (pn + 1 == r.smallest).
+    ///  (D) pn fits in the gap between r[i-1] and r[i] — fresh
+    ///  singleton inserted at position i.
+    ///  (E) pn is above every range — prepended.
+    ///  (F) pn is below every range — appended.
     ///
+
     /// After (B) / (C), a coalesce-with-neighbour step runs in case
     /// the extension closes the last gap between adjacent ranges.
     ///
+
     /// Linear scan; real workloads keep the list short (≤ 20 entries).
     public fn insert_pn(self, pn: UInt64) -> AckRanges {
         let mut ranges = self.inner;
@@ -115,13 +124,14 @@ implement AckRanges {
         }
 
         // Find insertion anchor. With descending order by `largest`:
-        //   r[0].largest  > r[1].largest  > ... > r[n-1].largest
-        //   r[0].smallest > r[1].largest+1 > r[1].smallest > r[2].largest+1 > ...
+        //  r[0].largest > r[1].largest > ... > r[n-1].largest
+        //  r[0].smallest > r[1].largest+1 > r[1].smallest > r[2].largest+1 > ...
         //
+
         // Scan to find the first i where r[i].largest < pn — i.e., pn
-        // is NOT below-or-equal-to r[i].  If no such i exists, pn is
-        // below every range (Case F).  If i == 0, pn is above every
-        // range (Case E).  Otherwise pn falls between r[i-1] and r[i]
+        // is NOT below-or-equal-to r[i]. If no such i exists, pn is
+        // below every range (Case F). If i == 0, pn is above every
+        // range (Case E). Otherwise pn falls between r[i-1] and r[i]
         // (Cases A / B / C / D).
         let mut i: Int = 0;
         while i < n && ranges[i].largest >= pn {
@@ -135,9 +145,10 @@ implement AckRanges {
         // At this point i is the first index where r[i].largest < pn
         // (or i == n, meaning pn is below every range).
         //
+
         // Candidates to merge with:
-        //   above:  r[i-1] (if exists) — might match pn + 1 == r.smallest (C).
-        //   below:  r[i]   (if exists) — might match r.largest + 1 == pn (B).
+        //  above: r[i-1] (if exists) — might match pn + 1 == r.smallest (C).
+        //  below: r[i] (if exists) — might match r.largest + 1 == pn (B).
 
         let can_extend_above = i >= 1 && ranges[i - 1].smallest == pn + 1_u64;
         let can_extend_below = i <  n && ranges[i].largest + 1_u64 == pn;

@@ -1,59 +1,71 @@
-//! Pronk's bicategory of fractions — V0 algorithmic kernel rule
+//! Pronk's bicategory of fractions — algorithmic kernel rule
 //! (Pronk 1996, "Etendues and Stacks as Bicategories of Fractions",
 //! *Compositio Mathematica* 102.3).
 //!
+
 //! ## What this delivers
 //!
+
 //! Given a 2-category `C` and a class `W` of 1-cells satisfying the
 //! **Pronk axioms** (BF1–BF5), Pronk's construction produces the
 //! **bicategory of fractions** `C[W^{-1}]` — the universal
 //! bicategory in which the 1-cells of `W` become equivalences:
 //!
-//!   * **Objects**: same as `C`.
-//!   * **1-cells** `X → Y`: equivalence classes of *spans*
-//!     `X ←w Y' → Y` with `w ∈ W` and a 2-cell.
-//!   * **2-cells**: zigzags between spans.
+
+//!  * **Objects**: same as `C`.
+//!  * **1-cells** `X → Y`: equivalence classes of *spans*
+//!  `X ←w Y' → Y` with `w ∈ W` and a 2-cell.
+//!  * **2-cells**: zigzags between spans.
 //!
+
 //! The bicategory `C[W^{-1}]` has the universal property that any
 //! 2-functor `F : C → B` sending `W` to equivalences factors uniquely
 //! through `C → C[W^{-1}]`.
 //!
+
 //! ## Why this matters for Diakrisis
 //!
+
 //! Diakrisis §16 uses the bicategory of fractions on
 //! `(LegitimateAbstraction, S-pop equivalences)` to construct the
-//! AC/OC duality classifier — the central 16.10 bridge.  The
+//! AC/OC duality classifier — the central 16.10 bridge. The
 //! construction is admitted via the host-stdlib axiom
 //! `diakrisis_pronk_bicat_fractions` pre-this-module.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`PronkAxioms`] — the BF1–BF5 axiom-witness record.
-//!   2. [`BicatOfFractions`] — the resulting bicategory `C[W^{-1}]`
-//!      with universal-functor witness.
-//!   3. [`Span`] — span-data carrier `X ←w Y' → Y` representing a
-//!      morphism in `C[W^{-1}]`.
-//!   4. [`build_bicat_of_fractions`] — algorithmic builder under
-//!      BF1–BF5 preconditions.
-//!   5. [`compose_spans`] — span composition (computes intermediate
-//!      pullback in the underlying 2-category).
-//!   6. [`universal_2_functor`] — the universal `2-functor`
-//!      `C → C[W^{-1}]` exhibiting the localisation.
+
+//!  1. [`PronkAxioms`] — the BF1–BF5 axiom-witness record.
+//!  2. [`BicatOfFractions`] — the resulting bicategory `C[W^{-1}]`
+//!  with universal-functor witness.
+//!  3. [`Span`] — span-data carrier `X ←w Y' → Y` representing a
+//!  morphism in `C[W^{-1}]`.
+//!  4. [`build_bicat_of_fractions`] — algorithmic builder under
+//!  BF1–BF5 preconditions.
+//!  5. [`compose_spans`] — span composition (computes intermediate
+//!  pullback in the underlying 2-category).
+//!  6. [`universal_2_functor`] — the universal `2-functor`
+//!  `C → C[W^{-1}]` exhibiting the localisation.
 //!
-//! V1 promotion: explicit pentagonal coherence cells for span
+
+//! Future work: explicit pentagonal coherence cells for span
 //! composition; full bicategorical 2-cell content.
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - **Diakrisis 16.10** — the AC/OC duality classifier.  Currently
-//!     admits via `diakrisis_pronk_bicat_fractions`; promotion via
-//!     [`build_bicat_of_fractions`].
-//!   - **MSFS Theorem 9.3 Step 3** — the canonical-classifier
-//!     construction's bicategorical content lifts via Pronk.
-//!   - **§7 OC/AC duality** — both directions of the duality are
-//!     bicategories of fractions.
+
+//!  - **Diakrisis 16.10** — the AC/OC duality classifier. Currently
+//!  admits via `diakrisis_pronk_bicat_fractions`; promotion via
+//!  [`build_bicat_of_fractions`].
+//!  - **MSFS Theorem 9.3 Step 3** — the canonical-classifier
+//!  construction's bicategorical content lifts via Pronk.
+//!  - **§7 OC/AC duality** — both directions of the duality are
+//!  bicategories of fractions.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -112,7 +124,7 @@ impl PronkAxioms {
 // =============================================================================
 
 /// A span `X ←w Y' → Y` representing a morphism in the bicategory of
-/// fractions.  `w` lives in the class `W`.
+/// fractions. `w` lives in the class `W`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Span {
     /// Diagnostic name.
@@ -124,7 +136,7 @@ pub struct Span {
     /// The intermediate object `Y'`.
     pub apex: Text,
     /// The W-leg `w : Y' → X` (or `Y' → Y` depending on orientation
-    /// — V0 uses left-leg-in-W convention).
+    /// — uses left-leg-in-W convention).
     pub w_leg: Text,
     /// The other leg `f : Y' → Y`.
     pub f_leg: Text,
@@ -189,9 +201,11 @@ pub struct BicatOfFractions {
 /// Build the bicategory of fractions `C[W^{-1}]` under Pronk's
 /// BF1–BF5 axioms.
 ///
+
 /// **Preconditions** (kernel-checked): the supplied [`PronkAxioms`]
 /// record asserts all five flags.
 ///
+
 /// Returns `None` if any axiom fails.
 pub fn build_bicat_of_fractions(
     base: &InfinityCategory,
@@ -223,9 +237,11 @@ pub fn build_bicat_of_fractions(
 /// Compose two spans `X ← Y → Z` and `Z ← W → V` to obtain
 /// `X ← P → V` where `P` is the apex of an Ore-pullback (BF4).
 ///
-/// **Preconditions** (V0 surface): both spans share the meeting
+
+/// **Preconditions** (current surface): both spans share the meeting
 /// object `Z` (i.e. `first.target == second.source`).
 ///
+
 /// Returns `None` when the meeting object doesn't match.
 pub fn compose_spans(first: &Span, second: &Span) -> Option<Span> {
     if first.target != second.source {
@@ -262,7 +278,7 @@ pub fn compose_spans(first: &Span, second: &Span) -> Option<Span> {
 
 /// Verify the universal property of the 2-functor `C → C[W^{-1}]`:
 /// every `2-functor F : C → B` sending `W` to equivalences factors
-/// uniquely through `C → C[W^{-1}]`.  V0 surface: returns the
+/// uniquely through `C → C[W^{-1}]`. current surface: returns the
 /// witness flag.
 pub fn universal_2_functor(bicat: &BicatOfFractions) -> bool {
     bicat.has_universal_functor && bicat.axioms.all_satisfied()

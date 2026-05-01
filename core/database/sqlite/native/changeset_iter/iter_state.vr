@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3changeset_next returns one of SQLITE_ROW (100), SQLITE_DONE
-// (101), or an error code.  We wrap that into a typed state.
+// (101), or an error code. We wrap that into a typed state.
 // =============================================================================
 
 module core.database.sqlite.native.changeset_iter.iter_state;

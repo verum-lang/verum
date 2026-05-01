@@ -1,20 +1,25 @@
 //! Inline assembly code generation for LLVM.
 //!
+
 //! This module handles lowering of Verum `@asm` expressions to LLVM inline assembly.
 //!
+
 //! # Example Usage
 //!
+
 //! ```verum
 //! let result: Int = @asm(
-//!     "mov {0}, {1}",
-//!     out("r") result,
-//!     in("r") input,
-//!     options(pure, nomem)
+//!  "mov {0}, {1}",
+//!  out("r") result,
+//!  in("r") input,
+//!  options(pure, nomem)
 //! );
 //! ```
 //!
+
 //! # LLVM Inline Assembly
 //!
+
 //! LLVM inline assembly uses a constraint-based system:
 //! - `r` = general purpose register
 //! - `m` = memory operand
@@ -22,6 +27,7 @@
 //! - `=r` = output to register
 //! - `+r` = read-write register
 //!
+
 //! Verum inline assembly uses `@asm(template, operands..., options(...))` syntax
 //! with full type safety. Operands use constraint-based system:
 //! - `in("reg") expr` for input operands
@@ -42,6 +48,7 @@ use super::error::{LlvmLoweringError, Result};
 
 /// Inline assembly code generator.
 ///
+
 /// Translates Verum @asm expressions to LLVM inline assembly calls.
 pub struct InlineAsmGenerator<'ctx> {
     context: &'ctx Context,
@@ -55,6 +62,7 @@ impl<'ctx> InlineAsmGenerator<'ctx> {
 
     /// Generate LLVM inline assembly from AST operands.
     ///
+
     /// Returns the PointerValue representing the inline assembly function,
     /// along with the input values that should be passed to it.
     pub fn generate(

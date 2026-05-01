@@ -1,5 +1,6 @@
 //! Naming-hygiene contract for `core/database/sqlite/native/`.
 //!
+
 //! Several catalogue waves shipped public type definitions whose names
 //! shadowed stdlib type or variant names — most notably `public type Result
 //! is | RNull | RText/RBytes`, which silently overrode `Result<T,E>::{Ok,
@@ -9,13 +10,15 @@
 //! RText]" — confusing because the catalogue and the test file looked
 //! syntactically fine in isolation.
 //!
+
 //! This test is a guardrail: it walks `core/database/sqlite/native/` and
 //! fails CI when any `.vr` file declares `public type {RESERVED} is …` for
-//! any name in the reserved set.  The reserved set is the small list of
+//! any name in the reserved set. The reserved set is the small list of
 //! stdlib identifiers that catalogue authors are most likely to
 //! accidentally shadow — types and variant constructors that carry critical
 //! "stdlib protocol" meaning.
 //!
+
 //! Spec: see `internal/specs/sqlite-native.md` and
 //! `memory/feedback_explicit_mount_glob_shadow.md` for prior incidents.
 
@@ -27,21 +30,21 @@ use std::path::{Path, PathBuf};
 const ROOT: &str = "core/database/sqlite/native";
 
 /// Reserved stdlib names that must never be redefined inside the catalogue
-/// tree.  Two classes here:
-///   * **Types**:    `Result`, `Maybe`, `List`, `Map`, `Set`, `Bytes`,
-///                   `Iterator`.  Defining a sibling type with the same
-///                   name silently shadows the stdlib import.
-///   * **Variants**: `Ok`, `Err`, `Some`, `None`.  Defining a `public type`
-///                   with these as the *type name* doesn't help the
-///                   variant lookup either, but the matching variant-level
-///                   collision is what historically caused the breakage.
-///                   We catch type-level redefinitions here; variant-level
-///                   coverage is left to the stricter checker that walks
-///                   `type X is | Ok | Err | …` patterns.
+/// tree. Two classes here:
+///  * **Types**: `Result`, `Maybe`, `List`, `Map`, `Set`, `Bytes`,
+///  `Iterator`. Defining a sibling type with the same
+///  name silently shadows the stdlib import.
+///  * **Variants**: `Ok`, `Err`, `Some`, `None`. Defining a `public type`
+///  with these as the *type name* doesn't help the
+///  variant lookup either, but the matching variant-level
+///  collision is what historically caused the breakage.
+///  We catch type-level redefinitions here; variant-level
+///  coverage is left to the stricter checker that walks
+///  `type X is | Ok | Err | …` patterns.
 const RESERVED_TYPE_NAMES: &[&str] = &[
     "Result", "Maybe", "List", "Map", "Set", "Bytes", "Iterator",
     "Ok", "Err", "Some", "None",
-    // `Slot<K, V>` lives in core/collections/map.vr.  Catalogues that
+    // `Slot<K, V>` lives in core/collections/map.vr. Catalogues that
     // declared `public type Slot is { … }` (bind_parameter_index_api,
     // bind_parameter_name_api) tripped type inference with
     // "expected 'Slot', found 'Slot<_, _>'" when used inside `List<Slot>`.
@@ -115,7 +118,7 @@ fn sqlite_native_does_not_shadow_stdlib_types() {
 
 fn workspace_root() -> PathBuf {
     // cargo passes CARGO_MANIFEST_DIR to integration tests as the crate's
-    // dir.  Walk up to find a directory containing the catalogue tree.
+    // dir. Walk up to find a directory containing the catalogue tree.
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for ancestor in crate_dir.ancestors() {
         if ancestor.join("core/database/sqlite/native").is_dir() {

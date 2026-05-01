@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for rename module
 //!
+
 //! Tests the rename refactoring support including:
 //! - Keyword detection
 //! - Identifier validation

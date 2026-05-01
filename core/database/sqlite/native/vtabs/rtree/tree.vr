@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
+
 // Holds a flat node table indexed by node_id, plus the root id. The
 // implementation is in-memory; a future revision can swap the table
 // for a pager-backed slice without changing the surface.
 //
+
 // Insert chooses the leaf with smallest area-enlargement, splits
 // when the leaf is full (linear-cost split — pick the two seeds with
 // largest "wasted area" then assign each remaining entry to the

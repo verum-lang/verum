@@ -2,28 +2,34 @@
 // MSFS — Syn(F) / Mod(F) bridge layer (M-INFRA Phase 1 skeleton)
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §3.1 (R5a / R5b — categorical
 // semantics) + §3.4 (Lemma 3.4 four-step argument) + Lurie HTT 5.1.4
 // (Grothendieck construction over Mod(F)).
 //
+
 // **Architectural role.** This module is the FOUNDATIONAL bridge
 // connecting:
 //
-//   • The R-S layer (`core.math.rich_s.conditions::RichS`) — abstract
-//     metatheory protocol with `syn()` accessor.
-//   • The S_S layer (`core.math.s_definable::class_s_s`) — class S_S
-//     of S-definable categorical structures with closure operations.
-//   • The L_Abs layer (`core.math.absolute_layer`) — three conditions
-//     (F_S), (Π_4), (Π_3-max) and the joint candidate carrier.
+
+//  • The R-S layer (`core.math.rich_s.conditions::RichS`) — abstract
+//  metatheory protocol with `syn()` accessor.
+//  • The S_S layer (`core.math.s_definable::class_s_s`) — class S_S
+//  of S-definable categorical structures with closure operations.
+//  • The L_Abs layer (`core.math.absolute_layer`) — three conditions
+//  (F_S), (Π_4), (Π_3-max) and the joint candidate carrier.
 //
+
 // Specifically: the MSFS Lemma 3.4 paper-proof is a four-step
 // argument that reads:
 //
-//   Step 1: φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
-//   Step 2: Syn(F) is the Grothendieck construction over Mod(F)  [HTT 5.1.4]
-//   Step 3: Hence Syn(F) ∈ S_S^global  [Definition 3.3 closure O2]
-//   Step 4: Therefore X ∈ Ob(Syn(F)) ⊆ S_S^global ⊆ S_S.
+
+//  Step 1: φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
+//  Step 2: Syn(F) is the Grothendieck construction over Mod(F) [HTT 5.1.4]
+//  Step 3: Hence Syn(F) ∈ S_S^global [Definition 3.3 closure O2]
+//  Step 4: Therefore X ∈ Ob(Syn(F)) ⊆ S_S^global ⊆ S_S.
 //
+
 // Pre-M-INFRA each step was discharged by a tautological
 // `() -> Bool ensures true` axiom — the kernel had no witness to
 // re-check, only a name. Post-M-INFRA Phase 1 (this file) each
@@ -33,30 +39,35 @@
 // Rosický + Lurie HTT 3.2 + Kapulkin–Lumsdaine type theory of
 // (∞,n)-categories.
 //
+
 // **Why the current shape.** The `Syn(F)` and `Mod(F)` carriers are
 // *protocols* (not concrete inductive types) because:
 //
-//   • A concrete inductive type for `(∞, n)`-categories at level
-//     n = ∞ requires either quasi-categories (full simplicial-set
-//     machinery, see `core.math.simplicial`) or complete Segal
-//     spaces (Reedy semi-model-categories) — both already declared
-//     as protocols in `core.math.infinity_category`.
-//   • Constructively realising `Syn(F)` as a quasi-category for an
-//     arbitrary R-S F requires either extracting from F's logical
-//     structure (a multi-month engineering task, M-INFRA full
-//     scope) or admitting it via the Lambek–Scott adjunction
-//     witness already on RichS.
+
+//  • A concrete inductive type for `(∞, n)`-categories at level
+//  n = ∞ requires either quasi-categories (full simplicial-set
+//  machinery, see `core.math.simplicial`) or complete Segal
+//  spaces (Reedy semi-model-categories) — both already declared
+//  as protocols in `core.math.infinity_category`.
+//  • Constructively realising `Syn(F)` as a quasi-category for an
+//  arbitrary R-S F requires either extracting from F's logical
+//  structure (a multi-month engineering task, M-INFRA full
+//  scope) or admitting it via the Lambek–Scott adjunction
+//  witness already on RichS.
 //
+
 // Today's protocols are sufficient to:
 //
-//   • Discharge Lemma 3.4's pre/post-conditions with witnessed
-//     content (no more `() -> Bool ensures true` axioms inside
-//     the four-step chain).
-//   • Document the exact structural obligations a future
-//     constructive `Syn(F)` instance must satisfy.
-//   • Type-gate downstream theorems (5.1, 6.1, 7.1, 8.6, 9.6,
-//     10.4) so they observe the witnesses, not just the names.
+
+//  • Discharge Lemma 3.4's pre/post-conditions with witnessed
+//  content (no more `() -> Bool ensures true` axioms inside
+//  the four-step chain).
+//  • Document the exact structural obligations a future
+//  constructive `Syn(F)` instance must satisfy.
+//  • Type-gate downstream theorems (5.1, 6.1, 7.1, 8.6, 9.6,
+//  10.4) so they observe the witnesses, not just the names.
 //
+
 // Tracked under task #6 (M-PROOFS-C) and task #3 (M-INFRA).
 // =============================================================================
 
@@ -84,6 +95,7 @@ mount core.math.accessible.{
 /// itself an R-S); the inclusion preserves the metatheory's logical
 /// signature but may restrict its axiom set.
 ///
+
 /// The `formula_in_subtheory` accessor records that the (F_S)
 /// witness's `φ_X` formula lives within F's logical surface, not
 /// just S's — this is the structural content that allows Lemma
@@ -112,11 +124,13 @@ public type SubTheoryInclusion is protocol {
 /// — its objects are F-models, 1-morphisms are F-preserving model
 /// maps, higher morphisms are coherence isomorphisms.
 ///
+
 /// Companion to RichS::syn() which already exposes Syn(F). Mod(F)
 /// was previously implicit in the LambekScottAdjunction witness;
 /// extracting it explicitly is what allows Step 2 of Lemma 3.4
 /// to talk about "Mod(F)" as a first-class object.
 ///
+
 /// **M-INFRA Phase 2 (2026-04-28).** Strengthened ensures-clause:
 /// the returned `&InfinityNCat` is now KNOWN to be κ-accessible at
 /// depth ≥ -1 (where -1 encodes ∞ per the Convention 1.2 alias).
@@ -132,6 +146,7 @@ public axiom mod_of_sub_theory(inclusion: &SubTheoryInclusion) -> &InfinityNCat
 // 2b. Lambek-Scott (R5b) unit + counit (M-INFRA Phase 2)
 // =============================================================================
 //
+
 // Per MSFS §3.1 (R5b), every Rich-S `S` carries a Lambek-Scott
 // adjunction `Syn ⊣ Mod` whose UNIT `η : id_Syn ⇒ Mod ∘ Syn` is an
 // `(∞, n_S)`-equivalence onto the initial S-structured (∞, n_S)-
@@ -169,12 +184,14 @@ public type LambekScottCounit is protocol {
 
 /// **MSFS (R5b) — Lambek-Scott unit-counit pair (witness-parameterised).**
 ///
+
 /// Given a sub-theory inclusion witness, produce the Lambek-Scott
 /// `(η, ε)` pair grounded in Lambek–Scott 1986 §11.5 (n=1 case),
 /// Awodey–Warren 2009 (MLTT n=∞), Kapulkin–Lumsdaine 2021 (HoTT
 /// n=∞), Barwick–Schommer-Pries 2021 + Bergner–Rezk 2013 + Gagna–
 /// Harpaz–Lanari 2021 (general n≥2).
 ///
+
 /// The witness's ensures-clause encodes the canonical adjunction
 /// laws: (a) unit fully faithful, (b) unit lands in initial
 /// S-structured object, (c) counit is evaluation, (d) triangle
@@ -200,6 +217,7 @@ public axiom lambek_scott_unit_counit(
 /// Lurie HTT 5.1.4 (Cartesian fibrations and straightening) applied
 /// to the syntactic/semantic adjunction of (R5b).
 ///
+
 /// **Why a protocol carrier, not a constructive type.** Constructively
 /// realising the Grothendieck construction for an `(∞, n)`-category-valued
 /// presheaf at the level n = ∞ requires the Lurie HTT 3.2 straightening
@@ -242,6 +260,7 @@ public type GrothendieckOverMod is protocol {
 /// + its level + accessibility property — all three of which are
 /// consumed by Step 3 (Definition 3.3 closure O2).
 ///
+
 /// **Architectural significance vs. tautological form.** Pre-M-INFRA
 /// `msfs_lemma_3_4_grothendieck_o2_bridge` bundled both Steps 2 and 3
 /// into a single tautological axiom whose ensures was just the SSMembership
@@ -250,7 +269,7 @@ public type GrothendieckOverMod is protocol {
 /// content visible to the kernel-recheck and to `verum audit
 /// --framework-axioms` — both citations now appear separately.
 /// **Kernel-discharged** via `verum_kernel::grothendieck::build_grothendieck`
-/// (V0 algorithmic surface).  The `@kernel_discharge` attribute below
+/// (V0 algorithmic surface). The `@kernel_discharge` attribute below
 /// is machine-checked by `verum audit --kernel-discharged-axioms`:
 /// every cited dispatcher name MUST exist in
 /// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
@@ -275,12 +294,14 @@ public axiom lurie_htt_5_1_4_syn_is_grothendieck(
 /// `Syn(F)` lies in `S_S^global` at closure depth ≥ 1 (one O2
 /// application beyond the base layer S_S^local).
 ///
+
 /// This is the second half of Lemma 3.4 Step 2+3 — admits that
 /// the closure operation O2 of Definition 3.3 (which closes
 /// S_S^local under Grothendieck constructions) deposits the
 /// Grothendieck-constructed Syn(F) inside S_S^global, and that
 /// the closure-depth counter increments by 1.
 ///
+
 /// **Why split from `lurie_htt_5_1_4_*`.** The HTT 5.1.4 axiom
 /// witnesses that "Syn(F) IS a Grothendieck construction"; this
 /// axiom witnesses that "Grothendieck constructions LAND in
@@ -301,6 +322,7 @@ public axiom msfs_definition_3_3_o2_lands_in_global(
 // 4b. M-INFRA Phase 2 — accessibility-grounded O2 closure (2026-04-28)
 // =============================================================================
 //
+
 // The Phase 1 axiom above takes the GrothendieckOverMod witness on faith
 // (its `is_kappa_S_accessible()` flag is a bare bool). Phase 2 wires the
 // witness to `core.math.accessible::KappaAccessibleInfCategory` so the
@@ -310,16 +332,19 @@ public axiom msfs_definition_3_3_o2_lands_in_global(
 
 /// **MSFS Definition 3.3 O2 closure (accessibility-grounded form).**
 ///
+
 /// Given a `KappaAccessibleInfCategory` witness `cat` and a candidate
 /// `SSMembership` witness `membership`, the membership lands in
 /// `S_S^global` at depth ≥ 1 because:
 ///
-///   Step 1 — `cat` has κ-filtered ∞-colimits AND a κ-compact dense
-///            subcategory (per AR 1.26 closure law).
-///   Step 2 — every object of such a category produces an
-///            SSMembership in S_S^global at depth ≥ 1 (per the
-///            `kappa_accessible_lands_in_s_s_global` bridge axiom).
+
+///  Step 1 — `cat` has κ-filtered ∞-colimits AND a κ-compact dense
+///  subcategory (per AR 1.26 closure law).
+///  Step 2 — every object of such a category produces an
+///  SSMembership in S_S^global at depth ≥ 1 (per the
+///  `kappa_accessible_lands_in_s_s_global` bridge axiom).
 ///
+
 /// **Architectural significance.** Pre-Phase-2 the Definition 3.3 O2
 /// closure was a single bridge axiom (`msfs_definition_3_3_o2_lands_in_global`)
 /// that consumed the GrothendieckOverMod witness directly. Phase 2
@@ -327,6 +352,7 @@ public axiom msfs_definition_3_3_o2_lands_in_global(
 /// `kappa_accessible_lands_in_s_s_global` on the recheck stack —
 /// two named structural axioms instead of one fused bridge.
 ///
+
 /// Downstream consumers can choose: (a) the Phase-1 single-axiom path
 /// (`msfs_definition_3_3_o2_lands_in_global`) for compactness, or
 /// (b) this Phase-2 two-step @theorem for honest depth.
@@ -344,23 +370,23 @@ public theorem msfs_definition_3_3_o2_via_accessibility<kappa: RegularCardinal>(
     ensures  membership.is_in_s_s_global() && membership.closure_depth() >= 1
     proof {
         // Step 1 — AR 1.26 closure law: κ-accessible cat is closed
-        //          under κ-filtered colimits, preserving the dense
-        //          subcategory of κ-compact objects. The Grothendieck
-        //          construction over Mod(F) is one such κ-filtered
-        //          colimit (small dense subcat = singletons of model
-        //          category objects).
+        //  under κ-filtered colimits, preserving the dense
+        //  subcategory of κ-compact objects. The Grothendieck
+        //  construction over Mod(F) is one such κ-filtered
+        //  colimit (small dense subcat = singletons of model
+        //  category objects).
         apply accessible_closed_under_kappa_filtered_colimits(cat);
         // Step 2 — Kappa-accessibility → S_S^global membership at
-        //          depth ≥ 1. The bridge axiom in `accessible.vr`
-        //          discharges the depth-bound contract and asserts
-        //          the membership facts on the candidate witness.
+        //  depth ≥ 1. The bridge axiom in `accessible.vr`
+        //  discharges the depth-bound contract and asserts
+        //  the membership facts on the candidate witness.
         apply kappa_accessible_lands_in_s_s_global(cat);
         // Step 3 (propositional) — the membership witness inherits
-        //          the depth ≥ 1 from the AR-grounded reasoning.
-        //          Discharged by the SMT verifier on the @verify(formal)
-        //          path (no further apply needed; the conclusion follows
-        //          definitionally from steps 1+2 plus the witness's
-        //          own ensures contract).
+        //  the depth ≥ 1 from the AR-grounded reasoning.
+        //  Discharged by the SMT verifier on the @verify(formal)
+        //  path (no further apply needed; the conclusion follows
+        //  definitionally from steps 1+2 plus the witness's
+        //  own ensures contract).
     };
 
 // =============================================================================
@@ -374,6 +400,7 @@ public theorem msfs_definition_3_3_o2_via_accessibility<kappa: RegularCardinal>(
 /// FormallySDefinable witness already records the existence of
 /// φ_X in some F ⊆ S; SubTheoryInclusion makes F explicit).
 ///
+
 /// Used by Lemma 3.4's Step 1 to extract the sub-theory before
 /// invoking HTT 5.1.4 in Step 2.
 @framework(msfs, "MSFS §3.4 Step 1 — FormallySDefinable witness → SubTheoryInclusion witness (shape translation)")
@@ -393,16 +420,19 @@ public axiom formally_s_definable_to_inclusion(
 /// SSMembership witness landing in S_S^global at depth ≥ 1, by
 /// chaining:
 ///
-///   Step 1:  formally_s_definable_to_inclusion(x)         -> SubTheoryInclusion
-///   Step 2:  lurie_htt_5_1_4_syn_is_grothendieck(...)     -> GrothendieckOverMod
-///   Step 3:  msfs_definition_3_3_o2_lands_in_global(...)  -> SSMembership lands in global
+
+///  Step 1: formally_s_definable_to_inclusion(x) -> SubTheoryInclusion
+///  Step 2: lurie_htt_5_1_4_syn_is_grothendieck(...) -> GrothendieckOverMod
+///  Step 3: msfs_definition_3_3_o2_lands_in_global(...) -> SSMembership lands in global
 ///
+
 /// The kernel re-checks each step. Together with Step 4 (propositional
 /// inclusion `X ∈ Ob(Syn(F)) ⊆ S_S^global ⊆ S_S`) this gives the
 /// full Lemma 3.4 — the next file (`lemma_3_4.vr`) consumes this
 /// theorem to promote `msfs_lemma_3_4_s_definability` from `axiom`
 /// to `@theorem` with a four-step proof body.
 ///
+
 /// **Phase v1.** Phase 1 admits the underlying Lurie HTT 5.1.4 +
 /// Definition 3.3 O2 closure as witness-parameterised axioms.
 /// Phase v2 (M-INFRA full) reduces the HTT 5.1.4 axiom to an
@@ -420,11 +450,12 @@ public theorem syn_mod_lemma_3_4_steps_2_3(
     ensures  membership.is_in_s_s_global() && membership.closure_depth() >= 1
     proof {
         // Step 1 (M0.1) — recover SubTheoryInclusion from
-        //                 FormallySDefinable witness.
+        //  FormallySDefinable witness.
         let inclusion = formally_s_definable_to_inclusion(x);
         // Step 2 (HTT 5.1.4) — Syn(F) realizes as Grothendieck
-        //                       construction over Mod(F).
+        //  construction over Mod(F).
         //
+
         // **Kernel discharge.** This step is now backed by the
         // algorithmic builder `verum_kernel::grothendieck::build_grothendieck`
         // surfaced via `core.proof.kernel_bridge::kernel_grothendieck_construction`.
@@ -434,9 +465,10 @@ public theorem syn_mod_lemma_3_4_steps_2_3(
         // --kernel-intrinsics` lists the dispatch table.
         let realization = lurie_htt_5_1_4_syn_is_grothendieck(inclusion);
         // Step 3 (Def 3.3 O2) — Grothendieck construction lands
-        //                        the SSMembership in S_S^global at
-        //                        depth ≥ 1.
+        //  the SSMembership in S_S^global at
+        //  depth ≥ 1.
         //
+
         // **Kernel discharge.** Backed by
         // `verum_kernel::limits_colimits::compute_colimit_in_psh`
         // (gates Definition 3.3 closure under colimits) +

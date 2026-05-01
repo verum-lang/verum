@@ -2,11 +2,11 @@
 // text_encoding/detect.vr — best-guess encoding detection
 // =============================================================================
 // Spec: heuristic used when sqlite3_prepare receives a raw blob and
-// must decide whether it's UTF-8 or UTF-16.  The rule is:
-//   1. If a BOM is present, trust it.
-//   2. Otherwise every even byte being 0 implies UTF-16LE; every odd
-//      byte being 0 implies UTF-16BE.
-//   3. Otherwise default to UTF-8.
+// must decide whether it's UTF-8 or UTF-16. The rule is:
+//  1. If a BOM is present, trust it.
+//  2. Otherwise every even byte being 0 implies UTF-16LE; every odd
+//  byte being 0 implies UTF-16BE.
+//  3. Otherwise default to UTF-8.
 // =============================================================================
 
 module core.database.sqlite.native.text_encoding.detect_encoding;

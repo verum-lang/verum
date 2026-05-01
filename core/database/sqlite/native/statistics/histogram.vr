@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.2
 //
+
 // stat4 stores per-key-prefix sample histograms. Each `Bucket` is
 // one sampled key together with the cumulative count of rows
 // preceding it. Selectivity for `key < ?` reduces to "binary-search

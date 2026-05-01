@@ -1,53 +1,63 @@
 //! n-truncation operators for (∞,1)-categories — V0 algorithmic
 //! kernel rule (HTT 5.5.6).
 //!
+
 //! ## What this delivers
 //!
+
 //! The **n-truncation** operator `τ_{≤n} : C → C_{≤n}` quotients an
 //! ∞-category `C` by collapsing all `(n+1)`-cells and higher to
-//! identities, producing the *n-truncated* sub-∞-category.  Per
+//! identities, producing the *n-truncated* sub-∞-category. Per
 //! HTT 5.5.6:
 //!
-//!   1. `τ_{≤n}` is a **localisation** at the class of
-//!      `(n+1)`-equivalences (HTT 5.5.6.18).
-//!   2. `τ_{≤n}` is the **left adjoint** of the inclusion
-//!      `C_{≤n} ↪ C` (HTT 5.5.6.21).
-//!   3. The class of `n`-truncated objects is **closed under all
-//!      small limits** (HTT 5.5.6.5).
+
+//!  1. `τ_{≤n}` is a **localisation** at the class of
+//!  `(n+1)`-equivalences (HTT 5.5.6.18).
+//!  2. `τ_{≤n}` is the **left adjoint** of the inclusion
+//!  `C_{≤n} ↪ C` (HTT 5.5.6.21).
+//!  3. The class of `n`-truncated objects is **closed under all
+//!  small limits** (HTT 5.5.6.5).
 //!
+
 //! Truncation is the workhorse of level-descent reasoning: it lets
 //! a proof at higher level be reduced to a finite sequence of
 //! 1-categorical / 2-categorical / ... assertions.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`Truncation`] — the apex `τ_{≤n}(x)` of the truncation
-//!      operator, with universal-property witness.
-//!   2. [`truncate_to_level`] — algorithmic builder.
-//!   3. [`is_n_truncated`] — decidable predicate per HTT 5.5.6.1.
-//!   4. [`truncation_unit_witness`] — witnesses the canonical map
-//!      `η : x → τ_{≤n}(x)`.
-//!   5. [`truncation_is_localisation`] — HTT 5.5.6.18 witness flag.
-//!   6. [`truncation_left_adjoint_to_inclusion`] — HTT 5.5.6.21
-//!      witness flag (composed with [`crate::adjoint_functor`]).
-//!   7. [`n_truncated_objects_closed_under_limits`] — HTT 5.5.6.5.
+
+//!  1. [`Truncation`] — the apex `τ_{≤n}(x)` of the truncation
+//!  operator, with universal-property witness.
+//!  2. [`truncate_to_level`] — algorithmic builder.
+//!  3. [`is_n_truncated`] — decidable predicate per HTT 5.5.6.1.
+//!  4. [`truncation_unit_witness`] — witnesses the canonical map
+//!  `η : x → τ_{≤n}(x)`.
+//!  5. [`truncation_is_localisation`] — HTT 5.5.6.18 witness flag.
+//!  6. [`truncation_left_adjoint_to_inclusion`] — HTT 5.5.6.21
+//!  witness flag (composed with [`crate::adjoint_functor`]).
+//!  7. [`n_truncated_objects_closed_under_limits`] — HTT 5.5.6.5.
 //!
-//! V1 promotion: explicit unit / counit natural-transformation cells
+
+//! Future work: explicit unit / counit natural-transformation cells
 //! with structurally-checked level-descent trace.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **Theorem 5.1** — id_X violation argument at higher levels:
-//!     `τ_{≤n}(id_X)` is `id_X` itself, so the violation propagates
-//!     down level by level via [`truncate_to_level`].
-//!   - **Lemma 3.4 V1** — the (∞,1)-categorical content of the
-//!     Grothendieck construction: each fibre is `n`-truncated for
-//!     some `n`, giving a level-graded factorisation.
-//!   - **Theorem 9.3 Step 2** — the canonical classifier 2-stack
-//!     is `2`-truncated; its construction reduces to building an
-//!     ordinary 2-categorical limit via [`truncate_to_level`].
+
+//!  - **Theorem 5.1** — id_X violation argument at higher levels:
+//!  `τ_{≤n}(id_X)` is `id_X` itself, so the violation propagates
+//!  down level by level via [`truncate_to_level`].
+//!  - **Lemma 3.4 V1** — the (∞,1)-categorical content of the
+//!  Grothendieck construction: each fibre is `n`-truncated for
+//!  some `n`, giving a level-graded factorisation.
+//!  - **Theorem 9.3 Step 2** — the canonical classifier 2-stack
+//!  is `2`-truncated; its construction reduces to building an
+//!  ordinary 2-categorical limit via [`truncate_to_level`].
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -59,7 +69,7 @@ use crate::ordinal::Ordinal;
 // Truncation surface
 // =============================================================================
 
-/// The result of applying `τ_{≤n}` to an object `x ∈ C`.  Carries
+/// The result of applying `τ_{≤n}` to an object `x ∈ C`. Carries
 /// both the apex name and the level at which the truncation lives.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Truncation {
@@ -86,11 +96,14 @@ pub struct Truncation {
 /// Apply `τ_{≤n}` to an object `x ∈ C`, producing the n-truncation
 /// `τ_{≤n}(x)`.
 ///
-/// **Algorithm (HTT 5.5.6.21 V0 surface)**:
+
+/// **Algorithm (HTT 5.5.6.21 current surface)**:
 ///
-///   1. Construct the apex name `τ_{≤n}(x)`.
-///   2. Witness the universal property — always true by HTT 5.5.6.21.
+
+///  1. Construct the apex name `τ_{≤n}(x)`.
+///  2. Witness the universal property — always true by HTT 5.5.6.21.
 ///
+
 /// **Preconditions**: `level` must be at most `c.level` (truncation
 /// at level `n > c.level` is the identity; we still allow it but
 /// surface a diagnostic via the apex name).
@@ -122,8 +135,8 @@ pub fn truncate_to_level(
 // Decision predicates
 // =============================================================================
 
-/// Decide whether `x` is `n`-truncated (HTT 5.5.6.1).  V0 surface:
-/// returns true iff the structural witness flag is set.  V1 will
+/// Decide whether `x` is `n`-truncated (HTT 5.5.6.1). current surface:
+/// returns true iff the structural witness flag is set. Future work will
 /// inspect the truncation's universal-property cone.
 pub fn is_n_truncated(t: &Truncation) -> bool {
     t.has_universal_property
@@ -135,19 +148,19 @@ pub fn truncation_unit_witness(t: &Truncation) -> bool {
 }
 
 /// HTT 5.5.6.18: `τ_{≤n}` is a *localisation* of `C` at the class of
-/// `(n+1)`-equivalences.  V0 surface: returns the witness flag.
+/// `(n+1)`-equivalences. current surface: returns the witness flag.
 pub fn truncation_is_localisation(t: &Truncation) -> bool {
     t.has_universal_property
 }
 
 /// HTT 5.5.6.21: `τ_{≤n}` is the *left adjoint* of the inclusion
-/// `C_{≤n} ↪ C`.  V0 surface: returns the witness flag.
+/// `C_{≤n} ↪ C`. current surface: returns the witness flag.
 pub fn truncation_left_adjoint_to_inclusion(t: &Truncation) -> bool {
     t.has_universal_property
 }
 
 /// HTT 5.5.6.5: the class of `n`-truncated objects is closed under
-/// all small limits.  V0 surface: returns true unconditionally — the
+/// all small limits. current surface: returns true unconditionally — the
 /// closure is a theorem, not a conditional admit.
 pub fn n_truncated_objects_closed_under_limits(_level: &Ordinal) -> bool {
     true
@@ -161,6 +174,7 @@ pub fn n_truncated_objects_closed_under_limits(_level: &Ordinal) -> bool {
 /// Per HTT 5.5.6.21, truncation is *idempotent up to canonical iso*
 /// and the iterated truncation collapses to the smaller level.
 ///
+
 /// Returns the canonical equivalent truncation at `min(m, n)`.
 pub fn compose_truncations(outer: &Truncation, inner: &Truncation) -> Option<Truncation> {
     if outer.source_category != inner.source_category {

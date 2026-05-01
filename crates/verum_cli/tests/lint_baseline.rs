@@ -1,8 +1,9 @@
 //! Suppression baseline contract tests.
 //!
+
 //! Each test exercises one knob in the workflow:
 //! 1. `--write-baseline` snapshots current issues; subsequent run
-//!    finds nothing to fail on.
+//!  finds nothing to fail on.
 //! 2. New issue introduced after the baseline → fails.
 //! 3. Fixed issue dropped on next `--write-baseline`.
 //! 4. Line drift within ±5 still suppressed; outside → fires.

@@ -1,20 +1,23 @@
 // =============================================================================
-// core/net/weft/io_uring_accept.vr — Multi-shot io_uring accept scaffold (V0)
+// core/net/weft/io_uring_accept.vr — Multi-shot io_uring accept scaffold
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §6.17
-// Task:  #316.3 — V0 scaffold; V1 (#316.4) plugs in liburing FFI
+// Spec: internal/specs/net-framework.md §6.17
+// Task: #316.3 — V0 scaffold; V1 (#316.4) plugs in liburing FFI
 // =============================================================================
 //
-// THIS IS A V0 SCAFFOLD.  The architectural surface lives here so the
-// future io_uring driver can land as a one-file diff.  No accept loop
+
+// THIS IS A V0 SCAFFOLD. The architectural surface lives here so the
+// future io_uring driver can land as a one-file diff. No accept loop
 // behaviour changes today; every existing call site keeps using
 // `TcpListener::accept` synchronously through `BlockingAcceptStrategy`.
 //
+
 // # Why multi-shot accept?
 //
+
 // Multi-shot accept is the single largest perf win available on Linux
-// without changing the application surface.  One io_uring SQE
+// without changing the application surface. One io_uring SQE
 // (`IORING_OP_ACCEPT_MULTI`) keeps emitting CQEs as new connections
 // arrive — no per-accept submit roundtrip, no SQE re-submission cost.
 // Per spec §6.17 the throughput jump is roughly 200 K → 4 M+ RPS for
@@ -22,82 +25,98 @@
 // paritет / +15% with axum, actix-web, and Pingora on TechEmpower R23
 // Plaintext.
 //
+
 // Pingora's choice of shared work-stealing over thread-per-core was
-// driven by their measured 87.1 → 99.92% conn-pool reuse boost.  That
+// driven by their measured 87.1 → 99.92% conn-pool reuse boost. That
 // architecture only pays off if accept itself is essentially free.
 // io_uring multi-shot is what makes accept free; without it the
 // reactor stalls on submit/CQE roundtrips at ~200 K conn/s and the
-// work-stealing benefit evaporates.  Hence Weft's spec mandates
+// work-stealing benefit evaporates. Hence Weft's spec mandates
 // multi-shot accept on Linux ≥ 6.11 as a default-on optimisation.
 //
+
 // # Scaffold layout
 //
-//   * `IoUringAcceptConfig` — knobs.  Default: multi-shot ON, batch
-//     128, no fixed-fd index.
-//   * `IoUringAcceptStrategy` — the protocol Listener drives.
-//   * `BlockingAcceptStrategy` — V0 fallback wrapping
-//     `TcpListener::accept`.  Always works.  Today's behaviour.
-//   * `MultiShotAcceptStrategy` — V1 placeholder.  `next_accept()`
-//     panics on dispatch with a "not yet wired" message so accidental
-//     V0 selection fails LOUDLY rather than silently degrading.
-//   * `select_accept_strategy()` — picks the strategy for a given
-//     target triple + config.  Returns Blocking today; will return
-//     MultiShot once V1 is wired.
-//   * `IoUringTelemetry` — observability counters surfaced to
-//     `metrics.vr` once V1 lands.
+
+//  * `IoUringAcceptConfig` — knobs. Default: multi-shot ON, batch
+//  128, no fixed-fd index.
+//  * `IoUringAcceptStrategy` — the protocol Listener drives.
+//  * `BlockingAcceptStrategy` — V0 fallback wrapping
+//  `TcpListener::accept`. Always works. Today's behaviour.
+//  * `MultiShotAcceptStrategy` — V1 placeholder. `next_accept()`
+//  panics on dispatch with a "not yet wired" message so accidental
+//  V0 selection fails LOUDLY rather than silently degrading.
+//  * `select_accept_strategy()` — picks the strategy for a given
+//  target triple + config. Returns Blocking today; will return
+//  MultiShot once V1 is wired.
+//  * `IoUringTelemetry` — observability counters surfaced to
+//  `metrics.vr` once V1 lands.
 //
+
 // # V1 wire-up plan (kept here so it is one file's worth of work)
 //
+
 // The methods on `MultiShotAcceptStrategy` map directly to the
-// liburing C API.  Names below are the exact symbols the V1
+// liburing C API. Names below are the exact symbols the V1
 // implementer should bind through `core/sys/linux/io.vr`:
 //
-//   1. `io_uring_queue_init(SQE_ENTRIES, &ring, 0)` — create the
-//      ring at strategy construction.  SQE_ENTRIES = 256 matches
-//      Pingora's reactor sizing.
+
+//  1. `io_uring_queue_init(SQE_ENTRIES, &ring, 0)` — create the
+//  ring at strategy construction. SQE_ENTRIES = 256 matches
+//  Pingora's reactor sizing.
 //
-//   2. `io_uring_register_files(&ring, &listener_fd, 1)` — register
-//      the listening fd if `cfg.fixed_listener_index == Some(idx)`.
-//      Lets the kernel skip per-op fd-table lookup.
+
+//  2. `io_uring_register_files(&ring, &listener_fd, 1)` — register
+//  the listening fd if `cfg.fixed_listener_index == Some(idx)`.
+//  Lets the kernel skip per-op fd-table lookup.
 //
-//   3. `io_uring_get_sqe(&ring)` →
-//      `io_uring_prep_accept(sqe, listener_fd, NULL, NULL,
-//                            SOCK_CLOEXEC | SOCK_NONBLOCK)` →
-//      set `sqe->ioprio |= IORING_ACCEPT_MULTISHOT` →
-//      optionally set `sqe->file_index = IORING_FILE_INDEX_ALLOC`
-//      to have the kernel auto-allocate a registered-fd slot.
+
+//  3. `io_uring_get_sqe(&ring)` →
+//  `io_uring_prep_accept(sqe, listener_fd, NULL, NULL,
+//  SOCK_CLOEXEC | SOCK_NONBLOCK)` →
+//  set `sqe->ioprio |= IORING_ACCEPT_MULTISHOT` →
+//  optionally set `sqe->file_index = IORING_FILE_INDEX_ALLOC`
+//  to have the kernel auto-allocate a registered-fd slot.
 //
-//   4. `io_uring_submit(&ring)` once at strategy startup.  The kernel
-//      now generates one CQE per arriving connection without any
-//      further submission from us.
+
+//  4. `io_uring_submit(&ring)` once at strategy startup. The kernel
+//  now generates one CQE per arriving connection without any
+//  further submission from us.
 //
-//   5. Per accept: `io_uring_wait_cqe(&ring, &cqe)` →
-//      `cqe->res` holds the accepted fd (or `-errno` on error) →
-//      `cqe->flags & IORING_CQE_F_MORE` indicates the multi-shot
-//      registration is still alive.  When `F_MORE` clears we MUST
-//      re-prep the multi-shot SQE (kernel terminates the chain on
-//      certain error paths — EFAULT on bad addr buf, ENOBUFS, etc.).
+
+//  5. Per accept: `io_uring_wait_cqe(&ring, &cqe)` →
+//  `cqe->res` holds the accepted fd (or `-errno` on error) →
+//  `cqe->flags & IORING_CQE_F_MORE` indicates the multi-shot
+//  registration is still alive. When `F_MORE` clears we MUST
+//  re-prep the multi-shot SQE (kernel terminates the chain on
+//  certain error paths — EFAULT on bad addr buf, ENOBUFS, etc.).
 //
-//   6. `io_uring_cqe_seen(&ring, cqe)` — release the CQE slot.
+
+//  6. `io_uring_cqe_seen(&ring, cqe)` — release the CQE slot.
 //
-//   7. On shutdown: `io_uring_prep_cancel_fd(...)` against the
-//      listener fd, then `io_uring_queue_exit(&ring)`.
+
+//  7. On shutdown: `io_uring_prep_cancel_fd(...)` against the
+//  listener fd, then `io_uring_queue_exit(&ring)`.
 //
+
 // All seven steps live behind the `IoUringAcceptStrategy` protocol
 // boundary — V0 → V1 is a struct-body swap, not a refactor of the
 // listener.
 //
+
 // # Why a strategy object instead of a feature flag?
 //
-// The strategy object lets the same binary fall back gracefully.  A
+
+// The strategy object lets the same binary fall back gracefully. A
 // runtime that fails to initialise io_uring (kernel < 5.1, seccomp
 // sandbox blocking io_uring_setup, missing CAP_SYS_NICE for ring
 // affinity) demotes to BlockingAcceptStrategy without recompilation.
 // Compile-time `@cfg(target_os = "linux")` would force a hard split
 // where macOS dev environments couldn't even type-check the Linux
-// path.  Runtime selection trades a single virtual call per accept
+// path. Runtime selection trades a single virtual call per accept
 // for the universal-build property.
 //
+
 // =============================================================================
 
 module core.net.weft.io_uring_accept;
@@ -113,30 +132,31 @@ mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 // IoUringAcceptConfig — runtime knobs
 // =============================================================================
 
-/// Configuration for io_uring multi-shot accept.  Surfaced through
+/// Configuration for io_uring multi-shot accept. Surfaced through
 /// `ListenerConfig.with_io_uring_strategy(...)` for opt-in callers.
 ///
+
 /// Defaults match spec §6.17 recommended values: multi-shot ON,
 /// SQE batch 128 (one cache-line worth of in-flight accepts), no
 /// fixed-fd registration (the listener fd is referenced by descriptor
 /// rather than by registered-file index).
 public type IoUringAcceptConfig is {
-    /// Whether to attempt `IORING_OP_ACCEPT_MULTI` at all.  When
+    /// Whether to attempt `IORING_OP_ACCEPT_MULTI` at all. When
     /// false, the strategy selector falls through to
-    /// `BlockingAcceptStrategy` even on Linux.  Tests use this to
+    /// `BlockingAcceptStrategy` even on Linux. Tests use this to
     /// pin behaviour under a known fallback path.
     multi_shot: Bool,
-    /// Number of in-flight accept SQEs to keep submitted.  Multi-shot
+    /// Number of in-flight accept SQEs to keep submitted. Multi-shot
     /// only consumes one SQE in steady state, but the V1 driver
     /// pre-arms `sqe_batch_size` SQEs to amortise the kernel-side
     /// `IORING_SETUP_SQPOLL` wakeup cost when running with a kernel
-    /// poll thread.  256 is the upper bound; 128 is a safe default.
+    /// poll thread. 256 is the upper bound; 128 is a safe default.
     sqe_batch_size: Int,
     /// `Some(idx)` — register the listening fd at fixed slot `idx`
     /// via `IORING_REGISTER_FILES` and pass `idx` plus
-    /// `IOSQE_FIXED_FILE` to every accept SQE.  Skips the kernel's
+    /// `IOSQE_FIXED_FILE` to every accept SQE. Skips the kernel's
     /// per-op fd-table lookup.
-    /// `None` — submit accepts against the raw fd.  Simpler; ~2%
+    /// `None` — submit accepts against the raw fd. Simpler; ~2%
     /// slower under heavy connect storms.
     fixed_listener_index: Maybe<Int>,
 };
@@ -165,7 +185,7 @@ implement IoUringAcceptConfig {
 
     /// Compact structural fingerprint — the round-trip test
     /// reconstructs a config via the builder methods and compares
-    /// fingerprints to verify field round-tripping.  The Maybe<Int>
+    /// fingerprints to verify field round-tripping. The Maybe<Int>
     /// is encoded as `(present?, value)` to keep the tuple shape
     /// stable across `None` and `Some(n)`.
     public fn fingerprint(&self) -> (Bool, Int, (Bool, Int)) {
@@ -194,25 +214,28 @@ implement Clone for IoUringAcceptConfig {
 // IoUringAcceptStrategy — protocol boundary between accept loop and driver
 // =============================================================================
 
-/// The pluggable accept driver.  Implementors:
+/// The pluggable accept driver. Implementors:
 ///
-///   * `BlockingAcceptStrategy` — synchronous `TcpListener::accept`,
-///     today's behaviour, works on every platform.
-///   * `MultiShotAcceptStrategy` — V1 placeholder; will be backed by
-///     `io_uring_prep_accept` + `IORING_OP_ACCEPT_MULTI` once the
-///     liburing FFI lands.
+
+///  * `BlockingAcceptStrategy` — synchronous `TcpListener::accept`,
+///  today's behaviour, works on every platform.
+///  * `MultiShotAcceptStrategy` — V1 placeholder; will be backed by
+///  `io_uring_prep_accept` + `IORING_OP_ACCEPT_MULTI` once the
+///  liburing FFI lands.
 ///
+
 /// The protocol is intentionally tiny: the accept loop does not care
-/// HOW the next connection arrived, only that it did.  Cancellation
+/// HOW the next connection arrived, only that it did. Cancellation
 /// is handled by the caller via the supplied token; strategies that
 /// spin native kernel resources (the multi-shot ring) MUST observe
 /// the token before issuing the next wait so shutdown completes
 /// promptly.
 public type IoUringAcceptStrategy is protocol {
-    /// Wait for the next accepted connection.  `None` indicates a
+    /// Wait for the next accepted connection. `None` indicates a
     /// clean shutdown (token cancelled or listener drained); `Some`
     /// hands the caller an owned stream + peer address.
     ///
+
     /// The strategy MUST NOT spin-busy-loop on transient errors;
     /// the existing `accept_loop` back-off (10 ms sleep on EMFILE)
     /// is the canonical retry shape.
@@ -223,7 +246,7 @@ public type IoUringAcceptStrategy is protocol {
     ) -> Maybe<(TcpStream, SocketAddr)>;
 
     /// Snapshot of telemetry counters for the metrics layer.
-    /// Cheap — atomic loads only.  Called once per scrape interval
+    /// Cheap — atomic loads only. Called once per scrape interval
     /// from the metrics exporter, not on the accept hot path.
     fn telemetry(&self) -> IoUringTelemetry;
 
@@ -236,26 +259,27 @@ public type IoUringAcceptStrategy is protocol {
 // IoUringTelemetry — observability counters
 // =============================================================================
 
-/// Snapshot of the counters every strategy maintains.  The plain
+/// Snapshot of the counters every strategy maintains. The plain
 /// struct is cheap to clone; the underlying atomics live on the
 /// strategy itself so the snapshot is read-only by design.
 ///
-/// All counters are monotonic.  The metrics layer computes per-second
+
+/// All counters are monotonic. The metrics layer computes per-second
 /// rates by sampling the snapshot at fixed intervals.
 public type IoUringTelemetry is {
-    /// Total successful accepts.  `BlockingAcceptStrategy` increments
+    /// Total successful accepts. `BlockingAcceptStrategy` increments
     /// this once per `accept()` return; `MultiShotAcceptStrategy`
-    /// increments once per CQE-with-success.  The name "shots" is the
+    /// increments once per CQE-with-success. The name "shots" is the
     /// io_uring vocabulary — one CQE = one shot — and stays even on
     /// the blocking strategy for dashboard uniformity.
     shots_observed: Int,
-    /// Times the strategy demoted to a slower path.  For
+    /// Times the strategy demoted to a slower path. For
     /// MultiShot: `IORING_CQE_F_MORE` cleared and we re-prep'd the
     /// SQE (counts every multishot re-arm — informative in
-    /// production but not a panic-trigger).  For Blocking: always 0.
+    /// production but not a panic-trigger). For Blocking: always 0.
     fallbacks_used: Int,
-    /// Accept errors observed.  CQEs with `cqe->res < 0`, EMFILE
-    /// from the blocking accept, etc.  Excludes clean cancellation.
+    /// Accept errors observed. CQEs with `cqe->res < 0`, EMFILE
+    /// from the blocking accept, etc. Excludes clean cancellation.
     accept_errors: Int,
 };
 
@@ -279,7 +303,7 @@ implement Clone for IoUringTelemetry {
     }
 }
 
-/// Atomic backing store for a strategy's counters.  Strategies hold
+/// Atomic backing store for a strategy's counters. Strategies hold
 /// one of these and project read-only `IoUringTelemetry` snapshots
 /// via `snapshot()`.
 public type IoUringTelemetryAtomics is {
@@ -334,10 +358,11 @@ implement Clone for IoUringTelemetryAtomics {
 
 /// Synchronous fallback that delegates to `TcpListener::accept`
 /// through the existing `accept_cancellable` cancellation-aware
-/// wrapper.  This is the strategy `select_accept_strategy()` returns
+/// wrapper. This is the strategy `select_accept_strategy()` returns
 /// today on every platform (because MultiShot is unwired); once V1
 /// lands, Linux callers transparently upgrade.
 ///
+
 /// The `BlockingAcceptStrategy` carries no native resources — it can
 /// be constructed unconditionally on every platform.
 public type BlockingAcceptStrategy is {
@@ -386,50 +411,54 @@ implement IoUringAcceptStrategy for BlockingAcceptStrategy {
 
 /// V1 io_uring multi-shot accept driver — placeholder today.
 ///
+
 /// The struct exists so `select_accept_strategy()` can return a
 /// `Heap<dyn IoUringAcceptStrategy>` of either variant by Linux flag.
 /// `next_accept()` panics with a clear "not yet wired" message — we
 /// want accidental V0 dispatch to fail LOUDLY rather than silently
-/// degrade.  `select_accept_strategy()` therefore ALWAYS routes to
+/// degrade. `select_accept_strategy()` therefore ALWAYS routes to
 /// the blocking strategy today, even on Linux; the placeholder only
 /// becomes reachable once V1 wires it in.
 ///
+
 /// # V1 FFI surface (verbatim liburing names)
 ///
+
 /// The implementer fills `next_accept` using these symbols, all
 /// already declared in `core/sys/linux/io.vr` skeleton or to be
 /// added there:
 ///
-///   * `io_uring_queue_init(unsigned entries, struct io_uring *ring, unsigned flags)`
-///   * `io_uring_get_sqe(struct io_uring *ring) -> struct io_uring_sqe *`
-///   * `io_uring_prep_accept(struct io_uring_sqe *sqe, int sockfd,
-///                           struct sockaddr *addr, socklen_t *addrlen,
-///                           int flags)`
-///   * `IORING_OP_ACCEPT_MULTI` — set via `sqe->ioprio |= IORING_ACCEPT_MULTISHOT`
-///   * `IORING_FILE_INDEX_ALLOC` — `sqe->file_index = IORING_FILE_INDEX_ALLOC`
-///     to let the kernel auto-allocate a registered-fd slot
-///   * `IOSQE_FIXED_FILE` — `sqe->flags |= IOSQE_FIXED_FILE` when
-///     `cfg.fixed_listener_index == Some(idx)`
-///   * `io_uring_register_files(struct io_uring *ring, const int *files, unsigned nr_files)`
-///   * `io_uring_submit(struct io_uring *ring) -> int`
-///   * `io_uring_wait_cqe(struct io_uring *ring, struct io_uring_cqe **cqe_ptr) -> int`
-///   * `io_uring_cqe_seen(struct io_uring *ring, struct io_uring_cqe *cqe)`
-///   * `IORING_CQE_F_MORE` — `cqe->flags & F_MORE` ⇒ multi-shot still armed
-///   * `io_uring_prep_cancel_fd(...)` — used in the shutdown path
-///   * `io_uring_queue_exit(struct io_uring *ring)`
+
+///  * `io_uring_queue_init(unsigned entries, struct io_uring *ring, unsigned flags)`
+///  * `io_uring_get_sqe(struct io_uring *ring) -> struct io_uring_sqe *`
+///  * `io_uring_prep_accept(struct io_uring_sqe *sqe, int sockfd,
+///  struct sockaddr *addr, socklen_t *addrlen,
+///  int flags)`
+///  * `IORING_OP_ACCEPT_MULTI` — set via `sqe->ioprio |= IORING_ACCEPT_MULTISHOT`
+///  * `IORING_FILE_INDEX_ALLOC` — `sqe->file_index = IORING_FILE_INDEX_ALLOC`
+///  to let the kernel auto-allocate a registered-fd slot
+///  * `IOSQE_FIXED_FILE` — `sqe->flags |= IOSQE_FIXED_FILE` when
+///  `cfg.fixed_listener_index == Some(idx)`
+///  * `io_uring_register_files(struct io_uring *ring, const int *files, unsigned nr_files)`
+///  * `io_uring_submit(struct io_uring *ring) -> int`
+///  * `io_uring_wait_cqe(struct io_uring *ring, struct io_uring_cqe **cqe_ptr) -> int`
+///  * `io_uring_cqe_seen(struct io_uring *ring, struct io_uring_cqe *cqe)`
+///  * `IORING_CQE_F_MORE` — `cqe->flags & F_MORE` ⇒ multi-shot still armed
+///  * `io_uring_prep_cancel_fd(...)` — used in the shutdown path
+///  * `io_uring_queue_exit(struct io_uring *ring)`
 public type MultiShotAcceptStrategy is {
     config:   IoUringAcceptConfig,
     counters: IoUringTelemetryAtomics,
     /// Reserved for V1: the io_uring ring handle, registered-fd slot,
-    /// pinned addr buffer, etc.  Today the struct is empty beyond the
+    /// pinned addr buffer, etc. Today the struct is empty beyond the
     /// config + counters so the placeholder type-checks on every
     /// platform without dragging in `core.sys.linux.io`.
     armed: Bool,
 };
 
 implement MultiShotAcceptStrategy {
-    /// Construct the placeholder.  Does NOT call `io_uring_queue_init`
-    /// today — that lives in V1.  Always succeeds on every platform
+    /// Construct the placeholder. Does NOT call `io_uring_queue_init`
+    /// today — that lives in V1. Always succeeds on every platform
     /// because no native resources are reserved.
     public fn new(config: IoUringAcceptConfig) -> MultiShotAcceptStrategy {
         MultiShotAcceptStrategy {
@@ -446,14 +475,15 @@ implement IoUringAcceptStrategy for MultiShotAcceptStrategy {
         _listener: &TcpListener,
         _token: &CancellationToken,
     ) -> Maybe<(TcpStream, SocketAddr)> {
-        // V1 placeholder.  Every accidental V0 dispatch must fail
+        // V1 placeholder. Every accidental V0 dispatch must fail
         // LOUDLY so we catch wiring bugs before they degrade
         // production servers to a silent fall-back.
         //
+
         // The selector (`select_accept_strategy`) intentionally
         // never returns this variant today — it picks
         // `BlockingAcceptStrategy` even when `cfg.multi_shot == true`
-        // on Linux.  Reaching this panic means a caller bypassed the
+        // on Linux. Reaching this panic means a caller bypassed the
         // selector and hand-built a `MultiShotAcceptStrategy`.
         panic("io_uring multi-shot accept not yet wired (#316.4 — V1 follow-up); use BlockingAcceptStrategy or select_accept_strategy()");
     }
@@ -473,28 +503,34 @@ implement IoUringAcceptStrategy for MultiShotAcceptStrategy {
 
 /// Pick an accept strategy for the running listener.
 ///
+
 /// V0 contract:
 ///
-///   * On `linux*` triples with `cfg.multi_shot == true`: WOULD pick
-///     `MultiShotAcceptStrategy` once V1 is wired.  Today, since
-///     `MultiShotAcceptStrategy.next_accept` panics, the function
-///     returns `BlockingAcceptStrategy` regardless — keeping every
-///     production listener on a working path until V1 lands.
+
+///  * On `linux*` triples with `cfg.multi_shot == true`: WOULD pick
+///  `MultiShotAcceptStrategy` once V1 is wired. Today, since
+///  `MultiShotAcceptStrategy.next_accept` panics, the function
+///  returns `BlockingAcceptStrategy` regardless — keeping every
+///  production listener on a working path until V1 lands.
 ///
-///   * On every other triple OR with `cfg.multi_shot == false`:
-///     returns `BlockingAcceptStrategy`.
+
+///  * On every other triple OR with `cfg.multi_shot == false`:
+///  returns `BlockingAcceptStrategy`.
 ///
+
 /// V1 contract (post-#316.4):
 ///
-///   * Same guard, but the Linux + multi_shot branch returns
-///     `MultiShotAcceptStrategy.new(cfg)` after a successful
-///     `io_uring_queue_init`.  If init fails (kernel < 5.1, sandbox,
-///     missing CAP), the function falls back to Blocking and
-///     records `fallbacks_used += 1` on the strategy returned.
+
+///  * Same guard, but the Linux + multi_shot branch returns
+///  `MultiShotAcceptStrategy.new(cfg)` after a successful
+///  `io_uring_queue_init`. If init fails (kernel < 5.1, sandbox,
+///  missing CAP), the function falls back to Blocking and
+///  records `fallbacks_used += 1` on the strategy returned.
 ///
+
 /// `target_triple` is the same string `module.get_triple()` returns
 /// in the LLVM backend — `"x86_64-unknown-linux-gnu"`,
-/// `"aarch64-apple-darwin"`, `"x86_64-pc-windows-msvc"`, etc.  We
+/// `"aarch64-apple-darwin"`, `"x86_64-pc-windows-msvc"`, etc. We
 /// match by substring (`linux`, `darwin`, `windows`) for forward
 /// compatibility with new triple variants (e.g. `linux-musl`).
 public fn select_accept_strategy(
@@ -503,9 +539,9 @@ public fn select_accept_strategy(
 ) -> Heap<dyn IoUringAcceptStrategy> {
     let is_linux = target_triple.contains(&"linux".to_text());
     if is_linux && cfg.multi_shot {
-        // V1 will return `Heap.new(MultiShotAcceptStrategy.new(cfg.clone()))`.
+        // Future work will return `Heap.new(MultiShotAcceptStrategy.new(cfg.clone()))`.
         // V0 routes Linux + multi_shot through the blocking path so
-        // production servers stay on a working code path.  When
+        // production servers stay on a working code path. When
         // wiring V1, replace this block with the MultiShot
         // construction + io_uring_queue_init error-handling fall-back
         // (record fallback, return Blocking on init failure).
@@ -517,9 +553,10 @@ public fn select_accept_strategy(
 
 /// Helper: would the V1 selector pick MultiShot for this combination?
 ///
+
 /// Lets tests pin the *intent* of the selector independently of the
-/// V0 placeholder behaviour, so when V1 lands the assertions stay
-/// green.  Returns true exactly when the triple is Linux AND the
+/// placeholder behaviour, so when V1 lands the assertions stay
+/// green. Returns true exactly when the triple is Linux AND the
 /// config requests multi-shot.
 public fn would_select_multi_shot(
     target_triple: &Text,

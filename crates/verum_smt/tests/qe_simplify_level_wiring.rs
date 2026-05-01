@@ -4,6 +4,7 @@
 //! field was documented as a 0-3 level but every build used a
 //! bare `Tactic::new("simplify")` regardless.
 //!
+
 //! Behavioural correctness for each level (i.e. that level 3
 //! produces a more thoroughly simplified result than level 1) is
 //! out of scope here — Z3's tactic semantics are the authority.

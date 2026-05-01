@@ -5,55 +5,67 @@
 // Dependencies: core, core.base.random
 // =============================================================================
 //
+
 // Algorithm R (Vitter 1985) — uniform reservoir sampling. Given a
 // stream of items of unknown or unbounded length, retain a fixed-
 // size sample where every item has equal probability `k / n` of
 // surviving, where k is the reservoir capacity and n is the
 // total number of items observed.
 //
+
 // Used by:
 //
-//   * Trace-sampling (Datadog / Honeycomb / OpenTelemetry tail
-//     sampler) — keep N random traces per second.
-//   * Streaming analytics — pick N representative events from a
-//     kafka topic without buffering the whole stream.
-//   * ML training — shuffle training samples out-of-core.
-//   * Load testing — pick a representative subset of production
-//     traffic to replay.
+
+//  * Trace-sampling (Datadog / Honeycomb / OpenTelemetry tail
+//  sampler) — keep N random traces per second.
+//  * Streaming analytics — pick N representative events from a
+//  kafka topic without buffering the whole stream.
+//  * ML training — shuffle training samples out-of-core.
+//  * Load testing — pick a representative subset of production
+//  traffic to replay.
 //
+
 // Weighted sampling (Algorithm A-Res, Efraimidis & Spirakis 2006)
 // lands in a follow-up once the stdlib's move-semantics surface
 // supports the heap-based priority-keyed eviction loop cleanly.
 //
+
 // # API
 //
+
 // ```
 // let mut res: Reservoir<TraceId> = Reservoir.new(1000);
 // while let Some(trace) = stream.next() {
-//     res.offer(trace);
+//  res.offer(trace);
 // }
 // let sample: List<TraceId> = res.take();
 // ```
 //
+
 // # Correctness
 //
+
 // Proof sketch (Vitter 1985):
 //
-//   * When `len < capacity`: every item is retained with p=1.
-//   * At item i > capacity: retain with probability `capacity/i`
-//     by replacing a uniformly-random slot. This is exactly the
-//     marginal probability that any item from 1..i survives to
-//     step i.
-//   * Induction closes: after n items, each has p = capacity/n.
+
+//  * When `len < capacity`: every item is retained with p=1.
+//  * At item i > capacity: retain with probability `capacity/i`
+//  by replacing a uniformly-random slot. This is exactly the
+//  marginal probability that any item from 1..i survives to
+//  step i.
+//  * Induction closes: after n items, each has p = capacity/n.
 //
+
 // # Security
 //
+
 // Uses the process-wide CSPRNG via `core.base.random.fill`. For
 // adversarial inputs (an attacker picking item order to bias the
 // sample), CSPRNG-sourced randomness is the correct choice —
 // deterministic PRNGs would let the attacker predict which
 // items survive.
 //
+
 // =============================================================================
 
 module core.collections.reservoir;

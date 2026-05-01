@@ -1,54 +1,64 @@
 //! Adjoint Functor Theorem (HTT 5.5.2.9 / Special AFT) — V0
 //! algorithmic kernel rule.
 //!
+
 //! ## What this delivers
 //!
+
 //! The **Special Adjoint Functor Theorem** for ∞-categories
 //! (Lurie HTT 5.5.2.9) is one of the most load-bearing existence
 //! theorems in higher-category theory:
 //!
+
 //! > Let `L : C → D` be a functor between presentable ∞-categories.
 //! > If `L` preserves all small colimits, then `L` admits a right
 //! > adjoint `R : D → C`.
 //!
+
 //! Dually, if `R : D → C` is between presentable ∞-categories and
 //! preserves all small limits + filtered colimits, then `R` admits
-//! a left adjoint.  Pre-this-module these existence claims are
+//! a left adjoint. Pre-this-module these existence claims are
 //! admitted via the host-stdlib axiom `msfs_aft_iota_r`.
 //!
+
 //! ## V0 algorithmic surface
 //!
-//! V0 ships:
+
+//! ships:
 //!
-//!   1. [`Adjunction`] — the data of an adjoint pair `L ⊣ R` with
-//!      unit `η : id_C ⇒ R ∘ L` and counit `ε : L ∘ R ⇒ id_D`.
-//!   2. [`left_adjoint_exists`] — decidable predicate certifying
-//!      that a colimit-preserving functor between presentable
-//!      ∞-categories admits a right adjoint (HTT 5.5.2.9
-//!      preconditions).
-//!   3. [`right_adjoint_exists`] — dual predicate.
-//!   4. [`build_adjunction`] — algorithmic builder that produces
-//!      the adjoint pair when SAFT preconditions hold.
-//!   5. [`triangle_identities_witness`] — witness flag that the
-//!      triangle identities `(R ∘ ε) ∘ (η ∘ R) = id_R` and
-//!      `(ε ∘ L) ∘ (L ∘ η) = id_L` hold (HTT 5.2.2.8).
+
+//!  1. [`Adjunction`] — the data of an adjoint pair `L ⊣ R` with
+//!  unit `η : id_C ⇒ R ∘ L` and counit `ε : L ∘ R ⇒ id_D`.
+//!  2. [`left_adjoint_exists`] — decidable predicate certifying
+//!  that a colimit-preserving functor between presentable
+//!  ∞-categories admits a right adjoint (HTT 5.5.2.9
+//!  preconditions).
+//!  3. [`right_adjoint_exists`] — dual predicate.
+//!  4. [`build_adjunction`] — algorithmic builder that produces
+//!  the adjoint pair when SAFT preconditions hold.
+//!  5. [`triangle_identities_witness`] — witness flag that the
+//!  triangle identities `(R ∘ ε) ∘ (η ∘ R) = id_R` and
+//!  `(ε ∘ L) ∘ (L ∘ η) = id_L` hold (HTT 5.2.2.8).
 //!
+
 //! V0 is the algorithmic skeleton; V1 promotion will produce the
 //! explicit unit/counit natural-transformation cells with full
 //! pentagonal coherence.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **Lemma 10.3** (`(ι, r)` construction) — currently admits via
-//!     `msfs_aft_iota_r` framework axiom.  Promotion: the proof body
-//!     invokes [`build_adjunction`] with the inclusion `ι : S_S → cF`
-//!     in the right-adjoint direction, the reflector `r : cF → S_S`
-//!     emerges algorithmically.
-//!   - **Diakrisis 16.3** (the `ι ⊣ r` reflective subcategory
-//!     existence claim) — direct invocation of [`left_adjoint_exists`].
-//!   - **§7 OC/AC duality** (the Galois duality between
-//!     OC-fragments and AC-fragments) — both directions are now
-//!     adjoint pairs producible via [`build_adjunction`].
+
+//!  - **Lemma 10.3** (`(ι, r)` construction) — currently admits via
+//!  `msfs_aft_iota_r` framework axiom. Promotion: the proof body
+//!  invokes [`build_adjunction`] with the inclusion `ι : S_S → cF`
+//!  in the right-adjoint direction, the reflector `r : cF → S_S`
+//!  emerges algorithmically.
+//!  - **Diakrisis 16.3** (the `ι ⊣ r` reflective subcategory
+//!  existence claim) — direct invocation of [`left_adjoint_exists`].
+//!  - **§7 OC/AC duality** (the Galois duality between
+//!  OC-fragments and AC-fragments) — both directions are now
+//!  adjoint pairs producible via [`build_adjunction`].
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -62,6 +72,7 @@ use crate::ordinal::Ordinal;
 
 /// An adjoint pair `L ⊣ R` between ∞-categories (HTT 5.2.2.1).
 ///
+
 /// **Algorithmic content**: source/target categories, the two
 /// functors' diagnostic names, and witness flags for unit/counit
 /// existence and the triangle identities.
@@ -102,7 +113,7 @@ impl Adjunction {
 // HTT 5.5.2.9 SAFT preconditions
 // =============================================================================
 
-/// SAFT precondition data for a functor `F : C → D`.  The
+/// SAFT precondition data for a functor `F : C → D`. The
 /// adjoint-existence decision uses this record to check whether
 /// HTT 5.5.2.9 applies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -137,13 +148,15 @@ impl SaftPreconditions {
 
 /// Decide whether a functor admits a *right adjoint* per HTT 5.5.2.9.
 ///
+
 /// **Preconditions** (kernel-checked):
-///   1. Source is presentable.
-///   2. Target is presentable.
-///   3. The functor preserves all small colimits.
+///  1. Source is presentable.
+///  2. Target is presentable.
+///  3. The functor preserves all small colimits.
 ///
-/// Returns `true` iff all three hold.  V0 surface trusts the witness
-/// flags; V1 will inspect each flag's structural witness.
+
+/// Returns `true` iff all three hold. current surface trusts the witness
+/// flags; Future work will inspect each flag's structural witness.
 pub fn left_adjoint_exists(pre: &SaftPreconditions) -> bool {
     pre.source_presentable
         && pre.target_presentable
@@ -152,10 +165,11 @@ pub fn left_adjoint_exists(pre: &SaftPreconditions) -> bool {
 
 /// Decide whether a functor admits a *left adjoint* (dual of HTT 5.5.2.9).
 ///
+
 /// **Preconditions** (kernel-checked):
-///   1. Source is presentable.
-///   2. Target is presentable.
-///   3. The functor preserves all small limits and is accessible.
+///  1. Source is presentable.
+///  2. Target is presentable.
+///  3. The functor preserves all small limits and is accessible.
 pub fn right_adjoint_exists(pre: &SaftPreconditions) -> bool {
     pre.source_presentable
         && pre.target_presentable
@@ -179,13 +193,15 @@ pub enum AdjunctionDirection {
 
 /// Build an adjoint pair under SAFT preconditions (HTT 5.5.2.9).
 ///
+
 /// **Algorithm**:
-///   1. Check the relevant precondition predicate.
-///   2. Construct the missing adjoint as an ∞-functor name
-///      (`L_dagger` or `R_dagger`).
-///   3. Witness unit/counit + triangle identities (always true by HTT
-///      5.5.2.9 when preconditions hold).
+///  1. Check the relevant precondition predicate.
+///  2. Construct the missing adjoint as an ∞-functor name
+///  (`L_dagger` or `R_dagger`).
+///  3. Witness unit/counit + triangle identities (always true by HTT
+///  5.5.2.9 when preconditions hold).
 ///
+
 /// Returns `None` if preconditions fail.
 pub fn build_adjunction(
     given: impl Into<Text>,
@@ -225,7 +241,7 @@ pub fn build_adjunction(
 }
 
 /// Verify that an adjunction's triangle identities hold (HTT 5.2.2.8).
-/// V0 surface: returns the witness flag stored on the adjunction.
+/// current surface: returns the witness flag stored on the adjunction.
 pub fn triangle_identities_witness(adj: &Adjunction) -> bool {
     adj.triangle_identities_hold
 }
@@ -233,6 +249,7 @@ pub fn triangle_identities_witness(adj: &Adjunction) -> bool {
 /// Compose two adjunctions: given `L_1 ⊣ R_1 : C → D` and
 /// `L_2 ⊣ R_2 : D → E`, produce `(L_2 ∘ L_1) ⊣ (R_1 ∘ R_2) : C → E`.
 ///
+
 /// Returns `None` if the source/target categories don't match
 /// (target of first = source of second).
 pub fn compose_adjunctions(first: &Adjunction, second: &Adjunction) -> Option<Adjunction> {
@@ -435,7 +452,7 @@ mod tests {
     #[test]
     fn msfs_lemma_10_3_iota_r_chain() {
         // Lemma 10.3 builds (ι, r) where ι : S_S → cF is a fully-faithful
-        // inclusion and r : cF → S_S is the reflector.  Under SAFT
+        // inclusion and r : cF → S_S is the reflector. Under SAFT
         // preconditions r exists as ι's left adjoint.
         let s_s = InfinityCategory::at_canonical_universe(
             "S_S^global", Ordinal::Finite(1),

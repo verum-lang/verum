@@ -81,8 +81,10 @@ impl Display for RemoveModuleError {
 
 /// A reference-counted wrapper around LLVM's execution engine.
 ///
+
 /// # Note
 ///
+
 /// Cloning this object is essentially just a case of copying a couple pointers
 /// and incrementing one or two atomics, so this should be quite cheap to create
 /// copies. The underlying LLVM object will be automatically deallocated when
@@ -138,43 +140,56 @@ impl<'ctx> ExecutionEngine<'ctx> {
 
     /// Maps the specified value to an address.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::targets::{InitializationConfig, Target};
     /// use verum_llvm::context::Context;
     /// use verum_llvm::OptimizationLevel;
     ///
+
     /// Target::initialize_native(&InitializationConfig::default()).unwrap();
     ///
+
     /// extern fn sumf(a: f64, b: f64) -> f64 {
-    ///     a + b
+    ///  a + b
     /// }
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("test");
     /// let builder = context.create_builder();
     ///
+
     /// let ft = context.f64_type();
     /// let fnt = ft.fn_type(&[], false);
     ///
+
     /// let f = module.add_function("test_fn", fnt, None);
     /// let b = context.append_basic_block(f, "entry");
     ///
+
     /// builder.position_at_end(b);
     ///
+
     /// let extf = module.add_function("sumf", ft.fn_type(&[ft.into(), ft.into()], false), None);
     ///
+
     /// let argf = ft.const_float(64.);
     /// let call_site_value = builder.build_call(extf, &[argf.into(), argf.into()], "retv").unwrap();
     /// let retv = call_site_value.try_as_basic_value().unwrap_basic().into_float_value();
     ///
+
     /// builder.build_return(Some(&retv)).unwrap();
     ///
+
     /// let mut ee = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
     /// ee.add_global_mapping(&extf, sumf as usize);
     ///
+
     /// let result = unsafe { ee.run_function(f, &[]) }.as_float(&ft);
     ///
+
     /// assert_eq!(result, 128.);
     /// ```
     pub fn add_global_mapping(&self, value: &dyn AnyValue<'ctx>, addr: usize) {
@@ -183,19 +198,24 @@ impl<'ctx> ExecutionEngine<'ctx> {
 
     /// Adds a module to an `ExecutionEngine`.
     ///
+
     /// The method will be `Ok(())` if the module does not belong to an `ExecutionEngine` already and `Err(())` otherwise.
     ///
+
     /// ```rust,no_run
     /// use verum_llvm::targets::{InitializationConfig, Target};
     /// use verum_llvm::context::Context;
     /// use verum_llvm::OptimizationLevel;
     ///
+
     /// Target::initialize_native(&InitializationConfig::default()).unwrap();
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("test");
     /// let mut ee = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
     ///
+
     /// assert!(ee.add_module(&module).is_err());
     /// ```
     pub fn add_module(&self, module: &Module<'ctx>) -> Result<(), ()> {
@@ -247,18 +267,23 @@ impl<'ctx> ExecutionEngine<'ctx> {
 
     /// Try to load a function from the execution engine.
     ///
+
     /// If a target hasn't already been initialized, spurious "function not
     /// found" errors may be encountered.
     ///
+
     /// The [`UnsafeFunctionPointer`] trait is designed so only `unsafe extern
     /// "C"` functions can be retrieved via the `get_function()` method. If you
     /// get funny type errors then it's probably because you have specified the
     /// wrong calling convention or forgotten to specify the retrieved function
     /// as `unsafe`.
     ///
+
     /// # Examples
     ///
+
     ///
+
     /// ```rust,no_run
     /// # use verum_llvm::targets::{InitializationConfig, Target};
     /// # use verum_llvm::context::Context;
@@ -268,39 +293,48 @@ impl<'ctx> ExecutionEngine<'ctx> {
     /// let module = context.create_module("test");
     /// let builder = context.create_builder();
     ///
+
     /// // Set up the function signature
     /// let double = context.f64_type();
     /// let sig = double.fn_type(&[], false);
     ///
+
     /// // Add the function to our module
     /// let f = module.add_function("test_fn", sig, None);
     /// let b = context.append_basic_block(f, "entry");
     /// builder.position_at_end(b);
     ///
+
     /// // Insert a return statement
     /// let ret = double.const_float(64.0);
     /// builder.build_return(Some(&ret)).unwrap();
     ///
+
     /// // create the JIT engine
     /// let mut ee = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
     ///
+
     /// // fetch our JIT'd function and execute it
     /// unsafe {
-    ///     let test_fn = ee.get_function::<unsafe extern "C" fn() -> f64>("test_fn").unwrap();
-    ///     let return_value = test_fn.call();
-    ///     assert_eq!(return_value, 64.0);
+    ///  let test_fn = ee.get_function::<unsafe extern "C" fn() -> f64>("test_fn").unwrap();
+    ///  let return_value = test_fn.call();
+    ///  assert_eq!(return_value, 64.0);
     /// }
     /// ```
     ///
+
     /// # Safety
     ///
+
     /// It is the caller's responsibility to ensure they call the function with
     /// the correct signature and calling convention.
     ///
+
     /// The `JitFunction` wrapper ensures a function won't accidentally outlive the
     /// execution engine it came from, but adding functions after calling this
     /// method *may* invalidate the function pointer.
     ///
+
     /// [`UnsafeFunctionPointer`]: trait.UnsafeFunctionPointer.html
     pub unsafe fn get_function<F>(&self, fn_name: &str) -> Result<JitFunction<'ctx, F>, FunctionLookupError>
     where
@@ -329,6 +363,7 @@ impl<'ctx> ExecutionEngine<'ctx> {
     /// Attempts to look up a function's address by its name. May return Err if the function cannot be
     /// found or some other unknown error has occurred.
     ///
+
     /// It is recommended to use `get_function` instead of this method when intending to call the function
     /// pointer so that you don't have to do error-prone transmutes yourself.
     pub fn get_function_address(&self, fn_name: &str) -> Result<usize, FunctionLookupError> {
@@ -512,6 +547,7 @@ mod private {
     /// A sealed trait which ensures nobody outside this crate can implement
     /// `UnsafeFunctionPointer`.
     ///
+
     /// See https://rust-lang-nursery.github.io/api-guidelines/future-proofing.html
     pub trait SealedUnsafeFunctionPointer: Copy {}
 }

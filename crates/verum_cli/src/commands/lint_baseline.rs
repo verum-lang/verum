@@ -2,12 +2,14 @@
 //! existing code without flooding the team with the legacy issue
 //! count.
 //!
+
 //! Standard pattern from clippy / ESLint / Pyre / Pylint / Ruff:
 //! snapshot the current N issues to a JSON file checked into the
 //! repo; subsequent runs only fail on issues NOT in the baseline.
 //! Fixed issues drop off automatically when the user re-runs
 //! `--write-baseline`.
 //!
+
 //! Match policy is `(rule, file, line, message_hash)` with line
 //! drift tolerance of ±5 — a TODO comment moved 2 lines doesn't
 //! unfreeze the suppression. The message_hash is blake3 of the

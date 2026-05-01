@@ -4,6 +4,7 @@
 // Layer: 4
 // Spec: sqlite-native.md §15.1 (Metadata section)
 //
+
 // `typeof(X)` is a pure function over `Register`. The remaining
 // metadata functions (`changes`, `last_insert_rowid`, ...) read
 // per-connection state, so they take a `&MetaCtx` view that the
@@ -52,12 +53,14 @@ public fn sqlite_source_id() -> Register { RText(loom_source_id()) }
 // Per-connection metadata view
 // -----------------------------------------------------------------------------
 //
+
 // Carries the bits the SQLITE_* metadata functions need, so a single
 // pure function can serve any caller (interpreter or external API).
 //
-// `n_changes`         — rows changed by the immediately previous INSERT/UPDATE/DELETE
-// `n_total_changes`   — cumulative row changes for the connection
-// `last_rowid`        — last automatically-assigned rowid by INSERT
+
+// `n_changes` — rows changed by the immediately previous INSERT/UPDATE/DELETE
+// `n_total_changes` — cumulative row changes for the connection
+// `last_rowid` — last automatically-assigned rowid by INSERT
 // =============================================================================
 
 public type MetaCtx is {

@@ -1,18 +1,23 @@
 //! Tactic Evaluation Engine for Verum Formal Proofs
 //!
+
 //! This module implements a comprehensive tactic evaluation system that maintains
 //! proof state and applies tactics to transform goals in the Verum proof system.
 //!
+
 //! # Architecture
 //!
+
 //! The tactic evaluation engine consists of:
 //! - **Goal State**: Current proof goals and hypotheses
 //! - **Tactic Application**: Transform goals via tactic primitives
 //! - **Progress Tracking**: Monitor proof completion status
 //! - **SMT Integration**: Leverage Z3 for automated tactics
 //!
+
 //! # Core Tactics
 //!
+
 //! - `intro`: Introduce variables/hypotheses from goal
 //! - `apply`: Apply a lemma to the current goal
 //! - `rewrite`: Rewrite using an equality hypothesis
@@ -21,19 +26,24 @@
 //! - `cases`: Case analysis on an expression
 //! - `simp`, `ring`, `omega`, `smt`: Automated tactics via SMT
 //!
+
 //! # Example
 //!
+
 //! ```no_run
 //! use verum_verification::tactic_evaluation::{TacticEvaluator, Goal, Hypothesis};
 //! use verum_ast::decl::TacticExpr;
 //!
+
 //! // Create evaluator
 //! let mut evaluator = TacticEvaluator::new();
 //!
+
 //! // Set initial goal
 //! // (Example code - see tests for complete usage)
 //! ```
 //!
+
 //! Formal Proofs System (Verum 2.0+ planned):
 //! Proof terms are first-class values via Curry-Howard correspondence.
 //! Theorem syntax: `theorem name(params): proposition { proof_term }`
@@ -116,6 +126,7 @@ pub type TacticResult<T> = Result<T, TacticError>;
 
 /// Result of applying a Z3 tactic to a goal
 ///
+
 /// Contains the resulting subgoals (if any) and whether the goal was proven.
 #[derive(Debug, Clone)]
 pub struct Z3TacticResult {
@@ -138,6 +149,7 @@ pub struct Z3Subgoal {
 
 /// Strategy for composing Z3 tactics
 ///
+
 /// Allows building complex tactic strategies using Z3's combinator framework.
 #[derive(Debug, Clone)]
 pub enum Z3TacticStrategy {
@@ -231,6 +243,7 @@ impl Z3TacticStrategy {
 
     /// Create a default powerful strategy for general proving
     ///
+
     /// Combines simplification, equation solving, and SMT solving
     pub fn default_prover() -> Self {
         Self::simplify()
@@ -258,6 +271,7 @@ impl Z3TacticStrategy {
 
 /// A proof goal to be proven
 ///
+
 /// Goals represent propositions that need to be proven given a context
 /// of hypotheses. The tactic evaluator transforms goals until they are
 /// trivially true or discharged by an automated tactic.
@@ -331,12 +345,14 @@ impl Goal {
 
     /// Check if two expressions are structurally equal
     ///
+
     /// Performs a deep structural equality check that handles:
     /// - Alpha-equivalence (renamed bound variables)
     /// - Path normalization
     /// - Literal comparison
     /// - Recursive expression comparison
     ///
+
     /// Proof term equality: structural comparison with alpha-equivalence
     /// (renamed bound variables are considered equal) and path normalization.
     fn expr_equal(&self, e1: &Expr, e2: &Expr) -> bool {
@@ -346,6 +362,7 @@ impl Goal {
 
 /// Perform structural equality check with alpha-equivalence support
 ///
+
 /// The `bindings` map tracks variable renamings for alpha-equivalence:
 /// if we encounter `forall x. P(x)` and `forall y. P(y)`, we track
 /// that x maps to y and check P(x) = P(y) under that mapping.
@@ -1051,6 +1068,7 @@ pub struct GoalMetadata {
 
 /// A hypothesis available in the proof context
 ///
+
 /// Hypotheses are named propositions that have been established
 /// and can be used in subsequent proof steps.
 #[derive(Debug, Clone)]
@@ -1115,6 +1133,7 @@ pub enum HypothesisSource {
 
 /// Proof state tracking progress through a proof
 ///
+
 /// The proof state maintains the current goals and tracks which
 /// have been proven. Tactics operate on the proof state to
 /// transform and discharge goals.
@@ -1240,6 +1259,7 @@ impl ProofState {
 
 /// Main tactic evaluation engine
 ///
+
 /// The evaluator maintains proof state and provides methods for
 /// applying tactics to transform goals. It integrates with the
 /// SMT solver for automated tactics.
@@ -1259,6 +1279,7 @@ pub struct TacticEvaluator {
 
     /// Registry of user-defined (named) tactics
     ///
+
     /// Maps tactic names to their declarations (parameters + body).
     /// Tactics can be registered via `register_tactic` and invoked
     /// with `TacticExpr::Named`.
@@ -1286,6 +1307,7 @@ impl TacticEvaluator {
 
     /// Replace the evaluator's configuration with `config`.
     ///
+
     /// Used by callers (and tests) that need to toggle policy
     /// flags such as `allow_admits` post-construction. The
     /// configuration is consulted on every tactic application,
@@ -1305,32 +1327,38 @@ impl TacticEvaluator {
 
     /// Register a named tactic in the registry
     ///
+
     /// This allows user-defined tactics to be invoked by name via
     /// `TacticExpr::Named`. The tactic declaration contains the
     /// parameters and body.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_verification::tactic_evaluation::TacticEvaluator;
     /// use verum_ast::decl::{TacticDecl, TacticBody, TacticExpr, Visibility};
     /// use verum_ast::{Ident, Span};
     /// use verum_common::{List, Text};
     ///
+
     /// let mut evaluator = TacticEvaluator::new();
     ///
+
     /// // Register a simple tactic that tries auto then simp
     /// let tactic = TacticDecl {
-    ///     visibility: Visibility::Public,
-    ///     name: Ident::new(Text::from("my_tactic"), Span::dummy()),
-    ///     generics: List::new(),
-    ///     params: List::new(),
-    ///     generic_where_clause: verum_common::Maybe::None,
-    ///     body: TacticBody::Simple(TacticExpr::Auto { with_hints: List::new() }),
-    ///     attributes: List::new(),
-    ///     span: Span::dummy(),
+    ///  visibility: Visibility::Public,
+    ///  name: Ident::new(Text::from("my_tactic"), Span::dummy()),
+    ///  generics: List::new(),
+    ///  params: List::new(),
+    ///  generic_where_clause: verum_common::Maybe::None,
+    ///  body: TacticBody::Simple(TacticExpr::Auto { with_hints: List::new() }),
+    ///  attributes: List::new(),
+    ///  span: Span::dummy(),
     /// };
     ///
+
     /// evaluator.register_tactic(tactic);
     /// ```
     pub fn register_tactic(&mut self, tactic: TacticDecl) {
@@ -1512,19 +1540,23 @@ impl TacticEvaluator {
 
     /// Apply intro tactic - introduce variables/hypotheses
     ///
+
     /// Handles multiple introduction scenarios:
     /// 1. Implication: `P => Q` - introduces P as a hypothesis, goal becomes Q
     /// 2. Universal quantifier: `forall x. P(x)` - introduces x as a fresh variable, goal becomes P(x)
     /// 3. Multiple intros: Can introduce several quantifiers/implications at once
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// // For goal: forall x. x > 0 => x >= 0
-    /// intro x      // Now have x in scope, goal is: x > 0 => x >= 0
-    /// intro H      // Now have H: x > 0, goal is: x >= 0
+    /// intro x // Now have x in scope, goal is: x > 0 => x >= 0
+    /// intro H // Now have H: x > 0, goal is: x >= 0
     /// ```
     ///
+
     /// Intro tactic: introduce variables/hypotheses from the goal into the context.
     /// For universal quantifier (forall x. P(x)): introduces x, goal becomes P(x).
     /// For implication (P -> Q): introduces hypothesis H: P, goal becomes Q.
@@ -1681,12 +1713,15 @@ impl TacticEvaluator {
 
     /// Apply apply tactic - apply a lemma to prove the current goal
     ///
+
     /// If the lemma is `P → Q` and the current goal is `Q`, this replaces
     /// the goal with `P` (we need to prove P to conclude Q via the lemma).
     ///
+
     /// For chained implications `P₁ → P₂ → ... → Pₙ → Q`, this creates
     /// subgoals for each premise P₁, P₂, ..., Pₙ.
     ///
+
     /// If `args` are provided, they instantiate quantified variables in the lemma.
     fn apply_apply(&mut self, lemma: &Heap<Expr>, args: &List<Expr>) -> TacticResult<()> {
         let goal = self.state.current_goal()?;
@@ -1851,9 +1886,11 @@ impl TacticEvaluator {
 
     /// Apply rewrite tactic - rewrite using an equality hypothesis
     ///
+
     /// Given a hypothesis `A = B`, this finds occurrences of `A` in the goal
     /// and replaces them with `B`. If `reverse` is true, it replaces `B` with `A`.
     ///
+
     /// If `at_target` is specified, only rewrites within the named hypothesis.
     fn apply_rewrite(
         &mut self,
@@ -2166,6 +2203,7 @@ impl TacticEvaluator {
 
     /// Apply exists tactic - provide a witness for an existential goal
     ///
+
     /// If the goal is `∃x. P(x)`, providing witness `w` transforms the goal to `P(w)`.
     fn apply_exists(&mut self, witness: &Heap<Expr>) -> TacticResult<()> {
         let goal = self.state.current_goal()?;
@@ -2215,9 +2253,11 @@ impl TacticEvaluator {
 
     /// Apply induction tactic
     ///
+
     /// Performs structural induction on a variable. For natural numbers (Int),
     /// this creates a base case (n = 0) and an inductive step (n → n + 1).
     ///
+
     /// The induction hypothesis is added to the context for the step case.
     fn apply_induction(&mut self, var: &Ident) -> TacticResult<()> {
         let goal = self.state.current_goal()?;
@@ -2256,6 +2296,7 @@ impl TacticEvaluator {
 
     /// Apply induction for natural numbers
     ///
+
     /// Creates two subgoals:
     /// - Base case: P(0)
     /// - Step case: P(n) → P(n+1), where the goal is P(n+1) with IH: P(n)
@@ -2317,6 +2358,7 @@ impl TacticEvaluator {
 
     /// Apply induction for lists
     ///
+
     /// Creates two subgoals:
     /// - Base case: P([])
     /// - Step case: P(xs) → P(x :: xs), where goal is P(x :: xs) with IH: P(xs)
@@ -2419,6 +2461,7 @@ impl TacticEvaluator {
 
     /// Apply cases tactic - case analysis on a variable
     ///
+
     /// For booleans, creates true/false cases.
     /// For Maybe/Option, creates Some/None cases.
     /// For Result, creates Ok/Err cases.
@@ -2498,6 +2541,7 @@ impl TacticEvaluator {
 
     /// Apply case analysis for Maybe/Option types
     ///
+
     /// Creates two subgoals with proper hypotheses:
     /// - Some case: `exists x. var = Some(x)`
     /// - None case: `var = None`
@@ -2536,6 +2580,7 @@ impl TacticEvaluator {
 
     /// Apply case analysis for Result types
     ///
+
     /// Creates two subgoals with proper hypotheses:
     /// - Ok case: `exists x. var = Ok(x)`
     /// - Err case: `exists e. var = Err(e)`
@@ -2705,19 +2750,22 @@ impl TacticEvaluator {
     /// Apply exact tactic — discharge the current goal with the
     /// supplied term.
     ///
+
     /// Soundness: the term must structurally match one of:
     /// 1. A `Path` that names a hypothesis whose proposition equals
-    ///    the current goal.
+    ///  the current goal.
     /// 2. The literal `true` when the goal is the literal `true`.
     /// 3. A reflexive equality `t = t` when the goal is the same
-    ///    reflexive equality.
+    ///  reflexive equality.
     /// 4. The goal expression itself (degenerate case where the user
-    ///    re-states the goal as the proof term — accepts only if the
-    ///    structural equality holds).
+    ///  re-states the goal as the proof term — accepts only if the
+    ///  structural equality holds).
     ///
+
     /// Anything else returns `TacticError::Failed` naming the proof
     /// term shape and the goal it failed to discharge.
     ///
+
     /// Pre-fix this was a stub that called `prove_current_goal()`
     /// unconditionally — every `exact <anything>` silently marked
     /// the goal as proven. A user could write `exact 42` for
@@ -2775,16 +2823,20 @@ impl TacticEvaluator {
 
     /// Apply unfold tactic - unfold definitions
     ///
+
     /// For each name in `names`, looks for a definition (an equality hypothesis
     /// of the form `name = expr`) and replaces occurrences of `name` in the goal
     /// with `expr`.
     ///
+
     /// Definitions are searched in order:
     /// 1. Local hypotheses with name `<name>_def` or equality `name = ...`
     /// 2. Global hypotheses with the same patterns
     ///
+
     /// # Errors
     ///
+
     /// Returns `TacticError::Failed` if:
     /// - No goals remain
     /// - No definition is found for any of the specified names
@@ -2839,6 +2891,7 @@ impl TacticEvaluator {
 
     /// Find a definition for the given name in hypotheses
     ///
+
     /// Searches for:
     /// 1. A hypothesis named `<name>_def` containing an equality `name = body`
     /// 2. Any hypothesis that is an equality of the form `name = body`
@@ -2915,8 +2968,10 @@ impl TacticEvaluator {
 
     /// Unfold a name within a block, handling statements and trailing expression
     ///
+
     /// Unfold a definition within a block (proof term transformation).
     ///
+
     /// This function performs a complete unfold within a block by:
     /// 1. Processing each statement, unfolding the name in expressions within
     /// 2. Tracking variable bindings to detect shadowing
@@ -3184,12 +3239,15 @@ impl TacticEvaluator {
 
                 // Unfold in branches - full implementation that processes both statements and trailing expr
                 //
+
                 // Proof term unfolding in if-then-else branches.
                 //
+
                 // For a complete unfold, we must traverse:
                 // 1. All statements in the block (which may contain let bindings, expressions, etc.)
                 // 2. The trailing expression if present
                 //
+
                 // We must also respect variable shadowing: if a statement binds the same name
                 // we're unfolding, we stop unfolding in subsequent statements and the trailing expr.
                 let new_then = self.unfold_in_block(then_branch, name, def_body);
@@ -3249,6 +3307,7 @@ impl TacticEvaluator {
 
     /// Apply compute tactic - normalize/evaluate the goal expression
     ///
+
     /// Performs computational normalization of the goal expression:
     /// - Evaluates arithmetic on concrete values (2 + 3 -> 5)
     /// - Simplifies boolean expressions (true && x -> x)
@@ -3256,10 +3315,13 @@ impl TacticEvaluator {
     /// - Beta-reduces function applications where possible
     /// - Uses Z3 simplify tactic for complex simplifications
     ///
+
     /// If the goal simplifies to `true`, it is automatically proven.
     ///
+
     /// # Errors
     ///
+
     /// Returns `TacticError::Failed` if no simplification progress is made.
     fn apply_compute(&mut self) -> TacticResult<()> {
         let goal = self.state.current_goal()?;
@@ -3666,12 +3728,14 @@ impl TacticEvaluator {
 
     /// Try to simplify expression using Z3
     ///
+
     /// Uses Z3's simplification tactic to normalize expressions. Handles:
     /// - Constant folding (2+3 -> 5)
     /// - Boolean simplification (true && x -> x)
     /// - Algebraic identities (x + 0 -> x)
     /// - Complex nested expressions
     ///
+
     /// Translates the simplified Z3 AST back to Verum Expr for full roundtrip.
     fn try_z3_simplify(&self, expr: &Expr) -> TacticResult<Expr> {
         // Translate to Z3 and use its simplify
@@ -3700,6 +3764,7 @@ impl TacticEvaluator {
 
     /// Translate a Z3 Dynamic AST back to a Verum Expr
     ///
+
     /// This provides complete roundtrip support for Z3 simplification results,
     /// handling all expression types that can result from simplification.
     fn translate_z3_to_expr(
@@ -4061,6 +4126,7 @@ impl TacticEvaluator {
 
     /// Apply Z3 tactic to simplify goal using the Goal/Tactic API
     ///
+
     /// This uses Z3's tactic framework for more powerful transformations than
     /// simple simplify(). Returns the list of subgoals produced by the tactic.
     fn apply_z3_tactic_to_goal(
@@ -4173,6 +4239,7 @@ impl TacticEvaluator {
 
     /// Apply a combined Z3 tactic strategy to the current goal
     ///
+
     /// Uses the Z3 tactic framework with combinators for powerful transformations:
     /// - `and_then`: Sequential tactic application
     /// - `or_else`: Try alternative if first fails
@@ -4433,6 +4500,7 @@ impl TacticEvaluator {
 
     /// Apply an SMT strategy to the current goal
     ///
+
     /// This method translates the current goal to Z3, calls the SMT solver,
     /// and updates the proof state based on the result:
     /// - UNSAT: The negation of the goal is unsatisfiable, meaning the goal is valid
@@ -4561,6 +4629,7 @@ impl TacticEvaluator {
 
     /// Translate a Verum Expr to a Z3 Dynamic expression
     ///
+
     /// This handles the core expression forms needed for proof goals.
     /// Uses z3 0.19.x API which doesn't require context for most operations.
     fn translate_expr_to_z3(
@@ -4882,47 +4951,59 @@ impl TacticEvaluator {
 
     /// Apply named (user-defined) tactic
     ///
+
     /// Looks up a registered tactic by name, validates and binds arguments
     /// to parameters, then executes the tactic body. This enables users to
     /// define reusable proof strategies.
     ///
+
     /// # Tactic Resolution
     ///
+
     /// 1. First checks the local tactic registry
     /// 2. Built-in tactics take precedence (handled by main apply_tactic dispatch)
     ///
+
     /// # Parameter Binding
     ///
+
     /// Arguments are bound to parameters by position. The following parameter
     /// kinds are supported (see `TacticParamKind`):
     ///
+
     /// - `Expr`: Expression arguments (most common)
     /// - `Type`: Type arguments (for polymorphic tactics)
     /// - `Tactic`: Higher-order tactic arguments
     /// - `Hypothesis`: Hypothesis name arguments
     /// - `Int`: Integer arguments (for iteration counts, etc.)
     ///
+
     /// # Errors
     ///
+
     /// - `TacticError::Failed` if the tactic is not found in the registry
     /// - `TacticError::InvalidArgument` if argument count doesn't match parameters
     /// - Propagates errors from the tactic body execution
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// // Define a tactic that simplifies and then applies auto
     /// tactic simp_auto is {
-    ///     simp;
-    ///     auto
+    ///  simp;
+    ///  auto
     /// }
     ///
+
     /// // Use the named tactic
     /// theorem example: P {
-    ///     by simp_auto
+    ///  by simp_auto
     /// }
     /// ```
     ///
+
     /// Named tactic application: look up a user-defined tactic in the registry
     /// and evaluate its body with the given arguments. Named tactics are defined
     /// via `tactic my_tactic is { ... }` and support repeat, match goal, first,
@@ -5028,6 +5109,7 @@ impl TacticEvaluator {
 
     /// Instantiate a tactic body by substituting parameter references with arguments
     ///
+
     /// This function traverses the tactic body and replaces references to parameters
     /// with the corresponding argument expressions.
     fn instantiate_tactic_body(
@@ -5052,6 +5134,7 @@ impl TacticEvaluator {
 
     /// Instantiate a single tactic expression with parameter bindings
     ///
+
     /// Recursively processes tactic expressions, substituting parameter references
     /// with bound argument expressions.
     fn instantiate_tactic_expr(
@@ -5301,6 +5384,7 @@ impl TacticEvaluator {
 
     /// Substitute parameter references in an expression
     ///
+
     /// Replaces path expressions that match parameter names with the bound argument.
     fn substitute_params_in_expr(&self, expr: &Expr, bindings: &Map<Text, Expr>) -> Expr {
         match &expr.kind {
@@ -5423,6 +5507,7 @@ impl TacticEvaluator {
 
     /// Apply admit tactic - admit goal without proof (for development)
     ///
+
     /// Honours `TacticConfig.allow_admits`: when `false`, the tactic
     /// fails before mutating state, so a production verification run
     /// cannot accidentally accept an admitted goal as proven. The
@@ -5441,6 +5526,7 @@ impl TacticEvaluator {
 
     /// Apply sorry tactic - like admit but marks as incomplete
     ///
+
     /// See [`apply_admit`]: also gated by `TacticConfig.allow_admits`.
     /// Both tactics short-circuit goals without producing real
     /// evidence, so they share the same opt-in flag.
@@ -5492,6 +5578,7 @@ impl TacticEvaluator {
     /// `Maybe.None`), so the first arm whose pattern's head constructor
     /// matches the scrutinee's head constructor wins.
     ///
+
     /// This is the tactic-evaluator's analogue of Lean's `match` inside
     /// tactic mode — structural on the constructor, not value-level.
     fn apply_match(
@@ -5608,6 +5695,7 @@ fn callee_head_name(callee: &Expr) -> Option<Text> {
 
 /// Check if a pattern matches the scrutinee's head constructor.
 ///
+
 /// A wildcard/variable pattern matches anything. A constructor pattern
 /// (e.g. `Maybe.Some(v)`) matches when the pattern's head name equals
 /// the scrutinee's head. More precise value-level matching happens in
@@ -5895,6 +5983,7 @@ mod tests {
         // wire-up the field was inert — every compute call took
         // the Z3 fallback regardless of caller config.
         //
+
         // Build a goal that the syntactic normaliser doesn't
         // touch: `f(x) == f(x)` where `f` is an opaque path —
         // syntactic equality reduces it to `true`, but if the
@@ -6007,7 +6096,7 @@ mod tests {
 
     #[test]
     fn test_unfold_basic() {
-        // Goal: f(x) > 0  with hypothesis f = x + 1
+        // Goal: f(x) > 0 with hypothesis f = x + 1
         // After unfold f: (x + 1) > 0
         let f_x = make_path_expr("f");
         let x = make_path_expr("x");

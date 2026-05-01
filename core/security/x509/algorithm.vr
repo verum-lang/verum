@@ -5,27 +5,33 @@
 // Dependencies: core, encoding.der, x509.oid
 // =============================================================================
 //
+
 // AlgorithmIdentifier ::= SEQUENCE {
-//     algorithm               OBJECT IDENTIFIER,
-//     parameters              ANY DEFINED BY algorithm OPTIONAL
+//  algorithm OBJECT IDENTIFIER,
+//  parameters ANY DEFINED BY algorithm OPTIONAL
 // }
 //
+
 // Used in three places per cert:
 //
-//   * TBSCertificate.signature — the signature algorithm over TBS
-//   * X509Certificate.signatureAlgorithm — same value, MUST match inner
-//     (RFC 5280 §4.1.1.2 — verify this equality during validation)
-//   * SubjectPublicKeyInfo.algorithm — the key's own algorithm + params
-//     (e.g. ecPublicKey + namedCurve parameter)
+
+//  * TBSCertificate.signature — the signature algorithm over TBS
+//  * X509Certificate.signatureAlgorithm — same value, MUST match inner
+//  (RFC 5280 §4.1.1.2 — verify this equality during validation)
+//  * SubjectPublicKeyInfo.algorithm — the key's own algorithm + params
+//  (e.g. ecPublicKey + namedCurve parameter)
 //
+
 // For RSASSA-PSS the `parameters` field carries the hash + salt-length
 // choice; for ecPublicKey it carries the named-curve OID; for
 // rsaEncryption it's NULL; for Ed25519 / Ed448 it's absent per RFC 8410.
 //
+
 // We decode the tag + optional params span into an enum so downstream
 // verify code has a typed view of the algorithm (rather than chasing
 // OIDs at each call site).
 //
+
 // =============================================================================
 
 module core.security.x509.algorithm;
@@ -58,12 +64,13 @@ public type SignatureAlg is
     | Unknown(Oid);
 
 /// RFC 8017 §A.2.3 RSASSA-PSS-params ::= SEQUENCE {
-///     hashAlgorithm      [0] HashAlgorithm DEFAULT sha1,
-///     maskGenAlgorithm   [1] MaskGenAlgorithm DEFAULT mgf1SHA1,
-///     saltLength         [2] INTEGER DEFAULT 20,
-///     trailerField       [3] INTEGER DEFAULT 1
+///  hashAlgorithm [0] HashAlgorithm DEFAULT sha1,
+///  maskGenAlgorithm [1] MaskGenAlgorithm DEFAULT mgf1SHA1,
+///  saltLength [2] INTEGER DEFAULT 20,
+///  trailerField [3] INTEGER DEFAULT 1
 /// }
 ///
+
 /// We model only the two DEFAULT-overriding fields WebPKI uses in the
 /// wild: `hash` (for MGF1 + hash) and `salt_length` (bytes). `trailerField`
 /// is required by RFC 8017 to be 1; reject others during decode.

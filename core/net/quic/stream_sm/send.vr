@@ -5,41 +5,46 @@
 // Dependencies: core, collections
 // =============================================================================
 //
+
 // RFC 9000 §3.1 state diagram for the sender side of a stream:
 //
-//       app: stream created        ┌──────────┐
-//        ──────────────────────────▶│  Ready   │
-//                                   └────┬─────┘
-//                                        │ app: send data
-//                                        ▼
-//                                   ┌──────────┐
-//              reset (out-of-band)  │   Send   │ ◀────┐
-//        ┌──────────────────────────┴────┬─────┘      │
-//        │                               │ fin        │ more data
-//        │                               ▼            │ from app
-//        │                          ┌────────────┐    │
-//        │                          │ DataSent   │ ───┘
-//        │                          └────────┬───┘
-//        │                                   │ all bytes ACKed
-//        │                                   ▼
-//        │                          ┌────────────┐
-//        │                          │ DataRecvd  │  (terminal)
-//        │                          └────────────┘
-//        │
-//        │           reset ACK
-//        ▼                                                ┌────────────┐
-//   ┌──────────┐  send RESET_STREAM  ┌─────────────┐      │            │
-//   │ResetSent │────────────────────▶│ ResetRecvd  │─────▶│ (terminal)│
-//   └──────────┘                     └─────────────┘      │            │
-//                                                         └────────────┘
+
+//  app: stream created ┌──────────┐
+//  ──────────────────────────▶│ Ready │
+//  └────┬─────┘
+//  │ app: send data
+//  ▼
+//  ┌──────────┐
+//  reset (out-of-band) │ Send │ ◀────┐
+//  ┌──────────────────────────┴────┬─────┘ │
+//  │ │ fin │ more data
+//  │ ▼ │ from app
+//  │ ┌────────────┐ │
+//  │ │ DataSent │ ───┘
+//  │ └────────┬───┘
+//  │ │ all bytes ACKed
+//  │ ▼
+//  │ ┌────────────┐
+//  │ │ DataRecvd │ (terminal)
+//  │ └────────────┘
+//  │
+//  │ reset ACK
+//  ▼ ┌────────────┐
+//  ┌──────────┐ send RESET_STREAM ┌─────────────┐ │ │
+//  │ResetSent │────────────────────▶│ ResetRecvd │─────▶│ (terminal)│
+//  └──────────┘ └─────────────┘ │ │
+//  └────────────┘
 //
+
 // # Invariants enforced:
 //
-//   * send_offset monotonically non-decreasing (RFC 9000 §2.2).
-//   * final_size, once set (FIN or RESET), never changes.
-//   * Every byte written is accounted in `send_buf` or already acked.
-//   * After RESET, no further STREAM frames are emitted for this stream.
+
+//  * send_offset monotonically non-decreasing (RFC 9000 §2.2).
+//  * final_size, once set (FIN or RESET), never changes.
+//  * Every byte written is accounted in `send_buf` or already acked.
+//  * After RESET, no further STREAM frames are emitted for this stream.
 //
+
 // =============================================================================
 
 module core.net.quic.stream_sm.send;

@@ -10,6 +10,7 @@ use super::super::super::autodiff::GradMode as AutodiffGradMode;
 
 /// Handler for MlExtended opcode (0xFD).
 ///
+
 /// This dispatches to ML operations based on the sub-opcode byte.
 /// Supports tokenizer, sampling, distributed training, and gradient operations.
 pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {

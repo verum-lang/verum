@@ -1,42 +1,50 @@
 //! Compute the set of stdlib modules reachable from a user entry point.
 //!
+
 //! This is the bridge between the AST (`MountDecl` / `MountTreeKind`) and
 //! the pre-computed `stdlib_dep_graph::DepGraph`. The pipeline calls
 //! [`compute_reachable_stdlib_modules`] once per user compilation; the
 //! result is the minimal set of stdlib modules that need to be parsed +
 //! registered for type-checking to succeed.
 //!
+
 //! # Algorithm
 //!
-//!   1. Walk the user `Module` AST, extracting every `mount` statement.
-//!      Convert each `MountTree` into one or more **module-path seeds**.
-//!   2. Hand the seed set to `DepGraph::reachable_from`, which BFS-walks
-//!      the pre-computed mount graph (including parent-chain climbing
-//!      for nested-leaf seeds and glob expansion via the index).
-//!   3. Return the closed set.
+
+//!  1. Walk the user `Module` AST, extracting every `mount` statement.
+//!  Convert each `MountTree` into one or more **module-path seeds**.
+//!  2. Hand the seed set to `DepGraph::reachable_from`, which BFS-walks
+//!  the pre-computed mount graph (including parent-chain climbing
+//!  for nested-leaf seeds and glob expansion via the index).
+//!  3. Return the closed set.
 //!
+
 //! # Conservative pruning
 //!
+
 //! The walk is deliberately over-approximate:
 //!
-//!   * `mount core.X.{a, b}` enqueues `core.X`, `core.X.a`, `core.X.b`.
-//!     If `a` is an item rather than a module, the runtime resolver
-//!     drops it during registration. If `a` is a re-exported module
-//!     from a different prefix, the dep graph's transitive closure
-//!     covers it via the owning module's edges.
-//!   * `mount core.X.*` expands to every module whose path begins with
-//!     `core.X.` per the `StdlibModuleIndex`.
-//!   * Forward-declared modules and inline `module …` declarations are
-//!     left to the existing late-resolution path; this pass does not
-//!     attempt to enumerate them.
+
+//!  * `mount core.X.{a, b}` enqueues `core.X`, `core.X.a`, `core.X.b`.
+//!  If `a` is an item rather than a module, the runtime resolver
+//!  drops it during registration. If `a` is a re-exported module
+//!  from a different prefix, the dep graph's transitive closure
+//!  covers it via the owning module's edges.
+//!  * `mount core.X.*` expands to every module whose path begins with
+//!  `core.X.` per the `StdlibModuleIndex`.
+//!  * Forward-declared modules and inline `module …` declarations are
+//!  left to the existing late-resolution path; this pass does not
+//!  attempt to enumerate them.
 //!
+
 //! # Performance contract
 //!
-//!   * Walk over a ~50-statement entry point: <1 ms.
-//!   * BFS over the dep graph for typical reachable sets (50-300 nodes):
-//!     <2 ms.
-//!   * No allocation in the hot path beyond the result `HashSet` and a
-//!     small `VecDeque` inside `DepGraph::reachable_from`.
+
+//!  * Walk over a ~50-statement entry point: <1 ms.
+//!  * BFS over the dep graph for typical reachable sets (50-300 nodes):
+//!  <2 ms.
+//!  * No allocation in the hot path beyond the result `HashSet` and a
+//!  small `VecDeque` inside `DepGraph::reachable_from`.
 
 use std::collections::HashSet;
 
@@ -48,6 +56,7 @@ use crate::stdlib_index::{self, StdlibModuleIndex};
 /// Compute the transitive closure of stdlib modules required to
 /// type-check the given user module.
 ///
+
 /// Returns `None` when the embedded dep graph is unavailable
 /// (e.g. minimal builds without `core/`); callers should fall back to
 /// the full-load path in that case.
@@ -57,6 +66,7 @@ pub fn compute_reachable_stdlib_modules(user: &Module) -> Option<HashSet<String>
 
     // Build the seed set: user mounts ⋃ implicit prelude.
     //
+
     // The prelude must be in the seed set because `core/mod.vr`'s
     // `public mount super.X` re-exports define the symbols that are
     // available without an explicit `mount` (List, Map, Maybe, Result,
@@ -85,6 +95,7 @@ pub fn compute_reachable_stdlib_modules(user: &Module) -> Option<HashSet<String>
 /// auto-imported into every user compilation via `core/mod.vr`'s
 /// `public mount super.X.{…}` re-export chain.
 ///
+
 /// This is intentionally not hardcoded. We read `core/mod.vr` once
 /// (cached by the index) and parse its `mount super.…` body to
 /// discover which trees the prelude exposes. Any future change to the
@@ -103,6 +114,7 @@ fn prelude_seeds(index: &StdlibModuleIndex) -> Vec<String> {
 /// Extract the module-paths referenced by `public mount super.X` /
 /// `mount super.X` declarations inside `core/mod.vr`.
 ///
+
 /// Lightweight regex-free scanner: line-oriented, handles single-line
 /// and multi-line nested `mount super.foo.{a, b, …}` forms. The result
 /// is the set of distinct module paths whose canonical form is

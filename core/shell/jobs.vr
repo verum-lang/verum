@@ -5,22 +5,26 @@
 // Dependencies: shell.{exec, result, context}, async.{nursery, cancellation, task}
 // =============================================================================
 //
+
 // `JobHandle` represents a running background dispatch. It is a *typed*
 // wrapper around the async task driving the dispatch and exposes the
 // minimum surface needed to wait for or cancel an in-flight command.
 //
+
 // Composability principles:
-//   * `background()` returns immediately — caller awaits or cancels later.
-//   * `parallel(cmds)` is a convenience over a fanout-fanin nursery.
-//   * Every spawned job inherits the parent's `ShellContext` (DI), so cwd
-//     and env_overrides are deterministic across siblings.
-//   * `JobHandle.kill()` sends SIGTERM, gives a grace window, then SIGKILL —
-//     identical to the Executor's cancellation semantics.
+//  * `background()` returns immediately — caller awaits or cancels later.
+//  * `parallel(cmds)` is a convenience over a fanout-fanin nursery.
+//  * Every spawned job inherits the parent's `ShellContext` (DI), so cwd
+//  and env_overrides are deterministic across siblings.
+//  * `JobHandle.kill()` sends SIGTERM, gives a grace window, then SIGKILL —
+//  identical to the Executor's cancellation semantics.
 //
+
 // Compatibility note: this module *prefers* `core.async.nursery` for fanout.
 // Direct `spawn` is allowed for one-shot background work where the caller
 // keeps the handle and is responsible for awaiting it.
 //
+
 // =============================================================================
 
 module jobs;
@@ -176,8 +180,8 @@ public async fn parallel_bounded(cmds: List<Text>, max_in_flight: Int)
 
 /// Runs commands in parallel; on the first failure, cancels the remaining
 /// jobs (SIGTERM → grace → SIGKILL). Returns:
-///   * `Ok(List<ShellResult>)` if every command succeeds
-///   * `Err(ShellError)` otherwise (the first error encountered)
+///  * `Ok(List<ShellResult>)` if every command succeeds
+///  * `Err(ShellError)` otherwise (the first error encountered)
 public async fn fail_fast(cmds: List<Text>)
     -> Result<List<ShellResult>, ShellError>
 

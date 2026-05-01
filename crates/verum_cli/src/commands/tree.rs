@@ -240,6 +240,7 @@ fn print_dependency_tree(
 /// Whether the requested options ask the tree printer to include
 /// the build-dependencies group in the output.
 ///
+
 /// Pure helper extracted so the gate semantics can be unit-tested
 /// without spinning up a manifest + lockfile fixture. The wiring
 /// at the call site is a single `if all_features { ... }` block

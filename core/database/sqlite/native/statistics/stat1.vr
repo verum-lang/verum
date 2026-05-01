@@ -3,12 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.2
 //
+
 // One sqlite_stat1 row records:
 //
-//   * `tbl`     — table name
-//   * `idx`     — index name (NULL means "the table's rowid")
-//   * `stat`    — text-encoded stats: total_rows + per-prefix-length avg dups
+
+//  * `tbl` — table name
+//  * `idx` — index name (NULL means "the table's rowid")
+//  * `stat` — text-encoded stats: total_rows + per-prefix-length avg dups
 //
+
 // Example: `1000 5 1` means "table has 1000 rows; the index's first
 // column has on average 5 duplicates per key, the first two columns
 // have 1 (i.e. unique)".

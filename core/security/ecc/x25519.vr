@@ -4,64 +4,80 @@
 // Layer: 2 (core primitive)
 // Dependencies: core, constant-time subsystem
 // Reference: RFC 7748 — Elliptic Curves for Security
-//            DJB, "Curve25519: new Diffie-Hellman speed records" (2006)
+//  DJB, "Curve25519: new Diffie-Hellman speed records" (2006)
 // =============================================================================
 //
+
 // X25519 is the Diffie-Hellman function over Curve25519 — the
 // cornerstone of TLS 1.3 / QUIC key_share and the classical half of
 // the PQ-hybrid `X25519MLKEM768` KEX that is the current and near-
 // future default (Chrome 131 onwards, §6.11 of net-framework.md).
 //
+
 // # API
 //
+
 // ```verum
 // // Generate a random private key (clamping applied internally).
 // let sk: X25519SecretKey = X25519.generate_secret_key();
 //
+
 // // Derive the public key from the secret.
 // let pk: X25519PublicKey = X25519.public_key(&sk);
 //
+
 // // Compute shared secret from peer's public key.
 // let shared: X25519SharedSecret = X25519.diffie_hellman(&sk, &peer_pk)?;
 // ```
 //
+
 // # Constant-time discipline
 //
+
 // X25519 is extremely timing-sensitive — any data-dependent branch or
 // memory access on the secret scalar leaks bits. The scalar-multiply
 // path is therefore routed through an `@intrinsic` that binds to
 // either:
 //
-//   * Dedicated hardware (ARMv8.2 PACGA / RV32/64 K extensions / Intel
-//     AVX-512 IFMA) — native constant-time with minimal cycles.
-//   * Formally-verified software (the "fiat-crypto" synthesised
-//     assembly, as used by BoringSSL / rustls / libsodium — each
-//     step machine-checked by Coq).
-//   * A Verum-native ref10 port as a follow-up (tracked), validated
-//     against the intrinsic via DST property tests.
+
+//  * Dedicated hardware (ARMv8.2 PACGA / RV32/64 K extensions / Intel
+//  AVX-512 IFMA) — native constant-time with minimal cycles.
+//  * Formally-verified software (the "fiat-crypto" synthesised
+//  assembly, as used by BoringSSL / rustls / libsodium — each
+//  step machine-checked by Coq).
+//  * A Verum-native ref10 port as a follow-up (tracked), validated
+//  against the intrinsic via DST property tests.
 //
+
 // Compile-time API shape is stable; the internal implementation is
 // swapped by `@cfg(feature = ...)` without any source-level
 // incompatibility.
 //
+
 // # Sizes (RFC 7748 §5)
 //
-//   * Scalar (secret):  32 bytes — randomly generated, clamped.
-//   * Point (public):   32 bytes — u-coordinate of the Montgomery curve.
-//   * Shared secret:    32 bytes — not directly usable as a key; run
-//                       through an HKDF (TLS 1.3 schedule) before use.
+
+//  * Scalar (secret): 32 bytes — randomly generated, clamped.
+//  * Point (public): 32 bytes — u-coordinate of the Montgomery curve.
+//  * Shared secret: 32 bytes — not directly usable as a key; run
+//  through an HKDF (TLS 1.3 schedule) before use.
 //
+
 // # Clamping (RFC 7748 §5)
 //
-//   scalar[0]  &= 248
-//   scalar[31] &= 127
-//   scalar[31] |=  64
+
+//  scalar[0] &= 248
+//  scalar[31] &= 127
+//  scalar[31] |= 64
 //
+
 // Applied transparently by `secret_key_from_bytes` / `generate_secret_key`;
 // callers never see an unclamped scalar.
 //
+
 // # Contributory property
 //
+
 // `diffie_hellman` returns `Err(AllZeroOutput)` if the computed
 // shared secret is all-zeros. This happens only when the peer sent a
 // low-order point (the 12 curve points of small order on Curve25519
@@ -69,6 +85,7 @@
 // continuing; TLS 1.3 (RFC 8446 §7.4.2) requires rejection — we
 // default to rejection for safety.
 //
+
 // =============================================================================
 
 module core.security.ecc.x25519;
@@ -195,9 +212,11 @@ fn clamp_scalar(k: &mut [Byte; 32]) {
 // Core scalar-multiply — intrinsic-backed
 // =============================================================================
 //
+
 // `scalar_mult(k, u, out)` computes X25519(k, u) and writes the 32-byte
 // u-coordinate of the resulting point into `out` (little-endian).
 //
+
 // This symbol is bound at link time to one of the backends documented
 // in the file header. The Verum type signature remains stable across
 // backends so callers are oblivious to the switch.

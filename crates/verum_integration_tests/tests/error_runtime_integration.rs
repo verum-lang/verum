@@ -16,10 +16,12 @@
 
 //! Error + Runtime Integration Tests
 //!
+
 //! Tests the integration between the error handling system and runtime,
 //! including error propagation across async boundaries, supervision tree
 //! error recovery, circuit breaker state transitions, and panic isolation.
 //!
+
 //! Error-Runtime Integration: Verum uses a 5-level error defense architecture:
 //! L0 (type prevention), L1 (static verification), L2 (explicit Result<T,E>
 //! handling with ? operator), L3 (fault tolerance: supervision, circuit breakers,

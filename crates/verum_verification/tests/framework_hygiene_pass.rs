@@ -1,5 +1,6 @@
 //! Integration tests for `HygieneRecheckPass` (#190).
 //!
+
 //! End-to-end pipeline tests: build a `Module` with synthetic
 //! axiom/theorem declarations carrying `@framework(...)` attributes,
 //! run the pass, and inspect the accumulated diagnostics for R1+R2+R3
@@ -263,7 +264,7 @@ fn impl_function_item(func: FunctionDecl) -> ImplItem {
 #[test]
 fn r1_fires_on_impl_method_with_brand_prefix_name() {
     // implement Foo {
-    //     @framework(diakrisis, "...") fn diakrisis_step() {}
+    //  @framework(diakrisis, "...") fn diakrisis_step() {}
     // }
     let bad_method = make_function_with_attrs(
         "diakrisis_step",
@@ -533,6 +534,7 @@ fn b8_designated_corpus_filtered_other_alone_at_threshold_quiet() {
     // Pre-V8: 2 candidates → R3 fires. V8: filter removes
     // diakrisis → 1 candidate left → R3 quiet.
     //
+
     // This is the exact bug B8 closes: when the designated
     // corpus is the *only* one cohabiting with one other corpus
     // that also crosses threshold, the original |>= 2| rule

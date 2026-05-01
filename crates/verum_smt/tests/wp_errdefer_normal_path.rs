@@ -1,14 +1,17 @@
 //! Regression: `errdefer` is a no-op for normal-path WP.
 //!
+
 //! Pre-fix `wp_calculus.rs::StmtKind::Errdefer` propagated WP through
 //! the cleanup expression — identical to `Defer`. The comment on the
 //! arm even said "treat as a no-op for normal path verification" but
 //! the body did the opposite. That gave any function with `errdefer`
 //! the WRONG normal-path WP.
 //!
+
 //! Post-fix: errdefer normal-path WP is just the postcondition
 //! unchanged. Error-path WP modeling is a separate phase.
 //!
+
 //! The pin: build two Blocks producing the same final value,
 //! one containing `errdefer cleanup_expr;` before the value, the
 //! other empty. Their WPs against the same postcondition must be

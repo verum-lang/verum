@@ -7,19 +7,23 @@ module core.database.sqlite.native.l4_vdbe;
 // Dependencies: l1_pager, l2_record, l3_btree
 // =============================================================================
 //
+
 // The VDBE is SQLite's bytecode virtual machine: the SQL planner emits
 // a program of ~180 opcodes, the interpreter runs them against a
 // register file + cursor table, and results flow out through the
 // `ResultRow` opcode.
 //
+
 // Shipped modules:
 //
-//   * `opcode`      — ~70-variant sum type covering the v1 subset
-//   * `register`    — Register value type + RegisterFile container
-//   * `program`     — VdbeProgram + ConstantPool + builder methods
-//   * `interpreter` — step-based executor for the I/O-free opcodes
-//   * `optimizer`   — Noop-elim + jump-threading peephole passes
+
+//  * `opcode` — ~70-variant sum type covering the v1 subset
+//  * `register` — Register value type + RegisterFile container
+//  * `program` — VdbeProgram + ConstantPool + builder methods
+//  * `interpreter` — step-based executor for the I/O-free opcodes
+//  * `optimizer` — Noop-elim + jump-threading peephole passes
 //
+
 // Not yet shipped: cursor-bound opcode execution (pending pager IPC),
 // sub-program / trigger support, EXPLAIN output, advanced optimizer
 // passes (constant folding, dead-code elim).

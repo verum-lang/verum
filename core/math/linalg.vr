@@ -3,6 +3,7 @@
 // =============================================================================
 // Layer: 2 (Linear Algebra)
 //
+
 // Provides vectors, matrices, and linear algebra operations:
 // - Vector and Matrix types (dynamic and static variants)
 // - BLAS Level 1: Vector-vector operations (dot, nrm2, axpy, etc.)
@@ -11,19 +12,24 @@
 // - Matrix decompositions: LU, QR, Cholesky, SVD
 // - Eigenvalue computations
 //
+
 // # Design Philosophy
 //
+
 // This module provides both dynamic (runtime-sized) and static (compile-time
 // sized) variants. Static variants enable shape verification at compile time
 // through refinement types.
 //
+
 // # Type Aliases
 //
+
 // - Vector<T>: Dynamic vector with runtime size
 // - StaticVector<T, N>: Static vector with compile-time size N
 // - Matrix<T>: Dynamic matrix with runtime dimensions
 // - StaticMatrix<T, M, N>: Static matrix with compile-time dimensions M×N
 //
+
 // Spec: docs/architecture/math-spec.md Section 7-8
 // =============================================================================
 
@@ -558,8 +564,8 @@ public fn swap<T: Numeric>(x: &mut Vector<T>, y: &mut Vector<T>) {
 
 // ROTG: Givens rotation parameters
 // Returns (r, z, c, s) where:
-//   [c  s] [a]   [r]
-//   [-s c] [b] = [0]
+//  [c s] [a] [r]
+//  [-s c] [b] = [0]
 public fn rotg<T: Numeric>(a: T, b: T) -> (T, T, T, T) {
     let r = hypot(a, b);
     if r == T.zero() {
@@ -578,7 +584,7 @@ public fn rotg<T: Numeric>(a: T, b: T) -> (T, T, T, T) {
 }
 
 // ROT: Apply Givens rotation
-// [x_i]   [c  s] [x_i]
+// [x_i] [c s] [x_i]
 // [y_i] = [-s c] [y_i]
 public fn rot<T: Numeric>(x: &mut Vector<T>, y: &mut Vector<T>, c: T, s: T) {
     assert(x.len() == y.len(), "dimension mismatch");
@@ -1378,10 +1384,12 @@ public type SVDDecomposition<T: Numeric> is {
 // Returns A = U * diag(s) * Vᵀ where s contains non-negative singular values
 // in descending order
 //
+
 // # Algorithm
 // Uses one-sided Jacobi rotations for numerical stability.
 // Complexity: O(m*n*min(m,n)) for m×n matrix
 //
+
 // # Example
 // ```verum
 // let a = Matrix.from_data(list![3.0, 2.0, 2.0, 3.0], 2, 2);
@@ -1520,9 +1528,11 @@ public fn svd<T: Numeric>(a: &Matrix<T>) -> SVDDecomposition<T> {
 // Compute eigenvalues and eigenvectors of a symmetric matrix via Jacobi method
 // Returns eigenvalues in descending order with corresponding eigenvectors
 //
+
 // # Requirements
 // Input matrix must be symmetric (A = Aᵀ)
 //
+
 // # Example
 // ```verum
 // let a = Matrix.from_data(list![4.0, 1.0, 1.0, 3.0], 2, 2);
@@ -1634,6 +1644,7 @@ public fn eigh<T: Numeric>(a: &Matrix<T>) -> EigenDecomposition<T> {
 // Compute eigenvalues of a general (non-symmetric) matrix via QR algorithm
 // Returns complex eigenvalues as (real_part, imag_part) vectors
 //
+
 // # Note
 // For symmetric matrices, use `eigh` which is more efficient.
 public type ComplexEigenDecomposition<T: Numeric> is {
@@ -1808,11 +1819,13 @@ public type SchurDecomposition<T: Numeric> is {
 // Compute real Schur decomposition: A = Z * T * Zᵀ
 // where T is upper quasi-triangular and Z is orthogonal
 //
+
 // # Algorithm
 // Uses QR iteration with implicit double shifts.
 // The matrix T has real eigenvalues on diagonal and 2x2 blocks
 // for complex conjugate eigenvalue pairs.
 //
+
 // # Example
 // ```verum
 // let a = Matrix.from_data(list![0.0, -1.0, 1.0, 0.0], 2, 2);
@@ -1994,6 +2007,7 @@ public fn schur<T: Numeric>(a: &Matrix<T>) -> SchurDecomposition<T> {
 // Quantum epistemic states (density matrices)
 // =============================================================================
 //
+
 // Density matrices are the fundamental representation of mixed
 // quantum states: positive-semidefinite Hermitian matrices with unit
 // trace. They generalise pure state vectors and encode statistical
@@ -2002,6 +2016,7 @@ public fn schur<T: Numeric>(a: &Matrix<T>) -> SchurDecomposition<T> {
 // represents a probability distribution over pure states — i.e. a
 // degree of belief about the system's quantum state.
 //
+
 // This section supplies the bare-minimum protocol surface
 // so that downstream projects (quantum logic programming,
 // formal epistemology, theory-interop consumers) can
@@ -2009,14 +2024,16 @@ public fn schur<T: Numeric>(a: &Matrix<T>) -> SchurDecomposition<T> {
 // satisfy the well-formedness properties as
 // `@verify(formal)` obligations.
 //
+
 // Related:
-//   - core/math/algebra.vr  (OrthomodularLattice, CommutingPair)
-//   - core/math/linalg.vr   (Matrix, Hermitian, PSD predicates below)
+//  - core/math/algebra.vr (OrthomodularLattice, CommutingPair)
+//  - core/math/linalg.vr (Matrix, Hermitian, PSD predicates below)
 
 /// An **epistemic state** of dimension `n` is a density matrix:
 /// an `n × n` matrix of complex numbers that is Hermitian,
 /// positive-semidefinite, and has trace one.
 ///
+
 /// Well-formedness is stated as three `@verify(formal)` obligations.
 /// Concrete implementations discharge them via numerical tolerance
 /// or symbolic verification.
@@ -2093,6 +2110,7 @@ public type VonNeumannEntropy<N: meta Int, S: EpistemicState<N>> is protocol {
 // Epistemic-layer structural facts (SMT-discharged theorems)
 // =============================================================================
 //
+
 // These theorems lock in the protocol inheritance chain of the
 // quantum-epistemic stack. They catch accidental changes to the
 // protocol graph at build time.

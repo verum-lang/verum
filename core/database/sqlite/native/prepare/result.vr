@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_prepare[_v2|_v3].
 //
+
 // On success: stmt id + byte-offset of the start of the next statement
 // (or 0 if this was the last statement in the buffer).
 // On failure: extended code + diagnostic text + error-offset in the sql.

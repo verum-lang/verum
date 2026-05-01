@@ -1,18 +1,20 @@
 //! Lean 4 proof-replay backend.
 //!
+
 //! Lowers an [`SmtCertificate`] into a Lean 4 tactic block. Z3-shape
 //! and CVC5-shape proof traces are recognised; unsupported shapes
 //! and empty traces fall back to `sorry`.
 //!
+
 //! Tactic vocabulary (V7.0 baseline):
-//!   * `intros` / `intro` for quantifier introduction.
-//!   * `rfl` / `Eq.refl` for reflexivity close-out.
-//!   * `simp` / `simp_all` for rewrite normalisation.
-//!   * `linarith` / `omega` for linear-integer arithmetic.
-//!   * `constructor` / `cases` for ∧/∨ destructuring.
-//!   * `apply <hyp>` / `exact <hyp>` for forward-chaining.
-//!   * `trivial` / `tauto` for proof-search close-out.
-//!   * `sorry` as the strict fallback.
+//!  * `intros` / `intro` for quantifier introduction.
+//!  * `rfl` / `Eq.refl` for reflexivity close-out.
+//!  * `simp` / `simp_all` for rewrite normalisation.
+//!  * `linarith` / `omega` for linear-integer arithmetic.
+//!  * `constructor` / `cases` for ∧/∨ destructuring.
+//!  * `apply <hyp>` / `exact <hyp>` for forward-chaining.
+//!  * `trivial` / `tauto` for proof-search close-out.
+//!  * `sorry` as the strict fallback.
 
 use verum_common::Text;
 use verum_kernel::SmtCertificate;
@@ -29,7 +31,7 @@ impl LeanProofReplay {
         Self
     }
 
-    /// Lean 4 tactic-block envelope: `by\n  <tactics>` (term-style)
+    /// Lean 4 tactic-block envelope: `by\n <tactics>` (term-style)
     /// or `:= by <tactics>`. Returns the tactic-block body (no
     /// outer `theorem ... :=` framing — that's the emitter's job).
     fn wrap_tactics(body: &str) -> String {

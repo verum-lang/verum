@@ -5,9 +5,11 @@
 // Dependencies: core.io, escape.vr, mod.vr (CursorShape)
 // =============================================================================
 //
+
 // Cursor movement, visibility, shape, save/restore via ANSI escape sequences.
 // All functions take an EscapeWriter so they work with any backend.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 4
 // =============================================================================
 

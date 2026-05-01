@@ -5,12 +5,14 @@
 // Dependencies: core (result, maybe, protocols)
 // =============================================================================
 //
+
 // This module defines the fundamental I/O protocols:
 // - Read: for reading bytes from sources
 // - Write: for writing bytes to sinks
 // - Seek: for random access
 // - BufRead: for buffered reading
 //
+
 // =============================================================================
 
 module core.io.protocols;
@@ -79,6 +81,7 @@ implement StreamError {
 
     /// Create from OS error code.
     ///
+
     /// Cross-platform: errno values differ between Linux and macOS in
     /// numerically-overlapping ways (e.g. Linux EAGAIN=11 collides
     /// with macOS EDEADLK=11; Linux EXFULL=54 collides with macOS
@@ -86,6 +89,7 @@ implement StreamError {
     /// mis-classify codes on at least one platform — so the mapping
     /// is dispatched per platform via @cfg.
     ///
+
     /// POSIX-stable codes (ENOENT=2, EACCES=13, EEXIST=17, EPIPE=32,
     /// EINTR=4, EINVAL=22, ENOMEM=12) match identically on Linux and
     /// macOS and are handled in the platform-specific tables below.
@@ -117,22 +121,24 @@ implement StreamError {
 
 // Platform-specific errno → IoErrorKind dispatcher.
 //
+
 // SOUNDNESS: Linux and macOS errno values overlap in non-trivial ways.
 // Examples of collisions where the same number means different things:
-//   *  11: Linux EAGAIN ↔ macOS EDEADLK
-//   *  35: Linux EDEADLK ↔ macOS EAGAIN/EWOULDBLOCK
-//   *  48: Linux ELNRNG ↔ macOS EADDRINUSE
-//   *  49: Linux EUNATCH ↔ macOS EADDRNOTAVAIL
-//   *  53: Linux EBADR ↔ macOS ECONNABORTED
-//   *  54: Linux EXFULL ↔ macOS ECONNRESET
-//   *  57: Linux EBADSLT ↔ macOS ENOTCONN
-//   *  60: Linux ENOSTR ↔ macOS ETIMEDOUT
-//   *  61: Linux ENODATA ↔ macOS ECONNREFUSED
-//   *  98: Linux EADDRINUSE ↔ macOS ENOSR
-//   *  99: Linux EADDRNOTAVAIL ↔ macOS ENOSTR
-//   * 103: Linux ECONNABORTED ↔ macOS ENOPOLICY
-//   * 104: Linux ECONNRESET ↔ macOS ENOTRECOVERABLE
+//  * 11: Linux EAGAIN ↔ macOS EDEADLK
+//  * 35: Linux EDEADLK ↔ macOS EAGAIN/EWOULDBLOCK
+//  * 48: Linux ELNRNG ↔ macOS EADDRINUSE
+//  * 49: Linux EUNATCH ↔ macOS EADDRNOTAVAIL
+//  * 53: Linux EBADR ↔ macOS ECONNABORTED
+//  * 54: Linux EXFULL ↔ macOS ECONNRESET
+//  * 57: Linux EBADSLT ↔ macOS ENOTCONN
+//  * 60: Linux ENOSTR ↔ macOS ETIMEDOUT
+//  * 61: Linux ENODATA ↔ macOS ECONNREFUSED
+//  * 98: Linux EADDRINUSE ↔ macOS ENOSR
+//  * 99: Linux EADDRNOTAVAIL ↔ macOS ENOSTR
+//  * 103: Linux ECONNABORTED ↔ macOS ENOPOLICY
+//  * 104: Linux ECONNRESET ↔ macOS ENOTRECOVERABLE
 //
+
 // Therefore the mapping must NOT be a single shared table — that would
 // mis-classify on at least one platform. Each platform owns its own
 // dispatcher selected at compile time via @cfg. POSIX-stable codes
@@ -442,6 +448,7 @@ public type Read is protocol {
 
     // Read all bytes until EOF.
     //
+
     // Transparently retries on `Interrupted` (EINTR) per POSIX convention,
     // so signal handlers do not cause spurious failures for well-behaved
     // callers. Other errors propagate immediately.
@@ -519,6 +526,7 @@ public type Write is protocol {
 
     // Write all bytes.
     //
+
     // Transparently retries on `Interrupted` (EINTR) per POSIX convention.
     // Returns error if not all bytes could be written (short write with
     // no apparent cause, or any other I/O error).

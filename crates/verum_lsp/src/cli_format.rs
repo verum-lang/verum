@@ -1,5 +1,6 @@
 //! Subprocess-based formatter — single source of truth.
 //!
+
 //! For the same architectural reason as `lint_diagnostics` (the
 //! formatter lives in `verum_cli`; `verum_cli` depends on
 //! `verum_lsp` for the `verum lsp` subcommand; cycle), the LSP
@@ -8,6 +9,7 @@
 //! "format document" command produce *byte-identical* output, not
 //! "almost the same" output.
 //!
+
 //! Cost: a subprocess spawn (~30 ms cold on macOS, ~10 ms on
 //! Linux). Format-on-save is human-paced, so this overhead is
 //! invisible. The old in-LSP formatter remains as a fallback for

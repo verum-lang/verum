@@ -1,69 +1,85 @@
 //! `K-Round-Trip` kernel rule — OC/DC translation round-trip
 //! admission (Theorem 108.T / Theorem 16.10).
 //!
+
 //! Pre-this-module the rule existed only as a `KernelRule::KRoundTrip`
-//! taxonomy entry (`proof_tree.rs:771`) at V0 stage with no actual
-//! rule logic. This module ships the V0/V1 admission gate for the
+//! taxonomy entry (`proof_tree.rs:771`) at current stage with no actual
+//! rule logic. This module ships the admission gate for the
 //! identity-functor and definitional-equality cases that are the
 //! load-bearing instances for the AC/OC duality (MSFS Theorem 10.4)
 //! flagship reasoning.
 //!
+
 //! ## What the rule certifies
 //!
+
 //! Given an articulation `α : Articulation` (carried as a `CoreTerm`),
 //! `K-Round-Trip` certifies that
 //!
+
 //! ```text
-//!     canonicalise(inverse(translate(α))) ≡ canonicalise(α)
+//!  canonicalise(inverse(translate(α))) ≡ canonicalise(α)
 //! ```
 //!
+
 //! holds — i.e. translating to the dual side and back, then
 //! canonicalising, recovers the same canonical class.
 //!
-//! ## V0 (this version) — identity-functor case
+
+//! ## — identity-functor case
 //!
+
 //! When the articulation is a syntactic-self-enactment
 //! `epsilon(F)` (carried as `CoreTerm::EpsilonOf(F)`), the round-trip
 //! is literally identity:
 //!
+
 //! ```text
-//!     canonicalise(alpha(epsilon(epsilon(F))))
-//!         ≡ canonicalise(epsilon(F))    [K-Adj-Unit: α∘ε = id]
+//!  canonicalise(alpha(epsilon(epsilon(F))))
+//!  ≡ canonicalise(epsilon(F)) [K-Adj-Unit: α∘ε = id]
 //! ```
 //!
-//! V0 admits this case via structural equality on the term shape.
+
+//! admits this case via structural equality on the term shape.
 //!
+
 //! ## V1 (this version) — definitional-equality round-trip
 //!
+
 //! Extends V0 to admit any pair `(α, α')` whose β-/ι-/δ-normal forms
 //! coincide, using [`crate::support::definitional_eq`]. This catches
 //! M-actions that are β-redexes normalising back to the same
 //! articulation under the K-Adj-Unit/Counit definitional rules.
 //!
-//! ## V2 — universal canonicalize with Diakrisis bridge admits
+
+//! ## Universal canonicalize — universal canonicalize with Diakrisis bridge admits
 //!
-//! V2 ships [`canonical_form`], a normalize-to-fixed-point algorithm
+
+//! ships [`canonical_form`], a normalize-to-fixed-point algorithm
 //! that walks every CoreTerm constructor applying:
 //!
-//!   * **K-Adj-Unit** — `AlphaOf(EpsilonOf(x)) → x`.
-//!   * **K-Adj-Counit** — `EpsilonOf(AlphaOf(x)) → x` (where
-//!     applicable on syntactic-self-enactments).
-//!   * **K-Refine fold** — `Refine(Refine(B, p₁), p₂) → Refine(B,
-//!     p₁ ∧ p₂)` for nested refinements with identical binders.
-//!   * **K-Modal-Idem** — `ModalBox(ModalBox(x)) → ModalBox(x)`,
-//!     `ModalDiamond(ModalDiamond(x)) → ModalDiamond(x)` (S5).
-//!   * **K-Cohesive-Idem** — `Shape(Shape(x)) → Shape(x)`,
-//!     `Flat(Flat(x)) → Flat(x)`, `Sharp(Sharp(x)) → Sharp(x)`.
-//!   * **K-β/η/ι/δ** — delegated to [`crate::support::normalize`].
+
+//!  * **K-Adj-Unit** — `AlphaOf(EpsilonOf(x)) → x`.
+//!  * **K-Adj-Counit** — `EpsilonOf(AlphaOf(x)) → x` (where
+//!  applicable on syntactic-self-enactments).
+//!  * **K-Refine fold** — `Refine(Refine(B, p₁), p₂) → Refine(B,
+//!  p₁ ∧ p₂)` for nested refinements with identical binders.
+//!  * **K-Modal-Idem** — `ModalBox(ModalBox(x)) → ModalBox(x)`,
+//!  `ModalDiamond(ModalDiamond(x)) → ModalDiamond(x)` (S5).
+//!  * **K-Cohesive-Idem** — `Shape(Shape(x)) → Shape(x)`,
+//!  `Flat(Flat(x)) → Flat(x)`, `Sharp(Sharp(x)) → Sharp(x)`.
+//!  * **K-β/η/ι/δ** — delegated to [`crate::support::normalize`].
 //!
+
 //! The full Diakrisis Theorem 16.10 confluence claim is preprint-
 //! blocked; V2 surfaces it as an explicit
 //! [`crate::diakrisis_bridge::BridgeId::ConfluenceOfModalRewrite`]
 //! admit recorded in the [`BridgeAudit`] returned by
-//! [`check_round_trip_v2`]. V3 will discharge the bridge once the
+//! [`check_round_trip_v2`]. Future work will discharge the bridge once the
 //! preprint result lands as a structural algorithm.
 //!
-//! Callers that need legacy V0/V1-only behaviour keep using
+
+//! Callers that need legacy -only behaviour keep using
 //! [`check_round_trip`]; callers that opt into V2's wider admit set
 //! pay the audit-trail introspection cost in exchange for accepting
 //! a substantially larger fragment.
@@ -75,25 +91,29 @@ use crate::KernelError;
 use crate::diakrisis_bridge::{BridgeAudit, admit_confluence_of_modal_rewrite};
 use crate::support::definitional_eq;
 
-/// `K-Round-Trip` admission rule (V0/V1).
+/// `K-Round-Trip` admission rule ().
 ///
+
 /// Accepts:
 ///
-///   * **V0 — identity sub-case.** `lhs == rhs` structurally — the
-///     trivial round-trip on a syntactic-self-enactment.
-///   * **V0 — `EpsilonOf` symmetric pair.** `lhs = EpsilonOf(F)` and
-///     `rhs = EpsilonOf(F)` with structurally-equal `F`.
-///   * **V0 — `AlphaOf(EpsilonOf(F))` ↔ identity.** When one side is
-///     `AlphaOf(EpsilonOf(F))` and the other is `F`, K-Adj-Unit
-///     ensures the round-trip is identity.
-///   * **V1 — definitional-equality round-trip.** `lhs` and `rhs`
-///     reduce to the same β-/ι-/δ-normal form.
+
+///  * **V0 — identity sub-case.** `lhs == rhs` structurally — the
+///  trivial round-trip on a syntactic-self-enactment.
+///  * **V0 — `EpsilonOf` symmetric pair.** `lhs = EpsilonOf(F)` and
+///  `rhs = EpsilonOf(F)` with structurally-equal `F`.
+///  * **V0 — `AlphaOf(EpsilonOf(F))` ↔ identity.** When one side is
+///  `AlphaOf(EpsilonOf(F))` and the other is `F`, K-Adj-Unit
+///  ensures the round-trip is identity.
+///  * **V1 — definitional-equality round-trip.** `lhs` and `rhs`
+///  reduce to the same β-/ι-/δ-normal form.
 ///
+
 /// Rejects everything else with [`KernelError::RoundTripFailed`]
-/// tagged with `context`. V2 (preprint-blocked) will extend the
-/// admit-set with the full canonicalize algorithm; V0/V1 are
+/// tagged with `context`. Preprint-blocked: will extend the
+/// admit-set with the full canonicalize algorithm; are
 /// strictly necessary conditions, never silent-accept.
 ///
+
 /// Context: typically a human-readable label describing the
 /// callsite (e.g. `"AC/OC duality at Theorem 10.4"`), surfaced in
 /// the rejection diagnostic.
@@ -116,7 +136,7 @@ pub fn check_round_trip(
                 if payload.as_ref() == other {
                     return Ok(());
                 }
-                // V1 lift on the inner: definitional equality.
+                // lift on the inner: definitional equality.
                 if definitional_eq(payload.as_ref(), other) {
                     return Ok(());
                 }
@@ -127,7 +147,7 @@ pub fn check_round_trip(
 
     // V0 — EpsilonOf(AlphaOf(x)) on one side ≡ x on the other side
     // for the IMAGE-of-syntactic-self case (K-Adj-Counit: ε∘α ≃ id
-    // on syntactic self-enactments). Exact shape + V1 definitional.
+    // on syntactic self-enactments). Exact shape + definitional.
     match (lhs, rhs) {
         (CoreTerm::EpsilonOf(inner), other) | (other, CoreTerm::EpsilonOf(inner)) => {
             if let CoreTerm::AlphaOf(payload) = inner.as_ref() {
@@ -160,7 +180,7 @@ pub fn check_round_trip(
 // V2: Universal canonicalize + audit-trail-aware round-trip.
 // =============================================================================
 
-/// Bound on the canonicalize-to-fixed-point iteration count.  Picked
+/// Bound on the canonicalize-to-fixed-point iteration count. Picked
 /// so that under typical kernel input the loop terminates in 4–6
 /// rounds; pathological adversarial input that bumps against this
 /// limit causes [`check_round_trip_v2`] to invoke the
@@ -168,15 +188,17 @@ pub fn check_round_trip(
 /// non-decidable audit trail.
 const CANONICALIZE_ITERATION_BUDGET: u32 = 64;
 
-/// V2 universal canonicalize: walk every CoreTerm constructor applying
+/// universal canonicalize: walk every CoreTerm constructor applying
 /// the K-rule rewrites, then β-/η-/ι-/δ-normalize via
 /// [`crate::support::normalize`], iterating until a fixed point or
 /// the iteration budget is exhausted.
 ///
+
 /// The audit trail is mutated when a rewrite class can't be applied
 /// without invoking a [`BridgeId`] admit. A decidable run leaves the
 /// audit trail empty.
 ///
+
 /// `context` is propagated into every bridge admit so external
 /// reporters can attribute admits back to a callsite.
 pub fn canonical_form(
@@ -228,10 +250,12 @@ fn rewrite_one_pass(
             CoreTerm::EpsilonOf(Heap::new(inner_rw))
         }
 
-        // K-Refine V3 fold (NEW, was V2 stub):
+        // K-Refine Refine fold (NEW, was stub):
         //
-        //   Refine(Refine(B, x: p₁), y: p₂) → Refine(B, y: p₁[x↦y] ∧ p₂)
+
+        //  Refine(Refine(B, x: p₁), y: p₂) → Refine(B, y: p₁[x↦y] ∧ p₂)
         //
+
         // Now decidable end-to-end via support::fold_refine_of_refine,
         // which handles the alpha-rename when the inner and outer
         // binders differ. Iteration to fixed point happens at the
@@ -245,7 +269,7 @@ fn rewrite_one_pass(
                 binder: binder.clone(),
                 predicate: Heap::new(pred_rw),
             };
-            // V3 fold: if the rewritten base is itself a Refine, fuse.
+            // Refine fold: if the rewritten base is itself a Refine, fuse.
             crate::support::fold_refine_of_refine(&candidate)
                 .unwrap_or(candidate)
         }
@@ -293,7 +317,7 @@ fn rewrite_one_pass(
         }
 
         // Recurse through compound constructors that don't have a
-        // V2 surface rewrite of their own.
+        // surface rewrite of their own.
         CoreTerm::App(f, a) => CoreTerm::App(
             Heap::new(rewrite_one_pass(f.as_ref(), audit, context)),
             Heap::new(rewrite_one_pass(a.as_ref(), audit, context)),
@@ -340,24 +364,25 @@ fn rewrite_one_pass(
 /// V2 round-trip: `canonical_form(lhs) ≡ canonical_form(rhs)` modulo
 /// the audit trail. Returns `Ok(audit)` on admission with the trail
 /// populated by every bridge admit invoked; `Err(...)` when even
-/// the V2 universal algorithm can't admit the pair.
+/// the universal algorithm can't admit the pair.
 ///
+
 /// V2 is **strictly stronger** than [`check_round_trip`]: every pair
-/// the V0/V1 algorithm admits is also admitted by V2 with an empty
-/// audit trail. Pairs that V2 admits but V0/V1 rejects produce a
+/// the algorithm admits is also admitted by V2 with an empty
+/// audit trail. Pairs that admits but rejects produce a
 /// non-empty audit trail.
 pub fn check_round_trip_v2(
     lhs: &CoreTerm,
     rhs: &CoreTerm,
     context: &str,
 ) -> Result<BridgeAudit, KernelError> {
-    // V0/V1 fast path: try the structural rules first; if they
+    //  fast path: try the structural rules first; if they
     // admit, the audit trail stays empty (decidable run).
     if check_round_trip(lhs, rhs, context).is_ok() {
         return Ok(BridgeAudit::new());
     }
 
-    // V2 universal: canonicalize both sides and compare. Each side
+    // universal: canonicalize both sides and compare. Each side
     // shares the audit trail so admits accumulate across the pair.
     let mut audit = BridgeAudit::new();
     let lhs_canon = canonical_form(lhs, &mut audit, context);
@@ -418,7 +443,7 @@ mod tests {
 
     #[test]
     fn round_trip_accepts_definitionally_equal_pair() {
-        // (λx. x) F  ≡_β  F. Round-trip across β-redex must be admitted.
+        // (λx. x) F ≡_β F. Round-trip across β-redex must be admitted.
         let f = var("F");
         let beta_redex = CoreTerm::App(
             Heap::new(CoreTerm::Lam {
@@ -449,12 +474,12 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // V2 universal canonicalize tests
+    // universal canonicalize tests
     // -------------------------------------------------------------------------
 
     #[test]
     fn canonical_form_collapses_alpha_epsilon_pair() {
-        // canonical_form(AlphaOf(EpsilonOf(F))) → F  (K-Adj-Unit).
+        // canonical_form(AlphaOf(EpsilonOf(F))) → F (K-Adj-Unit).
         let f = var("F");
         let aef = CoreTerm::AlphaOf(Heap::new(CoreTerm::EpsilonOf(Heap::new(f.clone()))));
         let mut audit = BridgeAudit::new();
@@ -466,7 +491,7 @@ mod tests {
 
     #[test]
     fn canonical_form_collapses_epsilon_alpha_pair() {
-        // canonical_form(EpsilonOf(AlphaOf(F))) → F  (K-Adj-Counit).
+        // canonical_form(EpsilonOf(AlphaOf(F))) → F (K-Adj-Counit).
         let f = var("F");
         let eaf = CoreTerm::EpsilonOf(Heap::new(CoreTerm::AlphaOf(Heap::new(f.clone()))));
         let mut audit = BridgeAudit::new();
@@ -477,7 +502,7 @@ mod tests {
 
     #[test]
     fn canonical_form_collapses_modal_box_idempotent() {
-        // ModalBox(ModalBox(F)) → ModalBox(F)  (S5 idempotency).
+        // ModalBox(ModalBox(F)) → ModalBox(F) (S5 idempotency).
         let f = var("F");
         let bbf = CoreTerm::ModalBox(Heap::new(CoreTerm::ModalBox(Heap::new(f.clone()))));
         let bf = CoreTerm::ModalBox(Heap::new(f.clone()));
@@ -533,7 +558,7 @@ mod tests {
 
     #[test]
     fn canonical_form_recurses_into_app() {
-        // App(AlphaOf(EpsilonOf(F)), x)  →  App(F, x)
+        // App(AlphaOf(EpsilonOf(F)), x) → App(F, x)
         let f = var("F");
         let x = var("x");
         let aef = CoreTerm::AlphaOf(Heap::new(CoreTerm::EpsilonOf(Heap::new(f.clone()))));
@@ -567,7 +592,7 @@ mod tests {
 
     #[test]
     fn check_round_trip_v2_admits_v0_pairs_with_empty_audit() {
-        // Every pair the V0/V1 algorithm admits must also be admitted
+        // Every pair the algorithm admits must also be admitted
         // by V2 with an EMPTY audit trail (decidable invariant).
         let f = var("F");
         let aef = CoreTerm::AlphaOf(Heap::new(CoreTerm::EpsilonOf(Heap::new(f.clone()))));
@@ -578,8 +603,8 @@ mod tests {
 
     #[test]
     fn check_round_trip_v2_admits_modal_idempotent_pairs() {
-        // ModalBox(ModalBox(F)) ≡ ModalBox(F) under V2 canonicalize.
-        // V0/V1 reject this (no Modal-Idem rule); V2 admits decidably
+        // ModalBox(ModalBox(F)) ≡ ModalBox(F) under canonicalize.
+        //  reject this (no Modal-Idem rule); admits decidably
         // because the rewrite is structural, not bridge-blocked.
         let f = var("F");
         let bbf = CoreTerm::ModalBox(Heap::new(CoreTerm::ModalBox(Heap::new(f.clone()))));
@@ -621,12 +646,12 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // K-Refine V3 fold tests — refine-of-refine collapse via canonical_form.
+    // K-Refine Refine fold tests — refine-of-refine collapse via canonical_form.
     // -------------------------------------------------------------------------
 
     #[test]
     fn canonical_form_folds_refine_of_refine_same_binder() {
-        // Refine(Refine(B, x: p), x: q)  →  Refine(B, x: p ∧ q)
+        // Refine(Refine(B, x: p), x: q) → Refine(B, x: p ∧ q)
         let b = var("Int");
         let p = var("p");
         let q = var("q");
@@ -660,8 +685,8 @@ mod tests {
     #[test]
     fn canonical_form_folds_three_level_refine_chain() {
         // Refine(Refine(Refine(B, x: p), x: q), x: r)
-        //   canonical iter 1:  Refine(Refine(B, x: p), x: q ∧ r)
-        //   canonical iter 2:  Refine(B, x: p ∧ (q ∧ r))
+        //  canonical iter 1: Refine(Refine(B, x: p), x: q ∧ r)
+        //  canonical iter 2: Refine(B, x: p ∧ (q ∧ r))
         let b = var("Int");
         let l1 = CoreTerm::Refine {
             base: Heap::new(b.clone()),
@@ -699,7 +724,7 @@ mod tests {
     #[test]
     fn canonical_form_folds_refine_with_alpha_rename() {
         // Refine(Refine(B, y: p(y)), x: q(x))
-        //   →  Refine(B, x: p(x) ∧ q(x))   (inner-binder y renamed to x)
+        //  → Refine(B, x: p(x) ∧ q(x)) (inner-binder y renamed to x)
         let b = var("Int");
         let inner = CoreTerm::Refine {
             base: Heap::new(b.clone()),
@@ -751,8 +776,8 @@ mod tests {
     #[test]
     fn check_round_trip_v2_admits_refine_fold_pair() {
         // Refine(Refine(B, x: p), x: q) is round-trip-equivalent to
-        // Refine(B, x: p ∧ q) — V2 admits via the structural fold,
-        // V0/V1 reject (not structurally identical).
+        // Refine(B, x: p ∧ q) — admits via the structural fold,
+        //  reject (not structurally identical).
         let b = var("Int");
         let inner = CoreTerm::Refine {
             base: Heap::new(b.clone()),

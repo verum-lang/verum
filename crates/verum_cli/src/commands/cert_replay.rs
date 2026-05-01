@@ -277,11 +277,11 @@ pub fn run_cross_check(
             .collect::<Result<Vec<_>>>()?
     };
 
-    // V0 ships kernel-only as the always-available baseline; for
+    // ships kernel-only as the always-available baseline; for
     // every requested external backend we use a mock that's
     // configured to "accept" (so a CI script demonstrating the
     // protocol shape doesn't fail just because cvc5 isn't on
-    // PATH).  V1+ swaps in real per-tool runners.
+    // PATH). V1+ swaps in real per-tool runners.
     let engines: Vec<Box<dyn CertReplayEngine>> = parsed_backends
         .iter()
         .filter(|b| **b != ReplayBackend::KernelOnly)
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn run_cross_check_default_runs_all_external_backends() {
-        // No --backend → run every external backend.  V0 returns
+        // No --backend → run every external backend. V0 returns
         // ToolMissing for each + kernel-only accepts → consensus
         // achieved (missing tools count as NotRun).
         let r = run_cross_check(

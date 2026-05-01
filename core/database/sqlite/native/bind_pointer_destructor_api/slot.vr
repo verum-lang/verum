@@ -5,9 +5,9 @@ module core.database.sqlite.native.bind_pointer_destructor_api.slot;
 mount base.{Bool, Int64, Text};
 
 // SQLite uses three "well-known" destructor sentinel values:
-//   SQLITE_STATIC      ((destructor*)0)         — caller manages, no callback
-//   SQLITE_TRANSIENT   ((destructor*)-1)        — engine copies + frees its copy
-//   custom callback                              — engine calls user fn
+//  SQLITE_STATIC ((destructor*)0) — caller manages, no callback
+//  SQLITE_TRANSIENT ((destructor*)-1) — engine copies + frees its copy
+//  custom callback — engine calls user fn
 public type Destructor is
     | DStatic
     | DTransient
@@ -41,7 +41,7 @@ public fn bind(mut s: BindDestructorSlot, type_tag: Text, d: Destructor) -> Bind
 }
 
 // Reset: invoked when sqlite3_reset / sqlite3_clear_bindings / sqlite3_finalize
-// drops the binding.  Returns whether the destructor needs to fire.
+// drops the binding. Returns whether the destructor needs to fire.
 public type ResetEffect is
     | ReNoop
     | ReFireCallback

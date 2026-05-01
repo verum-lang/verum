@@ -5,21 +5,24 @@
 // Spec: internal/specs/database.md §5.3 (verum db:introspect)
 // =============================================================================
 //
+
 // Walks an open SqliteConnection's sqlite_master + PRAGMA tables to
 // populate a `SchemaSnapshot` the sql# meta-fn can consume at compile
 // time.
 //
+
 // SQLite-specific facts:
-//   * `sqlite_master` (alias `sqlite_schema`) holds one row per object
-//     (table / index / view / trigger). type='table' is the user-table
-//     filter. Internal sqlite_* tables are skipped.
-//   * `PRAGMA table_info(t)` → (cid, name, type, notnull, dflt_value, pk)
-//     — pk is 0 (not pk), 1+ (column position in pk; 1 == single-col pk).
-//   * `PRAGMA index_list(t)` → (seq, name, unique, origin, partial).
-//   * `PRAGMA index_info(idx)` → (seqno, cid, col_name).
-//   * `PRAGMA foreign_key_list(t)` → (id, seq, ref_table, from_col,
-//      to_col, on_update, on_delete, match).
+//  * `sqlite_master` (alias `sqlite_schema`) holds one row per object
+//  (table / index / view / trigger). type='table' is the user-table
+//  filter. Internal sqlite_* tables are skipped.
+//  * `PRAGMA table_info(t)` → (cid, name, type, notnull, dflt_value, pk)
+//  — pk is 0 (not pk), 1+ (column position in pk; 1 == single-col pk).
+//  * `PRAGMA index_list(t)` → (seq, name, unique, origin, partial).
+//  * `PRAGMA index_info(idx)` → (seqno, cid, col_name).
+//  * `PRAGMA foreign_key_list(t)` → (id, seq, ref_table, from_col,
+//  to_col, on_update, on_delete, match).
 //
+
 // Refinement extraction. SQLite stores no refinement metadata (it's
 // the cost of being weakly-typed); the introspector emits empty
 // refinement / check_constraint slots and lets the developer add

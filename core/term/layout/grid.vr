@@ -5,19 +5,22 @@
 // Dependencies: rect.vr
 // =============================================================================
 //
+
 // CSS Grid Level 1 adapted for terminal cell grids. Supports fixed, fractional
 // (fr), min-max, and auto track sizing. Column and row gaps are supported.
 //
+
 // Usage:
 // ```verum
 // let grid = GridLayout.new(
-//     [GridTrack.Fixed(20), GridTrack.Fr(1.0), GridTrack.Fixed(30)],
-//     [GridTrack.Fixed(3), GridTrack.Fr(1.0), GridTrack.Fixed(1)],
+//  [GridTrack.Fixed(20), GridTrack.Fr(1.0), GridTrack.Fixed(30)],
+//  [GridTrack.Fixed(3), GridTrack.Fr(1.0), GridTrack.Fixed(1)],
 // ).column_gap(1).row_gap(1);
 // let cells = grid.compute(&area);
 // // cells[row][col] is the Rect for that grid cell
 // ```
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 8
 // =============================================================================
 
@@ -117,6 +120,7 @@ implement GridLayout {
 
 /// Resolve track sizes for a given available space and gap.
 ///
+
 /// Algorithm:
 /// 1. Subtract total gap space from available space.
 /// 2. Allocate fixed tracks and MinMax minimum sizes.

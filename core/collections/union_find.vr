@@ -5,37 +5,46 @@
 // Dependencies: core, core.collections.map
 // =============================================================================
 //
+
 // Union-Find / DSU — the "track connected components as edges
 // arrive" primitive. Textbook inverse-Ackermann amortised cost
 // per operation with both path compression and union by rank.
 //
+
 // Used by:
 //
-//   * Kruskal's MST algorithm.
-//   * CRDT causal-set reconciliation (per-key Add-Wins sets).
-//   * Static analyser equivalence classes.
-//   * Network flow graph compression.
-//   * Compile-time type-variable unification (including Verum's
-//     own type inference — for *incremental* unification at
-//     higher levels, where eager fallbacks are too eager).
+
+//  * Kruskal's MST algorithm.
+//  * CRDT causal-set reconciliation (per-key Add-Wins sets).
+//  * Static analyser equivalence classes.
+//  * Network flow graph compression.
+//  * Compile-time type-variable unification (including Verum's
+//  own type inference — for *incremental* unification at
+//  higher levels, where eager fallbacks are too eager).
 //
+
 // Two APIs: a `UnionFindInt` keyed by `Int` (array-backed, fastest)
 // and a generic `UnionFind<T>` keyed by any `Hash + Eq` type (map-
 // backed, slightly higher constant factor). Use the Int variant
 // when keys can be densely indexed; use the generic one for string
 // / UUID / arbitrary keys.
 //
+
 // # Complexity
 //
-//   `find`:   amortised O(α(n)) ≈ O(1)
-//   `union`:  amortised O(α(n))
-//   `count`:  O(n) once
+
+//  `find`: amortised O(α(n)) ≈ O(1)
+//  `union`: amortised O(α(n))
+//  `count`: O(n) once
 //
+
 // α is the inverse Ackermann function — bounded by 4 for any
 // conceivable input size.
 //
+
 // # API
 //
+
 // ```
 // let mut uf = UnionFindInt.new(n);
 // uf.union(a, b);
@@ -43,6 +52,7 @@
 // let components = uf.component_count();
 // ```
 //
+
 // =============================================================================
 
 module core.collections.union_find;

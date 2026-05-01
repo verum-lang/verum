@@ -1,35 +1,39 @@
 //! SQL literal parser
 //!
+
 //! Tagged text literal parser for `sql#"..."`, `sql.postgres#"..."`,
 //! `sql.sqlite#"..."`, `sql.mysql#"..."` per database.md §5.1 / §5.3.
 //!
+
 //! v0.1 contract (compile-time):
-//!   * String must be non-empty after trimming.
-//!   * Brace / bracket / paren depths must end balanced (catches the
-//!     classic copy-paste truncation that an empty grammar pass
-//!     would silently accept).
-//!   * Quoted strings (single, double, dollar-quoted) must close.
-//!   * Block comments (`/* ... */`) must close — Postgres allows
-//!     nested form, MySQL doesn't; we accept both nesting flavours.
-//!   * Reject obvious string-concatenation patterns that look like an
-//!     escape from the safe-interpolation contract:
-//!       - `' + ` or `" + ` after closing a quoted string token
-//!       - `${...}` interpolations within quoted strings (must live
-//!         in the SQL text, not inside a literal that the server
-//!         would interpret as part of the string).
-//!   * Count `${expr}` interpolations — the count is what `Params`
-//!     length must match at the call site.
-//!   * Compute a deterministic 64-bit fingerprint over the
-//!     **normalised** SQL (whitespace collapsed, comments stripped).
-//!     Two queries differing only in whitespace / comments share the
-//!     same server-side cached statement.
+//!  * String must be non-empty after trimming.
+//!  * Brace / bracket / paren depths must end balanced (catches the
+//!  classic copy-paste truncation that an empty grammar pass
+//!  would silently accept).
+//!  * Quoted strings (single, double, dollar-quoted) must close.
+//!  * Block comments (`/* ... */`) must close — Postgres allows
+//!  nested form, MySQL doesn't; we accept both nesting flavours.
+//!  * Reject obvious string-concatenation patterns that look like an
+//!  escape from the safe-interpolation contract:
+//!  - `' + ` or `" + ` after closing a quoted string token
+//!  - `${...}` interpolations within quoted strings (must live
+//!  in the SQL text, not inside a literal that the server
+//!  would interpret as part of the string).
+//!  * Count `${expr}` interpolations — the count is what `Params`
+//!  length must match at the call site.
+//!  * Compute a deterministic 64-bit fingerprint over the
+//!  **normalised** SQL (whitespace collapsed, comments stripped).
+//!  Two queries differing only in whitespace / comments share the
+//!  same server-side cached statement.
 //!
+
 //! Schema-aware row-typing (`SELECT id FROM users` → typed
 //! `PreparedQuery<{id: UserId}, ()>`) is gated on a separate
 //! schema-snapshot file (`schema.snap.vr`); when absent the
 //! parameter-count and fingerprint are still produced and the row
 //! shape is left as `Unknown` for the caller to ascribe explicitly.
 //!
+
 //! Spec: internal/specs/database.md §5.1 (PreparedQuery), §5.3 (sql#).
 
 use verum_ast::Span;
@@ -68,6 +72,7 @@ impl SqlDialect {
 
 /// Parse a `sql#"..."`-class tagged literal at compile time.
 ///
+
 /// On success the returned `ParsedLiteral::Sql` carries the
 /// normalised SQL text (callers reuse this as the on-wire payload),
 /// the dialect, the bound-parameter count, and a 64-bit fingerprint
@@ -382,6 +387,7 @@ fn count_interpolations(s: &str) -> usize {
 // Step 3: reject obvious dynamic-concatenation antipatterns.
 // ---------------------------------------------------------------------------
 //
+
 // Spindle's `sql#"..."` is supposed to be the only mechanism for
 // putting values into a SQL string. We don't have a lexer-level
 // guarantee — `sql#"SELECT * FROM users WHERE name = '" + input + "'"`
@@ -397,6 +403,7 @@ fn reject_concat_antipatterns(s: &str) -> Result<(), String> {
     // and `${...}` is also a smell — the user should have used a
     // single `${...}` and trusted the param-binding instead.
     //
+
     // We are conservative: only flag patterns that look intentional.
     // Catching every false positive here is bad UX.
     if s.contains("' + ") || s.contains("\" + ") {
@@ -556,6 +563,7 @@ fn normalise(s: &str) -> String {
 // Step 5: 64-bit fingerprint over the normalised SQL.
 // ---------------------------------------------------------------------------
 //
+
 // FNV-1a over UTF-8 bytes — fast, deterministic, no allocations,
 // adequate for naming a server-side prepared-statement slot.
 

@@ -1,11 +1,13 @@
 //! Roundtrip tests for `verum lint --fix`.
 //!
+
 //! Each test exercises one rule by:
-//!   1. Running lint on a fixture that violates the rule.
-//!   2. Asserting the issue fires and is reported as `fixable: true`.
-//!   3. Running `--fix` and reading back the file.
-//!   4. Asserting the rule no longer fires after the fix.
+//!  1. Running lint on a fixture that violates the rule.
+//!  2. Asserting the issue fires and is reported as `fixable: true`.
+//!  3. Running `--fix` and reading back the file.
+//!  4. Asserting the rule no longer fires after the fix.
 //!
+
 //! Step 4 is the load-bearing one — a fix that's idempotent in name
 //! only (rewrites the file but doesn't actually silence the rule)
 //! is worse than no fix at all.

@@ -5,31 +5,37 @@
 // Dependencies: core, sync/atomic, sync/mutex, sync/condvar
 // =============================================================================
 //
+
 // A barrier enables multiple threads to synchronize at a specific point.
 // All threads must reach the barrier before any of them can proceed.
 //
+
 // # Example
 // ```verum
 // let barrier = Shared.new(Barrier.new(3));
 //
+
 // for i in 0..3 {
-//     let b = barrier.clone();
-//     spawn {
-//         // Phase 1 work
-//         do_phase1_work(i);
+//  let b = barrier.clone();
+//  spawn {
+//  // Phase 1 work
+//  do_phase1_work(i);
 //
-//         // Wait for all threads
-//         let res = b.wait();
-//         if result.is_leader() {
-//             print("All threads completed phase 1");
-//         }
+
+//  // Wait for all threads
+//  let res = b.wait();
+//  if result.is_leader() {
+//  print("All threads completed phase 1");
+//  }
 //
-//         // Phase 2 work
-//         do_phase2_work(i);
-//     };
+
+//  // Phase 2 work
+//  do_phase2_work(i);
+//  };
 // }
 // ```
 //
+
 // =============================================================================
 
 module core.sync.barrier;
@@ -45,13 +51,16 @@ mount core.intrinsics.runtime.time.{monotonic_nanos};
 
 /// A synchronization primitive that blocks until N threads have reached it.
 ///
+
 /// A barrier can be reused after all threads have synchronized - it
 /// automatically resets for the next generation.
 ///
+
 /// # Thread Safety
 /// - Barrier is Sync && can be shared between threads
 /// - Thread-safe for concurrent use
 ///
+
 /// # Performance
 /// - wait: O(1) amortized (last thread wakes all)
 /// - Memory: O(1) constant overhead
@@ -74,6 +83,7 @@ type BarrierState is {
 
 /// Result returned from `Barrier.wait()`.
 ///
+
 /// Exactly one thread per barrier synchronization is designated as the
 /// "leader". This is useful for performing one-time actions after all
 /// threads have synchronized.
@@ -85,12 +95,14 @@ public type BarrierWaitResult is {
 implement Barrier {
     /// Create a new barrier for `n` threads.
     ///
+
     /// # Panics
     /// Panics if `n` is 0.
     ///
+
     /// # Example
     /// ```verum
-    /// let barrier = Barrier.new(4);  // Requires 4 threads
+    /// let barrier = Barrier.new(4); // Requires 4 threads
     /// ```
     public fn new(n: Int) -> Barrier {
         assert(n > 0, "Barrier requires at least 1 thread");
@@ -107,15 +119,17 @@ implement Barrier {
 
     /// Block until all threads have reached this barrier.
     ///
+
     /// Returns a `BarrierWaitResult` indicating whether this thread is
     /// the leader (exactly one thread per synchronization is the leader).
     ///
+
     /// # Example
     /// ```verum
     /// let res = barrier.wait();
     /// if result.is_leader() {
-    ///     // Only one thread executes this
-    ///     print("Barrier passed!");
+    ///  // Only one thread executes this
+    ///  print("Barrier passed!");
     /// }
     /// ```
     public fn wait(&self) -> BarrierWaitResult {
@@ -151,6 +165,7 @@ implement Barrier {
 
     /// Get the number of threads currently waiting.
     ///
+
     /// Note: This is approximate due to concurrent modifications.
     public fn waiting_count(&self) -> Int {
         self.state.lock().unwrap_or_else(|p| p.into_inner()).count
@@ -158,6 +173,7 @@ implement Barrier {
 
     /// Get the current generation number.
     ///
+
     /// The generation increments each time all threads pass the barrier.
     public fn generation(&self) -> Int {
         self.state.lock().unwrap_or_else(|p| p.into_inner()).generation
@@ -167,6 +183,7 @@ implement Barrier {
 implement BarrierWaitResult {
     /// Returns true if this thread is the leader.
     ///
+
     /// Exactly one thread per barrier synchronization is the leader.
     /// This is useful for performing actions that should only happen once.
     public fn is_leader(&self) -> Bool {
@@ -204,23 +221,26 @@ implement Debug for BarrierWaitResult {
 
 /// A flexible barrier supporting multiple phases && dynamic participants.
 ///
+
 /// Unlike Barrier, Phaser allows:
 /// - Threads to join/leave dynamically
 /// - Multiple phases with callbacks between them
 /// - Hierarchical organization for scalability
 ///
+
 /// # Example
 /// ```verum
-/// let phaser = Phaser.new(0);  // Start with 0 parties
+/// let phaser = Phaser.new(0); // Start with 0 parties
 ///
+
 /// for i in 0..4 {
-///     phaser.register();  // Dynamically add party
-///     spawn {
-///         // Work
-///         phaser.arrive_and_await();
-///         // More work
-///         phaser.arrive_and_deregister();
-///     };
+///  phaser.register(); // Dynamically add party
+///  spawn {
+///  // Work
+///  phaser.arrive_and_await();
+///  // More work
+///  phaser.arrive_and_deregister();
+///  };
 /// }
 /// ```
 public type Phaser is {
@@ -234,25 +254,28 @@ public type Phaser is {
 
 // State encoding (packed in i64, MUST avoid the sign bit):
 //
-//   Bit 63    — UNUSED (sign bit; storing 1 here corrupts every
-//               arithmetic-shift right because i64 `>>` is
-//               sign-extending; was previously TERMINATED_BIT
-//               which silently broke phase decoding after
-//               terminate() — see task #32).
-//   Bit 62    — terminated flag
-//   Bits 32-61 — phase number (30 bits = ~1.07 billion phases)
-//   Bits 16-31 — arrived (≤ 0xFFFF parties per phase)
-//   Bits  0-15 — parties (≤ 0xFFFF registered threads)
+
+//  Bit 63 — UNUSED (sign bit; storing 1 here corrupts every
+//  arithmetic-shift right because i64 `>>` is
+//  sign-extending; was previously TERMINATED_BIT
+//  which silently broke phase decoding after
+//  terminate() — see task #32).
+//  Bit 62 — terminated flag
+//  Bits 32-61 — phase number (30 bits = ~1.07 billion phases)
+//  Bits 16-31 — arrived (≤ 0xFFFF parties per phase)
+//  Bits 0-15 — parties (≤ 0xFFFF registered threads)
 //
+
 // The arithmetic-right-shift hazard: `state >> PHASE_SHIFT` on
-// a signed i64 sign-extends the high bit.  If TERMINATED_BIT is
+// a signed i64 sign-extends the high bit. If TERMINATED_BIT is
 // the sign bit, every phase decode after terminate() reads
 // `0xFFFF_FFFF_FFFF_FFFF as Int = -1`, then `(-1 + 1) << 32 = 0`
 // in `arrive_and_await`'s phase-advance loop — the entire
 // reconstructed state collapses to `0 | parties`, ALSO losing
-// the TERMINATED_BIT itself.  Net effect: terminated phaser
+// the TERMINATED_BIT itself. Net effect: terminated phaser
 // silently un-terminates the moment any thread arrives.
 //
+
 // Moving TERMINATED_BIT to bit 62 keeps the whole state
 // non-negative regardless of termination state, so the
 // arithmetic shift behaves identically to the logical shift on
@@ -282,6 +305,7 @@ implement Phaser {
 
     /// Register a new party (thread).
     ///
+
     /// Returns the current phase number.
     public fn register(&self) -> Int {
         let _guard = self.mutex.lock().unwrap_or_else(|p| p.into_inner());
@@ -295,8 +319,10 @@ implement Phaser {
 
     /// Arrive at the barrier && wait for others.
     ///
+
     /// Returns the phase number that was completed.
     ///
+
     /// **Phase-advance race fix**: when this thread is the
     /// last arrival, the phase-advance must use CAS to preserve
     /// concurrent `register()` / `arrive_and_deregister()`
@@ -318,7 +344,7 @@ implement Phaser {
             // concurrent register/deregister isn't lost.
             // Loop on observed-parties since concurrent
             // operations may have changed the count between
-            // our fetch_add and our CAS.  We MUST preserve
+            // our fetch_add and our CAS. We MUST preserve
             // TERMINATED_BIT in the new state (was lost in the
             // earlier reconstruction — terminated phaser silently
             // un-terminated on next arrival, see task #32).
@@ -329,7 +355,7 @@ implement Phaser {
                 let cur_terminated = cur & TERMINATED_BIT;
                 // Safety net: another thread may have already
                 // advanced the phase (race with concurrent
-                // last-arriver from a re-registration).  In
+                // last-arriver from a re-registration). In
                 // that case our work is done.
                 if cur_phase != phase {
                     break;
@@ -339,7 +365,7 @@ implement Phaser {
                 if self.state.compare_exchange(cur, new_state, MemoryOrdering.SeqCst, MemoryOrdering.SeqCst).is_ok() {
                     break;
                 }
-                // CAS lost — reload and retry.  Bounded by
+                // CAS lost — reload and retry. Bounded by
                 // contention (typically 1-2 retries).
             }
             self.condvar.notify_all();
@@ -357,8 +383,10 @@ implement Phaser {
 
     /// Arrive && deregister from the phaser.
     ///
+
     /// The calling thread will no longer participate in future phases.
     ///
+
     /// **Phase-advance race fix (task #32)**: the earlier
     /// implementation used `state.store(new_state)` to advance
     /// the phase while only holding `mutex` — that mutex is
@@ -367,7 +395,7 @@ implement Phaser {
     /// the arrived counter between our fetch_add and our store,
     /// and the store would silently overwrite the increment.
     /// Same data-loss class as the bug previously fixed in
-    /// `arrive_and_await` itself.  We now use the same CAS-loop
+    /// `arrive_and_await` itself. We now use the same CAS-loop
     /// pattern with TERMINATED_BIT preservation.
     public fn arrive_and_deregister(&self) -> Int {
         let _guard = self.mutex.lock().unwrap_or_else(|p| p.into_inner());
@@ -383,7 +411,7 @@ implement Phaser {
         if arrived == parties + 1 {  // +1 because we decremented parties
             // Last one — advance phase via CAS preserving any
             // concurrent register/arrive_and_await + the
-            // TERMINATED_BIT.  Loop on observed parties because
+            // TERMINATED_BIT. Loop on observed parties because
             // a concurrent register() under the mutex is impossible
             // (we hold it), but arrive_and_await is mutex-free and
             // can race the arrived counter forward.
@@ -446,20 +474,24 @@ type LatchState is {
 
 /// A single-use synchronization barrier.
 ///
+
 /// Threads block on `wait_for_zero()` until `count_down()` has been called N times.
 /// Unlike Barrier, a Latch can only be used once.
 ///
+
 /// # Example
 /// ```verum
 /// let latch = CountDownLatch.new(3);
 ///
+
 /// for i in 0..3 {
-///     spawn {
-///         do_work(i);
-///         latch.count_down();
-///     };
+///  spawn {
+///  do_work(i);
+///  latch.count_down();
+///  };
 /// }
 ///
+
 /// // Block until all 3 tasks complete
 /// latch.wait_for_zero();
 /// print("All tasks done!");
@@ -484,6 +516,7 @@ implement CountDownLatch {
 
     /// Decrement the count by 1.
     ///
+
     /// If the count reaches zero, all waiting threads are released.
     public fn count_down(&self) {
         let prev = self.count.fetch_sub(1, MemoryOrdering.SeqCst);
@@ -507,8 +540,10 @@ implement CountDownLatch {
 
     /// Block until count reaches zero || timeout expires.
     ///
+
     /// Returns true if count reached zero, false if timed out.
     ///
+
     /// **Correctness:** loops on the predicate (count > 0) under the
     /// mutex, recomputing remaining_ns against an absolute monotonic
     /// deadline each iteration. The earlier single-shot impl returned

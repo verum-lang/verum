@@ -2,6 +2,7 @@
 //! formats and emit a `.vr` source file with the corresponding typed
 //! attributes.
 //!
+
 //! V1 (follow-up, Task B5) ships the OWL 2 Functional-Style
 //! Syntax importer: `verum import --from owl2-fs <file.ofn>` reads a
 //! W3C OWL 2 FS document and emits a `.vr` file populated with
@@ -9,10 +10,12 @@
 //! `@owl2_characteristic`, `@owl2_disjoint_with`,
 //! `@owl2_equivalent_class`, and `@owl2_has_key` attributes.
 //!
+
 //! Round-trips with `verum export --to owl2-fs` for FOAF-shaped
 //! ontologies (Pellet / HermiT / Protégé / FaCT++ / ELK / Konclude
 //! compatible). Pipeline:
 //!
+
 //! 1. Tokenise the `.ofn` source into atoms / parens / strings.
 //! 2. Parse into a tree of `OwlSExpr` nodes.
 //! 3. Walk the `Ontology(...)` body and populate an `Owl2Graph`.

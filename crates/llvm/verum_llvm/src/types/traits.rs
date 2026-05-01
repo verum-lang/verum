@@ -50,12 +50,15 @@ pub unsafe trait BasicType<'ctx>: AnyType<'ctx> {
 
     /// Create a `FunctionType` with this `BasicType` as its return type.
     ///
+
     /// # Example:
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::BasicType;
     ///
+
     /// let context = Context::create();
     /// let int = context.i32_type();
     /// let int_basic_type = int.as_basic_type_enum();
@@ -68,16 +71,20 @@ pub unsafe trait BasicType<'ctx>: AnyType<'ctx> {
     /// Determines whether or not this `BasicType` is sized or not.
     /// For example, opaque structs are unsized.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::BasicType;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(40);
     ///
+
     /// assert!(f32_vec_type.is_sized());
     /// ```
     fn is_sized(&self) -> bool {
@@ -86,12 +93,15 @@ pub unsafe trait BasicType<'ctx>: AnyType<'ctx> {
 
     /// Gets the size of this `BasicType`. Value may vary depending on the target architecture.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::BasicType;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_basic_type = f32_type.as_basic_type_enum();
@@ -103,16 +113,20 @@ pub unsafe trait BasicType<'ctx>: AnyType<'ctx> {
 
     /// Gets the alignment of this `BasicType`. Value may vary depending on the target architecture.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::BasicType;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_type_alignment = i8_type.get_alignment();
     ///
+
     /// assert_eq!(i8_type_alignment.get_zero_extended_constant(), Some(1));
     /// ```
     fn get_alignment(&self) -> IntValue<'ctx> {
@@ -121,11 +135,13 @@ pub unsafe trait BasicType<'ctx>: AnyType<'ctx> {
 
     /// Create an `ArrayType` with this `BasicType` as its elements.
     ///
+
     /// Example:
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::BasicType;
     ///
+
     /// let context = Context::create();
     /// let int = context.i32_type();
     /// let int_basic_type = int.as_basic_type_enum();
@@ -138,12 +154,14 @@ pub unsafe trait BasicType<'ctx>: AnyType<'ctx> {
 
     /// Create a `PointerType` that points to this `BasicType`.
     ///
+
     /// Example:
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::BasicType;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let int = context.i32_type();
     /// let int_basic_type = int.as_basic_type_enum();

@@ -5,24 +5,30 @@
 // Dependencies: core, core.security.mac.hmac, core.encoding.base32
 // =============================================================================
 //
+
 // RFC 4226 — HMAC-Based One-Time Password (HOTP): deterministic
 // 6-/7-/8-digit codes from a shared secret + monotonic counter.
 //
+
 // RFC 6238 — Time-Based One-Time Password (TOTP): HOTP where the
 // counter is `floor((unix_time - T0) / X)`. The Google Authenticator /
 // Authy / FreeOTP family uses TOTP-SHA1, 30-second step, 6 digits.
 //
+
 // This module ships:
 //
-//   * `hotp(secret, counter, digits, algo) -> code`
-//   * `totp(secret, unix_time, step_sec, digits, algo) -> code`
-//   * `totp_verify(secret, code, now, step_sec, digits, algo, window)
-//        -> bool` — constant-time equality, anti-drift window.
-//   * `generate_secret(len)` + `provisioning_uri(..)` — Base32 secret
-//     + QR-ready otpauth:// URI for authenticator apps.
+
+//  * `hotp(secret, counter, digits, algo) -> code`
+//  * `totp(secret, unix_time, step_sec, digits, algo) -> code`
+//  * `totp_verify(secret, code, now, step_sec, digits, algo, window)
+//  -> bool` — constant-time equality, anti-drift window.
+//  * `generate_secret(len)` + `provisioning_uri(..)` — Base32 secret
+//  + QR-ready otpauth:// URI for authenticator apps.
 //
+
 // # Hash choice
 //
+
 // `OtpHash.Sha1` / `OtpHash.Sha256` / `OtpHash.Sha512` per RFC 6238
 // §1.2. Most authenticator apps default to SHA-1 even though SHA-256
 // is recommended — we default to SHA-1 for compatibility but callers
@@ -31,13 +37,16 @@
 // users who need legacy SHA-1 can plug in their own HMAC via a
 // future `OtpAlgo` protocol.
 //
+
 // # Security
 //
-//   * `totp_verify` runs the diff-accumulator comparison to avoid
-//     timing leakage.
-//   * Anti-drift window samples `now±window` steps and returns true
-//     on any match — tolerates up to ±1 step on typical deployments.
+
+//  * `totp_verify` runs the diff-accumulator comparison to avoid
+//  timing leakage.
+//  * Anti-drift window samples `now±window` steps and returns true
+//  on any match — tolerates up to ±1 step on typical deployments.
 //
+
 // =============================================================================
 
 module core.security.otp;
@@ -174,9 +183,10 @@ public fn hotp(
 
 /// Compute the TOTP code for (secret, unix_time).
 ///
+
 /// SOUNDNESS: rejects `step_sec == 0` to avoid integer division-
 /// by-zero (Verum's `UInt64 / 0` semantics are undefined / panic-
-/// dependent).  RFC 6238 §5.2 mandates a positive step (typically
+/// dependent). RFC 6238 §5.2 mandates a positive step (typically
 /// 30 seconds); `0` is always a misuse.
 public fn totp(
     secret:    &[Byte],
@@ -192,7 +202,7 @@ public fn totp(
     hotp(secret, counter, digits, algo)
 }
 
-/// Maximum permitted anti-drift window in step units.  Each window
+/// Maximum permitted anti-drift window in step units. Each window
 /// step costs one HMAC computation per `totp_verify` call; without
 /// this cap, a buggy / malicious caller passing `window = 10^9`
 /// would force the verifier to run 2×10^9+1 HOTP computations.
@@ -204,13 +214,14 @@ public const MAX_TOTP_WINDOW: Int = 100;
 /// true on match. Each comparison is constant-time against the
 /// candidate to avoid timing leakage.
 ///
+
 /// SOUNDNESS:
-///   * `step_sec == 0` rejected (division-by-zero / undefined
-///     counter semantics).
-///   * `window` clamped to MAX_TOTP_WINDOW to bound the per-call
-///     HMAC work (CPU-DoS prevention).  Negative `window` rejected
-///     (would be a programming error — the loop would never run
-///     and the verify would always return false).
+///  * `step_sec == 0` rejected (division-by-zero / undefined
+///  counter semantics).
+///  * `window` clamped to MAX_TOTP_WINDOW to bound the per-call
+///  HMAC work (CPU-DoS prevention). Negative `window` rejected
+///  (would be a programming error — the loop would never run
+///  and the verify would always return false).
 public fn totp_verify(
     secret:    &[Byte],
     candidate: &Text,
@@ -272,9 +283,11 @@ public fn generate_secret(len_bytes: Int) -> List<Byte> {
 /// Authenticator / Authy / FreeOTP. Form per the Google Authenticator
 /// key URI format spec:
 ///
-///   otpauth://totp/LABEL?secret=BASE32&issuer=ISSUER&algorithm=ALGO
-///     &digits=N&period=STEP
+
+///  otpauth://totp/LABEL?secret=BASE32&issuer=ISSUER&algorithm=ALGO
+///  &digits=N&period=STEP
 ///
+
 /// `label` should be pre-encoded (issuer:account) — this module
 /// does NOT percent-escape labels on the assumption callers already
 /// sanitise them.

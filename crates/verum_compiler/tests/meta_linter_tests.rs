@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for the Meta Linter
 //!
+
 //! Tests all detection algorithms:
 //! 1. String concatenation with external input
 //! 2. Unsafe format! with user input

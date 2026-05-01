@@ -1,55 +1,70 @@
 //! FromTensorLiteral Protocol Implementation
 //!
+
 //! Tensor protocol: operations on Tensor<T, Shape> including element-wise ops, reductions, reshaping with compile-time shape validation — Tensor Literal Protocol
 //!
+
 //! This module implements the `FromTensorLiteral` protocol for compile-time
 //! tensor literal construction with shape validation.
 //!
+
 //! # Protocol Definition
 //!
+
 //! ```verum
 //! protocol FromTensorLiteral<Shape: meta [usize], T> {
-//!     fn from_tensor_literal(elements: NestedArray<T, Shape>) -> Self
-//!         where const_eval;  // Must be compile-time evaluable
+//!  fn from_tensor_literal(elements: NestedArray<T, Shape>) -> Self
+//!  where const_eval; // Must be compile-time evaluable
 //! }
 //! ```
 //!
+
 //! # Key Features
 //!
+
 //! - **Compile-time shape validation** - Verify element count matches shape
 //! - **Type-safe construction** - Ensure element types match tensor type
 //! - **Zero-cost abstraction** - All validation at compile-time, no runtime overhead
 //! - **Nested array support** - Handle multi-dimensional tensor literals
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! // 1D tensor (vector)
 //! let vec = tensor<4>i32{1, 2, 3, 4};
 //! // Calls: FromTensorLiteral<[4], i32>::from_tensor_literal([1, 2, 3, 4])
 //!
+
 //! // 2D tensor (matrix)
 //! let mat = tensor<2, 2>f32{{1.0, 2.0}, {3.0, 4.0}};
 //! // Calls: FromTensorLiteral<[2, 2], f32>::from_tensor_literal([[1.0, 2.0], [3.0, 4.0]])
 //!
+
 //! // Broadcasting (single element repeated)
-//! let ones = tensor<8>f32{1.0};  // Expands to {1.0, 1.0, ..., 1.0}
+//! let ones = tensor<8>f32{1.0}; // Expands to {1.0, 1.0, ..., 1.0}
 //! ```
 //!
+
 //! # Architecture
 //!
+
 //! The protocol integrates with:
 //! - **const_eval**: Compile-time shape computation and validation
 //! - **type checker**: Shape type inference and element type checking
 //! - **diagnostics**: Rich error messages for shape/type mismatches
 //!
+
 //! # Performance
 //!
+
 //! All operations happen at compile-time:
 //! - Shape validation: 0ns runtime overhead
 //! - Element count checking: 0ns runtime overhead
 //! - Type checking: Standard type inference cost
 //!
+
 //! Result: Direct LLVM constant initialization (optimal codegen)
 
 use verum_ast::span::Span;
@@ -66,6 +81,7 @@ use crate::ty::Type;
 
 /// NestedArray type representation
 ///
+
 /// Represents compile-time nested arrays for tensor literal validation.
 /// This is a type-level construct used during type checking.
 #[derive(Debug, Clone, PartialEq)]
@@ -98,6 +114,7 @@ impl NestedArray {
 
 /// Tensor literal validator
 ///
+
 /// Validates tensor literals at compile-time according to FromTensorLiteral protocol.
 pub struct TensorLiteralValidator {
     /// Const evaluator for shape computation
@@ -114,18 +131,21 @@ impl TensorLiteralValidator {
 
     /// Validate tensor literal shape against expected dimensions
     ///
+
     /// Returns Ok(()) if shape matches, Err with diagnostic if mismatch.
     ///
+
     /// # Spec Compliance
     ///
+
     /// Implements compile-time validation from tensor protocol specification:
     /// ```verum
     /// meta {
-    ///     let expected_size = Shape.iter().product();
-    ///     let actual_size = count_elements(elements);
-    ///     if actual_size != expected_size {
-    ///         compile_error!("Tensor size mismatch...");
-    ///     }
+    ///  let expected_size = Shape.iter().product();
+    ///  let actual_size = count_elements(elements);
+    ///  if actual_size != expected_size {
+    ///  compile_error!("Tensor size mismatch...");
+    ///  }
     /// }
     /// ```
     pub fn validate_shape(
@@ -168,6 +188,7 @@ impl TensorLiteralValidator {
 
     /// Validate nested array structure matches expected shape
     ///
+
     /// For 2D tensors, validates that the literal has correct nesting structure.
     /// Example: `{{1, 2}, {3, 4}}` for shape [2, 2]
     pub fn validate_nesting(
@@ -207,8 +228,10 @@ impl TensorLiteralValidator {
 
     /// Generate example nesting structure for error messages
     ///
+
     /// # Visibility
     ///
+
     /// This method is `pub` to enable external testing but is not part of the stable API.
     pub fn nesting_example(&self, shape: &[usize]) -> String {
         match shape.len() {
@@ -271,15 +294,18 @@ impl Default for TensorLiteralValidator {
 
 /// Create the FromTensorLiteral protocol definition
 ///
+
 /// This protocol is used for compile-time tensor literal construction.
 ///
+
 /// # Spec Compliance
 ///
+
 /// Implements protocol from tensor protocol specification:
 /// ```verum
 /// protocol FromTensorLiteral<Shape: meta [usize], T> {
-///     fn from_tensor_literal(elements: NestedArray<T, Shape>) -> Self
-///         where const_eval;
+///  fn from_tensor_literal(elements: NestedArray<T, Shape>) -> Self
+///  where const_eval;
 /// }
 /// ```
 pub fn create_from_tensor_literal_protocol() -> Protocol {
@@ -350,6 +376,7 @@ pub fn create_from_tensor_literal_protocol() -> Protocol {
 
 /// Register FromTensorLiteral protocol in the protocol checker
 ///
+
 /// This should be called during standard protocol registration.
 pub fn register_tensor_literal_protocol(checker: &mut crate::protocol::ProtocolChecker) {
     let protocol = create_from_tensor_literal_protocol();

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_compileoption_get(N) returns the N-th compile flag in the
 // order they were declared; sqlite3_compileoption_used(flag) returns
 // 1 iff the flag is present (with or without a "SQLITE_" prefix).

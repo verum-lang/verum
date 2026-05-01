@@ -1,14 +1,17 @@
 //! End-to-End Compilation Pipeline Integration Tests
 //!
+
 //! Tests the complete Verum compilation pipeline from source code through
 //! all compilation phases to execution. Validates:
 //!
+
 //! - Parse → Typecheck → Codegen → Execute workflow
 //! - JIT compilation and execution
 //! - AOT compilation
 //! - Interpreter fallback
 //! - Error handling and diagnostics
 //!
+
 //! Tests the full compilation pipeline: parse -> type check -> VBC codegen -> execute.
 //! Verifies graceful fallback between execution tiers and proper error diagnostics.
 

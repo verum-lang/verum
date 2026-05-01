@@ -1,5 +1,6 @@
 //! System operation handlers for VBC interpreter dispatch.
 //!
+
 //! Handles: SyscallLinux (0xE0), Mmap (0xE1), Munmap (0xE2),
 //! AtomicLoad (0xE3), AtomicStore (0xE4), AtomicCas (0xE5), AtomicFence (0xE6),
 //! IoSubmit (0xE7), IoPoll (0xE8), TlsGet (0xE9), TlsSet (0xEA),
@@ -78,7 +79,7 @@ pub(in super::super) fn handle_atomic_load(state: &mut InterpreterState) -> Inte
 
     // Accept both Pointer-tagged and Int-tagged values as raw addresses
     // — StructFieldAddr (#37) returns Pointer-tagged via Value::from_ptr
-    // for true heap addresses; legacy callers may pass an Int.  Same
+    // for true heap addresses; legacy callers may pass an Int. Same
     // pattern as DerefRaw / DerefMutRaw.
     let val = state.get_reg(ptr_reg);
     let ptr = if val.is_ptr() {
@@ -116,10 +117,10 @@ pub(in super::super) fn handle_atomic_load(state: &mut InterpreterState) -> Inte
                     // 8-byte loads land on a NaN-boxed Value (the
                     // Tier-0 storage layout of every Verum struct
                     // field is uniform 8-byte slots tagged via
-                    // value.rs Value).  Mask off the tag bits and
+                    // value.rs Value). Mask off the tag bits and
                     // sign-extend at bit 47 to reconstruct the i64
                     // payload — this is what the user-level
-                    // `AtomicInt.load` etc. expect.  See task #39
+                    // `AtomicInt.load` etc. expect. See task #39
                     // for the architectural background; the
                     // alternative (raw u64 storage marker via a
                     // future @raw_layout attribute) is the
@@ -142,12 +143,12 @@ pub(in super::super) fn handle_atomic_load(state: &mut InterpreterState) -> Inte
 }
 
 /// Extract the inline-int payload from a NaN-boxed Value bit-
-/// pattern.  Mirrors `Value::as_i64` for the inline-integer case.
+/// pattern. Mirrors `Value::as_i64` for the inline-integer case.
 /// Used by 8-byte atomic load/CAS to reconstruct the user-visible
 /// integer from the raw u64 storage of a Verum struct field.
 #[inline]
 fn nan_box_payload_to_i64(raw: u64) -> i64 {
-    // PAYLOAD_MASK = bits 0..47 (48 bits).  Sign-extend at bit 47
+    // PAYLOAD_MASK = bits 0..47 (48 bits). Sign-extend at bit 47
     // so values -2^47..-1 round-trip correctly.
     let payload = (raw & 0x0000_FFFF_FFFF_FFFF) as i64;
     if payload & (1 << 47) != 0 {
@@ -159,7 +160,7 @@ fn nan_box_payload_to_i64(raw: u64) -> i64 {
 }
 
 /// Re-encode an i64 as a NaN-boxed Value bit-pattern with the
-/// integer tag.  Inverse of `nan_box_payload_to_i64`.
+/// integer tag. Inverse of `nan_box_payload_to_i64`.
 /// Mirrors `Value::from_i64` for the inline-integer case.
 #[inline]
 fn i64_to_nan_box_payload(v: i64) -> u64 {
@@ -301,7 +302,7 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
             8 => {
                 // Wrap expected/desired as NaN-boxed Value bit-
                 // patterns so the atomic CAS compares the WHOLE 8
-                // bytes including tag header (task #39).  Then
+                // bytes including tag header (task #39). Then
                 // unwrap the returned old_u64 back to an i64
                 // payload for the user.
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
@@ -322,11 +323,11 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
 
     // Pack (old_value, success) as a 2-slot Tuple heap object so
     // the destructuring `let (actual, did_swap) = atomic_cas_*` in
-    // user code can Unpack it correctly.  The previous convention
+    // user code can Unpack it correctly. The previous convention
     // wrote dst (i64) and dst+1 (Bool) directly, but the codegen
     // for intrinsic call sites doesn't allocate a paired register
     // pair — it allocates ONE dst — so the dst+1 write was
-    // unreachable and `did_swap` arrived as nil.  Discovered while
+    // unreachable and `did_swap` arrived as nil. Discovered while
     // validating task #39's NaN-box CAS fix: the underlying CAS
     // succeeded but the result tuple destructure read garbage.
     let data_size = 2 * std::mem::size_of::<Value>();

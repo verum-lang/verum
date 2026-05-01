@@ -14,16 +14,18 @@
 )]
 //! Parser tests for universe polymorphism syntax.
 //!
+
 //! Tests the `universe u` generic parameter form (verum-ext.md §2.1) and the
-//! existing `u: Level` alternative form.  Also tests `Type(max(u, v))` level
+//! existing `u: Level` alternative form. Also tests `Type(max(u, v))` level
 //! expressions inside type annotations.
 //!
+
 //! Grammar rules exercised:
-//!   universe_param = 'universe' , identifier ;
-//!   level_param    = identifier , ':' , 'Level' ;
-//!   universe_type  = 'Type' , [ '(' , universe_level_expr , ')' ] ;
-//!   universe_level_expr = integer_lit | identifier
-//!                       | 'max' '(' universe_level_expr ',' universe_level_expr ')' ;
+//!  universe_param = 'universe' , identifier ;
+//!  level_param = identifier , ':' , 'Level' ;
+//!  universe_type = 'Type' , [ '(' , universe_level_expr , ')' ] ;
+//!  universe_level_expr = integer_lit | identifier
+//!  | 'max' '(' universe_level_expr ',' universe_level_expr ')' ;
 
 use verum_ast::span::FileId;
 use verum_ast::ty::{GenericParamKind, UniverseLevelExpr};

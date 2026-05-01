@@ -14,12 +14,15 @@
 )]
 //! Tests for GenRef<T> type syntax parsing
 //!
+
 //! Tests for advanced protocol features: GATs, higher-rank bounds, specialization Section 1.2 lines 143-193
 //! Also covers streaming iterator generation-aware patterns
 //!
+
 //! This module tests parsing of GenRef types used for generation-aware
 //! references in CBGR lending iterators and self-referential types.
 //!
+
 //! GenRef<T> provides explicit generation tracking for references that
 //! need to outlive their origin in lending iterator patterns.
 

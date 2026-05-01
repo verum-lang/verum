@@ -1,5 +1,6 @@
 //! Build script for verum_tblgen
 //!
+
 //! This script handles:
 //! 1. Using local LLVM installation from llvm/install/ (PRIMARY)
 //! 2. Optional override via VERUM_LLVM_DIR environment variable
@@ -223,6 +224,7 @@ fn build_c_library(llvm_config: &Path, include_dir: &Path) {
     // Treat warnings as errors on Unix but not on MSVC — LLVM 21 headers
     // generate benign warnings with VS 18 that would block the build.
     //
+
     // Additionally, modern clang (Apple clang 16+, upstream clang 19+) is
     // stricter about `-Wunused-parameter` and flags several benign cases
     // inside vendored LLVM 21 headers (Support/Allocator.h, Support/Error.h,
@@ -230,6 +232,7 @@ fn build_c_library(llvm_config: &Path, include_dir: &Path) {
     // Support/TrailingObjects.h, TableGen/Record.h, ...). These are not
     // actionable in this project and would block the build entirely.
     //
+
     // The fix is minimal: enable -Werror but explicitly disable the few
     // warning categories that LLVM headers trigger. We keep -Werror so
     // that any warning *we* introduce in verum_tblgen C++ sources still

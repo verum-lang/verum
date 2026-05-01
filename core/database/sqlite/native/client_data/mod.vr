@@ -4,15 +4,18 @@
 // Layer: 7 (façade — sqlite3_get/set_clientdata)
 // Spec: SQLite C API (3.44+)
 //
-//   sqlite3_set_clientdata(db, zName, pData, xDestructor)
-//   sqlite3_get_clientdata(db, zName)
+
+//  sqlite3_set_clientdata(db, zName, pData, xDestructor)
+//  sqlite3_get_clientdata(db, zName)
 //
-// Per-connection named-pointer slots.  xDestructor runs when the
+
+// Per-connection named-pointer slots. xDestructor runs when the
 // connection is closed or a later set replaces the slot.
 //
+
 // Submodules:
-//   * `slot`      — ClientDataSlot record (name + handle + has_destructor)
-//   * `registry`  — per-connection list + get/set/clear
+//  * `slot` — ClientDataSlot record (name + handle + has_destructor)
+//  * `registry` — per-connection list + get/set/clear
 // =============================================================================
 
 module core.database.sqlite.native.client_data;

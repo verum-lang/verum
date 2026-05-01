@@ -1,51 +1,54 @@
 //! AOT (Ahead-of-Time) compilation.
 //!
+
 //! Compiles MLIR to object files and executables for production deployment.
 //!
+
 //! # Pipeline
 //!
+
 //! ```text
 //! MLIR Module (Verum + LLVM dialects)
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────────────────────┐
-//! │  Optimization Passes                                    │
-//! │  - CBGR elimination                                     │
-//! │  - Context monomorphization                             │
-//! │  - Standard MLIR/LLVM optimizations                     │
+//! │ Optimization Passes │
+//! │ - CBGR elimination │
+//! │ - Context monomorphization │
+//! │ - Standard MLIR/LLVM optimizations │
 //! └─────────────────────────────────────────────────────────┘
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────────────────────┐
-//! │  LLVM Lowering                                          │
-//! │  - convert-verum-to-scf                                 │
-//! │  - convert-scf-to-cf                                    │
-//! │  - convert-cf-to-llvm                                   │
+//! │ LLVM Lowering │
+//! │ - convert-verum-to-scf │
+//! │ - convert-scf-to-cf │
+//! │ - convert-cf-to-llvm │
 //! └─────────────────────────────────────────────────────────┘
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────────────────────┐
-//! │  LLVM IR Export                                         │
-//! │  - mlir-translate --mlir-to-llvmir                      │
+//! │ LLVM IR Export │
+//! │ - mlir-translate --mlir-to-llvmir │
 //! └─────────────────────────────────────────────────────────┘
-//!     │
-//!     ├─────────────────────────────────────────┐
-//!     ▼                                         ▼
-//! ┌─────────────┐                         ┌─────────────┐
-//! │ Object File │                         │   LLVM IR   │
-//! │    (.o)     │                         │    (.ll)    │
-//! └─────────────┘                         └─────────────┘
-//!     │
-//!     ▼
+//!  │
+//!  ├─────────────────────────────────────────┐
+//!  ▼ ▼
+//! ┌─────────────┐ ┌─────────────┐
+//! │ Object File │ │ LLVM IR │
+//! │ (.o) │ │ (.ll) │
+//! └─────────────┘ └─────────────┘
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────────────────────┐
-//! │  Linking                                                │
-//! │  - Link with libverum_std                               │
-//! │  - Link with system libraries                           │
+//! │ Linking │
+//! │ - Link with libverum_std │
+//! │ - Link with system libraries │
 //! └─────────────────────────────────────────────────────────┘
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! ┌─────────────┐
-//! │ Executable  │
+//! │ Executable │
 //! └─────────────┘
 //! ```
 

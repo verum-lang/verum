@@ -24,6 +24,7 @@ pub struct PointerType<'ctx> {
 impl<'ctx> PointerType<'ctx> {
     /// Create `PointerType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't pointer type
     pub unsafe fn new(ptr_type: LLVMTypeRef) -> Self {
@@ -36,12 +37,15 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Gets the size of this `PointerType`. Value may vary depending on the target architecture.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
@@ -54,18 +58,22 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Creates a `PointerType` with this `PointerType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let f32_ptr_ptr_type = f32_ptr_type.ptr_type(AddressSpace::default());
     ///
+
     /// ```
     #[deprecated(
         note = "Starting from LLVM 15.0, LLVM doesn't differentiate between pointer types. Use Context::ptr_type instead."
@@ -76,17 +84,21 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Gets a reference to the `Context` this `PointerType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     ///
+
     /// assert_eq!(f32_ptr_type.get_context(), context);
     /// ```
     /// Gets the context this pointer type was created in. Available on AnyType trait
@@ -97,12 +109,15 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Creates a `FunctionType` with this `PointerType` for its return type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
@@ -115,18 +130,22 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Creates an `ArrayType` with this `PointerType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let f32_ptr_array_type = f32_ptr_type.array_type(3);
     ///
+
     /// assert_eq!(f32_ptr_array_type.len(), 3);
     /// assert_eq!(f32_ptr_array_type.get_element_type().into_pointer_type(), f32_ptr_type);
     /// ```
@@ -136,17 +155,21 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Gets the `AddressSpace` a `PointerType` was created with.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     ///
+
     /// assert_eq!(f32_ptr_type.get_address_space(), AddressSpace::default());
     /// ```
     pub fn get_address_space(self) -> AddressSpace {
@@ -163,11 +186,13 @@ impl<'ctx> PointerType<'ctx> {
     /// Creates a null `PointerValue` of this `PointerType`.
     /// It will be automatically assigned this `PointerType`'s `Context`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// // Local Context
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
@@ -175,6 +200,7 @@ impl<'ctx> PointerType<'ctx> {
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let f32_ptr_null = f32_ptr_type.const_null();
     ///
+
     /// assert!(f32_ptr_null.is_null());
     /// ```
     pub fn const_null(self) -> PointerValue<'ctx> {
@@ -186,12 +212,15 @@ impl<'ctx> PointerType<'ctx> {
     /// This is practically the same as calling `const_null` for this particular type and
     /// so this function may be removed in the future.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
@@ -204,17 +233,20 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Creates an undefined instance of a `PointerType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let f32_ptr_undef = f32_ptr_type.get_undef();
     ///
+
     /// assert!(f32_ptr_undef.is_undef());
     /// ```
     pub fn get_undef(self) -> PointerValue<'ctx> {
@@ -223,18 +255,21 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Creates a poison instance of a `PointerType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::values::AnyValue;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let f32_ptr_undef = f32_ptr_type.get_poison();
     ///
+
     /// assert!(f32_ptr_undef.is_poison());
     /// ```
     pub fn get_poison(self) -> PointerValue<'ctx> {
@@ -243,18 +278,22 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Creates a `VectorType` with this `PointerType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let f32_ptr_vec_type = f32_ptr_type.vec_type(3);
     ///
+
     /// assert_eq!(f32_ptr_vec_type.get_size(), 3);
     /// assert_eq!(f32_ptr_vec_type.get_element_type().into_pointer_type(), f32_ptr_type);
     /// ```
@@ -264,18 +303,22 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Creates a `ScalableVectorType` with this `PointerType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     /// let f32_ptr_type = context.ptr_type(AddressSpace::default());
     /// let f32_ptr_scalable_vec_type = f32_ptr_type.scalable_vec_type(3);
     ///
+
     /// assert_eq!(f32_ptr_scalable_vec_type.get_size(), 3);
     /// assert_eq!(f32_ptr_scalable_vec_type.get_element_type().into_pointer_type(), f32_ptr_type);
     /// ```
@@ -285,11 +328,13 @@ impl<'ctx> PointerType<'ctx> {
 
     /// Creates a constant `ArrayValue`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
@@ -297,6 +342,7 @@ impl<'ctx> PointerType<'ctx> {
     /// let f32_ptr_val = f32_ptr_type.const_null();
     /// let f32_ptr_array = f32_ptr_type.const_array(&[f32_ptr_val, f32_ptr_val]);
     ///
+
     /// assert!(f32_ptr_array.is_const());
     /// ```
     pub fn const_array(self, values: &[PointerValue<'ctx>]) -> ArrayValue<'ctx> {

@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for type AST nodes including refinement types
 //!
+
 //! Tests cover:
 //! - Primitive types
 //! - Compound types (tuples, arrays, functions)
@@ -23,6 +24,7 @@
 //! - Type bounds and where clauses
 //! - Sigma types and dependent refinements
 //!
+
 //! Comprehensive tests for Verum type AST nodes.
 
 use verum_ast::ty::*;
@@ -571,6 +573,7 @@ fn test_refined_type_with_lambda() {
 fn test_sigma_type() {
     // Rule 3 (Sigma): x: Int where x > 0
     //
+
     // Per the sigma surface form collapses onto
     // `TypeKind::Refined { predicate.binding = Some(name) }`.
     let span = test_span();

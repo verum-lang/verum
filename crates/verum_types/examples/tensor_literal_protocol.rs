@@ -1,20 +1,26 @@
 //! Example: FromTensorLiteral Protocol Usage
 //!
+
 //! This example demonstrates the FromTensorLiteral protocol implementation
 //! for compile-time tensor literal construction with shape validation.
 //!
+
 //! Tensor protocol: operations on Tensor<T, Shape> including element-wise ops, reductions, reshaping with compile-time shape validation — Tensor Literal Protocol
 //!
+
 //! # Key Features Demonstrated
 //!
+
 //! 1. **Protocol registration** - FromTensorLiteral protocol in type system
 //! 2. **Shape validation** - Compile-time verification of tensor dimensions
 //! 3. **Element count checking** - Ensure correct number of elements
 //! 4. **Nesting validation** - Verify proper multi-dimensional structure
 //! 5. **Broadcasting** - Single element expansion to fill shape
 //!
+
 //! # Usage
 //!
+
 //! ```bash
 //! cargo run --example tensor_literal_protocol
 //! ```

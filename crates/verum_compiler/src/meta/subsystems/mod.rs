@@ -1,10 +1,13 @@
 //! Subsystems for meta context
 //!
+
 //! This module provides various subsystem components that support
 //! meta function execution.
 //!
+
 //! ## Module Structure
 //!
+
 //! - [`runtime_info`] - Compile-time and build-time information
 //! - [`build_assets`] - File access during meta execution
 //! - [`macro_state`] - Caching and invocation tracking
@@ -12,6 +15,7 @@
 //! - [`code_search`] - Type and usage tracking
 //! - [`project_info`] - Project metadata from Verum.toml
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

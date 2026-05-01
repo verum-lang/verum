@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports, unused_variables, unused_mut, deprecated)]
 //! VCS Pattern File Verification Tests
 //!
+
 //! These tests verify that the comprehensive VCS pattern test files
 //! parse correctly (success) or produce expected errors (failure).
 

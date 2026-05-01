@@ -5,45 +5,54 @@
 // Dependencies: core, encoding.der, x509.{oid, algorithm, name, spki, time, ext}
 // =============================================================================
 //
+
 // X509Certificate ::= SEQUENCE {
-//     tbsCertificate       TBSCertificate,
-//     signatureAlgorithm   AlgorithmIdentifier,
-//     signatureValue       BIT STRING
+//  tbsCertificate TBSCertificate,
+//  signatureAlgorithm AlgorithmIdentifier,
+//  signatureValue BIT STRING
 // }
 //
+
 // TBSCertificate ::= SEQUENCE {
-//     version              [0] EXPLICIT Version DEFAULT v1,
-//     serialNumber         CertificateSerialNumber,
-//     signature            AlgorithmIdentifier,
-//     issuer               Name,
-//     validity             CertValidity,
-//     subject              Name,
-//     subjectPublicKeyInfo SubjectPublicKeyInfo,
-//     issuerUniqueID   [1] IMPLICIT UniqueIdentifier OPTIONAL,  -- v2
-//     subjectUniqueID  [2] IMPLICIT UniqueIdentifier OPTIONAL,  -- v2
-//     extensions       [3] EXPLICIT Extensions OPTIONAL         -- v3
+//  version [0] EXPLICIT Version DEFAULT v1,
+//  serialNumber CertificateSerialNumber,
+//  signature AlgorithmIdentifier,
+//  issuer Name,
+//  validity CertValidity,
+//  subject Name,
+//  subjectPublicKeyInfo SubjectPublicKeyInfo,
+//  issuerUniqueID [1] IMPLICIT UniqueIdentifier OPTIONAL, -- v2
+//  subjectUniqueID [2] IMPLICIT UniqueIdentifier OPTIONAL, -- v2
+//  extensions [3] EXPLICIT Extensions OPTIONAL -- v3
 // }
 //
+
 // Version ::= INTEGER { v1(0), v2(1), v3(2) }
 //
+
 // # What we do with this
 //
+
 // The parse produces a `X509Certificate` ADT that's ready for:
 //
-//   1. Chain validation (RFC 5280 §6.1) — path construction + checks.
-//   2. Signature verification (signature_value + inner tbs_der bytes
-//      + parent's SubjectPublicKey).
-//   3. Hostname matching (SAN + NameConstraints).
+
+//  1. Chain validation (RFC 5280 §6.1) — path construction + checks.
+//  2. Signature verification (signature_value + inner tbs_der bytes
+//  + parent's SubjectPublicKey).
+//  3. Hostname matching (SAN + NameConstraints).
 //
+
 // We capture two raw byte slices alongside the structured data:
 //
-//   * `raw_der` — full X509Certificate DER (tag + length + everything).
-//     Needed for cert-level SHA-256 fingerprints (HPKP pins,
-//     X509Certificate Transparency).
-//   * `tbs_der` — exactly the bytes over which `signatureValue` was
-//     computed. The signature verify path feeds this directly to the
-//     appropriate hash + verify function without re-serialising.
+
+//  * `raw_der` — full X509Certificate DER (tag + length + everything).
+//  Needed for cert-level SHA-256 fingerprints (HPKP pins,
+//  X509Certificate Transparency).
+//  * `tbs_der` — exactly the bytes over which `signatureValue` was
+//  computed. The signature verify path feeds this directly to the
+//  appropriate hash + verify function without re-serialising.
 //
+
 // =============================================================================
 
 module core.security.x509.certificate;

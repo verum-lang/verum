@@ -1,5 +1,5 @@
 //! `verum benchmark` subcommand — head-to-head comparison surface
-//! for the continuous-benchmarking trait module.  Non-interactive
+//! for the continuous-benchmarking trait module. Non-interactive
 //! batch driver: runs the configured suite against one or more
 //! systems and emits a comparison matrix.
 
@@ -55,7 +55,7 @@ fn build_suite(name: &str, theorems: &[String]) -> Result<BenchmarkSuite> {
     Ok(suite)
 }
 
-/// Run the suite against a single system (mock runner).  V1
+/// Run the suite against a single system (mock runner). V1
 /// production runners that call out to the real tools plug in via
 /// the same trait without changing this dispatch.
 pub fn run_run(
@@ -76,7 +76,7 @@ pub fn run_run(
 }
 
 /// Run the suite against every requested system and emit a
-/// comparison matrix.  When `systems` is empty, runs against every
+/// comparison matrix. When `systems` is empty, runs against every
 /// known system.
 pub fn run_compare(
     systems: &[String],
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn run_compare_no_systems_runs_all() {
-        // Empty systems list → run all 5.  Smoke test only — we
+        // Empty systems list → run all 5. Smoke test only — we
         // can't easily capture stdout in unit tests.
         let r = run_compare(
             &[],

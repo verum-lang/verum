@@ -2,30 +2,36 @@
 // core/net/weft/h3_priority.vr — RFC 9218 priority extractor for Weft
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §6.10 (RFC 9218 priority)
-// RFC:   9218 — Extensible Prioritization Scheme for HTTP
+// Spec: internal/specs/net-framework.md §6.10 (RFC 9218 priority)
+// RFC: 9218 — Extensible Prioritization Scheme for HTTP
 // =============================================================================
 //
+
 // Phase 4 follow-up — closes the spec line:
 //
-//   "Priority header (§6.10 RFC 9218)"
+
+//  "Priority header (§6.10 RFC 9218)"
 //
+
 // Reads the inbound request's `priority` header (Structured-Field
 // dictionary per RFC 9218 §4) and exposes the typed `H3Priority`
 // value to handlers. When the header is absent or malformed, the
 // default `H3Priority { urgency: 3, incremental: false }` lands —
 // this is the conservative interpretation specified by §4.2.
 //
+
 // The middleware itself doesn't reorder requests — it only annotates
 // the WeftRequest's `priority` slot. The scheduler (typically
 // `core.net.h3.server.H3Connection`'s send queue or a custom
 // `Layer`) consumes the value to ordered-emit responses.
 //
+
 // Note: the priority encoded in the optional `PRIORITY_UPDATE` H3
 // frame (RFC 9218 §7) is consumed by `core.net.h3.connection`'s
 // frame dispatcher, not here. This middleware deals only with the
 // header surface, which is the case 90% of clients exercise.
 //
+
 // =============================================================================
 
 module core.net.weft.h3_priority;

@@ -3,18 +3,20 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The C struct is:
-//   void *(*xMalloc)(int);
-//   void  (*xFree)(void*);
-//   void *(*xRealloc)(void*, int);
-//   int   (*xSize)(void*);
-//   int   (*xRoundup)(int);
-//   int   (*xInit)(void*);
-//   void  (*xShutdown)(void*);
-//   void  *pAppData;
+//  void *(*xMalloc)(int);
+//  void (*xFree)(void*);
+//  void *(*xRealloc)(void*, int);
+//  int (*xSize)(void*);
+//  int (*xRoundup)(int);
+//  int (*xInit)(void*);
+//  void (*xShutdown)(void*);
+//  void *pAppData;
 //
+
 // We model each callback as an installed / not-installed flag; the
-// runtime plugs in real closures.  The catalogue owns *structure*,
+// runtime plugs in real closures. The catalogue owns *structure*,
 // not function pointers.
 // =============================================================================
 

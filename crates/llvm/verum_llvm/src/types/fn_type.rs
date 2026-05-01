@@ -22,6 +22,7 @@ pub struct FunctionType<'ctx> {
 impl<'ctx> FunctionType<'ctx> {
     /// Create `FunctionType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't function type
     pub unsafe fn new(fn_type: LLVMTypeRef) -> Self {
@@ -34,19 +35,23 @@ impl<'ctx> FunctionType<'ctx> {
 
     /// Creates a `PointerType` with this `FunctionType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // This example is ignored because LLVM 21 uses opaque pointers
     /// // and get_element_type() no longer exists
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], false);
     /// let fn_ptr_type = fn_type.ptr_type(AddressSpace::default());
     ///
+
     /// assert_eq!(fn_ptr_type.get_element_type().into_function_type(), fn_type);
     /// ```
     #[deprecated(note = "LLVM 21 uses opaque pointers. Use Context::ptr_type instead.")]
@@ -56,15 +61,19 @@ impl<'ctx> FunctionType<'ctx> {
 
     /// Determines whether or not a `FunctionType` is a variadic function.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], true);
     ///
+
     /// assert!(fn_type.is_var_arg());
     /// ```
     pub fn is_var_arg(self) -> bool {
@@ -73,16 +82,20 @@ impl<'ctx> FunctionType<'ctx> {
 
     /// Gets param types this `FunctionType` has.
     ///
+
     /// # Example
     ///
+
     /// ```
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[f32_type.into()], true);
     /// let param_types = fn_type.get_param_types();
     ///
+
     /// assert_eq!(param_types.len(), 1);
     /// assert_eq!(param_types[0].into_float_type(), f32_type);
     /// ```
@@ -107,15 +120,19 @@ impl<'ctx> FunctionType<'ctx> {
 
     /// Counts the number of param types this `FunctionType` has.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[f32_type.into()], true);
     ///
+
     /// assert_eq!(fn_type.count_param_types(), 1);
     /// ```
     pub fn count_param_types(self) -> u32 {
@@ -126,15 +143,19 @@ impl<'ctx> FunctionType<'ctx> {
     /// Gets whether or not this `FunctionType` is sized or not. This is likely
     /// always false and may be removed in the future.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], true);
     ///
+
     /// assert!(!fn_type.is_sized());
     /// ```
     pub fn is_sized(self) -> bool {
@@ -143,20 +164,24 @@ impl<'ctx> FunctionType<'ctx> {
 
     // REVIEW: Does this work on functions?
     // fn get_alignment(&self) -> IntValue {
-    //     self.fn_type.get_alignment()
+    //  self.fn_type.get_alignment()
     // }
 
     /// Gets a reference to the `Context` this `FunctionType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], true);
     ///
+
     /// assert_eq!(fn_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {
@@ -170,15 +195,19 @@ impl<'ctx> FunctionType<'ctx> {
 
     /// Gets the return type of this `FunctionType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], true);
     ///
+
     /// assert_eq!(fn_type.get_return_type().unwrap().into_float_type(), f32_type);
     /// ```
     pub fn get_return_type(self) -> Option<BasicTypeEnum<'ctx>> {
@@ -197,7 +226,7 @@ impl<'ctx> FunctionType<'ctx> {
     // Seems to "work" - no UB or SF so far but fails
     // LLVMIsAFunction() check. Commenting out for further research
     // pub fn get_undef(&self) -> FunctionValue {
-    //     FunctionValue::new(self.fn_type.get_undef()).expect("Should always get an undef value")
+    //  FunctionValue::new(self.fn_type.get_undef()).expect("Should always get an undef value")
     // }
 }
 

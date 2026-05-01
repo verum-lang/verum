@@ -2,15 +2,18 @@
 // core.theory_interop.coord — VVA §10.2 obstruction verdict + §10.4 MSFS coord
 // =============================================================================
 //
+
 // Lightweight, stdlib-grade companion to core.theory_interop.core: turns the
 // numeric obstruction Obs(F) returned by Kan-extension translation into the
 // VVA §10.2 verdict enum, and projects an Articulation to its MSFS
 // coordinate (framework, ν, τ) per §10.4.
 //
+
 // Kept deliberately small and free of category-theoretic dependencies so it
 // can be `mount`-ed by audit tooling and frontend integrations without
 // pulling in core.math.{kan_extension, infinity_topos}.
 //
+
 // VVA §10.4 demands ν ∈ Ordinal (countable). Earlier MVP collapsed ν to
 // `Int`, which silently dropped the transfinite ω-stratum used by
 // lurie_htt / schreiber_dcct / baez_dolan etc. This module ships a faithful
@@ -34,12 +37,14 @@ public type TranslationVerdict is
 
 /// Map an obstruction severity Obs(F) ∈ [0, 1] to its §10.2 verdict.
 ///
-///   Obs == 0          → Morita-equivalence witness
-///   (0, 0.05]         → Strong
-///   (0.05, 0.20]      → Moderate
-///   (0.20, 0.50]      → Weak
-///   (0.50, 1]         → Untranslatable (reject)
+
+///  Obs == 0 → Morita-equivalence witness
+///  (0, 0.05] → Strong
+///  (0.05, 0.20] → Moderate
+///  (0.20, 0.50] → Weak
+///  (0.50, 1] → Untranslatable (reject)
 ///
+
 /// Inputs outside [0, 1] clamp to the nearest valid bucket (defensive — a
 /// well-typed caller should already be inside the unit interval).
 public fn verdict_of(obstruction: Float) -> TranslationVerdict {
@@ -81,18 +86,20 @@ public fn verdict_admits(v: TranslationVerdict) -> Bool {
 // §10.4 — Ordinal type for ν-invariants
 // -----------------------------------------------------------------------------
 //
+
 // Encoding: every ordinal we need to express is below ε_0; concretely
-// the standard six-pack lives below ω·3+1.  We use a flat
+// the standard six-pack lives below ω·3+1. We use a flat
 // (omega_coefficient, finite_offset) pair which is the canonical Cantor-
-// normal-form prefix at this depth.  Comparison is lexicographic; addition
+// normal-form prefix at this depth. Comparison is lexicographic; addition
 // works pointwise; sup is the lex max.
 //
-//   ord_zero()                   = 0
-//   ord_finite(n)                = n           (omega_coefficient = 0)
-//   ord_omega()                  = ω           (omega_coefficient = 1)
-//   ord_omega_plus(k)            = ω + k       (omega_coefficient = 1, offset = k)
-//   ord_omega_times(n)           = ω · n       (omega_coefficient = n)
-//   ord_omega_times_plus(n, k)   = ω·n + k
+
+//  ord_zero() = 0
+//  ord_finite(n) = n (omega_coefficient = 0)
+//  ord_omega() = ω (omega_coefficient = 1)
+//  ord_omega_plus(k) = ω + k (omega_coefficient = 1, offset = k)
+//  ord_omega_times(n) = ω · n (omega_coefficient = n)
+//  ord_omega_times_plus(n, k) = ω·n + k
 
 @derive(Clone)
 public type Ordinal is {
@@ -203,16 +210,17 @@ public fn msfs_coord(framework: Text, ordinal: Ordinal, tau: Bool) -> MsfsCoord 
 /// articulation; user-defined frameworks fall through to (0, intensional)
 /// until a project-level `register_framework_coord` mechanism lands.
 ///
+
 /// Justification of the assigned ν-values (Diakrisis ν-invariant):
-///   actic.raw             ν = 0       no foundation, neutral element
-///   lurie_htt             ν = ω       ∞-cat completions, ω-stratum
-///   schreiber_dcct        ν = ω+2     cohesive-∞-topos two extensions
-///                                    above lurie_htt (∫ ⊣ ♭ ⊣ ♯)
-///   connes_reconstruction ν = ω       operator-algebraic ∞-presentation
-///   petz_classification   ν = 2       finite-dim matrix metrics
-///   arnold_catastrophe    ν = 2       codim ≤ 4 normal-form classifier
-///   baez_dolan            ν = ω+1     n-categories + stabilisation hypothesis
-///   owl2_fs               ν = 1       SROIQ DL-decidable fragment
+///  actic.raw ν = 0 no foundation, neutral element
+///  lurie_htt ν = ω ∞-cat completions, ω-stratum
+///  schreiber_dcct ν = ω+2 cohesive-∞-topos two extensions
+///  above lurie_htt (∫ ⊣ ♭ ⊣ ♯)
+///  connes_reconstruction ν = ω operator-algebraic ∞-presentation
+///  petz_classification ν = 2 finite-dim matrix metrics
+///  arnold_catastrophe ν = 2 codim ≤ 4 normal-form classifier
+///  baez_dolan ν = ω+1 n-categories + stabilisation hypothesis
+///  owl2_fs ν = 1 SROIQ DL-decidable fragment
 fn known_ordinal(framework_name: Text) -> Ordinal {
     if framework_name.eq("actic.raw") {
         return ord_zero();
@@ -255,7 +263,7 @@ fn known_tau(framework_name: Text) -> Bool {
 }
 
 /// MSFS coordinate of an articulation (VVA §10.4):
-///   coord(α) = (α.framework, ν(α), τ(intensional(α)))
+///  coord(α) = (α.framework, ν(α), τ(intensional(α)))
 public fn coord_of(alpha: Articulation) -> MsfsCoord {
     MsfsCoord {
         framework: alpha.framework.clone(),
@@ -288,16 +296,20 @@ public fn coord_eq(a: MsfsCoord, b: MsfsCoord) -> Bool {
 // V8 (#234) — Auto-induced ε(α) coord per VVA §11.3 + Diakrisis 108.T
 // -----------------------------------------------------------------------------
 //
+
 // VVA §11.3 says: every articulation α auto-induces its enactment ε(α) via
 // the syntactic self-enactment construction (Diakrisis 108.T):
 //
-//     ε(α) = (F, Syn(F), id, id)
+
+//  ε(α) = (F, Syn(F), id, id)
 //
+
 // where F is α's framework. This is NOT the Morita dual (which lives at the
 // AC ↔ OC bridge per 12-actic/04 and exchanges intensional/extensional τ);
 // it is the **identity self-enactment** — the canonical witness that α
 // inhabits its own enactment graph.
 //
+
 // Coord-preservation invariant: the auto-induced ε(α) inhabits the SAME
 // (Fw, ν, τ) coordinate as α. This is structural — Syn(F) is a syntactic
 // reflection, so depth and trust-tier are preserved.
@@ -307,6 +319,7 @@ public fn coord_eq(a: MsfsCoord, b: MsfsCoord) -> Bool {
 /// auto-induction convention, ε(α) inhabits the same framework + ν + τ
 /// as α.
 ///
+
 /// Distinguished from the Morita-dual (`12-actic/04-ac-oc-duality`)
 /// which flips intensional ↔ extensional and is a different
 /// construction — the dual is for cross-framework translation, the
@@ -331,12 +344,14 @@ public fn auto_induced_epsilon_coord_preserves(c: MsfsCoord) -> Bool {
 // §10.4 — Theorem coordinate (per theorem; multi-framework dependencies)
 // -----------------------------------------------------------------------------
 //
+
 // A theorem may invoke several @framework axioms. Its MSFS coordinate is the
 // upper bound in the (Set<Framework>, Ordinal, TauFlag) lattice:
-//   - frameworks: union of the per-axiom framework names
-//   - ordinal:    sup (lex on (omega_coefficient, finite_offset))
-//   - tau:        ∧ (intensional iff all dependencies intensional)
+//  - frameworks: union of the per-axiom framework names
+//  - ordinal: sup (lex on (omega_coefficient, finite_offset))
+//  - tau: ∧ (intensional iff all dependencies intensional)
 //
+
 // Empty-dependency theorems land at (∅, 0, intensional) — the kernel-only
 // baseline. The lattice has an honest least element so the sup is total.
 

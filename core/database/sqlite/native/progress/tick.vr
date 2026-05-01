@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// `TickAccumulator` is the per-VDBE opcode counter.  The engine calls
+
+// `TickAccumulator` is the per-VDBE opcode counter. The engine calls
 // `observe_op` on every op; `should_consult` answers "is this the tick
 // on which we should run the progress callback?"
 // =============================================================================

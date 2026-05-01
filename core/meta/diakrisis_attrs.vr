@@ -5,23 +5,26 @@
 // Version: V8.1 #196 V21+V22+V23+V24 (META1 unified)
 // =============================================================================
 //
+
 // VVA Part B introduces a small family of *advisory* attributes that
 // classify functions / theorems / types along Diakrisis foundational
 // axes without changing compiler dispatch:
 //
-//   `@effect(<kind>)`            — computational-effect classifier
-//                                  (VVA Part B §9 — Kleisli categories)
-//   `@infinity_category(<n>)`    — (∞,∞)-categorical level
-//                                  (VVA Part B §4)
-//   `@autopoietic(epsilon, depth)` — ε-fixpoint coordinate + finite
-//                                  approximation budget
-//                                  (VVA Part B §5)
-//   `@ludic_design`              — marks a value as a ludics design
-//                                  (lazy-evaluated proof tree)
-//                                  (VVA Part B §10)
-//   `@cut_elimination(bound)`    — cut-elimination step bound
-//                                  (VVA Part B §10)
+
+//  `@effect(<kind>)` — computational-effect classifier
+//  (VVA Part B §9 — Kleisli categories)
+//  `@infinity_category(<n>)` — (∞,∞)-categorical level
+//  (VVA Part B §4)
+//  `@autopoietic(epsilon, depth)` — ε-fixpoint coordinate + finite
+//  approximation budget
+//  (VVA Part B §5)
+//  `@ludic_design` — marks a value as a ludics design
+//  (lazy-evaluated proof tree)
+//  (VVA Part B §10)
+//  `@cut_elimination(bound)` — cut-elimination step bound
+//  (VVA Part B §10)
 //
+
 // **Architectural rationale (V8.1 #196 META1 reorganisation):** these
 // attributes were initially shipped as Rust-side typed-attrs in
 // `verum_ast.attr.typed`. Architectural review concluded that
@@ -32,19 +35,22 @@
 // the meta-system per the principles laid out in
 // `core/meta/framework_hygiene.vr`:
 //
-//   1. *Zero grammar bloat* — the generic `identifier(args)` form
-//      already parses; no parser extension required.
-//   2. *User-extensible* — users can add their own classifiers by
-//      adding analogous meta-fns in a sibling module.
-//   3. *Validation in source* — the meta-fn validates argument
-//      shape with the same Verum semantic types Rust would use.
-//   4. *Single source of truth* — definition + validation +
-//      docstring + spec citation all live in one `.vr` file.
+
+//  1. *Zero grammar bloat* — the generic `identifier(args)` form
+//  already parses; no parser extension required.
+//  2. *User-extensible* — users can add their own classifiers by
+//  adding analogous meta-fns in a sibling module.
+//  3. *Validation in source* — the meta-fn validates argument
+//  shape with the same Verum semantic types Rust would use.
+//  4. *Single source of truth* — definition + validation +
+//  docstring + spec citation all live in one `.vr` file.
 //
+
 // Each meta-fn in this module accepts an `Attribute` (the generic
 // AST representation) and returns either a domain-typed record on
 // success or a structured `Diagnostic` on failure.
 //
+
 // =============================================================================
 
 module meta.diakrisis_attrs;
@@ -109,6 +115,7 @@ public type EffectAttr is {
 /// Meta-fn: extract a validated `EffectAttr` from a generic
 /// attribute, or `Maybe.None` when the shape doesn't match.
 ///
+
 /// Accepts: `@effect(<kind-ident>)` exactly one arg, identifier.
 public fn parse_effect_attr(attr: &Attribute) -> Maybe<EffectAttr> {
     if attr.name != "effect" { return Maybe.None; }
@@ -248,9 +255,9 @@ public type CutEliminationAttr is {
 
 /// Meta-fn: extract `CutEliminationAttr` from generic attribute.
 /// Accepts:
-///   `@cut_elimination`                   → bound = default (1000)
-///   `@cut_elimination(bound = <int>)`    → named-arg form
-///   `@cut_elimination(<int>)`            → bare-int form
+///  `@cut_elimination` → bound = default (1000)
+///  `@cut_elimination(bound = <int>)` → named-arg form
+///  `@cut_elimination(<int>)` → bare-int form
 public fn parse_cut_elimination(attr: &Attribute) -> Maybe<CutEliminationAttr> {
     if attr.name != "cut_elimination" { return Maybe.None; }
     if attr.args.len() == 0 {

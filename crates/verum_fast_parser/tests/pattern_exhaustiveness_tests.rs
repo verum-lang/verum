@@ -15,6 +15,7 @@
 //! Pattern matching tests focused on complex patterns, guards, or-patterns,
 //! nested patterns, and binding patterns.
 //!
+
 //! These complement the existing pattern_matching_tests.rs and
 //! pattern_comprehensive_tests.rs with more complex scenarios.
 

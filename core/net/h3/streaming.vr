@@ -2,46 +2,53 @@
 // core/net/h3/streaming.vr — streaming response body primitives
 // =============================================================================
 // Layer: 5 (Network — HTTP/3)
-// Spec:  internal/specs/net-framework.md §6.10 (Phase 4 — streaming)
-//        internal/specs/tls-quic.md (warp stack)
-// RFC:   9114 §4.1 — message framing on a request stream
-//        9114 §6.2.1 — control / request streams
+// Spec: internal/specs/net-framework.md §6.10 (Phase 4 — streaming)
+//  internal/specs/tls-quic.md (warp stack)
+// RFC: 9114 §4.1 — message framing on a request stream
+//  9114 §6.2.1 — control / request streams
 // =============================================================================
 //
+
 // The buffered `H3Response` (in `core.net.h3.request`) holds the
 // entire body as `List<Byte>`. That's the right shape for ≤1 MiB
 // JSON / HTML / static assets, but it falls down for:
 //
-//   * Server-Sent Events (`text/event-stream`) — body lifetime is the
-//     subscription lifetime, may be hours long.
-//   * Large file downloads — reading 1 GiB into memory before
-//     emitting any byte is a non-starter.
-//   * Dynamic transcoding — encoder-driven byte stream where the
-//     producer can't know total size up front.
-//   * gRPC server-streaming over Connect-RPC — N response frames
-//     across a single H3 stream.
+
+//  * Server-Sent Events (`text/event-stream`) — body lifetime is the
+//  subscription lifetime, may be hours long.
+//  * Large file downloads — reading 1 GiB into memory before
+//  emitting any byte is a non-starter.
+//  * Dynamic transcoding — encoder-driven byte stream where the
+//  producer can't know total size up front.
+//  * gRPC server-streaming over Connect-RPC — N response frames
+//  across a single H3 stream.
 //
+
 // This module adds the *dual* of `H3Response`:
 //
-//   * `H3StreamWriter` — protocol the user implements; produces a
-//     stream of DATA-frame chunks driven by the connection's flow
-//     control window.
-//   * `H3DataSink` — opaque writer the server hands the user; emits
-//     bytes downstream and awaits when the stream-level
-//     `MAX_STREAM_DATA` window closes (RFC 9000 §19.10).
-//   * `H3StreamingResponse` — header section + writer, the value a
-//     streaming handler returns.
+
+//  * `H3StreamWriter` — protocol the user implements; produces a
+//  stream of DATA-frame chunks driven by the connection's flow
+//  control window.
+//  * `H3DataSink` — opaque writer the server hands the user; emits
+//  bytes downstream and awaits when the stream-level
+//  `MAX_STREAM_DATA` window closes (RFC 9000 §19.10).
+//  * `H3StreamingResponse` — header section + writer, the value a
+//  streaming handler returns.
 //
+
 // Backpressure is structural: every `H3DataSink.write` is `async fn`,
 // and the connection flow-control awakens it only when the peer
 // extends the window via `MAX_STREAM_DATA`. There is no implicit
 // buffer between the writer and the wire.
 //
+
 // Cancellation: if the peer sends `STOP_SENDING` or the connection
 // closes, `H3DataSink.write` returns `Err(H3Error.StreamCancelled)`.
 // The user's writer MUST propagate that — RAII + structured
 // concurrency guarantee no orphan emit task survives the cancel.
 //
+
 // =============================================================================
 
 module core.net.h3.streaming;
@@ -57,16 +64,19 @@ mount core.net.h3.qpack.decoder.{QpackHeaderField};
 // H3DataSink — server-provided writer the user emits chunks into
 // =============================================================================
 //
+
 // Conceptually a `WriteHalf` over a single H3 stream. Internally,
 // each `write(bytes)` enqueues a DATA frame for emission, awaits the
 // stream-level flow-control window when it closes, and resolves
 // when at least one byte has been accepted by the AEAD-seal path.
 //
+
 // `finish()` consumes the sink and emits an empty DATA frame with the
 // FIN flag set (RFC 9000 §19.8 STREAM frame, semantically), which
 // the H3 frame layer translates to the trailing-headers block (or
 // just END_STREAM if no trailers).
 //
+
 // All methods are cancel-safe: a CancellationToken passed at
 // construction wakes any pending await.
 
@@ -112,11 +122,12 @@ implement H3DataSink {
     /// per-stream send buffer (subsequent AEAD-seal happens in the
     /// connection's tx pump). Returns:
     ///
-    ///   * `Ok(())` — chunk accepted (may still be in flight).
-    ///   * `Err(H3Error.StreamCancelled)` — peer reset the stream
-    ///     or the surrounding nursery was cancelled.
-    ///   * `Err(H3Error.SendBufferFull)` — connection-level
-    ///     buffer cap exceeded; caller should slow producer.
+
+    ///  * `Ok(())` — chunk accepted (may still be in flight).
+    ///  * `Err(H3Error.StreamCancelled)` — peer reset the stream
+    ///  or the surrounding nursery was cancelled.
+    ///  * `Err(H3Error.SendBufferFull)` — connection-level
+    ///  buffer cap exceeded; caller should slow producer.
     pub async fn write(&mut self, bytes: &[Byte]) -> Result<(), H3Error> {
         if self.cancelled.load(MemoryOrdering.Acquire) {
             return Err(H3Error.StreamCancelled);
@@ -215,11 +226,13 @@ implement H3DataSink {
 // H3StreamWriter — protocol the user implements
 // =============================================================================
 //
+
 // One method: `write_to(sink)`. The connection drives this once per
 // streaming response; the user emits chunks via the sink, finishes
 // when done, and returns control. The connection then closes the
 // stream cleanly (END_STREAM via the sink's drain).
 //
+
 // Crucially, structured concurrency: the writer's future runs
 // inside the connection's per-stream nursery. If the connection
 // closes mid-stream, the future is dropped and any owned async
@@ -233,6 +246,7 @@ public type H3StreamWriter is protocol {
 // H3StreamingResponse — header section + writer
 // =============================================================================
 //
+
 // Mirrors `H3Response` shape but body is replaced by the writer.
 // Trailers are emitted post-writer-finish (RFC 9114 §4.5 supports
 // trailers as a second HEADERS frame after DATA).

@@ -14,6 +14,7 @@
 )]
 // Comprehensive tests for syntactic refinement subsumption patterns
 //
+
 // Syntactic refinement subsumption: common patterns like `Int{> 0} <: Int{>= 0}` are
 // resolved by structural comparison without invoking the SMT solver. Target: >80%
 // of refinement checks resolved syntactically (<1ms), remaining 20% fall through to

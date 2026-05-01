@@ -5,18 +5,21 @@
 // Dependencies: core, io.path, base.glob, shell.{context, result}
 // =============================================================================
 //
+
 // Extension API for `PermissionSet` providing path/host matching with glob
 // semantics. The base `PermissionSet` (in `shell.context`) carries the
 // allow-lists; this module adds:
 //
-//   * `check_fs_read` / `check_fs_write` — canonicalise the requested path
-//     and prefix-match against the allow-list (each entry interpreted as
-//     a glob pattern).
-//   * `check_net` — match host:port against the `net` list, supporting
-//     plain hostnames, wildcards (*.example.com) and CIDRs.
-//   * `check_env` — exact-match for env-var read/write capability.
-//   * Frontmatter parser for `// !@permission(...)` blocks.
+
+//  * `check_fs_read` / `check_fs_write` — canonicalise the requested path
+//  and prefix-match against the allow-list (each entry interpreted as
+//  a glob pattern).
+//  * `check_net` — match host:port against the `net` list, supporting
+//  plain hostnames, wildcards (*.example.com) and CIDRs.
+//  * `check_env` — exact-match for env-var read/write capability.
+//  * Frontmatter parser for `// !@permission(...)` blocks.
 //
+
 // =============================================================================
 
 module permissions;
@@ -123,17 +126,18 @@ fn path_matches(pattern: &Text, path: &Text) -> Bool {
 
 fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     // pattern forms (in dispatch order):
-    //   "[2001:db8::1]:443"    — bracketed IPv6 + port (RFC 3986 §3.2.2)
-    //   "[2001:db8::]/32:443"  — bracketed IPv6 CIDR + port
-    //   "[2001:db8::1]"        — bracketed IPv6 (no port)
-    //   "2001:db8::/32"        — IPv6 CIDR (no port)
-    //   "10.0.0.0/8"           — IPv4 CIDR (any port)
-    //   "10.0.0.0/8:443"       — IPv4 CIDR + port
-    //   "2001:db8::1"          — bare IPv6 literal, exact (no port)
-    //   "example.com"          — exact host, any port
-    //   "example.com:443"      — exact host + port
-    //   "*.example.com"        — suffix wildcard
+    //  "[2001:db8::1]:443" — bracketed IPv6 + port (RFC 3986 §3.2.2)
+    //  "[2001:db8::]/32:443" — bracketed IPv6 CIDR + port
+    //  "[2001:db8::1]" — bracketed IPv6 (no port)
+    //  "2001:db8::/32" — IPv6 CIDR (no port)
+    //  "10.0.0.0/8" — IPv4 CIDR (any port)
+    //  "10.0.0.0/8:443" — IPv4 CIDR + port
+    //  "2001:db8::1" — bare IPv6 literal, exact (no port)
+    //  "example.com" — exact host, any port
+    //  "example.com:443" — exact host + port
+    //  "*.example.com" — suffix wildcard
     //
+
     // The bracketed form must be checked FIRST since `[…]:port` would
     // otherwise be misparsed by the colon-splitter; CIDR is checked
     // BEFORE the colon-splitter so `/N` isn't read as part of host.
@@ -173,9 +177,9 @@ fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
 }
 
 // Match "<addr>/<prefix>[:port]" against (host, port).
-// `slash_idx` is the byte offset of the '/' in `pattern`.  The address
+// `slash_idx` is the byte offset of the '/' in `pattern`. The address
 // family is detected from `addr_text`: a colon-bearing addr is IPv6
-// (prefix 0..=128), otherwise IPv4 (prefix 0..=32).  Both addr and
+// (prefix 0..=128), otherwise IPv4 (prefix 0..=32). Both addr and
 // host must parse as the SAME family — a hostname never matches a
 // CIDR rule, and an IPv4 host never matches an IPv6 CIDR rule.
 fn cidr_host_matches(pattern: &Text, slash_idx: Int, host: &Text, port: Int) -> Bool {
@@ -204,7 +208,7 @@ fn cidr_host_matches(pattern: &Text, slash_idx: Int, host: &Text, port: Int) -> 
         if prefix < 0 || prefix > 32 { return false; }
         let pat_addr  = match parse_ipv4(&addr_text) { Some(a) => a, None => return false };
         let host_addr = match parse_ipv4(host)       { Some(a) => a, None => return false };
-        // mask = top `prefix` bits of a 32-bit word.  prefix == 0 → mask = 0
+        // mask = top `prefix` bits of a 32-bit word. prefix == 0 → mask = 0
         // (matches everything); prefix == 32 → mask = 0xFFFFFFFF (exact).
         let mask: Int = if prefix == 0 {
             0
@@ -215,10 +219,10 @@ fn cidr_host_matches(pattern: &Text, slash_idx: Int, host: &Text, port: Int) -> 
     }
 }
 
-// Bracketed IPv6 form (RFC 3986 §3.2.2).  Three accepted shapes:
-//   "[v6]"                  — exact match, any port
-//   "[v6]:port"             — exact match, specific port
-//   "[v6]/prefix[:port]"    — CIDR + optional port
+// Bracketed IPv6 form (RFC 3986 §3.2.2). Three accepted shapes:
+//  "[v6]" — exact match, any port
+//  "[v6]:port" — exact match, specific port
+//  "[v6]/prefix[:port]" — CIDR + optional port
 fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     let close = match pattern.find(']') { Some(i) => i, None => return false };
     if close < 1 { return false; }
@@ -231,9 +235,9 @@ fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
         };
     }
     if after.starts_with("/") {
-        // CIDR + optional :port  →  reuse the unified cidr path by
+        // CIDR + optional :port → reuse the unified cidr path by
         // re-stitching "addr/rest" so cidr_host_matches sees a
-        // canonical pattern.  rest is `after[1..]` (without the slash).
+        // canonical pattern. rest is `after[1..]` (without the slash).
         let rest: Text = after.slice(1, after.len()).into();
         // Build "addr/rest" and dispatch.
         let combined: Text = addr_text.concat("/").concat(&rest);
@@ -251,14 +255,14 @@ fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     false
 }
 
-// 128-bit IPv6 address stored as two 64-bit halves.  Verum's `Int` is
+// 128-bit IPv6 address stored as two 64-bit halves. Verum's `Int` is
 // signed 64-bit, so the low 64 bits of each half carry one half of
 // the address; bitwise comparisons and masks treat them as unsigned
 // (sign-extension does not affect bitand/bitor/shl/shr identity).
 type Ipv6Addr is { hi: Int, lo: Int };
 
 // Heuristic: a textual IPv6 literal contains either `::` (the
-// zero-run shorthand) or two-or-more `:` separators.  Single-colon
+// zero-run shorthand) or two-or-more `:` separators. Single-colon
 // strings are read as `host:port`, hostnames have no colons.
 fn is_v6_literal(text: &Text) -> Bool {
     if text.find("::").is_some() { return true; }
@@ -286,7 +290,7 @@ fn cidr_v6_match(pat: &Ipv6Addr, host: &Ipv6Addr, prefix: Int) -> Bool {
         && bitand(pat.lo, lo_mask) == bitand(host.lo, lo_mask)
 }
 
-// 64-bit mask covering the top `bits` bits.  `bits == 0 → 0`,
+// 64-bit mask covering the top `bits` bits. `bits == 0 → 0`,
 // `bits == 64 → -1` (all-ones in two's complement), else
 // `(-1) << (64 - bits)` — left-shifting -1 produces a top-aligned
 // run of ones with the correct width regardless of sign because
@@ -297,13 +301,14 @@ fn mask_top_bits_u64(bits: Int) -> Int {
     else { shl(-1, 64 - bits) }
 }
 
-// Parse RFC 4291 IPv6 textual form.  Supports:
-//   * Full form:        2001:0db8:85a3:0000:0000:8a2e:0370:7334
-//   * Compressed form:  2001:db8::8a2e:370:7334
-//   * Loopback:         ::1
-//   * Unspecified:      ::
-//   * IPv4-mapped tail: ::ffff:192.168.1.1  (last 32 bits = IPv4)
+// Parse RFC 4291 IPv6 textual form. Supports:
+//  * Full form: 2001:0db8:85a3:0000:0000:8a2e:0370:7334
+//  * Compressed form: 2001:db8::8a2e:370:7334
+//  * Loopback: ::1
+//  * Unspecified: ::
+//  * IPv4-mapped tail: ::ffff:192.168.1.1 (last 32 bits = IPv4)
 //
+
 // Returns None on any malformed input: unrecognised characters,
 // >4 hex chars per group, multiple `::` zones, total != 8 groups,
 // or invalid IPv4 tail.
@@ -312,7 +317,7 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
 
     // Reject inputs with more than one `::` zone — `split(":")` can't
     // distinguish "a:::b" (illegal) from "a::b" (legal) on its own
-    // because both produce ≥3 consecutive empties.  RFC 4291 §2.2
+    // because both produce ≥3 consecutive empties. RFC 4291 §2.2
     // permits exactly one `::`, anywhere.
     if let Some(first) = text.find("::") {
         let after: Text = text.slice(first + 2, text.len()).into();
@@ -340,7 +345,7 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
         groups = rebuilt;
     }
 
-    // Locate the empty-group span (the `::` zone).  Empty groups can
+    // Locate the empty-group span (the `::` zone). Empty groups can
     // appear at most ONE contiguous run, but the leading/trailing `::`
     // produces TWO adjacent empties (e.g. `::1` -> ["", "", "1"]).
     let n = groups.len();
@@ -376,7 +381,7 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
             }
         }
     } else {
-        // `::` zone present.  zeros_to_fill = 8 - non-empty groups.
+        // `::` zone present. zeros_to_fill = 8 - non-empty groups.
         let real_groups = n - empty_count;
         let zeros_to_fill = 8 - real_groups;
         if zeros_to_fill < 1 || zeros_to_fill > 8 { return None; }
@@ -427,7 +432,7 @@ fn parse_hex_group(text: &Text) -> Maybe<Int> {
 }
 
 // Lowercase-hex-encode a 0..=0xFFFF value (no leading zeros, no
-// "0x" prefix).  Used internally to splice an IPv4-mapped tail back
+// "0x" prefix). Used internally to splice an IPv4-mapped tail back
 // into a pure-hex IPv6 textual form before re-tokenisation.
 fn int_to_hex_text(n: Int) -> Text {
     if n == 0 { return "0".into(); }
@@ -450,7 +455,7 @@ fn int_to_hex_text(n: Int) -> Text {
 }
 
 // Parse a dotted-decimal IPv4 address into its 32-bit big-endian
-// numeric form (low 32 bits of the returned Int).  Returns None on
+// numeric form (low 32 bits of the returned Int). Returns None on
 // any parse failure: wrong number of octets, non-numeric octets,
 // out-of-range octets (>255), leading-zero octets are accepted.
 fn parse_ipv4(text: &Text) -> Maybe<Int> {
@@ -487,10 +492,12 @@ fn parse_ipv4(text: &Text) -> Maybe<Int> {
 // Frontmatter — parse `// !@permission(...)` blocks
 // =============================================================================
 //
+
 // Recognises lines of the form:
-//   // !@permission(run: ["git", "kubectl"], fs_read: ["/etc/kube/*"])
-//   // !@permission(net: ["api.github.com:443"])
+//  // !@permission(run: ["git", "kubectl"], fs_read: ["/etc/kube/*"])
+//  // !@permission(net: ["api.github.com:443"])
 //
+
 // The grammar is intentionally simple — single-line per directive,
 // comma-separated key=value pairs, lists in `["..."]` syntax. Multiple
 // directives accumulate into the same PermissionSet.

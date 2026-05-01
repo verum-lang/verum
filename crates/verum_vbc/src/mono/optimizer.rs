@@ -1,11 +1,13 @@
 //! Post-specialization bytecode optimization.
 //!
+
 //! Implements industrial-grade optimization passes for specialized bytecode:
 //! 1. Constant folding - evaluate compile-time constants
 //! 2. Dead code elimination - remove unreachable code
 //! 3. Peephole optimization - local instruction patterns
 //! 4. Copy propagation - eliminate redundant moves
 //!
+
 //! Runs after specialization to optimize the monomorphized bytecode before merging
 //! into the final module.
 
@@ -15,6 +17,7 @@ use crate::instruction::Opcode;
 
 /// Post-specialization bytecode optimizer.
 ///
+
 /// Applies optimization passes to specialized bytecode:
 /// 1. Constant folding - evaluate compile-time constants
 /// 2. Dead code elimination - remove unreachable code
@@ -78,6 +81,7 @@ impl SpecializationOptimizer {
 
     /// Optimizes specialized bytecode.
     ///
+
     /// Runs optimization passes iteratively until no more changes occur
     /// or max_iterations is reached.
     pub fn optimize(&mut self, bytecode: Vec<u8>) -> Vec<u8> {
@@ -116,6 +120,7 @@ impl SpecializationOptimizer {
 
     /// Constant folding pass.
     ///
+
     /// Patterns:
     /// - LOAD_I r0, X; LOAD_I r1, Y; ADD_I r2, r0, r1 → LOAD_I r2, X+Y
     /// - LOAD_I r0, 0; ADD_I r1, r2, r0 → MOV r1, r2 (identity for add)
@@ -329,6 +334,7 @@ impl SpecializationOptimizer {
 
     /// Dead code elimination pass.
     ///
+
     /// Patterns:
     /// - JMP +0 → NOP (useless jump)
     /// - Unreachable code after unconditional RET/JMP
@@ -400,6 +406,7 @@ impl SpecializationOptimizer {
 
     /// Peephole optimization pass.
     ///
+
     /// Patterns:
     /// - MOV r0, r1; MOV r2, r0 → MOV r2, r1 (copy propagation)
     /// - MOV r0, r0 → NOP (useless move)

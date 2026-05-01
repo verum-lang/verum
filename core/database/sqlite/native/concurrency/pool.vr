@@ -3,17 +3,21 @@
 // =============================================================================
 // Spec: sqlite-native.md §20.3
 //
+
 // Connection pool that respects the capability tag on Connection<Mode>.
 // Read-mode pool serves cheap snapshot readers; Write-mode pool serves
 // the (single) writer; Admin-mode is reserved for schema operations.
 //
+
 // Lease lifecycle:
 //
-//   1. `acquire(deadline_ns, now_ns)` returns either a `Lease<Mode>`
-//      or `PoolError.Timeout`.
-//   2. Caller uses the connection via `lease.connection_id()`.
-//   3. `release(lease)` returns the connection to the pool.
+
+//  1. `acquire(deadline_ns, now_ns)` returns either a `Lease<Mode>`
+//  or `PoolError.Timeout`.
+//  2. Caller uses the connection via `lease.connection_id()`.
+//  3. `release(lease)` returns the connection to the pool.
 //
+
 // Acquire semantics in v0.1 are LIFO (stack-ordered) — the most
 // recently released connection is served first, which is friendly
 // to per-connection caches.

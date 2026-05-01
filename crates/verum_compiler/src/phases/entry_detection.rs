@@ -1,10 +1,13 @@
 //! Phase 0: Entry Point Detection with Context Validation
 //!
+
 //! Detects `async fn main()` or `fn main()` entry point and validates
 //! context system compliance.
 //!
+
 //! ## Responsibilities
 //!
+
 //! 1. Find the main function across all modules
 //! 2. Determine if it's sync or async
 //! 3. Validate that all used contexts are explicitly declared with 'using'
@@ -12,18 +15,23 @@
 //! 5. Detect circular context group references
 //! 6. Validate async/sync consistency for contexts
 //!
+
 //! ## Output
 //!
+
 //! - `MainConfig`: Configuration for entry point validation
 //! - `EntryContextValidation`: Context validation results
 //!
+
 //! ## Context System Compliance
 //!
+
 //! Context system integration:
 //! - ALL contexts must be explicitly declared with 'using'
 //! - ALL contexts must be provided with 'provide' statements
 //! - NO automatic provision of contexts (auto-provide feature removed)
 //!
+
 //! Phase 0: Detects main() function, validates signature (fn main() or
 //! fn main(args: List<Text>)), and configures execution mode.
 
@@ -102,16 +110,19 @@ impl EntryDetectionPhase {
 
         // Verum execution-mode contract — strict separation:
         //
-        //   • **Application** = no shebang, declares `fn main()`. Runs
-        //     via interpreter or AOT. `main` is THE entry point.
+
+        //  • **Application** = no shebang, declares `fn main()`. Runs
+        //  via interpreter or AOT. `main` is THE entry point.
         //
-        //   • **Script** = shebang at byte 0, no `fn main()`. Top-level
-        //     statements are folded into a synthesised
-        //     `__verum_script_main` wrapper which is THE entry point.
-        //     A `fn main` declared inside a script-tagged module is a
-        //     regular function — callable but **not** treated as the
-        //     program entry.
+
+        //  • **Script** = shebang at byte 0, no `fn main()`. Top-level
+        //  statements are folded into a synthesised
+        //  `__verum_script_main` wrapper which is THE entry point.
+        //  A `fn main` declared inside a script-tagged module is a
+        //  regular function — callable but **not** treated as the
+        //  program entry.
         //
+
         // The two roles do not overlap: `main` only ever drives
         // application modules, `__verum_script_main` only ever drives
         // script modules.
@@ -165,13 +176,14 @@ impl EntryDetectionPhase {
             Some(func) => func,
             None => {
                 // Verum execution-mode contract:
-                //   1. Library/binary mode: a `fn main()` (or `async fn main()`)
-                //      defines the entry.
-                //   2. Script mode: the file MUST start with a `#!` shebang
-                //      line; the parser then folds top-level statements into
-                //      `__verum_script_main` and tags the module with
-                //      `@![__verum_kind("script")]`.
+                //  1. Library/binary mode: a `fn main()` (or `async fn main()`)
+                //  defines the entry.
+                //  2. Script mode: the file MUST start with a `#!` shebang
+                //  line; the parser then folds top-level statements into
+                //  `__verum_script_main` and tags the module with
+                //  `@![__verum_kind("script")]`.
                 //
+
                 // If neither path produced an entry, surface BOTH options so
                 // the user can pick the one that fits — without a shebang the
                 // file is treated as library code and needs `fn main()`; with
@@ -225,15 +237,16 @@ impl EntryDetectionPhase {
 
     /// Validate that all used contexts are declared with 'using' and provided with 'provide'
     ///
+
     /// Context system validation rules:
     /// - ALL contexts must be explicitly declared with `using [Context1, Context2]`
-    ///   after the function return type
+    ///  after the function return type
     /// - ALL contexts must be provided with `provide Context = impl` statements
-    ///   in a lexically enclosing scope before use
+    ///  in a lexically enclosing scope before use
     /// - NO automatic/implicit provision of contexts (auto-provide removed)
     /// - Context lookup at runtime uses task-local storage (~5-30ns overhead)
     /// - Context groups (e.g., `using WebContext = [Database, Logger]`) are expanded
-    ///   at compile time
+    ///  at compile time
     fn validate_context_usage(
         &self,
         func: &FunctionDecl,
@@ -904,8 +917,10 @@ impl EntryContextValidation {
 
 /// Main function configuration
 ///
+
 /// Main function configuration for context system integration.
 ///
+
 /// Context system rules for main():
 /// - NO automatic provision of contexts (auto-provide feature removed)
 /// - ALL contexts must be explicitly declared with `using [...]`

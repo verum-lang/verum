@@ -4,12 +4,15 @@
 // Layer: Stdlib (1)
 // Dependencies: Operating system
 //
+
 // Direct kernel access without libc wrappers.
 // AOT: Lower to inline assembly syscall instructions.
 // VBC: VM issues the syscall on behalf of the program.
 //
+
 // VBC Opcode: SyscallLinux (0x45)
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
@@ -21,6 +24,7 @@ module core.intrinsics.runtime.syscall;
 
 /// Raw syscall with 0 arguments.
 ///
+
 /// Requires: Operating system
 @intrinsic("syscall0")
 @vbc_direct_lowering

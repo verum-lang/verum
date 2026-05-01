@@ -4,9 +4,11 @@
 // Layer: 6
 // Spec: sqlite-native.md §16.1
 //
+
 // The two protocols every loom virtual table must implement, plus
 // a small `VtabError` taxonomy mirroring SQLite's vtab error codes.
 //
+
 // We deliberately avoid `async fn` here in the v0.1 protocol — the
 // VDBE interpreter is currently synchronous, and async cursors will
 // arrive together with the planner-driven streaming push (§13.4).
@@ -135,9 +137,9 @@ public type VirtualTable is protocol {
     /// Read-only by default — writable subclass overrides.
     fn is_writable(&self) -> Bool { false }
 
-    /// `args[0] == RNull`            → INSERT (returns new rowid)
-    /// `args[0] != RNull, len == 2`  → DELETE
-    /// `args[0] != RNull, len > 2`   → UPDATE
+    /// `args[0] == RNull` → INSERT (returns new rowid)
+    /// `args[0] != RNull, len == 2` → DELETE
+    /// `args[0] != RNull, len > 2` → UPDATE
     fn update(&mut self, args: &List<Register>) -> Result<Int64, VtabError> {
         let _ = args;
         Err(VtabUnsupported("vtab is read-only".clone()))
@@ -153,12 +155,14 @@ public type VirtualTable is protocol {
 // IndexInfo — passed to `best_index`
 // -----------------------------------------------------------------------------
 //
+
 // Mirrors `sqlite3_index_info`. The vtab returns:
-//   * which constraint slots it can satisfy and at what arg slot
-//   * whether the cursor will return rows in the requested order
-//     (skipping a sort in the planner)
-//   * a synthetic `index_num` + `index_str` carried back to `filter`
+//  * which constraint slots it can satisfy and at what arg slot
+//  * whether the cursor will return rows in the requested order
+//  (skipping a sort in the planner)
+//  * a synthetic `index_num` + `index_str` carried back to `filter`
 //
+
 // The planner reads `estimated_cost` to pick between candidate
 // access plans (vtab vs. brute-force scan).
 // =============================================================================

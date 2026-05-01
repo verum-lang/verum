@@ -1,8 +1,10 @@
 //! URI/URL literal parser
 //!
+
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
+
 //! Parses and validates URI/URL literals:
 //! - url#"https://example.com"
 //! - url#"https://api.example.com/v1/users"
@@ -15,14 +17,17 @@ use crate::literal_registry::ParsedLiteral;
 
 /// Parse URI literal at compile-time
 ///
+
 /// Semantic literal: `url#"https://..."` or `uri#"..."` is compile-time validated.
 /// Validates scheme, authority, path, query, and fragment components per RFC 3986.
 /// Produces type Url. Interpolated form `url"...{expr}..."` auto-encodes parameters.
 ///
+
 /// # Arguments
 /// - `content`: The URI string
 /// - `span`: Source location for error reporting
 ///
+
 /// # Returns
 /// Validated URI on success
 pub fn parse_uri(

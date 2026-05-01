@@ -19,9 +19,11 @@
 )]
 //! Tests for advanced_model.rs enumerate_sort_universe API updates
 //!
+
 //! This test suite validates that the enumerate_sort_universe function
 //! correctly documents the API limitations and returns None as expected.
 //!
+
 //! Related: advanced_model.rs:307 — API limitation documented and handled
 
 use verum_common::Maybe;

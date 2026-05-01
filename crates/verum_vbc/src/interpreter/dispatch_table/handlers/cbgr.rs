@@ -21,6 +21,7 @@ use verum_common::cbgr::caps;
 
 /// Check if requested capabilities are compatible with mutability.
 ///
+
 /// Each capability bit has different mutability requirements:
 /// - READ/DELEGATE/NO_ESCAPE: always available
 /// - WRITE/MUTABLE: requires is_mut
@@ -50,6 +51,7 @@ fn check_capabilities_for_mutability(cap_mask: u32, is_mut: bool) -> bool {
 
 /// Ref (0x70) - Create immutable reference (Tier 0 - full validation).
 ///
+
 /// For interpreter mode, an immutable reference stores the absolute register index
 /// and current CBGR generation of the referenced variable. On dereference, the
 /// generation is validated to detect use-after-free.
@@ -88,10 +90,12 @@ pub(in super::super) fn handle_ref_create(state: &mut InterpreterState) -> Inter
 
 /// RefMut (0x71) - Create mutable reference (Tier 0 - full validation).
 ///
+
 /// Stores the absolute register index and CBGR generation so that DerefMut
 /// can validate the reference before writing back to the original variable.
 /// Encodes the mutability bit so epoch_caps/can_write can detect mutable refs.
 ///
+
 /// IMPORTANT: Always creates a CBGR register reference, even for pointer-valued
 /// variables (structs). This ensures DerefMut can update the register value,
 /// not just write to the heap memory the pointer points to.
@@ -127,6 +131,7 @@ pub(in super::super) fn handle_ref_mut(state: &mut InterpreterState) -> Interpre
     // essential for struct assignment: `*ref = new_struct` must update the
     // register containing the struct pointer, not write into the struct's memory.
     //
+
     // Previous behavior passed pointers through directly, which broke
     // full struct assignment through mutable references.
     let abs_index = (state.reg_base() + src.0 as u32) as u32;
@@ -140,6 +145,7 @@ pub(in super::super) fn handle_ref_mut(state: &mut InterpreterState) -> Interpre
 
 /// Deref (0x72) - Dereference with CBGR validation (Tier 0).
 ///
+
 /// Reads the value at the absolute register index stored in the reference.
 /// For Tier 0 references, validates the CBGR generation to detect use-after-free.
 pub(in super::super) fn handle_deref(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -210,6 +216,7 @@ pub(in super::super) fn handle_deref(state: &mut InterpreterState) -> Interprete
                 // The pattern matching (IsVar, GetVariantData) handles variant extraction.
                 // Heap<T> wrappers are handled explicitly by codegen via GetVariantData.
                 //
+
                 // Previous bug: automatically unwrapping single-field variants broke sum types
                 // like IpAddr where V4(Ipv4Addr) and V6(Ipv6Addr) both have field_count=1.
                 // This caused `match *self` to receive the inner type instead of the variant.
@@ -235,6 +242,7 @@ pub(in super::super) fn handle_deref(state: &mut InterpreterState) -> Interprete
 
 /// DerefMut (0x73) - Write through mutable reference (Tier 0).
 ///
+
 /// Writes the value to the absolute register index stored in the reference.
 /// This enables mutation through &mut parameters. Validates CBGR generation
 /// before writing to detect use-after-free.
@@ -302,9 +310,11 @@ pub(in super::super) fn handle_deref_mut(state: &mut InterpreterState) -> Interp
 
 /// ChkRef (0x74) - Check reference validity (Tier 0 CBGR validation).
 ///
+
 /// Validates the CBGR generation and epoch of a reference.
 /// Supports both register-based and heap-based CBGR references.
 ///
+
 /// If the generation has been bumped (variable went out of scope) or
 /// the epoch has advanced (generation wrapped around), this panics
 /// with a use-after-free error.
@@ -367,6 +377,7 @@ pub(in super::super) fn handle_chk_ref(state: &mut InterpreterState) -> Interpre
 
 /// RefChecked (0x75) - Create Tier 1 checked reference.
 ///
+
 /// Tier 1 references are compiler-proven safe and skip generation checks.
 /// Uses CBGR_NO_CHECK_GENERATION sentinel so deref skips validation.
 pub(in super::super) fn handle_ref_checked(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -382,6 +393,7 @@ pub(in super::super) fn handle_ref_checked(state: &mut InterpreterState) -> Inte
 
 /// RefUnsafe (0x76) - Create Tier 2 unsafe reference (no runtime checks).
 ///
+
 /// Tier 2 references require manual safety proof and skip generation checks.
 /// Uses CBGR_NO_CHECK_GENERATION sentinel so deref skips validation.
 pub(in super::super) fn handle_ref_unsafe(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -397,11 +409,13 @@ pub(in super::super) fn handle_ref_unsafe(state: &mut InterpreterState) -> Inter
 
 /// DropRef (0x77) - Drop a value/reference.
 ///
+
 /// If the value has a user-defined Drop implementation, calls the drop method first.
 /// Then bumps the CBGR generation for the register slot, invalidating any
 /// references that captured the old generation. For CBGR heap allocations,
 /// also bumps the generation in the AllocationHeader.
 ///
+
 /// The drop implementation works as follows:
 /// 1. First call: if value has Drop impl, set up drop call, clear register, return Continue
 /// 2. Drop function executes and returns to this instruction
@@ -445,7 +459,7 @@ pub(in super::super) fn handle_drop_ref(state: &mut InterpreterState) -> Interpr
                 if let Some(type_desc) = state.module.types.get(type_idx) {
                     let _type_name = state.module.strings.get(type_desc.name).unwrap_or("?");
                     // DEBUG: eprintln!("[DEBUG DropRef] Dropping type '{}' (id={}, idx={}, drop_fn={:?}, fields={})",
-                    //     type_name, type_id.0, type_idx, type_desc.drop_fn, type_desc.fields.len());
+                    //  type_name, type_id.0, type_idx, type_desc.drop_fn, type_desc.fields.len());
                 }
             }
 
@@ -522,7 +536,7 @@ pub(in super::super) fn handle_drop_ref(state: &mut InterpreterState) -> Interpr
                                         };
                                         let field_val = unsafe { *field_ptr };
                                         // DEBUG: eprintln!("[DEBUG DropRef] Queueing field '{}' for drop: {:?}",
-                                        //     state.module.strings.get(field.name).unwrap_or("?"), field_val);
+                                        //  state.module.strings.get(field.name).unwrap_or("?"), field_val);
                                         state.pending_drops.push(field_val);
                                     }
                                 }
@@ -614,8 +628,10 @@ pub(in super::super) fn handle_drop_ref(state: &mut InterpreterState) -> Interpr
 
 /// CbgrExtended (0x78) - Extended CBGR (Capability-Based Generational References) operations.
 ///
+
 /// Format: `[0x78] [sub_opcode:u8] [operands...]`
 ///
+
 /// Sub-opcode categories:
 /// - 0x00-0x0F: Slice and Interior References
 /// - 0x10-0x1F: Capability Operations
@@ -623,6 +639,7 @@ pub(in super::super) fn handle_drop_ref(state: &mut InterpreterState) -> Interpr
 /// - 0x30-0x3F: Reference Conversion
 /// - 0x40-0x4F: Debug and Introspection
 ///
+
 /// Note: The interpreter provides simplified implementations for these operations.
 /// The AOT compiler generates optimized code with full CBGR semantics.
 pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -639,6 +656,7 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
             // existing DerefMut/Deref handlers for ptr values write
             // and read through it directly.
             //
+
             // Format: dst:reg, list:reg, index:reg
             let dst = read_reg(state)?;
             let list_reg = read_reg(state)?;
@@ -716,6 +734,7 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
             // `slice_from_raw_parts<T>` stdlib intrinsic when the pointer
             // does not point to an ObjectHeader (e.g. Text.as_bytes()).
             //
+
             // Format: dst:reg, ptr:reg, len:reg
             let dst = read_reg(state)?;
             let ptr_reg = read_reg(state)?;
@@ -764,7 +783,7 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
 
             // eprintln!("[DEBUG RefSlice] src={:?}, start={}, len={}", src, start, len);
             // eprintln!("[DEBUG RefSlice] src.is_ptr()={}, src.is_thin_ref()={}, src.is_fat_ref()={}",
-            //          src.is_ptr(), src.is_thin_ref(), src.is_fat_ref());
+            //  src.is_ptr(), src.is_thin_ref(), src.is_fat_ref());
 
             // Get the base pointer from source - could be a pointer, thin ref, or object
             let mut base_ptr = if src.is_ptr() {

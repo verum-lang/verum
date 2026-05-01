@@ -1,5 +1,6 @@
 //! Procedural macros for verum_llvm.
 //!
+
 //! This crate provides derive macros for safe LLVM enum conversions.
 //! Simplified from inkwell_internals for LLVM 21 only (no version conditionals).
 
@@ -17,20 +18,23 @@ use syn::{parse_quote, Arm, Attribute, Ident, PatPath, Path, Variant};
 
 /// Decorate an enum to generate conversions to/from an LLVM C enum type.
 ///
+
 /// The macro generates:
 /// - `impl EnumName { fn new(src: LLVMEnumType) -> Self }`
 /// - `impl From<LLVMEnumType> for EnumName`
 /// - `impl Into<LLVMEnumType> for EnumName`
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// #[llvm_enum(LLVMOpcode)]
 /// enum InstructionOpcode {
-///     Call,
-///     #[llvm_variant(LLVMRet)]
-///     Return,
-///     ...
+///  Call,
+///  #[llvm_variant(LLVMRet)]
+///  Return,
+///  ...
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -146,6 +150,7 @@ impl Parse for LLVMEnumType {
 /// Helper attribute for specifying LLVM variant names.
 /// Used with `#[llvm_enum]` to map Rust enum variants to LLVM enum variants.
 ///
+
 /// This is a no-op macro - the actual processing is done by `#[llvm_enum]`.
 #[proc_macro_attribute]
 pub fn llvm_variant(_args: TokenStream, input: TokenStream) -> TokenStream {

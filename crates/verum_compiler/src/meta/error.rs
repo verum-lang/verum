@@ -1,9 +1,12 @@
 //! Meta execution errors
 //!
+
 //! This module provides the error types used during compile-time meta function execution.
 //!
+
 //! ## Error Categories (46 total error codes)
 //!
+
 //! - **M0XX - Core meta errors** (8 codes): Basic evaluation and stage failures
 //! - **M1XX - Builtin errors** (5 codes): Builtin function call failures
 //! - **M2XX - Context errors** (5 codes): Missing or invalid context
@@ -12,6 +15,7 @@
 //! - **M5XX - Type-level errors** (6 codes): Type computation failures
 //! - **M6XX - Const evaluation errors** (7 codes): Constant folding failures
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -25,6 +29,7 @@ use super::builtins::RequiredContext;
 
 /// Meta execution error
 ///
+
 /// Error codes follow the M-prefix pattern:
 /// - M0XX: Core meta errors (function not found, argument mismatch, type errors)
 /// - M1XX: Sandbox violations (forbidden I/O, iteration limits, recursion depth)
@@ -234,6 +239,7 @@ pub enum MetaError {
 impl MetaError {
     /// Returns the error code for this error type
     ///
+
     /// Error code pattern (M-prefix):
     /// - M0XX: Core meta errors (8 codes)
     /// - M1XX: Builtin errors (5 codes)
@@ -319,6 +325,7 @@ impl MetaError {
     /// Returns the equivalent E-code for this meta error, for compatibility
     /// with the standard compiler error code namespace.
     ///
+
     /// Meta errors have their own M-prefixed codes, but some consumers expect
     /// the standard E-prefixed codes. This mapping provides the equivalent:
     /// - M003 (TypeMismatch) → E101
@@ -630,6 +637,7 @@ impl std::error::Error for MetaError {}
 impl MetaError {
     /// Convert a HygieneViolation to a MetaError
     ///
+
     /// This method provides explicit conversion from hygiene violations to
     /// meta errors without implementing From (which can cause type inference issues).
     pub fn from_hygiene_violation(v: crate::hygiene::HygieneViolation) -> Self {

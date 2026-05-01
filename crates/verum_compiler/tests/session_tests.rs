@@ -14,6 +14,7 @@
 )]
 // Unit tests for session.rs
 //
+
 // Migrated from src/session.rs to comply with CLAUDE.md test organization.
 
 use std::path::PathBuf;

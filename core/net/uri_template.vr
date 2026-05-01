@@ -5,21 +5,25 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // RFC 6570 — the parameterised-URL grammar every hypermedia API
 // speaks: OpenAPI `paths`, HAL `_links`, GitHub API, AsyncAPI
 // channels, Kubernetes discovery. Given a template and a variable
 // map, this module emits the concrete URI.
 //
+
 // # Levels
 //
-//   Level 1 — simple string substitution `{var}`
-//   Level 2 — reserved `{+var}` and fragment `{#var}` operators
-//   Level 3 — multiple variables + named operators:
-//              `{.var}` label, `{/var}` path segment,
-//              `{;var}` path-style, `{?var}` form-style query,
-//              `{&var}` continued query
-//   Level 4 — prefix `{var:N}` and explode `{var*}` modifiers
+
+//  Level 1 — simple string substitution `{var}`
+//  Level 2 — reserved `{+var}` and fragment `{#var}` operators
+//  Level 3 — multiple variables + named operators:
+//  `{.var}` label, `{/var}` path segment,
+//  `{;var}` path-style, `{?var}` form-style query,
+//  `{&var}` continued query
+//  Level 4 — prefix `{var:N}` and explode `{var*}` modifiers
 //
+
 // This module covers levels 1-3 in full plus the level-4 prefix
 // (`{var:N}`) modifier which is the only level-4 feature that sees
 // real production use (GitHub and OpenAPI both use it for IDs).
@@ -27,8 +31,10 @@
 // on parse and applied to list values; map explode lands in a
 // follow-up when a concrete caller demonstrates the need.
 //
+
 // # API
 //
+
 // ```
 // let tpl = UriTemplate.parse(&Text.from("/users/{user}/repos{?type,sort}"))?;
 // let mut vars: Map<Text, TemplateValue> = Map.new();
@@ -38,6 +44,7 @@
 // // "/users/alice/repos?type=public"
 // ```
 //
+
 // =============================================================================
 
 module core.net.uri_template;

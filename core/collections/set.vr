@@ -5,15 +5,18 @@
 // Dependencies: core, collections/map
 // =============================================================================
 //
+
 // Set<T> is implemented as a thin wrapper around Map<T, ()>, providing
 // set-specific operations while reusing the Robin Hood hashing from Map.
 //
+
 // Performance characteristics:
 // - Insert: O(1) amortized
 // - Contains: O(1) average
 // - Remove: O(1) average
 // - Iteration: O(n)
 //
+
 // =============================================================================
 
 module core.collections.set;
@@ -37,6 +40,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Create a set from an array literal.
     ///
+
     /// # Example
     /// ```verum
     /// let s = Set.from([1, 2, 3]);
@@ -53,6 +57,7 @@ implement<T: Hash + Eq> Set<T> {
 
     // Create with pre-allocated capacity.
     //
+
     // Panics on allocation failure. For a fallible counterpart see
     // `try_with_capacity`.
     public fn with_capacity(capacity: Int) -> Set<T> {
@@ -61,6 +66,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Fallible counterpart to `with_capacity`.
     ///
+
     /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request.
     public fn try_with_capacity(capacity: Int) -> Result<Set<T>, AllocError> {
@@ -93,6 +99,7 @@ implement<T: Hash + Eq> Set<T> {
     // Insert value into set.
     // Returns true if value was not already present.
     //
+
     // Panics on allocation failure (when growth is required). For a
     // fallible counterpart see `try_insert`.
     public fn insert(&mut self, value: T) -> Bool {
@@ -101,6 +108,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Fallible counterpart to `insert`.
     ///
+
     /// Returns `Err(AllocError.OutOfMemory)` if the underlying
     /// table needs to grow and the allocator cannot satisfy the
     /// request. On Ok the inner `Bool` is `true` iff the value was
@@ -133,6 +141,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Reserves capacity for at least `additional` more elements.
     ///
+
     /// Panics on allocation failure. For a fallible counterpart see
     /// `try_reserve`.
     public fn reserve(&mut self, additional: Int) {
@@ -141,6 +150,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Fallible counterpart to `reserve`.
     ///
+
     /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. The set is
     /// unchanged on failure.
@@ -198,6 +208,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Convert set to an owned List. The order of elements is unspecified.
     ///
+
     /// # Example
     /// ```verum
     /// let s = Set.from([1, 2, 3]);
@@ -218,6 +229,7 @@ implement<T: Hash + Eq> Set<T> {
     /// Consume the set and return its elements as a List.
     /// More efficient than to_list() since it avoids cloning.
     ///
+
     /// # Example
     /// ```verum
     /// let s = Set.from([1, 2, 3]);
@@ -397,10 +409,13 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Removes all elements matching the predicate and returns them as a list.
     ///
+
     /// Similar to `retain` but returns the removed elements.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut s = Set.from([1, 2, 3, 4, 5]);
     /// let evens = s.extract_if(|v| *v % 2 == 0);
@@ -468,6 +483,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Returns `true` if `self` is a strict (proper) subset of `other`.
     ///
+
     /// A strict subset means all elements of `self` are in `other`,
     /// and `other` has at least one element not in `self`.
     public fn is_strict_subset(&self, other: &Set<T>) -> Bool {
@@ -476,6 +492,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Returns `true` if `self` is a strict (proper) superset of `other`.
     ///
+
     /// A strict superset means all elements of `other` are in `self`,
     /// and `self` has at least one element not in `other`.
     public fn is_strict_superset(&self, other: &Set<T>) -> Bool {
@@ -484,8 +501,10 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Remove and return an arbitrary element from the set.
     ///
+
     /// Returns `None` if the set is empty.
     ///
+
     /// # Example
     /// ```verum
     /// let mut s = Set.from([1, 2, 3]);
@@ -506,6 +525,7 @@ implement<T: Hash + Eq> Set<T> {
 
     /// Update the set with all elements from another set.
     ///
+
     /// This is an alias for `extend_from_set`.
     public fn update(&mut self, other: &Set<T>)
     where T: Clone

@@ -28,7 +28,7 @@ public fn from_libversion_number(n: Int64) -> SqliteVersion {
     new(major, minor, patch)
 }
 
-// Emit integer as Text.  UInt64 magnitude — Int.MIN-safe.
+// Emit integer as Text. UInt64 magnitude — Int.MIN-safe.
 fn int_to_text(n: Int) -> Text {
     if n == 0 { return "0".clone(); }
     let mut mag: UInt64 = if n < 0 {

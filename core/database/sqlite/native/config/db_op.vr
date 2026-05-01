@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_db_config(db, op, …).
 //
+
 // These are per-connection; may be called before or after
 // sqlite3_initialize but always before any sqlite3_step on the db.
 // =============================================================================

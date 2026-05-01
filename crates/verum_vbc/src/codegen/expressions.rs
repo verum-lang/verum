@@ -1,18 +1,24 @@
 //! Expression compilation for VBC codegen.
 //!
+
 //! Transforms Verum AST expressions into VBC instructions.
 //!
+
 //! # CBGR Tier-Aware Reference Compilation
 //!
+
 //! Reference operations are compiled based on the tier determined by
 //! escape analysis:
 //!
+
 //! - **Tier 0 (Managed)**: Emit `Ref`/`Deref` with `ChkRef` validation
 //! - **Tier 1 (Checked)**: Emit `RefChecked` - direct access, no checks
 //! - **Tier 2 (Unsafe)**: Emit `RefUnsafe` - unchecked access
 //!
+
 //! # Well-Known Type (WKT) Usage
 //!
+
 //! This module uses the centralized `WellKnownType` enum (from `verum_common`)
 //! to identify types that need special codegen treatment. This is intentional:
 //! the bytecode compiler must emit different instruction sequences for wrapper
@@ -20,6 +26,7 @@
 //! concurrency primitives (Channel creation). All type identity checks go
 //! through the single `WKT` enum -- no raw string comparisons.
 //!
+
 //! Protocol-related dispatch uses `WellKnownProtocol` and `method_to_protocol`
 //! from the same central registry.
 
@@ -40,10 +47,12 @@ use verum_ast::{
 
 /// Resolves numeric type aliases to their base type.
 ///
+
 /// Verum uses semantic type names (Int8, Int16, Int32, UInt64, etc.) as primary types,
 /// with Rust-style compatibility aliases (i8, i16, i32, u64, etc.) for FFI.
 /// All sized integers resolve to `Int` and floats resolve to `Float` for method lookup.
 ///
+
 /// This function supports both naming conventions:
 /// - Semantic names: Int8, Int16, Int32, Int64, Int128, ISize, UInt8, ..., USize
 /// - Compatibility aliases: i8, i16, i32, i64, i128, isize, u8, ..., usize
@@ -240,6 +249,7 @@ fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
 
 /// Resolves a well-known stdlib constant name to its integer value.
 ///
+
 /// These values match the definitions in core/ .vr files.
 fn resolve_stdlib_constant_value(name: &str) -> i64 {
     match name {
@@ -286,6 +296,7 @@ fn resolve_stdlib_constant_value(name: &str) -> i64 {
 /// `BitwiseOp::Ushr` over `BitwiseOp::Shr` so the interpreter's shift
 /// handler doesn't sign-extend a high bit that was intentionally unsigned.
 ///
+
 /// The canonical set covers Verum's semantic primitive names, the
 /// Rust-style aliases, and `Byte` (which is u8). A generic type like
 /// `UInt32` that appears as a base in `UInt32<...>` (rare) is still
@@ -303,6 +314,7 @@ fn is_unsigned_int_type_name(name: &str) -> bool {
 
 /// Check if a name is a known type name (primitive or semantic numeric type).
 ///
+
 /// This is used to distinguish type names from variable names when compiling paths.
 fn is_type_name(name: &str) -> bool {
     type_names::is_primitive_value_type(name)
@@ -326,6 +338,7 @@ fn is_primitive_type(name: &str) -> bool {
 
 /// Information about an array element reference pattern (`&arr[idx]` or `&mut arr[idx]`).
 ///
+
 /// This is detected during FFI call argument analysis to enable proper array marshalling.
 /// VBC arrays store NaN-boxed Values, but FFI expects raw C data, so we need to marshal.
 #[derive(Debug, Clone)]
@@ -336,6 +349,7 @@ struct FfiArrayRefInfo {
 
 /// Tracks a function callback argument for FFI calls.
 ///
+
 /// When a Verum function is passed to an FFI call that expects a function pointer,
 /// we need to create a trampoline (C-callable function) that invokes the Verum function.
 #[derive(Debug, Clone)]
@@ -363,13 +377,14 @@ impl VbcCodegen {
     /// Emit a variant-construction instruction, choosing between the
     /// typed (`MakeVariantTyped`) and legacy (`MakeVariant`) forms
     /// based on whether the parent sum-type is registered in
-    /// `type_name_to_id`.  Single source of truth for variant-emit
+    /// `type_name_to_id`. Single source of truth for variant-emit
     /// dispatch across the codegen — every other site that wants to
     /// produce a variant routes through here so the typed-emission
     /// rule (carry concrete TypeId in the heap header so the runtime
     /// can disambiguate variant tags across sum types) lands
     /// uniformly.
     ///
+
     /// `parent_type_name` is the `Option<&str>` name of the sum type
     /// (e.g. "ShellError", "Result", "Maybe"); when it resolves to a
     /// registered TypeId, the typed form is emitted, otherwise the
@@ -386,12 +401,12 @@ impl VbcCodegen {
         // the resolved TypeId ALSO has a TypeDescriptor that will be
         // present in the final VBC module — the runtime validator
         // (`validate_make_variant_typed`) rejects with `LayoutMismatch
-        // { reason: "unknown type_id" }` otherwise.  `type_name_to_id`
+        // { reason: "unknown type_id" }` otherwise. `type_name_to_id`
         // can carry pre-allocated IDs that never get a descriptor
         // (Pass 1.5 allocates speculatively; descriptor population
         // happens in `compile_item`/`collect_declarations` and may be
         // skipped under `[lenient]` for unresolved cross-module
-        // references).  Cross-check `self.types` for an actual
+        // references). Cross-check `self.types` for an actual
         // descriptor with this id BEFORE committing to the typed form;
         // fall back to legacy `MakeVariant` (synthetic `0x8000+tag`
         // sentinel id, no validation) when no descriptor backs the id.
@@ -405,10 +420,10 @@ impl VbcCodegen {
         let typed_ok = parent_type_id.and_then(|tid| {
             let desc = self.types.iter().find(|d| d.id == tid)?;
             // **MakeVariantTyped survival check** (#168 / TypeId(148)
-            // regression close).  The codegen-side `self.types` snapshot
+            // regression close). The codegen-side `self.types` snapshot
             // can briefly hold a placeholder descriptor (id reserved
             // via Pass 1.5 speculative allocation) whose `variants`
-            // list is empty pending compile_item population.  Emitting
+            // list is empty pending compile_item population. Emitting
             // `MakeVariantTyped { type_id: <placeholder>, tag, ... }`
             // produces bytecode that the runtime's
             // `validate_make_variant_typed` then rejects with
@@ -416,26 +431,28 @@ impl VbcCodegen {
             // the FINAL module (which the runtime sees) carries only
             // fully-populated descriptors.
             //
+
             // Three-step gate makes the typed form survive to runtime:
-            //   1. Descriptor with this id exists in `self.types`.
-            //   2. The descriptor's variants list is non-empty —
-            //      placeholder descriptors slip through the previous
-            //      `find()` because their id is set but variants
-            //      haven't landed yet.  This guard catches them and
-            //      defers the typed-form decision until a real
-            //      descriptor lands.
-            //   3. The specific (tag, field_count) pair matches one of
-            //      the variants in the descriptor.
+            //  1. Descriptor with this id exists in `self.types`.
+            //  2. The descriptor's variants list is non-empty —
+            //  placeholder descriptors slip through the previous
+            //  `find()` because their id is set but variants
+            //  haven't landed yet. This guard catches them and
+            //  defers the typed-form decision until a real
+            //  descriptor lands.
+            //  3. The specific (tag, field_count) pair matches one of
+            //  the variants in the descriptor.
             //
+
             // When any step fails, we emit the legacy `MakeVariant`
             // form (synthetic `0x8000+tag` sentinel id, no runtime
             // validation) — the runtime's
             // `format_variant_for_print_depth` falls back to its
-            // O(N_types) tag scan, slower but correct.  The typed
+            // O(N_types) tag scan, slower but correct. The typed
             // form's win is the constructor-name disambiguation when
             // distinct sum types share a tag; emitting it
             // half-populated would TRADE that win for correctness
-            // bugs.  Correctness first.
+            // bugs. Correctness first.
             if desc.variants.is_empty() {
                 return None;
             }
@@ -460,16 +477,16 @@ impl VbcCodegen {
     }
 
     /// Best-effort parent-type extraction from a path / dotted-name
-    /// like "ShellError.SpawnFailed" or "Result::Err".  Returns the
+    /// like "ShellError.SpawnFailed" or "Result::Err". Returns the
     /// LEFT side of the rightmost separator, when that side is a
-    /// registered TypeId in `type_name_to_id`.  This is the
+    /// registered TypeId in `type_name_to_id`. This is the
     /// architectural complement to `emit_make_variant_for_function`:
     /// when the variant's FunctionInfo lacks `parent_type_name`
     /// (common for cross-module imported sum types whose
     /// constructors get registered through different paths), the
     /// parent is right there in the user's syntactic path
     /// (`Type . Variant`) and we can recover it without any cross-
-    /// table consultation.  Falls through to None when the path is
+    /// table consultation. Falls through to None when the path is
     /// a single segment (bare variant name with no qualifier) — the
     /// caller's other lookup avenues then take over.
     pub(super) fn parent_type_from_qualified_name(&self, name: &str) -> Option<String> {
@@ -517,6 +534,7 @@ impl VbcCodegen {
 
     /// Detects if an expression is an array element reference pattern (`&arr[idx]` or `&mut arr[idx]`).
     ///
+
     /// This pattern needs special handling for FFI calls because VBC arrays store NaN-boxed Values,
     /// but FFI expects raw C data. When detected, we marshal the array to a temporary buffer.
     fn detect_array_element_ref(arg: &Expr) -> Option<FfiArrayRefInfo> {
@@ -542,6 +560,7 @@ impl VbcCodegen {
 
     /// Detects if an expression is a function reference that should become a callback.
     ///
+
     /// When passing a function to an FFI call that expects a function pointer,
     /// we need to create a trampoline. This method detects function references
     /// (simple path to a function) and returns the callback info.
@@ -569,6 +588,7 @@ impl VbcCodegen {
 
     /// Compiles an expression and returns the result register.
     ///
+
     /// Returns `None` for expressions that don't produce a value (e.g., return).
     pub fn compile_expr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
         self.ctx.stats.expressions_compiled += 1;
@@ -1076,6 +1096,7 @@ impl VbcCodegen {
 
     /// Compiles a path expression (variable reference or qualified path).
     ///
+
     /// Handles:
     /// - Simple identifiers: `x` → lookup in scope
     /// - Module paths: `module::item` → resolve module and item
@@ -1167,8 +1188,8 @@ impl VbcCodegen {
                         }
                         // Check if this is a constant with a known value.
                         // Two formats:
-                        //   "__const_val_N"  — user-defined const with extracted literal value N
-                        //   "__const_NAME"   — well-known stdlib constant resolved by name
+                        //  "__const_val_N" — user-defined const with extracted literal value N
+                        //  "__const_NAME" — well-known stdlib constant resolved by name
                         if let Some(ref iname) = func_info.intrinsic_name {
                             if let Some(val_str) = iname.strip_prefix("__const_val_") {
                                 // Dynamic constant with encoded value
@@ -1784,6 +1805,7 @@ impl VbcCodegen {
             BinOp::Shr => {
                 // Root fix for Issue #2:
                 //
+
                 // `>>` was hard-wired to `BitwiseOp::Shr`, which the interpreter
                 // dispatches to `handle_shr` — an *arithmetic* (sign-preserving)
                 // 64-bit shift. For any unsigned type whose representation has
@@ -1793,6 +1815,7 @@ impl VbcCodegen {
                 // propagate sign-extended garbage. This shows up as a silent
                 // correctness bug (CRC32 test vectors diverge from zlib).
                 //
+
                 // The architecturally-correct behaviour is: `>>` on an unsigned
                 // operand is the C / Rust `>>` on the unsigned type — i.e. a
                 // logical shift. We detect the unsigned case from the left
@@ -1960,6 +1983,7 @@ impl VbcCodegen {
 
     /// Compiles logical implication: a -> b ≡ !a || b
     ///
+
     /// Implication is used in formal proofs and verification.
     /// It short-circuits: if !a is true, b is not evaluated.
     fn compile_implication(
@@ -2642,6 +2666,7 @@ impl VbcCodegen {
     fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
         // `&arr[range]` / `&mut arr[range]` — slice-borrow.
         //
+
         // Without this special case the generic path falls through to
         // `compile_index` which emits `GetE { arr, idx: range_value }`,
         // and the runtime then interprets the heap pointer to the Range
@@ -2808,6 +2833,7 @@ impl VbcCodegen {
                 // produces a logical NOT via `is_truthy`, never a bitwise
                 // complement.
                 //
+
                 // Method-dispatch path (CallM("not", ...)) is reserved for
                 // user types that explicitly `implement Not for MyType`.
                 // Going through method dispatch for Bool is unsound because
@@ -2815,7 +2841,7 @@ impl VbcCodegen {
                 // under the same bare `not#1` key and the runtime picks
                 // whichever loaded first — surfacing as `!some_bool_call()`
                 // returning `-2` when `mount base.{...}` pulls in
-                // primitives.vr's `Int.not` after `Bool.not`.  Live failure
+                // primitives.vr's `Int.not` after `Bool.not`. Live failure
                 // mode: `if !is_valid_page_size(4096)` taking the err branch
                 // for a perfectly-valid 4 KiB page.
                 let type_name = self.extract_expr_type_name(inner);
@@ -2862,10 +2888,12 @@ impl VbcCodegen {
 
             // Reference operations - tier-aware instruction emission
             //
+
             // The tier is determined by:
             // 1. The AST operator (RefChecked → Tier1, RefUnsafe → Tier2)
             // 2. Escape analysis results in tier_context (overrides AST)
             //
+
             // Tier 0: Ref + ChkRef (runtime validated)
             // Tier 1: RefChecked (compiler proven safe, 0ns)
             // Tier 2: RefUnsafe (manual proof, 0ns)
@@ -2925,19 +2953,21 @@ impl VbcCodegen {
                 });
                 // Typed-primitive deref dispatch (#26 codegen tail).
                 //
+
                 // The generic `Deref` instruction reads `sizeof(Value)=8`
                 // bytes regardless of the pointee size — for FFI-returned
                 // references to sub-Value-sized C primitives (`Int32`
                 // errno slot, `UInt8` byte field, `Bool` flag, …) it
                 // leaks 1–7 bytes of adjacent memory into the high half
-                // of the loaded i64.  Pre-fix: `errno()` on macOS
+                // of the loaded i64. Pre-fix: `errno()` on macOS
                 // returned `0x7E04ED1B 30000002` (high 32 = TLS
-                // bookkeeping leak, low 32 = real errno).  Post-fix:
+                // bookkeeping leak, low 32 = real errno). Post-fix:
                 // emit `FfiExtended { DerefRawSigned, size=N }` for
                 // signed C primitives or `DerefRaw, size=N` for
                 // unsigned/byte — read exactly N bytes and sign- or
                 // zero-extend per the pointee's signedness.
                 //
+
                 // Heap<T>/Shared<T> derefs always carry full
                 // Value-sized payloads, so they continue through the
                 // existing `Deref` path below.
@@ -2965,6 +2995,7 @@ impl VbcCodegen {
                     // checking cbgr_deref_source) rather than a register-based CBGR
                     // ref whose source register may be recycled.
                     //
+
                     // For non-CBGR receivers (user-defined Heap structs), Deref
                     // falls through to identity deref which matches Mov semantics.
                     self.ctx.emit(Instruction::Deref { dst: dest, ref_reg: inner_reg });
@@ -3075,27 +3106,29 @@ impl VbcCodegen {
 
         // **Module-qualified-first lookup** for unqualified bare-name calls.
         //
+
         // Multiple stdlib modules register the same function name with the
         // same arity but different parameter types — `is_valid_page_size#1`
         // exists in `l1_pager/pager.vr` (taking `Int`),
         // `journal_header_api/header.vr` (taking `&JournalHeader`),
         // `wal_frame_layout/constants.vr` (`Int`), and
-        // `l1_pager/journal/writer.vr` (`Int`).  The function table is
+        // `l1_pager/journal/writer.vr` (`Int`). The function table is
         // keyed by `(name, arity)` only — parameter type doesn't
         // disambiguate — so whichever module loaded first wins the bare
         // key under `prefer_existing` (stdlib loading), and a call
         // from `pager.vr` silently dispatches to a different module's
-        // same-name function.  The mismatch surfaces only when the user
+        // same-name function. The mismatch surfaces only when the user
         // adds `mount base.{Result, Ok, Err}` (transitively pulls in the
         // conflicting modules).
         //
+
         // Fix: if we know the calling source module, prefer the
-        // module-qualified form FIRST.  Each function is registered
+        // module-qualified form FIRST. Each function is registered
         // under both bare and `<module>.<name>` qualified forms (see
         // `register_function` at mod.rs:4855-4874), so the qualified
         // lookup reliably finds the local-module version when it
-        // exists.  Falls back to the bare name for cross-module
-        // imports.  Architecturally honest semantics: a bare
+        // exists. Falls back to the bare name for cross-module
+        // imports. Architecturally honest semantics: a bare
         // unqualified call from inside module M means "the M-local
         // function of that name, if any; otherwise the imported one".
         let module_qualified_lookup: Option<(String, FunctionInfo)> = {
@@ -3127,6 +3160,7 @@ impl VbcCodegen {
                 // try just the simple function name "init_main_thread_tls". Functions are often
                 // registered with their simple names even when called with qualified paths.
                 //
+
                 // SAFETY: skip this fallback when the path is rooted at a
                 // module-path keyword (`super`, `cog`, `.`). Those paths
                 // are *explicitly* cross-module, so if qualified lookup
@@ -3213,6 +3247,7 @@ impl VbcCodegen {
 
         // Check if this is a variant constructor — emit MakeVariant + SetVariantData.
         //
+
         // Disambiguation: if the resolved `func_info` is a variant whose
         // parent type does not match the surrounding return-type/scrutinee
         // context (e.g., we're in `fn new_v4() -> SocketAddr` but the
@@ -3251,7 +3286,7 @@ impl VbcCodegen {
             };
             let result = self.ctx.alloc_temp();
             // Route through the unified emit-variant helper so the
-            // typed-vs-legacy decision lives in one place.  See
+            // typed-vs-legacy decision lives in one place. See
             // `emit_make_variant`'s docstring for the SHELL-5a-related
             // rationale (sum types sharing variant tags need the
             // concrete TypeId in the heap header to disambiguate).
@@ -3325,10 +3360,12 @@ impl VbcCodegen {
         // This prevents register recycling from causing arguments to overwrite each other
         // when nested function calls are present.
         //
+
         // For FFI calls, we need special handling for:
         // 1. &mut variable patterns - track source registers for write-back
         // 2. &arr[idx] patterns - marshal arrays to temporary C buffers
         //
+
         // VBC arrays store NaN-boxed Values (8 bytes each), but FFI expects raw C data.
         // When &arr[0] is passed to FFI, we need to:
         // - Marshal the array contents to a contiguous buffer of raw C types
@@ -3493,6 +3530,7 @@ impl VbcCodegen {
 
         // Check if this is an FFI function.
         //
+
         // User-defined function with the *same basename and matching arity* wins
         // over the FFI symbol — otherwise `fn read() -> Int { 42 }` silently
         // dispatches to the libc `read(fd, buf, nbyte)` syscall and blows up at
@@ -3507,7 +3545,7 @@ impl VbcCodegen {
             && let Some(ffi_symbol_id) = self.get_ffi_symbol_id(&func_name) {
             // Emit FfiExtended.CallFfiC instruction
             // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
-            //         mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
+            //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let mut operands = Vec::<u8>::new();
 
             // Symbol index (4 bytes, little-endian)
@@ -3624,18 +3662,23 @@ impl VbcCodegen {
 
     /// Compiles an array element reference (`&arr[idx]` or `&mut arr[idx]`) for FFI calls.
     ///
+
     /// VBC arrays store NaN-boxed Values (8 bytes each with tag bits), but FFI expects
     /// raw C data (e.g., 4-byte i32, 8-byte f64). This method:
     ///
+
     /// 1. Gets the array from its variable
     /// 2. Emits FfiExtended.ArrayToC instruction to marshal the array to a temporary buffer
     /// 3. Returns a pointer to the marshalled data at the specified index
     ///
+
     /// The temporary buffer persists for the duration of the FFI call.
     /// For mutable references, the data is written back to the array after the call.
     ///
+
     /// # Arguments
     ///
+
     /// * `arg` - The argument expression (`&arr[idx]` or `&mut arr[idx]`)
     /// * `func_name` - The FFI function name (for error messages)
     /// * `arg_idx` - The argument index in the FFI call
@@ -3713,11 +3756,14 @@ impl VbcCodegen {
 
     /// Compiles a function callback for FFI calls.
     ///
+
     /// When a Verum function is passed to an FFI call that expects a function pointer,
     /// we emit a CreateCallback instruction to create a C-callable trampoline.
     ///
+
     /// # Arguments
     ///
+
     /// * `info` - The callback info containing function ID and signature
     fn compile_ffi_callback(&mut self, info: &FfiCallbackInfo) -> CodegenResult<Reg> {
         // Allocate result register for the callback pointer
@@ -3743,6 +3789,7 @@ impl VbcCodegen {
 
     /// Gets the element type tag for an FFI array parameter.
     ///
+
     /// Returns a type tag byte for the ArrayToC instruction:
     /// - 0x01: i8
     /// - 0x02: i16
@@ -3758,6 +3805,7 @@ impl VbcCodegen {
         // - ffi_process_f64 -> f64 elements
         // - etc.
         //
+
         // For industrial quality, this should also look up the FFI symbol signature
         // and determine the precise element type from the parameter type annotation.
 
@@ -4659,6 +4707,7 @@ impl VbcCodegen {
 
     /// Compiles a variant constructor call (e.g., Some(v), Ok(v), None, Err(e)).
     ///
+
     /// This is called when a function is not found but the name looks like
     /// a variant constructor (starts with uppercase). We emit a MakeVariant
     /// instruction that creates the variant value.
@@ -4731,6 +4780,7 @@ impl VbcCodegen {
         // Look up the variant tag from the registered FunctionInfo.
         // Tags are assigned as declaration-order indices when the type is registered.
         //
+
         // Disambiguation rule: when the simple lookup hits a variant whose
         // parent type does NOT match the surrounding return-type / scrutinee
         // context, prefer the qualified-suffix lookup (which uses
@@ -4828,6 +4878,7 @@ impl VbcCodegen {
         // the same static method — type arguments are erased at the VBC layer
         // (every value is one NaN-boxed slot).
         //
+
         // For the bare-Path form, only treat the segment as a type name when it
         // is *not* a local variable. Otherwise `nums.map(closure)` would lift
         // `nums` (a local List value) into a static lookup of `nums.map`, and
@@ -4942,7 +4993,7 @@ impl VbcCodegen {
         }
 
         // Raw-pointer `is_null()` interception happens AFTER the receiver
-        // is compiled (we need access to `raw_pointer_regs`).  The check
+        // is compiled (we need access to `raw_pointer_regs`). The check
         // is now placed at the end of the receiver-compilation block; see
         // the matching block immediately after `let receiver_reg = ...`.
 
@@ -5148,6 +5199,7 @@ impl VbcCodegen {
             // Try just the function name (it may have been imported).
             // Keep param_count check to avoid false positives with unqualified names.
             //
+
             // SAFETY: skip this fallback for rooted module paths (`super`,
             // `cog`, `.`). Those paths explicitly target a cross-module
             // symbol; falling back to the unqualified name silently
@@ -5157,6 +5209,7 @@ impl VbcCodegen {
             // `core/sys/common.vr::ctx_get` into infinite self-recursion.
             // Matches the guard in `compile_call`.
             //
+
             // Inspect the *raw* (pre-resolution) flatten via
             // `path_was_rooted_module_path` — `try_flatten_module_path_resolved`
             // strips the rooted prefix when it can translate it to an
@@ -5336,6 +5389,7 @@ impl VbcCodegen {
                     // because static method calls like `Time.now()` should resolve to Time.now,
                     // not treat `Time` as a value.
                     //
+
                     // Variants are a special case: `Maybe.Some(42)`, `Result.Ok(x)`, etc.
                     // are registered under the qualified name too (variant_tag set), but they
                     // don't have an ordinary bytecode body — compile_static_method_call would
@@ -5513,13 +5567,13 @@ impl VbcCodegen {
         // `… as *const T`, `… as *mut T`, propagated through
         // `compile_pattern_bind`'s Mov), route a small set of bare method
         // names directly to the matching stdlib intrinsic instead of
-        // emitting CallM.  Without this, CallM keyed by the bare name
+        // emitting CallM. Without this, CallM keyed by the bare name
         // `is_null` resolves to the user-defined `FatRef.is_null` function
         // (registered when `core/mem/fat_ref.vr` was processed) — that
         // method reads `self.generation` at offset 0, but a raw pointer
         // has no generation field, so its u64 address is reinterpreted
         // as a generation counter and the runtime panics with a null-
-        // pointer dereference at pc=0 inside `FatRef.is_null`.  Same
+        // pointer dereference at pc=0 inside `FatRef.is_null`. Same
         // class as the `Heap.new` / `Shared.new` interception above: a
         // built-in behaviour must always win over a stdlib `.method` of
         // the same bare name when the receiver kind statically
@@ -5881,6 +5935,7 @@ impl VbcCodegen {
         // This handles cases like d.saturating_add(other) where d is a Duration variable:
         // the intrinsic mapping for "Duration::saturating_add" applies to instance calls too.
         //
+
         // IMPORTANT: Only apply this for receivers that could actually be Duration/Instant.
         // Primitive numeric types (Byte, Int32, UInt64, Int, Float, etc.) must NOT match
         // Duration/Instant intrinsics, even if the method name happens to overlap
@@ -6477,6 +6532,7 @@ impl VbcCodegen {
 
     /// Determines the method name prefix based on the return type of a method call.
     ///
+
     /// Infer the return type of a method chain expression by walking up the chain.
     /// For `Num.new(1).add(2)`, determines that `.add(2)` returns "Num" by looking up
     /// the return type of `Num.new` → "Num", then `Num.add` → "Num".
@@ -6527,6 +6583,7 @@ impl VbcCodegen {
     ) -> String {
         // Known methods that return UInt64.
         //
+
         // Root fix for Issue #6: do NOT include generic collection-shape
         // methods (`len` / `capacity` / `count` / `size`) in this set —
         // they exist on multiple types (List, Text, Slice, Map, Set, …)
@@ -6536,6 +6593,7 @@ impl VbcCodegen {
         // (e.g. `.min`, which `uint64` never implemented) the caller
         // hit a runtime `method 'uint64$min' not found on value` panic.
         //
+
         // Narrative fix + stdlib-philosophy fix in one: keep only
         // genuinely type-specific names whose return shape is `UInt64`
         // across the stdlib by construction (Duration / Instant nanos
@@ -6544,6 +6602,7 @@ impl VbcCodegen {
         // further down, which consults the actual declared return type
         // rather than pattern-matching on a name.
         //
+
         // Per crates/verum_types/src/CLAUDE.md — "NEVER hardcode
         // stdlib/core type knowledge in the compiler". This list
         // shrinks to the minimum that's legitimately type-specific.
@@ -6705,6 +6764,7 @@ impl VbcCodegen {
 
     /// Compiles a static method call (Type::method syntax).
     ///
+
     /// This handles cases like `List::new()` or `List.new()` where the receiver
     /// is a type name, not a value.
     fn compile_static_method_call(
@@ -6813,10 +6873,12 @@ impl VbcCodegen {
 
     /// Compiles a method call on a type parameter (generic).
     ///
+
     /// For calls like `T.default()` where T is a generic type parameter,
     /// we emit a virtual dispatch call that will be resolved during
     /// monomorphization when T is replaced with a concrete type.
     ///
+
     /// Uses "dyn:" prefix to trigger protocol dispatch at the LLVM level.
     /// The LLVM dyn dispatch handler reads type_id from the receiver's object
     /// header and builds a switch over concrete protocol implementations.
@@ -6908,15 +6970,18 @@ impl VbcCodegen {
 
     /// Compiles an if expression with full support for if-let chains.
     ///
+
     /// Handles all condition chain patterns following RFC 2497 semantics:
     /// - `if expr { ... }`
     /// - `if let pattern = expr { ... }`
     /// - `if let A = x && let B = y { ... }`
     /// - `if let A = x && expr && let B = y { ... }`
     ///
+
     /// All let bindings in the chain are available in subsequent conditions
     /// and in the then branch. The entire chain uses AND semantics.
     ///
+
     /// If-let chains: `if let Some(x) = a && let Some(y) = b { ... }` compiles as
     /// a sequence of pattern tests with short-circuit AND semantics. All let bindings
     /// are scoped to the then branch.
@@ -8612,23 +8677,27 @@ impl VbcCodegen {
                 // Total patterns return Bool (test-only), partial patterns return Maybe<T>
                 // (extract value on match). Supports parameterized patterns and & combination.
                 //
+
                 // Active patterns are functions that take a value and return:
                 // - Bool for total patterns (test-only, no binding)
                 // - Maybe<T> for partial patterns (extract and bind on match)
                 //
+
                 // Codegen strategy:
                 // 1. Look up the pattern function by name
                 // 2. Call it with (params... , scrutinee) as arguments
                 // 3. For Bool patterns: result is the function return value
                 // 4. For Maybe patterns: test if result is Some variant
                 //
+
                 // Example:
-                //   pattern Even(n: Int) -> Bool = n % 2 == 0;
-                //   Even() compiles to: call Even(scrutinee), use result as match condition
+                //  pattern Even(n: Int) -> Bool = n % 2 == 0;
+                //  Even() compiles to: call Even(scrutinee), use result as match condition
                 //
-                //   pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
-                //   ParseInt(n) compiles to: call ParseInt(scrutinee), check if Some,
-                //   then bind extracted value to n
+
+                //  pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
+                //  ParseInt(n) compiles to: call ParseInt(scrutinee), check if Some,
+                //  then bind extracted value to n
 
                 let pattern_name = name.name.to_string();
 
@@ -8800,6 +8869,7 @@ impl VbcCodegen {
                 // Uses IsVar instruction with the type name as a tag to check if the
                 // scrutinee's runtime type matches the expected type.
                 //
+
                 // This is essential for working with `unknown` type safely - it allows
                 // narrowing the type at runtime and safely accessing type-specific operations.
                 let type_name = format!("{:?}", test_type.kind);
@@ -8815,9 +8885,11 @@ impl VbcCodegen {
                 // Stream pattern: stream[first, second, ...rest]
                 // Tests if the iterator/stream can produce the required number of elements.
                 //
+
                 // For empty pattern stream[]: check if iterator is exhausted
                 // For patterns stream[a, b, ...]: check if iterator has at least N elements
                 //
+
                 // Stream pattern matching: tests if the iterator can produce the required
                 // number of elements. Empty stream[] checks exhaustion; stream[a, b, ...]
                 // checks at least N elements are available.
@@ -8912,6 +8984,7 @@ impl VbcCodegen {
                 // Guard pattern: pattern if guard_expr
                 // Spec: Rust RFC 3637 - Guard Patterns
                 //
+
                 // Semantics:
                 // 1. First test if the inner pattern matches
                 // 2. If pattern matches, evaluate guard expression
@@ -9581,9 +9654,11 @@ impl VbcCodegen {
                 // Some value and bind it to the pattern variable. Total patterns (-> Bool)
                 // produce no bindings.
                 //
+
                 // Total patterns (-> Bool): no binding, just test
                 // Partial patterns (-> Maybe<T>): bind the extracted value if Some
                 //
+
                 // For partial patterns with bindings (e.g., ParseInt(n)):
                 // 1. Get the cached Maybe<T> result from compile_pattern_test
                 // 2. Extract the value from Maybe::Some
@@ -9694,10 +9769,12 @@ impl VbcCodegen {
                 // TypeTest pattern binding: `x is Type`
                 // Binds the scrutinee (cast to the narrowed type) to the binding name.
                 //
+
                 // The type test has already been performed in compile_pattern_test,
                 // so here we just need to bind the value. The runtime cast is a no-op
                 // since we've already verified the type matches.
                 //
+
                 // The binding gets the narrowed type, enabling type-safe access in the arm.
                 let var_reg = self.ctx.define_var(&binding.name, false);
                 self.ctx.emit(Instruction::Mov {
@@ -9711,6 +9788,7 @@ impl VbcCodegen {
                 // Consumes elements from the iterator and binds them to pattern variables.
                 // If rest is specified, binds the remaining iterator.
                 //
+
                 // Stream pattern binding: consume elements from iterator via GenNext and bind
                 // to pattern variables. If `...rest` is present, bind the remaining iterator.
 
@@ -9744,6 +9822,7 @@ impl VbcCodegen {
                 // Guard pattern binding: pattern if guard_expr
                 // Spec: Rust RFC 3637 - Guard Patterns
                 //
+
                 // For binding, we only need to bind the inner pattern's variables.
                 // The guard expression does not introduce any new bindings.
                 // Note: The guard has already been evaluated during pattern testing.
@@ -9763,12 +9842,14 @@ impl VbcCodegen {
 
     /// Compiles compound destructuring assignment: (a, b) += (da, db)
     ///
+
     /// For each element in the pattern, this:
     /// 1. Loads the current variable value
     /// 2. Unpacks the corresponding value element
     /// 3. Applies the binary operation
     /// 4. Stores the result back to the variable
     ///
+
     /// Unified destructuring with compound assignment: for each element in the pattern,
     /// loads the current variable, unpacks the corresponding value element, applies the
     /// binary operator (+=, -=, etc.), and stores the result back.
@@ -10076,6 +10157,7 @@ impl VbcCodegen {
         // expressions, because expression compilation may allocate/free temp registers
         // that could break consecutivity if we interleave allocation with compilation.
         //
+
         // Example of the bug this fixes:
         // For tuple (a, a+1, a+2):
         // - alloc_temp() for element 1 -> Reg(3)
@@ -10220,12 +10302,14 @@ impl VbcCodegen {
 
     /// Compiles a stream literal expression.
     ///
+
     /// Stream literals create lazy iterators:
     /// - `stream[1, 2, 3]` - finite iterator over elements
     /// - `stream[1, 2, 3, ...]` - cycling iterator that repeats infinitely
     /// - `stream[0..100]` - lazy range iterator
     /// - `stream[0..]` - infinite range from 0
     ///
+
     /// Stream literals create lazy iterators backed by generators. `stream[1,2,3]` yields
     /// elements on demand; `stream[0..100]` creates a lazy range; `stream[0..]` is infinite.
     fn compile_stream_literal(
@@ -10256,6 +10340,7 @@ impl VbcCodegen {
                     // Cycling stream: stream[1, 2, 3, ...]
                     // Create a generator that yields elements cyclically
                     //
+
                     // Strategy: Create a list of elements, then create a cycling iterator
                     // that wraps around when reaching the end.
 
@@ -10338,6 +10423,7 @@ impl VbcCodegen {
                         // Create a range object and then create an iterator from it
                         // For now, we create the elements lazily using a generator pattern
                         //
+
                         // Strategy: Pack start, end, inclusive into a tuple and create
                         // an iterator that unpacks and generates values
 
@@ -10388,6 +10474,7 @@ impl VbcCodegen {
                         // Unbounded range: stream[0..]
                         // Create an infinite iterator starting from start_reg
                         //
+
                         // Strategy: Create a generator that yields start, start+1, start+2, ...
                         // For now, we create a special range iterator
 
@@ -10419,6 +10506,7 @@ impl VbcCodegen {
 
     /// Try to resolve a reference type property like `(&Int).size`, `(&checked T).size`, etc.
     ///
+
     /// Reference memory layout (CBGR spec):
     /// - Managed ThinRef (`&T`, `&mut T`): 16 bytes (ptr=8 + generation=4 + epoch_caps=4)
     /// - Managed FatRef (`&[T]`, `&mut [T]`): 24 bytes (ptr=8 + len=8 + generation=4 + epoch_caps=4)
@@ -10497,6 +10585,7 @@ impl VbcCodegen {
     /// (e.g., `SharedInner<T>.size`, `Foo<Int>.alignment`). Returns the value to
     /// load as a compile-time constant.
     ///
+
     /// VBC layout model: every record slot holds a NaN-boxed `Value` (8 bytes),
     /// so a struct's size is `num_fields * 8` and alignment is 8 regardless of
     /// the type arguments. This matches the interpreter's heap layout and the
@@ -10620,7 +10709,7 @@ impl VbcCodegen {
     }
 
     /// Returns `true` if `expr` flattens to a module path that started
-    /// with a rooted prefix (`super`, `cog`, or `.`).  Use this in
+    /// with a rooted prefix (`super`, `cog`, or `.`). Use this in
     /// preference to inspecting `parts[0]` after
     /// `try_flatten_module_path_resolved`, because the *resolved*
     /// variant strips the rooted prefix when resolution succeeds — so
@@ -10630,6 +10719,7 @@ impl VbcCodegen {
     /// out at `compile_simple_path` with the original `PathSegment::Super`
     /// and emits "standalone super/crate/relative".
     ///
+
     /// Hot path: only called from field-access / call-site fallback
     /// branches, so the extra raw flatten is unmeasurable noise.
     pub(super) fn path_was_rooted_module_path(&self, expr: &Expr) -> bool {
@@ -10645,15 +10735,18 @@ impl VbcCodegen {
     /// reference. Returns `Some(absolute_parts)` when the path was rooted
     /// and could be resolved, `None` when it was not rooted.
     ///
+
     /// Concretely:
-    ///   current_module = "sys.common"
-    ///   "super.darwin.tls.ctx_get"  →  ["sys", "darwin", "tls", "ctx_get"]
-    ///   ".helper"                   →  ["sys", "common", "helper"]
-    ///   "cog.foo"                   →  ["core", "foo"]    (stdlib root)
+    ///  current_module = "sys.common"
+    ///  "super.darwin.tls.ctx_get" → ["sys", "darwin", "tls", "ctx_get"]
+    ///  ".helper" → ["sys", "common", "helper"]
+    ///  "cog.foo" → ["core", "foo"] (stdlib root)
     ///
+
     /// Multiple leading `super` segments walk further up:
-    ///   current = "a.b.c";  "super.super.x"  →  ["a", "x"]
+    ///  current = "a.b.c"; "super.super.x" → ["a", "x"]
     ///
+
     /// If a path tries to walk above the module root (e.g. `super` at the
     /// top of "main"), returns `None` — callers should emit a nil stub or a
     /// diagnostic, never silently rebind to a local symbol of the same name.
@@ -10709,11 +10802,12 @@ impl VbcCodegen {
 
     /// Compiles field access.
     ///
+
     /// Special handling for:
     /// - Module paths: `super.sys.linux.function` or `crate.module.item`
     /// - Variant constructor access: `TypeName.Variant`
-    ///   If the base is a Path that looks like a type name (starts with uppercase)
-    ///   and the field is also uppercase (variant name), treat as a variant constructor.
+    ///  If the base is a Path that looks like a type name (starts with uppercase)
+    ///  and the field is also uppercase (variant name), treat as a variant constructor.
     fn compile_field_access(&mut self, base: &Expr, field: &str) -> CodegenResult<Option<Reg>> {
         if std::env::var("VERUM_DEBUG_FIELDS2").is_ok() {
             let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
@@ -10886,6 +10980,7 @@ impl VbcCodegen {
             // produces — the real symbol resolution happens after all
             // platform modules have been registered.
             //
+
             // Inspect the *raw* (pre-resolution) flatten via
             // `path_was_rooted_module_path` — `try_flatten_module_path_resolved`
             // strips the rooted prefix when it can translate it to an
@@ -11006,7 +11101,7 @@ impl VbcCodegen {
                         let result = self.ctx.alloc_temp();
                         let variant_tag = self.intern_string(&qualified_variant);
                         // We know the parent type name (it's `type_name`),
-                        // so route through the unified helper.  When
+                        // so route through the unified helper. When
                         // type_name is a registered sum type, this lifts
                         // the synthesised "qualified-name as tag" path
                         // into the typed form too.
@@ -11135,6 +11230,7 @@ impl VbcCodegen {
 
         // #110 — static method reference as HOF arg.
         //
+
         // When `base` is a Type name (Path resolving to a type, possibly via
         // alias) and `.field` names a static method on that type, the
         // expression should produce a callable closure value, not a struct
@@ -11144,6 +11240,7 @@ impl VbcCodegen {
         // 0x85F0/0x85F8 because intern_field_name returns a globally-
         // monotonic ID for unrecognized field names.
         //
+
         // Try to resolve `Type.method` (with type-alias chasing) to a
         // FunctionInfo; if it's a real function, emit NewClosure. Falls
         // through to GetF only when the lookup fails — preserving the
@@ -11355,6 +11452,7 @@ impl VbcCodegen {
     /// the given field (looked up via `type_field_type_names`). Returns the
     /// previous value so `pop_field_type_context` can restore it.
     ///
+
     /// This is the root fix for Issue #1: without this hint, compiling
     /// `Foo { kind: SomeVariant }` inside a cross-module `implement` block
     /// calls `find_function_by_suffix(".SomeVariant")`, which finds
@@ -11363,6 +11461,7 @@ impl VbcCodegen {
     /// then hits the `[lenient] SKIP` path in `mod.rs`, and the method
     /// quietly disappears from the compiled module.
     ///
+
     /// With the field's declared type provided as context,
     /// `find_function_by_suffix` can pick the variant whose
     /// `parent_type_name` matches, eliminating the ambiguity.
@@ -11530,6 +11629,7 @@ impl VbcCodegen {
                 // multiple fields (e.g., Mat3 { r0: z, r1: z, r2: z }).
                 // For primitives, Clone is a no-op (just copies the register).
                 //
+
                 // Exception: raw pointers (e.g. results of `alloc()`) must NOT
                 // be Cloned. `handle_clone` treats a pointer value as a heap
                 // object, reads its first 24 bytes as an `ObjectHeader`, and
@@ -11573,16 +11673,19 @@ impl VbcCodegen {
 
     /// Compiles a copattern body into a VBC object.
     ///
+
     /// A copattern body defines a coinductive value by specifying the result of
     /// each observation. At the bytecode level this is represented as an ordinary
     /// object (allocated with `New`) whose fields correspond to the observations.
     ///
+
     /// Each field stores the **value** produced by the corresponding arm expression.
     /// For non-thunked arms (leaf values like integers) this is a direct value.
     /// For recursive arms (the co-recursive call), the expression is compiled in
     /// the normal way — the productivity checker in `verum_types` guarantees the
     /// call is guarded so the interpreter will not diverge on demand.
     ///
+
     /// Field assignment uses `SetF` with a sequential index matching the arm order.
     /// The interpreter resolves `head`/`tail`/etc. via the field index, which the
     /// type-checker ensures lines up with the coinductive type's destructor list.
@@ -11594,6 +11697,7 @@ impl VbcCodegen {
 
         // Allocate an object with one slot per observation arm.
         //
+
         // type_id 0 is used for anonymous/coinductive objects — this is consistent
         // with the VBC convention where fields are accessed by integer index via
         // GetF/SetF. Destructor calls (e.g., `.head`, `.tail`) go through CallM,
@@ -11601,6 +11705,7 @@ impl VbcCodegen {
         // The type checker ensures arm ordering matches the coinductive type's
         // destructor declaration order, so field_idx 0 = first destructor, etc.
         //
+
         // For named type resolution at runtime, the TypeDescriptor table maps
         // type_id to field name metadata. When a coinductive type is registered
         // by verum_types, its destructor names are stored in the TypeDescriptor,
@@ -11669,12 +11774,14 @@ impl VbcCodegen {
         // and returns the value. Only `spawn { … }` produces a real task
         // handle that requires the runtime poll path.
         //
+
         // The interpreter's `Await` handler tolerates both cases (it pattern-
         // matches on a sentinel-encoded task ID and falls through to a direct
         // pass-through otherwise). The AOT lowering, however, dereferences
         // the value as a pool handle pointer unconditionally, so passing a
         // direct result (e.g., `42`) SIGSEGVs at runtime.
         //
+
         // Suppress the `Await` opcode when the inner expression is not a
         // `Spawn`. Most user code (`some_async_fn(x).await`) flows through
         // this path; `spawn { … }.await` keeps the threaded-await path.
@@ -11778,9 +11885,11 @@ impl VbcCodegen {
 
     /// Compiles a try block expression: try { expr } -> Result<T, E>
     ///
+
     /// A plain try block evaluates its inner expression and wraps the result
     /// in Ok(). Any ? operators within the block will propagate errors normally.
     ///
+
     /// Try blocks provide scoped error handling: the inner expression is evaluated and
     /// wrapped in Ok(). Any `?` operators within emit Throw to the exception handler.
     /// The block desugars to an immediately-invoked closure returning Result<T, E>.
@@ -11851,6 +11960,7 @@ impl VbcCodegen {
 
     /// Compiles a cast expression.
     ///
+
     /// Supports conversions between primitive types:
     /// - Int → Float (CvtIF)
     /// - Float → Int with truncation mode (CvtFI)
@@ -12100,13 +12210,15 @@ impl VbcCodegen {
     /// Tries to compile a struct-field address pattern: `&receiver.field as *const T`
     /// (or `&mut receiver.field as *mut T`).
     ///
+
     /// Lowers the cast to `FfiSubOpcode::StructFieldAddr` so the
     /// resulting raw pointer is the actual heap address of the field
-    /// inside the receiver's data section.  Required by every atomic
+    /// inside the receiver's data section. Required by every atomic
     /// stdlib op (AtomicU8 / AtomicU16 / AtomicU32 etc.) which lowers
     /// `&self.value as *const Byte` and feeds the result to typed
     /// `atomic_load_*` / `atomic_cas_*` intrinsics.
     ///
+
     /// Returns `Some(reg)` if the pattern was detected and lowered,
     /// `None` otherwise (caller falls through to generic cast paths).
     fn try_compile_struct_field_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
@@ -12138,7 +12250,7 @@ impl VbcCodegen {
         };
 
         // Receiver type must be a registered struct so we can look up
-        // the field offset.  Use the same type-resolution helper that
+        // the field offset. Use the same type-resolution helper that
         // GetF + compile_field_access rely on.
         let receiver_type_name = self
             .infer_expr_type_name(receiver)
@@ -12148,16 +12260,16 @@ impl VbcCodegen {
             None => return Ok(None),
         };
 
-        // Field offset in bytes within the data section.  Verum stores
+        // Field offset in bytes within the data section. Verum stores
         // every field as an 8-byte Value slot regardless of the field's
-        // declared type — see compute_field_offset.  The address we
+        // declared type — see compute_field_offset. The address we
         // return points to the low byte of that Value's u64 storage,
         // which on little-endian targets is exactly the inline-int
         // payload byte that AtomicU8 / U16 / U32 read/write.
         let field_offset = self.compute_field_offset(&type_name, field_name);
         if !(0..=u16::MAX as i64).contains(&field_offset) {
             // Out-of-range offset (likely an unregistered type for
-            // which compute_field_offset returned a fallback).  Bail
+            // which compute_field_offset returned a fallback). Bail
             // so the generic cast path fires and the user sees the
             // existing diagnostic instead of a silent miscompile.
             return Ok(None);
@@ -12190,12 +12302,15 @@ impl VbcCodegen {
 
     /// Tries to compile an array element address pattern: `&mut arr[idx] as *mut T`
     ///
+
     /// When casting a reference to an array element to a raw pointer, we need the actual
     /// memory address of that element, not its value. This is critical for memory intrinsics
     /// like memset, memcpy, etc.
     ///
+
     /// Handles both byte arrays (element size 1) and typed arrays (element size 2, 4, 8).
     ///
+
     /// Returns `Some(reg)` if the pattern was detected and compiled, `None` otherwise.
     fn try_compile_byte_array_element_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
         use crate::instruction::FfiSubOpcode;
@@ -12297,6 +12412,7 @@ impl VbcCodegen {
 
     /// Extracts the custom type name from an initializer expression.
     ///
+
     /// Detects struct constructors (`OSError { ... }`), static method calls
     /// (`OSError.new(...)`), tuple-style constructors (`SomeType(...)`), and
     /// Compute the type a match-arm body would have when the body is just
@@ -12849,6 +12965,7 @@ impl VbcCodegen {
 
     /// Infers the custom type name for an expression used as an operand.
     ///
+
     /// For variable references, looks up the type name from `variable_type_names`.
     /// For inline record literals, extracts the type name directly.
     /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
@@ -12891,6 +13008,7 @@ impl VbcCodegen {
             // `BinaryIntOp::UDiv` opcode existed. The real fix is to
             // surface the suffix at type-inference time.
             //
+
             // Float literals carry the same shape via `FloatLit.suffix`;
             // Bool / Char / Text are never unsigned-intish, so they
             // fall through to `None` (no suffix → no narrower type).
@@ -12954,11 +13072,11 @@ impl VbcCodegen {
                 if let ExprKind::Path(path) = &func.kind {
                     let func_name = format!("{}", path);
                     // (1) Direct lookup. If the registered entry is a
-                    //     variant constructor (`variant_tag.is_some()`),
-                    //     prefer the `parent_type_name` over the
-                    //     possibly-unset `return_type_name`. The parent
-                    //     type is what carries the methods (`Result`
-                    //     declares `unwrap`, not the `Err` constructor).
+                    //  variant constructor (`variant_tag.is_some()`),
+                    //  prefer the `parent_type_name` over the
+                    //  possibly-unset `return_type_name`. The parent
+                    //  type is what carries the methods (`Result`
+                    //  declares `unwrap`, not the `Err` constructor).
                     if let Some(info) = self.ctx.lookup_function(&func_name) {
                         if info.variant_tag.is_some()
                             && let Some(parent) = &info.parent_type_name {
@@ -12969,10 +13087,10 @@ impl VbcCodegen {
                         }
                     }
                     // (2) Disambiguating fallback for variants: when the
-                    //     call is `Err(99)` and `Err` is shared by
-                    //     several types (e.g. user-defined + stdlib),
-                    //     `find_variant_parent_type_by_args` resolves
-                    //     uniquely by name + arity.
+                    //  call is `Err(99)` and `Err` is shared by
+                    //  several types (e.g. user-defined + stdlib),
+                    //  `find_variant_parent_type_by_args` resolves
+                    //  uniquely by name + arity.
                     if let Some(parent) = self.ctx
                         .find_variant_parent_type_by_args(&func_name, args.len())
                     {
@@ -13069,6 +13187,7 @@ impl VbcCodegen {
 
     /// Resolves the protocol_id for a CmpG equality instruction.
     ///
+
     /// If either operand has a known custom type name with a registered `TypeName::eq`
     /// function, returns a non-zero protocol_id encoding the string table index + 1.
     /// The interpreter uses this to dispatch to the custom Eq implementation.
@@ -13130,6 +13249,7 @@ impl VbcCodegen {
     /// Infers the TypeKind of an expression based on its structure.
     /// Returns None if type cannot be determined statically.
     ///
+
     /// This method is now an instance method so it can access the context
     /// for variable type lookups when expressions reference variables.
     pub fn infer_expr_type_kind(&self, expr: &Expr) -> Option<verum_ast::ty::TypeKind> {
@@ -13447,6 +13567,7 @@ impl VbcCodegen {
 
     /// Compiles a closure expression.
     ///
+
     /// Closures are compiled by:
     /// 1. Analyzing the body to find free variables (variables referenced but not defined locally)
     /// 2. Compiling the closure body as a separate function with captures as first parameters
@@ -13630,6 +13751,7 @@ impl VbcCodegen {
 
     /// Analyzes an expression to find free variables.
     ///
+
     /// Free variables are variables that are:
     /// - Referenced in the expression
     /// - Not defined locally within the expression
@@ -13642,6 +13764,7 @@ impl VbcCodegen {
 
     /// Compiles a closure body with support for complex parameter patterns.
     ///
+
     /// The function takes captured variables as the first parameters,
     /// followed by the user-specified closure parameters. For complex patterns
     /// (tuples, etc.), the pattern binding is performed at the start of the body.
@@ -13736,14 +13859,15 @@ impl VbcCodegen {
         // function-type annotation, param-type, assignment-target, etc.)
         // because that IS what the closure is being shaped to return.
         //
+
         // Rationale: previously we cleared on absent-annotation "to avoid
         // the enclosing function's return leaking into the body", but the
         // two valid incoming values of `current_return_type_name` at this
         // point are:
-        //   (a) the let-binding's `fn() -> Maybe<T>` return — correct,
-        //   (b) a param-type for a callback — correct,
-        //   (c) the enclosing function's own return type (if the closure
-        //       happens to be at a return-position) — still correct.
+        //  (a) the let-binding's `fn() -> Maybe<T>` return — correct,
+        //  (b) a param-type for a callback — correct,
+        //  (c) the enclosing function's own return type (if the closure
+        //  happens to be at a return-position) — still correct.
         // Clearing threw all three away. Restoring on exit retains
         // isolation between sibling closures.
         let saved_closure_rtn_wp = {
@@ -13847,11 +13971,13 @@ impl VbcCodegen {
 
     // ==================== CBGR Tier-Aware Reference Helpers ====================
     //
+
     // CBGR three-tier reference model helpers:
     // Tier decisions are verified against escape analysis (5.3), unsafe blocks promote
     // tier via enter/exit_unsafe (5.4), capability checks validate Read/Write/Execute
     // permissions (5.5), and ChkRef validates generation/epoch at runtime (5.6).
     //
+
     // These helpers implement the three-tier CBGR reference model:
     // - Tier 0: Runtime validated (~15ns overhead)
     // - Tier 1: Compile-time proven safe (0ns overhead)
@@ -13859,10 +13985,12 @@ impl VbcCodegen {
 
     /// Gets the tier for a reference expression from tier_context.
     ///
+
     /// Uses the expression's span as the key to look up tier decisions
     /// from escape analysis. Also considers unsafe blocks for automatic
     /// tier promotion.
     ///
+
     /// # Tier Promotion Rules (Phase 5.4)
     /// - Inside `unsafe` blocks: Can use Tier 2 references
     /// - Escape analysis proves safety: Promotes to Tier 1
@@ -13890,6 +14018,7 @@ impl VbcCodegen {
 
     /// Gets the tier for a dereference expression.
     ///
+
     /// For derefs, we look up the reference being dereferenced.
     fn get_deref_tier_for_expr(&self, expr: &Expr) -> CbgrTier {
         // The expression here is the reference being dereferenced
@@ -13901,6 +14030,7 @@ impl VbcCodegen {
     /// Promote a register-resident value to a non-recyclable slot before
     /// emitting a CBGR reference to it.
     ///
+
     /// CBGR references encode the absolute index of their source register,
     /// and a Tier 0 `Deref` later reads back through that index. Refs into
     /// a *named* variable (`&x` where `x` is a let-bound local) are stable
@@ -13912,6 +14042,7 @@ impl VbcCodegen {
     /// marshalling, manifesting as a baffling `Value::SmallStr("…")` or a
     /// sudden `Value::Ptr(…)`).
     ///
+
     /// When the inner expression is a named local, return its register
     /// untouched. Otherwise allocate a fresh, never-recycled slot, copy the
     /// value into it, and reference that. This costs one extra `Mov` per
@@ -13921,15 +14052,17 @@ impl VbcCodegen {
     fn stabilize_ref_source(&mut self, inner: &Expr, inner_reg: Reg) -> Reg {
         // Already-stable sources don't need promotion:
         //
-        //   - Named locals (`&x`): the variable's slot is never recycled.
-        //   - Deref of a CBGR-tracked pointer (`&*heap_val`): the
-        //     reference machinery's whole *purpose* is to expose the
-        //     dereffed slot to subsequent CBGR generation/epoch checks.
-        //     Copying through a fresh stable slot would defeat the
-        //     use-after-free detection (e.g.,
-        //     `let r = &*heap; drop(heap); *r // → expected panic`).
-        //   - Anything else not in the temp-recycling pool.
+
+        //  - Named locals (`&x`): the variable's slot is never recycled.
+        //  - Deref of a CBGR-tracked pointer (`&*heap_val`): the
+        //  reference machinery's whole *purpose* is to expose the
+        //  dereffed slot to subsequent CBGR generation/epoch checks.
+        //  Copying through a fresh stable slot would defeat the
+        //  use-after-free detection (e.g.,
+        //  `let r = &*heap; drop(heap); *r // → expected panic`).
+        //  - Anything else not in the temp-recycling pool.
         //
+
         // We only need to stabilize when the inner expression is an
         // `Index` (a temp holding a *copy* of an array element) or a
         // `Field` access on a temp-valued receiver. For those the temp
@@ -13955,6 +14088,7 @@ impl VbcCodegen {
 
     /// Emits a reference instruction based on tier.
     ///
+
     /// - Tier 0: `Ref` or `RefMut` (runtime validated)
     /// - Tier 1: `RefChecked` (compiler proven safe)
     /// - Tier 2: `RefUnsafe` (manual safety proof)
@@ -13984,26 +14118,33 @@ impl VbcCodegen {
 
     /// Emits a dereference instruction based on tier.
     ///
+
     /// - Tier 0: `Deref` with preceding `ChkRef` validation
     /// - Tier 1: `Deref` only (no validation needed)
     /// - Tier 2: `Deref` only (unsafe, no validation)
     ///
+
     /// # Phase 5.6: Generation/Epoch Validation
     ///
+
     /// For Tier 0 references, ChkRef performs runtime validation to ensure
     /// the reference is still valid. This validation can be enhanced with
     /// compile-time known generation/epoch values:
     ///
+
     /// - **Generation**: Increments when the allocator slot is reused
     /// - **Epoch**: Global epoch for cross-allocator validation
     ///
+
     /// When compile-time analysis provides expected values, they can be
     /// encoded in an extended ChkRef instruction (future opcode extension).
     /// Currently, ChkRef uses the stored generation/epoch from the reference
     /// metadata at runtime.
     ///
+
     /// # Validation Flow
     ///
+
     /// ```text
     /// Tier 0: ChkRef → Deref (15ns overhead for validation)
     /// Tier 1: Deref only (0ns, compiler proven safe)
@@ -14034,12 +14175,14 @@ impl VbcCodegen {
                 // Emit CBGR validation check before dereference
                 // Phase 5.6: ChkRef validates generation/epoch from reference metadata
                 //
+
                 // The ChkRef instruction performs:
                 // 1. Extract generation from reference header
                 // 2. Compare against allocator's current generation
                 // 3. Validate epoch for cross-allocator safety
                 // 4. Trap on mismatch (use-after-free detected)
                 //
+
                 // Future: Extended ChkRef with compile-time expected values
                 // for faster validation when static analysis proves the expected
                 // generation/epoch.
@@ -14059,6 +14202,7 @@ impl VbcCodegen {
 
     /// Compiles optional chaining: obj?.field
     ///
+
     /// Returns None if obj is None, otherwise accesses the field.
     /// Equivalent to: match obj { Some(v) => Some(v.field), None => None }
     fn compile_optional_chain(
@@ -14090,7 +14234,7 @@ impl VbcCodegen {
             });
         self.ctx.free_temp(tag_reg);
 
-        // None case: return None (tag 0).  Routed through the
+        // None case: return None (tag 0). Routed through the
         // typed-or-legacy helper so when `Maybe` is registered, the
         // emitted variant carries the concrete TypeId.
         self.emit_make_variant(dest, 0, 0, Some("Maybe"));
@@ -14128,7 +14272,7 @@ impl VbcCodegen {
         });
         self.ctx.free_temp(inner_reg);
 
-        // Wrap result in Some.  Routed through the typed-or-legacy
+        // Wrap result in Some. Routed through the typed-or-legacy
         // helper so when `Maybe` is registered, the emitted variant
         // carries the concrete TypeId.
         self.emit_make_variant(dest, 1, 1, Some("Maybe"));
@@ -14146,6 +14290,7 @@ impl VbcCodegen {
 
     /// Compiles pipeline operator: x |> f |> g
     ///
+
     /// Equivalent to g(f(x)) but reads left-to-right.
     fn compile_pipeline(
         &mut self,
@@ -14214,6 +14359,7 @@ impl VbcCodegen {
 
     /// Compiles null coalescing: a ?? b
     ///
+
     /// Returns a if a is not None, otherwise returns b.
     fn compile_null_coalesce(
         &mut self,
@@ -14336,6 +14482,7 @@ impl VbcCodegen {
 
     /// Compiles try-recover: try { ... } recover { pattern => expr, ... }
     ///
+
     /// Exception handling with pattern-based recovery for caught exceptions.
     fn compile_try_recover(
         &mut self,
@@ -14520,21 +14667,27 @@ impl VbcCodegen {
 
     /// Compiles spawn expression: spawn { expr }
     ///
+
     /// Compile `inject TypeName` expression.
     ///
+
     /// Level 1 static DI resolution. Three strategies based on scope:
     ///
+
     /// - **Singleton/Request**: The injectable type was `provide`d earlier in the
-    ///   call chain. `inject` resolves to `CtxGet` which retrieves the value
-    ///   from the context stack. Cost: ~5ns (same as context method call).
+    ///  call chain. `inject` resolves to `CtxGet` which retrieves the value
+    ///  from the context stack. Cost: ~5ns (same as context method call).
     ///
+
     /// - **Transient**: Each `inject` creates a new instance by calling the
-    ///   type's `@inject` constructor. Cost: constructor call overhead.
+    ///  type's `@inject` constructor. Cost: constructor call overhead.
     ///
+
     /// - **Fallback** (scope unknown at codegen): Uses `CtxGet`. If the type
-    ///   hasn't been provided, the interpreter/AOT runtime returns nil with
-    ///   a diagnostic warning.
+    ///  hasn't been provided, the interpreter/AOT runtime returns nil with
+    ///  a diagnostic warning.
     ///
+
     /// Grammar: inject_expr = 'inject' , type_path ;
     fn compile_inject(&mut self, type_path: &verum_ast::ty::Path) -> CodegenResult<Option<Reg>> {
         let type_name = type_path.as_ident()
@@ -14633,6 +14786,7 @@ impl VbcCodegen {
         // Cooperative scheduling: emit a Spawn instruction that defers execution.
         // The task is registered but NOT executed until .await is called.
         //
+
         // If the spawned expression is a function call, emit a proper Spawn
         // instruction with the function ID and arguments. Otherwise, fall back
         // to compiling the expression inline (eager evaluation).
@@ -14882,6 +15036,7 @@ impl VbcCodegen {
 
     /// Compiles select expression
     ///
+
     /// Waits on multiple futures and executes the body of the first one to complete.
     /// Supports both biased (ordered priority) and fair (random) selection.
     fn compile_select(
@@ -15002,21 +15157,23 @@ impl VbcCodegen {
 
     /// Compiles nursery expression for structured concurrency
     ///
+
     /// A nursery creates a scope where spawned tasks are guaranteed to complete
     /// before the scope exits. This ensures structured concurrency semantics:
     /// - All spawned tasks must complete (or be cancelled) before exit
     /// - Errors propagate correctly with optional recovery
     /// - Optional timeout and max_tasks limits
     ///
+
     /// Syntax:
     /// ```ignore
     /// nursery(timeout: 5s, on_error: cancel_all) {
-    ///     spawn task1();
-    ///     spawn task2();
+    ///  spawn task1();
+    ///  spawn task2();
     /// } on_cancel {
-    ///     cleanup();
+    ///  cleanup();
     /// } recover |err| {
-    ///     handle_error(err)
+    ///  handle_error(err)
     /// }
     /// ```
     fn compile_nursery(
@@ -15241,6 +15398,7 @@ impl VbcCodegen {
 
     /// Compiles for-await loop
     ///
+
     /// Async iteration: for await pattern in async_iter { body }
     /// Each iteration awaits the next value from the async iterator.
     fn compile_for_await(
@@ -15330,10 +15488,12 @@ impl VbcCodegen {
 
     /// Compiles yield expression.
     ///
+
     /// For generator functions (fn*), yield suspends execution and
     /// returns the value to the caller. When resumed, execution
     /// continues after the yield point.
     ///
+
     /// Generator yield: saves current PC, registers, and context stack, then returns
     /// the yielded value to the caller. When resumed via GenNext, execution continues
     /// after the yield point.
@@ -15398,13 +15558,16 @@ impl VbcCodegen {
 
     /// Compiles an unsafe block with proper tier promotion.
     ///
+
     /// Inside an unsafe block:
     /// - Tier 1 references can be promoted to Tier 2 (skip CBGR validation)
     /// - Tier 0 stays Tier 0 (safety-critical, cannot be promoted)
     /// - Explicit `&unsafe` syntax always uses Tier 2
     ///
+
     /// # Phase 5.4 Implementation
     ///
+
     /// This properly handles nested unsafe blocks by saving and restoring
     /// the previous unsafe state.
     fn compile_unsafe_block(&mut self, block: &verum_ast::Block) -> CodegenResult<Option<Reg>> {
@@ -15431,13 +15594,16 @@ impl VbcCodegen {
 
     /// Compiles quote expression for code generation.
     ///
+
     /// Quote expressions are processed at compile-time during staged meta compilation.
     /// At runtime (or if encountered outside meta context), they produce a TokenStream value.
     ///
+
     /// Syntax:
     /// - `quote { token_tree }` - default stage (N-1)
     /// - `quote(N) { token_tree }` - explicit target stage N
     ///
+
     /// Staged meta-compilation: quote expressions capture code as TokenStream values.
     /// `quote { ... }` captures at current stage; `quote(N) { ... }` targets stage N.
     /// All compile-time constructs use the unified `meta` system with `@` prefix syntax.
@@ -15481,6 +15647,7 @@ impl VbcCodegen {
 
     /// Converts AST TokenTree list to verum_lexer::Token list.
     ///
+
     /// This flattens nested groups and converts TokenTreeKind to TokenKind.
     fn token_tree_to_lexer_tokens(
         &self,
@@ -15719,9 +15886,11 @@ impl VbcCodegen {
 
     /// Compiles stage escape expression: $(stage N){ expr }
     ///
+
     /// Stage escapes evaluate the inner expression at the specified stage level
     /// within a quote block. This enables inserting computed values into generated code.
     ///
+
     /// Staged meta-compilation: stage escapes (`$expr` inside `quote { }`) evaluate
     /// the inner expression at the enclosing stage level and splice the result into
     /// the generated token stream. Enables inserting computed values into generated code.
@@ -15738,10 +15907,12 @@ impl VbcCodegen {
 
     /// Compiles lift expression: lift(expr)
     ///
+
     /// Lift is syntactic sugar for stage escape at the current stage.
     /// Like stage escape, it's processed during staged compilation.
     /// During normal VBC codegen, we simply compile the inner expression.
     ///
+
     /// Spec: grammar/verum.ebnf - quote_lift production
     fn compile_lift_expr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
         // Lift expressions are processed during staged compilation.
@@ -15965,6 +16136,7 @@ impl VbcCodegen {
 
     /// Compiles @intrinsic("name", args...) call.
     ///
+
     /// Maps the intrinsic name to optimal VBC instruction sequences using
     /// the industrial-grade intrinsic registry.
     fn compile_intrinsic_call(
@@ -16021,20 +16193,25 @@ impl VbcCodegen {
 
     /// Compiles @vbc(NAME, args...) call.
     ///
+
     /// Unlike `@intrinsic("name", args...)` which takes a string literal,
     /// `@vbc(NAME, args...)` takes a bareword identifier as the intrinsic name.
     /// This is the canonical syntax for VBC intrinsic calls in core/math/*.vr files.
     ///
+
     /// # Syntax
     ///
+
     /// ```verum
     /// @vbc(TENSOR_FILL, tensor_data, value)
     /// @vbc(MEM_ALLOC_TENSOR, size, device)
     /// @vbc(TENSOR_MATMUL, a, b)
     /// ```
     ///
+
     /// # Arguments
     ///
+
     /// - First argument: Identifier specifying the VBC intrinsic name (e.g., TENSOR_FILL)
     /// - Remaining arguments: Expressions passed to the intrinsic
     fn compile_vbc_intrinsic_call(
@@ -16112,6 +16289,7 @@ impl VbcCodegen {
 
     /// Compiles a call to an intrinsic function imported via `import sys.intrinsics.*`.
     ///
+
     /// This handles the case where intrinsic functions declared with `@intrinsic("name")`
     /// are called through normal import syntax rather than `@intrinsic("name", args...)`.
     fn compile_imported_intrinsic_call(
@@ -16157,19 +16335,21 @@ impl VbcCodegen {
         // here: the dispatch handler raises a typed panic on
         // Deny, the rest of the codegen continues unchanged.
         //
+
         // scope_tag derivation:
-        //   IntrinsicCategory::Syscall   → 0 (PermissionScope::Syscall)
+        //  IntrinsicCategory::Syscall → 0 (PermissionScope::Syscall)
         //
+
         // target_id derivation:
-        //   For raw syscallN intrinsics the first argument
-        //   register holds the syscall number, which is the
-        //   stable target identifier within the Syscall scope.
-        //   The pin tests
-        //   (test_syscall_intrinsics_require_permission /
-        //    test_observational_intrinsics_skip_permission) keep
-        //   this mapping load-bearing — any new tagged category
-        //   triggers a deliberate match-arm extension here, not
-        //   a silent "ungated" emission.
+        //  For raw syscallN intrinsics the first argument
+        //  register holds the syscall number, which is the
+        //  stable target identifier within the Syscall scope.
+        //  The pin tests
+        //  (test_syscall_intrinsics_require_permission /
+        //  test_observational_intrinsics_skip_permission) keep
+        //  this mapping load-bearing — any new tagged category
+        //  triggers a deliberate match-arm extension here, not
+        //  a silent "ungated" emission.
         if intrinsic.hints.contains(&IntrinsicHint::RequiresPermission) {
             let (scope_tag, target_reg) = match intrinsic.category {
                 IntrinsicCategory::Syscall => {
@@ -16764,10 +16944,11 @@ impl VbcCodegen {
             InlineSequenceId::SecureZero => {
                 // Format: dst:reg, size:reg
                 //
+
                 // Routes to FFI sub-opcode 0xA3 (CSecureZero), which
                 // lowers in AOT to a *volatile* `llvm.memset` (the
-                // optimiser cannot DCE it).  Used to wipe key
-                // material before storage leaves scope.  Audit
+                // optimiser cannot DCE it). Used to wipe key
+                // material before storage leaves scope. Audit
                 // `internal/specs/tls-quic-security-audit.md` §2
                 // Action #2.
                 if args.len() >= 2 {
@@ -16804,6 +16985,7 @@ impl VbcCodegen {
 
             // Pointer offset: byte-level addressing (ptr + count).
             //
+
             // All core/ stdlib uses `ptr_offset` for raw byte pointers, so
             // the stride is 1 byte per `count`. Route through
             // `FfiExtended::PtrAdd` (0x63) rather than a plain `BinaryI::Add`
@@ -16882,19 +17064,21 @@ impl VbcCodegen {
 
             // Atomic fetch operations — width-aware inline emit.
             //
+
             // Earlier this arm dispatched through
             // `emit_intrinsic_library_call("verum_atomic_fetch_*", ...)`
             // whose handlers hardcoded `size: 8` regardless of the
-            // intrinsic's actual width.  That meant `atomic_fetch_or_u8`
+            // intrinsic's actual width. That meant `atomic_fetch_or_u8`
             // emitted an 8-byte AtomicLoad on a byte-aligned pointer —
             // misaligned-atomic error in the interpreter (silent zero on
             // load, then InvalidOperand on the cas), and a 7-byte read
             // past the AtomicU8's storage in AOT.
             //
+
             // We now plumb `byte_width` (passed in from the registry's
             // `InlineSequenceWithWidth(..., width)` strategy) through to
             // both AtomicLoad and AtomicCas so the size byte matches the
-            // declared width.  Single-attempt CAS pattern is functionally
+            // declared width. Single-attempt CAS pattern is functionally
             // correct for single-threaded execution; multi-threaded
             // contention would need a real CAS-loop (separate follow-up).
             InlineSequenceId::AtomicFetchAdd |
@@ -17088,6 +17272,7 @@ impl VbcCodegen {
             InlineSequenceId::MakeSlice => {
                 // Lower `slice_from_raw_parts(ptr, len)` to a FatRef directly.
                 //
+
                 // Previously this packed (ptr, len) into a heap tuple, but the
                 // resulting Value was not recognised as a slice by any downstream
                 // opcode: `.len()` returned 2 (tuple arity), `bytes[i]` read a
@@ -17666,7 +17851,7 @@ impl VbcCodegen {
 
             // Atomic exchange — width-aware single-attempt CAS.
             // Same width-bug as the AtomicFetch* arm above: prior
-            // dispatch hardcoded `size: 8`.  Now uses `byte_width`
+            // dispatch hardcoded `size: 8`. Now uses `byte_width`
             // from `InlineSequenceWithWidth(..., width)`.
             InlineSequenceId::AtomicExchange => {
                 if args.len() >= 2 {
@@ -18441,10 +18626,10 @@ impl VbcCodegen {
                         sub_op: CmpSubOpcode::LtU, dst: overflow, a: sum, b: args[0],
                     });
                     // If overflow, dest = u64::MAX; else dest = sum
-                    //   I+2: JmpNot { offset: 3 } → I+5 (Mov, no overflow)
-                    //   I+3: LoadI (overflow case)
-                    //   I+4: Jmp { offset: 2 } → I+6 (past Mov)
-                    //   I+5: Mov (no overflow case)
+                    //  I+2: JmpNot { offset: 3 } → I+5 (Mov, no overflow)
+                    //  I+3: LoadI (overflow case)
+                    //  I+4: Jmp { offset: 2 } → I+6 (past Mov)
+                    //  I+5: Mov (no overflow case)
                     self.ctx.emit(Instruction::JmpNot { cond: overflow, offset: 3 });
                     self.ctx.emit(Instruction::LoadI { dst: dest, value: u64::MAX as i64 });
                     self.ctx.emit(Instruction::Jmp { offset: 2 });
@@ -18467,10 +18652,10 @@ impl VbcCodegen {
                         sub_op: CmpSubOpcode::GeU, dst: cmp_result, a: args[0], b: args[1],
                     });
                     // If a >= b, use diff; else use 0
-                    //   I+2: JmpNot { offset: 3 } → I+5 (LoadI, underflow)
-                    //   I+3: Mov (no underflow case)
-                    //   I+4: Jmp { offset: 2 } → I+6 (past LoadI)
-                    //   I+5: LoadI (underflow case)
+                    //  I+2: JmpNot { offset: 3 } → I+5 (LoadI, underflow)
+                    //  I+3: Mov (no underflow case)
+                    //  I+4: Jmp { offset: 2 } → I+6 (past LoadI)
+                    //  I+5: LoadI (underflow case)
                     self.ctx.emit(Instruction::JmpNot { cond: cmp_result, offset: 3 });
                     self.ctx.emit(Instruction::Mov { dst: dest, src: diff });
                     self.ctx.emit(Instruction::Jmp { offset: 2 });
@@ -19619,6 +19804,7 @@ impl VbcCodegen {
 
     /// Emits type-aware wrapping arithmetic instruction.
     ///
+
     /// Wrapping operations perform modular arithmetic with explicit bit width truncation.
     /// The width parameter (8, 16, 32, 64) determines the mask applied to results.
     fn emit_intrinsic_wrapping(
@@ -19696,6 +19882,7 @@ impl VbcCodegen {
 
     /// Emits type-aware saturating arithmetic instruction.
     ///
+
     /// Saturating operations clamp results to type bounds instead of wrapping.
     /// The width and signed parameters determine the MIN/MAX bounds.
     fn emit_intrinsic_saturating(
@@ -19827,6 +20014,7 @@ impl VbcCodegen {
     /// Emits tensor ext extended operations (using TensorExtSubOpcode).
     /// These are complex operations encoded using TensorExtended with sub_op=0xFF marker.
     ///
+
     /// Encoding: TensorExtended { sub_op: 0xFF, operands: [ext_sub_op, dst, args...] }
     fn emit_intrinsic_tensor_ext_extended(
         &mut self,
@@ -19906,6 +20094,7 @@ impl VbcCodegen {
 
     /// Emits math extended operations for transcendental and special functions.
     ///
+
     /// Uses MathExtended opcode (0x29) with sub-opcode for zero-cost dispatch.
     fn emit_intrinsic_math_extended(
         &mut self,
@@ -19943,9 +20132,11 @@ impl VbcCodegen {
 
     /// Emits runtime intrinsic calls using typed opcodes.
     ///
+
     /// This function replaces the deprecated LibraryCall-based dispatch with
     /// proper typed opcodes for zero-cost dispatch (~2ns vs ~15ns for string lookup).
     ///
+
     /// The function maps intrinsic names to their corresponding extended opcodes:
     /// - SIMD operations → SimdExtended (0x2A)
     /// - Text operations → TextExtended (0x79)
@@ -20882,6 +21073,7 @@ impl VbcCodegen {
                 // The argument was already parsed by the macro expansion phase
                 // into the parsed_args if available.
                 //
+
                 // Fallback: parse the token text manually for simple cases
                 let token_text = args.tokens.as_str().trim();
 
@@ -21122,16 +21314,19 @@ impl VbcCodegen {
 
     /// Compiles stream comprehension to a lazy Stream/Iterator.
     ///
+
     /// `stream[expr for x in source if pred]` creates a lazy iterator that:
     /// 1. Wraps the source iterable
     /// 2. Applies filter predicates lazily
     /// 3. Maps the expression lazily
     ///
+
     /// Implementation strategy:
     /// - Creates an Iterator from the source
     /// - The Iterator is semantically lazy (next() computes on demand)
     /// - For full lazy evaluation, filtered/nested streams use generator-based approach
     ///
+
     /// Returns a Stream<T>/Iterator<Item=T> object that implements lazy evaluation.
     fn compile_stream_comprehension(
         &mut self,
@@ -21157,9 +21352,11 @@ impl VbcCodegen {
         // For simple cases (single for clause), create a lazy iterator
         // For complex cases (multiple for clauses), use eager evaluation wrapped as iterator
         //
+
         // This approach provides correct lazy semantics for the common case while
         // falling back to eager evaluation for complex nested comprehensions.
         //
+
         // Full lazy evaluation for nested comprehensions requires:
         // 1. Closure-based flat_map implementation
         // 2. Generator state machine support
@@ -21183,12 +21380,14 @@ impl VbcCodegen {
 
     /// Compiles simple stream comprehension (single for clause).
     ///
+
     /// `stream[expr for x in source if pred]` creates an iterator that lazily:
     /// 1. Gets next item from source
     /// 2. Binds pattern
     /// 3. Evaluates predicates
     /// 4. If all pass, yields transformed value
     ///
+
     /// Returns an Iterator<Item=T> that can be consumed lazily.
     fn compile_simple_stream_comprehension(
         &mut self,
@@ -21229,6 +21428,7 @@ impl VbcCodegen {
         // function (fn*) that yields elements lazily. This gives true O(1)
         // memory overhead per stream element.
         //
+
         // The generator approach provides correct lazy semantics: each
         // `IterNext` on the resulting generator only advances to the next
         // matching/mapped element on demand, with filter predicates and map
@@ -21251,6 +21451,7 @@ impl VbcCodegen {
 
     /// Compiles stream comprehension with eager evaluation, wrapped as iterator.
     ///
+
     /// Used when full lazy evaluation is not yet supported (filters, let bindings, etc.)
     fn _compile_eager_stream_as_iterator(
         &mut self,
@@ -21275,8 +21476,10 @@ impl VbcCodegen {
 
     /// Compiles nested stream comprehension (multiple for clauses).
     ///
+
     /// `stream[expr for x in xs for y in ys if pred]`
     ///
+
     /// Uses generator-based approach for true lazy evaluation with O(1) memory.
     /// Nested for-clauses compile as nested loops inside an anonymous fn* generator.
     fn compile_nested_stream_comprehension(
@@ -21290,42 +21493,50 @@ impl VbcCodegen {
 
     /// Compiles stream comprehension as a generator function for true lazy evaluation.
     ///
+
     /// This transforms `stream[expr for x in source if pred]` into an anonymous
     /// generator function that yields values lazily:
     ///
+
     /// ```verum
     /// fn* stream_gen(captured_vars...) {
-    ///     for x in source {
-    ///         if pred {
-    ///             yield expr;
-    ///         }
-    ///     }
+    ///  for x in source {
+    ///  if pred {
+    ///  yield expr;
+    ///  }
+    ///  }
     /// }
     /// ```
     ///
+
     /// The generator implements the Iterator protocol via GenCreate/GenNext.
     ///
+
     /// # True Lazy Evaluation
     ///
+
     /// Unlike eager evaluation which materializes all elements:
     /// - Each `yield` suspends the generator
     /// - `GenNext` resumes from the yield point
     /// - Memory: O(1) - only current element + generator state
     /// - Filters evaluated per-element, not upfront
     ///
+
     /// # Nested Comprehensions
     ///
+
     /// For `stream[(x, y) for x in xs for y in ys]`, this generates:
     /// ```ignore
     /// fn* stream_gen() {
-    ///     for x in xs {
-    ///         for y in ys {
-    ///             yield (x, y);
-    ///         }
-    ///     }
+    ///  for x in xs {
+    ///  for y in ys {
+    ///  yield (x, y);
+    ///  }
+    ///  }
     /// }
     /// ```
     ///
+
     /// True lazy stream comprehensions via generators: compiles `stream[expr for x in source if pred]`
     /// into an anonymous `fn*` that captures variables and yields matching elements on demand.
     /// Memory: O(1) - only generator state (~300 bytes per suspended generator).
@@ -21418,6 +21629,7 @@ impl VbcCodegen {
 
     /// Compiles the body of a stream generator function.
     ///
+
     /// Creates a generator function that:
     /// 1. Takes captured variables as parameters
     /// 2. Iterates through all for clauses (nested)
@@ -21530,15 +21742,16 @@ impl VbcCodegen {
 
     /// Recursively compiles comprehension clauses into nested loops with yield.
     ///
+
     /// This builds the nested structure:
     /// ```ignore
     /// for x in xs {
-    ///     for y in ys {
-    ///         if pred1 && pred2 {
-    ///             let z = value;
-    ///             yield output;
-    ///         }
-    ///     }
+    ///  for y in ys {
+    ///  if pred1 && pred2 {
+    ///  let z = value;
+    ///  yield output;
+    ///  }
+    ///  }
     /// }
     /// ```
     fn compile_stream_clauses_recursive(
@@ -21673,6 +21886,7 @@ impl VbcCodegen {
 
     /// Compiles map comprehension: {k: v for (k, v) in pairs if condition}
     ///
+
     /// Returns a Map<K, V> containing all key-value pairs generated.
     fn compile_map_comprehension(
         &mut self,
@@ -21811,6 +22025,7 @@ impl VbcCodegen {
 
     /// Compiles set comprehension: set{x for x in items if condition}
     ///
+
     /// Returns a Set<T> containing all unique elements generated.
     fn compile_set_comprehension(
         &mut self,
@@ -21939,6 +22154,7 @@ impl VbcCodegen {
 
     /// Compiles generator expression: gen{x for x in items if condition}
     ///
+
     /// Returns a Generator<T> that yields values lazily on demand.
     /// This is similar to stream comprehension but returns a Generator type.
     fn compile_generator_comprehension(
@@ -22082,19 +22298,21 @@ impl VbcCodegen {
     /// Desugar `format("fmt", args...)` at VBC codegen time by reusing the
     /// `InterpolatedString` lowering path. Returns:
     ///  - `Ok(Some(reg))` — format call matched and was emitted;
-    ///  - `Ok(None)`      — not a `format` shape we handle (empty args, first
-    ///                      arg isn't a `Text` literal, malformed fmt string,
-    ///                      or placeholder count ≠ supplied-arg count). The
-    ///                      caller falls through to the regular function
-    ///                      lookup path, which will raise `UndefinedFunction`
-    ///                      if no `format` is registered.
+    ///  - `Ok(None)` — not a `format` shape we handle (empty args, first
+    ///  arg isn't a `Text` literal, malformed fmt string,
+    ///  or placeholder count ≠ supplied-arg count). The
+    ///  caller falls through to the regular function
+    ///  lookup path, which will raise `UndefinedFunction`
+    ///  if no `format` is registered.
     ///
+
     /// Supported fmt syntax (anonymous placeholders only):
     ///  - `{}` anonymous placeholder
     ///  - `{:spec}` anonymous with spec (spec is discarded, matching the way
-    ///    `f"..."` currently strips its specifier at parse time)
+    ///  `f"..."` currently strips its specifier at parse time)
     ///  - `{{` / `}}` escaped braces
     ///
+
     /// Positional/named placeholders (`{0}`, `{name}`) are deliberately not
     /// supported — they'd need either variable-binding rewriting or a
     /// dedicated format-string AST node. The stdlib/L2 call sites all use the
@@ -22511,6 +22729,7 @@ impl VbcCodegen {
 
     /// Resolve size/alignment for reference types in type property access.
     ///
+
     /// Returns the property value (as i64) if `ty` is a reference type and
     /// `property` is Size or Alignment. Returns None for non-reference types.
     fn resolve_ref_type_size(
@@ -22571,6 +22790,7 @@ impl VbcCodegen {
 
     /// Compute the byte offset of a field within a struct type.
     ///
+
     /// Uses the type_field_layouts map (populated during type declaration
     /// collection) to find the field's position in the struct, then
     /// computes the offset based on Verum's uniform 64-bit value model
@@ -22615,6 +22835,7 @@ impl VbcCodegen {
 
     /// Compiles forall quantifier: forall x: T. predicate
     ///
+
     /// Supports multiple bindings with optional domain and guard:
     /// - Type-based: `forall x: Int. P(x)`
     /// - Domain-based: `forall x in items. P(x)`
@@ -22633,6 +22854,7 @@ impl VbcCodegen {
 
     /// Compiles exists quantifier: exists x: T. predicate
     ///
+
     /// Supports multiple bindings with optional domain and guard:
     /// - Type-based: `exists x: Int. P(x)`
     /// - Domain-based: `exists x in items. P(x)`
@@ -22712,6 +22934,7 @@ impl VbcCodegen {
 
 /// Analyzer for finding free variables in an expression.
 ///
+
 /// Performs a recursive traversal of the AST to identify variables that:
 /// - Are referenced (appear in identifier expressions)
 /// - Are not locally bound (not parameters, not let-bound within)
@@ -23156,24 +23379,27 @@ impl FreeVarAnalyzer {
 }
 
 /// Map a typed-reference's pointee name to the matching typed-deref
-/// `(FfiSubOpcode, size)` pair.  Returns `Some` when the pointee is a
+/// `(FfiSubOpcode, size)` pair. Returns `Some` when the pointee is a
 /// C primitive smaller than 8 bytes — signals that `*ptr` should emit
 /// a typed deref (`FfiSubOpcode::DerefRawSigned` / `DerefRaw`) rather
 /// than the generic Value-sized `Deref`.
 ///
+
 /// `t` is the inner expression's static type as text, e.g.
 /// `"&mut Int32"`, `"&UInt8"`, `"&Bool"`, `"&unsafe Int8"`.
 ///
+
 /// Closes the codegen tail of #26 — pre-fix `*__error()` (where
 /// `__error: extern fn() -> &mut Int32`) read 8 bytes via `Deref`,
 /// leaking 4 bytes of adjacent TLS bookkeeping into the high half of
-/// `errno()`.  Post-fix `compile_unary[UnOp::Deref]` consults this
+/// `errno()`. Post-fix `compile_unary[UnOp::Deref]` consults this
 /// helper and emits `FfiExtended { DerefRawSigned, size=4 }` for any
 /// `&[mut] Int32` reference.
 ///
+
 /// Pointees ≥ 8 bytes (`Int64`, `UInt64`, `Int`, `Float`, `Float64`)
 /// fall through to `None` — the generic 8-byte `Deref` is correct
-/// for them.  `Float32` is currently unhandled (would need a typed
+/// for them. `Float32` is currently unhandled (would need a typed
 /// load-and-fpext path); falls through to None as well — if user
 /// code derefs an `&Float32`, the upper 4 bytes leak — but that is
 /// an extremely rare FFI shape (most C `float` returns come back via
@@ -23183,7 +23409,7 @@ fn typed_primitive_pointee_deref(
 ) -> Option<(crate::instruction::FfiSubOpcode, u8)> {
     use crate::instruction::FfiSubOpcode;
     let t = t.trim();
-    // Strip the reference prefix.  The order matters: longer prefixes
+    // Strip the reference prefix. The order matters: longer prefixes
     // (e.g. `&unsafe mut`) must be tested before shorter ones
     // (`&unsafe`, `&mut`, `&`).
     let pointee = if let Some(rest) = t.strip_prefix("&unsafe mut ") {
@@ -23207,7 +23433,7 @@ fn typed_primitive_pointee_deref(
         "Int8" | "i8" => Some((FfiSubOpcode::DerefRawSigned, 1)),
         "Int16" | "i16" => Some((FfiSubOpcode::DerefRawSigned, 2)),
         "Int32" | "i32" => Some((FfiSubOpcode::DerefRawSigned, 4)),
-        // Unsigned C primitives + bool/char — zero-extend.  `DerefRaw`'s
+        // Unsigned C primitives + bool/char — zero-extend. `DerefRaw`'s
         // existing default semantics match the unsigned-byte-array
         // invariant (CRC32 / wire-format reads).
         "UInt8" | "u8" | "Byte" => Some((FfiSubOpcode::DerefRaw, 1)),

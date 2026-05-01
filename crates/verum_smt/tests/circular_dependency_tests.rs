@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for circular dependency detection in dependent types
 //!
+
 //! Tests cover:
 //! 1. Simple circular dependencies (A -> B -> A)
 //! 2. Multi-node cycles (A -> B -> C -> A)

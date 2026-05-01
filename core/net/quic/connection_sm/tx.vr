@@ -3,28 +3,32 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, collections, core.encoding.varint,
-//               core.net.quic.{frame, connection_id, version},
-//               core.net.quic.crypto.header_protection
+//  core.net.quic.{frame, connection_id, version},
+//  core.net.quic.crypto.header_protection
 // =============================================================================
 //
+
 // Build a wire datagram carrying one QUIC packet:
 //
-//   1. Compose frames (payload).
-//   2. Allocate packet number from PnSpace.
-//   3. Build header bytes:
-//        - Long: 1 byte first | 4 byte version | dcid_len | dcid | scid_len | scid
-//                + [Initial only: token_len + token] + length (varint, includes PN + payload + tag)
-//                + truncated PN bytes (1..=4)
-//        - Short: 1 byte first | dcid | truncated PN bytes
-//   4. AEAD-seal payload with AAD = full header bytes up to and including
-//      the truncated PN field (RFC 9001 §5.3).
-//   5. Compute HP mask from `sample = ciphertext[4..20]` (counting from
-//      the start of PN bytes, padded with AEAD tag bytes if payload <
-//      16 bytes).
-//   6. Apply HP mask to first byte's low 4/5 bits + truncated PN bytes.
+
+//  1. Compose frames (payload).
+//  2. Allocate packet number from PnSpace.
+//  3. Build header bytes:
+//  - Long: 1 byte first | 4 byte version | dcid_len | dcid | scid_len | scid
+//  + [Initial only: token_len + token] + length (varint, includes PN + payload + tag)
+//  + truncated PN bytes (1..=4)
+//  - Short: 1 byte first | dcid | truncated PN bytes
+//  4. AEAD-seal payload with AAD = full header bytes up to and including
+//  the truncated PN field (RFC 9001 §5.3).
+//  5. Compute HP mask from `sample = ciphertext[4..20]` (counting from
+//  the start of PN bytes, padded with AEAD tag bytes if payload <
+//  16 bytes).
+//  6. Apply HP mask to first byte's low 4/5 bits + truncated PN bytes.
 //
+
 // Output: full datagram bytes ready for UDP send.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.tx;

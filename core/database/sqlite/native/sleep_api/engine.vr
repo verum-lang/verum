@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The engine records how many sleeps were issued + the total
-// requested / actually slept milliseconds.  `floor_ms` lets platforms
+// requested / actually slept milliseconds. `floor_ms` lets platforms
 // with ≥1 ms minimum granularity upgrade tiny requests.
 // =============================================================================
 

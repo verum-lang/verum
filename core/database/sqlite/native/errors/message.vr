@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_errmsg / sqlite3_errstr / sqlite3_error_offset
 //
-// `SqlErrorMessage` is the value returned by sqlite3_errmsg.  It carries:
-//   * the extended code (for sqlite3_extended_errcode),
-//   * the diagnostic text,
-//   * an optional byte-offset into the *current* SQL for parse errors
-//     (sqlite3_error_offset; -1 if not applicable),
-//   * an optional platform errno (sqlite3_system_errno).
+
+// `SqlErrorMessage` is the value returned by sqlite3_errmsg. It carries:
+//  * the extended code (for sqlite3_extended_errcode),
+//  * the diagnostic text,
+//  * an optional byte-offset into the *current* SQL for parse errors
+//  (sqlite3_error_offset; -1 if not applicable),
+//  * an optional platform errno (sqlite3_system_errno).
 // =============================================================================
 
 module core.database.sqlite.native.errors.message;

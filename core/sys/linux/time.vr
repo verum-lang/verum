@@ -8,18 +8,21 @@ module sys.linux.time;
 // Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
+
 // This module provides high-resolution time operations using Linux syscalls:
 // - clock_gettime: Get time from various clock sources
 // - clock_nanosleep: High-precision sleep
 // - gettimeofday: Traditional Unix time (legacy)
 // - rdtsc: Direct CPU timestamp counter access
 //
+
 // Clock sources:
 // - CLOCK_MONOTONIC: Time since boot (not affected by NTP)
 // - CLOCK_REALTIME: Wall-clock time (affected by NTP)
 // - CLOCK_BOOTTIME: Like monotonic but includes suspend time
 // - CLOCK_THREAD_CPUTIME_ID: LinuxThread CPU time
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -184,6 +187,7 @@ implement LinuxInstant {
 
 /// Get time from a specific clock.
 ///
+
 /// # Arguments
 /// * `clock_id` - Clock to query (CLOCK_* constant). C: `clockid_t` (Int32).
 /// * `ts` - Output timespec
@@ -206,6 +210,7 @@ public fn clock_gettime(clock_id: Int32, ts: &mut LinuxTimeTimespec) -> Result<(
 
 /// Get monotonic time in nanoseconds.
 ///
+
 /// This is the primary time source for performance measurement
 /// and timeouts. It is not affected by system time changes.
 public fn monotonic_nanos() -> UInt64 {
@@ -226,6 +231,7 @@ public fn monotonic_millis() -> UInt64 {
 
 /// Get raw monotonic time in nanoseconds.
 ///
+
 /// Like monotonic_nanos but not adjusted by NTP.
 public fn monotonic_raw_nanos() -> UInt64 {
     let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
@@ -235,6 +241,7 @@ public fn monotonic_raw_nanos() -> UInt64 {
 
 /// Get coarse monotonic time in nanoseconds.
 ///
+
 /// Faster but lower resolution (~1ms).
 public fn monotonic_coarse_nanos() -> UInt64 {
     let mut ts = LinuxTimeTimespec { tv_sec: 0, tv_nsec: 0 };
@@ -286,9 +293,11 @@ public const TIMER_ABSTIME: Int = 1;
 
 /// Sleep for a duration (relative time).
 ///
+
 /// # Arguments
 /// * `duration` - Time to sleep
 ///
+
 /// # Returns
 /// Remaining time if interrupted, None if completed.
 public fn sleep(duration: LinuxDuration) -> Maybe<LinuxDuration> {
@@ -313,6 +322,7 @@ public fn sleep(duration: LinuxDuration) -> Maybe<LinuxDuration> {
 
 /// Sleep using a specific clock (absolute or relative time).
 ///
+
 /// # Arguments
 /// * `clock_id` - Clock to use
 /// * `flags` - 0 for relative, TIMER_ABSTIME for absolute
@@ -349,6 +359,7 @@ public fn clock_nanosleep(
 
 /// Sleep until an absolute time.
 ///
+
 /// More precise than relative sleep for periodic wakeups.
 public fn sleep_until(deadline_nanos: UInt64) -> Result<(), OSError> {
     let req = LinuxTimeTimespec {
@@ -375,11 +386,13 @@ public fn sleep_us(us: UInt64) {
 
 /// Read CPU timestamp counter.
 ///
+
 /// Very fast (~10-20 cycles) but:
 /// - Not synchronized across cores (use RDTSCP for that)
 /// - Frequency may vary (use invariant TSC on modern CPUs)
 /// - Not directly convertible to wall time
 ///
+
 /// Best used for micro-benchmarking and elapsed time between
 /// operations on the same core.
 @inline
@@ -390,6 +403,7 @@ public fn rdtsc() -> UInt64 {
 
 /// Read CPU timestamp counter with processor ID.
 ///
+
 /// Like rdtsc but also returns the processor ID, and includes
 /// a serializing instruction to prevent reordering.
 @inline
@@ -401,12 +415,13 @@ public fn rdtscp() -> (UInt64, UInt32) {
 
 /// Serializing fence + TSC read for accurate timing.
 ///
+
 /// Use at start and end of timed region for accurate measurement.
 @inline
 public fn rdtsc_serialized() -> UInt64 {
     // Serialize the timestamp read so prior loads/stores retire first.
-    //   x86_64:  lfence  — serializes subsequent RDTSC on Intel/AMD
-    //   aarch64: isb     — instruction-synchronization barrier
+    //  x86_64: lfence — serializes subsequent RDTSC on Intel/AMD
+    //  aarch64: isb — instruction-synchronization barrier
     @cfg(target_arch = "x86_64") {
         @asm("lfence");
     }
@@ -422,6 +437,7 @@ public fn rdtsc_serialized() -> UInt64 {
 
 /// Measure elapsed time for a closure.
 ///
+
 /// Returns (result, duration in nanoseconds).
 public fn time_it<T>(f: fn() -> T) -> (T, LinuxDuration) {
     let start = LinuxInstant.now();

@@ -7,16 +7,18 @@
 // under the hood. Request/response messages follow the SPIFFE Workload
 // API proto3 definitions (SpiffeWorkloadAPI service).
 //
+
 // Protocol:
-//   UDS path  : env SPIFFE_ENDPOINT_SOCKET, or /tmp/spire-agent/public/api.sock
-//   Scheme    : gRPC (HTTP/2)
-//   Required  : "workload.spiffe.io: true" header on every request
+//  UDS path : env SPIFFE_ENDPOINT_SOCKET, or /tmp/spire-agent/public/api.sock
+//  Scheme : gRPC (HTTP/2)
+//  Required : "workload.spiffe.io: true" header on every request
 //
+
 // Methods:
-//   /SpiffeWorkloadAPI/FetchX509SVID    — streaming X.509-SVID updates
-//   /SpiffeWorkloadAPI/FetchJWTSVID     — unary signed JWT
-//   /SpiffeWorkloadAPI/FetchJWTBundles  — streaming JWKS updates
-//   /SpiffeWorkloadAPI/ValidateJWTSVID  — unary JWT verification
+//  /SpiffeWorkloadAPI/FetchX509SVID — streaming X.509-SVID updates
+//  /SpiffeWorkloadAPI/FetchJWTSVID — unary signed JWT
+//  /SpiffeWorkloadAPI/FetchJWTBundles — streaming JWKS updates
+//  /SpiffeWorkloadAPI/ValidateJWTSVID — unary JWT verification
 // =============================================================================
 
 module core.security.spiffe.workload_api;

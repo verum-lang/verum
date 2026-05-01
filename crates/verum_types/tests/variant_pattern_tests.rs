@@ -14,8 +14,10 @@
 )]
 // Comprehensive tests for variant pattern matching (P0 Blocker #10)
 //
+
 // Sum types (variants): "type T is A | B(payload) | C { fields }" for algebraic data types (Variants)
 //
+
 // This test suite validates:
 // 1. Simple variant patterns (None, Some)
 // 2. Tuple-style variants: Ok(x), Error(code, msg)
@@ -652,8 +654,8 @@ fn test_variant_pattern_in_match_expression() {
     let maybe_int = Type::Variant(variants);
 
     // match value {
-    //     Some(x) => x + 1,
-    //     None => 0
+    //  Some(x) => x + 1,
+    //  None => 0
     // }
 
     // Create scrutinee: value

@@ -6,15 +6,18 @@ module core.database.sqlite.native.l4_vdbe.interpreter;
 // Layer: 4
 // Spec: sqlite-native.md §11.3
 //
+
 // The interpreter is deliberately *step-based* rather than batched —
 // SQLite's sqlite3_step() returns one row at a time and the caller
 // controls iteration. Our `step(&mut VdbeState)` returns a `StepResult`:
 //
-//   * `Row(reg_start, n_cols)` — caller should emit a result row
-//   * `Done`                    — Halt(0) reached, program complete
-//   * `Error(code, msg)`        — Halt(nonzero) or runtime error
-//   * `Yield`                   — no visible effect; call step() again
+
+//  * `Row(reg_start, n_cols)` — caller should emit a result row
+//  * `Done` — Halt(0) reached, program complete
+//  * `Error(code, msg)` — Halt(nonzero) or runtime error
+//  * `Yield` — no visible effect; call step() again
 //
+
 // This module implements the subset of opcodes that don't require
 // cursor I/O (arithmetic, control flow, register moves, comparisons).
 // Cursor-touching opcodes — Column, Next, SeekGE, Insert — are stubbed
@@ -75,7 +78,7 @@ public type affine VdbeState is {
     cursors: CursorTable,        // live cursor pipeline (opened lazily)
     /// Mutation log — captured by Insert/Delete/UpdateRow opcodes,
     /// drained by the L6 writeback bridge to fire update_hook
-    /// callbacks.  Empty for read-only programs.
+    /// callbacks. Empty for read-only programs.
     mutations: List<RowMutation>,
     /// Active parameter bindings — written exclusively at the L6
     /// `PreparedStatement.step()` boundary; read by `Variable` /
@@ -106,7 +109,7 @@ implement VdbeState {
     /// Borrow the mutation log — bridge consumers call this to fire
     /// update_hooks.
     public fn mutations_ref(&self) -> &List<RowMutation> { &self.mutations }
-    /// Drain the mutation log.  Bridge calls this to consume + fire
+    /// Drain the mutation log. Bridge calls this to consume + fire
     /// hooks, leaving the state ready for a fresh program (re-run on
     /// the same statement).
     public fn drain_mutations(&mut self) -> List<RowMutation> {
@@ -264,11 +267,11 @@ fn arith_rem(a: &Register, b: &Register) -> Register {
 fn arith_div(a: &Register, b: &Register) -> Register {
     // SQLite divides as REAL for REAL operands, INT otherwise with 0
     // protection (0 / 0 = NULL). Two integer-overflow edge cases:
-    //   * `bi == 0`        — return NULL per SQLite spec.
-    //   * `Int64.MIN / -1` — quotient 2^63 unrepresentable in Int64;
-    //     x86 raises #DE, aarch64 wraps to Int64.MIN. Promote to
-    //     REAL (`9.223372036854776e+18`) matching SQLite's
-    //     OP_Divide overflow-promotion behaviour.
+    //  * `bi == 0` — return NULL per SQLite spec.
+    //  * `Int64.MIN / -1` — quotient 2^63 unrepresentable in Int64;
+    //  x86 raises #DE, aarch64 wraps to Int64.MIN. Promote to
+    //  REAL (`9.223372036854776e+18`) matching SQLite's
+    //  OP_Divide overflow-promotion behaviour.
     match (a, b) {
         (RReal(_), _) | (_, RReal(_)) => {
             let bx = to_real(b);
@@ -312,6 +315,7 @@ fn cmp_eq(a: &Register, b: &Register) -> Bool {
 /// Execute one opcode. Advances `pc` to the next instruction unless the
 /// opcode jumps. Returns the step outcome for the caller to dispatch on.
 ///
+
 /// Cursor-bound opcodes return `Yield` (still a no-op) until the pager
 /// actor IPC is wired; callers can special-case by inspecting the
 /// current opcode via `program.get_opcode(state.pc)`.
@@ -675,7 +679,7 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                 i = i + 1;
             }
             let _ = state.cursors.append_row(cursor_id, row);
-            // Record the mutation for the update_hook.  rowid
+            // Record the mutation for the update_hook. rowid
             // resolution: prefer the `key_reg` content if it's an
             // RInt/RRowId; fall back to the cursor's most-recent
             // assigned rowid (1-based — matches NewRowid emission).
@@ -1522,10 +1526,12 @@ fn trim_ascii(s: &Text, left: Bool, right: Bool) -> Text {
 /// any characters in `chars` (treated as a SET, not a substring) from
 /// the requested ends of `s`.
 ///
+
 /// Per SQL spec: `TRIM('xyhelloy', 'xy')` returns `"hello"` because
-/// the SET {x, y} is stripped from both ends.  Empty `chars` is a
+/// the SET {x, y} is stripped from both ends. Empty `chars` is a
 /// no-op (matches SQLite behaviour).
 ///
+
 /// ASCII-only — multi-byte chars in `chars` are matched byte-by-byte,
 /// which is correct for ASCII trim sets and matches SQLite's behaviour
 /// (SQLite's `TRIM` is byte-oriented, not codepoint-oriented).
@@ -1548,7 +1554,7 @@ fn trim_with_chars(s: &Text, chars: &Text, left: Bool, right: Bool) -> Text {
     out
 }
 
-/// Linear search through the trim-char set.  At typical SQL trim
+/// Linear search through the trim-char set. At typical SQL trim
 /// set sizes (≤ 16 chars) this beats a HashSet by avoiding the
 /// hash + allocation cost.
 fn byte_in_set(b: Byte, set: &List<Byte>) -> Bool {

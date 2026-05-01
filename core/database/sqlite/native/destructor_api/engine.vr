@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Tracks static-refs / transient-copies / custom-callbacks fired so
 // tooling can audit allocator balance between bind/result pairs.
 // =============================================================================

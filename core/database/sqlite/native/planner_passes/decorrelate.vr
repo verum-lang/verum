@@ -3,17 +3,23 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.5
 //
+
 // Transform:
 //
-//   SELECT … FROM outer_t WHERE outer_t.x IN (SELECT y FROM inner_t WHERE p)
+
+//  SELECT … FROM outer_t WHERE outer_t.x IN (SELECT y FROM inner_t WHERE p)
 //
+
 // becomes
 //
-//   SELECT … FROM outer_t SEMI JOIN inner_t ON outer_t.x = inner_t.y
-//                                         AND p
+
+//  SELECT … FROM outer_t SEMI JOIN inner_t ON outer_t.x = inner_t.y
+//  AND p
 //
+
 // `EXISTS` and `NOT EXISTS` become SEMI / ANTI joins respectively.
 //
+
 // Only **uncorrelated** subqueries are decorrelated by this pass —
 // the magic-sets pass handles correlated cases.
 // =============================================================================
@@ -56,12 +62,14 @@ fn walk(node: PvNode, edits: &mut Int) -> PvNode {
             // child as left input and the subquery body as right.
             // We model that as Join(SEMI, child, subquery.body).
             //
+
             // We can't introspect the predicate text here without
             // a parser; the L5 codegen tags filters that *contain*
             // a subquery via the `is_correlated` flag false +
             // surrounding context; we therefore rely on the
             // subquery being a sibling node, not embedded in text.
             //
+
             // For the pure-Verum view we expose, the inner subquery
             // appears as a child of the filter via `predicate_sql`.
             // Until codegen surfaces it as a tree, we just pass

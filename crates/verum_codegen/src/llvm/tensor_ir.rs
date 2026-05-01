@@ -1,27 +1,30 @@
 //! Tensor runtime as LLVM IR — replaces verum_tensor.c (3,709 LOC, ~225 functions).
 //!
+
 //! Uses LLVM intrinsics for math (llvm.sqrt.f64, llvm.exp.f64, etc.) instead of
 //! software approximations, giving native hardware performance.
 //!
+
 //! Strategy:
-//!   - Core ~30 tensor functions: full LLVM IR bodies
-//!   - Math intrinsics: direct LLVM intrinsic calls
-//!   - Remaining ~195 functions: extern declarations (linked from C if needed)
+//!  - Core ~30 tensor functions: full LLVM IR bodies
+//!  - Math intrinsics: direct LLVM intrinsic calls
+//!  - Remaining ~195 functions: extern declarations (linked from C if needed)
 //!
+
 //! Tensor Handle System:
-//!   A tensor handle (i64) is a pointer to a heap-allocated header:
-//!   ```text
-//!   VerumTensor {           // sizeof = 152 bytes (matching C layout)
-//!     refcount: u32,        // offset  0
-//!     dtype:    u8,         // offset  4
-//!     ndim:     u8,         // offset  5
-//!     _pad:     u16,        // offset  6
-//!     shape:    [i64; 8],   // offset  8
-//!     strides:  [i64; 8],   // offset 72
-//!     numel:    i64,        // offset 136
-//!     data:     *f64,       // offset 144
-//!   }
-//!   ```
+//!  A tensor handle (i64) is a pointer to a heap-allocated header:
+//!  ```text
+//!  VerumTensor { // sizeof = 152 bytes (matching C layout)
+//!  refcount: u32, // offset 0
+//!  dtype: u8, // offset 4
+//!  ndim: u8, // offset 5
+//!  _pad: u16, // offset 6
+//!  shape: [i64; 8], // offset 8
+//!  strides: [i64; 8], // offset 72
+//!  numel: i64, // offset 136
+//!  data: *f64, // offset 144
+//!  }
+//!  ```
 
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
@@ -177,25 +180,26 @@ impl<'ctx> TensorIR<'ctx> {
     }
 
     /// Compute a pointer to a tensor-header field at the given
-    /// byte offset.  Single-source SAFETY contract for all the
+    /// byte offset. Single-source SAFETY contract for all the
     /// header load / store helpers below (#310 consolidation —
     /// previously each helper duplicated the same unsafe GEP).
     ///
+
     /// SAFETY of the underlying `build_in_bounds_gep`:
-    ///   1. `base_ptr` is a tensor-header allocation produced by
-    ///      `emit_alloca_tensor_header` (or equivalent), which
-    ///      always reserves enough bytes for every documented
-    ///      header field.
-    ///   2. `byte_offset` is one of the canonical header-field
-    ///      offsets defined in the tensor IR layout (see
-    ///      `tensor_layout::FIELD_*` consts).  Every call site
-    ///      passes a layout const — never a user-controlled
-    ///      value.
-    ///   3. The result is a pointer back into the same allocation
-    ///      with provenance preserved; subsequent loads/stores
-    ///      through it stay in-bounds because the tensor header
-    ///      cannot grow or shrink (it's a fixed-size struct
-    ///      lowered to i8 storage).
+    ///  1. `base_ptr` is a tensor-header allocation produced by
+    ///  `emit_alloca_tensor_header` (or equivalent), which
+    ///  always reserves enough bytes for every documented
+    ///  header field.
+    ///  2. `byte_offset` is one of the canonical header-field
+    ///  offsets defined in the tensor IR layout (see
+    ///  `tensor_layout::FIELD_*` consts). Every call site
+    ///  passes a layout const — never a user-controlled
+    ///  value.
+    ///  3. The result is a pointer back into the same allocation
+    ///  with provenance preserved; subsequent loads/stores
+    ///  through it stay in-bounds because the tensor header
+    ///  cannot grow or shrink (it's a fixed-size struct
+    ///  lowered to i8 storage).
     fn header_field_ptr_in_bounds(
         &self,
         builder: &verum_llvm::builder::Builder<'ctx>,

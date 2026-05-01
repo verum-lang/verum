@@ -2,8 +2,10 @@
 // cbpv.vr — Call-by-Push-Value
 // =============================================================================
 //
+
 // Layer: Standard Library / Evaluation
 //
+
 // User-facing surface for the CBPV analysis core (`verum_types::
 // cbpv`). Levy's call-by-push-value separates *values* from
 // *computations*. Both call-by-value and call-by-name λ-calculi
@@ -11,28 +13,35 @@
 // gain a clean denotational semantics where they attach to
 // computations rather than values.
 //
+
 // CBPV is the canonical setting for monadic semantics, algebraic
 // effects research, and intermediate representations.
 //
+
 // ## Syntax
 //
+
 // ```text
-//     V ::= x | λx. C | thunk C       (values)
-//     C ::= return V                  (lift value to trivial computation)
-//         | V to x. C                 (sequence: bind producer's value)
-//         | force V
-//         | V₁ V₂                      (application — V₁ is a thunk-of-fn)
+//  V ::= x | λx. C | thunk C (values)
+//  C ::= return V (lift value to trivial computation)
+//  | V to x. C (sequence: bind producer's value)
+//  | force V
+//  | V₁ V₂ (application — V₁ is a thunk-of-fn)
 // ```
 //
+
 // ## Reductions
 //
+
 // ```text
-//     force (thunk C)        ↦ C
-//     V₁ V₂  where  V₁ = λx. body  ↦  body[x := V₂]
+//  force (thunk C) ↦ C
+//  V₁ V₂ where V₁ = λx. body ↦ body[x := V₂]
 // ```
 //
+
 // ## Encoding note
 //
+
 // Verum's surface syntax requires explicit `Heap<T>` indirection
 // for self-referential ADTs, and mutual recursion between two
 // ADTs through Heap can be expensive to type-check. We collapse
@@ -40,6 +49,7 @@
 // `CbpvTerm` with a `kind` discriminator (`Value` / `Computation`)
 // — semantically identical, more friendly to the checker.
 //
+
 // =============================================================================
 
 module core.eval.cbpv;
@@ -255,19 +265,21 @@ public type CbpvStep is
 /// One small-step reduction in left-to-right call-by-push-value
 /// evaluation order:
 ///
+
 /// ```text
-///     force (thunk C)        ↦ C                   (force-thunk)
-///     return V to x. C       ↦ C[x := V]           (sequence-bind)
-///     (λx. C) V              ↦ C[x := V]           (β)
+///  force (thunk C) ↦ C (force-thunk)
+///  return V to x. C ↦ C[x := V] (sequence-bind)
+///  (λx. C) V ↦ C[x := V] (β)
 /// ```
 ///
+
 /// Reduction looks beneath congruences (under `force`, under the
 /// producer side of `SeqTo`, under `App` operands) so the
 /// reduction is a confluent rewrite system on closed terms — not
 /// just a top-level rewrite.
 public fn cbpv_step(t: CbpvTerm) -> CbpvStep {
     match t {
-        // force (thunk C)  ↦  C
+        // force (thunk C) ↦ C
         CbpvTerm.Force { value } => {
             match *value {
                 CbpvTerm.Thunk { inner } => CbpvStep.Stepped { next: *inner },
@@ -279,7 +291,7 @@ public fn cbpv_step(t: CbpvTerm) -> CbpvStep {
                 },
             }
         },
-        // return V to x. C  ↦  C[x := V]
+        // return V to x. C ↦ C[x := V]
         CbpvTerm.SeqTo { producer, binder, body } => {
             match *producer {
                 CbpvTerm.Return { value } =>
@@ -298,7 +310,7 @@ public fn cbpv_step(t: CbpvTerm) -> CbpvStep {
                 },
             }
         },
-        // (λx. body) V  ↦  body[x := V]
+        // (λx. body) V ↦ body[x := V]
         CbpvTerm.App { func, arg } => {
             match *func {
                 CbpvTerm.Lam { param, body } =>
@@ -339,6 +351,7 @@ public fn cbpv_step(t: CbpvTerm) -> CbpvStep {
 /// inputs with non-terminating reduction (e.g. the CBPV
 /// ω = thunk (force x) trick).
 ///
+
 /// Returns `(final, steps)` where `steps` is the number of
 /// reduction steps actually fired. `steps < gas` means a normal
 /// form was reached; `steps == gas` means the budget was
@@ -372,6 +385,7 @@ type AlphaEntry is { name: Text, index: Int };
 /// Look up the de-Bruijn level for `name` in the current renaming
 /// context. Returns -1 if the variable is free.
 ///
+
 /// SOUNDNESS: walks the context from MOST-RECENT (back of list) to
 /// OLDEST (front). Binders are pushed onto the back at descent;
 /// shadowing means an inner-scope `x` rebinds the name and the
@@ -400,6 +414,7 @@ fn alpha_lookup(ctx: List<AlphaEntry>, name: Text) -> Int {
 /// of bound variables. Free variables must match by name; bound
 /// variables are compared by binding depth ("de Bruijn level").
 ///
+
 /// Implementation: walk both terms in lock-step, threading two
 /// renaming contexts. At each binder we push (binder_name,
 /// current_depth) onto each side; comparing variables looks up
@@ -495,7 +510,7 @@ implement Debug for CbpvKind {
 }
 
 implement Eq for CbpvTerm {
-    /// Syntactic equality on CBPV terms.  This is **not**
+    /// Syntactic equality on CBPV terms. This is **not**
     /// α-equivalence — for α-equivalence use `cbpv_alpha_eq` (or
     /// `cbpv_alpha_eq_ctx` for the context-tracking variant).
     /// Two terms with different bound-variable names compare
@@ -529,13 +544,13 @@ implement Eq for CbpvTerm {
 
 implement Display for CbpvTerm {
     /// Renders in standard call-by-push-value notation:
-    ///   `Var { name }`                    → `x`
-    ///   `Lam { param, body }`             → `λparam. body`
-    ///   `Thunk { inner }`                 → `thunk C`
-    ///   `Return { value }`                → `return V`
-    ///   `SeqTo { producer, binder, body }`→ `producer to binder. body`
-    ///   `Force { value }`                 → `force V`
-    ///   `App { func, arg }`               → `func arg`
+    ///  `Var { name }` → `x`
+    ///  `Lam { param, body }` → `λparam. body`
+    ///  `Thunk { inner }` → `thunk C`
+    ///  `Return { value }` → `return V`
+    ///  `SeqTo { producer, binder, body }`→ `producer to binder. body`
+    ///  `Force { value }` → `force V`
+    ///  `App { func, arg }` → `func arg`
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             CbpvTerm.Var { name } =>

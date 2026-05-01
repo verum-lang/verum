@@ -5,56 +5,65 @@
 // Dependencies: core, encoding.varint, collections
 // =============================================================================
 //
+
 // RFC 9000 §19 defines 20 frame types. Each frame on the wire is:
 //
-//   QuicFrame {
-//       Type (i),        -- QUIC varint
-//       Type-Specific Fields ...,
-//   }
+
+//  QuicFrame {
+//  Type (i), -- QUIC varint
+//  Type-Specific Fields ...,
+//  }
 //
+
 // The type code is a QUIC-varint; types 0x00..=0x1e are in common use,
 // 0x30/0x31 are DATAGRAM (RFC 9221 extension). This module implements
 // every standard frame type plus DATAGRAM.
 //
+
 // # QuicFrame categorisation (§19)
 //
-//   Ack-eliciting?     Most frames are. PADDING, ACK, CONNECTION_CLOSE
-//                      are not. Only ack-eliciting frames reset the
-//                      loss-detection timer.
-//   Probing?           PATH_CHALLENGE, PATH_RESPONSE, NEW_CONNECTION_ID,
-//                      and PADDING are path-probing; they can be sent
-//                      on non-validated paths.
-//   Flow-controlled?   STREAM contributes to both connection- and
-//                      stream-level FC; others are exempt.
+
+//  Ack-eliciting? Most frames are. PADDING, ACK, CONNECTION_CLOSE
+//  are not. Only ack-eliciting frames reset the
+//  loss-detection timer.
+//  Probing? PATH_CHALLENGE, PATH_RESPONSE, NEW_CONNECTION_ID,
+//  and PADDING are path-probing; they can be sent
+//  on non-validated paths.
+//  Flow-controlled? STREAM contributes to both connection- and
+//  stream-level FC; others are exempt.
 //
+
 // Each QuicFrame variant exposes `is_ack_eliciting()` / `is_probing()` /
 // `is_flow_controlled()` for the connection logic to query without
 // re-implementing the table.
 //
+
 // # QuicFrame-type codes (RFC 9000 §19)
 //
-//   0x00        PADDING
-//   0x01        PING
-//   0x02..0x03  ACK (with / without ECN counts)
-//   0x04        RESET_STREAM
-//   0x05        STOP_SENDING
-//   0x06        CRYPTO
-//   0x07        NEW_TOKEN
-//   0x08..0x0f  STREAM (8 type-bits encode OFF, LEN, FIN flags)
-//   0x10        MAX_DATA
-//   0x11        MAX_STREAM_DATA
-//   0x12..0x13  MAX_STREAMS (bidi / uni)
-//   0x14        DATA_BLOCKED
-//   0x15        STREAM_DATA_BLOCKED
-//   0x16..0x17  STREAMS_BLOCKED (bidi / uni)
-//   0x18        NEW_CONNECTION_ID
-//   0x19        RETIRE_CONNECTION_ID
-//   0x1a        PATH_CHALLENGE
-//   0x1b        PATH_RESPONSE
-//   0x1c..0x1d  CONNECTION_CLOSE (transport / application)
-//   0x1e        HANDSHAKE_DONE
-//   0x30..0x31  DATAGRAM (RFC 9221, with / without LEN)
+
+//  0x00 PADDING
+//  0x01 PING
+//  0x02..0x03 ACK (with / without ECN counts)
+//  0x04 RESET_STREAM
+//  0x05 STOP_SENDING
+//  0x06 CRYPTO
+//  0x07 NEW_TOKEN
+//  0x08..0x0f STREAM (8 type-bits encode OFF, LEN, FIN flags)
+//  0x10 MAX_DATA
+//  0x11 MAX_STREAM_DATA
+//  0x12..0x13 MAX_STREAMS (bidi / uni)
+//  0x14 DATA_BLOCKED
+//  0x15 STREAM_DATA_BLOCKED
+//  0x16..0x17 STREAMS_BLOCKED (bidi / uni)
+//  0x18 NEW_CONNECTION_ID
+//  0x19 RETIRE_CONNECTION_ID
+//  0x1a PATH_CHALLENGE
+//  0x1b PATH_RESPONSE
+//  0x1c..0x1d CONNECTION_CLOSE (transport / application)
+//  0x1e HANDSHAKE_DONE
+//  0x30..0x31 DATAGRAM (RFC 9221, with / without LEN)
 //
+
 // =============================================================================
 
 module core.net.quic.frame;
@@ -117,12 +126,13 @@ fn vfail<T>(_: VarintError) -> Result<T, FrameError> { Err(FrameError.VarintFail
 /// A single ACK range. The struct-level invariant `smallest <= largest`
 /// is enforced at construction time via refinement on `largest`.
 ///
+
 /// Spec: RFC 9000 §19.3 — an ACK range [smallest..=largest] must be
-///       non-negative (largest >= smallest).
+///  non-negative (largest >= smallest).
 public type AckRange is {
     /// Smallest packet number in this range.
     smallest: UInt64,
-    /// Largest packet number in this range.  Carries the structural
+    /// Largest packet number in this range. Carries the structural
     /// refinement that it must be >= `smallest` at construction.
     /// The struct-field refinement path is live: see
     /// `crates/verum_types/src/infer.rs` — `check_refinement_for_expanded_alias`.

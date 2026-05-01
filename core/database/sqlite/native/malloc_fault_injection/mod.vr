@@ -4,18 +4,21 @@
 // Layer: 7 (façade — SQLITE_TESTCTRL_FAULT_INSTALL)
 // Spec: SQLite test-control fault hook.
 //
+
 // SQLite's test harness installs a fault schedule that fires on
-// specific malloc invocation counts.  Three scheduling modes:
+// specific malloc invocation counts. Three scheduling modes:
 //
-//   * Disabled                — every malloc succeeds
-//   * After-Nth               — first N mallocs succeed; (N+1)th fails
-//                               permanently
-//   * Every-Nth               — fail on each Nth malloc in perpetuity
-//   * Always                  — every malloc fails
+
+//  * Disabled — every malloc succeeds
+//  * After-Nth — first N mallocs succeed; (N+1)th fails
+//  permanently
+//  * Every-Nth — fail on each Nth malloc in perpetuity
+//  * Always — every malloc fails
 //
+
 // Submodules:
-//   * `schedule`  — MallocFaultSchedule sum
-//   * `engine`    — ticker that issues the pass/fail verdict
+//  * `schedule` — MallocFaultSchedule sum
+//  * `engine` — ticker that issues the pass/fail verdict
 // =============================================================================
 
 module core.database.sqlite.native.malloc_fault_injection;

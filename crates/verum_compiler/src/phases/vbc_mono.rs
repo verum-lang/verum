@@ -1,62 +1,67 @@
 //! VBC Monomorphization Phase
 //!
+
 //! This phase specializes generic VBC functions with concrete type arguments.
 //! It is Phase 6 in the VBC-first pipeline.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! VBC Module (with generics)
-//!       │
-//!       ▼
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                      MONOMORPHIZATION PIPELINE                              │
+//! │ MONOMORPHIZATION PIPELINE │
 //! ├─────────────────────────────────────────────────────────────────────────────┤
-//! │                                                                             │
-//! │  ┌─────────────────────────────────────────────────────────────────────┐   │
-//! │  │                    INSTANTIATION GRAPH                               │   │
-//! │  │                  (from type checking)                                │   │
-//! │  │                                                                      │   │
-//! │  │  [(List.new, [Int]), (List.push, [Int]), (List.new, [MyStruct]), ...]│   │
-//! │  └─────────────────────────────────────────────────────────────────────┘   │
-//! │                                    │                                        │
-//! │                                    ▼                                        │
-//! │  ┌─────────────────────────────────────────────────────────────────────┐   │
-//! │  │                      RESOLUTION PHASE                                │   │
-//! │  │                                                                      │   │
-//! │  │  For each (fn_id, type_args):                                       │   │
-//! │  │    1. Check stdlib precompiled → FOUND → use                        │   │
-//! │  │    2. Check persistent cache → VALID → use                          │   │
-//! │  │    3. MISS → schedule for specialization                            │   │
-//! │  └─────────────────────────────────────────────────────────────────────┘   │
-//! │                                    │                                        │
-//! │                                    ▼                                        │
-//! │  ┌─────────────────────────────────────────────────────────────────────┐   │
-//! │  │                   SPECIALIZATION PHASE                               │   │
-//! │  │                                                                      │   │
-//! │  │  For each unresolved (fn_id, type_args):                            │   │
-//! │  │    1. Load generic VBC                                               │   │
-//! │  │    2. Apply type substitution                                        │   │
-//! │  │    3. Optimize specialized VBC                                       │   │
-//! │  │    4. Cache result                                                   │   │
-//! │  └─────────────────────────────────────────────────────────────────────┘   │
-//! │                                    │                                        │
-//! │                                    ▼                                        │
-//! │  ┌─────────────────────────────────────────────────────────────────────┐   │
-//! │  │                      MERGE PHASE                                     │   │
-//! │  │                                                                      │   │
-//! │  │  Combine:                                                            │   │
-//! │  │    - User module VBC                                                 │   │
-//! │  │    - Stdlib precompiled specializations                             │   │
-//! │  │    - Newly monomorphized functions                                   │   │
-//! │  │  → Final monomorphized VBC module                                   │   │
-//! │  └─────────────────────────────────────────────────────────────────────┘   │
-//! │                                                                             │
+//! │ │
+//! │ ┌─────────────────────────────────────────────────────────────────────┐ │
+//! │ │ INSTANTIATION GRAPH │ │
+//! │ │ (from type checking) │ │
+//! │ │ │ │
+//! │ │ [(List.new, [Int]), (List.push, [Int]), (List.new, [MyStruct]), ...]│ │
+//! │ └─────────────────────────────────────────────────────────────────────┘ │
+//! │ │ │
+//! │ ▼ │
+//! │ ┌─────────────────────────────────────────────────────────────────────┐ │
+//! │ │ RESOLUTION PHASE │ │
+//! │ │ │ │
+//! │ │ For each (fn_id, type_args): │ │
+//! │ │ 1. Check stdlib precompiled → FOUND → use │ │
+//! │ │ 2. Check persistent cache → VALID → use │ │
+//! │ │ 3. MISS → schedule for specialization │ │
+//! │ └─────────────────────────────────────────────────────────────────────┘ │
+//! │ │ │
+//! │ ▼ │
+//! │ ┌─────────────────────────────────────────────────────────────────────┐ │
+//! │ │ SPECIALIZATION PHASE │ │
+//! │ │ │ │
+//! │ │ For each unresolved (fn_id, type_args): │ │
+//! │ │ 1. Load generic VBC │ │
+//! │ │ 2. Apply type substitution │ │
+//! │ │ 3. Optimize specialized VBC │ │
+//! │ │ 4. Cache result │ │
+//! │ └─────────────────────────────────────────────────────────────────────┘ │
+//! │ │ │
+//! │ ▼ │
+//! │ ┌─────────────────────────────────────────────────────────────────────┐ │
+//! │ │ MERGE PHASE │ │
+//! │ │ │ │
+//! │ │ Combine: │ │
+//! │ │ - User module VBC │ │
+//! │ │ - Stdlib precompiled specializations │ │
+//! │ │ - Newly monomorphized functions │ │
+//! │ │ → Final monomorphized VBC module │ │
+//! │ └─────────────────────────────────────────────────────────────────────┘ │
+//! │ │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Implementation
 //!
+
 //! This phase delegates to the industrial-grade monomorphization implementation
 //! in `verum_vbc::mono`, which provides:
 //! - `InstantiationGraph` - dependency tracking with topological ordering
@@ -65,6 +70,7 @@
 //! - `SpecializationOptimizer` - constant folding, DCE, peephole optimization
 //! - `ModuleMerger` - final module assembly
 //!
+
 //! VBC monomorphization: specializes generic functions for concrete type
 //! arguments, producing type-specific VBC bytecode for efficient execution.
 
@@ -90,9 +96,11 @@ use verum_vbc::types::TypeRef;
 
 /// VBC monomorphization phase.
 ///
+
 /// Specializes generic VBC functions with concrete type arguments.
 /// This is a required step before interpretation or further lowering to MLIR.
 ///
+
 /// Uses the industrial-grade implementation from `verum_vbc::mono`.
 pub struct VbcMonomorphizationPhase {
     /// Monomorphization cache directory.
@@ -173,9 +181,11 @@ impl VbcMonomorphizationPhase {
 
     /// Monomorphize a VBC module, specializing generic functions with concrete types.
     ///
+
     /// This is the public entry point for the AOT compilation path.
     /// Wraps the internal `process_module()` logic with a `VbcModuleData` wrapper.
     ///
+
     /// Returns the monomorphized module on success, or diagnostic errors on failure.
     pub fn monomorphize(
         &mut self,

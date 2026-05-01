@@ -5,10 +5,12 @@
 // Spec: internal/specs/database.md §5.4
 // =============================================================================
 //
+
 // Type-level access control. `Database<DbRead>` exposes `.query` only;
 // `Database<DbReadWriteTx>` exposes the full surface; misuse is a
 // compile error, not a runtime check.
 //
+
 // We model capabilities as phantom marker types. The wrapper
 // `Database<C>` carries the marker through `using [Database<C>]`
 // context; method bodies are gated on capability bounds.
@@ -102,12 +104,15 @@ implement CapabilitySet {
 // Marker types — phantom carriers for compile-time access control.
 // -----------------------------------------------------------------------------
 //
+
 // User code annotates the `Database<C>` capability they need:
 //
-//     async fn analytics(_db: &Database<DbRead>) using [Logger] {
-//         _db.query(sql#"...").await
-//     }
+
+//  async fn analytics(_db: &Database<DbRead>) using [Logger] {
+//  _db.query(sql#"...").await
+//  }
 //
+
 // Calling a method that requires `DbWrite` on a `Database<DbRead>`
 // fails to type-check.
 // -----------------------------------------------------------------------------

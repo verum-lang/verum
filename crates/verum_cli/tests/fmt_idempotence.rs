@@ -1,5 +1,6 @@
 //! Idempotence contract: `fmt(fmt(x)) == fmt(x)` for every fixture.
 //!
+
 //! A formatter that doesn't reach a fixed point in one pass is
 //! broken — running `verum fmt` after another `verum fmt` would
 //! produce a diff, breaking format-on-save and CI's `fmt --check`

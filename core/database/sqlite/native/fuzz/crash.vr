@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.6 (fuzz harness)
 //
+
 // `CrashBucket` deduplicates by signature so 1000 hits of the same
 // bug don't drown out the second bug. Signature is the panic message
 // truncated + first stack frame; close enough that "two crashes that

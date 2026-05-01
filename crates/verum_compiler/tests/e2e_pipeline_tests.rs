@@ -14,18 +14,23 @@
 )]
 //! Comprehensive End-to-End Integration Tests for Verum Compiler Pipeline
 //!
+
 //! Tests the complete compilation pipeline: parse → typecheck → codegen → execute
 //!
+
 //! ## Test Coverage
 //!
+
 //! 1. **Simple Function Execution** - Basic compilation and execution flow
 //! 2. **Refinement Types** - Refinement type checking through full pipeline
 //! 3. **CBGR Checks** - Verification that CBGR checks are inserted in compiled code
 //! 4. **Context System** - Dependency injection end-to-end
 //! 5. **Protocol Dispatch** - Protocol method dispatch through compilation
 //!
+
 //! ## Architecture
 //!
+
 //! Each test follows the pipeline:
 //! - **Phase 1**: Lexing & Parsing (verum_fast_parser)
 //! - **Phase 2**: Type Checking (verum_types)
@@ -33,6 +38,7 @@
 //! - **Phase 4**: Code Generation (verum_codegen)
 //! - **Phase 5**: Execution (verum_runtime)
 //!
+
 //! Pipeline: Phase 0 (stdlib prep) -> Phase 1 (lex/parse) -> Phase 2 (meta registry) ->
 //! Phase 3 (macro expansion) -> Phase 3a (contract verification) -> Phase 4 (semantic
 //! analysis) -> Phase 4a (autodiff) -> Phase 5 (VBC codegen) -> Phase 6 (optimization)
@@ -1096,6 +1102,7 @@ fn test_unicode_in_strings() {
 
 /// Test deeply nested control flow structures
 ///
+
 /// Spawns a separate thread with a large stack to handle deep recursion.
 /// The default test thread stack is often too small for deeply nested AST processing.
 #[test]

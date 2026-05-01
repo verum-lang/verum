@@ -1,36 +1,47 @@
 //! LSP-specific error recovery extensions.
 //!
+
 //! This module extends the base recovery infrastructure from `verum_fast_parser`
 //! with LSP-specific features:
 //!
+
 //! - **Recovery Sets**: Define which tokens can start valid constructs for grammar rules
 //! - **Event-Based Recovery**: Create ERROR nodes for unparseable content
 //! - **TokenKind to SyntaxKind Mapping**: Bridge between lexer and syntax tree
 //!
+
 //! For base recovery types (Delimiter, SyncPoint, RecoveryStrategy, RecoveryContext),
 //! see `verum_fast_parser::recovery`.
 //!
+
 //! # Event-Based Recovery
 //!
+
 //! The event-based recovery system integrates with the marker/precede pattern:
 //!
+
 //! ```text
 //! Source → Events → GreenTree (with ERROR nodes) → AstSink → Module
 //! ```
 //!
+
 //! Unparseable content is wrapped in ERROR nodes to preserve source fidelity
 //! while marking problematic regions for downstream error reporting.
 //!
+
 //! # Recovery Sets
 //!
+
 //! Recovery sets define tokens that can start various language constructs:
 //!
+
 //! - **ITEM_RECOVERY**: Tokens that start top-level items
 //! - **STMT_RECOVERY**: Tokens that start statements
 //! - **EXPR_RECOVERY**: Tokens that start expressions
 //! - **TYPE_RECOVERY**: Tokens in type position
 //! - **PATTERN_RECOVERY**: Tokens in pattern position
 //!
+
 //! See `recovery_sets` module for all pre-defined sets.
 
 use verum_ast::Span;
@@ -52,6 +63,7 @@ pub use verum_fast_parser::{
 
 /// Recovery set for event-based parsing.
 ///
+
 /// A recovery set defines which tokens can start the next valid construct,
 /// allowing the parser to skip erroneous tokens and create ERROR nodes.
 #[derive(Clone, Debug)]
@@ -260,6 +272,7 @@ pub fn token_kind_to_syntax_kind(kind: &TokenKind) -> SyntaxKind {
 
 /// Pre-defined recovery sets for Verum grammar.
 ///
+
 /// These sets define the tokens that can start various language constructs,
 /// allowing the parser to recover from errors by skipping to these tokens.
 pub mod recovery_sets {
@@ -563,6 +576,7 @@ impl RecoveryResult {
 
 /// Event-based recovery context for structured error handling.
 ///
+
 /// This struct integrates with the event-based parser to create ERROR nodes
 /// for unparseable content while allowing parsing to continue.
 #[derive(Debug)]
@@ -660,6 +674,7 @@ impl Default for EventRecovery {
 
 /// Trait for parsers that support event-based error recovery.
 ///
+
 /// This trait defines the interface for integrating error recovery
 /// with event-based parsing, allowing parsers to:
 /// - Skip tokens until a recovery point
@@ -689,6 +704,7 @@ pub trait Recoverable {
 
     /// Recover from an error using the given recovery set.
     ///
+
     /// This method skips tokens until it finds one in the recovery set,
     /// wrapping skipped tokens in an ERROR node if configured.
     fn recover(&mut self, set: &RecoverySet, message: &str) -> RecoveryResult {
@@ -755,6 +771,7 @@ pub trait Recoverable {
 
     /// Try to parse with recovery on failure.
     ///
+
     /// Returns true if parsing succeeded, false if recovery was needed.
     fn try_parse_with_recovery<T>(
         &mut self,

@@ -14,12 +14,14 @@
 )]
 //! Comprehensive tests for proof generation and validation
 //!
+
 //! Tests the complete proof generation pipeline:
 //! - Z3 proof extraction
 //! - Proof validation
 //! - Proof minimization
 //! - Integration with verification workflow
 //!
+
 //! Proof terms are first-class evidence values following the Curry-Howard correspondence.
 //! A `Proof<P>` is evidence of proposition P. Construction via modus ponens, proof by cases
 //! (or_elim), lambda abstraction (introduce hypothesis), and SMT discharge. Proofs are

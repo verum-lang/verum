@@ -3,9 +3,10 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_busy_timeout(db, ms) installs a built-in handler that
 // retries with exponential-ish back-off up to the requested total
-// wall-clock budget.  Passing ms == 0 (or negative) removes the
+// wall-clock budget. Passing ms == 0 (or negative) removes the
 // handler entirely.
 // =============================================================================
 

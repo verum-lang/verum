@@ -4,11 +4,14 @@
 // Layer: Stdlib (1)
 // Dependencies: CBGR runtime
 //
+
 // Memory safety validation intrinsics for Capability-Based Generational
 // References (CBGR).
 //
+
 // VBC Opcode: ChkRef (0x74)
 //
+
 // Spec: docs/detailed/26-cbgr-implementation.md
 // =============================================================================
 
@@ -20,11 +23,13 @@ module core.intrinsics.runtime.cbgr;
 
 /// Validate CBGR reference (Tier 0 check).
 ///
+
 /// Performs full CBGR validation:
 /// - Generation check
 /// - Epoch check
 /// - Capability check
 ///
+
 /// Requires: CBGR runtime
 @intrinsic("cbgr_validate")
 public fn cbgr_validate<T>(reference: &T) -> Bool;
@@ -35,6 +40,7 @@ public fn cbgr_validate<T>(reference: &T) -> Bool;
 
 /// Get current epoch.
 ///
+
 /// Reads global epoch counter via TLS.
 /// Requires: CBGR runtime
 @intrinsic("cbgr_current_epoch")
@@ -42,6 +48,7 @@ public fn cbgr_current_epoch() -> UInt64;
 
 /// Advance epoch.
 ///
+
 /// Increments global epoch counter atomically.
 /// Requires: CBGR runtime
 @intrinsic("cbgr_advance_epoch")
@@ -53,6 +60,7 @@ public fn cbgr_advance_epoch();
 
 /// Get generation counter for allocation.
 ///
+
 /// Reads from allocation header.
 /// Requires: CBGR runtime
 @intrinsic("cbgr_get_generation")

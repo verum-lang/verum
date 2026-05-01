@@ -15,6 +15,7 @@
 )]
 // Comprehensive tests for CBGR Check Elimination via Escape Analysis
 //
+
 // CBGR Check Elimination via Escape Analysis:
 // CBGR (~15ns) checks are eliminated when escape analysis proves references don't
 // outlive their allocations. Conservative criteria (ALL must hold):
@@ -23,9 +24,11 @@
 // 3. No concurrent access (not shared across threads)
 // 4. Scope validity is stack-bounded (reference contained within function)
 //
+
 // When proven safe, compiler promotes &T -> &checked T (0ns overhead).
 // Unknown/escaping references conservatively keep CBGR checks.
 //
+
 // These tests verify the CBGR elimination system correctly identifies safe
 // references, never produces false negatives, handles complex control flow,
 // and integrates with CFG and scope analysis.

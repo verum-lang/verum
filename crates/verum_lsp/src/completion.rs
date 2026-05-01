@@ -1,5 +1,6 @@
 //! Auto-completion support
 //!
+
 //! Provides context-aware code completions for keywords, types, functions, and variables.
 //! Includes member access completion for struct/enum fields, module import completion,
 //! and attribute completion with full registry support.
@@ -106,6 +107,7 @@ const BUILTIN_TYPES: &[&str] = &[
 
 /// Generate completions for a document at a given position.
 ///
+
 /// Each item carries a `data` payload (`{"uri": ..., "name": ...}`) that the
 /// `completionItem/resolve` handler can use to lazily fill documentation and
 /// type details without computing them up-front for every candidate.
@@ -162,6 +164,7 @@ pub fn complete_at_position(document: &DocumentState, position: Position) -> Lis
 
 /// Attach a resolve-data payload to a completion item.
 ///
+
 /// The payload is a small JSON object that the `completionItem/resolve`
 /// handler can use to look up full documentation and type info without
 /// the initial completion request having to compute it for every item.
@@ -200,6 +203,7 @@ pub enum TriggerContext {
 
 /// Determine the trigger context from the line content
 ///
+
 /// The order of checks is important:
 /// 1. Attribute context must be checked first (after '@')
 /// 2. Proof tactic context (after 'by' in proof context)
@@ -288,6 +292,7 @@ fn check_tagged_literal_context(prefix: &str) -> bool {
 
 /// Check if we're in an attribute context (after '@')
 ///
+
 /// Returns the partial attribute name if any characters have been typed after '@'.
 /// Also tries to infer the attribute target from surrounding context.
 fn check_attribute_context(prefix: &str) -> Option<TriggerContext> {
@@ -324,6 +329,7 @@ fn check_attribute_context(prefix: &str) -> Option<TriggerContext> {
 
 /// Infer the attribute target from the surrounding context
 ///
+
 /// This is a heuristic based on common patterns:
 /// - Lines starting with '@' at the beginning are likely module-level
 /// - Lines before 'fn' are function attributes
@@ -411,6 +417,7 @@ pub fn add_type_completions(completions: &mut List<CompletionItem>) {
 
 /// Add completions from the module.
 ///
+
 /// Function and type items carry a lightweight `data` payload so that the
 /// resolve handler can lazily look up full documentation and type info from
 /// the symbol table without paying that cost for every candidate in the
@@ -497,15 +504,15 @@ fn add_module_completions(completions: &mut List<CompletionItem>, module: &verum
 fn get_receiver_name(line: &str, character: u32) -> Option<String> {
     let prefix = verum_common::text_utf8::safe_prefix(line, character as usize);
 
-    // Find the dot and get the identifier before it.  `rfind` returns
+    // Find the dot and get the identifier before it. `rfind` returns
     // a byte offset at a char boundary, so the slice is always safe.
     if let Some(dot_pos) = prefix.rfind('.') {
         let before_dot = &prefix[..dot_pos];
 
-        // Extract the identifier (going backwards from the dot).  We
+        // Extract the identifier (going backwards from the dot). We
         // walk via `char_indices().rev()` because identifier
         // characters in user code can include multi-byte chars
-        // (Verum permits Unicode identifiers).  The previous
+        // (Verum permits Unicode identifiers). The previous
         // implementation used `before_dot.len() - i` where `i` was a
         // *char* index, which silently corrupted into a byte offset
         // for ASCII-only code and then panicked on the receiver
@@ -723,6 +730,7 @@ fn add_import_completions(
 
 /// Add attribute completions from the global attribute registry
 ///
+
 /// Attributes are grouped by category and filtered by the inferred target context.
 /// Each completion item includes documentation, argument hints, and category information.
 fn add_attribute_completions(
@@ -815,6 +823,7 @@ fn create_attribute_completion(
 
 /// Build the insert text for an attribute, with snippet placeholders for arguments.
 ///
+
 /// When the attribute name matches a known enum-valued argument (see
 /// `known_attr_choices`), emits an LSP `${1|a,b,c|}` choice snippet so
 /// editors offer the allowed values inline. Other attributes fall back
@@ -904,6 +913,7 @@ fn build_attribute_insert_text(meta: &AttributeMetadata) -> String {
 /// typing `@inline(` offers `always`, `never`, `hint`, `release` inline
 /// rather than the generic placeholder "identifier".
 ///
+
 /// Values mirror `verum_vbc::codegen::extract_optimization_hints` and
 /// `extract_type_layout_hints`; keep in sync when adding/removing
 /// supported argument names on those attributes.

@@ -43,7 +43,7 @@ public fn is_known_only(fl: Int64) -> Bool {
     (fl & !well_known_mask()) == 0_i64
 }
 
-// Read/Write/Create resolution.  Engine treats CREATE as no-op without RW.
+// Read/Write/Create resolution. Engine treats CREATE as no-op without RW.
 public type OpenAccessMode is
     | AmReadOnly
     | AmReadWrite

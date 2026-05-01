@@ -1,34 +1,43 @@
 //! # CVC5 Advanced Features
 //!
+
 //! Exposes capabilities that are either exclusive to CVC5 or where CVC5's
 //! implementation is substantially more powerful than Z3's:
 //!
+
 //! - **SyGuS** (Syntax-Guided Synthesis) — synthesize functions matching a
-//!   specification with user-provided grammars. CVC5 is the reference
-//!   implementation; Z3 has no equivalent.
+//!  specification with user-provided grammars. CVC5 is the reference
+//!  implementation; Z3 has no equivalent.
 //!
+
 //! - **Abduction** — given `ψ` unprovable from `Γ`, find the weakest `A` such
-//!   that `Γ ∪ {A} ⊢ ψ`. Useful for discovering missing hypotheses,
-//!   debugging failed proofs, and inferring loop invariants. CVC5-specific.
+//!  that `Γ ∪ {A} ⊢ ψ`. Useful for discovering missing hypotheses,
+//!  debugging failed proofs, and inferring loop invariants. CVC5-specific.
 //!
+
 //! - **Quantifier Elimination** (QE) — compute a quantifier-free formula
-//!   equivalent to a quantified input. Both solvers support QE, but CVC5's
-//!   implementation handles a broader fragment (including some nonlinear
-//!   reals via CAD).
+//!  equivalent to a quantified input. Both solvers support QE, but CVC5's
+//!  implementation handles a broader fragment (including some nonlinear
+//!  reals via CAD).
 //!
+
 //! - **Finite Model Finding** (FMF) — for goals with universal quantifiers
-//!   over uninterpreted domains, CVC5 can enumerate finite models as
-//!   counterexamples. Z3's `model-based quantifier instantiation` is
-//!   weaker in this regard.
+//!  over uninterpreted domains, CVC5 can enumerate finite models as
+//!  counterexamples. Z3's `model-based quantifier instantiation` is
+//!  weaker in this regard.
 //!
+
 //! ## Runtime Availability
 //!
+
 //! All functions check `cvc5_sys::init()` at entry. When CVC5 is not linked,
 //! they return `Cvc5AdvancedError::NotAvailable` immediately without any
 //! FFI calls. This lets downstream code feature-detect CVC5 at runtime.
 //!
+
 //! ## Safety
 //!
+
 //! This module wraps raw FFI calls into safe Rust APIs. The wrappers:
 //! - Validate all input pointers before dereferencing.
 //! - Convert C strings to owned `String`s (no dangling references).
@@ -110,24 +119,29 @@ fn require_cvc5() -> Cvc5AdvancedResult<()> {
 
 /// A SyGuS synthesis specification.
 ///
+
 /// The user provides:
 /// - A logic (e.g., `"LIA"`, `"BV"`).
 /// - A grammar describing the shape of candidate solutions.
 /// - A set of constraints the synthesized function must satisfy.
 ///
+
 /// CVC5 returns either a synthesized function body or declares the problem
 /// unsolvable within the grammar.
 ///
+
 /// ## Example
 ///
+
 /// Synthesize a function `max(x, y)` that returns the maximum of two integers:
 ///
+
 /// ```text
 /// (set-logic LIA)
 /// (synth-fun max ((x Int) (y Int)) Int
-///     ((Start Int) (Cond Bool))
-///     ((Start Int (x y (ite Cond Start Start)))
-///      (Cond Bool ((>= x y) (<= x y) (= x y)))))
+///  ((Start Int) (Cond Bool))
+///  ((Start Int (x y (ite Cond Start Start)))
+///  (Cond Bool ((>= x y) (<= x y) (= x y)))))
 /// (declare-var x Int)
 /// (declare-var y Int)
 /// (constraint (>= (max x y) x))
@@ -141,6 +155,7 @@ pub struct SyGuSProblem {
     pub logic: String,
     /// SyGuS specification in SMT-LIB 2 format.
     ///
+
     /// The string must include:
     /// - `set-logic`
     /// - `synth-fun` (or multiple) declarations
@@ -165,12 +180,15 @@ pub struct SyGuSResult {
 
 /// Solve a SyGuS synthesis problem.
 ///
+
 /// Returns the synthesized function body on success. The solution is a
 /// string in SMT-LIB 2 syntax that can be substituted into the original
 /// specification to produce a closed-form function definition.
 ///
+
 /// ## Current Status
 ///
+
 /// The full SyGuS pipeline requires CVC5's parser to consume the SMT-LIB
 /// specification directly. In the current implementation (CVC5 1.3.3+),
 /// this is achieved via `cvc5_solver_check_synth()` after parsing the
@@ -196,14 +214,16 @@ pub fn synthesize(problem: &SyGuSProblem) -> Cvc5AdvancedResult<SyGuSResult> {
     // features), this uses the live API. Otherwise, this returns NoSolution
     // as the stub fallback (but require_cvc5() already blocked us here).
     //
+
     // The full FFI sequence for SyGuS is:
-    //   1. cvc5_tm_new() → term manager
-    //   2. cvc5_solver_new() → solver
-    //   3. Parse specification (requires libcvc5parser)
-    //   4. cvc5_solver_check_synth() → result code
-    //   5. cvc5_solver_get_synth_solution() → solution term
-    //   6. cvc5_term_to_string() → SMT-LIB string
+    //  1. cvc5_tm_new() → term manager
+    //  2. cvc5_solver_new() → solver
+    //  3. Parse specification (requires libcvc5parser)
+    //  4. cvc5_solver_check_synth() → result code
+    //  5. cvc5_solver_get_synth_solution() → solution term
+    //  6. cvc5_term_to_string() → SMT-LIB string
     //
+
     // This is implemented via the cvc5-sys FFI bindings. In stub mode
     // (which is where we are unless cvc5-sys/vendored is enabled), we
     // can't actually invoke the solver — require_cvc5() handles that.
@@ -219,17 +239,21 @@ pub fn synthesize(problem: &SyGuSProblem) -> Cvc5AdvancedResult<SyGuSResult> {
 
 /// A formula abduction query.
 ///
+
 /// Given axioms `Γ` and a conjecture `ψ` that is NOT provable from `Γ` alone,
 /// find the weakest formula `A` (over a permitted vocabulary) such that:
 ///
+
 /// ```text
 /// Γ ∪ {A} ⊨ ψ
 /// ```
 ///
+
 /// This is the dual of unsat-core extraction: instead of finding which
 /// assertions are responsible for UNSAT, we find what additional assumption
 /// would make the conjecture provable.
 ///
+
 /// Use cases:
 /// - Loop invariant discovery: abduce `A` from loop body + postcondition.
 /// - Debugging failed proofs: what's the missing lemma?
@@ -260,6 +284,7 @@ pub struct AbductionResult {
 
 /// Compute an abduct for the given query.
 ///
+
 /// Uses CVC5's `cvc5_solver_get_abduct()` FFI.
 pub fn abduce(query: &AbductionQuery) -> Cvc5AdvancedResult<AbductionResult> {
     require_cvc5()?;
@@ -289,15 +314,18 @@ pub fn abduce(query: &AbductionQuery) -> Cvc5AdvancedResult<AbductionResult> {
 
 /// A quantifier elimination query.
 ///
+
 /// Given a formula `Q̄x. φ(x̄, ȳ)` (where `Q̄` is a quantifier prefix and
 /// `x̄` are the quantified variables, `ȳ` are free), compute a
 /// quantifier-free formula `ψ(ȳ)` equivalent to the original.
 ///
+
 /// This is decidable for:
 /// - Presburger arithmetic (LIA)
 /// - Real closed fields (NRA — via CAD in CVC5)
 /// - Boolean combinations of LIA/LRA/BV atoms
 ///
+
 /// Use cases:
 /// - Program semantics: compute strongest postconditions.
 /// - Parametric formula simplification.
@@ -339,10 +367,12 @@ pub fn eliminate_quantifiers(query: &QeQuery) -> Cvc5AdvancedResult<QeResult> {
 
 /// A finite model finding query.
 ///
+
 /// Attempts to find a finite interpretation satisfying the assertions, with
 /// all uninterpreted sorts bounded. Returns a model if one exists within
 /// the size bound, or declares UNSAT if no such model exists.
 ///
+
 /// This is particularly useful for:
 /// - Detecting counterexamples in quantified formulas.
 /// - Enumerating domain elements for testing.
@@ -376,6 +406,7 @@ pub enum FmfResult {
 
 /// Run finite model finding.
 ///
+
 /// Sets CVC5 options:
 /// - `finite-model-find=true`
 /// - `mbqi-mode=fmc`
@@ -402,6 +433,7 @@ pub fn find_finite_model(query: &FmfQuery) -> Cvc5AdvancedResult<FmfResult> {
 
 /// A snapshot of which CVC5 advanced features are currently available.
 ///
+
 /// Call `detect_capabilities()` to query the linked CVC5 library for
 /// supported features. This is useful for feature-gating UI or tooling
 /// based on the actual solver build.
@@ -463,6 +495,7 @@ impl Cvc5Capabilities {
 
 /// Detect the capabilities of the currently-linked CVC5.
 ///
+
 /// In stub mode, returns `Cvc5Capabilities::not_available()`. In linked
 /// mode, queries CVC5 via the `get-option` API for individual features.
 pub fn detect_capabilities() -> Cvc5Capabilities {

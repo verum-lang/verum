@@ -1,130 +1,134 @@
 //! Error types and recovery strategies for the parser.
 //!
+
 //! This module provides standalone error types for parsing errors using
 //! native recursive descent parsing.
 //!
+
 //! # Error Codes
 //!
+
 //! The parser uses a comprehensive error code system for categorized diagnostics:
 //!
+
 //! - **E001-E009**: Lexer/literal errors
-//!   - E001: Unterminated character literal
-//!   - E002: Invalid escape sequence
-//!   - E003: Invalid number literal
-//!   - E004: Empty character literal
-//!   - E005: Invalid interpolation syntax
-//!   - E006: Unknown token/character
+//!  - E001: Unterminated character literal
+//!  - E002: Invalid escape sequence
+//!  - E003: Invalid number literal
+//!  - E004: Empty character literal
+//!  - E005: Invalid interpolation syntax
+//!  - E006: Unknown token/character
 //! - **E010-E019**: Statement/attribute errors
-//!   - E010: Missing semicolon
-//!   - E011: Unclosed attribute parenthesis
-//!   - E012: Invalid attribute arguments
-//!   - E013: Missing attribute name
-//!   - E014: Invalid nested attribute
-//!   - E015: Invalid empty cfg attribute
-//!   - E016: Invalid empty requires clause
-//!   - E017: Invalid empty ensures clause
-//!   - E018: Unexpected token
-//!   - E019: Missing block after control flow
+//!  - E010: Missing semicolon
+//!  - E011: Unclosed attribute parenthesis
+//!  - E012: Invalid attribute arguments
+//!  - E013: Missing attribute name
+//!  - E014: Invalid nested attribute
+//!  - E015: Invalid empty cfg attribute
+//!  - E016: Invalid empty requires clause
+//!  - E017: Invalid empty ensures clause
+//!  - E018: Unexpected token
+//!  - E019: Missing block after control flow
 //! - **E020-E029**: Proof/theorem errors
-//!   - E020: Invalid theorem declaration
-//!   - E021: Missing theorem name
-//!   - E022: Invalid lemma declaration
-//!   - E023: Unclosed forall quantifier
-//!   - E024: Unclosed exists quantifier
-//!   - E025: Invalid proof keyword
-//!   - E026: Invalid assert expression
-//!   - E027: Invalid assume expression
-//!   - E028: Malformed tactic
-//!   - E029: Proof block not terminated
+//!  - E020: Invalid theorem declaration
+//!  - E021: Missing theorem name
+//!  - E022: Invalid lemma declaration
+//!  - E023: Unclosed forall quantifier
+//!  - E024: Unclosed exists quantifier
+//!  - E025: Invalid proof keyword
+//!  - E026: Invalid assert expression
+//!  - E027: Invalid assume expression
+//!  - E028: Malformed tactic
+//!  - E029: Proof block not terminated
 //! - **E030-E039**: Function declaration errors
-//!   - E030: Missing function name
-//!   - E031: Missing function parameter list
-//!   - E032: Missing function body
-//!   - E033: Invalid function visibility
-//!   - E034: Duplicate function modifier
-//!   - E035: Invalid function parameter
-//!   - E036: Missing parameter type
-//!   - E037: Invalid return type syntax
-//!   - E038: Invalid where clause syntax
-//!   - E039: Invalid using clause syntax
+//!  - E030: Missing function name
+//!  - E031: Missing function parameter list
+//!  - E032: Missing function body
+//!  - E033: Invalid function visibility
+//!  - E034: Duplicate function modifier
+//!  - E035: Invalid function parameter
+//!  - E036: Missing parameter type
+//!  - E037: Invalid return type syntax
+//!  - E038: Invalid where clause syntax
+//!  - E039: Invalid using clause syntax
 //! - **E040-E049**: Type definition errors
-//!   - E040: Invalid throws clause syntax
-//!   - E041: Missing generic closing bracket
-//!   - E042: Empty generic parameters
-//!   - E043: Missing type name
-//!   - E044: Missing type 'is' keyword
-//!   - E045: Missing type body
-//!   - E046: Invalid record field syntax
-//!   - E047: Missing field type
-//!   - E048: Invalid variant syntax
-//!   - E049: Duplicate field name
+//!  - E040: Invalid throws clause syntax
+//!  - E041: Missing generic closing bracket
+//!  - E042: Empty generic parameters
+//!  - E043: Missing type name
+//!  - E044: Missing type 'is' keyword
+//!  - E045: Missing type body
+//!  - E046: Invalid record field syntax
+//!  - E047: Missing field type
+//!  - E048: Invalid variant syntax
+//!  - E049: Duplicate field name
 //! - **E050-E059**: Protocol/implement errors
-//!   - E050: Invalid generic constraint
-//!   - E051: Missing protocol opening brace
-//!   - E052: Invalid protocol method
-//!   - E053: Invalid refinement syntax
-//!   - E054: Missing impl type
-//!   - E055: Missing 'for' in trait impl
-//!   - E056: Invalid impl method
-//!   - E057: Missing impl opening brace
-//!   - E058: Missing context name
-//!   - E059: Missing context body
+//!  - E050: Invalid generic constraint
+//!  - E051: Missing protocol opening brace
+//!  - E052: Invalid protocol method
+//!  - E053: Invalid refinement syntax
+//!  - E054: Missing impl type
+//!  - E055: Missing 'for' in trait impl
+//!  - E056: Invalid impl method
+//!  - E057: Missing impl opening brace
+//!  - E058: Missing context name
+//!  - E059: Missing context body
 //! - **E060-E069**: Context/module/const errors
-//!   - E060: Invalid context method
-//!   - E061: Missing module name
-//!   - E062: Missing module opening brace
-//!   - E063: Invalid link syntax
-//!   - E064: Invalid pub use syntax
-//!   - E065: Missing const type
-//!   - E066: Missing const value
-//!   - E067: Missing static type
-//!   - E068: Invalid const/static expression
-//!   - E069: Duplicate generic parameter name
+//!  - E060: Invalid context method
+//!  - E061: Missing module name
+//!  - E062: Missing module opening brace
+//!  - E063: Invalid link syntax
+//!  - E064: Invalid pub use syntax
+//!  - E065: Missing const type
+//!  - E066: Missing const value
+//!  - E067: Missing static type
+//!  - E068: Invalid const/static expression
+//!  - E069: Duplicate generic parameter name
 //! - **E070-E079**: Type syntax errors
-//!   - E070: Unclosed array type
-//!   - E071: Array type missing size
-//!   - E072: Array type with negative size
-//!   - E073: Array type with double semicolon
-//!   - E074: Array missing element type
-//!   - E075: Unclosed capability list
-//!   - E076: Empty capability list
-//!   - E077: Capability syntax without 'with' keyword
-//!   - E078: Unclosed refinement type
-//!   - E079: Refinement without base type
+//!  - E070: Unclosed array type
+//!  - E071: Array type missing size
+//!  - E072: Array type with negative size
+//!  - E073: Array type with double semicolon
+//!  - E074: Array missing element type
+//!  - E075: Unclosed capability list
+//!  - E076: Empty capability list
+//!  - E077: Capability syntax without 'with' keyword
+//!  - E078: Unclosed refinement type
+//!  - E079: Refinement without base type
 //! - **E080-E089**: Reference/pointer type errors
-//!   - E080: Invalid integer type suffix
-//!   - E081: Unclosed type constraint generic
-//!   - E082: Empty generic type arguments
-//!   - E083: Double comma in capability list
-//!   - E084: Trailing comma in capability list
-//!   - E085: Double opening angle bracket
-//!   - E086: Invalid double ampersand in reference
-//!   - E087: Reference without type
-//!   - E088: Double checked in reference
-//!   - E089: Conflicting reference modifiers
+//!  - E080: Invalid integer type suffix
+//!  - E081: Unclosed type constraint generic
+//!  - E082: Empty generic type arguments
+//!  - E083: Double comma in capability list
+//!  - E084: Trailing comma in capability list
+//!  - E085: Double opening angle bracket
+//!  - E086: Invalid double ampersand in reference
+//!  - E087: Reference without type
+//!  - E088: Double checked in reference
+//!  - E089: Conflicting reference modifiers
 //! - **E090-E099**: Function type errors
-//!   - E090: Rank-2 function missing parameter list
-//!   - E091: Unclosed function parameter list
-//!   - E092: Function type missing return type
-//!   - E093: Wrong arrow operator (=> instead of ->)
-//!   - E094: Unclosed throws clause in function type
-//!   - E095: Using clause without context list
-//!   - E096: Async keyword in wrong position
-//!   - E097: Unclosed tuple type
-//!   - E098: Single element tuple invalid
-//!   - E099: Unit type with content
+//!  - E090: Rank-2 function missing parameter list
+//!  - E091: Unclosed function parameter list
+//!  - E092: Function type missing return type
+//!  - E093: Wrong arrow operator (=> instead of ->)
+//!  - E094: Unclosed throws clause in function type
+//!  - E095: Using clause without context list
+//!  - E096: Async keyword in wrong position
+//!  - E097: Unclosed tuple type
+//!  - E098: Single element tuple invalid
+//!  - E099: Unit type with content
 //! - **E0A0-E0AF**: Exception/control flow errors
-//!   - E0A0: Throw without expression
-//!   - E0A1: Finally clause without block
-//!   - E0A2: Recover with malformed closure
+//!  - E0A0: Throw without expression
+//!  - E0A1: Finally clause without block
+//!  - E0A2: Recover with malformed closure
 //! - **E0B0-E0BF**: Expression syntax errors
-//!   - E0B0: Generic type args unclosed angle
-//!   - E0B1: Turbofish missing type
-//!   - E0B2: Tuple index invalid literal
+//!  - E0B0: Generic type args unclosed angle
+//!  - E0B1: Turbofish missing type
+//!  - E0B2: Tuple index invalid literal
 //! - **E0C0-E0CF**: Quantifier/typeof errors
-//!   - E0C0: Tagged literal missing string
-//!   - E0C1: Typeof expression without argument
-//!   - E0C2: Forall missing dot before body
+//!  - E0C0: Tagged literal missing string
+//!  - E0C1: Typeof expression without argument
+//!  - E0C2: Forall missing dot before body
 
 use std::fmt;
 use verum_ast::{FileId, Span};

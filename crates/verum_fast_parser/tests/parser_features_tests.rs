@@ -247,7 +247,7 @@ fn test_type_level_function_nested() {
 // =============================================================================
 // 4. CONSTRAINED TYPE ALIASES
 // Grammar: constrained_type_alias = 'type' , identifier , '<' , constrained_params , '>' ,
-//                                   '=' , type_expr , [ type_alias_where ] , ';' ;
+//  '=' , type_expr , [ type_alias_where ] , ';' ;
 // =============================================================================
 
 #[test]

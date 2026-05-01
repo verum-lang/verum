@@ -5,10 +5,12 @@
 // Dependencies: core.sys, core.io
 // =============================================================================
 //
+
 // Detects terminal capabilities via environment variables ($TERM, $COLORTERM,
 // $TERM_PROGRAM), DECRPM queries, and heuristics. Used by style layer to
 // choose correct color profile and by event layer to select mouse protocol.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 4.4
 // =============================================================================
 
@@ -78,6 +80,7 @@ public type QueryRgb is {
 
 /// Detect terminal capabilities from environment variables and heuristics.
 ///
+
 /// Checks $TERM, $COLORTERM, $TERM_PROGRAM, $TMUX, $STY, $NO_COLOR,
 /// and common terminal emulator patterns.
 public fn detect_capabilities(fd: FileDesc) -> TermCapabilities {
@@ -162,7 +165,7 @@ public fn detect_capabilities(fd: FileDesc) -> TermCapabilities {
 /// Returns the RGB color if the terminal responds, None otherwise.
 /// NOTE: This is a blocking query with a short timeout.
 /// Sends OSC 11 query: ESC ] 11 ; ? BEL
-/// Expects: ESC ] 11 ; rgb:RRRR/GGGG/BBBB ESC \  (or BEL terminated)
+/// Expects: ESC ] 11 ; rgb:RRRR/GGGG/BBBB ESC \ (or BEL terminated)
 public fn query_background_color(fd: FileDesc) -> Maybe<QueryRgb> {
     // Write the query to stdout (fd 1)
     let query = "\x1b]11;?\x07";

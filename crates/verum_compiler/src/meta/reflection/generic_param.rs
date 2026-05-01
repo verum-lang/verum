@@ -1,5 +1,6 @@
 //! Generic parameter information for compile-time reflection
 //!
+
 //! Provides generic type parameter metadata matching core/meta/reflection.vr GenericParam.
 
 use verum_ast::MetaValue;
@@ -19,6 +20,7 @@ pub enum GenericParamKind {
 
 /// Information about a generic type parameter
 ///
+
 /// Matches: core/meta/reflection.vr GenericParam
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenericParam {
@@ -137,6 +139,7 @@ impl GenericParam {
 
 /// Information about a lifetime parameter
 ///
+
 /// Matches: core/meta/reflection.vr LifetimeParam
 #[derive(Debug, Clone, PartialEq)]
 pub struct LifetimeParam {

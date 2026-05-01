@@ -1,10 +1,12 @@
 //! Interpreter dispatch benchmarks for VBC.
 //!
+
 //! Benchmarks the function table dispatch performance which provides:
 //! - O(1) opcode lookup via array indexing
 //! - Better branch prediction for indirect calls
 //! - Reduced code size improving instruction cache utilization
 //!
+
 //! Run with: cargo bench -p verum_vbc -- interpreter
 
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
@@ -23,16 +25,17 @@ use verum_vbc::types::{PropertySet, TypeId, TypeRef, Visibility};
 
 /// Creates a simple test module with a counting loop function.
 ///
+
 /// The function is equivalent to:
 /// ```
 /// fn count_loop(n: i64) -> i64 {
-///     let mut sum = 0;
-///     let mut i = 0;
-///     while i < n {
-///         sum = sum + i;
-///         i = i + 1;
-///     }
-///     return sum;
+///  let mut sum = 0;
+///  let mut i = 0;
+///  while i < n {
+///  sum = sum + i;
+///  i = i + 1;
+///  }
+///  return sum;
 /// }
 /// ```
 fn create_loop_module(iterations: i64) -> Arc<VbcModule> {
@@ -45,13 +48,13 @@ fn create_loop_module(iterations: i64) -> Arc<VbcModule> {
     // r2 = i = 0
     // r3 = temp for comparison
     // loop (index 3):
-    //   r3 = i < n
-    //   if !r3 goto end (index 8)
-    //   sum = sum + i
-    //   i = i + 1
-    //   goto loop (index 3)
+    //  r3 = i < n
+    //  if !r3 goto end (index 8)
+    //  sum = sum + i
+    //  i = i + 1
+    //  goto loop (index 3)
     // end (index 8):
-    //   return sum
+    //  return sum
 
     let instructions = vec![
         // 0: Load iteration count into r0
@@ -134,6 +137,7 @@ fn create_loop_module(iterations: i64) -> Arc<VbcModule> {
 
 /// Creates a simple arithmetic benchmark module.
 ///
+
 /// Performs N iterations of simple arithmetic operations.
 fn create_arith_module(iterations: i64) -> Arc<VbcModule> {
     let mut module = VbcModule::new("bench_arith".to_string());
@@ -146,12 +150,12 @@ fn create_arith_module(iterations: i64) -> Arc<VbcModule> {
     // r3 = b = 2
     // r4 = result
     // loop:
-    //   r4 = a + b
-    //   r2 = r4
-    //   r4 = a + b (simulating more work)
-    //   r3 = r4
-    //   counter++
-    //   if counter < iterations goto loop
+    //  r4 = a + b
+    //  r2 = r4
+    //  r4 = a + b (simulating more work)
+    //  r3 = r4
+    //  counter++
+    //  if counter < iterations goto loop
     // return r4
 
     let instructions = vec![

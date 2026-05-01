@@ -14,6 +14,7 @@
 )]
 //! Tests for Dependent Types v2.0+ Features
 //!
+
 //! These tests cover the new dependent types features added for v2.0+:
 //! - Universe Hierarchy: Type : Type1 : Type2 : ... (prevents paradoxes via stratification)
 //! - Inductive Types: defined by constructors with strict positivity (e.g., Nat = Zero | Succ(Nat))
@@ -22,6 +23,7 @@
 //! - View Patterns: alternative pattern interfaces (e.g., Parity view on Nat -> Even(k) | Odd(k))
 //! - Proof Irrelevance: all proofs of a Prop are equal; Squash<A> truncates to proposition
 //!
+
 // REQUIRES API MIGRATION:
 // - Use verum_std::core::Text instead of verum_common::Text (which is just String alias)
 // - Text::from() returns verum_std::core::Text, but dependent module expects this type
@@ -239,8 +241,8 @@ fn test_higher_inductive_type_circle() {
 
     // Circle type from spec:
     // hott inductive Circle : Type {
-    //     base : Circle,
-    //     loop : base = base
+    //  base : Circle,
+    //  loop : base = base
     // }
     let base_expr = make_var("base");
     let circle = HigherInductiveType::new(Text::from("Circle"))

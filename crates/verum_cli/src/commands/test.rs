@@ -1,21 +1,27 @@
 //! Test command — discover and execute `@test` functions and whole-
 //! file tests across both execution tiers.
 //!
+
 //! # Tiers
 //!
+
 //! Matches the `verum run` / `verum bench` convention:
 //!
-//! | Tier         | How a test is run                                           |
+
+//! | Tier | How a test is run |
 //! |--------------|-------------------------------------------------------------|
-//! | Interpreter  | Compile file to VBC once, run main()-or-test via the        |
-//! |              | interpreter in-process. Fast iteration, full diagnostics.   |
-//! | AOT (native) | Build a binary per test file, spawn it; exit 0 == pass.     |
+//! | Interpreter | Compile file to VBC once, run main()-or-test via the |
+//! | | interpreter in-process. Fast iteration, full diagnostics. |
+//! | AOT (native) | Build a binary per test file, spawn it; exit 0 == pass. |
 //!
+
 //! Default: **AOT** (a test is a promise about the final artefact;
 //! interpreter is available via `--interp` for fast red-green loops).
 //!
+
 //! # Options modelled on libtest / `cargo test`
 //!
+
 //! * `--filter STR` — substring match on test name
 //! * `--exact` — require full match (like libtest `--exact`)
 //! * `--skip PATTERN` — substring-exclude; repeatable
@@ -24,9 +30,9 @@
 //! * `--list` — print discovered tests and exit
 //! * `--nocapture` — don't capture stdout/stderr
 //! * `--test-threads N` — parallel workers; wired to rayon here (was
-//!   accepted-but-ignored previously)
+//!  accepted-but-ignored previously)
 //! * `--format pretty | terse | json` — presentation; `json` emits one
-//!   newline-delimited JSON event per test for CI ingest
+//!  newline-delimited JSON event per test for CI ingest
 
 use colored::Colorize;
 use rayon::prelude::*;
@@ -168,9 +174,9 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         .collect();
 
     // Ignore resolution:
-    //   --ignored       → only ignored
-    //   --include-ignored → everything
-    //   default          → skip ignored
+    //  --ignored → only ignored
+    //  --include-ignored → everything
+    //  default → skip ignored
     let active: Vec<&Test> = filtered
         .iter()
         .filter(|t| {
@@ -254,7 +260,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     // After #298 + #273 + #299 every [test].* manifest field is
     // load-bearing through `TestRunCfg`: property_testing /
     // proptest_cases / differential / fuzzing all flow through to
-    // a real consumer.  Surface the load-bearing modes when set
+    // a real consumer. Surface the load-bearing modes when set
     // so embedders see the runner observed their setting.
     if manifest.test.differential && !quiet {
         ui::output(
@@ -276,6 +282,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
 
     // Thread pool: wire --test-threads so it actually takes effect.
     //
+
     // T0.5.1 — rayon worker threads default to a small stack (512 KiB
     // on macOS, ~2 MiB on Linux). Each test invokes the full compiler
     // pipeline (type checker + VBC codegen + AOT) which recursively
@@ -284,6 +291,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     // DEPTH=64) are sized for typical program ASTs but stdlib
     // bootstrap can blow them on debug builds at deeper modules.
     //
+
     // Match the main thread's 16 MiB stack so workers don't SIGBUS
     // mid-stdlib-load.
     let pool: Option<rayon::ThreadPool> = if manifest.test.parallel {
@@ -427,10 +435,10 @@ pub fn execute(opts: TestOptions) -> Result<()> {
 
     // Fuzz orchestration (#299): when [test].fuzzing = true, after
     // the @test / @property suite finishes, discover cargo-fuzz
-    // targets under `fuzz/` and exercise each.  New crash artifacts
+    // targets under `fuzz/` and exercise each. New crash artifacts
     // count as additional failures — the run is GREEN only when
     // both regular tests pass AND no fuzz target produces a fresh
-    // artifact.  Cargo-fuzz absent → hint message + zero outcomes
+    // artifact. Cargo-fuzz absent → hint message + zero outcomes
     // (best-effort: missing toolchain shouldn't fail CI).
     let mut fuzz_failures: usize = 0;
     if cfg.fuzzing {
@@ -651,7 +659,7 @@ struct TestRunCfg {
     /// on a typo. Closes the inert-defense pattern for the CLI
     /// `--verify <mode>` flag.
     verify_mode_override: Option<verum_compiler::options::VerifyMode>,
-    /// Mirror of `[test].property_testing` from the manifest.  When
+    /// Mirror of `[test].property_testing` from the manifest. When
     /// `false`, tests carrying the `@property(...)` attribute are
     /// skipped with a "property testing disabled" outcome instead of
     /// being executed — embedders can opt out of the proptest path
@@ -660,21 +668,21 @@ struct TestRunCfg {
     property_testing: bool,
     /// Mirror of `[test].proptest_cases` — used as the default
     /// `runs` count when an individual `@property(runs = N)` does
-    /// not override it.  Pre-fix: hardcoded to 100 inside
-    /// `run_test_property`.  Post-fix: reads from the manifest so
+    /// not override it. Pre-fix: hardcoded to 100 inside
+    /// `run_test_property`. Post-fix: reads from the manifest so
     /// a project-wide `proptest_cases = 1000` actually shapes how
     /// many samples each property explores.
     proptest_cases: u32,
     /// Mirror of `[test].differential` — when `true`, every
     /// non-property test runs through BOTH the interpreter (Tier
     /// 0, in-process VBC) AND the AOT pipeline (Tier 1, native
-    /// binary).  The differential wrapper requires both tiers to
+    /// binary). The differential wrapper requires both tiers to
     /// produce a PASS for the test to count as PASS; any tier
     /// disagreement (one passes, the other fails) surfaces as a
     /// dedicated cross-tier failure with both tiers' diagnostics
-    /// attached.  This is the load-bearing soundness gate for
+    /// attached. This is the load-bearing soundness gate for
     /// the language's two execution backends — disagreement is
-    /// the bug, not the test.  Property tests (carrying
+    /// the bug, not the test. Property tests (carrying
     /// `@property(...)`) are NOT subject to differential
     /// expansion: they route through the interpreter by design
     /// (per-iteration Value construction is impractical under
@@ -684,11 +692,11 @@ struct TestRunCfg {
     /// regular @test / @property suite finishes, the runner
     /// discovers every cargo-fuzz target under `fuzz/` (workspace
     /// root + `crates/*/fuzz/`) and exercises each via
-    /// `cargo fuzz run <target> -- -max_total_time=<N>`.  New
+    /// `cargo fuzz run <target> -- -max_total_time=<N>`. New
     /// crash artifacts under `fuzz/artifacts/<target>/` count as
-    /// test failures.  Cargo-fuzz absent → the runner emits a
+    /// test failures. Cargo-fuzz absent → the runner emits a
     /// hint and continues (best-effort observability rather than
-    /// a hard CI gate).  See `commands/fuzz.rs`.
+    /// a hard CI gate). See `commands/fuzz.rs`.
     fuzzing: bool,
 }
 
@@ -723,10 +731,10 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
     if let Some(prop) = &test.property {
         // When the manifest disables property testing, we treat any
         // test carrying `@property(...)` as a configured skip rather
-        // than executing the proptest harness.  This lets embedders
+        // than executing the proptest harness. This lets embedders
         // turn the entire property-testing surface off without
         // editing individual `.vr` files — the attribute stays put,
-        // the runner simply records a "skipped" outcome.  Reported
+        // the runner simply records a "skipped" outcome. Reported
         // as a Pass with a single-line stdout so CI tooling sees a
         // clean run rather than a synthetic failure.
         if !cfg.property_testing {
@@ -739,13 +747,13 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
         // Property tests are NOT subject to differential expansion:
         // their per-iteration Value construction is impractical
         // under per-binary respawn (the AOT path would require
-        // re-launching the binary for every sample).  Route them
+        // re-launching the binary for every sample). Route them
         // through the proptest harness regardless of cfg.differential.
         return run_test_property(test, prop, cfg);
     }
     // Differential dispatch: run the test through BOTH tiers and
-    // require agreement.  This is the load-bearing soundness gate
-    // for the language's two execution backends.  Disagreement
+    // require agreement. This is the load-bearing soundness gate
+    // for the language's two execution backends. Disagreement
     // (one tier Pass, the other Fail) is itself the test failure.
     if cfg.differential {
         return run_test_differential(test, target_dir, cfg);
@@ -757,22 +765,25 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
 }
 
 /// Run `test` through both Tier 0 (interpreter) and Tier 1 (AOT)
-/// and require both to PASS.  Any disagreement surfaces as a
+/// and require both to PASS. Any disagreement surfaces as a
 /// cross-tier soundness failure with both tiers' diagnostics
 /// attached so a maintainer can pinpoint which tier produced the
 /// faulty result.
 ///
+
 /// Outcome lattice:
 ///
-/// | T0 outcome  | T1 outcome  | Differential outcome           |
+
+/// | T0 outcome | T1 outcome | Differential outcome |
 /// |-------------|-------------|--------------------------------|
-/// | Pass        | Pass        | Pass (durations summed)        |
-/// | Pass        | Fail        | Fail (cross-tier disagreement) |
-/// | Fail        | Pass        | Fail (cross-tier disagreement) |
-/// | Fail        | Fail        | Fail (both tiers; first error) |
-/// | CompileErr  | *           | CompileErr (T0 short-circuits) |
-/// | Pass        | CompileErr  | Fail (T1 cannot lower)         |
+/// | Pass | Pass | Pass (durations summed) |
+/// | Pass | Fail | Fail (cross-tier disagreement) |
+/// | Fail | Pass | Fail (cross-tier disagreement) |
+/// | Fail | Fail | Fail (both tiers; first error) |
+/// | CompileErr | * | CompileErr (T0 short-circuits) |
+/// | Pass | CompileErr | Fail (T1 cannot lower) |
 ///
+
 /// The duration field aggregates both tiers so the test report
 /// reflects total cross-tier work.
 fn run_test_differential(
@@ -804,9 +815,10 @@ fn run_test_differential(
 
 /// Pure-function outcome combiner for differential testing.
 ///
+
 /// Extracted from `run_test_differential` so the cross-tier
 /// agreement contract can be pinned by unit tests without
-/// driving the full compile/link/execute pipeline.  The tier
+/// driving the full compile/link/execute pipeline. The tier
 /// inputs are already-computed `TestResult` values; this
 /// function only handles the lattice that maps two outcomes
 /// to a single `TestResult`.
@@ -831,7 +843,7 @@ fn combine_differential_outcomes(
         // tiers Pass so the test is GREEN, but a maintainer can
         // see disagreement in the textual output (typically
         // tolerable: timestamps, addresses, hashmap iteration
-        // order).  Hard-failing on stdout drift would force every
+        // order). Hard-failing on stdout drift would force every
         // test to be deterministic across both backends, which is
         // not a goal of differential testing — agreement on the
         // test's pass/fail verdict is the load-bearing contract.
@@ -951,7 +963,7 @@ fn run_test_property(
     let replay_seeds = seeds_for(&db, test.name.as_str());
 
     // Default-runs precedence: per-test `@property(runs = N)` wins
-    // over manifest `[test].proptest_cases`.  When neither is set
+    // over manifest `[test].proptest_cases`. When neither is set
     // we fall back to TestConfig::default()'s 256 (the historical
     // hard-coded literal here was 100, which silently masked the
     // manifest setting since the pre-fix runner ignored cfg).
@@ -1067,6 +1079,7 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     // line and prepend it via a temp file so the production pipeline
     // resolves crate-root references without per-test boilerplate.
     //
+
     // T0.5.2 — additionally synthesise a `fn main()` that invokes the
     // @test function and exits 0 on success, so the AOT-compiled
     // binary's exit code matches the test convention (mirrors what
@@ -1080,9 +1093,9 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
 
     // Wire CLI `--verify` and `--release` into the compilation:
     //  * `verify_mode_override` overrides the default Runtime mode
-    //    when the user passed `verum test --verify static|proof`.
+    //  when the user passed `verum test --verify static|proof`.
     //  * `release = true` lifts the optimization level to 3,
-    //    matching `verum build --release` semantics.
+    //  matching `verum build --release` semantics.
     let verify_mode = cfg.verify_mode_override.unwrap_or(VerifyMode::Runtime);
     let optimization_level = if cfg.release { 3 } else { 0 };
     let options = CompilerOptions {
@@ -1197,6 +1210,7 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
 /// crate root since the test file owns its own module identity),
 /// and write to `<target_dir>/test_<stem>.merged.vr`.
 ///
+
 /// T0.5.2 — when `test_fn_name` is provided, *also* append a
 /// synthesised `fn main() -> Int { <fn>(); 0 }` so the AOT
 /// binary's exit-code semantics match the test convention. The
@@ -1364,8 +1378,8 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     let module = Arc::new(module);
 
     // Pick the function to run. Priority:
-    //   1. Function whose name matches the test name (for per-@test tests)
-    //   2. `main`
+    //  1. Function whose name matches the test name (for per-@test tests)
+    //  2. `main`
     let fn_name_tail: &str = if let Some(fn_name) = &test.fn_name {
         fn_name.as_str()
     } else {
@@ -1650,6 +1664,7 @@ fn format_duration(d: Duration) -> String {
 /// list of argument vectors ready for call_with_args. Returns empty
 /// vec if no @test_case attributes are present.
 ///
+
 /// Supported argument literals: Int, Bool, Text, Float. Anything else
 /// is silently dropped — keeps the attribute surface simple and avoids
 /// inventing type coercions at discover time.
@@ -1974,7 +1989,7 @@ mod tests {
     fn property_testing_disabled_skips_property_tests_with_pass() {
         // Pin (#298): when [test].property_testing = false, a test
         // carrying @property(...) yields a Pass with the disabled
-        // marker line, NOT a property-runner invocation.  This is
+        // marker line, NOT a property-runner invocation. This is
         // the load-bearing dispatch contract for the manifest flag.
         let test = Test {
             name: "demo_property".into(),
@@ -2141,7 +2156,7 @@ mod tests {
     fn differential_disabled_returns_tier_specific_path() {
         // Pin (#273): when cfg.differential = false, the
         // dispatcher takes the cfg.tier branch and does NOT
-        // invoke run_test_differential.  We can't observe that
+        // invoke run_test_differential. We can't observe that
         // directly without integration scaffolding, but we can
         // verify the cfg shape carries the flag through.
         let cfg = cfg_with_differential(false);
@@ -2154,7 +2169,7 @@ mod tests {
     fn property_testing_enabled_does_not_short_circuit() {
         // Pin (#298): with property_testing = true, the dispatcher
         // routes to run_test_property — which will then fail at
-        // file-read because /dev/null isn't a real test file.  The
+        // file-read because /dev/null isn't a real test file. The
         // failure mode (CompileError "read:") is the proof that the
         // dispatcher did not short-circuit at the disabled gate.
         let test = Test {

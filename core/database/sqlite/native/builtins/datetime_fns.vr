@@ -4,25 +4,30 @@
 // Layer: 4
 // Spec: sqlite-native.md §15.1 (Date/time section), §15.6
 //
+
 // SQLite stores dates in three forms:
-//   * TEXT    — ISO 8601 string `YYYY-MM-DD HH:MM:SS.SSS`
-//   * REAL    — Julian day number
-//   * INTEGER — Unix timestamp (seconds since 1970-01-01)
+//  * TEXT — ISO 8601 string `YYYY-MM-DD HH:MM:SS.SSS`
+//  * REAL — Julian day number
+//  * INTEGER — Unix timestamp (seconds since 1970-01-01)
 //
+
 // All five builders (`date`, `time`, `datetime`, `julianday`,
 // `unixepoch`) share the same pipeline:
 //
-//   1. Parse the first argument into an absolute Julian-day number.
-//      `'now'` resolves to the current UTC instant via `core.time`.
-//   2. Apply each subsequent string argument as a modifier
-//      (`'+1 day'`, `'-3 hours'`, `'start of month'`, `'localtime'`,
-//      `'unixepoch'`, ...).
-//   3. Format back per the function's target form.
+
+//  1. Parse the first argument into an absolute Julian-day number.
+//  `'now'` resolves to the current UTC instant via `core.time`.
+//  2. Apply each subsequent string argument as a modifier
+//  (`'+1 day'`, `'-3 hours'`, `'start of month'`, `'localtime'`,
+//  `'unixepoch'`, ...).
+//  3. Format back per the function's target form.
 //
+
 // `strftime(fmt, ...)` runs steps 1-2 then formats per a printf-like
 // specifier ('%Y', '%m', '%d', '%H', '%M', '%S', '%j', '%w', '%s',
 // '%J', '%%' …).
 //
+
 // Output of `date`/`time`/`datetime`/`strftime` is TEXT or NULL on
 // parse failure. `julianday` returns REAL, `unixepoch` returns INT.
 // =============================================================================

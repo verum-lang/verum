@@ -5,15 +5,19 @@
 // Dependencies: core, sync/atomic
 // =============================================================================
 //
+
 // Mutex<T> provides mutual exclusion for shared mutable state.
 // Uses a futex-based implementation for efficient OS-level blocking.
 //
+
 // Performance:
 // - Uncontended: ~25ns
 // - Contended: ~1-10μs (OS-level sleep, no CPU waste)
 //
+
 // Spec: docs/audit1.md Section 11.5
 //
+
 // =============================================================================
 
 module core.sync.mutex;
@@ -79,8 +83,10 @@ implement<T> Mutex<T> {
 
     /// Check if mutex is poisoned (previous holder marked it as poisoned).
     ///
+
     /// # Note on poisoning semantics
     ///
+
     /// Verum does NOT yet expose a "currently unwinding a panic" predicate
     /// at the language level (the Rust `std.thread.panicking()` analogue),
     /// so `MutexGuard.drop` cannot poison the mutex automatically when
@@ -96,6 +102,7 @@ implement<T> Mutex<T> {
 
     /// Mark this mutex as poisoned.
     ///
+
     /// Subsequent `lock()` and `try_lock()` calls will return
     /// `Err(PoisonError)` until `clear_poison()` is invoked. Intended for
     /// callers that detect inconsistent state while holding the guard
@@ -104,6 +111,7 @@ implement<T> Mutex<T> {
     /// unrecoverable error up the stack), so the next acquirer sees the
     /// poison flag.
     ///
+
     /// Uses Release ordering so the poison flag write is visible to the
     /// next acquirer through the lock's release-acquire pair.
     public fn poison(&self) {
@@ -112,6 +120,7 @@ implement<T> Mutex<T> {
 
     /// Clear poison state.
     ///
+
     /// Subsequent acquirers will not see this mutex as poisoned. Caller
     /// is responsible for ensuring the protected data is in a valid state
     /// before clearing.

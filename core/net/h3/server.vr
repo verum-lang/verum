@@ -5,25 +5,32 @@
 // Dependencies: core, core.net.{udp, quic, h3, tls13}, core.security.x509
 // =============================================================================
 //
+
 // User-facing server that listens on a UDP socket, accepts incoming
 // QUIC connections, and routes each HTTP/3 request through a
 // `Handler` callback:
 //
-//   fn handler(req: H3Request) -> H3Response { ... }
+
+//  fn handler(req: H3Request) -> H3Response { ... }
 //
-//   let server = H3Server.bind("[::]:443", ServerOptions.from_cert(...)).await?;
-//   server.run(handler).await?;
+
+//  let server = H3Server.bind("[::]:443", ServerOptions.from_cert(...)).await?;
+//  server.run(handler).await?;
 //
+
 // Or with the protocol-style handler type for statefully-dispatched
 // request routing:
 //
-//   type Api is protocol {
-//       async fn serve(&self, req: H3Request) -> H3Response;
-//   };
+
+//  type Api is protocol {
+//  async fn serve(&self, req: H3Request) -> H3Response;
+//  };
 //
-//   let my_api: Heap<dyn Api> = ...;
-//   server.run_with(my_api).await?;
+
+//  let my_api: Heap<dyn Api> = ...;
+//  server.run_with(my_api).await?;
 //
+
 // =============================================================================
 
 module core.net.h3.server;

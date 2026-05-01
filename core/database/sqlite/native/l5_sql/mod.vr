@@ -7,17 +7,20 @@ module core.database.sqlite.native.l5_sql;
 // Dependencies: l4_vdbe, l3_btree, l2_record, l1_pager, l0_vfs
 // =============================================================================
 //
+
 // The SQL compiler turns source SQL text into a compiled `VdbeProgram`:
 //
-//   source.sql
-//        │
-//        ├─> lexer     (Token stream)
-//        ├─> parser    (AST)
-//        ├─> resolver  (name resolution, CTE inlining)
-//        ├─> planner   (index selection, join order)
-//        ├─> codegen   (plan → VDBE)
-//        └─> VdbeProgram
+
+//  source.sql
+//  │
+//  ├─> lexer (Token stream)
+//  ├─> parser (AST)
+//  ├─> resolver (name resolution, CTE inlining)
+//  ├─> planner (index selection, join order)
+//  ├─> codegen (plan → VDBE)
+//  └─> VdbeProgram
 //
+
 // This v1 ships the lexer + AST + a minimal parser for SELECT / INSERT /
 // UPDATE / DELETE / basic DDL. Planner + codegen land in follow-on
 // patches.

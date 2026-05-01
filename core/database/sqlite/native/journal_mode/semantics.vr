@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §18.4
 //
+
 // Each predicate answers one yes/no question about how the journal
 // behaves under a given JournalMode. The L1 pager + checkpointer
 // consult these to know what to do.

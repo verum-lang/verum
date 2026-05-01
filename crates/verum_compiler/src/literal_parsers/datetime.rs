@@ -1,8 +1,10 @@
 //! DateTime literal parser
 //!
+
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
+
 //! Parses datetime literals in ISO 8601 format:
 //! - d#"2024-01-15T10:30:00Z"
 //! - d#"2024-01-15T10:30:00+05:00"
@@ -38,24 +40,29 @@ fn convert_span(ast_span: Span, source_file: Option<&SourceFile>) -> verum_diagn
 
 /// Parse datetime literal at compile-time
 ///
+
 /// Tagged text literal: `d#"2025-11-05"` or `datetime#"..."` is compile-time
 /// validated datetime. Produces type DateTime. Invalid dates (e.g., month 13)
 /// are caught at compile time.
 ///
+
 /// # Arguments
 /// - `content`: The datetime string (e.g., "2024-01-15T10:30:00Z")
 /// - `span`: Source location for error reporting
 /// - `source_file`: Optional source file for accurate span conversion
 ///
+
 /// # Returns
 /// Unix timestamp (seconds since epoch) on success
 ///
+
 /// # Examples
 /// ```ignore
 /// use verum_compiler::literal_parsers::parse_datetime;
 /// use verum_ast::Span;
 /// use verum_common::Text;
 ///
+
 /// let span = Span::new(0, 10, verum_ast::FileId::new(0));
 /// let result = parse_datetime(&Text::from("2024-01-15T10:30:00Z"), span, None);
 /// assert!(result.is_ok());

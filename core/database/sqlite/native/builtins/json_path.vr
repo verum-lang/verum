@@ -3,17 +3,20 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.4 — extended JSON1 surface
 //
+
 // Spec compliance:
-//   * `json_set(X, P, V, ...)`     — replace existing OR insert if absent
-//   * `json_insert(X, P, V, ...)`  — insert only if path does NOT exist
-//   * `json_replace(X, P, V, ...)` — replace only if path DOES exist
-//   * `json_remove(X, P, ...)`     — delete the value at every path
-//   * `json_patch(X, Y)`           — RFC 7396 merge of Y into X
+//  * `json_set(X, P, V, ...)` — replace existing OR insert if absent
+//  * `json_insert(X, P, V, ...)` — insert only if path does NOT exist
+//  * `json_replace(X, P, V, ...)` — replace only if path DOES exist
+//  * `json_remove(X, P, ...)` — delete the value at every path
+//  * `json_patch(X, Y)` — RFC 7396 merge of Y into X
 //
+
 // Path grammar (matches SQLite):
-//   path     ::= '$' segment*
-//   segment  ::= '.' name | '.[' INDEX ']' | '[' INDEX ']'
+//  path ::= '$' segment*
+//  segment ::= '.' name | '.[' INDEX ']' | '[' INDEX ']'
 //
+
 // Names allow alphanumeric + underscore; quoted form ".\"name with spaces\""
 // is recognised but folded to the unquoted comparison form.
 // =============================================================================
@@ -398,11 +401,13 @@ fn remove(cur: &JsonValue, path: &List<PathSeg>, idx: Int) -> JsonValue {
 // json_patch — RFC 7396 merge
 // -----------------------------------------------------------------------------
 //
+
 // Merge semantics: for every key in `patch`:
-//   * if value is null → remove the key from `base`
-//   * if value is object AND base[key] is object → recurse
-//   * else → replace base[key]
+//  * if value is null → remove the key from `base`
+//  * if value is object AND base[key] is object → recurse
+//  * else → replace base[key]
 //
+
 // Non-object patches replace `base` entirely.
 // =============================================================================
 

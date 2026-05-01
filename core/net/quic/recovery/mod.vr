@@ -6,24 +6,28 @@
 // Spec: internal/specs/tls-quic.md §7.2, §7.3, §12 Phase 4
 // =============================================================================
 //
+
 // Phase 4 step 1: per-space PN bookkeeping + RTT estimator + loss
 // detection + NewReno congestion controller. Assembles into
 // `core.net.quic.recovery.LossDetection` as the one-stop integration
 // point for the connection state machine.
 //
+
 // # Module layout
 //
+
 // ```
 // core.net.quic.recovery
-// ├── mod.vr                   ← this file (re-exports)
-// ├── rtt.vr                   — RttEstimator (RFC 9002 §5)
-// ├── pn_space.vr              — PnSpace bookkeeping + ACK ranges
-// ├── loss_detection.vr        — RFC 9002 §6 threshold + PTO
+// ├── mod.vr ← this file (re-exports)
+// ├── rtt.vr — RttEstimator (RFC 9002 §5)
+// ├── pn_space.vr — PnSpace bookkeeping + ACK ranges
+// ├── loss_detection.vr — RFC 9002 §6 threshold + PTO
 // └── cc/
-//     ├── mod.vr               — CongestionCtrl protocol + constants
-//     └── new_reno.vr          — RFC 9002 §7 NewReno
+//  ├── mod.vr — CongestionCtrl protocol + constants
+//  └── new_reno.vr — RFC 9002 §7 NewReno
 // ```
 //
+
 // =============================================================================
 
 module core.net.quic.recovery;

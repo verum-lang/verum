@@ -5,13 +5,16 @@
 // Dependencies: None
 // =============================================================================
 //
+
 // Pure Verum implementations of fundamental memory operations.
 // These use @intrinsic annotations so LLVM can lower them to optimal
 // hardware-specific instructions (e.g., rep movsb, NEON, SVE).
 //
+
 // Performance: LLVM's MemCpy/MemSet intrinsics are used, which generate
 // code equivalent to or better than libc on modern hardware.
 //
+
 // =============================================================================
 
 module raw_ops;

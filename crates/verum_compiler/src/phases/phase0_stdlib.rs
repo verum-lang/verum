@@ -1,27 +1,35 @@
 //! Phase 0: stdlib Compilation & Preparation
 //!
+
 //! This phase compiles the Verum standard library (verum_std) from Rust source
 //! to static library and LLVM bitcode, generating FFI exports and symbol registries
 //! for consumption by all execution tiers (interpreter, JIT, AOT).
 //!
+
 //! ## Key Outputs
 //!
+
 //! - `libverum_std.a` - Static library for AOT linking
 //! - `libverum_std.bc` - LLVM bitcode for LTO optimization
 //! - `registry.rs` - Symbol mappings (Verum names → Rust implementations)
 //! - FFI exports - C-compatible function wrappers
 //! - Monomorphization cache - Pre-instantiated generic types
 //!
+
 //! ## Caching Strategy
 //!
+
 //! Phase 0 runs once per build and caches outputs. Subsequent compilations
 //! check if verum_std source has changed; if not, cached artifacts are reused.
 //!
+
 //! ## Performance Target
 //!
+
 //! - Initial compilation: ~1-5 seconds
 //! - Cached reuse: ~10-50 milliseconds
 //!
+
 //! Phase 0: stdlib preparation. Compiles verum_std to static library,
 //! generates C-compatible FFI exports, builds symbol registry,
 //! prepares LLVM bitcode for LTO, caches monomorphized generics.
@@ -205,6 +213,7 @@ pub struct ParsedFFIFunction {
 // FFI Bridge Tables (data-driven stdlib binding)
 // ============================================================================
 //
+
 // These tables describe the FFI boundary between the Verum stdlib (implemented
 // in Rust as `verum_std`) and user code. They are NOT semantic assumptions about
 // stdlib types — they are the *wiring* that lets generated code call into the
@@ -1251,6 +1260,7 @@ impl Phase0CoreCompiler {
 
     /// Infer type parameters for a given type name.
     ///
+
     /// Driven by `GENERIC_TYPE_PARAMS`: stdlib container types that need
     /// generic parameters to be materialized at FFI time.
     fn infer_type_params(&self, type_name: &str) -> List<Text> {
@@ -1263,6 +1273,7 @@ impl Phase0CoreCompiler {
 
     /// Detect whether a stdlib path corresponds to a compiler intrinsic.
     ///
+
     /// Driven by `INTRINSIC_PATTERNS`: matches `(type_segment, method_segment)`
     /// appearing in the path. Used by codegen to inline rather than FFI-call.
     fn detect_intrinsic(&self, path: &str) -> Option<IntrinsicId> {

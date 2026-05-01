@@ -1,5 +1,6 @@
 //! Workspace-wide symbol index for cross-file navigation
 //!
+
 //! Maintains a mapping of symbols to their locations across all .vr files
 //! in the workspace. Supports cross-file goto definition, find references,
 //! and rename operations.

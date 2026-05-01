@@ -450,6 +450,7 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
                 // sign garbage then propagated through arithmetic shifts,
                 // corrupting every computation downstream.
                 //
+
                 // Callers that need signed-32 semantics can truncate with
                 // `as i32` at the use site; zero-extension is the
                 // invariant-preserving choice for raw byte-level work.
@@ -665,6 +666,7 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
         } else if header.type_id == TypeId::U32 {
             // 32-bit typed array (UInt32 / Int32 / Float32 storage).
             //
+
             // Root fix for Issue #2 (third code path, after the FatRef
             // branch above and `DerefRaw` in `ffi_extended.rs`): read as
             // `*const u32` and zero-extend into the i64 NaN-box slot. The
@@ -674,6 +676,7 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
             // symptom being a `[UInt32; 256]` CRC32 table lookup
             // returning a "negative" i64 representation of the same bits.
             //
+
             // Callers needing signed-32 semantics can truncate at the use
             // site (`as i32`); zero-extension is the invariant-preserving
             // default for unsigned raw storage, matching the policy used
@@ -1030,9 +1033,9 @@ pub(in super::super) fn handle_array_len(state: &mut InterpreterState) -> Interp
         (unsafe { (*data_ptr).as_i64() }) as usize
     } else if header.type_id == crate::types::TypeId::TEXT || header.type_id == crate::types::TypeId(0x0001) {
         // Text objects come in two runtime shapes sharing the same TypeId:
-        //   * static / intrinsic-built heap string: `[ObjectHeader][len:u64][bytes…]`
-        //   * stdlib builder `Text {ptr, len, cap}`: three NaN-boxed Value fields,
-        //     where field 1 (offset HEADER+8) carries the integer length.
+        //  * static / intrinsic-built heap string: `[ObjectHeader][len:u64][bytes…]`
+        //  * stdlib builder `Text {ptr, len, cap}`: three NaN-boxed Value fields,
+        //  where field 1 (offset HEADER+8) carries the integer length.
         // Distinguish by data size. A three-Value struct is exactly 24 bytes;
         // heap strings are `8 + n` bytes where `n` is the byte count — the
         // only overlap with 24 is a 16-byte string, which we fall through to
@@ -1122,9 +1125,9 @@ pub(in super::super) fn handle_new_list(state: &mut InterpreterState) -> Interpr
 
     // Initialize list: len=0, cap, backing_ptr
     unsafe {
-        *data_ptr = Value::from_i64(0);         // len
-        *data_ptr.add(1) = Value::from_i64(cap as i64);  // cap
-        *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);  // backing_ptr
+        *data_ptr = Value::from_i64(0); // len
+        *data_ptr.add(1) = Value::from_i64(cap as i64); // cap
+        *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8); // backing_ptr
     }
 
     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
@@ -1244,11 +1247,11 @@ pub(crate) fn value_hash(v: Value) -> usize {
 
     // For heap strings, hash the actual string bytes, not the pointer.
     // Text objects come in two layouts under `TypeId::TEXT`:
-    //   * static heap string: [header][len:u64][bytes…]
-    //   * stdlib builder `{ptr, len, cap}`: three NaN-boxed Value fields
-    //     (24 bytes). Reading a u64 at offset 0 of a builder returns the
-    //     NaN-boxed `ptr` bit pattern as a "length", which then drives an
-    //     out-of-bounds byte loop.
+    //  * static heap string: [header][len:u64][bytes…]
+    //  * stdlib builder `{ptr, len, cap}`: three NaN-boxed Value fields
+    //  (24 bytes). Reading a u64 at offset 0 of a builder returns the
+    //  NaN-boxed `ptr` bit pattern as a "length", which then drives an
+    //  out-of-bounds byte loop.
     if super::string_helpers::is_heap_string(&v) {
         let ptr = v.as_ptr::<u8>();
         let data_offset = heap::OBJECT_HEADER_SIZE;
@@ -1368,6 +1371,7 @@ fn text_value_bytes_and_len(v: &Value) -> (*const u8, usize) {
 
 /// NewMap (0x6B) - Create new map with default capacity.
 ///
+
 /// Format: `NewMap dst`
 /// Creates an empty map and stores pointer in dst.
 pub(in super::super) fn handle_new_map(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -1399,9 +1403,9 @@ pub(in super::super) fn handle_new_map(state: &mut InterpreterState) -> Interpre
 
     // Initialize header: count=0, capacity, entries_ptr
     unsafe {
-        *header_ptr = Value::from_i64(0);                           // count
-        *header_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64);   // capacity
-        *header_ptr.add(2) = Value::from_ptr(entries_ptr);          // entries_ptr
+        *header_ptr = Value::from_i64(0); // count
+        *header_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64); // capacity
+        *header_ptr.add(2) = Value::from_ptr(entries_ptr); // entries_ptr
     }
 
     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
@@ -1410,6 +1414,7 @@ pub(in super::super) fn handle_new_map(state: &mut InterpreterState) -> Interpre
 
 /// MapGet (0x6C) - Get value from map.
 ///
+
 /// Format: `MapGet dst, map, key`
 /// Looks up key in map, stores value in dst (or unit if not found).
 pub(in super::super) fn handle_map_get(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -1469,6 +1474,7 @@ pub(in super::super) fn handle_map_get(state: &mut InterpreterState) -> Interpre
 
 /// MapSet (0x6D) - Set value in map.
 ///
+
 /// Format: `MapSet map, key, val`
 /// Sets map[key] = val, growing the map if necessary.
 pub(in super::super) fn handle_map_set(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -1577,6 +1583,7 @@ pub(in super::super) fn handle_map_set(state: &mut InterpreterState) -> Interpre
 
 /// MapContains (0x6E) - Check if key exists in map.
 ///
+
 /// Format: `MapContains dst, map, key`
 /// Sets dst to true if key exists, false otherwise.
 pub(in super::super) fn handle_map_contains(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -1634,6 +1641,7 @@ pub(in super::super) fn handle_map_contains(state: &mut InterpreterState) -> Int
 
 /// Clone (0x78) - Clone a value (deep copy for heap objects).
 ///
+
 /// For primitives and for pointers that do NOT point at a tracked heap
 /// object (e.g. raw buffers returned by the `alloc` intrinsic), this is a
 /// straight Value copy. Attempting to deep-copy a raw byte buffer would
@@ -1684,6 +1692,7 @@ pub(in super::super) fn handle_clone(state: &mut InterpreterState) -> Interprete
 
 /// NewSet (0xC7) - Create new empty set.
 ///
+
 /// Format: `NewSet dst`
 /// Creates an empty set and stores pointer in dst.
 pub(in super::super) fn handle_new_set(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -1717,9 +1726,9 @@ pub(in super::super) fn handle_new_set(state: &mut InterpreterState) -> Interpre
 
     // Initialize header: count=0, capacity, entries_ptr
     unsafe {
-        *header_ptr = Value::from_i64(0);                           // count
-        *header_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64);   // capacity
-        *header_ptr.add(2) = Value::from_ptr(entries_ptr);          // entries_ptr
+        *header_ptr = Value::from_i64(0); // count
+        *header_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64); // capacity
+        *header_ptr.add(2) = Value::from_ptr(entries_ptr); // entries_ptr
     }
 
     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
@@ -1728,6 +1737,7 @@ pub(in super::super) fn handle_new_set(state: &mut InterpreterState) -> Interpre
 
 /// SetInsert (0xC8) - Insert element into set.
 ///
+
 /// Format: `SetInsert set, elem`
 /// Inserts elem into set if not already present.
 pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -1829,6 +1839,7 @@ pub(in super::super) fn handle_set_insert(state: &mut InterpreterState) -> Inter
 
 /// SetContains (0xC9) - Check if set contains element.
 ///
+
 /// Format: `SetContains dst, set, elem`
 /// Sets dst to true if elem is in set, false otherwise.
 pub(in super::super) fn handle_set_contains(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -1886,6 +1897,7 @@ pub(in super::super) fn handle_set_contains(state: &mut InterpreterState) -> Int
 
 /// SetRemove (0xCA) - Remove element from set.
 ///
+
 /// Format: `SetRemove set, elem`
 /// Removes elem from set if present.
 pub(in super::super) fn handle_set_remove(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -1966,6 +1978,7 @@ pub(in super::super) fn handle_set_remove(state: &mut InterpreterState) -> Inter
 
 /// NewDeque (0xCD) - Create new empty deque with default capacity.
 ///
+
 /// Format: `NewDeque dst`
 pub(in super::super) fn handle_new_deque(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -1994,10 +2007,10 @@ pub(in super::super) fn handle_new_deque(state: &mut InterpreterState) -> Interp
     }
 
     unsafe {
-        *header_ptr = Value::from_ptr(buffer_ptr);                 // data (index 0)
-        *header_ptr.add(1) = Value::from_i64(0);                  // head (index 1)
-        *header_ptr.add(2) = Value::from_i64(0);                  // len  (index 2)
-        *header_ptr.add(3) = Value::from_i64(DEFAULT_CAP as i64); // cap  (index 3)
+        *header_ptr = Value::from_ptr(buffer_ptr); // data (index 0)
+        *header_ptr.add(1) = Value::from_i64(0); // head (index 1)
+        *header_ptr.add(2) = Value::from_i64(0); // len (index 2)
+        *header_ptr.add(3) = Value::from_i64(DEFAULT_CAP as i64); // cap (index 3)
     }
 
     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
@@ -2006,6 +2019,7 @@ pub(in super::super) fn handle_new_deque(state: &mut InterpreterState) -> Interp
 
 /// NewChannel (0xDD) - Create new bounded channel.
 ///
+
 /// Format: `NewChannel dst, capacity`
 pub(in super::super) fn handle_new_channel(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -2032,11 +2046,11 @@ pub(in super::super) fn handle_new_channel(state: &mut InterpreterState) -> Inte
     }
 
     unsafe {
-        *header_ptr = Value::from_i64(0);                  // len
-        *header_ptr.add(1) = Value::from_i64(cap as i64);  // cap
-        *header_ptr.add(2) = Value::from_i64(0);           // head
-        *header_ptr.add(3) = Value::from_ptr(buffer_ptr);  // buffer_ptr
-        *header_ptr.add(4) = Value::from_i64(0);           // closed (0=open)
+        *header_ptr = Value::from_i64(0); // len
+        *header_ptr.add(1) = Value::from_i64(cap as i64); // cap
+        *header_ptr.add(2) = Value::from_i64(0); // head
+        *header_ptr.add(3) = Value::from_ptr(buffer_ptr); // buffer_ptr
+        *header_ptr.add(4) = Value::from_i64(0); // closed (0=open)
     }
 
     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
@@ -2045,6 +2059,7 @@ pub(in super::super) fn handle_new_channel(state: &mut InterpreterState) -> Inte
 
 /// Push (0xCE) - Push value to argument stack.
 ///
+
 /// Format: `Push src`
 /// Pushes the value from src register onto the argument stack.
 pub(in super::super) fn handle_push(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -2056,6 +2071,7 @@ pub(in super::super) fn handle_push(state: &mut InterpreterState) -> Interpreter
 
 /// Pop (0xCF) - Pop value from argument stack.
 ///
+
 /// Format: `Pop dst`
 /// Pops a value from the argument stack into dst register.
 pub(in super::super) fn handle_pop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {

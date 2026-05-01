@@ -2,6 +2,7 @@
 // Modified work Copyright 2023 Daan Vanoverloop
 // See the COPYRIGHT file at the top-level directory of this distribution.
 //
+
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
@@ -11,6 +12,7 @@
 //! This module contains smart pointers that reference various `Init` types in
 //! TableGen.
 //!
+
 //! Init reference types can be converted to Rust types using [`Into`] and
 //! [`TryInto`]. Most conversions are cheap, except for conversion to
 //! [`String`].
@@ -195,8 +197,10 @@ impl<'a> TypedInit<'a> {
 
     /// Creates a new init from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// The raw object must be valid.
     #[allow(non_upper_case_globals)]
     pub unsafe fn from_raw(init: TableGenTypedInitRef) -> Self {
@@ -227,8 +231,10 @@ macro_rules! init {
         impl<'a> $name<'a> {
             /// Creates a new init from a raw object.
             ///
+
             /// # Safety
             ///
+
             /// The raw object must be valid.
             pub unsafe fn from_raw(raw: TableGenTypedInitRef) -> Self {
                 Self {
@@ -344,8 +350,10 @@ impl<'a> TryFrom<StringInit<'a>> for &'a str {
 impl<'a> StringInit<'a> {
     /// Converts the string init to a [`&str`].
     ///
+
     /// # Errors
     ///
+
     /// Returns a [`Utf8Error`] if the string init does not contain valid UTF-8.
     pub fn to_str(self) -> Result<&'a str, Utf8Error> {
         unsafe { StringRef::from_raw(tableGenStringInitGetValue(self.raw)) }.try_into()
@@ -370,6 +378,7 @@ init!(DagInit);
 impl<'a> DagInit<'a> {
     /// Returns an iterator over the arguments of the dag.
     ///
+
     /// The iterator yields tuples `(&str, TypedInit)`.
     pub fn args(self) -> DagIter<'a> {
         DagIter {
@@ -431,6 +440,7 @@ init!(ListInit);
 impl<'a> ListInit<'a> {
     /// Returns an iterator over the elements of the list.
     ///
+
     /// The iterator yields values of type [`TypedInit`].
     pub fn iter(self) -> ListIter<'a> {
         ListIter {

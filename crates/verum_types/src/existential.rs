@@ -1,32 +1,43 @@
 //! Existential Type Inference
 //!
+
 //! This module implements full support for existential types in the type system,
 //! including skolemization for unpacking and packing with bound verification.
 //!
+
 //! # Theory
 //!
+
 //! Existential types (`some T: Bound`) hide the concrete type while exposing
 //! its properties. They are the dual of universal types:
 //!
+
 //! - Universal: `forall T: Bound. Body` - consumer chooses T
 //! - Existential: `some T: Bound. Body` - producer chooses T, consumer sees opaque
 //!
+
 //! # Key Operations
 //!
+
 //! 1. **Packing**: Creating an existential by hiding a witness type
-//!    `pack(witness_type, value) : some T: Bound. Body`
+//!  `pack(witness_type, value) : some T: Bound. Body`
 //!
+
 //! 2. **Unpacking (Skolemization)**: Using an existential by introducing a skolem
-//!    `unpack(existential, x => body)` - x has skolem type that cannot escape
+//!  `unpack(existential, x => body)` - x has skolem type that cannot escape
 //!
+
 //! # Scope Safety
 //!
+
 //! Skolem constants represent "unknown but fixed" types. They must not escape
 //! their scope - this ensures type safety by preventing the hidden type from
 //! leaking.
 //!
+
 //! # References
 //!
+
 //! - Existential types: hiding concrete types behind protocol bounds (impl Protocol returns)
 //! - Types and Programming Languages, Chapter 24
 //! - Type inference for existential types: unifying impl Protocol with concrete implementations
@@ -42,12 +53,14 @@ use verum_common::ToText;
 
 /// A skolem constant, representing an opaque type from an unpacked existential.
 ///
+
 /// Skolem constants are created during existential unpacking and must not
 /// escape their scope. Each skolem has:
 /// - A unique identifier
 /// - The span where it was created (for error reporting)
 /// - Protocol bounds that the hidden type is known to satisfy
 ///
+
 /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .2 - Skolemization
 #[derive(Debug, Clone)]
 pub struct SkolemConstant {
@@ -103,6 +116,7 @@ impl std::fmt::Display for SkolemId {
 
 /// Result of existential packing
 ///
+
 /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .1 - Existential Packing
 #[derive(Debug, Clone)]
 pub struct PackResult {
@@ -114,6 +128,7 @@ pub struct PackResult {
 
 /// Result of existential unpacking (skolemization)
 ///
+
 /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .2 - Skolemization
 #[derive(Debug, Clone)]
 pub struct UnpackResult {
@@ -125,9 +140,11 @@ pub struct UnpackResult {
 
 /// Tracker for skolem constants and their scopes
 ///
+
 /// This ensures that skolem constants don't escape their scope by tracking
 /// which skolems are in scope at each level.
 ///
+
 /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .3 - Scope Checking
 #[derive(Debug, Clone, Default)]
 pub struct SkolemTracker {
@@ -152,6 +169,7 @@ impl SkolemTracker {
 
     /// Exit the current scope level, invalidating all skolems at this level
     ///
+
     /// Returns the skolems that are now out of scope (for error checking)
     pub fn exit_scope(&mut self) -> List<SkolemConstant> {
         let exiting = self
@@ -223,6 +241,7 @@ impl SkolemTracker {
 
     /// Check if a type contains any skolem that would escape scope
     ///
+
     /// Returns the first escaping skolem if found
     pub fn check_escape(&self, ty: &Type, target_level: usize) -> Option<&SkolemConstant> {
         self.find_escaping_skolem(ty, target_level)
@@ -350,10 +369,12 @@ impl SkolemTracker {
 
 /// Existential type operations
 ///
+
 /// This struct provides the core operations for working with existential types:
 /// - Packing: hide a witness type behind an existential
 /// - Unpacking: skolemize an existential to work with its contents
 ///
+
 /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types)
 pub struct ExistentialOps<'a> {
     /// Protocol checker for bound verification
@@ -380,32 +401,40 @@ impl<'a> ExistentialOps<'a> {
 
     /// Pack a witness type into an existential type
     ///
+
     /// This verifies that the witness satisfies all required bounds and creates
     /// the existential type that hides the witness.
     ///
+
     /// # Arguments
     ///
+
     /// * `witness` - The concrete type to hide
     /// * `bounds` - Protocol bounds that the witness must satisfy
     /// * `body_template` - The body type template (containing the existential variable)
     /// * `span` - Source location for error reporting
     ///
+
     /// # Returns
     ///
+
     /// The packed existential type, or an error if bounds are not satisfied.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // Packing Int as `some T: Ord. List<T>`
     /// let packed = ops.pack(
-    ///     Type::Int,
-    ///     vec![ProtocolBound::simple("Ord")],
-    ///     |t| Type::Generic { name: "List", args: vec![t] },
-    ///     span
+    ///  Type::Int,
+    ///  vec![ProtocolBound::simple("Ord")],
+    ///  |t| Type::Generic { name: "List", args: vec![t] },
+    ///  span
     /// )?;
     /// ```
     ///
+
     /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .1 - Existential Packing
     pub fn pack(
         &self,
@@ -447,23 +476,31 @@ impl<'a> ExistentialOps<'a> {
 
     /// Unpack an existential type by introducing a skolem constant
     ///
+
     /// This creates a fresh skolem constant representing the hidden type and
     /// returns the body with the existential variable replaced by the skolem.
     ///
+
     /// The skolem must not escape the current scope - this is checked when
     /// the scope is exited.
     ///
+
     /// # Arguments
     ///
+
     /// * `existential` - The existential type to unpack
     /// * `span` - Source location for error reporting
     ///
+
     /// # Returns
     ///
+
     /// The unpacking result with the skolem and substituted body, or an error.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // Unpacking `some T: Ord. List<T>`
     /// let unpack = ops.unpack(&existential, span)?;
@@ -471,6 +508,7 @@ impl<'a> ExistentialOps<'a> {
     /// // unpack.body is List<sk_0> where sk_0 is the skolem
     /// ```
     ///
+
     /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .2 - Skolemization
     pub fn unpack(&mut self, existential: &Type, span: Span) -> Result<UnpackResult, TypeError> {
         match existential {
@@ -512,9 +550,11 @@ impl<'a> ExistentialOps<'a> {
 
     /// Check if a type would escape the current scope via skolem constants
     ///
+
     /// This should be called before returning a type from a scope where
     /// existentials were unpacked.
     ///
+
     /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .3 - Escape Checking
     pub fn check_scope_escape(&self, ty: &Type, span: Span) -> Result<(), TypeError> {
         // The target level is one less than current (we're about to exit)
@@ -534,6 +574,7 @@ impl<'a> ExistentialOps<'a> {
 
 /// Subtyping rules for existential types
 ///
+
 /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .4 - Existential Subtyping
 pub mod subtyping {
     use super::*;
@@ -541,15 +582,18 @@ pub mod subtyping {
 
     /// Check if an existential is a subtype of another existential
     ///
+
     /// The rule is:
     /// `(some a:P. S) <: (some b:Q. T)` if:
     /// 1. P is a superset of Q (stronger bounds on the sub-type)
     /// 2. S[a/witness] <: T[b/witness] for some witness satisfying P
     ///
+
     /// In practice, we use skolemization to check this:
     /// - Introduce a fresh skolem `sk` for `a`
     /// - Check that `S[a/sk] <: T[b/sk]`
     ///
+
     /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .4
     pub fn existential_subtype(
         subtyping: &Subtyping,
@@ -579,10 +623,12 @@ pub mod subtyping {
 
     /// Check if an existential is a subtype of a concrete type
     ///
+
     /// `(some a:P. S) <: T` if there exists a witness `w` such that:
     /// 1. `w` satisfies all bounds in P
     /// 2. `S[a/w] <: T`
     ///
+
     /// This is generally not decidable without knowing the witness,
     /// so we conservatively return false unless T is also existential.
     pub fn existential_to_concrete(_subtyping: &Subtyping, _exists: &Type, _concrete: &Type) -> bool {
@@ -593,11 +639,13 @@ pub mod subtyping {
 
     /// Check if a concrete type is a subtype of an existential
     ///
+
     /// `T <: (some a:P. S)` if T can be packed as the existential:
     /// 1. Find a witness `w` (which might be T itself or part of T)
     /// 2. `w` satisfies all bounds in P
     /// 3. T is structurally compatible with S[a/w]
     ///
+
     /// This is useful for implicit packing during assignment.
     pub fn concrete_to_existential(
         subtyping: &Subtyping,
@@ -623,6 +671,7 @@ pub mod subtyping {
 
 /// Unification rules for existential types
 ///
+
 /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .5 - Existential Unification
 pub mod unification {
     use super::*;
@@ -630,9 +679,11 @@ pub mod unification {
 
     /// Unify two existential types
     ///
+
     /// Two existentials unify if their bodies unify after alpha-renaming
     /// to use the same bound variable.
     ///
+
     /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .5
     pub fn unify_existentials(
         unifier: &mut crate::unify::Unifier,
@@ -653,8 +704,10 @@ pub mod unification {
 
     /// Unify an existential with a concrete type
     ///
+
     /// This attempts to find a witness type that makes the unification work.
     ///
+
     /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .5
     pub fn unify_existential_concrete(
         unifier: &mut crate::unify::Unifier,

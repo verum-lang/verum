@@ -1,27 +1,30 @@
 //! Bridge-discharge audit walker — task #134 / MSFS-L4.1.
 //!
+
 //! Walks the corpus's `.vr` modules, finds every
 //! `apply kernel_*_strict(args)` invocation in proof bodies, and
 //! invokes [`verum_kernel::dispatch_intrinsic`] against the literal-arg
-//! call sites.  Reports per-bridge:
+//! call sites. Reports per-bridge:
 //!
-//!   * **callsites_total**       — total `apply` invocations of the bridge
-//!   * **callsites_literal_args** — invocations whose args reduce to literals
-//!     (the dispatcher can run on these; the elaborator wiring in #135
-//!     turns the dispatcher's verdict into a compile-time gate)
-//!   * **callsites_non_literal**  — invocations with non-literal args
-//!     (e.g., function-of-parameter forms; these are admitted under the
-//!     runtime ladder until #135 lands)
-//!   * **dispatcher_decisions**  — per-callsite Decision { holds, reason }
-//!     for every literal-arg invocation
-//!   * **false_discharges**      — count of invocations where the
-//!     dispatcher returned `holds: false` (CI-fail trigger)
+
+//!  * **callsites_total** — total `apply` invocations of the bridge
+//!  * **callsites_literal_args** — invocations whose args reduce to literals
+//!  (the dispatcher can run on these; the elaborator wiring in #135
+//!  turns the dispatcher's verdict into a compile-time gate)
+//!  * **callsites_non_literal** — invocations with non-literal args
+//!  (e.g., function-of-parameter forms; these are admitted under the
+//!  runtime ladder until #135 lands)
+//!  * **dispatcher_decisions** — per-callsite Decision { holds, reason }
+//!  for every literal-arg invocation
+//!  * **false_discharges** — count of invocations where the
+//!  dispatcher returned `holds: false` (CI-fail trigger)
 //!
+
 //! **Architecture**: this module is the *observability layer* on top
 //! of the existing `verum_kernel::intrinsic_dispatch` infrastructure.
 //! It introduces no per-bridge hardcoding — every bridge auto-registers
 //! through the dispatcher table, and every literal-arg invocation in
-//! the corpus is replayed mechanically.  Adding a new
+//! the corpus is replayed mechanically. Adding a new
 //! `kernel_<verb>_strict` bridge requires only registering the
 //! dispatcher entry; this audit picks up the discharge automatically.
 
@@ -33,7 +36,7 @@ use verum_ast::decl::{ItemKind, ProofBody, ProofStep, ProofStepKind, TacticExpr}
 use verum_ast::{Expr, ExprKind, LiteralKind, Literal, Module};
 use verum_kernel::intrinsic_dispatch::{IntrinsicValue, dispatch_intrinsic, is_known_intrinsic};
 
-/// One callsite's discharge result.  Each `apply kernel_*_strict(args)`
+/// One callsite's discharge result. Each `apply kernel_*_strict(args)`
 /// invocation in a proof body produces one of these.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallsiteDischarge {
@@ -51,13 +54,13 @@ pub struct CallsiteDischarge {
     /// String representation of the args as written in the source —
     /// useful for audit reports even when the dispatcher can't run.
     pub args_text: Vec<String>,
-    /// Dispatcher verdict.  `Some(true)` if the dispatcher returned
+    /// Dispatcher verdict. `Some(true)` if the dispatcher returned
     /// `Decision { holds: true }`, `Some(false)` for `holds: false`,
     /// `None` if the dispatcher couldn't be invoked (non-literal args
     /// or unrecognised name).
     pub holds: Option<bool>,
-    /// Dispatcher's stated reason.  Empty when the dispatcher wasn't
-    /// invoked.  Preserved verbatim so the audit-JSON consumer sees
+    /// Dispatcher's stated reason. Empty when the dispatcher wasn't
+    /// invoked. Preserved verbatim so the audit-JSON consumer sees
     /// exactly the kernel's diagnostic message.
     pub reason: String,
 }
@@ -79,8 +82,8 @@ pub struct BridgeReport {
     pub callsites: Vec<CallsiteDischarge>,
 }
 
-/// Top-level discharge audit report.  Aggregates per-bridge plus
-/// totals.  Serialised verbatim into `audit-reports/bridge-discharge.json`.
+/// Top-level discharge audit report. Aggregates per-bridge plus
+/// totals. Serialised verbatim into `audit-reports/bridge-discharge.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DischargeReport {
     /// Number of `.vr` modules walked.
@@ -94,14 +97,15 @@ pub struct DischargeReport {
     /// Per-bridge reports keyed by bridge name (canonical sorted order).
     pub bridges: Vec<BridgeReport>,
     /// Names of bridges referenced in the corpus that don't have a
-    /// dispatcher entry — gap report.  An empty list is the green
+    /// dispatcher entry — gap report. An empty list is the green
     /// state.
     pub unknown_bridges: Vec<String>,
 }
 
 /// Walk a `Module` and accumulate per-bridge callsite results.
 ///
-/// `aggregator` is a mutable map from bridge-name → BridgeReport.  The
+
+/// `aggregator` is a mutable map from bridge-name → BridgeReport. The
 /// caller calls `walk_module` for every parsed `.vr` file in the
 /// corpus, then promotes the map into the final `DischargeReport`.
 pub fn walk_module(
@@ -116,7 +120,7 @@ pub fn walk_module(
                 (t.name.as_str().to_string(), t.proof.as_ref())
             }
             // FunctionDecl has no `proof` field — theorem-shaped proofs
-            // always go through TheoremDecl in this AST.  Skip.
+            // always go through TheoremDecl in this AST. Skip.
             _ => continue,
         };
 
@@ -138,7 +142,7 @@ pub fn walk_module(
                 visit_tactic_for_apply(t, rel_path, &item_name, aggregator);
             }
             // Term / ByMethod proof bodies don't carry tactic
-            // invocations the audit cares about.  Skip.
+            // invocations the audit cares about. Skip.
             ProofBody::ByMethod(_) | ProofBody::Term(_) => continue,
         }
     }
@@ -181,6 +185,7 @@ fn visit_proof_step(
 
 /// Recursively walk a `TacticExpr` looking for `Apply { lemma, args }`.
 ///
+
 /// Tactic combinators (Then / OrElse / Repeat / etc.) are walked into
 /// so that nested `apply` calls inside `then` chains are picked up.
 fn visit_tactic_for_apply(
@@ -192,11 +197,12 @@ fn visit_tactic_for_apply(
     match tactic {
         TacticExpr::Apply { lemma, args } => {
             // Two parser shapes for `apply lemma(arg1, arg2, ...)`:
-            //   1. `lemma: Path(name)`, `args: [arg1, arg2, ...]`
-            //   2. `lemma: Call { func: Path(name), args: [arg1, ...] }`,
-            //      `args: []`  ← what the fast parser actually produces.
+            //  1. `lemma: Path(name)`, `args: [arg1, arg2, ...]`
+            //  2. `lemma: Call { func: Path(name), args: [arg1, ...] }`,
+            //  `args: []` ← what the fast parser actually produces.
             //
-            // Detect both by case-analysing `lemma`.  When the lemma
+
+            // Detect both by case-analysing `lemma`. When the lemma
             // is a Call, hoist its inner args.
             let owned_args: Vec<Expr>;
             let (effective_lemma, arg_refs): (&Expr, Vec<&Expr>) = match &lemma.kind {
@@ -234,7 +240,7 @@ fn visit_tactic_for_apply(
     }
 }
 
-/// Process a single `apply lemma(args...)` callsite.  Extracts the
+/// Process a single `apply lemma(args...)` callsite. Extracts the
 /// lemma name, classifies the args as literal vs non-literal, invokes
 /// the dispatcher when possible, and records the verdict in the
 /// aggregator.
@@ -256,7 +262,7 @@ fn handle_apply_callsite(
     }
 
     // The dispatcher table is keyed on the bare name; strict-form
-    // bridges share the same entry.  Strip the `_strict` suffix if
+    // bridges share the same entry. Strip the `_strict` suffix if
     // present.
     let bare_name = raw_name.strip_suffix("_strict").unwrap_or(&raw_name).to_string();
 
@@ -271,12 +277,12 @@ fn handle_apply_callsite(
     let all_literal = !intrinsic_args.is_empty()
         && intrinsic_args.iter().all(|v| v.is_some());
     // Dispatcher invocation policy:
-    //   - all-literal args: invoke and capture verdict
-    //   - bare call (zero args): invoke with empty arg slice; some
-    //     dispatchers handle this (returning the bare-call default),
-    //     others require args (returning None)
-    //   - mixed / non-literal: skip dispatcher, classify as
-    //     "non-literal" — the elaborator wiring (#135) handles these
+    //  - all-literal args: invoke and capture verdict
+    //  - bare call (zero args): invoke with empty arg slice; some
+    //  dispatchers handle this (returning the bare-call default),
+    //  others require args (returning None)
+    //  - mixed / non-literal: skip dispatcher, classify as
+    //  "non-literal" — the elaborator wiring (#135) handles these
     let dispatcher_eligible = all_literal || intrinsic_args.is_empty();
 
     let (holds, reason) = if dispatcher_eligible {
@@ -320,7 +326,7 @@ fn handle_apply_callsite(
     });
 }
 
-/// Project an `Expr` to its single-segment Path identifier name.  Any
+/// Project an `Expr` to its single-segment Path identifier name. Any
 /// other shape returns `None`.
 fn expr_as_path_name(e: &Expr) -> Option<String> {
     match &e.kind {
@@ -330,7 +336,7 @@ fn expr_as_path_name(e: &Expr) -> Option<String> {
 }
 
 /// Convert a literal `Expr` to an `IntrinsicValue` if it's a literal
-/// the dispatcher can consume.  Returns `None` for any non-literal
+/// the dispatcher can consume. Returns `None` for any non-literal
 /// shape (parameter reference, arithmetic expression, function call,
 /// etc.).
 fn expr_to_intrinsic_value(e: &Expr) -> Option<IntrinsicValue> {
@@ -340,7 +346,7 @@ fn expr_to_intrinsic_value(e: &Expr) -> Option<IntrinsicValue> {
                 // The intrinsic dispatcher uses `IntrinsicValue::Int(i64)`;
                 // i128 → i64 narrowing is sound for the literal sizes
                 // bridges actually use (StrictPos, NonNegInt, levels ≤
-                // u32::MAX).  Negative literals are also fine because
+                // u32::MAX). Negative literals are also fine because
                 // the dispatcher's own range checks will reject them.
                 let v = int_lit.value;
                 if v >= i64::MIN as i128 && v <= i64::MAX as i128 {
@@ -365,7 +371,7 @@ fn expr_to_intrinsic_value(e: &Expr) -> Option<IntrinsicValue> {
 }
 
 /// Render an `Expr` to a human-readable text representation suitable
-/// for audit reports.  This is intentionally *coarse* — we just want
+/// for audit reports. This is intentionally *coarse* — we just want
 /// enough text to identify the callsite in a JSON report, not a
 /// pretty-printer round-trip.
 fn expr_to_text(e: &Expr) -> String {
@@ -397,6 +403,7 @@ fn expr_to_text(e: &Expr) -> String {
 
 /// Promote a per-bridge aggregator into the final `DischargeReport`.
 ///
+
 /// Computes totals and identifies bridges referenced in the corpus
 /// that don't have a dispatcher entry (the "unknown_bridges" gap).
 pub fn finalise_report(

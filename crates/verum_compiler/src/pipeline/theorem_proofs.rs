@@ -1,16 +1,19 @@
 //! Theorem / lemma / corollary proof verification orchestration.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 2) so the proof-verification
 //! orchestration is independently reviewable. The single public entry
 //! `verify_theorem_proofs` walks every `theorem` / `lemma` / `corollary`
 //! in the module and dispatches to the appropriate proof-verification
 //! strategy:
 //!
-//!   * Tactic proofs   → ProofSearchEngine (automated tactic application).
-//!   * Term proofs     → Z3 formula translation + satisfiability check.
-//!   * Structured     → weakest-precondition calculus.
-//!   * Method proofs   → induction / cases via WP engine.
+
+//!  * Tactic proofs → ProofSearchEngine (automated tactic application).
+//!  * Term proofs → Z3 formula translation + satisfiability check.
+//!  * Structured → weakest-precondition calculus.
+//!  * Method proofs → induction / cases via WP engine.
 //!
+
 //! The closure-cache fast path (#79 / #88) keys each verdict on a
 //! blake3 hash of the theorem signature + proof body + sorted+deduped
 //! `@framework(...)` citations. Cache hits skip the SMT round entirely.
@@ -113,6 +116,7 @@ impl<'s> CompilationPipeline<'s> {
         // proof engine so `proof by auto` can unfold user function
         // calls through Z3.
         //
+
         // Conservative: functions that can't be translated (multi-
         // statement bodies, unsupported operators, closures, etc.)
         // are silently skipped — no incorrect axiom is ever emitted.

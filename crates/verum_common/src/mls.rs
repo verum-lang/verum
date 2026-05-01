@@ -1,54 +1,65 @@
 //! Multi-Level Security (MLS) classification lattice — Phase 2a (#282).
 //!
+
 //! Foundational primitive for Verum's information-flow analysis. Phase 1
 //! (#266) established the call-site friction layer: every dangerous
 //! declaration (extern fn, unsafe fn) must carry an explicit
 //! `@classification(level)` attribute matching the manifest floor.
 //!
+
 //! This module promotes the enum from its private home in
 //! `verum_compiler::phases::safety_gate` to the shared layer so the
 //! type checker (Phase 2b: propagation through Pi-types) and the
 //! context system (Phase 3: side-effect classification) can consume
 //! the same lattice without re-defining it.
 //!
+
 //! # Lattice
 //!
+
 //! The classification levels form a total order:
 //!
+
 //! ```text
-//!     Public ⊑ Secret ⊑ TopSecret
+//!  Public ⊑ Secret ⊑ TopSecret
 //! ```
 //!
+
 //! - **Join (⊔)** — least upper bound. The classification of a value
-//!   derived from multiple sources is the join of the source
-//!   classifications. Adding `Secret` and `Public` produces `Secret`;
-//!   adding `Secret` and `TopSecret` produces `TopSecret`.
+//!  derived from multiple sources is the join of the source
+//!  classifications. Adding `Secret` and `Public` produces `Secret`;
+//!  adding `Secret` and `TopSecret` produces `TopSecret`.
 //!
+
 //! - **Meet (⊓)** — greatest lower bound. The classification floor
-//!   that ALL of a set of contexts can write into. Used for sink-
-//!   detection: the meet of every consumer's classification gives the
-//!   minimum classification a value must have to flow into all of
-//!   them.
+//!  that ALL of a set of contexts can write into. Used for sink-
+//!  detection: the meet of every consumer's classification gives the
+//!  minimum classification a value must have to flow into all of
+//!  them.
 //!
+
 //! - **Subsumes (⊒)** — `a ⊒ b` iff `a` is at least as classified as
-//!   `b`. Used for the surface gate (`@classification(top_secret)`
-//!   satisfies `mls_level = "secret"` because TopSecret ⊒ Secret).
+//!  `b`. Used for the surface gate (`@classification(top_secret)`
+//!  satisfies `mls_level = "secret"` because TopSecret ⊒ Secret).
 //!
+
 //! # Phase Roadmap
 //!
+
 //! - **Phase 1 (#266)**: surface gate at safety_gate.rs — closed.
 //! - **Phase 2a (#282)**: this module — lattice primitive.
 //! - **Phase 2b (#282-Followup)**: type-level taint propagation. Add
-//!   `Classification` annotation to function parameter types; the
-//!   unifier joins source classifications when binding values.
+//!  `Classification` annotation to function parameter types; the
+//!  unifier joins source classifications when binding values.
 //! - **Phase 3 (#283)**: side-effect classification. The context
-//!   system tracks which contexts are low-classification sinks; values
-//!   above the sink's classification require explicit `@declassify`.
+//!  system tracks which contexts are low-classification sinks; values
+//!  above the sink's classification require explicit `@declassify`.
 
 use serde::{Deserialize, Serialize};
 
 /// MLS classification level.
 ///
+
 /// Total-ordered: `Public < Secret < TopSecret`. The `Ord` impl is
 /// the lattice's height ordering — directly usable for `cmp` and
 /// `min`/`max` (which compute meet/join).
@@ -74,6 +85,7 @@ impl MlsLevel {
     /// `Public` (the safe default — un-annotated values are
     /// unclassified).
     ///
+
     /// Accepts: `"public"`, `"secret"`, `"top_secret"`. The hyphen
     /// form `"top-secret"` is also accepted as an alias.
     pub fn from_manifest_str(s: &str) -> Self {
@@ -97,6 +109,7 @@ impl MlsLevel {
     /// Lattice join — least upper bound. The classification of a
     /// value derived from `self` AND `other` is `self.join(other)`.
     ///
+
     /// For the total order, this is `max(self, other)`.
     #[inline]
     pub fn join(self, other: Self) -> Self {
@@ -107,6 +120,7 @@ impl MlsLevel {
     /// classification a value can have and still flow into BOTH of
     /// the levels at `self` and `other`.
     ///
+
     /// For the total order, this is `min(self, other)`.
     #[inline]
     pub fn meet(self, other: Self) -> Self {
@@ -205,7 +219,7 @@ mod tests {
 
     #[test]
     fn join_is_idempotent() {
-        // Pin: x.join(x) = x for every level.  Algebraic invariant.
+        // Pin: x.join(x) = x for every level. Algebraic invariant.
         for level in [MlsLevel::Public, MlsLevel::Secret, MlsLevel::TopSecret] {
             assert_eq!(level.join(level), level);
         }

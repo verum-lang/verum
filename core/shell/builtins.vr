@@ -5,13 +5,16 @@
 // Dependencies: core, io.fs, base.env, shell.{result, context}
 // =============================================================================
 //
+
 // Pure-Verum implementations of common shell utilities. Avoids spawning
 // `cp`/`mv`/`rm` on every call (which would cost ~2 ms per spawn on Unix
 // and ~3 ms on Windows) and works identically across platforms.
 //
+
 // All functions are `using [ShellContext]` so cwd / env overrides apply
 // transparently to relative paths.
 //
+
 // =============================================================================
 
 module builtins;

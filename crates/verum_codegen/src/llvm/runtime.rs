@@ -1,14 +1,18 @@
 //! LLVM IR helper functions emitted inline for collection operations.
 //!
+
 //! These functions are defined as Internal-linkage LLVM IR functions during
 //! module creation (Phase 0.5 in `lower_module`) for list, set, and map-grow operations.
 //!
+
 //! Most map operations (insert/get/contains/iter) are handled by compiled
 //! `core/collections/map.vr` via Strategy 1/2 dispatch and do NOT need
 //! LLVM IR helpers here.
 //!
+
 //! # LLVM IR Helpers
 //!
+
 //! | Function | Description |
 //! |----------|-------------|
 //! | verum_list_grow | Grow list backing array (2x capacity) |
@@ -113,12 +117,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower NewList instruction.
     ///
+
     /// Creates a new empty list with cap=0, len=0, ptr=null.
     /// Returns pointer to list object.
     ///
+
     /// Layout (NewG): [24-byte header][ptr:i64][len:i64][cap:i64] = 48 bytes
     /// This matches the struct layout from list.vr: { ptr, len, cap }
     ///
+
     /// The backing array is NOT pre-allocated. The first push triggers
     /// List.grow() → List.resize_buffer() → alloc() via verum_cbgr_allocate,
     /// which correctly sets up AllocationHeader for subsequent realloc calls.
@@ -148,6 +155,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower ListPush instruction.
     ///
+
     /// Pushes a value onto the list, growing if necessary.
     pub fn lower_list_push(
         &self,
@@ -284,6 +292,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower ListPop instruction.
     ///
+
     /// Pops a value from the list (returns unit if empty).
     pub fn lower_list_pop(
         &self,
@@ -375,9 +384,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower NewMap instruction.
     ///
+
     /// Creates a new empty map with default capacity.
     /// Returns pointer to map object (NewG layout with 24-byte header).
     ///
+
     /// Layout: [header(24)][entries_ptr:i64][len:i64][cap:i64] = 48 bytes
     /// Field order matches map.vr: { entries, len, cap, tombstones }
     /// (tombstones not set here — defaults to 0 from memset)
@@ -451,6 +462,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IterNew for a list iterable.
     ///
+
     /// Iterator layout: [tag=0: i64, iterable_ptr: i64, index=0: i64]
     pub fn lower_iter_new(
         &self,
@@ -499,6 +511,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IterNew for a range iterable.
     ///
+
     /// Range object layout: [header(24 bytes)][start: i64][end: i64][inclusive: i64]
     /// Iterator layout: [tag=1: i64, current=start: i64, end: i64]
     pub fn lower_iter_new_range(
@@ -591,6 +604,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IterNext for a range iterator.
     ///
+
     /// Iterator layout: [tag=1: i64, current: i64, end: i64]
     /// Returns current value, increments current. has_more = (current < end).
     pub fn lower_iter_next_range(
@@ -655,6 +669,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IterNew for a flat range (from NewRange/verum_range_new).
     ///
+
     /// Flat range layout: {start: i64, end: i64, step: i64, current: i64} at offsets 0, 8, 16, 24.
     /// The end value is already adjusted for inclusive by the NewRange instruction handler.
     /// Iterator layout: [tag=1: i64, current=start: i64, end: i64]
@@ -729,6 +744,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IterNext for a list iterator.
     ///
+
     /// Iterator layout: [tag=0: i64, iterable_ptr: i64, current_index: i64]
     /// Returns list[index], increments index. has_more = (index < len).
     pub fn lower_iter_next_list(
@@ -857,6 +873,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IterNext for a byte slice iterable (from Pack{ptr, len}).
     ///
+
     /// Slice layout (Pack object): [24-byte header][ptr: i64][len: i64]
     /// Iterator layout: [tag=0: i64, iterable_ptr: i64, index: i64]
     /// Elements are i8 bytes, zero-extended to i64.
@@ -973,13 +990,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IterNew for a text/string iterable.
     ///
+
     /// Text layout (flat): {ptr: *u8, len: i64, cap: i64} — 24 bytes, NO object header.
     /// For string_register (C runtime): plain `char*` pointer — use strlen for len.
     /// Iterator layout: [tag=2: i64, text_data_ptr: i64, len_and_index: i64]
-    ///   - tag=2 distinguishes text iterators (vs list=0, range=1)
-    ///   - text_data_ptr = pointer to raw UTF-8 bytes
-    ///   - We store current_index in field 2
-    ///   - len is stored in a 4th slot
+    ///  - tag=2 distinguishes text iterators (vs list=0, range=1)
+    ///  - text_data_ptr = pointer to raw UTF-8 bytes
+    ///  - We store current_index in field 2
+    ///  - len is stored in a 4th slot
     /// Actually we use 4 i64 fields: [tag=2, data_ptr, index, len]
     pub fn lower_iter_new_text(
         &self,
@@ -1106,6 +1124,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IterNext for a text iterator.
     ///
+
     /// Iterator layout: [tag=2: i64, data_ptr: i64, index: i64, len: i64]
     /// Returns (byte_value_as_i64, has_more_as_i64).
     /// Iterates UTF-8 bytes (codepoint iteration requires UTF-8 decode).
@@ -1215,6 +1234,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower New instruction — allocate a record/object on the heap.
     ///
+
     /// Layout: [header (24 bytes)][field0:i64][field1:i64]...
     /// All fields are zero-initialized. Callers should store field values
     /// using GEP + store at the appropriate offsets.
@@ -1248,6 +1268,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower NewClosure — allocate a closure struct with captured environment.
     ///
+
     /// Closure layout: { fn_ptr: ptr (offset 0), env_ptr: ptr (offset 8) }
     /// Environment layout: [capture_0: i64][capture_1: i64]...
     pub fn lower_new_closure(
@@ -1319,6 +1340,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower MakeVariant instruction.
     ///
+
     /// Creates a new variant with the specified tag.
     /// Layout: [header (24 bytes)][tag:u32][pad:u32][payload:Value...]
     pub fn lower_make_variant(
@@ -1367,6 +1389,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower GetTag instruction.
     ///
+
     /// Gets the tag from a variant (stored at offset OBJECT_HEADER_SIZE).
     pub fn lower_get_tag(
         &self,
@@ -1403,6 +1426,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower SetVariantData instruction.
     ///
+
     /// Sets a field in the variant payload.
     pub fn lower_set_variant_data(
         &self,
@@ -1436,6 +1460,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower GetVariantData instruction.
     ///
+
     /// Gets a field from the variant payload.
     pub fn lower_get_variant_data(
         &self,
@@ -1469,6 +1494,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower IsVar instruction.
     ///
+
     /// Checks if a variant has the specified tag.
     pub fn lower_is_var(
         &self,
@@ -1512,6 +1538,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower AsVar instruction.
     ///
+
     /// Extracts the payload from a variant at the specified field index.
     /// Equivalent to GetVariantData but named for pattern matching context.
     pub fn lower_as_var(
@@ -1530,6 +1557,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower Pack instruction.
     ///
+
     /// Packs multiple values into a tuple (allocated on heap).
     /// Layout: [header (24 bytes)][values:Value...]
     pub fn lower_pack(
@@ -1571,6 +1599,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower Unpack instruction (single element extraction).
     ///
+
     /// Gets a value from a tuple at the specified index.
     pub fn lower_unpack_element(
         &self,
@@ -1605,10 +1634,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // Text LLVM IR Functions — replaces C runtime text stubs
     // =========================================================================
     //
+
     // These emit LLVM IR function bodies for text operations that were previously
     // in verum_runtime.c. By emitting IR here, we can delete the C implementations
     // and let LLVM inline them at -O2.
     //
+
     // Text layout: { ptr: i8*, len: i64, cap: i64 } = 24 bytes (3 x i64)
 
     /// Emit all text runtime functions as LLVM IR.
@@ -1689,17 +1720,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// must match the C runtime exactly for interop. This fixup re-emits the
     /// function body with correct offsets and probing logic.
     ///
+
     /// Map layout (24-byte header + fields):
-    ///   offset 24: entries_ptr (i64)
-    ///   offset 32: len (i64)
-    ///   offset 40: cap (i64)
-    ///   offset 48: tombstones (i64)
+    ///  offset 24: entries_ptr (i64)
+    ///  offset 32: len (i64)
+    ///  offset 40: cap (i64)
+    ///  offset 48: tombstones (i64)
     ///
+
     /// Slot layout (32 bytes, NO header):
-    ///   offset 0: key (i64)
-    ///   offset 8: value (i64)
-    ///   offset 16: hash (i64)
-    ///   offset 24: psl (i64)
+    ///  offset 0: key (i64)
+    ///  offset 8: value (i64)
+    ///  offset 16: hash (i64)
+    ///  offset 24: psl (i64)
     fn fixup_map_get(&self, module: &Module<'ctx>) -> Result<()> {
         let Some(func) = module.get_function("Map.get") else { return Ok(()) };
         if func.count_basic_blocks() == 0 { return Ok(()); }
@@ -2373,6 +2406,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// The compiled map.vr insert has broken hashing/equality for Text keys.
     /// This fixup replaces the body with code using verum_generic_hash/verum_generic_eq.
     ///
+
     /// Signature: Map.insert(self: i64, key: i64, value: i64) -> i64
     /// Returns 0 for None (no previous value) or old_value for Some.
     fn fixup_map_insert(&self, module: &Module<'ctx>) -> Result<()> {
@@ -3128,13 +3162,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// verum_generic_len(obj: i64) -> i64
     /// Runtime-dispatched length for untyped registers that could be List, Map/Set/Deque, or Text.
     ///
+
     /// All heap collections (List, Map, Set, Deque) now use NewG layout with 24-byte header.
     /// Text still uses flat {ptr, len, cap} layout.
     ///
+
     /// Heuristic: check offset 0 (first field).
     /// - If offset_0 is a heap pointer (> 0x10000): this is Text → len at offset 8
     /// - Else: this is a NewG object (List/Map/Set/Deque) → len at offset 32
     ///
+
     /// Note: For NewG objects, offset 0 is type_tag (typically 0 or small number),
     /// so it will NOT look like a heap pointer. For Text, offset 0 is the char*
     /// pointer which is always a heap address.
@@ -3301,9 +3338,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // Entry: reject values that can't be valid heap pointers.
         // On 64-bit systems, heap addresses (from malloc) are:
-        //   - Above 256MB (ASLR puts heap well above program text on all platforms)
-        //   - 16-byte aligned (guaranteed by malloc on macOS/Linux/Windows)
-        //   - Below 0x7FFFFFFFFFFF (user-space canonical address)
+        //  - Above 256MB (ASLR puts heap well above program text on all platforms)
+        //  - 16-byte aligned (guaranteed by malloc on macOS/Linux/Windows)
+        //  - Below 0x7FFFFFFFFFFF (user-space canonical address)
         builder.position_at_end(entry);
         let val = func.get_nth_param(0).or_internal("missing param 0")?.into_int_value();
         let min_ptr = i64_type.const_int(0x10000000, false); // 256MB — well below any heap start
@@ -3516,6 +3553,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // Format / Conversion LLVM IR Functions
     // =========================================================================
     //
+
     // These replace C runtime format/conversion stubs with LLVM IR that calls
     // libc snprintf/strtol/strtod directly. They serve as fallback when
     // compiled text.vr (Text.from_int, Text.from_float, Text.to_int, Text.to_float)
@@ -3534,7 +3572,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Get or declare strtol(str: ptr, endptr: ptr, base: i32) -> i64
     /// Forward-declare `verum_internal_strtol` (defined in
     /// `instruction.rs::get_or_declare_internal_strtol`) so callers
-    /// in runtime.rs can resolve the libc-free wrapper.  Same
+    /// in runtime.rs can resolve the libc-free wrapper. Same
     /// signature as libc strtol — `(ptr, ptr, i32) -> i64`.
     fn get_or_declare_strtol(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let name = "verum_internal_strtol";
@@ -3555,8 +3593,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module.add_function("strtod", fn_type, None)
     }
 
-    /// verum_int_to_text(value: i64) -> i64  (returns Text object pointer as i64)
+    /// verum_int_to_text(value: i64) -> i64 (returns Text object pointer as i64)
     ///
+
     /// Converts integer to Text using snprintf(buf, 32, "%ld", value).
     /// Allocates a new Text object with the result.
     fn emit_verum_int_to_text(&self, module: &Module<'ctx>) -> Result<()> {
@@ -3612,8 +3651,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_float_to_text(value: f64) -> i64  (returns Text object pointer as i64)
+    /// verum_float_to_text(value: f64) -> i64 (returns Text object pointer as i64)
     ///
+
     /// Converts float to Text using snprintf(buf, 64, "%g", value).
     fn emit_verum_float_to_text(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_float_to_text") {
@@ -3669,6 +3709,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// verum_string_parse_int(str: ptr) -> i64
     ///
+
     /// Parses C string to integer using strtol(str, NULL, 10).
     fn emit_verum_string_parse_int(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_string_parse_int") {
@@ -3710,8 +3751,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_string_parse_float(str: ptr) -> i64  (f64 bits as i64)
+    /// verum_string_parse_float(str: ptr) -> i64 (f64 bits as i64)
     ///
+
     /// Parses C string to float using strtod, returns f64 bits as i64.
     fn emit_verum_string_parse_float(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_string_parse_float") {
@@ -3757,6 +3799,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// verum_text_char_len(text_obj: i64) -> i64
     ///
+
     /// Returns the number of UTF-8 codepoints in a Text object.
     /// Counts bytes that are NOT continuation bytes (0x80..0xBF).
     fn emit_verum_text_char_len(&self, module: &Module<'ctx>) -> Result<()> {
@@ -3844,6 +3887,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // Misc LLVM IR Functions — time, random, range
     // =========================================================================
     //
+
     // These replace C runtime functions with pure LLVM IR emission.
     // Platform differences are resolved at IR-generation time via cfg!().
 
@@ -3878,17 +3922,20 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// verum_time_monotonic_nanos() -> i64
     ///
-    /// Returns monotonic clock time in nanoseconds.  Per-platform
+
+    /// Returns monotonic clock time in nanoseconds. Per-platform
     /// dispatch (libc-free per the user's 2026-05-01 directive):
     ///
-    ///   * **Linux**: direct `clock_gettime(CLOCK_MONOTONIC, &ts)`
-    ///     syscall via inline assembly.  No glibc/musl link
-    ///     dependency.  syscall numbers: x86_64=228, aarch64=113.
-    ///   * **macOS**: libSystem `clock_gettime(CLOCK_MONOTONIC=6, &ts)`.
-    ///     Acceptable per user directive — libsystem IS the macOS OS
-    ///     interface, there's no separate "libc" on macOS.
-    ///   * **other**: libc fallback (FreeBSD/OpenBSD).
+
+    ///  * **Linux**: direct `clock_gettime(CLOCK_MONOTONIC, &ts)`
+    ///  syscall via inline assembly. No glibc/musl link
+    ///  dependency. syscall numbers: x86_64=228, aarch64=113.
+    ///  * **macOS**: libSystem `clock_gettime(CLOCK_MONOTONIC=6, &ts)`.
+    ///  Acceptable per user directive — libsystem IS the macOS OS
+    ///  interface, there's no separate "libc" on macOS.
+    ///  * **other**: libc fallback (FreeBSD/OpenBSD).
     ///
+
     /// Both paths produce the same `tv_sec * 1e9 + tv_nsec` result.
     fn emit_verum_time_monotonic_nanos(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_time_monotonic_nanos") {
@@ -3912,7 +3959,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // Cross-compilation-correct: dispatch on the LLVM module's
         // *target* triple, not the compile host's `target_os` cfg.
         if target_is_linux(module) {
-            // Direct syscall — libc-free.  CLOCK_MONOTONIC = 1 on Linux.
+            // Direct syscall — libc-free. CLOCK_MONOTONIC = 1 on Linux.
             // Syscall numbers are arch-specific.
             let sys_num: u64 = if target_is_aarch64(module) {
                 113 // SYS_clock_gettime aarch64
@@ -3972,7 +4019,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ts = builder.build_alloca(timespec_type, "ts").or_llvm_err()?;
 
         // Per-platform `clock_gettime(CLOCK_REALTIME=0, &ts)` dispatch
-        // (libc-free per user 2026-05-01 directive).  Same shape as
+        // (libc-free per user 2026-05-01 directive). Same shape as
         // monotonic_nanos but with CLOCK_REALTIME=0 instead of 1.
         // Cross-compilation-correct: TARGET-triple dispatch via
         // `Self::target_is_linux`, never host `#[cfg]`.
@@ -4054,12 +4101,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // Per-platform `nanosleep(&ts, NULL)` dispatch (libc-free).
         // Cross-compilation-correct: TARGET-triple dispatch.
-        //   * Linux: direct SYS_nanosleep syscall.  x86_64=35, aarch64=101.
-        //     Args: (&req_ts, &rem_ts NULL).  Return value ignored —
-        //     interrupted sleeps just complete early; the semantics
-        //     of `verum_time_sleep_nanos` don't promise full duration
-        //     under signals.
-        //   * macOS / other Unix: libSystem nanosleep (acceptable).
+        //  * Linux: direct SYS_nanosleep syscall. x86_64=35, aarch64=101.
+        //  Args: (&req_ts, &rem_ts NULL). Return value ignored —
+        //  interrupted sleeps just complete early; the semantics
+        //  of `verum_time_sleep_nanos` don't promise full duration
+        //  under signals.
+        //  * macOS / other Unix: libSystem nanosleep (acceptable).
         if target_is_linux(module) {
             let sys_num: u64 = if target_is_aarch64(module) {
                 101 // SYS_nanosleep aarch64
@@ -4440,34 +4487,40 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// trap instruction (per user's 2026-05-01 directive: "for AOT we
     /// don't use libc on any platform; on Linux use direct syscalls").
     ///
+
     /// Mirrors the per-architecture register convention used by
     /// `Opcode::SyscallLinux` lowering at instruction.rs:3730:
     ///
-    ///   * **x86_64**: `syscall` instruction; rax = syscall number,
-    ///     rdi/rsi/rdx/r10/r8/r9 = a0..a5; return in rax.
-    ///   * **aarch64**: `svc #0` instruction; x8 = syscall number,
-    ///     x0..x5 = a0..a5; return in x0.
+
+    ///  * **x86_64**: `syscall` instruction; rax = syscall number,
+    ///  rdi/rsi/rdx/r10/r8/r9 = a0..a5; return in rax.
+    ///  * **aarch64**: `svc #0` instruction; x8 = syscall number,
+    ///  x0..x5 = a0..a5; return in x0.
     ///
-    /// Always 6-arg shape — pass i64 zeros for unused args.  Caller
+
+    /// Always 6-arg shape — pass i64 zeros for unused args. Caller
     /// is responsible for marshalling argument types into i64 (`build_ptr_to_int`
     /// for pointers, sign- or zero-extend for narrow integers).
     ///
+
     /// This is the canonical libc-free syscall path for the AOT
     /// runtime helpers; every `verum_*` helper that previously called
-    /// libc on Linux now routes through this helper.  Other-Unix
+    /// libc on Linux now routes through this helper. Other-Unix
     /// platforms (FreeBSD/OpenBSD) keep libc fallback under `@cfg`
     /// for now; production targeting needs explicit per-platform arms.
     ///
+
     /// **Cross-compilation note**: this method is ALWAYS available
     /// regardless of host OS — the inline-asm register convention is
     /// selected by inspecting `module.get_triple()` at codegen time
     /// (the LLVM module's *target* triple) so that producing a
     /// Linux/aarch64 binary on an x86_64-darwin host emits ARM64
-    /// syscall conventions, and vice versa.  HOST-based `#[cfg]`
+    /// syscall conventions, and vice versa. HOST-based `#[cfg]`
     /// gating would have tied the method's behavior to the compile
     /// host instead of the target — silently miscompiling every
     /// cross build.
     ///
+
     /// The LLVM module is the source of truth for the target triple
     /// (set by `verum_codegen::llvm::vbc_lowering` from
     /// `CompilerOptions.target_triple`), so we read the architecture
@@ -4482,7 +4535,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = self.context.i64_type();
 
         // Inspect the LLVM module's TARGET triple, NOT the compile
-        // host's `target_arch`.  Cross-compilation safe: producing a
+        // host's `target_arch`. Cross-compilation safe: producing a
         // Linux/aarch64 binary on x86_64-darwin emits ARM64 syscall
         // conventions correctly.
         let triple = module.get_triple();
@@ -4500,7 +4553,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         } else {
             // Other archs (32-bit ARM, RISC-V, …): caller should
             // route through the per-platform fallback rather than
-            // relying on this helper.  Emit a stub that returns 0.
+            // relying on this helper. Emit a stub that returns 0.
             ("", "=r,r,r,r,r,r,r,r")
         };
 
@@ -4671,7 +4724,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 // macOS: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=0x200, O_TRUNC=0x400, O_APPEND=8
                 // Linux: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=0x40, O_TRUNC=0x200, O_APPEND=0x400
                 // Cross-compilation-correct: TARGET-triple dispatch,
-                // never host `#[cfg]`.  open(2) flag numbers are
+                // never host `#[cfg]`. open(2) flag numbers are
                 // ABI-divergent between Darwin and Linux — emitting
                 // host's table into a cross-target binary silently
                 // produces O_TRUNC where O_APPEND was intended.
@@ -5630,11 +5683,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // verum_sys_getpid() -> i64
         //
+
         // Per-platform dispatch (libc-free):
-        //   * Linux: direct `getpid` syscall via inline asm.
-        //     SYS_getpid: x86_64=39, aarch64=172.
-        //   * macOS / other Unix: libSystem `getpid()` (acceptable —
-        //     libsystem IS the macOS OS interface).
+        //  * Linux: direct `getpid` syscall via inline asm.
+        //  SYS_getpid: x86_64=39, aarch64=172.
+        //  * macOS / other Unix: libSystem `getpid()` (acceptable —
+        //  libsystem IS the macOS OS interface).
         {
             let fn_type = i64_type.fn_type(&[], false);
             let func = module.get_function("verum_sys_getpid")
@@ -5664,24 +5718,26 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // verum_sys_gettid() -> i64
         //
-        // Real per-thread identifier — NOT process pid.  Pre-fix this
+
+        // Real per-thread identifier — NOT process pid. Pre-fix this
         // helper called `getpid()` "as a safe default", which made
         // `core/sys/common.vr::get_thread_id()` return the same value
         // for every thread in the process (parity-with-process bug,
-        // not parity-with-thread).  The interpreter side
+        // not parity-with-thread). The interpreter side
         // (`crates/verum_vbc/.../ffi_extended.rs::SysGettid`) uses
         // `pthread_threadid_np` on macOS and the std::thread::id
         // hash on other Unix; this AOT helper now mirrors that
         // semantics so interpreter and AOT report the same tid for
         // the same OS thread.
         //
+
         // Platforms:
-        //   * macOS: `pthread_threadid_np(0, &mut tid)` — Apple's
-        //     stable API; `0` selects the calling thread.
-        //   * Linux: `gettid()` — direct syscall wrapper in glibc/musl.
-        //   * Other Unix: fall back to `getpid()` as the historical
-        //     placeholder (parity with the interpreter's
-        //     `non-macos non-windows` arm at ffi_extended.rs:1738).
+        //  * macOS: `pthread_threadid_np(0, &mut tid)` — Apple's
+        //  stable API; `0` selects the calling thread.
+        //  * Linux: `gettid()` — direct syscall wrapper in glibc/musl.
+        //  * Other Unix: fall back to `getpid()` as the historical
+        //  placeholder (parity with the interpreter's
+        //  `non-macos non-windows` arm at ffi_extended.rs:1738).
         {
             let fn_type = i64_type.fn_type(&[], false);
             let func = module.get_function("verum_sys_gettid")
@@ -5692,7 +5748,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 builder.position_at_end(entry);
 
                 // Cross-compilation-correct dispatch: inspect the LLVM
-                // module's TARGET triple.  Three platform arms share
+                // module's TARGET triple. Three platform arms share
                 // the same compiled function — selection happens at
                 // codegen-time, not host compile-time.
                 if target_is_darwin(module) {
@@ -5732,13 +5788,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 } else if target_is_linux(module) {
                     // **Direct syscall — libc-free** (per user 2026-05-01
                     // directive: "for AOT we don't use libc on any
-                    // platform").  Pre-fix this path called `gettid`
+                    // platform"). Pre-fix this path called `gettid`
                     // through libc which forced a glibc/musl link
-                    // dependency for the AOT binary.  Post-fix we route
+                    // dependency for the AOT binary. Post-fix we route
                     // through `emit_linux_syscall` which selects the
                     // arch-correct trap from the TARGET triple
                     // (cross-compilation-safe).
                     //
+
                     // SYS_gettid: x86_64=186, aarch64=178.
                     let sys_num: u64 = if target_is_aarch64(module) {
                         178
@@ -6045,16 +6102,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `open(path, flags, mode) -> i32` wrapper.
     ///
+
     /// **Libc-free**: Linux x86_64 uses `SYS_open` (2) direct syscall;
     /// aarch64 uses `SYS_openat` (56) with `AT_FDCWD=-100` (the bare
     /// `open` syscall was removed from the aarch64 syscall table).
     /// Other-Unix routes through libSystem.
     ///
+
     /// **Variadic-safe by construction**: pre-fix declared `open` as
     /// libc-style variadic, which had a known Apple ARM64 ABI bug
     /// — variadic args go on the stack but the declaration caused
     /// the mode_t to be passed in `w2` register, producing garbage
-    /// permissions on file creation.  Post-fix the wrapper has a
+    /// permissions on file creation. Post-fix the wrapper has a
     /// fixed 3-arg signature (path, flags, mode), and the syscall
     /// path passes the mode as a regular i64 register argument so
     /// the variadic-vs-fixed ABI confusion is impossible.
@@ -6124,7 +6183,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             // libSystem path: declare a non-variadic 3-arg `open` —
             // libSystem on macOS accepts the fixed shape (the variadic
             // ABI confusion only matters when the caller's declaration
-            // mismatches).  Since *we* control the callee's declaration
+            // mismatches). Since *we* control the callee's declaration
             // here, fixed-3 is safe.
             let libsys = module.get_function("__verum_libsys_open").unwrap_or_else(|| {
                 let f = module.add_function(
@@ -6160,13 +6219,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `close(fd) -> i32` wrapper.
     ///
+
     /// **Libc-free**: on Linux dispatches via direct `SYS_close` (3)
-    /// syscall.  On macOS routes through libSystem (acceptable per
+    /// syscall. On macOS routes through libSystem (acceptable per
     /// the no-libc rule — Apple requires libSystem as the system
-    /// boundary).  Internal-linkage wrapper named
+    /// boundary). Internal-linkage wrapper named
     /// `verum_internal_close` so the symbol doesn't escape into the
     /// produced object's exported table.
     ///
+
     /// See `docs/architecture/no-libc-architecture.md`.
     fn get_or_declare_close(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_close";
@@ -6202,7 +6263,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("close ret trunc");
             builder.build_return(Some(&ret_i32)).expect("close return");
         } else {
-            // macOS / other Unix: libSystem close.  Symbol name kept
+            // macOS / other Unix: libSystem close. Symbol name kept
             // distinct so the wrapper doesn't collide.
             let libsys_close = module.get_function("__verum_libsys_close").unwrap_or_else(|| {
                 let f = module.add_function(
@@ -6234,6 +6295,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `read(fd, buf, count) -> i64` wrapper.
     ///
+
     /// **Libc-free**: Linux uses `SYS_read` (0) direct syscall, macOS
     /// routes through libSystem.
     fn get_or_declare_read(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
@@ -6296,10 +6358,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `unlink(path) -> i32` wrapper.
     ///
+
     /// **Libc-free**: Linux uses `SYS_unlink` (87) direct syscall on
     /// x86_64; aarch64 uses `SYS_unlinkat` (35) which takes
     /// `(AT_FDCWD, path, 0)` instead of a bare path — we issue the
-    /// arch-correct call via target-triple inspection.  Other-Unix
+    /// arch-correct call via target-triple inspection. Other-Unix
     /// routes through libSystem.
     fn get_or_declare_unlink(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_unlink";
@@ -6367,6 +6430,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `lseek(fd, offset, whence) -> i64` wrapper.
     ///
+
     /// **Libc-free**: Linux uses `SYS_lseek` (8) direct syscall.
     /// Other-Unix routes through libSystem.
     fn get_or_declare_lseek(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
@@ -6437,9 +6501,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `access(path, mode) -> i32` wrapper.
     ///
+
     /// **Libc-free**: Linux x86_64 uses `SYS_access` (21); aarch64
     /// uses `SYS_faccessat` (48) with `AT_FDCWD` since `access` was
-    /// removed from the aarch64 syscall table.  Other-Unix routes
+    /// removed from the aarch64 syscall table. Other-Unix routes
     /// through libSystem.
     fn get_or_declare_access(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_access";
@@ -6510,8 +6575,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `write(fd, buf, count) -> i64` wrapper.
     ///
+
     /// **Libc-free**: Linux uses `SYS_write` (1) direct syscall,
-    /// macOS routes through libSystem.  Note: signature here uses
+    /// macOS routes through libSystem. Note: signature here uses
     /// `i64` for fd (matching the historical caller convention in
     /// `runtime.rs`), but the kernel ABI takes i32; we truncate
     /// before issuing the syscall.
@@ -6605,23 +6671,27 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Get or declare strlen function.
     /// Get or declare a libc-free `strlen` wrapper.
     ///
+
     /// **Libc-free**: emits a small open-coded null-byte scan loop
-    /// instead of declaring `extern "C" fn strlen`.  Internal-linkage
+    /// instead of declaring `extern "C" fn strlen`. Internal-linkage
     /// so the symbol doesn't escape into the produced object file.
     /// LLVM's optimiser typically inlines the body into call sites
     /// at -O2+ so the wrapper has zero runtime cost.
     ///
+
     /// Loop body:
     ///
-    ///   entry:           br loop_check
-    ///   loop_check:      %i  = phi i64 [0, entry], [%i_next, loop_body]
-    ///                    %c  = load i8, ptr %s+%i
-    ///                    %z  = icmp eq i8 %c, 0
-    ///                    br i1 %z, return_label, loop_body
-    ///   loop_body:       %i_next = add i64 %i, 1
-    ///                    br loop_check
-    ///   return_label:    ret i64 %i
+
+    ///  entry: br loop_check
+    ///  loop_check: %i = phi i64 [0, entry], [%i_next, loop_body]
+    ///  %c = load i8, ptr %s+%i
+    ///  %z = icmp eq i8 %c, 0
+    ///  br i1 %z, return_label, loop_body
+    ///  loop_body: %i_next = add i64 %i, 1
+    ///  br loop_check
+    ///  return_label: ret i64 %i
     ///
+
     /// See `docs/architecture/no-libc-architecture.md`.
     fn get_or_declare_strlen(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_strlen";
@@ -6704,6 +6774,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `memcpy` wrapper.
     ///
+
     /// **Libc-free**: declares an internal-linkage wrapper with the
     /// historical libc 3-arg shape, body calls
     /// `llvm.memcpy.p0.p0.i64(dst, src, size, isvolatile=false)` —
@@ -6768,12 +6839,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `verum_checked_malloc(size) -> ptr`.
     ///
+
     /// **Libc-free**: the wrapper calls `verum_os_alloc` (defined in
     /// `platform_ir.rs::emit_verum_os_alloc`) which itself uses mmap
     /// on Linux / macOS, VirtualAlloc on Windows — no libc `malloc`
-    /// symbol is referenced at any link stage.  See
+    /// symbol is referenced at any link stage. See
     /// `docs/architecture/no-libc-architecture.md`.
     ///
+
     /// On allocation failure (verum_os_alloc returns NULL) the
     /// wrapper aborts via `verum_os_exit(1)` — also libc-free.
     fn get_or_declare_malloc(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
@@ -6788,7 +6861,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let malloc_fn_type = ptr_type.fn_type(&[i64_type.into()], false);
 
         // Underlying allocator: `verum_os_alloc(size) -> ptr` from
-        // `platform_ir.rs::emit_verum_os_alloc`.  That helper does
+        // `platform_ir.rs::emit_verum_os_alloc`. That helper does
         // the per-platform dispatch (mmap / VirtualAlloc) under the
         // libc-free architectural rule.
         let os_alloc_fn = module.get_function("verum_os_alloc").unwrap_or_else(|| {
@@ -6809,9 +6882,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         });
 
         // Wrapper: ptr verum_checked_malloc(i64 size) {
-        //   ptr p = verum_os_alloc(size);
-        //   if (p == null) verum_os_exit(1);
-        //   return p;
+        //  ptr p = verum_os_alloc(size);
+        //  if (p == null) verum_os_exit(1);
+        //  return p;
         // }
         let wrapper = module.add_function(wrapper_name, malloc_fn_type, None);
         let entry_bb = self.context.append_basic_block(wrapper, "entry");
@@ -6899,12 +6972,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free exit wrapper.
     ///
+
     /// Returns a (i64) -> noreturn wrapper that internally calls
     /// `verum_os_exit` (libc-free; defined in
     /// `platform_ir.rs::emit_verum_os_exit` — uses ExitProcess on
     /// Windows, `_exit` syscall on Linux, libSystem `_exit` on
     /// macOS).
     ///
+
     /// Wrapper preserves the historical (i64) caller signature so
     /// existing call sites don't need updating; the (i64 → i32)
     /// truncation happens in the wrapper body.
@@ -6958,23 +7033,26 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Get or declare a 3-arg memset wrapper that internally calls
     /// the LLVM intrinsic `llvm.memset.p0.i64` with `isvolatile=false`.
     ///
+
     /// **Libc-free**: the wrapper is an LLVM-internal function that
     /// lowers to inline code via the LLVM backend (no `libc::memset`
-    /// symbol resolution at link time, no glibc dependency).  The
+    /// symbol resolution at link time, no glibc dependency). The
     /// 3-arg shape `(ptr, value_i32, size_i64)` is preserved so the
     /// many existing callers (~30 sites) don't need updating; the
     /// extra `isvolatile=false` argument is supplied internally.
     ///
+
     /// Distinct from `FfiLowering::lower_secure_zero` which uses the
     /// 4-arg intrinsic directly with `isvolatile=true` for the
     /// security-critical zeroise path.
     ///
+
     /// See `internal/specs/no-libc-architecture.md` for the
     /// architectural rule this method enforces.
     fn get_or_declare_memset(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         // The wrapper gets a Verum-internal name to avoid colliding
         // with the libc `memset` symbol (which any C interop layer
-        // would still want to expose).  Internal-linkage so it
+        // would still want to expose). Internal-linkage so it
         // doesn't escape into the produced object file's exported
         // symbol table.
         let wrapper_name = "verum_internal_memset";
@@ -7011,9 +7089,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
 
         // Body: %dst = arg0; %val = trunc i32 arg1 to i8;
-        //       %size = arg2;
-        //       call void @llvm.memset.p0.i64(%dst, %val, %size, i1 false);
-        //       ret ptr %dst
+        //  %size = arg2;
+        //  call void @llvm.memset.p0.i64(%dst, %val, %size, i1 false);
+        //  ret ptr %dst
         let entry = self.context.append_basic_block(wrapper, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -7052,25 +7130,29 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // Context System Operations
     // =========================================================================
     //
+
     // The context system implements dependency injection via scoped provide/get.
     // In AOT mode, we call into the Verum runtime library for context management.
     //
+
     // Runtime layout for context stack (thread-local):
     // ```text
     // struct ContextStack {
-    //     entries: *mut ContextEntry,  // Dynamic array of entries
-    //     len: u64,                     // Number of active entries
-    //     cap: u64,                     // Capacity
+    //  entries: *mut ContextEntry, // Dynamic array of entries
+    //  len: u64, // Number of active entries
+    //  cap: u64, // Capacity
     // }
     //
+
     // struct ContextEntry {
-    //     ctx_type: u32,   // Context type ID
-    //     _pad: u32,       // Padding
-    //     value: i64,      // NaN-boxed value
-    //     stack_depth: u64 // Call stack depth for scoping
+    //  ctx_type: u32, // Context type ID
+    //  _pad: u32, // Padding
+    //  value: i64, // NaN-boxed value
+    //  stack_depth: u64 // Call stack depth for scoping
     // }
     // ```
     //
+
     // Context System: Capability-based dependency injection via `using [...]` clause.
     // Contexts are stored in thread-local storage as a stack of ContextEntry structs.
     // CtxGet retrieves a context value by type ID from the TLS context stack.
@@ -7080,6 +7162,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower CtxGet instruction.
     ///
+
     /// Retrieves a context value by type ID from the thread-local context stack.
     /// Returns the value if found, or a nil/unit value if not.
     pub fn lower_ctx_get(
@@ -7106,6 +7189,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower CtxProvide instruction.
     ///
+
     /// Pushes a context value onto the thread-local context stack.
     /// The value will be active until ctx_end is called with the same depth.
     pub fn lower_ctx_provide(
@@ -7134,6 +7218,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Lower CtxEnd instruction.
     ///
+
     /// Removes all context entries at or above the specified stack depth.
     pub fn lower_ctx_end(
         &self,
@@ -7152,6 +7237,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare verum_ctx_get runtime function.
     ///
+
     /// Signature: i64 verum_ctx_get(i32 ctx_type)
     /// Returns the context value (NaN-boxed) or nil if not found.
     fn get_or_declare_ctx_get(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
@@ -7170,6 +7256,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare verum_ctx_provide runtime function.
     ///
+
     /// Signature: void verum_ctx_provide(i32 ctx_type, i64 value, i64 stack_depth)
     fn get_or_declare_ctx_provide(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         let name = "verum_ctx_provide";
@@ -7188,6 +7275,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare verum_ctx_end runtime function.
     ///
+
     /// Signature: void verum_ctx_end(i64 stack_depth)
     fn get_or_declare_ctx_end(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         let name = "verum_ctx_end";
@@ -7220,7 +7308,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// `module` parameter is required for TARGET-triple dispatch:
     /// the sockaddr_in layout differs between Darwin (sin_len byte at
     /// offset 0, sin_family byte at offset 1) and Linux (sin_family
-    /// i16 at offset 0–1).  Selecting the layout based on the host OS
+    /// i16 at offset 0–1). Selecting the layout based on the host OS
     /// (via `#[cfg]`) would silently miscompile cross builds — Linux
     /// targets would receive a Darwin-shaped sockaddr that the kernel
     /// rejects with EINVAL, or vice versa.
@@ -7348,24 +7436,28 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `inet_pton(af, src, dst) -> i32` wrapper.
     ///
+
     /// **Libc-free**: emits an open-coded IPv4 dotted-decimal parser
-    /// in LLVM IR.  IPv6 path returns -1 (unsupported in this
+    /// in LLVM IR. IPv6 path returns -1 (unsupported in this
     /// minimal implementation; callers fall back to libSystem on
     /// macOS or use the v2 TCP intrinsic family which carries the
     /// IPv4 address directly).
     ///
+
     /// Algorithm for AF_INET (af == 2):
-    ///   1. Walk `src` byte-by-byte, accumulating each octet's
-    ///      digits into an i32 (rejecting non-digit, non-dot
-    ///      characters via early-exit-with-0).
-    ///   2. On '.' or NUL, store accumulated octet to dst[i].
-    ///   3. Validate exactly 4 octets and each in range [0,255].
-    ///   4. Return 1 on success, 0 on parse error, -1 on bad af.
+    ///  1. Walk `src` byte-by-byte, accumulating each octet's
+    ///  digits into an i32 (rejecting non-digit, non-dot
+    ///  characters via early-exit-with-0).
+    ///  2. On '.' or NUL, store accumulated octet to dst[i].
+    ///  3. Validate exactly 4 octets and each in range [0,255].
+    ///  4. Return 1 on success, 0 on parse error, -1 on bad af.
     ///
+
     /// Returns the wrapper as a FunctionValue with libc-compatible
     /// signature `(i32, ptr, ptr) -> i32` so existing call sites
     /// don't need updating.
     ///
+
     /// See `docs/architecture/no-libc-architecture.md`.
     fn get_or_declare_inet_pton(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_inet_pton";
@@ -7419,7 +7511,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let neg_one = i32_type.const_int(u32::MAX as u64, true);
         builder.build_return(Some(&neg_one)).expect("af_other ret");
 
-        // af_inet: enter parse loop.  State: i (byte index in src),
+        // af_inet: enter parse loop. State: i (byte index in src),
         // octet_idx (0..4), digit_count (digits in current octet),
         // current_octet (accumulator).
         builder.position_at_end(af_inet);
@@ -7578,7 +7670,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_int_add(octet_idx, i32_type.const_int(1, false), "oi_inc")
             .expect("oi add");
 
-        // Was this octet terminated by NUL?  If so, check octet_idx==4 → ok else fail.
+        // Was this octet terminated by NUL? If so, check octet_idx==4 → ok else fail.
         let ipv4_done = ctx.append_basic_block(func, "ipv4_done");
         let continue_parse = ctx.append_basic_block(func, "continue_parse");
         builder
@@ -7768,7 +7860,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // SOL_SOCKET / SO_REUSEADDR — TARGET-dependent values.
         // Cross-compilation-correct: dispatch on the LLVM module's
-        // target triple, never the compile host.  Pre-fix a Linux
+        // target triple, never the compile host. Pre-fix a Linux
         // target binary built on macOS would emit Darwin's 0xFFFF /
         // 4 into setsockopt, which Linux rejects with ENOPROTOOPT.
         let (sol_socket, so_reuseaddr): (u64, u64) = if target_is_darwin(module) {
@@ -7868,19 +7960,21 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // ============================================================
         // verum_tcp_listen_v2(host: ptr, port: i64, backlog: i64,
-        //                    flags: i64) -> i64
+        //  flags: i64) -> i64
         //
+
         // Rich-signature replacement for `verum_tcp_listen` — the
         // sibling of the interpreter's `tcp_listen_v2` in
         // `verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs`.
         // Both implementations honour the same contract:
-        //   * `host`    — IPv4 or IPv6 literal. inet_pton is the
-        //                 source of truth for parse success.
-        //   * `port=0`  — the kernel chooses; recover via
-        //                 `verum_tcp_local_port` (below).
-        //   * `backlog` — passed through to listen(2).
-        //   * `flags`   — bit 0 = SO_REUSEPORT (best-effort).
+        //  * `host` — IPv4 or IPv6 literal. inet_pton is the
+        //  source of truth for parse success.
+        //  * `port=0` — the kernel chooses; recover via
+        //  `verum_tcp_local_port` (below).
+        //  * `backlog` — passed through to listen(2).
+        //  * `flags` — bit 0 = SO_REUSEPORT (best-effort).
         //
+
         // Failure semantics: `-EINVAL` (= -22) for parse / argument
         // failures, `-1` for socket / bind / listen failures (matches
         // the lossy semantics of the legacy `verum_tcp_listen`; the
@@ -7994,7 +8088,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
                 b.position_at_end(do_reuseport);
                 // SO_REUSEPORT is TARGET-dependent: Darwin = 0x0200 (512),
-                // Linux = 15.  Cross-compilation-correct dispatch on the
+                // Linux = 15. Cross-compilation-correct dispatch on the
                 // module's target triple.
                 let so_reuseport: u64 = if target_is_darwin(module) {
                     0x0200
@@ -8058,6 +8152,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         // verum_tcp_local_port(fd: i64) -> i64
         //
+
         // getsockname(2) into a 28-byte buffer (sockaddr_in6 size, big
         // enough for v4 too), then read sin_port at offset 2 and ntohs
         // it. Returns the port as i64, or -1 on failure.
@@ -8474,7 +8569,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     sa.into(), i32_type.const_zero().into(), i64_type.const_int(16, false).into(),
                 ], "").or_llvm_err()?;
                 // sockaddr_in family field — Darwin: sin_len byte +
-                // sin_family byte; Linux: sin_family i16.  TARGET-triple
+                // sin_family byte; Linux: sin_family i16. TARGET-triple
                 // dispatch keeps cross builds correct.
                 if target_is_darwin(module) {
                     // SAFETY: GEP at offset 0 within a struct of known layout; the offset is within the allocation
@@ -8675,6 +8770,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // Process Management — LLVM IR (replaces verum_platform.c process functions)
     // =========================================================================
     //
+
     // Only simple functions are migrated to LLVM IR. The fork+exec functions
     // (verum_process_spawn_cmd, verum_process_exec) remain in C because the
     // fork+pipe+dup2+execvp pattern requires complex multi-process control flow
@@ -8911,17 +9007,20 @@ fn checked_malloc<'ctx>(
 
 /// Define a libc-free `verum_internal_calloc(n, size) -> ptr` wrapper.
 ///
+
 /// **Libc-free**: the wrapper computes `n * size` and routes through
 /// `verum_os_alloc` (mmap-based on Linux/macOS; mmap with
 /// MAP_ANONYMOUS already returns zero-filled pages, so no explicit
 /// memset is needed for the calloc semantics on those platforms;
-/// VirtualAlloc on Windows likewise zero-initialises).  Internal
+/// VirtualAlloc on Windows likewise zero-initialises). Internal
 /// linkage so the symbol doesn't escape into the produced object's
 /// exported table.
 ///
+
 /// Idempotent: returns immediately if the wrapper is already defined
 /// in the module.
 ///
+
 /// See `docs/architecture/no-libc-architecture.md`.
 pub fn define_internal_calloc<'ctx>(
     context: &'ctx Context,
@@ -9302,7 +9401,7 @@ pub fn define_list_ir_helpers<'ctx>(
     let void_type = context.void_type();
 
     // Libc-free: ensure verum_internal_calloc + verum_internal_memcpy
-    // wrappers are present.  Defined elsewhere in this module
+    // wrappers are present. Defined elsewhere in this module
     // (calloc by `define_internal_calloc`, memcpy via the LLVM
     // intrinsic-routing wrapper in `get_or_declare_memcpy`).
     define_internal_calloc(context, module)?;
@@ -10429,15 +10528,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // CBGR Memory Management — LLVM IR emission
     // ========================================================================
     //
+
     // AllocationHeader layout (32 bytes, placed BEFORE user data pointer):
-    //   offset  0: generation   (i32, atomic)
-    //   offset  4: size         (i32)
-    //   offset  8: epoch        (i16, atomic)
-    //   offset 10: capabilities (i16)
-    //   offset 12: ref_count    (i32, atomic)
-    //   offset 16: flags        (i64, atomic)
-    //   offset 24: next_free    (ptr)
+    //  offset 0: generation (i32, atomic)
+    //  offset 4: size (i32)
+    //  offset 8: epoch (i16, atomic)
+    //  offset 10: capabilities (i16)
+    //  offset 12: ref_count (i32, atomic)
+    //  offset 16: flags (i64, atomic)
+    //  offset 24: next_free (ptr)
     //
+
     // The user pointer is at (raw_ptr + 32). get_header subtracts 32.
 
     /// AllocationHeader size in bytes (aligned to 32).

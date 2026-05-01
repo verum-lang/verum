@@ -4,6 +4,7 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: docs/detailed/13-formal-proofs.md
 //
+
 // Defines the number-theoretic types and theorem statements:
 // natural numbers (Peano), divisibility, primes, GCD/LCM,
 // modular arithmetic, arithmetic functions, and key theorems
@@ -114,6 +115,7 @@ public fn divides(a: Int, b: Int) -> Bool {
 
 /// Greatest common divisor via the Euclidean algorithm.
 ///
+
 /// Two's-complement-safe absolute value: the naive `0 - x` wraps
 /// back to Int.MIN for `x == Int.MIN`, leaving the Euclidean loop
 /// running with a negative operand. The mathematical identity
@@ -135,6 +137,7 @@ public fn gcd(a: Int, b: Int) -> Int {
 
 /// Least common multiple.
 ///
+
 /// `a * b` may overflow signed Int even for moderate inputs; combined
 /// with the abs trick (`0 - product` overflows for product == Int.MIN
 /// or wraps to a value that the negation can't recover), the historical
@@ -264,6 +267,7 @@ public fn primes_up_to(n: Int) -> List<Int> {
 
 /// Trial division factorization.
 ///
+
 /// Two's-complement-safe magnitude — `0 - Int.MIN` wraps back to
 /// Int.MIN, leaving `x < 0` and the trial-division loop never
 /// terminates correctly. Sign is irrelevant for prime-factorisation,

@@ -5,45 +5,55 @@
 // Dependencies: core, core.sync, core.async.waker
 // =============================================================================
 //
+
 // An async-task counting semaphore — the "at most N concurrent
 // operations" primitive. Different from `core.sync.semaphore` in
 // three key ways:
 //
-//   * Waiters are awoken by Futures / Wakers (no thread blocking).
-//   * `acquire()` returns `SemaphoreFuture` that completes when a
-//     permit frees up.
-//   * The returned `SemaphorePermit` releases on drop (RAII —
-//     no manual `release` calls, no leaks on panic).
+
+//  * Waiters are awoken by Futures / Wakers (no thread blocking).
+//  * `acquire()` returns `SemaphoreFuture` that completes when a
+//  permit frees up.
+//  * The returned `SemaphorePermit` releases on drop (RAII —
+//  no manual `release` calls, no leaks on panic).
 //
+
 // # Why not wrap the sync version
 //
+
 // `core.sync.semaphore.Semaphore` does a futex wait — parks the
 // OS thread. That defeats the whole point of async: the executor
 // needs every task to yield cooperatively so it can multiplex
 // thousands of connections onto a handful of OS threads.
 //
+
 // # Use cases
 //
-//   * Cap outbound HTTP fan-out at N concurrent requests.
-//   * DB connection-pool checkout.
-//   * Rate-limit CPU-bound async work (N parallel ML inferences).
-//   * Producer/consumer backpressure without a channel.
+
+//  * Cap outbound HTTP fan-out at N concurrent requests.
+//  * DB connection-pool checkout.
+//  * Rate-limit CPU-bound async work (N parallel ML inferences).
+//  * Producer/consumer backpressure without a channel.
 //
+
 // # API
 //
+
 // ```
-// let sem = AsyncSemaphore.new(10);   // 10 permits
+// let sem = AsyncSemaphore.new(10); // 10 permits
 //
+
 // // Bounded fan-out:
 // for url in urls {
-//     let permit = sem.acquire().await;
-//     spawn(async move {
-//         let _p = permit;          // held for the lifetime of the task
-//         fetch(url).await;
-//     });
+//  let permit = sem.acquire().await;
+//  spawn(async move {
+//  let _p = permit; // held for the lifetime of the task
+//  fetch(url).await;
+//  });
 // }
 // ```
 //
+
 // =============================================================================
 
 module core.async.semaphore;

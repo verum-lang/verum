@@ -3,29 +3,34 @@
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
 //
+
 // A graph is an object with three equivalent views, each exposing a
 // different aspect of its structure:
 //
-//   1. Simplicial:   Graph<V> is a 1-truncated simplicial set.
-//                    Inherits face/degeneracy maps, geometric realisation,
-//                    the Kan-complex condition. Topologically: a 1-CW
-//                    complex. This is the view for fundamental groupoid,
-//                    connectivity, covering theory.
+
+//  1. Simplicial: Graph<V> is a 1-truncated simplicial set.
+//  Inherits face/degeneracy maps, geometric realisation,
+//  the Kan-complex condition. Topologically: a 1-CW
+//  complex. This is the view for fundamental groupoid,
+//  connectivity, covering theory.
 //
-//   2. Categorical:  FreeGraphCategory<G> is the free category whose
-//                    objects are G.vertices() and whose morphisms are
-//                    walks (paths with possible repetition). A graph
-//                    homomorphism = a functor. Graph quotient = coequalizer.
-//                    Covering = covering functor. This is the view for
-//                    universal properties and transport of structure.
+
+//  2. Categorical: FreeGraphCategory<G> is the free category whose
+//  objects are G.vertices() and whose morphisms are
+//  walks (paths with possible repetition). A graph
+//  homomorphism = a functor. Graph quotient = coequalizer.
+//  Covering = covering functor. This is the view for
+//  universal properties and transport of structure.
 //
-//   3. Presheaf:     GraphPresheaf<G> is a contravariant functor
-//                    FreeGraphCategory<G>^op → Set. Sheaf cohomology on
-//                    this presheaf recovers the graph Laplacian spectrum
-//                    (integrates with core/math/linalg.vr.EigenDecomposition).
-//                    This is the view for spectral methods, graph neural
-//                    network message passing, and homology.
+
+//  3. Presheaf: GraphPresheaf<G> is a contravariant functor
+//  FreeGraphCategory<G>^op → Set. Sheaf cohomology on
+//  this presheaf recovers the graph Laplacian spectrum
+//  (integrates with core/math/linalg.vr.EigenDecomposition).
+//  This is the view for spectral methods, graph neural
+//  network message passing, and homology.
 //
+
 // The three views are all EQUIVALENT descriptions of the same mathematical
 // object — classical graph theory becomes a special case of each, and
 // theorems proved at the category/topos level automatically lift to
@@ -71,12 +76,14 @@ public type Walk<V, L> is {
 
 /// A directed graph, specialised as a 1-truncated simplicial set.
 ///
+
 /// Every implementation of `Graph<V, L>` must:
-///   1. Enumerate its vertices (0-simplices) and edges (1-simplices).
-///   2. Provide face maps `face(edge, 0) = src`, `face(edge, 1) = tgt`.
-///   3. Provide the degeneracy `deg(v) = Edge { src: v, tgt: v, label: () }`.
-///   4. Satisfy the truncation axiom: no n-simplices for n ≥ 2.
+///  1. Enumerate its vertices (0-simplices) and edges (1-simplices).
+///  2. Provide face maps `face(edge, 0) = src`, `face(edge, 1) = tgt`.
+///  3. Provide the degeneracy `deg(v) = Edge { src: v, tgt: v, label: () }`.
+///  4. Satisfy the truncation axiom: no n-simplices for n ≥ 2.
 ///
+
 /// A concrete implementation may choose any representation — adjacency
 /// list, adjacency matrix, sparse CSR, edge list — the protocol is
 /// agnostic. Algorithm selection depends on the representation's
@@ -142,6 +149,7 @@ public type SimpleGraph<V, L> is protocol extends Graph<V, L> {
 /// category: objects are vertices, morphisms are walks, identity at
 /// each vertex is the empty walk, composition is walk concatenation.
 ///
+
 /// Graph homomorphism = a functor `FreeGraphCategory<G> -> FreeGraphCategory<H>`.
 /// Graph quotient = a coequalizer in the 2-category of graph categories.
 /// Covering space = a covering functor (see core/math/topology.vr).
@@ -215,10 +223,12 @@ public type DAG<V, L> is protocol extends Graph<V, L> {
 
 /// **Breadth-first search** — fold over level-sets of the face map.
 ///
+
 /// At each level, collect the current frontier's out-neighbourhoods,
 /// dedup against the visited set, and emit them as the next level.
 /// Runs until the frontier is empty; returns the visitation order.
 ///
+
 /// Complexity: O(|V| + |E|) — each vertex and each edge is touched at
 /// most once, provided the graph's `out_edges` and vertex-equality
 /// operations are O(1).
@@ -247,10 +257,12 @@ public fn bfs<V, L, G>(g: &G, start: V) -> List<V>
 
 /// **Depth-first search** — coalgebraic unfold from a seed vertex.
 ///
+
 /// Maintains a stack of vertices to visit; at each step pops the top,
 /// marks visited, pushes unvisited out-neighbours. Returns the
 /// visitation order in the order vertices were popped from the stack.
 ///
+
 /// Complexity: O(|V| + |E|) with O(1) vertex equality.
 public fn dfs<V, L, G>(g: &G, start: V) -> List<V>
     where type G: Graph<V, L>, type V: Eq
@@ -299,10 +311,12 @@ public fn euler_characteristic<V, L, G>(g: &G) -> Int
 /// **Connected components** (undirected graphs) — partitions the
 /// vertex set into maximal BFS-reachable classes.
 ///
+
 /// Algorithm: repeatedly pick an unvisited vertex, BFS it to
 /// saturation, emit the reached set as a component. Terminates when
 /// every vertex has been placed in some component.
 ///
+
 /// Complexity: O(|V| + |E|) total across all components.
 public fn connected_components<V, L, G>(g: &G) -> List<List<V>>
     where type G: UndirectedGraph<V, L>, type V: Eq
@@ -324,12 +338,14 @@ public fn connected_components<V, L, G>(g: &G) -> List<List<V>>
 /// **Topological sort** — a linear extension of the DAG's
 /// causal order.
 ///
+
 /// Uses the Kahn algorithm: repeatedly emit a vertex with zero
 /// remaining in-edges, then remove its out-edges from the
 /// residual degree count. If the algorithm terminates with all
 /// vertices emitted, the sort is a valid topological order; the
 /// DAG axiom (no cycles) guarantees termination.
 ///
+
 /// Complexity: O(|V| + |E|) with O(1) vertex equality.
 public fn topological_sort<V, L, G>(g: &G) -> List<V>
     where type G: DAG<V, L>, type V: Eq
@@ -372,30 +388,35 @@ public fn topological_sort<V, L, G>(g: &G) -> List<V>
 /// **Dijkstra's shortest-path algorithm** — fold over a priority-
 /// queued frontier with semiring (min, +) structure.
 ///
+
 /// Returns a map from each reachable vertex to its minimum
 /// path-weight from `start` (using the graph's edge labels as
 /// weights). Unreachable vertices are absent from the result.
 /// `dist[start] = W.zero()` (set by this function — callers no
 /// longer need to pre-populate the source weight).
 ///
+
 /// Requires the graph's edge label type `W` to form a total order
 /// with associative, commutative addition (`Add<W, Output=W>`) and
 /// an additive identity (`Zero`) — the classical min-plus semiring
 /// structure for shortest paths.
 ///
+
 /// Complexity: O(|V|² + |E|) with the current repeated-min-scan
 /// frontier. Swap-in of BinaryHeap with Reverse<(W, V)> is the
 /// O((|V| + |E|) log |V|) optimisation follow-up.
 ///
+
 /// **Algorithm**:
-///   1. Initialise `dist[start] = W.zero()`. All other vertices have
-///      no entry (represents +∞ — unvisited).
-///   2. Loop: pick the unvisited vertex `u` with minimum `dist[u]`.
-///      Mark `u` visited. Relax each out-edge `(u, v, w)`: if
-///      `dist[u] + w < dist[v]`, set `dist[v] = dist[u] + w`.
-///   3. Terminate when no unvisited vertex has a finite dist —
-///      remaining vertices are unreachable.
+///  1. Initialise `dist[start] = W.zero()`. All other vertices have
+///  no entry (represents +∞ — unvisited).
+///  2. Loop: pick the unvisited vertex `u` with minimum `dist[u]`.
+///  Mark `u` visited. Relax each out-edge `(u, v, w)`: if
+///  `dist[u] + w < dist[v]`, set `dist[v] = dist[u] + w`.
+///  3. Terminate when no unvisited vertex has a finite dist —
+///  remaining vertices are unreachable.
 ///
+
 /// Pre-fix this function required the caller to pre-populate `dist`
 /// with the source's starting weight, and the relaxation step
 /// compared raw edge weight `w` rather than path weight `dist[u]+w`,
@@ -469,6 +490,7 @@ public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
 
 /// The combinatorial Laplacian of a weighted graph.
 ///
+
 /// `L = D - A` where `D` is the diagonal degree matrix (row sums of the
 /// weighted adjacency matrix) and `A` is the weighted adjacency matrix
 /// itself. This is the object whose spectrum encodes connectivity and
@@ -477,6 +499,7 @@ public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
 /// mixing times, and the eigenvectors diagonalise the graph-signal
 /// domain for spectral graph networks.
 ///
+
 /// Complexity: `O(n^2)` to assemble the `n × n` Laplacian matrix,
 /// where `n = g.vertices().len()`.
 public fn laplacian_matrix<V, G>(g: &G) -> Matrix<Float>
@@ -509,20 +532,22 @@ public fn laplacian_matrix<V, G>(g: &G) -> Matrix<Float>
 
 /// **Laplacian spectrum** — eigenvalues of `L = D - A`.
 ///
+
 /// Returns the spectrum in the ordering produced by
 /// `core.math.linalg.eigh` (descending). The smallest eigenvalue is
 /// zero with multiplicity equal to the number of connected components;
 /// the second-smallest (the *algebraic connectivity*, or Fiedler value)
 /// bounds graph-expansion properties.
 ///
+
 /// Contract:
-///   - Input graph must be weighted over `Float` (via `WeightedGraph`).
-///   - For undirected graphs the Laplacian is symmetric and every
-///     eigenvalue is real. For a directed graph the returned spectrum
-///     is that of the symmetric combinatorial Laplacian `D - A`, not
-///     the directed Laplacian `D_out - A`; use the latter via
-///     `laplacian_matrix` + `eig` for non-symmetric cases.
-///   - Spectrum length equals `g.vertices().len()`.
+///  - Input graph must be weighted over `Float` (via `WeightedGraph`).
+///  - For undirected graphs the Laplacian is symmetric and every
+///  eigenvalue is real. For a directed graph the returned spectrum
+///  is that of the symmetric combinatorial Laplacian `D - A`, not
+///  the directed Laplacian `D_out - A`; use the latter via
+///  `laplacian_matrix` + `eig` for non-symmetric cases.
+///  - Spectrum length equals `g.vertices().len()`.
 public fn laplacian_spectrum<V, G>(g: &G) -> List<Float>
     where type G: WeightedGraph<V, Float>
 {
@@ -537,10 +562,12 @@ public fn laplacian_spectrum<V, G>(g: &G) -> List<Float>
 
 /// **Algebraic connectivity** — the Fiedler eigenvalue.
 ///
+
 /// The second-smallest eigenvalue of the Laplacian. Zero iff the graph
 /// is disconnected; strictly positive otherwise. Larger values imply
 /// better expansion and faster mixing.
 ///
+
 /// Contract: the graph must have at least two vertices. The empty
 /// graph has no eigenvalues, and the one-vertex graph has only a
 /// single zero eigenvalue — both cases violate the "second-smallest"
@@ -562,15 +589,18 @@ public fn algebraic_connectivity<V, G>(g: &G) -> Float
 // Algorithm signatures reserved for future extension
 // =============================================================================
 //
+
 // Spectral / algebraic methods (require linalg.vr integration):
-//   fn pagerank<G: WeightedGraph<V, Float>>(g: &G, damping: Float) -> Map<V, Float>;
+//  fn pagerank<G: WeightedGraph<V, Float>>(g: &G, damping: Float) -> Map<V, Float>;
 //
+
 // Matroid / combinatorial (require matroid protocol):
-//   fn minimum_spanning_tree<G: UndirectedGraph<V, W>>(g: &G) -> List<Edge<V, W>>;
-//   fn maximum_matching<G: UndirectedGraph<V, L>>(g: &G) -> List<Edge<V, L>>;
+//  fn minimum_spanning_tree<G: UndirectedGraph<V, W>>(g: &G) -> List<Edge<V, W>>;
+//  fn maximum_matching<G: UndirectedGraph<V, L>>(g: &G) -> List<Edge<V, L>>;
 //
+
 // Flow / cut (require capacity semantics):
-//   fn max_flow<G: WeightedGraph<V, Float>>(g: &G, source: V, sink: V) -> Float;
+//  fn max_flow<G: WeightedGraph<V, Float>>(g: &G, source: V, sink: V) -> Float;
 // =============================================================================
 
 // =============================================================================

@@ -2,33 +2,40 @@
 // core/net/weft/tls.vr — TLS termination + ALPN dispatch
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §6.7 / §6.11 / §6.13
+// Spec: internal/specs/net-framework.md §6.7 / §6.11 / §6.13
 // =============================================================================
 //
+
 // Plugs `core.net.tls.TlsStream` into Weft through two small pieces:
 //
-//   * `TlsTransport` — `WeftTransport` adapter.  Both TlsStream and
-//     the transport ABI speak `List<Byte>` end-to-end (red-team §4
-//     fix), so this adaptor is a thin pass-through (no Int↔Byte
-//     conversion in either direction).
+
+//  * `TlsTransport` — `WeftTransport` adapter. Both TlsStream and
+//  the transport ABI speak `List<Byte>` end-to-end (red-team §4
+//  fix), so this adaptor is a thin pass-through (no Int↔Byte
+//  conversion in either direction).
 //
-//   * `TlsHttp1Runner<H>` — `ConnectionRunner` implementor; runs the
-//     async handshake, then drives `serve_http1` over the
-//     `TlsTransport`. Used by `Server<H>.with_tls(tls_config)`; there
-//     is no separate `TlsServer` — the same unified `Server<H>` runs
-//     both plaintext and TLS lifecycles, the runner switch happens
-//     at `.serve()` time.
+
+//  * `TlsHttp1Runner<H>` — `ConnectionRunner` implementor; runs the
+//  async handshake, then drives `serve_http1` over the
+//  `TlsTransport`. Used by `Server<H>.with_tls(tls_config)`; there
+//  is no separate `TlsServer` — the same unified `Server<H>` runs
+//  both plaintext and TLS lifecycles, the runner switch happens
+//  at `.serve()` time.
 //
+
 // No crypto logic lives here — all handshake / cipher / ALPN work is
 // done by `core/net/tls.vr` (1043 LOC of intrinsic-backed TLS 1.3
 // implementation). This file is pure glue.
 //
+
 // Out of scope for phase 3 (deferred to §6.13 / §6.17 / §8.13):
 //
-//   * HACL*-verified crypto FFI boundary.
-//   * KTLS sendfile offload (needs io_uring hooks from phase 5).
-//   * Client-cert → WeftRequest header projection (phase 6 SPIFFE).
+
+//  * HACL*-verified crypto FFI boundary.
+//  * KTLS sendfile offload (needs io_uring hooks from phase 5).
+//  * Client-cert → WeftRequest header projection (phase 6 SPIFFE).
 //
+
 // =============================================================================
 
 module core.net.weft.tls;
@@ -119,6 +126,7 @@ implement WeftTransport for TlsTransport {
 /// Per-connection strategy: accept raw TCP, run the TLS handshake,
 /// wrap the result in `TlsTransport`, then drive `serve_http1`.
 ///
+
 /// Cloned once per spawned connection (everything inside is
 /// Shared/Heap, so clone is cheap pointer copies).
 public type TlsHttp1Runner<H> is {
@@ -195,13 +203,14 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
     /// Consumes `self` and the supplied `TlsConfig`; returns on clean
     /// shutdown identical to `.serve()`.
     ///
+
     /// Example:
     /// ```verum
     /// let cfg = TlsConfig.server()
-    ///     .with_identity(cert, key)
-    ///     .with_alpn(List.from(["h2", "http/1.1"]));
+    ///  .with_identity(cert, key)
+    ///  .with_alpn(List.from(["h2", "http/1.1"]));
     /// Server.bind(addr, router, ListenerConfig.default())?
-    ///     .serve_tls(cfg).await
+    ///  .serve_tls(cfg).await
     /// ```
     pub async fn serve_tls(self, tls: TlsConfig) -> Result<(), Text> {
         if !tls.is_server {

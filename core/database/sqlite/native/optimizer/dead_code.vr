@@ -3,18 +3,21 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.5
 //
+
 // After every `Halt`, `Goto`, `Return` (with no path back), or
 // `RollbackOp` whose successor is not the target of any jump, the
 // remaining instructions are unreachable. Drop them.
 //
+
 // Algorithm:
-//   1. Mark PC 0 as reachable.
-//   2. Walk forward; mark each successor reachable unless the entry
-//      is a terminator (Halt / Return).
-//   3. For every jump-bearing instruction, mark its target reachable.
-//   4. Iterate to fixpoint.
-//   5. Drop entries marked unreachable.
+//  1. Mark PC 0 as reachable.
+//  2. Walk forward; mark each successor reachable unless the entry
+//  is a terminator (Halt / Return).
+//  3. For every jump-bearing instruction, mark its target reachable.
+//  4. Iterate to fixpoint.
+//  5. Drop entries marked unreachable.
 //
+
 // We only consider opcodes catalogued in `opcode_catalog.effects`
 // as `is_branch` or terminator-shaped — extending the taxonomy adds
 // more terminators automatically.

@@ -1,7 +1,9 @@
 //! Default derive macro implementation
 //!
+
 //! Generates `implement Default for Type { fn default() -> Self }`
 //!
+
 //! @derive(Default): generates Default protocol implementation with
 //! sensible defaults for each field type (0 for Int, "" for Text, etc.).
 

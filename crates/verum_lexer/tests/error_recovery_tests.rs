@@ -14,6 +14,7 @@
 )]
 // Error Recovery Tests for Verum Lexer
 //
+
 // Tests lexer behavior with invalid input, malformed tokens,
 // and error recovery strategies.
 

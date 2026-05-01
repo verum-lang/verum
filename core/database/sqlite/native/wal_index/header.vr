@@ -3,21 +3,24 @@
 // =============================================================================
 // Spec: sqlite-native.md §6.6
 //
+
 // 48-byte header (held in two contiguous copies inside the shm file):
 //
-//   offset  size  field
-//   0       4     iVersion       — WAL-index format version (3007000)
-//   4       4     unused
-//   8       4     iChange        — counter incremented on every WAL change
-//   12      1     isInit         — non-zero after first writer
-//   13      1     bigEndCksum    — checksum endianness
-//   14      2     szPage         — database page size
-//   16      4     mxFrame        — index of last valid frame in WAL
-//   20      4     nPage          — db_size_after of last commit frame
-//   24      8     aFrameCksum    — checksum of last frame
-//   32      8     aSalt          — salts copied from WAL header
-//   40      8     aCksum         — checksum of THIS header
+
+//  offset size field
+//  0 4 iVersion — WAL-index format version (3007000)
+//  4 4 unused
+//  8 4 iChange — counter incremented on every WAL change
+//  12 1 isInit — non-zero after first writer
+//  13 1 bigEndCksum — checksum endianness
+//  14 2 szPage — database page size
+//  16 4 mxFrame — index of last valid frame in WAL
+//  20 4 nPage — db_size_after of last commit frame
+//  24 8 aFrameCksum — checksum of last frame
+//  32 8 aSalt — salts copied from WAL header
+//  40 8 aCksum — checksum of THIS header
 //
+
 // =============================================================================
 
 module core.database.sqlite.native.wal_index.header;

@@ -1,8 +1,10 @@
 //! Proof-failure repair-suggestion catalogue — the structured-error
 //! frontier for kernel / type / verification failures.
 //!
+
 //! ## What this module is
 //!
+
 //! When the kernel rejects a term or the type-checker fails on an
 //! obligation, downstream tooling (LSP / REPL / CLI) needs more than
 //! just an error message — it needs **actionable repair suggestions**
@@ -10,47 +12,58 @@
 //! documentation, and structured fields suitable for LSP code-action
 //! emission.
 //!
+
 //! This module ships:
 //!
-//!   * [`ProofFailureKind`] — typed classification of every kernel /
-//!     type-checker failure mode (mirrors `verum_kernel::KernelError`
-//!     variants + verification-time obligation failures).
-//!   * [`RepairSuggestion`] — a structured-fix record with snippet,
-//!     rationale, applicability, score, and optional doc-link.
-//!   * [`RepairEngine`] trait — single dispatch interface; LSP and
-//!     CLI consume the same engine.
-//!   * [`DefaultRepairEngine`] — reference V0 implementation with a
-//!     hand-curated rule-set per failure kind.
+
+//!  * [`ProofFailureKind`] — typed classification of every kernel /
+//!  type-checker failure mode (mirrors `verum_kernel::KernelError`
+//!  variants + verification-time obligation failures).
+//!  * [`RepairSuggestion`] — a structured-fix record with snippet,
+//!  rationale, applicability, score, and optional doc-link.
+//!  * [`RepairEngine`] trait — single dispatch interface; LSP and
+//!  CLI consume the same engine.
+//!  * [`DefaultRepairEngine`] — reference V0 implementation with a
+//!  hand-curated rule-set per failure kind.
 //!
+
 //! ## Design principles
 //!
-//!   1. **Every suggestion is concrete.**  The `snippet` field is a
-//!      drop-in code fragment, not advice prose.  IDE consumers can
-//!      apply it as a code-action.
+
+//!  1. **Every suggestion is concrete.** The `snippet` field is a
+//!  drop-in code fragment, not advice prose. IDE consumers can
+//!  apply it as a code-action.
 //!
-//!   2. **Repair suggestions come ranked.**  Score in `[0, 1]`
-//!      reflects estimated likelihood the suggestion fixes the
-//!      reported failure.  Top-3 are surfaced by IDE hover; full set
-//!      via "see all alternatives".
+
+//!  2. **Repair suggestions come ranked.** Score in `[0, 1]`
+//!  reflects estimated likelihood the suggestion fixes the
+//!  reported failure. Top-3 are surfaced by IDE hover; full set
+//!  via "see all alternatives".
 //!
-//!   3. **Doc-links to a stable URL.**  Each suggestion carries an
-//!      optional `doc_link` (e.g. `docs.verum.lang/kernel/k-refine`)
-//!      that opens in-browser from the IDE.
+
+//!  3. **Doc-links to a stable URL.** Each suggestion carries an
+//!  optional `doc_link` (e.g. `docs.verum.lang/kernel/k-refine`)
+//!  that opens in-browser from the IDE.
 //!
-//!   4. **Related theorems come from kernel introspection.**
-//!      For an unresolved-name failure, the engine queries the
-//!      lemma registry for near-miss matches; for a positivity
-//!      violation, it suggests known-positive alternatives.
+
+//!  4. **Related theorems come from kernel introspection.**
+//!  For an unresolved-name failure, the engine queries the
+//!  lemma registry for near-miss matches; for a positivity
+//!  violation, it suggests known-positive alternatives.
 //!
+
 //! ## Integration with existing infrastructure
 //!
+
 //! Builds on `crates/verum_diagnostics/src/suggestion.rs`'s
 //! `Suggestion` / `Applicability` / `CodeSnippet` types — this
 //! module adds the proof-failure-specific catalogue + ranking
 //! logic on top of that base.
 //!
+
 //! ## Foundation-neutral
 //!
+
 //! The catalogue is foundation-neutral: kernel-rule failures are
 //! universal (Refine / Positivity / Universe / Adjunction-Unit /
 //! …), while corpus-specific repair hints (e.g. MSFS-specific
@@ -206,16 +219,17 @@ impl RepairSuggestion {
 // RepairEngine — the trait boundary
 // =============================================================================
 
-/// Single dispatch interface for repair-suggestion generation.  LSP
+/// Single dispatch interface for repair-suggestion generation. LSP
 /// and CLI consumers call `suggest(failure)` with a typed
 /// [`ProofFailureKind`] and receive a ranked, deduplicated list of
 /// [`RepairSuggestion`]s.
 ///
+
 /// **Purity contract:** implementations MUST be pure — no I/O.
 /// Side-effecting adapters (lemma-registry fuzzy-search, LLM repair
 /// proposals) compose via [`CompositeRepairEngine`].
 pub trait RepairEngine {
-    /// Suggest repairs for the given failure.  Caller bounds the
+    /// Suggest repairs for the given failure. Caller bounds the
     /// response size with `max_results`.
     fn suggest(&self, failure: &ProofFailureKind, max_results: usize) -> Vec<RepairSuggestion>;
 }
@@ -224,7 +238,7 @@ pub trait RepairEngine {
 // DefaultRepairEngine — V0 reference catalogue
 // =============================================================================
 
-/// V0 reference engine.  Hand-curated rule-set per failure kind.
+/// V0 reference engine. Hand-curated rule-set per failure kind.
 /// Each rule emits 1–4 [`RepairSuggestion`]s that an IDE can render
 /// as code-actions.
 #[derive(Debug, Default, Clone, Copy)]
@@ -413,7 +427,7 @@ impl RepairEngine for DefaultRepairEngine {
 
 /// Combines multiple [`RepairEngine`]s — useful for composing the
 /// default catalogue with a corpus-specific engine (MSFS-aware) or
-/// an LLM repair adapter.  Suggestions are merged + re-sorted by
+/// an LLM repair adapter. Suggestions are merged + re-sorted by
 /// score; ties broken by source order.
 pub struct CompositeRepairEngine {
     pub engines: Vec<Box<dyn RepairEngine>>,

@@ -5,12 +5,14 @@
 // Dependencies: core.net.tls13.keyschedule, core.net.quic.crypto.labels
 // =============================================================================
 //
+
 // Bridge between TLS 1.3 traffic secrets (from the handshake SM) and
 // QUIC's per-space key sets. RFC 9001 §5.1 mandates the labels are
 // "quic key" / "quic iv" / "quic hp" rather than the "key" / "iv"
 // used by the TLS record layer — everything else (HKDF-Expand-Label
 // with the "tls13 " prefix + the same hash) is identical.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.keys;

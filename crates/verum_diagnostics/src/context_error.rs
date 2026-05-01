@@ -1,5 +1,6 @@
 //! Context-specific error types and diagnostics.
 //!
+
 //! This module provides world-class error messages for context-related issues,
 //! especially E0301 (context used but not declared). It implements:
 //! - Call chain propagation visualization
@@ -39,14 +40,17 @@ pub mod error_codes {
 
     /// Async context mismatch: async context used in sync function
     ///
+
     /// This error occurs when an async context (declared with `context async X`)
     /// is used in a synchronous function. Async contexts require an async runtime
     /// and can only be used in async functions.
     ///
+
     /// # Example
     /// ```verum
     /// context async Database { ... }
     ///
+
     /// // ERROR E0803: Cannot use async context 'Database' in sync function
     /// fn sync_function() using [Database] { ... }
     /// ```
@@ -54,21 +58,24 @@ pub mod error_codes {
 
     /// Async context method mismatch
     ///
+
     /// This error occurs in several scenarios:
     /// 1. Calling async context method from sync function
     /// 2. Calling async context method without `.await` in async function
     /// 3. Using `.await` in sync function
     /// 4. Providing sync implementation for async context
     ///
+
     /// # Example
     /// ```verum
     /// context async Database {
-    ///     async fn query(sql: Text) -> List<Row>;
+    ///  async fn query(sql: Text) -> List<Row>;
     /// }
     ///
+
     /// // ERROR E0804: Async context method 'Database.query' must be awaited
     /// async fn fetch() using [Database] -> List<Row> {
-    ///     Database.query("SELECT 1")  // Missing .await
+    ///  Database.query("SELECT 1") // Missing .await
     /// }
     /// ```
     pub const E0804: &str = "E0804";

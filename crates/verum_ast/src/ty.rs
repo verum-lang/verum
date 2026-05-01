@@ -1,5 +1,6 @@
 //! Type nodes in the AST.
 //!
+
 //! This module defines all type representations in Verum, including:
 //! - Primitive types (Int, Float, Bool, Text)
 //! - Compound types (tuples, arrays, functions)
@@ -53,9 +54,11 @@ impl Type {
 
     /// Creates a never type (`!`).
     ///
+
     /// The never type represents the type of expressions that never return,
     /// such as `panic()`, `exit()`, `abort()`, or infinite loops.
     ///
+
     /// The never type is the bottom type - it is a subtype of all other types.
     pub fn never(span: Span) -> Self {
         Self::new(TypeKind::Never, span)
@@ -63,10 +66,12 @@ impl Type {
 
     /// Creates an unknown type (`unknown`).
     ///
+
     /// The unknown type is the top type - any value can be assigned to it,
     /// but nothing can be done with it without explicit type narrowing
     /// (via pattern matching or type guards like `x is T`).
     ///
+
     /// The unknown type is the top type: any value can be assigned to it, but
     /// nothing can be done without explicit type narrowing via `x is T` guards
     /// or pattern matching. Subtyping: T <: unknown for all T.
@@ -91,16 +96,19 @@ pub enum TypeKind {
     /// The type of expressions that never return (diverging expressions).
     /// Examples: panic(), exit(), infinite loops, return/break/continue.
     ///
+
     /// The never type is the bottom type - it is a subtype of all other types.
     /// This means a diverging expression can be used wherever any type is expected.
     ///
+
     /// ```verum
     /// fn abort() -> ! {
-    ///     panic("Fatal error");
+    ///  panic("Fatal error");
     /// }
     ///
+
     /// fn get_value(opt: Maybe<Int>) -> Int {
-    ///     opt.unwrap_or_else(|| panic("No value"))  // panic returns !
+    ///  opt.unwrap_or_else(|| panic("No value")) // panic returns !
     /// }
     /// ```
     Never,
@@ -109,10 +117,12 @@ pub enum TypeKind {
     /// The top type - any value can be assigned to it, but nothing can be done
     /// with it without explicit type narrowing (via pattern matching or type guards).
     ///
+
     /// Subtyping rules:
     /// - T <: unknown (any type is a subtype of unknown)
     /// - unknown <: T only if T == unknown
     ///
+
     /// # Examples
     /// ```verum
     /// // Any value can be assigned to unknown
@@ -120,20 +130,23 @@ pub enum TypeKind {
     /// let y: unknown = "hello";
     /// let z: unknown = User { name: "Alice" };
     ///
+
     /// // But nothing can be done without narrowing
-    /// // x + 1;       // ERROR: unknown doesn't support +
-    /// // x.method();  // ERROR: unknown has no methods
+    /// // x + 1; // ERROR: unknown doesn't support +
+    /// // x.method(); // ERROR: unknown has no methods
     ///
+
     /// // Type narrowing via pattern matching
     /// match x {
-    ///     x is Int => process_int(x),   // x: Int here
-    ///     x is Text => process_text(x), // x: Text here
-    ///     _ => handle_other(),
+    ///  x is Int => process_int(x), // x: Int here
+    ///  x is Text => process_text(x), // x: Text here
+    ///  _ => handle_other(),
     /// }
     ///
+
     /// // Type narrowing via guard
     /// if x is User {
-    ///     print(x.name);  // x: User here (flow-sensitive)
+    ///  print(x.name); // x: User here (flow-sensitive)
     /// }
     /// ```
     Unknown,
@@ -159,6 +172,7 @@ pub enum TypeKind {
 
     /// General dependent type application: `T<A1, A2>(v1, v2, v3)`.
     ///
+
     /// Covers the full scheme of type constructors indexed by values,
     /// e.g. `Fiber<A, B>(f, b)`, `IsContrMap<A, B>(f)`,
     /// `Glue<A>(phi, T, e)` used throughout `core/math/hott.vr`,
@@ -167,6 +181,7 @@ pub enum TypeKind {
     /// (`PathType`) for backward compatibility with the existing
     /// elaboration path; everything else goes through here.
     ///
+
     /// `carrier` is the type head (already includes the generic
     /// `<…>` args as a `TypeKind::Generic`); `value_args` is the
     /// positional list of index expressions.
@@ -189,29 +204,36 @@ pub enum TypeKind {
 
     /// Function type: fn(A, B) -> C or extern "C" fn(A, B) -> C
     ///
+
     /// Supports optional calling convention for FFI function pointer types.
     /// When `calling_convention` is `Some`, this represents an extern function
     /// pointer type that can be passed to/from C code.
     ///
+
     /// # Context Requirements
     ///
+
     /// Function types can specify context requirements using the `using` clause:
     /// ```verum
     /// // Function type with context requirements
     /// type QueryFn is fn(Int) -> Data using [Database, Logger];
     ///
+
     /// // Function type with negative contexts (purity guarantee)
     /// type PureFn is fn(Int) -> Int using [!IO, !State<_>];
     /// ```
     ///
+
     /// # Examples
     /// ```verum
     /// // Regular Verum function type
     /// type Handler is fn(Int) -> Bool;
     ///
+
     /// // C-compatible function pointer type
     /// type CCallback is extern "C" fn(c_int, *mut c_void) -> c_int;
     ///
+
     /// // System calling convention (Windows)
     /// type WinCallback is extern "stdcall" fn(c_int) -> c_int;
     /// ```
@@ -232,29 +254,36 @@ pub enum TypeKind {
 
     /// Rank-2 polymorphic function type: fn<R>(Reducer<B, R>) -> Reducer<A, R>
     ///
+
     /// A function type with universally quantified type parameters that scope
     /// only within the function type itself. This enables storing functions
     /// that work for ANY choice of the quantified type parameters.
     ///
+
     /// # Semantics
     /// The type `fn<R>(Reducer<B, R>) -> Reducer<A, R>` means:
     /// "For all types R, a function from Reducer<B, R> to Reducer<A, R>"
     ///
+
     /// This is essential for transducers and other higher-order abstractions
     /// that need to be polymorphic over result types.
     ///
+
     /// # Example
     /// ```verum
     /// // Transducer transformation type
     /// type Transform<A, B> is fn<R>(Reducer<B, R>) -> Reducer<A, R>;
     ///
+
     /// // Function that clones any cloneable type
     /// type Clone<T: Clone> is fn<>() -> (T, T);
     ///
+
     /// // With context requirements
     /// type QueryTransform<A, B> is fn<R>(Reducer<B, R>) -> Reducer<A, R> using [Database];
     /// ```
     ///
+
     /// # Implementation
     /// At runtime, rank-2 functions are implemented via monomorphization when
     /// the quantified parameters are known, or via dictionary passing when
@@ -283,21 +312,25 @@ pub enum TypeKind {
 
     /// Checked reference: &checked T (compile-time proof, 0ns overhead, AOT-only)
     ///
+
     /// Statically verified references that require compile-time safety proof.
     /// Only available in Tier 2+ (Optimizing JIT/AOT) compilation modes.
     ///
+
     /// In Tier 0/1, falls back to CBGR validation for safety.
     ///
+
     /// # Semantics
     /// - "checked" means "statically verified", NOT "lives forever"
     /// - Requires escape analysis proof of no-escape or local-escape
     /// - Zero runtime overhead when proof succeeds
     ///
+
     /// # Examples
     /// ```verum
     /// fn hot_path(data: &checked List<Int>) -> Int {
-    ///     // Zero-cost access, proven safe at compile time
-    ///     data[0]
+    ///  // Zero-cost access, proven safe at compile time
+    ///  data[0]
     /// }
     /// ```
     CheckedReference {
@@ -319,42 +352,53 @@ pub enum TypeKind {
 
     /// Volatile pointer: *volatile T or *volatile mut T
     ///
+
     /// Volatile pointers guarantee that reads/writes are not optimized away
     /// or reordered by the compiler. Essential for MMIO (memory-mapped I/O)
     /// and hardware register access.
     ///
+
     /// # Semantics
     ///
+
     /// - Reads are always performed (never cached or eliminated)
     /// - Writes are always performed (never deferred or eliminated)
     /// - Access order is preserved relative to other volatile accesses
     /// - No guarantee of ordering relative to non-volatile accesses
-    ///   (use memory barriers for that)
+    ///  (use memory barriers for that)
     ///
+
     /// # Use Cases
     ///
+
     /// - Hardware register access (MMIO)
     /// - Shared memory with hardware devices
     /// - Memory-mapped peripherals
     /// - Interrupt status registers
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// // Read from hardware status register
     /// let status_reg: *volatile UInt32 = 0x4000_0000 as *volatile UInt32;
-    /// let value = volatile_load(status_reg);  // Never optimized away
+    /// let value = volatile_load(status_reg); // Never optimized away
     ///
+
     /// // Write to hardware control register
     /// let ctrl_reg: *volatile mut UInt32 = 0x4000_0004 as *volatile mut UInt32;
-    /// volatile_store(ctrl_reg, 0x0001);  // Always performed
+    /// volatile_store(ctrl_reg, 0x0001); // Always performed
     /// ```
     ///
+
     /// # Safety
     ///
+
     /// Accessing volatile pointers requires unsafe code as the pointed-to
     /// hardware may have side effects on read (e.g., clearing interrupt flags).
     ///
+
     /// Used for memory-mapped I/O (MMIO) in embedded/systems programming where
     /// hardware registers have side effects on read/write that must not be optimized away.
     VolatilePointer {
@@ -378,13 +422,15 @@ pub enum TypeKind {
     /// Refinement type — canonical node for all three surface forms
     /// (VVA spec §5 collapses the three forms into a single AST shape):
     ///
+
     /// - Rule 1 (Inline): `T{pred}` with implicit `it` — `predicate.binding = None`.
     /// - Rule 2 (Lambda where): `T where |x| pred(x)` — `predicate.binding = Some(x)`.
     /// - Rule 3 (Sigma): `x: T where pred(x)` — `predicate.binding = Some(x)`.
     /// - Rule 4 (Named predicate): `T where predicate_name` — `predicate.binding = None`,
-    ///   `predicate.expr = Path("predicate_name")`.
+    ///  `predicate.expr = Path("predicate_name")`.
     /// - Rule 5 (Bare where): `T where pred` — `predicate.binding = None`.
     ///
+
     /// The pretty-printer distinguishes the Sigma surface syntax from the inline
     /// form by inspecting `predicate.binding`.
     Refined {
@@ -405,12 +451,14 @@ pub enum TypeKind {
     /// Uses dynamic dispatch (vtable) for runtime polymorphism.
     /// Contrasts with Bounded (impl Protocol) which uses static dispatch.
     ///
+
     /// Supports associated type bindings for protocols with GATs:
     /// ```verum
     /// dyn Container<Item = Int> + Display
     /// dyn Iterator<Item = String, State = Int>
     /// ```
     ///
+
     /// Uses dynamic dispatch via vtable. Syntax: `dyn Protocol1 + Protocol2`.
     /// Can include associated type bindings: `dyn Iterator<Item = Int>`.
     DynProtocol {
@@ -449,14 +497,17 @@ pub enum TypeKind {
     /// Hides concrete type behind protocol bounds, enabling information hiding
     /// without runtime cost. Similar to Rust's `impl Trait`.
     ///
+
     /// # Examples
     /// ```verum
     /// // Return type hides concrete iterator implementation
     /// fn make_iter() -> some I: Iterator<Item = Int> { ... }
     ///
+
     /// // Named existential type
     /// type Plugin is some P: PluginInterface;
     ///
+
     /// // Multiple bounds
     /// fn processor() -> some P: Processor + Send + Sync { ... }
     /// ```
@@ -470,6 +521,7 @@ pub enum TypeKind {
     /// Associated type path: T.Item or Self.Item
     /// Enables accessing associated types from type parameters and protocol bounds.
     ///
+
     /// # Examples
     /// ```verum
     /// fn get_item<I: Iterator>() -> I.Item { ... }
@@ -484,32 +536,38 @@ pub enum TypeKind {
 
     /// Tensor type: Tensor<T, Shape>
     ///
+
     /// Unified tensor type with compile-time shape tracking.
     /// Syntax: tensor<Shape...>T{elements} or Tensor<T, [d1, d2, ...]>
     ///
+
     /// # Examples
     /// ```verum
     /// // 1D vector: Tensor<f32, [4]>
     /// let v: Tensor<f32, [4]> = tensor<4>f32{1.0, 2.0, 3.0, 4.0};
     ///
+
     /// // 2D matrix: Tensor<i32, [2, 3]>
     /// let m: Tensor<i32, [2, 3]> = tensor<2, 3>i32{
-    ///     {1, 2, 3},
-    ///     {4, 5, 6}
+    ///  {1, 2, 3},
+    ///  {4, 5, 6}
     /// };
     ///
+
     /// // With meta parameters: Tensor<f32, [N, M]>
     /// fn matmul<N: meta usize, M: meta usize, K: meta usize>(
-    ///     a: &Tensor<f32, [N, K]>,
-    ///     b: &Tensor<f32, [K, M]>
+    ///  a: &Tensor<f32, [N, K]>,
+    ///  b: &Tensor<f32, [K, M]>
     /// ) -> Tensor<f32, [N, M]>
     /// ```
     ///
+
     /// # Memory Layout
     /// - Row-major (C-order) by default for cache-friendliness
     /// - Column-major available for compatibility with BLAS/LAPACK
     /// - SIMD-aligned (16/32/64 bytes depending on platform)
     ///
+
     /// # Implementation
     /// Lowers to struct { data: [T; product(Shape)], strides: [usize; len(Shape)] }
     Tensor {
@@ -528,38 +586,44 @@ pub enum TypeKind {
 
     /// Capability-restricted type: T with [Capabilities]
     ///
+
     /// Allows defining types with restricted capabilities for fine-grained access control.
     /// This enables compile-time verification of capability requirements and automatic
     /// capability attenuation at call sites.
     ///
+
     /// # Subtyping Rule
     /// `T with [A, B, C] <: T with [A, B]` when the first set is a superset
     /// This means "more capabilities" is a subtype of "fewer capabilities",
     /// enabling automatic attenuation (narrowing) at call sites.
     ///
+
     /// # Examples
     /// ```verum
     /// // Define capability-restricted type aliases
     /// type Database.Full is Database with [Read, Write, Admin];
     /// type Database.ReadOnly is Database with [Read];
     ///
+
     /// // Use in function signatures
     /// fn analyze(db: Database with [Read]) -> Stats {
-    ///     db.query("SELECT ...")  // OK - query only needs Read
-    ///     db.execute("DELETE")    // COMPILE ERROR - Execute not in [Read]
+    ///  db.query("SELECT ...") // OK - query only needs Read
+    ///  db.execute("DELETE") // COMPILE ERROR - Execute not in [Read]
     /// }
     ///
+
     /// // Automatic attenuation at call sites
     /// fn process(db: Database with [Read, Write]) {
-    ///     analyze(db);  // OK - [Read, Write] ⊇ [Read], auto-attenuates
+    ///  analyze(db); // OK - [Read, Write] ⊇ [Read], auto-attenuates
     /// }
     /// ```
     ///
+
     /// # Integration with Context System
     /// Works with the context system for DI:
     /// ```verum
     /// fn handler() using [Database with [Read]] {
-    ///     // Only read operations available
+    ///  // Only read operations available
     /// }
     /// ```
     CapabilityRestricted {
@@ -572,28 +636,35 @@ pub enum TypeKind {
     /// Anonymous record type: { field: Type, ... }
     /// Used in type expressions for anonymous structured data.
     ///
+
     /// # Examples
     /// ```verum
     /// // Anonymous record type in function parameter
     /// fn process(data: { name: Text, age: Int }) -> Bool { ... }
     ///
+
     /// // Anonymous record with refinement
     /// type ValidPoint is { x: Int, y: Int } { self.x > 0, self.y > 0 };
     /// ```
     ///
+
     /// # Grammar
     /// record_type = '{' , field_list , [ '|' , identifier ] , '}' ;
     ///
+
     /// # Row polymorphism (T1-E)
     ///
+
     /// When `row_var` is `Some(r)`, the record is *extensible* — it
     /// specifies some fields and leaves the rest open:
     ///
+
     /// ```verum
     /// // Works with any record that has at least an `x: Int` field.
     /// fn get_x<r>(p: { x: Int | r }) -> Int { p.x }
     /// ```
     ///
+
     /// This lowers to `Type::ExtensibleRecord { fields, row_var: Some(r) }`
     /// in the elaborated type system. A closed record (no row variable)
     /// lowers to `Type::Record`.
@@ -606,27 +677,33 @@ pub enum TypeKind {
 
     /// Universe type: `Type`, `Type(0)`, `Type(1)`, `Type(N)`, etc.
     ///
+
     /// Universe types form a cumulative hierarchy preventing Girard's paradox:
     /// ```text
     /// Type(0) : Type(1) : Type(2) : ...
     /// ```
     ///
+
     /// `Type` is sugar for `Type(0)`. Universe polymorphism is supported
     /// through level variables in generic parameters.
     ///
+
     /// # Examples
     /// ```verum
     /// // Concrete universe levels
     /// type Container<T: Type(1)> is { value: T };
     ///
+
     /// // Universe polymorphism via level parameters
     /// fn identity<u: Level, T: Type(u)>(x: T) -> T { x }
     ///
+
     /// // Implicit levels (inferred)
     /// type Pair<A, B> is { fst: A, snd: B };
     /// // A: Type(u), B: Type(v), Pair: Type(max(u,v))
     /// ```
     ///
+
     /// # Grammar
     /// universe_type = 'Type' , [ '(' , universe_level , ')' ] ;
     /// universe_level = integer_lit | identifier ;
@@ -639,15 +716,17 @@ pub enum TypeKind {
 
     /// Meta type: `meta T`
     ///
+
     /// Represents a compile-time (meta-level) type used in dependent type programming.
     /// Meta types indicate values that exist at compile time and can be used in
     /// type-level computations.
     ///
+
     /// # Examples
     /// ```verum
     /// fn take<T, N: meta Nat, K: meta Nat>(
-    ///     xs: SizedList<T, N>,
-    ///     k: meta K        // k is a meta-level value
+    ///  xs: SizedList<T, N>,
+    ///  k: meta K // k is a meta-level value
     /// ) -> SizedList<T, K>
     /// where K <= N { ... }
     /// ```
@@ -658,9 +737,11 @@ pub enum TypeKind {
 
     /// Type-level lambda: `|x| Body(x)`
     ///
+
     /// Used in dependent type contexts where a type is parameterized by a value.
     /// Common in sigma types: `Sigma<A, |a| B(a)>`.
     ///
+
     /// # Examples
     /// ```verum
     /// type Sigma<A, B: fn(A) -> Type> is (fst: A, snd: B(fst));
@@ -678,10 +759,12 @@ pub enum TypeKind {
 impl TypeKind {
     /// Returns the display name for primitive type kinds.
     ///
+
     /// This is the single source of truth for converting primitive TypeKind variants
     /// to their string representation. All crates should use this instead of
     /// duplicating match arms.
     ///
+
     /// Returns `None` for non-primitive variants (Path, Tuple, Function, etc.)
     /// which require more context to format.
     pub fn primitive_name(&self) -> Option<&'static str> {
@@ -702,6 +785,7 @@ impl TypeKind {
 
 /// Universe level expression in the AST.
 ///
+
 /// Represents the level annotation on a universe type `Type(...)`.
 /// This is the syntactic form; it gets lowered to `UniverseLevel` in verum_types
 /// during type checking.
@@ -719,10 +803,12 @@ pub enum UniverseLevelExpr {
 
 /// Tensor memory layout strategy.
 ///
+
 /// The memory layout affects cache locality and SIMD efficiency:
 /// - RowMajor: Last dimension is contiguous (C-order, NumPy default)
 /// - ColumnMajor: First dimension is contiguous (Fortran-order, BLAS/LAPACK)
 ///
+
 /// # Performance implications
 /// - RowMajor: Better for row-wise operations, natural for SIMD vectorization
 /// - ColumnMajor: Better for column-wise operations, required for BLAS interop
@@ -741,6 +827,7 @@ pub enum TensorLayout {
 
 /// A refinement predicate attached to a type.
 ///
+
 /// Refinement types are Verum's unique value proposition:
 /// Rule 1 (Inline): type Positive is Int{> 0}
 /// Rule 2 (Lambda): type Positive is Int where |x| x > 0
@@ -748,6 +835,7 @@ pub enum TensorLayout {
 /// Rule 4 (Named): type Email is Text where is_email
 /// Rule 5 (Bare where - deprecated): type Positive is Int where it > 0
 ///
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RefinementPredicate {
     /// The predicate expression
@@ -811,6 +899,7 @@ pub enum TypeBoundKind {
     /// Generic protocol bound: T: Iterator<Item = U> or T: Container<Element = V>
     /// Protocol bound with generic type arguments, including associated type bindings.
     ///
+
     /// # Examples
     /// ```verum
     /// type Iter: Iterator<Item = Self.Item>;
@@ -820,6 +909,7 @@ pub enum TypeBoundKind {
     /// Associated type bound: I.Item: Display
     /// Constrains an associated type to satisfy certain bounds.
     ///
+
     /// # Examples
     /// ```verum
     /// where type I.Item: Display + Clone
@@ -836,6 +926,7 @@ pub enum TypeBoundKind {
     /// Associated type equality: I.Item = T
     /// Requires an associated type to equal a specific type.
     ///
+
     /// # Examples
     /// ```verum
     /// where type I.Item = Int
@@ -853,12 +944,14 @@ pub enum TypeBoundKind {
 
 /// A type binding for associated types in dyn protocol objects.
 ///
+
 /// Used to bind associated types when using dynamic protocol objects:
 /// ```verum
 /// dyn Container<Item = Int> + Display
 /// dyn Iterator<Item = String, State = Int>
 /// ```
 ///
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TypeBinding {
     /// The name of the associated type (e.g., "Item")
@@ -877,24 +970,29 @@ impl TypeBinding {
 
 /// A generic parameter in a type or function definition.
 ///
+
 /// Supports both explicit and implicit parameters:
 /// - Explicit: `<T>`, `<N: meta Nat>` - must be provided at call site
 /// - Implicit: `<{T}>`, `<{N: meta Nat}>` - inferred from usage context
 ///
+
 /// Implicit parameters use `{...}` syntax (e.g., `<{A: Type}>`) and are inferred
 /// from usage context rather than requiring explicit specification at call sites.
 ///
+
 /// # Examples
 /// ```verum
 /// // Explicit type parameter
 /// fn id<T>(x: T) -> T = x
-/// let y = id<Int>(42)  // Must specify T
+/// let y = id<Int>(42) // Must specify T
 ///
+
 /// // Implicit type parameter - inferred from argument
 /// fn singleton<{A: Type}>(x: A) -> List<A, 1: meta usize> =
-///     Cons(x, Nil)
-/// let v = singleton(42)  // A inferred as Int
+///  Cons(x, Nil)
+/// let v = singleton(42) // A inferred as Int
 ///
+
 /// // Implicit value parameter
 /// fn complex<{n: meta Nat}>(x: Int) -> List<Int, n: meta Nat> = ...
 /// ```
@@ -918,6 +1016,7 @@ pub enum GenericParamKind {
     /// Higher-kinded type parameter: F<_>, F<_, _>
     /// Enables abstraction over type constructors like Functor, Monad.
     ///
+
     /// # Examples
     /// ```verum
     /// fn map<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>
@@ -947,22 +1046,25 @@ pub enum GenericParamKind {
 
     /// Context parameter: using C
     ///
+
     /// Enables higher-order functions to propagate contexts from callbacks.
     /// The context variable can be used in function signatures to indicate
     /// that the function's context requirements depend on the callback.
     ///
+
     /// # Examples
     /// ```verum
     /// // Context-polymorphic map function
     /// fn map<T, U, using C>(
-    ///     iter: Iterator<Item = T>,
-    ///     f: fn(T) -> U using C
+    ///  iter: Iterator<Item = T>,
+    ///  f: fn(T) -> U using C
     /// ) -> MapIter<T, U, C> using C {
-    ///     MapIter { iter, f }
+    ///  MapIter { iter, f }
     /// }
     ///
+
     /// // Usage - context inferred from callback
-    /// data.iter().map(|x| Database.lookup(x.id))  // C = [Database]
+    /// data.iter().map(|x| Database.lookup(x.id)) // C = [Database]
     /// ```
     Context {
         /// The name of the context variable (e.g., C)
@@ -971,15 +1073,18 @@ pub enum GenericParamKind {
 
     /// Universe level parameter: `u: Level`
     ///
+
     /// Enables universe polymorphism — functions and types that work across
     /// multiple universe levels. The `Level` keyword marks a generic parameter
     /// as a universe level variable rather than a type variable.
     ///
+
     /// # Examples
     /// ```verum
     /// // Universe-polymorphic identity
     /// fn identity<u: Level, T: Type(u)>(x: T) -> T { x }
     ///
+
     /// // Universe-polymorphic container
     /// type Container<u: Level, T: Type(u)> is { value: T };
     /// ```
@@ -990,24 +1095,28 @@ pub enum GenericParamKind {
 
     /// Kind-annotated type parameter: `F: Type -> Type`
     ///
+
     /// An explicit kind annotation expressing that `F` is a type constructor of
     /// the given kind, using arrow notation. This is the spec-required alternative
     /// to the `F<_>` placeholder syntax.
     ///
+
     /// # Grammar
     /// ```ebnf
     /// kind_annotated_param = identifier , ':' , kind_expr ;
     /// kind_expr = 'Type' , [ '->' , kind_expr ] | '(' , kind_expr , ')' ;
     /// ```
     ///
+
     /// # Examples
     /// ```verum
     /// type Functor<F: Type -> Type> is protocol {
-    ///     fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
+    ///  fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
     /// };
     ///
+
     /// type Bifunctor<F: Type -> Type -> Type> is protocol {
-    ///     fn bimap<A, B, C, D>(fab: F<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> F<C, D>;
+    ///  fn bimap<A, B, C, D>(fab: F<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> F<C, D>;
     /// };
     /// ```
     KindAnnotated {
@@ -1022,6 +1131,7 @@ pub enum GenericParamKind {
 
 /// A kind annotation for use in `F: Type -> Type` generic parameter syntax.
 ///
+
 /// This mirrors `verum_types::poly_kinds::Kind` but lives in the AST crate so
 /// that the parser can represent kind annotations without depending on the type
 /// system crate.
@@ -1036,6 +1146,7 @@ pub enum KindAnnotation {
 impl KindAnnotation {
     /// Compute the arity (number of type arguments) this kind expects.
     ///
+
     /// `Type` has arity 0, `Type -> Type` has arity 1,
     /// `Type -> Type -> Type` has arity 2, etc.
     pub fn arity(&self) -> usize {
@@ -1087,11 +1198,13 @@ impl Path {
     /// Create a Path from a single Ident.
     /// This is an alias for `Path::single` for better API ergonomics.
     ///
+
     /// # Examples
     /// ```
     /// use verum_ast::{Path, Ident};
     /// use verum_ast::span::Span;
     ///
+
     /// let ident = Ident::new("foo", Span::dummy());
     /// let path = Path::from_ident(ident);
     /// assert!(path.is_single());
@@ -1203,10 +1316,12 @@ pub struct Lifetime {
 
 /// A where clause containing predicates.
 ///
+
 /// In v6.0-BALANCED, there are two separate where clause types:
 /// 1. Generic where clause (where type T: Protocol) - for type constraints
 /// 2. Meta where clause (where meta N > 0) - for meta-parameter refinements
 ///
+
 /// These are represented as separate optional fields in declarations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhereClause {
@@ -1229,6 +1344,7 @@ impl WhereClause {
 
 /// A predicate in a where clause.
 ///
+
 /// The `where` keyword serves four distinct purposes in v6.0-BALANCED:
 /// 1. `where type T: Protocol` - Generic type constraints
 /// 2. `where meta N > 0` - Meta-parameter refinements

@@ -2,19 +2,22 @@
 // core/net/weft/transport.vr — byte-duplex transport protocol
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §2 "Transport"
+// Spec: internal/specs/net-framework.md §2 "Transport"
 // =============================================================================
 //
+
 // Plumbing that lets the HTTP/1.1 connection pipeline in `connection.vr`
 // work uniformly over plain TCP, TLS-wrapped TCP, Unix-domain sockets,
 // and (eventually) QUIC bidirectional streams.
 //
+
 // The core.net.tcp.TcpStream type already exposes the methods expected
 // here — defining the protocol separately lets us add a blanket impl
 // without touching tcp.vr, and gives us a single binding point for
 // TLS / UDS / vsock adaptors.
 //
-// Buffer type — `List<Byte>` end-to-end.  Pre-§4 the stdlib socket
+
+// Buffer type — `List<Byte>` end-to-end. Pre-§4 the stdlib socket
 // layer marshalled bytes through `List<Int>` (8 bytes per element
 // in the NaN-boxed Value representation), forcing every parse-layer
 // consumer to mask + cast back to Byte at 8× the memory footprint.
@@ -22,6 +25,7 @@
 // `List<Byte>`, so this transport surface is a direct passthrough
 // with zero per-await conversion.
 //
+
 // =============================================================================
 
 module core.net.weft.transport;
@@ -36,6 +40,7 @@ mount core.io.protocols.{IoError};
 /// drive without knowing whether it sits above TCP, TLS, UDS, or
 /// another carrier.
 ///
+
 /// Implementors MUST be cancellation-aware on `read_cancellable` —
 /// this is what lets the listener's shutdown token reach in-flight
 /// reads in bounded time. `write_async` MAY ignore cancellation
@@ -46,7 +51,7 @@ public type WeftTransport is protocol {
     fn peer_addr(&self) -> Result<SocketAddr, IoError>;
 
     /// Cancellable read. Outer Result is the cancellation channel;
-    /// inner Result the normal read outcome.  `buf` is `&mut List<Byte>`.
+    /// inner Result the normal read outcome. `buf` is `&mut List<Byte>`.
     async fn read_cancellable(
         &mut self,
         buf: &mut List<Byte>,
@@ -55,7 +60,7 @@ public type WeftTransport is protocol {
 
     /// Write — may be partial; the connection pipeline is responsible
     /// for retrying until `buf` is fully drained (see `write_response`
-    /// in connection.vr).  `buf` is `&List<Byte>`.
+    /// in connection.vr). `buf` is `&List<Byte>`.
     async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError>;
 
     /// Half-close write direction (HTTP/1.1 `Connection: close` path

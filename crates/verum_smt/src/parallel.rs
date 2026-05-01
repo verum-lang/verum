@@ -1,8 +1,10 @@
 //! Parallel Solving Module
 //!
+
 //! This module provides parallel solving capabilities using multiple Z3 contexts
 //! with different strategies, implementing portfolio solving for improved performance.
 //!
+
 //! Features:
 //! - Portfolio solving with multiple strategies
 //! - Cube-and-conquer search space partitioning
@@ -10,6 +12,7 @@
 //! - Early termination on first solution
 //! - Load balancing and resource limits
 //!
+
 //! Based on experiments/z3.rs documentation
 //! Parallel solving improves SMT verification throughput for `@verify(proof)` functions.
 //! Target: type inference <100ms per 10K LOC, compilation >50K LOC/sec.
@@ -259,6 +262,7 @@ pub struct ParallelSolver {
 
 /// Problem instance shared between workers
 ///
+
 /// Uses SMT-LIB string representation for thread safety.
 /// Each worker parses these strings in its own context.
 #[derive(Debug, Clone)]
@@ -341,6 +345,7 @@ impl ParallelSolver {
 
         // Create communication channels.
         //
+
         // `enable_sharing` gates lemma exchange in addition to
         // `enable_lemma_exchange`: lemma exchange is the concrete
         // mechanism by which workers share intermediate results
@@ -855,6 +860,7 @@ impl Worker {
         // CRITICAL: Force Z3 solver destruction NOW, inside the rayon
         // worker, before the worker thread returns to the pool.
         //
+
         // Z3 0.20's Solver::new() uses a process-global thread-local
         // context. If we let the solver drop lazily (during rayon
         // thread-pool shutdown), its destructor races with LLVM's
@@ -863,6 +869,7 @@ impl Worker {
         // teardown order is non-deterministic — causing SIGSEGV in
         // ~40-60% of compilations.
         //
+
         // Explicit drop ensures Z3 context cleanup completes HERE,
         // well before LLVM module emission on the main thread.
         drop(solver);
@@ -870,6 +877,7 @@ impl Worker {
 
     /// Load problem into solver
     ///
+
     /// Parses SMT-LIB strings from the shared problem and reconstructs
     /// them as Z3 AST in this worker's context.
     fn load_problem(&self, solver: &Solver) -> bool {
@@ -1068,10 +1076,12 @@ impl Default for PortfolioSolver {
 
 /// SMT-LIB string parser for parallel solving
 ///
+
 /// Parses SMT-LIB2 format assertions and reconstructs them as Z3 AST
 /// in the current thread's context. This enables sharing formulas
 /// between parallel workers without sharing Z3 AST objects directly.
 ///
+
 /// Supports a subset of SMT-LIB2:
 /// - Arithmetic: +, -, *, /, mod
 /// - Comparisons: =, <, <=, >, >=, distinct

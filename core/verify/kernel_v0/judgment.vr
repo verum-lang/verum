@@ -2,29 +2,35 @@
 // kernel_v0 — Judgment (Γ ⊢ t : T)
 // =============================================================================
 //
+
 // The well-typedness judgment that the bootstrap kernel decides.
-// `Γ ⊢ t : T` reads as "in context Γ, the term t has type T".  The
+// `Γ ⊢ t : T` reads as "in context Γ, the term t has type T". The
 // 7 inference rules in `rules/` constructively build derivations of
 // this judgment; the soundness theorem in `soundness.vr` shows that
 // every such derivation denotes a value of the claimed type in the
 // categorical model.
 //
+
 // **Architectural role**
 //
+
 // The Judgment type is the propositional surface: theorems quantify
 // over derivations, rules introduce + eliminate them, the soundness
-// theorem unpacks them.  Phase 3 (#154) close: this Verum-side
+// theorem unpacks them. Phase 3 (#154) close: this Verum-side
 // Judgment becomes the source of truth for what the Rust-side
 // `proof_checker::infer` decides.
 //
+
 // **Faithfulness mirror**
 //
-//   Rust-side `proof_checker::infer(ctx, term) -> Result<Term, _>`
-//     → Verum-side `Derivation { ctx, term, type, witness }`
+
+//  Rust-side `proof_checker::infer(ctx, term) -> Result<Term, _>`
+//  → Verum-side `Derivation { ctx, term, type, witness }`
 //
-//   Successful inference IS the existence of a Derivation; failure
-//   IS the absence.  The 7 rules are constructive recipes for
-//   building Derivations.
+
+//  Successful inference IS the existence of a Derivation; failure
+//  IS the absence. The 7 rules are constructive recipes for
+//  building Derivations.
 // =============================================================================
 
 module core.verify.kernel_v0.judgment;
@@ -35,7 +41,8 @@ mount super.context.{Context};
 
 /// **Judgment** — `Γ ⊢ t : T` formed by the 10 inference rules.
 ///
-/// A value of `Judgment` is a STATEMENT.  The proof of it is a
+
+/// A value of `Judgment` is a STATEMENT. The proof of it is a
 /// `Derivation` (separate type), constructed by the rules.
 public type Judgment is {
     context:    Context,
@@ -45,27 +52,31 @@ public type Judgment is {
 
 /// **Derivation** — a constructive proof of a Judgment.
 ///
+
 /// The ten cases mirror the ten inference rules in `rules/`: each
-/// case carries the sub-derivations the rule consumes.  Building a
+/// case carries the sub-derivations the rule consumes. Building a
 /// derivation IS proving the corresponding judgment; the soundness
 /// theorem peels off cases inductively to show the term denotes a
 /// value of the claimed type.
 ///
+
 /// **The 10-rule roster** (mirrors `verum_kernel::soundness::canonical_rules`):
 ///
-///   Proved structurally (foundation):
-///     T-Var       — variable lookup
-///     T-Univ      — universe stratification
-///     T-FwAx      — forward-axiom witness (escape hatch)
-///     T-Pos      — positivity check (Berardi 1998)
+
+///  Proved structurally (foundation):
+///  T-Var — variable lookup
+///  T-Univ — universe stratification
+///  T-FwAx — forward-axiom witness (escape hatch)
+///  T-Pos — positivity check (Berardi 1998)
 ///
-///   Admitted (await Phase-1 trust-base reduction):
-///     T-Pi-Form   — Π-formation (substitution-lemma IOU)
-///     T-Lam-Intro — λ-introduction
-///     T-App-Elim  — application (β-reduction IOU)
-///     T-Beta      — β-conversion
-///     T-Eta       — η-conversion
-///     T-Sub       — universe cumulativity (κ-tower IOU)
+
+///  Admitted (await Phase-1 trust-base reduction):
+///  T-Pi-Form — Π-formation (substitution-lemma IOU)
+///  T-Lam-Intro — λ-introduction
+///  T-App-Elim — application (β-reduction IOU)
+///  T-Beta — β-conversion
+///  T-Eta — η-conversion
+///  T-Sub — universe cumulativity (κ-tower IOU)
 public type Derivation is
     /// **T-Var**: `Γ ⊢ Var(i) : T` when `Γ.lookup(i) = T`.
     | Var {
@@ -79,7 +90,7 @@ public type Derivation is
         level: Int{>= 0},
     }
     /// **T-FwAx**: `Γ ⊢ axiom_witness(A) : T` when `A` is on the
-    /// trusted-axiom roster and `T` is a sort under Γ.  The kernel's
+    /// trusted-axiom roster and `T` is a sort under Γ. The kernel's
     /// only mechanism for admitting unverified content; each occurrence
     /// is logged in the audit bundle's IOU dashboard.
     | FwAx {
@@ -87,7 +98,7 @@ public type Derivation is
         axiom_name: Text,
         result_type: CoreTerm,
     }
-    /// **T-Pos**: positivity of an inductive declaration.  Berardi 1998
+    /// **T-Pos**: positivity of an inductive declaration. Berardi 1998
     /// style structural analysis: the recursive occurrences appear only
     /// in strictly-positive position in the constructor types.
     | Pos {
@@ -120,7 +131,7 @@ public type Derivation is
         result_type:         CoreTerm,
     }
     /// **T-Conv** (β-equivalence): if `Γ ⊢ t : T1` and `T1 ≡_β T2`,
-    /// then `Γ ⊢ t : T2`.  Implicitly used by T-App-Elim's
+    /// then `Γ ⊢ t : T2`. Implicitly used by T-App-Elim's
     /// argument-matching step.
     | BetaConv {
         context: Context,
@@ -137,7 +148,7 @@ public type Derivation is
         new_type: CoreTerm,
     }
     /// **T-Sub** (universe cumulativity): if `Γ ⊢ t : Univ(n)` and
-    /// `n ≤ m`, then `Γ ⊢ t : Univ(m)`.  Embeds smaller universes
+    /// `n ≤ m`, then `Γ ⊢ t : Univ(m)`. Embeds smaller universes
     /// into larger ones via the κ-tower well-foundedness axiom.
     | Sub {
         context: Context,
@@ -150,6 +161,7 @@ public type Derivation is
 /// **Definitional equality witness** — a proof that two terms are
 /// definitionally equal under the kernel's notion of α + β + η.
 ///
+
 /// The four cases mirror the def_eq rules in
 /// `verum_kernel::proof_checker`:
 public type DefinitionalEquality is
@@ -161,13 +173,13 @@ public type DefinitionalEquality is
         body: CoreTerm,
         argument: CoreTerm,
     }
-    /// **Eta**: `Lam(A, App(f, Var(0))) ≡ f`  (when Var(0) ∉ FV(f)).
+    /// **Eta**: `Lam(A, App(f, Var(0))) ≡ f` (when Var(0) ∉ FV(f)).
     | Eta {
         domain: CoreTerm,
         function: CoreTerm,
     }
     /// **Symm + Trans + Congr** are derivable; not first-class
-    /// constructors here.  The minimal set is { Refl, Beta, Eta }
+    /// constructors here. The minimal set is { Refl, Beta, Eta }
     /// — every other equation reduces to compositions of these.
     | Trans {
         first:  Heap<DefinitionalEquality>,
@@ -176,25 +188,26 @@ public type DefinitionalEquality is
 
 /// **Project** — the term whose typing the derivation proves.
 ///
+
 /// Each variant reconstructs the term from its sub-derivations:
-///   - `Var { index }` → `CoreTerm.Var { index }` (atomic).
-///   - `Univ { level }` → `CoreTerm.Universe { level }` (atomic).
-///   - `PiForm { domain_d, codomain_d }`
-///     → `Pi { domain: term_of(domain_d), body: term_of(codomain_d) }`.
-///   - `LamIntro { domain_well_typed, body_d }`
-///     → `Lam { domain: term_of(domain_well_typed), body: term_of(body_d) }`.
-///   - `AppElim { function_d, argument_d }`
-///     → `App { function: term_of(function_d), argument: term_of(argument_d) }`.
-///   - `BetaConv | EtaConv | Sub { original }` → `term_of(original)` —
-///     conversion / cumulativity rules change only the type, not the
-///     term being typed.
-///   - `FwAx { axiom_name, .. }` and `Pos { .. }` carry no concrete
-///     CoreTerm (axiom witnesses live outside the algebraic
-///     core-term language; positivity certifies a constructor SET,
-///     not a single term).  These return `Var { index: 0 }` as a
-///     soundness-neutral placeholder — `soundness.vr`'s consumers
-///     either short-circuit on these kinds before calling `term_of`
-///     or use the placeholder for diagnostics only.
+///  - `Var { index }` → `CoreTerm.Var { index }` (atomic).
+///  - `Univ { level }` → `CoreTerm.Universe { level }` (atomic).
+///  - `PiForm { domain_d, codomain_d }`
+///  → `Pi { domain: term_of(domain_d), body: term_of(codomain_d) }`.
+///  - `LamIntro { domain_well_typed, body_d }`
+///  → `Lam { domain: term_of(domain_well_typed), body: term_of(body_d) }`.
+///  - `AppElim { function_d, argument_d }`
+///  → `App { function: term_of(function_d), argument: term_of(argument_d) }`.
+///  - `BetaConv | EtaConv | Sub { original }` → `term_of(original)` —
+///  conversion / cumulativity rules change only the type, not the
+///  term being typed.
+///  - `FwAx { axiom_name, .. }` and `Pos { .. }` carry no concrete
+///  CoreTerm (axiom witnesses live outside the algebraic
+///  core-term language; positivity certifies a constructor SET,
+///  not a single term). These return `Var { index: 0 }` as a
+///  soundness-neutral placeholder — `soundness.vr`'s consumers
+///  either short-circuit on these kinds before calling `term_of`
+///  or use the placeholder for diagnostics only.
 public fn term_of(d: &Derivation) -> CoreTerm {
     match d {
         Derivation.Var { index, .. } => CoreTerm.Var { index: index },
@@ -222,7 +235,7 @@ public fn term_of(d: &Derivation) -> CoreTerm {
         Derivation.Sub      { original, .. } => term_of(&*original),
         // FwAx + Pos do not carry a concrete CoreTerm — see docstring.
         // Returning Var{0} keeps the function total without claiming
-        // a fictitious term.  Verifier consumers gate these kinds
+        // a fictitious term. Verifier consumers gate these kinds
         // separately (FwAx via the trusted-axiom roster, Pos via
         // the constructor-set positivity checker).
         _ => CoreTerm.Var { index: 0 },

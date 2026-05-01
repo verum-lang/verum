@@ -14,11 +14,13 @@
 )]
 //! # Core Standard Library Validation Tests
 //!
+
 //! These tests ensure that ALL core/ .vr files parse and type-check correctly.
 //! The stdlib is loaded during every compilation — these tests explicitly verify
 //! that no parsing errors, type errors, or import resolution failures exist in
 //! the standard library.
 //!
+
 //! Run with: `cargo test -p verum_compiler --test core_stdlib_validation_test`
 
 use std::path::PathBuf;
@@ -26,6 +28,7 @@ use verum_compiler::{CompilationPipeline, CompilerOptions, Session};
 
 /// Verify that the stdlib loads without parse errors.
 ///
+
 /// This test compiles a minimal program, which triggers stdlib loading.
 /// Any parse failures in core/ .vr files will surface as compilation errors.
 #[test]
@@ -70,6 +73,7 @@ fn test_core_stdlib_loads_without_errors() {
 
 /// Count internal stdlib type registration errors.
 ///
+
 /// These errors are suppressed during normal compilation but indicate
 /// quality issues in the stdlib .vr files or type system coverage.
 /// Requires a large stack due to deep type resolution of 280+ stdlib modules.
@@ -106,44 +110,46 @@ fn test_count_stdlib_internal_type_errors() {
             eprintln!("=========================================");
 
             // Ratchet: assert total is at or below the documented
-            // budget.  Any tightening (lowering the budget) is a
+            // budget. Any tightening (lowering the budget) is a
             // welcome PR; any regression (going above) gets
             // surfaced immediately so it can be diagnosed before it
             // accumulates.
             //
+
             // History:
-            //   2026-03-26  budget: 10  (count: 6)   — Args/Output
-            //                                          context-order issues
-            //   2026-04-29  budget: 75  (count: 75)  — accumulated drift,
-            //                                          mostly TypeNotFound
-            //                                          for path-prefixes
-            //                                          `base.X` / `common.X`
-            //                                          that should resolve
-            //                                          to core.{base,common}
-            //                                          (registration order
-            //                                          / module-path
-            //                                          resolution issue in
-            //                                          fn/impl registration
-            //                                          phase, NOT in
-            //                                          user code)
-            //   2026-04-29  budget: 5   (count: 5)   — `base.X` / `common.X`
-            //                                          path-prefix call sites
-            //                                          rewritten to bare names
-            //                                          via brace-mount
-            //                                          (52 .vr files touched);
-            //                                          `Event` mismatch in
-            //                                          core/term renamed to
-            //                                          match its consumers;
-            //                                          `AlterValidationError`
-            //                                          import name corrected;
-            //                                          remaining 5 are the
-            //                                          `Output` registration-
-            //                                          order bug in
-            //                                          core/io/process.vr
-            //                                          (tracked separately —
-            //                                          requires compiler
-            //                                          fix, not stdlib fix)
+            //  2026-03-26 budget: 10 (count: 6) — Args/Output
+            //  context-order issues
+            //  2026-04-29 budget: 75 (count: 75) — accumulated drift,
+            //  mostly TypeNotFound
+            //  for path-prefixes
+            //  `base.X` / `common.X`
+            //  that should resolve
+            //  to core.{base,common}
+            //  (registration order
+            //  / module-path
+            //  resolution issue in
+            //  fn/impl registration
+            //  phase, NOT in
+            //  user code)
+            //  2026-04-29 budget: 5 (count: 5) — `base.X` / `common.X`
+            //  path-prefix call sites
+            //  rewritten to bare names
+            //  via brace-mount
+            //  (52 .vr files touched);
+            //  `Event` mismatch in
+            //  core/term renamed to
+            //  match its consumers;
+            //  `AlterValidationError`
+            //  import name corrected;
+            //  remaining 5 are the
+            //  `Output` registration-
+            //  order bug in
+            //  core/io/process.vr
+            //  (tracked separately —
+            //  requires compiler
+            //  fix, not stdlib fix)
             //
+
             // Reduce as the Output registration-order bug lands.
             const BUDGET: usize = 5;
             assert!(
@@ -161,6 +167,7 @@ fn test_count_stdlib_internal_type_errors() {
 
 /// Count all stdlib body type-checking errors.
 ///
+
 /// This runs the FULL type checker (including function bodies) on all core/ modules
 /// to identify all type errors. This is the comprehensive test that exposes the
 /// ~950 errors that were previously hidden by skipping stdlib body checking.
@@ -209,6 +216,7 @@ fn test_count_stdlib_body_errors() {
 
 /// Verify that basic programs with core types compile through VBC.
 ///
+
 /// Uses simple types (Int, Text, Bool) that are always available
 /// without generic resolution. Generic collections (List, Map, Set)
 /// require the full AOT pipeline to resolve.
@@ -250,6 +258,7 @@ fn test_core_basic_types_available() {
 
 /// Verify that CBGR reference types parse and compile.
 ///
+
 /// Tests that the three-tier reference system (&T, &checked T, &unsafe T)
 /// is properly wired through the compilation pipeline.
 #[test]
@@ -303,6 +312,7 @@ fn test_cbgr_reference_types_compile() {
 
 /// Verify that functions with &mut self compile through VBC.
 ///
+
 /// This exercises the CBGR RefMut instruction path in the VBC codegen.
 #[test]
 fn test_mut_ref_compiles() {

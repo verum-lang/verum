@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.6 (fuzz harness — WAL surface)
 //
+
 // Operates on a list of frames represented opaquely as `List<Byte>`
 // payloads — the recovery code in L1 must shrug off every variant
 // (re-order, duplicate, dropped commit, mismatched checksum).

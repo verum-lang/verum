@@ -8,16 +8,19 @@ module sys.darwin.thread;
 // Platform: macOS (x86_64, arm64)
 // =============================================================================
 //
+
 // This module provides thread management using pthread on macOS.
 // Unlike Linux which uses clone/clone3 syscalls directly, macOS requires
 // going through the pthread API in libSystem.B.dylib.
 //
+
 // Features:
 // - DarwinThread creation with automatic TLS initialization
 // - DarwinMutex (pthread_mutex)
 // - Condition variable (pthread_cond)
 // - Spin lock (atomic-based for low-contention scenarios)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -166,6 +169,7 @@ fn thread_entry(data: &unsafe Byte) -> &unsafe Byte {
 implement DarwinThread {
     /// Spawn a new thread.
     ///
+
     /// The thread function will be called with TLS already initialized.
     public fn spawn(func: DarwinThreadFn, arg: &unsafe Byte) -> Result<DarwinThread, DarwinThreadError> {
         // Allocate entry data (leaked - thread will use it)
@@ -304,6 +308,7 @@ implement DarwinMutex {
 
     /// Try to lock the mutex (non-blocking).
     ///
+
     /// Returns true if lock acquired, false if already locked.
     public fn try_lock(&mut self) -> Bool {
         let result = unsafe { pthread_mutex_trylock(&mut self.inner) };
@@ -364,6 +369,7 @@ implement DarwinCondvar {
 
     /// Wait on the condition variable.
     ///
+
     /// The mutex must be locked before calling. It will be unlocked
     /// while waiting and re-locked before returning.
     public fn wait(&mut self, mutex: &mut DarwinMutex) -> Result<(), DarwinThreadError> {
@@ -377,6 +383,7 @@ implement DarwinCondvar {
 
     /// Wait on the condition variable with timeout.
     ///
+
     /// Returns Ok(true) if signaled, Ok(false) if timed out.
     public fn wait_timeout(&mut self, mutex: &mut DarwinMutex, timeout_ms: Int) -> Result<Bool, DarwinThreadError> {
         // Calculate absolute timeout
@@ -528,6 +535,7 @@ implement DarwinOnce {
 // These provide the same API as sys/linux/thread.futex_wait/futex_wake,
 // enabling cross-platform futex code with @cfg(target_os) imports.
 //
+
 // macOS __ulock operations (from XNU):
 // - UL_COMPARE_AND_WAIT (1): compare *addr with value, sleep if equal
 // - ULF_NO_ERRNO (0x01000000): return negative errno instead of setting errno
@@ -548,11 +556,13 @@ const ETIMEDOUT: Int = 60;
 
 /// Wait on a futex-like address if value matches expected.
 ///
+
 /// Blocks until:
 /// - The value at `addr` differs from `expected`
 /// - The timeout expires (if timeout_ns is Some)
 /// - Another thread calls futex_wake on the same address
 ///
+
 /// Compatible with sys/linux/thread.futex_wait signature.
 public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Result<(), OSError> {
     let timeout_us: UInt32 = match timeout_ns {
@@ -581,6 +591,7 @@ public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Re
 
 /// Wake threads waiting on a futex-like address.
 ///
+
 /// Wakes up to `count` threads blocked in futex_wait on the same address.
 /// Compatible with sys/linux/thread.futex_wake signature.
 public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {

@@ -14,6 +14,7 @@
 )]
 // Tests for protocol objects and dynamic dispatch.
 //
+
 // Unification: Robinson's algorithm extended with row polymorphism, refinement subtyping, and type class constraints — .2
 // Protocol objects (formerly trait objects) enable runtime polymorphism through vtable dispatch.
 

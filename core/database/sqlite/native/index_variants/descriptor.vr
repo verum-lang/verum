@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.3
 //
+
 // `IndexDescriptor` carries everything the planner needs about an
 // index that's not a function of the table itself.
 // =============================================================================

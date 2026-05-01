@@ -1,5 +1,6 @@
 //! Comprehensive tests for Separation Logic implementation
 //!
+
 //! Separation Logic for heap reasoning:
 //! - SepProp: Heap -> Prop (assertions over heap state)
 //! - Separating conjunction (P * Q): heap splits into disjoint h1, h2 with P(h1) and Q(h2)

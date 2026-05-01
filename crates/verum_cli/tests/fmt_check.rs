@@ -1,5 +1,6 @@
 //! `verum fmt --check` exit-code contract.
 //!
+
 //! Pre-commit hooks and CI gates rely on this: exit 0 when every
 //! file is canonically formatted, non-zero otherwise. The exit code
 //! is the only signal a script consumes — locking it down is just

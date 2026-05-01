@@ -1,9 +1,11 @@
 //! Sheaf descent condition encoding for SMT verification.
 //!
+
 //! An ∞-sheaf on a site `(C, J)` satisfies the **descent condition**:
 //! for every covering sieve `S` of an object `c`, the canonical map
 //! `F(c) → holim_{d → c ∈ S} F(d)` is an equivalence of ∞-groupoids.
 //!
+
 //! At the SMT level, we encode descent as a first-order constraint:
 //! given a covering family `{f_i : d_i → c}` and compatible local
 //! data `{s_i : F(d_i)}` with `restrict_ij(s_i) = restrict_ji(s_j)`
@@ -65,6 +67,7 @@ pub enum DescentResult {
 
 /// Verify the descent condition for a given problem.
 ///
+
 /// This is a lightweight syntactic check at the SMT-encoding level;
 /// the actual descent-preservation proof requires the concrete
 /// ∞-sheaf implementation to discharge its `@verify(formal) descent`

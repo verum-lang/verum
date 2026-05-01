@@ -4,30 +4,34 @@
 // Layer: 5 (Network — TLS 1.3 core)
 // =============================================================================
 //
+
 // RFC 8446 §4 defines the handshake message ADT:
 //
-//   struct {
-//       HandshakeType msg_type;
-//       uint24 length;
-//       select (msg_type) {
-//           case client_hello:          ClientHello;
-//           case server_hello:          ServerHello;
-//           case new_session_ticket:    NewSessionTicket;
-//           case end_of_early_data:     EndOfEarlyData;
-//           case encrypted_extensions:  EncryptedExtensions;
-//           case certificate_request:   CertificateRequest;
-//           case certificate:           Certificate;
-//           case certificate_verify:    CertificateVerify;
-//           case finished:              Finished;
-//           case key_update:            KeyUpdate;
-//       };
-//   } Handshake;
+
+//  struct {
+//  HandshakeType msg_type;
+//  uint24 length;
+//  select (msg_type) {
+//  case client_hello: ClientHello;
+//  case server_hello: ServerHello;
+//  case new_session_ticket: NewSessionTicket;
+//  case end_of_early_data: EndOfEarlyData;
+//  case encrypted_extensions: EncryptedExtensions;
+//  case certificate_request: CertificateRequest;
+//  case certificate: Certificate;
+//  case certificate_verify: CertificateVerify;
+//  case finished: Finished;
+//  case key_update: KeyUpdate;
+//  };
+//  } Handshake;
 //
+
 // This module carries the full message ADT + wire-level encode/decode.
 // The transcript-hash machinery (RFC 8446 §4.4.1) sits in `transcript.vr`;
 // the typed state machine that drives these messages lives in
 // `client_sm.vr` / `server_sm.vr`.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.messages;

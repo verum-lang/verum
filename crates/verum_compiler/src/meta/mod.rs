@@ -1,10 +1,13 @@
 //! Meta Context - Compile-time execution environment
 //!
+
 //! This module provides the execution context for meta functions,
 //! including variable bindings and constant value representation.
 //!
+
 //! ## Module Structure
 //!
+
 //! - [`error`] - Meta execution errors
 //! - [`types`] - Core type definitions (TypeDefinition, ProtocolImplementation)
 //! - [`reflection`] - Type introspection API
@@ -19,21 +22,25 @@
 //! - [`sandbox`] - Safe meta execution sandbox
 //! - [`value_ops`] - MetaValue arithmetic/comparison operations
 //!
+
 //! ## Type Properties
 //!
+
 //! Verum uses **Type Properties** for compile-time type introspection:
 //!
-//! | Property      | Description                    |
+
+//! | Property | Description |
 //! |---------------|--------------------------------|
-//! | `T.size`      | Memory size in bytes           |
-//! | `T.alignment` | Memory alignment requirement   |
-//! | `T.stride`    | Array element stride           |
-//! | `T.bits`      | Size in bits                   |
-//! | `T.min`       | Minimum value (numeric types)  |
-//! | `T.max`       | Maximum value (numeric types)  |
-//! | `T.name`      | Type name as Text              |
-//! | `T.id`        | Unique type identifier (u64)   |
+//! | `T.size` | Memory size in bytes |
+//! | `T.alignment` | Memory alignment requirement |
+//! | `T.stride` | Array element stride |
+//! | `T.bits` | Size in bits |
+//! | `T.min` | Minimum value (numeric types) |
+//! | `T.max` | Maximum value (numeric types) |
+//! | `T.name` | Type name as Text |
+//! | `T.id` | Unique type identifier (u64) |
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

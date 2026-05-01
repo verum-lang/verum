@@ -1,5 +1,6 @@
 //! Demonstration of the critical v1.0 refinement error format
 //!
+
 //! Run with: cargo run --example refinement_error_demo
 
 use verum_diagnostics::*;

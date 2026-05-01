@@ -14,8 +14,10 @@
 )]
 //! Tests for Analysis Module
 //!
+
 //! Tests formal verification of real analysis theorems and properties.
 //!
+
 //! Real analysis verification: limits, continuity, intermediate value theorem.
 //! Uses epsilon-delta definitions: `limit(f, a, L) = forall eps > 0. exists delta > 0.
 //! forall x. 0 < |x - a| < delta => |f(x) - L| < eps`. Continuous at a means

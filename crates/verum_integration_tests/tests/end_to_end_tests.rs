@@ -16,9 +16,11 @@
 #![cfg(feature = "full-pipeline-tests")] // Requires complete API updates
 // End-to-End Integration Tests for Complete Verum Pipeline
 //
+
 // Tests the complete compilation pipeline:
 // Source → Lexer → Parser → Type Checker → Code Generator → Execution
 //
+
 // Spec: All components from TIER 0-4
 
 use verum_ast::{expr::*, literal::*, pattern::Pattern, span::Span, ty::*};

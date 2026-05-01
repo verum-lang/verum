@@ -1,25 +1,28 @@
 //! UTF-8-safe primitives for byte-offset / char-boundary navigation.
 //!
+
 //! This module is the canonical home for the operations that previously
 //! showed up as ad-hoc byte-vs-char-index confusion across the LSP and
 //! VBC layers — every fix in the 2026-04-29 R2-§8.1 sweep ultimately
 //! reduces to one of three primitives:
 //!
+
 //! 1. **Clamp a byte offset to a char boundary.** The LSP protocol
-//!    delivers cursor positions that may land mid-codepoint (e.g.,
-//!    UTF-16-column ↔ UTF-8-byte rounding); naive `&line[..offset]`
-//!    panics.
+//!  delivers cursor positions that may land mid-codepoint (e.g.,
+//!  UTF-16-column ↔ UTF-8-byte rounding); naive `&line[..offset]`
+//!  panics.
 //! 2. **Truncate a string by character count, not byte count.** Debug
-//!    previews and disassembly output fed `&s[..N]` for a fixed N;
-//!    when N landed inside a multi-byte UTF-8 sequence, the slice
-//!    panicked.
+//!  previews and disassembly output fed `&s[..N]` for a fixed N;
+//!  when N landed inside a multi-byte UTF-8 sequence, the slice
+//!  panicked.
 //! 3. **Find the word at a byte offset.** Identifier extraction
-//!    around a cursor previously mixed byte offsets with
-//!    `chars().nth(byte_offset)` (treating bytes as char indices).
-//!    For ASCII this coincidentally works; for any multi-byte
-//!    content it silently mis-locates or returns false-positive
-//!    matches.
+//!  around a cursor previously mixed byte offsets with
+//!  `chars().nth(byte_offset)` (treating bytes as char indices).
+//!  For ASCII this coincidentally works; for any multi-byte
+//!  content it silently mis-locates or returns false-positive
+//!  matches.
 //!
+
 //! All three primitives are zero-allocation on the hot path (the
 //! word-extraction primitive returns byte-offset bounds rather than
 //! a copy), use only standard-library `is_char_boundary` /
@@ -29,16 +32,19 @@
 
 /// Clamp a byte offset DOWN to the nearest preceding char boundary.
 ///
+
 /// Walks at most 3 bytes since UTF-8 sequences are ≤ 4 bytes long;
-/// returns immediately if the offset is already at a boundary.  When
+/// returns immediately if the offset is already at a boundary. When
 /// the offset exceeds `text.len()` it is first capped at `text.len()`,
 /// which is always a valid char boundary.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::text_utf8::clamp_to_char_boundary;
-/// // π is U+03C0 — 2 bytes in UTF-8.  Byte offset 1 lands inside it.
+/// // π is U+03C0 — 2 bytes in UTF-8. Byte offset 1 lands inside it.
 /// let s = "π = 1";
 /// assert_eq!(clamp_to_char_boundary(s, 0), 0); // before π
 /// assert_eq!(clamp_to_char_boundary(s, 1), 0); // mid-π → clamped
@@ -57,13 +63,16 @@ pub fn clamp_to_char_boundary(text: &str, byte_offset: usize) -> usize {
 /// UTF-8-safe prefix slice: `&text[..byte_offset]` with the offset
 /// clamped to the nearest preceding char boundary.
 ///
+
 /// The conservative choice is to round DOWN — returning the
 /// already-typed prefix is always semantically safe, while extending
 /// past a half-typed multi-byte char would lie about the cursor
 /// position.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::text_utf8::safe_prefix;
 /// let s = "π = 1";
@@ -78,15 +87,18 @@ pub fn safe_prefix(text: &str, byte_offset: usize) -> &str {
 }
 
 /// Truncate a string to at most `max_chars` characters, returning a
-/// borrowed `&str` slice.  Counts Unicode characters (code points),
+/// borrowed `&str` slice. Counts Unicode characters (code points),
 /// NOT bytes — naive `&s[..N]` panics when `N` falls inside a
 /// multi-byte UTF-8 sequence.
 ///
+
 /// Returns the original slice unchanged if it has ≤ `max_chars`
 /// characters.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::text_utf8::truncate_chars;
 /// assert_eq!(truncate_chars("hello", 3), "hel");
@@ -112,16 +124,20 @@ pub fn truncate_chars(text: &str, max_chars: usize) -> &str {
 /// the given byte offset, using the supplied `is_word_char`
 /// predicate.
 ///
+
 /// `byte_offset` is clamped to the nearest preceding char boundary
-/// before the walk begins.  Returns `None` when the cursor is not on
+/// before the walk begins. Returns `None` when the cursor is not on
 /// a word character (the standard LSP contract — no word means no
 /// rename / hover / completion target).
 ///
+
 /// The returned bounds are always at char boundaries, so
 /// `&text[start..end]` is always safe to slice.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::text_utf8::find_word_bounds;
 /// let pred = |c: char| c.is_alphanumeric() || c == '_';
@@ -168,12 +184,14 @@ pub fn find_word_bounds(
 }
 
 /// Whether the character immediately preceding `byte_offset` in
-/// `text` (if any) satisfies the given predicate.  Returns `None`
-/// when `byte_offset == 0` (no preceding char).  Walks UTF-8 backwards
+/// `text` (if any) satisfies the given predicate. Returns `None`
+/// when `byte_offset == 0` (no preceding char). Walks UTF-8 backwards
 /// correctly; never panics on multi-byte input.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::text_utf8::char_before_satisfies;
 /// let s = "foo.bar";
@@ -197,11 +215,13 @@ pub fn char_before_satisfies(
 }
 
 /// Whether the character at `byte_offset` in `text` (if any) satisfies
-/// the given predicate.  Returns `None` when `byte_offset >= text.len()`.
+/// the given predicate. Returns `None` when `byte_offset >= text.len()`.
 /// Walks UTF-8 forwards correctly; never panics on multi-byte input.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::text_utf8::char_at_satisfies;
 /// let s = "foo.bar";

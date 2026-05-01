@@ -1,5 +1,6 @@
 //! `verum doc-render` subcommand — auto-paper generator surface.
 //!
+
 //! Walks every `.vr` file in the project (using the same
 //! `audit::discover_vr_files` + `audit::parse_file_for_audit`
 //! helpers as the verify-ladder integration), projects each
@@ -8,24 +9,28 @@
 //! the resulting [`DocCorpus`] to
 //! [`DefaultDocRenderer`](verum_verification::doc_render::DefaultDocRenderer).
 //!
+
 //! ## Why a sibling to `doc.rs`
 //!
+
 //! The pre-existing `commands/doc.rs` is a Rust-style API-doc
 //! generator that walks `///` comments on functions/types — useful
 //! but a different concern than the auto-paper pipeline: the
 //! auto-paper output renders the *formal statement + proof* of every
 //! theorem with cross-references, citation graph, and reproducibility
-//! envelope (closure hash).  Two separate generators with two
+//! envelope (closure hash). Two separate generators with two
 //! separate use cases.
 //!
+
 //! ## Subcommands
 //!
-//!   * `verum doc-render render [--format md|latex|html] [--out <PATH>] [--public]`
-//!     Render the entire corpus.
-//!   * `verum doc-render graph [--format dot|json] [--public]`
-//!     Citation-graph export.
-//!   * `verum doc-render check-refs [--format plain|json] [--public]`
-//!     Broken-cross-ref audit (CI-friendly; non-zero exit on broken refs).
+
+//!  * `verum doc-render render [--format md|latex|html] [--out <PATH>] [--public]`
+//!  Render the entire corpus.
+//!  * `verum doc-render graph [--format dot|json] [--public]`
+//!  Citation-graph export.
+//!  * `verum doc-render check-refs [--format plain|json] [--public]`
+//!  Broken-cross-ref audit (CI-friendly; non-zero exit on broken refs).
 
 use crate::error::{CliError, Result};
 use std::path::PathBuf;
@@ -41,11 +46,12 @@ use super::audit::{discover_vr_files, parse_file_for_audit};
 /// Walk every `.vr` file under the manifest dir and project each
 /// declaration to a typed `DocItem`.
 ///
+
 /// Citation resolution is two-pass: pass 1 builds the corpus's
 /// name allowlist (every Theorem / Lemma / Corollary / Axiom);
 /// pass 2 walks each proof body's AST via
 /// [`collect_proof_citations`] and filters references against that
-/// allowlist (#92 hardening).  Replaces the previous
+/// allowlist (#92 hardening). Replaces the previous
 /// `Debug`-formatted-string heuristic that produced both false
 /// positives (struct-debug noise from `format!("{:?}", body)`) and
 /// false negatives (citations whose names didn't end in `_lemma` /
@@ -128,7 +134,7 @@ fn project_item(
     use verum_common::Maybe;
 
     // Theorem-shaped declarations carry requires/ensures/proof; axioms
-    // are postulated propositions only.  Project to a uniform tuple.
+    // are postulated propositions only. Project to a uniform tuple.
     enum Shape<'a> {
         Theoremish {
             requires: &'a verum_common::List<verum_ast::Expr>,
@@ -240,10 +246,10 @@ fn project_item(
     })
 }
 
-/// Best-effort proof-body → tactic-step list extraction.  V0 ships a
+/// Best-effort proof-body → tactic-step list extraction. ships a
 /// shallow projection that captures named tactic invocations by
 /// walking the `Debug`-rendered body and pulling out one line per
-/// surface step.  V1 will replace this with a proper
+/// surface step. Future work will replace this with a proper
 /// `ProofBody → Vec<TacticStep>` projection.
 fn render_proof_steps(body: &verum_ast::decl::ProofBody) -> Vec<Text> {
     let raw = format!("{:?}", body);
@@ -483,6 +489,7 @@ mod tests {
 
     // ----- citations: AST-based path (collect_proof_citations) -----
     //
+
     // The earlier test set covered a `citations_from_text` text-
     // search heuristic that used a free-form "find tokens
     // ending in `_lemma`" walk. That heuristic was replaced by

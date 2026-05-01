@@ -5,9 +5,11 @@
 // Dependencies: core, collections, sync
 // =============================================================================
 //
+
 // Multi-producer, single-consumer channels for message passing.
 // Provides both bounded and unbounded variants.
 //
+
 // =============================================================================
 
 module core.async.channel;
@@ -35,7 +37,7 @@ mount sys.darwin.thread.{
 };
 
 // Synchronous sleep for the bounded-channel send/recv timeout
-// busy-loops below.  Imported under the historic `sleep_millis` alias
+// busy-loops below. Imported under the historic `sleep_millis` alias
 // since that's the name the busy-loop sites use.
 mount sys.time_ops.{sleep_ms as sleep_millis};
 
@@ -49,15 +51,19 @@ mount sys.windows.thread.{
 // Channel<T> - Bounded channel for interpreter/AOT
 // =============================================================================
 //
+
 // Simple bounded channel with ring buffer storage.
 // In the interpreter/AOT, Channel.new(cap) is intercepted by the C runtime
 // (verum_chan_new), and send/recv dispatch through CallM to C builtins.
 //
+
 // This implementation provides correct behavior when the stdlib is compiled
 // natively (self-hosting), using a ring buffer with futex-based blocking.
 //
+
 // Layout: [len, cap, head, tail, buffer_ptr, closed, notify_seq]
 //
+
 public type Channel<T> is {
     len: AtomicInt,
     cap: Int,
@@ -286,6 +292,7 @@ implement<T> Sender<T> {
     // returns `Err(SendError)`; on timeout returns `Err(SendError)`
     // with the unsent value preserved.
     //
+
     // For an unbounded channel this degenerates to `send` because
     // there is no capacity limit — the timeout only applies to the
     // wait-for-slot path.
@@ -418,7 +425,7 @@ implement<T> Debug for Sender<T> {
 
 implement<T> Drop for Sender<T> {
     /// SOUNDNESS: previous revision used `Relaxed` on the fetch_sub,
-    /// missing the Acquire-fence on the "last sender" path.  On
+    /// missing the Acquire-fence on the "last sender" path. On
     /// weakly-ordered architectures (ARM / AArch64 / Apple Silicon),
     /// the last-sender thread could observe `count == 0` BEFORE
     /// concurrent siblings' Release-ordered writes were visible —
@@ -576,6 +583,7 @@ implement<T> Receiver<T> {
     // queue lock and returns them as a fresh List. Returns an empty list
     // iff the channel closed with no items left.
     //
+
     // Use this over `recv_many` when you want to BLOCK rather than
     // best-effort drain — it wakes exactly once per batch rather than
     // spinning on an empty queue.

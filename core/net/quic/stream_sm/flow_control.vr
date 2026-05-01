@@ -4,26 +4,31 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // RFC 9000 §4: QUIC enforces flow control at both the connection
 // and per-stream levels. Stream FC lives inside SendStream/RecvStream;
 // this module tracks the connection-level counters.
 //
+
 // Outgoing FC (what *we* have authorised the peer to send on this
 // connection):
-//   max_data_local      — total bytes the peer may send across all
-//                         streams. We raise this via MAX_DATA frames
-//                         as the app reads data.
-//   bytes_recv          — total received so far.
+//  max_data_local — total bytes the peer may send across all
+//  streams. We raise this via MAX_DATA frames
+//  as the app reads data.
+//  bytes_recv — total received so far.
 //
+
 // Incoming FC (what the peer has authorised *us* to send):
-//   max_data_remote     — upper bound; the peer raises via MAX_DATA.
-//   bytes_sent          — total sent so far.
+//  max_data_remote — upper bound; the peer raises via MAX_DATA.
+//  bytes_sent — total sent so far.
 //
+
 // Stream-count FC (how many streams peer may open, symmetric both
 // directions):
-//   max_streams_{bidi,uni}_local  — we raise via MAX_STREAMS as streams close.
-//   max_streams_{bidi,uni}_remote — peer raises; gates fresh opens.
+//  max_streams_{bidi,uni}_local — we raise via MAX_STREAMS as streams close.
+//  max_streams_{bidi,uni}_remote — peer raises; gates fresh opens.
 //
+
 // =============================================================================
 
 module core.net.quic.stream_sm.flow_control;

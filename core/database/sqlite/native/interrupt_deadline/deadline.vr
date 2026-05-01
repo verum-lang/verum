@@ -10,7 +10,7 @@ mount core.*;
 mount base.{Bool};
 
 public type Deadline is {
-    /// Absolute monotonic ns at which interruption fires.  0 means
+    /// Absolute monotonic ns at which interruption fires. 0 means
     /// "disarmed"; negative values are normalised to 0.
     absolute_ns: Int64,
     /// Set via `disarm` — allows the embedder to cancel the deadline

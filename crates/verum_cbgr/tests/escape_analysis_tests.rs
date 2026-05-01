@@ -14,6 +14,7 @@
 )]
 //! Comprehensive Tests for Enhanced Escape Analysis
 //!
+
 //! Tests cover all escape scenarios from Section 2.3:
 //! - NoEscape (0ns optimization)
 //! - Heap escape

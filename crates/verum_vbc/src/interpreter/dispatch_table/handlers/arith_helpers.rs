@@ -210,6 +210,7 @@ pub(super) fn saturating_sub(a: i64, b: i64, width: u8, signed: bool) -> i64 {
 
 /// Saturating signed negation.
 ///
+
 /// `T::MIN` saturates to `T::MAX` (mathematically `-T::MIN = T::MAX + 1`
 /// is unrepresentable in two's complement; saturate rather than wrap).
 /// For unsigned T the operation is meaningless (negation produces a
@@ -232,6 +233,7 @@ pub(super) fn saturating_neg(a: i64, width: u8, signed: bool) -> i64 {
 
 /// Saturating signed absolute value.
 ///
+
 /// `|T::MIN|` saturates to `T::MAX` (same overflow as `saturating_neg`).
 /// For unsigned T the value is already non-negative, so identity.
 #[inline(always)]
@@ -252,6 +254,7 @@ pub(super) fn saturating_abs(a: i64, width: u8, signed: bool) -> i64 {
 /// Checked signed negation. Returns `Maybe<i64>` encoded as `(value, is_some)`.
 /// Caller wraps this into a Maybe Value at dispatch time.
 ///
+
 /// Returns `(0, false)` for `T::MIN` (the only value that overflows
 /// negation in two's complement); `(- a, true)` for every other input.
 /// For unsigned T, negation of non-zero is unrepresentable; only 0
@@ -269,6 +272,7 @@ pub(super) fn checked_neg(a: i64, width: u8, signed: bool) -> (i64, bool) {
 /// Checked signed absolute value. Returns `(value, is_some)` like
 /// `checked_neg`.
 ///
+
 /// Returns `(|a|, true)` for every value EXCEPT `T::MIN` (which
 /// returns `(0, false)` because `|T::MIN|` is unrepresentable in
 /// two's complement). For unsigned T the value is already

@@ -2,24 +2,30 @@
 // coinductive.vr — Productivity & Bisimulation for Greatest Fixed Points
 // =============================================================================
 //
+
 // Layer: Standard Library / Base
 //
+
 // User-facing surface for the coinductive analysis core
 // (`verum_types.coinductive_analysis`). Coinductive types are
 // *greatest* fixed points — infinite objects defined by what we
 // can observe about them. Streams, infinite trees, processes are
 // the classic examples.
 //
+
 // ## Productivity
 //
+
 // A corecursive definition is **productive** iff every prefix of
 // its observable output is computed in finite time. The standard
 // syntactic check is *guarded corecursion*: every recursive
 // self-reference must occur immediately under a constructor of
 // the coinductive type, never inside another function call.
 //
+
 // ## Bisimulation
 //
+
 // Two coinductive values are bisimilar iff every observation we
 // can make about one we can make about the other, and the
 // results are themselves bisimilar. This module exposes
@@ -28,6 +34,7 @@
 // bounded-depth check is sound for all observable contexts up
 // to that depth.
 //
+
 // =============================================================================
 
 module core.base.coinductive;

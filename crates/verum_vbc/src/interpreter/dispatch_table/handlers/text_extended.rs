@@ -8,8 +8,10 @@ use super::bytecode_io::*;
 
 /// TextExtended (0x79) - Text parsing and conversion operations.
 ///
+
 /// Format: `[0x79] [sub_opcode:u8] [operands...]`
 ///
+
 /// Sub-opcodes:
 /// - 0x00: FromStatic - Create Text from static string data
 /// - 0x10: ParseInt - Parse integer from Text
@@ -21,6 +23,7 @@ use super::bytecode_io::*;
 /// - 0x32: IsEmpty - Check if Text is empty
 /// - 0x33: IsUtf8 - Check if Text is valid UTF-8
 ///
+
 /// Performance: ~2ns dispatch via Rust match (vs ~15ns for LibraryCall)
 pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     use crate::instruction::TextSubOpcode;
@@ -183,10 +186,11 @@ pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> In
             // Borrow a Text as a byte slice (FatRef with elem_size=1),
             // handling small-string, heap-string, and reference forms.
             //
+
             // The runtime representation of Text is not the same as the
             // Verum struct `{ptr, len, cap}`:
-            //   small string → 6 bytes packed into the NaN-boxed Value itself
-            //   heap string  → pointer to `[ObjectHeader][len:u64][bytes...]`
+            //  small string → 6 bytes packed into the NaN-boxed Value itself
+            //  heap string → pointer to `[ObjectHeader][len:u64][bytes...]`
             // Reading `self.ptr` via GetF is wrong in both cases, so we
             // materialise the byte view here. References (`&Text`) first
             // deref to reach the underlying Text value.
@@ -231,9 +235,9 @@ pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> In
                 let header = unsafe { &*(base as *const heap::ObjectHeader) };
                 if header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001) {
                     // Two coexisting Text layouts under the same TypeId:
-                    //   builder `{ptr, len, cap}` (24-byte object, NaN-boxed fields)
-                    //     — field 0 = Value(ptr), field 1 = Value(len), field 2 = Value(cap)
-                    //   heap string `[ObjectHeader][len:u64][bytes…]`
+                    //  builder `{ptr, len, cap}` (24-byte object, NaN-boxed fields)
+                    //  — field 0 = Value(ptr), field 1 = Value(len), field 2 = Value(cap)
+                    //  heap string `[ObjectHeader][len:u64][bytes…]`
                     // The same size disambiguation used by `handle_array_len`
                     // applies here: a 24-byte object whose field 0 is a pointer
                     // and field 1 is an Int is the builder.

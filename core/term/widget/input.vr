@@ -3,18 +3,19 @@
 // =============================================================================
 // Layer: 5 (Widgets)
 //
+
 // Production-grade single-line editor:
-//   * grapheme-cluster cursor movement (UAX #29 approximation via cell.vr
-//     zero-width classification);
-//   * word-wise movement (whitespace/punctuation boundaries);
-//   * selection (anchor + cursor) with Shift+Arrow extensions;
-//   * cut / copy / paste integration (widget-level clipboard hook — the app
-//     is responsible for piping to OSC 52 if desired);
-//   * bounded undo/redo history (default: 64 entries);
-//   * placeholder + mask character (for password input);
-//   * auto-scroll that keeps cursor visible in bounded width;
-//   * `handle_key` dispatcher that implements the standard Emacs/readline
-//     keybindings out of the box.
+//  * grapheme-cluster cursor movement (UAX #29 approximation via cell.vr
+//  zero-width classification);
+//  * word-wise movement (whitespace/punctuation boundaries);
+//  * selection (anchor + cursor) with Shift+Arrow extensions;
+//  * cut / copy / paste integration (widget-level clipboard hook — the app
+//  is responsible for piping to OSC 52 if desired);
+//  * bounded undo/redo history (default: 64 entries);
+//  * placeholder + mask character (for password input);
+//  * auto-scroll that keeps cursor visible in bounded width;
+//  * `handle_key` dispatcher that implements the standard Emacs/readline
+//  keybindings out of the box.
 // =============================================================================
 module input;
 

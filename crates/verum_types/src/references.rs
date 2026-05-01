@@ -1,13 +1,16 @@
 //! Reference Type Implementations with Deref Protocol
 //!
+
 //! CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Deref Protocol Implementation
 //!
+
 //! This module implements the three reference types in Verum:
 //! - `ThinRef<T>` - CBGR-managed reference for sized types (16 bytes, ~15ns overhead)
 //! - `FatRef<T>` - CBGR-managed reference for unsized types (24 bytes, ~15ns overhead)
 //! - `CheckedRef<T>` - Statically verified reference with zero-cost transmute
 //! - `UnsafeRef<T>` - Unsafe reference with zero-cost transmute
 //!
+
 //! Each type implements the Deref protocol with different semantics:
 //! - ThinRef/FatRef: Runtime CBGR validation (~15ns overhead)
 //! - CheckedRef: Static verification + transmute (0ns overhead)
@@ -20,21 +23,26 @@ use std::ops::{Deref, DerefMut};
 
 /// Statically verified reference type (zero-cost)
 ///
+
 /// CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2
 ///
+
 /// CheckedRef represents a reference that has been statically verified to be safe.
 /// It provides zero-cost dereferencing through compile-time proofs.
 ///
+
 /// # Performance
 /// - Deref overhead: 0ns (compile-time verified)
 /// - Memory layout: Same as raw pointer
 ///
+
 /// # Safety
 /// The static verification ensures:
 /// - No use-after-free
 /// - No data races
 /// - Bounds are respected
 ///
+
 /// # Example
 /// ```rust,ignore
 /// let x = 42;
@@ -52,16 +60,20 @@ pub struct CheckedRef<T: 'static> {
 impl<T> CheckedRef<T> {
     /// Create a new CheckedRef from a raw pointer
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure:
     /// - `ptr` is non-null and properly aligned
     /// - `ptr` points to valid memory for the lifetime of this reference
     /// - Static verification has proven safety
     ///
+
     /// # Arguments
     /// * `ptr` - Raw pointer to data
     ///
+
     /// # Returns
     /// A new CheckedRef wrapping the pointer
     #[inline]
@@ -74,11 +86,14 @@ impl<T> CheckedRef<T> {
 
     /// Create from a reference (safe constructor)
     ///
+
     /// This is the safe way to create a CheckedRef from a regular reference.
     ///
+
     /// # Arguments
     /// * `reference` - Rust reference
     ///
+
     /// # Returns
     /// A new CheckedRef
     #[inline]
@@ -103,12 +118,15 @@ impl<T> Deref for CheckedRef<T> {
 
     /// Dereference with zero-cost transmute
     ///
+
     /// CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 lines 1219-1223
     ///
+
     /// # Performance
     /// - Overhead: 0ns (compile-time verified, transmute only)
     /// - No runtime checks
     ///
+
     /// # Safety
     /// This is safe because static verification has proven:
     /// - The pointer is valid for the lifetime
@@ -123,10 +141,10 @@ impl<T> Deref for CheckedRef<T> {
         // - Precondition 3: self.ptr is non-null and properly aligned (verified at construction)
         // - Precondition 4: Memory pointed to is valid and initialized (proven by static analysis)
         // - Proof: CheckedRef can only be constructed from valid references (via from_ref) or
-        //   through unsafe new() where the caller must ensure validity. The type system ensures
-        //   the lifetime is valid. Static verification (Tier 2) has proven that no use-after-free
-        //   or aliasing violations are possible. Therefore, dereferencing is safe and incurs
-        //   zero runtime cost - it's just a transmute from *const T to &T.
+        //  through unsafe new() where the caller must ensure validity. The type system ensures
+        //  the lifetime is valid. Static verification (Tier 2) has proven that no use-after-free
+        //  or aliasing violations are possible. Therefore, dereferencing is safe and incurs
+        //  zero runtime cost - it's just a transmute from *const T to &T.
         unsafe { &*self.ptr }
     }
 }
@@ -135,10 +153,13 @@ impl<T> Deref for CheckedRef<T> {
 
 /// Statically verified mutable reference type (zero-cost)
 ///
+
 /// CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2
 ///
+
 /// CheckedRefMut represents a mutable reference that has been statically verified to be safe.
 ///
+
 /// # Performance
 /// - Deref overhead: 0ns (compile-time verified)
 /// - Memory layout: Same as raw pointer
@@ -153,8 +174,10 @@ pub struct CheckedRefMut<T: 'static> {
 impl<T> CheckedRefMut<T> {
     /// Create a new CheckedRefMut from a raw pointer
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure:
     /// - `ptr` is non-null and properly aligned
     /// - `ptr` points to valid memory for the lifetime of this reference
@@ -206,6 +229,7 @@ impl<T> Deref for CheckedRefMut<T> {
 impl<T> DerefMut for CheckedRefMut<T> {
     /// Mutable dereference with zero-cost transmute
     ///
+
     /// # Performance
     /// - Overhead: 0ns (compile-time verified)
     #[inline]
@@ -217,9 +241,9 @@ impl<T> DerefMut for CheckedRefMut<T> {
         // - Precondition 3: self.ptr is non-null and properly aligned
         // - Precondition 4: &mut self ensures exclusive access (Rust borrow checker)
         // - Proof: CheckedRefMut provides exclusive access guarantees through Rust's type system.
-        //   Static verification has proven no aliasing violations. The &mut self parameter ensures
-        //   exclusive access at the Rust level. Therefore, creating a mutable reference is safe
-        //   and incurs zero runtime cost.
+        //  Static verification has proven no aliasing violations. The &mut self parameter ensures
+        //  exclusive access at the Rust level. Therefore, creating a mutable reference is safe
+        //  and incurs zero runtime cost.
         unsafe { &mut *self.ptr }
     }
 }
@@ -228,16 +252,20 @@ impl<T> DerefMut for CheckedRefMut<T> {
 
 /// Unsafe reference type (zero-cost, no safety checks)
 ///
+
 /// CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2
 ///
+
 /// UnsafeRef represents a reference with no safety guarantees. It provides
 /// maximum performance at the cost of safety. Use only when you can prove
 /// safety through other means.
 ///
+
 /// # Performance
 /// - Deref overhead: 0ns (no checks)
 /// - Memory layout: Same as raw pointer
 ///
+
 /// # Safety
 /// The caller is responsible for ensuring:
 /// - No use-after-free
@@ -245,6 +273,7 @@ impl<T> DerefMut for CheckedRefMut<T> {
 /// - Proper aliasing
 /// - Valid lifetimes
 ///
+
 /// # Example
 /// ```rust,ignore
 /// let x = 42;
@@ -262,8 +291,10 @@ pub struct UnsafeRef<T> {
 impl<T> UnsafeRef<T> {
     /// Create a new UnsafeRef from a raw pointer
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure ALL safety invariants:
     /// - `ptr` is non-null and properly aligned
     /// - `ptr` points to valid, initialized memory
@@ -271,9 +302,11 @@ impl<T> UnsafeRef<T> {
     /// - Aliasing rules are respected
     /// - Lifetime is valid
     ///
+
     /// # Arguments
     /// * `ptr` - Raw pointer to data
     ///
+
     /// # Returns
     /// A new UnsafeRef wrapping the pointer
     #[inline]
@@ -286,8 +319,10 @@ impl<T> UnsafeRef<T> {
 
     /// Create from a reference (bypasses safety checks)
     ///
+
     /// # Safety
     ///
+
     /// Same as `new()` - caller must ensure all safety invariants.
     #[inline]
     pub unsafe fn from_ref(reference: &T) -> Self {
@@ -310,11 +345,14 @@ impl<T> Deref for UnsafeRef<T> {
 
     /// Dereference with zero-cost transmute (no safety checks)
     ///
+
     /// CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 lines 1226-1232
     ///
+
     /// # Performance
     /// - Overhead: 0ns (no checks, direct transmute)
     ///
+
     /// # Safety
     /// This is unsafe because there are NO runtime or compile-time checks.
     /// The caller must ensure all safety invariants hold.
@@ -328,12 +366,12 @@ impl<T> Deref for UnsafeRef<T> {
         // - Precondition 4: (CALLER MUST ENSURE) Aliasing rules are respected
         // - Precondition 5: (CALLER MUST ENSURE) Lifetime is valid
         // - Proof: UnsafeRef provides NO safety guarantees. This is the escape hatch for
-        //   maximum performance when the programmer can prove safety through external means
-        //   (e.g., hardware guarantees, external synchronization, proven invariants).
-        //   This is truly unsafe - all safety is the caller's responsibility. The only
-        //   guarantee is zero runtime cost - this compiles to a simple pointer dereference
-        //   with no checks whatsoever. Use only in performance-critical code where safety
-        //   has been proven externally.
+        //  maximum performance when the programmer can prove safety through external means
+        //  (e.g., hardware guarantees, external synchronization, proven invariants).
+        //  This is truly unsafe - all safety is the caller's responsibility. The only
+        //  guarantee is zero runtime cost - this compiles to a simple pointer dereference
+        //  with no checks whatsoever. Use only in performance-critical code where safety
+        //  has been proven externally.
         unsafe { &*self.ptr }
     }
 }
@@ -342,6 +380,7 @@ impl<T> Deref for UnsafeRef<T> {
 
 /// Unsafe mutable reference type (zero-cost, no safety checks)
 ///
+
 /// CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2
 #[repr(transparent)]
 pub struct UnsafeRefMut<T> {
@@ -354,8 +393,10 @@ pub struct UnsafeRefMut<T> {
 impl<T> UnsafeRefMut<T> {
     /// Create a new UnsafeRefMut from a raw pointer
     ///
+
     /// # Safety
     ///
+
     /// Same as UnsafeRef::new, plus:
     /// - Exclusive access is guaranteed
     /// - No other references exist
@@ -404,6 +445,7 @@ impl<T> Deref for UnsafeRefMut<T> {
 impl<T> DerefMut for UnsafeRefMut<T> {
     /// Mutable dereference with zero-cost transmute (no safety checks)
     ///
+
     /// # Performance
     /// - Overhead: 0ns (no checks)
     #[inline]
@@ -413,8 +455,8 @@ impl<T> DerefMut for UnsafeRefMut<T> {
         // - Precondition 1-5: (CALLER MUST ENSURE) Same as UnsafeRef::deref
         // - Precondition 6: (CALLER MUST ENSURE) Exclusive access is guaranteed
         // - Proof: UnsafeRefMut provides NO safety guarantees for mutable access. All safety
-        //   is the caller's responsibility. This is the ultimate escape hatch for performance-
-        //   critical code with external safety proofs. Zero runtime cost guaranteed.
+        //  is the caller's responsibility. This is the ultimate escape hatch for performance-
+        //  critical code with external safety proofs. Zero runtime cost guaranteed.
         unsafe { &mut *self.ptr }
     }
 }

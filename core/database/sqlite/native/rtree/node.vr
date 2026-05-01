@@ -3,11 +3,14 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
+
 // `RNode` is a single tree node. Two flavours:
 //
-//   * `RnInterior` — children are `(box, child_node_id)` pairs
-//   * `RnLeaf`     — children are `(box, rowid)` records
+
+//  * `RnInterior` — children are `(box, child_node_id)` pairs
+//  * `RnLeaf` — children are `(box, rowid)` records
 //
+
 // Each node is bounded by `M` (max children) and `m` (min children;
 // `m ≤ M/2`). When a node overflows the inserter splits it; when
 // underflows on delete, the inserter rebalances (see `tree.vr`).

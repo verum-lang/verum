@@ -1,39 +1,48 @@
 //! Verum workspace manifest (`verum.work`) — P8.
 //!
+
 //! A workspace bundles multiple cogs under one root for shared
 //! dependency declarations, unified build, and atomic publish. The
 //! manifest is a TOML file at the workspace root; the conventional
 //! filename is **`verum.work`** (lowercase, matching `verum.toml` /
 //! `verum.lock`).
 //!
+
 //! # Example
 //!
+
 //! ```toml
 //! [workspace]
-//! members         = ["crates/api", "crates/runtime", "examples/*"]
+//! members = ["crates/api", "crates/runtime", "examples/*"]
 //! default-members = ["crates/api"]
-//! exclude         = ["target", "vendored/*"]
+//! exclude = ["target", "vendored/*"]
 //!
+
 //! [workspace.dependencies]
 //! json = "1.4"
 //! http = { version = "0.2", features = ["std"] }
 //!
+
 //! [workspace.metadata]
 //! description = "Multi-cog Verum workspace"
 //! ```
 //!
+
 //! Members support glob patterns (`crates/*`); they are expanded
 //! relative to the workspace root at load time. `default-members` must
 //! be a subset of `members` (after expansion) — that's enforced at
 //! parse time so a typo doesn't silently disappear.
 //!
+
 //! `[workspace.dependencies]` declares deps that members can inherit
 //! via `foo.workspace = true` in their own `[dependencies]` table —
 //! the canonical Cargo-style approach for keeping versions consistent
 //! across a workspace without copying them everywhere.
 //!
+
 //! # Discovery
 //!
+
 //! [`WorkspaceManifest::discover`] walks up from a starting directory
 //! looking for `verum.work`. The first hit wins; `None` means the cwd
 //! is not inside a workspace. Tooling (`verum build`, `verum test`,

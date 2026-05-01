@@ -1,8 +1,10 @@
 //! Integration tests for the hygiene system
 //!
+
 //! These tests verify that the hygiene system integrates correctly with
 //! the rest of the compiler, including the meta evaluator and code generation.
 //!
+
 //! Quote hygiene prevents accidental variable capture in macro expansions.
 //! Each macro expansion gets a unique Mark (expansion context). Identifiers are
 //! resolved based on their mark set: same-mark identifiers can reference each other,

@@ -1,12 +1,15 @@
 //! End-to-end integration tests for `verum proof-repair`.
 //!
+
 //! Spawns the actual `verum` binary and validates the full chain:
 //!
-//!   `verum proof-repair` (CLI clap) →
-//!     `commands::proof_repair::run_proof_repair` →
-//!       `verum_diagnostics::proof_repair::DefaultRepairEngine` →
-//!         ranked output (plain or JSON)
+
+//!  `verum proof-repair` (CLI clap) →
+//!  `commands::proof_repair::run_proof_repair` →
+//!  `verum_diagnostics::proof_repair::DefaultRepairEngine` →
+//!  ranked output (plain or JSON)
 //!
+
 //! Together with the 17 handler unit tests in
 //! `commands::proof_repair::tests` and the 10 trait-level tests in
 //! `verum_diagnostics::proof_repair::tests`, this proves the

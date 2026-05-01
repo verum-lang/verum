@@ -1,16 +1,20 @@
 //! Production-grade IR-based Call Site Extraction for CBGR
 //!
+
 //! Provides precise call site extraction from IR instructions for context-sensitive
 //! escape analysis. Unlike heuristic CFG-based detection, this parses actual IR to
 //! identify function calls, map arguments to parameters, and track return values,
 //! enabling accurate per-parameter escape tracking for CBGR promotion decisions.
 //!
+
 //! This module implements IR-based call site extraction for context-sensitive escape analysis.
 //! Unlike heuristic CFG-based call site detection, this module parses actual IR instructions
 //! to precisely identify function calls, map arguments to parameters, and track return values.
 //!
+
 //! # Key Features
 //!
+
 //! - **Real IR instruction parsing**: Direct parsing of simplified IR representation
 //! - **Call instruction identification**: Precise detection of call sites in IR
 //! - **Callee resolution**: Maps call instructions to target functions
@@ -18,70 +22,85 @@
 //! - **Return value tracking**: Follows return values across call boundaries
 //! - **Linear scan performance**: O(instructions) complexity
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌────────────────────────────────────────────────────────────┐
-//! │                    IR Call Extraction                      │
+//! │ IR Call Extraction │
 //! ├────────────────────────────────────────────────────────────┤
-//! │                                                            │
-//! │  IrInstruction  ──→  IrCallExtractor  ──→  IrCallSite    │
-//! │       │                    │                     │         │
-//! │       │                    │                     │         │
-//! │       v                    v                     v         │
-//! │  IrFunction      CallArgMapping        IrCallInfo        │
-//! │                                                            │
+//! │ │
+//! │ IrInstruction ──→ IrCallExtractor ──→ IrCallSite │
+//! │ │ │ │ │
+//! │ │ │ │ │
+//! │ v v v │
+//! │ IrFunction CallArgMapping IrCallInfo │
+//! │ │
 //! └────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Example Usage
 //!
+
 //! ```rust,ignore
 //! use verum_cbgr::ir_call_extraction::{IrCallExtractor, IrFunction, IrInstruction, IrOperand};
 //! use verum_cbgr::analysis::{FunctionId, BlockId, RefId};
 //!
+
 //! // Create simplified IR function
 //! let mut func = IrFunction::new(FunctionId(1), "process_data");
 //! func.add_parameter(0, "data");
 //!
+
 //! // Add call instruction
 //! let call_inst = IrInstruction::Call {
-//!     target: "validate".into(),
-//!     args: vec![IrOperand::LocalVar(0)],
-//!     result: Some(1),
+//!  target: "validate".into(),
+//!  args: vec![IrOperand::LocalVar(0)],
+//!  result: Some(1),
 //! };
 //! func.add_instruction(BlockId(0), 0, call_inst);
 //!
+
 //! // Extract call sites
 //! let extractor = IrCallExtractor::new();
 //! let call_sites = extractor.extract_from_function(&func);
 //!
+
 //! // Examine first call site
 //! let site = &call_sites[0];
 //! println!("Call to {} at {}:{}", site.callee_name, site.block, site.instruction_offset);
 //!
+
 //! // Map arguments
 //! let mapping = site.arg_mapping();
 //! for (arg_idx, param_idx) in &mapping.arg_to_param {
-//!     println!("Arg {} → Param {}", arg_idx, param_idx);
+//!  println!("Arg {} → Param {}", arg_idx, param_idx);
 //! }
 //! ```
 //!
+
 //! # Performance Characteristics
 //!
+
 //! - **Call site extraction**: O(n) where n = number of instructions
 //! - **Argument mapping**: O(args) per call site
 //! - **Memory overhead**: ~200 bytes per call site
 //! - **Target**: <10µs for 1000-instruction function
 //!
+
 //! # Simplified IR Representation
 //!
+
 //! Since full MIR integration is future work, we use a simplified IR:
 //!
+
 //! - **`IrFunction`**: Function representation with parameters and instructions
 //! - **`IrInstruction`**: Call, Assign, Return, Branch instructions
 //! - **`IrOperand`**: `LocalVar`, Argument, Constant operands
 //!
+
 //! This allows production-grade call site extraction without full compiler integration.
 
 use crate::analysis::{BlockId, FunctionId, RefId};
@@ -94,6 +113,7 @@ use verum_common::{Map, Maybe, Set, Text};
 
 /// Simplified IR operand
 ///
+
 /// Represents a value in the IR (local variable, parameter, constant, etc.)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IrOperand {
@@ -143,6 +163,7 @@ impl IrOperand {
 
 /// Simplified IR instruction
 ///
+
 /// Represents a single instruction in the IR. We support a minimal subset
 /// of instructions sufficient for call site extraction.
 #[derive(Debug, Clone, PartialEq)]
@@ -250,6 +271,7 @@ impl IrInstruction {
 
 /// Simplified IR function representation
 ///
+
 /// Represents a function with parameters and instructions organized by basic blocks.
 /// This is a simplified representation suitable for call site extraction without
 /// full MIR integration.
@@ -321,6 +343,7 @@ impl IrFunction {
 
 /// Precise call site extracted from IR
 ///
+
 /// Represents a single function call with complete information about location,
 /// target, arguments, and return value.
 #[derive(Debug, Clone, PartialEq)]
@@ -413,6 +436,7 @@ impl fmt::Display for IrCallSite {
 
 /// Argument to parameter mapping for a call site
 ///
+
 /// Tracks how actual arguments at the call site map to formal parameters
 /// of the callee function.
 #[derive(Debug, Clone)]
@@ -452,6 +476,7 @@ impl CallArgMapping {
 
 /// Complete call information including context
 ///
+
 /// Combines call site information with calling context for precise
 /// context-sensitive analysis.
 #[derive(Debug, Clone)]
@@ -516,6 +541,7 @@ impl IrCallInfo {
 
 /// IR-based call site extractor
 ///
+
 /// Parses IR instructions to extract precise call site information.
 /// This is the main entry point for IR-based call extraction.
 #[derive(Debug)]
@@ -548,6 +574,7 @@ impl IrCallExtractor {
 
     /// Extract all call sites from a function
     ///
+
     /// Performs linear scan through all instructions to find call sites.
     /// Complexity: O(n) where n = number of instructions
     #[must_use]
@@ -749,23 +776,28 @@ impl fmt::Display for ExtractionStats {
 
 /// AST to IR converter
 ///
+
 /// Converts Verum AST expressions to the simplified IR representation used by
 /// the call extraction module. This enables escape analysis to work with
 /// actual parsed Verum code rather than just synthetic IR.
 ///
+
 /// # Architecture
 ///
+
 /// ```text
-/// verum_ast::Expr  ─────►  IrInstruction
-///        │                      │
-///        ▼                      ▼
-/// ExprKind::Call   ─────►  IrInstruction::Call
-/// ExprKind::Await  ─────►  IrInstruction::Call (with async marker)
-/// ExprKind::Try    ─────►  IrInstruction with exception info
+/// verum_ast::Expr ─────► IrInstruction
+///  │ │
+///  ▼ ▼
+/// ExprKind::Call ─────► IrInstruction::Call
+/// ExprKind::Await ─────► IrInstruction::Call (with async marker)
+/// ExprKind::Try ─────► IrInstruction with exception info
 /// ```
 ///
+
 /// # Performance
 ///
+
 /// - Single-pass conversion: O(nodes)
 /// - Memory: O(instructions) for output
 /// - Target: <1ms for 1000-node AST
@@ -860,6 +892,7 @@ impl AstToIrConverter {
 
     /// Convert an AST expression kind to IR operand
     ///
+
     /// This converts expressions that can be used as operands (values, variables, etc.)
     /// to their IR representation.
     #[must_use]
@@ -893,6 +926,7 @@ impl AstToIrConverter {
 
     /// Convert an AST Call expression to an IR call instruction
     ///
+
     /// # Arguments
     /// * `func` - The function being called
     /// * `args` - The arguments to the call
@@ -925,6 +959,7 @@ impl AstToIrConverter {
 
     /// Convert an AST Await expression to IR instructions
     ///
+
     /// Await is represented as a call to the async runtime with
     /// special metadata for the async boundary analysis.
     #[must_use]
@@ -979,6 +1014,7 @@ impl Default for AstToIrConverter {
 
 /// Wrapper types for AST expressions (to avoid direct dependency cycles)
 ///
+
 /// These type aliases allow the IR extraction module to reference AST types
 /// when they're available, while keeping the simplified IR as the primary
 /// representation for analysis.

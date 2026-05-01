@@ -141,6 +141,7 @@ fn test_circuit_breaker_reset() {
 // SupervisionConfig wiring tests
 // =============================================================================
 //
+
 // Pin: SupervisionConfig.{strategy, max_restarts, within} reach
 // the public `should_permit_restart` + `strategy()` accessors.
 // Pre-fix all three fields were stored on the struct + asserted

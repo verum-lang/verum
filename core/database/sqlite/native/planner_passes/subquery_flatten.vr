@@ -3,22 +3,28 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.5
 //
+
 // Pattern:
 //
-//   SELECT … FROM (SELECT col1, col2 FROM t WHERE p1) AS sub
-//    WHERE p2(sub.col1, sub.col2);
+
+//  SELECT … FROM (SELECT col1, col2 FROM t WHERE p1) AS sub
+//  WHERE p2(sub.col1, sub.col2);
 //
+
 // becomes
 //
-//   SELECT … FROM t WHERE p1 AND p2(col1, col2);
+
+//  SELECT … FROM t WHERE p1 AND p2(col1, col2);
 //
+
 // Conditions for safe flattening (per SQLite docs §6 and Verum
 // extension):
-//   1. The inner SELECT has a single FROM source (no JOIN).
-//   2. The inner SELECT has no GROUP BY, no aggregates, no LIMIT,
-//      no DISTINCT.
-//   3. The outer query is not a UNION ALL branch with a recursive CTE.
+//  1. The inner SELECT has a single FROM source (no JOIN).
+//  2. The inner SELECT has no GROUP BY, no aggregates, no LIMIT,
+//  no DISTINCT.
+//  3. The outer query is not a UNION ALL branch with a recursive CTE.
 //
+
 // We model this transform as: when the outer is `Project(Filter(
 // Project(Filter(Scan))))` we collapse the redundant inner Project
 // + Filter into the outer ones.

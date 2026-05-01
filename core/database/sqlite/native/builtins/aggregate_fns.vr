@@ -4,19 +4,21 @@
 // Layer: 4
 // Spec: sqlite-native.md §15.2
 //
+
 // All aggregates implement the (init, step, final) protocol. Each is
 // represented by a `AggregateState` instance carried in a register.
 // The L4 interpreter holds the per-group state and calls `step` for
 // each input row, then `final` once when the group flushes.
 //
+
 // Functions covered:
-//   COUNT(*)          — count all rows including NULLs
-//   COUNT(X)          — count non-NULL X
-//   SUM(X) / TOTAL(X) — numeric sum (TOTAL returns 0.0 on empty group)
-//   AVG(X)            — average; NULL on empty group, REAL otherwise
-//   MIN(X) / MAX(X)   — min/max non-NULL; NULL on empty group
-//   GROUP_CONCAT(X[, SEP])
-//   STRING_AGG(X, SEP)
+//  COUNT(*) — count all rows including NULLs
+//  COUNT(X) — count non-NULL X
+//  SUM(X) / TOTAL(X) — numeric sum (TOTAL returns 0.0 on empty group)
+//  AVG(X) — average; NULL on empty group, REAL otherwise
+//  MIN(X) / MAX(X) — min/max non-NULL; NULL on empty group
+//  GROUP_CONCAT(X[, SEP])
+//  STRING_AGG(X, SEP)
 // =============================================================================
 
 module core.database.sqlite.native.builtins.aggregate_fns;

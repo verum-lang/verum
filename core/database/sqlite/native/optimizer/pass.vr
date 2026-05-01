@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.5
 //
+
 // Each pre-emission pass is a protocol implementor, not a function
 // pointer. The protocol carries a name (for tracing / EXPLAIN), an
 // idempotency advertisement (so the pipeline can fix-point safely),
 // and the apply method itself.
 //
+
 // `Pipeline` runs every pass in order and re-runs the pipeline until
 // all passes report no change OR the iteration cap is reached. This
 // is enough for the SQLite-flavoured peephole + jump-thread + dead-

@@ -1,39 +1,50 @@
 //! Tensor Shape Verification using Z3 Array Theory
 //!
+
 //! This module provides production-grade tensor shape verification for Verum's
 //! compile-time tensor type checking using Z3's Array theory.
 //!
+
 //! ## Features
 //!
+
 //! - **Matrix Multiplication Shape Checking**: Verify that matrix dimensions are compatible
 //! - **Broadcasting Verification**: NumPy-style broadcasting rules
 //! - **Meta Parameter Resolution**: Support for symbolic tensor shapes
 //! - **Multi-dimensional Tensors**: Full support for arbitrary rank tensors
 //!
+
 //! ## Implementation
 //!
+
 //! Uses Z3 Array theory to model multi-dimensional tensors:
 //! - 1D tensor: Array[Int -> T]
 //! - 2D tensor: Array[Int -> Array[Int -> T]]
 //! - ND tensor: nested arrays with symbolic dimensions
 //!
+
 //! ## Spec Reference
 //!
+
 //! Matrix multiplication type-level dimension checking: for `matmul(A: Tensor<f32, [M, K]>,
 //! B: Tensor<f32, [K, N]>) -> Tensor<f32, [M, N]>`, the inner dimensions must match.
 //! Reshape operations verify product-of-dimensions invariant. Broadcast follows NumPy rules.
 //!
+
 //! ## Examples
 //!
+
 //! ```rust,no_run
 //! use verum_smt::tensor_shapes::TensorShapeVerifier;
 //! use verum_ast::{Expr, ExprKind, Literal, LiteralKind};
 //!
+
 //! let verifier = TensorShapeVerifier::new();
 //!
+
 //! // Matmul verification: [N, K] × [K, M] = [N, M]
-//! // let a_shape = vec![expr_int(2), expr_int(3)];  // [2, 3]
-//! // let b_shape = vec![expr_int(3), expr_int(4)];  // [3, 4]
+//! // let a_shape = vec![expr_int(2), expr_int(3)]; // [2, 3]
+//! // let b_shape = vec![expr_int(3), expr_int(4)]; // [3, 4]
 //! // let result = verifier.verify_matmul_shapes(&a_shape, &b_shape).unwrap();
 //! // assert_eq!(result.len(), 2); // Result is [2, 4]
 //! ```
@@ -48,6 +59,7 @@ use z3::ast::{Bool, Dynamic, Int};
 
 /// Tensor shape verifier using Z3 Array theory
 ///
+
 /// This verifier uses Z3's SMT solver to verify tensor shape constraints
 /// at compile time, enabling safe zero-overhead tensor operations.
 pub struct TensorShapeVerifier {
@@ -82,23 +94,29 @@ impl TensorShapeVerifier {
 
     /// Verify matrix multiplication shape compatibility
     ///
+
     /// Given matrices A: [M, K] and B: [K, N], verifies that:
     /// 1. A.cols == B.rows (K dimensions match)
     /// 2. Returns result shape [M, N]
     ///
+
     /// Supports both concrete dimensions and meta parameters.
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// fn matmul<M: meta usize, N: meta usize, K: meta usize>(
-    ///     a: &Tensor<f32, [M, K]>,
-    ///     b: &Tensor<f32, [K, N]>
+    ///  a: &Tensor<f32, [M, K]>,
+    ///  b: &Tensor<f32, [K, N]>
     /// ) -> Tensor<f32, [M, N]>
     /// ```
     ///
+
     /// # Errors
     ///
+
     /// Returns `ShapeError::DimensionMismatch` if K dimensions don't match.
     pub fn verify_matmul_shapes(
         &mut self,
@@ -184,21 +202,24 @@ impl TensorShapeVerifier {
 
     /// Verify NumPy-style broadcasting rules for element-wise operations
     ///
+
     /// Broadcasting allows tensors with different shapes to be combined:
     /// - Dimensions are aligned from right to left
     /// - Each dimension must either:
-    ///   1. Be equal
-    ///   2. One of them is 1
-    ///   3. One dimension is missing (treated as 1)
+    ///  1. Be equal
+    ///  2. One of them is 1
+    ///  3. One dimension is missing (treated as 1)
     ///
+
     /// # Examples
     ///
+
     /// ```text
-    /// [3, 1, 5] + [   2, 5] = [3, 2, 5]  ✅
-    /// [4, 3]    + [4, 3]    = [4, 3]     ✅
-    /// [3, 4]    + [4]       = [3, 4]     ✅
-    /// [3, 4]    + [3, 1]    = [3, 4]     ✅
-    /// [3, 4]    + [2, 4]    = ERROR      ❌
+    /// [3, 1, 5] + [ 2, 5] = [3, 2, 5] ✅
+    /// [4, 3] + [4, 3] = [4, 3] ✅
+    /// [3, 4] + [4] = [3, 4] ✅
+    /// [3, 4] + [3, 1] = [3, 4] ✅
+    /// [3, 4] + [2, 4] = ERROR ❌
     /// ```
     pub fn verify_broadcast(&mut self, shapes: &[List<Expr>]) -> Result<List<Expr>, ShapeError> {
         self.stats.total_checks += 1;
@@ -247,6 +268,7 @@ impl TensorShapeVerifier {
 
     /// Compute the broadcast dimension for a set of dimension values
     ///
+
     /// Rules:
     /// - All equal → return that value
     /// - Some are 1, others equal → return the non-1 value
@@ -319,6 +341,7 @@ impl TensorShapeVerifier {
 
     /// Verify element-wise operation shape compatibility
     ///
+
     /// For operations like +, -, *, /, the shapes must either:
     /// 1. Be exactly equal, or
     /// 2. Follow broadcasting rules
@@ -356,6 +379,7 @@ impl TensorShapeVerifier {
 
     /// Resolve meta parameters in tensor shapes
     ///
+
     /// Given a shape with meta parameters like [M, N, K], attempts to
     /// resolve concrete values based on context and constraints.
     pub fn resolve_meta_parameters(
@@ -420,32 +444,39 @@ impl TensorShapeVerifier {
 
     /// Verify reshape operation
     ///
+
     /// Validates that the total number of elements is preserved:
     /// `product(old_shape) == product(new_shape)`
     ///
+
     /// This uses Z3 to verify the constraint for both concrete and symbolic shapes.
     /// For symbolic shapes (with meta parameters like M, N, K), we use Z3 to prove
     /// that the products are equal for ALL possible values of the symbolic parameters.
     ///
+
     /// # Verification Strategy
     ///
+
     /// To verify that `product(old) == product(new)` for all valid symbolic values:
     /// 1. Assert that all dimensions are positive (required for valid tensor shapes)
     /// 2. Assert the NEGATION of equality: `product(old) != product(new)`
     /// 3. If UNSAT, the products are provably equal for all positive dimension values
     /// 4. If SAT, we found a counterexample where the products differ
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// let v: Tensor<f32, [12]> = ...;
-    /// let m: Tensor<f32, [3, 4]> = reshape(&v);  // OK: 12 = 3*4
+    /// let m: Tensor<f32, [3, 4]> = reshape(&v); // OK: 12 = 3*4
     /// let m2: Tensor<f32, [2, 6]> = reshape(&v); // OK: 12 = 2*6
     /// let bad: Tensor<f32, [5, 5]> = reshape(&v); // ERROR: 12 != 25
     ///
+
     /// // Symbolic example:
     /// fn reshape_symbolic<M: meta usize, N: meta usize>(
-    ///     t: Tensor<f32, [M, N]>
+    ///  t: Tensor<f32, [M, N]>
     /// ) -> Tensor<f32, [N, M]> // OK: M*N == N*M (commutative)
     /// ```
     pub fn verify_reshape(
@@ -544,6 +575,7 @@ impl TensorShapeVerifier {
 
     /// Compute the product of all dimensions in a shape
     ///
+
     /// Returns a Z3 Int expression representing the total number of elements.
     fn compute_shape_product(&mut self, shape: &[Expr]) -> Result<Dynamic, ShapeError> {
         if shape.is_empty() {
@@ -578,25 +610,28 @@ impl TensorShapeVerifier {
 
     /// Verify bounds check elimination for loop indices
     ///
+
     /// Given loop bounds and array accesses, proves that all accesses are within bounds.
     /// This enables the compiler to eliminate runtime bounds checks.
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// @verify(bounds_elimination)
     /// fn matmul<M: meta usize, N: meta usize, K: meta usize>(
-    ///     a: &Tensor<f32, [M, K]>,
-    ///     b: &Tensor<f32, [K, N]>
+    ///  a: &Tensor<f32, [M, K]>,
+    ///  b: &Tensor<f32, [K, N]>
     /// ) -> Tensor<f32, [M, N]> {
-    ///     for i in 0..M {
-    ///         for j in 0..N {
-    ///             for k in 0..K {
-    ///                 // Compiler PROVES: i < M, j < N, k < K
-    ///                 result[i, j] += a[i, k] * b[k, j];
-    ///             }
-    ///         }
-    ///     }
+    ///  for i in 0..M {
+    ///  for j in 0..N {
+    ///  for k in 0..K {
+    ///  // Compiler PROVES: i < M, j < N, k < K
+    ///  result[i, j] += a[i, k] * b[k, j];
+    ///  }
+    ///  }
+    ///  }
     /// }
     /// ```
     pub fn verify_bounds_elimination(
@@ -727,24 +762,31 @@ impl TensorShapeVerifier {
 
     /// Verify slicing operation bounds
     ///
+
     /// Validates that a slice operation is within bounds:
     /// - `0 <= start <= end <= dim` for each dimension
     /// - Returns the resulting shape after slicing
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// let t: Tensor<f32, [10, 20, 30]> = ...;
-    /// let s = t[2:5, :, 10:25];  // Result: [3, 20, 15]
+    /// let s = t[2:5, :, 10:25]; // Result: [3, 20, 15]
     /// ```
     ///
+
     /// # Parameters
     ///
+
     /// - `tensor_shape`: The shape of the input tensor
     /// - `slices`: Vector of slice specifications (start, end, step) for each dimension
     ///
+
     /// # Returns
     ///
+
     /// The resulting shape after slicing, or an error if slicing is out of bounds.
     pub fn verify_slice(
         &mut self,
@@ -860,13 +902,16 @@ impl TensorShapeVerifier {
 
     /// Verify transpose operation
     ///
+
     /// Validates that a transpose permutation is valid and computes the result shape.
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// let t: Tensor<f32, [2, 3, 4]> = ...;
-    /// let t2 = t.transpose([2, 0, 1]);  // Result: [4, 2, 3]
+    /// let t2 = t.transpose([2, 0, 1]); // Result: [4, 2, 3]
     /// ```
     pub fn verify_transpose(
         &mut self,
@@ -917,9 +962,11 @@ impl TensorShapeVerifier {
 
     /// Verify matrix multiplication with symbolic dimensions
     ///
+
     /// Extended version that uses Z3 to prove dimension compatibility
     /// for symbolic shapes like [M, K] x [K, N] -> [M, N].
     ///
+
     /// This proves that the K dimensions are always equal given the constraints.
     pub fn verify_matmul_symbolic(
         &mut self,
@@ -1012,14 +1059,17 @@ impl TensorShapeVerifier {
 
     /// Verify concatenation along a specified axis
     ///
+
     /// Validates that all tensors have matching shapes except along the concat axis.
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// let a: Tensor<f32, [2, 3]> = ...;
     /// let b: Tensor<f32, [2, 5]> = ...;
-    /// let c = concat([a, b], axis=1);  // Result: [2, 8]
+    /// let c = concat([a, b], axis=1); // Result: [2, 8]
     /// ```
     pub fn verify_concat(
         &mut self,
@@ -1326,6 +1376,7 @@ impl SliceSpec {
 
 /// Symbolic constraint for shape verification
 ///
+
 /// Represents a constraint on symbolic dimension parameters like:
 /// - M == N
 /// - M >= 1

@@ -1,8 +1,10 @@
 //! Context Environment (θ) - Runtime task-local storage for DI
 //!
+
 //! Context runtime: task-local storage (theta) for context lookup, ~5-30ns overhead per access — Contexts + Async Integration
 //! Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Section 6 - Performance Characteristics
 //!
+
 //! This module implements the context environment (θ, theta), which provides
 //! task-local storage for context providers. The environment supports:
 //! - Fast context lookup (<50ns target, ~5-30ns typical)
@@ -10,23 +12,29 @@
 //! - Thread-safe access via Arc/Mutex when needed
 //! - Integration with async runtime
 //!
+
 //! # Performance Target
 //!
+
 //! Context lookup: **< 50ns** (typically ~5-30ns with optimizations)
 //!
+
 //! # Examples
 //!
+
 //! ```ignore
 //! use verum_types::di::env::ContextEnv;
 //! # struct Logger;
 //! # impl Logger { fn log(&self, _: &str) {} }
 //! # let logger = Logger;
 //!
+
 //! let mut env = ContextEnv::new();
 //! env.insert(logger);
 //!
+
 //! if let Some(logger) = env.get::<Logger>() {
-//!     logger.log("Hello");
+//!  logger.log("Hello");
 //! }
 //! ```
 
@@ -38,24 +46,30 @@ use verum_common::{Maybe, Text};
 
 /// Context environment (θ) - task-local storage for context providers
 ///
+
 /// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context System Runtime
 ///
+
 /// The context environment stores context provider instances and provides
 /// fast lookup by type. It supports lexical scoping through parent chains.
 ///
+
 /// # Implementation Notes
 ///
+
 /// - Uses `HashMap<TypeId, Box<dyn Any>>` for fast O(1) lookup
 /// - Parent chain for lexical scoping (provide blocks)
 /// - Thread-safe variant available via `Arc<Mutex<ContextEnv>>`
 /// - Performance: ~5-30ns per lookup (Tier 1-3), ~100ns (Tier 0)
 ///
+
 /// # Memory Layout
 ///
+
 /// ```text
 /// ContextEnv {
-///     contexts: HashMap<TypeId, Box<dyn Any>>  // ~24 bytes overhead per entry
-///     parent: Option<Arc<ContextEnv>>           // 8 bytes when None, 16 when Some
+///  contexts: HashMap<TypeId, Box<dyn Any>> // ~24 bytes overhead per entry
+///  parent: Option<Arc<ContextEnv>> // 8 bytes when None, 16 when Some
 /// }
 /// ```
 pub struct ContextEnv {
@@ -75,17 +89,21 @@ pub struct ContextEnv {
 
 /// Thread-safe context environment wrapper
 ///
+
 /// Used when contexts need to be shared across threads or modified concurrently.
 pub type SharedContextEnv = Arc<Mutex<ContextEnv>>;
 
 impl ContextEnv {
     /// Create a new empty context environment
     ///
+
     /// # Examples
     ///
+
     /// ```
     /// use verum_types::di::env::ContextEnv;
     ///
+
     /// let env = ContextEnv::new();
     /// assert!(env.is_empty());
     /// ```
@@ -99,20 +117,26 @@ impl ContextEnv {
 
     /// Create a context environment with a parent
     ///
+
     /// The parent chain enables lexical scoping:
     /// - Child scopes can override parent contexts
     /// - Lookups fall back to parent if not found locally
     ///
+
     /// # Arguments
     ///
+
     /// * `parent` - The parent environment
     ///
+
     /// # Examples
     ///
+
     /// ```
     /// use std::sync::Arc;
     /// use verum_types::di::env::ContextEnv;
     ///
+
     /// let parent = Arc::new(ContextEnv::new());
     /// let child = ContextEnv::with_parent(parent);
     /// ```
@@ -126,20 +150,28 @@ impl ContextEnv {
 
     /// Insert a context provider into this environment
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The provider type (must be `Any + Send + Sync + 'static`)
     ///
+
     /// # Arguments
     ///
+
     /// * `value` - The provider instance
     ///
+
     /// # Performance
     ///
+
     /// O(1) insertion via HashMap
     ///
+
     /// # Examples
     ///
+
     /// ```no_run
     /// use verum_types::di::env::ContextEnv;
     /// # struct ConsoleLogger;
@@ -147,6 +179,7 @@ impl ContextEnv {
     /// # struct PostgresDatabase;
     /// # impl PostgresDatabase { fn new() -> Self { PostgresDatabase } }
     ///
+
     /// let mut env = ContextEnv::new();
     /// env.insert(ConsoleLogger::new());
     /// env.insert(PostgresDatabase::new());
@@ -158,10 +191,13 @@ impl ContextEnv {
 
     /// Insert a context provider with explicit TypeId
     ///
+
     /// Used when the type is not known at compile time.
     ///
+
     /// # Arguments
     ///
+
     /// * `type_id` - The type identifier
     /// * `value` - The provider instance (boxed)
     pub fn insert_boxed(&mut self, type_id: TypeId, value: Box<dyn Any + Send + Sync>) {
@@ -170,27 +206,36 @@ impl ContextEnv {
 
     /// Insert a context provider with an alias
     ///
+
     /// Aliased contexts allow multiple instances of the same type to coexist,
     /// distinguished by their alias name.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The provider type (must be `Any + Send + Sync + 'static`)
     ///
+
     /// # Arguments
     ///
+
     /// * `alias` - The alias name for this context instance
     /// * `value` - The provider instance
     ///
+
     /// # Examples
     ///
+
     /// ```no_run
     /// use verum_types::di::env::ContextEnv;
     /// # struct Database;
     /// # impl Database { fn new(_url: &str) -> Self { Database } }
     ///
+
     /// let mut env = ContextEnv::new();
     /// env.insert_with_alias("primary_db", Database::new("postgres://primary"));
     /// env.insert_with_alias("replica_db", Database::new("postgres://replica"));
@@ -207,10 +252,13 @@ impl ContextEnv {
 
     /// Insert a boxed context provider with an alias
     ///
+
     /// Used when the type is not known at compile time.
     ///
+
     /// # Arguments
     ///
+
     /// * `alias` - The alias name for this context instance
     /// * `type_id` - The type identifier
     /// * `value` - The provider instance (boxed)
@@ -226,30 +274,40 @@ impl ContextEnv {
 
     /// Get a context provider by alias (local only)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The expected provider type
     ///
+
     /// # Arguments
     ///
+
     /// * `alias` - The alias name to look up
     ///
+
     /// # Returns
     ///
+
     /// `Some(&T)` if found locally with matching type, `None` otherwise
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// use verum_types::di::env::ContextEnv;
     /// # struct Database;
     /// # impl Database { fn query(&self, _: &str) {} }
     ///
+
     /// let env = ContextEnv::new();
     /// if let Some(db) = env.get_by_alias::<Database>("primary_db") {
-    ///     db.query("SELECT * FROM users");
+    ///  db.query("SELECT * FROM users");
     /// }
     /// ```
     pub fn get_by_alias<T: Any + 'static>(&self, alias: &str) -> Maybe<&T> {
@@ -265,16 +323,22 @@ impl ContextEnv {
 
     /// Get a mutable reference to a context provider by alias (local only)
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The expected provider type
     ///
+
     /// # Arguments
     ///
+
     /// * `alias` - The alias name to look up
     ///
+
     /// # Returns
     ///
+
     /// `Some(&mut T)` if found locally with matching type, `None` otherwise
     pub fn get_by_alias_mut<T: Any + 'static>(&mut self, alias: &str) -> Maybe<&mut T> {
         let alias_text = Text::from(alias);
@@ -289,24 +353,34 @@ impl ContextEnv {
 
     /// Get a context provider by alias, searching parent chain if needed
     ///
+
     /// This is the primary aliased lookup method used at runtime.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The expected provider type
     ///
+
     /// # Arguments
     ///
+
     /// * `alias` - The alias name to look up
     ///
+
     /// # Returns
     ///
+
     /// `Some(&T)` if found in this env or any parent, `None` otherwise
     ///
+
     /// # Performance
     ///
+
     /// - Local hit: ~5-10ns (HashMap lookup)
     /// - Parent chain: +10-20ns per level
     pub fn get_by_alias_or_parent<T: Any + 'static>(&self, alias: &str) -> Maybe<&T> {
@@ -329,12 +403,16 @@ impl ContextEnv {
 
     /// Check if an alias is defined (locally or in parent chain)
     ///
+
     /// # Arguments
     ///
+
     /// * `alias` - The alias name to check
     ///
+
     /// # Returns
     ///
+
     /// `true` if the alias exists, `false` otherwise
     pub fn has_alias(&self, alias: &str) -> bool {
         let alias_text = Text::from(alias);
@@ -358,8 +436,10 @@ impl ContextEnv {
 
     /// Get all alias names defined in this environment (local only)
     ///
+
     /// # Returns
     ///
+
     /// Iterator over alias names
     pub fn aliases(&self) -> impl Iterator<Item = &Text> {
         self.aliased_contexts.keys()
@@ -372,18 +452,25 @@ impl ContextEnv {
 
     /// Remove an aliased context from this environment
     ///
+
     /// Only removes from local environment, not from parent.
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The provider type
     ///
+
     /// # Arguments
     ///
+
     /// * `alias` - The alias name to remove
     ///
+
     /// # Returns
     ///
+
     /// `Some(T)` if the alias was present with matching type, `None` otherwise
     pub fn remove_alias<T: Any + 'static>(&mut self, alias: &str) -> Maybe<T> {
         let alias_text = Text::from(alias);
@@ -399,30 +486,40 @@ impl ContextEnv {
 
     /// Get a context provider from this environment (local only)
     ///
+
     /// Does NOT search parent chain. Use `get_or_parent` for full lookup.
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The provider type
     ///
+
     /// # Returns
     ///
+
     /// `Some(&T)` if found locally, `None` otherwise
     ///
+
     /// # Performance
     ///
+
     /// O(1) lookup via HashMap: ~5-10ns
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// use verum_types::di::env::ContextEnv;
     /// # struct Logger;
     /// # impl Logger { fn log(&self, _: &str) {} }
     ///
+
     /// let env = ContextEnv::new();
     /// if let Some(logger) = env.get::<Logger>() {
-    ///     logger.log("Hello");
+    ///  logger.log("Hello");
     /// }
     /// ```
     pub fn get<T: Any + 'static>(&self) -> Maybe<&T> {
@@ -434,12 +531,16 @@ impl ContextEnv {
 
     /// Get a mutable reference to a context provider (local only)
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The provider type
     ///
+
     /// # Returns
     ///
+
     /// `Some(&mut T)` if found locally, `None` otherwise
     pub fn get_mut<T: Any + 'static>(&mut self) -> Maybe<&mut T> {
         let type_id = TypeId::of::<T>();
@@ -450,32 +551,42 @@ impl ContextEnv {
 
     /// Get a context provider, searching parent chain if needed
     ///
+
     /// This is the primary lookup method used at runtime.
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The provider type
     ///
+
     /// # Returns
     ///
+
     /// `Some(&T)` if found in this env or any parent, `None` otherwise
     ///
+
     /// # Performance
     ///
+
     /// - Local hit: ~5-10ns (HashMap lookup)
     /// - Parent chain: +10-20ns per level
     /// - Target: < 50ns for typical 2-3 level chains
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// use verum_types::di::env::ContextEnv;
     /// # struct Logger;
     /// # impl Logger { fn log(&self, _: &str) {} }
     ///
+
     /// let env = ContextEnv::new();
     /// if let Some(logger) = env.get_or_parent::<Logger>() {
-    ///     logger.log("Hello from child or parent");
+    ///  logger.log("Hello from child or parent");
     /// }
     /// ```
     pub fn get_or_parent<T: Any + 'static>(&self) -> Maybe<&T> {
@@ -498,14 +609,19 @@ impl ContextEnv {
 
     /// Check if a context is available (by TypeId)
     ///
+
     /// Used for requirement checking during compilation/runtime.
     ///
+
     /// # Arguments
     ///
+
     /// * `type_id` - The type identifier to check
     ///
+
     /// # Returns
     ///
+
     /// `true` if the context is available (locally or in parent)
     pub fn has_context(&self, type_id: TypeId) -> bool {
         // Check locally
@@ -527,14 +643,19 @@ impl ContextEnv {
 
     /// Remove a context provider from this environment
     ///
+
     /// Only removes from local environment, not from parent.
     ///
+
     /// # Type Parameters
     ///
+
     /// * `T` - The provider type
     ///
+
     /// # Returns
     ///
+
     /// `Some(T)` if the context was present, `None` otherwise
     pub fn remove<T: Any + 'static>(&mut self) -> Maybe<T> {
         let type_id = TypeId::of::<T>();
@@ -546,6 +667,7 @@ impl ContextEnv {
 
     /// Clear all contexts from this environment
     ///
+
     /// Does not affect parent environments.
     /// Clears both typed contexts and aliased contexts.
     pub fn clear(&mut self) {
@@ -560,6 +682,7 @@ impl ContextEnv {
 
     /// Get the number of typed contexts in this environment (local only)
     ///
+
     /// Does not include aliased contexts. Use `len_with_aliases()` for total.
     pub fn len(&self) -> usize {
         self.contexts.len()
@@ -572,6 +695,7 @@ impl ContextEnv {
 
     /// Get the total number of contexts including parent chain
     ///
+
     /// Includes both typed and aliased contexts from all levels.
     pub fn total_len(&self) -> usize {
         let mut count = self.contexts.len() + self.aliased_contexts.len();
@@ -585,10 +709,13 @@ impl ContextEnv {
 
     /// Get the depth of the parent chain
     ///
+
     /// Useful for debugging and performance analysis.
     ///
+
     /// # Returns
     ///
+
     /// 0 for root environment, 1+ for nested scopes
     pub fn depth(&self) -> usize {
         let mut depth = 0;
@@ -602,13 +729,17 @@ impl ContextEnv {
 
     /// Clone this environment with a new parent
     ///
+
     /// Creates a child scope that inherits from this environment.
     ///
+
     /// # Examples
     ///
+
     /// ```
     /// use verum_types::di::env::ContextEnv;
     ///
+
     /// let parent = ContextEnv::new();
     /// let child = parent.create_child();
     /// assert_eq!(child.depth(), 1);
@@ -623,8 +754,10 @@ impl ContextEnv {
 
     /// Create a child scope from a shared reference
     ///
+
     /// # Arguments
     ///
+
     /// * `parent` - Arc to the parent environment
     pub fn create_child_from(parent: Arc<ContextEnv>) -> Self {
         ContextEnv::with_parent(parent)

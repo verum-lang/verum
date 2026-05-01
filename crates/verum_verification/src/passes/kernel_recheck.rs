@@ -1,5 +1,6 @@
 //! Kernel-rule re-checking verification pass .
 //!
+
 //! Invokes the trusted-base K-rules from `verum_kernel` on every
 //! function in the module. Currently runs `K-Refine-omega` over
 //! every refinement type appearing in parameter / return positions;
@@ -7,24 +8,27 @@
 //! Corollary/Axiom signatures, Module nested items, and
 //! function-body let-binding refinements.
 //!
+
 //! # Why this is its own pass
 //!
+
 //! Kernel rules are the trusted base of the verification ladder.
 //! Routing them through a dedicated pass gives
 //! three structural advantages:
 //!
-//!   1. *Defense-in-depth* — `SmtVerificationPass::verify_function`
-//!      *also* runs the recheck preamble; with `KernelRecheckPass`
-//!      in the default pipeline the K-rules fire even when SMT is
-//!      disabled, so a non-SMT build still sees kernel-level
-//!      formation errors.
-//!   2. *Fail-fast* — K-rule violations are hard formation errors
-//!      (`m_depth_omega(P) ≥ m_depth_omega(A) + 1` cannot be
-//!      recovered by any SMT proof). Running the K-pass first and
-//!      short-circuiting on failure saves the SMT round.
-//!   3. *Diagnostic separation* — the `KernelRecheckResult` is its
-//!      own pipeline-result row, not a confusing co-tenant of the
-//!      SMT result.
+
+//!  1. *Defense-in-depth* — `SmtVerificationPass::verify_function`
+//!  *also* runs the recheck preamble; with `KernelRecheckPass`
+//!  in the default pipeline the K-rules fire even when SMT is
+//!  disabled, so a non-SMT build still sees kernel-level
+//!  formation errors.
+//!  2. *Fail-fast* — K-rule violations are hard formation errors
+//!  (`m_depth_omega(P) ≥ m_depth_omega(A) + 1` cannot be
+//!  recovered by any SMT proof). Running the K-pass first and
+//!  short-circuiting on failure saves the SMT round.
+//!  3. *Diagnostic separation* — the `KernelRecheckResult` is its
+//!  own pipeline-result row, not a confusing co-tenant of the
+//!  SMT result.
 
 use std::time::Instant;
 
@@ -86,7 +90,7 @@ impl KernelRecheckPass {
 
     /// Run the K-rules on a single function and append its
     /// per-call cost record to `costs`. Used by both the
-    /// top-level Function arm and the  impl-method
+    /// top-level Function arm and the impl-method
     /// recursion.
     fn recheck_one_function(
         &mut self,

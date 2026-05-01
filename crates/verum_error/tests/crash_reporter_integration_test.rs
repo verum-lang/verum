@@ -1,5 +1,6 @@
 //! Integration tests for the industrial crash reporter.
 //!
+
 //! These tests exercise the full install → panic → write path in an
 //! isolated temp directory. They do NOT install the fatal-signal
 //! handlers (that process-wide side effect would break rayon and other

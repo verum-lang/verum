@@ -1,29 +1,35 @@
 //! Phase 7: Code Generation (Two-Tier)
 //!
+
 //! Complete implementation of two-tier execution model:
 //!
+
 //! ## Tier 0: Tree-Walking Interpreter (Development)
 //! - Full safety checks (~100ns CBGR, 3-5% bounds)
 //! - Rich diagnostics
 //! - Instant startup
 //!
+
 //! ## Tier 1: Baseline JIT (Scripts)
 //! - Fast compilation (~1ms/function)
 //! - ALL checks preserved (~15ns CBGR, 2-3% bounds)
 //! - 5-10x interpreter performance
 //! - Uses ORC JIT with lazy compilation
 //!
+
 //! ## Tier 2: Optimizing JIT (Hot Paths)
 //! - Escape analysis for check elimination
 //! - ~5ns CBGR for promoted refs
 //! - 15-30x interpreter performance
 //!
+
 //! ## Tier 3: AOT Compiler (Production)
 //! - LLVM backend with full optimization
 //! - Proven-safe checks eliminated (0ns)
 //! - 50-90% check elimination (typical)
 //! - 0.85-0.95x Rust performance
 //!
+
 //! Phase 7: Code generation. Tier 0 (interpreter, full CBGR ~100ns),
 //! Tier 1 (baseline JIT, ~15ns CBGR), Tier 2 (optimizing JIT, ~5ns),
 //! Tier 3 (AOT/LLVM, proven checks eliminated to 0ns).
@@ -39,6 +45,7 @@ use super::{CompilationPhase, ExecutionTier, PhaseData, PhaseInput, PhaseMetrics
 
 /// Phase 7: Code Generation with Three-Tier Execution Model
 ///
+
 /// Implements complete code generation pipeline with graceful fallback
 /// between tiers and comprehensive statistics tracking.
 pub struct CodegenTiersPhase {
@@ -243,9 +250,11 @@ impl CodegenTiersPhase {
 
     /// Generate code for Tier 0: Interpreter
     ///
+
     /// Prepares AST for tree-walking interpretation.
     /// No actual code generation needed - interpreter works directly on AST.
     ///
+
     /// ## Performance Characteristics
     /// - CBGR overhead: ~100ns per check
     /// - Bounds checking: 3-5% overhead
@@ -285,8 +294,10 @@ impl CodegenTiersPhase {
 
     /// Generate code for Tier 3: AOT LLVM
     ///
+
     /// Full ahead-of-time compilation with LLVM backend.
     ///
+
     /// ## Features
     /// - Complete LLVM IR generation
     /// - Full optimization pipeline (O0-O3, Os, Oz)
@@ -295,11 +306,13 @@ impl CodegenTiersPhase {
     /// - Cross-compilation support
     /// - Object file and executable generation
     ///
+
     /// ## Performance Characteristics
     /// - CBGR overhead: 0ns for proven-safe refs
     /// - Check elimination: 50-90% typical
     /// - Performance: 0.85-0.95x Rust native
     ///
+
     /// PERF: Takes llvm_ctx by reference to avoid creating new Context per call.
     #[cfg(feature = "llvm")]
     fn codegen_aot_llvm(
@@ -494,6 +507,7 @@ impl CodegenTiersPhase {
             // 3. Call lto_manager.run_thin_lto() or run_full_lto()
             // 4. Write the optimized modules
             //
+
             // For now, we use per-module optimization which provides most benefits.
             // Cross-module inlining happens at link time with -flto flag.
             self.stats.lto_enabled = true;
@@ -523,9 +537,11 @@ impl CodegenTiersPhase {
 
     /// Analyze reference usage in a function for CBGR check estimation
     ///
+
     /// Performs full AST traversal to count reference operations and estimate
     /// the number of CBGR checks needed.
     ///
+
     /// Returns (total_references, cbgr_checks_needed)
     fn analyze_reference_usage(&self, func: &verum_ast::decl::FunctionDecl) -> (usize, usize) {
         let mut total_refs = 0;

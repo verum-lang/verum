@@ -14,6 +14,7 @@
 )]
 // Tests for contract literal lexing.
 //
+
 // Contract literals are compiler intrinsics for formal verification (NOT in @tagged_literal registry).
 // - Syntax: contract#"..." (plain) or contract#"""...""" (raw multiline)
 // - Used for preconditions, postconditions, invariants

@@ -577,6 +577,7 @@ pub fn run_consensus(
 // =============================================================================
 // run_seed_demo — populate an in-memory registry for demo / docs.
 //
+
 // Not strictly part of the production protocol, but useful for the
 // auto-paper docs generator when it needs sample data.
 // =============================================================================

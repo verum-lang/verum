@@ -1,28 +1,34 @@
 //! Meta Sandbox Module
 //!
+
 //! This module implements the security sandbox that ensures meta functions
 //! cannot perform I/O operations during compile-time execution.
 //!
+
 //! Enforcement occurs at THREE levels:
 //! 1. Parser level: Rejects I/O calls syntactically during Pass 1 meta block parsing
 //! 2. Interpreter level: Restricted syscall environment during Pass 2 meta execution,
-//!    blocks file/network/process operations even if they pass parsing
+//!  blocks file/network/process operations even if they pass parsing
 //! 3. Type checker level: Purity analysis verifies no I/O function calls escape detection,
-//!    tracks taint from external inputs through dataflow
+//!  tracks taint from external inputs through dataflow
 //!
+
 //! CRITICAL: I/O is forbidden in ALL meta contexts (meta fn, meta async fn, @derive,
 //! procedural macros, meta blocks). This ensures deterministic builds, security (no
 //! network access during compilation), and reproducibility (builds work offline).
 //! meta async fn IS allowed for parallel pure computation, but NOT for I/O.
 //!
+
 //! ## Module Structure
 //!
+
 //! - `errors`: Error types and operation enum
 //! - `allowlist`: Function allowlists/blocklists organized by category
 //! - `resource_limits`: Execution limits and RAII guards
 //! - `validation`: Expression validation for sandbox compliance
 //! - `execution`: Sandboxed executor for meta expressions
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -53,10 +59,12 @@ use crate::meta::context::{ConstValue, MetaContext};
 
 /// Sandbox for meta function execution with comprehensive I/O restrictions
 ///
+
 /// The sandbox enforces that meta functions can only perform pure computations
 /// and cannot execute I/O operations like file access, network calls, or
 /// process spawning.
 ///
+
 /// **Defense in Depth**: Multiple enforcement layers ensure no forbidden
 /// operations can occur, even if one layer fails.
 #[derive(Debug, Clone)]
@@ -90,6 +98,7 @@ impl MetaSandbox {
 
     /// Execute an expression in the sandbox
     ///
+
     /// This is the main entry point for executing meta functions at compile-time.
     pub fn execute(
         &self,

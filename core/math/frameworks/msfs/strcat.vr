@@ -3,24 +3,29 @@
 // S-structured categories
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §1 — Definition 1.3.
 //
+
 // `StrCat<S, n>` is the total (∞, n)-category whose objects are
 // pairs (C∞, str) where C∞ is an accessible (∞, n)-category and
 // `str` is an S-model structure on C∞. The 1-morphisms are
 // S-preserving (∞, n)-functors; higher cells are coherent natural
 // transformations.
 //
+
 // This module installs:
 //
-//   • `StrCatObject` — carrier protocol for objects (C∞, str).
-//   • `StrCat` — carrier protocol for the total (∞, n)-category.
-//   • `msfs_strcat_total_definition` — Definition 1.3 itself,
-//     declaring that StrCat<S, n> exists as such an (∞, n)-category.
-//   • `msfs_strcat_well_formed` — the structural facts (κ_1-local
-//     accessibility + pointing constructions) the paper bundles
-//     into Definition 1.3 and consumes throughout §§3–10.
+
+//  • `StrCatObject` — carrier protocol for objects (C∞, str).
+//  • `StrCat` — carrier protocol for the total (∞, n)-category.
+//  • `msfs_strcat_total_definition` — Definition 1.3 itself,
+//  declaring that StrCat<S, n> exists as such an (∞, n)-category.
+//  • `msfs_strcat_well_formed` — the structural facts (κ_1-local
+//  accessibility + pointing constructions) the paper bundles
+//  into Definition 1.3 and consumes throughout §§3–10.
 //
+
 // The Rich-S parameter and the ordinal `n` are abstracted as type
 // parameters so this module compiles before the rich_s and ordinal
 // stdlib helpers land. Once those are wired (`core.math.rich_s`,
@@ -40,6 +45,7 @@ mount core.math.frameworks.msfs.key_symbols.{InfinityNCat};
 /// One object of `StrCat<S, n>` — a pair (C∞, str) with C∞ an
 /// accessible (∞, n)-category and str an S-model structure on it.
 ///
+
 /// MSFS treats this as a *bundle*: the underlying (∞, n)-category
 /// and its S-model-structure are inseparable in the categorical
 /// type-theoretic sense. The protocol exposes the underlying
@@ -83,6 +89,7 @@ public type StrCat is protocol {
 /// are pairs (C∞, str) and that admits the canonical pointing
 /// constructions used in §§3–10.
 ///
+
 /// This is a *definitional* axiom: the paper defines StrCat<S, n>
 /// at this point and consumes it as a primitive from there on. The
 /// downstream proofs (Lemma 3.4, Theorem 5.1, Theorem 6.1, Theorem

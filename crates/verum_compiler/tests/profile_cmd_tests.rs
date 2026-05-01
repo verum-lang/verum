@@ -14,6 +14,7 @@
 )]
 // Unit tests for profile_cmd.rs
 //
+
 // Migrated from src/profile_cmd.rs to comply with CLAUDE.md test organization.
 
 use verum_compiler::profile_cmd::{CbgrStats, FunctionProfile, ProfileReport};

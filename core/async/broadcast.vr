@@ -3,31 +3,38 @@
 // =============================================================================
 // Layer: 4 (Async)
 // Dependencies: core, collections, async/poll, async/waker, async/future,
-//               async/stream, async/cancellation, sync/atomic, sync/mutex
+//  async/stream, async/cancellation, sync/atomic, sync/mutex
 // =============================================================================
 //
+
 // Multi-producer, multi-consumer broadcast. Each value sent by any sender is
 // observed by every active receiver. Each receiver tracks its own position
 // in a shared ring buffer; slow receivers may fall behind and receive a
 // `Lagged` error indicating skipped messages.
 //
+
 // # Thread safety
 //
+
 // - Ring buffer mutations (push, reassign-slot) are protected by a FutexLock.
 // - sender_count / receiver_count / closed / write_pos are AtomicInt,
-//   providing lock-free observation for fast paths.
+//  providing lock-free observation for fast paths.
 // - Per-receiver waker slot is Mutex-protected; sender drain on publish
-//   iterates a snapshot under lock and invokes wakers outside the lock.
+//  iterates a snapshot under lock and invokes wakers outside the lock.
 //
+
 // # Async receive
 //
+
 // `BroadcastReceiver<T>` implements `Future<Output = Result<T, BroadcastRecvError>>`
 // AND `Stream<Item = Result<T, BroadcastRecvError>>`, so both `rx.recv().await` and
 // `for await msg in rx { ... }` work. Empty buffer → Poll.Pending + waker
 // registration. Sender publish drains all registered-waker snapshots.
 //
+
 // # Example
 //
+
 // ```verum
 // let (tx, rx1) = broadcast_channel(16);
 // let rx2 = tx.subscribe();
@@ -36,6 +43,7 @@
 // assert_eq(rx2.recv().await.unwrap(), 42);
 // ```
 //
+
 // =============================================================================
 
 module broadcast;
@@ -126,6 +134,7 @@ type RecvSlot is {
 
 /// Internal shared state for the broadcast channel.
 ///
+
 /// Ring buffer of fixed capacity. `write_pos` is a monotonically increasing
 /// counter; buffer index is `write_pos % capacity`. Each receiver has its
 /// own `read_pos` and `waker` slot. Receiver drops mark themselves via
@@ -197,6 +206,7 @@ fn wake_all_receivers<T>(inner: &BroadcastInner<T>) {
 
 /// Sender half of a broadcast channel.
 ///
+
 /// Can be cloned to create additional senders. All senders share the same
 /// underlying channel. When all senders are dropped, the channel is closed
 /// and receivers wake to observe the closure.
@@ -207,9 +217,11 @@ public type BroadcastSender<T> is {
 implement<T> BroadcastSender<T> {
     /// Broadcast `value` to all currently-subscribed receivers.
     ///
+
     /// Returns `Ok(n)` where `n` is the number of active receivers that
     /// will see this value, or `Err(BroadcastSendError)` if no receivers are active.
     ///
+
     /// If a receiver is slow enough that the write wraps past its read_pos,
     /// the `LagPolicy` determines what happens (default: receiver observes
     /// `BroadcastRecvError.Lagged(skipped)` on its next recv).
@@ -244,6 +256,7 @@ implement<T> BroadcastSender<T> {
 
     /// Create a new receiver that will receive all future messages.
     ///
+
     /// New receiver starts at the current write_pos and does NOT see
     /// previously-sent messages.
     public fn subscribe(&self) -> BroadcastReceiver<T> {
@@ -316,6 +329,7 @@ implement<T> Drop for BroadcastSender<T> {
 
 /// Receiver half of a broadcast channel.
 ///
+
 /// Each receiver tracks its own position. Implements both `Future` (so that
 /// `rx.recv().await` works in an idiomatic way) and `Stream` (so that
 /// `for await msg in rx { ... }` works with combinators).

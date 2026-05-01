@@ -4,10 +4,12 @@
 // Layer: 0 (façade — SQLITE_ACCESS_* for xAccess)
 // Spec: SQLite C API
 //
-//   SQLITE_ACCESS_EXISTS    = 0
-//   SQLITE_ACCESS_READWRITE = 1   /* used by journal test */
-//   SQLITE_ACCESS_READ      = 2   /* unused */
+
+//  SQLITE_ACCESS_EXISTS = 0
+//  SQLITE_ACCESS_READWRITE = 1 /* used by journal test */
+//  SQLITE_ACCESS_READ = 2 /* unused */
 //
+
 // xAccess returns SQLITE_OK with a boolean output parameter telling
 // the caller whether the access mode is available for the named file.
 // =============================================================================

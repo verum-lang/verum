@@ -1,11 +1,13 @@
 // `verum vbc-version <archive>` — inspect a .vbc archive header.
 //
+
 // Reads the first 96 bytes of the archive (the VbcHeader) and prints
 // magic / version / section offsets / hashes. Verifies magic and
 // version-compatibility against the consumer (this binary's
 // VERSION_MAJOR / VERSION_MINOR), printing a clear OK / NOT-COMPATIBLE
 // banner.
 //
+
 // Tracked under #175 (VBC bytecode versioning + migration path).
 
 use crate::error::{CliError, Result};

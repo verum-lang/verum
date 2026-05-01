@@ -1,7 +1,9 @@
 //! Debug derive macro implementation
 //!
+
 //! Generates `implement Debug for Type { fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> }`
 //!
+
 //! For record types: generates "TypeName { field1: {val1}, field2: {val2} }" format.
 //! For sum types: matches each variant and formats with variant name and payload.
 //! Output is for development/testing use, not end-user display (use Display for that).
@@ -127,12 +129,13 @@ impl DeriveDebug {
 
     /// Generate fmt body for enum types
     ///
+
     /// Generates match expression:
     /// ```verum
     /// match self {
-    ///     Self::Unit => f.debug_struct("Unit").finish(),
-    ///     Self::Tuple(v0, v1) => f.debug_tuple("Tuple").field(&v0).field(&v1).finish(),
-    ///     Self::Struct { field } => f.debug_struct("Struct").field("field", &field).finish(),
+    ///  Self::Unit => f.debug_struct("Unit").finish(),
+    ///  Self::Tuple(v0, v1) => f.debug_tuple("Tuple").field(&v0).field(&v1).finish(),
+    ///  Self::Struct { field } => f.debug_struct("Struct").field("field", &field).finish(),
     /// }
     /// ```
     fn generate_enum_fmt(

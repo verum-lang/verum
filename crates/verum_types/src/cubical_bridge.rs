@@ -2,34 +2,39 @@
 //! throughout the type system) and `CubicalTerm` (the internal cubical
 //! normalizer representation).
 //!
+
 //! The type checker stores `Type::Eq { lhs, rhs }` where `lhs`/`rhs`
 //! are `EqTerm` values. Syntactic equality on `EqTerm` is fast but
 //! incomplete — it misses `transport Refl x = x`, path-lambda
 //! β-reduction, hcomp collapse, etc.
 //!
+
 //! This module provides a translation `eq_to_cubical` that lowers
 //! `EqTerm` into `CubicalTerm`, plus a one-shot
 //! `definitionally_equal_cubical` predicate that the unifier uses as
 //! a more powerful fallback when syntactic comparison fails.
 //!
+
 //! ## Mapping
 //!
-//! | `EqTerm`                             | `CubicalTerm`                         |
+
+//! | `EqTerm` | `CubicalTerm` |
 //! |--------------------------------------|---------------------------------------|
-//! | `Var(v)`                             | `Value(v)`                            |
-//! | `Const(c)`                           | `Value(<const-name>)`                 |
-//! | `Refl(x)`                            | `Refl(cubical(x))`                    |
-//! | `App { "transport", [line, val] }`   | `Transport { line, value }`           |
-//! | `App { "hcomp",     [base, sides] }` | `Hcomp { base, sides }`               |
-//! | `App { "sym",       [p] }`           | `Sym(p)`                              |
-//! | `App { "trans",     [p, q] }`        | `Trans(p, q)`                         |
-//! | `App { "path",      [dim, body] }`   | `PathLambda { dim, body }`            |
-//! | `App { "at",        [path, pt] }`    | `PathApp { path, at }`                |
-//! | `App { func, args }`                 | opaque `Value(func(a1, ..., an))`     |
-//! | `Lambda { param, body }`             | `PathLambda { param, body }`          |
-//! | `Proj { pair, component }`           | opaque `Value("proj_<c>(<p>)")`       |
-//! | `J { proof, motive, base }`          | opaque `Value("J(...)")`              |
+//! | `Var(v)` | `Value(v)` |
+//! | `Const(c)` | `Value(<const-name>)` |
+//! | `Refl(x)` | `Refl(cubical(x))` |
+//! | `App { "transport", [line, val] }` | `Transport { line, value }` |
+//! | `App { "hcomp", [base, sides] }` | `Hcomp { base, sides }` |
+//! | `App { "sym", [p] }` | `Sym(p)` |
+//! | `App { "trans", [p, q] }` | `Trans(p, q)` |
+//! | `App { "path", [dim, body] }` | `PathLambda { dim, body }` |
+//! | `App { "at", [path, pt] }` | `PathApp { path, at }` |
+//! | `App { func, args }` | opaque `Value(func(a1, ..., an))` |
+//! | `Lambda { param, body }` | `PathLambda { param, body }` |
+//! | `Proj { pair, component }` | opaque `Value("proj_<c>(<p>)")` |
+//! | `J { proof, motive, base }` | opaque `Value("J(...)")` |
 //!
+
 //! The opaque fallback is always safe: two opaque values compare
 //! syntactically, matching the conservative behaviour of the pre-bridge
 //! unifier.
@@ -41,6 +46,7 @@ use crate::ty::{EqConst, EqTerm, ProjComponent};
 
 /// Translate an `EqTerm` into a `CubicalTerm`.
 ///
+
 /// Terms the cubical core does not model (arbitrary function
 /// application, projections, J) become opaque `Value` strings built
 /// from a canonical textual representation so that syntactic
@@ -228,6 +234,7 @@ fn format_eq_term(term: &EqTerm) -> String {
 /// normalizer. Both terms are translated to `CubicalTerm`, reduced to
 /// WHNF, and compared structurally.
 ///
+
 /// This is strictly more permissive than syntactic equality on
 /// `EqTerm` — every pair that is syntactically equal is also cubically
 /// equal, and additional identities like `transport Refl x ≡ x`,
@@ -259,7 +266,7 @@ mod tests {
 
     #[test]
     fn transport_refl_reduces_to_value() {
-        // transport(refl(A), x)  ≡  x
+        // transport(refl(A), x) ≡ x
         let refl_a = EqTerm::Refl(Box::new(EqTerm::Var(Text::from("A"))));
         let x = EqTerm::Var(Text::from("x"));
 
@@ -273,7 +280,7 @@ mod tests {
 
     #[test]
     fn sym_refl_reduces_to_refl() {
-        // sym(refl(x))  ≡  refl(x)
+        // sym(refl(x)) ≡ refl(x)
         let refl_x = EqTerm::Refl(Box::new(EqTerm::Var(Text::from("x"))));
         let sym_refl = EqTerm::App {
             func: Box::new(EqTerm::Var(Text::from("sym"))),

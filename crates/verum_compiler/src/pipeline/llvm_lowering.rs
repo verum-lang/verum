@@ -1,21 +1,23 @@
 //! VBC → LLVM IR lowering + native-binary generation.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 20). Houses the
 //! AOT-only LLVM lowering surface that translates VBC bytecode
 //! to LLVM IR (CPU code path) and drives the native-binary
 //! generation steps that follow:
 //!
-//!   * `lower_vbc_to_llvm` — core CPU compilation step;
-//!     translates VBC bytecode instructions to LLVM IR via
-//!     `VbcToLlvmLowering`, applying tier-aware CBGR
-//!     optimisations.
-//!   * `execute_llvm_jit` — JIT-execute the LLVM module via
-//!     ExecutionEngine; called from the VBC JIT path.
-//!   * `generate_native_from_llvm` — emit native object file
-//!     from LLVM IR (post-optimisation), invoke the linker.
-//!   * `analyze_compilation_paths` — pre-codegen analysis that
-//!     classifies each function as CPU / GPU / Both for routing
-//!     to the appropriate code-generator.
+
+//!  * `lower_vbc_to_llvm` — core CPU compilation step;
+//!  translates VBC bytecode instructions to LLVM IR via
+//!  `VbcToLlvmLowering`, applying tier-aware CBGR
+//!  optimisations.
+//!  * `execute_llvm_jit` — JIT-execute the LLVM module via
+//!  ExecutionEngine; called from the VBC JIT path.
+//!  * `generate_native_from_llvm` — emit native object file
+//!  from LLVM IR (post-optimisation), invoke the linker.
+//!  * `analyze_compilation_paths` — pre-codegen analysis that
+//!  classifies each function as CPU / GPU / Both for routing
+//!  to the appropriate code-generator.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,6 +42,7 @@ use super::CompilationPipeline;
 impl<'s> CompilationPipeline<'s> {
     /// Lower a VBC module to LLVM IR.
     ///
+
     /// This is the core of the CPU compilation path. It translates VBC bytecode
     /// instructions to LLVM IR, applying tier-aware CBGR optimizations.
     pub(super) fn lower_vbc_to_llvm<'ctx>(
@@ -135,7 +138,7 @@ impl<'s> CompilationPipeline<'s> {
         // SAFETY: get_function transmutes the JIT-resolved symbol
         // address to the requested fn pointer type without runtime
         // checking — a wrong signature here would invoke UB at the
-        // subsequent call.  We pin `unsafe extern "C" fn() -> i64`
+        // subsequent call. We pin `unsafe extern "C" fn() -> i64`
         // because main() is emitted with that exact signature in
         // `pipeline/native_codegen.rs::emit_program_main` (commit
         // 0d04ee0b documented main's i64 return contract).
@@ -257,16 +260,21 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Analyze VBC module to determine compilation paths for each function.
     ///
+
     /// This phase analyzes the VBC bytecode to determine whether functions
     /// should be compiled via the CPU path (LLVM IR) or GPU path (MLIR).
     ///
+
     /// # Arguments
     ///
+
     /// * `vbc_module` - The VBC module to analyze
     /// * `target_config` - Target configuration (GPU availability, thresholds, etc.)
     ///
+
     /// # Returns
     ///
+
     /// Returns Ok(()) if all functions can be compiled, or an error if GPU
     /// compilation is required but unavailable.
     pub(super) fn analyze_compilation_paths(

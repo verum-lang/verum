@@ -128,9 +128,11 @@ pub(in super::super) fn handle_gef(state: &mut InterpreterState) -> InterpreterR
 
 /// EqG (0x3C) - Generic equality via Eq protocol.
 ///
+
 /// Encoding: opcode + dst:reg + a:reg + b:reg + protocol_id:varint
 /// Effect: Sets `dst` to true if `a` equals `b` using deep structural comparison.
 ///
+
 /// Supports:
 /// - Primitive types (int, float, bool, unit, nil)
 /// - Strings (both small strings and heap strings)
@@ -189,9 +191,11 @@ pub(in super::super) fn handle_eqg(state: &mut InterpreterState) -> InterpreterR
 
 /// CmpG (0x3D) - Generic comparison via Ord protocol.
 ///
+
 /// Encoding: opcode + dst:reg + a:reg + b:reg + protocol_id:varint
 /// Effect: Sets `dst` to ordering value (-1 for Less, 0 for Equal, 1 for Greater).
 ///
+
 /// Supports:
 /// - Primitive types (int, float)
 /// - Strings (lexicographic comparison)
@@ -250,9 +254,11 @@ pub(in super::super) fn handle_cmpg(state: &mut InterpreterState) -> Interpreter
 
 /// EqRef (0x3E) - Reference equality (pointer comparison).
 ///
+
 /// Encoding: opcode + dst:reg + a:reg + b:reg
 /// Effect: Sets `dst` to true if `a` and `b` point to the same memory location.
 ///
+
 /// This compares raw pointer values, not the content they point to.
 /// For content comparison, use EqG instead.
 pub(in super::super) fn handle_eqref(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -271,6 +277,7 @@ pub(in super::super) fn handle_eqref(state: &mut InterpreterState) -> Interprete
 
 /// CmpExtended (0x4F) - Extended comparison operations (unsigned comparisons).
 ///
+
 /// Encoding: opcode(0x4F) + sub_op:u8 + dst:reg + a:reg + b:reg
 /// Sub-opcodes:
 /// - 0x00: LtU (unsigned less-than)
@@ -278,6 +285,7 @@ pub(in super::super) fn handle_eqref(state: &mut InterpreterState) -> Interprete
 /// - 0x02: GtU (unsigned greater-than)
 /// - 0x03: GeU (unsigned greater-or-equal)
 ///
+
 /// Operands are interpreted as u64 for comparison purposes.
 pub(in super::super) fn handle_cmp_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;

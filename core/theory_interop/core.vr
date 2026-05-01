@@ -4,28 +4,32 @@
 // Layer: Application (Theory Interoperation)
 // Spec: Theory-interop core
 //
+
 // A computational ∞-topos where formally-represented theories live as
 // sheaves. This module provides the three fundamental operations:
 //
-//   1. load_theory()    — Yoneda embedding: Theory → Sh_∞(Th, J_ep)
-//   2. translate()      — Kan extension: partial functor → full translation
-//   3. check_coherence()— Descent verification: translations → global section
+
+//  1. load_theory() — Yoneda embedding: Theory → Sh_∞(Th, J_ep)
+//  2. translate() — Kan extension: partial functor → full translation
+//  3. check_coherence()— Descent verification: translations → global section
 //
+
 // The ∞-topos structure ensures that:
-//   - Theories are objects in Sh_∞(Th, J_ep)
-//   - Translations are morphisms (∞-functors between claim categories)
-//   - Coherence = descent condition on the Čech nerve of a covering
-//   - Obstruction = failure of the counit to be an equivalence
+//  - Theories are objects in Sh_∞(Th, J_ep)
+//  - Translations are morphisms (∞-functors between claim categories)
+//  - Coherence = descent condition on the Čech nerve of a covering
+//  - Obstruction = failure of the counit to be an equivalence
 //
+
 // Dependencies:
-//   core.math.epistemic      — Theory, EpistemicStatus, EpistemicTopology
-//   core.math.infinity_topos — InfinityTopos, SheafInfinityTopos, descent
-//   core.math.kan_extension  — compute_pointwise_lan/ran, compute_obstruction
-//   (core.math.hott was previously mounted for Path/Equiv/transport
-//    but none are referenced in this module; the mount was dropped
-//    to silence the `Path` import error after the hott rename to
-//    `HottPath`)
-//   core.math.giry           — LlmOracle (for stochastic translation)
+//  core.math.epistemic — Theory, EpistemicStatus, EpistemicTopology
+//  core.math.infinity_topos — InfinityTopos, SheafInfinityTopos, descent
+//  core.math.kan_extension — compute_pointwise_lan/ran, compute_obstruction
+//  (core.math.hott was previously mounted for Path/Equiv/transport
+//  but none are referenced in this module; the mount was dropped
+//  to silence the `Path` import error after the hott rename to
+//  `HottPath`)
+//  core.math.giry — LlmOracle (for stochastic translation)
 // =============================================================================
 
 module core.theory_interop.core;
@@ -87,14 +91,16 @@ public fn new_registry() -> TheoryRegistry {
 
 /// Load a theory into the theory ∞-topos via Yoneda embedding.
 ///
+
 /// The Yoneda embedding y : Th → Sh_∞(Th, J_ep) sends each theory T
 /// to the representable sheaf y(T)(S) = Hom(S, T). This is the
 /// canonical way to "internalize" a theory into the topos.
 ///
+
 /// Properties (verified by SMT):
-///   - y is fully faithful: Hom(T₁, T₂) ≃ Hom(y(T₁), y(T₂))
-///   - y preserves limits: y(lim T_i) = lim y(T_i)
-///   - y(T) is always a sheaf (representables are sheaves)
+///  - y is fully faithful: Hom(T₁, T₂) ≃ Hom(y(T₁), y(T₂))
+///  - y preserves limits: y(lim T_i) = lim y(T_i)
+///  - y(T) is always a sheaf (representables are sheaves)
 public fn load_theory(
     registry: &mut TheoryRegistry,
     theory: Theory,
@@ -144,13 +150,15 @@ public type TranslationRecord is {
 
 /// The result of translating between theories via Kan extensions.
 ///
+
 /// Given a partial functor F : C_S → C_T mapping some claims of the
 /// source theory S to claims of the target theory T, the translation
 /// produces three things:
 ///
-///   optimistic  = Lan_F (left Kan extension) — the most generous reading
-///   conservative = Ran_F (right Kan extension) — the most cautious reading
-///   obstruction = deviation of Ran_F ∘ F* from Id — information loss measure
+
+///  optimistic = Lan_F (left Kan extension) — the most generous reading
+///  conservative = Ran_F (right Kan extension) — the most cautious reading
+///  obstruction = deviation of Ran_F ∘ F* from Id — information loss measure
 public type TranslationResult is {
     /// Left Kan extension: optimistic translation.
     /// Maps each target claim to the colimit of matching source claims.
@@ -166,10 +174,12 @@ public type TranslationResult is {
 
 /// Translate between theories using Kan extensions.
 ///
+
 /// Given:
-///   - source, target: loaded theories
-///   - partial_map: claim index pairs (source_idx, target_idx) for known correspondences
+///  - source, target: loaded theories
+///  - partial_map: claim index pairs (source_idx, target_idx) for known correspondences
 ///
+
 /// Computes the optimistic (Lan) and conservative (Ran) translations
 /// together with the obstruction (how much information is lost).
 public fn translate(
@@ -240,22 +250,25 @@ public fn translate(
 
 /// Translate between theories with LLM-assisted partial mapping.
 ///
+
 /// When no explicit partial_map is provided, this uses the LLM
 /// oracle to propose claim correspondences based on semantic
-/// similarity.  For each source claim the oracle is queried with a
+/// similarity. For each source claim the oracle is queried with a
 /// context embedding derived from the claim's content; the
 /// highest-probability proposal that exceeds `confidence` is taken
 /// as the target claim, looked up by name in
 /// `target.theory.statements`.
 ///
+
 /// Pre-fix this used the placeholder `i % target.claim_count`
 /// (modular index map) which ignored the oracle entirely — every
 /// caller paid the oracle-construction cost but received a
-/// deterministic structural map, not a semantic one.  The new
+/// deterministic structural map, not a semantic one. The new
 /// dispatch routes through `sample_above` + a name→index lookup
 /// against the target theory's claim list, so the oracle's
 /// proposal distribution is actually consulted.
 ///
+
 /// When a source claim's oracle proposal does not match any target
 /// claim id (out-of-vocab) the pair is skipped — the partial map
 /// only contains entries the oracle is confident about, which is
@@ -270,7 +283,7 @@ public fn translate_with_oracle<C, D: InfinityCategory>(
     let mut partial_map: List<(Int, Int)> = List.new();
 
     // Walk every source claim, query the oracle, and resolve the
-    // proposal name to a target claim index.  Source claims with no
+    // proposal name to a target claim index. Source claims with no
     // confident oracle match are skipped — the partial map carries
     // only oracle-validated pairs.
     let mut i = 0;
@@ -285,7 +298,7 @@ public fn translate_with_oracle<C, D: InfinityCategory>(
                     None => {
                         // Out-of-vocab: oracle proposed a functor
                         // name that doesn't correspond to any
-                        // target claim id.  Skip — partial_map
+                        // target claim id. Skip — partial_map
                         // stays a partial functor rather than
                         // forcing a structural fallback.
                     },
@@ -304,11 +317,11 @@ public fn translate_with_oracle<C, D: InfinityCategory>(
 }
 
 /// Build a `ContextEmbedding` for the i-th source claim, suitable
-/// to be passed to `LlmOracle.query`.  The runtime LLM intrinsic
+/// to be passed to `LlmOracle.query`. The runtime LLM intrinsic
 /// (`@intrinsic("llm.query_log_probs")`) consumes the embedding
 /// vector; this stub-side helper synthesises a minimal,
 /// deterministic embedding from the claim's id (one float per
-/// byte, normalised to [0, 1]).  When a real embedding backend is
+/// byte, normalised to [0, 1]). When a real embedding backend is
 /// wired in it will replace this helper without changing the call
 /// site — the contract is just "produce a `ContextEmbedding` whose
 /// content depends on the source claim".
@@ -364,12 +377,14 @@ public type CoherenceResult is
 
 /// Check coherence of a set of translations between theories.
 ///
+
 /// Given a collection of translations {F_ij : T_i → T_j}, coherence
 /// requires that:
-///   1. Functorial composition: F_jk ∘ F_ij ≈ F_ik
-///   2. Descent condition: the Čech nerve of the covering resolves
-///   3. No circular contradictions in epistemic status
+///  1. Functorial composition: F_jk ∘ F_ij ≈ F_ik
+///  2. Descent condition: the Čech nerve of the covering resolves
+///  3. No circular contradictions in epistemic status
 ///
+
 /// This is the computational heart of the theory-interop system: it verifies
 /// that a web of theory translations forms a consistent picture.
 public fn check_coherence(
@@ -451,11 +466,12 @@ public type AuditResult is {
 
 /// Audit a theory for internal consistency.
 ///
+
 /// Checks:
-///   1. Status propagation: no claim has a stronger status than its weakest dependency
-///   2. Circular dependencies: no claim transitively depends on itself
-///   3. Dangling references: all dependency targets exist
-///   4. Epistemic coherence: theorem claims have valid proof chains
+///  1. Status propagation: no claim has a stronger status than its weakest dependency
+///  2. Circular dependencies: no claim transitively depends on itself
+///  3. Dangling references: all dependency targets exist
+///  4. Epistemic coherence: theorem claims have valid proof chains
 public fn audit_theory(theory: &mut Theory) -> AuditResult {
     let name = theory.name.clone();
     let claim_count = theory.statements.len();
@@ -511,6 +527,7 @@ public fn audit_theory(theory: &mut Theory) -> AuditResult {
 
 /// Audit the meta-theory T_meta (the theory about the registry itself).
 ///
+
 /// The meta-theory has a special constraint: claims about the
 /// consistency of the registry cannot have status stronger than [H]
 /// (Hypothesis), by Gödel's second incompleteness theorem.
@@ -584,6 +601,7 @@ theorem zero_obstruction_exact(result: TranslationResult)
 // =============================================================================
 // §6. Audit-helper layer (#242)
 //
+
 // Translation+coherence operations return rich structures; downstream
 // callers (CLI `verum audit --coord`, IDE plugins, the JSON-RPC server)
 // need a tiny, stable surface for verdict classification + admit/reject.
@@ -597,12 +615,14 @@ mount core.theory_interop.coord.{
 
 /// Classify a `TranslationResult` against the §10.2 thresholds.
 ///
-///   • `result.obstruction.average_severity == 0`   ⇒ `Morita`
-///   • `(0,    0.05]`                                ⇒ `Strong`
-///   • `(0.05, 0.20]`                                ⇒ `Moderate`
-///   • `(0.20, 0.50]`                                ⇒ `Weak`
-///   • `(0.50, 1]`                                   ⇒ `Untranslatable`
+
+///  • `result.obstruction.average_severity == 0` ⇒ `Morita`
+///  • `(0, 0.05]` ⇒ `Strong`
+///  • `(0.05, 0.20]` ⇒ `Moderate`
+///  • `(0.20, 0.50]` ⇒ `Weak`
+///  • `(0.50, 1]` ⇒ `Untranslatable`
 ///
+
 /// Use this instead of inlining `verdict_of(result.obstruction.average_severity)`
 /// at every call site — the helper hides the obstruction internals so the
 /// spec's bucket boundaries can evolve without churning callers.
@@ -645,17 +665,18 @@ public fn coherence_quality(result: &CoherenceResult) -> Float {
 // Foundation Protocol Impls — Display + Debug for CoherenceResult
 // =============================================================================
 //
+
 // Eq is intentionally NOT defined: CoherenceResult.Obstruction carries a
 // `List<CoherenceViolation>` whose own Eq impl is non-trivial (deep
 // structural comparison would risk false negatives on order-permutation
-// across runs).  Callers comparing results in regression tests should
+// across runs). Callers comparing results in regression tests should
 // destructure to inspect the bucket + numeric fields.
 
 implement Display for CoherenceResult {
     /// Renders a single-line summary suitable for audit-log lines:
-    ///   `Coherent { global_quality }`  → `coherent (q=<global>)`
-    ///   `Obstruction { violations, severity }` →
-    ///       `obstructed (severity=<s>, <N> violations)`
+    ///  `Coherent { global_quality }` → `coherent (q=<global>)`
+    ///  `Obstruction { violations, severity }` →
+    ///  `obstructed (severity=<s>, <N> violations)`
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             CoherenceResult.Coherent { global_quality } =>

@@ -1,49 +1,57 @@
 //! VBC Interpreter - register-based virtual machine.
 //!
+
 //! The VBC interpreter provides execution of VBC bytecode with:
 //! - **Fast startup**: Minimal initialization overhead
 //! - **NaN-boxing**: Compact 64-bit value representation
 //! - **Register-based execution**: No operand stack
 //! - **CBGR integration**: Memory safety through runtime checks
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
-//! │                     INTERPRETER ENGINE                          │
+//! │ INTERPRETER ENGINE │
 //! ├─────────────────────────────────────────────────────────────────┤
-//! │                                                                 │
-//! │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-//! │  │ RegisterFile │  │  CallStack   │  │       Heap           │  │
-//! │  │  [r0..r255]  │  │ CallFrame[]  │  │ Object allocation    │  │
-//! │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
-//! │                                                                 │
-//! │  ┌─────────────────────────────────────────────────────────┐   │
-//! │  │                    DISPATCH LOOP                         │   │
-//! │  │  while pc < bytecode.len() {                            │   │
-//! │  │    let op = bytecode[pc];                               │   │
-//! │  │    pc += 1;                                             │   │
-//! │  │    match op { ... }                                     │   │
-//! │  │  }                                                       │   │
-//! │  └─────────────────────────────────────────────────────────┘   │
-//! │                                                                 │
+//! │ │
+//! │ ┌──────────────┐ ┌──────────────┐ ┌──────────────────────┐ │
+//! │ │ RegisterFile │ │ CallStack │ │ Heap │ │
+//! │ │ [r0..r255] │ │ CallFrame[] │ │ Object allocation │ │
+//! │ └──────────────┘ └──────────────┘ └──────────────────────┘ │
+//! │ │
+//! │ ┌─────────────────────────────────────────────────────────┐ │
+//! │ │ DISPATCH LOOP │ │
+//! │ │ while pc < bytecode.len() { │ │
+//! │ │ let op = bytecode[pc]; │ │
+//! │ │ pc += 1; │ │
+//! │ │ match op { ... } │ │
+//! │ │ } │ │
+//! │ └─────────────────────────────────────────────────────────┘ │
+//! │ │
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Performance Targets
 //!
+
 //! | Operation | Target | Notes |
 //! |-----------|--------|-------|
 //! | Arithmetic | 100M ops/sec | Integer add loop |
 //! | Function call | 10M calls/sec | Non-generic |
 //! | Object alloc | 1M allocs/sec | Small objects |
 //!
+
 //! # Example
 //!
+
 //! ```ignore
 //! use verum_vbc::interpreter::Interpreter;
 //! use verum_vbc::VbcModule;
 //!
+
 //! let module = VbcModule::new("example".to_string());
 //! let mut interp = Interpreter::new(&module);
 //! let result = interp.execute_function(FunctionId(0))?;
@@ -87,28 +95,37 @@ pub use permission::{
 
 /// Executes a function using table-based dispatch.
 ///
+
 /// This is ~40% faster than the match-based dispatch due to:
 /// - O(1) opcode lookup via array indexing
 /// - Better branch prediction for indirect calls
 /// - Reduced code size improving instruction cache utilization
 ///
+
 /// This is the default dispatch method in VBC.
 ///
+
 /// # Arguments
 ///
+
 /// * `state` - The interpreter state
 /// * `func_id` - The function to execute
 ///
+
 /// # Returns
 ///
+
 /// The return value of the executed function
 ///
+
 /// # Errors
 ///
+
 /// Returns `ModuleNotInterpretable` if the module has the `NOT_INTERPRETABLE` flag set.
 /// Systems profile modules are NOT interpretable - VBC serves only as intermediate IR
 /// for AOT compilation.
 ///
+
 /// V-LLSI architecture: only Application/Research profile modules are interpretable.
 /// Systems profile modules use VBC as intermediate IR for AOT compilation only.
 pub fn execute_table(state: &mut InterpreterState, func_id: FunctionId) -> InterpreterResult<Value> {
@@ -159,6 +176,7 @@ use std::sync::Arc;
 
 /// Main interpreter entry point.
 ///
+
 /// The `Interpreter` manages execution state and provides a high-level
 /// interface for running VBC bytecode.
 pub struct Interpreter {
@@ -169,12 +187,15 @@ pub struct Interpreter {
 impl Interpreter {
     /// Creates a new interpreter for the given module.
     ///
+
     /// # Panics
     ///
+
     /// Panics if the module has the `NOT_INTERPRETABLE` flag set.
     /// Systems profile modules are NOT interpretable - VBC serves only as
     /// intermediate IR for AOT compilation. Use `try_new()` for fallible construction.
     ///
+
     /// V-LLSI: panics if module has NOT_INTERPRETABLE flag (Systems/embedded profiles).
     pub fn new(module: Arc<VbcModule>) -> Self {
         Self::try_new(module).expect("Module is not interpretable")
@@ -183,12 +204,15 @@ impl Interpreter {
     /// Creates a new interpreter for the given module, returning an error if
     /// the module is not interpretable.
     ///
+
     /// # Errors
     ///
+
     /// Returns `ModuleNotInterpretable` if the module has the `NOT_INTERPRETABLE`
     /// flag set. Systems profile modules are NOT interpretable - VBC serves only
     /// as intermediate IR for AOT compilation.
     ///
+
     /// V-LLSI: returns ModuleNotInterpretable error for Systems/embedded profiles.
     pub fn try_new(module: Arc<VbcModule>) -> InterpreterResult<Self> {
         // Check if module is interpretable (V-LLSI architecture check)
@@ -212,6 +236,7 @@ impl Interpreter {
 
     /// Creates a new interpreter with a custom `InterpreterConfig`.
     ///
+
     /// Closes the architectural gap that left `[runtime]` manifest
     /// settings (`cbgr_mode`, `async_scheduler`, `task_stack_size`,
     /// `heap_policy`, etc.) unable to reach the interpreter through
@@ -221,6 +246,7 @@ impl Interpreter {
     /// embedders threading verum.toml `[runtime]` values can route
     /// them through.
     ///
+
     /// Same V-LLSI interpretability check as `try_new` — Systems /
     /// embedded profile modules surface as `ModuleNotInterpretable`.
     pub fn try_new_with_config(
@@ -248,31 +274,35 @@ impl Interpreter {
     /// Creates a new interpreter for the given module **after** running
     /// the per-instruction bytecode validator.
     ///
+
     /// This is the secure-default constructor for any module that
     /// did NOT come from this process's own compiler — downloaded
     /// modules, archives shared across processes, files edited by
-    /// hand, network-loaded bytecode.  The validator walks every
+    /// hand, network-loaded bytecode. The validator walks every
     /// function's bytecode and rejects out-of-range cross-references,
     /// register-bounds violations, branch offsets landing mid-
-    /// instruction, and call-arity mismatches.  Cost is O(N) in
+    /// instruction, and call-arity mismatches. Cost is O(N) in
     /// total instruction count.
     ///
+
     /// `try_new` (the non-validating constructor) is preserved for
     /// trusted-source loads where the validator's walk is wasted
     /// work — for example, the in-process compiler emitting bytecode
     /// it just produced.
     ///
+
     /// # Errors
     ///
+
     /// * `ModuleNotInterpretable` — propagated from `try_new`.
     /// * `ValidationFailed { module_name, reason }` — the bytecode
-    ///   validator surfaced a typed error.  The `reason` string is
-    ///   the rendered `VbcError`.
+    ///  validator surfaced a typed error. The `reason` string is
+    ///  the rendered `VbcError`.
     pub fn try_new_validated(module: Arc<VbcModule>) -> InterpreterResult<Self> {
         // Run the validator BEFORE the interpretable-flag check so
         // the user gets a load-time validation failure on a corrupt
         // module even if the flag would have rejected it for a
-        // different reason.  In practice both surfaces are early-
+        // different reason. In practice both surfaces are early-
         // exit; ordering here is only relevant when both apply.
         if let Err(err) = crate::validate::validate_module(&module) {
             return Err(InterpreterError::ValidationFailed {
@@ -285,8 +315,10 @@ impl Interpreter {
 
     /// Executes a function by ID and returns the result.
     ///
+
     /// Executes a function by ID using function pointer table dispatch.
     ///
+
     /// This is ~40% faster than match-based dispatch due to:
     /// - O(1) opcode lookup via array indexing
     /// - Better branch prediction for indirect calls
@@ -297,6 +329,7 @@ impl Interpreter {
 
     /// Executes the main function (function 0) if it exists.
     ///
+
     /// Runs `module.global_ctors` in priority order before `main`, matching
     /// the AOT path (which emits an LLVM `@llvm.global_ctors` array whose
     /// entries are invoked by the C runtime prior to `main`). This is
@@ -317,6 +350,7 @@ impl Interpreter {
     /// Executes the subset of `module.global_ctors` that initialise
     /// `@thread_local static` slots (functions named `__tls_init_*`).
     ///
+
     /// Why restricted to TLS inits: historically `global_ctors` also
     /// contains declared-only FFI library initializers (e.g. Windows
     /// `kernel32` startup functions) that panic via debug_assert! inside
@@ -331,6 +365,7 @@ impl Interpreter {
     /// `Maybe<LocalHeap>` and its pattern-match misfires, causing
     /// `Shared::new(...)` to crash with "Expected int, got None".
     ///
+
     /// Call this before executing user code. Running TLS inits is
     /// idempotent — each ctor re-executes and re-writes its slot — so
     /// callers do not need to track whether they have been run.
@@ -460,6 +495,7 @@ impl Interpreter {
     // Generator API
     // =========================================================================
     //
+
     // Generator API: fn* functions produce values lazily via Yield. Each generator
     // maintains saved_pc, saved_registers, saved_contexts, and status (Created/Running/
     // Yielded/Completed). GenCreate allocates a Generator, GenNext resumes it,
@@ -467,12 +503,15 @@ impl Interpreter {
 
     /// Creates a new generator from a generator function.
     ///
+
     /// The generator is created in the Created state and must be resumed
     /// to begin execution.
     ///
+
     /// # Arguments
     /// * `func_id` - The generator function (fn*)
     ///
+
     /// # Returns
     /// The generator ID that can be used to resume the generator.
     pub fn create_generator(&mut self, func_id: FunctionId) -> InterpreterResult<GeneratorId> {
@@ -487,13 +526,16 @@ impl Interpreter {
 
     /// Resumes a suspended generator, returning the next yielded value.
     ///
+
     /// This implements the Iterator::next() protocol:
     /// - Returns `Some(value)` if the generator yields a value
     /// - Returns `None` if the generator is completed
     ///
+
     /// # Arguments
     /// * `gen_id` - The generator to resume
     ///
+
     /// # Returns
     /// - `Ok(Some(value))` - Generator yielded a value
     /// - `Ok(None)` - Generator is completed

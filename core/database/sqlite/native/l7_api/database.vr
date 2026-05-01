@@ -6,23 +6,27 @@ module core.database.sqlite.native.l7_api.database;
 // Layer: 7 — user-visible handle.
 // Spec: sqlite-native.md §16.1 + §Appendix D (error-code map)
 //
+
 // `Database` is what end-user code holds. It wraps a Connection at L6,
 // translates L6's strongly-typed ConnectionError / StmtError into a
 // single `SqliteApiDbError` tagged with SQLSTATE-style codes, and exposes the
 // idiomatic open / prepare / execute / close API.
 //
+
 // For v1:
 //
-//   * open_memory(mode)     — in-memory DB
-//   * prepare(sql)          — compile SQL → PreparedStatement
-//   * execute(sql)          — compile + run-to-completion for
-//                             statements that produce no rows
-//                             (DDL / INSERT / DELETE / TX)
-//   * query(sql)            — compile + run returning first row;
-//                             callers needing more call step() on
-//                             the returned PreparedStatement
-//   * close(self)           — affine consume
+
+//  * open_memory(mode) — in-memory DB
+//  * prepare(sql) — compile SQL → PreparedStatement
+//  * execute(sql) — compile + run-to-completion for
+//  statements that produce no rows
+//  (DDL / INSERT / DELETE / TX)
+//  * query(sql) — compile + run returning first row;
+//  callers needing more call step() on
+//  the returned PreparedStatement
+//  * close(self) — affine consume
 //
+
 // File-backed open (open_path / open_uri) lands once the PosixVfs
 // pager backend is integrated — pager_open_memory is the only route
 // until the actor IPC is wired.
@@ -191,11 +195,11 @@ public fn open_memory_db(mode: ConnectionMode) -> Result<Database, SqliteApiDbEr
     }
 }
 
-// Each open_<mode> inlines the open_memory_db body directly.  An earlier
+// Each open_<mode> inlines the open_memory_db body directly. An earlier
 // shape that delegated through open_memory_db (`{ open_memory_db(CmX) }`
 // or `{ let r = open_memory_db(CmX); return r; }`) produced a deterministic
 // `Null pointer dereference` panic at the call site once VBC codegen was
-// stabilised (task #152).  Inlining sidesteps the broken wrapper-call path
+// stabilised (task #152). Inlining sidesteps the broken wrapper-call path
 // without losing any expressiveness — the bodies are tiny and the duplicate
 // match is the only price.
 public fn open_readonly() -> Result<Database, SqliteApiDbError> {
@@ -250,12 +254,12 @@ implement Database {
 
     /// Borrow the underlying L1 pager — used by the online-backup
     /// surface (`l7_api/backup.vr`) and other low-level callers that
-    /// need to walk pages directly.  External crates should prefer
+    /// need to walk pages directly. External crates should prefer
     /// the higher-level operations in `database.vr` itself.
     public fn pager_view(&self) -> &Pager { self.conn.pager() }
     public fn pager_mut(&mut self) -> &mut Pager { self.conn.pager_mut() }
 
-    /// Borrow the connection's function & hook registry.  Used by the
+    /// Borrow the connection's function & hook registry. Used by the
     /// `l7_api.hooks` surface to expose `set_commit_hook` /
     /// `set_rollback_hook` / etc. as method-style sugar on Database
     /// without leaking the underlying Connection through the public
@@ -263,14 +267,14 @@ implement Database {
     public fn registry_view(&self) -> &FnRegistry { self.conn.registry_view() }
     public fn registry_mut(&mut self) -> &mut FnRegistry { self.conn.registry_mut() }
 
-    /// Borrow the connection's per-connection PRAGMA state.  Used by
+    /// Borrow the connection's per-connection PRAGMA state. Used by
     /// the `l7_api.pragma_api` surface for typed pragma_get / _set.
     public fn pragma_cfg_view(&self) -> &PragmaConfig { self.conn.pragma_cfg_view() }
     public fn pragma_cfg_mut(&mut self) -> &mut PragmaConfig { self.conn.pragma_cfg_mut() }
 
-    /// Borrow the underlying L6 Connection.  Required by
+    /// Borrow the underlying L6 Connection. Required by
     /// `l7_api.blob` so it can talk to the schema cache + table store
-    /// + blob engine in one logical pass.  Other L7 modules should
+    /// + blob engine in one logical pass. Other L7 modules should
     /// prefer the narrower accessors above.
     public fn conn_view_for_blob(&self) -> &Connection { &self.conn }
     public fn conn_mut_for_blob(&mut self) -> &mut Connection { &mut self.conn }
@@ -283,15 +287,16 @@ implement Database {
     /// schema-aware pipeline so that `SELECT ... FROM t` resolves
     /// column references against the live SchemaCache.
     ///
+
     /// **Cursor seed at prepare-time** — pre-fix the bare `prepare`
     /// path returned a statement with empty cursors, so a direct
     /// `db.prepare(sql).step()` returned no rows for SELECT and
     /// silently dropped INSERTs (only `execute`/`query_first_row`/
-    /// `query_all` called `seed_cursors_from_connection`).  Seeding
+    /// `query_all` called `seed_cursors_from_connection`). Seeding
     /// here gives `prepare()` the same row-store visibility as the
     /// other entry points; the caller still owns writeback via
     /// `Database.flush_statement(&stmt)` (added below) when their
-    /// statement issues mutations.  Read-only `SELECT` callers
+    /// statement issues mutations. Read-only `SELECT` callers
     /// don't need writeback.
     public fn prepare(&self, sql: &Text) -> Result<PreparedStatement, SqliteApiDbError> {
         match prepare_with_schema(sql, self.conn.schema()) {
@@ -304,9 +309,9 @@ implement Database {
     }
 
     /// Drain mutations from a `prepare()`-obtained statement back
-    /// into the connection's row stores.  Caller MUST invoke this
+    /// into the connection's row stores. Caller MUST invoke this
     /// after stepping a mutating statement (INSERT/UPDATE/DELETE)
-    /// or the writes are lost.  Read-only SELECTs may skip it.
+    /// or the writes are lost. Read-only SELECTs may skip it.
     /// Internal `execute`/`query_*` paths still call this implicitly.
     public fn flush_statement(&mut self, stmt: &PreparedStatement) {
         writeback_cursors_to_connection(stmt, &mut self.conn);
@@ -503,16 +508,18 @@ implement Database {
     // Transaction — affine handle API
     // -------------------------------------------------------------------------
     //
+
     // Spec database.md §4.1+§5.5: `Transaction` is `affine` — the value
     // MUST be consumed by exactly one of `commit_tx` / `rollback_tx`.
     // The compiler refuses to drop a Transaction out of scope, which
     // makes "leaked transaction" (the most common production SQL bug)
     // lexically impossible.
     //
+
     // For the 90% case use `with_transaction(|d| body)`; for the
     // advanced manual case use `begin_tx_*` + `commit_tx`/`rollback_tx`.
 
-    /// Begin a deferred transaction (BEGIN).  Returns the affine
+    /// Begin a deferred transaction (BEGIN). Returns the affine
     /// handle the caller MUST consume.
     public fn begin_tx(&mut self) -> Result<Transaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
@@ -540,7 +547,7 @@ implement Database {
         }
     }
 
-    /// Consume the transaction handle and COMMIT.  Returns
+    /// Consume the transaction handle and COMMIT. Returns
     /// `DbMisuse(...)` if the connection's tx-depth no longer matches
     /// what `tx` recorded at begin time (savepoint left dangling).
     public fn commit_tx(&mut self, tx: Transaction) -> Result<(), SqliteApiDbError> {
@@ -549,7 +556,7 @@ implement Database {
         let now = self.conn.tx_depth();
         if now != started + 1 {
             // The user opened a savepoint and forgot to release it before
-            // committing the outer tx.  We refuse and let them clean up.
+            // committing the outer tx. We refuse and let them clean up.
             return Err(DbMisuse(
                 "commit_tx called with stale tx-depth — release nested savepoints first"
                     .clone(),
@@ -561,7 +568,7 @@ implement Database {
         }
     }
 
-    /// Consume the transaction handle and ROLLBACK.  Tolerant of stale
+    /// Consume the transaction handle and ROLLBACK. Tolerant of stale
     /// depth — rollback is a recovery path, so we issue the ROLLBACK
     /// regardless.
     public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), SqliteApiDbError> {
@@ -576,6 +583,7 @@ implement Database {
     /// Begins, runs, and commits on success; rolls back on either a
     /// `body` error or a panic propagating through the closure.
     ///
+
     /// This is the recommended entry point for almost all transactional
     /// code — the affine `Transaction` value is created and consumed
     /// internally so the caller never has to thread it.
@@ -603,7 +611,7 @@ implement Database {
         }
     }
 
-    /// IMMEDIATE-mode variant of `with_transaction`.  Useful in
+    /// IMMEDIATE-mode variant of `with_transaction`. Useful in
     /// concurrent-writer setups to avoid SQLITE_BUSY.
     public fn with_transaction_immediate<R>(
         &mut self,

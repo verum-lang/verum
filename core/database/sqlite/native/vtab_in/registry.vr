@@ -48,7 +48,7 @@ implement VtabInRegistry {
         -1
     }
 
-    /// Returns 0 / 1 per the sqlite3_vtab_in contract.  Query-mode
+    /// Returns 0 / 1 per the sqlite3_vtab_in contract. Query-mode
     /// returns eligibility; Commit / Revert flip the handled flag.
     pub fn sqlite3_vtab_in(&mut self, index: Int, mode: &RequestMode) -> Int {
         let idx = self.find(index);

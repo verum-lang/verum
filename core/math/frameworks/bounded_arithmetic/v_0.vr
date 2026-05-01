@@ -7,6 +7,7 @@
 /// Bounded comprehension over Σ^B_0-formulas; induction restricted to
 /// the same class. ν^weak = 0.
 ///
+
 /// V3 form: parameterised over a complexity-class index naming the
 /// fragment claim (0 = LOGSPACE for V_0).
 @framework(bounded_arithmetic_v_0, "V_0 (Cook-Reckhow 1979 / Cook-Nguyen 2010 §V): LOGSPACE")

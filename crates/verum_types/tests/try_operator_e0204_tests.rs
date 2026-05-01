@@ -14,13 +14,17 @@
 )]
 //! Comprehensive tests for E0204: Multiple conversion paths detection
 //!
+
 //! E0204 Multiple conversion paths: when try (?) operator finds multiple From implementations for error conversion, requiring explicit disambiguation
 //!
+
 //! This test suite validates that the type checker correctly detects ambiguous
 //! From implementations that create multiple conversion paths for the ? operator.
 //!
+
 //! # Test Coverage
 //!
+
 //! 1. Direct vs indirect path ambiguity
 //! 2. Multiple indirect paths
 //! 3. Single path (no ambiguity)
@@ -59,11 +63,14 @@ fn named_type(name: &str) -> Type {
 
 /// Helper to create a From<source_type> protocol implementation for a target type.
 ///
+
 /// This properly registers the implementation with the protocol checker,
 /// enabling the `find_all_conversion_paths` algorithm to discover it.
 ///
+
 /// # Arguments
 ///
+
 /// * `protocol_checker` - The protocol checker to register with
 /// * `source_type` - The type being converted from (the T in From<T>)
 /// * `target_type` - The type implementing From<T>
@@ -102,10 +109,11 @@ fn register_from_impl(
 #[test]
 fn test_e0204_direct_vs_indirect_path() {
     // Scenario:
-    //   implement From<ErrorA> for AppError       // Direct path
-    //   implement From<ErrorA> for ErrorB         // Indirect via ErrorB
-    //   implement From<ErrorB> for AppError
+    //  implement From<ErrorA> for AppError // Direct path
+    //  implement From<ErrorA> for ErrorB // Indirect via ErrorB
+    //  implement From<ErrorB> for AppError
     //
+
     // Expected: E0204 - Two paths from ErrorA to AppError
 
     let mut checker = TypeChecker::new();
@@ -138,11 +146,12 @@ fn test_e0204_direct_vs_indirect_path() {
 #[test]
 fn test_e0204_multiple_indirect_paths() {
     // Scenario:
-    //   implement From<ErrorA> for ErrorB1
-    //   implement From<ErrorB1> for AppError      // Path 1: A -> B1 -> App
-    //   implement From<ErrorA> for ErrorB2
-    //   implement From<ErrorB2> for AppError      // Path 2: A -> B2 -> App
+    //  implement From<ErrorA> for ErrorB1
+    //  implement From<ErrorB1> for AppError // Path 1: A -> B1 -> App
+    //  implement From<ErrorA> for ErrorB2
+    //  implement From<ErrorB2> for AppError // Path 2: A -> B2 -> App
     //
+
     // Expected: E0204 - Two indirect paths
 
     let mut checker = TypeChecker::new();
@@ -176,8 +185,9 @@ fn test_e0204_multiple_indirect_paths() {
 #[test]
 fn test_e0204_no_ambiguity_single_path() {
     // Scenario:
-    //   implement From<ErrorA> for AppError       // Only one path
+    //  implement From<ErrorA> for AppError // Only one path
     //
+
     // Expected: No E0204 error - unambiguous conversion
 
     let mut checker = TypeChecker::new();
@@ -204,12 +214,13 @@ fn test_e0204_no_ambiguity_single_path() {
 #[test]
 fn test_e0204_three_way_ambiguity() {
     // Scenario:
-    //   implement From<ErrorA> for AppError              // Path 1: direct
-    //   implement From<ErrorA> for ErrorB
-    //   implement From<ErrorB> for AppError              // Path 2: via B
-    //   implement From<ErrorA> for ErrorC
-    //   implement From<ErrorC> for AppError              // Path 3: via C
+    //  implement From<ErrorA> for AppError // Path 1: direct
+    //  implement From<ErrorA> for ErrorB
+    //  implement From<ErrorB> for AppError // Path 2: via B
+    //  implement From<ErrorA> for ErrorC
+    //  implement From<ErrorC> for AppError // Path 3: via C
     //
+
     // Expected: E0204 - Three paths from ErrorA to AppError
 
     let mut checker = TypeChecker::new();
@@ -245,11 +256,12 @@ fn test_e0204_three_way_ambiguity() {
 #[test]
 fn test_e0204_cycle_detection() {
     // Scenario:
-    //   implement From<ErrorA> for ErrorB
-    //   implement From<ErrorB> for ErrorC
-    //   implement From<ErrorC> for ErrorA         // Cycle!
-    //   implement From<ErrorC> for AppError       // Valid path
+    //  implement From<ErrorA> for ErrorB
+    //  implement From<ErrorB> for ErrorC
+    //  implement From<ErrorC> for ErrorA // Cycle!
+    //  implement From<ErrorC> for AppError // Valid path
     //
+
     // Expected: Should detect path A -> B -> C -> App without infinite loop
 
     let mut checker = TypeChecker::new();
@@ -280,13 +292,14 @@ fn test_e0204_cycle_detection() {
 #[test]
 fn test_e0204_max_depth_limit() {
     // Scenario: Very long conversion chain (> 5 steps)
-    //   implement From<E1> for E2
-    //   implement From<E2> for E3
-    //   implement From<E3> for E4
-    //   implement From<E4> for E5
-    //   implement From<E5> for E6
-    //   implement From<E6> for AppError          // Too deep!
+    //  implement From<E1> for E2
+    //  implement From<E2> for E3
+    //  implement From<E3> for E4
+    //  implement From<E4> for E5
+    //  implement From<E5> for E6
+    //  implement From<E6> for AppError // Too deep!
     //
+
     // Expected: Max depth of 5 should prevent finding this path
 
     let mut checker = TypeChecker::new();
@@ -325,17 +338,19 @@ fn test_e0204_max_depth_limit() {
 #[test]
 fn test_e0204_diamond_pattern() {
     // Scenario:
-    //          ErrorA
-    //         /      \
-    //     ErrorB    ErrorC
-    //         \      /
-    //         AppError
+    //  ErrorA
+    //  / \
+    //  ErrorB ErrorC
+    //  \ /
+    //  AppError
     //
-    //   implement From<ErrorA> for ErrorB
-    //   implement From<ErrorA> for ErrorC
-    //   implement From<ErrorB> for AppError
-    //   implement From<ErrorC> for AppError
+
+    //  implement From<ErrorA> for ErrorB
+    //  implement From<ErrorA> for ErrorC
+    //  implement From<ErrorB> for AppError
+    //  implement From<ErrorC> for AppError
     //
+
     // Expected: E0204 - Two paths (via B and via C)
 
     let mut checker = TypeChecker::new();

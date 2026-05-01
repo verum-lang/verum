@@ -1,11 +1,13 @@
 //! Demonstration of enhanced refinement error diagnostics
 //!
+
 //! This example shows how the enhanced diagnostics provide:
 //! - Actual value tracking
 //! - Predicate decomposition with ✓/✗ markers
 //! - Context-aware suggestions
 //! - Multi-constraint breakdown
 //!
+
 //! Run with: cargo run --example refinement_diagnostics_demo
 
 use verum_ast::{

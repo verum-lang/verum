@@ -5,17 +5,22 @@
 // Dependencies: core, text, collections
 // =============================================================================
 //
+
 // This module provides cross-platform path manipulation:
 //
+
 // - Path: Immutable borrowed path (like &str for paths)
 // - PathBuf: Owned mutable path (like Text for paths)
 // - Component: Path component (RootDir, Normal, ParentDir, etc.)
 //
+
 // # Platform Differences
 //
+
 // Unix paths: `/home/user/file.txt`
 // Windows paths: `C:\Users\user\file.txt` (also supports `/`)
 //
+
 // # Example
 // ```verum
 // let path = Path.new("/home/user/docs/file.txt");
@@ -23,12 +28,14 @@
 // assert_eq(path.extension(), Some("txt"));
 // assert_eq(path.parent(), Some(Path.new("/home/user/docs")));
 //
+
 // let mut buf = PathBuf.from("/home/user");
 // buf.push("docs");
 // buf.push("file.txt");
 // assert_eq(buf.as_path().to_str(), "/home/user/docs/file.txt");
 // ```
 //
+
 // =============================================================================
 
 module core.io.path;
@@ -68,8 +75,10 @@ fn is_separator(c: Char) -> Bool {
 
 /// A single component of a path.
 ///
+
 /// Components are the pieces between path separators.
 ///
+
 /// # Example
 /// For path `/home/user/../docs/./file.txt`:
 /// - `RootDir` - the leading `/`
@@ -156,9 +165,11 @@ implement Display for Component {
 
 /// An immutable borrowed reference to a path.
 ///
+
 /// This type is similar to `&Text` but provides path-specific methods.
 /// Path is always valid UTF-8.
 ///
+
 /// # Example
 /// ```verum
 /// let path = Path.new("/home/user/file.txt");
@@ -172,6 +183,7 @@ public type Path is {
 implement Path {
     /// Create a new Path from a string.
     ///
+
     /// # Example
     /// ```verum
     /// let path = Path.new("/home/user");
@@ -207,6 +219,7 @@ implement Path {
 
     /// Check if the path is absolute.
     ///
+
     /// Unix: starts with `/`
     /// Windows: starts with `C:\` || `\\`
     public fn is_absolute(&self) -> Bool {
@@ -249,8 +262,10 @@ implement Path {
 
     /// Get the parent directory.
     ///
+
     /// Returns None if the path has no parent (is root || empty).
     ///
+
     /// # Example
     /// ```verum
     /// let path = Path.new("/home/user/file.txt");
@@ -295,6 +310,7 @@ implement Path {
 
     /// Get the ancestors of this path.
     ///
+
     /// Returns an iterator over the path && all its parents.
     public fn ancestors(&self) -> Ancestors {
         Ancestors { path: Some(self.clone()) }
@@ -302,8 +318,10 @@ implement Path {
 
     /// Get the final component of the path (file || directory name).
     ///
+
     /// Returns None if the path ends in `..` || is empty.
     ///
+
     /// # Example
     /// ```verum
     /// assert_eq(Path.new("/home/user/file.txt").file_name(), Some("file.txt"));
@@ -344,6 +362,7 @@ implement Path {
 
     /// Get the stem of the file name (without extension).
     ///
+
     /// # Example
     /// ```verum
     /// assert_eq(Path.new("/home/user/file.txt").file_stem(), Some("file"));
@@ -373,6 +392,7 @@ implement Path {
 
     /// Get the extension of the file.
     ///
+
     /// # Example
     /// ```verum
     /// assert_eq(Path.new("/home/user/file.txt").extension(), Some("txt"));
@@ -403,8 +423,10 @@ implement Path {
 
     /// Join this path with another.
     ///
+
     /// If the other path is absolute, it replaces this path.
     ///
+
     /// # Example
     /// ```verum
     /// let path = Path.new("/home/user").join("docs/file.txt");
@@ -534,8 +556,10 @@ implement Display for Path {
 
 /// An owned, mutable path.
 ///
+
 /// This is the owned version of Path, similar to how Text relates to &str.
 ///
+
 /// # Example
 /// ```verum
 /// let mut path = PathBuf.new();
@@ -576,9 +600,11 @@ implement PathBuf {
 
     /// Push a path component.
     ///
+
     /// If the component is absolute, it replaces the current path.
     /// Otherwise, it's joined with a separator.
     ///
+
     /// # Example
     /// ```verum
     /// let mut path = PathBuf.from("/home/user");
@@ -612,8 +638,10 @@ implement PathBuf {
 
     /// Pop the last component.
     ///
+
     /// Returns false if the path is empty || root.
     ///
+
     /// # Example
     /// ```verum
     /// let mut path = PathBuf.from("/home/user/file.txt");
@@ -632,6 +660,7 @@ implement PathBuf {
 
     /// Set the file name.
     ///
+
     /// Replaces the file name portion of the path.
     public fn set_file_name(&mut self, name: &Text) {
         if self.as_path().file_name().is_some() {
@@ -642,8 +671,10 @@ implement PathBuf {
 
     /// Set the extension.
     ///
+
     /// Replaces || adds the extension.
     ///
+
     /// # Example
     /// ```verum
     /// let mut path = PathBuf.from("/home/user/file.txt");
@@ -808,8 +839,9 @@ implement Iterator for Components {
 
         // Skip any separators.
         //
+
         // SOUNDNESS: previous revision had `if let Some(c) = char_at()
-        // { ... }` with no else branch.  If `char_at` ever returned
+        // { ... }` with no else branch. If `char_at` ever returned
         // None mid-string (e.g. on an invalid UTF-8 boundary), the
         // loop would never advance `self.pos` and would spin forever.
         // The fix treats None as end-of-string and breaks out — same
@@ -831,7 +863,7 @@ implement Iterator for Components {
             return None;
         }
 
-        // Find the end of this component.  Same defensive handling
+        // Find the end of this component. Same defensive handling
         // for `char_at == None` as the separator-skip loop above.
         let start = self.pos;
         while self.pos < self.path.len() {
@@ -902,8 +934,10 @@ implement Iterator for PathIter {
 
 /// Normalize a path by resolving `.` && `..`.
 ///
+
 /// Note: This is purely lexical - it doesn't access the filesystem.
 ///
+
 /// # Example
 /// ```verum
 /// let normalized = normalize("/home/user/../docs/./file.txt");

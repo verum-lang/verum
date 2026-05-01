@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2
 //
+
 // Recursive-descent parser. Lexes whitespace-separated tokens with
 // special handling for `"..."` (phrases), `AND`/`OR`/`NOT` (operators),
 // `NEAR(t1, t2, n)` (proximity).

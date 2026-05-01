@@ -1,45 +1,54 @@
 //! Linear Logic — full propositional connectives + exponentials.
 //!
+
 //! Where QTT (`qtt_usage`) tracks resource usage by quantity
 //! arithmetic, **linear logic** (Girard 1987) does it through
 //! a richer connective algebra:
 //!
+
 //! ```text
-//!     A, B ::= a              (atom)
-//!            | A ⊗ B          (tensor:  both A and B, paired)
-//!            | A ⅋ B          (par:     both A and B, parallel)
-//!            | A & B          (with:    one of A, B by external choice)
-//!            | A ⊕ B          (plus:    one of A, B by internal choice)
-//!            | A ⊸ B          (lolli:   linear function A → B)
-//!            | !A             (of-course / bang: A unrestricted)
-//!            | ?A             (why-not: A weakenable & contractable)
-//!            | 1, ⊥           (units of ⊗, ⅋)
-//!            | ⊤, 0           (units of &, ⊕)
-//!            | A^⊥            (linear negation / dual)
+//!  A, B ::= a (atom)
+//!  | A ⊗ B (tensor: both A and B, paired)
+//!  | A ⅋ B (par: both A and B, parallel)
+//!  | A & B (with: one of A, B by external choice)
+//!  | A ⊕ B (plus: one of A, B by internal choice)
+//!  | A ⊸ B (lolli: linear function A → B)
+//!  | !A (of-course / bang: A unrestricted)
+//!  | ?A (why-not: A weakenable & contractable)
+//!  | 1, ⊥ (units of ⊗, ⅋)
+//!  | ⊤, 0 (units of &, ⊕)
+//!  | A^⊥ (linear negation / dual)
 //! ```
 //!
+
 //! ## de Morgan dualities
 //!
+
 //! Linear negation is involutive (`(A^⊥)^⊥ = A`) and exchanges:
 //!
+
 //! ```text
-//!     (A ⊗ B)^⊥ = A^⊥ ⅋ B^⊥
-//!     (A & B)^⊥ = A^⊥ ⊕ B^⊥
-//!     (!A)^⊥    = ?(A^⊥)
-//!     1^⊥       = ⊥
-//!     ⊤^⊥       = 0
-//!     (A ⊸ B)   ≡ A^⊥ ⅋ B    (definitional)
+//!  (A ⊗ B)^⊥ = A^⊥ ⅋ B^⊥
+//!  (A & B)^⊥ = A^⊥ ⊕ B^⊥
+//!  (!A)^⊥ = ?(A^⊥)
+//!  1^⊥ = ⊥
+//!  ⊤^⊥ = 0
+//!  (A ⊸ B) ≡ A^⊥ ⅋ B (definitional)
 //! ```
 //!
+
 //! ## Structural rules
 //!
+
 //! Linear logic restricts contraction (use a hypothesis twice)
 //! and weakening (drop a hypothesis) to formulas under `!`. The
 //! [`is_unrestricted`] and [`is_weakenable`] predicates classify
 //! formulas accordingly.
 //!
+
 //! ## Status
 //!
+
 //! Standalone algebraic core. Integration with QTT is a future
 //! step — `!A` corresponds to `Quantity::Omega`, `?A` to
 //! `Quantity::AtMost(n)` for some n, plain atoms to
@@ -213,13 +222,15 @@ impl LinForm {
     /// number of times, including zero. The unrestricted-shape set
     /// in classical linear logic:
     ///
+
     /// - `!A` (`OfCourse`) admits weakening + contraction on the
-    ///   LHS — the bang's exponential structural rules.
+    ///  LHS — the bang's exponential structural rules.
     /// - `?A` (`WhyNot`) admits weakening + contraction on the RHS
-    ///   — the dual why-not modality.
+    ///  — the dual why-not modality.
     /// - `⊤` (`Top`) is the additive truth: `⊢ Δ, ⊤` absorbs any
-    ///   surrounding context, so it admits both rules trivially.
+    ///  surrounding context, so it admits both rules trivially.
     ///
+
     /// `1` (`One`) is the unit of `⊗` — exactly one proof, no
     /// structural rules. The previous implementation classified
     /// `One` as unrestricted; that was a soundness defect that
@@ -294,7 +305,7 @@ mod tests {
 
     #[test]
     fn dual_of_tensor_is_par_after_nnf() {
-        // (A ⊗ B)^⊥  ↦  A^⊥ ⅋ B^⊥
+        // (A ⊗ B)^⊥ ↦ A^⊥ ⅋ B^⊥
         let lhs = LinForm::dual_of(LinForm::tensor(a(), b()));
         let nnf = lhs.negation_normal_form();
         assert_eq!(
@@ -334,7 +345,7 @@ mod tests {
 
     #[test]
     fn lolli_definition_unfolds_to_par_of_dual() {
-        // A ⊸ B  ≡  A^⊥ ⅋ B
+        // A ⊸ B ≡ A^⊥ ⅋ B
         let lolli = LinForm::lolli(a(), b());
         assert_eq!(lolli, LinForm::par(LinForm::dual_of(a()), b()));
     }
@@ -370,7 +381,7 @@ mod tests {
 
     #[test]
     fn nested_dual_pushes_inward() {
-        // ((A ⊗ B)^⊥)^⊥  ↦  A ⊗ B   (involution)
+        // ((A ⊗ B)^⊥)^⊥ ↦ A ⊗ B (involution)
         let inner = LinForm::tensor(a(), b());
         let f = LinForm::dual_of(LinForm::dual_of(inner.clone()));
         assert_eq!(f.negation_normal_form(), inner);
@@ -431,7 +442,7 @@ mod tests {
 
     #[test]
     fn deeply_nested_de_morgan_normalises() {
-        // (! (A ⊗ B))^⊥  ↦  ?(A^⊥ ⅋ B^⊥)
+        // (! (A ⊗ B))^⊥ ↦ ?(A^⊥ ⅋ B^⊥)
         let f = LinForm::dual_of(LinForm::of_course(LinForm::tensor(a(), b())));
         let nnf = f.negation_normal_form();
         assert_eq!(

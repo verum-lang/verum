@@ -3,25 +3,28 @@
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
 // Spec: Mac Lane "Categories for the Working Mathematician" Ch. X,
-//       Lurie "Higher Topos Theory" §4.3
+//  Lurie "Higher Topos Theory" §4.3
 //
+
 // ∞-categorical Kan extensions: the universal way to extend a functor
 // along another functor up to coherent homotopy.
 //
+
 // This module provides:
-//   §1  Left Kan extension (Lan_K F) — pointwise homotopy colimit
-//   §2  Right Kan extension (Ran_K F) — pointwise homotopy limit
-//   §3  Adjunction triple: Lan_K ⊣ K* ⊣ Ran_K
-//   §4  Pointwise Kan extensions and preservation
-//   §5  Comma categories (over-categories)
-//   §6  Computational algorithms for finite categories
-//   §7  Obstruction measurement
-//   §8  Theorems
+//  §1 Left Kan extension (Lan_K F) — pointwise homotopy colimit
+//  §2 Right Kan extension (Ran_K F) — pointwise homotopy limit
+//  §3 Adjunction triple: Lan_K ⊣ K* ⊣ Ran_K
+//  §4 Pointwise Kan extensions and preservation
+//  §5 Comma categories (over-categories)
+//  §6 Computational algorithms for finite categories
+//  §7 Obstruction measurement
+//  §8 Theorems
 //
+
 // See also:
-//   core/math/category.vr          — 1-categorical Kan extensions
-//   core/math/infinity_category.vr — InfinityCategory, InfinityFunctor
-//   core/math/infinity_topos.vr    — ∞-sheaves (heavy users of Kan exts)
+//  core/math/category.vr — 1-categorical Kan extensions
+//  core/math/infinity_category.vr — InfinityCategory, InfinityFunctor
+//  core/math/infinity_topos.vr — ∞-sheaves (heavy users of Kan exts)
 // =============================================================================
 
 module core.math.kan_extension;
@@ -43,8 +46,10 @@ mount core.math.category.{LeftKanExtension, RightKanExtension};
 /// is the universal ∞-functor equipped with a natural transformation
 /// η : F → Lan_K F ∘ K such that:
 ///
-///   Map(Lan_K F, G) ≃ Map(F, G ∘ K)   for all G : E → D
+
+///  Map(Lan_K F, G) ≃ Map(F, G ∘ K) for all G : E → D
 ///
+
 /// Pointwise: Lan_K F(e) = colim_{(K ↓ e)} F
 public type InfLeftKanExtension<C, D, E: InfinityCategory> is protocol
     extends InfinityFunctor<E, D>
@@ -175,11 +180,13 @@ public type CommaCategory is {
 
 /// Build the comma category (K ↓ e) from finite data.
 ///
+
 /// Given:
-///   - k_on_objects[i] = K(c_i) for each object c_i of C
-///   - morphisms_to_target[(src, img, mor)] = morphisms from K-images to e
-///   - target = the object e
+///  - k_on_objects[i] = K(c_i) for each object c_i of C
+///  - morphisms_to_target[(src, img, mor)] = morphisms from K-images to e
+///  - target = the object e
 ///
+
 /// Returns the comma category with all objects and morphisms.
 public fn build_comma_category(
     k_on_objects: &List<Int>,
@@ -227,11 +234,14 @@ public type KanExtensionResult is
 
 /// Compute the pointwise left Kan extension at a target object.
 ///
+
 /// Lan_K(F)(d) = colim_{(K ↓ d)} F
 ///
+
 /// For a finite category C, this builds the comma category (K ↓ d),
 /// restricts F to it, and computes the finite colimit.
 ///
+
 /// # Arguments
 /// * `k_values` — K(c_i) for each object c_i of C
 /// * `f_values` — F(c_i) for each object c_i of C
@@ -287,9 +297,9 @@ public fn compute_pointwise_lan(
 
     // Step 2: Restrict F to the comma category and compute the colimit.
     // Colimit of a finite diagram:
-    //   - Discrete diagram: coproduct (disjoint union → sum for Set-valued)
-    //   - Connected diagram: coequalizer of face maps
-    //   - General: iterated pushouts
+    //  - Discrete diagram: coproduct (disjoint union → sum for Set-valued)
+    //  - Connected diagram: coequalizer of face maps
+    //  - General: iterated pushouts
 
     let mut colimit = 0;
     for obj in comma_objects.iter() {
@@ -307,8 +317,10 @@ public fn compute_pointwise_lan(
 
 /// Compute the pointwise right Kan extension at a target object.
 ///
+
 /// Ran_K(F)(d) = lim_{(d ↓ K)} F
 ///
+
 /// Dual to left Kan: uses limits instead of colimits.
 public fn compute_pointwise_ran(
     k_values: &List<Int>,
@@ -414,9 +426,11 @@ public type ObstructionData is {
 
 /// Measure the obstruction of a right Kan extension.
 ///
+
 /// The obstruction is the deviation of the counit ε : Ran_K ∘ K* → Id
 /// from being an isomorphism. Returns detailed obstruction data.
 ///
+
 /// An obstruction of 0 means the extension is exact (no
 /// information loss). This is the key diagnostic for
 /// theory-translation systems: when translating between

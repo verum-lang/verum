@@ -16,6 +16,7 @@ use super::super::super::tensor::{TensorHandle, DType};
 /// Handler for TensorNew opcode (0xF0).
 /// Creates a new tensor with specified shape and dtype.
 ///
+
 /// Format: `dst:reg, shape_len:u8, shape..., dtype:u8`
 pub(in super::super) fn handle_tensor_new(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -39,6 +40,7 @@ pub(in super::super) fn handle_tensor_new(state: &mut InterpreterState) -> Inter
 /// Handler for TensorBinop opcode (0xF1).
 /// Performs element-wise binary operation on tensors.
 ///
+
 /// Format: `op:u8, dst:reg, a:reg, b:reg`
 pub(in super::super) fn handle_tensor_binop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let op_byte = read_u8(state)?;
@@ -72,6 +74,7 @@ pub(in super::super) fn handle_tensor_binop(state: &mut InterpreterState) -> Int
 /// Handler for TensorUnop opcode (0xF2).
 /// Performs element-wise unary operation on tensor.
 ///
+
 /// Format: `op:u8, dst:reg, src:reg`
 pub(in super::super) fn handle_tensor_unop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let op_byte = read_u8(state)?;
@@ -100,6 +103,7 @@ pub(in super::super) fn handle_tensor_unop(state: &mut InterpreterState) -> Inte
 /// Handler for TensorMatmul opcode (0xF3).
 /// Performs matrix multiplication on tensors.
 ///
+
 /// Format: `dst:reg, a:reg, b:reg`
 pub(in super::super) fn handle_tensor_matmul(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -131,6 +135,7 @@ pub(in super::super) fn handle_tensor_matmul(state: &mut InterpreterState) -> In
 /// Handler for TensorReduce opcode (0xF4).
 /// Performs reduction operation along specified axes.
 ///
+
 /// Format: `op:u8, dst:reg, src:reg, axes_len:u8, axes..., keepdim:bool`
 pub(in super::super) fn handle_tensor_reduce(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let op_byte = read_u8(state)?;
@@ -168,6 +173,7 @@ pub(in super::super) fn handle_tensor_reduce(state: &mut InterpreterState) -> In
 /// Handler for TensorReshape opcode (0xF5).
 /// Reshapes tensor to new shape.
 ///
+
 /// Format: `dst:reg, src:reg, shape_len:u8, shape...`
 pub(in super::super) fn handle_tensor_reshape(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -199,6 +205,7 @@ pub(in super::super) fn handle_tensor_reshape(state: &mut InterpreterState) -> I
 /// Handler for TensorTranspose opcode (0xF6).
 /// Transposes tensor (swaps last two dimensions).
 ///
+
 /// Format: `dst:reg, src:reg`
 pub(in super::super) fn handle_tensor_transpose(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -225,6 +232,7 @@ pub(in super::super) fn handle_tensor_transpose(state: &mut InterpreterState) ->
 /// Handler for TensorSlice opcode (0xF7).
 /// Slices tensor along specified ranges.
 ///
+
 /// Format: `dst:reg, src:reg, ranges_len:u8, (start, end)...`
 pub(in super::super) fn handle_tensor_slice(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -260,6 +268,7 @@ pub(in super::super) fn handle_tensor_slice(state: &mut InterpreterState) -> Int
 /// Handler for TensorFull opcode (0xFE).
 /// Creates a tensor filled with a constant value.
 ///
+
 /// Format: `dst:reg, value:reg, shape_len:varint, shape_regs..., dtype:u8`
 pub(in super::super) fn handle_tensor_full(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
@@ -292,6 +301,7 @@ pub(in super::super) fn handle_tensor_full(state: &mut InterpreterState) -> Inte
 /// Handler for TensorFromSlice opcode (0xFF).
 /// Creates a tensor from a data source (list of values).
 ///
+
 /// Format: `dst:reg, data:reg, shape_len:varint, shape_regs..., dtype:u8`
 pub(in super::super) fn handle_tensor_from_slice(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;

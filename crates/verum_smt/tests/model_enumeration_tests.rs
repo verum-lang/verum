@@ -14,6 +14,7 @@
 )]
 //! Model Enumeration Tests - Sort Universe Extraction
 //!
+
 //! These tests verify that we can enumerate all values of finite sorts
 //! from Z3 models using the C API.
 

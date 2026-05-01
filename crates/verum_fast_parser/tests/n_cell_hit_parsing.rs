@@ -1,9 +1,11 @@
 //! n-cell HIT surface parsing.
 //!
+
 //! Verifies that the parser correctly recognises the higher-cell
 //! HIT syntax `Foo() = (lhs..rhs) .. (lhs'..rhs')` and computes
 //! the variant's `path_dim` from the endpoint nesting depth.
 //!
+
 //! Note: when an n-cell variant is followed by another variant
 //! (rather than `;`), the user must use a separate `type` decl
 //! for the higher cell or trail with a `;`. The current parser

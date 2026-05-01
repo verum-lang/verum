@@ -14,6 +14,7 @@
 )]
 // Unit tests for error.rs
 //
+
 // Migrated from src/error.rs to comply with test organization guidelines.
 
 use verum_ast::span::{FileId, Span};
@@ -51,6 +52,7 @@ fn test_error_with_help() {
 // Error Message Formatting Tests
 // =============================================================================
 //
+
 // These tests verify that error messages display human-readable file:line:column
 // locations instead of internal representations like FileId(0):1367-1386.
 
@@ -134,7 +136,7 @@ fn test_multiline_error_span() {
     let source = "fn foo() {\n    invalid\n    syntax\n}";
     verum_common::register_source_file(file_id, "multiline.vr", source);
 
-    // Span covering "invalid\n    syntax" (bytes 15-35)
+    // Span covering "invalid\n syntax" (bytes 15-35)
     let span = Span::new(15, 35, file_id);
     let error = ParseError::new(
         ParseErrorKind::InvalidSyntax {

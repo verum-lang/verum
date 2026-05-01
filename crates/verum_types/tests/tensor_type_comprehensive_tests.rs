@@ -14,6 +14,7 @@
 )]
 // Comprehensive tensor type system tests
 //
+
 // SIMD and tensor system: unified Tensor<T, Shape> type with compile-time shape validation, SIMD acceleration (SSE/AVX/NEON), auto-differentiation
 // This module provides exhaustive testing of tensor type checking:
 // - Shape inference and validation
@@ -22,6 +23,7 @@
 // - Matrix multiplication shape checking
 // - Type compatibility for all tensor operations
 //
+
 // Target: ~150 tensor type tests per tensor type system roadmap requirements
 
 use verum_ast::span::Span;

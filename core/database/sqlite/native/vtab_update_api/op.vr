@@ -41,9 +41,9 @@ public fn changes_rowid(o: &VtabUpdateOp) -> Bool {
 }
 
 // Classify given argc and two equality flags about argv[0].
-//   argc_is_one              — argc == 1 → DELETE
-//   argv0_is_null            — argv[0] is NULL
-//   argv0_equals_argv1       — argv[0] == argv[1] (when argc > 1)
+//  argc_is_one — argc == 1 → DELETE
+//  argv0_is_null — argv[0] is NULL
+//  argv0_equals_argv1 — argv[0] == argv[1] (when argc > 1)
 public fn classify(
     argc_is_one: Bool,
     argv0_is_null: Bool,

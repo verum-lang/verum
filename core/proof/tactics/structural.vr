@@ -1,6 +1,7 @@
 // core.proof.tactics.structural — induction + case analysis
 // over inductive / variant types.
 //
+
 // These tactics consume the induction / recursion principles
 // auto-derived by `InductiveType.finalize` (task #74) — any
 // inductive declared via `type T is A | B(...)` has its
@@ -8,11 +9,13 @@
 
 // Proof by structural induction on a variable.
 //
+
 // `induction(x)` looks up `x`'s type, fetches the type's
 // auto-derived induction principle, and opens one subgoal per
 // constructor. Recursive constructors get an induction
 // hypothesis added to the local context.
 //
+
 // Requires: `x` has an inductive type registered in the
 // current scope (finalized via `InductiveType.finalize`).
 // Fails with a useful diagnostic if the type has no
@@ -22,18 +25,21 @@ tactic induction(var: Hypothesis) { induction(var) }
 
 // Destructure a variant into cases.
 //
+
 // `destruct(x)` opens one subgoal per variant in `x`'s type,
 // with the variant's payload bound into the local context for
 // each case. The goal type stays the same in each branch — this
 // is the non-inductive analogue of `induction`, used for
 // variant-with-payload pattern matching on the goal.
 //
+
 // The fresh payload binders use compiler-chosen names; see
 // `destruct_as` for the named form.
 tactic destruct(var: Hypothesis) { destruct(var) }
 
 // Destructure + name the payloads explicitly.
 //
+
 // `destruct_as(x, ["n", "xs"])` names the payload binders for
 // each variant's fields. The names list must have one entry
 // per field in the constructor's payload; a mismatch fails.
@@ -44,16 +50,19 @@ tactic destruct_as(
 
 // Case analysis on a proposition.
 //
+
 // `case(P)` splits the goal into two subgoals: one with `P` as
 // a hypothesis, one with `¬P`. Useful when the goal admits
 // different strategies depending on whether `P` holds.
 //
+
 // Classical-only; the `¬P` branch only makes sense when
 // double-negation elimination is admitted.
 tactic case(prop: Expr) { case(prop) }
 
 // Enumerate every variant without specific naming.
 //
+
 // `cases(x)` is shorthand for `destruct` followed by a `first`-
 // combinator attempt that tries `trivial` / `auto` on each
 // branch. The common case for "kill every variant by auto";
@@ -62,6 +71,7 @@ tactic cases(var: Hypothesis) { cases(var) }
 
 // Well-founded induction on a measure.
 //
+
 // `induction_on(m)` takes a measure function `m: T -> Nat` and
 // performs induction on `m(x)` for the current variable `x`.
 // Requires that `m` is known to decrease along the recursion

@@ -1,9 +1,11 @@
 //! Performance Benchmarks for Kind Inference
 //!
+
 //! Higher-kinded type (HKT) kind inference: infers kinds for type constructors
 //! (e.g., List has kind Type -> Type, Map has kind Type -> Type -> Type).
 //! Uses constraint-based kind inference with unification.
 //!
+
 //! Performance Targets:
 //! - Kind inference: <5ms for typical protocols
 //! - Kind checking: <1ms per type application
@@ -265,8 +267,8 @@ fn bench_functor_protocol(c: &mut Criterion) {
     c.bench_function("kind_check_functor_protocol", |b| {
         // Simulate Functor protocol:
         // protocol Functor {
-        //     type F<_>  // Kind: * -> *
-        //     fn fmap<A, B>(f: fn(A) -> B, fa: F<A>) -> F<B>
+        //  type F<_> // Kind: * -> *
+        //  fn fmap<A, B>(f: fn(A) -> B, fa: F<A>) -> F<B>
         // }
 
         let type_params = List::from(vec![GATTypeParam {
@@ -306,9 +308,9 @@ fn bench_monad_protocol(c: &mut Criterion) {
     c.bench_function("kind_check_monad_protocol", |b| {
         // Simulate Monad protocol:
         // protocol Monad {
-        //     type M<_>  // Kind: * -> *
-        //     fn pure<T>(value: T) -> M<T>
-        //     fn flat_map<A, B>(ma: M<A>, f: fn(A) -> M<B>) -> M<B>
+        //  type M<_> // Kind: * -> *
+        //  fn pure<T>(value: T) -> M<T>
+        //  fn flat_map<A, B>(ma: M<A>, f: fn(A) -> M<B>) -> M<B>
         // }
 
         let type_params = List::from(vec![GATTypeParam {

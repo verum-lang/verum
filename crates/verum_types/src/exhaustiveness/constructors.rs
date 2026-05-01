@@ -1,10 +1,13 @@
 //! Type Constructor Enumeration
 //!
+
 //! This module provides the ability to enumerate all constructors for a given type.
 //! Constructors represent the different ways a value of a type can be built.
 //!
+
 //! # Examples
 //!
+
 //! - `Bool` has two constructors: `true` and `false`
 //! - `Maybe<T>` has two constructors: `Some(T)` and `None`
 //! - `Int` has infinitely many constructors (each integer value)
@@ -122,6 +125,7 @@ impl TypeConstructors {
 
 /// Get all constructors for a type
 ///
+
 /// This is the main entry point for constructor enumeration.
 pub fn get_type_constructors(ty: &Type, env: &TypeEnv) -> TypeConstructors {
     match ty {

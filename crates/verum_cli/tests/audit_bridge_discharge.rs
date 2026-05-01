@@ -1,20 +1,21 @@
 //! Integration tests for `verum audit --bridge-discharge` (#134 / MSFS-L4.1).
 //!
+
 //! Pin coverage:
-//!   - Empty project (no `.vr` proof bodies citing kernel bridges) →
-//!     report shows 0 callsites + 0 bridges + exit 0.
-//!   - Project with a literal-arg discharge that the dispatcher
-//!     accepts (`apply kernel_grothendieck_construction_strict(1)`) →
-//!     report shows 1 callsite, `holds: true`, exit 0.
-//!   - Project with a literal-arg discharge that the dispatcher
-//!     REJECTS (e.g. `apply kernel_grothendieck_construction_strict(0)`
-//!     — fails the `StrictPos` precondition at the dispatcher) →
-//!     report shows 1 callsite with `holds: false`, exits non-zero.
-//!   - Project that cites a `kernel_*` bridge with no dispatcher
-//!     entry → audit reports it under `unknown_bridges` and exits
-//!     non-zero.
-//!   - JSON output carries the schema_version=1 envelope and the
-//!     per-callsite `holds` field is rendered correctly.
+//!  - Empty project (no `.vr` proof bodies citing kernel bridges) →
+//!  report shows 0 callsites + 0 bridges + exit 0.
+//!  - Project with a literal-arg discharge that the dispatcher
+//!  accepts (`apply kernel_grothendieck_construction_strict(1)`) →
+//!  report shows 1 callsite, `holds: true`, exit 0.
+//!  - Project with a literal-arg discharge that the dispatcher
+//!  REJECTS (e.g. `apply kernel_grothendieck_construction_strict(0)`
+//!  — fails the `StrictPos` precondition at the dispatcher) →
+//!  report shows 1 callsite with `holds: false`, exits non-zero.
+//!  - Project that cites a `kernel_*` bridge with no dispatcher
+//!  entry → audit reports it under `unknown_bridges` and exits
+//!  non-zero.
+//!  - JSON output carries the schema_version=1 envelope and the
+//!  per-callsite `holds` field is rendered correctly.
 
 #![allow(unused_imports)]
 
@@ -71,7 +72,7 @@ fn empty_project_reports_zero_callsites() {
 #[test]
 fn literal_arg_passing_discharge_succeeds() {
     // `kernel_grothendieck_construction_strict` requires `StrictPos`
-    // (i.e., n > 0).  A literal `1` passes the dispatcher gate.
+    // (i.e., n > 0). A literal `1` passes the dispatcher gate.
     let body = r#"
 public theorem example_theorem()
     ensures true

@@ -4,33 +4,39 @@
 // Layer: 5 (Network — HTTP/3)
 // =============================================================================
 //
+
 // RFC 9114 §4.6:
 //
-//   Server push is an HTTP/3 feature that allows a server to send a
-//   response to a client in anticipation of the client requesting it.
-//   A server initiates a push by sending a PUSH_PROMISE frame on a
-//   request stream; the push request is delivered on a push stream
-//   (HTTP unidirectional stream type 0x01).
+
+//  Server push is an HTTP/3 feature that allows a server to send a
+//  response to a client in anticipation of the client requesting it.
+//  A server initiates a push by sending a PUSH_PROMISE frame on a
+//  request stream; the push request is delivered on a push stream
+//  (HTTP unidirectional stream type 0x01).
 //
+
 // Flow:
 //
-//   1. Client advertises its push-id budget via MAX_PUSH_ID frame
-//      (on the control stream). Initial budget is 0.
-//   2. Server opens a unidirectional stream with type 0x01, writes
-//      the push_id varint, then the HTTP/3 response as DATA + HEADERS
-//      frames.
-//   3. Server emits PUSH_PROMISE on the original request stream
-//      carrying the pushed request's QPACK-encoded headers.
-//   4. Client MAY cancel a push by sending CANCEL_PUSH on the control
-//      stream. Server MAY cancel via CANCEL_PUSH on its control
-//      stream.
+
+//  1. Client advertises its push-id budget via MAX_PUSH_ID frame
+//  (on the control stream). Initial budget is 0.
+//  2. Server opens a unidirectional stream with type 0x01, writes
+//  the push_id varint, then the HTTP/3 response as DATA + HEADERS
+//  frames.
+//  3. Server emits PUSH_PROMISE on the original request stream
+//  carrying the pushed request's QPACK-encoded headers.
+//  4. Client MAY cancel a push by sending CANCEL_PUSH on the control
+//  stream. Server MAY cancel via CANCEL_PUSH on its control
+//  stream.
 //
+
 // The `PushEmitter` below tracks the server-side budget locally and
 // rejects emissions past the client-advertised limit. It does NOT
 // wire push streams end-to-end; the integration layer (h3.server)
 // drives the stream write after `emit_promise` returns a promise
 // descriptor.
 //
+
 // =============================================================================
 
 module core.net.h3.push;
@@ -98,10 +104,11 @@ implement Eq for PushError {
 
 /// Per-connection push-id allocator. Call sites:
 ///
-///   * on each `MAX_PUSH_ID` frame from the client → `grant(id)`.
-///   * on each `CANCEL_PUSH` from the client → `mark_cancelled(id)`.
-///   * before initiating a new push → `reserve(headers) -> PushPromiseDescriptor`.
-///   * on client GOAWAY → `mark_client_goneaway()`.
+
+///  * on each `MAX_PUSH_ID` frame from the client → `grant(id)`.
+///  * on each `CANCEL_PUSH` from the client → `mark_cancelled(id)`.
+///  * before initiating a new push → `reserve(headers) -> PushPromiseDescriptor`.
+///  * on client GOAWAY → `mark_client_goneaway()`.
 public type PushEmitter is {
     /// Highest push_id the client will accept. RFC 9114 §7.2.7:
     /// MAX_PUSH_ID is cumulative (monotonically non-decreasing).

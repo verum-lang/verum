@@ -1,5 +1,6 @@
 //! Build-time symbol manifest reader (#102).
 //!
+
 //! Counterpart to the `build_symbol_manifest` extractor in
 //! `build.rs`. Reads the embedded archive of per-module top-level
 //! declarations so the type-checker can resolve `mount core.X.{Y}`
@@ -7,24 +8,30 @@
 //! late-resolution path (the user might `mount core.X.{Y}` referring
 //! to a symbol whose owning module hasn't been pulled in yet).
 //!
+
 //! # Why a separate manifest from the dep graph
 //!
+
 //! The dep graph (`stdlib_dep_graph.rs`) records `mount` edges.
 //! The symbol manifest records `pub fn`, `pub type`, `pub const`, …
 //! definitions. They serve orthogonal queries:
 //!
-//!   * dep graph → "if I mount X, what other modules do I drag in?"
-//!   * symbol manifest → "what's defined inside X?"
+
+//!  * dep graph → "if I mount X, what other modules do I drag in?"
+//!  * symbol manifest → "what's defined inside X?"
 //!
+
 //! Each is target-independent (no AST, no platform-specific
 //! lowering — pure textual scan); both are pre-computed at build time
 //! so the compiler avoids re-doing the work per session.
 //!
+
 //! # Performance contract
 //!
-//!   * Decompress + parse: ~3 ms (~170 KB compressed manifest).
-//!   * Symbol lookup: O(1) HashMap.
-//!   * Memory: ~1 MB after deserialisation (~36800 symbols × ~30 B).
+
+//!  * Decompress + parse: ~3 ms (~170 KB compressed manifest).
+//!  * Symbol lookup: O(1) HashMap.
+//!  * Memory: ~1 MB after deserialisation (~36800 symbols × ~30 B).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;

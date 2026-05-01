@@ -1,41 +1,52 @@
 //! verum_llvm_sys - Low-level FFI bindings for LLVM and LLD
 //!
+
 //! This crate provides raw FFI bindings to LLVM's C API and LLD linker.
 //! It uses a locally built or downloaded LLVM installation from `llvm/install/`.
 //!
+
 //! ## Features
 //!
+
 //! - `llvm` (default): Core LLVM bindings
 //! - `lld` (default): LLD linker bindings
 //! - `static` (default): Static linking
 //! - `orc2`: OrcV2 JIT compilation API
 //!
+
 //! ## Usage
 //!
+
 //! ```rust,no_run
 //! use verum_llvm_sys::core::{LLVMContextCreate, LLVMContextDispose};
 //! use verum_llvm_sys::verum_llvm_initialize_all_targets;
 //!
+
 //! unsafe {
-//!     // Initialize LLVM
-//!     verum_llvm_initialize_all_targets();
+//!  // Initialize LLVM
+//!  verum_llvm_initialize_all_targets();
 //!
-//!     // Create context
-//!     let ctx = LLVMContextCreate();
-//!     // ...
-//!     LLVMContextDispose(ctx);
+
+//!  // Create context
+//!  let ctx = LLVMContextCreate();
+//!  // ...
+//!  LLVMContextDispose(ctx);
 //! }
 //! ```
 //!
+
 //! ## Building
 //!
+
 //! This crate requires LLVM to be installed. The build script searches for LLVM in:
 //!
+
 //! 1. `VERUM_LLVM_DIR` environment variable
 //! 2. `LLVM_SYS_211_PREFIX` environment variable
 //! 3. `llvm/install/` directory in workspace root
 //! 4. Downloads prebuilt from GitHub Releases
 //!
+
 //! To build LLVM locally:
 //! ```bash
 //! cd llvm && ./build.sh
@@ -67,8 +78,10 @@ unsafe extern "C" {
 
 /// Initialize all LLVM targets (convenience function)
 ///
+
 /// # Safety
 ///
+
 /// This function is safe to call multiple times, but should typically
 /// be called once at program startup.
 pub fn initialize_targets() {
@@ -83,8 +96,10 @@ pub fn initialize_targets() {
 
 /// Initialize only the native target (convenience function)
 ///
+
 /// # Safety
 ///
+
 /// This function is safe to call multiple times.
 pub fn initialize_native_target() {
     unsafe {

@@ -1,5 +1,6 @@
 //! Standard attribute registration for Verum.
 //!
+
 //! This module registers all built-in Verum attributes with the registry.
 //! Attributes are organized by category for maintainability.
 
@@ -1394,18 +1395,22 @@ fn register_ffi_attributes(registry: &mut AttributeRegistry) {
 
     // @console / @gui — Windows PE subsystem hint applied to `fn main`.
     //
+
     // `@console`: standard CLI app (default), allocates a console
-    // window when launched.  Maps to `/SUBSYSTEM:CONSOLE`.
+    // window when launched. Maps to `/SUBSYSTEM:CONSOLE`.
     //
-    // `@gui`: Win32 GUI app, no console window allocated.  Maps to
-    // `/SUBSYSTEM:WINDOWS`.  The runtime's `print()` helper
+
+    // `@gui`: Win32 GUI app, no console window allocated. Maps to
+    // `/SUBSYSTEM:WINDOWS`. The runtime's `print()` helper
     // gracefully degrades when the process has no console (returns
     // count, doesn't block).
     //
+
     // Resolution order with manifest / CLI knobs (highest precedence
     // first): `--windows-subsystem` CLI flag > `@gui`/`@console`
     // attribute > `[build].windows_subsystem` manifest > Console.
     //
+
     // Ignored on non-Windows targets.
     registry
         .register(

@@ -2,33 +2,41 @@
 // core/net/weft/listener.vr — TCP listener + shared accept loop
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §4.2, §4.4, §7.8
+// Spec: internal/specs/net-framework.md §4.2, §4.4, §7.8
 // =============================================================================
 //
+
 // Owns the bind + accept lifecycle. The per-connection behaviour is
 // pluggable through the `ConnectionRunner` protocol, so the same loop
 // drives plain-TCP (`Server<H>`) and TLS-terminating (`TlsServer<H>`,
 // see `tls.vr`) variants without duplicated code.
 //
+
 // Responsibilities:
 //
-//   * Lifecycle. Own the cancellation token + draining flag. One
-//     `.shutdown()` triggers graceful drain; `.begin_drain()` stops
-//     accepting while letting in-flight requests finish.
+
+//  * Lifecycle. Own the cancellation token + draining flag. One
+//  `.shutdown()` triggers graceful drain; `.begin_drain()` stops
+//  accepting while letting in-flight requests finish.
 //
-//   * Concurrency budget. `max_concurrent_connections` bounds total
-//     in-flight connections; excess sockets are closed immediately via
-//     the runner's `refuse_overloaded` hook — TCP runners emit a 503
-//     HTTP reply, TLS runners just drop (can't speak plaintext).
+
+//  * Concurrency budget. `max_concurrent_connections` bounds total
+//  in-flight connections; excess sockets are closed immediately via
+//  the runner's `refuse_overloaded` hook — TCP runners emit a 503
+//  HTTP reply, TLS runners just drop (can't speak plaintext).
 //
-//   * Per-connection task isolation. Each connection is spawned into
-//     its own task; the runner owns the lifecycle until return.
+
+//  * Per-connection task isolation. Each connection is spawned into
+//  its own task; the runner owns the lifecycle until return.
 //
+
 // Out of scope (phase 5):
 //
-//   * io_uring multi-shot accept / registered buffers (§4.2.1–2).
-//   * Kernel-bypass reactor (§6.8).
+
+//  * io_uring multi-shot accept / registered buffers (§4.2.1–2).
+//  * Kernel-bypass reactor (§6.8).
 //
+
 // =============================================================================
 
 module core.net.weft.listener;
@@ -68,9 +76,9 @@ public type ListenerConfig is {
     /// the listener emits 503 + closes for any further accept
     /// from that IP — without consuming a global slot.
     /// 0 disables the per-IP throttle (NOT recommended in
-    /// internet-exposed deployments).  Default 100.
+    /// internet-exposed deployments). Default 100.
     per_ip_max: Int,
-    /// Optional io_uring multi-shot accept config (§6.17).  `None`
+    /// Optional io_uring multi-shot accept config (§6.17). `None`
     /// keeps the existing `TcpListener::accept` path; `Some(cfg)`
     /// opts the listener into the strategy selected by
     /// `io_uring_accept.select_accept_strategy(target_triple, cfg)`.
@@ -105,11 +113,11 @@ implement ListenerConfig {
     }
 
     /// Opt the listener into io_uring multi-shot accept (Linux ≥ 6.11)
-    /// per spec §6.17.  The supplied `IoUringAcceptConfig` is handed
+    /// per spec §6.17. The supplied `IoUringAcceptConfig` is handed
     /// to `select_accept_strategy()` at startup; on non-Linux targets
     /// or when V1 isn't yet wired the listener silently falls through
     /// to today's `TcpListener::accept` path — caller-side behaviour
-    /// is unchanged either way.  Default for new `ListenerConfig`s
+    /// is unchanged either way. Default for new `ListenerConfig`s
     /// remains `None` (no behavioural change to existing call sites).
     public fn with_io_uring_strategy(self, cfg: IoUringAcceptConfig) -> ListenerConfig {
         ListenerConfig { io_uring_accept: Some(cfg), ..self }
@@ -123,10 +131,12 @@ implement ListenerConfig {
 /// The pluggable piece that turns a freshly-accepted TCP socket into a
 /// served HTTP/* connection. Implementations decide:
 ///
-///   * Whether to wrap the socket in TLS (or any other transport).
-///   * Which protocol to speak (HTTP/1.1, HTTP/2 via ALPN, WebSocket).
-///   * What to say to a client refused for overload.
+
+///  * Whether to wrap the socket in TLS (or any other transport).
+///  * Which protocol to speak (HTTP/1.1, HTTP/2 via ALPN, WebSocket).
+///  * What to say to a client refused for overload.
 ///
+
 /// The two phase-3 implementors are `PlainHttp1Runner<H>` (defined
 /// below) and `TlsHttp1Runner<H>` (`tls.vr`). Both ultimately drive
 /// `serve_http1` but differ in the transport adapter.
@@ -190,15 +200,17 @@ implement<H: Handler + Send + Sync + 'static> ConnectionRunner for PlainHttp1Run
     }
 
     async fn refuse_overloaded(&self, mut stream: TcpStream) {
-        // Best-effort minimal 503 before drop.  We do NOT go through
+        // Best-effort minimal 503 before drop. We do NOT go through
         // the full response pipeline — the peer didn't yet finish a
         // request that Weft could parse.
         //
+
         // Pre-fix the write went through `await` directly on the
         // accept-loop's task — a slow attacker (TCP-handshake-then-stall)
         // could stall the loop on its 503 response, blocking new
-        // accepts.  Redteam §6.
+        // accepts. Redteam §6.
         //
+
         // Post-fix the write is fire-and-forget under a 1-second
         // deadline: spawn the write into its own task so the
         // accept-loop returns immediately; the deadline ensures the
@@ -228,10 +240,12 @@ implement<H: Handler + Send + Sync + 'static> ConnectionRunner for PlainHttp1Run
 /// The heart of every Weft server. Consumes ownership of the listener,
 /// runs until cancelled or drained, returns on clean shutdown.
 ///
+
 /// Typed parameters:
 ///
-///   * `R` — the connection runner (zero-cost polymorphism via
-///     monomorphisation; no `Box<dyn>` on the hot path).
+
+///  * `R` — the connection runner (zero-cost polymorphism via
+///  monomorphisation; no `Box<dyn>` on the hot path).
 public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>(
     listener: TcpListener,
     config: ListenerConfig,
@@ -240,22 +254,24 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
     runner: R,
 ) -> Result<(), Text> {
     // ConnectionLimiter + PerIpLimiter: shared atomic + RAII ticket
-    // pattern.  The accept loop *acquires* a ticket before spawning
+    // pattern. The accept loop *acquires* a ticket before spawning
     // the per-conn task; the ticket's `Drop` impl decrements both
     // counters unconditionally — whether the spawned future returned
     // normally, panicked, was cancelled, or got dropped at shutdown.
     //
+
     // Pre-fix the manual `counter.fetch_sub` after
     // `runner_c.run().await` ran ONLY in the happy-path return,
     // leaking the slot on every panic — after
     // `max_concurrent_connections` panics the listener refused
-    // every subsequent client with 503 (redteam §1).  And the
+    // every subsequent client with 503 (redteam §1). And the
     // global cap was the only DoS guard — a single attacker IP
     // saturated all 10 000 slots in one box (redteam §10).
     //
+
     // The RAII pattern uses Verum's existing primitives —
     // `Shared<AtomicInt>` for the counters, language-level Drop
-    // for the release.  No new runtime infrastructure; the type
+    // for the release. No new runtime infrastructure; the type
     // system makes both leak classes impossible at compile time.
     let limiter = ConnectionLimiter.new(config.max_concurrent_connections);
     let per_ip = PerIpLimiter.new(config.per_ip_max);
@@ -296,7 +312,7 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
                     // `_ticket` outlives `runner_c.run` and is dropped
                     // here — even if `run` panics, even if the task is
                     // cancelled, even if a host shutdown unwinds the
-                    // future.  The slot release is the type system's
+                    // future. The slot release is the type system's
                     // responsibility, not the developer's.
                     let _ticket = global_slot;
                     runner_c.run(stream, peer).await;
@@ -320,6 +336,7 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
 // ConnectionLimiter — RAII slot accounting for accept_loop
 // =============================================================================
 //
+
 // The accept loop bounds in-flight connections via an atomic counter
 // shared between the loop and every spawned per-connection task.
 // The counter must decrement on EVERY exit path of the per-conn
@@ -327,13 +344,15 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
 // listener leaks slots and eventually refuses every new client
 // with 503 (silent DoS).
 //
+
 // Pre-fix the decrement was a manual `counter.fetch_sub(...)` at
-// the end of the spawned closure.  Panic paths skipped it.  A
+// the end of the spawned closure. Panic paths skipped it. A
 // single panic-prone handler turned the listener into a slow-fuse
 // DoS.
 //
+
 // Post-fix the counter is wrapped in a `ConnectionLimiter` whose
-// `try_acquire` returns a `ConnectionTicket`.  The ticket's
+// `try_acquire` returns a `ConnectionTicket`. The ticket's
 // `Drop` impl unconditionally decrements the counter — Verum's
 // language-level Drop runs on every exit path, so the leak
 // becomes impossible at compile time.
@@ -353,9 +372,9 @@ implement ConnectionLimiter {
         }
     }
 
-    /// Try to acquire a global slot.  Returns `None` when the
+    /// Try to acquire a global slot. Returns `None` when the
     /// limiter is at capacity — caller emits a 503 / refuses the
-    /// connection.  On `Some(ticket)`, the slot is reserved until
+    /// connection. On `Some(ticket)`, the slot is reserved until
     /// the ticket is dropped.
     public fn try_acquire(&self) -> Maybe<ConnectionTicket> {
         let cur = self.in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
@@ -373,8 +392,8 @@ implement ConnectionLimiter {
     }
 
     /// Try to acquire a global slot with a pre-acquired per-IP
-    /// slot bundled in.  The ticket's Drop releases both — global
-    /// counter first, then per-IP — atomically.  When the global
+    /// slot bundled in. The ticket's Drop releases both — global
+    /// counter first, then per-IP — atomically. When the global
     /// acquire fails, the caller is responsible for releasing the
     /// already-acquired per-IP slot via `drop(per_ip_slot)`; we
     /// release it here on the race-loss path so callers don't
@@ -405,12 +424,12 @@ implement ConnectionLimiter {
     }
 }
 
-/// RAII guard for one occupied slot.  Dropping releases the slot.
+/// RAII guard for one occupied slot. Dropping releases the slot.
 /// Move-only by design — cloning would double-release.
 public type ConnectionTicket is {
     in_flight: Shared<AtomicInt>,
     /// Per-IP slot the ticket also owns (None if per-IP limit
-    /// disabled).  The Drop impl releases both atomically — global
+    /// disabled). The Drop impl releases both atomically — global
     /// slot first, then per-IP — so a panic between releases can
     /// never leak the global slot.
     per_ip_slot: Maybe<Shared<AtomicInt>>,
@@ -429,19 +448,22 @@ implement Drop for ConnectionTicket {
 // PerIpLimiter — close redteam §10 single-source DoS surface
 // =============================================================================
 //
+
 // Pre-fix the listener had only a *global* `max_concurrent_connections`
-// cap.  A single attacker IP could open all 10 000 slots from one
-// box, shutting out every legitimate client.  The DoS surface
+// cap. A single attacker IP could open all 10 000 slots from one
+// box, shutting out every legitimate client. The DoS surface
 // included everyone NAT'd behind the same egress.
 //
+
 // Post-fix `PerIpLimiter` keys an `AtomicInt` per peer-IP via a
-// `Shared<Map<IpAddr, Shared<AtomicInt>>>`.  The check fires
+// `Shared<Map<IpAddr, Shared<AtomicInt>>>`. The check fires
 // BEFORE `task.spawn` so attackers can't even sustain the per-conn
-// task-spawn cost.  Eviction: when the per-IP counter reaches 0,
+// task-spawn cost. Eviction: when the per-IP counter reaches 0,
 // the map entry is reaped on next access (no background sweeper —
 // the lazy-evict pattern keeps the limiter zero-cost during steady
 // state).
 //
+
 // `per_ip_max == 0` disables the limiter entirely — recommended
 // only on internal services where peer IPs are trusted.
 
@@ -461,9 +483,9 @@ implement PerIpLimiter {
         }
     }
 
-    /// Try to acquire one slot for `peer`.  Returns `None` when
+    /// Try to acquire one slot for `peer`. Returns `None` when
     /// the peer-IP has already saturated its budget; caller emits
-    /// 503 + close.  On `Some(slot)` the caller stores the
+    /// 503 + close. On `Some(slot)` the caller stores the
     /// `Shared<AtomicInt>` inside the connection's `Ticket` so
     /// Drop releases it.
     public fn try_acquire(&self, peer: &IpAddr) -> Maybe<Shared<AtomicInt>> {
@@ -500,11 +522,12 @@ implement PerIpLimiter {
 /// Bound listener + shared `Handler`. Call `.serve().await` to run
 /// until cancellation. Two-phase shutdown (§7.8):
 ///
-///   1. `begin_drain()` — stop accepting new connections, mark the
-///      draining flag so existing keep-alive connections stamp
-///      `Connection: close` on their next response.
-///   2. `shutdown()`    — both `begin_drain()` and token cancel;
-///      after `drain_grace_ms` any still-running handler is dropped.
+
+///  1. `begin_drain()` — stop accepting new connections, mark the
+///  draining flag so existing keep-alive connections stamp
+///  `Connection: close` on their next response.
+///  2. `shutdown()` — both `begin_drain()` and token cancel;
+///  after `drain_grace_ms` any still-running handler is dropped.
 public type Server<H> is {
     listener: TcpListener,
     app: Heap<H>,

@@ -14,11 +14,13 @@
 )]
 // Three-tier reference model tests
 //
+
 // Tests Verum's three-tier reference system:
 // - `&T` - CBGR-managed references (~15ns overhead)
 // - `&checked T` - Runtime bounds checking
 // - `&unsafe T` - Zero-cost, no checks
 //
+
 // Verum type system with semantic types (List, Text, Map, Maybe) and HM inference
 
 use verum_ast::{

@@ -14,6 +14,7 @@
 )]
 //! Tests for documentation extraction from attributes
 //!
+
 //! Per CLAUDE.md standards: Tests in tests/ directory, not inline
 
 use verum_ast::FileId;
@@ -133,6 +134,7 @@ fn test_multiline_doc_extraction() {
 fn test_block_doc_extraction() {
     let source = r#"
         /**
+
          * Block style documentation
          * with multiple lines
          */

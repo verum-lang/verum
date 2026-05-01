@@ -1,5 +1,6 @@
 //! Public API for verum_compiler
 //!
+
 //! This module provides a clean, well-designed public API for the Verum compiler.
 //! It exposes the key compilation functions that can be used by:
 //! - VCS test runner (vtest)
@@ -7,12 +8,16 @@
 //! - IDE integrations (LSP)
 //! - Embedding applications
 //!
+
 //! # Architecture
 //!
+
 //! The compiler is split into two main pipelines:
 //!
+
 //! ## Common Pipeline (Source → TypedAST)
 //!
+
 //! This is the core of the language implementation, covering:
 //! - Lexical analysis and parsing (verum_lexer, verum_fast_parser)
 //! - Macro expansion (meta-system)
@@ -21,31 +26,39 @@
 //! - Contract verification (SMT-based pre/post conditions)
 //! - Context system validation (using/provide)
 //! - CBGR reference tier analysis (verum_cbgr) - determines reference safety tiers:
-//!   - Tier 0: Runtime checked (~15ns overhead)
-//!   - Tier 1: Compiler-proven safe (0ns overhead)
-//!   - Tier 2: Unsafe (manual proof required)
+//!  - Tier 0: Runtime checked (~15ns overhead)
+//!  - Tier 1: Compiler-proven safe (0ns overhead)
+//!  - Tier 2: Unsafe (manual proof required)
 //!
+
 //! The Common Pipeline produces `TypedAST` which can be verified against
 //! the full language specification.
 //!
+
 //! ## Backend Pipeline (TypedAST → Execution)
 //!
+
 //! Handles tier-specific compilation:
 //! - VBC code generation
 //! - Monomorphization
 //! - Interpreter / JIT / AOT execution
 //!
+
 //! # Example
 //!
+
 //! ```ignore
 //! use verum_compiler::api::{parse, typecheck, run_common_pipeline};
 //!
+
 //! // Parse only
 //! let ast = parse("fn main() { print(\"hello\"); }")?;
 //!
+
 //! // Parse + type check
 //! let typed = typecheck("fn main() { let x: Int = 42; }")?;
 //!
+
 //! // Full common pipeline with verification
 //! let config = CommonPipelineConfig::default();
 //! let result = run_common_pipeline(&["main.vr"], &config)?;
@@ -238,12 +251,12 @@ pub struct CommonPipelineConfig {
     /// `[protocols].resolution_strategy` — selects how
     /// `ProtocolChecker::find_impl` resolves multi-candidate
     /// matches: `"most_specific"` (default), `"first_declared"`,
-    /// or `"error"`.  Forwarded via
+    /// or `"error"`. Forwarded via
     /// `with_protocol_resolution_strategy`.
     pub protocol_resolution_strategy: verum_common::Text,
     /// `[protocols].blanket_impls` — when false, blanket impls
     /// (`impl<T> Protocol for T`) are excluded from the
-    /// candidate set.  Forwarded via `with_protocol_blanket_impls`.
+    /// candidate set. Forwarded via `with_protocol_blanket_impls`.
     pub protocol_blanket_impls: bool,
     /// `[protocols].coherence` — selects how strictly orphan-rule
     /// + overlap checks gate `register_impl`:
@@ -257,7 +270,7 @@ pub struct CommonPipelineConfig {
     pub protocol_higher_kinded_protocols: bool,
     /// `[protocols].generic_associated_types` — when false (the
     /// default), GAT-bearing protocol declarations (`type
-    /// Item<T>` inside a protocol body) are rejected.  Forwarded
+    /// Item<T>` inside a protocol body) are rejected. Forwarded
     /// via `with_protocol_generic_associated_types`.
     pub protocol_generic_associated_types: bool,
     /// Optional shared routing-stats collector. When present, the
@@ -544,18 +557,25 @@ impl From<String> for SourceFile {
 
 /// Parse source code into AST.
 ///
+
 /// This is Phase 1 of the compilation pipeline.
 ///
+
 /// # Arguments
 ///
+
 /// * `source` - Source code to parse
 ///
+
 /// # Returns
 ///
+
 /// Parsed AST module or parse error
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// let ast = verum_compiler::api::parse("fn main() { print(\"hello\"); }")?;
 /// ```
@@ -575,22 +595,29 @@ pub fn parse(source: &str) -> Result<Module, CompilationError> {
 
 /// Parse and type check source code.
 ///
+
 /// This runs Phases 1-4 of the compilation pipeline:
 /// - Phase 1: Lexical parsing
 /// - Phase 2: Meta registry (minimal)
 /// - Phase 3: Macro expansion
 /// - Phase 4: Semantic analysis (type checking)
 ///
+
 /// # Arguments
 ///
+
 /// * `source` - Source code to compile
 ///
+
 /// # Returns
 ///
+
 /// Typed AST (HIR) module or compilation error
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// let typed = verum_compiler::api::typecheck("fn main() { let x: Int = 42; }")?;
 /// ```
@@ -614,6 +641,7 @@ pub fn typecheck(source: &str) -> Result<HirModule, CompilationError> {
 
 /// Run the common pipeline (Source → TypedAST).
 ///
+
 /// This runs Phases 1-4b of the compilation pipeline:
 /// - Phase 1: Lexical parsing
 /// - Phase 2: Meta registry
@@ -622,28 +650,36 @@ pub fn typecheck(source: &str) -> Result<HirModule, CompilationError> {
 /// - Phase 4: Semantic analysis (type inference, refinements)
 /// - Phase 4b: Context validation (if enabled)
 ///
+
 /// The common pipeline is the core of the language implementation and should
 /// be fully verified against the language specification.
 ///
+
 /// # Arguments
 ///
+
 /// * `sources` - Source files to compile
 /// * `config` - Pipeline configuration
 ///
+
 /// # Returns
 ///
+
 /// Common pipeline result containing typed AST and diagnostics
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// let config = CommonPipelineConfig::default();
 /// let result = run_common_pipeline(&[SourceFile::load("main.vr")?], &config)?;
 ///
+
 /// if result.has_errors() {
-///     for diag in &result.diagnostics {
-///         eprintln!("{}", diag);
-///     }
+///  for diag in &result.diagnostics {
+///  eprintln!("{}", diag);
+///  }
 /// }
 /// ```
 pub fn run_common_pipeline(
@@ -680,13 +716,14 @@ pub fn run_common_pipeline(
 
     // Phase context.
     //
+
     // `verify_mode` is enabled when EITHER `verify_contracts` (SMT
     // proof of `requires` / `ensures` clauses) or `check_refinements`
-    // (refinement-type predicate verification) is set.  The two flags
+    // (refinement-type predicate verification) is set. The two flags
     // historically described overlapping but conceptually-distinct
     // checks; in the current architecture both flow through the same
     // SMT-backed verification phase, so they're now treated as
-    // siblings on the same gate.  Pre-fix `check_refinements` was an
+    // siblings on the same gate. Pre-fix `check_refinements` was an
     // inert config field — set in three preset constructors but never
     // read, making the documented "Enable refinement type checking"
     // contract a no-op when `verify_contracts` happened to be false.
@@ -1026,20 +1063,27 @@ pub fn run_common_pipeline(
 
 /// Compile source code to VBC bytecode.
 ///
+
 /// This runs Phases 1-5 of the compilation pipeline:
 /// - Phases 1-4b: Common pipeline
 /// - Phase 5: VBC code generation
 ///
+
 /// # Arguments
 ///
+
 /// * `source` - Source code to compile
 ///
+
 /// # Returns
 ///
+
 /// VBC module or compilation error
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// let vbc = verum_compiler::api::compile_to_vbc("fn main() { print(42); }")?;
 /// ```
@@ -1075,27 +1119,34 @@ pub fn compile_to_vbc(source: &str) -> Result<verum_vbc::VbcModule, CompilationE
 
 /// Run full compilation pipeline.
 ///
+
 /// This runs all phases from source to final output:
 /// - Phases 1-4b: Common pipeline
 /// - Phase 5: VBC code generation
 /// - Phase 6: Monomorphization (see `phases/vbc_mono.rs`)
 /// - Phase 7: Execution/compilation (tier-dependent)
 ///
+
 /// # Arguments
 ///
+
 /// * `sources` - Source files to compile
 /// * `config` - Compiler configuration
 ///
+
 /// # Returns
 ///
+
 /// Full compilation result including artifacts
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// let config = CompilerConfig {
-///     target_tier: ExecutionTier::Aot,
-///     ..Default::default()
+///  target_tier: ExecutionTier::Aot,
+///  ..Default::default()
 /// };
 /// let result = compile(&[SourceFile::load("main.vr")?], &config)?;
 /// ```

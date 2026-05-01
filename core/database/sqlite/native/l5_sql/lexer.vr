@@ -6,6 +6,7 @@ module core.database.sqlite.native.l5_sql.lexer;
 // Layer: 5
 // Spec: sqlite-native.md §12.1, sqlite.org/lang.html
 //
+
 // Breaks an input `Text` into a stream of `SqlToken` values ready for the
 // recursive-descent parser in `parser/`. SQLite's SQL dialect is
 // case-insensitive for keywords, allows `--` line comments and
@@ -14,6 +15,7 @@ module core.database.sqlite.native.l5_sql.lexer;
 // hex integer literals, float literals with exponent, and three
 // parameter syntaxes (`?`, `?N`, `:name`, `@name`, `$name`).
 //
+
 // This module intentionally NOT built on top of `core/text/regex` —
 // it's a hand-rolled scanner because SQL's lexing rules are small
 // enough that a single-pass byte-switch is both faster and easier to
@@ -70,11 +72,11 @@ public type Punct is
     | PStar;                       // `*` inside result columns treated as punct
 
 /// Parameter-binding variants — SQLite supports:
-///   `?`      → indexed by sequential position
-///   `?N`     → indexed by explicit number
-///   `:name`  → named
-///   `@name`  → named (alternative)
-///   `$name`  → named (Tcl-style, same behavior as @name)
+///  `?` → indexed by sequential position
+///  `?N` → indexed by explicit number
+///  `:name` → named
+///  `@name` → named (alternative)
+///  `$name` → named (Tcl-style, same behavior as @name)
 public type VariableKind is
       VAnon
     | VIndexed(Int)

@@ -19,7 +19,7 @@ public fn new(r_setup: Int, r_run: Int, n_out: Int) -> WhereLoop {
 
 // Total cost of running this loop once over an outer-loop cardinality of
 // `outer_rows` (log-est). Formula:
-//   total = r_setup + outer_rows * r_run
+//  total = r_setup + outer_rows * r_run
 public fn total_cost(l: &WhereLoop, outer_rows_logest: Int) -> Int {
     add(l.r_setup, mul(outer_rows_logest, l.r_run))
 }

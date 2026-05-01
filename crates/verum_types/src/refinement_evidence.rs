@@ -1,40 +1,51 @@
 //! Refinement Evidence Propagation System
 //!
+
 //! Flow-sensitive refinement evidence tracking: maintains proof witnesses for satisfied
 //! refinement predicates, propagates evidence through control flow (if/match narrowing),
 //! and enables zero-cost refinement checks when evidence is available.
 //!
+
 //! This module implements flow-sensitive refinement tracking, enabling the type
 //! checker to learn and propagate refinement predicates through control flow.
 //!
+
 //! # Problem
 //!
+
 //! Without evidence propagation, the compiler cannot reason about values after
 //! conditional checks:
 //!
+
 //! ```verum
 //! fn process(data: List<Int>) -> Int {
-//!     if data.is_empty() { return 0; }
-//!     // Without evidence propagation: compiler doesn't know data is non-empty
-//!     first(data)  // May generate spurious error
+//!  if data.is_empty() { return 0; }
+//!  // Without evidence propagation: compiler doesn't know data is non-empty
+//!  first(data) // May generate spurious error
 //! }
 //! ```
 //!
+
 //! # Solution
 //!
+
 //! Track refinement evidence through control flow:
 //! 1. After `if cond { return/break/continue }`, we know `!cond` holds
 //! 2. In `if cond { ... }` then-branch, we know `cond` holds
 //! 3. In match arms, we know the pattern matched
 //!
+
 //! # Architecture
 //!
+
 //! - `PathCondition`: A predicate known to be true on current path
 //! - `RefinementEvidence`: Maps variables to learned predicates
 //! - `EvidenceStack`: Stack of evidence scopes for nested control flow
 //!
+
 //! # Performance
 //!
+
 //! - Evidence lookup: O(1) hash map
 //! - Evidence propagation: O(n) where n = active conditions
 //! - Memory: ~64 bytes per tracked variable
@@ -56,6 +67,7 @@ use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 /// A predicate known to be true on the current execution path.
 ///
+
 /// Path conditions are accumulated as we traverse control flow:
 /// - After `if cond { return }`, we add `!cond` as a path condition
 /// - In `if cond { ... }`, we add `cond` in the then-branch
@@ -277,6 +289,7 @@ impl PathCondition {
 
 /// Tracks learned refinement predicates for variables on the current path.
 ///
+
 /// This is the main data structure for flow-sensitive refinement tracking.
 /// It maintains a stack of evidence scopes that correspond to nested control flow.
 #[derive(Debug, Clone)]
@@ -425,6 +438,7 @@ impl RefinementEvidence {
 
     /// Convert all evidence to SMT assumptions
     ///
+
     /// Returns a list of expressions that can be added to SMT path conditions
     pub fn to_smt_assumptions(&self) -> List<Expr> {
         self.get_all_conditions()
@@ -455,6 +469,7 @@ impl RefinementEvidence {
 
 /// Logic for propagating refinement evidence through control flow.
 ///
+
 /// This struct contains the algorithms for determining what evidence
 /// to add based on control flow patterns.
 pub struct EvidencePropagator;
@@ -462,6 +477,7 @@ pub struct EvidencePropagator;
 impl EvidencePropagator {
     /// Analyze an if-condition and extract evidence for both branches.
     ///
+
     /// Returns:
     /// - `then_evidence`: Predicates known true in then-branch
     /// - `else_evidence`: Predicates known true in else-branch (or continuation)
@@ -477,6 +493,7 @@ impl EvidencePropagator {
 
     /// Check if a block unconditionally exits (return, break, continue, panic).
     ///
+
     /// If true, we can propagate negated evidence to the continuation.
     pub fn block_unconditionally_exits(block: &verum_ast::expr::Block) -> bool {
         use verum_ast::stmt::StmtKind;
@@ -545,6 +562,7 @@ impl EvidencePropagator {
 
     /// Analyze a method call condition (e.g., `data.is_empty()`)
     ///
+
     /// Returns the receiver variable name and method name if identifiable.
     pub fn analyze_method_condition(condition: &Expr) -> Maybe<(Text, Text, bool)> {
         match &condition.kind {

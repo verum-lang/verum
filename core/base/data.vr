@@ -6,10 +6,12 @@
 // Spec: docs/improvements.md Section 13.1 - Data Type
 // =============================================================================
 //
+
 // The Data type provides type-safe access to dynamically-structured data.
 // Unlike a full "dyn" escape hatch, Data maintains static typing while
 // enabling work with JSON, external APIs, and other unstructured sources.
 //
+
 // Key design principles:
 // - Semantically honest: "Data" = "runtime-typed value"
 // - All operations are explicitly typed (no implicit any)
@@ -18,21 +20,25 @@
 
 /// Structured dynamic data type.
 ///
+
 /// Represents any JSON-like value at runtime. All access is explicit
 /// and type-safe through accessor methods that return Maybe<T>.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// let response: Data = http.get(url).json()?;
 /// let name = response["user"]["name"].as_text() ?? "Unknown";
 /// let age = response["user"]["age"].as_int() ?? 0;
 ///
+
 /// match response {
-///     Data.Object(obj) => process_object(obj),
-///     Data.Array(arr) => process_array(arr),
-///     Data.Null => handle_null(),
-///     _ => handle_primitive(),
+///  Data.Object(obj) => process_object(obj),
+///  Data.Array(arr) => process_array(arr),
+///  Data.Null => handle_null(),
+///  _ => handle_primitive(),
 /// }
 /// ```
 
@@ -1103,9 +1109,11 @@ implement JsonParser {
 
 /// Parse JSON string into Data.
 ///
+
 /// Supports all JSON value types: null, booleans, numbers (integer and float),
 /// strings (with escape sequences), arrays, and objects.
 ///
+
 /// # Examples
 /// ```verum
 /// let data = parse_json("{\"name\": \"Alice\", \"age\": 30}").unwrap();

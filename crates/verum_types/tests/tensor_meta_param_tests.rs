@@ -14,9 +14,11 @@
 )]
 // Comprehensive tests for tensor operations with meta parameters
 //
+
 // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Meta parameters for compile-time tensor shapes
 // Verum base types: Bool, Int, Float, Text, Unit, plus compound types (Array, Tuple, Record, Function) and Tensor<T, Shape> with compile-time shape parameters — with meta parameters
 //
+
 // These tests verify that meta parameters work correctly for tensor shapes
 // and compile-time computation.
 

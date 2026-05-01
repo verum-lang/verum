@@ -5,32 +5,39 @@
 // Dependencies: core, collections, core.encoding.varint
 // =============================================================================
 //
+
 // RFC 9114 §7.2 — every HTTP/3 frame is:
 //
-//   HTTP/3 Frame Format {
-//       Type (i),
-//       Length (i),
-//       Frame Payload (..),
-//   }
+
+//  HTTP/3 Frame Format {
+//  Type (i),
+//  Length (i),
+//  Frame Payload (..),
+//  }
 //
+
 // Both Type and Length are QUIC varints. Unknown frame types on
 // request / control streams MUST be ignored (§7.2.8) — pass-through
 // via `FrameType.Reserved(v)` so client code can decide.
 //
+
 // Frame catalogue (RFC 9114 §7.2):
 //
-//   0x00  DATA            — request/response body
-//   0x01  HEADERS         — QPACK-encoded field section
-//   0x03  CANCEL_PUSH     — cancel an outstanding server push
-//   0x04  SETTINGS        — control-stream only; negotiated params
-//   0x05  PUSH_PROMISE    — request-stream; server push announce
-//   0x07  GOAWAY          — control-stream; graceful shutdown
-//   0x0D  MAX_PUSH_ID     — control-stream; raise push budget
+
+//  0x00 DATA — request/response body
+//  0x01 HEADERS — QPACK-encoded field section
+//  0x03 CANCEL_PUSH — cancel an outstanding server push
+//  0x04 SETTINGS — control-stream only; negotiated params
+//  0x05 PUSH_PROMISE — request-stream; server push announce
+//  0x07 GOAWAY — control-stream; graceful shutdown
+//  0x0D MAX_PUSH_ID — control-stream; raise push budget
 //
+
 // Reserved frame type `0xff` is reserved for extensions; GREASE
 // values (0x1f × N + 0x21) MUST be ignored per RFC 9114 §7.2.8 +
 // RFC 8701.
 //
+
 // =============================================================================
 
 module core.net.h3.frame;
@@ -304,15 +311,19 @@ fn append(out: &mut List<Byte>, src: &List<Byte>) {
 // Stream-type prefix (RFC 9114 §6.2)
 // =============================================================================
 //
+
 // Unidirectional streams open with a QUIC-varint stream-type prefix:
 //
-//   0x00  Control stream
-//   0x01  Push stream
-//   0x02  QPACK encoder stream  (RFC 9204)
-//   0x03  QPACK decoder stream  (RFC 9204)
+
+//  0x00 Control stream
+//  0x01 Push stream
+//  0x02 QPACK encoder stream (RFC 9204)
+//  0x03 QPACK decoder stream (RFC 9204)
 //
+
 // Plus reserved values (0x1f × N + 0x21 — GREASE).
 //
+
 // =============================================================================
 
 public const STREAM_TYPE_CONTROL:       UInt64 = 0x00;

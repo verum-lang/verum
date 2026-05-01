@@ -14,6 +14,7 @@
 )]
 //! Tests for @transparent attribute and quote hygiene (M400-M409 errors)
 //!
+
 //! These tests verify:
 //! - @transparent attribute is correctly propagated to TypeChecker
 //! - M402 (Accidental Capture) is only emitted for transparent macros

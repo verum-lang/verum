@@ -1,13 +1,16 @@
 //! Severity precedence integration tests.
 //!
+
 //! Locks down the precedence stack documented in
 //! `internal/website/docs/reference/lint-configuration.md`:
 //!
-//!   1. per-file overrides (most specific glob wins)
-//!   2. severity_map (`[lint.severity].<rule>`)
-//!   3. disabled / allowed / denied / warned lists
-//!   4. default level
+
+//!  1. per-file overrides (most specific glob wins)
+//!  2. severity_map (`[lint.severity].<rule>`)
+//!  3. disabled / allowed / denied / warned lists
+//!  4. default level
 //!
+
 //! In-source `@allow` / `@deny` / `@warn` attributes win over all of
 //! the above, scoped to the enclosing item.
 

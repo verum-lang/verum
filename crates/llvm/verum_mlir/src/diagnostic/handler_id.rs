@@ -9,8 +9,10 @@ pub struct DiagnosticHandlerId {
 impl DiagnosticHandlerId {
     /// Creates a diagnostic handler ID from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub const unsafe fn from_raw(raw: MlirDiagnosticHandlerID) -> Self {
         Self { raw }

@@ -1,5 +1,6 @@
 //! Parallel-runner determinism contract.
 //!
+
 //! `verum lint --format json` opportunistically streams issues to
 //! stdout as parallel rayon workers complete each file (see the
 //! `streaming_eligible` branch in `lint.rs`). The streaming path
@@ -8,16 +9,19 @@
 //! pinned in the JSON schema spec so tooling that diffs lint
 //! reports can rely on it.
 //!
+
 //! These tests therefore compare *sorted* outputs across thread
 //! counts: regardless of which worker finished first, the issue
 //! SET is identical, and after the consumer sorts, the byte-
 //! stream is identical too.
 //!
+
 //! Determinism guarantee:
-//!   * every (issue) tuple emitted at threads=N is also emitted at
-//!     threads=M, for any M, N ≥ 1.
-//!   * after lex-sorting each NDJSON line, the streams are equal.
+//!  * every (issue) tuple emitted at threads=N is also emitted at
+//!  threads=M, for any M, N ≥ 1.
+//!  * after lex-sorting each NDJSON line, the streams are equal.
 //!
+
 //! This is the regression gate for any future change that touches
 //! the parallel path — losing the SET-equality would silently
 //! break CI pipelines that diff lint reports across runs.

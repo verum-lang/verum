@@ -3,45 +3,54 @@
 // =============================================================================
 // Layer: 3 (depends on cipher/chacha20 + mac/poly1305)
 // Dependencies: core.security.cipher.chacha20
-//               core.security.mac.poly1305
-//               core.security.util.constant_time
+//  core.security.mac.poly1305
+//  core.security.util.constant_time
 // Reference: RFC 8439 §2.8 — AEAD construction
-//            RFC 7905 — TLS cipher-suite registration
-//            RFC 9001 — QUIC usage
+//  RFC 7905 — TLS cipher-suite registration
+//  RFC 9001 — QUIC usage
 // =============================================================================
 //
+
 // The RFC 8439 AEAD construction combining ChaCha20 and Poly1305.
 // This is the mandatory-to-implement cipher for TLS 1.3
 // (`TLS_CHACHA20_POLY1305_SHA256`) and a first-class choice for QUIC
 // on hosts without AES hardware.
 //
+
 // # Construction (RFC 8439 §2.8.1)
 //
+
 // ```
 // poly_key = ChaCha20-Block(key, counter=0, nonce) [first 32 bytes]
 // ciphertext = ChaCha20-XOR(key, counter=1, nonce, plaintext)
 // mac_data =
-//      AAD                || pad16(AAD)
-//   || ciphertext         || pad16(ciphertext)
-//   || len(AAD)   (8 LE)  || len(ciphertext) (8 LE)
+//  AAD || pad16(AAD)
+//  || ciphertext || pad16(ciphertext)
+//  || len(AAD) (8 LE) || len(ciphertext) (8 LE)
 // tag = Poly1305(poly_key, mac_data)
 // ```
 //
+
 // Poly1305 is used exactly once per (key, nonce) pair — poly_key is
 // regenerated each call via ChaCha20(counter=0). Never reuse a nonce.
 //
+
 // # API
 //
-//   * `ChaCha20Poly1305.new(&key)` — precomputes nothing (stateless
-//     pair with fresh per-message poly_key).
-//   * `.encrypt(iv, aad, plaintext, &mut ciphertext, &mut tag)`.
-//   * `.decrypt(iv, aad, ciphertext, &tag, &mut plaintext)` — tag
-//     verified in constant time before any plaintext is exposed.
+
+//  * `ChaCha20Poly1305.new(&key)` — precomputes nothing (stateless
+//  pair with fresh per-message poly_key).
+//  * `.encrypt(iv, aad, plaintext, &mut ciphertext, &mut tag)`.
+//  * `.decrypt(iv, aad, ciphertext, &tag, &mut plaintext)` — tag
+//  verified in constant time before any plaintext is exposed.
 //
+
 // # Errors
 //
-//   * `TagMismatch`   — integrity check failed; output NOT usable.
+
+//  * `TagMismatch` — integrity check failed; output NOT usable.
 //
+
 // =============================================================================
 
 module core.security.aead.chacha20_poly1305;
@@ -73,7 +82,7 @@ public type AeadError is
     /// keystream — keystream-reuse catastrophe.
     | InputTooLarge { limit_bytes: Int };
 
-// Display + Debug + Eq for AeadError.  TagMismatch
+// Display + Debug + Eq for AeadError. TagMismatch
 // Display avoids field-level detail per RFC 7539 / NIST
 // AEAD semantics — leaking which field failed
 // verification opens timing/oracle side channels.
@@ -124,15 +133,18 @@ implement Eq for AeadError {
 
 /// RFC 7539 §2.8 absolute upper bound on plaintext per (key, nonce):
 ///
-///     max_blocks = 2^32
-///     block_size = 64 bytes
-///     max_bytes  = 2^32 × 64 = 274_877_906_880  ≈ 256 GiB
+
+///  max_blocks = 2^32
+///  block_size = 64 bytes
+///  max_bytes = 2^32 × 64 = 274_877_906_880 ≈ 256 GiB
 ///
+
 /// Any caller wanting to encrypt more than this MUST rotate the
-/// nonce.  Beyond the limit a single (key, nonce) pair the ChaCha20
+/// nonce. Beyond the limit a single (key, nonce) pair the ChaCha20
 /// counter wraps modulo 2^32 and the keystream of block N collides
 /// with block (N − 2^32), enabling plaintext recovery via XOR.
 ///
+
 /// Mirrors the AES-GCM `GCM_MAX_PT_BYTES_PER_NONCE` cap shipped in
 /// the sibling module — both AEADs share the per-nonce keystream-
 /// reuse failure mode, just at different boundary sizes (GCM at
@@ -157,12 +169,13 @@ implement ChaCha20Poly1305 {
 
     /// Seal plaintext → (ciphertext, 16-byte tag).
     ///
+
     /// SOUNDNESS: panics on plaintext exceeding RFC 7539 §2.8
-    /// per-(key,nonce) limit (256 GiB).  Beyond the limit the
+    /// per-(key,nonce) limit (256 GiB). Beyond the limit the
     /// ChaCha20 counter wraps modulo 2^32 and the keystream
     /// repeats — keystream-reuse catastrophe enables plaintext
     /// recovery from any pair of (counter mod 2^32)-aligned
-    /// ciphertext blocks.  Same failure mode and mitigation as
+    /// ciphertext blocks. Same failure mode and mitigation as
     /// the sibling `aes_gcm` cap.
     public fn encrypt(
         &self,
@@ -208,6 +221,7 @@ implement ChaCha20Poly1305 {
     /// Open ciphertext; fails (TagMismatch) without exposing plaintext
     /// if integrity check fails.
     ///
+
     /// SOUNDNESS: rejects ciphertext exceeding the RFC 7539 §2.8
     /// per-(key,nonce) limit BEFORE running Poly1305+ChaCha20.
     /// Hostile callers can't force the verifier to do CPU-DoS work

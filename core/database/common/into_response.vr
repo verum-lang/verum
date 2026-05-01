@@ -5,10 +5,12 @@
 // Spec: internal/specs/database.md §5.6, internal/specs/net-framework.md §5.6
 // =============================================================================
 //
+
 // Wires `core.database.common.error.DbError` into the Weft framework's
 // `IntoResponse` protocol so handlers that use `[Database]` get
 // `?`-propagation to a typed HTTP response with no extra ceremony.
 //
+
 // The mapping is conservative: server-internal detail (SQL text,
 // vendor error codes, position offsets, internal message bodies)
 // is NEVER echoed to clients — instead we emit a stable shape per
@@ -16,13 +18,14 @@
 // via the framework's tracing layer; the response carries only the
 // public-safe summary.
 //
-//   ErrorCategory       Status            Body                            Reason
-//   -----------------------------------------------------------------------------
-//   EcTransient    →    503 Service Unavailable    "service temporarily unavailable"
-//   EcPermanent    →    500 Internal Server Error  "internal error"
-//   EcSecurity     →    403 Forbidden              "access denied"
-//   EcClient       →    400 Bad Request            "<DbError.message>"  (safe — already de-detailed)
-//   EcUpstream     →    502 Bad Gateway            "upstream error"
+
+//  ErrorCategory Status Body Reason
+//  -----------------------------------------------------------------------------
+//  EcTransient → 503 Service Unavailable "service temporarily unavailable"
+//  EcPermanent → 500 Internal Server Error "internal error"
+//  EcSecurity → 403 Forbidden "access denied"
+//  EcClient → 400 Bad Request "<DbError.message>" (safe — already de-detailed)
+//  EcUpstream → 502 Bad Gateway "upstream error"
 // =============================================================================
 
 module core.database.common.into_response;

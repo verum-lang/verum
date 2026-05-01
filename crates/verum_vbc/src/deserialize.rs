@@ -1,9 +1,12 @@
 //! VBC module deserialization.
 //!
+
 //! This module provides deserialization of VBC modules from binary format.
 //!
+
 //! ## Compression Support
 //!
+
 //! VBC files may be compressed using zstd or lz4. The deserializer automatically
 //! detects and decompresses compressed sections based on the compression header.
 
@@ -50,9 +53,10 @@ struct ExtensionsData {
 
 /// Deserializes a VBC module from binary data.
 ///
+
 /// **Trust model**: this entry point assumes the input was produced
-/// by a trusted compiler / source.  It performs structural decoding
-/// only — no per-instruction cross-reference validation.  Use
+/// by a trusted compiler / source. It performs structural decoding
+/// only — no per-instruction cross-reference validation. Use
 /// [`deserialize_module_validated`] for loads from any other source
 /// (archives shared across processes, network-loaded modules, files
 /// edited by hand).
@@ -65,28 +69,32 @@ pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
 /// per-instruction bytecode validator + content-hash verification
 /// before returning.
 ///
+
 /// This is the architectural defense for loading bytecode that may
 /// not have come from a trusted source — it does, in order:
 ///
-///   1. **Structural decode** via `deserialize_module`.
-///   2. **Content-hash verification**: recompute `blake3(data[HEADER_SIZE..])`
-///      and compare its first 8 bytes to the header's
-///      `content_hash`.  Pre-fix the field was COMPUTED at
-///      serialize time but never CHECKED at deserialize — an
-///      attacker could edit a `.vbc` file in place without
-///      re-stamping the hash and the loader wouldn't notice.
-///   3. **Per-instruction bytecode validation** via the validator,
-///      catching out-of-range `FunctionId` / `ConstId` /
-///      `StringId` / `TypeId`, register-bounds violations, branch
-///      offsets landing mid-instruction, call-arity mismatches,
-///      and decoder failures mid-stream.
+
+///  1. **Structural decode** via `deserialize_module`.
+///  2. **Content-hash verification**: recompute `blake3(data[HEADER_SIZE..])`
+///  and compare its first 8 bytes to the header's
+///  `content_hash`. Pre-fix the field was COMPUTED at
+///  serialize time but never CHECKED at deserialize — an
+///  attacker could edit a `.vbc` file in place without
+///  re-stamping the hash and the loader wouldn't notice.
+///  3. **Per-instruction bytecode validation** via the validator,
+///  catching out-of-range `FunctionId` / `ConstId` /
+///  `StringId` / `TypeId`, register-bounds violations, branch
+///  offsets landing mid-instruction, call-arity mismatches,
+///  and decoder failures mid-stream.
 ///
+
 /// Catches at LOAD time what the interpreter would otherwise catch
 /// on execution-reach (best case) or silent state corruption (worst
-/// case).  Cost is O(N) in total bytes (hash) + O(M) in total
-/// instruction count (validator).  Use whenever the bytecode source
+/// case). Cost is O(N) in total bytes (hash) + O(M) in total
+/// instruction count (validator). Use whenever the bytecode source
 /// is not the in-process compiler.
 ///
+
 /// Closes round-1 §3.1 + round-2 §3.1 of the red-team review and
 /// activates the previously-INERT `ContentHashMismatch` defense.
 pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
@@ -97,6 +105,7 @@ pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
 /// [`ValidationOptions::skip_hash_check`] and
 /// [`ValidationOptions::skip_bytecode_validation`].
 ///
+
 /// Pre-fix the only validated entry point invoked
 /// `verify_content_hash` unconditionally — `ValidationOptions::fast()`
 /// (which sets both skip flags) had no way to actually skip hash
@@ -105,6 +114,7 @@ pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
 /// pass `ValidationOptions::fast()` and the loader honors both flags
 /// in lockstep.
 ///
+
 /// Caveat: skipping hash verification is a security trade-off, not a
 /// validity trade-off — the hash is the only on-disk artefact that
 /// flags tampering. Reserve `fast()` for in-process loads from a
@@ -129,6 +139,7 @@ pub fn deserialize_module_validated_with_options(
 /// Verifies the content hash carried by the VBC header against a
 /// freshly-computed `blake3(data[HEADER_SIZE..])`.
 ///
+
 /// The hash is over the raw on-wire bytes after the header, which
 /// for a compressed module is the COMPRESSED payload — exactly what
 /// the serializer hashes (`crates/verum_vbc/src/serialize.rs:153`).
@@ -136,8 +147,9 @@ pub fn deserialize_module_validated_with_options(
 /// catching tampering on the disk artifact without paying the
 /// decompression cost first.
 ///
+
 /// Returns `VbcError::ContentHashMismatch { expected, computed }`
-/// on mismatch.  Bypassed by `ValidationOptions::skip_hash_check =
+/// on mismatch. Bypassed by `ValidationOptions::skip_hash_check =
 /// true`; the lenient `deserialize_module` entry point doesn't
 /// invoke this check at all.
 fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
@@ -147,11 +159,11 @@ fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
     let computed = {
         let hash = blake3::hash(&data[HEADER_SIZE..]);
         // blake3::Hash::as_bytes() always returns a 32-byte buffer;
-        // `[..8]` on it is statically safe.  `expect` rather than
+        // `[..8]` on it is statically safe. `expect` rather than
         // `unwrap_or([0u8; 8])` because the silent-zero fallback would
         // make this verifier ACCEPT any module whose serializer also
         // hit the same fallback (zero hash on both sides matches),
-        // defeating the integrity defense.  Panic-on-impossible is
+        // defeating the integrity defense. Panic-on-impossible is
         // architecturally correct.
         u64::from_le_bytes(
             hash.as_bytes()[..8]
@@ -169,6 +181,7 @@ fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
 /// freshly-computed `blake3` over the concatenation of each dependency's
 /// `hash` field (encoded as little-endian u64).
 ///
+
 /// This is the dependency-tree-fingerprint defense:
 /// `content_hash` covers the bytes-on-disk; `dependency_hash`
 /// independently fingerprints the cog-distribution dependency
@@ -176,6 +189,7 @@ fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
 /// reproducibility checker) can compare two modules' dep trees in
 /// O(8) without walking the full dependency table.
 ///
+
 /// Returns `VbcError::DependencyHashMismatch { expected, computed }`
 /// on mismatch.
 fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
@@ -205,15 +219,17 @@ fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
 
 /// Architectural upper bounds for module-table counts.
 ///
+
 /// Hostile bytecode can claim `u32::MAX` (4 billion) for any
 /// `*_count` field in the header, triggering a multi-GB
 /// `Vec::with_capacity(u32::MAX as usize)` allocation before the
 /// deserializer reads a single entry — a memory-amplification
-/// denial-of-service.  Real-world Verum modules have at most a
+/// denial-of-service. Real-world Verum modules have at most a
 /// few thousand entries in any of these tables; the bounds below
 /// are 1 M, comfortably above any plausible module while staying
 /// far below the wraparound cliff.
 ///
+
 /// Hit at parse time (before any allocation), each rejection
 /// names the offending field for triage.
 const MAX_TYPE_TABLE_ENTRIES: u32 = 1 << 20;            // 1 048 576
@@ -223,15 +239,16 @@ const MAX_SPECIALIZATION_TABLE_ENTRIES: u32 = 1 << 20;
 
 /// Descriptor-level architectural upper bounds.
 ///
+
 /// Within a type / function descriptor, varint-encoded counts
 /// (type params, fields, variants, protocols, methods, params,
 /// contexts, bounds) drive `SmallVec::with_capacity` /
 /// `Vec::with_capacity` allocations that have the same memory-
-/// amplification surface as the table counts above.  Post the
+/// amplification surface as the table counts above. Post the
 /// varint-canonicality fix (cf1cff4c) the largest accepted
 /// varint is `u64::MAX`, which casts to `usize::MAX` on 64-bit
 /// platforms — `with_capacity(usize::MAX)` aborts the process
-/// in most Rust allocators.  Bounds below are tight enough that
+/// in most Rust allocators. Bounds below are tight enough that
 /// real-world descriptors stay under them by 1-2 orders of
 /// magnitude while still rejecting adversarial inputs early.
 const MAX_TYPE_PARAMS_PER_DESCRIPTOR: usize = 64;
@@ -240,13 +257,13 @@ const MAX_VARIANTS_PER_DESCRIPTOR: usize = 4 * 1024;
 const MAX_PROTOCOLS_PER_DESCRIPTOR: usize = 256;
 const MAX_METHODS_PER_PROTOCOL_IMPL: usize = 4 * 1024;
 
-/// Type-param-level architectural upper bounds.  Each type
+/// Type-param-level architectural upper bounds. Each type
 /// parameter can declare protocol bounds (`fn f<T: P + Q>`) and
 /// each variant can have its own field list — both varint-driven.
 const MAX_BOUNDS_PER_TYPE_PARAM: usize = 64;
 const MAX_FIELDS_PER_VARIANT: usize = 1024;
 
-/// Type-reference-level architectural upper bounds.  `TypeRef`
+/// Type-reference-level architectural upper bounds. `TypeRef`
 /// carries varint-driven counts for instantiation args, function
 /// params, and context names — all reachable from hostile
 /// bytecode in arbitrarily-deep type expressions.
@@ -254,7 +271,7 @@ const MAX_TYPE_REF_INSTANTIATION_ARGS: usize = 64;
 const MAX_FN_TYPE_REF_PARAMS: usize = 256;
 const MAX_FN_TYPE_REF_CONTEXTS: usize = 32;
 
-/// Constant-pool / specialization / source-map bounds.  Each
+/// Constant-pool / specialization / source-map bounds. Each
 /// driver is a varint that, post the cf1cff4c canonicality fix,
 /// can decode to `u64::MAX`.
 const MAX_CONSTANT_ARRAY_LEN: usize = 1 << 20;          // 1 048 576
@@ -264,10 +281,11 @@ const MAX_SOURCE_MAP_ENTRIES: usize = 1 << 22;          // 4 194 304
 
 /// Maximum decompressed bytecode size for a single module.
 ///
+
 /// Adversarial bytecode can claim a near-`u32::MAX` decompressed
 /// size in the bytecode-section header; the decompressor would
 /// `Vec::with_capacity` that amount before reading a byte from
-/// the compressed stream.  1 GB is a generous cap — real Verum
+/// the compressed stream. 1 GB is a generous cap — real Verum
 /// modules are kilobytes, the embedded stdlib (every core/*.vr
 /// compiled) is ~14 MB.
 const MAX_DECOMPRESSED_BYTECODE_BYTES: u32 = 1 << 30;   // 1 GB
@@ -299,7 +317,7 @@ impl<'a> Deserializer<'a> {
         self.header = Some(header.clone());
 
         // Memory-amplification defense: reject implausibly large
-        // table-count fields before any allocation.  See the
+        // table-count fields before any allocation. See the
         // MAX_*_ENTRIES constants above for rationale.
         if header.type_table_count > MAX_TYPE_TABLE_ENTRIES {
             return Err(VbcError::TableTooLarge {
@@ -552,7 +570,7 @@ impl<'a> Deserializer<'a> {
         let mut table = StringTable::new();
         // Use checked_add for the section-end calculation — on
         // 32-bit targets the cast `size as usize` covers full u32
-        // (4 GB) and adding *offset can overflow.  On 64-bit the
+        // (4 GB) and adding *offset can overflow. On 64-bit the
         // overflow is unreachable but the checked path is
         // platform-portable and zero-cost when no overflow occurs.
         let end = self.offset
@@ -612,15 +630,17 @@ impl<'a> Deserializer<'a> {
 
     /// Parses bytecode with optional decompression.
     ///
+
     /// # Format
     ///
+
     /// The bytecode section has a compression header followed by the data:
     /// - `u8`: Compression algorithm (0=None, 1=Zstd, 2=Lz4)
     /// - `u32`: Uncompressed size (only present if algorithm != None)
     /// - `bytes`: Compressed or uncompressed bytecode
     fn parse_bytecode(&mut self, section_size: u32) -> VbcResult<Vec<u8>> {
         // The section MUST contain at least the algorithm byte; a
-        // zero-size section is malformed.  Without this check the
+        // zero-size section is malformed. Without this check the
         // `section_size as usize - 1` arithmetic on the None branch
         // below would underflow on hostile inputs.
         if section_size == 0 {
@@ -681,7 +701,7 @@ impl<'a> Deserializer<'a> {
                     });
                 }
 
-                // Read compressed data (rest of section).  section_end
+                // Read compressed data (rest of section). section_end
                 // is bounded by data.len() above, so this subtraction
                 // is safe and the slice is in-bounds.
                 let compressed_size = section_end - self.offset;
@@ -1240,15 +1260,16 @@ impl<'a> Deserializer<'a> {
 
     /// Parses the extensions section (tensor metadata, FFI, dependencies).
     ///
+
     /// Extension section format:
     /// - u8 section_mask: bitmask of present sections
-    ///   - 0x01: shape_metadata (tensor shapes)
-    ///   - 0x02: device_hints (GPU/CPU placement)
-    ///   - 0x04: distribution (distributed training)
-    ///   - 0x08: autodiff_graph (gradient computation)
-    ///   - 0x10: mlir_hints (optimization hints)
-    ///   - 0x20: ffi_tables (libraries, symbols, layouts)
-    ///   - 0x40: dependencies (module dependencies)
+    ///  - 0x01: shape_metadata (tensor shapes)
+    ///  - 0x02: device_hints (GPU/CPU placement)
+    ///  - 0x04: distribution (distributed training)
+    ///  - 0x08: autodiff_graph (gradient computation)
+    ///  - 0x10: mlir_hints (optimization hints)
+    ///  - 0x20: ffi_tables (libraries, symbols, layouts)
+    ///  - 0x40: dependencies (module dependencies)
     /// - For each present section: u32 length + bincode data
     fn parse_extensions(&mut self, _size: u32) -> VbcResult<ExtensionsData> {
         // Read section mask
@@ -1426,7 +1447,7 @@ mod tests {
     /// Hostile module header claims `type_table_count = u32::MAX`.
     /// Pre-fix the deserializer would `Vec::with_capacity(u32::MAX)`
     /// — multi-GB allocation — before discovering the file is too
-    /// short.  Post-fix the size is rejected at the parse-header
+    /// short. Post-fix the size is rejected at the parse-header
     /// gate before any allocation.
     #[test]
     fn test_deserialize_rejects_huge_type_table_count() {
@@ -1444,12 +1465,13 @@ mod tests {
         // serialized module, parse its header, find its offset.
         // For test purposes we just patch the first u32 after the
         // magic/version/flags/type_table_offset fields — this is
-        // brittle but acceptable inside the test.  Use the actual
+        // brittle but acceptable inside the test. Use the actual
         // header struct to compute the byte offset.
         //
+
         // Layout (matches format::VbcHeader serialize order):
-        //   magic[4] version[4] flags[4] module_name_offset[4]
-        //   type_table_offset[4] type_table_count[4]   ← target
+        //  magic[4] version[4] flags[4] module_name_offset[4]
+        //  type_table_offset[4] type_table_count[4] ← target
         let count_offset = 4 + 4 + 4 + 4 + 4;
         bytes[count_offset..count_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
 

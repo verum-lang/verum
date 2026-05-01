@@ -5,42 +5,52 @@
 // Dependencies: core, core.collections.map
 // =============================================================================
 //
+
 // Topological sort — the "order these items such that every
 // dependency comes before its dependent" primitive used by:
 //
-//   * Package managers (npm install order, Cargo build order, pip).
-//   * Build systems (Bazel, Make, Ninja target graph).
-//   * Task runners (GitHub Actions jobs, Airflow DAGs).
-//   * Database migration tools (ordering schema-change files).
-//   * Module loaders / link editors.
+
+//  * Package managers (npm install order, Cargo build order, pip).
+//  * Build systems (Bazel, Make, Ninja target graph).
+//  * Task runners (GitHub Actions jobs, Airflow DAGs).
+//  * Database migration tools (ordering schema-change files).
+//  * Module loaders / link editors.
 //
+
 // # Algorithm
 //
+
 // Kahn's algorithm — iterate over nodes with in-degree 0, remove
 // them, repeat. Detects cycles (any remaining node with in-degree
 // > 0 after the iteration completes is part of one).
 //
-//   Time:   O(V + E)
-//   Space:  O(V + E)
+
+//  Time: O(V + E)
+//  Space: O(V + E)
 //
+
 // Stable: within each "in-degree 0" wave, nodes retain their
 // insertion order. That gives deterministic output for repeat
 // builds and tests.
 //
+
 // # API
 //
+
 // ```
 // let mut g: TopoGraph<Text> = TopoGraph.new();
 // g.add_node(Text.from("a"));
 // g.add_node(Text.from("b"));
 // g.add_node(Text.from("c"));
-// g.add_edge(Text.from("a"), Text.from("b"));   // b depends on a
+// g.add_edge(Text.from("a"), Text.from("b")); // b depends on a
 // g.add_edge(Text.from("b"), Text.from("c"));
 //
+
 // let order: List<Text> = g.toposort()?;
 // // ["a", "b", "c"]
 // ```
 //
+
 // =============================================================================
 
 module core.collections.toposort;

@@ -1,43 +1,51 @@
 //! Static Verification Engine for AOT Tier
 //!
+
 //! This module provides Z3-based static verification for the AOT compilation tier,
 //! enabling CBGR check elimination through SMT proofs.
 //!
+
 //! # Features
 //!
+
 //! - **Static Safety Proofs**: Prove memory safety at compile time using Z3
 //! - **CBGR Check Elimination**: Remove runtime checks when Z3 proves safety
 //! - **Counterexample Extraction**: Detailed failure diagnostics with variable bindings
 //! - **Unsat Core Extraction**: Minimal counterexamples for debugging
 //! - **Timeout-Based Graceful Degradation**: Fallback to runtime checks on timeout
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! AST with CBGR Annotations
-//!          |
-//!          v
+//!  |
+//!  v
 //! +-------------------+
-//! | StaticVerifier    |
-//! |  - Constraint     |
-//! |    Generation     |
-//! |  - Z3 Solving     |
-//! |  - Proof Cache    |
+//! | StaticVerifier |
+//! | - Constraint |
+//! | Generation |
+//! | - Z3 Solving |
+//! | - Proof Cache |
 //! +-------------------+
-//!          |
-//!     +----+----+
-//!     |         |
-//!     v         v
-//! Proved    Failed/Timeout
-//! (Eliminate)  (Keep Check)
+//!  |
+//!  +----+----+
+//!  | |
+//!  v v
+//! Proved Failed/Timeout
+//! (Eliminate) (Keep Check)
 //! ```
 //!
+
 //! # Performance Targets
 //!
+
 //! - SMT queries: < 10ms average for CBGR constraints
 //! - CBGR elimination rate: > 80% in typical code
 //! - Timeout handling: graceful degradation within 100ms
 //!
+
 //! In AOT compilation (Tier 2-3), static verification proves CBGR checks unnecessary
 //! via escape analysis and dataflow, enabling `&T` to `&checked T` promotion (0ns overhead).
 //! Three reference tiers: `&T` (~15ns CBGR check), `&checked T` (0ns, compiler-proven safe),
@@ -347,6 +355,7 @@ pub struct PartialResult {
 
 /// Main static verification engine
 ///
+
 /// Integrates Z3 for static safety proofs with CBGR check elimination.
 pub struct StaticVerifier {
     /// Configuration
@@ -547,6 +556,7 @@ impl StaticVerifier {
 
     /// Verify a safety constraint
     ///
+
     /// Returns whether the constraint can be statically verified,
     /// allowing the corresponding runtime check to be eliminated.
     pub fn verify(&self, constraint: &SafetyConstraint) -> VerificationResult {
@@ -586,6 +596,7 @@ impl StaticVerifier {
 
     /// Verify multiple constraints, returning elimination decisions.
     ///
+
     /// `config.timeout_ms` bounds the cumulative wall-clock of the
     /// batch — once the budget is exhausted, every remaining
     /// constraint is short-circuited to a `Timeout` result rather

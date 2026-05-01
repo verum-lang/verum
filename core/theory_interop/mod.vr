@@ -3,61 +3,71 @@
 // =============================================================================
 // Layer: Application
 //
+
 // A computational ∞-topos where formally-represented theories
 // live as sheaves, translations between theories are Kan
 // extensions, and coherence across translation chains is
 // verified through descent conditions.
 //
+
 // This module tree provides:
 //
-//   core.vr      — Theory loading (Yoneda), translation (Kan),
-//                  coherence (descent), audit
-//   protocol.vr  — JSON-RPC wire protocol for external tooling
-//                  (IDE plugins, theorem-prover bridges,
-//                  LLM-driven translators)
+
+//  core.vr — Theory loading (Yoneda), translation (Kan),
+//  coherence (descent), audit
+//  protocol.vr — JSON-RPC wire protocol for external tooling
+//  (IDE plugins, theorem-prover bridges,
+//  LLM-driven translators)
 //
+
 // # Quick Start
 //
+
 // ```verum
 // mount core.theory_interop.*;
 //
+
 // // Load two theories
 // let mut reg = new_registry();
 // let a = load_theory(&mut reg, first_theory);
 // let b = load_theory(&mut reg, second_theory);
 //
+
 // // Translate with partial mapping
 // let result = translate(&a, &b, &partial_map);
 // print(f"Translation quality: {result.quality}");
 //
+
 // // Check coherence across translations
 // let coherence = check_coherence(&reg, &pairs);
 // match coherence {
-//     CoherenceResult.Coherent { global_quality } =>
-//         print(f"Coherent! Quality: {global_quality}"),
-//     CoherenceResult.Obstruction { violations, severity } =>
-//         print(f"Incoherent: {violations.len()} violations, \
-//                severity {severity}"),
+//  CoherenceResult.Coherent { global_quality } =>
+//  print(f"Coherent! Quality: {global_quality}"),
+//  CoherenceResult.Obstruction { violations, severity } =>
+//  print(f"Incoherent: {violations.len()} violations, \
+//  severity {severity}"),
 // }
 // ```
 //
+
 // # Architecture
 //
+
 // ```
 // Theory-interop application layer
-// ├── core.vr      — load_theory, translate, check_coherence, audit
-// └── protocol.vr  — JSON-RPC server (theory/list, claim/translate, …)
-//         │
-//         ▼
+// ├── core.vr — load_theory, translate, check_coherence, audit
+// └── protocol.vr — JSON-RPC server (theory/list, claim/translate, …)
+//  │
+//  ▼
 // Mathematical foundation (core/math/)
-// ├── epistemic.vr     — EpistemicStatus, Theory, EpistemicTopology
+// ├── epistemic.vr — EpistemicStatus, Theory, EpistemicTopology
 // ├── infinity_topos.vr— ∞-Topos, descent, coherence violations
 // ├── kan_extension.vr — Lan/Ran, comma categories, obstruction
 // ├── quantum_logic.vr — Quantum epistemic states, density matrices
-// ├── giry.vr          — Giry monad, LLM oracle
-// ├── cohesive.vr      — Cohesive modalities (Π ⊣ Disc ⊣ Γ ⊣ coDisc)
+// ├── giry.vr — Giry monad, LLM oracle
+// ├── cohesive.vr — Cohesive modalities (Π ⊣ Disc ⊣ Γ ⊣ coDisc)
 // ├── day_convolution.vr — Day ⊗, cognitive extension
-// └── hott.vr          — Cubical HoTT, Path types, equivalences
+// └── hott.vr — Cubical HoTT, Path types, equivalences
 // ```
 // =============================================================================
 

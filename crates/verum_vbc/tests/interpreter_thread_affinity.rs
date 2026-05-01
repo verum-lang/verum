@@ -1,6 +1,7 @@
 //! Red-team Round 2 §7.3 — VBC interpreter LocalHeap thread-affinity
 //! invariant.
 //!
+
 //! Adversarial scenario: a malicious / pathological caller tries
 //! to share an `InterpreterState` (or its owned `Heap`) across
 //! threads. If this succeeded, the bump-allocator / object-table
@@ -9,31 +10,34 @@
 //! `CURRENT_INTERPRETER` thread-local pointer in
 //! `interpreter::state` would alias inconsistent state.
 //!
+
 //! Defense (structural):
-//!   1. `Heap` owns `Vec<NonNull<ObjectHeader>>`. `NonNull<T>` is
-//!      `!Send + !Sync` by default. Rust's type system therefore
-//!      rejects cross-thread sharing of `InterpreterState` at
-//!      compile time — there's no runtime check needed because
-//!      the unsafe program never compiles.
-//!   2. `CURRENT_INTERPRETER: thread_local! { Option<*mut
-//!      InterpreterState> }` binds the active state pointer
-//!      per-thread; spawning a new thread starts with `None`.
+//!  1. `Heap` owns `Vec<NonNull<ObjectHeader>>`. `NonNull<T>` is
+//!  `!Send + !Sync` by default. Rust's type system therefore
+//!  rejects cross-thread sharing of `InterpreterState` at
+//!  compile time — there's no runtime check needed because
+//!  the unsafe program never compiles.
+//!  2. `CURRENT_INTERPRETER: thread_local! { Option<*mut
+//!  InterpreterState> }` binds the active state pointer
+//!  per-thread; spawning a new thread starts with `None`.
 //!
+
 //! Defense (behavioural):
-//!   Each thread that wants its own interpreter constructs a
-//!   fresh `InterpreterState` from a shared `Arc<VbcModule>`.
-//!   The `Module` is `Send + Sync` (immutable bytecode held
-//!   behind `Arc`), so threads share the *code* without sharing
-//!   the *state*. Per-thread heap isolation falls out
-//!   automatically.
+//!  Each thread that wants its own interpreter constructs a
+//!  fresh `InterpreterState` from a shared `Arc<VbcModule>`.
+//!  The `Module` is `Send + Sync` (immutable bytecode held
+//!  behind `Arc`), so threads share the *code* without sharing
+//!  the *state*. Per-thread heap isolation falls out
+//!  automatically.
 //!
+
 //! These tests pin the behavioural side programmatically:
-//!   - 8 threads can each construct + drop their own
-//!     `InterpreterState` from a shared `Arc<VbcModule>` without
-//!     panic, deadlock, or per-thread pollution.
-//!   - Heap statistics on each thread's interpreter are
-//!     independent — no thread sees another thread's
-//!     allocation count.
+//!  - 8 threads can each construct + drop their own
+//!  `InterpreterState` from a shared `Arc<VbcModule>` without
+//!  panic, deadlock, or per-thread pollution.
+//!  - Heap statistics on each thread's interpreter are
+//!  independent — no thread sees another thread's
+//!  allocation count.
 
 use std::sync::Arc;
 use std::thread;
@@ -78,6 +82,7 @@ fn per_thread_interpreters_have_independent_heaps() {
     // exactly the allocations made on their own thread —
     // never another thread's count.
     //
+
     // We verify this indirectly: each thread starts with
     // 0-allocation heap, regardless of what other threads do.
     let module = Arc::new(VbcModule::new("isolation_test".to_string()));

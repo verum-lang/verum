@@ -1,13 +1,16 @@
 //! End-to-end integration tests for `verum proof-draft`.
 //!
+
 //! Drives the actual CLI binary as a child process and checks the
-//! captured output.  Validates the entire wiring chain:
+//! captured output. Validates the entire wiring chain:
 //!
-//!   `verum proof-draft` (CLI clap) →
-//!     `commands::proof_draft::run_proof_draft` →
-//!       `verum_verification::proof_drafting::SuggestionEngine` →
-//!         ranked output text / JSON
+
+//!  `verum proof-draft` (CLI clap) →
+//!  `commands::proof_draft::run_proof_draft` →
+//!  `verum_verification::proof_drafting::SuggestionEngine` →
+//!  ranked output text / JSON
 //!
+
 //! These tests prove that the `proof_drafting` trait surface
 //! is actually consumable from a shell invocation, not just from
 //! Rust unit tests.
@@ -15,7 +18,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Locate the freshly-built `verum` binary.  Tests run after
+/// Locate the freshly-built `verum` binary. Tests run after
 /// `cargo build -p verum_cli` so the binary lives at
 /// `target/debug/verum`.
 fn verum_bin() -> PathBuf {
@@ -62,7 +65,7 @@ fn proof_draft_plain_output_ranks_lemma_first() {
     assert!(stdout.contains("Theorem: thm_test"), "stdout missing theorem");
 
     // The relevant lemma MUST appear; the unrelated one is correctly
-    // filtered (score=0 — engine drops zero-score suggestions).  This
+    // filtered (score=0 — engine drops zero-score suggestions). This
     // is precisely the desired ranking behaviour: only structurally-
     // relevant lemmas show up.
     assert!(stdout.contains("succ_pos"), "relevant lemma must appear");

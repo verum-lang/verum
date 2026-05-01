@@ -4,29 +4,34 @@
 // Layer: 2 (core primitive)
 // Dependencies: core, core.security.hash.sha256 (internal)
 // Reference: NIST FIPS 186-5 §6 — Digital Signature Standard (ECDSA)
-//            NIST SP 800-186 §3.2.1 — P-256 parameters (aka secp256r1)
-//            SECG SEC 2 v2.0 — the curve was first standardised here
-//            RFC 6979 — deterministic ECDSA (§3)
+//  NIST SP 800-186 §3.2.1 — P-256 parameters (aka secp256r1)
+//  SECG SEC 2 v2.0 — the curve was first standardised here
+//  RFC 6979 — deterministic ECDSA (§3)
 // =============================================================================
 //
+
 // NIST P-256 (also known as secp256r1 / prime256v1) is the "safe
 // classical" elliptic curve for:
 //
-//   * **Legacy certificate chains** — most public-CA X.509 certs use
-//     ECDSA-P256 (or ECDSA-P384 for higher-security) — we ship P-256
-//     here, leaving P-384 as a future extension.
-//   * **TLS 1.3 fallback key_share** when the peer does not advertise
-//     X25519.
-//   * **FIPS-mandated deployments** — U.S. federal environments that
-//     require FIPS 140-2 / 140-3 validated crypto prefer NIST-curves
-//     over Bernstein's Curve25519.
-//   * **JWT with ES256** — one of the most common JWT signature
-//     algorithms for public-key JWTs.
+
+//  * **Legacy certificate chains** — most public-CA X.509 certs use
+//  ECDSA-P256 (or ECDSA-P384 for higher-security) — we ship P-256
+//  here, leaving P-384 as a future extension.
+//  * **TLS 1.3 fallback key_share** when the peer does not advertise
+//  X25519.
+//  * **FIPS-mandated deployments** — U.S. federal environments that
+//  require FIPS 140-2 / 140-3 validated crypto prefer NIST-curves
+//  over Bernstein's Curve25519.
+//  * **JWT with ES256** — one of the most common JWT signature
+//  algorithms for public-key JWTs.
 //
+
 // # Why Curve25519 + P-256, not just one?
 //
+
 // They have different failure modes:
 //
+
 // | | Curve25519 | P-256 |
 // |---|---|---|
 // | Designer | DJB (2006) | NIST (1999, NSA-assisted parameters) |
@@ -35,46 +40,59 @@
 // | FIPS approval | Ed25519 approved in FIPS 186-5 (2023) | Approved since FIPS 186-2 (2000) |
 // | Performance (software) | ~2× faster | Slower, PCLMULQDQ-accelerated variants narrow the gap |
 //
+
 // Modern protocol recommendation: **prefer X25519/Ed25519 when you
 // have the choice**; fall back to P-256 for interop with legacy
 // clients or FIPS-mandated deployments.
 //
+
 // # Sizes (FIPS 186-5 §6)
 //
-// | Object       | Size | Encoding |
+
+// | Object | Size | Encoding |
 // |--------------|------|-----------|
-// | Private key  | 32 B | big-endian scalar in [1, n-1] |
-// | Public key   | 65 B (uncompressed) / 33 B (compressed) | SEC 1 §2.3.3 |
+// | Private key | 32 B | big-endian scalar in [1, n-1] |
+// | Public key | 65 B (uncompressed) / 33 B (compressed) | SEC 1 §2.3.3 |
 // | Shared secret (ECDH) | 32 B | x-coordinate big-endian |
-// | Signature    | 64 B (r || s) fixed-width OR DER-encoded variable |
+// | Signature | 64 B (r || s) fixed-width OR DER-encoded variable |
 //
+
 // Our API uses **raw fixed-width 64-byte** signatures (`r || s`) by
 // default — the TLS 1.3 / JWT convention. For DER-encoded signatures
 // (X.509 certs, some legacy JSON), use `signature_to_der` / `_from_der`.
 //
+
 // # Strict verification
 //
+
 // Verify rejects:
 //
-//   * r or s ≤ 0 or ≥ n (curve order) — signature malleability fix.
-//   * Public key not on curve (SEC 1 §3.2.2.1 point-on-curve check).
-//   * Public key = ∞ (identity).
+
+//  * r or s ≤ 0 or ≥ n (curve order) — signature malleability fix.
+//  * Public key not on curve (SEC 1 §3.2.2.1 point-on-curve check).
+//  * Public key = ∞ (identity).
 //
+
 // These checks match FIPS 186-5 §6.4.2 "Full Public Key Validation".
 //
+
 // # Intrinsic-backed
 //
+
 // Point operations route through `@intrinsic`:
 //
-//   * `verum.p256.keygen`
-//   * `verum.p256.ecdh`
-//   * `verum.p256.ecdsa_sign`          (RFC 6979 deterministic)
-//   * `verum.p256.ecdsa_sign_random`   (random k)
-//   * `verum.p256.ecdsa_verify`
+
+//  * `verum.p256.keygen`
+//  * `verum.p256.ecdh`
+//  * `verum.p256.ecdsa_sign` (RFC 6979 deterministic)
+//  * `verum.p256.ecdsa_sign_random` (random k)
+//  * `verum.p256.ecdsa_verify`
 //
+
 // Backend: fiat-crypto's formally-verified P-256 (the same one
 // BoringSSL / rustls / libsodium use).
 //
+
 // =============================================================================
 
 module core.security.ecc.p256;
@@ -211,6 +229,7 @@ implement P256 {
     /// x-coordinate in big-endian form (FIPS 186-5 §6.1.3 + §5.7.1.2
     /// of SP 800-56A).
     ///
+
     /// Like [`x25519.diffie_hellman`](x25519.vr), the caller MUST
     /// run this through HKDF before using as a key. Never use the
     /// raw x-coordinate directly.
@@ -230,6 +249,7 @@ implement P256 {
     /// hash, eliminating the need for a high-quality RNG at sign
     /// time. Preferred over the random variant for most use cases.
     ///
+
     /// `message` is NOT pre-hashed — this function internally
     /// computes SHA-256(message). If your protocol requires a
     /// different hash, use `sign_prehashed` instead.
@@ -266,9 +286,10 @@ implement P256 {
     /// reject, `Err(InvalidSignature)` on malformed input
     /// (r, s out of range).
     ///
+
     /// Strict validation per FIPS 186-5 §6.4.2:
-    ///   * r, s ∈ [1, n-1]
-    ///   * public key on curve, non-identity
+    ///  * r, s ∈ [1, n-1]
+    ///  * public key on curve, non-identity
     public fn verify(
         pk: &P256PublicKey,
         message: &[Byte],

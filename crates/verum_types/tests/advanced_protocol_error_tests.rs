@@ -14,10 +14,12 @@
 )]
 //! Comprehensive Test Suite for Advanced Protocol Error Messages
 //!
+
 //! Higher-kinded type (HKT) kind inference: infers kinds for type constructors
 //! (e.g., List has kind Type -> Type, Map has kind Type -> Type -> Type).
 //! Uses constraint-based kind inference with unification.
 //!
+
 //! This test suite validates:
 //! - Error message formatting and clarity
 //! - Diagnostic generation with labels and notes

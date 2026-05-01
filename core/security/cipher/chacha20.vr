@@ -4,49 +4,60 @@
 // Layer: 2 (core primitive)
 // Dependencies: core
 // Reference: RFC 8439 (replaces RFC 7539) — ChaCha20 and Poly1305 for
-//            IETF Protocols
-//            DJ Bernstein — "ChaCha, a variant of Salsa20" (2008)
+//  IETF Protocols
+//  DJ Bernstein — "ChaCha, a variant of Salsa20" (2008)
 // =============================================================================
 //
+
 // ChaCha20 block function + counter-mode keystream generator. This
 // module provides:
 //
-//   * `chacha20_block(key, counter, nonce) -> [Byte; 64]` — the raw
-//     block function; produces one 64-byte keystream block.
+
+//  * `chacha20_block(key, counter, nonce) -> [Byte; 64]` — the raw
+//  block function; produces one 64-byte keystream block.
 //
-//   * `chacha20_xor(key, counter, nonce, data, out)` — stream-encrypt
-//     (or decrypt, identical operation since XOR is self-inverse) any
-//     length of data starting at the given counter.
+
+//  * `chacha20_xor(key, counter, nonce, data, out)` — stream-encrypt
+//  (or decrypt, identical operation since XOR is self-inverse) any
+//  length of data starting at the given counter.
 //
+
 // ChaCha20 is the "Plan B" AEAD for TLS 1.3 / QUIC on hosts without
 // AES hardware acceleration (embedded, mobile SoCs, attacker-free
 // analyser setups). It is also the primitive Google uses in its QUIC
 // deployment where AES-NI isn't universally available.
 //
+
 // # Constant-time by construction
 //
+
 // The ChaCha20 round function uses only addition, XOR, and rotation
 // on 32-bit words — no table lookups, no data-dependent branches.
 // Unlike AES, the software reference is naturally constant-time.
 //
+
 // # Parameters (RFC 8439 §2.3)
 //
-//   * Key:     256 bits = 32 bytes.
-//   * Nonce:   96 bits  = 12 bytes (IETF variant; original Bernstein
-//                         ChaCha20 used 64-bit nonce).
-//   * Counter: 32 bits  — caller-supplied. Poly1305 key derivation
-//                         uses counter=0; encryption starts at
-//                         counter=1.
-//   * Block:   512 bits = 64 bytes.
+
+//  * Key: 256 bits = 32 bytes.
+//  * Nonce: 96 bits = 12 bytes (IETF variant; original Bernstein
+//  ChaCha20 used 64-bit nonce).
+//  * Counter: 32 bits — caller-supplied. Poly1305 key derivation
+//  uses counter=0; encryption starts at
+//  counter=1.
+//  * Block: 512 bits = 64 bytes.
 //
+
 // # Performance
 //
+
 // Reference ~250-400 MiB/s on modern x86_64 with `@inline` rounds.
 // `@cfg(feature = "crypto-accel")` substitutes the inner loop with
 // AVX2 / AVX-512 vectorised variants — the quarter-round naturally
 // parallelises across four columns. Typical accelerated throughput:
 // 3-6 GiB/s.
 //
+
 // =============================================================================
 
 module core.security.cipher.chacha20;
@@ -97,10 +108,11 @@ fn quarter_round(s: &mut [UInt32; 16], a: Int, b: Int, c: Int, d: Int) {
 /// Produce one 64-byte ChaCha20 keystream block for the given
 /// `(key, counter, nonce)` tuple.
 ///
+
 /// The state is a 4×4 matrix of u32:
-///   cccc cccc cccc cccc   — constants "expand 32-byte k"
-///   kkkk kkkk kkkk kkkk   — 256-bit key (little-endian words 0..8)
-///   cccc nnnn nnnn nnnn   — 32-bit counter + 96-bit nonce
+///  cccc cccc cccc cccc — constants "expand 32-byte k"
+///  kkkk kkkk kkkk kkkk — 256-bit key (little-endian words 0..8)
+///  cccc nnnn nnnn nnnn — 32-bit counter + 96-bit nonce
 public fn chacha20_block(
     key: &ChaChaKey,
     counter: UInt32,
@@ -182,6 +194,7 @@ public fn chacha20_block(
 /// starting at the given 32-bit counter. `out` is appended to — caller
 /// can pre-reserve capacity.
 ///
+
 /// Encrypt and decrypt are the same operation (XOR is self-inverse).
 public fn chacha20_xor(
     key: &ChaChaKey,

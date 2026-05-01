@@ -5,26 +5,32 @@
 // Dependencies: protocols.vr, result.vr, maybe.vr
 // =============================================================================
 //
+
 // Provides the standard logging protocol for Verum applications.
 //
+
 // Logging uses the context system so that log output can be directed to
 // different backends (console, file, network) without changing application code.
 //
+
 // # Usage
 //
+
 // ```verum
 // fn process_request(req: &Request) using [Logger] {
-//     info("processing request");
-//     // ... work ...
-//     debug("request complete");
+//  info("processing request");
+//  // ... work ...
+//  debug("request complete");
 // }
 //
+
 // // Provide a logger via context
 // provide ConsoleLogger.new() as Logger {
-//     process_request(&req);
+//  process_request(&req);
 // }
 // ```
 //
+
 // =============================================================================
 
 module core.base.log;
@@ -43,6 +49,7 @@ mount core.ordering.{Ordering, Less, Equal, Greater};
 
 /// The severity level of a log message.
 ///
+
 /// Levels are ordered from most verbose (Trace) to least verbose (Error).
 /// A logger configured at a given level will emit messages at that level
 /// and all less verbose levels.
@@ -141,27 +148,32 @@ implement Default for LogLevel {
 
 /// Protocol for log output backends.
 ///
+
 /// Loggers receive log messages and decide how to output them (console, file,
 /// network, etc.). The Logger protocol is used as a context dependency,
 /// enabling dependency injection of logging throughout an application.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// type ConsoleLogger is {
-///     min_level: LogLevel,
+///  min_level: LogLevel,
 /// };
 ///
+
 /// implement Logger for ConsoleLogger {
-///     fn log(&self, level: LogLevel, message: &Text) {
-///         if self.is_enabled(level) {
-///             print(f"[{level.name()}] {message}");
-///         }
-///     }
+///  fn log(&self, level: LogLevel, message: &Text) {
+///  if self.is_enabled(level) {
+///  print(f"[{level.name()}] {message}");
+///  }
+///  }
 ///
-///     fn is_enabled(&self, level: LogLevel) -> Bool {
-///         level.severity() >= self.min_level.severity()
-///     }
+
+///  fn is_enabled(&self, level: LogLevel) -> Bool {
+///  level.severity() >= self.min_level.severity()
+///  }
 /// }
 /// ```
 public type Logger is protocol {
@@ -170,6 +182,7 @@ public type Logger is protocol {
 
     /// Check if the given log level is enabled.
     ///
+
     /// Callers may use this to avoid expensive message formatting
     /// when the level is disabled.
     fn is_enabled(&self, level: LogLevel) -> Bool;
@@ -181,6 +194,7 @@ public type Logger is protocol {
 
 /// A structured log record with metadata.
 ///
+
 /// Used by advanced loggers that need access to source location,
 /// timestamps, or structured fields.
 public type LogRecord is {
@@ -289,6 +303,7 @@ public fn error(msg: &Text) using [Logger] {
 
 /// A logger that discards all messages.
 ///
+
 /// Useful for testing or when logging is not needed.
 public type NullLogger is {};
 

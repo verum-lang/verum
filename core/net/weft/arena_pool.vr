@@ -2,49 +2,59 @@
 // core/net/weft/arena_pool.vr — Per-request arena pool
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §4.3 "CBGR-арены"
+// Spec: internal/specs/net-framework.md §4.3 "CBGR-арены"
 // =============================================================================
 //
+
 // Phase-5 killer feature for the Weft hot path. Each incoming request
 // gets a fresh arena handed to it; the arena lives exactly for the
 // request's lifetime; at end-of-request `reset()` invalidates every
 // allocation in O(1) — generation bump, ~1 ns on the bench bus.
 //
+
 // Key architectural properties (§4.3 normative rules):
 //
-//   1. **Hierarchy.** Per-shard (long-lived, holds DNS / pool caches)
-//      → per-connection (keepalive lifetime) → per-request (this
-//      pool's subject). We ship the per-request layer here; the
-//      other two are follow-ups once the connection layer is wired
-//      to the pool (phase 5.5).
+
+//  1. **Hierarchy.** Per-shard (long-lived, holds DNS / pool caches)
+//  → per-connection (keepalive lifetime) → per-request (this
+//  pool's subject). We ship the per-request layer here; the
+//  other two are follow-ups once the connection layer is wired
+//  to the pool (phase 5.5).
 //
-//   2. **O(1) mass invalidation.** `GenerationalArena.reset()` (already
-//      in core/mem/arena.vr, 503 LOC, production) — increments the
-//      shared generation; any outstanding `ThinRef` into the old
-//      arena is rejected by CBGR on next deref.
+
+//  2. **O(1) mass invalidation.** `GenerationalArena.reset()` (already
+//  in core/mem/arena.vr, 503 LOC, production) — increments the
+//  shared generation; any outstanding `ThinRef` into the old
+//  arena is rejected by CBGR on next deref.
 //
-//   3. **Bounded OOM.** Each arena is created with a fixed capacity;
-//      allocations past that return NULL and the caller handles the
-//      413 Payload Too Large surface (already wired in connection.vr).
+
+//  3. **Bounded OOM.** Each arena is created with a fixed capacity;
+//  allocations past that return NULL and the caller handles the
+//  413 Payload Too Large surface (already wired in connection.vr).
 //
-//   4. **Epoch dual-protection.** `core/mem/epoch.vr` manages a
-//      process-level epoch; its wraparound detection (§4.3.3) tells
-//      the pool when to rebuild arenas to avoid generation aliasing
-//      after ~4 billion resets per arena.
+
+//  4. **Epoch dual-protection.** `core/mem/epoch.vr` manages a
+//  process-level epoch; its wraparound detection (§4.3.3) tells
+//  the pool when to rebuild arenas to avoid generation aliasing
+//  after ~4 billion resets per arena.
 //
+
 // # Lease model
 //
-//   let pool = ArenaPool.new(ArenaPoolConfig.default());
-//   {
-//       let lease = pool.acquire();          // takes an arena
-//       // ... handler runs, allocates into &mut lease.arena ...
-//   }   // ArenaLease.Drop returns it to the pool (with reset()).
+
+//  let pool = ArenaPool.new(ArenaPoolConfig.default());
+//  {
+//  let lease = pool.acquire(); // takes an arena
+//  // ... handler runs, allocates into &mut lease.arena ...
+//  } // ArenaLease.Drop returns it to the pool (with reset()).
 //
+
 // The `ArenaLease` RAII discipline is the contract: handlers see
 // `&mut Arena`, never the lease itself, and have no way to leak a
 // lease out of the request scope (CBGR escape analysis enforces it
 // once `@lifetime(request)` lands — follow-up).
 //
+
 // =============================================================================
 
 module core.net.weft.arena_pool;

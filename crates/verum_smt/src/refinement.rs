@@ -1,16 +1,19 @@
 //! Production-ready refinement type verification for Tier 1
 //!
+
 //! Verum refinement types constrain base types with predicates: five binding forms are
 //! supported (inline `T{pred}`, lambda `T where |x| pred`, sigma-type `x: T where pred(x)`,
 //! named predicate `T where pred_name`, bare `T where pred`). Refinement subtyping:
 //! `T{P} <: T{Q}` iff `forall x. P(x) => Q(x)`. All forms desugar to sigma types
 //! in the dependent type core: `(x: T, Proof(P(x)))`.
 //!
+
 //! Implements the three-tier verification strategy:
 //! 1. Syntactic checks: <1ms for simple cases
 //! 2. SMT solver: 10-500ms for complex predicates (with timeout)
 //! 3. Runtime fallback: For undecidable cases
 //!
+
 //! Supports three verification modes:
 //! - @verify(runtime): Skip SMT, use runtime checks only
 //! - @verify(proof): Full SMT verification (may be slow)
@@ -94,22 +97,26 @@ impl RefinementVerifier {
 
     /// Verify a refinement type constraint
     ///
+
     /// # Three-Tier Strategy
     ///
+
     /// 1. **Syntactic**: Fast pattern matching (<1ms)
-    ///    - Simple comparisons: `x > 0`, `x >= y`
-    ///    - Conjunction/disjunction: `a && b`, `a || b`
-    ///    - Tautologies: `true`, `false`
+    ///  - Simple comparisons: `x > 0`, `x >= y`
+    ///  - Conjunction/disjunction: `a && b`, `a || b`
+    ///  - Tautologies: `true`, `false`
     ///
+
     /// 2. **SMT**: Z3 solver with timeout (10-500ms)
-    ///    - Complex predicates requiring logical reasoning
-    ///    - Arithmetic relationships
-    ///    - Quantified formulas (limited support)
+    ///  - Complex predicates requiring logical reasoning
+    ///  - Arithmetic relationships
+    ///  - Quantified formulas (limited support)
     ///
+
     /// 3. **Runtime Fallback**: When SMT times out or is disabled
-    ///    - Undecidable predicates
-    ///    - Complex custom functions
-    ///    - User-specified @verify(runtime)
+    ///  - Undecidable predicates
+    ///  - Complex custom functions
+    ///  - User-specified @verify(runtime)
     pub fn verify_refinement(
         &self,
         ty: &Type,
@@ -304,6 +311,7 @@ impl RefinementVerifier {
 
     /// Check subsumption: does T1{φ1} <: T2{φ2}?
     ///
+
     /// According to spec: T{φ₁} <: T{φ₂} iff φ₁ ⇒ φ₂
     pub fn check_subsumption(&self, ty1: &Type, ty2: &Type, mode: CheckMode) -> SubsumptionResult {
         // Extract refinement predicates
@@ -346,6 +354,7 @@ impl RefinementVerifier {
 
     /// Count the number of proof steps in a ProofTerm
     ///
+
     /// This provides a metric for proof complexity.
     fn count_proof_steps(proof: &ProofTerm) -> usize {
         match proof {
@@ -409,6 +418,7 @@ impl RefinementVerifier {
 
     /// Extract axiom names used in a proof
     ///
+
     /// Returns a set of all axiom names referenced in the proof.
     fn extract_axiom_names(proof: &ProofTerm) -> Set<Text> {
         let mut axioms = Set::new();
@@ -514,6 +524,7 @@ impl Default for RefinementVerifier {
 impl RefinementVerifier {
     /// Propagate constraints through type hierarchy
     ///
+
     /// Given a type with refinements, propagate the constraints to
     /// extract implied predicates. This enables better verification
     /// by discovering implicit constraints.
@@ -552,9 +563,11 @@ impl RefinementVerifier {
 
     /// Verify dependent refinement types
     ///
+
     /// Dependent types have refinements that depend on other values.
     /// Example: List<T, n: Int> where the length is part of the type.
     ///
+
     /// This version uses pattern-based quantifier instantiation when beneficial.
     pub fn verify_dependent_refinement(
         &mut self,
@@ -588,6 +601,7 @@ impl RefinementVerifier {
         // an unconstrained Int constant that wasn't tied to the
         // value, producing trivially-true (unsound) verdicts.
         //
+
         // Dispatch on the translated value's sort and create a fresh
         // const of the matching sort. Sorts the translator can
         // currently produce: Bool, Int, Real. Other sorts fall back
@@ -737,9 +751,11 @@ impl RefinementVerifier {
 
     /// Validate a proof witness
     ///
+
     /// Takes a proof witness and validates its structure and soundness.
     /// Returns a ProofValidation result with any errors or warnings.
     ///
+
     /// Note: This performs structural validation based on the proof metadata.
     /// For full proof validation including inference step verification, the proof
     /// should be validated during extraction via `ProofExtractor::validate_proof()`.
@@ -817,6 +833,7 @@ impl RefinementVerifier {
 
     /// Extract and validate proof from a verification result
     ///
+
     /// This is a convenience method that combines proof extraction and validation.
     pub fn extract_and_validate_proof(
         &self,

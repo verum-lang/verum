@@ -2,25 +2,29 @@
 // core.verify.level — user-facing mirror of the VVA §2.3 nine-strategy ladder
 // =============================================================================
 //
+
 // Per VVA §2.3, `@verify(<strategy>)` selects discharge intent across
 // nine strategies that form a strictly-monotone ordinal ν-table:
 //
-//   | Strategy    | ν       | Cost / Completeness                         |
-//   |-------------|---------|---------------------------------------------|
-//   | runtime     | 0       | dynamic checks; ~5–15ns per assertion       |
-//   | static      | 1       | conservative dataflow / CBGR / const fold   |
-//   | fast        | 2       | bounded SMT (single solver, short timeout) |
-//   | formal      | ω       | full SMT portfolio (Z3+CVC5)                |
-//   | proof       | ω+1     | user-supplied tactic proof; kernel re-check |
-//   | thorough    | ω·2     | formal + invariant/frame/termination obligs |
-//   | reliable    | ω·2+1   | thorough + cross-solver agreement           |
-//   | certified   | ω·2+2   | reliable + certificate re-check + export    |
-//   | synthesize  | ≤ω·3+1  | inverse search across 𝔐; fills holes        |
+
+//  | Strategy | ν | Cost / Completeness |
+//  |-------------|---------|---------------------------------------------|
+//  | runtime | 0 | dynamic checks; ~5–15ns per assertion |
+//  | static | 1 | conservative dataflow / CBGR / const fold |
+//  | fast | 2 | bounded SMT (single solver, short timeout) |
+//  | formal | ω | full SMT portfolio (Z3+CVC5) |
+//  | proof | ω+1 | user-supplied tactic proof; kernel re-check |
+//  | thorough | ω·2 | formal + invariant/frame/termination obligs |
+//  | reliable | ω·2+1 | thorough + cross-solver agreement |
+//  | certified | ω·2+2 | reliable + certificate re-check + export |
+//  | synthesize | ≤ω·3+1 | inverse search across 𝔐; fills holes |
 //
+
 // Strategies are *strictly monotone* on `<` over countable ordinals;
 // `evaluate_attempt(level, attempt)` returns a `VerificationOutcome`
 // per the canonical table in `core.verify.attempt`.
 //
+
 // Pre-V8 versions of this module exposed only three levels (Runtime /
 // Static / Proof). Those names remain as enum variants so existing
 // callers continue to compile; the six new strategies are additive.
@@ -38,6 +42,7 @@ mount core.{Maybe, Text};
 /// function or theorem is compiled. Variants are listed in
 /// monotone-ν order; `nu_ordinal` projects each to its ν per VVA §2.3.
 ///
+
 /// **Coherent variants (M4.E)** mirror the Rust-side
 /// `verum_ast::attr::VerificationMode::{Coherent, CoherentStatic,
 /// CoherentRuntime}` introduced for VVA-6 (operational coherence
@@ -214,6 +219,7 @@ public fn allows_runtime_fallback(level: VerificationLevel) -> Bool {
 /// without certificate materialisation; `Runtime / Static / Fast`
 /// have no certificate path.
 ///
+
 /// **Coherent variants (M4.E):** `Coherent` emits a CoherenceCert
 /// (α-cert ⟺ ε-cert correspondence witness); `CoherentStatic` /
 /// `CoherentRuntime` produce SMT or trace-bounded verdicts without
@@ -295,7 +301,7 @@ implement Copy for VerificationLevel {}
 
 implement Display for VerificationLevel {
     /// Renders as the canonical annotation form — round-trips back
-    /// to the same value via `parse_level`.  Mirrors VVA §2.3
+    /// to the same value via `parse_level`. Mirrors VVA §2.3
     /// strategy names so audit logs read directly as the source
     /// `@verify(<level>)` annotation.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

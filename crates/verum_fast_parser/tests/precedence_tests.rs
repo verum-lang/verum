@@ -14,6 +14,7 @@
 )]
 // Operator precedence tests for Verum parser.
 //
+
 // Verifies that operators are parsed with correct precedence and associativity.
 // Precedence from lowest to highest:
 // 1. Pipeline `|>`
@@ -715,5 +716,6 @@ fn test_real_world_3() {
 // - Unary precedence: 8 tests
 // - Complex precedence tests: 15 tests
 //
+
 // This comprehensive test suite ensures that all operators have the correct
 // precedence and associativity according to the Verum language specification.

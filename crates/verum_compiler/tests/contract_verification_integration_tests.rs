@@ -15,9 +15,11 @@
 #![cfg(test)]
 
 //!
+
 //! These tests verify the complete pipeline integration for contract verification,
 //! from parsing contract# literals through SMT verification to semantic analysis.
 //!
+
 //! Phase 3a: Contract verification via SMT-LIB translation. contract#"..." literals
 //! specify requires/ensures/invariant clauses. Three verification modes:
 //! @verify(proof) - SMT solver proves correctness, contracts erased (zero runtime cost);

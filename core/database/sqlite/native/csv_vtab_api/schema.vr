@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite ext/misc/csv.c
 //
+
 // When the caller doesn't supply `schema=...`, the vtab infers
 // "CREATE TABLE x(c0 TEXT, c1 TEXT, …)" from the first row's column
 // count (or from the explicit `columns=N` option).

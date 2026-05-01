@@ -5,6 +5,7 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // TextBuilder provides an efficient way to construct Text values incrementally.
 // Backs a single growing `Text` buffer — push_str / push_byte / push_char all
 // append in place. The previous chunk-list design cloned every input Text on
@@ -12,16 +13,19 @@
 // buffer design is strictly faster (amortised O(N) appends, log-N
 // reallocations) and zero overhead beyond the final Text itself.
 //
+
 // # Usage
 //
+
 // ```verum
 // let mut builder = TextBuilder.new();
 // builder.push("Hello");
 // builder.push_char(' ');
 // builder.push("World");
-// let result = builder.build();  // "Hello World"
+// let result = builder.build(); // "Hello World"
 // ```
 //
+
 // =============================================================================
 
 module core.text.builder;
@@ -39,13 +43,16 @@ mount core.result.{Result, Ok, Err};
 
 /// An efficient builder for constructing Text values incrementally.
 ///
+
 /// Backed by a single growing Text buffer — every `push_*` operation
 /// appends in place, and `build()` returns the buffer. There is no
 /// chunk-list intermediate, no per-push Text clone, and no
 /// per-char Text allocation.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// let mut b = TextBuilder.new();
 /// b.push("name");
@@ -54,10 +61,11 @@ mount core.result.{Result, Ok, Err};
 /// assert_eq(b.build(), "name=value");
 /// ```
 ///
+
 /// ```verum
-/// let mut b = TextBuilder.with_capacity(1024);   // 1024 bytes
+/// let mut b = TextBuilder.with_capacity(1024); // 1024 bytes
 /// for item in items {
-///     b.push_line(&item.to_string());
+///  b.push_line(&item.to_string());
 /// }
 /// let output = b.build();
 /// ```
@@ -111,6 +119,7 @@ implement TextBuilder {
 
     /// Build the final Text value.
     ///
+
     /// Returns a clone of the internal buffer so subsequent push
     /// operations don't mutate the returned Text. The clone is
     /// O(|buf|) but unavoidable when the builder remains in scope —

@@ -3,26 +3,31 @@
 // =============================================================================
 // Layer: 5 (Network — HTTP/3 / QPACK)
 // Dependencies: core, collections, .{dynamic_table, instructions, static_table,
-//               integer, huffman, decoder (for QpackHeaderField)}
+//  integer, huffman, decoder (for QpackHeaderField)}
 // =============================================================================
 //
+
 // One side of a QPACK session is exactly two tables + two streams:
 //
-//   * encoder_table — our outgoing dynamic table; peer mirrors it via
-//     the encoder-stream instructions we emit.
-//   * decoder_table — peer's outgoing dynamic table; we mirror it via
-//     the encoder-stream instructions peer emits.
-//   * our encoder-stream output (bytes we push onto the peer's
-//     encoder-stream view — actually our encoder stream).
-//   * our decoder-stream output (acks we send back to peer).
+
+//  * encoder_table — our outgoing dynamic table; peer mirrors it via
+//  the encoder-stream instructions we emit.
+//  * decoder_table — peer's outgoing dynamic table; we mirror it via
+//  the encoder-stream instructions peer emits.
+//  * our encoder-stream output (bytes we push onto the peer's
+//  encoder-stream view — actually our encoder stream).
+//  * our decoder-stream output (acks we send back to peer).
 //
+
 // `QpackSession` carries both tables and emits / consumes both
 // instruction streams. High-level `encode_field_section` /
 // `decode_field_section` methods accept/produce QpackHeaderField lists
 // with the full dynamic-table plus static-table matching path.
 //
+
 // # Blocked streams (RFC 9204 §2.1.2)
 //
+
 // If an encoded section references dynamic-table entries that have
 // not yet arrived on the decoder side, the decoder blocks that
 // stream until the needed inserts land. `qpack_blocked_streams`
@@ -31,6 +36,7 @@
 // confirmed Insert Count) so streams never block regardless of
 // ordering.
 //
+
 // =============================================================================
 
 module core.net.h3.qpack.session;
@@ -168,14 +174,15 @@ implement QpackSession {
         let mut body: List<Byte> = List.with_capacity(headers.len() * 32 + 16);
 
         // Plan per-header emission:
-        //   1. exact (name, value) in static table  → Indexed Field Line, static
-        //   2. exact in dynamic table, abs < peer_insert_count → Indexed Field Line, dynamic
-        //   3. name match in static → Literal Field Line with static name ref
-        //   4. name match in dynamic + abs < peer_insert_count → Literal with dynamic name ref
-        //   5. else:
-        //       a. encoder_table.can_insert(entry) → Insert on encoder stream; emit Indexed ref post-base
-        //       b. otherwise → Literal with Literal Name
+        //  1. exact (name, value) in static table → Indexed Field Line, static
+        //  2. exact in dynamic table, abs < peer_insert_count → Indexed Field Line, dynamic
+        //  3. name match in static → Literal Field Line with static name ref
+        //  4. name match in dynamic + abs < peer_insert_count → Literal with dynamic name ref
+        //  5. else:
+        //  a. encoder_table.can_insert(entry) → Insert on encoder stream; emit Indexed ref post-base
+        //  b. otherwise → Literal with Literal Name
         //
+
         // For v0.2 we never block, so we keep Required Insert Count = 0
         // and Delta Base = 0. Insert instructions still propagate the
         // peer-side table for future sections.

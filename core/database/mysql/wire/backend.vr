@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
 //
+
 // Decodes the basic server packet types (Initial Handshake, OK / EOF /
 // ERR, AuthSwitchRequest, AuthMoreData) plus MyColumnDefinition41.
 // All decoders propagate `MyFrameError` from `wire/frame.vr`; the
@@ -303,18 +304,21 @@ fn bytes_to_text(o: &Maybe<List<Byte>>) -> Text {
 // COM_STMT_PREPARE_OK (database.md §6.3.3)
 // -----------------------------------------------------------------------------
 //
+
 // Layout:
-//     u8   status = 0x00
-//     u32  statement_id
-//     u16  num_columns (in result set; 0 for non-SELECT)
-//     u16  num_params  (placeholder count)
-//     u8   reserved (always 0)
-//     u16  warning_count
+//  u8 status = 0x00
+//  u32 statement_id
+//  u16 num_columns (in result set; 0 for non-SELECT)
+//  u16 num_params (placeholder count)
+//  u8 reserved (always 0)
+//  u16 warning_count
 //
+
 // Followed on the wire by:
-//     num_params  MyColumnDefinition41 packets + EOF (or skipped if 0)
-//     num_columns MyColumnDefinition41 packets + EOF (or skipped if 0)
+//  num_params MyColumnDefinition41 packets + EOF (or skipped if 0)
+//  num_columns MyColumnDefinition41 packets + EOF (or skipped if 0)
 //
+
 // We parse the fixed-size header here; the trailing column descs are
 // read separately by the connection driver (it already knows how to
 // loop MyColumnDefs from the COM_QUERY result-set path).
@@ -354,14 +358,16 @@ public fn parse_stmt_prepare_ok(payload: &[Byte])
 // Binary-protocol row decoder
 // -----------------------------------------------------------------------------
 //
+
 // Binary result-set rows are framed as:
-//     [0x00]              header byte (NOT EOF / OK / ERR)
-//     [null_bitmap]       ceil((n_cols + 2) / 8) bytes — note +2
-//                          offset for backwards-compat with old proto
-//     [for each non-NULL column: type-specific payload]
+//  [0x00] header byte (NOT EOF / OK / ERR)
+//  [null_bitmap] ceil((n_cols + 2) / 8) bytes — note +2
+//  offset for backwards-compat with old proto
+//  [for each non-NULL column: type-specific payload]
 //
+
 // v0.1 returns each row as a List<Maybe<List<Byte>>> — None for NULL,
-// Some(bytes) for the column's type-encoded value.  Higher layers
+// Some(bytes) for the column's type-encoded value. Higher layers
 // translate to typed columns via `core.database.common.types.WireRow`.
 
 public fn parse_binary_row(
@@ -406,7 +412,7 @@ public fn parse_binary_row(
 }
 
 /// Decode one column value at `off` in `payload`, returning the raw
-/// payload bytes and the count of bytes consumed.  Type-specific
+/// payload bytes and the count of bytes consumed. Type-specific
 /// fixed widths follow the MySQL binary protocol; lenenc-prefixed
 /// variable-length fields share decoding via `read_lenenc_string`.
 fn decode_binary_value(

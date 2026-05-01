@@ -1,5 +1,6 @@
 //! Demo of parallel SMT solving capabilities
 //!
+
 //! Shows portfolio solving, cube-and-conquer, and parallel verification strategies.
 
 use std::thread;

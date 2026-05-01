@@ -1,5 +1,6 @@
 //! Autodiff graph metadata for gradient computation.
 //!
+
 //! Supports three levels of autodiff:
 //! - Level 1: Source transform (compile-time, zero overhead)
 //! - Level 2: Checkpointing (hybrid, memory/compute tradeoff)

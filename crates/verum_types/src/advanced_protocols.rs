@@ -1,43 +1,50 @@
 //! Advanced Protocol Features Implementation
 //!
+
 //! Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Complete Advanced Protocol System
 //!
+
 //! This module implements sophisticated protocol features that enable advanced
 //! type-level programming while maintaining zero-cost guarantees:
 //!
+
 //! - **Generic Associated Types (GATs)**: Associated types with type parameters
 //! - **Specialization**: More specific implementations override general ones
 //! - **GenRef Wrapper**: Generation-aware references for lending iterators
 //! - **Refinement Integration**: Value-level constraints in protocol signatures
 //! - **Higher-Kinded Types**: Type constructors as protocol parameters
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────┐
-//! │  GAT System                             │
-//! │  - Type parameters on associated types  │
-//! │  - Where clauses and bounds             │
-//! │  - Higher-kinded type support           │
+//! │ GAT System │
+//! │ - Type parameters on associated types │
+//! │ - Where clauses and bounds │
+//! │ - Higher-kinded type support │
 //! └─────────────────────────────────────────┘
-//!           ↓
+//!  ↓
 //! ┌─────────────────────────────────────────┐
-//! │  Specialization Lattice                 │
-//! │  - Precedence resolution                │
-//! │  - Overlap detection                    │
-//! │  - Negative reasoning                   │
+//! │ Specialization Lattice │
+//! │ - Precedence resolution │
+//! │ - Overlap detection │
+//! │ - Negative reasoning │
 //! └─────────────────────────────────────────┘
-//!           ↓
+//!  ↓
 //! ┌─────────────────────────────────────────┐
-//! │  GenRef Wrapper                         │
-//! │  - Generation tracking                  │
-//! │  - CBGR integration                     │
-//! │  - Lending iterator support             │
+//! │ GenRef Wrapper │
+//! │ - Generation tracking │
+//! │ - CBGR integration │
+//! │ - Lending iterator support │
 //! └─────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Performance Guarantees
 //!
+
 //! - **GATs**: Zero-cost (compile to concrete types via monomorphization)
 //! - **Specialization**: Zero-cost (resolved at compile-time)
 //! - **GenRef**: ~20ns overhead (15ns CBGR + 5ns generation check)
@@ -59,13 +66,15 @@ pub use crate::variance::Variance;
 
 /// Type parameter for a Generic Associated Type
 ///
+
 /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1 lines 116-134
 ///
+
 /// Example:
 /// ```verum
 /// protocol Monad {
-///     type Wrapped<T>  // GAT with one type parameter
-///     fn pure<T>(value: T) -> Self.Wrapped<T>
+///  type Wrapped<T> // GAT with one type parameter
+///  fn pure<T>(value: T) -> Self.Wrapped<T>
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -87,12 +96,14 @@ pub struct GATTypeParam {
 
 /// Where clause specific to a GAT (not the protocol itself)
 ///
+
 /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4 lines 441-471
 ///
+
 /// Example:
 /// ```verum
 /// protocol Container {
-///     type Item<T> where T: Clone + Debug
+///  type Item<T> where T: Clone + Debug
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -109,6 +120,7 @@ pub struct GATWhereClause {
 
 /// Kind of associated type
 ///
+
 /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .3 lines 410-437
 #[derive(Debug, Clone, PartialEq)]
 pub enum AssociatedTypeKind {
@@ -126,11 +138,13 @@ pub enum AssociatedTypeKind {
 
 /// Extended AssociatedType with GAT support
 ///
+
 /// This extends the basic AssociatedType from protocol.rs with:
 /// - Type parameters for GATs
 /// - Per-GAT where clauses
 /// - Kind tracking (regular, generic, higher-kinded)
 ///
+
 /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1-1.4 lines 112-471
 #[derive(Debug, Clone)]
 pub struct AssociatedTypeGAT {
@@ -206,20 +220,27 @@ impl AssociatedTypeGAT {
 
     /// Instantiate a GAT with concrete types
     ///
+
     /// Creates a concrete instantiation of this GAT by substituting type parameters
     /// with the provided concrete types. Returns the resulting concrete type.
     ///
+
     /// # Arguments
     ///
+
     /// * `concrete_types` - The concrete types to substitute for each type parameter
     ///
+
     /// # Returns
     ///
+
     /// * `Ok(Type)` - The instantiated concrete type
     /// * `Err(String)` - Error if arity mismatch or instantiation fails
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // Given: type Item<T> in Iterator protocol
     /// let gat = AssociatedTypeGAT::generic("Item", vec![...], ...);
@@ -258,16 +279,21 @@ impl AssociatedTypeGAT {
 
     /// Instantiate a GAT with concrete types and validate constraints
     ///
+
     /// Like `instantiate`, but also validates that where clause constraints
     /// are satisfied by the concrete types.
     ///
+
     /// # Arguments
     ///
+
     /// * `concrete_types` - The concrete types to substitute
     /// * `check_constraint` - Callback to check if a type satisfies a protocol bound
     ///
+
     /// # Returns
     ///
+
     /// * `Ok(Type)` - The instantiated concrete type if all constraints are satisfied
     /// * `Err(String)` - Error if arity mismatch or constraints not satisfied
     pub fn instantiate_checked<F>(
@@ -366,43 +392,51 @@ fn format_type(ty: &Type) -> Text {
 
 /// Generation-aware reference wrapper for CBGR
 ///
+
 /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .2 lines 143-193, 533-547
 ///
+
 /// GenRef wraps a CBGR reference with explicit generation tracking,
 /// enabling lending iterators and self-referential types without lifetime annotations.
 ///
+
 /// # Memory Layout
 ///
+
 /// ```text
 /// GenRef<T> {
-///     ptr: *const T      // 8 bytes
-///     generation: u64    // 8 bytes
+///  ptr: *const T // 8 bytes
+///  generation: u64 // 8 bytes
 /// }
 /// Total: 16 bytes
 /// ```
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// type WindowIterator<T> {
-///     data: GenRef<List<T>>,
-///     window_size: usize,
-///     position: usize
+///  data: GenRef<List<T>>,
+///  window_size: usize,
+///  position: usize
 /// }
 ///
+
 /// implement<T> Iterator for WindowIterator<T> {
-///     type Item is [T]
+///  type Item is [T]
 ///
-///     fn next(&mut self) -> Maybe<GenRef<&[T]>> {
-///         let data = self.data.deref()?;
-///         if self.position + self.window_size <= data.len() {
-///             let slice = &data[self.position..self.position + self.window_size];
-///             self.position += 1;
-///             Some(GenRef.borrow(slice))
-///         } else {
-///             None
-///         }
-///     }
+
+///  fn next(&mut self) -> Maybe<GenRef<&[T]>> {
+///  let data = self.data.deref()?;
+///  if self.position + self.window_size <= data.len() {
+///  let slice = &data[self.position..self.position + self.window_size];
+///  self.position += 1;
+///  Some(GenRef.borrow(slice))
+///  } else {
+///  None
+///  }
+///  }
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -431,8 +465,10 @@ impl GenRefType {
 
 /// Generation tracking predicates for refinement types
 ///
+
 /// Higher-rank protocol bounds: for<T> quantification in protocol bounds for universal requirements — .2 lines 515-532
 ///
+
 /// These predicates are available in ensures/requires clauses:
 /// - `generation(ref)` - Get generation counter
 /// - `epoch(ref)` - Get epoch counter
@@ -457,33 +493,40 @@ pub enum GenerationPredicate {
 
 /// Specialization metadata for protocol implementations
 ///
+
 /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — lines 549-663
 ///
+
 /// Enables more specific implementations to override more general ones
 /// with compile-time resolution based on specificity lattice.
 ///
+
 /// # Precedence Lattice (most specific wins)
 ///
+
 /// 1. Concrete type: `impl Show for List<Int>`
 /// 2. Partially specialized: `impl<T> Show for List<T> where T: Copy`
 /// 3. Generic: `impl<T> Show for List<T> where T: Display`
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// // General implementation
 /// implement<T> Display for List<T> where T: Display {
-///     fn fmt(self: &Self, f: &mut Formatter) -> Result<(), Error> {
-///         // Generic formatting
-///     }
+///  fn fmt(self: &Self, f: &mut Formatter) -> Result<(), Error> {
+///  // Generic formatting
+///  }
 /// }
 ///
+
 /// // Specialized implementation (more specific)
 /// @specialize
 /// implement Display for List<Text> {
-///     fn fmt(self: &Self, f: &mut Formatter) -> Result<(), Error> {
-///         // Optimized for List<Text>
-///     }
+///  fn fmt(self: &Self, f: &mut Formatter) -> Result<(), Error> {
+///  // Optimized for List<Text>
+///  }
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -531,13 +574,16 @@ impl SpecializationInfo {
 
 /// Negative protocol bound for mutual exclusion
 ///
+
 /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .4 lines 623-638
 ///
+
 /// Example:
 /// ```verum
 /// // These are mutually exclusive:
 /// implement<T> MyProtocol for T where T: Send + Sync { }
 ///
+
 /// @specialize
 /// implement<T> MyProtocol for T where T: Send + !Sync { }
 /// ```
@@ -554,8 +600,10 @@ pub enum ProtocolBoundPolarity {
 
 /// Refinement constraint in protocol method signature
 ///
+
 /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 5.4 lines 801-937
 ///
+
 /// Tracks refinements on parameters and return types for:
 /// - Inline syntax: `Int{> 0}`
 /// - Declarative syntax: `Int where is_positive`
@@ -615,6 +663,7 @@ pub enum BinaryOp {
 
 /// Refinement syntax kind
 ///
+
 /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 5.4.1-5.4.3
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefinementKind {
@@ -634,8 +683,10 @@ pub enum RefinementKind {
 
 /// Specialization lattice for coherence checking
 ///
+
 /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .2 lines 572-602
 ///
+
 /// Orders implementations by specificity to select the most specific one.
 #[derive(Debug, Clone)]
 pub struct SpecializationLattice {

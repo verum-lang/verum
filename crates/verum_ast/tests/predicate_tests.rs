@@ -14,9 +14,11 @@
 )]
 // Tests for predicate declarations.
 //
+
 // This module tests PredicateDecl, which allows defining reusable
 // boolean expressions for refinement types.
 //
+
 // Tests for refinement predicate construction and the five binding rules.
 
 use verum_ast::decl::*;

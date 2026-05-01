@@ -14,6 +14,7 @@
 )]
 // Unit tests for context.rs
 //
+
 // Migrated from src/context.rs to comply with CLAUDE.md test organization.
 
 use verum_diagnostics::{

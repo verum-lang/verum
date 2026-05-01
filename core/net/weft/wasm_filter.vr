@@ -2,53 +2,64 @@
 // core/net/weft/wasm_filter.vr — WASI / Proxy-Wasm filter sandbox
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §8.14
+// Spec: internal/specs/net-framework.md §8.14
 // =============================================================================
 //
+
 // Standard Layer for running third-party filters (WAF rules, A/B
 // tests, custom metrics, auth plugins) as WebAssembly modules. The
 // module is loaded once at start, instantiated per worker, and
 // invoked on every request via the Proxy-Wasm 0.2.1 ABI — the same
 // ABI used by Envoy, so existing filters drop in unchanged.
 //
+
 // Three orthogonal guarantees:
 //
-//   1. **Capability sandbox.** WASI linker grants only the
-//      capabilities the filter asked for in its manifest (read
-//      headers + call `log`; NOT `open_file`). Mirrors §5.8 capability
-//      discipline at the filter boundary.
+
+//  1. **Capability sandbox.** WASI linker grants only the
+//  capabilities the filter asked for in its manifest (read
+//  headers + call `log`; NOT `open_file`). Mirrors §5.8 capability
+//  discipline at the filter boundary.
 //
-//   2. **Resource caps.** Per-invocation CPU-quota (10 ms default),
-//      memory-cap (8 MiB), instruction-limit. A misbehaving filter
-//      gets dropped for that request only; the Weft pipeline keeps
-//      running.
+
+//  2. **Resource caps.** Per-invocation CPU-quota (10 ms default),
+//  memory-cap (8 MiB), instruction-limit. A misbehaving filter
+//  gets dropped for that request only; the Weft pipeline keeps
+//  running.
 //
-//   3. **Determinism in DST.** In simulation mode the filter's
-//      randomness and clock are rerouted to the DST subsystem
-//      (§8.15), keeping the filter's behaviour reproducible.
+
+//  3. **Determinism in DST.** In simulation mode the filter's
+//  randomness and clock are rerouted to the DST subsystem
+//  (§8.15), keeping the filter's behaviour reproducible.
 //
+
 // Phase-6 skeleton status:
 //
-//   * API shape (config, layer, handler) is stable — future
-//     changes only flesh out internals.
-//   * Actual WASM instantiation lives in the runtime behind the
-//     `verum.wasm.*` intrinsic family. Until that lands the layer
-//     short-circuits by letting the request through unchanged +
-//     incrementing a "wasm-skipped" counter so deployments know.
+
+//  * API shape (config, layer, handler) is stable — future
+//  changes only flesh out internals.
+//  * Actual WASM instantiation lives in the runtime behind the
+//  `verum.wasm.*` intrinsic family. Until that lands the layer
+//  short-circuits by letting the request through unchanged +
+//  incrementing a "wasm-skipped" counter so deployments know.
 //
+
 // Usage:
 //
+
 // ```verum
 // let waf = WasmFilter.load_from_bytes(waf_bytes,
-//              WasmFilterConfig.default()
-//                  .with_cpu_quota_ms(20)
-//                  .with_memory_bytes(16 * 1024 * 1024))?;
+//  WasmFilterConfig.default()
+//  .with_cpu_quota_ms(20)
+//  .with_memory_bytes(16 * 1024 * 1024))?;
 //
+
 // let app = Router.new()
-//     .route("/api/...", Method.Get, handler)
-//     .layer(WasmFilterLayer.new(waf));
+//  .route("/api/...", Method.Get, handler)
+//  .layer(WasmFilterLayer.new(waf));
 // ```
 //
+
 // =============================================================================
 
 module core.net.weft.wasm_filter;

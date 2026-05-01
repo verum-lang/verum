@@ -1,5 +1,6 @@
 //! Per-function lowering context for VBC → LLVM IR.
 //!
+
 //! This module manages the state needed during the lowering of a single
 //! VBC function to LLVM IR.
 
@@ -31,6 +32,7 @@ use std::sync::Arc;
 
 /// Pre-built index for O(1) function name lookups in VBC modules.
 ///
+
 /// Replaces O(n) linear scans of `vbc_mod.functions` in instruction.rs
 /// Strategy 2/3 with efficient HashMap lookups.
 #[derive(Debug, Clone, Default)]
@@ -92,6 +94,7 @@ impl FuncNameIndex {
 
 /// Per-function lowering context.
 ///
+
 /// Manages register values, basic blocks, and statistics for a single
 /// function being lowered.
 pub struct FunctionContext<'a, 'ctx> {
@@ -367,6 +370,7 @@ pub struct FunctionContext<'a, 'ctx> {
 
     /// Unified register type map (Phase 1: coexists with legacy HashSets).
     ///
+
     /// This is the new architecture that will replace all 40+ HashSet<u16> tracking
     /// fields. During Phase 1, both systems are maintained in parallel. Once all
     /// call sites are migrated, the legacy fields will be removed.
@@ -374,6 +378,7 @@ pub struct FunctionContext<'a, 'ctx> {
 
     /// Method dispatch table for declarative method routing.
     ///
+
     /// Maps (type_name, method_name) → DispatchTarget, replacing the Strategy
     /// 0/1/2/3/4 cascade in instruction.rs.
     dispatch_table: MethodDispatchTable,
@@ -431,6 +436,7 @@ pub struct FunctionContext<'a, 'ctx> {
     /// (or `--allow*` CLI flags); `None` for trusted-application
     /// AOT runs that bypass script-mode enforcement.
     ///
+
     /// `PermissionAssert` lowering reads this to decide whether to
     /// elide, panic unconditionally, or emit a per-target switch.
     /// Shared via `Arc` so every lowered function in the module sees
@@ -442,12 +448,12 @@ pub struct FunctionContext<'a, 'ctx> {
     /// time with a manifest-citing diagnostic — the Tier 1 (AOT)
     /// counterpart of the Tier 0 dispatch rejection at
     /// `verum_vbc/src/interpreter/dispatch_table/handlers/
-    /// async_nursery.rs::handle_spawn`.  Default `true`.
+    /// async_nursery.rs::handle_spawn`. Default `true`.
     futures_enabled: bool,
 
     /// Manifest-driven `[runtime].nurseries` gate (#262-AOT, task #281).
     /// When `false`, the `Instruction::NurseryInit` arm rejects at
-    /// codegen time with a manifest-citing diagnostic.  Default `true`.
+    /// codegen time with a manifest-citing diagnostic. Default `true`.
     nurseries_enabled: bool,
 }
 
@@ -667,6 +673,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Create a new function context with VBC module for FFI support.
     ///
+
     /// The VBC module provides access to FFI symbol tables, struct layouts,
     /// and other metadata required for zero-cost FFI lowering.
     pub fn with_vbc_module(
@@ -802,6 +809,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the VBC module if available.
     ///
+
     /// Returns None if the context was created without a VBC module.
     /// FFI operations that require module-level metadata will fail
     /// with an appropriate error if no VBC module is set.
@@ -849,10 +857,10 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.permission_policy.as_deref()
     }
 
-    /// Install `[runtime].futures` (#262-AOT, task #281).  When false,
+    /// Install `[runtime].futures` (#262-AOT, task #281). When false,
     /// `Instruction::Spawn` arm of the lowering rejects at codegen
-    /// time.  Threaded by the lowering driver before instruction
-    /// emission.  Default true (no gate).
+    /// time. Threaded by the lowering driver before instruction
+    /// emission. Default true (no gate).
     pub fn set_futures_enabled(&mut self, enabled: bool) {
         self.futures_enabled = enabled;
     }
@@ -863,7 +871,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.futures_enabled
     }
 
-    /// Install `[runtime].nurseries` (#262-AOT, task #281).  When false,
+    /// Install `[runtime].nurseries` (#262-AOT, task #281). When false,
     /// `Instruction::NurseryInit` arm rejects at codegen time.
     /// Default true.
     pub fn set_nurseries_enabled(&mut self, enabled: bool) {
@@ -923,6 +931,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get builder and mutable CBGR helper together.
     ///
+
     /// This method allows simultaneous access to both the builder (for generating
     /// instructions) and the CBGR helper (for reference operations) by splitting
     /// the borrow across the two fields.
@@ -942,6 +951,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the LLVM context.
     ///
+
     /// This is needed for FFI lowering and other operations that require
     /// creating new types or values.
     pub fn llvm_context(&self) -> &'ctx Context {
@@ -950,6 +960,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the LLVM module that contains this function.
     ///
+
     /// Returns the parent module of the function being lowered.
     /// This is needed for declaring external functions for FFI calls.
     pub fn get_module(&self) -> &'a Module<'ctx> {
@@ -962,6 +973,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Set the CBGR tier for a specific register.
     ///
+
     /// This is used for escape-analysis-based optimization where individual
     /// registers can have different tiers based on their escape behavior.
     pub fn set_register_tier(&mut self, reg: u16, tier: RefTier) {
@@ -970,6 +982,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the CBGR tier for a specific register.
     ///
+
     /// Returns the per-register tier if set, otherwise falls back to the
     /// function's default tier.
     pub fn get_register_tier(&self, reg: u16) -> RefTier {
@@ -981,6 +994,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Set VBC escape analysis tier decisions for this function.
     ///
+
     /// Maps VBC instruction offset to RefTier. Called before instruction lowering
     /// to provide escape analysis results from `VbcEscapeAnalyzer`.
     pub fn set_vbc_escape_tiers(&mut self, tiers: HashMap<usize, RefTier>) {
@@ -989,6 +1003,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Look up the escape-analysis-decided tier for a VBC instruction offset.
     ///
+
     /// Returns `Some(RefTier)` if the escape analysis produced a decision for
     /// this instruction, `None` otherwise.
     pub fn get_vbc_escape_tier(&self, offset: usize) -> Option<RefTier> {
@@ -1658,6 +1673,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Register a reference in a register for escape tracking.
     ///
+
     /// Call this when creating a reference (Ref/RefMut instructions).
     pub fn register_reference(&mut self, reg: u16, info: ReferenceInfo) {
         // Set initial tier based on escape analysis (before moving info)
@@ -1672,6 +1688,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Mark a register's reference as escaping to heap.
     ///
+
     /// Call this when storing a reference to heap memory.
     pub fn mark_heap_escape(&mut self, reg: u16) {
         if let Some(info) = self.reference_registers.get_mut(&reg) {
@@ -1683,6 +1700,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Mark a register's reference as returned from function.
     ///
+
     /// Call this when a reference is returned.
     pub fn mark_returned(&mut self, reg: u16) {
         if let Some(info) = self.reference_registers.get_mut(&reg) {
@@ -1702,6 +1720,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the effective tier for a reference operation.
     ///
+
     /// This considers both the per-register tier and the function's default tier,
     /// and records statistics for CBGR elimination.
     pub fn get_effective_ref_tier(&mut self, reg: u16) -> RefTier {
@@ -1897,8 +1916,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     // unit type) must be coerced:
                     //  - Empty struct (unit): store 0
                     //  - Non-empty struct: spill to a stack alloca and store the
-                    //    alloca pointer as i64 so downstream code can recover it
-                    //    via inttoptr.
+                    //  alloca pointer as i64 so downstream code can recover it
+                    //  via inttoptr.
                     let field_count = sv.get_type().count_fields();
                     if field_count == 0 {
                         i64_ty.const_zero().into()
@@ -2060,6 +2079,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Push an exception handler onto the stack.
     ///
+
     /// Called by TryBegin to set up structured exception handling.
     pub fn push_exception_handler(&mut self, handler: ExceptionHandler<'ctx>) {
         self.exception_handlers.push(handler);
@@ -2067,6 +2087,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Pop an exception handler from the stack.
     ///
+
     /// Called by TryEnd when leaving a try block normally.
     pub fn pop_exception_handler(&mut self) -> Option<ExceptionHandler<'ctx>> {
         self.exception_handlers.pop()
@@ -2084,6 +2105,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get or create the exception value slot.
     ///
+
     /// This allocates a stack slot to store the current exception value.
     /// The slot is reused across all exception handlers in the function.
     pub fn get_or_create_exception_slot(&mut self) -> Result<PointerValue<'ctx>> {

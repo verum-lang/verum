@@ -5,26 +5,32 @@
 // Dependencies: core (memory, maybe, result, protocols, iterator)
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI memory operations:
 // - Uses core/memory.vr native allocator (CBGR-backed)
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // Map<K, V> is a hash map implementation using Robin Hood hashing.
 // Semantic naming: Map not HashMap (describes purpose, not implementation).
 //
+
 // Performance:
 // - Average O(1) for get, insert, remove
 // - Worst case O(n) for pathological hash distributions
 //
+
 // =============================================================================
 
 module core.collections.map;
 mount core.*;
-// Allocator primitives for typed-OOM (#65, #68).  See list.vr for
+// Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale — `mount core.*` doesn't surface these via the re-export
 // chain in `core/base/mod.vr` for unqualified function references.
 mount core.base.memory.{try_alloc, try_alloc_zeroed, try_realloc};
@@ -85,8 +91,10 @@ implement<K, V> Slot<K, V> {
 
 /// A view into a single entry in a map, which may be vacant or occupied.
 ///
+
 /// This is returned by the `entry()` method on Map.
 ///
+
 /// # Example
 /// ```verum
 /// let mut map = Map.new();
@@ -128,6 +136,7 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
 
     /// Ensure a value exists with a default, && return mutable reference.
     ///
+
     /// # Example
     /// ```verum
     /// let count = map.entry(word).or_insert(0);
@@ -142,6 +151,7 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
 
     /// Ensure a value exists with a computed default.
     ///
+
     /// The closure is only called if the entry is vacant.
     public fn or_insert_with<F: fn() -> V>(self, default: F) -> &mut V {
         match self {
@@ -152,6 +162,7 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
 
     /// Ensure a value exists with a default computed from the key.
     ///
+
     /// Note: Uses internal restructuring to avoid borrow checker conflicts.
     public fn or_insert_with_key<F: fn(&K) -> V>(self, default: F) -> &mut V {
         match self {
@@ -181,6 +192,7 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
 
     /// Modify an existing value if present.
     ///
+
     /// # Example
     /// ```verum
     /// map.entry(key).and_modify(|v| *v += 1).or_insert(1);
@@ -319,6 +331,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Create a map from an array of key-value pairs.
     ///
+
     /// # Example
     /// ```verum
     /// let m = Map.from([("a", 1), ("b", 2)]);
@@ -338,6 +351,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     // Create with preallocated capacity.
     //
+
     // Panics on allocation failure. For a fallible counterpart see
     // `try_with_capacity`.
     public fn with_capacity(capacity: Int) -> Map<K, V> {
@@ -349,6 +363,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Fallible counterpart to `with_capacity`.
     ///
+
     /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. Use at trust
     /// boundaries (FFI, untrusted-size config, large allocations
@@ -403,20 +418,25 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // Get value by key. Returns the value or 0/default if not found.
     // Takes key by value (avoids &K deref limitation in AOT codegen).
     //
+
     // ⚠ SEMANTIC HAZARD — DEPRECATED IN FAVOR OF `get_optional`.
     //
+
     // The 0/default fallback is unsound when `V`'s zero value is a
     // legitimate domain value: a map containing `(k, 0)` returns the
     // same answer as a map missing `k`. This silently masks lookup
     // failures. Task #54 tracks the architectural fix.
     //
+
     // Prefer:
     //
-    //   * `get_optional(key) -> Maybe<V>` — explicit presence
-    //     semantics, the type-level safe default.
-    //   * `get_or(key, fallback)` — explicit fallback, makes the
-    //     fallback value visible at the call site.
+
+    //  * `get_optional(key) -> Maybe<V>` — explicit presence
+    //  semantics, the type-level safe default.
+    //  * `get_or(key, fallback)` — explicit fallback, makes the
+    //  fallback value visible at the call site.
     //
+
     // `get` stays available because a ~666-call-site migration is
     // out of scope for a single patch. Every new call site SHOULD
     // use `get_optional` or `get_or`; future linter warning W505
@@ -457,9 +477,11 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Get value by key, returning Maybe<V>.
     ///
+
     /// Unlike `get()` which returns a zero-value on miss, this method
     /// returns `None` when the key is not found.
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, 10), (2, 20)]);
@@ -502,16 +524,19 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Get value by key with an explicit fallback.
     ///
+
     /// Semantic complement of `get`: the fallback value is visible at
     /// the call site, so readers can tell presence-missing from a
     /// legitimate zero-valued entry. Recommended over `get` when the
     /// caller genuinely wants "this key or that default".
     ///
+
     /// ```verum
-    /// let age = users.get_or(user_id, 0);  // 0 is an explicit default
+    /// let age = users.get_or(user_id, 0); // 0 is an explicit default
     /// let name = settings.get_or(key, "anonymous");
     /// ```
     ///
+
     /// Implementation: delegates to `get_optional` + `unwrap_or(default)`
     /// so the fallback path is exactly the same as the Maybe-based API.
     /// Closes the silent-fallback ambiguity of `get` without forcing
@@ -525,15 +550,17 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Get the key-value pair for a given key.
     ///
+
     /// Returns references to the key and value stored in the map,
     /// or None if the key is not present. Used internally by Set.get.
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([("hello", 1), ("world", 2)]);
     /// match m.get_key_value("hello") {
-    ///     Some(pair) => assert_eq(*pair.1, 1),
-    ///     None => panic("key not found"),
+    ///  Some(pair) => assert_eq(*pair.1, 1),
+    ///  None => panic("key not found"),
     /// }
     /// ```
     public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
@@ -612,6 +639,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // Insert key-value pair.
     // Returns old value if key was present.
     //
+
     // Panics on allocation failure (when growth is required). For a
     // fallible counterpart see `try_insert`.
     public fn insert(&mut self, key: K, value: V) -> Maybe<V> {
@@ -622,6 +650,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Fallible counterpart to `insert`.
     ///
+
     /// Returns `Err(AllocError.OutOfMemory)` if the table needs to
     /// grow and the allocator cannot satisfy the request. On Ok the
     /// inner `Maybe<V>` is the previous value for `key` (if any).
@@ -633,13 +662,15 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Get an entry for in-place manipulation.
     ///
+
     /// This is the primary way to perform insert-or-update operations efficiently.
     ///
+
     /// # Example
     /// ```verum
     /// // Count word occurrences
     /// for word in words {
-    ///     *map.entry(word).or_insert(0) += 1;
+    ///  *map.entry(word).or_insert(0) += 1;
     /// }
     /// ```
     public fn entry(&mut self, key: K) -> MapEntry<K, V> {
@@ -819,6 +850,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Reserves capacity for at least `additional` more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
     ///
+
     /// Panics on allocation failure. For a fallible counterpart see
     /// `try_reserve`.
     public fn reserve(&mut self, additional: Int) {
@@ -838,6 +870,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Fallible counterpart to `reserve`.
     ///
+
     /// Returns `Err(AllocError.OutOfMemory)` instead of panicking
     /// when the allocator cannot satisfy the request. The map is
     /// unchanged on failure.
@@ -960,16 +993,19 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Returns an iterator that yields ownership of all key-value pairs.
     /// After iteration completes, the map is empty but retains its capacity.
     ///
+
     /// # Example
     /// ```verum
     /// let mut map = Map.new();
     /// map.insert("a", 1);
     /// map.insert("b", 2);
     ///
+
     /// for (k, v) in map.drain() {
-    ///     print(f"Removed: {k} = {v}");
+    ///  print(f"Removed: {k} = {v}");
     /// }
     ///
+
     /// assert(map.is_empty());
     /// ```
     public fn drain(&mut self) -> MapDrain<K, V> {
@@ -981,8 +1017,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Retains only the entries that satisfy the predicate.
     ///
+
     /// In other words, removes all entries for which `f(&key, &mut value)` returns `false`.
     ///
+
     /// # Example
     /// ```verum
     /// let mut map = Map.new();
@@ -990,9 +1028,11 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// map.insert("b", 2);
     /// map.insert("c", 3);
     ///
+
     /// // Keep only entries with even values
     /// map.retain(|_k, v| *v % 2 == 0);
     ///
+
     /// assert_eq(map.len(), 1);
     /// assert(map.contains_key(&"b"));
     /// ```
@@ -1053,8 +1093,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// if the key already exists, or Ok with a mutable reference to the
     /// newly inserted value.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut m: Map<Text, Int> = Map.new();
     /// assert(m.try_insert("a", 1).is_ok());
@@ -1073,8 +1115,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Check if the map contains a given value. O(n) linear scan.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut m: Map<Text, Int> = Map.new();
     /// m.insert("a", 42);
@@ -1111,14 +1155,17 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Returns a mutable iterator over (&K, &mut V) pairs.
     ///
+
     /// Keys are immutable (changing keys would break hash invariants).
     /// Values can be mutated freely.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// for (key, val) in m.iter_mut() {
-    ///     *val = *val * 2;
+    ///  *val = *val * 2;
     /// }
     /// ```
     public fn iter_mut(&mut self) -> MapIterMut<K, V> {
@@ -1137,10 +1184,13 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Removes all entries matching the predicate and returns them as a list
     /// of (K, V) pairs. Retained entries preserve their position.
     ///
+
     /// Similar to `retain` but returns the removed entries.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut m = map([(1, "a"), (2, "b"), (3, "c")]);
     /// let removed = m.extract_if(|k, _v| *k % 2 == 0);
@@ -1187,14 +1237,18 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Merge another map into this one, using a conflict resolution function
     /// when both maps contain the same key.
     ///
+
     /// # Arguments
     ///
+
     /// - `other` - The map to merge from (consumed).
     /// - `resolve` - Function called with (existing_value, incoming_value) when
-    ///   a key exists in both maps. Returns the value to keep.
+    ///  a key exists in both maps. Returns the value to keep.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut a = map([(1, 10), (2, 20)]);
     /// let b = map([(2, 200), (3, 300)]);
@@ -1217,8 +1271,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Get value by key, or return a default value if not found.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let m = map([(1, 10), (2, 20)]);
     /// assert_eq(m.get_or_default(&1, 0), 10);
@@ -1236,8 +1292,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Filter and transform values, returning a new map.
     /// Applies f to each (key, value) pair; keeps entries where f returns Some.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let m = map([(1, 10), (2, 20), (3, 30)]);
     /// let filtered = m.filter_map(|k, v| if *v > 15 { Some(*v * 2) } else { None });
@@ -1261,6 +1319,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Filter entries keeping only those whose keys satisfy the predicate.
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, "a"), (2, "b"), (3, "c")]);
@@ -1284,6 +1343,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Filter entries keeping only those whose values satisfy the predicate.
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([("a", 1), ("b", 2), ("c", 3)]);
@@ -1307,6 +1367,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Map keys to new keys using a function, keeping values unchanged.
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, "a"), (2, "b")]);
@@ -1355,9 +1416,11 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Update the map with all entries from another map.
     ///
+
     /// For keys that exist in both maps, the value from `other` overwrites
     /// the existing value. This is equivalent to Python's `dict.update()`.
     ///
+
     /// # Example
     /// ```verum
     /// let mut m = map([(1, "a"), (2, "b")]);
@@ -1379,9 +1442,11 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Remove and return an arbitrary key-value pair from the map.
     ///
+
     /// Returns `None` if the map is empty.
     /// Useful for iteratively draining entries one at a time.
     ///
+
     /// # Example
     /// ```verum
     /// let mut m = map([(1, "a"), (2, "b")]);
@@ -1421,6 +1486,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Create a new map with values transformed by a function.
     /// The function receives references to both key and value.
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, 10), (2, 20)]);
@@ -1447,6 +1513,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Split the map into two maps based on a predicate.
     /// Returns (matching, not_matching).
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, 10), (2, 20), (3, 30)]);
@@ -1474,6 +1541,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     /// Returns true if any entry satisfies the predicate.
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, 10), (2, 20)]);
@@ -1494,6 +1562,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Returns true if all entries satisfy the predicate.
     /// Returns true for empty maps (vacuously true).
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, 10), (2, 20)]);
@@ -1515,6 +1584,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Returns the key-value pair, or None if no match.
     /// Note: order is implementation-defined (hash table order).
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, 10), (2, 20)]);
@@ -1540,6 +1610,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Returns a new map containing entries from self whose keys
     /// are NOT present in other.
     ///
+
     /// # Example
     /// ```verum
     /// let m1 = map([(1, 10), (2, 20), (3, 30)]);
@@ -1565,6 +1636,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Returns a new map containing entries from self whose keys
     /// ARE present in other. Values come from self.
     ///
+
     /// # Example
     /// ```verum
     /// let m1 = map([(1, 10), (2, 20), (3, 30)]);
@@ -1591,6 +1663,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// one of self or other (XOR on keys). Values come from whichever
     /// map contains the key.
     ///
+
     /// # Example
     /// ```verum
     /// let m1 = map([(1, 10), (2, 20)]);
@@ -1626,6 +1699,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Swap keys and values, returning a new Map<V, K>.
     /// If multiple keys map to the same value, one is kept (non-deterministic).
     ///
+
     /// # Example
     /// ```verum
     /// let m = map([(1, 10), (2, 20)]);
@@ -1728,6 +1802,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     // Ensure capacity for insertion.
     //
+
     // Panics on allocation failure. For a fallible counterpart see
     // `try_ensure_capacity`.
     fn ensure_capacity(&mut self) {
@@ -1822,6 +1897,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     // Resize hash table.
     //
+
     // Panics with descriptive message on allocation failure. For a
     // fallible counterpart that returns Err(AllocError.OutOfMemory)
     // instead of panicking, see `try_resize`.

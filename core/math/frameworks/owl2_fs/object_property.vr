@@ -2,9 +2,11 @@
 // owl2_fs.object_property — Shkotin 2019 Table 1 (Object Property Expressions)
 // =============================================================================
 //
+
 // §2.2.1 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 1 operator.
 // Shkotin 2019 Table 1 gives the HOL definition of `ObjectInverseOf`.
 //
+
 // V2 status (#134, 2026-04-25): the single object-property-expression
 // operator now carries the verbatim §3.1 inverse-relation body.
 // =============================================================================
@@ -19,9 +21,10 @@ mount core.math.frameworks.owl2_fs.types.{
 /// OPE₂'s interpretation under I.
 /// ⟦ObjectInverseOf(OPE₂)⟧^I = (⟦OPE₂⟧^I)⁻¹.
 ///
+
 /// Operationally: (a^I, b^I) ∈ ⟦ObjectInverseOf(OPE₂)⟧^I
-///                iff
-///                (b^I, a^I) ∈ ⟦OPE₂⟧^I
+///  iff
+///  (b^I, a^I) ∈ ⟦OPE₂⟧^I
 /// for all individuals a, b.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.2.1 Table 1: ObjectInverseOf")
 public axiom ObjectInverseOf<I: Interpretation, P: ObjectPropertyExpression>(

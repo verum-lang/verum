@@ -5,24 +5,30 @@
 // Dependencies: None
 // =============================================================================
 //
+
 // Size classes with ~12.5% spacing for minimal internal fragmentation.
 // Based on mimalloc's proven bin design:
 // - 73 size classes covering 8 bytes to 5 MiB
 // - Exact sizes for small allocations (≤64 bytes)
 // - Exponential growth with 4 sub-bins per power of 2
 //
+
 // # Size Class Distribution
 //
-// Bins 0-7:   Exact sizes: 8, 16, 24, 32, 40, 48, 56, 64 bytes
-// Bins 8+:   Exponential with 12.5% spacing up to 5 MiB
-// Bin 73:    Huge allocations (direct segment allocation)
+
+// Bins 0-7: Exact sizes: 8, 16, 24, 32, 40, 48, 56, 64 bytes
+// Bins 8+: Exponential with 12.5% spacing up to 5 MiB
+// Bin 73: Huge allocations (direct segment allocation)
 //
+
 // # Performance
 //
+
 // - O(1) size-to-bin calculation via bit manipulation
 // - Direct lookup array for small sizes (≤1024 bytes)
 // - Maximum internal fragmentation: ~12.5%
 //
+
 // Spec: docs/architecture/mimalloc-allocator-plan.md
 // =============================================================================
 
@@ -179,6 +185,7 @@ const SMALL_BIN_LOOKUP: [UInt8; 129] = [
 /// Convert allocation size to bin index.
 /// Returns BIN_HUGE for sizes > HUGE_SIZE_THRESHOLD.
 ///
+
 /// # Performance
 /// - O(1) for sizes ≤ 1024 bytes (direct lookup)
 /// - O(1) for larger sizes (bit manipulation)
@@ -203,21 +210,24 @@ public fn size_to_bin(size: Int) -> Int {
 /// Calculate bin for large sizes (wsize > 128, i.e. > 1024 bytes).
 /// Uses bit manipulation for O(1) calculation.
 ///
+
 /// Canonical mimalloc-style algorithm adapted to Verum's
 /// 0-indexed `SIZE_CLASSES` table starting at 8 bytes:
 ///
-///   w = wsize - 1                       // align to power-of-2 boundaries
-///   b = bsr(w)                          // top set-bit position
-///   sub = (w >> (b - 2)) & 0x03         // 2 bits after top → sub-bin
-///   bin = (b << 2) + sub - 4            // 4 sub-bins per power of 2
+
+///  w = wsize - 1 // align to power-of-2 boundaries
+///  b = bsr(w) // top set-bit position
+///  sub = (w >> (b - 2)) & 0x03 // 2 bits after top → sub-bin
+///  bin = (b << 2) + sub - 4 // 4 sub-bins per power of 2
 ///
+
 /// Earlier revisions used `((b - 3) << 2) + sub` over `wsize`
 /// (no `wsize - 1` alignment). That formula was off by 8 across
 /// the entire range — e.g. `wsize=129` (1032 bytes) returned
 /// bin 16 (320 bytes!) when the correct bin is 24 (1280 bytes).
 /// Every allocation > 1024 bytes was getting an undersized bin,
 /// which in production allocator paths could let writes overrun
-/// the bin slot into the next block.  No test exercised the
+/// the bin slot into the next block. No test exercised the
 /// large path so the bug went unnoticed.
 fn size_to_bin_large(wsize: Int) -> Int {
     // Subtract 1 so wsize=129 (just over the lookup-table top

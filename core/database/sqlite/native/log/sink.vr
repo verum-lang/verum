@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_config(SQLITE_CONFIG_LOG, xLog, pArg).
 //
-// A sink is (name, min_level, ring_capacity).  The engine buffers
+
+// A sink is (name, min_level, ring_capacity). The engine buffers
 // recent records up to `ring_capacity` for later inspection; the
 // host-level callback is threaded through `engine` separately.
 // =============================================================================

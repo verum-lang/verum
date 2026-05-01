@@ -1,29 +1,37 @@
 #![allow(dead_code, unused_imports)]
 //! Build script for `cvc5-sys`.
 //!
+
 //! This script provides three modes, selected via feature flags:
 //!
+
 //! 1. **`vendored` (default for distribution)**: Build CVC5 from source using
-//!    the vendored source tree in `cvc5/`. Produces a static library linked
-//!    directly into the final binary. Requires CMake + C++17 compiler + GMP.
+//!  the vendored source tree in `cvc5/`. Produces a static library linked
+//!  directly into the final binary. Requires CMake + C++17 compiler + GMP.
 //!
+
 //! 2. **`system`**: Link against a system-installed `libcvc5.so`/`libcvc5.dylib`.
-//!    Fast builds, but requires the user to install CVC5 separately.
+//!  Fast builds, but requires the user to install CVC5 separately.
 //!
+
 //! 3. **No features (fallback)**: Check `CVC5_ROOT` environment variable for
-//!    a pre-built CVC5 installation. If found, use it; otherwise, report an
-//!    actionable error telling the user how to proceed.
+//!  a pre-built CVC5 installation. If found, use it; otherwise, report an
+//!  actionable error telling the user how to proceed.
 //!
+
 //! ## Environment Variables
 //!
+
 //! * `CVC5_ROOT` — Path to a CVC5 installation (contains `include/` and `lib/`).
-//!   Takes precedence over vendored and system builds.
+//!  Takes precedence over vendored and system builds.
 //! * `CVC5_NO_VENDOR` — If set, disables vendored build (useful for CI).
 //! * `CVC5_JOBS` — Number of parallel jobs for CMake build (default: `num_cpus`).
 //! * `DOCS_RS` — Set by docs.rs; skips linking and provides stub bindings.
 //!
+
 //! ## Output
 //!
+
 //! Sets the following Cargo instructions:
 //! - `cargo:rustc-link-lib=static=cvc5` (and dependencies)
 //! - `cargo:rustc-link-search=native=<build_dir>/lib`
@@ -114,10 +122,11 @@ fn main() {
 
 /// Link against a pre-built CVC5 installation at `root`.
 ///
+
 /// Expects the standard layout:
 /// ```text
 /// <root>/
-/// ├── include/cvc5/       — headers
+/// ├── include/cvc5/ — headers
 /// ├── lib/libcvc5.{a,dylib,so}
 /// └── lib/libcvc5parser.{a,dylib,so}
 /// ```
@@ -198,6 +207,7 @@ fn link_system() -> Result<(), String> {
 
 /// Build CVC5 from vendored source and statically link it.
 ///
+
 /// This is the preferred mode for distribution: it produces a self-contained
 /// binary with zero runtime dependencies on external SMT solvers.
 #[cfg(any(feature = "vendored", feature = "static"))]
@@ -236,9 +246,9 @@ fn build_vendored() {
 
     // CVC5 uses custom CMake build types: Production | Debug | Testing | Competition
     // (see cvc5/CMakeLists.txt:246). We map standard Cargo profiles:
-    //   - release  → Production (fully optimized, no debug assertions)
-    //   - debug    → Debug (assertions + debug info)
-    //   - default  → Production (prefer fast builds for dev iteration on cvc5)
+    //  - release → Production (fully optimized, no debug assertions)
+    //  - debug → Debug (assertions + debug info)
+    //  - default → Production (prefer fast builds for dev iteration on cvc5)
     let profile = match env::var("PROFILE").as_deref() {
         Ok("release") => "Production",
         Ok("debug") => "Debug",
@@ -253,6 +263,7 @@ fn build_vendored() {
 
     // --- GMP detection ---
     //
+
     // CVC5 requires GMP (arbitrary precision arithmetic). On macOS Homebrew
     // installs GMP in a non-standard location that CMake doesn't probe by
     // default. We detect it and inject the include/lib paths.
@@ -263,10 +274,12 @@ fn build_vendored() {
 
     // --- C++ compatibility flags ---
     //
+
     // CVC5's transitive dep LibPoly (built as an ExternalProject) includes
     // gmpxx.h, which uses older `operator"" _foo` syntax that triggers
     // -Wdeprecated-literal-operator as error on Clang 20+.
     //
+
     // We must set CXXFLAGS in the environment so they propagate to the nested
     // ExternalProject_Add builds (Poly-EP, CaDiCaL-EP, etc.). Setting them on
     // the outer cmake::Config only affects CVC5 itself, not its deps.
@@ -393,6 +406,7 @@ fn build_vendored() {
 
 /// Link CVC5's statically-bundled dependencies.
 ///
+
 /// CVC5 ships with several dependencies that must be linked in the correct order:
 /// - `cadical`: SAT solver (BSD)
 /// - `antlr4-runtime`: Parser runtime (BSD)
@@ -425,6 +439,7 @@ fn link_static_deps() {
 
 /// Link the C++ standard library required by CVC5.
 ///
+
 /// Platform-specific:
 /// - macOS: `libc++` (Clang)
 /// - Linux: `libstdc++` (GCC) or `libc++` (Clang via CXX=clang++)
@@ -468,6 +483,7 @@ fn lib_name(base: &str, static_lib: bool) -> String {
 
 /// Return `on` if feature `gpl` is enabled, else `off`.
 ///
+
 /// Used to toggle GPL-licensed dependencies (CLN, CryptoMiniSat).
 /// The Verum project is Apache-2.0 licensed, so GPL components are off by default.
 #[cfg(any(feature = "vendored", feature = "static"))]
@@ -486,12 +502,14 @@ fn bool_define(b: bool) -> &'static str {
 
 /// Detect the GMP installation prefix.
 ///
+
 /// Checks (in order):
 /// 1. `GMP_PREFIX` environment variable
 /// 2. Homebrew on Apple Silicon (`/opt/homebrew`)
 /// 3. Homebrew on Intel Mac / MacPorts (`/usr/local`)
 /// 4. Linux system (`/usr`)
 ///
+
 /// Returns `None` if GMP headers/lib are not found — the CMake build will
 /// then fall back to its own detection (which may fail and produce a
 /// clearer error for the user).
@@ -526,6 +544,7 @@ fn detect_gmp_prefix() -> Option<String> {
 
 /// Return the number of logical CPU cores on the build machine.
 ///
+
 /// Falls back to 4 if detection fails (reasonable default for CI).
 fn num_logical_cpus() -> u32 {
     std::thread::available_parallelism()

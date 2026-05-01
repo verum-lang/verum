@@ -5,7 +5,7 @@ module core.database.sqlite.native.result_subtype_api.subtype;
 mount base.{Bool, Text};
 
 // The byte may carry either a well-known tag (currently only JSON) or any
-// caller-defined byte.  We represent both.
+// caller-defined byte. We represent both.
 public type Subtype is
     | StNone            // 0 — no subtype
     | StJson            // 'J' (0x4A) — JSON text
@@ -55,7 +55,7 @@ public fn is_valid_byte(b: Int) -> Bool {
 }
 
 // SUBTYPE_NOCHANGE flag — added 3.45 — set on results that the engine should
-// treat as "unchanged" for vtab no-change detection.  Modelled here as a
+// treat as "unchanged" for vtab no-change detection. Modelled here as a
 // boolean flag carried alongside Subtype.
 public type Annotation is
     | AnPlain

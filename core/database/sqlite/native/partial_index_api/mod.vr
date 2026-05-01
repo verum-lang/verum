@@ -3,8 +3,10 @@
 // =============================================================================
 // Partial indexes (SQLite 3.8+):
 //
-//   CREATE INDEX idx_active ON users(name) WHERE is_active = 1;
+
+//  CREATE INDEX idx_active ON users(name) WHERE is_active = 1;
 //
+
 // Only rows matching the WHERE predicate are indexed; queries can use the
 // index only when their WHERE clause logically implies the partial-index
 // predicate.

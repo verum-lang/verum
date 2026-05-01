@@ -2,47 +2,56 @@
 // core/net/weft/service.vr — Service / Permit / Layer / ServiceBuilder
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §5.1
-// Spec:  docs/architecture/weft-redteam-2026-05-01.md §7
+// Spec: internal/specs/net-framework.md §5.1
+// Spec: docs/architecture/weft-redteam-2026-05-01.md §7
 // =============================================================================
 //
+
 // # The Permit pattern — affine readiness capability
 //
+
 // Tower-style Services have a known foot-gun: callers must drive
-// `poll_ready` to `Ready(Ok(()))` BEFORE invoking `call`.  Skipping
+// `poll_ready` to `Ready(Ok(()))` BEFORE invoking `call`. Skipping
 // that step silently bypasses backpressure: load-shedding,
 // rate-limiting, and concurrency-bounding middleware all stop
-// working with no diagnostic.  Tower-rs catches the error with a
-// runtime debug-assert.  Verum makes it a compile-time invariant.
+// working with no diagnostic. Tower-rs catches the error with a
+// runtime debug-assert. Verum makes it a compile-time invariant.
 //
+
 // `ready(&mut svc).await` yields
-// `Result<Permit<S, Req, Resp>, S.Error>`.  A `Permit` is:
+// `Result<Permit<S, Req, Resp>, S.Error>`. A `Permit` is:
 //
-//   * Move-only (no Clone) — affine; consumed exactly once.
-//   * Borrows `&mut self` — exclusion: the underlying service
-//     cannot be touched while a permit is outstanding.
-//   * Witnesses a successful readiness probe at the type level.
+
+//  * Move-only (no Clone) — affine; consumed exactly once.
+//  * Borrows `&mut self` — exclusion: the underlying service
+//  cannot be touched while a permit is outstanding.
+//  * Witnesses a successful readiness probe at the type level.
 //
+
 // Correct shape is forced by the type system:
 //
+
 // ```verum
-// let permit = ready(&mut svc).await?;        // earn capability
-// let resp   = permit.dispatch(req).await?;   // consume capability
+// let permit = ready(&mut svc).await?; // earn capability
+// let resp = permit.dispatch(req).await?; // consume capability
 // ```
 //
-// You cannot `dispatch` without a Permit.  You cannot construct a
-// Permit without first awaiting readiness.  The borrow checker
-// enforces at-most-one-outstanding-permit per service.  Backpressure
+
+// You cannot `dispatch` without a Permit. You cannot construct a
+// Permit without first awaiting readiness. The borrow checker
+// enforces at-most-one-outstanding-permit per service. Backpressure
 // correctness becomes a property the compiler observes, not a
 // convention the developer must remember.
 //
+
 // # Why the low-level `poll_ready` / `call` pair stays on the protocol
 //
+
 // Implementers must still define `poll_ready` and `call` — the
 // Permit pattern is a caller-side ergonomic + safety wrapper, not a
-// replacement for the underlying state machine.  Library authors
+// replacement for the underlying state machine. Library authors
 // (middleware, executors, custom-Future combinators) sometimes need
-// the raw poll-based interface.  Application code should reach for
+// the raw poll-based interface. Application code should reach for
 // `ready()` + `Permit::dispatch` exclusively; the type system makes
 // that the path of least resistance.
 
@@ -60,6 +69,7 @@ mount core.async.waker.{Context};
 /// Base protocol for every request-handling component in Weft.
 /// `poll_ready` is mandatory — §5.1 rationale.
 ///
+
 /// **Prefer `ready()` + `Permit::dispatch` for application code.**
 /// The raw `poll_ready` / `call` pair is the implementer-facing
 /// state machine; the Permit wrapper is the safe caller-facing
@@ -69,19 +79,21 @@ public type Service<Req, Resp> is protocol {
 
     /// Probe whether the service can accept a new request.
     ///
+
     /// Returns:
-    ///   * `Poll.Pending` — not ready; the waker registered on
-    ///     `cx` will be notified when readiness changes.
-    ///   * `Poll.Ready(Ok(()))` — ready for exactly one `call`.
-    ///   * `Poll.Ready(Err(e))` — service has failed terminally;
-    ///     no further calls will succeed.
+    ///  * `Poll.Pending` — not ready; the waker registered on
+    ///  `cx` will be notified when readiness changes.
+    ///  * `Poll.Ready(Ok(()))` — ready for exactly one `call`.
+    ///  * `Poll.Ready(Err(e))` — service has failed terminally;
+    ///  no further calls will succeed.
     fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self.Error>>;
 
     /// Dispatch a request.
     ///
+
     /// **Precondition** (uncheckable here): a prior `poll_ready`
     /// must have returned `Poll.Ready(Ok(()))` since the last
-    /// `call`.  Application code should obtain a `Permit` via
+    /// `call`. Application code should obtain a `Permit` via
     /// `ready()` instead — the Permit witnesses this precondition
     /// at the type level.
     async fn call(&mut self, req: Req) -> Result<Resp, Self.Error>;
@@ -94,17 +106,19 @@ public type Service<Req, Resp> is protocol {
 /// Capability token: holding a `Permit` proves the inner Service
 /// has admitted exactly one upcoming `call`.
 ///
+
 /// Permits are move-only — Verum's affine semantics (no Clone)
-/// guarantee at-most-once consumption.  The struct holds `&mut S`,
+/// guarantee at-most-once consumption. The struct holds `&mut S`,
 /// so the borrow checker also guarantees no concurrent mutation
 /// of the service while the permit is outstanding.
 ///
+
 /// The only way to construct a `Permit` is through the `ready()`
-/// free function, which awaits a successful `poll_ready`.  The
+/// free function, which awaits a successful `poll_ready`. The
 /// only way to use a `Permit` is `dispatch`, which moves it
 /// (releasing the inner borrow) and forwards to `Service::call`.
 public type Permit<S: Service<Req, Resp>, Req, Resp> is {
-    /// Borrow of the underlying service.  The borrow's lifetime
+    /// Borrow of the underlying service. The borrow's lifetime
     /// equals the Permit's lifetime; on `dispatch` the Permit is
     /// consumed and the borrow released.
     service: &mut S,
@@ -113,8 +127,9 @@ public type Permit<S: Service<Req, Resp>, Req, Resp> is {
 implement<S: Service<Req, Resp>, Req, Resp> Permit<S, Req, Resp> {
     /// Consume the Permit and dispatch the call.
     ///
+
     /// The Permit's affine nature ensures this method is invoked
-    /// at most once per readiness probe.  After `dispatch`
+    /// at most once per readiness probe. After `dispatch`
     /// returns, the caller must obtain a fresh Permit via
     /// `ready()` before the next call.
     public async fn dispatch(self, req: Req) -> Result<Resp, S.Error> {
@@ -127,7 +142,7 @@ implement<S: Service<Req, Resp>, Req, Resp> Permit<S, Req, Resp> {
 // =============================================================================
 
 /// Future that pumps `Service::poll_ready` until it returns
-/// `Ready(Ok(()))`, then resolves with a `Permit`.  Internal
+/// `Ready(Ok(()))`, then resolves with a `Permit`. Internal
 /// driver for `ready()`.
 type PollReadyFuture<S: Service<Req, Resp>, Req, Resp> is {
     /// `Some(svc)` while still polling; `None` once consumed.
@@ -165,12 +180,15 @@ implement<S: Service<Req, Resp>, Req, Resp> Future for PollReadyFuture<S, Req, R
 
 /// Earn a `Permit` to call `service` exactly once.
 ///
+
 /// Awaits `poll_ready` until it returns `Ready(Ok(()))` or fails.
 /// On success, returns `Ok(permit)` — the caller now holds an
 /// affine capability they can spend via `permit.dispatch(req)`.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Backpressure-correct dispatch — the type system enforces
 /// // poll_ready-before-call at compile time:
@@ -178,11 +196,13 @@ implement<S: Service<Req, Resp>, Req, Resp> Future for PollReadyFuture<S, Req, R
 /// let response = permit.dispatch(request).await?;
 /// ```
 ///
+
 /// # Why this is safer than direct `call`
 ///
-/// `service.call(req).await` skips the readiness probe.  In a
+
+/// `service.call(req).await` skips the readiness probe. In a
 /// rate-limited or load-shed Service, this bypasses the bound and
-/// can drive the service into overload.  `ready()` makes the
+/// can drive the service into overload. `ready()` makes the
 /// readiness probe unforgeable — you literally cannot reach
 /// `call` without first awaiting readiness.
 public fn ready<S: Service<Req, Resp>, Req, Resp>(

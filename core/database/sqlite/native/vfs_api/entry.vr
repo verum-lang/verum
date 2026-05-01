@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// A VFS entry is (name, handle, made_default).  The handle is opaque —
+
+// A VFS entry is (name, handle, made_default). The handle is opaque —
 // the runtime binds real implementations elsewhere.
 // =============================================================================
 

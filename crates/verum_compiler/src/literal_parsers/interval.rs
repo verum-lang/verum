@@ -1,13 +1,15 @@
 //! Interval literal parser
 //!
+
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
+
 //! Parses mathematical interval literals:
-//! - interval#"[0, 100]"  // Closed interval
-//! - interval#"[0, 100)"  // Half-open interval
-//! - interval#"(0, 100]"  // Half-open interval
-//! - interval#"(0, 100)"  // Open interval
+//! - interval#"[0, 100]" // Closed interval
+//! - interval#"[0, 100)" // Half-open interval
+//! - interval#"(0, 100]" // Half-open interval
+//! - interval#"(0, 100)" // Open interval
 
 use verum_ast::{SourceFile, Span};
 use verum_common::{List, Text};
@@ -38,24 +40,29 @@ fn convert_span(ast_span: Span, source_file: Option<&SourceFile>) -> verum_diagn
 
 /// Parse interval literal at compile-time
 ///
+
 /// Composite literal: `interval#"[0, 100)"` is compile-time validated interval
 /// notation. Uses standard mathematical bracket notation: [ for inclusive, ( for
 /// exclusive. Produces type Interval<f64> or DateRange.
 ///
+
 /// # Arguments
 /// - `content`: The interval string (e.g., "[0, 100)")
 /// - `span`: Source location for error reporting
 /// - `source_file`: Optional source file for accurate span conversion
 ///
+
 /// # Returns
 /// Parsed interval with bounds and inclusivity flags
 ///
+
 /// # Examples
 /// ```ignore
 /// use verum_compiler::literal_parsers::parse_interval;
 /// use verum_ast::Span;
 /// use verum_common::Text;
 ///
+
 /// let span = Span::new(0, 10, verum_ast::FileId::new(0));
 /// let result = parse_interval(&Text::from("[0, 100)"), span, None);
 /// assert!(result.is_ok());

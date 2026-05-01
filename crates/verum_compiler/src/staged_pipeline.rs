@@ -1,21 +1,27 @@
 //! Staged Compilation Pipeline for N-Level Metaprogramming
 //!
+
 //! This module implements the multi-stage compilation pipeline for Verum's
 //! N-level staged metaprogramming system. It orchestrates the execution of
 //! staged functions from highest stage to lowest.
 //!
+
 //! # Staged Metaprogramming Model
 //!
+
 //! Verum supports N-level staged metaprogramming where functions execute at
 //! different compilation stages:
 //!
+
 //! ```text
-//! Stage N   ──►  generates  ──►  Stage N-1  ──►  ...  ──►  Stage 0 (runtime)
-//! (meta(N))                       (meta(N-1))              (normal code)
+//! Stage N ──► generates ──► Stage N-1 ──► ... ──► Stage 0 (runtime)
+//! (meta(N)) (meta(N-1)) (normal code)
 //! ```
 //!
+
 //! ## Stage Semantics
 //!
+
 //! | Stage | Syntax | Execution | Description |
 //! |-------|--------|-----------|-------------|
 //! | 0 | `fn f()` | Runtime | Normal runtime functions |
@@ -23,86 +29,99 @@
 //! | 2 | `meta(2) fn f()` | Pre-compile | Generates meta functions |
 //! | N | `meta(N) fn f()` | Stage N | Generates Stage N-1 code |
 //!
+
 //! ## Stage Coherence Rule
 //!
+
 //! The fundamental rule of staged metaprogramming:
 //!
+
 //! > **A Stage N function can only DIRECTLY generate Stage N-1 code.**
 //!
+
 //! This means:
 //! - `meta(2)` can only directly generate `meta` (stage 1) code
 //! - To generate runtime (stage 0) code from `meta(2)`, the output must contain
-//!   a `meta` function that performs the final generation
+//!  a `meta` function that performs the final generation
 //! - Each `quote { ... }` lowers the stage by 1
 //!
+
 //! # Compilation Flow
 //!
+
 //! ```text
 //! ┌──────────────────────────────────────────────────────────────────┐
-//! │                     StagedPipeline                               │
+//! │ StagedPipeline │
 //! ├──────────────────────────────────────────────────────────────────┤
-//! │                                                                  │
-//! │  Input: Module with meta(N), meta(N-1), ..., meta, fn           │
-//! │                                                                  │
-//! │  Stage N:                                                        │
-//! │    1. Collect all meta(N) functions                             │
-//! │    2. Execute meta(N) functions → TokenStream                   │
-//! │    3. Parse TokenStream → Stage N-1 AST fragments               │
-//! │    4. Inject into codebase                                       │
-//! │                                                                  │
-//! │  Stage N-1:                                                      │
-//! │    1. Collect all meta(N-1) functions (including generated)     │
-//! │    2. Execute meta(N-1) functions → TokenStream                 │
-//! │    3. Parse TokenStream → Stage N-2 AST fragments               │
-//! │    4. Inject into codebase                                       │
-//! │                                                                  │
-//! │  ...repeat until Stage 1...                                      │
-//! │                                                                  │
-//! │  Stage 1 (meta):                                                 │
-//! │    1. Execute meta functions → runtime code                     │
-//! │    2. All code is now Stage 0 (runtime)                         │
-//! │                                                                  │
-//! │  Output: Pure runtime code (Stage 0)                            │
-//! │                                                                  │
+//! │ │
+//! │ Input: Module with meta(N), meta(N-1), ..., meta, fn │
+//! │ │
+//! │ Stage N: │
+//! │ 1. Collect all meta(N) functions │
+//! │ 2. Execute meta(N) functions → TokenStream │
+//! │ 3. Parse TokenStream → Stage N-1 AST fragments │
+//! │ 4. Inject into codebase │
+//! │ │
+//! │ Stage N-1: │
+//! │ 1. Collect all meta(N-1) functions (including generated) │
+//! │ 2. Execute meta(N-1) functions → TokenStream │
+//! │ 3. Parse TokenStream → Stage N-2 AST fragments │
+//! │ 4. Inject into codebase │
+//! │ │
+//! │ ...repeat until Stage 1... │
+//! │ │
+//! │ Stage 1 (meta): │
+//! │ 1. Execute meta functions → runtime code │
+//! │ 2. All code is now Stage 0 (runtime) │
+//! │ │
+//! │ Output: Pure runtime code (Stage 0) │
+//! │ │
 //! └──────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Example
 //!
+
 //! ```verum
 //! // Stage 2: Generates stage 1 code
 //! meta(2) fn derive_factory<T>() -> TokenStream {
-//!     quote {
-//!         meta fn derive_impl() -> TokenStream {
-//!             quote {
-//!                 impl Factory for @T {
-//!                     fn create() -> Self { Self::default() }
-//!                 }
-//!             }
-//!         }
-//!     }
+//!  quote {
+//!  meta fn derive_impl() -> TokenStream {
+//!  quote {
+//!  impl Factory for @T {
+//!  fn create() -> Self { Self::default() }
+//!  }
+//!  }
+//!  }
+//!  }
 //! }
 //!
+
 //! // Invocation at stage 2
 //! @derive_factory<MyType>()
 //!
+
 //! // After stage 2 execution, this is injected:
 //! meta fn derive_impl() -> TokenStream {
-//!     quote {
-//!         impl Factory for MyType {
-//!             fn create() -> Self { Self::default() }
-//!         }
-//!     }
+//!  quote {
+//!  impl Factory for MyType {
+//!  fn create() -> Self { Self::default() }
+//!  }
+//!  }
 //! }
 //!
+
 //! // After stage 1 execution:
 //! impl Factory for MyType {
-//!     fn create() -> Self { Self::default() }
+//!  fn create() -> Self { Self::default() }
 //! }
 //! ```
 //!
+
 //! # Integration
 //!
+
 //! The StagedPipeline integrates with:
 //! - **verum_types/stage_checker**: Validates stage constraints
 //! - **verum_compiler/meta_registry**: Stores meta functions per stage
@@ -129,6 +148,7 @@ use crate::quote::TokenStream;
 
 /// Serialize a list of tokens to source code for caching.
 ///
+
 /// This converts tokens back to their textual representation so they can
 /// be stored and later reparsed. This is used for staged pipeline caching.
 fn serialize_tokens_to_source(tokens: &List<Token>) -> String {
@@ -373,6 +393,7 @@ fn extract_call_dependencies(func_decl: &verum_ast::decl::FunctionDecl) -> List<
 
 /// Analyze a function body to determine the minimum stage level required.
 ///
+
 /// Returns the minimum stage needed based on compile-time constructs:
 /// - `quote { ... }` requires at least stage 1
 /// - `StageEscape { stage: N, .. }` requires at least stage N + 1
@@ -470,12 +491,14 @@ fn analyze_minimum_stage(func_decl: &verum_ast::decl::FunctionDecl) -> u32 {
 pub struct StagedConfig {
     /// Maximum allowed stage level (default: 2).
     ///
+
     /// Higher stages require more compilation passes but enable more
     /// sophisticated metaprogramming patterns.
     pub max_stage: u32,
 
     /// Whether to enable stage-aware caching.
     ///
+
     /// When enabled, each stage's output is cached separately, allowing
     /// incremental recompilation when only certain stages change.
     pub enable_caching: bool,
@@ -504,23 +527,29 @@ impl Default for StagedConfig {
 
 /// Cache for a single compilation stage.
 ///
+
 /// Stores the results of executing meta functions at a specific stage,
 /// allowing incremental recompilation when inputs haven't changed.
 ///
+
 /// # Cache Invalidation Strategy
 ///
+
 /// The cache uses a multi-level invalidation strategy:
 ///
+
 /// 1. **Hash-based**: If the input AST hash changes, cache is invalid
 /// 2. **Fine-grained**: Uses ItemHashes to distinguish signature vs body changes
-///    - Signature change → full re-execution required
-///    - Body-only change → dependents need re-verification, not re-execution
+///  - Signature change → full re-execution required
+///  - Body-only change → dependents need re-verification, not re-execution
 /// 3. **Dependency-based**: If any dependency file changes, cache is invalid
 /// 4. **Stage cascade**: Invalidating stage N invalidates all stages < N
 /// 5. **Time-based**: Optional TTL for long-running compilations
 ///
+
 /// # Fragment Storage
 ///
+
 /// Generated code is stored as serialized token streams, enabling:
 /// - Fast retrieval without re-execution
 /// - Dependency tracking per fragment
@@ -622,6 +651,7 @@ impl StageCache {
 
     /// Check if cache is valid considering all factors.
     ///
+
     /// # Arguments
     /// - `input_hash`: Hash of the current input AST
     /// - `ttl_ms`: Optional time-to-live in milliseconds (0 = no TTL)
@@ -685,9 +715,11 @@ impl StageCache {
 
     /// Check if dependencies have changed.
     ///
+
     /// Returns true if any dependency file's hash has changed from
     /// what was recorded when cache was created.
     ///
+
     /// # Arguments
     /// - `current_hashes`: Function that returns current hash for a file path
     pub fn dependencies_changed<F>(&self, current_hashes: F) -> bool
@@ -766,11 +798,13 @@ impl StageCache {
 
     /// Compare current item hashes with cached hashes to determine change kind.
     ///
+
     /// Returns:
     /// - `ChangeKind::NoChange` if cache is valid and nothing changed
     /// - `ChangeKind::BodyOnly` if only function bodies changed (not signatures)
     /// - `ChangeKind::Signature` if any signature changed (requires full re-execution)
     ///
+
     /// # Arguments
     /// - `current_hashes`: The item hashes computed from the current module
     pub fn compare_item_hashes(&self, current_hashes: &ItemHashes) -> ChangeKind {
@@ -782,9 +816,11 @@ impl StageCache {
 
     /// Check if cache is valid using fine-grained item hash comparison.
     ///
+
     /// This extends the basic hash check with fine-grained comparison that can
     /// detect when only function bodies changed (not requiring full re-execution).
     ///
+
     /// Returns a tuple of (is_valid, change_kind):
     /// - (true, NoChange) - cache is fully valid, use cached results
     /// - (false, BodyOnly) - only bodies changed, may use partial cache
@@ -1008,6 +1044,7 @@ impl StagedStats {
 
 /// Multi-stage compilation pipeline.
 ///
+
 /// Orchestrates the execution of N-level staged metaprogramming, compiling
 /// from highest stage down to runtime code.
 pub struct StagedPipeline {
@@ -1093,17 +1130,22 @@ impl StagedPipeline {
 
     /// Import meta functions from an external MetaRegistry.
     ///
+
     /// This method stores meta functions from the pipeline's MetaRegistry into
     /// StagedPipeline's internal storage for execution during staged compilation.
     /// Stage levels are determined from the module AST.
     ///
+
     /// # Arguments
     ///
+
     /// * `external_registry` - The MetaRegistry from the compilation pipeline
     /// * `module` - The module AST to extract stage levels from
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let mut staged = StagedPipeline::new(StagedConfig::default());
     /// staged.import_from_registry(&pipeline.meta_registry, &module);
@@ -1242,6 +1284,7 @@ impl StagedPipeline {
 
     /// Reset the pipeline state while keeping configuration.
     ///
+
     /// This clears all accumulated state (functions, diagnostics, caches, stats)
     /// while preserving the configuration. Use this when processing multiple
     /// modules sequentially with the same pipeline instance.
@@ -1312,6 +1355,7 @@ impl StagedPipeline {
 
     /// Compile the module through all stages.
     ///
+
     /// This is the main entry point for staged compilation. It processes
     /// stages from highest (N) down to lowest (0), executing meta functions
     /// and injecting generated code at each step.
@@ -1458,12 +1502,14 @@ impl StagedPipeline {
 
     /// Execute all meta functions at a specific stage.
     ///
+
     /// This method implements the core staged expansion loop:
     /// 1. Execute all meta functions at Stage N
     /// 2. Parse generated TokenStreams back into AST items
     /// 3. Inject generated items into the module
     /// 4. Register any newly generated meta functions for Stage N-1
     ///
+
     /// The stage coherence rule ensures Stage N can only directly generate
     /// Stage N-1 code, maintaining the staged metaprogramming invariant.
     fn execute_stage(&mut self, stage: u32, module: Module) -> Result<Module> {
@@ -1709,6 +1755,7 @@ impl StagedPipeline {
 
     /// Apply cached fragments to a module.
     ///
+
     /// This reconstructs the generated items from cache without re-executing
     /// the meta functions. The cached fragments contain serialized source code
     /// that is reparsed and injected into the module.
@@ -1810,6 +1857,7 @@ impl StagedPipeline {
 
     /// Register a generated function for the appropriate stage.
     ///
+
     /// When a Stage N meta function generates code containing meta functions,
     /// those generated functions are registered for Stage N-1.
     fn register_generated_function(&mut self, item: &Item, module: &Module, current_stage: u32) -> Result<()> {
@@ -1868,6 +1916,7 @@ impl StagedPipeline {
 
     /// Check for stage downgrade opportunities.
     ///
+
     /// Uses the pre-computed `min_required_stage` on each `StagedFunction`
     /// to suggest lowering the declared stage when the body doesn't need it.
     fn check_stage_downgrades(&mut self) {
@@ -1901,6 +1950,7 @@ impl StagedPipeline {
 
     /// Compute a hash of the module for caching.
     ///
+
     /// Uses a structural hash of the module content to detect changes.
     /// The hash includes:
     /// - File ID
@@ -2019,6 +2069,7 @@ impl StagedPipeline {
 
     /// Pre-warm cache from a previous compilation result.
     ///
+
     /// This allows reusing cache data across incremental compilations.
     pub fn prewarm_cache(&mut self, previous: &StagedPipeline) {
         for (stage, cache) in previous.stage_caches.iter().enumerate() {
@@ -2044,6 +2095,7 @@ impl StagedPipeline {
 
     /// Register a file dependency for the current stage being executed.
     ///
+
     /// Call this during meta function execution to track dependencies.
     pub fn register_dependency(&mut self, stage: u32, file_path: Text, content_hash: u64) {
         if let Some(cache) = self.stage_caches.get_mut(stage as usize) {

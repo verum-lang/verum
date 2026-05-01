@@ -5,19 +5,23 @@
 // Dependencies: math/elementary (sqrt, atan2, sin, cos, exp, ln)
 // =============================================================================
 //
+
 // Provides complex number types and arithmetic operations.
 //
+
 // # Example
 // ```verum
-// let z1 = Complex.new(3.0, 4.0);  // 3 + 4i
+// let z1 = Complex.new(3.0, 4.0); // 3 + 4i
 // let z2 = Complex.new(1.0, -2.0); // 1 - 2i
 //
-// let sum = z1 + z2;           // 4 + 2i
-// let product = z1 * z2;       // 11 - 2i
-// let magnitude = z1.abs();    // 5.0
-// let angle = z1.arg();        // atan2(4, 3)
+
+// let sum = z1 + z2; // 4 + 2i
+// let product = z1 * z2; // 11 - 2i
+// let magnitude = z1.abs(); // 5.0
+// let angle = z1.arg(); // atan2(4, 3)
 // ```
 //
+
 // =============================================================================
 
 module math.complex;
@@ -34,6 +38,7 @@ mount core.math.constants.{NAN};
 
 /// Complex number type parameterized by the scalar type.
 ///
+
 /// Represents a complex number `re + im * i` where `i` is the imaginary unit.
 public type Complex<T> is {
     /// Real part.
@@ -73,6 +78,7 @@ implement<T: Default> Complex<T> {
 implement Complex<Float> {
     /// Create a complex number from polar coordinates (r, theta).
     ///
+
     /// Returns r * (cos(theta) + i * sin(theta)).
     public fn from_polar(r: Float, theta: Float) -> Complex<Float> {
         Complex {
@@ -98,6 +104,7 @@ implement Complex<Float> {
 
     /// Get the squared magnitude |z|^2 = re^2 + im^2.
     ///
+
     /// More efficient than `abs()` when only comparison is needed.
     public fn abs_sq(&self) -> Float {
         self.re * self.re + self.im * self.im
@@ -120,6 +127,7 @@ implement Complex<Float> {
 
     /// Get the reciprocal (1/z).
     ///
+
     /// Returns None if z is zero.
     public fn recip(&self) -> Maybe<Complex<Float>> {
         let denom = self.abs_sq();
@@ -144,6 +152,7 @@ implement Complex<Float> {
 
     /// Complex natural logarithm: ln(z) = ln|z| + i*arg(z).
     ///
+
     /// Returns the principal value (imaginary part in (-pi, pi]).
     public fn cln(&self) -> Complex<Float> {
         Complex {
@@ -199,6 +208,7 @@ implement Complex<Float> {
 
     /// Normalize to unit magnitude (z / |z|).
     ///
+
     /// Returns None if z is zero.
     public fn normalize(&self) -> Maybe<Complex<Float>> {
         let mag = self.abs();
@@ -214,6 +224,7 @@ implement Complex<Float> {
 
     /// Linear interpolation between two complex numbers.
     ///
+
     /// Returns self + t * (other - self).
     public fn lerp(&self, other: &Complex<Float>, t: Float) -> Complex<Float> {
         Complex {

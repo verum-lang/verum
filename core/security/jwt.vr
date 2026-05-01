@@ -3,40 +3,49 @@
 // =============================================================================
 // Layer: 3 (Security — token-level auth)
 // Dependencies: core, core.collections, core.encoding.{base64, json},
-//               core.security.mac.hmac,
-//               core.security.ecc.ed25519,
-//               core.security.util.constant_time
+//  core.security.mac.hmac,
+//  core.security.ecc.ed25519,
+//  core.security.util.constant_time
 // =============================================================================
 //
+
 // RFC 7519 — JWT wire format:
 //
-//   base64url(header) . base64url(payload) . base64url(signature)
+
+//  base64url(header) . base64url(payload) . base64url(signature)
 //
+
 // Where header = {"alg":"HS256","typ":"JWT"} and payload is the
 // claims object. Signing is byte-exact over `header.payload`
 // (the first two segments + dot separator).
 //
+
 // # Supported algorithms
 //
-//   HS256  — HMAC-SHA256 (symmetric)
-//   HS384  — HMAC-SHA384 (symmetric)
-//   HS512  — HMAC-SHA512 (symmetric)
-//   EdDSA  — Ed25519 (asymmetric)
+
+//  HS256 — HMAC-SHA256 (symmetric)
+//  HS384 — HMAC-SHA384 (symmetric)
+//  HS512 — HMAC-SHA512 (symmetric)
+//  EdDSA — Ed25519 (asymmetric)
 //
+
 // ES256 (ECDSA-P256) arrives in a follow-up once the stdlib P-256
 // signing API exposes a one-shot convenience wrapper.
 //
+
 // # Security defaults
 //
-//   * `verify` rejects the "alg":"none" bypass (CVE-2015-2951)
-//     unconditionally — even when the caller explicitly asked
-//     for it. There is no compatibility escape hatch.
-//   * Algorithm confusion (RS256 key used to verify HS256 tokens)
-//     is prevented by the typed `JwtKey` enum — an HMAC key cannot
-//     be passed where a public key is expected.
-//   * Signature comparison is constant-time.
-//   * `exp` / `nbf` claims enforced with configurable clock skew.
+
+//  * `verify` rejects the "alg":"none" bypass (CVE-2015-2951)
+//  unconditionally — even when the caller explicitly asked
+//  for it. There is no compatibility escape hatch.
+//  * Algorithm confusion (RS256 key used to verify HS256 tokens)
+//  is prevented by the typed `JwtKey` enum — an HMAC key cannot
+//  be passed where a public key is expected.
+//  * Signature comparison is constant-time.
+//  * `exp` / `nbf` claims enforced with configurable clock skew.
 //
+
 // =============================================================================
 
 module core.security.jwt;
@@ -101,7 +110,7 @@ public type JwtError is
     | WrongKeyKind                   // JwtKey variant doesn't match algorithm
     | SigningFailure;
 
-// Display + Debug + Eq for JwtError.  SignatureMismatch
+// Display + Debug + Eq for JwtError. SignatureMismatch
 // Display deliberately surfaces no detail — RFC 7515
 // requires constant-time, value-blind verification
 // failure (oracle-attack surface for HMAC keys).
@@ -172,14 +181,15 @@ implement Eq for JwtError {
     }
 }
 
-// Maximum permitted JWT compact-form token length in bytes.  Hostile
+// Maximum permitted JWT compact-form token length in bytes. Hostile
 // inputs with multi-megabyte tokens would force the verifier to do
 // expensive base64-decode + HMAC/signature work on attacker-supplied
 // data before any structural validation can reject the token.
 //
+
 // 64 KiB is generous compared to industry norms — typical OAuth /
 // OIDC tokens are 1-4 KiB, AWS IAM tokens up to 8 KiB, and even
-// large-claim-set scenarios rarely exceed 16 KiB.  Tokens over
+// large-claim-set scenarios rarely exceed 16 KiB. Tokens over
 // 64 KiB are almost certainly DoS attempts or a misuse of the
 // JWT format (use a separate API for bulk credentials).
 public const MAX_JWT_TOKEN_BYTES: Int = 64 * 1024;
@@ -295,7 +305,7 @@ public fn verify_compact(
 ) -> Result<JwtPayload, JwtError> {
     let bytes = token.as_bytes();
     // SOUNDNESS: cap token length BEFORE doing any parsing or crypto
-    // work.  Without this, hostile multi-megabyte tokens would force
+    // work. Without this, hostile multi-megabyte tokens would force
     // the verifier to run expensive base64 decode + HMAC/signature
     // verification on attacker-supplied data — a trivial DoS amplifier
     // (small input cost on the attacker, large CPU cost on the

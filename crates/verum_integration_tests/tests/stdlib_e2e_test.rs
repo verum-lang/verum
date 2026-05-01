@@ -15,6 +15,7 @@
 )]
 //! End-to-End Tests for Verum stdlib constructs
 //!
+
 //! These tests verify that stdlib-related Verum source code parses correctly
 //! and type-checks through the pipeline. Originally these were VBC execution
 //! tests; they have been converted to parse+typecheck tests.

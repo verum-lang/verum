@@ -31,11 +31,11 @@ public fn blob_error_kind(e: &BlobError) -> Text {
 }
 
 /// Map onto closest SQLite C-API error code:
-///   SQLITE_ABORT   = 4    (handle aborted)
-///   SQLITE_READONLY = 8
-///   SQLITE_NOTFOUND = 12  (no such table/column/row)
-///   SQLITE_RANGE   = 25
-///   SQLITE_MISMATCH = 20  (column not a BLOB)
+///  SQLITE_ABORT = 4 (handle aborted)
+///  SQLITE_READONLY = 8
+///  SQLITE_NOTFOUND = 12 (no such table/column/row)
+///  SQLITE_RANGE = 25
+///  SQLITE_MISMATCH = 20 (column not a BLOB)
 public fn sqlite_error_code(e: &BlobError) -> Int {
     match e {
         BeNoTable(_)        => 12,

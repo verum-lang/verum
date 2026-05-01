@@ -5,24 +5,29 @@
 // Dependencies: core, collections, .{integer, huffman}
 // =============================================================================
 //
+
 // Two dedicated unidirectional streams carry out-of-band QPACK state
 // synchronisation:
 //
-//   Encoder stream (type 0x02, §4.3.1)
-//     Set Dynamic Table Capacity    001xxxxx (5-bit prefix)
-//     Insert with Name Reference    1Txxxxxx (6-bit prefix + literal value)
-//     Insert with Literal Name      01Hxxxxx (5-bit prefix + value literal)
-//     Duplicate                     000xxxxx (5-bit prefix)
+
+//  Encoder stream (type 0x02, §4.3.1)
+//  Set Dynamic Table Capacity 001xxxxx (5-bit prefix)
+//  Insert with Name Reference 1Txxxxxx (6-bit prefix + literal value)
+//  Insert with Literal Name 01Hxxxxx (5-bit prefix + value literal)
+//  Duplicate 000xxxxx (5-bit prefix)
 //
-//   Decoder stream (type 0x03, §4.3.2)
-//     Section Acknowledgment        1xxxxxxx (7-bit prefix)
-//     Stream Cancellation           01xxxxxx (6-bit prefix)
-//     Insert Count Increment        00xxxxxx (6-bit prefix)
+
+//  Decoder stream (type 0x03, §4.3.2)
+//  Section Acknowledgment 1xxxxxxx (7-bit prefix)
+//  Stream Cancellation 01xxxxxx (6-bit prefix)
+//  Insert Count Increment 00xxxxxx (6-bit prefix)
 //
+
 // Instruction codec symmetric with the rest of QPACK — prefix
 // integers from integer.vr + optional Huffman on literal strings
 // from huffman.vr.
 //
+
 // =============================================================================
 
 module core.net.h3.qpack.instructions;

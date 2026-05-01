@@ -1,8 +1,10 @@
 //! Circular dependency tests.
 //!
+
 //! Tests detection and handling of circular dependencies between modules.
 //! Type dependencies are allowed, value dependencies cause errors.
 //!
+
 //! Circular type dependencies (via references) are allowed. Circular value
 //! dependencies (constants) cause compile errors. Function call cycles are
 //! allowed (resolved at runtime). Topological sorting determines compilation order.

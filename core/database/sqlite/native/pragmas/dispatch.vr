@@ -4,10 +4,12 @@
 // Layer: 5–6
 // Spec: sqlite-native.md §18
 //
+
 // Surface used by the L5 codegen when it lowers a `PStPragma` AST
 // node into VDBE. Returns either a single-row result-set (the
 // READ form) or applies a configuration mutation (the WRITE form).
 //
+
 // The dispatcher is purely Verum — no opcode emission. The codegen
 // embeds a `PragmaApply` opcode that calls back into this module
 // at runtime. This keeps the catalogue and execution semantics in

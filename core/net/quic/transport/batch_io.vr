@@ -5,20 +5,23 @@
 // Dependencies: core, core.net.{addr, udp}, core.net.quic.transport.abstraction
 // =============================================================================
 //
+
 // Kernel-assisted batch UDP I/O dramatically reduces per-packet syscall
 // overhead on QUIC servers. Three primitives cover ~90% of production
 // wins:
 //
-//   * GSO (Generic Segmentation Offload, Linux `UDP_SEGMENT`):
-//     single sendmsg emits N MTU-sized segments from one `iovec`.
-//     One syscall for a full CC window → ~8× send-path throughput.
-//   * GRO (Generic Receive Offload, Linux `UDP_GRO`):
-//     kernel coalesces incoming datagrams into one `recvmmsg` call
-//     when the same 4-tuple sends multiple back-to-back.
-//   * sendmmsg / recvmmsg (Linux, Win32 WSARecvFrom batched, macOS
-//     recvmsg loop): one syscall ships or receives M independent
-//     datagrams to potentially different peers.
+
+//  * GSO (Generic Segmentation Offload, Linux `UDP_SEGMENT`):
+//  single sendmsg emits N MTU-sized segments from one `iovec`.
+//  One syscall for a full CC window → ~8× send-path throughput.
+//  * GRO (Generic Receive Offload, Linux `UDP_GRO`):
+//  kernel coalesces incoming datagrams into one `recvmmsg` call
+//  when the same 4-tuple sends multiple back-to-back.
+//  * sendmmsg / recvmmsg (Linux, Win32 WSARecvFrom batched, macOS
+//  recvmsg loop): one syscall ships or receives M independent
+//  datagrams to potentially different peers.
 //
+
 // This module ships the typed API; the concrete `@intrinsic` backends
 // live in core.sys.{linux, macos, windows} — Linux fully plumbed (GSO
 // + GRO + recvmmsg via `UDP_SEGMENT`/`UDP_GRO`/`MSG_TRUNC` control
@@ -26,13 +29,16 @@
 // segmentation, Windows uses `UDP_SEND_MSG_SIZE` /
 // `UDP_RECV_MAX_COALESCED_SIZE` when available (Win10 1803+).
 //
+
 // # Performance targets (v1)
 //
-//   Single-peer echo      — send side ≥ 2 Gbps on one core (vs
-//                            ~250 Mbps without GSO).
-//   Multi-peer fan-in     — recv side ≥ 1 M datagrams/sec (vs
-//                            ~120K with plain recv_from loop).
+
+//  Single-peer echo — send side ≥ 2 Gbps on one core (vs
+//  ~250 Mbps without GSO).
+//  Multi-peer fan-in — recv side ≥ 1 M datagrams/sec (vs
+//  ~120K with plain recv_from loop).
 //
+
 // =============================================================================
 
 module core.net.quic.transport.batch_io;

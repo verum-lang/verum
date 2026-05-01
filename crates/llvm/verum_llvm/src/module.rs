@@ -63,8 +63,10 @@ use crate::{AddressSpace, OptimizationLevel};
 /// This enum defines how to link a global variable or function in a module. The variant documentation is
 /// mostly taken straight from LLVM's own documentation except for some minor clarification.
 ///
+
 /// It is illegal for a function declaration to have any linkage type other than external or extern_weak.
 ///
+
 /// All Global Variables, Functions and Aliases can have one of the following DLL storage class: `DLLImport`
 /// & `DLLExport`.
 // REVIEW: Maybe this should go into it's own module?
@@ -176,8 +178,10 @@ pub struct Module<'ctx> {
 impl<'ctx> Module<'ctx> {
     /// Get a module from an [LLVMModuleRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid.
     pub unsafe fn new(module: LLVMModuleRef) -> Self {
         debug_assert!(!module.is_null());
@@ -198,21 +202,26 @@ impl<'ctx> Module<'ctx> {
     /// Creates a function given its `name` and `ty`, adds it to the `Module`
     /// and returns it.
     ///
+
     /// An optional `linkage` can be specified, without which the default value
     /// `Linkage::ExternalLinkage` will be used.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::{Module, Linkage};
     /// use verum_llvm::types::FunctionType;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     ///
+
     /// let fn_type = context.f32_type().fn_type(&[], false);
     /// let fn_val = module.add_function("my_function", fn_type, None);
     ///
+
     /// assert_eq!(fn_val.get_name().to_str(), Ok("my_function"));
     /// assert_eq!(fn_val.get_linkage(), Linkage::External);
     /// ```
@@ -232,14 +241,17 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets the `Context` from which this `Module` originates.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::{Context, ContextRef};
     /// use verum_llvm::module::Module;
     ///
+
     /// let local_context = Context::create();
     /// let local_module = local_context.create_module("my_module");
     ///
+
     /// assert_eq!(local_module.get_context(), local_context);
     /// ```
     pub fn get_context(&self) -> ContextRef<'ctx> {
@@ -248,20 +260,25 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets the first `FunctionValue` defined in this `Module`.
     ///
+
     /// # Example
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     ///
+
     /// assert!(module.get_first_function().is_none());
     ///
+
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     ///
+
     /// assert_eq!(fn_value, module.get_first_function().unwrap());
     /// ```
     pub fn get_first_function(&self) -> Option<FunctionValue<'ctx>> {
@@ -270,20 +287,25 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets the last `FunctionValue` defined in this `Module`.
     ///
+
     /// # Example
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     ///
+
     /// assert!(module.get_last_function().is_none());
     ///
+
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     ///
+
     /// assert_eq!(fn_value, module.get_last_function().unwrap());
     /// ```
     pub fn get_last_function(&self) -> Option<FunctionValue<'ctx>> {
@@ -292,20 +314,25 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets a `FunctionValue` defined in this `Module` by its name.
     ///
+
     /// # Example
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     ///
+
     /// assert!(module.get_function("my_fn").is_none());
     ///
+
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     ///
+
     /// assert_eq!(fn_value, module.get_function("my_fn").unwrap());
     /// ```
     pub fn get_function(&self, name: &str) -> Option<FunctionValue<'ctx>> {
@@ -316,24 +343,30 @@ impl<'ctx> Module<'ctx> {
 
     /// An iterator over the functions in this `Module`.
     ///
+
     /// ```
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     ///
+
     /// assert!(module.get_function("my_fn").is_none());
     ///
+
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     ///
+
     /// let names: Vec<String> = module
-    ///     .get_functions()
-    ///     .map(|f| f.get_name().to_string_lossy().to_string())
-    ///     .collect();
+    ///  .get_functions()
+    ///  .map(|f| f.get_name().to_string_lossy().to_string())
+    ///  .collect();
     ///
+
     /// assert_eq!(vec!["my_fn".to_owned()], names);
     /// ```
     pub fn get_functions(&self) -> FunctionIterator<'ctx> {
@@ -342,35 +375,48 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets a named `StructType` from this `Module`'s `Context`.
     ///
+
     /// # Example
     ///
+
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     ///
+
     /// assert!(module.get_struct_type("foo").is_none());
     ///
+
     /// let opaque = context.opaque_struct_type("foo");
     ///
+
     /// assert_eq!(module.get_struct_type("foo").unwrap(), opaque);
     /// ```
     ///
+
     /// Gets a named `StructType` from this `Module`'s `Context`.
     ///
+
     /// # Example
     ///
+
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     ///
+
     /// assert!(module.get_struct_type("foo").is_none());
     ///
+
     /// let opaque = context.opaque_struct_type("foo");
     ///
+
     /// assert_eq!(module.get_struct_type("foo").unwrap(), opaque);
     /// ```
     pub fn get_struct_type(&self, name: &str) -> Option<StructType<'ctx>> {
@@ -379,21 +425,27 @@ impl<'ctx> Module<'ctx> {
 
     /// Assigns a `TargetTriple` to this `Module`.
     ///
+
     /// # Example
     ///
+
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{Target, TargetTriple, InitializationConfig};
     ///
+
     /// Target::initialize_all(&InitializationConfig::default());
     /// let context = Context::create();
     /// let module = context.create_module("mod");
     /// let triple = TargetTriple::create("x86_64-pc-linux-gnu");
     ///
+
     /// assert_eq!(module.get_triple(), TargetTriple::create(""));
     ///
+
     /// module.set_triple(&triple);
     ///
+
     /// assert_eq!(module.get_triple(), triple);
     /// ```
     pub fn set_triple(&self, triple: &TargetTriple) {
@@ -403,21 +455,27 @@ impl<'ctx> Module<'ctx> {
     /// Gets the `TargetTriple` assigned to this `Module`. If none has been
     /// assigned, the triple will default to "".
     ///
+
     /// # Example
     ///
+
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{Target, TargetTriple, InitializationConfig};
     ///
+
     /// Target::initialize_all(&InitializationConfig::default());
     /// let context = Context::create();
     /// let module = context.create_module("mod");
     /// let triple = TargetTriple::create("x86_64-pc-linux-gnu");
     ///
+
     /// assert_eq!(module.get_triple(), TargetTriple::create(""));
     ///
+
     /// module.set_triple(&triple);
     ///
+
     /// assert_eq!(module.get_triple(), triple);
     /// ```
     pub fn get_triple(&self) -> TargetTriple {
@@ -429,18 +487,22 @@ impl<'ctx> Module<'ctx> {
 
     /// Creates an `ExecutionEngine` from this `Module`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::targets::{InitializationConfig, Target};
     ///
+
     /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let execution_engine = module.create_execution_engine().unwrap();
     ///
+
     /// assert_eq!(module.get_context(), context);
     /// ```
     // SubType: ExecutionEngine<Basic?>
@@ -483,18 +545,22 @@ impl<'ctx> Module<'ctx> {
 
     /// Creates an interpreter `ExecutionEngine` from this `Module`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::targets::{InitializationConfig, Target};
     ///
+
     /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let execution_engine = module.create_interpreter_execution_engine().unwrap();
     ///
+
     /// assert_eq!(module.get_context(), context);
     /// ```
     // SubType: ExecutionEngine<Interpreter>
@@ -538,6 +604,7 @@ impl<'ctx> Module<'ctx> {
 
     /// Creates a JIT `ExecutionEngine` from this `Module`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::OptimizationLevel;
@@ -545,12 +612,15 @@ impl<'ctx> Module<'ctx> {
     /// use verum_llvm::module::Module;
     /// use verum_llvm::targets::{InitializationConfig, Target};
     ///
+
     /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
     ///
+
     /// assert_eq!(module.get_context(), context);
     /// ```
     // SubType: ExecutionEngine<Jit>
@@ -598,34 +668,42 @@ impl<'ctx> Module<'ctx> {
 
     /// Creates an MCJIT `ExecutionEngine` for this `Module` using a custom memory manager.
     ///
+
     /// # Parameters
     ///
+
     /// * `memory_manager` - Specifies how LLVM allocates and finalizes code and data sections.
-    ///   Implement the [`McjitMemoryManager`] trait to customize these operations.
+    ///  Implement the [`McjitMemoryManager`] trait to customize these operations.
     /// * `opt_level` - Sets the desired optimization level (e.g. `None`, `Less`, `Default`, `Aggressive`).
-    ///   Higher levels generally produce faster code at the expense of longer compilation times.
+    ///  Higher levels generally produce faster code at the expense of longer compilation times.
     /// * `code_model` - Determines how code addresses are represented. Common values include
-    ///   `CodeModel::Default` or `CodeModel::JITDefault`. This impacts the generated machine code layout.
+    ///  `CodeModel::Default` or `CodeModel::JITDefault`. This impacts the generated machine code layout.
     /// * `no_frame_pointer_elim` - If true, frame pointer elimination is disabled. This may assist
-    ///   with certain debugging or profiling tasks but can incur a performance cost.
+    ///  with certain debugging or profiling tasks but can incur a performance cost.
     /// * `enable_fast_isel` - If true, uses a faster instruction selector where possible. This can
-    ///   improve compilation speed, though it may produce less optimized code in some cases.
+    ///  improve compilation speed, though it may produce less optimized code in some cases.
     ///
+
     /// # Returns
     ///
+
     /// Returns a newly created [`ExecutionEngine`] for MCJIT on success. Returns an error if:
     /// - The native target fails to initialize,
     /// - The `Module` is already owned by another `ExecutionEngine`,
     /// - Or MCJIT fails to create the engine (in which case an error string is returned from LLVM).
     ///
+
     /// # Notes
     ///
+
     /// Using a custom memory manager can help intercept or manage allocations for specific
     /// sections (for example, capturing `.llvm_stackmaps` or applying custom permissions).
     /// For details, refer to the [`McjitMemoryManager`] documentation.
     ///
+
     /// # Safety
     ///
+
     /// The returned [`ExecutionEngine`] takes ownership of the memory manager. Do not move
     /// or free the `memory_manager` after calling this method. When the `ExecutionEngine`
     /// is dropped, LLVM will destroy the memory manager by calling
@@ -726,17 +804,21 @@ impl<'ctx> Module<'ctx> {
 
     /// Creates a `GlobalValue` based on a type in an address space.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("mod");
     /// let i8_type = context.i8_type();
     /// let global = module.add_global(i8_type, Some(AddressSpace::from(1u16)), "my_global");
     ///
+
     /// assert_eq!(module.get_first_global().unwrap(), global);
     /// assert_eq!(module.get_last_global().unwrap(), global);
     /// ```
@@ -765,20 +847,26 @@ impl<'ctx> Module<'ctx> {
 
     /// Writes a `Module` to a file.
     ///
+
     /// # Arguments
     ///
+
     /// * `path` - path to write the module's bitcode to. Must be valid Unicode.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     ///
+
     /// module.add_function("my_fn", fn_type, None);
     /// module.write_bitcode_to_path("module.bc");
     /// ```
@@ -817,11 +905,14 @@ impl<'ctx> Module<'ctx> {
 
     /// Writes this `Module` to a `MemoryBuffer`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("mod");
     /// let void_type = context.void_type();
@@ -830,9 +921,11 @@ impl<'ctx> Module<'ctx> {
     /// let basic_block = context.append_basic_block(f, "entry");
     /// let builder = context.create_builder();
     ///
+
     /// builder.position_at_end(basic_block);
     /// builder.build_return(None);
     ///
+
     /// let buffer = module.write_bitcode_to_memory();
     /// ```
     pub fn write_bitcode_to_memory(&self) -> MemoryBuffer {
@@ -843,8 +936,10 @@ impl<'ctx> Module<'ctx> {
 
     /// Check whether the current [`Module`] is valid.
     ///
+
     /// The error variant is an LLVM-allocated string.
     ///
+
     /// # Remarks
     /// See also: [`LLVMVerifyModule`](https://llvm.org/doxygen/group__LLVMCAnalysis.html#ga5645aec2d95116c0432a676db77b2cb0).
     pub fn verify(&self) -> Result<(), LLVMString> {
@@ -876,23 +971,29 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets a smart pointer to the `DataLayout` belonging to a particular `Module`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::OptimizationLevel;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{InitializationConfig, Target};
     ///
+
     /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
     /// let target_data = execution_engine.get_target_data();
     /// let data_layout = target_data.get_data_layout();
     ///
+
     /// module.set_data_layout(&data_layout);
     ///
+
     /// assert_eq!(*module.get_data_layout(), data_layout);
     /// ```
     pub fn get_data_layout(&self) -> Ref<'_, DataLayout> {
@@ -905,23 +1006,29 @@ impl<'ctx> Module<'ctx> {
     // valgrind might come in handy once non jemalloc allocators stabilize
     /// Sets the `DataLayout` for a particular `Module`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::OptimizationLevel;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{InitializationConfig, Target};
     ///
+
     /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
     /// let target_data = execution_engine.get_target_data();
     /// let data_layout = target_data.get_data_layout();
     ///
+
     /// module.set_data_layout(&data_layout);
     ///
+
     /// assert_eq!(*module.get_data_layout(), data_layout);
     /// ```
     pub fn set_data_layout(&self, data_layout: &DataLayout) {
@@ -983,11 +1090,14 @@ impl<'ctx> Module<'ctx> {
     /// Appends a `MetaDataValue` to a global list indexed by a particular key.
     /// The metadata is appended to the module's named metadata node for `key`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let bool_type = context.bool_type();
@@ -995,22 +1105,30 @@ impl<'ctx> Module<'ctx> {
     /// let bool_val = bool_type.const_int(0, false);
     /// let f32_val = f32_type.const_float(0.0);
     ///
+
     /// assert_eq!(module.get_global_metadata_size("my_md"), 0);
     ///
+
     /// let md_string = context.metadata_string("lots of metadata here");
     /// let md_node = context.metadata_node(&[bool_val.into(), f32_val.into()]);
     ///
+
     /// module.add_global_metadata("my_md", &md_string).unwrap();
     /// module.add_global_metadata("my_md", &md_node).unwrap();
     ///
+
     /// assert_eq!(module.get_global_metadata_size("my_md"), 2);
     ///
+
     /// let global_md = module.get_global_metadata("my_md");
     ///
+
     /// assert_eq!(global_md.len(), 2);
     ///
+
     /// let (md_0, md_1) = (global_md[0].get_node_values(), global_md[1].get_node_values());
     ///
+
     /// assert_eq!(md_0.len(), 1);
     /// assert_eq!(md_1.len(), 2);
     /// assert_eq!(md_0[0].into_metadata_value().get_string_value(), md_string.get_string_value());
@@ -1033,11 +1151,14 @@ impl<'ctx> Module<'ctx> {
     // REVIEW: Better name? get_global_metadata_len or _count?
     /// Obtains the number of `MetaDataValue`s indexed by a particular key.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let bool_type = context.bool_type();
@@ -1045,22 +1166,30 @@ impl<'ctx> Module<'ctx> {
     /// let bool_val = bool_type.const_int(0, false);
     /// let f32_val = f32_type.const_float(0.0);
     ///
+
     /// assert_eq!(module.get_global_metadata_size("my_md"), 0);
     ///
+
     /// let md_string = context.metadata_string("lots of metadata here");
     /// let md_node = context.metadata_node(&[bool_val.into(), f32_val.into()]);
     ///
+
     /// module.add_global_metadata("my_md", &md_string).unwrap();
     /// module.add_global_metadata("my_md", &md_node).unwrap();
     ///
+
     /// assert_eq!(module.get_global_metadata_size("my_md"), 2);
     ///
+
     /// let global_md = module.get_global_metadata("my_md");
     ///
+
     /// assert_eq!(global_md.len(), 2);
     ///
+
     /// let (md_0, md_1) = (global_md[0].get_node_values(), global_md[1].get_node_values());
     ///
+
     /// assert_eq!(md_0.len(), 1);
     /// assert_eq!(md_1.len(), 2);
     /// assert_eq!(md_0[0].into_metadata_value().get_string_value(), md_string.get_string_value());
@@ -1076,11 +1205,14 @@ impl<'ctx> Module<'ctx> {
     // SubTypes: -> Vec<MetadataValue<Node>>
     /// Obtains the global `MetaDataValue` node indexed by key, which may contain 1 string or multiple values as its `get_node_values()`
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let bool_type = context.bool_type();
@@ -1088,22 +1220,30 @@ impl<'ctx> Module<'ctx> {
     /// let bool_val = bool_type.const_int(0, false);
     /// let f32_val = f32_type.const_float(0.0);
     ///
+
     /// assert_eq!(module.get_global_metadata_size("my_md"), 0);
     ///
+
     /// let md_string = context.metadata_string("lots of metadata here");
     /// let md_node = context.metadata_node(&[bool_val.into(), f32_val.into()]);
     ///
+
     /// module.add_global_metadata("my_md", &md_string).unwrap();
     /// module.add_global_metadata("my_md", &md_node).unwrap();
     ///
+
     /// assert_eq!(module.get_global_metadata_size("my_md"), 2);
     ///
+
     /// let global_md = module.get_global_metadata("my_md");
     ///
+
     /// assert_eq!(global_md.len(), 2);
     ///
+
     /// let (md_0, md_1) = (global_md[0].get_node_values(), global_md[1].get_node_values());
     ///
+
     /// assert_eq!(md_0.len(), 1);
     /// assert_eq!(md_1.len(), 2);
     /// assert_eq!(md_0[0].into_metadata_value().get_string_value(), md_string.get_string_value());
@@ -1128,20 +1268,26 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets the first `GlobalValue` in a module.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let module = context.create_module("mod");
     ///
+
     /// assert!(module.get_first_global().is_none());
     ///
+
     /// let global = module.add_global(i8_type, Some(AddressSpace::from(4u16)), "my_global");
     ///
+
     /// assert_eq!(module.get_first_global().unwrap(), global);
     /// ```
     pub fn get_first_global(&self) -> Option<GlobalValue<'ctx>> {
@@ -1156,20 +1302,26 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets the last `GlobalValue` in a module.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("mod");
     /// let i8_type = context.i8_type();
     ///
+
     /// assert!(module.get_last_global().is_none());
     ///
+
     /// let global = module.add_global(i8_type, Some(AddressSpace::from(4u16)), "my_global");
     ///
+
     /// assert_eq!(module.get_last_global().unwrap(), global);
     /// ```
     pub fn get_last_global(&self) -> Option<GlobalValue<'ctx>> {
@@ -1184,20 +1336,26 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets a named `GlobalValue` in a module.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("mod");
     /// let i8_type = context.i8_type();
     ///
+
     /// assert!(module.get_global("my_global").is_none());
     ///
+
     /// let global = module.add_global(i8_type, Some(AddressSpace::from(4u16)), "my_global");
     ///
+
     /// assert_eq!(module.get_global("my_global").unwrap(), global);
     /// ```
     pub fn get_global(&self, name: &str) -> Option<GlobalValue<'ctx>> {
@@ -1218,21 +1376,26 @@ impl<'ctx> Module<'ctx> {
 
     /// Creates a new `Module` from a `MemoryBuffer` with bitcode.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use verum_llvm::memory_buffer::MemoryBuffer;
     /// use std::path::Path;
     ///
+
     /// let path = Path::new("foo/bar.bc");
     /// let context = Context::create();
     /// let buffer = MemoryBuffer::create_from_file(&path).unwrap();
     /// let module = Module::parse_bitcode_from_buffer(&buffer, &context);
     ///
+
     /// assert_eq!(module.unwrap().get_context(), context);
     ///
+
     /// ```
     pub fn parse_bitcode_from_buffer(
         buffer: &MemoryBuffer,
@@ -1254,19 +1417,24 @@ impl<'ctx> Module<'ctx> {
 
     /// A convenience function for creating a `Module` from a bitcode file for a given context.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Module;
     /// use std::path::Path;
     ///
+
     /// let path = Path::new("foo/bar.bc");
     /// let context = Context::create();
     /// let module = Module::parse_bitcode_from_path(&path, &context);
     ///
+
     /// assert_eq!(module.unwrap().get_context(), context);
     ///
+
     /// ```
     // LLVMGetBitcodeModuleInContext was a pain to use, so I seem to be able to achieve the same effect
     // by reusing create_from_file instead. This is basically just a convenience function.
@@ -1281,14 +1449,18 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets the name of this `Module`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     ///
+
     /// assert_eq!(module.get_name().to_str(), Ok("my_mdoule"));
     /// ```
     pub fn get_name(&self) -> &CStr {
@@ -1300,16 +1472,21 @@ impl<'ctx> Module<'ctx> {
 
     /// Assigns the name of this `Module`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     ///
+
     /// module.set_name("my_module2");
     ///
+
     /// assert_eq!(module.get_name().to_str(), Ok("my_module2"));
     /// ```
     pub fn set_name(&self, name: &str) {
@@ -1318,18 +1495,24 @@ impl<'ctx> Module<'ctx> {
 
     /// Gets the source file name. It defaults to the module identifier but is separate from it.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     ///
+
     /// assert_eq!(module.get_source_file_name().to_str(), Ok("my_mod"));
     ///
+
     /// module.set_source_file_name("my_mod.rs");
     ///
+
     /// assert_eq!(module.get_name().to_str(), Ok("my_mod"));
     /// assert_eq!(module.get_source_file_name().to_str(), Ok("my_mod.rs"));
     /// ```
@@ -1344,18 +1527,24 @@ impl<'ctx> Module<'ctx> {
 
     /// Sets the source file name. It defaults to the module identifier but is separate from it.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     ///
+
     /// assert_eq!(module.get_source_file_name().to_str(), Ok("my_mod"));
     ///
+
     /// module.set_source_file_name("my_mod.rs");
     ///
+
     /// assert_eq!(module.get_name().to_str(), Ok("my_mod"));
     /// assert_eq!(module.get_source_file_name().to_str(), Ok("my_mod.rs"));
     /// ```
@@ -1373,15 +1562,19 @@ impl<'ctx> Module<'ctx> {
 
     /// Links one module into another. This will merge two `Module`s into one.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let module = context.create_module("mod");
     /// let module2 = context.create_module("mod2");
     ///
+
     /// assert!(module.link_in_module(module2).is_ok());
     /// ```
     pub fn link_in_module(&self, other: Self) -> Result<(), LLVMString> {
@@ -1531,6 +1724,7 @@ impl<'ctx> Module<'ctx> {
 
     /// Construct and run a set of passes over a module.
     ///
+
     /// This function takes a string with the passes that should be used.
     /// The format of this string is the same as
     /// [`opt`](https://llvm.org/docs/CommandGuide/opt.html)'s

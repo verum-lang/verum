@@ -16,8 +16,10 @@
 
 use verum_common::Heap;
 //
+
 // Coverage target: >95% of SMT solver code
 //
+
 // Test categories:
 // - Basic SAT/UNSAT checking
 // - Translation from Verum expressions to Z3

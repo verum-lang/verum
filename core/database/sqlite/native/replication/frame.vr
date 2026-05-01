@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
 //
+
 // `WalFrameRecord` carries one WAL frame across the wire — header
 // metadata + payload. Identical to the on-disk WAL frame layout,
 // plus a transport-level epoch counter so replicas can detect
@@ -59,6 +60,7 @@ implement WalFrameRecord {
 // Comparator — establish a strict total order on frames
 // -----------------------------------------------------------------------------
 //
+
 // Order: epoch ASC, seq ASC. Used by replica's apply-loop to detect
 // out-of-order delivery and by the lag tracker to determine "how far
 // behind".

@@ -2,7 +2,7 @@
 // tracing/context.vr — SpanContext + TraceFlags + TraceState
 // =============================================================================
 // W3C Trace Context propagation types. Follows spec rev 2021-11-23:
-//   https://www.w3.org/TR/trace-context/
+//  https://www.w3.org/TR/trace-context/
 // =============================================================================
 
 module core.tracing.context;
@@ -50,11 +50,13 @@ implement TraceFlags {
 // TraceState — W3C-compliant key/value vendor list (§3.3.1)
 // =============================================================================
 //
+
 // Limits per spec:
-//   max 32 members; each key <= 256 chars; each value <= 256 chars; total
-//   combined serialised length <= 512 chars. Members preserve insertion
-//   order; new members prepend so the latest mutator is first.
+//  max 32 members; each key <= 256 chars; each value <= 256 chars; total
+//  combined serialised length <= 512 chars. Members preserve insertion
+//  order; new members prepend so the latest mutator is first.
 //
+
 // Storage: fixed-capacity list of (Text, Text). We enforce the count
 // limit at mutation time; key/value length is caller-validated.
 

@@ -1,46 +1,55 @@
 //! Specialization Validation and Enforcement
 //!
+
 //! Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — Protocol Specialization
 //!
+
 //! This module implements the validation layer for @specialize attribute, ensuring:
 //! 1. Specialized implementations are actually more specific than base implementations
 //! 2. No overlapping implementations exist without a specialization relationship
 //! 3. Specialization lattice is well-formed (coherence)
 //!
+
 //! # Architecture
 //!
+
 //! The specialization system works in two phases:
 //!
+
 //! ## Compile-Time Validation (this module)
 //! - Detect overlapping implementations
 //! - Verify specialization relationships
 //! - Build specialization lattice
 //! - Check coherence constraints
 //!
+
 //! ## Runtime Selection (specialization_selection.rs)
 //! - Select most specific implementation
 //! - Cache selection decisions
 //! - Handle method dispatch
 //!
+
 //! # Example
 //!
+
 //! ```verum
 //! // General implementation
 //! implement<T> Clone for Maybe<T> where T: Clone {
-//!     default fn clone(self: &Self) -> Self {
-//!         match self {
-//!             Some(x) => Some(x.clone()),
-//!             None => None,
-//!         }
-//!     }
+//!  default fn clone(self: &Self) -> Self {
+//!  match self {
+//!  Some(x) => Some(x.clone()),
+//!  None => None,
+//!  }
+//!  }
 //! }
 //!
+
 //! // Specialized implementation (more specific)
 //! @specialize
 //! implement<T> Clone for Maybe<T> where T: Copy {
-//!     fn clone(self: &Self) -> Self {
-//!         *self  // More efficient for Copy types
-//!     }
+//!  fn clone(self: &Self) -> Self {
+//!  *self // More efficient for Copy types
+//!  }
 //! }
 //! ```
 
@@ -109,11 +118,14 @@ impl OverlapDetector {
 
     /// Detect all overlapping implementations for a protocol
     ///
+
     /// Two implementations overlap if there exists a type that could match both.
     /// This is conservative - we may report false positives to be safe.
     ///
+
     /// # Algorithm
     ///
+
     /// For each pair of implementations (I1, I2):
     /// 1. Try to unify their for_types
     /// 2. If unification succeeds, they overlap
@@ -160,14 +172,18 @@ impl OverlapDetector {
 
     /// Check if two types overlap (could be unified)
     ///
+
     /// Returns the overlapping type if they overlap, None otherwise.
     ///
+
     /// Two types overlap if there exists a substitution that makes them equal.
     /// This is a conservative check - it may report overlap where none exists,
     /// but will never miss an actual overlap.
     ///
+
     /// # Algorithm
     ///
+
     /// We use a simplified unification-based approach:
     /// 1. Type variables overlap with anything
     /// 2. Named types with same constructor overlap if all args overlap
@@ -604,10 +620,12 @@ impl OverlapDetector {
 
     /// Check if two implementations have a specialization relationship.
     ///
+
     /// Two implementations have a specialization relationship if:
     /// 1. One declares `@specialize` and its for_type is more specific, OR
     /// 2. One has strictly more restrictive where clauses covering the same type space
     ///
+
     /// This prevents false-positive overlap errors when a valid specialization exists.
     fn has_specialization_relationship(&self, impl1: &ProtocolImpl, impl2: &ProtocolImpl) -> bool {
         // Check if either impl explicitly declares specialization
@@ -631,6 +649,7 @@ impl OverlapDetector {
 
     /// Compute a specificity score for a type.
     ///
+
     /// Higher scores indicate more specific types (fewer type variables, more concrete).
     /// Used to validate specialization relationships.
     fn type_specificity_score(&self, ty: &Type) -> usize {
@@ -698,10 +717,13 @@ impl SpecializationValidator {
 
     /// Validate all specializations for a protocol
     ///
+
     /// This is the main entry point for specialization validation.
     ///
+
     /// # Checks Performed
     ///
+
     /// 1. **Overlap Detection**: Ensure no overlapping impls without specialization
     /// 2. **Specificity Validation**: @specialize impls must be more specific
     /// 3. **Lattice Well-Formedness**: Check for cycles and consistency
@@ -749,6 +771,7 @@ impl SpecializationValidator {
 
     /// Validate a single specialization relationship
     ///
+
     /// Ensures that the specialized impl is actually more specific than base impls
     fn validate_specialization(
         &self,
@@ -838,6 +861,7 @@ impl SpecializationValidator {
 
     /// Check if ty1 is more specific than ty2
     ///
+
     /// A type is more specific if it has fewer type variables and more concrete types.
     /// Any concrete type (primitive, named, tuple, etc.) is more specific than a type variable.
     fn is_more_specific(&self, ty1: &Type, ty2: &Type) -> bool {
@@ -894,6 +918,7 @@ impl SpecializationValidator {
 
     /// Check if where clauses are more restrictive
     ///
+
     /// Specialized impl should have all constraints of base plus potentially more
     fn where_clauses_more_restrictive(
         &self,
@@ -924,12 +949,15 @@ impl SpecializationValidator {
 
     /// Check if types are compatible for where clause comparison.
     ///
+
     /// Two types are compatible if they can potentially unify, meaning there exists
     /// a substitution that makes them equal. This is used when checking if where clause
     /// constraints match between a base and specialized implementation.
     ///
+
     /// # Compatibility Rules
     ///
+
     /// 1. Type variables are compatible with any type (they can be instantiated)
     /// 2. Primitive types must match exactly
     /// 3. Named/Generic types must have matching paths/names and compatible arguments
@@ -1279,6 +1307,7 @@ impl SpecializationValidator {
 
     /// Check if two universe levels are compatible.
     ///
+
     /// Levels are compatible if:
     /// 1. Both are concrete and equal
     /// 2. At least one is a variable (can be unified)
@@ -1312,6 +1341,7 @@ impl SpecializationValidator {
 
     /// Validate specialization lattice structure
     ///
+
     /// Ensures no cycles and lattice is well-formed
     fn validate_lattice(
         &self,
@@ -1392,6 +1422,7 @@ impl SpecializationValidator {
 
     /// Validate default method placement
     ///
+
     /// Default methods should only appear in base (non-specialized) implementations
     fn validate_default_methods(
         &self,

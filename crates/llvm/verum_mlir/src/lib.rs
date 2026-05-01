@@ -1,5 +1,6 @@
 //! Safe Rust bindings for MLIR.
 //!
+
 //! This crate provides a safe and ergonomic API for working with MLIR
 //! (Multi-Level Intermediate Representation) from Rust.
 

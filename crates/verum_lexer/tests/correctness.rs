@@ -15,6 +15,7 @@
 )]
 //! Correctness tests for verum_lexer
 //!
+
 //! Tests functional behavior of lexer components.
 //! Covers token recognition for keywords, literals, operators, and delimiters
 //! as defined by the Verum lexical grammar.
@@ -298,11 +299,12 @@ fn test_contract_literal_start() {
 // DISABLED: RegexLit token not yet implemented
 // #[test]
 // fn test_regex_literal() {
-//     let input = r#"r"[a-z]+""#;
-//     let lexer = Lexer::new(input, FileId::new(0));
-//     let tokens: Vec<Token> = lexer.map(|r| r.unwrap()).collect();
+//  let input = r#"r"[a-z]+""#;
+//  let lexer = Lexer::new(input, FileId::new(0));
+//  let tokens: Vec<Token> = lexer.map(|r| r.unwrap()).collect();
 //
-//     assert!(matches!(tokens[0].kind, TokenKind::RegexLit(_)));
+
+//  assert!(matches!(tokens[0].kind, TokenKind::RegexLit(_)));
 // }
 
 // ============================================================================

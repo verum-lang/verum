@@ -3,22 +3,25 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.5 (DST)
 //
+
 // `DstHarness` ties seed → generator → fault-schedule → oracle. The
 // caller drives one `step()` per logical op; the harness reports
 // every fault site + the final state to compare against the live DB
 // after recovery.
 //
+
 // Lifecycle:
 //
-//   let mut h = harness_from_seed(0x1234, 100);
-//   while !h.is_terminated() {
-//       let plan = h.next_step();
-//       // execute plan.op against the DB; if plan.fault is Some,
-//       // inject it through the simulated VFS.
-//       h.advance();
-//   }
-//   let expected = h.expected_state();
-//   // assert!(expected.matches(&observed_after_recovery));
+
+//  let mut h = harness_from_seed(0x1234, 100);
+//  while !h.is_terminated() {
+//  let plan = h.next_step();
+//  // execute plan.op against the DB; if plan.fault is Some,
+//  // inject it through the simulated VFS.
+//  h.advance();
+//  }
+//  let expected = h.expected_state();
+//  // assert!(expected.matches(&observed_after_recovery));
 // =============================================================================
 
 module core.database.sqlite.native.dst.harness;

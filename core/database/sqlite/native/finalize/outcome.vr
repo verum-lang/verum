@@ -3,9 +3,10 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_finalize / _reset return either SQLITE_OK or the error code
 // produced by the LAST sqlite3_step that failed — a "sticky" error
-// semantics.  clear_bindings always returns SQLITE_OK.
+// semantics. clear_bindings always returns SQLITE_OK.
 // =============================================================================
 
 module core.database.sqlite.native.finalize.outcome;
@@ -45,7 +46,7 @@ public fn outcome_reason(o: &FinalizeOutcome) -> Text {
     }
 }
 
-/// Build an outcome from the sticky-last-step code.  A success code
+/// Build an outcome from the sticky-last-step code. A success code
 /// (OK/ROW/DONE) collapses to FoOk regardless of action.
 public fn from_last_step(primary: &PrimaryCode, code: ExtendedCode, reason: Text) -> FinalizeOutcome {
     if primary_is_success(primary) { return FoOk; }

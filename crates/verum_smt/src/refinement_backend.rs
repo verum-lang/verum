@@ -1,26 +1,31 @@
 //! Z3 SMT Backend Implementation for Refinement Type Checking
 //!
+
 //! Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 - Refinement Types with SMT
 //!
+
 //! This module provides a bridge implementation that delegates to verum_smt's
 //! SubsumptionChecker for all SMT operations. It implements the
 //! `verum_types::refinement::SmtBackend` trait.
 //!
+
 //! Historical note: this module used to live in `verum_types::smt_backend`.
 //! It was moved into `verum_smt` to break the circular dependency between
 //! `verum_smt` and `verum_types`. The public type was renamed from
 //! `Z3Backend` to `RefinementZ3Backend` to avoid colliding with the
 //! pre-existing `verum_smt::solver::Z3Backend` type.
 //!
+
 //! ## Architecture
 //!
+
 //! ```text
 //! RefinementChecker (verum_types)
-//!   ↓ (uses SmtBackend trait from verum_types::refinement)
+//!  ↓ (uses SmtBackend trait from verum_types::refinement)
 //! RefinementZ3Backend (verum_smt - this file, delegation)
-//!   ↓ (delegates to)
+//!  ↓ (delegates to)
 //! SubsumptionChecker (verum_smt - full Z3 implementation)
-//!   ↓ (uses)
+//!  ↓ (uses)
 //! Z3 Solver (via z3-rs with proper Context management)
 //! ```
 
@@ -41,6 +46,7 @@ use crate::{CheckMode, SolverStats, SubsumptionChecker, SubsumptionResult};
 
 /// Z3-based SMT backend for refinement verification
 ///
+
 /// This implementation delegates all SMT operations to verum_smt::SubsumptionChecker,
 /// which provides:
 /// - Proper Z3 Context management (thread-local)
@@ -196,12 +202,16 @@ impl SmtBackend for RefinementZ3Backend {
 
 /// Helper to check refinement subsumption using SMT
 ///
+
 /// This is the key function for subtyping: T{φ1} <: T{φ2} iff φ1 => φ2
 ///
+
 /// Delegates to verum_smt::SubsumptionChecker which handles all Z3 complexity.
 ///
+
 /// # Algorithm
 ///
+
 /// To check φ1 ⇒ φ2, SubsumptionChecker:
 /// 1. First tries syntactic subsumption (cheap, no SMT)
 /// 2. If inconclusive, uses Z3 to check ¬(φ1 ⇒ φ2) is UNSAT

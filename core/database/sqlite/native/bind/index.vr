@@ -3,14 +3,17 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Five SQL forms map onto the same 1-based parameter index:
 //
-//   `?`              — auto-numbered (next free index)
-//   `?N`             — explicit numbered position
-//   `:name`          — named (colon)
-//   `$name`          — named (dollar — Tcl convention)
-//   `@name`          — named (at — sqlite extension)
+
+//  `?` — auto-numbered (next free index)
+//  `?N` — explicit numbered position
+//  `:name` — named (colon)
+//  `$name` — named (dollar — Tcl convention)
+//  `@name` — named (at — sqlite extension)
 //
+
 // `BindParamSpec` records ONE source-form occurrence; `ParamIndex` is the
 // per-statement collection that lets the binder resolve `name → 1-based idx`.
 // =============================================================================

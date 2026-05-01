@@ -1,30 +1,38 @@
 //! Attribute argument specifications for the Verum AST.
 //!
+
 //! This module defines the type system for attribute arguments, enabling
 //! compile-time validation of attribute syntax.
 //!
+
 //! # Overview
 //!
+
 //! Verum attributes can have various argument forms:
 //!
+
 //! ```verum
-//! @cold                                    // No arguments
-//! @inline(always)                          // Single positional argument
-//! @align(16)                               // Single integer argument
-//! @serialize(rename = "user_id")           // Named argument
-//! @validate(min = 1, max = 100)            // Multiple named arguments
-//! @derive(Clone, Serialize, Debug)         // Variadic arguments
-//! @deprecated(since = "2.0", use = "new")  // Multiple named strings
+//! @cold // No arguments
+//! @inline(always) // Single positional argument
+//! @align(16) // Single integer argument
+//! @serialize(rename = "user_id") // Named argument
+//! @validate(min = 1, max = 100) // Multiple named arguments
+//! @derive(Clone, Serialize, Debug) // Variadic arguments
+//! @deprecated(since = "2.0", use = "new") // Multiple named strings
 //! ```
 //!
+
 //! # Design
 //!
+
 //! - [`ArgSpec`]: Specification for what arguments an attribute accepts
 //! - [`ArgType`]: Type of a single argument value
 //! - [`NamedArgSpec`]: Specification for a named argument
 //!
+
 //! # Argument Validation
 //!
+
 //! Attribute argument specs define what arguments an attribute accepts: none (@cold),
 //! optional (@inline or @inline(always)), required (@align(16)), named keyword-style
 //! (@serialize(rename = "x")), variadic (@derive(Clone, Serialize)), or mixed.
@@ -38,22 +46,29 @@ use crate::span::Span;
 
 /// Specification for attribute arguments.
 ///
+
 /// Defines what arguments an attribute accepts and their structure.
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_ast::attr::{ArgSpec, ArgType, NamedArgSpec};
 ///
+
 /// // @cold - no arguments
 /// let no_args = ArgSpec::None;
 ///
+
 /// // @inline or @inline(always)
 /// let optional = ArgSpec::Optional(ArgType::Ident);
 ///
+
 /// // @align(16) - required integer
 /// let required = ArgSpec::Required(ArgType::Int);
 ///
+
 /// // @derive(Clone, Serialize) - variadic identifiers
 /// let variadic = ArgSpec::Variadic(ArgType::Ident);
 /// ```
@@ -72,11 +87,13 @@ pub enum ArgSpec {
 
     /// Named arguments (keyword style): `@serialize(rename = "x", skip = true)`
     ///
+
     /// Named arguments can be required or optional with defaults.
     Named(List<NamedArgSpec>),
 
     /// Variadic positional arguments: `@derive(Clone, Serialize, Debug)`
     ///
+
     /// All arguments must be of the same type.
     Variadic(ArgType),
 
@@ -200,6 +217,7 @@ impl ArgSpec {
 
 /// Type of a single attribute argument value.
 ///
+
 /// Used to validate argument values at compile time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ArgType {
@@ -258,6 +276,7 @@ impl ArgType {
 
     /// Check if an expression matches this expected type.
     ///
+
     /// This performs a shallow check based on expression structure,
     /// not full type inference.
     #[must_use]
@@ -332,17 +351,22 @@ impl std::fmt::Display for ArgType {
 
 /// Specification for a single named argument.
 ///
+
 /// Used in [`ArgSpec::Named`] to define keyword-style arguments.
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_ast::attr::{NamedArgSpec, ArgType};
 ///
+
 /// // @serialize(rename = "user_id")
 /// let rename_arg = NamedArgSpec::optional("rename", ArgType::String);
 ///
-/// // @validate(min = 1)  -- required
+
+/// // @validate(min = 1) -- required
 /// let min_arg = NamedArgSpec::required("min", ArgType::Int);
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -358,6 +382,7 @@ pub struct NamedArgSpec {
 
     /// Default value expression (for optional arguments)
     ///
+
     /// If `None` and `required` is `false`, the argument is truly optional.
     pub default: Maybe<Text>,
 

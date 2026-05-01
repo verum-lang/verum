@@ -1,5 +1,6 @@
 //! Shape metadata for compile-time tensor verification.
 //!
+
 //! Provides static shape tracking with symbolic dimension support
 //! for compile-time shape verification of tensor operations.
 
@@ -21,6 +22,7 @@ pub struct SymbolId(pub u32);
 
 /// Dimension type for tensor shapes.
 ///
+
 /// Supports static, symbolic, and dynamic dimensions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ShapeDim {
@@ -173,6 +175,7 @@ pub enum ShapeConstraint {
 
 /// Shape metadata for a VBC module.
 ///
+
 /// Maps instruction IDs to their static shapes and tracks symbolic dimensions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ShapeMetadata {

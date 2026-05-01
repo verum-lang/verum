@@ -5,8 +5,10 @@
 // Dependencies: core, async/future, async/poll, time
 // =============================================================================
 //
+
 // Provides timer-based async primitives:
 //
+
 // - sleep(duration): Future that completes after a duration
 // - sleep_ms(ms): Convenience for millisecond sleep
 // - sleep_until(deadline): Sleep until an absolute time
@@ -14,8 +16,10 @@
 // - Timeout: Wraps a future with a deadline
 // - Delay: Delays execution of a future
 //
+
 // All timers use monotonic clock for correctness (immune to wall clock changes).
 //
+
 // =============================================================================
 
 module timer;
@@ -33,15 +37,19 @@ mount core.time.instant.{Instant};
 
 /// Future that completes after a specified duration.
 ///
+
 /// Uses monotonic clock for accuracy. The actual sleep may be slightly
 /// longer than requested due to scheduling, but never shorter.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// // Sleep for 100 milliseconds
 /// sleep(Duration.from_millis(100)).await;
 ///
+
 /// // Convenience
 /// sleep_ms(100).await;
 /// ```
@@ -80,13 +88,13 @@ implement Future for Sleep {
         if Instant.now() >= deadline {
             Poll.Ready(())
         } else {
-            // Park until the deadline.  Register the waker on the
+            // Park until the deadline. Register the waker on the
             // runtime's timer queue so we're polled exactly once at
-            // the deadline (no busy-spin).  When the runtime isn't
+            // the deadline (no busy-spin). When the runtime isn't
             // visible — e.g. during synchronous test polling —
             // fall back to the historical wake_by_ref pattern so
             // existing call sites still progress (with the busy-spin
-            // cost).  Closes #243 for the canonical sleep primitive.
+            // cost). Closes #243 for the canonical sleep primitive.
             match core.async.executor.current_runtime() {
                 Some(rt) => {
                     rt.register_timer(deadline.as_nanos() as UInt64, cx.waker().clone());
@@ -121,6 +129,7 @@ public fn sleep_secs(secs: Int) -> Sleep {
 
 /// Future that completes at an absolute deadline.
 ///
+
 /// Unlike `sleep` which is relative, `sleep_until` takes an absolute
 /// monotonic instant. Useful for scheduling at precise times.
 public type SleepUntil is {
@@ -142,9 +151,9 @@ implement Future for SleepUntil {
             Poll.Ready(())
         } else {
             // Park until the deadline via the runtime's timer queue
-            // when one is in scope.  Synchronous test contexts fall
+            // when one is in scope. Synchronous test contexts fall
             // back to the busy-spin wake_by_ref so the existing API
-            // surface stays compatible.  See Sleep::poll for the
+            // surface stays compatible. See Sleep::poll for the
             // rationale (closes #243).
             match core.async.executor.current_runtime() {
                 Some(rt) => {
@@ -173,16 +182,19 @@ public fn sleep_until(deadline: Instant) -> SleepUntil {
 
 /// A stream that yields at fixed intervals.
 ///
+
 /// After each tick, the interval waits for `period` before yielding again.
 /// The first tick happens after `period` from creation (not immediately).
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let mut ticker = TimerInterval.new(Duration.from_millis(100));
 /// loop {
-///     ticker.tick().await;
-///     do_periodic_work();
+///  ticker.tick().await;
+///  do_periodic_work();
 /// }
 /// ```
 public type TimerInterval is {
@@ -195,6 +207,7 @@ public type TimerInterval is {
 implement TimerInterval {
     /// Create a new interval with the given period.
     ///
+
     /// The first tick will be `period` from now.
     public fn new(period: Duration) -> TimerInterval {
         TimerInterval {
@@ -213,6 +226,7 @@ implement TimerInterval {
 
     /// Wait for the next tick.
     ///
+
     /// Returns the instant at which the tick occurred.
     public async fn tick(&mut self) -> Instant {
         let deadline = match self.next_tick {
@@ -251,13 +265,16 @@ implement TimerInterval {
 
 /// Wraps a future and delays its first poll.
 ///
+
 /// The inner future is not polled until after the delay has elapsed.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let delayed = delay(Duration.from_secs(1), async {
-///     expensive_operation().await
+///  expensive_operation().await
 /// });
 /// let result = delayed.await; // waits 1s before starting
 /// ```
@@ -329,15 +346,18 @@ implement Eq for TimeoutError {
 
 /// Wraps a future with a timeout.
 ///
+
 /// If the inner future does not complete within the timeout,
 /// returns `Err(TimeoutError)`.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// match timeout(Duration.from_secs(5), fetch_data()).await {
-///     Ok(data) => process(data),
-///     Err(TimeoutError) => print("timed out!"),
+///  Ok(data) => process(data),
+///  Err(TimeoutError) => print("timed out!"),
 /// }
 /// ```
 public type Timeout<F: Future> is {
@@ -401,6 +421,7 @@ public fn timeout_ms<F: Future>(ms: Int, future: F) -> Timeout<F> {
 
 /// Debounce state for collapsing rapid events into a single delayed action.
 ///
+
 /// After each trigger, waits for `delay` without another trigger before firing.
 /// Useful for input handling, search-as-you-type, window resize, etc.
 public type Debounce is {
@@ -424,6 +445,7 @@ implement Debounce {
 
     /// Check if the debounce has settled (enough time passed since last trigger).
     ///
+
     /// Returns true if no trigger has been called, or if the delay has elapsed
     /// since the last trigger.
     public fn is_settled(&self) -> Bool {
@@ -435,6 +457,7 @@ implement Debounce {
 
     /// Wait until the debounce settles.
     ///
+
     /// Returns immediately if no trigger has been called.
     public async fn settled(&self) {
         match self.deadline {
@@ -455,6 +478,7 @@ implement Debounce {
 
 /// Throttle state for rate-limiting operations.
 ///
+
 /// Allows at most one operation per `interval`.
 /// Unlike debounce, the first call goes through immediately.
 public type Throttle is {
@@ -473,6 +497,7 @@ implement Throttle {
 
     /// Check if an operation is currently allowed.
     ///
+
     /// Returns true and records the time if allowed.
     /// Returns false if the interval has not elapsed since last allowed call.
     public fn try_acquire(&mut self) -> Bool {

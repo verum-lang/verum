@@ -3,7 +3,7 @@
 // =============================================================================
 // xSavepoint / xRelease / xRollbackTo — optional vtab methods (table v2+).
 // Called by the engine when SAVEPOINT / RELEASE / ROLLBACK TO is issued
-// on a transaction containing the vtab.  All three take an int savepoint id.
+// on a transaction containing the vtab. All three take an int savepoint id.
 // Spec §16.1.
 // =============================================================================
 

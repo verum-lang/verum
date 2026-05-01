@@ -5,6 +5,7 @@
 // area in cell coordinates. Margin defines spacing around a rectangle.
 // Position is a simple (x, y) point.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#8.1
 // =============================================================================
 

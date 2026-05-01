@@ -1,10 +1,12 @@
 //! Monomorphization resolver for resolving generic instantiations.
 //!
+
 //! The resolver implements a three-level resolution strategy:
 //! 1. Stdlib precompiled specializations
 //! 2. Persistent cache (validated)
 //! 3. Schedule for specialization
 //!
+
 //! Three-level resolution: (1) stdlib precompiled specializations, (2) persistent
 //! disk cache with validity checking, (3) schedule for fresh specialization.
 
@@ -89,7 +91,7 @@ impl CacheMetadata {
         }
 
         // Parse: [version_major:u16][version_minor:u16][version_patch:u16][pad:u16]
-        //        [type_hash:u64][function_hash:u64][timestamp:u64]
+        //  [type_hash:u64][function_hash:u64][timestamp:u64]
         let version_major = u16::from_le_bytes([data[0], data[1]]);
         let version_minor = u16::from_le_bytes([data[2], data[3]]);
         let version_patch = u16::from_le_bytes([data[4], data[5]]);
@@ -172,6 +174,7 @@ impl Version {
 
     /// Checks if this version is compatible with another.
     ///
+
     /// Compatible means: same major version and other.minor >= self.minor.
     pub fn compatible_with(&self, other: &Version) -> bool {
         self.major == other.major && self.minor <= other.minor
@@ -184,6 +187,7 @@ impl Version {
 
 /// Resolver for generic instantiations.
 ///
+
 /// Implements a three-level resolution strategy:
 /// 1. Check stdlib precompiled specializations
 /// 2. Check persistent cache (with validation)
@@ -334,6 +338,7 @@ impl MonomorphizationResolver {
 
     /// Validates a cached specialization.
     ///
+
     /// Full validation includes:
     /// 1. Compiler version compatibility
     /// 2. Type definition hash match

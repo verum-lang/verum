@@ -1,5 +1,6 @@
 //! Benchmarks for value tracking performance
 //!
+
 //! Measures performance of key operations:
 //! - Concrete value propagation
 //! - Range analysis computation
@@ -7,6 +8,7 @@
 //! - Path predicate evaluation
 //! - Full dataflow analysis
 //!
+
 //! Performance target: < 200μs for typical functions
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

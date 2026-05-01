@@ -1,5 +1,6 @@
 // `verum verify --check-smt-formula <FILE>` handler.
 //
+
 // Reads an SMT-LIB 2 file from disk, dispatches it to the
 // configured solver (currently Z3), and prints the verdict on
 // stdout. Thin wrapper over `verum_smt::smtlib_check`: the

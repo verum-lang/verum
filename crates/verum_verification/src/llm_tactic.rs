@@ -1,52 +1,60 @@
 //! LLM-native tactic protocol — LCF-style fail-closed bridge between
 //! a language-model proof proposer and the trusted kernel.
 //!
+
 //! ## Goal
 //!
+
 //! Verum is the first proof assistant where LLM assistance is
-//! guaranteed sound *by construction*.  An LLM may propose tactic
+//! guaranteed sound *by construction*. An LLM may propose tactic
 //! sequences for any goal, but the proposal is **always re-checked
-//! by the kernel** before being committed.  If the kernel rejects
+//! by the kernel** before being committed. If the kernel rejects
 //! any step, the proposal is discarded and the audit trail records
-//! the rejection.  The LLM never short-circuits the kernel.
+//! the rejection. The LLM never short-circuits the kernel.
 //!
+
 //! This is the LCF principle, generalised: every term is kernel-
 //! checked regardless of who / what proposed it.
 //!
+
 //! ## Architectural pattern
 //!
+
 //! Same single-trait-boundary pattern as the rest of the integration
 //! arc (ladder_dispatch / proof_drafting / proof_repair / closure_cache
 //! / doc_render / foreign_import):
 //!
-//!   * [`LlmGoalSummary`] — typed projection of the focused proof
-//!     state (goal + hypotheses + lemmas + recent history + framework
-//!     axioms in scope) handed to the LLM.
-//!   * [`LlmProofProposal`] — typed result (model_id + prompt_hash +
-//!     completion_hash + tactic_sequence + raw_completion).
-//!   * [`LlmTacticAdapter`] trait — single dispatch interface.
-//!     Reference impls: [`MockLlmAdapter`] (deterministic,
-//!     test-friendly), [`EchoLlmAdapter`] (echoes a configured
-//!     hint).  Production adapters (cloud / local) plug in via the
-//!     same trait.
-//!   * [`KernelChecker`] trait — re-checks each proposed step.
-//!     Reference impl: [`PatternKernelChecker`] (V0 — recognises
-//!     well-formed `apply NAME` / canonical-tactic shapes).  V1
-//!     wires the actual kernel re-check.
-//!   * [`KernelGate`] — orchestrates `adapter.propose` →
-//!     `checker.check_step` per-step → typed [`KernelVerdict`] +
-//!     [`LlmProtocolEvent`] for the audit trail.
-//!   * [`AuditTrail`] — append-only JSONL log persisted to
-//!     `target/.verum_cache/llm-proofs.jsonl` (or wherever the
-//!     consumer points it).  Every LLM invocation produces an
-//!     event so the proof is reproducible from the log.
+
+//!  * [`LlmGoalSummary`] — typed projection of the focused proof
+//!  state (goal + hypotheses + lemmas + recent history + framework
+//!  axioms in scope) handed to the LLM.
+//!  * [`LlmProofProposal`] — typed result (model_id + prompt_hash +
+//!  completion_hash + tactic_sequence + raw_completion).
+//!  * [`LlmTacticAdapter`] trait — single dispatch interface.
+//!  Reference impls: [`MockLlmAdapter`] (deterministic,
+//!  test-friendly), [`EchoLlmAdapter`] (echoes a configured
+//!  hint). Production adapters (cloud / local) plug in via the
+//!  same trait.
+//!  * [`KernelChecker`] trait — re-checks each proposed step.
+//!  Reference impl: [`PatternKernelChecker`] (V0 — recognises
+//!  well-formed `apply NAME` / canonical-tactic shapes). V1
+//!  wires the actual kernel re-check.
+//!  * [`KernelGate`] — orchestrates `adapter.propose` →
+//!  `checker.check_step` per-step → typed [`KernelVerdict`] +
+//!  [`LlmProtocolEvent`] for the audit trail.
+//!  * [`AuditTrail`] — append-only JSONL log persisted to
+//!  `target/.verum_cache/llm-proofs.jsonl` (or wherever the
+//!  consumer points it). Every LLM invocation produces an
+//!  event so the proof is reproducible from the log.
 //!
+
 //! ## Fail-closed contract
 //!
+
 //! `KernelGate::run` returns [`KernelVerdict::Accepted`] only when
-//! the kernel re-checked every step in the proposal.  Any rejection
+//! the kernel re-checked every step in the proposal. Any rejection
 //! produces [`KernelVerdict::Rejected`] with the failing step's
-//! index + reason.  The audit trail captures both paths.
+//! index + reason. The audit trail captures both paths.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -88,7 +96,7 @@ impl LlmGoalSummary {
     }
 
     /// Render the goal into the canonical prompt the adapters
-    /// hash and feed to the LLM.  Order is stable so the prompt
+    /// hash and feed to the LLM. Order is stable so the prompt
     /// hash is deterministic across runs.
     pub fn render_prompt(&self) -> Text {
         let mut s = String::new();
@@ -123,7 +131,7 @@ impl LlmGoalSummary {
         Text::from(s)
     }
 
-    /// Stable blake3 hash of the rendered prompt.  Hex-encoded.
+    /// Stable blake3 hash of the rendered prompt. Hex-encoded.
     pub fn prompt_hash(&self) -> Text {
         let p = self.render_prompt();
         Text::from(hex32(blake3::hash(p.as_str().as_bytes()).as_bytes()))
@@ -194,10 +202,10 @@ impl std::error::Error for LlmError {}
 /// Single dispatch interface for an LLM proof-proposer.
 pub trait LlmTacticAdapter: std::fmt::Debug + Send + Sync {
     /// Stable model identifier (e.g. `"local/llama-3-8b-q4"`,
-    /// `"cloud/claude-sonnet-4-6"`).  Goes into the audit trail.
+    /// `"cloud/claude-sonnet-4-6"`). Goes into the audit trail.
     fn model_id(&self) -> Text;
 
-    /// Propose a tactic sequence for the given goal.  The
+    /// Propose a tactic sequence for the given goal. The
     /// implementation MUST be deterministic on the same `(prompt,
     /// model_id)` pair *or* explicitly mark itself as
     /// non-deterministic via an extra-info channel — the audit
@@ -308,7 +316,7 @@ impl LlmTacticAdapter for EchoLlmAdapter {
 // KernelChecker trait
 // =============================================================================
 
-/// Typed rejection reason from a kernel re-check.  Replaces the
+/// Typed rejection reason from a kernel re-check. Replaces the
 /// stringly-typed Text-only rejection so callers (LLM auditing,
 /// CLI metrics, replay engines) can branch on the failure class.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -317,7 +325,7 @@ pub enum KernelRejectReason {
     /// AND not in the kernel's axiom registry.
     NotInScope { name: Text },
     /// Name resolves textually but isn't a registered kernel
-    /// axiom.  Production mode rejects these as "unattested" —
+    /// axiom. Production mode rejects these as "unattested" —
     /// the LLM would otherwise be free to invent lemma names.
     NotKernelAttested { name: Text },
     /// The tactic head isn't recognised (neither `apply NAME` nor
@@ -332,7 +340,7 @@ pub enum KernelRejectReason {
 }
 
 impl KernelRejectReason {
-    /// Render as a single-line diagnostic.  Used by the back-compat
+    /// Render as a single-line diagnostic. Used by the back-compat
     /// `check_step` shim that returns `Result<(), Text>`.
     pub fn render(&self) -> Text {
         match self {
@@ -371,26 +379,29 @@ impl KernelRejectReason {
 
 /// Re-checks one proposed tactic step against the goal.
 ///
+
 /// Two implementations ship:
 ///
-///   * [`PatternKernelChecker`] — text-shape recogniser; accepts
-///     `apply NAME` when `NAME` is in the goal's textual lemma
-///     list, plus a fixed canonical-tactic head set.  V0 mode.
-///   * [`KernelInferChecker`] — production hardening (#90).
-///     Carries a `verum_kernel::AxiomRegistry`; `apply NAME` MUST
-///     resolve through the registry (kernel-attested), not just
-///     through the LLM's textual context.
+
+///  * [`PatternKernelChecker`] — text-shape recogniser; accepts
+///  `apply NAME` when `NAME` is in the goal's textual lemma
+///  list, plus a fixed canonical-tactic head set. V0 mode.
+///  * [`KernelInferChecker`] — production hardening (#90).
+///  Carries a `verum_kernel::AxiomRegistry`; `apply NAME` MUST
+///  resolve through the registry (kernel-attested), not just
+///  through the LLM's textual context.
 ///
+
 /// Both honour the **fail-closed contract**: if the checker can't
 /// *prove* the step is sound it MUST reject.
 pub trait KernelChecker: std::fmt::Debug + Send + Sync {
-    /// Primary check.  Returns Ok on accept; Err with a stringly-
-    /// typed diagnostic on reject.  Implementors that produce
+    /// Primary check. Returns Ok on accept; Err with a stringly-
+    /// typed diagnostic on reject. Implementors that produce
     /// structured rejections should override [`check_step_typed`]
     /// instead and project the Text via `KernelRejectReason::render`.
     fn check_step(&self, goal: &LlmGoalSummary, step: &str) -> Result<(), Text>;
 
-    /// Typed entry point.  Default impl wraps `check_step`'s Text
+    /// Typed entry point. Default impl wraps `check_step`'s Text
     /// in [`KernelRejectReason::Other`]; impls that want structured
     /// reasons override this method (and make `check_step` call it
     /// + `.render()`).
@@ -403,15 +414,16 @@ pub trait KernelChecker: std::fmt::Debug + Send + Sync {
     }
 }
 
-/// V0 reference checker.  Recognises:
-///   * `apply <name>` where `<name>` is one of the lemmas in scope.
-///   * Canonical tactic invocations: `intro`, `intro <name>`,
-///     `auto`, `simp`, `refl`, `assumption`, `trivial`, `ring`,
-///     `linarith`, `nlinarith`, `norm_num`, `omega`, `field`,
-///     `blast`, `smt`.
-///   * Lines starting with `//` (comments) — admitted as no-ops.
+/// V0 reference checker. Recognises:
+///  * `apply <name>` where `<name>` is one of the lemmas in scope.
+///  * Canonical tactic invocations: `intro`, `intro <name>`,
+///  `auto`, `simp`, `refl`, `assumption`, `trivial`, `ring`,
+///  `linarith`, `nlinarith`, `norm_num`, `omega`, `field`,
+///  `blast`, `smt`.
+///  * Lines starting with `//` (comments) — admitted as no-ops.
 ///
-/// Anything else is rejected.  V1 wires in the full kernel
+
+/// Anything else is rejected. V1 wires in the full kernel
 /// re-check (refinement-type elaboration, depth check, framework
 /// axiom resolution, …).
 #[derive(Debug, Default, Clone, Copy)]
@@ -423,23 +435,25 @@ impl PatternKernelChecker {
     }
 }
 
-/// Public accessor for the canonical-tactic set.  Used by sibling
+/// Public accessor for the canonical-tactic set. Used by sibling
 /// modules (e.g. `proof_repl`'s GoalRewriter surface-alignment
 /// invariant) to ensure their dispatch surface stays in sync.
 pub fn canonical_tactics() -> &'static [&'static str] {
     CANONICAL_TACTICS
 }
 
-/// Canonical tactic heads accepted by `parse_step`.  Every entry is
+/// Canonical tactic heads accepted by `parse_step`. Every entry is
 /// either:
 ///
-///   * A name from `verum_verification::tactic_combinator::TacticCombinator`
-///     (`skip` / `fail` / etc.); or
-///   * A canonical decision-procedure / surface tactic the catalogue
-///     documents elsewhere (`auto` / `simp` / `linarith` / etc.).
+
+///  * A name from `verum_verification::tactic_combinator::TacticCombinator`
+///  (`skip` / `fail` / etc.); or
+///  * A canonical decision-procedure / surface tactic the catalogue
+///  documents elsewhere (`auto` / `simp` / `linarith` / etc.).
 ///
+
 /// Adding a new head here is the right place to extend the
-/// PatternKernelChecker's accept set.  The KernelInferChecker layers
+/// PatternKernelChecker's accept set. The KernelInferChecker layers
 /// kernel-attestation on top of this for `apply NAME` resolution.
 const CANONICAL_TACTICS: &[&str] = &[
     // ----- core combinator surface (matches TacticCombinator::all) -----
@@ -579,24 +593,27 @@ impl KernelChecker for PatternKernelChecker {
 // KernelInferChecker — production: kernel-attested apply-resolution (#90)
 // =============================================================================
 //
+
 // Pre-this-module `PatternKernelChecker` accepted `apply NAME` as long
 // as `NAME` appeared in the goal's textual `lemmas_in_scope` list —
 // which is whatever the LLM-prompt-builder rendered into the goal
-// view.  An adversarial LLM could exploit that by constructing a
+// view. An adversarial LLM could exploit that by constructing a
 // goal with a fictitious lemma in scope.
 //
+
 // Hardening: the production checker carries a
 // `verum_kernel::AxiomRegistry` — the *kernel-side* trust boundary
-// — and resolves `apply NAME` through it.  A name that's only in
+// — and resolves `apply NAME` through it. A name that's only in
 // the textual lemma list but not registered as an axiom or
 // definition is rejected as `NotKernelAttested`.
 //
+
 // This closes the LCF gate at the layer the `KernelGate` orchestrator
 // asked for: every accepted `apply` step is provably a citation of
 // a registered kernel axiom — solver-side proof reconstruction is
 // no longer in the trust path for citation-resolution.
 
-/// Production kernel re-checker.  Resolves `apply NAME` through a
+/// Production kernel re-checker. Resolves `apply NAME` through a
 /// kernel `AxiomRegistry` (rather than through the LLM's textual
 /// goal context, which is untrusted).
 #[derive(Debug, Clone)]
@@ -606,7 +623,7 @@ pub struct KernelInferChecker {
 
 impl KernelInferChecker {
     /// Build a checker carrying the running kernel's
-    /// `AxiomRegistry`.  Callers (CLI, REPL, batch) thread their
+    /// `AxiomRegistry`. Callers (CLI, REPL, batch) thread their
     /// production registry in here.
     pub fn new(registry: verum_kernel::AxiomRegistry) -> Self {
         Self { registry }
@@ -618,7 +635,7 @@ impl KernelInferChecker {
         &self.registry
     }
 
-    /// Lookup a lemma name in the kernel registry.  Returns true
+    /// Lookup a lemma name in the kernel registry. Returns true
     /// iff a registered axiom or definition matches by name.
     fn registry_has(&self, name: &str) -> bool {
         self.registry
@@ -646,7 +663,7 @@ impl KernelChecker for KernelInferChecker {
             ParsedStep::Apply { name } => {
                 // Kernel-side resolution: the registry is the
                 // authoritative trust boundary for citation
-                // attestation.  The textual `lemmas_in_scope` view
+                // attestation. The textual `lemmas_in_scope` view
                 // is *advisory* — useful for diagnostics, never
                 // sufficient on its own.
                 if self.registry_has(name) {
@@ -699,7 +716,7 @@ impl KernelVerdict {
     }
 }
 
-/// One audit-trail event.  Persisted as a single JSONL line.
+/// One audit-trail event. Persisted as a single JSONL line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum LlmProtocolEvent {
@@ -764,7 +781,7 @@ fn now_secs() -> u64 {
 // AuditTrail — append-only JSONL log
 // =============================================================================
 
-/// Append-only event log.  Implementations may persist to disk
+/// Append-only event log. Implementations may persist to disk
 /// (`FilesystemAuditTrail`), an in-memory buffer
 /// (`MemoryAuditTrail`, used in tests), or a remote sink.
 pub trait AuditTrail: std::fmt::Debug + Send + Sync {
@@ -878,7 +895,7 @@ impl KernelGate {
         Self
     }
 
-    /// Run one round of the protocol.  Returns the verdict and
+    /// Run one round of the protocol. Returns the verdict and
     /// emits exactly two audit events on the success / failure
     /// paths (LlmInvoked + KernelAccepted, or LlmInvoked +
     /// KernelRejected), or one audit event on transport / config
@@ -1071,7 +1088,7 @@ mod tests {
     #[test]
     fn pattern_checker_accepts_extended_canonical_tactics() {
         // #105 hardening: every entry in CANONICAL_TACTICS must be
-        // admitted as a bare invocation.  The PatternKernelChecker is
+        // admitted as a bare invocation. The PatternKernelChecker is
         // a pure-pattern recogniser; the kernel-attestation gate
         // KernelInferChecker layers on top.
         let c = PatternKernelChecker::new();
@@ -1088,7 +1105,7 @@ mod tests {
     #[test]
     fn pattern_checker_accepts_extended_with_argument() {
         // Tactics that take an argument: `cases h`, `induction n`,
-        // `unfold foo`, `subst x`.  The pattern checker only inspects
+        // `unfold foo`, `subst x`. The pattern checker only inspects
         // the head — argument parsing is the consumer's job.
         let c = PatternKernelChecker::new();
         let g = LlmGoalSummary::new("thm", "P");
@@ -1367,7 +1384,7 @@ mod tests {
         }
         // `apply` followed by an empty argument list ⇒
         // MalformedSyntax (the prefix `"apply "` is matched, then
-        // the remaining tokens are empty).  Use a comma-only suffix
+        // the remaining tokens are empty). Use a comma-only suffix
         // to drive the empty-name path through `strip_prefix`.
         match c.check_step_typed(&g, "apply ,") {
             Err(KernelRejectReason::MalformedSyntax { .. }) => {}
@@ -1381,7 +1398,7 @@ mod tests {
         let c = KernelInferChecker::new(reg);
         // The goal's textual lemma list does NOT contain `foo_lemma`
         // — the checker MUST still accept because the kernel-side
-        // registry attests the name.  This is the production
+        // registry attests the name. This is the production
         // contract: registry, not LLM-prompt-text, is authoritative.
         let g = LlmGoalSummary::new("thm", "P");
         c.check_step(&g, "apply foo_lemma").unwrap();
@@ -1411,9 +1428,9 @@ mod tests {
     #[test]
     fn kernel_infer_checker_distinguishes_in_scope_from_unattested() {
         // Three states:
-        //   1. In registry             ⇒ Ok
-        //   2. In textual scope only   ⇒ NotKernelAttested
-        //   3. Nowhere                 ⇒ NotInScope
+        //  1. In registry ⇒ Ok
+        //  2. In textual scope only ⇒ NotKernelAttested
+        //  3. Nowhere ⇒ NotInScope
         let reg = registry_with(&["registered"]);
         let c = KernelInferChecker::new(reg);
         let mut g = LlmGoalSummary::new("thm", "P");
@@ -1456,16 +1473,17 @@ mod tests {
     fn task_90_kernel_attestation_replaces_textual_resolution() {
         // Pin the #90 hardening contract:
         //
+
         // The production checker is built on a kernel-side
         // `AxiomRegistry`; an `apply NAME` step succeeds only when
-        // `NAME` is registered.  The textual `lemmas_in_scope`
+        // `NAME` is registered. The textual `lemmas_in_scope`
         // view (which the LLM's prompt builder controls) is no
         // longer the trust boundary for citation resolution.
         let trusted = registry_with(&["legit_axiom"]);
         let c = KernelInferChecker::new(trusted);
 
         // Goal claims a different name is in scope; the LLM
-        // attempts to apply it.  Production mode rejects.
+        // attempts to apply it. Production mode rejects.
         let mut g = LlmGoalSummary::new("thm", "P");
         g.lemmas_in_scope = vec![(
             Text::from("forged_axiom"),

@@ -1,10 +1,12 @@
 //! K-PathTy β-normalization integration tests (V8, #216).
 //!
+
 //! Pre-V8 the PathTy formation rule used `structural_eq` (byte-
 //! identity) to compare endpoint types against the carrier.
 //! Definitionally-equal-but-syntactically-different terms (e.g.
 //! `App(Lam(x, _, x), Nat) ≡_β Nat`) FALSELY REJECTED.
 //!
+
 //! V8 ships `support::normalize` (β-normaliser to fixed point or
 //! `NORMALIZE_STEP_LIMIT` steps) and `support::definitional_eq`
 //! (normalise-then-compare). PathTy formation now uses the latter.
@@ -46,7 +48,7 @@ fn normalize_universe_is_idempotent() {
 
 #[test]
 fn normalize_simple_beta_redex_reduces() {
-    // (λx:Nat. x) y  →  y
+    // (λx:Nat. x) y → y
     let id_lam = CoreTerm::Lam {
         binder: Text::from("x"),
         domain: Heap::new(nat_ind()),
@@ -62,7 +64,7 @@ fn normalize_simple_beta_redex_reduces() {
 
 #[test]
 fn normalize_nested_beta_redex_reduces_to_fixed_point() {
-    // (λx. (λy. x) z) w  →  (λy. w) z  →  w
+    // (λx. (λy. x) z) w → (λy. w) z → w
     let inner = CoreTerm::Lam {
         binder: Text::from("y"),
         domain: Heap::new(nat_ind()),
@@ -126,7 +128,7 @@ fn normalize_recurses_into_pi_codomain() {
 
 #[test]
 fn normalize_sigma_projections_reduce_via_pair_beta() {
-    // Fst((a, b))  →  a; Snd((a, b))  →  b.
+    // Fst((a, b)) → a; Snd((a, b)) → b.
     let pair = CoreTerm::Pair(
         Heap::new(CoreTerm::Var(Text::from("a"))),
         Heap::new(CoreTerm::Var(Text::from("b"))),
@@ -196,7 +198,7 @@ fn definitional_eq_handles_byte_identical_terms() {
 
 #[test]
 fn definitional_eq_handles_beta_equivalent_terms() {
-    // (λx.x) y  ≡  y
+    // (λx.x) y ≡ y
     let id_lam = CoreTerm::Lam {
         binder: Text::from("x"),
         domain: Heap::new(nat_ind()),
@@ -254,10 +256,11 @@ fn v8_pathty_accepts_beta_equivalent_carrier() {
     // `nat_ty` against `App(Lam, Nat)` (which β-reduces to
     // Nat) and the equality failed.
     //
+
     // V8 normalizes both sides; the equality holds.
     let (ctx, mut reg) = empty();
     let n = refl_axiom_at_nat(&mut reg, "n_beta");
-    // carrier = (λT:Type. T) Nat  ≡_β  Nat
+    // carrier = (λT:Type. T) Nat ≡_β Nat
     let id_type_lam = CoreTerm::Lam {
         binder: Text::from("T"),
         domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
@@ -288,13 +291,14 @@ fn b221_app_accepts_beta_equivalent_domain() {
     // match. A Π whose domain has a β-redex (e.g., (λT. T) Nat
     // ≡_β Nat) would falsely reject any arg typed at Nat.
     //
+
     // V8 lifts to definitional_eq → both sides normalised before
     // comparison → application admitted.
     let (ctx, mut reg) = empty();
     let n = refl_axiom_at_nat(&mut reg, "n_app_beta");
     // f : Π(_: (λT:Type. T) Nat). Nat
-    //   = (λu: Nat. u : Nat → Nat) wrapped via Lam over the
-    //     β-redex domain.
+    //  = (λu: Nat. u : Nat → Nat) wrapped via Lam over the
+    //  β-redex domain.
     let beta_dom = CoreTerm::App(
         Heap::new(CoreTerm::Lam {
             binder: Text::from("T"),

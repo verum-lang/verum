@@ -14,11 +14,13 @@
 )]
 //! Test macro invocation parsing.
 //!
+
 //! This test verifies that the parser correctly handles macro invocation syntax:
-//! - macro!(args)   (for user-defined macros, NOT Rust built-ins)
+//! - macro!(args) (for user-defined macros, NOT Rust built-ins)
 //! - macro![args]
 //! - macro!{args}
 //!
+
 //! Note: Rust built-in macros (println!, vec!, assert!, etc.) are intentionally
 //! rejected with helpful error messages suggesting the Verum equivalents.
 

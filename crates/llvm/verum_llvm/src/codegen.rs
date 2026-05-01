@@ -1,5 +1,6 @@
 //! Code generation and object file emission
 //!
+
 //! High-level API for generating object files, assembly, and bitcode.
 
 use std::path::Path;
@@ -87,6 +88,7 @@ impl Default for CodegenConfig {
 
 /// High-level code generator
 ///
+
 /// Provides a simple interface for compiling LLVM IR to native code.
 pub struct Codegen<'ctx> {
     module: LlvmModule<'ctx>,
@@ -126,6 +128,7 @@ impl<'ctx> Codegen<'ctx> {
         // `LoweringConfig.debug_info`, and symbol stripping lives
         // downstream in the linker phase.
         //
+
         // Surface a debug trace when both flags are set true
         // simultaneously — that's the contradictory configuration
         // (DWARF requested AND symbols stripped) which signals an

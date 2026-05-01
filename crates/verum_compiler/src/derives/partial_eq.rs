@@ -1,7 +1,9 @@
 //! PartialEq derive macro implementation
 //!
+
 //! Generates `implement PartialEq for Type { fn eq(&self, other: &Self) -> Bool }`
 //!
+
 //! For record types: compares all fields pairwise with &&. For sum types: matches
 //! variant tags first, then compares payloads field-by-field. Returns false for
 //! mismatched variants. NaN != NaN for float fields (IEEE 754 semantics).
@@ -125,13 +127,14 @@ impl DerivePartialEq {
 
     /// Generate eq body for enum types
     ///
+
     /// Generates match expression:
     /// ```verum
     /// match (self, other) {
-    ///     (Self::Unit, Self::Unit) => true,
-    ///     (Self::Tuple(a0, a1), Self::Tuple(b0, b1)) => a0 == b0 && a1 == b1,
-    ///     (Self::Struct { field: a }, Self::Struct { field: b }) => a == b,
-    ///     _ => false,
+    ///  (Self::Unit, Self::Unit) => true,
+    ///  (Self::Tuple(a0, a1), Self::Tuple(b0, b1)) => a0 == b0 && a1 == b1,
+    ///  (Self::Struct { field: a }, Self::Struct { field: b }) => a == b,
+    ///  _ => false,
     /// }
     /// ```
     fn generate_enum_eq(

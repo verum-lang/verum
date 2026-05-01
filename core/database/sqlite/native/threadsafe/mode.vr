@@ -3,10 +3,11 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   SingleThread — no locking; every call must be on the creator thread
-//   MultiThread  — multiple threads safe as long as no single DB handle
-//                  is accessed from two threads concurrently
-//   Serialized   — all sqlite3_* calls fully serialised by internal mutexes
+
+//  SingleThread — no locking; every call must be on the creator thread
+//  MultiThread — multiple threads safe as long as no single DB handle
+//  is accessed from two threads concurrently
+//  Serialized — all sqlite3_* calls fully serialised by internal mutexes
 // =============================================================================
 
 module core.database.sqlite.native.threadsafe.mode;

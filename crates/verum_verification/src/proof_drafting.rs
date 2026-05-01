@@ -1,45 +1,54 @@
 //! Proof-drafting infrastructure — zero-friction goal display +
 //! tactic suggestion + obligation auto-completion.
 //!
+
 //! ## What this module is
 //!
-//! The user-facing surface for interactive proof development.  Builds
+
+//! The user-facing surface for interactive proof development. Builds
 //! on the existing `tactic_evaluation::{Goal, ProofState}` types and
 //! adds a clean trait boundary that LSP / REPL / CLI consumers all
 //! drive through:
 //!
-//!   * [`ProofStateView`] — read-only snapshot of the live proof
-//!     state at a given cursor / step.
-//!   * [`TacticSuggestion`] — ranked candidate next-step.
-//!   * [`SuggestionEngine`] trait — single dispatch for ranked
-//!     tactic-suggestion queries.
-//!   * [`DefaultSuggestionEngine`] — V0 reference that wires
-//!     fuzzy-match against a lemma name registry + tactic-registry
-//!     lookup.
+
+//!  * [`ProofStateView`] — read-only snapshot of the live proof
+//!  state at a given cursor / step.
+//!  * [`TacticSuggestion`] — ranked candidate next-step.
+//!  * [`SuggestionEngine`] trait — single dispatch for ranked
+//!  tactic-suggestion queries.
+//!  * [`DefaultSuggestionEngine`] — V0 reference that wires
+//!  fuzzy-match against a lemma name registry + tactic-registry
+//!  lookup.
 //!
+
 //! ## Why a single trait boundary
 //!
+
 //! Pre-this-module, IDE/LSP consumed proof state via ad-hoc parsing
 //! of compiler diagnostics; REPL had its own goal-printer; CLI had
-//! none.  A single typed surface eliminates the per-consumer
+//! none. A single typed surface eliminates the per-consumer
 //! re-parsing tax and gives LLM-tactic adapters (VERUM-EXPR-2) a
 //! clean integration point.
 //!
+
 //! ## Invariants
 //!
-//!   1. Every [`TacticSuggestion`] carries enough metadata for the
-//!      kernel to verify the suggested step independently — no
-//!      "suggestion that can't be checked".
-//!   2. `SuggestionEngine` impls MUST be pure (no I/O); side-effecting
-//!      adapters (LLM, network registry) wrap them via composition.
-//!   3. `ProofStateView` snapshots are immutable; advancing the proof
-//!      produces a new snapshot.
+
+//!  1. Every [`TacticSuggestion`] carries enough metadata for the
+//!  kernel to verify the suggested step independently — no
+//!  "suggestion that can't be checked".
+//!  2. `SuggestionEngine` impls MUST be pure (no I/O); side-effecting
+//!  adapters (LLM, network registry) wrap them via composition.
+//!  3. `ProofStateView` snapshots are immutable; advancing the proof
+//!  produces a new snapshot.
 //!
+
 //! ## Foundation-neutral
 //!
+
 //! The trait is foundation-neutral: it accepts any goal-shape that
 //! reduces to `verum_kernel::CoreTerm` (via `tactic_evaluation::Goal`
-//! → CoreTerm projection).  Cubical / classical / paraconsistent
+//! → CoreTerm projection). Cubical / classical / paraconsistent
 //! corpora share the same suggestion surface.
 
 use serde::{Deserialize, Serialize};
@@ -127,7 +136,7 @@ impl ProofStateView {
 /// the focused goal.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TacticSuggestion {
-    /// Source-form snippet that the user can type / accept.  Suitable
+    /// Source-form snippet that the user can type / accept. Suitable
     /// for direct insertion at the cursor position.
     pub snippet: Text,
     /// Human-readable reason why this is suggested (used by the
@@ -170,16 +179,18 @@ impl SuggestionCategory {
 // SuggestionEngine — the trait boundary
 // =============================================================================
 
-/// Single dispatch interface for ranked tactic suggestions.  Every
+/// Single dispatch interface for ranked tactic suggestions. Every
 /// IDE / REPL / CLI consumer routes through this one trait.
 ///
+
 /// **Purity contract:** implementations MUST be pure — no I/O, no
-/// network, no time-of-day dependence.  Side-effecting adapters
+/// network, no time-of-day dependence. Side-effecting adapters
 /// (LLM, registry-fetch) wrap a pure inner engine via composition.
 pub trait SuggestionEngine {
-    /// Return ranked tactic suggestions for the focused goal.  May
+    /// Return ranked tactic suggestions for the focused goal. May
     /// return an empty list if no suggestions match.
     ///
+
     /// Caller-provided `max_results` bounds the response size; the
     /// engine MUST return at most that many entries.
     fn suggest(&self, view: &ProofStateView, max_results: usize) -> Vec<TacticSuggestion>;
@@ -191,18 +202,21 @@ pub trait SuggestionEngine {
 
 /// V0 reference implementation:
 ///
-///   1. **Lemma fuzzy-match.**  For each lemma in `available_lemmas`,
-///      compute a similarity score between the lemma's signature and
-///      the focused goal's proposition (case-insensitive substring +
-///      shared-token count).  Top-k get LemmaApplication suggestions.
+
+///  1. **Lemma fuzzy-match.** For each lemma in `available_lemmas`,
+///  compute a similarity score between the lemma's signature and
+///  the focused goal's proposition (case-insensitive substring +
+///  shared-token count). Top-k get LemmaApplication suggestions.
 ///
-///   2. **Default tactics.**  Always offers `apply auto`, `apply lia`,
-///      `apply decide` as fallback TacticInvocation suggestions
-///      (lower score).
+
+///  2. **Default tactics.** Always offers `apply auto`, `apply lia`,
+///  `apply decide` as fallback TacticInvocation suggestions
+///  (lower score).
 ///
-///   3. **State navigation.**  When the goal is a Π-type (universal
-///      quantifier), offers `intro` / `intros` as StateNavigation
-///      suggestions.
+
+///  3. **State navigation.** When the goal is a Π-type (universal
+///  quantifier), offers `intro` / `intros` as StateNavigation
+///  suggestions.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultSuggestionEngine;
 
@@ -224,11 +238,11 @@ impl SuggestionEngine for DefaultSuggestionEngine {
         let prop_lower = prop.to_lowercase();
         let goal_head = head_token(prop);
 
-        // 1) Lemma match.  Score = base structural overlap (Jaccard
-        //    over identifier tokens) + head-match bonus.  The head-
-        //    bonus rewards lemmas whose signature head is the same
-        //    head as the goal — a textual proxy for typed-head
-        //    unification.
+        // 1) Lemma match. Score = base structural overlap (Jaccard
+        //  over identifier tokens) + head-match bonus. The head-
+        //  bonus rewards lemmas whose signature head is the same
+        //  head as the goal — a textual proxy for typed-head
+        //  unification.
         for lemma in &view.available_lemmas {
             let score =
                 lemma_score(prop, lemma.signature.as_str(), &goal_head);
@@ -248,9 +262,9 @@ impl SuggestionEngine for DefaultSuggestionEngine {
             }
         }
 
-        // 2) Shape-aware tactics (#102 hardening).  Each fires only
-        //    when the proposition's textual shape suggests it; each
-        //    carries a structured `rationale` citing why.
+        // 2) Shape-aware tactics (#102 hardening). Each fires only
+        //  when the proposition's textual shape suggests it; each
+        //  carries a structured `rationale` citing why.
 
         // 2a) Hypothesis match — `assumption` / `apply h`.
         for h in &goal.hypotheses {
@@ -340,8 +354,8 @@ impl SuggestionEngine for DefaultSuggestionEngine {
             }
         }
         // 2g) Inductive hypothesis — `induction <name>` when the
-        //     hypothesis's type head looks like an inductive
-        //     (Nat / List / Tree).
+        //  hypothesis's type head looks like an inductive
+        //  (Nat / List / Tree).
         for h in &goal.hypotheses {
             let h_head = head_token(h.ty.as_str());
             if matches!(
@@ -361,10 +375,10 @@ impl SuggestionEngine for DefaultSuggestionEngine {
             }
         }
 
-        // 3) State navigation for Π-shaped goals.  Promote when the
-        //    arrow is at the *top level* (parenthesis-aware via the
-        //    `has_top_level` helper) so `(A -> B) -> C` ranks intro
-        //    over a structurally-internal arrow.
+        // 3) State navigation for Π-shaped goals. Promote when the
+        //  arrow is at the *top level* (parenthesis-aware via the
+        //  `has_top_level` helper) so `(A -> B) -> C` ranks intro
+        //  over a structurally-internal arrow.
         let is_universal = prop_lower.starts_with("forall")
             || prop_lower.starts_with("∀");
         if is_universal || has_top_level(prop, &["->", "→"]) {
@@ -379,7 +393,7 @@ impl SuggestionEngine for DefaultSuggestionEngine {
         }
 
         // 4) Default tactic fallbacks (lower score so they trail
-        //    lemma-matches + shape-aware suggestions; always available).
+        //  lemma-matches + shape-aware suggestions; always available).
         suggestions.push(TacticSuggestion {
             snippet: Text::from("apply auto;"),
             rationale: Text::from("portfolio SMT + tactic-registry auto-search (verify=formal)"),
@@ -417,7 +431,7 @@ impl SuggestionEngine for DefaultSuggestionEngine {
 // =============================================================================
 
 /// Lemma similarity score combining structural-overlap (Jaccard
-/// over identifier tokens) with a head-match bonus.  Range:
+/// over identifier tokens) with a head-match bonus. Range:
 /// `[0.0, 1.0]`.
 fn lemma_score(goal: &str, lemma_sig: &str, goal_head: &str) -> f64 {
     let base = similarity_score(&goal.to_lowercase(), &lemma_sig.to_lowercase());
@@ -455,7 +469,7 @@ fn similarity_score(a: &str, b: &str) -> f64 {
     shared as f64 / denom as f64
 }
 
-/// First identifier-shaped token of `s`.  Used as a textual proxy
+/// First identifier-shaped token of `s`. Used as a textual proxy
 /// for the typed head of a proposition (`P x y` → `P`,
 /// `Path A x y` → `Path`, `forall n, ...` → `forall`).
 fn head_token(s: &str) -> String {
@@ -473,7 +487,7 @@ fn looks_like_false(prop_lower: &str) -> bool {
 }
 
 /// True iff the proposition has shape `t = t` / `Path A t t` /
-/// `t ≡ t` — recognises `=`, `≡`, and `Path A t t` shapes.  Best-
+/// `t ≡ t` — recognises `=`, `≡`, and `Path A t t` shapes. Best-
 /// effort textual heuristic; the kernel still rechecks before the
 /// suggestion is acted on.
 fn looks_like_reflexive(prop: &str) -> bool {
@@ -486,7 +500,7 @@ fn looks_like_reflexive(prop: &str) -> bool {
             }
         }
     }
-    // Path shape: `Path A x y` or `Path<A>(x, y)`.  Match when the
+    // Path shape: `Path A x y` or `Path<A>(x, y)`. Match when the
     // last two whitespace-separated identifiers coincide.
     if s.starts_with("Path") {
         let tokens: Vec<&str> = s
@@ -502,8 +516,8 @@ fn looks_like_reflexive(prop: &str) -> bool {
 }
 
 /// True iff `s` contains any of `needles` at depth 0 (parenthesis-
-/// aware).  Used to recognise top-level `/\` / `∨` / `->` operators
-/// for shape-aware suggestions.  Byte-safe: needle comparison runs
+/// aware). Used to recognise top-level `/\` / `∨` / `->` operators
+/// for shape-aware suggestions. Byte-safe: needle comparison runs
 /// against `s.as_bytes()` so multi-byte UTF-8 (∧, ∨, →) doesn't
 /// panic on char-boundary slicing.
 fn has_top_level(s: &str, needles: &[&str]) -> bool {
@@ -533,7 +547,7 @@ fn has_top_level(s: &str, needles: &[&str]) -> bool {
 
 /// Combines multiple [`SuggestionEngine`]s into one — useful for
 /// composing the default engine with an LLM adapter, registry-search
-/// adapter, etc.  Suggestions are merged + re-sorted by score; ties
+/// adapter, etc. Suggestions are merged + re-sorted by score; ties
 /// broken by source order.
 pub struct CompositeEngine {
     /// Component engines, called in order; their suggestions are
@@ -889,7 +903,7 @@ mod tests {
     #[test]
     fn lemma_score_head_match_bonus_lifts_targeted_lemma() {
         // Two lemmas with the same Jaccard overlap on shared tokens,
-        // but only one's head matches the goal head.  The head-match
+        // but only one's head matches the goal head. The head-match
         // lemma must rank higher.
         let v = ProofStateView {
             theorem_name: Text::from("t"),
@@ -931,7 +945,7 @@ mod tests {
     #[test]
     fn task_102_shape_aware_suggestions_carry_structured_rationale() {
         // Pin: every shape-aware suggestion carries a non-empty
-        // rationale that cites *why* it fired.  Empty rationales
+        // rationale that cites *why* it fired. Empty rationales
         // would defeat the IDE's hover-explanation panel.
         let v = view_with(
             "x = x",

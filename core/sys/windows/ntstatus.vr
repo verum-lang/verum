@@ -8,6 +8,7 @@ module sys.windows.ntstatus;
 // Platform: Windows (x86_64)
 // =============================================================================
 //
+
 // This module defines NT status codes used by ntdll.dll functions.
 // Status codes follow the NTSTATUS format:
 // - Bits 31-30: Severity (0=Success, 1=Info, 2=Warning, 3=Error)
@@ -16,6 +17,7 @@ module sys.windows.ntstatus;
 // - Bits 27-16: Facility
 // - Bits 15-0: Code
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 

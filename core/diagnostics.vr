@@ -5,51 +5,62 @@
 // Dependencies: core.mem.diagnostics, core.async.diagnostics, core.base.panic
 // =============================================================================
 //
+
 // `core.diagnostics` is the single user-facing surface for read-only
-// introspection of Verum runtime state.  It composes three layer-local
+// introspection of Verum runtime state. It composes three layer-local
 // snapshot surfaces:
 //
-// - `core.mem.diagnostics`   — CBGR allocation introspection
-//                                 (MemHeaderView, header_view_of)
+
+// - `core.mem.diagnostics` — CBGR allocation introspection
+//  (MemHeaderView, header_view_of)
 // - `core.async.diagnostics` — async runtime task introspection
-//                                 (TaskInfo, TaskLifecycleState)
-// - `core.base.panic`        — panic-site identity (PanicInfo, Location)
+//  (TaskInfo, TaskLifecycleState)
+// - `core.base.panic` — panic-site identity (PanicInfo, Location)
 //
+
 // Application code that needs a heterogeneous observability handle should
 // prefer `mount core.diagnostics.*;` over reaching into the layer-local
 // modules directly — this insulates callers from internal reorganisation
 // (e.g. when tracing / metrics surfaces are folded in on a future PR).
 //
+
 // # Anti-goals (inherited from layer-local surfaces)
 //
-// - No mutation surface.  Every snapshot type is read-only.
+
+// - No mutation surface. Every snapshot type is read-only.
 // - No reflection escape that would bypass CBGR or async cancellation.
-//   `MemHeaderView` summarises identity + capabilities, not raw pointers.
-//   `TaskInfo` summarises identity + state, not the task's continuation.
-// - Zero overhead when not subscribed.  All re-exports are zero-cost
-//   (the importer pays only for what it actually references); the
-//   composing modules themselves are feature-gated via
-//   `@cfg(feature = "diagnostics")` for builds that strip them.
+//  `MemHeaderView` summarises identity + capabilities, not raw pointers.
+//  `TaskInfo` summarises identity + state, not the task's continuation.
+// - Zero overhead when not subscribed. All re-exports are zero-cost
+//  (the importer pays only for what it actually references); the
+//  composing modules themselves are feature-gated via
+//  `@cfg(feature = "diagnostics")` for builds that strip them.
 //
+
 // # Composition: PanicReport
 //
+
 // The umbrella's load-bearing addition over the layer-local surfaces is
 // `PanicReport` — a heterogeneous bundle of (PanicInfo, Maybe<TaskInfo>,
 // Maybe<MemHeaderView>, thread_name) that panic hooks construct as they
-// gather context from different layers of the runtime.  See `PanicReport`
+// gather context from different layers of the runtime. See `PanicReport`
 // for the format-stable boundary observers code against.
 //
+
 // # Future extensions
 //
+
 // Introspection is iterative; the umbrella is the stable boundary that
-// callers code against while the substrate grows.  Planned additions
+// callers code against while the substrate grows. Planned additions
 // (tracked in #197):
 //
+
 // - `live_allocations` iterator over the global allocation index
 // - capability audit log (revoke / attenuate trace)
 // - tracing / metrics observability handle (composed with
-//   `core.tracing` and `core.metrics`)
+//  `core.tracing` and `core.metrics`)
 //
+
 // Spec: docs/architecture/observability.md (TODO)
 // =============================================================================
 
@@ -78,9 +89,9 @@ public mount core.mem.cap_audit.{
     record_gen_bump, record_epoch_advance,
 };
 
-/// Producer + reader API for the capability-audit ring buffer.  The
+/// Producer + reader API for the capability-audit ring buffer. The
 /// producer side is wired into CBGR write sites; observers call
-/// `recent_cap_events(n)` to snapshot the last N events.  The umbrella
+/// `recent_cap_events(n)` to snapshot the last N events. The umbrella
 /// re-exports them under stable names so consumers only need to mount
 /// `core.diagnostics.*` to access the entire audit surface.
 public mount core.mem.cap_audit_ring.{
@@ -110,24 +121,27 @@ public mount core.base.panic.{PanicInfo, Location};
 // =============================================================================
 
 /// Composing report assembled at panic time from heterogeneous
-/// snapshot sources.  Every field is optional except `info` because
+/// snapshot sources. Every field is optional except `info` because
 /// the panic hook may have access to varying degrees of context:
 ///
-/// - Synchronous panics in non-async code:    only `info`
-/// - Panics during async task execution:      `info` + `task`
-/// - Panics from CBGR pointer operations:     `info` + `header`
+
+/// - Synchronous panics in non-async code: only `info`
+/// - Panics during async task execution: `info` + `task`
+/// - Panics from CBGR pointer operations: `info` + `header`
 /// - Panics inside an async task that is also touching CBGR memory:
-///   all three (info + task + header)
+///  all three (info + task + header)
 ///
+
 /// `thread_name` is the OS thread label when one was set (e.g. by
-/// `std.thread.Builder.name`).  Empty when no name was supplied.
+/// `std.thread.Builder.name`). Empty when no name was supplied.
 ///
+
 /// PanicReport is a strict pass-through of metadata — it does NOT
 /// capture the panic's continuation, the task's future, or any user
 /// data — so it can cross thread / executor boundaries safely and be
 /// serialised into log lines without risk of dangling references.
 public type PanicReport is {
-    /// Always present.  The panic message + location identifying the
+    /// Always present. The panic message + location identifying the
     /// panic site.
     info: PanicInfo,
 
@@ -143,10 +157,10 @@ public type PanicReport is {
     /// Empty for non-memory-related panics.
     header: Maybe<MemHeaderView>,
 
-    /// Symbolicated call stack at panic time.  Empty list when frame
+    /// Symbolicated call stack at panic time. Empty list when frame
     /// walking is unavailable (Tier-0 interpreter without VBC debug-
     /// info, Tier-1 AOT with stripped DWARF) or the panic hook opted
-    /// out of capture for performance.  Frames are in innermost-first
+    /// out of capture for performance. Frames are in innermost-first
     /// order (matching `current_call_stack()`).
     call_stack: List<CallFrame>,
 
@@ -171,7 +185,7 @@ implement PanicReport {
         }
     }
 
-    /// Builder: attach a symbolicated call stack.  Pass the result of
+    /// Builder: attach a symbolicated call stack. Pass the result of
     /// `current_call_stack(0)` to capture from the panic site upward,
     /// or `current_call_stack(1)` to skip the panic-hook frame itself.
     public fn with_call_stack(mut self, frames: List<CallFrame>) -> PanicReport {
@@ -179,14 +193,14 @@ implement PanicReport {
         self
     }
 
-    /// Builder: attach an async task snapshot.  The hook should call
+    /// Builder: attach an async task snapshot. The hook should call
     /// this when the panic occurred inside an executor-driven task.
     public fn with_task(mut self, task: TaskInfo) -> PanicReport {
         self.task = Some(task);
         self
     }
 
-    /// Builder: attach a CBGR allocation snapshot.  The hook should
+    /// Builder: attach a CBGR allocation snapshot. The hook should
     /// call this when the panic was triggered by a pointer operation
     /// and the panic site had access to the source AllocationHeader
     /// (e.g. through the failing `try_revoke` / `increment_ref_count`
@@ -196,7 +210,7 @@ implement PanicReport {
         self
     }
 
-    /// Builder: attach the OS thread name.  Empty Text is treated as
+    /// Builder: attach the OS thread name. Empty Text is treated as
     /// "no name" by `format_panic_context`.
     public fn with_thread_name(mut self, name: Text) -> PanicReport {
         self.thread_name = name;
@@ -227,12 +241,13 @@ implement PanicReport {
         !self.call_stack.is_empty()
     }
 
-    /// Format as a multi-section panic-site dump.  Each present
+    /// Format as a multi-section panic-site dump. Each present
     /// section is two-space indented so the dump composes as the body
-    /// of a panic message.  Sections appear in the order
+    /// of a panic message. Sections appear in the order
     /// (info, thread, task, header) — most specific context last,
     /// matching the convention used by `core.base.panic`.
     ///
+
     /// Single allocation per call; OOM-path callers should prefer the
     /// individual `format_panic_context` methods on each component
     /// directly to limit aggregate allocation size.
@@ -301,7 +316,7 @@ implement Display for PanicReport {
 }
 
 implement Debug for PanicReport {
-    /// Multi-line dump suitable for panic post-mortems.  Each
+    /// Multi-line dump suitable for panic post-mortems. Each
     /// component is rendered via its own Debug impl, preserving the
     /// layer-local diagnostic shape.
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {

@@ -5,24 +5,29 @@
 // Dependencies: core, core.collections.map, core.time
 // =============================================================================
 //
+
 // The user-level cache every service needs: bounded capacity, per-
 // entry expiration, LRU eviction when full. Designed as:
 //
-//   * O(1) amortised `insert` / `get` / `remove`
-//   * Lazy expiration — entries are checked on read and periodically
-//     by `purge_expired`, never eagerly. Hot paths don't scan.
-//   * Bounded by `capacity` — insert on full evicts the LRU entry,
-//     not the nearest-to-expiry one. (LRU fits most caches; workloads
-//     where age matters more should use a different store.)
+
+//  * O(1) amortised `insert` / `get` / `remove`
+//  * Lazy expiration — entries are checked on read and periodically
+//  by `purge_expired`, never eagerly. Hot paths don't scan.
+//  * Bounded by `capacity` — insert on full evicts the LRU entry,
+//  not the nearest-to-expiry one. (LRU fits most caches; workloads
+//  where age matters more should use a different store.)
 //
+
 // # Shape
 //
+
 // Backed by `Map<K, Entry>` for O(1) value lookup. LRU order is
 // maintained by a separate `List<K>` — O(n) worst-case on each
 // touch but constant-factor small for typical cache sizes (≤ 10k
 // entries). A doubly-linked list upgrade arrives in a follow-up
 // when a concrete workload demonstrates the need.
 //
+
 // =============================================================================
 
 module core.collections.ttl_cache;

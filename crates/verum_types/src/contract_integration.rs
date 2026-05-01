@@ -1,23 +1,29 @@
 //! Contract Integration for Type Checking
 //!
+
 //! This module enables the type checker to leverage verified contracts from Phase 3a
 //! to strengthen type inference and validate call sites.
 //!
+
 //! ## Features
 //!
+
 //! - Store verified contracts from SMT-based verification phase
 //! - Strengthen parameter types using verified preconditions
 //! - Strengthen return types using verified postconditions
 //! - Validate call sites against function preconditions
 //! - Check return values against function postconditions
 //!
+
 //! ## Integration Flow
 //!
+
 //! 1. Phase 3a verifies contracts with Z3
 //! 2. Verified contracts passed to Phase 4 via VerifiedContractRegistry
 //! 3. TypeChecker stores registry and uses it during type checking
 //! 4. Call sites and returns are validated against contracts
 //!
+
 //! Verification system: three levels - @verify(runtime) for assertions, @verify(static) for dataflow analysis, @verify(proof) for SMT-based proofs — Contract integration
 //! Compilation pipeline: parse -> type check -> verify -> lower -> codegen phases — Phase 4
 
@@ -25,6 +31,7 @@ use verum_common::{List, Text};
 
 /// Placeholder for VerifiedContract (will be imported from verum_compiler)
 ///
+
 /// In practice, verum_types should not depend on verum_compiler.
 /// Instead, we use a minimal trait-based interface to avoid circular dependencies.
 pub trait VerifiedContractLike {
@@ -43,6 +50,7 @@ pub trait VerifiedContractLike {
 
 /// Registry of verified contracts for type checking
 ///
+
 /// This is a trait to avoid circular dependencies between verum_types and verum_compiler.
 /// The actual implementation lives in verum_compiler/src/phases/verified_contract.rs
 pub trait VerifiedContractRegistryLike {
@@ -58,6 +66,7 @@ pub trait VerifiedContractRegistryLike {
 
 /// Contract-aware type checking context
 ///
+
 /// This structure is added to TypeChecker to enable contract-based type strengthening.
 #[derive(Debug, Clone)]
 pub struct ContractContext {

@@ -1,5 +1,6 @@
 //! MLIR module translation to LLVM IR.
 //!
+
 //! Provides safe wrappers around MLIR's C API for translating MLIR modules
 //! (in the LLVM dialect) to LLVM IR modules.
 
@@ -8,6 +9,7 @@ use verum_mlir_sys::mlirTranslateModuleToLLVMIR;
 
 /// Opaque LLVM context handle (from llvm-c).
 ///
+
 /// This wraps `LLVMContextRef` without depending on the inkwell crate,
 /// allowing callers to pass their own LLVM context.
 #[repr(transparent)]
@@ -31,8 +33,10 @@ impl LlvmContextRef {
 
     /// Create from a raw `LLVMContextRef`.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure the context is valid and will outlive this wrapper.
     pub unsafe fn from_raw(raw: verum_mlir_sys::LLVMContextRef) -> Self {
         Self { raw }
@@ -52,6 +56,7 @@ impl Drop for LlvmContextRef {
 
 /// Opaque LLVM module handle (from llvm-c).
 ///
+
 /// Represents a compiled LLVM IR module that can be serialized to bitcode,
 /// printed as textual IR, or passed to an LLVM target machine for object
 /// code emission.
@@ -62,10 +67,12 @@ pub struct LlvmModule {
 impl LlvmModule {
     /// Translate an MLIR module (in LLVM dialect) to an LLVM IR module.
     ///
+
     /// The MLIR module must have been fully lowered to the LLVM dialect
     /// (via `convert-to-llvm` or equivalent passes). The resulting LLVM
     /// module is owned by the caller.
     ///
+
     /// Returns `None` if translation fails (e.g., module contains
     /// non-LLVM-dialect operations).
     pub fn from_mlir(module: &Module, llvm_ctx: &LlvmContextRef) -> Option<Self> {
@@ -98,6 +105,7 @@ impl LlvmModule {
 
     /// Write LLVM IR as textual representation to a file.
     ///
+
     /// Returns `Ok(())` on success, `Err(message)` on failure.
     pub fn print_to_file(&self, path: &str) -> Result<(), String> {
         let c_path = std::ffi::CString::new(path).unwrap();

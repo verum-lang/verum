@@ -14,6 +14,7 @@
 )]
 //! Fixed-Point Query Tests - Datalog and Transitive Closure
 //!
+
 //! These tests verify that the fixed-point engine can correctly answer
 //! queries about derivable facts using Datalog rules.
 
@@ -75,8 +76,8 @@ fn test_query_transitive_closure_simple() {
 
     // Add facts: edge(1, 2), edge(2, 3)
     // Add rules:
-    //   path(x, y) :- edge(x, y)
-    //   path(x, z) :- edge(x, y), path(y, z)
+    //  path(x, y) :- edge(x, y)
+    //  path(x, z) :- edge(x, y), path(y, z)
 
     // Query: path(1, 3)?
     // Expected: true (via transitive closure: 1->2->3)

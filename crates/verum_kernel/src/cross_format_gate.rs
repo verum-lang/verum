@@ -1,7 +1,9 @@
-//! Cross-format CI hard gate — V0 algorithmic kernel rule.
+//! Cross-format CI hard gate — algorithmic kernel rule.
 //!
+
 //! ## What this delivers
 //!
+
 //! Verum proofs can be exported to four foreign proof-assistant
 //! formats: **Coq**, **Lean 4**, **Isabelle/HOL**, and **Dedukti**.
 //! Each export must be re-checked by the foreign system; the
@@ -9,33 +11,38 @@
 //! survives a round-trip through every backend before being
 //! merged.
 //!
+
 //! Pre-this-module the gate was a series of ad-hoc shell scripts in
 //! `vcs/scripts/` that were neither composable nor inspectable from
-//! kernel-side tooling.  V0 ships:
+//! kernel-side tooling. ships:
 //!
-//!   1. [`ExportFormat`] — Coq / Lean4 / Isabelle / Dedukti enumeration.
-//!   2. [`FormatStatus`] — per-format CI status (`Passed` / `Failed` /
-//!      `NotRun`).
-//!   3. [`CrossFormatReport`] — accumulating report record covering
-//!      every format.
-//!   4. [`evaluate_gate`] — decision predicate: a proof passes the
-//!      hard gate iff every format reports `Passed`.
-//!   5. [`required_formats_for_msfs`] — returns the canonical
-//!      MSFS-required format list (currently all four).
-//!   6. [`format_replay_command`] — emits the deterministic shell
-//!      command that reproduces a given format's check (used by
-//!      `verum audit --reproducibility`).
+
+//!  1. [`ExportFormat`] — Coq / Lean4 / Isabelle / Dedukti enumeration.
+//!  2. [`FormatStatus`] — per-format CI status (`Passed` / `Failed` /
+//!  `NotRun`).
+//!  3. [`CrossFormatReport`] — accumulating report record covering
+//!  every format.
+//!  4. [`evaluate_gate`] — decision predicate: a proof passes the
+//!  hard gate iff every format reports `Passed`.
+//!  5. [`required_formats_for_msfs`] — returns the canonical
+//!  MSFS-required format list (currently all four).
+//!  6. [`format_replay_command`] — emits the deterministic shell
+//!  command that reproduces a given format's check (used by
+//!  `verum audit --reproducibility`).
 //!
-//! V1 promotion: tighten the hard gate to additionally require
+
+//! Future work: tighten the hard gate to additionally require
 //! kernel-recheck of the foreign-system's *output* (closing the loop
 //! on the cross-format trust boundary).
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - **`verum audit --cross-format`** CLI command: walks the gate
-//!     report and surfaces the precise per-format pass/fail state.
-//!   - **MSFS reproducibility chain** — every `@verify(certified)`
-//!     theorem must survive the gate before merge.
+
+//!  - **`verum audit --cross-format`** CLI command: walks the gate
+//!  report and surfaces the precise per-format pass/fail state.
+//!  - **MSFS reproducibility chain** — every `@verify(certified)`
+//!  theorem must survive the gate before merge.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -93,7 +100,7 @@ impl ExportFormat {
         ]
     }
 
-    /// Convert to the canonical `ForeignSystem` enum.  Total — every
+    /// Convert to the canonical `ForeignSystem` enum. Total — every
     /// `ExportFormat` variant has a corresponding `ForeignSystem`.
     pub fn to_foreign_system(self) -> crate::foreign_system::ForeignSystem {
         match self {
@@ -105,7 +112,7 @@ impl ExportFormat {
         }
     }
 
-    /// Try to construct from the canonical `ForeignSystem`.  Returns
+    /// Try to construct from the canonical `ForeignSystem`. Returns
     /// `None` for systems without a cross-format-export pathway
     /// (Mizar, Metamath — both lift to V1).
     pub fn from_foreign_system(system: crate::foreign_system::ForeignSystem) -> Option<Self> {
@@ -174,7 +181,7 @@ pub struct CrossFormatReport {
 }
 
 impl CrossFormatReport {
-    /// Construct a fresh report keyed by the artefact name.  Per-
+    /// Construct a fresh report keyed by the artefact name. Per-
     /// format statuses are pushed via the recording helpers.
     pub fn new(artefact: impl Into<Text>) -> Self {
         Self {
@@ -204,7 +211,7 @@ impl CrossFormatReport {
     }
 
     /// Return the list of formats that are not `Passed` (Failed +
-    /// NotRun + missing).  Used by `verum audit` to emit the
+    /// NotRun + missing). Used by `verum audit` to emit the
     /// "missing-format" diagnostic.
     pub fn missing_or_failed(&self) -> Vec<ExportFormat> {
         let required = required_formats_for_msfs();
@@ -236,7 +243,7 @@ impl CrossFormatReport {
 // =============================================================================
 
 /// MSFS-required format list — the canonical set that every theorem
-/// must survive.  Currently all five (Coq + Lean4 + Agda +
+/// must survive. Currently all five (Coq + Lean4 + Agda +
 /// Isabelle + Dedukti) after #156 closed Agda.
 pub fn required_formats_for_msfs() -> Vec<ExportFormat> {
     ExportFormat::full_list().to_vec()
@@ -249,9 +256,10 @@ pub fn evaluate_gate(report: &CrossFormatReport) -> bool {
 }
 
 /// Emit the deterministic shell command that re-checks a given
-/// format's output for an artefact.  Used by reproducibility audits.
+/// format's output for an artefact. Used by reproducibility audits.
 ///
-/// Returns a string of the form `coqc <path>.v` (etc.).  V1
+
+/// Returns a string of the form `coqc <path>.v` (etc.). V1
 /// promotion: thread sandbox flags + version-pin metadata.
 pub fn format_replay_command(fmt: ExportFormat, artefact_stem: &str) -> String {
     match fmt {

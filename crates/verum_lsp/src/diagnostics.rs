@@ -1,5 +1,6 @@
 //! Diagnostic conversion and publishing with incremental support
 //!
+
 //! Converts Verum compiler diagnostics to LSP format and publishes them to the client.
 //! This module provides comprehensive diagnostic conversion with:
 //! - Severity mapping (Error/Warning/Info/Hint)
@@ -284,7 +285,7 @@ impl IncrementalDiagnosticsProvider {
         } else if !text.ends_with(';') && self.looks_like_statement(node) {
             ("Missing semicolon".to_string(), "E0020".to_string())
         } else {
-            // Generic syntax error.  Truncate by characters, not raw
+            // Generic syntax error. Truncate by characters, not raw
             // bytes — uses the UTF-8-safe truncate from verum_common
             // so combining marks / emoji / CJK in user source can't
             // crash the diagnostic generator.

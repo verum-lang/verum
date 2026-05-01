@@ -2,37 +2,44 @@
 // linear.vr — Linear Logic Connectives
 // =============================================================================
 //
+
 // Layer: Standard Library / Logic
 //
+
 // User-facing surface for the linear-logic analysis core
 // (`verum_types.linear_logic`). Full Girard-style propositional
 // linear logic with multiplicative, additive, and exponential
 // connectives — a richer foundation than QTT alone for resource
 // reasoning.
 //
+
 // ## Connective summary
 //
+
 // ```text
-//     A ⊗ B    multiplicative conjunction (tensor)   "both, paired"
-//     A ⅋ B    multiplicative disjunction (par)      "both, parallel"
-//     A & B    additive conjunction (with)           "external choice"
-//     A ⊕ B    additive disjunction (plus)           "internal choice"
-//     A ⊸ B    linear function                       defined as A^⊥ ⅋ B
-//     !A       of-course / bang                       unrestricted use
-//     ?A       why-not                                weakenable
-//     1, ⊥, ⊤, 0    units                            (multiplicative + additive)
-//     A^⊥      linear negation (involutive)
+//  A ⊗ B multiplicative conjunction (tensor) "both, paired"
+//  A ⅋ B multiplicative disjunction (par) "both, parallel"
+//  A & B additive conjunction (with) "external choice"
+//  A ⊕ B additive disjunction (plus) "internal choice"
+//  A ⊸ B linear function defined as A^⊥ ⅋ B
+//  !A of-course / bang unrestricted use
+//  ?A why-not weakenable
+//  1, ⊥, ⊤, 0 units (multiplicative + additive)
+//  A^⊥ linear negation (involutive)
 // ```
 //
+
 // ## Example
 //
+
 // ```verum
-// // (A ⊗ B)^⊥ ↦ A^⊥ ⅋ B^⊥  (de Morgan)
+// // (A ⊗ B)^⊥ ↦ A^⊥ ⅋ B^⊥ (de Morgan)
 // let f: LinForm = lin_tensor(lin_atom("A"), lin_atom("B"));
 // let neg: LinForm = lin_dual(f);
 // // After NNF, neg is A^⊥ ⅋ B^⊥
 // ```
 //
+
 // =============================================================================
 
 module core.logic.linear;
@@ -48,6 +55,7 @@ public type LinForm is
     | Atom { name: Text }
     /// `A ⊗ B` — multiplicative conjunction (tensor product).
     ///
+
     /// Named `MTensor` (multiplicative tensor) rather than bare `Tensor`
     /// to avoid an unqualified-name collision with `core.math.tensor.Tensor`
     /// in user code. `Tensor.zeros([N])` used to resolve to this variant's
@@ -123,14 +131,16 @@ public fn lin_lolli(a: LinForm, b: LinForm) -> LinForm {
 /// of times, including zero. The unrestricted-shape set in
 /// classical linear logic:
 ///
+
 /// - `!A` (`OfCourse`) admits weakening + contraction on the LHS
-///   — the bang's exponential structural rules.
+///  — the bang's exponential structural rules.
 /// - `?A` (`WhyNot`) admits weakening + contraction on the RHS
-///   — the dual why-not modality.
+///  — the dual why-not modality.
 /// - `⊤` (`Top`) is the additive truth: `⊢ Δ, ⊤` absorbs any
-///   surrounding context, so it admits both structural rules
-///   trivially.
+///  surrounding context, so it admits both structural rules
+///  trivially.
 ///
+
 /// `1` (`One`) is the unit of `⊗` — it has exactly one proof and
 /// admits **no** structural rules. The previous implementation
 /// claimed `One` was unrestricted; that was a soundness defect
@@ -169,19 +179,20 @@ public fn is_weakenable(f: LinForm) -> Bool {
 /// surrounding `Dual` consumed); recursive callers will continue
 /// pushing duals through the children if needed.
 ///
+
 /// ```text
-///     (A ⊗ B)^⊥  ↦  A^⊥ ⅋ B^⊥
-///     (A ⅋ B)^⊥  ↦  A^⊥ ⊗ B^⊥
-///     (A & B)^⊥  ↦  A^⊥ ⊕ B^⊥
-///     (A ⊕ B)^⊥  ↦  A^⊥ & B^⊥
-///     (!A)^⊥     ↦  ?(A^⊥)
-///     (?A)^⊥     ↦  !(A^⊥)
-///     1^⊥        ↦  ⊥
-///     ⊥^⊥        ↦  1
-///     ⊤^⊥        ↦  0
-///     0^⊥        ↦  ⊤
-///     (A^⊥)^⊥    ↦  A         (involutivity)
-///     atom^⊥     ↦  Dual(atom) (atom dual stays as a leaf)
+///  (A ⊗ B)^⊥ ↦ A^⊥ ⅋ B^⊥
+///  (A ⅋ B)^⊥ ↦ A^⊥ ⊗ B^⊥
+///  (A & B)^⊥ ↦ A^⊥ ⊕ B^⊥
+///  (A ⊕ B)^⊥ ↦ A^⊥ & B^⊥
+///  (!A)^⊥ ↦ ?(A^⊥)
+///  (?A)^⊥ ↦ !(A^⊥)
+///  1^⊥ ↦ ⊥
+///  ⊥^⊥ ↦ 1
+///  ⊤^⊥ ↦ 0
+///  0^⊥ ↦ ⊤
+///  (A^⊥)^⊥ ↦ A (involutivity)
+///  atom^⊥ ↦ Dual(atom) (atom dual stays as a leaf)
 /// ```
 fn lin_negate(f: LinForm) -> LinForm {
     match f {
@@ -212,6 +223,7 @@ fn lin_negate(f: LinForm) -> LinForm {
 /// positive (non-dualised) arguments. Idempotent — `lin_to_nnf`
 /// applied to an already-NNF formula returns it unchanged.
 ///
+
 /// This is the standard preprocessing step for sequent-calculus
 /// search and proof-net construction in linear logic.
 public fn lin_to_nnf(f: LinForm) -> LinForm {
@@ -271,10 +283,12 @@ public fn lin_is_nnf(f: LinForm) -> Bool {
 
 /// Structural equality on linear-logic formulas.
 ///
+
 /// LinForm has no binders, so this is a pure recursive walk over
 /// the constructor tree. Two formulas compare equal iff every
 /// constructor matches and the leaf atoms / units are identical.
 ///
+
 /// Note: this is *syntactic* equality. Two formulas may be
 /// equivalent under the linear-logic proof theory yet differ
 /// here (e.g. `A ⊗ (B ⊗ C)` vs `(A ⊗ B) ⊗ C`). For semantic
@@ -313,6 +327,7 @@ public fn lin_eq(a: LinForm, b: LinForm) -> Bool {
 /// connective (⊗, ⅋, &, ⊕) contributes 1; each unary modality
 /// (!, ?, _^⊥) contributes 1; atoms and units contribute 0.
 ///
+
 /// Used as a termination metric for proof-search heuristics and as
 /// a complexity bound for proof-net construction (the number of
 /// internal nodes is bounded by the size of the formula tree).
@@ -364,7 +379,7 @@ implement Eq for LinForm {
     /// Structural (syntactic) equality on linear-logic formulas.
     /// Not provability — `A ⊗ B` and `B ⊗ A` compare unequal under
     /// `==` even though they are linearly equivalent up to
-    /// commutativity of `⊗`.  Callers needing semantic equivalence
+    /// commutativity of `⊗`. Callers needing semantic equivalence
     /// should reduce to a canonical normal form first.
     fn eq(&self, other: &LinForm) -> Bool {
         match (self, other) {
@@ -402,15 +417,15 @@ implement Eq for LinForm {
 
 implement Display for LinForm {
     /// Renders a linear-logic formula in standard notation:
-    ///   `Atom { p }`             → `p`
-    ///   `MTensor { L, R }`       → `(L ⊗ R)`   (multiplicative conjunction)
-    ///   `Par { L, R }`           → `(L ⅋ R)`   (multiplicative disjunction)
-    ///   `With { L, R }`          → `(L & R)`   (additive conjunction)
-    ///   `Plus { L, R }`          → `(L ⊕ R)`   (additive disjunction)
-    ///   `OfCourse { φ }`         → `!φ`        (unrestricted use)
-    ///   `WhyNot { φ }`           → `?φ`        (weakenable)
-    ///   `One / Bottom / Top / Zero` → `1 / ⊥ / ⊤ / 0`
-    ///   `Dual { φ }`             → `φ^⊥`       (linear negation)
+    ///  `Atom { p }` → `p`
+    ///  `MTensor { L, R }` → `(L ⊗ R)` (multiplicative conjunction)
+    ///  `Par { L, R }` → `(L ⅋ R)` (multiplicative disjunction)
+    ///  `With { L, R }` → `(L & R)` (additive conjunction)
+    ///  `Plus { L, R }` → `(L ⊕ R)` (additive disjunction)
+    ///  `OfCourse { φ }` → `!φ` (unrestricted use)
+    ///  `WhyNot { φ }` → `?φ` (weakenable)
+    ///  `One / Bottom / Top / Zero` → `1 / ⊥ / ⊤ / 0`
+    ///  `Dual { φ }` → `φ^⊥` (linear negation)
     /// Parens around binary connectives preserve precedence.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {

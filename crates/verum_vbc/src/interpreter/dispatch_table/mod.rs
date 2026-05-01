@@ -1,20 +1,26 @@
 //! Function table dispatch for VBC interpreter.
 //!
+
 //! This module implements an optimized dispatch mechanism using a pre-computed
 //! function pointer table. Instead of a large match statement, we use direct
 //! array indexing for O(1) dispatch.
 //!
+
 //! # Performance
 //!
+
 //! - Switch-based dispatch: ~5-8 cycles per instruction (branch prediction misses)
 //! - Function table dispatch: ~2-3 cycles per instruction (indirect call, predictable)
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! opcode byte → DISPATCH_TABLE[opcode] → handler function → DispatchResult
 //! ```
 //!
+
 //! Interpreter dispatch optimization: pre-computed function pointer table indexed by opcode
 //! byte (0x00-0xFF). Each handler reads operands from the bytecode stream, executes the
 //! operation, and returns a DispatchResult. Expected throughput improvement of 30-50% over
@@ -183,6 +189,7 @@ use handlers::extended::handle_extended;
 
 /// Result of executing a single instruction handler.
 ///
+
 /// This enum allows handlers to communicate control flow decisions back to
 /// the dispatch loop without using exceptions or early returns.
 #[derive(Debug)]
@@ -200,6 +207,7 @@ pub enum DispatchResult {
 
 /// Handler function type for opcode dispatch.
 ///
+
 /// Each handler reads its operands from bytecode (via state), executes the
 /// operation, and returns a DispatchResult indicating what the loop should do.
 pub type Handler = fn(&mut InterpreterState) -> InterpreterResult<DispatchResult>;
@@ -210,12 +218,14 @@ pub type Handler = fn(&mut InterpreterState) -> InterpreterResult<DispatchResult
 
 /// Static dispatch table mapping opcode bytes to handler functions.
 ///
+
 /// This is a 256-entry array for O(1) lookup. Unimplemented opcodes map to
 /// `handle_not_implemented` which returns an appropriate error.
 pub static DISPATCH_TABLE: [Handler; 256] = build_dispatch_table();
 
 /// Builds the dispatch table at compile time.
 ///
+
 /// CRITICAL: Opcode mappings MUST match instruction.rs definitions exactly.
 /// See instruction.rs for the authoritative opcode layout.
 const fn build_dispatch_table() -> [Handler; 256] {
@@ -548,11 +558,13 @@ const fn build_dispatch_table() -> [Handler; 256] {
 // Shared Utility Functions
 // ============================================================================
 //
+
 // These functions are used by multiple handler modules and remain here as
 // the single source of truth. Handler modules access them via super::super::.
 
 /// Process a function return: pop frame, record stats, handle awaited tasks.
 ///
+
 /// This is the core return-handling logic used by Ret/RetV handlers and
 /// by the dispatch loop for implicit returns at end of function.
 pub(crate) fn do_return(state: &mut InterpreterState, value: Value) -> InterpreterResult<DispatchResult> {
@@ -883,10 +895,11 @@ pub(crate) fn get_array_length(ptr: *const u8, header: &super::heap::ObjectHeade
 
 /// Get element at index from an array (Value array or List).
 ///
+
 /// SECURITY: `index * size_of::<Value>()` can overflow `usize` on
 /// huge indices, producing a wrapped offset that would point into
-/// arbitrary memory.  Use `checked_mul` and return an overflow
-/// error if the multiplication wraps.  This was previously a
+/// arbitrary memory. Use `checked_mul` and return an overflow
+/// error if the multiplication wraps. This was previously a
 /// silent unsafe-multiply hazard duplicated across handlers; this
 /// canonical implementation absorbs the safer variant.
 pub(crate) fn get_array_element(
@@ -911,7 +924,7 @@ pub(crate) fn get_array_element(
             unsafe { backing.add(super::heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
         Ok(unsafe { *elem_ptr })
     } else {
-        // SAFETY: Non-LIST arrays store Values directly after the header.  Same
+        // SAFETY: Non-LIST arrays store Values directly after the header. Same
         // checked-offset reasoning as the LIST branch above.
         let elem_ptr =
             unsafe { ptr.add(super::heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
@@ -1028,6 +1041,7 @@ fn decode_cbgr_ref(encoded: i64) -> (u32, u32) {
 
 /// Deep structural value equality comparison.
 ///
+
 /// Handles all value types including heap objects (variants, tuples, arrays),
 /// references (ThinRef, FatRef, CBGR), and cross-representation strings.
 pub(crate) fn deep_value_eq(va: &Value, vb: &Value, state: &InterpreterState) -> bool {
@@ -1257,6 +1271,7 @@ fn handle_not_implemented(_state: &mut InterpreterState) -> InterpreterResult<Di
 
 /// Optimized dispatch loop using function table.
 ///
+
 /// This is ~30-50% faster than match-based dispatch for hot loops
 /// due to better branch prediction and reduced code size.
 pub fn dispatch_loop_table(state: &mut InterpreterState) -> InterpreterResult<Value> {
@@ -1265,6 +1280,7 @@ pub fn dispatch_loop_table(state: &mut InterpreterState) -> InterpreterResult<Va
 
 /// Dispatch loop for nested/callback execution.
 ///
+
 /// This variant tracks the entry stack depth and returns when the stack depth
 /// falls back to the entry level after a return. This is essential for re-entrant
 /// execution (e.g., FFI callbacks, closure calls) where we want to return control

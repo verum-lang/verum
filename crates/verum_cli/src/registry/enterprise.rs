@@ -113,13 +113,14 @@ impl AuditLevel {
     /// `SecurityScanner::log_action` — pre-fix the level was
     /// documented but `log_action` recorded every call regardless.
     ///
-    ///   * `All`      — every action is recorded.
-    ///   * `Changes`  — only state-changing package operations
-    ///                  (`Install`, `Update`, `Remove`, `Publish`,
-    ///                  `Yank`) are recorded.
-    ///   * `Security` — only security-flavoured actions
-    ///                  (`SecurityScan`, `VulnerabilityFound`) are
-    ///                  recorded.
+
+    ///  * `All` — every action is recorded.
+    ///  * `Changes` — only state-changing package operations
+    ///  (`Install`, `Update`, `Remove`, `Publish`,
+    ///  `Yank`) are recorded.
+    ///  * `Security` — only security-flavoured actions
+    ///  (`SecurityScan`, `VulnerabilityFound`) are
+    ///  recorded.
     pub fn includes(&self, action: &super::security::AuditAction) -> bool {
         use super::security::AuditAction::*;
         match self {
@@ -220,21 +221,23 @@ impl EnterpriseClient {
 
         // All four AuditConfig fields are now load-bearing:
         //
-        //   * `audit.enabled` — gates log_action calls at
-        //     cog_manager.rs:190/263/332.
-        //   * `audit.log_level` — wired via
-        //     `SecurityScanner::with_audit_level`; filters
-        //     log_action by AuditLevel category.
-        //   * `audit.log_file` — `CogManager::new` calls
-        //     `security.load_audit_log(path)` at startup and
-        //     `flush_audit_log()` after every state-changing
-        //     operation. Persistence is atomic via tmp+rename.
-        //   * `audit.retention_days` — `CogManager::new` calls
-        //     `security.evict_older_than(days)` at startup so
-        //     entries past the retention window are dropped from
-        //     the in-memory log AND flushed away on the next save.
-        //     `0` is a sentinel meaning "never evict".
+
+        //  * `audit.enabled` — gates log_action calls at
+        //  cog_manager.rs:190/263/332.
+        //  * `audit.log_level` — wired via
+        //  `SecurityScanner::with_audit_level`; filters
+        //  log_action by AuditLevel category.
+        //  * `audit.log_file` — `CogManager::new` calls
+        //  `security.load_audit_log(path)` at startup and
+        //  `flush_audit_log()` after every state-changing
+        //  operation. Persistence is atomic via tmp+rename.
+        //  * `audit.retention_days` — `CogManager::new` calls
+        //  `security.evict_older_than(days)` at startup so
+        //  entries past the retention window are dropped from
+        //  the in-memory log AND flushed away on the next save.
+        //  `0` is a sentinel meaning "never evict".
         //
+
         // Pre-fix log_file and retention_days were forward-looking
         // knobs documented as observed-but-unused in this same
         // location; they reach production code paths now.
@@ -296,6 +299,7 @@ impl EnterpriseClient {
     /// Whether the access-control policy requires every installed
     /// cog to ship a verified signature.
     ///
+
     /// Surfaces `EnterpriseConfig.access_control.require_signature`
     /// as a public read so callers driving install / publish flows
     /// can branch on the policy without re-reading the config.
@@ -307,6 +311,7 @@ impl EnterpriseClient {
     /// AND, when `require_signature = true`, the caller has confirmed
     /// the cog ships a verified signature.
     ///
+
     /// This is the load-bearing wiring for
     /// `AccessControl.require_signature`. Pre-fix the field was
     /// inert: enterprises that set the flag in `enterprise.toml`
@@ -314,6 +319,7 @@ impl EnterpriseClient {
     /// consulted the flag. Now the policy is enforced at every
     /// gate that calls this method.
     ///
+
     /// Callers that don't have signature info yet should call
     /// `is_cog_allowed` for the name-only check and
     /// `requires_signature` to decide whether to look up the
@@ -348,6 +354,7 @@ impl EnterpriseClient {
     /// reject cogs whose licenses happen to match a partial-string
     /// rule in `allowed_licenses`.
     ///
+
     /// Pre-fix this field was set in defaults / parsed from
     /// `enterprise.toml` but no consumer read it — the license check
     /// in `CogManager::install` always fired when `enterprise` was
@@ -361,15 +368,18 @@ impl EnterpriseClient {
     /// Whether a vulnerability of the given severity exceeds the
     /// `compliance.max_severity` policy.
     ///
+
     /// `max_severity` (default `"high"`) caps the SEVERITY allowed
     /// through the install gate when `require_vulnerability_scan`
     /// is also true. Returns `true` (= blocked) when:
     ///
+
     /// * the actual severity rank > the configured ceiling, or
     /// * the configured ceiling string is not a recognised severity
-    ///   (fail-closed: an unrecognised policy value blocks everything
-    ///   so a typo doesn't silently disable the gate).
+    ///  (fail-closed: an unrecognised policy value blocks everything
+    ///  so a typo doesn't silently disable the gate).
     ///
+
     /// Pre-fix the install path treated `require_vulnerability_scan
     /// = true` as "block on ANY vulnerability". Now `max_severity =
     /// "high"` means Low/Medium/High vulnerabilities pass through

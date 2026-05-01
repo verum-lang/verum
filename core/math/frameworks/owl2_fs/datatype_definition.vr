@@ -2,9 +2,11 @@
 // owl2_fs.datatype_definition — Shkotin 2019 Table 8 (Datatype Definitions)
 // =============================================================================
 //
+
 // §2.3.4 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 1 axiom
 // defining a named datatype as an alias for a data range.
 //
+
 // V2 status (#134, 2026-04-25): verbatim W3C OWL 2 DS §5.7 body.
 // =============================================================================
 

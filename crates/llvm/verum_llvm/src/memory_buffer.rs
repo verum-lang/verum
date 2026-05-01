@@ -90,6 +90,7 @@ impl MemoryBuffer {
 
     /// This will create a new `MemoryBuffer` from the given input.
     ///
+
     /// This function is likely slightly more expensive than `create_from_memory_range` since it does not leak
     /// data to LLVM, forcing LLVM to make a copy. This function may be removed in the future in favor of
     /// `create_from_memory_range`

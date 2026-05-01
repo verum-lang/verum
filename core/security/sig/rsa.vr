@@ -4,62 +4,76 @@
 // Layer: 2 (core primitive)
 // Dependencies: core, core.security.hash.{sha256, sha384, sha512}
 // Reference: RFC 8017 — PKCS #1 v2.2 (RSA Cryptography Standard)
-//            FIPS 186-5 §5 — Digital Signature Standard (RSA section)
+//  FIPS 186-5 §5 — Digital Signature Standard (RSA section)
 // =============================================================================
 //
+
 // **RSA is verify-only in Verum**. We ship RSA signature verification
 // for compatibility with existing X.509 cert chains (~80% of public
 // web CAs still use RSA, as of early 2026), JWTs (RS256 / RS384 /
 // RS512 / PS256 / PS384 / PS512), and legacy software-signing
 // pipelines. We do NOT ship RSA key generation or signing.
 //
+
 // # Why verify-only?
 //
+
 // RSA is structurally harder to get right than ECDSA or EdDSA:
 //
-//   * **Key size.** Any new RSA signing in 2026 should use ≥ 3072-bit
-//     keys for equivalent security to ECDSA-P256. That's ~2 KiB of
-//     key material per signature — an order of magnitude larger.
-//   * **Side channels.** RSA private-key operations are famously
-//     vulnerable to timing, cache, and fault attacks. Implementing
-//     signing safely requires constant-time modular exponentiation
-//     with Montgomery multiplication, CRT caching, and blinding —
-//     far more subtle than verifying.
-//   * **Migration path.** Every modern protocol is deprecating RSA
-//     *signing*. TLS 1.3 still accepts RSA-certified clients but
-//     the server cert tier is migrating to EC. New PKI uses
-//     Ed25519 / ECDSA / ML-DSA. There is no good reason to sign
-//     with RSA in new designs.
+
+//  * **Key size.** Any new RSA signing in 2026 should use ≥ 3072-bit
+//  keys for equivalent security to ECDSA-P256. That's ~2 KiB of
+//  key material per signature — an order of magnitude larger.
+//  * **Side channels.** RSA private-key operations are famously
+//  vulnerable to timing, cache, and fault attacks. Implementing
+//  signing safely requires constant-time modular exponentiation
+//  with Montgomery multiplication, CRT caching, and blinding —
+//  far more subtle than verifying.
+//  * **Migration path.** Every modern protocol is deprecating RSA
+//  *signing*. TLS 1.3 still accepts RSA-certified clients but
+//  the server cert tier is migrating to EC. New PKI uses
+//  Ed25519 / ECDSA / ML-DSA. There is no good reason to sign
+//  with RSA in new designs.
 //
+
 // Verify, on the other hand, has no such pitfalls — it's a public-
 // key operation, no secret material, no timing leak risk from the
 // implementation side.
 //
+
 // If you need RSA signing, use a platform HSM / KMS (AWS KMS, GCP
 // KMS, HashiCorp Vault Transit, YubiHSM 2, Thales Luna). The key
 // stays in hardware, Verum just formats the unsigned input.
 //
+
 // # Supported schemes
 //
-//   * **PSS** — RFC 8017 §8.1. The modern scheme (PS256 JWT, X.509
-//     RSASSA-PSS). Strongly preferred.
-//   * **PKCS#1 v1.5** — RFC 8017 §8.2. The legacy scheme (RS256 JWT,
-//     most X.509 RSA signatures). Still widely used — we support it
-//     because X.509 interop demands it.
+
+//  * **PSS** — RFC 8017 §8.1. The modern scheme (PS256 JWT, X.509
+//  RSASSA-PSS). Strongly preferred.
+//  * **PKCS#1 v1.5** — RFC 8017 §8.2. The legacy scheme (RS256 JWT,
+//  most X.509 RSA signatures). Still widely used — we support it
+//  because X.509 interop demands it.
 //
+
 // Both over SHA-256 / SHA-384 / SHA-512 digests.
 //
+
 // # Architecture
 //
+
 // RSA modular arithmetic is extremely expensive to implement
 // portably in pure Verum. Verify routes through `@intrinsic`:
 //
-//   * `verum.rsa.verify_pss`
-//   * `verum.rsa.verify_pkcs1_v15`
+
+//  * `verum.rsa.verify_pss`
+//  * `verum.rsa.verify_pkcs1_v15`
 //
+
 // The runtime binds these to Verum's multi-precision integer
 // backend (tracked separately as `core.math.bigint` — P2 work).
 //
+
 // =============================================================================
 
 module core.security.sig.rsa;
@@ -75,6 +89,7 @@ mount core.security.hash.sha512.{Sha512};
 /// An RSA public key — modulus `n` and public exponent `e`
 /// (typically 65537).
 ///
+
 /// Modulus length dictates the security level: 2048 bits = 112-bit
 /// classical security (deprecated-but-acceptable); 3072 = 128-bit;
 /// 4096 = ~140-bit (marginal gain for 2× cost).
@@ -137,7 +152,7 @@ public type RsaError is
     /// Backend intrinsic not available.
     | BackendNotReady;
 
-// Display + Debug + Eq for RsaError.  VerificationFailed
+// Display + Debug + Eq for RsaError. VerificationFailed
 // Display deliberately surfaces no detail — RSA-PSS
 // verification failure cannot leak field-level info
 // (oracle / timing attack surface, RFC 8017 §8.1
@@ -202,6 +217,7 @@ implement Eq for RsaError {
 /// `salt_length` is the PSS salt parameter — for interop with TLS
 /// 1.3 (RFC 8446 §4.2.3), use salt_length = hash output size.
 ///
+
 /// Returns `Ok(())` on valid, `Err(VerificationFailed)` on clean
 /// reject, `Err(Malformed)` on ill-formed input.
 public fn verify_pss(
@@ -223,6 +239,7 @@ public fn verify_pss(
 /// most X.509 certs and JWT RS256/RS384/RS512. Slightly less modern
 /// than PSS but still standardised and widely supported.
 ///
+
 /// `hash` must match the digest algorithm the signature was produced
 /// with — there is no algorithm negotiation within the signature
 /// itself for v1.5.

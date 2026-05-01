@@ -1,44 +1,51 @@
 //! High-level Rust intercepts for `core.io.file` and `core.io.fs`
 //! operations.
 //!
+
 //! Mirrors the architecture of `shell_runtime.rs` (VBC-1): bypass the
 //! libSystem FFI chain for open(2)/read(2)/write(2)/stat(2)/mkdir(2)/
 //! unlink(2)/rename(2) syscalls and dispatch directly to `std::fs`
-//! from the interpreter host process.  See `shell_runtime.rs`
+//! from the interpreter host process. See `shell_runtime.rs`
 //! docstring for the full Tier-0 architectural rationale.
 //!
+
 //! # Functions intercepted
 //!
+
 //! ## `core.io.file.*` (Text paths)
 //!
-//!   * `read_to_string(path: &Text) -> IoResult<Text>` —
-//!     `std::fs::read_to_string`.
-//!   * `read(path: &Text) -> IoResult<List<Byte>>` —
-//!     `std::fs::read`.
-//!   * `write(path: &Text, contents: &Text) -> IoResult<()>` —
-//!     `std::fs::write` with text contents.
-//!   * `write_bytes(path: &Text, contents: &[Byte]) -> IoResult<()>` —
-//!     `std::fs::write` with byte slice.
-//!   * `exists(path: &Text) -> Bool` — `std::path::Path::exists`.
+
+//!  * `read_to_string(path: &Text) -> IoResult<Text>` —
+//!  `std::fs::read_to_string`.
+//!  * `read(path: &Text) -> IoResult<List<Byte>>` —
+//!  `std::fs::read`.
+//!  * `write(path: &Text, contents: &Text) -> IoResult<()>` —
+//!  `std::fs::write` with text contents.
+//!  * `write_bytes(path: &Text, contents: &[Byte]) -> IoResult<()>` —
+//!  `std::fs::write` with byte slice.
+//!  * `exists(path: &Text) -> Bool` — `std::path::Path::exists`.
 //!
+
 //! ## `core.io.fs.*` (Path-typed paths — `Path` is `{ inner: Text }`)
 //!
-//!   * `exists(path: &Path) -> Bool`
-//!   * `is_file(path: &Path) -> Bool`
-//!   * `is_dir(path: &Path) -> Bool`
-//!   * `is_symlink(path: &Path) -> Bool`
-//!   * `create_dir(path: &Path) -> IoResult<()>` — `std::fs::create_dir`
-//!   * `create_dir_all(path: &Path) -> IoResult<()>`
-//!   * `remove_file(path: &Path) -> IoResult<()>`
-//!   * `remove_dir(path: &Path) -> IoResult<()>`
-//!   * `remove_dir_all(path: &Path) -> IoResult<()>`
-//!   * `rename(from: &Path, to: &Path) -> IoResult<()>`
-//!   * `copy(from: &Path, to: &Path) -> IoResult<Int>` — bytes copied.
-//!   * `read(path: &Path) -> IoResult<List<Byte>>`
-//!   * `read_to_string(path: &Path) -> IoResult<Text>`
-//!   * `write(path: &Path, contents: &[Byte]) -> IoResult<()>`
-//!   * `write_str(path: &Path, contents: &Text) -> IoResult<()>`
+
+//!  * `exists(path: &Path) -> Bool`
+//!  * `is_file(path: &Path) -> Bool`
+//!  * `is_dir(path: &Path) -> Bool`
+//!  * `is_symlink(path: &Path) -> Bool`
+//!  * `create_dir(path: &Path) -> IoResult<()>` — `std::fs::create_dir`
+//!  * `create_dir_all(path: &Path) -> IoResult<()>`
+//!  * `remove_file(path: &Path) -> IoResult<()>`
+//!  * `remove_dir(path: &Path) -> IoResult<()>`
+//!  * `remove_dir_all(path: &Path) -> IoResult<()>`
+//!  * `rename(from: &Path, to: &Path) -> IoResult<()>`
+//!  * `copy(from: &Path, to: &Path) -> IoResult<Int>` — bytes copied.
+//!  * `read(path: &Path) -> IoResult<List<Byte>>`
+//!  * `read_to_string(path: &Path) -> IoResult<Text>`
+//!  * `write(path: &Path, contents: &[Byte]) -> IoResult<()>`
+//!  * `write_str(path: &Path, contents: &Text) -> IoResult<()>`
 //!
+
 //! Path-typed args (`&Path`) are unwrapped via [`extract_path_or_text_arg`]
 //! which transparently handles BOTH bare `&Text` and `&Path` (the
 //! one-field `{ inner: Text }` record produced by `Path.new(s)`).
@@ -46,8 +53,10 @@
 //! triggered an out-of-bounds register dereference inside the
 //! libSystem FFI dispatch chain.
 //!
+
 //! # Marshaling
 //!
+
 //! `IoResult<T>` = `Result<T, StreamError>` where
 //! `StreamError { kind: IoErrorKind, message: Maybe<Text> }`.
 //! On Rust-side `std::io::Error`, the kind is mapped from
@@ -55,8 +64,10 @@
 //! corresponding `IoErrorKind` variant; an OS-error message goes
 //! into `message` (`Maybe.Some(text)`).
 //!
+
 //! # Permission gate
 //!
+
 //! Consults `PermissionScope::FileSystem` — a script declaring
 //! `permissions = ["time"]` (no `fs`) is denied uniformly with the
 //! libSystem open/read FFI gate.
@@ -72,10 +83,11 @@ use super::heap_helpers::{
 };
 use super::string_helpers::{alloc_string_value, extract_string};
 
-/// Try to intercept a file-I/O runtime call.  Returns `Some(value)`
+/// Try to intercept a file-I/O runtime call. Returns `Some(value)`
 /// when the interception fires, `None` otherwise (caller falls through
 /// to normal bytecode dispatch).
 ///
+
 /// Hot-path miss: one string-suffix compare + return None.
 pub(in super::super) fn try_intercept_file_runtime(
     state: &mut InterpreterState,
@@ -89,7 +101,7 @@ pub(in super::super) fn try_intercept_file_runtime(
     // interpreter via `Call` dispatch only when mount-resolved (the
     // bare-name builtin path is reserved for `print`/`println`/
     // `panic`/`assert` and friends, which use `DebugPrint` /
-    // `Panic` / `Assert` opcodes at codegen).  Every bare-name match
+    // `Panic` / `Assert` opcodes at codegen). Every bare-name match
     // below is uniquely-stdlib-flavored: there is no protocol method
     // or user-defined function the qualifier disambiguates against.
     match bare {
@@ -101,7 +113,7 @@ pub(in super::super) fn try_intercept_file_runtime(
             intercept_read_bytes(state, args_start_reg, arg_count, caller_base)
         }
         // Writes — io.file uses (path, &Text); io.fs uses (path, &[Byte])
-        // for `write` and (path, &Text) for `write_str`.  The two-arg
+        // for `write` and (path, &Text) for `write_str`. The two-arg
         // signature is preserved; we dispatch on whether the second
         // arg is a Text or a List<Byte> by trying Text extraction
         // first, then byte-list extraction.
@@ -341,9 +353,9 @@ fn intercept_copy(
 }
 
 /// Two-arg `write(path, contents)` — choose between text and byte
-/// payload by inspecting the second arg's heap shape.  TEXT-typed
+/// payload by inspecting the second arg's heap shape. TEXT-typed
 /// values flow through `extract_text_arg`; List-typed values flow
-/// through `extract_byte_list_arg`.  This unifies `core.io.file.write`
+/// through `extract_byte_list_arg`. This unifies `core.io.file.write`
 /// (text) and `core.io.fs.write` (bytes) under one bare-name match.
 fn intercept_write_dispatch(
     state: &mut InterpreterState,
@@ -377,7 +389,7 @@ fn intercept_write_dispatch(
 }
 
 /// Quick shape probe — does this Value carry text payload (TEXT type
-/// id, the 0x0001 concat layout, or a small string)?  Used to
+/// id, the 0x0001 concat layout, or a small string)? Used to
 /// dispatch between text-write and byte-write at `write(path, ...)`.
 fn value_is_text(v: &Value) -> bool {
     if v.is_small_string() {
@@ -403,12 +415,14 @@ fn value_is_text(v: &Value) -> bool {
 
 /// Extract a path argument, transparently unwrapping THREE shapes:
 ///
-///   1. Bare `&Text` (`extract_text_arg` handles small + heap strings).
-///   2. `&Path` — Verum's `Path is { inner: Text }` record.  We peek
-///      the first field of the heap record and try Text extraction on
-///      it; on success the path is the inner Text.
-///   3. CBGR-encoded references on top of either of the above.
+
+///  1. Bare `&Text` (`extract_text_arg` handles small + heap strings).
+///  2. `&Path` — Verum's `Path is { inner: Text }` record. We peek
+///  the first field of the heap record and try Text extraction on
+///  it; on success the path is the inner Text.
+///  3. CBGR-encoded references on top of either of the above.
 ///
+
 /// Falls back to the empty string when the value is none of the
 /// above — the caller's `std::fs::*` invocation will then surface a
 /// `NotFound` error which the script can match on.
@@ -424,7 +438,7 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
     if value_is_text(&unwrapped) {
         return extract_string(&unwrapped, state);
     }
-    // Slow path: try to peek field 0 of a 1-field record.  Verum's
+    // Slow path: try to peek field 0 of a 1-field record. Verum's
     // `Path is { inner: Text }` lays out as `[ObjectHeader][Value(text)]`
     // — a single-field record, payload size = 8 bytes (one Value slot).
     if unwrapped.is_ptr() && !unwrapped.is_nil() {
@@ -434,7 +448,7 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
         {
             let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
             // Single-field record carries a payload of exactly 8 bytes
-            // (one Value slot).  Peek field 0; if it's a Text, that's
+            // (one Value slot). Peek field 0; if it's a Text, that's
             // the path content.
             if (header.size as usize) >= std::mem::size_of::<Value>() {
                 let field0 =
@@ -452,7 +466,7 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
 }
 
 /// Extract a `&[Byte]` (or `List<Byte>`) argument from a register
-/// into an owned `Vec<u8>`.  Reads the List header `[len, cap,
+/// into an owned `Vec<u8>`. Reads the List header `[len, cap,
 /// backing_ptr]` and copies the byte payload.
 fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Vec<u8> {
     let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
@@ -486,7 +500,7 @@ fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -
         }
         // Backing is one Value-slot per element (List<Byte> stores
         // each byte as a NaN-boxed integer); unpack by truncating
-        // each slot to u8.  Mirrors `alloc_byte_list`.
+        // each slot to u8. Mirrors `alloc_byte_list`.
         let backing_data = backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value;
         let mut out = Vec::with_capacity(len);
         for i in 0..len {
@@ -501,9 +515,9 @@ fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -
 // ============================================================================
 
 /// Check that the script has FileSystem permission for the given
-/// access kind (`"read"` or `"write"`).  Returns `Some(denied_err)`
+/// access kind (`"read"` or `"write"`). Returns `Some(denied_err)`
 /// when blocked — the caller substitutes the value into `dst` and
-/// short-circuits.  Returns `None` when allowed.
+/// short-circuits. Returns `None` when allowed.
 fn check_fs_permission(state: &mut InterpreterState, _kind: &str) -> Option<Value> {
     if state.check_permission(PermissionScope::FileSystem, 0) == PermissionDecision::Deny {
         // Build an Err(PermissionDenied) result.
@@ -563,4 +577,4 @@ fn build_io_error_kind(
 // Heap helpers (`alloc_byte_list`, `alloc_record_n_fields`,
 // `wrap_in_variant`, `lookup_type_id_by_name`) live in
 // `super::heap_helpers` — single canonical source for all six
-// Tier-0 intercept modules.  See VBC-HEAP-1.
+// Tier-0 intercept modules. See VBC-HEAP-1.

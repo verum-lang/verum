@@ -4,6 +4,7 @@
 // Convenience functions for creating styled Spans without manual Style
 // construction. Provides bold(), italic(), color-named helpers, etc.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#16.1
 // =============================================================================
 

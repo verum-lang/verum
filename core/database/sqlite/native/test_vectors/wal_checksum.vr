@@ -3,15 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md Appendix E.3 (WAL frame checksum vectors)
 //
+
 // SQLite WAL uses a Fibonacci-style running checksum (NOT crc32):
 //
-//   s0' = s0 + (word @ offset) + s1
-//   s1' = s1 + (word @ offset+4) + s0
+
+//  s0' = s0 + (word @ offset) + s1
+//  s1' = s1 + (word @ offset+4) + s0
 //
+
 // Each test vector pairs a sequence of 4-byte little-endian payloads
 // against the expected (cs0_after, cs1_after) value with starting
 // salts (cs0_init, cs1_init).
 //
+
 // (NOT to be confused with `core.security.hash.crc32` — distinct
 // algorithm; loom uses crc32 separately for the WAL header CRC.)
 // =============================================================================

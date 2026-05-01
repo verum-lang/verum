@@ -1,47 +1,54 @@
 //! Kernel intrinsic dispatch — string-name → kernel-function bridge.
 //!
+
 //! ## What this delivers
 //!
+
 //! The 15 ∞-cat + foundation kernel modules
 //! (yoneda, cartesian_fibration, adjoint_functor, whitehead,
 //! reflective_subcategory, limits_colimits, truncation,
 //! factorisation, pronk_fractions, infinity_topos,
 //! zfc_self_recognition, godel_coding, tactics_industrial,
 //! cross_format_gate, mechanisation_roadmap) ship as typed Rust
-//! APIs.  Downstream callers — the compiler's elaborator, the proof-
+//! APIs. Downstream callers — the compiler's elaborator, the proof-
 //! body verifier, audit tooling — need a **uniform string-name
 //! dispatch** so a `.vr` `apply kernel_grothendieck_construction(...)`
 //! can be translated into a kernel function call.
 //!
+
 //! This module ships:
 //!
-//!   1. [`IntrinsicValue`] — a small typed enum carrying the
-//!      argument and result shapes the kernel intrinsics consume
-//!      (`Bool`, `Int`, `Text`, `OrdinalLevel`, `WitnessFlag`).
-//!   2. [`dispatch_intrinsic`] — the single entry point.  Given a
-//!      `kernel_*` name and an argument list, returns the kernel's
-//!      result as another `IntrinsicValue`.
-//!   3. [`available_intrinsics`] — enumeration of dispatchable names
-//!      for diagnostics + `verum audit --kernel-intrinsics`.
+
+//!  1. [`IntrinsicValue`] — a small typed enum carrying the
+//!  argument and result shapes the kernel intrinsics consume
+//!  (`Bool`, `Int`, `Text`, `OrdinalLevel`, `WitnessFlag`).
+//!  2. [`dispatch_intrinsic`] — the single entry point. Given a
+//!  `kernel_*` name and an argument list, returns the kernel's
+//!  result as another `IntrinsicValue`.
+//!  3. [`available_intrinsics`] — enumeration of dispatchable names
+//!  for diagnostics + `verum audit --kernel-intrinsics`.
 //!
-//! V0 surface ships the **decision-predicate intrinsics** — the
+
+//! current surface ships the **decision-predicate intrinsics** — the
 //! Boolean witness flags that `core/proof/kernel_bridge.vr`'s
-//! `kernel_*() -> Bool` axioms ultimately resolve to.  V1 promotion
+//! `kernel_*() -> Bool` axioms ultimately resolve to. V1 promotion
 //! will surface the typed-record intrinsics (returning
 //! `GrothendieckConstruction` etc. as opaque handle IDs).
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - `core/proof/kernel_bridge.vr` axioms become **functional**
-//!     instead of tautological — their `ensures` clauses bind to
-//!     [`dispatch_intrinsic`] outputs at proof-check time.
-//!   - The compiler's `@framework_axiom` admission for `kernel_*`
-//!     names can validate *what* the kernel actually computes,
-//!     replacing the V0 trust-the-name pattern with a V1
-//!     re-checkable witness.
-//!   - `verum audit --kernel-intrinsics` produces a structured
-//!     listing of every kernel-callable name + its current
-//!     decidability status.
+
+//!  - `core/proof/kernel_bridge.vr` axioms become **functional**
+//!  instead of tautological — their `ensures` clauses bind to
+//!  [`dispatch_intrinsic`] outputs at proof-check time.
+//!  - The compiler's `@framework_axiom` admission for `kernel_*`
+//!  names can validate *what* the kernel actually computes,
+//!  replacing the V0 trust-the-name pattern with a V1
+//!  re-checkable witness.
+//!  - `verum audit --kernel-intrinsics` produces a structured
+//!  listing of every kernel-callable name + its current
+//!  decidability status.
 
 use serde::{Deserialize, Serialize};
 
@@ -103,10 +110,11 @@ impl IntrinsicValue {
 // Dispatch
 // =============================================================================
 
-/// Dispatch a kernel intrinsic by string name.  Returns `None` when
+/// Dispatch a kernel intrinsic by string name. Returns `None` when
 /// the name is not in the dispatch table OR the argument shape
 /// doesn't match.
 ///
+
 /// **Naming convention**: every intrinsic is named `kernel_<verb>` —
 /// matches the `core/proof/kernel_bridge.vr` axiom names.
 pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<IntrinsicValue> {
@@ -116,7 +124,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
             // args: [source_level: Int, source_universe: Int].
             // Reject when args missing or pathological: HTT 1.2.1 requires
             // a *well-formed* ∞-category with non-negative level + at least
-            // one universe.  Bare-call (no args) returns None — caller must
+            // one universe. Bare-call (no args) returns None — caller must
             // supply structural data to claim Yoneda discharge.
             let level = args.first().and_then(|v| {
                 if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
@@ -153,7 +161,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
 
         // -- Cartesian fibration + Straightening -------------------------
         "kernel_straightening_equivalence" => {
-            // args: [base_level: Int].  HTT 3.2.0.1 requires the base
+            // args: [base_level: Int]. HTT 3.2.0.1 requires the base
             // ∞-category to live at level ≥ 1.
             let level = args.first().and_then(|v| {
                 if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
@@ -168,7 +176,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         }
         // Identity-is-equivalence — DIRECT discharge for the
         // "id_X is (∞,n)-equivalence" step in Theorem 5.1.
-        // args: [level: Int].  Identity is always an equivalence at any
+        // args: [level: Int]. Identity is always an equivalence at any
         // non-negative ordinal level (HTT 1.2.13 / Whitehead corollary).
         "kernel_identity_is_equivalence" => {
             let level = args.first().and_then(|v| {
@@ -225,9 +233,9 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         }
         "kernel_reflective_subcategory_aft" => {
             // args: [ff: Bool, src_pres: Bool, tgt_pres: Bool,
-            //        preserves_limits_acc: Bool]
+            //  preserves_limits_acc: Bool]
             // Reject if inclusion isn't fully faithful OR SAFT preconditions
-            // fail.  Required by HTT 5.2.7 + 5.5.2.9 dual.
+            // fail. Required by HTT 5.2.7 + 5.5.2.9 dual.
             let ff = args.first().and_then(|v| v.as_bool())?;
             let src = args.get(1).and_then(|v| v.as_bool())?;
             let tgt = args.get(2).and_then(|v| v.as_bool())?;
@@ -245,7 +253,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         "kernel_whitehead_promote" => {
             // args: [num_levels: Int, all_levels_iso: Bool, levels_complete: Bool]
             // Reject when no level data supplied OR any level fails iso OR
-            // the certificate is incomplete.  Per HTT 1.2.4.3 the criterion
+            // the certificate is incomplete. Per HTT 1.2.4.3 the criterion
             // requires PER-LEVEL π_k iso witness for k ∈ [0, n].
             let n = args.first().and_then(|v| {
                 if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
@@ -279,7 +287,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
             })
         }
         "kernel_specialised_limits" => {
-            // args: [diagram_size: Int].  Reject negative sizes; size=0
+            // args: [diagram_size: Int]. Reject negative sizes; size=0
             // is the empty (terminal) diagram, allowed.
             let n = args.first().and_then(|v| {
                 if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
@@ -296,7 +304,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         // -- Truncation --------------------------------------------------
         "kernel_truncate_to_level" => {
             // args: [level: Int, source_level: Int].
-            // Reject negative level.  Truncation at level > source is the
+            // Reject negative level. Truncation at level > source is the
             // identity (allowed); at level < 0 is undefined (rejected).
             let level = args.first().and_then(|v| {
                 if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
@@ -315,7 +323,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
 
         // -- Factorisation -----------------------------------------------
         "kernel_epi_mono_factorisation" => {
-            // args: [category_level: Int].  Reject when category is below
+            // args: [category_level: Int]. Reject when category is below
             // (∞,1)-level (epi/mono only meaningful at level ≥ 1).
             let level = args.first().and_then(|v| {
                 if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
@@ -329,7 +337,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
             })
         }
         "kernel_n_truncation_factorisation" => {
-            // args: [trunc_level: Int].  Reject negative trunc-level.
+            // args: [trunc_level: Int]. Reject negative trunc-level.
             let level = args.first().and_then(|v| {
                 if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
             })?;
@@ -459,13 +467,14 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
 
         // ─── HoTT coherence dispatch ───────────────────────────
         //
+
         // These five entries discharge the IOU-bearing axioms
-        // declared in `core/math/hott.vr` (commit 7b63d5bd).  Each
+        // declared in `core/math/hott.vr` (commit 7b63d5bd). Each
         // axiom carries a `@framework(hott, "...")` annotation
         // citing its HoTT-Book section; the load-bearing structural
         // proof is constructive in CCHM cubical type theory (which
         // Verum's kernel adopts), so the kernel ALWAYS witnesses
-        // these coherence laws for any well-formed input.  The
+        // these coherence laws for any well-formed input. The
         // bool-typed first arg lets the dispatcher reject
         // pathologically-malformed call sites that the elaborator
         // catches; well-typed `@framework(hott, …)` axioms always
@@ -581,7 +590,7 @@ pub fn available_intrinsics() -> &'static [&'static str] {
         "kernel_mechanisation_roadmap",
         "kernel_msfs_self_contained",
         // HoTT coherence dispatch — discharges core/math/hott.vr axioms
-        // (commit 7b63d5bd).  Each kernel_*_coherence rule witnesses a
+        // (commit 7b63d5bd). Each kernel_*_coherence rule witnesses a
         // structural HoTT-Book law that's constructive in CCHM cubical TT.
         "kernel_equiv_inv_coherence",
         "kernel_equiv_compose_coherence",
@@ -593,6 +602,7 @@ pub fn available_intrinsics() -> &'static [&'static str] {
 
 /// Returns true iff the given name is an available kernel intrinsic.
 ///
+
 /// Recognises both the bare dispatcher name (e.g.
 /// `kernel_grothendieck_construction`) AND its `_strict` form
 /// (`kernel_grothendieck_construction_strict`); the strict form is the
@@ -911,7 +921,7 @@ mod tests {
 
     // ===========================================================
     // Adversarial-attack red-team suite — STRENGTHENED dispatchers
-    // must REJECT pathological inputs.  These tests are the
+    // must REJECT pathological inputs. These tests are the
     // contract that distinguishes Verum from "any system that
     // accepts proofs": we PROVE the dispatcher catches malformed
     // inputs at the boundary between bridge and kernel.
@@ -1103,15 +1113,16 @@ mod tests {
 
     /// **THE NON-VACUITY INVARIANT.**
     ///
+
     /// For every strict (parameterised) dispatcher, there must exist a
-    /// pathological input that defeats it.  This is the hard test
+    /// pathological input that defeats it. This is the hard test
     /// that distinguishes Verum from "any system that justifies":
     /// every kernel-discharge step has a *witness of falsifiability*.
     /// If a dispatcher cannot be defeated by any input, its `holds`
     /// is vacuous and the discharge is silent-true.
     #[test]
     fn invariant_every_strict_dispatcher_has_a_falsifying_input() {
-        // (name, args_that_falsify) pairs.  Every entry MUST produce
+        // (name, args_that_falsify) pairs. Every entry MUST produce
         // holds=false; if any returns holds=true, the dispatcher is
         // vacuous and Verum's "error detection" guarantee is broken.
         let falsifying_attacks: &[(&str, Vec<IntrinsicValue>)] = &[
@@ -1226,9 +1237,9 @@ mod tests {
 
     #[test]
     fn attack_kernel_safety_via_int_args_to_bool_dispatchers() {
-        // Type-confusion attack: pass Int where Bool expected.  The
+        // Type-confusion attack: pass Int where Bool expected. The
         // dispatcher must either FAIL DISPATCH (None) or return
-        // holds=false — must not silently succeed.  This is the
+        // holds=false — must not silently succeed. This is the
         // "fail-closed under type confusion" invariant.
         let int_attack = vec![IntrinsicValue::Int(1); 5];
         for name in ["kernel_pronk_bicat_fractions", "kernel_reflective_subcategory_aft", "kernel_infinity_topos"] {

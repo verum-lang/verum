@@ -1,12 +1,14 @@
 //! Pin: `StaticVerificationConfig.memory_limit_mb` is honoured
 //! by the static verifier when constructing solver parameters.
 //!
+
 //! Closes the inert-defense pattern: the field defaulted to
 //! `Some(4096)` (4 GB) and was documented as "Memory limit (MB)"
 //! but no code path consulted it. Hostile / pathological
 //! constraints could push Z3's memory use above the documented
 //! ceiling without triggering any failure mode.
 //!
+
 //! These tests pin the configuration contract via the public
 //! struct surface; behavioural verification (e.g. that Z3
 //! actually rejects a constraint that would breach the limit)

@@ -1,68 +1,82 @@
 //! Integer Type Hierarchy
 //!
+
 //! Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates
 //!
+
 //! Verum provides a comprehensive integer type hierarchy with explicit bounds
 //! and overflow semantics. All integer types are refinements of the base `Int` type.
 //!
+
 //! # Semantic Type Names (Primary)
 //!
+
 //! Following Verum's **Semantic Honesty** principle, numeric types use descriptive names:
 //!
+
 //! ```text
 //! Int (arbitrary precision, default for integer literals)
 //! ├── Signed Fixed-Width
-//! │   ├── Int8   = Int{>= -128 && <= 127}
-//! │   ├── Int16  = Int{>= -32768 && <= 32767}
-//! │   ├── Int32  = Int{>= -2147483648 && <= 2147483647}
-//! │   ├── Int64  = Int{>= -9223372036854775808 && <= 9223372036854775807}
-//! │   ├── Int128 = Int{>= -(2^127) && <= (2^127 - 1)}
-//! │   └── ISize  = platform-dependent (Int32 or Int64)
+//! │ ├── Int8 = Int{>= -128 && <= 127}
+//! │ ├── Int16 = Int{>= -32768 && <= 32767}
+//! │ ├── Int32 = Int{>= -2147483648 && <= 2147483647}
+//! │ ├── Int64 = Int{>= -9223372036854775808 && <= 9223372036854775807}
+//! │ ├── Int128 = Int{>= -(2^127) && <= (2^127 - 1)}
+//! │ └── ISize = platform-dependent (Int32 or Int64)
 //! │
 //! └── Unsigned Fixed-Width
-//!     ├── UInt8   = Int{>= 0 && <= 255}
-//!     ├── UInt16  = Int{>= 0 && <= 65535}
-//!     ├── UInt32  = Int{>= 0 && <= 4294967295}
-//!     ├── UInt64  = Int{>= 0 && <= 18446744073709551615}
-//!     ├── UInt128 = Int{>= 0 && <= (2^128 - 1)}
-//!     └── USize   = platform-dependent (UInt32 or UInt64)
+//!  ├── UInt8 = Int{>= 0 && <= 255}
+//!  ├── UInt16 = Int{>= 0 && <= 65535}
+//!  ├── UInt32 = Int{>= 0 && <= 4294967295}
+//!  ├── UInt64 = Int{>= 0 && <= 18446744073709551615}
+//!  ├── UInt128 = Int{>= 0 && <= (2^128 - 1)}
+//!  └── USize = platform-dependent (UInt32 or UInt64)
 //! ```
 //!
+
 //! # Compatibility Aliases (FFI)
 //!
+
 //! For interoperability with Rust/C, aliases are provided:
 //! - i8, i16, i32, i64, i128, isize → Int8, Int16, Int32, Int64, Int128, ISize
 //! - u8, u16, u32, u64, u128, usize → UInt8, UInt16, UInt32, UInt64, UInt128, USize
 //!
+
 //! # Overflow Semantics
 //!
+
 //! Three overflow modes (controlled by annotations):
 //! - **checked** (default): Runtime overflow detection, panic on overflow
 //! - **wrapping**: Two's complement wraparound
 //! - **saturating**: Clamp to min/max bounds
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! // Type inference from literals
-//! let a: i32 = 42;        // Inferred as i32
-//! let b = 42_i64;         // Explicit i64 suffix
-//! let c: u8 = 255;        // Maximum u8 value
+//! let a: i32 = 42; // Inferred as i32
+//! let b = 42_i64; // Explicit i64 suffix
+//! let c: u8 = 255; // Maximum u8 value
 //!
+
 //! // Overflow modes
 //! @overflow(checked)
 //! fn safe_add(x: i32, y: i32) -> i32 {
-//!     x + y  // Panics on overflow
+//!  x + y // Panics on overflow
 //! }
 //!
+
 //! @overflow(wrapping)
 //! fn wrapping_add(x: u8, y: u8) -> u8 {
-//!     x + y  // Wraps: 255 + 1 = 0
+//!  x + y // Wraps: 255 + 1 = 0
 //! }
 //!
+
 //! @overflow(saturating)
 //! fn saturating_add(x: u8, y: u8) -> u8 {
-//!     x + y  // Saturates: 255 + 1 = 255
+//!  x + y // Saturates: 255 + 1 = 255
 //! }
 //! ```
 
@@ -85,6 +99,7 @@ pub enum OverflowMode {
 
 /// Integer type variant
 ///
+
 /// Primary names follow Verum's Semantic Honesty principle (Int8, UInt64, etc.)
 /// Compatibility aliases (i8, u64) are also supported for FFI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -347,6 +362,7 @@ pub struct IntegerHierarchy {
 impl IntegerHierarchy {
     /// Create a new integer hierarchy with all predefined types
     ///
+
     /// Integer types are represented as `Type::Named` with their semantic names.
     /// For example, `Int32` becomes `Type::Named { path: "Int32", args: [] }`.
     /// Refinement checking (bounds validation) happens later in the type checker.
@@ -403,6 +419,7 @@ impl IntegerHierarchy {
 
     /// Infer integer type from literal suffix
     ///
+
     /// Examples:
     /// - `42` → None (context-dependent)
     /// - `42_i32` → Some(I32)
@@ -413,6 +430,7 @@ impl IntegerHierarchy {
 
     /// Get default integer type for unsuffixed literals
     ///
+
     /// Spec: Default is Int32 for signed, UInt32 for unsigned
     pub fn default_signed() -> IntegerKind {
         IntegerKind::Int32
@@ -424,6 +442,7 @@ impl IntegerHierarchy {
 
     /// Check if type1 is a subtype of type2 in the integer hierarchy
     ///
+
     /// Examples:
     /// - i8 <: i16 (smaller range is subtype of larger)
     /// - u8 <: u16 (smaller range is subtype of larger)
@@ -483,17 +502,21 @@ impl Default for IntegerHierarchy {
 
 /// Trait for checked arithmetic operations (returns Maybe<T>)
 ///
+
 /// Checked operations detect overflow/underflow and return None on failure.
 /// This is the default behavior for arithmetic operators in Verum.
 ///
+
 /// # Examples
 /// ```
 /// use verum_types::CheckedOps;
 /// use verum_common::Maybe;
 ///
+
 /// let x: i32 = i32::MAX;
 /// assert_eq!(x.checked_add(1), None); // Overflow detected
 ///
+
 /// let y: i32 = 100;
 /// assert_eq!(y.checked_add(50), Some(150));
 /// ```
@@ -511,16 +534,20 @@ pub trait CheckedOps: Sized {
 
 /// Trait for wrapping arithmetic operations (two's complement)
 ///
+
 /// Wrapping operations perform modular arithmetic, wrapping around on overflow.
 /// Useful for bit manipulation, cryptography, and hash functions.
 ///
+
 /// # Examples
 /// ```
 /// use verum_types::WrappingOps;
 ///
+
 /// let x: i32 = i32::MAX;
 /// assert_eq!(x.wrapping_add(1), i32::MIN); // Wraps to minimum
 ///
+
 /// let y: u8 = 255;
 /// assert_eq!(y.wrapping_add(1), 0); // Wraps to 0
 /// ```
@@ -538,16 +565,20 @@ pub trait WrappingOps: Sized {
 
 /// Trait for saturating arithmetic operations (clamp to bounds)
 ///
+
 /// Saturating operations clamp results to min/max values on overflow.
 /// Useful for graphics, audio, signal processing, and embedded systems.
 ///
+
 /// # Examples
 /// ```
 /// use verum_types::SaturatingOps;
 ///
+
 /// let x: i32 = i32::MAX;
 /// assert_eq!(x.saturating_add(1), i32::MAX); // Clamps to max
 ///
+
 /// let y: u8 = 10;
 /// assert_eq!(y.saturating_sub(20), 0); // Clamps to 0
 /// ```

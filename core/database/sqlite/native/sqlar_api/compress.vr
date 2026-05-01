@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite ext/misc/sqlar.c
 //
+
 // sqlar_compress only compresses when the result is shorter than the
-// input; otherwise the entry is stored raw.  Entries below
+// input; otherwise the entry is stored raw. Entries below
 // MIN_COMPRESS_BYTES are stored raw regardless.
 // =============================================================================
 

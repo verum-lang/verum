@@ -1,13 +1,15 @@
 //! Pre-typecheck safety-feature gates.
 //!
+
 //! Walks the parsed AST looking for language constructs that are
 //! disabled by the current `[safety]` feature set, emitting clean
 //! diagnostics before type-checking runs. Keeping these checks in
 //! their own walker avoids threading feature flags through the
 //! ~52K-line `TypeChecker` and keeps the gate logic auditable.
 //!
+
 //! Currently gates:
-//!   - `unsafe { … }` expressions when `safety.unsafe_allowed = false`.
+//!  - `unsafe { … }` expressions when `safety.unsafe_allowed = false`.
 
 use verum_ast::decl::{FunctionBody, ImplItemKind, Item, ItemKind};
 use verum_ast::expr::{Block, ConditionKind};
@@ -18,6 +20,7 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// Policy for the safety-gate walker.
 ///
+
 /// Each flag maps 1:1 to a `[safety]` field in `Verum.toml`. When a
 /// flag is `true`, the corresponding construct is allowed; when
 /// `false`, the walker emits a clean diagnostic pointing at the
@@ -46,6 +49,7 @@ pub struct SafetyPolicy {
 impl SafetyPolicy {
     /// All permissive defaults — no gate fires.
     ///
+
     /// Note: `ffi_boundary` is "lenient" in this constructor (not the
     /// project-default "strict") so the name "permissive" remains
     /// accurate — strict mode emits a warning on every extern fn
@@ -84,7 +88,7 @@ pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic
 
     // Surface elevated MLS levels via tracing for observability.
     // Operation-level enforcement runs in `walk_item` below
-    // (Phase 1 of #266 — surface gate).  Pre-fix the gate
+    // (Phase 1 of #266 — surface gate). Pre-fix the gate
     // logged the level but did not enforce.
     if policy.mls_level.as_str() != "public" {
         tracing::debug!(
@@ -101,10 +105,11 @@ pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic
     // safe on its own); include it in the early-return condition so
     // strict mode actually runs the walk.
     //
+
     // mls_level != "public" also requires the walk to fire — the
     // Phase 1 gate (#266) inspects every extern fn / unsafe fn /
     // unsafe block for an @classification annotation matching the
-    // manifest floor.  Non-public mls_level is the marker.
+    // manifest floor. Non-public mls_level is the marker.
     if policy.unsafe_allowed && policy.ffi
         && !policy.capability_required
         && !policy.forbid_stdlib_extern
@@ -157,6 +162,7 @@ fn walk_item(item: &Item, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
 /// MLS classification level — re-exported from
 /// `verum_common::mls::MlsLevel` (#282 Phase 2a).
 ///
+
 /// Pre-#282 this enum was private to safety_gate. Promoting it to
 /// the shared layer lets the type checker (Phase 2b) and the
 /// context system (Phase 3) consume the same lattice without
@@ -165,10 +171,10 @@ fn walk_item(item: &Item, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
 /// (`join`, `meet`) are reserved for downstream Phase 2b/3 work.
 use verum_common::mls::MlsLevel;
 
-/// Inspect an attribute list for `@classification(<level>)`.  Returns
+/// Inspect an attribute list for `@classification(<level>)`. Returns
 /// the highest classification declared (so a function carrying
 /// `@classification(top_secret)` AND `@classification(secret)` —
-/// pathological but legal AST — produces TopSecret).  Returns
+/// pathological but legal AST — produces TopSecret). Returns
 /// `MlsLevel::Public` when no classification attribute is present
 /// (i.e., the function inherits the public floor).
 fn read_classification(attrs: &List<verum_ast::attr::Attribute>) -> MlsLevel {
@@ -181,7 +187,7 @@ fn read_classification(attrs: &List<verum_ast::attr::Attribute>) -> MlsLevel {
             for arg in args.iter() {
                 // The classification level is the first identifier
                 // argument: `@classification(secret)` or
-                // `@classification(top_secret)`.  Anything else
+                // `@classification(top_secret)`. Anything else
                 // (string literals, malformed args) is ignored —
                 // those failures are the parser's domain.
                 if let verum_ast::expr::ExprKind::Path(path) = &arg.kind {
@@ -201,7 +207,7 @@ fn read_classification(attrs: &List<verum_ast::attr::Attribute>) -> MlsLevel {
 /// Find the highest-classified parameter on `func`, returning
 /// `Some((name, level, span))` for the maximally-classified one
 /// when at least one parameter is non-Public, or `None` when every
-/// parameter is unclassified.  Used by the Phase 2b diagnostic to
+/// parameter is unclassified. Used by the Phase 2b diagnostic to
 /// point users at the SOURCE of the parameter classification
 /// (otherwise the error would just say "the function" without
 /// indicating which parameter triggered the requirement).
@@ -238,35 +244,39 @@ fn pattern_to_name(p: &verum_ast::pattern::Pattern) -> verum_common::Text {
     }
 }
 
-/// MLS surface gate (Phase 1 of #266 + Phase 2b of #288).  Emits a
+/// MLS surface gate (Phase 1 of #266 + Phase 2b of #288). Emits a
 /// diagnostic when:
-///   1. `[safety].mls_level` is non-`"public"` (the manifest floor),
-///   2. the function is FFI (extern_abi present), `unsafe fn`, OR
-///      carries any classified parameter (Phase 2b addition), AND
-///   3. the function's effective classification (its own
-///      `@classification` joined with every parameter's
-///      `@classification`) is < the manifest floor.
+///  1. `[safety].mls_level` is non-`"public"` (the manifest floor),
+///  2. the function is FFI (extern_abi present), `unsafe fn`, OR
+///  carries any classified parameter (Phase 2b addition), AND
+///  3. the function's effective classification (its own
+///  `@classification` joined with every parameter's
+///  `@classification`) is < the manifest floor.
 ///
+
 /// Phase 1 covered the call-site friction layer for dangerous
-/// declarations.  Phase 2b extends the trigger to functions that
+/// declarations. Phase 2b extends the trigger to functions that
 /// merely RECEIVE classified data (a Secret-classified parameter
 /// is a contract that the function handles classified data
-/// appropriately — it must itself be classified).  Full type-
+/// appropriately — it must itself be classified). Full type-
 /// level taint propagation through Pi-types remains Phase 2b-full
 /// at `verum_types::infer`.
 /// Default low-classification sink registry (#283 Phase 3a).
 ///
+
 /// These context names are recognized as sinks where classified
 /// data leaks observably out of the program (logs, files, network
 /// packets). When a function with a Secret-or-higher classification
 /// `using` one of these contexts, the surface gate emits a leak
 /// warning unless the function is explicitly marked `@declassify`.
 ///
+
 /// The list is conservative — only contexts whose semantic is
 /// "this is publicly observable output" are sinks. Pure-compute
 /// contexts (Database queries that return Secret data, validation
 /// services) are NOT sinks; they're classified-data CONSUMERS.
 ///
+
 /// The registry is hardcoded at the prefix level — any context
 /// whose final path segment matches one of these is a sink.
 /// Phase 3 full-form will extend this with manifest-driven custom
@@ -283,7 +293,7 @@ const DEFAULT_LOW_CLASSIFICATION_SINKS: &[&str] = &[
 ];
 
 /// Determine whether a `ContextRequirement` references a known
-/// low-classification sink (#283 Phase 3a).  Matches against the
+/// low-classification sink (#283 Phase 3a). Matches against the
 /// final identifier segment so `core.io.Logger` and
 /// `my_lib.audit.Logger` both register as Logger sinks.
 fn is_low_classification_sink(ctx: &verum_ast::context::ContextRequirement) -> bool {
@@ -298,7 +308,7 @@ fn is_low_classification_sink(ctx: &verum_ast::context::ContextRequirement) -> b
 
 /// Check if a function carries the `@declassify` attribute, which
 /// is the explicit escape hatch for classified data flowing into
-/// low-classification sinks (#283).  Without this attribute the
+/// low-classification sinks (#283). Without this attribute the
 /// surface gate rejects the leak; with it the user accepts
 /// responsibility (the value's classification is shed at the
 /// `@declassify` boundary).
@@ -306,13 +316,14 @@ fn has_declassify_attr(attrs: &List<verum_ast::attr::Attribute>) -> bool {
     attrs.iter().any(|a| a.is_named("declassify"))
 }
 
-/// MLS Phase 3a sink-detection (#283).  Emits a diagnostic when a
+/// MLS Phase 3a sink-detection (#283). Emits a diagnostic when a
 /// function:
-///   1. carries a classified parameter (Phase 2b trigger), AND
-///   2. uses a low-classification sink context (Logger, FS,
-///      Network, …), AND
-///   3. is NOT marked `@declassify`.
+///  1. carries a classified parameter (Phase 2b trigger), AND
+///  2. uses a low-classification sink context (Logger, FS,
+///  Network, …), AND
+///  3. is NOT marked `@declassify`.
 ///
+
 /// This is the surface-level information-flow check: classified
 /// data + observable sink + no explicit declassification = leak.
 /// Full type-level taint propagation (where every classified value
@@ -494,6 +505,7 @@ fn check_function_decl(
         // unsafe to call but the declaration itself can omit the
         // modifier).
         //
+
         // Closes the inert-defense pattern around
         // `SafetyPolicy.ffi_boundary`: pre-fix the field landed on
         // the policy + flowed from manifest but no code path
@@ -821,6 +833,7 @@ mod tests {
         // but no code path consulted it, so `[safety].ffi_boundary =
         // "strict"` had no observable effect on the safety walk.
         //
+
         // With the wire-up, an extern function declared without `unsafe`
         // surfaces a warning suggesting the modifier — pinning the
         // strict-mode contract end-to-end.
@@ -1041,7 +1054,7 @@ mod tests {
     #[test]
     fn mls_top_secret_rejects_secret_classified_extern() {
         // Pin: the inverse — a LOWER classification does NOT satisfy
-        // a higher floor.  secret-classified function fails mls=
+        // a higher floor. secret-classified function fails mls=
         // top_secret gate.
         let mut attrs = List::new();
         attrs.push(mk_classification_attr("secret"));
@@ -1063,7 +1076,7 @@ mod tests {
     #[test]
     fn mls_secret_does_not_gate_safe_pure_function() {
         // Pin: safe (non-unsafe, non-FFI) functions are unaffected by
-        // the gate even under elevated mls_level.  No false positives
+        // the gate even under elevated mls_level. No false positives
         // on ordinary code.
         let module = mk_module_with_function(false, Maybe::None);
         let mut policy = SafetyPolicy::permissive();
@@ -1079,6 +1092,7 @@ mod tests {
     // ============================================================
     // [safety].mls_level Phase 2b parameter-level pin tests (#288).
     //
+
     // Phase 2b extends the Phase 1 surface gate to detect functions
     // that RECEIVE classified data via parameter-level
     // `@classification` annotations. The function's effective
@@ -1168,7 +1182,7 @@ mod tests {
     fn mls_phase2b_secret_param_without_classified_function_rejected() {
         // Pin: a function with a Secret-classified parameter must
         // itself be at least Secret — otherwise Secret data flows
-        // through an unclassified function body.  The Phase 2b
+        // through an unclassified function body. The Phase 2b
         // surface gate catches this even when the function is
         // neither extern nor unsafe.
         let module = mk_module_with_classified_param(
@@ -1198,7 +1212,7 @@ mod tests {
     fn mls_phase2b_param_classification_is_inherited_to_function() {
         // Pin: when the function is itself @classification(secret)
         // AND has a Secret-classified param, both consistency
-        // checks pass — no diagnostic.  The function's effective
+        // checks pass — no diagnostic. The function's effective
         // floor (join of own + params) is Secret, which subsumes
         // the manifest floor.
         let mut func_attrs = List::new();
@@ -1233,7 +1247,7 @@ mod tests {
         // No: this would still need the FUNCTION to be classified
         // (since the param's TopSecret floor must be matched).
         // Actually: with param=TopSecret AND function=TopSecret,
-        // both pass.  Verify with explicit @classification(top_secret)
+        // both pass. Verify with explicit @classification(top_secret)
         // on the function.
         let mut func_attrs = List::new();
         func_attrs.push(mk_classification_attr("top_secret"));
@@ -1338,6 +1352,7 @@ mod tests {
     // ============================================================
     // [safety].mls_level Phase 3a sink-detection pin tests (#283).
     //
+
     // Phase 3a: classified data + low-classification sink (Logger,
     // FS, Network, …) + no @declassify = leak diagnostic.
     // ============================================================
@@ -1466,7 +1481,7 @@ mod tests {
     #[test]
     fn mls_phase3a_declassify_escape_hatch_silences_leak() {
         // Pin: @declassify on the function declaration acts as the
-        // explicit escape hatch — the leak is suppressed.  User
+        // explicit escape hatch — the leak is suppressed. User
         // accepted responsibility for the boundary.
         let mut func_attrs = List::new();
         func_attrs.push(mk_classification_attr("secret"));

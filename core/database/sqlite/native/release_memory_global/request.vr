@@ -3,10 +3,11 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_release_memory(N):
-//   * N > 0  → "release at least N bytes" (target)
-//   * N == 0 → no-op; return 0
-//   * N < 0  → undefined-behaviour per docs; we normalise to 0
+//  * N > 0 → "release at least N bytes" (target)
+//  * N == 0 → no-op; return 0
+//  * N < 0 → undefined-behaviour per docs; we normalise to 0
 // =============================================================================
 
 module core.database.sqlite.native.release_memory_global.request;

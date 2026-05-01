@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_column_*
 //
+
 // `ResultRow` ties a `ColumnSpecList` (the header — set once at
 // prepare time) to a `List<ColumnValue>` (the values — refreshed at
 // each sqlite3_step return). The L7 façade hands these to the user

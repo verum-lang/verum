@@ -5,12 +5,15 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Provides the Regex type for pattern matching on text. Regex values are
 // typically created from `re#"..."` or `rx#"..."` tagged literals, which the
 // parser desugars to `Regex.new(pattern).unwrap_or_else(...)`.
 //
+
 // # Runtime
 //
+
 // Each operation forwards to a Verum intrinsic backed by the `regex` 1.x
 // crate inside the VBC interpreter (and by the same engine after AOT
 // lowering). Pattern compilation happens **per call**: today we do not cache
@@ -21,17 +24,20 @@
 // A v2 may introduce a per-Regex compiled handle once we surface a
 // fallible `Regex.compile` returning a runtime-side handle.
 //
+
 // # Available operations
 //
+
 // All seven core intrinsics are wired end-to-end:
-//   * `is_match` — boolean test
-//   * `find_all` — all matches as a list
-//   * `replace_all` — replace every match
-//   * `split` — split on the pattern
-//   * `find` — first match only (`Maybe<Text>`)
-//   * `replace` — replace first match only
-//   * `captures` — capture groups of the first match
+//  * `is_match` — boolean test
+//  * `find_all` — all matches as a list
+//  * `replace_all` — replace every match
+//  * `split` — split on the pattern
+//  * `find` — first match only (`Maybe<Text>`)
+//  * `replace` — replace first match only
+//  * `captures` — capture groups of the first match
 //
+
 // The interpreter kernel (verum_vbc/src/interpreter/kernel/mod.rs) hosts the
 // dispatchers; the intrinsic registry (verum_vbc/src/intrinsics/registry.rs)
 // advertises them under the canonical lowercase names. The bulk variants
@@ -86,6 +92,7 @@ implement Eq for RegexError {
 implement Regex {
     /// Construct a `Regex` from a pattern string.
     ///
+
     /// Returns `Result<Regex, RegexError>` for forward compatibility with a
     /// future fallible compile; today every call is `Ok` because compilation
     /// is deferred to match-time. Catches malformed patterns at compile-time
@@ -133,6 +140,7 @@ implement Regex {
     /// Run the pattern against `text` and return the ordered group
     /// captures of the first match.
     ///
+
     /// Layout: `result[0]` is always the whole match; `result[i]`
     /// for `i >= 1` is the i-th `(group)` capture. Non-participating
     /// groups appear as empty strings — callers that want

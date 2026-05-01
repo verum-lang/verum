@@ -1,18 +1,22 @@
 //! Attribute conversion implementations for typed attributes.
 //!
+
 //! This module provides:
 //! - Helper functions for extracting values from `Expr` nodes
 //! - `FromAttribute` implementations for all typed attributes in `typed.rs`
 //!
+
 //! # Examples
 //!
+
 //! ```rust
 //! use verum_ast::attr::{Attribute, InlineAttr, FromAttribute};
 //!
+
 //! fn process_inline(attr: &Attribute) {
-//!     if let Ok(inline) = InlineAttr::from_attribute(attr) {
-//!         println!("Inline mode: {:?}", inline.mode);
-//!     }
+//!  if let Ok(inline) = InlineAttr::from_attribute(attr) {
+//!  println!("Inline mode: {:?}", inline.mode);
+//!  }
 //! }
 //! ```
 
@@ -42,18 +46,22 @@ use super::{Attribute, AttributeConversionError, FromAttribute};
 
 /// Extract an identifier from an expression.
 ///
+
 /// Works with:
 /// - `ExprKind::Path` with a single segment
 /// - Identifier expressions
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_ast::attr::conversion::extract_ident;
 /// use verum_ast::expr::{Expr, ExprKind};
 /// use verum_ast::ty::{Path, Ident};
 /// use verum_ast::span::Span;
 ///
+
 /// let expr = Expr::ident(Ident::new("always", Span::default()));
 /// let ident = extract_ident(&expr).unwrap();
 /// assert_eq!(ident.as_str(), "always");
@@ -79,11 +87,14 @@ pub fn extract_ident(expr: &Expr) -> Result<Text, AttributeConversionError> {
 
 /// Extract a string literal from an expression.
 ///
+
 /// Works with:
 /// - `ExprKind::Literal(LiteralKind::Text(...))`
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// use verum_ast::attr::conversion::extract_string;
 /// use verum_ast::expr::Expr;
@@ -91,6 +102,7 @@ pub fn extract_ident(expr: &Expr) -> Result<Text, AttributeConversionError> {
 /// use verum_ast::span::Span;
 /// use verum_common::Text;
 ///
+
 /// let expr = Expr::literal(Literal::string(Text::from("hello"), Span::default()));
 /// let s = extract_string(&expr).unwrap();
 /// assert_eq!(s.as_str(), "hello");
@@ -124,9 +136,11 @@ impl StringLitExt for StringLit {
 
 /// Extract an integer literal from an expression.
 ///
+
 /// Works with:
 /// - `ExprKind::Literal(LiteralKind::Int(...))`
 ///
+
 /// Returns the value as i128 (can be downcast to smaller types if needed).
 pub fn extract_int(expr: &Expr) -> Result<i128, AttributeConversionError> {
     match &expr.kind {
@@ -146,6 +160,7 @@ pub fn extract_int(expr: &Expr) -> Result<i128, AttributeConversionError> {
 
 /// Extract a positive integer (u32) from an expression.
 ///
+
 /// Returns an error if the value is negative or too large for u32.
 pub fn extract_u32(expr: &Expr) -> Result<u32, AttributeConversionError> {
     let value = extract_int(expr)?;
@@ -161,6 +176,7 @@ pub fn extract_u32(expr: &Expr) -> Result<u32, AttributeConversionError> {
 
 /// Extract a positive integer (u64) from an expression.
 ///
+
 /// Returns an error if the value is negative or too large for u64.
 pub fn extract_u64(expr: &Expr) -> Result<u64, AttributeConversionError> {
     let value = extract_int(expr)?;
@@ -176,6 +192,7 @@ pub fn extract_u64(expr: &Expr) -> Result<u64, AttributeConversionError> {
 
 /// Extract a boolean literal from an expression.
 ///
+
 /// Works with:
 /// - `ExprKind::Literal(LiteralKind::Bool(...))`
 /// - Identifiers "true" and "false"
@@ -214,6 +231,7 @@ pub fn extract_bool(expr: &Expr) -> Result<bool, AttributeConversionError> {
 
 /// Extract a floating-point literal from an expression.
 ///
+
 /// Works with:
 /// - `ExprKind::Literal(LiteralKind::Float(...))`
 /// - Integer literals (converted to f64)
@@ -236,6 +254,7 @@ pub fn extract_float(expr: &Expr) -> Result<f64, AttributeConversionError> {
 
 /// Extract a named argument from a list of expressions.
 ///
+
 /// Looks for expressions of the form `name = value` or `name: value`.
 pub fn extract_named_arg<'a>(args: &'a [Expr], name: &str) -> Option<&'a Expr> {
     for arg in args {
@@ -262,6 +281,7 @@ pub fn extract_named_arg<'a>(args: &'a [Expr], name: &str) -> Option<&'a Expr> {
 
 /// Extract a list of identifiers from expression arguments.
 ///
+
 /// Used for attributes like `@profile(application, systems)`.
 pub fn extract_ident_list(args: &[Expr]) -> Result<List<Text>, AttributeConversionError> {
     let mut result = List::new();
@@ -273,6 +293,7 @@ pub fn extract_ident_list(args: &[Expr]) -> Result<List<Text>, AttributeConversi
 
 /// Extract a list of strings from expression arguments or a single array expression.
 ///
+
 /// Used for attributes like `@feature(enable: ["unsafe", "inline_asm"])`.
 pub fn extract_string_list(expr: &Expr) -> Result<List<Text>, AttributeConversionError> {
     match &expr.kind {

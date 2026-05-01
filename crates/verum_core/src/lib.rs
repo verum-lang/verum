@@ -1,63 +1,76 @@
 //! Verum Core IR.
 //!
+
 //! A typed intermediate representation shared across the verification
 //! pipeline. Sits between the raw AST (`verum_ast`) and the LCF-style
 //! trusted kernel (`verum_kernel`):
 //!
+
 //! ```text
-//!   verum_ast          — surface syntax, lossless
-//!   verum_core (here)  — typed IR, pipeline-shared
-//!   verum_kernel       — LCF core terms, trusted
+//!  verum_ast — surface syntax, lossless
+//!  verum_core (here) — typed IR, pipeline-shared
+//!  verum_kernel — LCF core terms, trusted
 //! ```
 //!
+
 //! ## Why a dedicated crate
 //!
+
 //! Before this crate landed, the verification pipeline threaded raw
 //! `verum_ast::Expr` values through every stage. That had two problems:
 //!
+
 //! 1. **Pipeline instability.** Every change to the AST broke every
-//!    downstream pass. Verification-relevant information (refinement
-//!    predicates, variant tags, framework attribution) was scattered
-//!    across the AST with no unified access API.
+//!  downstream pass. Verification-relevant information (refinement
+//!  predicates, variant tags, framework attribution) was scattered
+//!  across the AST with no unified access API.
 //!
+
 //! 2. **No stable contract between stages.** The tactic layer, SMT
-//!    translator, and proof-certificate exporter each had to rediscover
-//!    the same IR-level facts (e.g. "this expression is a variant
-//!    constructor reference") by independent analysis.
+//!  translator, and proof-certificate exporter each had to rediscover
+//!  the same IR-level facts (e.g. "this expression is a variant
+//!  constructor reference") by independent analysis.
 //!
+
 //! `verum_core` establishes the stable contract: a small set of
 //! **pipeline-shared typed nodes** plus accessor APIs. Individual
 //! consumers (SMT translator, proof engine, kernel-replay) project into
 //! their own representations, but the *shared contract* lives here.
 //!
+
 //! ## Scope
 //!
+
 //! This is Phase 1.1 (the skeleton) — the crate intentionally stays
 //! small. It defines:
 //!
+
 //! * [`IrExpr`] — shared typed-expression form with stable accessors.
 //! * [`IrType`] — shared typed-type form.
 //! * [`IrObligation`] — a proof obligation with its hypothesis context,
-//!   goal, and metadata.
+//!  goal, and metadata.
 //! * [`IrModule`] — a read-only view of a module's IR-level contents
-//!   (functions, types, theorems, axioms).
+//!  (functions, types, theorems, axioms).
 //!
+
 //! Phase 1.2 will add the lowering passes from `verum_ast::Module` to
 //! `IrModule`, replacing the ad-hoc walks currently scattered across
 //! `verum_compiler::verify_cmd` and `verum_smt`.
 //!
+
 //! ## Design principles
 //!
+
 //! * **No stdlib hardcoding.** The IR knows nothing about `Maybe`,
-//!   `Result`, `List`, etc. — they're ordinary user-level types as far
-//!   as the IR is concerned.
+//!  `Result`, `List`, etc. — they're ordinary user-level types as far
+//!  as the IR is concerned.
 //! * **Serializable.** All IR nodes derive `Serialize`/`Deserialize` so
-//!   the IR can be persisted (cache, incremental compilation, remote
-//!   verification, LSP state).
+//!  the IR can be persisted (cache, incremental compilation, remote
+//!  verification, LSP state).
 //! * **Span-preserved.** Every node carries its source span for
-//!   diagnostics.
+//!  diagnostics.
 //! * **Immutable after construction.** Lowering produces an `IrModule`
-//!   that verification passes consume without mutation.
+//!  that verification passes consume without mutation.
 
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]

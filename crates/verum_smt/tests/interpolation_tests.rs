@@ -14,11 +14,14 @@
 )]
 // Comprehensive tests for Craig interpolation
 //
+
 // Tests all interpolation algorithms, compositional verification,
 // and CEGAR loops.
 //
+
 // FIXED (Session 24): Interpolant.validate now uses verum_smt::Context
 //
+
 // Many tests assert `time_ms >= 0` / `iterations >= 0` to confirm that
 // the timing/iteration counter was at least *initialised*. With u64
 // fields the comparison is trivially true; clippy 1.80+ promotes this

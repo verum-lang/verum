@@ -1,5 +1,6 @@
 //! Build script for verum_llvm_sys
 //!
+
 //! This script handles:
 //! 1. Using local LLVM installation from llvm/install/ (PRIMARY)
 //! 2. Optional override via VERUM_LLVM_DIR environment variable
@@ -90,11 +91,13 @@ fn has_llvm_config(dir: &Path) -> bool {
 
 /// Find LLVM installation directory
 ///
+
 /// Search order:
 /// 1. VERUM_LLVM_DIR environment variable (explicit override)
 /// 2. Local llvm/install/ directory — built automatically via
-///    `llvm/build.sh` if missing.
+///  `llvm/build.sh` if missing.
 ///
+
 /// System LLVM is NOT used — we require our own build for
 /// consistency. Auto-invocation of `llvm/build.sh` keeps
 /// `cargo build` self-contained: a fresh checkout that lacks
@@ -127,8 +130,8 @@ fn get_llvm_install_dir() -> PathBuf {
     }
 
     // 3. Auto-invoke llvm/build.sh — clones llvm-project, configures
-    //    cmake with llvm/llvm.toml, builds LLVM/LLD/MLIR static libs
-    //    and installs into llvm/install/.
+    //  cmake with llvm/llvm.toml, builds LLVM/LLD/MLIR static libs
+    //  and installs into llvm/install/.
     auto_build_llvm(&workspace_root);
 
     // 4. Re-check after the build script ran.
@@ -244,8 +247,8 @@ fn link_llvm_libraries(llvm_dir: &Path, llvm_config: &Path) {
 
     for lib in libs_output.split_whitespace() {
         // Extract library name from filename:
-        //   Unix:    libLLVMCore.a   -> LLVMCore
-        //   Windows: LLVMCore.lib    -> LLVMCore
+        //  Unix: libLLVMCore.a -> LLVMCore
+        //  Windows: LLVMCore.lib -> LLVMCore
         let lib_name = lib
             .strip_prefix("lib")
             .unwrap_or(lib)

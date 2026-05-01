@@ -2,59 +2,75 @@
 // kernel_v0 — T-Sub (universe cumulativity) inference rule + soundness (ADMITTED)
 // =============================================================================
 //
+
 // **Rule**
 //
-//   ┌─────────────────────────────────────────────────────────┐
-//   │ Γ ⊢ t : Universe(n)                                        │
-//   │ n ≤ m                                                       │
-//   │ ────────────────────────────────────────  T-Sub             │
-//   │ Γ ⊢ t : Universe(m)                                        │
-//   └─────────────────────────────────────────────────────────┘
+
+//  ┌─────────────────────────────────────────────────────────┐
+//  │ Γ ⊢ t : Universe(n) │
+//  │ n ≤ m │
+//  │ ──────────────────────────────────────── T-Sub │
+//  │ Γ ⊢ t : Universe(m) │
+//  └─────────────────────────────────────────────────────────┘
 //
+
 // **What this captures**
 //
+
 // Universe cumulativity: any element of `Univ(n)` is also an element
-// of `Univ(m)` whenever `n ≤ m`.  Without cumulativity, every
+// of `Univ(m)` whenever `n ≤ m`. Without cumulativity, every
 // type-level construction would be parametrised by a fixed level,
-// making polymorphism impossibly verbose.  With it, the user writes
+// making polymorphism impossibly verbose. With it, the user writes
 // `Universe` and lets the elaborator pick a level satisfying all
 // constraints.
 //
+
 // **Soundness lemma** (ADMITTED — κ-tower well-foundedness IOU)
 //
-//   For every Γ, t, n, m with n ≤ m, if Γ ⊢ t : Univ(n) then
-//   Γ ⊢ t : Univ(m).
+
+//  For every Γ, t, n, m with n ≤ m, if Γ ⊢ t : Univ(n) then
+//  Γ ⊢ t : Univ(m).
 //
+
 // **Why admitted (not yet proved)**
 //
+
 // The denotational picture: `⟦Univ(n)⟧` is the Grothendieck universe
-// at the inaccessible cardinal κ_n.  Cumulativity is the inclusion
+// at the inaccessible cardinal κ_n. Cumulativity is the inclusion
 // `V_{κ_n} ⊆ V_{κ_m}` whenever n ≤ m, which holds because the
 // universe tower is well-founded (κ_0 < κ_1 < κ_2 < ... is a strict
 // linear order).
 //
+
 // Soundness reduces to:
 //
-//     ZFC + 2-inacc ⊢ ∀ n m. n ≤ m → V_{κ_n} ⊆ V_{κ_m}
+
+//  ZFC + 2-inacc ⊢ ∀ n m. n ≤ m → V_{κ_n} ⊆ V_{κ_m}
 //
+
 // This is provable in ZFC + 2-inacc but the proof requires set-
 // theoretic machinery (cumulative hierarchy, transfinite induction)
 // that the bootstrap kernel does not yet formalize.
 //
+
 // **Discharge plan** (#173 Phase 2)
 //
-//   1. Formalize the `cumulative_hierarchy` ZFC schema as a Verum
-//      theorem (or import from mathlib once #155 lands).
-//   2. Cross-discharge via Coq's `Universe` polymorphism.
+
+//  1. Formalize the `cumulative_hierarchy` ZFC schema as a Verum
+//  theorem (or import from mathlib once #155 lands).
+//  2. Cross-discharge via Coq's `Universe` polymorphism.
 //
+
 // **Position in the bootstrap chain**
 //
+
 // T-Sub is the LAST admitted rule because:
-//   - It's not a destructor — it doesn't unpack any term.
-//   - It's not a constructor — it doesn't build a new term.
-//   - It's a TRANSPORT — moving an inhabitant between two views of
-//     the same universe.  Sound iff the universe tower is sound.
+//  - It's not a destructor — it doesn't unpack any term.
+//  - It's not a constructor — it doesn't build a new term.
+//  - It's a TRANSPORT — moving an inhabitant between two views of
+//  the same universe. Sound iff the universe tower is sound.
 //
+
 // Once ZFC + 2-inacc is taken as foundational, T-Sub is automatic.
 // =============================================================================
 
@@ -68,6 +84,7 @@ mount super.super.judgment.{Derivation};
 /// Construct a T-Sub derivation, lifting an inhabitant from
 /// `Univ(from_level)` to `Univ(to_level)` when `from_level ≤ to_level`.
 ///
+
 /// Returns `Maybe::None` when the level inequality fails (the
 /// elaborator rejects).
 public fn introduce_sub(
@@ -92,17 +109,20 @@ public fn introduce_sub(
 
 /// **Soundness lemma — ADMITTED.**
 ///
+
 /// `∀ ctx t n m.
-///     n ≤ m
-///     → Γ ⊢ t : Univ(n)
-///     → Γ ⊢ t : Univ(m).`
+///  n ≤ m
+///  → Γ ⊢ t : Univ(n)
+///  → Γ ⊢ t : Univ(m).`
 ///
+
 /// **IOU** (recorded in audit bundle `soundness-iou.json`):
 /// κ-tower well-foundedness — the inaccessible-cardinal sequence
 /// κ_0 < κ_1 < κ_2 < ... is a strict linear order, so the cumulative
-/// hierarchy V_{κ_n} ⊆ V_{κ_m} whenever n ≤ m.  Provable in
+/// hierarchy V_{κ_n} ⊆ V_{κ_m} whenever n ≤ m. Provable in
 /// ZFC + 2-inacc but not yet formalized in the kernel.
 ///
+
 /// **Discharge target**: lemma `cumulative_universe_inclusion` in
 /// `core/verify/kernel_v0/lemmas/sub.vr` (Phase-1 work, after
 /// mathlib import in #155).

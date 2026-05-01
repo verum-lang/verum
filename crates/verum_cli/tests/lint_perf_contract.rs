@@ -1,10 +1,12 @@
 //! Performance regression contract for `verum lint`.
 //!
+
 //! These tests run the same fixtures the criterion benchmarks use,
 //! with a relaxed wall-clock cap (~3× the criterion target) so they
 //! don't flake on slow CI hardware while still catching the case
 //! where someone reintroduces O(n²) behaviour.
 //!
+
 //! Targets are documented in
 //! `internal/website/docs/architecture/lint-engine.md` under
 //! "Performance contract".

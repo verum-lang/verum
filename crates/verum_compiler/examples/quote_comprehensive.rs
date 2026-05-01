@@ -1,5 +1,6 @@
 //! Comprehensive demonstration of the quote module
 //!
+
 //! This example showcases all major features of the quote module for metaprogramming.
 
 use verum_ast::{

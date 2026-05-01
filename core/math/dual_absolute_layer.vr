@@ -2,28 +2,33 @@
 // MSFS §10 — Dual Absolute Layer: F̃_S, Π̃_4, Π̃_{3-max}, and L_Abs^E
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §10 — AC/OC Morita Duality.
 //
+
 // `L_Abs^E` is the DC-side mirror of MSFS §4's `L_Abs`: an enactment
 // `q ∈ \cE` inhabits `L_Abs^E` iff there exist a Rich-metatheory `S`
 // and ordinal `n` such that `q` simultaneously satisfies *three dual
 // conditions*:
 //
-//   • **(F̃_S)** — formally S-definable enactment: ∃ ι_F ↪ ε(S) with
-//     a φ̃_q in F presenting `q` as a Syn(F)-enactment via Lemma 10.3.
-//   • **(Π̃_{4,S,n})** — dual irreducibility: no `(∞, n)`-enactment
-//     morphism `q → q'` for any `q' ∈ \cS_S^cE^global` is an
-//     equivalence onto its image.
-//   • **(Π̃_{3-max,S,n})** — dual maximal generativity: every
-//     sub-foundation enactment `F̃ ∈ \cF̃` admits an `(∞, n)`-functor
-//     `F̃ → q` equivalent onto its image.
+
+//  • **(F̃_S)** — formally S-definable enactment: ∃ ι_F ↪ ε(S) with
+//  a φ̃_q in F presenting `q` as a Syn(F)-enactment via Lemma 10.3.
+//  • **(Π̃_{4,S,n})** — dual irreducibility: no `(∞, n)`-enactment
+//  morphism `q → q'` for any `q' ∈ \cS_S^cE^global` is an
+//  equivalence onto its image.
+//  • **(Π̃_{3-max,S,n})** — dual maximal generativity: every
+//  sub-foundation enactment `F̃ ∈ \cF̃` admits an `(∞, n)`-functor
+//  `F̃ → q` equivalent onto its image.
 //
+
 // MSFS Theorem 10.7 (Diakrisis 109.T — Dual Boundary Lemma) shows the
 // conjunction is internally inconsistent — `L_Abs^E == ∅`. This module
 // installs the three dual conditions as protocol-level predicates plus
 // the joint-membership axiom; the dual-emptiness theorem itself lands
 // in `theorems/msfs/10_ac_oc_duality/`.
 //
+
 // **Architectural mirror (M0.F).** The dual side mirrors `core/math/
 // absolute_layer.vr` line-for-line, with one structural addition: the
 // `EnactmentCandidate` carrier carries an `&LAbsCandidate`-shaped
@@ -135,20 +140,23 @@ public axiom msfs_definition_10_2_Pi_3_max_dual(witness: &DualConditionPi3Max) -
 // AC/OC Morita Duality — Theorem 10.4 4-step structural decomposition
 // =============================================================================
 //
+
 // MSFS §10 Theorem 10.4 paper proof has FOUR steps:
 //
-//   (a) Full faithfulness of ε. Hom_{cE}(εF_1, εF_2) ≃ Hom_{cF}(F_1, F_2)
-//       via 2-functoriality of Syn over (R5b) Lambek-Scott.
-//   (b) Essential surjectivity at gauge level. The reflector r is part
-//       of object data with invertible counit ε_r; (id_F, r) and
-//       (id_F, ι) compose to identity up to gauge_E (Riehl-Verity 2.1.11
-//       + Adámek-Rosický 1.26).
-//   (c) Lift to (∞,∞). Argument is parametric in n ∈ ℕ ∪ {∞}; uses (R5b),
-//       Kapulkin-Lumsdaine 2021, Barwick-Schommer-Pries 2021, with
-//       stabilisation at n=∞ via Theorem A.7.
-//   (d) Stratum correspondence. Cls and Gen meta-operations preserved
-//       under the equivalence; strata bijection follows from (a)+(b).
+
+//  (a) Full faithfulness of ε. Hom_{cE}(εF_1, εF_2) ≃ Hom_{cF}(F_1, F_2)
+//  via 2-functoriality of Syn over (R5b) Lambek-Scott.
+//  (b) Essential surjectivity at gauge level. The reflector r is part
+//  of object data with invertible counit ε_r; (id_F, r) and
+//  (id_F, ι) compose to identity up to gauge_E (Riehl-Verity 2.1.11
+//  + Adámek-Rosický 1.26).
+//  (c) Lift to (∞,∞). Argument is parametric in n ∈ ℕ ∪ {∞}; uses (R5b),
+//  Kapulkin-Lumsdaine 2021, Barwick-Schommer-Pries 2021, with
+//  stabilisation at n=∞ via Theorem A.7.
+//  (d) Stratum correspondence. Cls and Gen meta-operations preserved
+//  under the equivalence; strata bijection follows from (a)+(b).
 //
+
 // Pre-M-PROOFS-E this was a single witness-parameterised @axiom that
 // directly delivered the AC-projection ensures-clause. M-PROOFS-E
 // (2026-04-28): each of (a), (b), (c), (d) gets its own witness-typed
@@ -247,10 +255,12 @@ public type AcOcMoritaDualityWitness is protocol {
 
 /// **MSFS Theorem 10.4 — AC/OC Morita Duality (compact witness-axiom form).**
 ///
+
 /// `𝔐 ≃_{(∞,∞)} 𝔐_\cE` via the `α ⊣ ε` biadjunction. Compact form:
 /// any DC-side L_Abs candidate projects through `articulation_view()`
 /// into a bona fide AC-side L_Abs candidate satisfying the AC triple.
 ///
+
 /// **Architectural note (M-PROOFS-E 2026-04-28).** This compact form
 /// is preserved for back-compat with existing callers in
 /// `theorems/msfs/10_ac_oc_duality/`; the new `_full` 4-step @theorem
@@ -258,6 +268,7 @@ public type AcOcMoritaDualityWitness is protocol {
 /// the kernel to re-check (a)..(d) on the recheck stack should
 /// supply an `AcOcMoritaDualityWitness` and call the `_full` form.
 ///
+
 /// **This is the load-bearing axiom for §10's promotion to honest
 /// @theorem.** Without it, every dual @theorem would be a self-contained
 /// repeat of the Theorem 5.1 argument; with it, the dual @theorems
@@ -277,20 +288,23 @@ public axiom msfs_theorem_10_4_ac_oc_morita_duality_witness(
 
 /// **MSFS Theorem 10.4 (full 4-step structural body).**
 ///
+
 /// Same statement as the compact form above, but as @theorem with
 /// the 4-step paper proof (a)..(d) decomposed into named structural
 /// applies. Each step is a paper-citation axiom:
 ///
-///   (a) `msfs_theorem_10_4_step_a_eps_fully_faithful` — Lambek-Scott
-///       2-functoriality of Syn.
-///   (b) `msfs_theorem_10_4_step_b_eps_essentially_surjective` —
-///       Riehl-Verity 2.1.11 reflector counit invertibility +
-///       gauge-equivalence-to-identity.
-///   (c) `msfs_theorem_10_4_step_c_lift_to_infinity` — parametric in n
-///       + Theorem A.7 stabilisation.
-///   (d) `msfs_theorem_10_4_step_d_strata_correspondence` — Cls/Gen
-///       preservation + L_Fnd/L_Cls/L_Cls^⊤/L_Abs strata bijection.
+
+///  (a) `msfs_theorem_10_4_step_a_eps_fully_faithful` — Lambek-Scott
+///  2-functoriality of Syn.
+///  (b) `msfs_theorem_10_4_step_b_eps_essentially_surjective` —
+///  Riehl-Verity 2.1.11 reflector counit invertibility +
+///  gauge-equivalence-to-identity.
+///  (c) `msfs_theorem_10_4_step_c_lift_to_infinity` — parametric in n
+///  + Theorem A.7 stabilisation.
+///  (d) `msfs_theorem_10_4_step_d_strata_correspondence` — Cls/Gen
+///  preservation + L_Fnd/L_Cls/L_Cls^⊤/L_Abs strata bijection.
 ///
+
 /// The kernel re-checks all four on the recheck stack — `verum audit
 /// --framework-axioms` enumerates each step's citation independently.
 @verify(formal)
@@ -334,6 +348,7 @@ public theorem msfs_theorem_10_4_ac_oc_morita_duality_full(
 
 /// **MSFS Lemma 10.3 — Enactment syntax-semantics (witness-parameterised).**
 ///
+
 /// Formally S-definable enactment ⟹ in `\cS_S^cE^{global}`. Post-audit
 /// C-7 explicit construction of (ι, r) via Kan extension along
 /// `Syn(F') ↪ \cC`; left reflector r via Adámek–Rosický adjoint-functor
@@ -354,6 +369,7 @@ public axiom msfs_lemma_10_3_enactment_syntax_semantics_witness(
 // Dual conservativity (MSFS Corollary 10.5)
 // =============================================================================
 //
+
 // MSFS Corollary 10.5: Con(F ∪ E) = Con(F) = Con(ZFC + 2-inacc).
 // The witness-parameterised form (M-PROOFS-B 2026-04-28) takes a
 // `&DualLAbsCandidate`, projects it via `articulation_view()` to
@@ -365,6 +381,7 @@ public axiom msfs_lemma_10_3_enactment_syntax_semantics_witness(
 
 /// **MSFS Corollary 10.5 conservativity strength claim — witness-parameterised.**
 ///
+
 /// Conservativity of the AC/OC duality extension: extending MSFS's
 /// theory-side framework `\cF` with the dual-side `\cE` adds no new
 /// proof-theoretic strength. The witness-shape: any `&DualLAbsCandidate`
@@ -374,6 +391,7 @@ public axiom msfs_lemma_10_3_enactment_syntax_semantics_witness(
 /// AC-side conditions hold), which is what the Theorem 10.4 duality
 /// actually delivers.
 ///
+
 /// **Architectural fix (M-PROOFS-B, 2026-04-28).** Pre-fix this was
 /// `() -> Bool ensures true` and the `msfs_corollary_10_5_conservativity`
 /// @theorem applied it as a single tautological cite. Post-fix the

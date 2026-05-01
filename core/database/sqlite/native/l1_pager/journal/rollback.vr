@@ -6,27 +6,32 @@ module core.database.sqlite.native.l1_pager.journal.rollback;
 // Layer: 1
 // Spec: sqlite-native.md §8.7, sqlite.org/lockingv3.html #rollback
 //
+
 // Pre-WAL SQLite writes used a rollback journal file `<db>-journal`.
 // Writers copied each page's pre-image to the journal BEFORE overwriting
 // it in the main DB file; on abort or crash, recovery replays the
 // journal entries back onto the main DB.
 //
+
 // File format (big-endian, matching C-SQLite):
 //
-//     byte 0..7     magic      = 0xd9 0xd5 0x05 0xf9 0x20 0xa1 0x63 0xd7
-//     byte 8..11    nRec       (u32) — number of page records that follow,
-//                                      or 0xFFFFFFFF meaning "use size
-//                                      field" for mid-fsync recovery
-//     byte 12..15   checksum_nonce (u32) — included in per-record cksum
-//     byte 16..19   initial_db_size_pages (u32)
-//     byte 20..23   sector_size (u32)
-//     byte 24..27   page_size   (u32)
+
+//  byte 0..7 magic = 0xd9 0xd5 0x05 0xf9 0x20 0xa1 0x63 0xd7
+//  byte 8..11 nRec (u32) — number of page records that follow,
+//  or 0xFFFFFFFF meaning "use size
+//  field" for mid-fsync recovery
+//  byte 12..15 checksum_nonce (u32) — included in per-record cksum
+//  byte 16..19 initial_db_size_pages (u32)
+//  byte 20..23 sector_size (u32)
+//  byte 24..27 page_size (u32)
 //
-//     -- then `nRec` records of:
-//     byte 0..3     page_number (u32)
-//     byte 4..page_size+3   pre-image bytes
-//     byte page_size+4..+7  checksum (u32; simple accumulator)
+
+//  -- then `nRec` records of:
+//  byte 0..3 page_number (u32)
+//  byte 4..page_size+3 pre-image bytes
+//  byte page_size+4..+7 checksum (u32; simple accumulator)
 //
+
 // This module implements the *pure* serialise / parse side; durability
 // (fsync barriers before any DB overwrite) is driven by the pager actor
 // via `JournalCommand.AppendPreimage` requests.

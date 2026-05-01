@@ -14,6 +14,7 @@
 )]
 //! Edge case tests for parser robustness.
 //!
+
 //! Tests that the parser never panics on any input and handles all edge cases
 //! gracefully by returning errors instead of crashing.
 

@@ -1,9 +1,10 @@
 //! Tests for the type-layout invariant verifier (#146).
 //!
+
 //! Each test constructs a synthetic `TypeDescriptor` with a deliberate
 //! shape violation, pushes it into a fresh `VbcCodegen`'s type table,
 //! and asserts that `verify_type_layout_invariants` rejects it with
-//! a focused error message.  Together they pin the invariants that
+//! a focused error message. Together they pin the invariants that
 //! `finalize_module` enforces before bytecode is emitted.
 
 use smallvec::smallvec;

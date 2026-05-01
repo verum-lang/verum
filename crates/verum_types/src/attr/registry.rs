@@ -1,46 +1,59 @@
 //! Attribute Registry for Verum.
 //!
+
 //! This module provides a centralized registry for all known attributes,
 //! enabling compile-time validation, IDE support, and documentation generation.
 //!
+
 //! # Overview
 //!
+
 //! The [`AttributeRegistry`] is the single source of truth for attribute metadata.
 //! It provides:
 //!
+
 //! - Validation of attribute names and targets
 //! - Argument specification checking
 //! - Conflict and requirement detection
 //! - IDE completion support
 //! - Documentation generation
 //!
+
 //! # Usage
 //!
+
 //! ```rust
 //! use verum_types::attr::{registry, AttributeRegistry};
 //! use verum_ast::attr::{Attribute, AttributeTarget};
 //!
+
 //! // Get read access to global registry
 //! let reg = registry();
 //!
+
 //! // Check if an attribute exists
 //! assert!(reg.exists("inline"));
 //! assert!(reg.exists("cold"));
 //!
+
 //! // Validate an attribute
 //! let attr = Attribute::simple("inline".into(), Default::default());
 //! let result = reg.validate(&attr, AttributeTarget::Function);
 //! assert!(result.is_ok());
 //! ```
 //!
+
 //! # Thread Safety
 //!
+
 //! The registry is thread-safe and can be accessed from multiple threads
 //! concurrently. Use [`registry()`] for read access and [`registry_mut()`]
 //! for write access (rare, typically only during initialization).
 //!
+
 //! # Specification
 //!
+
 //! Attribute registry: validation rules for @derive, @verify, @cfg, @repr and other compile-time attributes
 
 use std::sync::RwLock;
@@ -55,6 +68,7 @@ use super::error::AttributeError;
 
 /// Global attribute registry instance.
 ///
+
 /// Initialized lazily on first access with all standard Verum attributes.
 pub static REGISTRY: Lazy<RwLock<AttributeRegistry>> = Lazy::new(|| {
     let mut registry = AttributeRegistry::new();
@@ -64,10 +78,13 @@ pub static REGISTRY: Lazy<RwLock<AttributeRegistry>> = Lazy::new(|| {
 
 /// Get read access to the global attribute registry.
 ///
+
 /// This is the primary way to access the registry for validation.
 ///
+
 /// # Panics
 ///
+
 /// Panics if the registry lock is poisoned (should never happen in practice).
 #[must_use]
 pub fn registry() -> std::sync::RwLockReadGuard<'static, AttributeRegistry> {
@@ -76,11 +93,14 @@ pub fn registry() -> std::sync::RwLockReadGuard<'static, AttributeRegistry> {
 
 /// Get write access to the global attribute registry.
 ///
+
 /// This is rarely needed - typically only during initialization or
 /// when registering custom attributes.
 ///
+
 /// # Panics
 ///
+
 /// Panics if the registry lock is poisoned.
 #[must_use]
 pub fn registry_mut() -> std::sync::RwLockWriteGuard<'static, AttributeRegistry> {
@@ -89,6 +109,7 @@ pub fn registry_mut() -> std::sync::RwLockWriteGuard<'static, AttributeRegistry>
 
 /// Centralized registry for all known attributes.
 ///
+
 /// The registry maintains metadata for all registered attributes and provides
 /// validation, lookup, and iteration capabilities.
 #[derive(Debug)]
@@ -120,8 +141,10 @@ impl AttributeRegistry {
 
     /// Register a new attribute.
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if an attribute with the same name is already registered.
     pub fn register(&mut self, meta: AttributeMetadata) -> Result<(), RegistryError> {
         if self.attrs.contains_key(&meta.name) {
@@ -140,6 +163,7 @@ impl AttributeRegistry {
 
     /// Register an attribute, replacing any existing registration.
     ///
+
     /// Use this for testing or overriding built-in attributes.
     pub fn register_or_replace(&mut self, meta: AttributeMetadata) {
         // Remove from old category if exists
@@ -199,8 +223,10 @@ impl AttributeRegistry {
 
     /// Validate a single attribute.
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if:
     /// - The attribute is unknown and `allow_unknown` is false
     /// - The attribute is not valid for the given target
@@ -276,14 +302,17 @@ impl AttributeRegistry {
 
     /// Validate a collection of attributes on the same item.
     ///
+
     /// This checks for:
     /// - Individual attribute validity
     /// - Duplicate non-repeatable attributes
     /// - Conflicting attributes
     /// - Missing required attributes
     ///
+
     /// # Errors
     ///
+
     /// Returns a list of all validation errors found.
     pub fn validate_collection(
         &self,
@@ -362,6 +391,7 @@ impl AttributeRegistry {
 
     /// Set whether to allow unknown attributes.
     ///
+
     /// When enabled, unknown attributes will produce warnings instead of errors.
     pub fn set_allow_unknown(&mut self, allow: bool) {
         self.allow_unknown = allow;
@@ -369,6 +399,7 @@ impl AttributeRegistry {
 
     /// Set whether to warn about unknown attributes.
     ///
+
     /// Only applies when `allow_unknown` is true.
     pub fn set_warn_unknown(&mut self, warn: bool) {
         self.warn_unknown = warn;

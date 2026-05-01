@@ -1,7 +1,9 @@
 //! Production Target Benchmarks for verum_fast_parser
 //!
+
 //! Target: Compilation > 50K LOC/sec (parsing is part of the pipeline)
 //!
+
 //! This benchmark generates realistic Verum source at various scales
 //! and measures parse throughput in LOC/sec.
 

@@ -5,12 +5,15 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // The text module provides comprehensive text processing capabilities:
 //
+
 // - text.vr: UTF-8 Text type with SSO optimization
 // - char.vr: Character utilities and Unicode support
 // - format.vr: Formatting system (Formatter, Debug, Display, print)
 //
+
 // =============================================================================
 
 // Re-export text types

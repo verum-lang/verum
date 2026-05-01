@@ -1,8 +1,9 @@
 //! Lean 4 backend for kernel-soundness cross-export.
 //!
+
 //! Produces a single `KernelSoundness.lean` file in the same shape
 //! as the Coq backend's output: inductives, per-rule lemmas, top-level
-//! theorem.  `lean KernelSoundness.lean` re-checks Verum's claim
+//! theorem. `lean KernelSoundness.lean` re-checks Verum's claim
 //! independently.
 
 use super::{LemmaStatus, RuleSpec, SoundnessBackend};

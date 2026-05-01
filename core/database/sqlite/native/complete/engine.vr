@@ -3,8 +3,10 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_complete(sql) → int (1 if complete, 0 otherwise)
+
+//  sqlite3_complete(sql) → int (1 if complete, 0 otherwise)
 //
+
 // The UTF-16 variant sqlite3_complete16 is expected to decode into the
 // same byte-oriented scanner; this façade only exposes the UTF-8 form.
 // =============================================================================

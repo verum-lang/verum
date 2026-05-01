@@ -1,5 +1,6 @@
 //! Module-level IR.
 //!
+
 //! [`IrModule`] is the top-level read-only view a verification pass
 //! consumes. It holds the lowered view of every function, theorem,
 //! lemma, corollary, axiom, and type declaration in one compilation

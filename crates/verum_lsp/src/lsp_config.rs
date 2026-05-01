@@ -1,5 +1,6 @@
 //! LSP-wide configuration driven by the client's `initializationOptions`.
 //!
+
 //! Every knob surfaced in the VS Code extension's `package.json` (and the
 //! settings snippet in `docs/detailed/25-developer-tooling.md §3.12`) lands
 //! here. Components that need the value (refinement validator, CBGR hints,
@@ -7,6 +8,7 @@
 //! we can update it from the `initialize` handler without `&mut self` on
 //! the `LanguageServer` trait.
 //!
+
 //! All fields have sensible defaults: a freshly constructed `LspConfig`
 //! reproduces the old hard-coded behaviour, so existing code paths continue
 //! to work even when the client sends no init options.
@@ -81,6 +83,7 @@ impl SmtSolverChoice {
 
 /// All LSP-side knobs exposed by the client.
 ///
+
 /// Field names mirror the `initializationOptions` keys the VS Code extension
 /// sends in `extension.ts::startLanguageClient`. Unknown / missing keys fall
 /// back to `Default` values, so older clients remain forward-compatible.
@@ -276,6 +279,7 @@ impl LspConfig {
 
 /// Thread-safe shared view for components that read the config.
 ///
+
 /// Uses `RwLock` so concurrent reads (every hover / validate call) are
 /// lock-free after initialization; writes happen only from `initialize` and
 /// `workspace/didChangeConfiguration`.

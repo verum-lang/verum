@@ -2,47 +2,55 @@
 // core/net/weft/http3.vr — HTTP/3 (QUIC) server adapter
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §6.3 / §6.10 / §6.11
-// RFCs:  9114 (HTTP/3), 9204 (QPACK), 9221 (QUIC datagrams),
-//        9218 (H3 extensible priorities), 9297 (H3 datagrams),
-//        draft-ietf-webtrans-http3-15 (WebTransport)
+// Spec: internal/specs/net-framework.md §6.3 / §6.10 / §6.11
+// RFCs: 9114 (HTTP/3), 9204 (QPACK), 9221 (QUIC datagrams),
+//  9218 (H3 extensible priorities), 9297 (H3 datagrams),
+//  draft-ietf-webtrans-http3-15 (WebTransport)
 // =============================================================================
 //
+
 // Plugs `core/net/http3.Http3Server` (intrinsic-backed, ~1200 LOC of
 // QUIC+QPACK stdlib) into Weft's `Handler` + `Router` stack. No QUIC,
 // QPACK, or frame logic duplicated — this file only:
 //
-//   1. Owns an Http3Server + the app's Handler.
-//   2. Loops `Http3Server.accept()`; for each accepted request,
-//      spawns a task that:
-//        a) Converts `Http3Request` → `WeftRequest`.
-//        b) Dispatches through the Handler / Router.
-//        c) Writes the response body to `Http3RequestHandle`.
+
+//  1. Owns an Http3Server + the app's Handler.
+//  2. Loops `Http3Server.accept()`; for each accepted request,
+//  spawns a task that:
+//  a) Converts `Http3Request` → `WeftRequest`.
+//  b) Dispatches through the Handler / Router.
+//  c) Writes the response body to `Http3RequestHandle`.
 //
+
 // Why a distinct `Http3WeftServer` (rather than `Server<H>.serve_h3()`)?
 // HTTP/3 multiplexes at the QUIC-stream level, not the TCP-connection
 // level; the accept-loop cadence is "accept request" not "accept TCP".
 // A separate server type keeps that cleanly separated while reusing
 // the entire Handler / Router / Middleware stack unchanged.
 //
+
 // Phase-4 scope (in):
 //
-//   * Unary request/response over h3 streams (the 90% case).
-//   * Response stamping via H3 frames (HEADERS, DATA, END_STREAM
-//     implicit in `finish()`).
-//   * QuicConfig exposure with the Weft-blessed PQ-hybrid defaults
-//     (§6.11) — MLKEM768 + X25519 + TLS 1.3 mandatory.
+
+//  * Unary request/response over h3 streams (the 90% case).
+//  * Response stamping via H3 frames (HEADERS, DATA, END_STREAM
+//  implicit in `finish()`).
+//  * QuicConfig exposure with the Weft-blessed PQ-hybrid defaults
+//  (§6.11) — MLKEM768 + X25519 + TLS 1.3 mandatory.
 //
+
 // Phase-4 scope (deferred to follow-up):
 //
-//   * Server-streaming via multiple DATA writes before finish.
-//   * WebTransport sessions (§6.10 CONNECT + bidi/uni streams +
-//     DATAGRAM fan-out).
-//   * Multipath QUIC path scheduler (§6.10 draft-ietf-quic-multipath-21).
-//   * QUIC-LB connection-ID rotation (§6.10 draft-ietf-quic-load-balancers).
-//   * 0-RTT idempotent-only admission (§6.10 "0-RTT replay-defence").
-//   * Priority header (§6.10 RFC 9218).
+
+//  * Server-streaming via multiple DATA writes before finish.
+//  * WebTransport sessions (§6.10 CONNECT + bidi/uni streams +
+//  DATAGRAM fan-out).
+//  * Multipath QUIC path scheduler (§6.10 draft-ietf-quic-multipath-21).
+//  * QUIC-LB connection-ID rotation (§6.10 draft-ietf-quic-load-balancers).
+//  * 0-RTT idempotent-only admission (§6.10 "0-RTT replay-defence").
+//  * Priority header (§6.10 RFC 9218).
 //
+
 // =============================================================================
 
 module core.net.weft.http3;
@@ -294,6 +302,7 @@ fn split_path_query(raw: &Text) -> (Text, Maybe<Text>) {
 /// completion via an H3DataSink, then flushes any accumulated bytes
 /// and finishes the stream.
 ///
+
 /// On success: the stream is closed cleanly with END_STREAM.
 /// On `H3Error.StreamCancelled`: the surrounding cancellation token
 /// fires, the sink reports cancellation, and we propagate the error
@@ -323,6 +332,7 @@ public async fn emit_streaming_response(
     // the drain loop replenishes the sink's credit + flushes pending
     // bytes through the H3 handle.
     //
+
     // Phase-F current scope drives them sequentially (writer to
     // completion, then single drain) — the credit-aware spawn
     // pattern is a §6.10 follow-up once the runtime exposes
@@ -340,7 +350,7 @@ public async fn emit_streaming_response(
         handle.write_body(&chunk).await?;
     }
 
-    // 4. Trailers (RFC 9114 §4.4).  Emitted as a second QPACK-encoded
+    // 4. Trailers (RFC 9114 §4.4). Emitted as a second QPACK-encoded
     // HEADERS frame after the final DATA frame and before stream FIN.
     // gRPC over HTTP/3 carries grpc-status / grpc-message in trailers,
     // so this is a load-bearing path.

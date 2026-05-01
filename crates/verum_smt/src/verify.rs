@@ -1,5 +1,6 @@
 //! Core refinement type verification using Z3.
 //!
+
 //! This module provides the main verification logic for checking if values
 //! satisfy refinement predicates.
 
@@ -26,9 +27,11 @@ fn get_verification_cache() -> &'static VerificationCache {
 
 /// Get verification cache statistics.
 ///
+
 /// Returns metrics about cache performance including hit rate, size, and timing.
 /// Useful for monitoring and optimizing verification performance.
 ///
+
 /// # Example
 /// ```ignore
 /// let stats = get_cache_stats();
@@ -41,6 +44,7 @@ pub fn get_cache_stats() -> crate::verification_cache::CacheStats {
 
 /// Clear the verification cache.
 ///
+
 /// This removes all cached verification results. Useful for testing or when
 /// starting a new compilation session.
 pub fn clear_cache() {
@@ -132,6 +136,7 @@ impl ProofResult {
 
     /// Add structured proof term.
     ///
+
     /// This stores the fully parsed proof term from Z3 for downstream analysis,
     /// proof minimization, and export to other proof formats.
     pub fn with_structured_proof(mut self, proof: crate::proof_extraction::ProofTerm) -> Self {
@@ -156,21 +161,26 @@ impl ProofResult {
 
     /// Export the structured proof (if any) as a certificate in the requested format.
     ///
+
     /// This is the main integration point between the verification pipeline and the
     /// certificate export pipeline:
     ///
+
     /// ```text
-    /// ProofResult.structured_proof  (proof_extraction::ProofTerm)
-    ///   └─ ProofExtractor::to_bridge_term()
-    ///   └─ proof_extraction_bridge::proof_to_certificate()
-    ///   └─ certificates::Certificate
+    /// ProofResult.structured_proof (proof_extraction::ProofTerm)
+    ///  └─ ProofExtractor::to_bridge_term()
+    ///  └─ proof_extraction_bridge::proof_to_certificate()
+    ///  └─ certificates::Certificate
     /// ```
     ///
+
     /// Returns `None` if no structured proof is available (e.g. cache hit with
     /// `enable_proofs = false`, or the proof was erased).
     ///
+
     /// # Arguments
     ///
+
     /// * `theorem_name` — identifier for the theorem
     /// * `theorem_statement` — human-readable statement of what was proven
     /// * `format` — target certificate format
@@ -260,12 +270,14 @@ impl VerificationError {
 
 /// Verify a refinement type constraint.
 ///
+
 /// # Arguments
 /// * `context` - The Z3 context
 /// * `ty` - The type being verified (should be a refinement type)
 /// * `value_expr` - Optional expression representing the value to check
 /// * `mode` - Verification mode
 ///
+
 /// # Returns
 /// * `Ok(ProofResult)` if the constraint is proven
 /// * `Err(VerificationError)` if the constraint cannot be proven or verification fails
@@ -302,6 +314,7 @@ pub fn verify_refinement(
 
 /// Uncached verification (internal helper).
 ///
+
 /// This function performs the actual SMT verification without caching.
 /// It is called by verify_refinement when a cache miss occurs.
 fn verify_refinement_uncached(
@@ -440,6 +453,7 @@ pub fn estimate_complexity(ty: &Type) -> u32 {
 
 /// Estimate the complexity of an expression.
 ///
+
 /// Public wrapper for testing. This function estimates how complex an expression
 /// is for SMT verification purposes (0-100 scale).
 pub fn estimate_expr_complexity(expr: &Expr) -> u32 {
@@ -582,6 +596,7 @@ impl<'ctx> IncrementalVerifier<'ctx> {
 
 /// Parallel verification for independent constraints
 ///
+
 /// Verifies multiple constraints in parallel (conceptually - actual parallelism
 /// would require thread-safe Z3 contexts). Returns results in the same order
 /// as input constraints.
@@ -602,6 +617,7 @@ pub fn verify_parallel(
 
 /// Batch verification with shared context
 ///
+
 /// Optimized for verifying multiple related constraints that share
 /// common subexpressions or variables. Uses incremental solving.
 pub fn verify_batch_incremental(

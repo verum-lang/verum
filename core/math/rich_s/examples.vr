@@ -2,12 +2,14 @@
 // MSFS — R-S examples (standard Rich foundations)
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §3.2 — Examples of R-S
 // metatheories. The paper enumerates eight canonical foundations
 // that satisfy (R1)–(R5); plus side-references to several
 // extensions (linear logic + !, Eff internal, Lurie ∞-topos
 // internal, cohesive ∞-topos, NCG, motivic homotopy theory, …).
 //
+
 // Each example here is a single `@framework(msfs, "<S> ∈ R-S")`
 // axiom that admits the *fact* that the named theory satisfies
 // (R1)–(R5). The actual proof of (R1)–(R5) for each theory lives
@@ -16,6 +18,7 @@
 // Lambek–Scott style syntax-semantics theorem). Verum records the
 // admission, not the metatheoretic proof.
 //
+
 // The `n_S` value is captured per-axiom because §7 (vertical
 // absoluteness) consumes it directly. ∞ is encoded as `-1` in
 // keeping with `lib.math.frameworks.msfs.key_symbols::n_level`.
@@ -29,6 +32,7 @@ mount core.math.rich_s.conditions.{RichS};
 // V3 NOTE — witness-parameterised R-S admission axioms
 // =============================================================================
 //
+
 // Each `<theory> ∈ R-S` admission is now witness-parameterised over
 // a `R: RichS` carrier instance. The ensures clause asserts the
 // theory's claimed `n_S` value via the `R::n_S()` protocol method —
@@ -36,11 +40,12 @@ mount core.math.rich_s.conditions.{RichS};
 // concrete proofs live outside Verum (literature-cited per theory);
 // this admission records the membership FACT.
 //
+
 // The integer encoding for `n_S`:
-//   n_ZFC = 1 (1-categorical), n_NBG = 1, n_MLTT = -1 (∞),
-//   n_HoTT = -1, n_CIC = -1, n_Cubical = -1, n_linear = -1,
-//   n_Eff = -1, n_Lurie = -1, n_cohesive = -1, n_NCG = -1,
-//   n_motivic = -1.
+//  n_ZFC = 1 (1-categorical), n_NBG = 1, n_MLTT = -1 (∞),
+//  n_HoTT = -1, n_CIC = -1, n_Cubical = -1, n_linear = -1,
+//  n_Eff = -1, n_Lurie = -1, n_cohesive = -1, n_NCG = -1,
+//  n_motivic = -1.
 // (-1 is the wire-level encoding of ∞ per
 // `core.math.frameworks.msfs.key_symbols::n_level`.)
 

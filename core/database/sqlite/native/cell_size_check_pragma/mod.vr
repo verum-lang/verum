@@ -3,7 +3,7 @@
 // =============================================================================
 // PRAGMA cell_size_check — when ON, the engine validates the size of every
 // b-tree cell as pages are loaded from disk, catching certain corruptions
-// before they can be acted on.  Slight read-side cost.  Default OFF.
+// before they can be acted on. Slight read-side cost. Default OFF.
 // Spec §15.4.
 // =============================================================================
 

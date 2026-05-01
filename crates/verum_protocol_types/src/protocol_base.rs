@@ -1,17 +1,21 @@
 //! Core Protocol Type Definitions
 //!
+
 //! Verum Protocol System Core Types:
 //! Protocols (analogous to traits) declare required methods, associated types,
 //! and associated constants. Implementations provide concrete definitions.
 //! Protocol bounds constrain generic type parameters. Object safety rules
 //! determine which protocols can be used as dynamic dispatch (dyn Protocol).
 //!
+
 //! This module contains the foundational protocol (trait) type definitions
 //! without any verification logic. These types are used by both verum_types
 //! and verum_smt.
 //!
+
 //! # Design
 //!
+
 //! These are pure data structures representing:
 //! - Protocol declarations (methods, associated types, constants)
 //! - Protocol implementations
@@ -33,6 +37,7 @@ pub type Type = AstType;
 
 /// Object safety error
 ///
+
 /// Object safety errors that prevent a protocol from being used as `dyn Protocol`.
 /// A protocol is object-safe when all methods can be dispatched through a vtable:
 /// - Methods must not return Self (unknown size through vtable)
@@ -40,7 +45,7 @@ pub type Type = AstType;
 /// - Methods must take self by reference (&self or &mut self), not by value
 /// - Protocol must not have associated constants (no vtable slot)
 /// - Protocol must not require Self: Sized bound
-///   These rules ensure dynamic dispatch is possible without knowing the concrete type.
+///  These rules ensure dynamic dispatch is possible without knowing the concrete type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObjectSafetyError {
     /// Method returns Self (unknown size)
@@ -124,16 +129,18 @@ impl std::fmt::Display for ObjectSafetyError {
 
 /// A protocol declaration (like a trait/type class)
 ///
+
 /// Protocols define required methods, associated types, and constants
 /// that implementing types must provide.
 ///
+
 /// Example:
 /// ```verum
 /// protocol Eq<T> {
-///     fn eq(self: T, other: T) -> Bool;
-///     fn ne(self: T, other: T) -> Bool {
-///         !self.eq(other)  // Default implementation
-///     }
+///  fn eq(self: T, other: T) -> Bool;
+///  fn ne(self: T, other: T) -> Bool {
+///  !self.eq(other) // Default implementation
+///  }
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -182,17 +189,20 @@ pub struct ProtocolMethod {
 
 /// Associated type in a protocol
 ///
+
 /// Associated type in a protocol. Implementations must provide a concrete type.
 /// Example: `type Item` in Iterator protocol, implemented as `type Item is Int`.
 ///
+
 /// This is the base version without GAT support.
 /// For GAT support, see gat_types::AssociatedTypeGAT.
 ///
+
 /// Example:
 /// ```verum
 /// protocol Container {
-///     type Item
-///     fn get(&self, index: Int) -> Maybe<Self.Item>
+///  type Item
+///  fn get(&self, index: Int) -> Maybe<Self.Item>
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -236,6 +246,7 @@ pub struct AssociatedConst {
 
 /// A protocol bound (constraint)
 ///
+
 /// Example: `T: Eq + Ord`
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolBound {
@@ -245,6 +256,7 @@ pub struct ProtocolBound {
     pub args: List<Type>,
     /// Whether this is a negative bound (!Protocol syntax)
     ///
+
     /// When true, this bound requires the type to NOT implement the protocol.
     /// This is used for specialization coherence and mutual exclusion patterns.
     pub is_negative: bool,
@@ -284,12 +296,13 @@ impl ProtocolBound {
 
 /// An implementation of a protocol for a specific type
 ///
+
 /// Example:
 /// ```verum
 /// impl Eq for Int {
-///     fn eq(self: Int, other: Int) -> Bool {
-///         // implementation
-///     }
+///  fn eq(self: Int, other: Int) -> Bool {
+///  // implementation
+///  }
 /// }
 /// ```
 #[derive(Debug, Clone)]

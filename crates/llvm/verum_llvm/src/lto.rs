@@ -1,5 +1,6 @@
 //! Link-Time Optimization (LTO) support
 //!
+
 //! Provides ThinLTO and Full LTO with incremental caching.
 
 // On MSVC, the linker processes static libraries in single-pass order.
@@ -84,6 +85,7 @@ impl ThinLtoCache {
         // routes pruning_interval / expiration / max_size_percentage
         // into the LLVM cache setters, dropping max_size_bytes.
         //
+
         // Surface a debug trace when the user sets a non-zero byte
         // cap so embedders writing
         // `[lto.cache] max_size_bytes = 1073741824` see the value
@@ -283,6 +285,7 @@ impl ThinLtoCodegen {
 
     /// Set PIC model.
     ///
+
     /// ThinLTO has its own PIC-model setter
     /// (`thinlto_codegen_set_pic_model`) — wires the manifest's
     /// `pic` setting into the codegen so position-independent /
@@ -461,12 +464,14 @@ impl FullLtoCodegen {
     /// Set whether the linker should internalize non-preserved
     /// symbols.
     ///
+
     /// Internalization is the LTO optimization that converts
     /// external linkage to internal linkage for symbols that
     /// aren't part of the public API. This unlocks aggressive
     /// inlining and dead-code elimination on functions that
     /// would otherwise be considered linker-visible.
     ///
+
     /// Wraps `lto_codegen_set_should_internalize`.
     pub fn set_internalize(&self, internalize: bool) {
         unsafe {
@@ -596,6 +601,7 @@ unsafe impl Send for FullLtoCodegen {}
 
 /// High-level LTO compilation function
 ///
+
 /// Compiles multiple bitcode modules using LTO.
 pub fn lto_compile(modules: &[&[u8]], config: &LtoConfig) -> LlvmResult<Vec<Vec<u8>>> {
     match config.mode {

@@ -8,8 +8,9 @@ mount base.{Bool, Int64};
 // IDF(term) = log((N - df + 0.5) / (df + 0.5) + 1)
 // where N = total docs and df = doc frequency of the term.
 //
+
 // To keep this catalogue side-effect-free we expose a monotone approximation:
-//   idf_rank(N, df) = (N - df + 1) / (df + 1)
+//  idf_rank(N, df) = (N - df + 1) / (df + 1)
 // which preserves the ordering of the real IDF for a fixed N.
 public fn idf_rank(total_docs: Int64, doc_freq: Int64) -> Float {
     let n = total_docs as Float;
@@ -19,8 +20,9 @@ public fn idf_rank(total_docs: Int64, doc_freq: Int64) -> Float {
 
 // Term score contribution — tf-normalized per the full BM25 formula.
 //
-//   tf_norm = tf * (k1 + 1)
-//           / (tf + k1 * (1 - b + b * (dl / avgdl)))
+
+//  tf_norm = tf * (k1 + 1)
+//  / (tf + k1 * (1 - b + b * (dl / avgdl)))
 public fn term_score(
     tf: Int64,               // raw term frequency in this doc
     dl: Int64,               // document length (tokens)

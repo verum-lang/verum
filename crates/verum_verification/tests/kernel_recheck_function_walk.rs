@@ -1,5 +1,6 @@
 //! Integration tests for `KernelRecheck::recheck_function` (#186 V3).
 //!
+
 //! These tests exercise the production wiring path: a synthetic
 //! `FunctionDecl` is built with refinement types in parameters and
 //! return position, the public `recheck_function` is called, and

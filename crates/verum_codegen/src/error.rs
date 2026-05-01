@@ -1,5 +1,6 @@
 //! Code Generation Errors
 //!
+
 //! Error types for MLIR-based code generation.
 
 use std::fmt::Display;

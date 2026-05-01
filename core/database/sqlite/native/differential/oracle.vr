@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.4
 //
+
 // `DifferentialOracle` accumulates per-case outcomes + provides a
 // summary report. Callers feed it (case, loom_result, c_result)
 // triples and the oracle classifies each via the comparator.

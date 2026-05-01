@@ -1,5 +1,6 @@
 //! Playbook session state management
 //!
+
 //! This module manages the execution state for a playbook session, including:
 //! - Cell management (create, delete, reorder)
 //! - VBC execution pipeline integration
@@ -15,6 +16,7 @@ use crate::IncrementalScriptParser;
 
 /// Session state for a playbook
 ///
+
 /// Manages the complete state of a playbook session including:
 /// - Cell contents and outputs
 /// - VBC execution pipeline for actual code execution
@@ -228,6 +230,7 @@ impl SessionState {
 
     /// Execute the current cell and return any diagnostics (line, message pairs).
     ///
+
     /// Diagnostics are extracted from parse errors to enable editor underlines.
     pub fn execute_current_with_diagnostics(&mut self) -> (Result<(), Text>, Vec<(usize, String)>) {
         let result = self.execute_current();
@@ -400,6 +403,7 @@ impl SessionState {
 
     /// Execute all cells from the beginning
     ///
+
     /// Resets the execution context and re-executes all cells in order.
     /// This ensures a clean state and is useful when bindings may have
     /// become inconsistent.
@@ -427,6 +431,7 @@ impl SessionState {
 
     /// Execute cells from the current one to the end
     ///
+
     /// Invalidates the parser cache from the current line and re-executes
     /// all cells from this point forward. Bindings from earlier cells
     /// are preserved.
@@ -463,6 +468,7 @@ impl SessionState {
 
     /// Clear all outputs
     ///
+
     /// Clears all cell outputs and resets the execution context.
     /// The next execution will start fresh.
     pub fn clear_all_outputs(&mut self) {

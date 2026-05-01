@@ -1,31 +1,40 @@
 //! Variance Inference and Checking
 //!
+
 //! Variance inference: determining covariant/contravariant/invariant usage of type parameters from their positions
 //!
+
 //! Variance determines how generic type parameters behave under subtyping.
 //! This module implements variance inference and checking to ensure type soundness.
 //!
+
 //! # Variance Rules
 //!
+
 //! - **Covariant** (+T): If S <: T, then Container<S> <: Container<T>
 //! - **Contravariant** (-T): If S <: T, then Container<T> <: Container<S>
 //! - **Invariant** (T): Requires exact type match
 //!
+
 //! # Examples
 //!
+
 //! ```rust,ignore
 //! use verum_types::variance::*;
 //! use verum_types::ty::Type;
 //! use verum_common::{List, Text};
 //!
+
 //! // Container<+T> with only covariant uses of T
 //! // type Container<+T> is { value: T, get: Unit -> T }
 //! // ✅ Covariant (safe)
 //!
+
 //! // Sink<-T> with only contravariant uses of T
 //! // type Sink<-T> is { put: T -> Unit }
 //! // ✅ Contravariant (safe)
 //!
+
 //! // Cell<T> with mutable reference
 //! // type Cell<T> is { value: &mut T }
 //! // ✅ Invariant (required for soundness)
@@ -45,6 +54,7 @@ const WKT_MAP: &str = wkt_names::MAP;
 
 /// Variance of a type parameter
 ///
+
 /// Determines how subtyping works for generic types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Variance {
@@ -140,9 +150,11 @@ impl VarianceChecker {
 
     /// Infer the variance of a type parameter in a type body
     ///
+
     /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant///
     /// # Algorithm
     ///
+
     /// 1. Find all occurrences of the parameter in the type body
     /// 2. Compute variance at each occurrence position
     /// 3. Combine all variances (must be compatible)
@@ -163,6 +175,7 @@ impl VarianceChecker {
 
     /// Check that declared variance matches inferred variance
     ///
+
     /// Variance compatibility: checking that type parameter usage is consistent with declared variance
     pub fn check_variance(
         &mut self,
@@ -188,6 +201,7 @@ impl VarianceChecker {
 
     /// Compute variance at a specific position in the type
     ///
+
     /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
     fn variance_at_position(
         &mut self,
@@ -296,6 +310,7 @@ impl VarianceChecker {
                 // and C's parameter has declared variance v2, then the combined variance
                 // is compose_variance(v2, v1).
                 //
+
                 // Example: If we have Container<+T> (covariant) and we're checking
                 // variance of S in Container<Foo<S>>, and S is covariant in Foo,
                 // then S is covariant in Container<Foo<S>> (compose Covariant ∘ Covariant).
@@ -305,6 +320,7 @@ impl VarianceChecker {
                 // Since we don't have a type definition registry yet, we use a conservative
                 // approach: assume covariance for standard library types and invariance for others.
                 //
+
                 // Standard library covariant types: List, Set, Maybe, Tree, etc.
                 // Invariant types: Map (keys), Cell, Ref, etc.
                 let param_variances = self.infer_constructor_variances(path);
@@ -443,6 +459,7 @@ impl VarianceChecker {
 
     /// Check if declared variance is compatible with inferred variance
     ///
+
     /// Variance compatibility: checking that type parameter usage is consistent with declared variance
     fn compatible_variance(&self, declared: Variance, inferred: Variance) -> bool {
         match (declared, inferred) {
@@ -532,9 +549,11 @@ impl VarianceChecker {
 
     /// Infer variance for constructor parameters based on well-known types
     ///
+
     /// This is a temporary implementation until we have a proper type definition registry.
     /// It provides correct variance for standard library types based on their documented behavior.
     ///
+
     /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
     fn infer_constructor_variances(&self, path: &verum_ast::ty::Path) -> List<Variance> {
         // Get the last component of the path (the type name)
@@ -604,6 +623,7 @@ impl Default for VarianceChecker {
 
 /// Flip variance: Covariant ↔ Contravariant, Invariant stays Invariant
 ///
+
 /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
 pub fn flip_variance(v: Variance) -> Variance {
     match v {
@@ -615,10 +635,13 @@ pub fn flip_variance(v: Variance) -> Variance {
 
 /// Compose variances: outer variance ∘ inner variance
 ///
+
 /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
 ///
+
 /// # Examples
 ///
+
 /// ```text
 /// Covariant ∘ Covariant = Covariant
 /// Covariant ∘ Contravariant = Contravariant
@@ -639,10 +662,13 @@ pub fn compose_variance(outer: Variance, inner: Variance) -> Variance {
 
 /// Combine multiple variances into a single variance
 ///
+
 /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
 ///
+
 /// # Rules
 ///
+
 /// - If any is Invariant, result is Invariant
 /// - If both Covariant and Contravariant present, result is Invariant
 /// - If all Covariant, result is Covariant

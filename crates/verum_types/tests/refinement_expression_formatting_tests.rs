@@ -1,5 +1,6 @@
 //! Tests for expression formatting and hashing in the refinement checker.
 //!
+
 //! These tests verify that:
 //! 1. Expression formatting produces readable output
 //! 2. Cache key hashing is deterministic and structural

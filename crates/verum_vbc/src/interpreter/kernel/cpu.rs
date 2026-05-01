@@ -1,10 +1,13 @@
 //! CPU kernel implementations with SIMD optimization.
 //!
+
 //! This module provides scalar and SIMD-optimized implementations of tensor
 //! operations for CPU execution.
 //!
+
 //! # Broadcasting
 //!
+
 //! Binary operations support NumPy-style broadcasting:
 //! - Shapes are right-aligned
 //! - Dimensions match if equal or one is 1
@@ -20,16 +23,20 @@ use crate::instruction::{TensorBinaryOp, TensorUnaryOp, TensorReduceOp};
 
 /// Compute broadcast output shape and effective strides.
 ///
+
 /// Returns (output_shape, output_ndim, a_strides, b_strides) where a_strides and b_strides
 /// are the effective strides for a and b respectively, with 0 stride for broadcast dimensions.
 ///
+
 /// Returns None if shapes are not broadcast-compatible.
 ///
+
 /// # NumPy Broadcasting Rules
 /// 1. Shapes are right-aligned (smaller tensor padded with 1s on the left)
 /// 2. Dimensions match if: equal, or one of them is 1
 /// 3. Output dimension is max(a_dim, b_dim)
 ///
+
 /// NumPy-style broadcasting: shapes are right-aligned, dimensions match if equal or one is 1,
 /// output dimension is max(a_dim, b_dim). Strides for broadcast dimensions are set to 0.
 pub fn compute_broadcast_shape(
@@ -104,6 +111,7 @@ fn compute_broadcast_offset(indices: &[usize], strides: &[isize], ndim: usize) -
 
 /// Iterator for broadcast-compatible tensor element pairs.
 ///
+
 /// This iterator yields (a_offset, b_offset) pairs for each element in the
 /// output tensor, handling broadcasting transparently.
 pub struct BroadcastIterator {
@@ -190,6 +198,7 @@ impl ExactSizeIterator for BroadcastIterator {}
 
 /// Scalar F32 binary operation with broadcasting support.
 ///
+
 /// Supports NumPy-style broadcasting:
 /// - `[3, 4] + [4]` broadcasts scalar along first dimension
 /// - `[3, 1] + [1, 4]` broadcasts to `[3, 4]`
@@ -930,6 +939,7 @@ pub fn binop_u8_scalar(
 
 /// Bool binary operation (scalar fallback)
 ///
+
 /// Treats Bool as 0/1 integers with logical semantics:
 /// - Add: OR semantics (saturates at 1)
 /// - Mul: AND semantics (0*0=0, 0*1=0, 1*1=1)
@@ -1300,6 +1310,7 @@ pub fn binop_i8_scalar(
 
 /// Convert F16 (IEEE 754 binary16) to F32.
 ///
+
 /// F16 format: 1 bit sign, 5 bits exponent, 10 bits mantissa
 #[inline]
 pub fn f16_to_f32(bits: u16) -> f32 {
@@ -1339,6 +1350,7 @@ pub fn f16_to_f32(bits: u16) -> f32 {
 
 /// Convert F32 to F16 (IEEE 754 binary16).
 ///
+
 /// Rounds to nearest, with ties to even.
 #[inline]
 pub fn f32_to_f16(val: f32) -> u16 {
@@ -1391,6 +1403,7 @@ pub fn f32_to_f16(val: f32) -> u16 {
 
 /// Convert BF16 (Brain float16) to F32.
 ///
+
 /// BF16 format: 1 bit sign, 8 bits exponent, 7 bits mantissa
 /// Same exponent range as F32, so conversion is just adding zeros to mantissa.
 #[inline]
@@ -1400,6 +1413,7 @@ pub fn bf16_to_f32(bits: u16) -> f32 {
 
 /// Convert F32 to BF16 (Brain float16).
 ///
+
 /// Truncates the lower 16 bits of mantissa (rounds toward zero).
 #[inline]
 pub fn f32_to_bf16(val: f32) -> u16 {
@@ -2656,6 +2670,7 @@ pub fn unop_u8_scalar(
 
 /// Bool unary operation (scalar fallback)
 ///
+
 /// Provides logical semantics for unary operations on Bool tensors:
 /// - Neg: logical NOT
 /// - Abs: identity (0/1 already non-negative)
@@ -3229,7 +3244,7 @@ pub fn complex64_conj_scalar(a: &TensorHandle) -> Option<TensorHandle> {
     unsafe {
         for i in 0..n {
             let idx = i * 2;
-            *out_ptr.add(idx) = *a_ptr.add(idx);         // real unchanged
+            *out_ptr.add(idx) = *a_ptr.add(idx); // real unchanged
             *out_ptr.add(idx + 1) = -*a_ptr.add(idx + 1); // imag negated
         }
     }
@@ -3256,7 +3271,7 @@ pub fn complex128_conj_scalar(a: &TensorHandle) -> Option<TensorHandle> {
     unsafe {
         for i in 0..n {
             let idx = i * 2;
-            *out_ptr.add(idx) = *a_ptr.add(idx);         // real unchanged
+            *out_ptr.add(idx) = *a_ptr.add(idx); // real unchanged
             *out_ptr.add(idx + 1) = -*a_ptr.add(idx + 1); // imag negated
         }
     }
@@ -4603,6 +4618,7 @@ pub fn matmul_f32_tiled(
 
 /// SIMD F32 matrix multiplication with AVX-512 + FMA
 ///
+
 /// Uses:
 /// - AVX-512 for processing 16 floats at once
 /// - FMA (fused multiply-add) for reduced latency
@@ -4747,6 +4763,7 @@ pub fn matmul_f32_avx512(
 
 /// SIMD F32 matrix multiplication with AVX2 + FMA
 ///
+
 /// Uses:
 /// - AVX2 for processing 8 floats at once
 /// - FMA (fused multiply-add) for reduced latency
@@ -4881,6 +4898,7 @@ pub fn matmul_f32_avx2(
 
 /// SIMD F64 matrix multiplication with AVX-512 + FMA
 ///
+
 /// Uses:
 /// - AVX-512 for processing 8 doubles at once
 /// - FMA (fused multiply-add) for reduced latency
@@ -5010,6 +5028,7 @@ pub fn matmul_f64_avx512(
 
 /// SIMD F64 matrix multiplication with AVX2 + FMA
 ///
+
 /// Uses:
 /// - AVX2 for processing 4 doubles at once
 /// - FMA (fused multiply-add) for reduced latency
@@ -5197,6 +5216,7 @@ pub fn matmul_f64_simd(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandl
 
 /// Scalar broadcast binary operation F32 (AVX-512)
 ///
+
 /// Optimized kernel for when one operand is a scalar (numel=1) and the other
 /// is a tensor. Uses SIMD broadcast (splat) to avoid memory expansion.
 /// Processes 16 floats per SIMD operation.
@@ -5343,6 +5363,7 @@ pub fn binop_f32_scalar_broadcast_avx512(
 
 /// Scalar broadcast binary operation F32 (AVX2)
 ///
+
 /// Optimized kernel for when one operand is a scalar (numel=1) and the other
 /// is a tensor. Uses SIMD broadcast (splat) to avoid memory expansion.
 #[cfg(target_arch = "x86_64")]
@@ -5853,6 +5874,7 @@ pub fn fill_f32_scalar(output: &mut TensorHandle, value: f32) -> bool {
 
 /// Cholesky decomposition for F32 symmetric positive-definite matrix.
 ///
+
 /// Computes L such that A = L * L^T (lower=true) or U such that A = U^T * U (lower=false).
 /// Returns None if the matrix is not positive-definite or not square.
 pub fn cholesky_f32_scalar(
@@ -6040,10 +6062,12 @@ impl TriSolveFlags {
 
 /// Triangular solve for F32: solves A * x = b where A is triangular.
 ///
+
 /// - `a`: Triangular matrix [n, n]
 /// - `b`: Right-hand side vector [n] or matrix [n, m]
 /// - `flags`: Solve options (upper, transpose, unit_diagonal)
 ///
+
 /// Returns x such that A * x = b (or A^T * x = b if transpose=true).
 pub fn trisolve_f32_scalar(
     a: &TensorHandle,
@@ -6400,6 +6424,7 @@ pub fn trisolve_f64_scalar(
 
 /// Vector/Matrix norm computation.
 ///
+
 /// Supports:
 /// - ord=0: Count of non-zero elements (L0 "norm")
 /// - ord=1: L1 norm (sum of absolute values)
@@ -6735,6 +6760,7 @@ pub fn norm_f64_scalar(
 
 /// Matrix-vector multiplication: y = A @ x
 ///
+
 /// - `a`: Matrix [m, n]
 /// - `x`: Vector [n]
 /// Returns: Vector [m]
@@ -6825,9 +6851,11 @@ pub fn mv_f64_scalar(
 
 /// Extract diagonal from matrix or create diagonal matrix from vector.
 ///
+
 /// - If input is 2D [m, n]: returns 1D diagonal [min(m, n)]
 /// - If input is 1D [n]: returns 2D diagonal matrix [n, n]
 ///
+
 /// `k` parameter: diagonal offset (0=main, >0=above, <0=below)
 pub fn diag_f32_scalar(
     a: &TensorHandle,
@@ -6979,6 +7007,7 @@ pub fn diag_f64_scalar(
 
 /// Upper triangular part of matrix.
 ///
+
 /// - `k`: diagonal offset (0=main diagonal, >0=above, <0=below)
 /// Returns: matrix with zeros below the k-th diagonal
 pub fn triu_f32_scalar(
@@ -7052,6 +7081,7 @@ pub fn triu_f64_scalar(
 
 /// Lower triangular part of matrix.
 ///
+
 /// - `k`: diagonal offset (0=main diagonal, >0=above, <0=below)
 /// Returns: matrix with zeros above the k-th diagonal
 pub fn tril_f32_scalar(
@@ -7124,9 +7154,11 @@ pub fn tril_f64_scalar(
 
 /// Matrix inverse via Gauss-Jordan elimination.
 ///
+
 /// Input: square matrix A [n, n]
 /// Output: A^(-1) [n, n] such that A @ A^(-1) = I
 ///
+
 /// Returns None if matrix is singular (non-invertible).
 pub fn inverse_f32_scalar(
     a: &TensorHandle,
@@ -7981,6 +8013,7 @@ fn bit_reverse(mut x: usize, log2n: u32) -> usize {
 
 /// Cooley-Tukey radix-2 FFT in-place.
 ///
+
 /// Operates on interleaved complex data (real, imag, real, imag, ...).
 /// `inverse` = true performs the inverse FFT.
 #[inline]
@@ -8050,6 +8083,7 @@ fn fft_radix2_inplace(data: &mut [f64], n: usize, inverse: bool) {
 
 /// 1D FFT for complex F64 tensor (C64 stored as F64 pairs).
 ///
+
 /// `dim` specifies which dimension to transform (-1 = last dimension).
 /// `inverse` specifies forward or inverse transform.
 pub fn fft_complex64_1d(
@@ -8151,6 +8185,7 @@ pub fn fft_complex64_1d(
 
 /// 1D FFT for real F64 tensor, producing complex output.
 ///
+
 /// Converts real input to complex, performs FFT, returns C64 result.
 pub fn fft_f64_1d(
     input: &TensorHandle,
@@ -8249,14 +8284,17 @@ pub fn fft_f64_1d(
 
 /// Scaled dot-product attention for F32 tensors.
 ///
+
 /// Computes: Attention(Q, K, V) = softmax(Q @ K^T / sqrt(d_k)) @ V
 ///
+
 /// Input shapes:
 /// - Q: [batch, num_heads, seq_len_q, head_dim] or [batch, seq_len_q, head_dim]
 /// - K: [batch, num_heads, seq_len_k, head_dim] or [batch, seq_len_k, head_dim]
 /// - V: [batch, num_heads, seq_len_k, head_dim] or [batch, seq_len_k, head_dim]
 /// - mask: optional [batch, 1, seq_len_q, seq_len_k] or [seq_len_q, seq_len_k]
 ///
+
 /// Output: [batch, num_heads, seq_len_q, head_dim] or [batch, seq_len_q, head_dim]
 pub fn attention_f32_scalar(
     q: &TensorHandle,
@@ -8619,12 +8657,15 @@ pub fn attention_f64_scalar(
 
 /// Batched matrix multiplication for F32 tensors.
 ///
+
 /// Computes C[b, i, j] = sum_k A[b, i, k] * B[b, k, j] for each batch b.
 ///
+
 /// Input shapes:
 /// - A: [batch, M, K]
 /// - B: [batch, K, N]
 ///
+
 /// Output: [batch, M, N]
 pub fn bmm_f32_scalar(
     a: &TensorHandle,
@@ -8740,11 +8781,14 @@ pub fn bmm_f64_scalar(
 
 /// QR decomposition via Householder reflections for F32 matrices.
 ///
+
 /// Decomposes A = Q * R where Q is orthogonal and R is upper triangular.
 ///
+
 /// Input: A [M, N] where M >= N
 /// Output: (Q [M, M], R [M, N])
 ///
+
 /// Returns None if M < N or matrix is singular.
 pub fn qr_f32_householder(
     a: &TensorHandle,
@@ -8980,11 +9024,13 @@ pub fn qr_f64_householder(
 
 /// SVD decomposition using Jacobi algorithm for F32 matrices.
 ///
+
 /// Computes A = U * S * V^T where:
 /// - U [M, M] is orthogonal (left singular vectors)
 /// - S [min(M,N)] is diagonal (singular values, sorted descending)
 /// - V [N, N] is orthogonal (right singular vectors)
 ///
+
 /// Input: A [M, N]
 /// Output: (U [M, M], S [min(M,N)], Vt [N, N]) where Vt = V^T
 pub fn svd_f32_jacobi(
@@ -9465,10 +9511,12 @@ pub fn svd_f64_jacobi(
 
 /// Eigenvalue decomposition for symmetric F32 matrices using Jacobi method.
 ///
+
 /// Computes A = V * D * V^T where:
 /// - D is diagonal containing eigenvalues (sorted descending by magnitude)
 /// - V is orthogonal containing eigenvectors as columns
 ///
+
 /// Input: A [N, N] (must be symmetric)
 /// Output: (eigenvalues [N], eigenvectors [N, N])
 pub fn eig_symmetric_f32_jacobi(
@@ -9737,12 +9785,15 @@ pub fn eig_symmetric_f64_jacobi(
 
 /// Least squares solve using QR decomposition for F32 matrices.
 ///
+
 /// Solves min_x ||A * x - b||_2 using QR factorization.
 ///
+
 /// Input:
 /// - A [M, N] where M >= N (overdetermined system)
 /// - b [M] or [M, K] (multiple right-hand sides)
 ///
+
 /// Output: x [N] or [N, K]
 pub fn lstsq_f32_qr(
     a: &TensorHandle,
@@ -9951,9 +10002,11 @@ pub fn lstsq_f64_qr(
 
 /// Cumulative sum along an axis for F32 tensors (TENSOR_CUMSUM 0xF2).
 ///
+
 /// Computes the cumulative sum along the specified axis.
 /// out[..., i, ...] = sum(input[..., 0:i+1, ...])
 ///
+
 /// Input: tensor of any shape
 /// Output: tensor with same shape, containing cumulative sums
 pub fn cumsum_f32_scalar(
@@ -10078,9 +10131,11 @@ pub fn cumsum_f64_scalar(
 
 /// Cumulative product along an axis for F32 tensors (TENSOR_CUMPROD 0xF3).
 ///
+
 /// Computes the cumulative product along the specified axis.
 /// out[..., i, ...] = prod(input[..., 0:i+1, ...])
 ///
+
 /// Input: tensor of any shape
 /// Output: tensor with same shape, containing cumulative products
 pub fn cumprod_f32_scalar(
@@ -10202,14 +10257,17 @@ pub fn cumprod_f64_scalar(
 
 /// Gather elements along an axis for F32 tensors (TENSOR_GATHER 0xF5).
 ///
+
 /// Gathers values from input using indices along the specified axis.
-/// output[i][j][k] = input[index[i][j][k]][j][k]  (for axis=0)
-/// output[i][j][k] = input[i][index[i][j][k]][k]  (for axis=1)
+/// output[i][j][k] = input[index[i][j][k]][j][k] (for axis=0)
+/// output[i][j][k] = input[i][index[i][j][k]][k] (for axis=1)
 ///
+
 /// Input shapes:
 /// - input: source tensor
 /// - indices: integer tensor with indices
 ///
+
 /// Output: tensor with shape matching indices, dtype matching input
 pub fn gather_f32_scalar(
     input: &TensorHandle,
@@ -10442,14 +10500,17 @@ pub enum ScatterMode {
 
 /// Scatter elements along an axis for F32 tensors (TENSOR_SCATTER 0xF6).
 ///
+
 /// Scatters values from src into output at positions specified by indices.
-/// output[index[i][j][k]][j][k] = src[i][j][k]  (for axis=0, mode=Replace)
+/// output[index[i][j][k]][j][k] = src[i][j][k] (for axis=0, mode=Replace)
 ///
+
 /// Input shapes:
 /// - output: destination tensor (modified in-place or cloned from input)
 /// - indices: integer tensor with indices
 /// - src: source tensor (same shape as indices)
 ///
+
 /// Output: tensor with values scattered according to indices
 pub fn scatter_f32_scalar(
     input: &TensorHandle,
@@ -10700,12 +10761,15 @@ pub fn scatter_f64_scalar(
 
 /// Solve linear system Ax = b for F32 tensors using LU decomposition with partial pivoting.
 ///
+
 /// Solves for x in the equation Ax = b where A is a square matrix.
 ///
+
 /// Input:
 /// - A: [N, N] coefficient matrix
 /// - b: [N] or [N, K] right-hand side
 ///
+
 /// Output: x [N] or [N, K]
 pub fn solve_f32_lu(
     a: &TensorHandle,
@@ -10988,8 +11052,10 @@ pub fn solve_f64_lu(
 
 /// Argmax along an axis for F32 tensors.
 ///
+
 /// Returns the indices of maximum values along the specified axis.
 ///
+
 /// Input: tensor of any shape
 /// Output: tensor with axis dimension removed, dtype I64
 pub fn argmax_f32_scalar(
@@ -11335,14 +11401,17 @@ pub fn argmin_f64_scalar(
 
 /// Index select along an axis for F32 tensors.
 ///
+
 /// Selects elements from input along the specified axis using 1D indices.
 /// This is different from gather in that indices is always 1D.
 ///
+
 /// Input:
 /// - input: source tensor
 /// - indices: 1D integer tensor
 /// - axis: dimension to select along
 ///
+
 /// Output: tensor with axis dimension size = len(indices)
 pub fn index_select_f32_scalar(
     input: &TensorHandle,
@@ -13268,6 +13337,7 @@ pub fn schur_f64_scalar(input: &TensorHandle) -> Option<(TensorHandle, TensorHan
 
 /// Kronecker product (F32).
 ///
+
 /// The Kronecker product of A (m x n) and B (p x q) is (mp x nq) where:
 /// (A ⊗ B)[i,j] = A[i/p, j/q] * B[i%p, j%q]
 pub fn kron_f32_scalar(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
@@ -13353,6 +13423,7 @@ pub fn kron_f64_scalar(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandl
 
 /// Cross product (F32) - 3D vectors only.
 ///
+
 /// c = a × b where c[0] = a[1]*b[2] - a[2]*b[1], etc.
 pub fn cross_f32_scalar(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || b.dtype != DType::F32 {
@@ -13416,6 +13487,7 @@ pub fn cross_f64_scalar(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHand
 
 /// Tensor contraction (F32).
 ///
+
 /// Contract tensor along specified axes. For 2D tensors this is a generalized
 /// matrix operation. axis_a and axis_b specify which dimensions to contract.
 pub fn contract_f32_scalar(
@@ -13593,6 +13665,7 @@ pub fn contract_f64_scalar(
 
 /// Matrix power (F32) - compute A^n for integer n.
 ///
+
 /// Uses binary exponentiation for efficiency: O(log n) matrix multiplications.
 pub fn matrix_power_f32_scalar(input: &TensorHandle, n: i32) -> Option<TensorHandle> {
     if input.dtype != DType::F32 {
@@ -13699,6 +13772,7 @@ fn identity_f64(n: usize) -> Option<TensorHandle> {
 
 /// Matrix exponential (F32) using Padé approximation.
 ///
+
 /// Computes e^A using scaling and squaring with Padé approximation.
 /// Uses the [6/6] Padé approximant for good accuracy.
 pub fn expm_f32_scalar(input: &TensorHandle) -> Option<TensorHandle> {
@@ -13934,6 +14008,7 @@ fn frobenius_norm_f64(a: &TensorHandle) -> f64 {
 
 /// Matrix logarithm (F32) using inverse scaling and squaring.
 ///
+
 /// Computes log(A) for a matrix A with no eigenvalues on the negative real axis.
 /// Uses the inverse scaling and squaring method with Padé approximation.
 pub fn logm_f32_scalar(input: &TensorHandle) -> Option<TensorHandle> {
@@ -14193,19 +14268,25 @@ fn matrix_sqrt_f64(a: &TensorHandle) -> Option<TensorHandle> {
 
 /// Parallel associative scan for SSM (F32).
 ///
+
 /// Implements Blelloch's work-efficient parallel scan algorithm when the `parallel`
 /// feature is enabled. Falls back to sequential scan otherwise.
 ///
+
 /// op: 0=add, 1=mul, 2=matmul
 ///
+
 /// # Blelloch's Algorithm
 ///
+
 /// For parallel prefix sum computation:
 /// 1. **Up-sweep (reduce)**: Build binary tree of partial results, O(log n) parallel steps
 /// 2. **Down-sweep**: Traverse tree top-down to compute final prefix sums, O(log n) steps
 ///
+
 /// Total work: O(n), span: O(log n)
 ///
+
 /// Parallel prefix scan (Blelloch): O(n) work, O(log n) span. Used for state-space models
 /// (SSM) where each element depends on the previous via an associative binary operation.
 pub fn ssm_scan_f32(
@@ -14326,6 +14407,7 @@ pub fn ssm_scan_f32(
 
 /// Parallel associative scan for SSM (F64).
 ///
+
 /// See `ssm_scan_f32` for algorithm details.
 pub fn ssm_scan_f64(
     op: u8,
@@ -14667,7 +14749,7 @@ pub fn complex_pow_f32(base: &TensorHandle, exp: &TensorHandle) -> Option<Tensor
 
             let ln_r = r.ln();
             // w * ln(z) = (er + ei*i) * (ln_r + theta*i)
-            //           = (er*ln_r - ei*theta) + (er*theta + ei*ln_r)*i
+            //  = (er*ln_r - ei*theta) + (er*theta + ei*ln_r)*i
             let new_r = (er * ln_r - ei * theta).exp();
             let new_theta = er * theta + ei * ln_r;
 

@@ -3,44 +3,54 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, core.net.quic.connection_sm.{QuicSpaceKeys, keys},
-//               core.net.tls13.keyschedule, core.net.tls13.cipher_suite
+//  core.net.tls13.keyschedule, core.net.tls13.cipher_suite
 // =============================================================================
 //
+
 // RFC 9001 §6 — once the 1-RTT keys are installed, both endpoints can
 // rotate to the next generation independently. The protocol uses a
 // single `Key Phase` bit in the 1-RTT short-header first-byte:
 //
-//     bit 2 (0x04) = current key phase  (toggles on each rotation)
+
+//  bit 2 (0x04) = current key phase (toggles on each rotation)
 //
+
 // Correctness rules enforced by this module:
 //
-//   * § 6.1  — "An endpoint MUST NOT initiate a subsequent key update
-//     unless it has received an acknowledgment for a packet that was
-//     sent protected with keys from the current key phase."
+
+//  * § 6.1 — "An endpoint MUST NOT initiate a subsequent key update
+//  unless it has received an acknowledgment for a packet that was
+//  sent protected with keys from the current key phase."
 //
-//     We expose `note_ack_received(pn)` to track which phase the most
-//     recent ack belongs to. `can_initiate()` returns true only when
-//     the most recent ack is from the *current* phase.
+
+//  We expose `note_ack_received(pn)` to track which phase the most
+//  recent ack belongs to. `can_initiate()` returns true only when
+//  the most recent ack is from the *current* phase.
 //
-//   * § 6.2  — On receiving a packet whose key_phase bit differs from
-//     the current phase, the receiver attempts decrypt with the NEXT
-//     generation keys. On success, it:
-//         (a) commits to the new phase,
-//         (b) discards the previous (now-retired) keys,
-//         (c) prepares next-next generation keys for the subsequent
-//             rotation.
+
+//  * § 6.2 — On receiving a packet whose key_phase bit differs from
+//  the current phase, the receiver attempts decrypt with the NEXT
+//  generation keys. On success, it:
+//  (a) commits to the new phase,
+//  (b) discards the previous (now-retired) keys,
+//  (c) prepares next-next generation keys for the subsequent
+//  rotation.
 //
-//     We expose `on_inbound_phase(observed_phase)` → `Action`.
+
+//  We expose `on_inbound_phase(observed_phase)` → `Action`.
 //
-//   * § 6.3  — "Endpoints MUST count the number of encrypted packets
-//     for each set of keys. If the total … exceeds a cipher-specific
-//     confidentiality limit, the endpoint MUST stop using those keys."
+
+//  * § 6.3 — "Endpoints MUST count the number of encrypted packets
+//  for each set of keys. If the total … exceeds a cipher-specific
+//  confidentiality limit, the endpoint MUST stop using those keys."
 //
-//     We ship `KeyPhaseUsage` + a per-cipher hard limit table (RFC
-//     9001 §6.6). Callers drive `note_outbound_encrypted()` /
-//     `note_inbound_decrypted()` from their tx/rx paths and check
-//     `should_initiate_update()` / `exceeded_integrity_limit()`.
+
+//  We ship `KeyPhaseUsage` + a per-cipher hard limit table (RFC
+//  9001 §6.6). Callers drive `note_outbound_encrypted()` /
+//  `note_inbound_decrypted()` from their tx/rx paths and check
+//  `should_initiate_update()` / `exceeded_integrity_limit()`.
 //
+
 // =============================================================================
 
 module core.net.quic.key_update;

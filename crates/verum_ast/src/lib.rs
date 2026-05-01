@@ -1,14 +1,18 @@
 #![allow(unexpected_cfgs)]
 //! Abstract Syntax Tree (AST) for the Verum language.
 //!
+
 //! This crate provides complete AST node definitions for the Verum compiler,
 //! including all expression types, statements, declarations, patterns, and
 //! the critical refinement type system.
 //!
+
 //! # Overview
 //!
+
 //! The AST is organized into several modules:
 //!
+
 //! - [`span`]: Source location tracking for error reporting
 //! - [`literal`]: Literal values (integers, floats, strings, etc.)
 //! - [`ty`]: Type system including refinement types
@@ -18,41 +22,55 @@
 //! - [`decl`]: Top-level declarations (functions, types, protocols, etc.)
 //! - [`visitor`]: AST traversal using the visitor pattern
 //!
+
 //! # Key Features
 //!
+
 //! ## Refinement Types
 //!
+
 //! Verum's unique value proposition is its refinement type system. The AST
 //! fully supports refinement predicates:
 //!
+
 //! ```verum
 //! type Positive is Int{> 0}
 //! type Email is Text{is_email(it)}
 //! type SortedList<T> is List<T>{is_sorted(it)}
 //! ```
 //!
+
 //! These are represented in the AST as [`TypeKind::Refined`] nodes.
 //!
+
 //! ## Stream Comprehensions
 //!
+
 //! First-class support for lazy stream processing:
 //!
+
 //! ```verum
 //! stream [x * 2 for x in source if x > 0]
 //! ```
 //!
+
 //! Represented as [`ExprKind::StreamComprehension`].
 //!
+
 //! ## Three-Tier Reference Model
 //!
+
 //! Support for Verum's three-tier reference system:
 //!
+
 //! - Safe references: `&T`, `&mut T` ([`TypeKind::Reference`])
 //! - Checked references: `&checked T` (runtime bounds checking)
 //! - Unsafe references: `&unsafe T` (no bounds checking)
 //!
+
 //! # Example Usage
 //!
+
 //! ```rust
 //! use verum_ast::*;
 //! use verum_ast::span::{Span, FileId};
@@ -60,22 +78,25 @@
 //! use verum_ast::literal::Literal;
 //! use verum_common::Heap;
 //!
+
 //! // Create a simple binary expression: 1 + 2
 //! let span = Span::new(0, 5, FileId::new(0));
 //! let left = Heap::new(Expr::literal(Literal::int(1, span)));
 //! let right = Heap::new(Expr::literal(Literal::int(2, span)));
 //! let expr = Expr::new(
-//!     ExprKind::Binary {
-//!         op: BinOp::Add,
-//!         left,
-//!         right,
-//!     },
-//!     span,
+//!  ExprKind::Binary {
+//!  op: BinOp::Add,
+//!  left,
+//!  right,
+//!  },
+//!  span,
 //! );
 //! ```
 //!
+
 //! # Design Principles
 //!
+
 //! 1. **Explicit over implicit**: All information is represented explicitly
 //! 2. **Memory efficient**: Use `SmallVec` for common cases
 //! 3. **Serializable**: All nodes derive `Serialize` and `Deserialize`
@@ -251,6 +272,7 @@ pub use visitor::{
 /// `fn main()`. Scripts bypass `verum.toml` discovery and are executed via
 /// `verum run path.vr` (or directly via the shebang chain).
 ///
+
 /// The kind is encoded as a synthetic module attribute (`@![__verum_kind(...)]`)
 /// to avoid breaking the `Module` struct's field layout — there are dozens of
 /// struct-literal construction sites across the codebase. Use
@@ -296,6 +318,7 @@ impl CogKind {
     /// `@![__verum_kind(...)]` attribute. Defaults to [`CogKind::Library`]
     /// when no such attribute is present.
     ///
+
     /// The attribute carries the tag as a string token. Attribute argument
     /// representation is introspected via `Debug` formatting rather than a
     /// typed walk because the attr-arg AST layout intentionally varies
@@ -326,6 +349,7 @@ impl CogKind {
     /// observed, and by tests that need to construct a kind-tagged
     /// module without going through the full lexer pipeline.
     ///
+
     /// Idempotent: any existing `@![__verum_kind(...)]` attribute is
     /// removed first so the latest tag wins. The synthetic attribute
     /// stores the tag as a string-literal expression — the exact same
@@ -439,6 +463,7 @@ impl Module {
 
     /// Check if this module has the @![no_implicit_prelude] attribute.
     ///
+
     /// When set, the module does not automatically import the standard prelude
     /// (core types like List, Text, Map, Maybe, etc.). All types must be
     /// explicitly imported via `mount` statements.

@@ -9,9 +9,11 @@ module sys.linux;
 // =============================================================================
 @cfg(target_os = "linux")
 //
+
 // This module provides the complete Linux V-LLSI (Verum Low-Level System
 // Interface) implementation for the bootstrap kernel.
 //
+
 // Architecture:
 // - syscall.vr: Raw syscall intrinsic + basic wrappers (read/write/mmap/futex)
 // - errno.vr: Error constants and categorization
@@ -21,8 +23,10 @@ module sys.linux;
 // - mem.vr: Memory management (mprotect, madvise, mremap)
 // - time.vr: Time operations (clock_gettime, monotonic time, RDTSC)
 //
+
 // Linux uses direct syscalls for maximum performance. No libc dependency.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 

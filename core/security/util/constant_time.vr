@@ -4,14 +4,17 @@
 // Layer: 0 (no dependencies beyond core primitives)
 // =============================================================================
 //
+
 // Constant-time operations over byte slices. Every instruction executes
 // regardless of input content — no early exit, no data-dependent branches,
 // no secret-indexed memory access. Used for comparing MACs, verifying
 // passwords, checking signature components — anywhere a naive `==`
 // comparison would leak timing information about secret material.
 //
+
 // # Threat model
 //
+
 // A naive byte-by-byte comparison with short-circuit-on-mismatch reveals
 // *where* the first differing byte is via total execution time — an
 // attacker submitting guessed MACs observes ~O(n) different response
@@ -19,25 +22,30 @@
 // leaks the full MAC. `constant_time_eq` closes this channel at the
 // primitive level.
 //
+
 // # Correctness invariants
 //
+
 // 1. No data-dependent branches — the control flow is identical for
-//    every input of the same length.
+//  every input of the same length.
 // 2. No data-dependent memory accesses (no indexed lookup based on a
-//    secret byte).
+//  secret byte).
 // 3. Accumulation via XOR-OR pattern, which the compiler must NOT
-//    simplify to an early-exit. The `@verify(constant_time)` annotation
-//    is a request to the codegen backend to suppress any optimizations
-//    that would introduce data dependence.
+//  simplify to an early-exit. The `@verify(constant_time)` annotation
+//  is a request to the codegen backend to suppress any optimizations
+//  that would introduce data dependence.
 //
+
 // # Bounds
 //
+
 // Inputs of *different* lengths do NOT produce a timing-safe result —
 // they return `false` via a fast length check (length is not secret
 // under any reasonable threat model; attackers already know their
 // guess's length). For secret-length comparisons, always pad to a
 // known length first.
 //
+
 // =============================================================================
 
 module core.security.util.constant_time;
@@ -45,24 +53,28 @@ mount core.*;
 
 /// Timing-safe byte-slice equality.
 ///
+
 /// Returns `true` iff `a` and `b` have the same length AND every byte
 /// matches. Runtime is O(min(len(a), len(b))) plus a single length
 /// comparison. Secret bytes are never used as branch predicates or
 /// memory indices.
 ///
+
 /// ```verum
 /// let expected = hmac_sha256(&key, &data);
 /// let received: [Byte; 32] = /* from wire */;
 /// if !constant_time_eq(&expected, &received) {
-///     return Err(AuthError.InvalidMac);
+///  return Err(AuthError.InvalidMac);
 /// }
 /// ```
 ///
+
 /// # Returns
 ///
+
 /// - `true` when both slices are byte-identical and have equal length.
 /// - `false` in every other case. Lengths are allowed to differ without
-///   timing leak — the attacker already knows the length of their guess.
+///  timing leak — the attacker already knows the length of their guess.
 @verify(constant_time)
 public fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
     // Length mismatch is non-secret — bail fast.
@@ -85,6 +97,7 @@ public fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
     // The subtraction trick `(0 - diff) >> 31` (sign-bit of -diff) yields
     // 1 if diff != 0, 0 if diff == 0 — no branches. Invert for equality.
     //
+
     // We express it plainly here; the backend's @verify(constant_time)
     // guarantees no branching is introduced.
     diff == 0
@@ -106,12 +119,13 @@ public fn constant_time_compare(a: &[Byte], b: &[Byte]) -> Int {
             let bi = b[i] as Int;
             let d = ai - bi;
             // Branchless "first-ever-non-zero diff wins":
-            //   zero_mask is -1 (all bits set) iff diff == 0, else 0.
-            //   This is the standard ct_is_zero idiom: `(x | -x) >> 63`
-            //   has bit-63 (sign) set iff x != 0; complementing gives
-            //   the desired mask. Holds for x == Int.MIN too because
-            //   -Int.MIN wraps to Int.MIN whose sign bit is also set.
+            //  zero_mask is -1 (all bits set) iff diff == 0, else 0.
+            //  This is the standard ct_is_zero idiom: `(x | -x) >> 63`
+            //  has bit-63 (sign) set iff x != 0; complementing gives
+            //  the desired mask. Holds for x == Int.MIN too because
+            //  -Int.MIN wraps to Int.MIN whose sign bit is also set.
             //
+
             // The previous implementation used `if diff == 0`, a
             // data-dependent branch on the accumulator that leaked
             // timing about which byte first differed — defeating the

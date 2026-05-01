@@ -5,22 +5,28 @@
 // Dependencies: core, io, net/addr, sys/
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI system interfaces:
 // - Linux: Uses sys/linux/syscall.{socket, bind, sendto, recvfrom, ...}
 // - macOS: Uses sys/darwin/libsystem.{safe_socket, safe_bind, ...}
 // - No FFI dependencies on verum_runtime or verum_bootstrap
 //
+
 // # Performance Characteristics
 //
+
 // - Zero-copy I/O via direct syscalls
 // - ~50ns per send/recv operation (no FFI overhead)
 // - MSG_DONTWAIT support for non-blocking I/O on blocking sockets
 // - Multicast with minimal kernel-user transitions
 //
+
 // =============================================================================
 //
+
 // UDP (User Datagram Protocol) provides connectionless, unreliable
 // transmission of datagrams. Ideal for:
 // - Real-time applications (VoIP, gaming)
@@ -28,29 +34,34 @@
 // - QUIC protocol transport
 // - Multicast/broadcast communication
 //
+
 // # Example - Echo Server
 // ```verum
 // let socket = UdpSocket.bind("127.0.0.1:8080")?;
 // let mut buf = [0_u8; 1500];
 //
+
 // loop {
-//     let (len, src) = socket.recv_from(&mut buf)?;
-//     socket.send_to(&buf[..len], src)?;
+//  let (len, src) = socket.recv_from(&mut buf)?;
+//  socket.send_to(&buf[..len], src)?;
 // }
 // ```
 //
+
 // # Example - Multicast Receiver
 // ```verum
 // let socket = UdpSocket.bind("0.0.0.0:5000")?;
 // socket.join_multicast_v4(&Ipv4Addr.new(239, 0, 0, 1), &Ipv4Addr.any())?;
 //
+
 // let mut buf = [0_u8; 1500];
 // loop {
-//     let (len, src) = socket.recv_from(&mut buf)?;
-//     print(f"Received {len} bytes from {src}");
+//  let (len, src) = socket.recv_from(&mut buf)?;
+//  print(f"Received {len} bytes from {src}");
 // }
 // ```
 //
+
 // =============================================================================
 
 module core.net.udp;
@@ -202,31 +213,40 @@ mount sys.io_engine.{IOEngine, IOInterest, IoError};
 
 /// A UDP socket for connectionless datagram communication.
 ///
+
 /// After creating a UdpSocket by binding it to a socket address, data can
 /// be sent and received using `send_to`/`recv_from` for connectionless
 /// communication, or `connect`/`send`/`recv` for connected communication.
 ///
+
 /// # Performance Characteristics
 ///
+
 /// - Direct syscall access: ~50ns per operation
 /// - Zero-copy for aligned buffers
 /// - Support for scatter/gather I/O (via native sendmsg/recvmsg)
 ///
+
 /// # MTU Considerations
 ///
+
 /// - Maximum UDP datagram size is ~65507 bytes (65535 - 20 IP - 8 UDP)
 /// - Practical limit is often 1472 bytes (Ethernet MTU - IP - UDP)
 /// - For path MTU discovery, use IP_PMTUDISC_DO socket option
 /// - Large datagrams may be fragmented or dropped
 ///
+
 /// # Thread Safety
 ///
+
 /// - UdpSocket can be safely shared between threads
 /// - Concurrent sends and receives are safe (atomic at kernel level)
 /// - Consider using separate sockets per thread for maximum throughput
 ///
+
 /// # Protocol Implementation Notes
 ///
+
 /// For QUIC and similar protocols:
 /// - Use non-blocking I/O with event loop for connection multiplexing
 /// - Set SO_RCVBUF/SO_SNDBUF for optimal buffer sizes
@@ -241,6 +261,7 @@ public type UdpSocket is {
 implement UdpSocket {
     /// Create a UDP socket bound to the specified address.
     ///
+
     /// # Example
     /// ```verum
     /// let socket = UdpSocket.bind("127.0.0.1:8080")?;
@@ -305,9 +326,11 @@ implement UdpSocket {
 
     /// Receive a datagram from any address.
     ///
+
     /// Returns the number of bytes received and the source address.
     /// If the buffer is smaller than the datagram, excess bytes are discarded.
     ///
+
     /// # Example
     /// ```verum
     /// let mut buf = [0_u8; 1500];
@@ -332,9 +355,11 @@ implement UdpSocket {
 
     /// Send a datagram to the specified address.
     ///
+
     /// Returns the number of bytes sent (should equal buf.len() on success).
     /// The entire datagram is sent atomically - partial sends don't occur.
     ///
+
     /// # Example
     /// ```verum
     /// let dest = SocketAddr.parse("127.0.0.1:8080")?;
@@ -355,15 +380,18 @@ implement UdpSocket {
 
     /// Connect this socket to a remote address.
     ///
+
     /// After calling connect, `send`/`recv` can be used instead of
     /// `send_to`/`recv_from`. Only datagrams from the connected address
     /// will be received (kernel filters other sources).
     ///
+
     /// # Benefits of connected UDP
     /// - Slightly faster send/recv (no address lookup per call)
     /// - Receives ICMP errors (e.g., port unreachable)
     /// - Kernel filters packets from other sources
     ///
+
     /// # Example
     /// ```verum
     /// socket.connect("127.0.0.1:8080")?;
@@ -421,6 +449,7 @@ implement UdpSocket {
 
     /// Send data to the connected peer.
     ///
+
     /// The socket must be connected first with `connect()`.
     /// More efficient than send_to when sending multiple datagrams to same address.
     public fn send(&self, buf: &[Byte]) -> Result<Int, IoError> {
@@ -438,6 +467,7 @@ implement UdpSocket {
 
     /// Receive data from the connected peer.
     ///
+
     /// The socket must be connected first with `connect()`.
     /// Only receives datagrams from the connected address.
     public fn recv(&self, buf: &mut [Byte]) -> Result<Int, IoError> {
@@ -455,6 +485,7 @@ implement UdpSocket {
 
     /// Peek at incoming data without consuming it.
     ///
+
     /// The data remains in the receive buffer for subsequent recv/recv_from.
     /// Useful for checking message size or type before full receive.
     public fn peek_from(&self, buf: &mut [Byte]) -> Result<(Int, SocketAddr), IoError> {
@@ -488,6 +519,7 @@ implement UdpSocket {
 
     /// Set the socket to non-blocking mode.
     ///
+
     /// In non-blocking mode, send/recv operations return immediately with
     /// EWOULDBLOCK/EAGAIN if they would block.
     public fn set_nonblocking(&self, nonblocking: Bool) -> Result<(), IoError> {
@@ -501,6 +533,7 @@ implement UdpSocket {
 
     /// Enable or disable SO_BROADCAST.
     ///
+
     /// Required for sending to broadcast addresses (e.g., 255.255.255.255).
     /// Note: Broadcast only works on IPv4.
     public fn set_broadcast(&self, broadcast: Bool) -> Result<(), IoError> {
@@ -561,6 +594,7 @@ implement UdpSocket {
 
     /// Set the send buffer size (SO_SNDBUF).
     ///
+
     /// Larger buffers allow more datagrams to be queued for transmission.
     /// Kernel may double the requested value.
     public fn set_send_buffer_size(&self, size: Int) -> Result<(), IoError> {
@@ -574,6 +608,7 @@ implement UdpSocket {
 
     /// Set the receive buffer size (SO_RCVBUF).
     ///
+
     /// Larger buffers reduce packet loss under high load.
     /// Kernel may double the requested value.
     public fn set_recv_buffer_size(&self, size: Int) -> Result<(), IoError> {
@@ -587,6 +622,7 @@ implement UdpSocket {
 
     /// Set the read timeout.
     ///
+
     /// A value of None means reads will block indefinitely.
     /// A value of Some(ms) sets the timeout in milliseconds.
     public fn set_read_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
@@ -601,6 +637,7 @@ implement UdpSocket {
 
     /// Set the write timeout.
     ///
+
     /// A value of None means writes will block indefinitely.
     /// A value of Some(ms) sets the timeout in milliseconds.
     public fn set_write_timeout(&self, timeout_ms: Maybe<Int>) -> Result<(), IoError> {
@@ -615,10 +652,12 @@ implement UdpSocket {
 
     /// Join an IPv4 multicast group.
     ///
+
     /// # Arguments
     /// - multiaddr: The multicast group address (224.0.0.0 - 239.255.255.255)
     /// - interface: Local interface to receive multicast on (use Ipv4Addr.any() for default)
     ///
+
     /// # Example
     /// ```verum
     /// socket.join_multicast_v4(&Ipv4Addr.new(239, 0, 0, 1), &Ipv4Addr.any())?;
@@ -660,6 +699,7 @@ implement UdpSocket {
 
     /// Set the multicast TTL (time-to-live).
     ///
+
     /// TTL controls how many network hops a multicast packet can traverse:
     /// - 0: Restricted to same host
     /// - 1: Restricted to same subnet (default)
@@ -678,6 +718,7 @@ implement UdpSocket {
 
     /// Set multicast loopback.
     ///
+
     /// When enabled (default), multicast packets sent are looped back to the
     /// local socket if it has joined the same multicast group.
     public fn set_multicast_loop_v4(&self, enabled: Bool) -> Result<(), IoError> {
@@ -691,6 +732,7 @@ implement UdpSocket {
 
     /// Get the raw file descriptor for advanced operations.
     ///
+
     /// Use for custom socket options or integration with external event loops.
     public fn as_raw_fd(&self) -> FileDesc {
         self.fd
@@ -698,6 +740,7 @@ implement UdpSocket {
 
     /// Clone the socket via dup().
     ///
+
     /// Both sockets share the same underlying file descriptor state.
     public fn try_clone(&self) -> Result<UdpSocket, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -797,6 +840,7 @@ implement Drop for UdpIoReady {
 implement UdpSocket {
     /// Receive a datagram asynchronously.
     ///
+
     /// Yields to the executor while waiting for data.
     public async fn recv_from_async(&self, buf: &mut [Byte]) -> Result<(Int, SocketAddr), IoError> {
         // Ensure non-blocking mode
@@ -836,6 +880,7 @@ implement UdpSocket {
 
     /// Send a datagram asynchronously.
     ///
+
     /// Yields to the executor if the send buffer is full.
     public async fn send_to_async(&self, buf: &[Byte], addr: SocketAddr) -> Result<Int, IoError> {
         self.set_nonblocking(true)?;
@@ -879,6 +924,7 @@ implement UdpSocket {
 
 /// Serialize a socket address to bytes for syscalls.
 ///
+
 /// Mirror of `core/net/tcp.vr.serialize_socket_addr` — same
 /// BSD-vs-POSIX `sockaddr` header divergence (task #5).
 fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {

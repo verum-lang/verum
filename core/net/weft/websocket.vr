@@ -2,55 +2,65 @@
 // core/net/weft/websocket.vr — WebSocket (RFC 6455) handler wrapper
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §6.4
+// Spec: internal/specs/net-framework.md §6.4
 // =============================================================================
 //
+
 // Plugs the existing `core/net/websocket.vr` framing + handshake stdlib
 // (445 LOC) into Weft's `ConnectionRunner` abstraction. No frame
 // encoding / decoding / masking / handshake-key logic is duplicated —
 // this file is pure glue that composes the stdlib WS codec with the
 // Weft transport protocol and accept loop.
 //
+
 // Architecture
 //
-//   WsRunner<H>  ── ConnectionRunner plugged into `accept_loop`
-//        │
-//        ▼
-//   WsSession<T: WeftTransport>
-//        │
-//        ▼
-//   core.net.websocket.{encode, decode, accept_key, Frame}
+
+//  WsRunner<H> ── ConnectionRunner plugged into `accept_loop`
+//  │
+//  ▼
+//  WsSession<T: WeftTransport>
+//  │
+//  ▼
+//  core.net.websocket.{encode, decode, accept_key, Frame}
 //
+
 // Per-connection lifecycle:
 //
-//   1. Read HTTP/1.1 handshake request; extract Host, Upgrade,
-//      Connection, Sec-WebSocket-Key, Sec-WebSocket-Version (=13).
-//   2. If any MUST-header is missing / malformed → 400 + close.
-//   3. Compute `Sec-WebSocket-Accept` (SHA-1 + base64, driven by
-//      `core.net.websocket.accept_key`), send 101 Switching Protocols.
-//   4. Hand `WsSession` to the user's `WsHandler.on_connect` inside a
-//      nursery — reader / writer / ping / heartbeat tasks all live
-//      in that scope; `on_connect` returning (or the socket closing)
-//      terminates the whole set (§4.4 structured concurrency).
+
+//  1. Read HTTP/1.1 handshake request; extract Host, Upgrade,
+//  Connection, Sec-WebSocket-Key, Sec-WebSocket-Version (=13).
+//  2. If any MUST-header is missing / malformed → 400 + close.
+//  3. Compute `Sec-WebSocket-Accept` (SHA-1 + base64, driven by
+//  `core.net.websocket.accept_key`), send 101 Switching Protocols.
+//  4. Hand `WsSession` to the user's `WsHandler.on_connect` inside a
+//  nursery — reader / writer / ping / heartbeat tasks all live
+//  in that scope; `on_connect` returning (or the socket closing)
+//  terminates the whole set (§4.4 structured concurrency).
 //
+
 // Framework invariants respected:
 //
-//   * Server never masks (RFC 6455 §5.1); client MUST mask.
-//   * Control-frame payload ≤ 125 bytes enforced by peer rejection.
-//   * Max-payload per message bounded by `WsConfig.max_message_bytes`.
-//   * Close handshake: if client sends Close, we reply with Close
-//     before closing the socket (spec §5.5.1).
+
+//  * Server never masks (RFC 6455 §5.1); client MUST mask.
+//  * Control-frame payload ≤ 125 bytes enforced by peer rejection.
+//  * Max-payload per message bounded by `WsConfig.max_message_bytes`.
+//  * Close handshake: if client sends Close, we reply with Close
+//  before closing the socket (spec §5.5.1).
 //
+
 // Phase-3 scope limits:
 //
-//   * Only a dedicated WS listener (`.serve_ws(handler)`). Mixed
-//     HTTP+WS dispatch on one port is phase-4 once the ALPN/Upgrade
-//     dispatcher runner lands.
-//   * No compression extension (permessage-deflate) — phase 5.
-//   * No fragmentation-across-frames yet; CONT-driven split messages
-//     are delivered as one assembled payload but large messages are
-//     capped at `max_message_bytes`.
+
+//  * Only a dedicated WS listener (`.serve_ws(handler)`). Mixed
+//  HTTP+WS dispatch on one port is phase-4 once the ALPN/Upgrade
+//  dispatcher runner lands.
+//  * No compression extension (permessage-deflate) — phase 5.
+//  * No fragmentation-across-frames yet; CONT-driven split messages
+//  are delivered as one assembled payload but large messages are
+//  capped at `max_message_bytes`.
 //
+
 // =============================================================================
 
 module core.net.weft.websocket;
@@ -476,7 +486,7 @@ implement<H: WsHandler + Send + Sync + 'static> ConnectionRunner for WsRunner<H>
     }
 
     async fn refuse_overloaded(&self, stream: TcpStream) {
-        // Mirror the HTTP/1.1 plaintext 503.  Post-#316: emit bytes
+        // Mirror the HTTP/1.1 plaintext 503. Post-#316: emit bytes
         // straight into the byte buffer.
         let msg = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 11\r\n\r\noverloaded\n";
         let mut buf: List<Byte> = List.with_capacity(msg.len());
@@ -545,7 +555,7 @@ async fn read_handshake(
     token: &CancellationToken,
 ) -> Result<HandshakeInfo, Text> {
     // Post-#316 follow-up: keep the accumulator as `List<Byte>`
-    // directly, mirroring connection.vr's request-buffer fix.  Pre-fix
+    // directly, mirroring connection.vr's request-buffer fix. Pre-fix
     // every loop iteration paid a per-byte Int→Byte reconversion of
     // the entire buffer; post-fix the parser feeds against `&accum`
     // with no conversion at all.
@@ -657,6 +667,7 @@ async fn write_handshake_failure(
 // serve_ws — WS listener entry point (free function)
 // =============================================================================
 //
+
 // Kept as a free function (rather than a method on `Server<H>`) because
 // the shared `Server<H>` type is bound to `Handler` — WS handlers
 // satisfy a DIFFERENT protocol (`WsHandler`). A dedicated entry point

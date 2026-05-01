@@ -14,6 +14,7 @@
 )]
 //! Comprehensive Test Suite for Structured Error Contexts
 //!
+
 //! Tests all aspects of the structured context system:
 //! - ContextValue types and conversions
 //! - ToContextValue trait implementations

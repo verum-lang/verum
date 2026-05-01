@@ -14,21 +14,23 @@
 )]
 //! Tests for 12 previously untested grammar productions.
 //!
+
 //! Each production gets at least 3 tests:
-//!   - Happy path (valid syntax)
-//!   - Error case (invalid syntax produces error)
-//!   - Edge case (complex/nested usage)
+//!  - Happy path (valid syntax)
+//!  - Error case (invalid syntax produces error)
+//!  - Edge case (complex/nested usage)
 //!
+
 //! Productions tested:
-//!   1. provide_stmt
-//!   2. context_expr (context_def)
-//!   3. nursery_block (nursery_expr)
-//!   4. spawn_expr
-//!   5. defer_stmt
-//!   6. errdefer_stmt
-//!   7. pipe_expr
-//!   8. lambda_expr
-//!   9. mount_stmt
+//!  1. provide_stmt
+//!  2. context_expr (context_def)
+//!  3. nursery_block (nursery_expr)
+//!  4. spawn_expr
+//!  5. defer_stmt
+//!  6. errdefer_stmt
+//!  7. pipe_expr
+//!  8. lambda_expr
+//!  9. mount_stmt
 //!  10. rank2_fn_type
 //!  11. ffi_block (extern_block)
 //!  12. newtype_def
@@ -74,7 +76,7 @@ fn parse_stmts(source: &str) -> Module {
 // =============================================================================
 // 1. PROVIDE_STMT
 // Grammar: provide_stmt = 'provide' context_path ['as' identifier] '=' expression (';' | 'in' block_expr)
-//                        | 'provide' identifier ';' ;
+//  | 'provide' identifier ';' ;
 // =============================================================================
 
 #[test]
@@ -123,7 +125,7 @@ fn test_provide_stmt_nested() {
 // =============================================================================
 // 2. CONTEXT_DEF
 // Grammar: context_def = visibility ('context' ['async'] | 'async' 'context') identifier
-//                         [generics] '{' {context_item} '}'
+//  [generics] '{' {context_item} '}'
 // =============================================================================
 
 #[test]
@@ -264,7 +266,7 @@ fn test_spawn_complex_expr() {
 // =============================================================================
 // 5. DEFER_STMT
 // Grammar: defer_stmt = 'defer' defer_body | 'errdefer' defer_body
-//          defer_body = expression ';' | block_expr
+//  defer_body = expression ';' | block_expr
 // =============================================================================
 
 #[test]
@@ -376,7 +378,7 @@ fn test_pipe_in_let() {
 // =============================================================================
 // 8. LAMBDA_EXPR
 // Grammar: lambda_expr = '|' param_list_lambda '|' expression
-//          (also: \x -> expr syntax may exist)
+//  (also: \x -> expr syntax may exist)
 // =============================================================================
 
 #[test]
@@ -419,9 +421,9 @@ fn test_lambda_closure_with_pipe() {
 // =============================================================================
 // 9. MOUNT_STMT
 // Grammar: mount_stmt = 'mount' mount_tree ['as' identifier] ';'
-//          mount_tree = mount_item ['as' identifier]
-//                     | path '.' '{' mount_list '}'
-//                     | path '.' '*'
+//  mount_tree = mount_item ['as' identifier]
+//  | path '.' '{' mount_list '}'
+//  | path '.' '*'
 // =============================================================================
 
 #[test]
@@ -467,7 +469,7 @@ fn test_mount_multiple() {
 // =============================================================================
 // 10. RANK2_FN_TYPE
 // Grammar: rank2_function_type = ['async'] 'fn' generics '(' type_list ')'
-//                                ['->' type_expr] [context_clause] [generic_where_clause]
+//  ['->' type_expr] [context_clause] [generic_where_clause]
 // =============================================================================
 
 #[test]
@@ -504,8 +506,8 @@ fn test_rank2_fn_type_missing_generics() {
 // =============================================================================
 // 11. FFI_BLOCK (extern_block)
 // Grammar: extern_block = 'extern' [string_lit] '{' {extern_fn_decl} '}'
-//          extern_fn_decl = [visibility] 'fn' identifier [generics]
-//                           '(' param_list ')' ['->' type_expr] ';'
+//  extern_fn_decl = [visibility] 'fn' identifier [generics]
+//  '(' param_list ')' ['->' type_expr] ';'
 // =============================================================================
 
 #[test]
@@ -562,7 +564,7 @@ fn test_extern_block_with_pub() {
 // =============================================================================
 // 12. NEWTYPE_DEF
 // Grammar: type_definition_body = ... | '(' type_list ')' ';'
-//          (newtype: type Name is (InnerType);)
+//  (newtype: type Name is (InnerType);)
 // =============================================================================
 
 #[test]

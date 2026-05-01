@@ -1,5 +1,6 @@
 //! Per-opcode VBC dispatch microbenchmarks (#102).
 //!
+
 //! Measures the wall-clock cost of each opcode's dispatch + execute
 //! path in isolation, by building a function whose body is a tight
 //! straight-line block of N copies of the opcode under test followed
@@ -8,34 +9,40 @@
 //! cycles, multiply by the host CPU frequency in GHz (e.g. 3.2 GHz
 //! Apple-silicon performance core ⇒ cycles ≈ ns × 3.2).
 //!
+
 //! ## Targets (`crates/verum_vbc/CLAUDE.md`)
 //!
-//! | Opcode class                | Target                | Source              |
+
+//! | Opcode class | Target | Source |
 //! |-----------------------------|-----------------------|---------------------|
-//! | Dispatch (any opcode)       | < 20 cycles           | "Performance Targets" |
-//! | `Call` / `CallM`            | < 50 cycles           | "Method call"       |
-//! | `NewList` / `NewMap` / `NewSet` | < 100 cycles      | "Memory alloc"      |
+//! | Dispatch (any opcode) | < 20 cycles | "Performance Targets" |
+//! | `Call` / `CallM` | < 50 cycles | "Method call" |
+//! | `NewList` / `NewMap` / `NewSet` | < 100 cycles | "Memory alloc" |
 //!
+
 //! Any benchmark exceeding 2× the relevant target (e.g. > 40 cycles
 //! on a basic dispatch opcode) flags a perf gap that warrants
 //! investigation. The bench output ends with a synthesised "GAP /
 //! PASS / WARN" report when run via `cargo bench`.
 //!
+
 //! ## Methodology notes
 //!
+
 //! - **Straight-line, no branches**: We avoid loop frameworks so
-//!   the measurement is dominated by the dispatch + execute of the
-//!   target opcode rather than the loop bookkeeping (CmpI, JmpNot,
-//!   UnaryI, Jmp). The trade-off is that some opcodes (e.g. Call)
-//!   need different parameters per copy; we stamp out N variants
-//!   programmatically.
+//!  the measurement is dominated by the dispatch + execute of the
+//!  target opcode rather than the loop bookkeeping (CmpI, JmpNot,
+//!  UnaryI, Jmp). The trade-off is that some opcodes (e.g. Call)
+//!  need different parameters per copy; we stamp out N variants
+//!  programmatically.
 //! - **N is large** (default 1024) so per-iteration setup (state
-//!   allocation, function lookup) is amortised below 1 % of the
-//!   measurement.
+//!  allocation, function lookup) is amortised below 1 % of the
+//!  measurement.
 //! - **Module + InterpreterState reused** across iterations of the
-//!   same bench: only `execute_table` is timed, mirroring the
-//!   typical hot-path where one VBC module runs many times.
+//!  same bench: only `execute_table` is timed, mirroring the
+//!  typical hot-path where one VBC module runs many times.
 //!
+
 //! Run with:
 //! ```sh
 //! cargo bench -p verum_vbc --bench dispatch_microbench
@@ -481,35 +488,40 @@ fn bench_jmp_dispatch(c: &mut Criterion) {
 // Driver
 // ============================================================================
 //
+
 // Each `bench_*` function above measures one opcode (or a small,
 // thematically-related cluster). After the bench run, criterion
 // emits HTML reports under `target/criterion/dispatch/<group>/`,
 // and the textual summary on stdout reports per-element ns/op.
 //
+
 // To convert ns/op → cycles: multiply by the host CPU's effective
 // frequency in GHz (3.2 on Apple-silicon perf cores; cat
 // /proc/cpuinfo on Linux). E.g. ns/op = 6.0 on a 3.2-GHz core ⇒
 // 19.2 cycles/op.
 //
+
 // ## Compliance reading
 //
-// | Group                    | Target / op | 2× gap |
+
+// | Group | Target / op | 2× gap |
 // |--------------------------|-------------|--------|
-// | dispatch/load_imm        | < 20 cyc    | > 40   |
-// | dispatch/mov             | < 20 cyc    | > 40   |
-// | dispatch/binary          | < 20 cyc    | > 40   |
-// | dispatch/compare         | < 20 cyc    | > 40   |
-// | dispatch/unary           | < 20 cyc    | > 40   |
-// | dispatch/jmp             | < 20 cyc    | > 40   |
+// | dispatch/load_imm | < 20 cyc | > 40 |
+// | dispatch/mov | < 20 cyc | > 40 |
+// | dispatch/binary | < 20 cyc | > 40 |
+// | dispatch/compare | < 20 cyc | > 40 |
+// | dispatch/unary | < 20 cyc | > 40 |
+// | dispatch/jmp | < 20 cyc | > 40 |
 //
+
 // Future extensions (not yet wired — tracked with #102 follow-up):
-//   * Call / CallM: requires a target function in the same module
-//     and a body op-factory that stamps out distinct callsites.
-//     Target < 50 cycles.
-//   * NewList / NewMap / NewSet: requires runtime allocator
-//     plumbing reachable from the interpreter; target < 100
-//     cycles. The current straight-line model would also need to
-//     manage register reuse to avoid heap blowup.
+//  * Call / CallM: requires a target function in the same module
+//  and a body op-factory that stamps out distinct callsites.
+//  Target < 50 cycles.
+//  * NewList / NewMap / NewSet: requires runtime allocator
+//  plumbing reachable from the interpreter; target < 100
+//  cycles. The current straight-line model would also need to
+//  manage register reuse to avoid heap blowup.
 
 criterion_group!(
     dispatch_microbench,

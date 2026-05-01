@@ -1,15 +1,18 @@
 //! Thread-local breadcrumb trail attached to crash reports.
 //!
+
 //! A breadcrumb records *where in the pipeline* we are — phase name plus
 //! a short detail (file being compiled, function, pass). On a crash the
 //! trail is serialised into the report so the dev who receives the
 //! report can see the last few steps before the fault without having
 //! access to the user's `.vr` sources.
 //!
+
 //! Each breadcrumb is pushed via `enter(...)` and popped automatically
 //! when the returned RAII guard is dropped. Trails are bounded
 //! (`MAX_TRAIL_LEN`) so long compilations don't retain unbounded memory.
 //!
+
 //! Crossing a signal boundary: the trail lives in thread-local storage;
 //! signal handlers read it via a process-wide "last known trail" snapshot
 //! updated on every push/pop. This makes the last good trail visible
@@ -55,6 +58,7 @@ fn last_trail() -> &'static Mutex<Vec<Breadcrumb>> {
 
 /// RAII guard that pops the breadcrumb when dropped.
 ///
+
 /// Must not outlive the thread that pushed it.
 #[must_use = "breadcrumb guard must be bound to a local (e.g. `let _g = breadcrumb::enter(...)`)"]
 pub struct BreadcrumbGuard {
@@ -74,6 +78,7 @@ impl Drop for BreadcrumbGuard {
 
 /// Push a new breadcrumb; the returned guard pops it on drop.
 ///
+
 /// `phase` is a stable, coarse-grained label like `"codegen.llvm.generate"`.
 /// `detail` is free-form context — the .vr file name, function, op index.
 pub fn enter(phase: &'static str, detail: impl Into<String>) -> BreadcrumbGuard {
@@ -100,6 +105,7 @@ pub fn enter(phase: &'static str, detail: impl Into<String>) -> BreadcrumbGuard 
 
 /// Record a breadcrumb without a guard (fire-and-forget).
 ///
+
 /// Use sparingly — there is no matching pop, so these stay in the trail
 /// until the ring buffer rolls over. Useful for marking one-shot events
 /// like "acquired LLVM context" that don't naturally bracket a scope.
@@ -130,6 +136,7 @@ pub fn current_trail() -> Vec<Breadcrumb> {
 
 /// Best-effort cross-thread snapshot.
 ///
+
 /// Called by the signal handler (where TLS of the offending thread may
 /// not be reachable). Returns whichever thread most recently updated
 /// its trail. Imperfect — but better than nothing when the fault is on
@@ -149,10 +156,12 @@ fn snapshot_current() {
 
 /// Macro form: `breadcrumb!("phase", "format {} string", arg)`.
 ///
+
 /// Expands to `let _bc = crate::breadcrumb::enter(phase, format!(...));`
 /// **in the caller's scope**, so the guard stays alive for the enclosing
 /// block. You bind the guard yourself:
 ///
+
 /// ```ignore
 /// let _bc = verum_error::breadcrumb!("codegen", "file={}", path);
 /// ```

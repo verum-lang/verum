@@ -9,9 +9,11 @@ module sys.windows;
 // =============================================================================
 @cfg(target_os = "windows")
 //
+
 // This module provides the complete Windows V-LLSI (Verum Low-Level System
 // Interface) implementation for the bootstrap kernel.
 //
+
 // Architecture:
 // - ntstatus.vr: NT status codes and helpers
 // - ntdll.vr: NT Native API FFI (@extern("ntdll.dll"))
@@ -21,8 +23,10 @@ module sys.windows;
 // - thread.vr: Thread creation and synchronization
 // - time.vr: Time operations (QueryPerformanceCounter, GetTickCount64)
 //
+
 // Windows uses IAT imports via @extern("dll.dll") for API access.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 

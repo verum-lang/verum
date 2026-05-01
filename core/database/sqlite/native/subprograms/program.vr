@@ -3,19 +3,22 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.4
 //
+
 // `SubProgram` is the metadata wrapper around a slice of opcodes
 // that the main VDBE can `Gosub` into. We carry:
 //
-//   * an opaque `SubProgramId` — the value the main program
-//     references; allocated by the registry, stable for the
-//     lifetime of the connection
-//   * a register window size — how many registers the sub-program
-//     wants to operate on; the interpreter shifts the parent's
-//     register-base by this amount before invocation
-//   * the source-table dependency — when DROP TABLE fires, every
-//     sub-program whose `source_table` matches must be invalidated
-//   * the trigger-event tag (for diagnostic / EXPLAIN hooks)
+
+//  * an opaque `SubProgramId` — the value the main program
+//  references; allocated by the registry, stable for the
+//  lifetime of the connection
+//  * a register window size — how many registers the sub-program
+//  wants to operate on; the interpreter shifts the parent's
+//  register-base by this amount before invocation
+//  * the source-table dependency — when DROP TABLE fires, every
+//  sub-program whose `source_table` matches must be invalidated
+//  * the trigger-event tag (for diagnostic / EXPLAIN hooks)
 //
+
 // We DON'T store the opcode list here directly — the opcode stream
 // lives in the gated `l4_vdbe/program.vr` `VdbeProgram` and is
 // addressed by id via the registry. This keeps the data layer

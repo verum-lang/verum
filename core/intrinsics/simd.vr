@@ -4,18 +4,23 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides architecture-independent SIMD abstractions that map
 // to the best available instructions on each platform.
 //
+
 // All operations are zero-allocation and VBC-compatible.
 //
+
 // # Operations
 //
+
 // - Lane access: simd_extract, simd_insert
 // - Shuffling: simd_shuffle
 // - Reductions: simd_reduce_add, simd_reduce_mul, simd_reduce_min, simd_reduce_max
 // - Bitwise reductions: simd_reduce_and, simd_reduce_or, simd_reduce_xor
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

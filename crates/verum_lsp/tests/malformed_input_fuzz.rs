@@ -1,25 +1,28 @@
 //! Red-team Round-2 §8.1 — LSP responses to malformed source.
 //!
+
 //! Pins the no-panic contract for the user-reachable LSP entry points
-//! when fed adversarial source text.  Every LSP request that ingests
+//! when fed adversarial source text. Every LSP request that ingests
 //! a `DocumentState` flows through the parser which MAY emit a
 //! diagnostic but MUST NOT panic the LSP worker — a panic kills the
 //! editor's language server connection and forces a manual restart.
 //!
+
 //! The test corpus covers the empirical failure modes from the parser
 //! red-team sweep:
-//!   - empty document
-//!   - mid-token EOF (truncated function declaration)
-//!   - unbalanced bracket pyramid (typical fuzz seed)
-//!   - deeply nested generic angle-bracket spam
-//!   - non-UTF-8-clean byte sequences (handled at the str::from_utf8 layer
-//!     before reaching the LSP — but the test pins the lossy fallback)
-//!   - position past end-of-document
-//!   - position with line/character at u32::MAX (no panic on overflow
-//!     during line walk)
-//!   - 0-length string with various trigger characters at position 0
-//!   - very long single line (forces position_to_offset hot path)
+//!  - empty document
+//!  - mid-token EOF (truncated function declaration)
+//!  - unbalanced bracket pyramid (typical fuzz seed)
+//!  - deeply nested generic angle-bracket spam
+//!  - non-UTF-8-clean byte sequences (handled at the str::from_utf8 layer
+//!  before reaching the LSP — but the test pins the lossy fallback)
+//!  - position past end-of-document
+//!  - position with line/character at u32::MAX (no panic on overflow
+//!  during line walk)
+//!  - 0-length string with various trigger characters at position 0
+//!  - very long single line (forces position_to_offset hot path)
 //!
+
 //! Every case asserts: (a) DocumentState construction succeeds; (b)
 //! `complete_at_position` returns without panicking; (c) the returned
 //! list is well-formed (the fuzzed input may legitimately yield zero
@@ -121,7 +124,7 @@ fn very_long_single_line_does_not_panic() {
 #[test]
 fn embedded_nul_bytes_do_not_panic() {
     // \0 in source should be lex-rejected without panicking the document
-    // construction.  Mid-string NULs are a common fuzz seed.
+    // construction. Mid-string NULs are a common fuzz seed.
     let s = "fn \0foo() {}\0";
     let d = doc(s);
     let _ = complete_at_position(&d, at(0, 4));
@@ -187,7 +190,7 @@ fn member_access_after_emoji_does_not_panic() {
     let d = doc(s);
     let _ = complete_at_position(&d, at(0, s.len() as u32));
     // Position at every byte offset from 0..len — at least some
-    // will land mid-emoji.  None must panic.
+    // will land mid-emoji. None must panic.
     for col in 0..(s.len() as u32 + 2) {
         let _ = complete_at_position(&d, at(0, col));
     }
@@ -195,9 +198,10 @@ fn member_access_after_emoji_does_not_panic() {
 
 // ===== rename / find_word_range =====
 //
+
 // `prepare_rename` calls `find_word_range` which walks `&line[..n]`
 // using LSP byte offsets that may land mid-codepoint after editor-
-// negotiation rounding.  Multi-byte chars in the line previously
+// negotiation rounding. Multi-byte chars in the line previously
 // caused the slice to panic.
 
 #[test]

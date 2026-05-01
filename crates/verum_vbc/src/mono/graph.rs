@@ -1,8 +1,10 @@
 //! Instantiation graph for tracking generic function instantiations.
 //!
+
 //! The instantiation graph is built during type checking and represents
 //! all generic function instantiations required in a compilation unit.
 //!
+
 //! Built during type checking: records each (function_id, type_args) pair and
 //! dependency edges between instantiations for topological specialization ordering.
 
@@ -70,6 +72,7 @@ impl InstantiationRequest {
 
     /// Computes a stable hash for caching and deduplication.
     ///
+
     /// The hash includes:
     /// - Function ID
     /// - All type arguments (recursively hashed)
@@ -134,6 +137,7 @@ impl InstantiationKey {
 /// instantiation. Prevents resource exhaustion from pathological
 /// generic instantiations like `Vec<Vec<Vec<...<T>...>>>`.
 ///
+
 /// 64 levels comfortably accommodates any realistic hand-written code
 /// while aborting runaway macro/generated code before it consumes
 /// gigabytes of compiler memory.
@@ -231,6 +235,7 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
 
 /// Graph of all generic function instantiations in a compilation unit.
 ///
+
 /// The graph tracks:
 /// - All instantiation requests (deduplicated)
 /// - Index by function ID for fast lookup
@@ -292,6 +297,7 @@ impl InstantiationGraph {
 
     /// Records an instantiation request.
     ///
+
     /// Returns the index of the instantiation (existing or new).
     pub fn record(&mut self, request: InstantiationRequest) -> usize {
         // Check for existing instantiation
@@ -424,6 +430,7 @@ impl InstantiationGraph {
 
     /// Returns instantiations in topological order (dependencies first).
     ///
+
     /// Uses Kahn's algorithm for topological sorting.
     /// Dependencies are processed before the nodes that depend on them.
     pub fn topological_order(&self) -> Vec<usize> {

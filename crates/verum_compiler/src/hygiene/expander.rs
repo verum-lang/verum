@@ -1,16 +1,20 @@
 //! Quote Expansion with Hygiene
 //!
+
 //! Implements the quote expansion pipeline with proper hygiene enforcement.
 //! This module handles the mark phase, splice phase, and stage management.
 //!
+
 //! ## Pipeline Stages
 //!
+
 //! 1. Parse Quote - Parse quote { ... } into QuoteAST
 //! 2. Mark Phase - Assign fresh marks to introduced bindings
 //! 3. Splice Phase - Substitute $var and $[for...] expressions
 //! 4. Hygiene Check - Verify no accidental capture occurs
 //! 5. Emit Code - Generate TokenStream with hygiene metadata
 //!
+
 //! Hygienic macro expansion: ensures macro-introduced bindings do not
 //! capture or shadow user bindings via syntax context tracking.
 
@@ -81,6 +85,7 @@ impl ExpansionConfig {
 
 /// A single event in the `debug_bindings` trace.
 ///
+
 /// Emitted by the expander only when `ExpansionConfig.debug_bindings`
 /// is `true`. Lets callers reconstruct the chronological order of
 /// quote-scope entries/exits, binding registrations, references,
@@ -175,6 +180,7 @@ pub enum ConstValue {
 impl ConstValue {
     /// Convert from MetaValue (the evaluator's const value type)
     ///
+
     /// This converts the rich MetaValue type to the simpler ConstValue
     /// used for hygiene purposes. AST nodes cannot be converted.
     pub fn from_meta_value(value: &verum_ast::MetaValue) -> Maybe<Self> {
@@ -489,6 +495,7 @@ pub type LiftEvalResult = Result<verum_ast::MetaValue, Text>;
 
 /// Evaluator callback for lift expressions
 ///
+
 /// This callback is invoked when a lift expression needs to be evaluated.
 /// It takes the expression to evaluate and returns either a MetaValue
 /// or an error message.
@@ -514,12 +521,14 @@ pub struct QuoteExpander {
     binding_stack: List<Map<Text, BindingInfo>>,
     /// Optional evaluator for lift expressions
     ///
+
     /// When set, lift expressions will be evaluated at compile time
     /// using this callback. The callback receives the expression to
     /// evaluate and should return the resulting MetaValue.
     lift_evaluator: Maybe<LiftEvaluator>,
     /// Recorded debug events.
     ///
+
     /// Populated only when `config.debug_bindings = true`. Stays
     /// empty (and zero-allocation) under the default configuration so
     /// production callers pay nothing.
@@ -567,18 +576,21 @@ impl QuoteExpander {
 
     /// Set the lift evaluator callback
     ///
+
     /// The lift evaluator is called when a `lift(expr)` expression needs
     /// to be evaluated. It should evaluate the expression in the current
     /// meta context and return the resulting value.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let meta_ctx = MetaContext::new();
     /// expander.set_lift_evaluator(Box::new(move |expr| {
-    ///     let meta_expr = meta_ctx.ast_expr_to_meta_expr(expr)?;
-    ///     meta_ctx.eval_meta_expr(&meta_expr)
-    ///         .map_err(|e| e.to_string().into())
+    ///  let meta_expr = meta_ctx.ast_expr_to_meta_expr(expr)?;
+    ///  meta_ctx.eval_meta_expr(&meta_expr)
+    ///  .map_err(|e| e.to_string().into())
     /// }));
     /// ```
     pub fn set_lift_evaluator(&mut self, evaluator: LiftEvaluator) {
@@ -618,6 +630,7 @@ impl QuoteExpander {
 
     /// Borrow the chronological list of recorded debug events.
     ///
+
     /// Only populated when the expander was constructed with
     /// `ExpansionConfig.debug_bindings = true`. Empty otherwise — the
     /// flag is the master gate for all event recording, so the per-
@@ -664,6 +677,7 @@ impl QuoteExpander {
 
     /// Enter a quote block
     ///
+
     /// Creates a fresh mark and pushes a new quote scope.
     pub fn enter_quote(&mut self, target_stage: u32, span: Span) -> Result<ScopeMark, HygieneViolation> {
         // Check max depth
@@ -732,6 +746,7 @@ impl QuoteExpander {
 
     /// Process a binding (let, fn parameter, etc.)
     ///
+
     /// Adds current marks to the binding and registers it.
     pub fn process_binding(
         &mut self,
@@ -771,6 +786,7 @@ impl QuoteExpander {
 
     /// Process a reference to an identifier
     ///
+
     /// Verifies that the reference is hygienic.
     pub fn process_reference(&mut self, name: &Text, span: Span) -> HygienicIdent {
         let scopes = self.context.current_scopes();
@@ -798,6 +814,7 @@ impl QuoteExpander {
 
     /// Splice a value into the quote
     ///
+
     /// For `$name` or `${expr}` splices.
     pub fn splice_value(&mut self, name: &Text, span: Span) -> Result<SpliceResult, HygieneViolation> {
         self.record_debug_event(
@@ -853,6 +870,7 @@ impl QuoteExpander {
 
     /// Splice an expression into the quote
     ///
+
     /// For `${expr}` splices that need evaluation.
     pub fn splice_expr(&mut self, expr: Expr, _span: Span) -> Result<SpliceResult, HygieneViolation> {
         // Mark the expression with call-site scopes
@@ -862,27 +880,33 @@ impl QuoteExpander {
 
     /// Handle a lift expression
     ///
+
     /// For `lift(expr)` which evaluates at a higher stage and embeds
     /// the result into the generated code.
     ///
+
     /// # Evaluation
     ///
+
     /// If a lift evaluator is set, this will:
     /// 1. Evaluate the expression using the evaluator callback
     /// 2. Convert the resulting MetaValue to a ConstValue
     /// 3. Return a LiftedValue containing the constant
     ///
+
     /// If no evaluator is set, this returns a LiftedValue without
     /// the evaluated constant (deferred evaluation).
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// meta fn make_array(count: Int) -> Expr {
-    ///     quote {
-    ///         let size = $(lift(count));  // count is evaluated here
-    ///         new_array(size)
-    ///     }
+    ///  quote {
+    ///  let size = $(lift(count)); // count is evaluated here
+    ///  new_array(size)
+    ///  }
     /// }
     /// ```
     pub fn lift_value(
@@ -917,20 +941,21 @@ impl QuoteExpander {
                     (const_val, type_name)
                 }
                 Err(err_msg) => {
-                    // Evaluation failed.  Under `strict_mode = true` we
+                    // Evaluation failed. Under `strict_mode = true` we
                     // abort the lift with a typed error so the caller
                     // sees an immediate hygiene violation rather than a
                     // degraded `LiftedValue { const_value: None }` that
-                    // looks like a deferred-evaluation case.  Under
+                    // looks like a deferred-evaluation case. Under
                     // lenient mode we record the violation and continue
                     // (the caller is expected to inspect
                     // `take_violations()` and decide its own policy).
                     //
+
                     // Pre-fix `config.strict_mode` was inert — the
                     // field defaulted to `true` (claiming strict
                     // enforcement) but the expander never read it, so
                     // every lift failure silently degraded to the
-                    // deferred-eval shape.  Now the strict flag has
+                    // deferred-eval shape. Now the strict flag has
                     // actual teeth.
                     let v = HygieneViolation::InvalidQuoteSyntax {
                         message: Text::from(format!(
@@ -961,6 +986,7 @@ impl QuoteExpander {
 
     /// Evaluate a lift expression and return the raw MetaValue
     ///
+
     /// This is a lower-level interface that returns the MetaValue directly
     /// without converting it to ConstValue. Useful when you need to work
     /// with AST values or other complex types.
@@ -986,6 +1012,7 @@ impl QuoteExpander {
 
     /// Handle a stage escape expression
     ///
+
     /// For `$(stage N){ expr }` which evaluates at a specific stage.
     pub fn stage_escape(
         &mut self,
@@ -1013,8 +1040,10 @@ impl QuoteExpander {
 
     /// Handle a repetition splice
     ///
+
     /// For `$[for pattern in expr { body }]`.
     ///
+
     /// This method expands the body once for each element in the list,
     /// substituting the pattern variable with each element.
     pub fn expand_repetition(
@@ -1059,6 +1088,7 @@ impl QuoteExpander {
 
     /// Handle a repetition with multiple items
     ///
+
     /// For `$[for (a, b) in zip(list1, list2) { body }]`.
     pub fn expand_repetition_multi(
         &mut self,
@@ -1105,6 +1135,7 @@ impl QuoteExpander {
 
     /// Expand a single iteration of a repetition body
     ///
+
     /// This is called for each element in the iteration.
     pub fn expand_repetition_iteration(
         &mut self,
@@ -1191,6 +1222,7 @@ impl QuoteExpander {
 
     /// Apply call-site marks to an expression
     ///
+
     /// Walks the expression tree and adds call-site marks to all identifiers.
     /// This ensures that spliced values have proper hygiene marking.
     fn apply_call_site_marks_to_expr(&self, expr: Expr) -> Expr {
@@ -1204,6 +1236,7 @@ impl QuoteExpander {
 
     /// Apply stage marks to an expression
     ///
+
     /// Marks the expression with stage-specific scopes for multi-stage hygiene.
     fn apply_stage_marks_to_expr(&self, expr: Expr, stage: u32) -> Expr {
         // Create a stage-specific mark
@@ -1213,6 +1246,7 @@ impl QuoteExpander {
 
     /// Apply a mark to all identifiers in an expression tree
     ///
+
     /// This method recursively transforms the expression, adding the mark
     /// to all Path expressions which contain identifiers.
     fn apply_mark_to_expr(&self, expr: Expr, mark: Mark) -> Expr {
@@ -1395,6 +1429,7 @@ impl QuoteExpander {
 
 /// Repetition expander for $[for...] syntax
 ///
+
 /// Handles the expansion of repetition patterns in quotes.
 #[derive(Debug)]
 pub struct RepetitionExpander {
@@ -1460,6 +1495,7 @@ impl RepetitionExpander {
 
     /// Expand the body template
     ///
+
     /// In a real implementation, this would receive the actual list values
     /// and iterate over them. For now, it returns the body as-is.
     pub fn expand_body(
@@ -2362,8 +2398,8 @@ mod tests {
     fn test_lift_with_evaluator_error_strict_aborts() {
         // Under strict mode (`strict_mode = true` — the default), a
         // failed lift evaluation aborts immediately with a typed
-        // error.  Pre-fix the field was inert and lenient was the
-        // only behaviour available.  Pin the new strict path so a
+        // error. Pre-fix the field was inert and lenient was the
+        // only behaviour available. Pin the new strict path so a
         // regression to the inert-field state is caught.
         let context = HygieneContext::new();
         let mut expander = QuoteExpander::with_default_config(context)

@@ -19,8 +19,10 @@ pub struct StructValue<'ctx> {
 impl<'ctx> StructValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type struct.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());
@@ -32,9 +34,11 @@ impl<'ctx> StructValue<'ctx> {
 
     /// Gets the value of a field belonging to this `StructValue`.
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i32_type = context.i32_type();
     /// let i8_type = context.i8_type();
@@ -43,6 +47,7 @@ impl<'ctx> StructValue<'ctx> {
     /// let struct_type = context.struct_type(&[i8_type.into(), i32_type.into()], false);
     /// let struct_val = struct_type.const_named_struct(&[i8_val.into(), i32_val.into()]);
     ///
+
     /// assert!(struct_val.get_field_at_index(0).is_some());
     /// assert!(struct_val.get_field_at_index(1).is_some());
     /// assert!(struct_val.get_field_at_index(3).is_none());
@@ -59,8 +64,10 @@ impl<'ctx> StructValue<'ctx> {
 
     /// Gets the value of a field belonging to this `StructValue`.
     ///
+
     /// # Safety
     ///
+
     /// The index must be smaller than [StructValue::count_fields].
     pub unsafe fn get_field_at_index_unchecked(self, index: u32) -> BasicValueEnum<'ctx> {
         unsafe { BasicValueEnum::new(LLVMGetOperand(self.as_value_ref(), index)) }
@@ -93,9 +100,11 @@ impl<'ctx> StructValue<'ctx> {
 
     /// Counts the number of fields.
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i32_type = context.i32_type();
     /// let i8_type = context.i8_type();
@@ -104,6 +113,7 @@ impl<'ctx> StructValue<'ctx> {
     /// let struct_type = context.struct_type(&[i8_type.into(), i32_type.into()], false);
     /// let struct_val = struct_type.const_named_struct(&[i8_val.into(), i32_val.into()]);
     ///
+
     /// assert_eq!(struct_val.count_fields(), 2);
     /// assert_eq!(struct_val.count_fields(), struct_type.count_fields());
     /// ```
@@ -148,16 +158,20 @@ impl<'ctx> StructValue<'ctx> {
 
     /// Determines whether or not a `StructValue` is a constant.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::{context::Context, values::BasicValue};
     ///
+
     /// let context = Context::create();
     /// let i64_type = context.i64_type();
     /// let i64_val = i64_type.const_int(23, false).as_basic_value_enum();
     /// let struct_val = context.const_struct(&[i64_val, i64_val], false);
     ///
+
     /// assert!(struct_val.is_const());
     /// ```
     pub fn is_const(self) -> bool {

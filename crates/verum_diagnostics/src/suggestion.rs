@@ -1,5 +1,6 @@
 //! Suggestion system for providing actionable fixes to diagnostics.
 //!
+
 //! This module provides types for representing fix suggestions with code snippets,
 //! applicability levels, and rich descriptions.
 

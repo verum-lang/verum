@@ -11,6 +11,7 @@ pub use verum_common::Map;
 
 /// SAT solver for dependency resolution
 ///
+
 /// This implements a DPLL-based SAT solver optimized for package dependency resolution.
 /// Each package version is assigned a boolean variable, and constraints are expressed
 /// as clauses in CNF (Conjunctive Normal Form).

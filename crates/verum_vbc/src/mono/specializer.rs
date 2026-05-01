@@ -1,5 +1,6 @@
 //! Industrial-grade bytecode specialization for monomorphization.
 //!
+
 //! The VBC Specializer transforms generic bytecode into specialized bytecode by:
 //! 1. Substituting type parameters with concrete types
 //! 2. Rewriting CALL_G to CALL with specialized function IDs
@@ -8,6 +9,7 @@
 //! 5. Specializing generic comparison (EQ_G → EQ_I/EQ_F)
 //! 6. Computing concrete sizes/alignments for SIZE_OF_G/ALIGN_OF_G
 //!
+
 //! Part of the VBC monomorphization pipeline. Operates on the InstantiationGraph built
 //! during type checking to produce specialized bytecode with concrete type arguments.
 
@@ -162,6 +164,7 @@ pub struct SpecializerStats {
 
 /// Industrial-grade bytecode specializer for generic functions.
 ///
+
 /// Transforms generic VBC bytecode to specialized bytecode by:
 /// - Substituting type parameters with concrete types
 /// - Rewriting generic calls to direct calls
@@ -230,6 +233,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes a function's bytecode.
     ///
+
     /// Returns the specialized function or an error.
     pub fn specialize(
         &mut self,
@@ -326,6 +330,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes a CALL_G instruction.
     ///
+
     /// CALL_G format: dst:reg func:varint type_arg_count:u8 [type_refs...] arg_count:u8 [args:reg...]
     /// CALL format: dst:reg func:varint arg_count:u8 [args:reg...]
     fn specialize_call_g(
@@ -391,8 +396,10 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes a CALL_V instruction.
     ///
+
     /// CALL_V format: dst:reg receiver:reg protocol:varint method_idx:u8 arg_count:u8 [args:reg...]
     ///
+
     /// Attempts devirtualization if the receiver type is monomorphic and implements the protocol.
     /// If devirtualizable: emits CALL with direct function ID
     /// Otherwise: copies through as CALL_V
@@ -485,6 +492,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Looks up a protocol implementation for a concrete type.
     ///
+
     /// Returns the function ID for the method if the type implements the protocol.
     fn lookup_protocol_impl(
         &self,
@@ -513,6 +521,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes a NEW_G instruction.
     ///
+
     /// NEW_G format: dst:reg type_id:varint type_arg_count:u8 [type_refs...]
     /// NEW format: dst:reg type_id:varint
     fn specialize_new_g(
@@ -558,6 +567,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes generic arithmetic operations.
     ///
+
     /// ADD_G/SUB_G/MUL_G/DIV_G format: dst:reg a:reg b:reg protocol_id:varint
     fn specialize_generic_arith(
         &mut self,
@@ -628,6 +638,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes generic comparison operations.
     ///
+
     /// EQ_G/CMP_G format: dst:reg a:reg b:reg protocol_id:varint
     fn specialize_generic_cmp(
         &mut self,
@@ -680,6 +691,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes SIZE_OF_G instruction.
     ///
+
     /// SIZE_OF_G format: dst:reg type_ref
     /// Becomes: LOAD_I dst, <concrete_size>
     fn specialize_sizeof_g(
@@ -824,6 +836,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Gets or creates an instantiated type.
     ///
+
     /// This is a CRITICAL operation for monomorphization correctness.
     /// Creates a new concrete type for a generic type instantiated with specific type arguments.
     fn get_or_create_instantiated_type(&mut self, base: TypeId, args: &[TypeRef]) -> TypeId {
@@ -934,6 +947,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Infers operand type from substitution context.
     ///
+
     /// Checks all type parameters in the substitution to find a concrete numeric type
     /// that can be used for arithmetic specialization.
     fn infer_operand_type_from_context(&self) -> Option<TypeRef> {
@@ -962,6 +976,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Updates register type tracking after an instruction.
     ///
+
     /// This is used for devirtualization - knowing the concrete type of a register
     /// allows us to resolve virtual calls statically.
     fn _track_register_type(&mut self, dst: u16, type_ref: TypeRef) {

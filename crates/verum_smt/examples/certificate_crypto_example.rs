@@ -1,5 +1,6 @@
 //! Example demonstrating cryptographic certificate functionality
 //!
+
 //! This example shows:
 //! 1. Proof certificate generation
 //! 2. Certificate verification

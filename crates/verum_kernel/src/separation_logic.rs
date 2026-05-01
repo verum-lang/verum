@@ -1,55 +1,64 @@
 //! Separation logic — the verification surface for stateful programs.
 //!
+
 //! Verum's pure-theorem verification (theorems / lemmas / fn
 //! contracts over functional values) is handled by
-//! [`crate::verification_goal`].  This module extends the surface to
+//! [`crate::verification_goal`]. This module extends the surface to
 //! cover **stateful** programs: mutating heap, concurrent threads,
-//! IO-bearing operations.  The data layer here is the architectural
+//! IO-bearing operations. The data layer here is the architectural
 //! commitment; the verification dispatcher consumes it via the same
 //! pattern as [`crate::verification_goal::VerificationGoal`].
 //!
+
 //! ## The fundamentals
 //!
+
 //! Separation logic (Reynolds 2002, O'Hearn 2007) extends Hoare
 //! logic with the **separating conjunction** `P ∗ Q` — meaning
 //! "the heap splits into disjoint parts; `P` holds in one, `Q` in
-//! the other".  The associated **frame rule**
+//! the other". The associated **frame rule**
 //!
-//!     { P } c { Q }
-//!     ─────────────────
-//!     { P ∗ R } c { Q ∗ R }
+
+//!  { P } c { Q }
+//!  ─────────────────
+//!  { P ∗ R } c { Q ∗ R }
 //!
+
 //! makes local reasoning sound: a command's effect on its
 //! footprint doesn't disturb invariants on disjoint heap fragments.
 //!
+
 //! ## Architectural alignment with Verum philosophy
 //!
+
 //! - **Semantic honesty**: a separation goal IS what we're proving
-//!   about a stateful operation — a Hoare triple, not "the SMT layer
-//!   wants this".  One concept, one type.
+//!  about a stateful operation — a Hoare triple, not "the SMT layer
+//!  wants this". One concept, one type.
 //! - **No magic**: every triple has explicit pre/post/footprint.
-//!   Aliasing, frame conditions, capability constraints all
-//!   surface as data in the goal.
+//!  Aliasing, frame conditions, capability constraints all
+//!  surface as data in the goal.
 //! - **Foundation-neutral**: pre/post conditions are kernel `Term`
-//!   values — they live in the same trust base as `proof_checker`.
+//!  values — they live in the same trust base as `proof_checker`.
 //! - **Gradual safety**: `Capability` permissions plug into the
-//!   three-tier reference model (Ref / RefChecked / RefUnsafe) so
-//!   the verification pipeline can run at any tier.
+//!  three-tier reference model (Ref / RefChecked / RefUnsafe) so
+//!  the verification pipeline can run at any tier.
 //!
+
 //! ## Surface
 //!
-//!   - [`HeapPredicate`] — a heap-shaped proposition (kernel `Term`
-//!     parameterised by an implicit heap variable).
-//!   - [`HoareTriple`] — `{ pre } command { post }` with footprint
-//!     metadata.
-//!   - [`SeparationGoal`] — Hoare triple + framing-context for the
-//!     verification dispatcher.
-//!   - [`Capability`] — heap permission (Read / Write / Own / None)
-//!     that links separation-logic verification to the three-tier
-//!     reference model.
-//!   - [`from_hoare_triple`] — adapter to
-//!     [`crate::verification_goal::VerificationGoal`] so the unified
-//!     verification surface (pure + stateful) consumes both.
+
+//!  - [`HeapPredicate`] — a heap-shaped proposition (kernel `Term`
+//!  parameterised by an implicit heap variable).
+//!  - [`HoareTriple`] — `{ pre } command { post }` with footprint
+//!  metadata.
+//!  - [`SeparationGoal`] — Hoare triple + framing-context for the
+//!  verification dispatcher.
+//!  - [`Capability`] — heap permission (Read / Write / Own / None)
+//!  that links separation-logic verification to the three-tier
+//!  reference model.
+//!  - [`from_hoare_triple`] — adapter to
+//!  [`crate::verification_goal::VerificationGoal`] so the unified
+//!  verification surface (pure + stateful) consumes both.
 
 use std::collections::BTreeMap;
 
@@ -61,25 +70,27 @@ use crate::proof_checker::Term;
 // HeapPredicate
 // =============================================================================
 
-/// A heap-shaped proposition.  Conceptually `Heap → Prop`; encoded
+/// A heap-shaped proposition. Conceptually `Heap → Prop`; encoded
 /// here as a kernel `Term` whose outermost binder is the implicit
 /// heap variable.
 ///
+
 /// Standard combinators are surfaced explicitly so the verification
 /// dispatcher can pattern-match on them:
 ///
-///   - `emp` — the empty-heap predicate, true exactly when the
-///     heap is empty.
-///   - `points_to(addr, value)` — the singleton predicate, true when
-///     the heap is a single binding `addr ↦ value`.
-///   - `sep(p, q)` — separating conjunction `P ∗ Q`.
-///   - `pure(t)` — heap-irrelevant proposition `t` (lifts a kernel
-///     `Term` into the heap-predicate language).
+
+///  - `emp` — the empty-heap predicate, true exactly when the
+///  heap is empty.
+///  - `points_to(addr, value)` — the singleton predicate, true when
+///  the heap is a single binding `addr ↦ value`.
+///  - `sep(p, q)` — separating conjunction `P ∗ Q`.
+///  - `pure(t)` — heap-irrelevant proposition `t` (lifts a kernel
+///  `Term` into the heap-predicate language).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HeapPredicate {
     /// `emp` — the heap is empty.
     Emp,
-    /// `addr ↦ value` — the heap is a single binding.  Both
+    /// `addr ↦ value` — the heap is a single binding. Both
     /// `addr` and `value` are kernel `Term`s.
     PointsTo {
         /// Address term.
@@ -87,7 +98,7 @@ pub enum HeapPredicate {
         /// Value term.
         value: Term,
     },
-    /// `P ∗ Q` — separating conjunction.  The heap splits into
+    /// `P ∗ Q` — separating conjunction. The heap splits into
     /// disjoint parts; `lhs` holds in one, `rhs` in the other.
     Sep {
         /// Left disjunct.
@@ -98,7 +109,7 @@ pub enum HeapPredicate {
     /// `pure(P)` — heap-irrelevant proposition; true at every heap.
     /// Lifts a kernel `Term` into the heap-predicate language.
     Pure(Term),
-    /// `P ∧ Q` — ordinary (non-separating) conjunction.  Both hold
+    /// `P ∧ Q` — ordinary (non-separating) conjunction. Both hold
     /// at the same heap.
     And {
         /// Left conjunct.
@@ -107,7 +118,7 @@ pub enum HeapPredicate {
         rhs: Box<HeapPredicate>,
     },
     /// Custom-named heap predicate — user-defined or library
-    /// abstraction.  The `args` are kernel `Term`s; the `name`
+    /// abstraction. The `args` are kernel `Term`s; the `name`
     /// resolves via the elaboration context's axiom registry.
     Named {
         /// Predicate name (resolved via axiom registry).
@@ -175,11 +186,12 @@ impl HeapPredicate {
 // Capability
 // =============================================================================
 
-/// Heap-region capability.  Links separation-logic verification to
+/// Heap-region capability. Links separation-logic verification to
 /// Verum's three-tier reference model: every heap-bearing proof
 /// obligation declares which capability the command needs over the
 /// touched region.
 ///
+
 /// **Soundness invariant**: a `Hoare`-triple-style obligation can
 /// only mutate regions whose capability is `Write` or `Own`.
 /// `Read` obligations cannot mutate; `None` obligations are pure.
@@ -191,7 +203,7 @@ pub enum Capability {
     Read,
     /// Read + write access (linear; aliased writes forbidden).
     Write,
-    /// Full ownership — read, write, and free.  Required for
+    /// Full ownership — read, write, and free. Required for
     /// allocation / deallocation operations.
     Own,
 }
@@ -224,6 +236,7 @@ impl Capability {
 
 /// A Hoare triple `{ pre } command { post }` with footprint metadata.
 ///
+
 /// `command_term` is a kernel `Term` representing the command being
 /// verified — function call, assignment, sequence, conditional, etc.
 /// The pre/post conditions are heap predicates; the
@@ -259,7 +272,7 @@ impl HoareTriple {
     }
 
     /// Whether this triple's pre and post are both pure (heap-
-    /// irrelevant).  Pure triples reduce to ordinary
+    /// irrelevant). Pure triples reduce to ordinary
     /// [`crate::verification_goal::VerificationGoal`]s — no
     /// separation-logic dispatcher needed.
     pub fn is_pure(&self) -> bool {
@@ -271,27 +284,28 @@ impl HoareTriple {
 // SeparationGoal
 // =============================================================================
 
-/// A separation-logic verification goal.  The stateful counterpart
+/// A separation-logic verification goal. The stateful counterpart
 /// of [`crate::verification_goal::VerificationGoal`]: every source
 /// of a stateful proof obligation produces this shape.
 ///
+
 /// **Frame rule**: when the verifier discharges a goal, the
 /// `frame_invariant` is preserved across the command — the
 /// separation-logic dispatcher checks `pre ∗ frame_invariant`
-/// against `post ∗ frame_invariant`.  Setting `frame_invariant =
+/// against `post ∗ frame_invariant`. Setting `frame_invariant =
 /// HeapPredicate::Emp` recovers the bare Hoare triple.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeparationGoal {
     /// The Hoare triple at the heart of the goal.
     pub triple: HoareTriple,
     /// Frame invariant — heap-shape that's preserved across the
-    /// command.  `HeapPredicate::Emp` for goals without a frame.
+    /// command. `HeapPredicate::Emp` for goals without a frame.
     pub frame_invariant: HeapPredicate,
-    /// Where this goal arose.  Diagnostic + audit-gate metadata.
+    /// Where this goal arose. Diagnostic + audit-gate metadata.
     pub source: SeparationGoalSource,
 }
 
-/// Source pipeline for a [`SeparationGoal`].  Mirrors the
+/// Source pipeline for a [`SeparationGoal`]. Mirrors the
 /// architecture of [`crate::verification_goal::GoalSource`] for the
 /// pure-theorem world.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -361,7 +375,7 @@ impl SeparationGoal {
 
     /// Whether this goal is *purely* heap-irrelevant — the triple
     /// has pure pre/post, the frame is empty, and the capability
-    /// is `None`.  Pure goals can be discharged by the ordinary
+    /// is `None`. Pure goals can be discharged by the ordinary
     /// pure-verification dispatcher.
     pub fn is_pure(&self) -> bool {
         self.triple.is_pure()
@@ -369,7 +383,7 @@ impl SeparationGoal {
             && self.triple.footprint_capability == Capability::None
     }
 
-    /// Audit-gate metadata.  Suitable for direct serde-JSON emission.
+    /// Audit-gate metadata. Suitable for direct serde-JSON emission.
     pub fn audit_metadata(&self) -> BTreeMap<String, String> {
         let mut m = BTreeMap::new();
         m.insert("kind".to_string(), self.source.kind_tag().to_string());
@@ -388,10 +402,11 @@ impl SeparationGoal {
 
 /// **Adapter** — produce a pure-verification
 /// [`crate::verification_goal::VerificationGoal`] from a
-/// [`SeparationGoal`] when the latter is pure.  Returns `None` for
+/// [`SeparationGoal`] when the latter is pure. Returns `None` for
 /// stateful goals (those need the separation-logic dispatcher; the
 /// pure-verification surface can't represent them).
 ///
+
 /// This is the bridge between the two verification surfaces: pure
 /// and stateful goals coexist; pure separation goals fall back to
 /// the unified dispatcher.
@@ -403,9 +418,9 @@ pub fn try_lift_to_verification_goal(
     }
     // Extract the pure conclusion: a pure heap predicate is
     // either Emp (Universe(0)), Pure(t), or a conjunction of
-    // pure predicates.  For Emp → Universe(0); for Pure(t) → t;
+    // pure predicates. For Emp → Universe(0); for Pure(t) → t;
     // for And/Sep of pure → conjoin via the connective axiom
-    // (callers must register the connective).  Phase-0 of this
+    // (callers must register the connective). Phase-0 of this
     // adapter only handles the simplest cases.
     let conclusion = pure_predicate_to_term(&goal.triple.post)?;
     Some(crate::verification_goal::VerificationGoal::new(
@@ -431,8 +446,8 @@ pub fn try_lift_to_verification_goal(
     ))
 }
 
-/// Translate a pure heap predicate to a kernel `Term`.  Returns
-/// `None` for non-pure predicates.  The simplest cases handled
+/// Translate a pure heap predicate to a kernel `Term`. Returns
+/// `None` for non-pure predicates. The simplest cases handled
 /// here; full Pi/Eq/Conj encodings are downstream connective
 /// work in [`crate::tactic_elaborator`].
 fn pure_predicate_to_term(p: &HeapPredicate) -> Option<Term> {
@@ -441,7 +456,7 @@ fn pure_predicate_to_term(p: &HeapPredicate) -> Option<Term> {
         HeapPredicate::Pure(t) => Some(t.clone()),
         HeapPredicate::And { lhs, rhs } if lhs.is_pure() && rhs.is_pure() => {
             // Without registering a connective axiom here, fall
-            // back to the lhs.  The tactic_elaborator's connective
+            // back to the lhs. The tactic_elaborator's connective
             // encoding handles the And-encoding when needed.
             let _ = rhs;
             pure_predicate_to_term(lhs)
@@ -455,18 +470,20 @@ fn pure_predicate_to_term(p: &HeapPredicate) -> Option<Term> {
 // =============================================================================
 
 /// The verdict the separation-logic dispatcher returns for a single
-/// [`SeparationGoal`].  Mirrors the shape of
+/// [`SeparationGoal`]. Mirrors the shape of
 /// [`crate::verification_goal::VerificationGoal`]'s pure-side
 /// dispatcher: every goal terminates in a verdict, and every verdict
 /// carries enough metadata for audit-gate emission without re-running
 /// the dispatcher.
 ///
+
 /// **Soundness invariant**: only [`SeparationVerdict::Discharged`]
-/// commits to "the goal holds in the kernel".  Every other variant
+/// commits to "the goal holds in the kernel". Every other variant
 /// either explicitly admits an IOU, rejects the goal as ill-formed,
 /// or routes to a downstream verification strategy that produces its
 /// own follow-up verdict.
 ///
+
 /// **Audit-gate use**: the verdict's variant tag feeds
 /// [`SeparationDispatcherStats`] so `verum audit
 /// --separation-dispatch` can enumerate the per-strategy load
@@ -474,22 +491,22 @@ fn pure_predicate_to_term(p: &HeapPredicate) -> Option<Term> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SeparationVerdict {
     /// The goal is closed by the kernel directly — no downstream
-    /// verification needed.  At dispatcher V1 only the trivial
+    /// verification needed. At dispatcher V1 only the trivial
     /// `{ emp } _ { emp }` shape lands here.
     Discharged,
     /// The dispatcher cannot close the goal at this version of the
-    /// kernel; the wrapped string names the IOU.  Downstream audit
+    /// kernel; the wrapped string names the IOU. Downstream audit
     /// gates surface the IOU in `--soundness-iou`.
     AdmittedWithIou(String),
     /// The goal is structurally malformed (capability inconsistent
     /// with the program statement, footprint mismatched against the
-    /// frame, etc.).  Wrapped string explains the violation.  This
+    /// frame, etc.). Wrapped string explains the violation. This
     /// is the only "negative" verdict — distinct from
     /// [`SeparationVerdict::AdmittedWithIou`] which records a
     /// well-formed goal that the dispatcher merely cannot close yet.
     RejectIllFormed(String),
     /// The goal's frame is non-trivial; closing it requires applying
-    /// the frame rule.  The next slice consumes this verdict and runs
+    /// the frame rule. The next slice consumes this verdict and runs
     /// the frame-rule strategy on the bare triple.
     RoutedToFrameRule,
     /// The command is a sequence; closing it requires Hoare-style
@@ -518,7 +535,7 @@ impl SeparationVerdict {
         }
     }
 
-    /// Whether this verdict commits to "the goal holds".  Only
+    /// Whether this verdict commits to "the goal holds". Only
     /// `Discharged` does; the routing verdicts defer the decision
     /// to a downstream strategy and IOUs / rejections are negative.
     pub fn is_closed(&self) -> bool {
@@ -541,37 +558,41 @@ impl SeparationVerdict {
 /// verification strategy and returns the resulting
 /// [`SeparationVerdict`].
 ///
+
 /// **V1 routing rules** (in priority order — the first matching rule
 /// wins):
 ///
+
 /// 1. **Capability mismatch** — the goal carries an IO capability
-///    (`Read` / `Write` / `Own`) but the triple is pure (both pre
-///    and post are heap-irrelevant).  A pure command cannot need
-///    heap-region access; reject as ill-formed.
+///  (`Read` / `Write` / `Own`) but the triple is pure (both pre
+///  and post are heap-irrelevant). A pure command cannot need
+///  heap-region access; reject as ill-formed.
 /// 2. **Trivial frame** — pre and post are both `emp` and the frame
-///    is `emp`.  Discharged unconditionally.
+///  is `emp`. Discharged unconditionally.
 /// 3. **Non-trivial frame invariant** — `frame_invariant` is not
-///    `emp`.  Route to the frame rule.
+///  `emp`. Route to the frame rule.
 /// 4. **Sequencing-shaped command** — `triple.command_term` is an
-///    application `App(_, _)` and the goal is non-trivial.  Route
-///    to Hoare sequencing.
+///  application `App(_, _)` and the goal is non-trivial. Route
+///  to Hoare sequencing.
 /// 5. **Differing pre/post with a non-trivial pattern** — pre and
-///    post are non-`emp` and differ.  Route to the consequence rule.
+///  post are non-`emp` and differ. Route to the consequence rule.
 /// 6. **Default** — admit with IOU "no rule matches — frame
-///    inference V1".
+///  inference V1".
 ///
+
 /// **What this dispatcher deliberately does NOT do (yet)**: it does
-/// not run any strategy.  It only RECOGNISES the shape of a goal and
-/// tags it for the strategy that should consume it.  The strategies
+/// not run any strategy. It only RECOGNISES the shape of a goal and
+/// tags it for the strategy that should consume it. The strategies
 /// themselves land in the next slice (#161 follow-up).
 ///
+
 /// **Soundness invariant**: the dispatcher never returns
 /// [`SeparationVerdict::Discharged`] except for the one trivial case
-/// above.  Adding a new closed-form discharge requires a kernel-rule
+/// above. Adding a new closed-form discharge requires a kernel-rule
 /// audit and a corresponding promotion of the goal's
 /// [`SeparationGoalSource`] to a kernel-recognised pattern.
 pub fn dispatch_separation_goal(goal: &SeparationGoal) -> SeparationVerdict {
-    // Rule 1: capability mismatch.  A pure triple cannot demand
+    // Rule 1: capability mismatch. A pure triple cannot demand
     // a non-trivial heap-region capability.
     if goal.triple.is_pure() && goal.triple.footprint_capability != Capability::None {
         return SeparationVerdict::RejectIllFormed(
@@ -597,7 +618,7 @@ pub fn dispatch_separation_goal(goal: &SeparationGoal) -> SeparationVerdict {
     }
 
     // Rule 4: sequencing-shaped command — App(_, _) suggests
-    // composition.  Route to Hoare sequencing.
+    // composition. Route to Hoare sequencing.
     if matches!(goal.triple.command_term, Term::App(_, _)) {
         return SeparationVerdict::RoutedToHoareSequencing;
     }
@@ -616,11 +637,12 @@ pub fn dispatch_separation_goal(goal: &SeparationGoal) -> SeparationVerdict {
     )
 }
 
-/// Per-verdict counters for audit-gate aggregation.  The dispatcher
+/// Per-verdict counters for audit-gate aggregation. The dispatcher
 /// itself doesn't accumulate — callers thread a
 /// [`SeparationDispatcherStats`] through their corpus walk and
 /// invoke [`SeparationDispatcherStats::record`] on each verdict.
 ///
+
 /// Used by `verum audit --separation-dispatch` (next slice) to emit
 /// a structured per-verdict load distribution.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -671,7 +693,7 @@ impl SeparationDispatcherStats {
             + self.routed_to_consequence_rule
     }
 
-    /// Audit-gate metadata.  Suitable for direct serde-JSON emission
+    /// Audit-gate metadata. Suitable for direct serde-JSON emission
     /// alongside [`SeparationGoal::audit_metadata`].
     pub fn audit_metadata(&self) -> BTreeMap<String, String> {
         let mut m = BTreeMap::new();
@@ -932,7 +954,7 @@ mod tests {
 
     #[test]
     fn dispatch_pure_with_capability_rejects_as_ill_formed() {
-        // Pure pre + pure post, but capability claims Write.  Pure
+        // Pure pre + pure post, but capability claims Write. Pure
         // statements cannot need heap-region access — reject.
         let goal = make_goal(
             HeapPredicate::emp(),
@@ -986,7 +1008,7 @@ mod tests {
     #[test]
     fn dispatch_application_command_routes_to_sequencing() {
         // App(_, _) command-term shape signals a sequenceable
-        // composition.  Pre/post are non-emp and capability is
+        // composition. Pre/post are non-emp and capability is
         // consistent (Write); frame is emp so we don't hit Rule 3.
         let goal = make_goal(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
@@ -1018,7 +1040,7 @@ mod tests {
 
     #[test]
     fn dispatch_default_admits_with_iou() {
-        // Heap-shaped pre with emp post.  Not trivial (post is emp
+        // Heap-shaped pre with emp post. Not trivial (post is emp
         // but pre isn't), no frame, no App command, capability ok.
         // This is the residual case — admit with IOU.
         let goal = make_goal(

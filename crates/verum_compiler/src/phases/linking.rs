@@ -1,31 +1,39 @@
 //! Phase 7.5: Final Linking
 //!
+
 //! This phase performs the final linking step where user-compiled code is combined
 //! with the pre-compiled stdlib. This is crucial for achieving zero-cost abstractions
 //! through LTO (Link Time Optimization).
 //!
+
 //! Runtime support is provided by stdlib via FFI and intrinsics. The VBC interpreter
 //! handles all execution internally, and AOT compilation links directly with stdlib.
 //!
+
 //! ## NO LIBC ARCHITECTURE
 //!
+
 //! **IMPORTANT**: Verum does NOT link against libc or any system C libraries.
 //! All runtime functionality is provided by:
 //! - LLVM intrinsics (llvm.sin.f32, llvm.sqrt.f64, etc.)
 //! - Custom Verum runtime implementations in `/core/`
 //! - Platform-specific system calls via the Verum syscall layer
 //!
+
 //! This enables:
 //! - Fully self-contained binaries with no external dependencies
 //! - Consistent behavior across all platforms
 //! - Smaller binary sizes (no libc bloat)
 //! - Better optimization opportunities (no opaque library calls)
 //!
+
 //! Entry point: `/core/sys/init.vr` provides the custom entry point that
 //! initializes the Verum runtime before calling the user's `main` function.
 //!
+
 //! ## Features
 //!
+
 //! - Object file linking with proper symbol resolution
 //! - Stdlib linking (stdlib.vbca provides all runtime support)
 //! - Link-Time Optimization (Thin/Full LTO)
@@ -33,19 +41,22 @@
 //! - Generic monomorphization during linking
 //! - Self-contained linking (no libc, no external dependencies)
 //! - Multiple output formats:
-//!   - Native executable (default)
-//!   - Shared library (.so/.dylib/.dll)
-//!   - Static library (.a)
-//!   - Object file (.o)
+//!  - Native executable (default)
+//!  - Shared library (.so/.dylib/.dll)
+//!  - Static library (.a)
+//!  - Object file (.o)
 //!
+
 //! ## Performance Characteristics
 //!
+
 //! | Linking Mode | Time | Binary Size | Runtime Performance |
 //! |-------------|------|-------------|-------------------|
 //! | Debug (no LTO) | ~100ms | 5MB | Baseline |
 //! | Release (thin LTO) | ~500ms | 3MB | 1.5x faster |
 //! | Release (full LTO) | ~2s | 2.5MB | 2x faster |
 //!
+
 //! Phase 7.5: Final linking. Links object files with libverum_std.a,
 //! applies LTO optimization, produces final executable binary.
 
@@ -198,6 +209,7 @@ pub struct LinkingConfig {
 
     /// V-LLSI no-libc linking configuration.
     ///
+
     /// When set, Verum produces fully self-contained binaries without libc:
     /// - **Linux**: Direct syscalls (stable kernel ABI), no libraries
     /// - **macOS**: libSystem.B.dylib only (Apple prohibits direct syscalls)
@@ -279,6 +291,7 @@ impl LinkingConfig {
 
     /// Configure for no-libc linking on the specified platform.
     ///
+
     /// V-LLSI Architecture: Verum produces fully self-contained binaries:
     /// - **Linux**: Direct syscalls (stable kernel ABI), no external libraries
     /// - **macOS**: libSystem.B.dylib only (Apple prohibits direct syscalls)
@@ -291,11 +304,12 @@ impl LinkingConfig {
     }
 
     /// Configure for no-libc linking on the specified platform with
-    /// an explicit Windows subsystem flag.  On non-Windows platforms
+    /// an explicit Windows subsystem flag. On non-Windows platforms
     /// `subsystem_flag` is ignored.
     ///
+
     /// `subsystem_flag` must be `"CONSOLE"` (default CLI app) or
-    /// `"WINDOWS"` (Win32 GUI app, no console window).  See
+    /// `"WINDOWS"` (Win32 GUI app, no console window). See
     /// `verum_codegen::link::NoLibcConfig::windows_with_subsystem`.
     pub fn with_no_libc_subsystem(
         mut self,
@@ -330,6 +344,7 @@ impl LinkingConfig {
 
     /// Get the effective entry point based on no-libc configuration.
     ///
+
     /// Returns the platform-specific entry point for no-libc builds,
     /// or the configured entry point for standard builds.
     pub fn effective_entry_point(&self) -> Option<&str> {
@@ -673,6 +688,7 @@ impl LinkingStats {
 
 /// Phase 7.5: Final Linking
 ///
+
 /// This linker supports multiple output formats and properly resolves symbols
 /// from object files, stdlib, and system libraries.
 pub struct FinalLinker {
@@ -721,6 +737,7 @@ impl FinalLinker {
 
     /// Link object files to produce final binary
     ///
+
     /// This method dispatches to the appropriate linking strategy based on:
     /// 1. Target execution tier (interpreter, JIT, AOT)
     /// 2. Output kind (executable, shared library, static library, object file)
@@ -1133,6 +1150,7 @@ impl FinalLinker {
 
     /// Static linking with LTO (for AOT tier)
     ///
+
     /// This handles both executables and shared libraries based on output_kind.
     fn static_link_with_lto(&mut self, object_files: &[ObjectFile]) -> Result<Binary> {
         // Collect statistics
@@ -1193,10 +1211,12 @@ impl FinalLinker {
 
     /// LTO linking pipeline
     ///
+
     /// This is the main AOT linking pipeline that handles:
     /// - Bitcode merging and LTO optimization
     /// - Final system linking (for both executables and shared libraries)
     ///
+
     /// CBGR runtime is built into stdlib via VBC intrinsics.
     fn lto_link_pipeline(&mut self, object_files: &[ObjectFile]) -> Result<Binary> {
         info!(
@@ -1515,27 +1535,27 @@ impl FinalLinker {
 
         if self.config.debug_info {
             // `-g` retains DWARF / Mach-O debug sections through
-            // linking so a debugger can map back to source.  Skipped
+            // linking so a debugger can map back to source. Skipped
             // when `strip` already discards everything.
             cmd.arg("-g");
         }
 
         if self.config.static_link {
             // Static linking — no runtime dependencies on shared
-            // libraries.  Pre-fix this flag was inert; macOS users
+            // libraries. Pre-fix this flag was inert; macOS users
             // get a friendly diagnostic from `cc` if they request
             // `-static` (Apple actively rejects fully-static linking
             // against libSystem).
             cmd.arg("-static");
         }
 
-        // `target_triple` overrides the host target.  When unset
+        // `target_triple` overrides the host target. When unset
         // (the default), the system `cc` picks its native triple.
         if let Some(ref triple) = self.config.target_triple {
             cmd.arg(format!("--target={}", triple.as_str()));
         }
 
-        // `entry_point` overrides the default `main` symbol.  Only
+        // `entry_point` overrides the default `main` symbol. Only
         // honoured when `no_libc_config` is None, because no-libc
         // mode owns its own entry-point handling above (see line
         // ~1404).

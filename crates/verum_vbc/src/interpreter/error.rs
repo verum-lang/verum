@@ -58,11 +58,13 @@ pub enum InterpreterError {
 
     /// Cooperative process-termination signal.
     ///
+
     /// Raised by the `ProcessExit` extended sub-opcode handler so the
     /// outer driver can run post-execution work (cache store, timing
     /// flush, telemetry) before the OS terminates the process.
     /// Carries the requested exit code.
     ///
+
     /// Strictly a control-flow signal — not an error. The pipeline
     /// translates it into `Session::record_exit_code(code)` and
     /// returns `Ok(())`; the CLI then calls `std::process::exit(code)`
@@ -98,6 +100,7 @@ pub enum InterpreterError {
 
     /// Null pointer dereference.
     ///
+
     /// `context` carries optional diagnostic data: which opcode triggered
     /// the deref, which register / field, current PC, and a hint about
     /// the originating operation. Bare `NullPointer` without context is
@@ -146,12 +149,14 @@ pub enum InterpreterError {
     /// Variant-layout disagreement at typed-variant construction
     /// (`MakeVariantTyped`, Extended sub-op `0x01` — #146 Phase 3b).
     ///
+
     /// Raised when the operand-supplied `(type_id, tag, field_count)`
     /// tuple disagrees with the global type table's view of the
     /// declared variant: the type_id has no registered descriptor,
     /// the tag is not a declared variant of that type, or the
     /// field_count does not match the declared variant's arity.
     ///
+
     /// Surfaces a codegen drift between `MakeVariantTyped` emission
     /// and the type-descriptor population pass — without this gate
     /// such drift would silently produce a heap object whose field
@@ -268,6 +273,7 @@ pub enum InterpreterError {
 
     /// FFI call failed.
     ///
+
     /// This error occurs when a call through the RuntimeFfiGate fails.
     /// The underlying FFI error is converted to this format.
     FfiError {
@@ -279,6 +285,7 @@ pub enum InterpreterError {
 
     /// Capability check failed.
     ///
+
     /// This error occurs when RequireCapability opcode fails.
     CapabilityDenied {
         /// Required capability bits.
@@ -289,6 +296,7 @@ pub enum InterpreterError {
 
     /// FFI runtime error (for libffi-based FFI calls).
     ///
+
     /// This error occurs when the new FFI system (using FfiRuntime with libffi)
     /// encounters an error during symbol resolution or function calls.
     /// Distinct from FfiError which is for the RuntimeFfiGate (slot-based FFI).
@@ -296,6 +304,7 @@ pub enum InterpreterError {
 
     /// Invalid operand for instruction.
     ///
+
     /// This error occurs when an instruction receives an operand that is
     /// invalid for the operation (e.g., invalid size for raw pointer deref).
     InvalidOperand {
@@ -313,10 +322,12 @@ pub enum InterpreterError {
 
     /// Module is not interpretable.
     ///
+
     /// This error occurs when attempting to interpret a VBC module that has
     /// the NOT_INTERPRETABLE flag set. Systems profile modules are NOT
     /// interpretable - VBC serves only as intermediate IR for AOT compilation.
     ///
+
     /// V-LLSI: Systems/embedded profile modules cannot be interpreted (AOT-only).
     ModuleNotInterpretable {
         /// Module name.
@@ -327,6 +338,7 @@ pub enum InterpreterError {
 
     /// Allocation too large.
     ///
+
     /// This error occurs when a typed array or buffer allocation exceeds
     /// the maximum allowed size.
     AllocationTooLarge {
@@ -338,9 +350,10 @@ pub enum InterpreterError {
 
     /// Module failed bytecode-level validation.
     ///
+
     /// Surfaced by `Interpreter::try_new_validated` when the module
     /// failed the per-instruction bytecode validator
-    /// (`crates/verum_vbc/src/validate.rs`).  The wrapped reason is
+    /// (`crates/verum_vbc/src/validate.rs`). The wrapped reason is
     /// rendered from the `VbcError` produced by the validator —
     /// typically `InvalidFunctionId(N)`, `InvalidTypeId(N)`,
     /// `RegisterOutOfBounds { ... }`, `JumpOutOfBounds { ... }`,
@@ -348,6 +361,7 @@ pub enum InterpreterError {
     /// `InvalidInstructionEncoding { reason: ... }` (which carries
     /// arity-mismatch detail).
     ///
+
     /// Use the validating constructor for any module that did NOT
     /// come from this process's compiler (downloaded modules,
     /// archives shared across processes, files edited by hand).
@@ -582,12 +596,13 @@ impl InterpreterError {
     /// dereference" into something a developer can map back to the
     /// failing opcode + the function it was running in.
     ///
+
     /// Example:
-    ///   return Err(InterpreterError::null_pointer(
-    ///       "GetVariantData",
-    ///       state.current_function_name(),
-    ///       state.pc(),
-    ///   ));
+    ///  return Err(InterpreterError::null_pointer(
+    ///  "GetVariantData",
+    ///  state.current_function_name(),
+    ///  state.pc(),
+    ///  ));
     pub fn null_pointer(op: impl Into<String>, site: impl Into<String>, pc: u32) -> Self {
         Self::NullPointerAt {
             op: op.into(),

@@ -2,6 +2,7 @@ module sys.interrupt;
 
 /// Verum Standard Library: Interrupt Handling Infrastructure
 ///
+
 /// This module provides safe interrupt handling primitives for systems programming.
 /// Unlike C (which uses compiler extensions) or Rust (which requires `#[naked]` + unsafe),
 /// Verum provides:
@@ -10,46 +11,54 @@ module sys.interrupt;
 /// - Critical section primitives with automatic restoration
 /// - Platform-specific exception frame types
 ///
+
 /// # Core Concepts
 ///
+
 /// ## @interrupt Attribute
 /// The `@interrupt(vector = N)` attribute marks a function as an interrupt handler:
 /// - Compiler generates proper calling convention (X86_INTR on x86_64)
 /// - Automatic save/restore of callee-saved registers
 /// - Proper return instruction (IRET on x86_64)
 ///
+
 /// ## @naked Attribute
 /// The `@naked` attribute generates a function with no prologue/epilogue:
 /// - For context switching and low-level assembly
 /// - Must use inline assembly for the entire function body
 /// - Calling convention must be specified manually
 ///
+
 /// ## Critical Sections
 /// Critical sections disable interrupts for atomic operations:
 /// - RAII pattern with CriticalSection guard
 /// - Automatic interrupt restoration on drop
 /// - Nesting-safe (restores previous interrupt state)
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Simple interrupt handler
 /// @interrupt(vector = 0x20)
 /// fn timer_handler(frame: &mut ExceptionFrame) {
-///     TIMER_COUNT.fetch_add(1, MemoryOrdering.Relaxed);
-///     // Acknowledge interrupt
-///     TIMER_STATUS.clear(TIMER_PENDING);
+///  TIMER_COUNT.fetch_add(1, MemoryOrdering.Relaxed);
+///  // Acknowledge interrupt
+///  TIMER_STATUS.clear(TIMER_PENDING);
 /// }
 ///
+
 /// // Critical section for atomic operations
 /// fn update_shared_data() {
-///     let _guard = CriticalSection.enter();
-///     // Interrupts disabled in this block
-///     SHARED_DATA.value += 1;
-///     // Interrupts restored when guard is dropped
+///  let _guard = CriticalSection.enter();
+///  // Interrupts disabled in this block
+///  SHARED_DATA.value += 1;
+///  // Interrupts restored when guard is dropped
 /// }
 /// ```
 ///
+
 /// Implementation Reference: docs/architecture/low-level-features.md Section 4
 
 // =============================================================================
@@ -58,6 +67,7 @@ module sys.interrupt;
 
 /// x86_64 Exception Frame - passed to interrupt handlers.
 ///
+
 /// This structure matches the hardware-pushed exception frame layout.
 /// The compiler passes a mutable reference to allow modifying return state.
 @repr(C)
@@ -128,6 +138,7 @@ implement ExceptionFrame {
 
 /// Disable interrupts and return previous state.
 ///
+
 /// Returns the previous interrupt enable state, which should be passed
 /// to `restore_interrupts` to restore the previous state.
 @inline(always)
@@ -136,6 +147,7 @@ public fn disable_interrupts() -> USize;
 
 /// Restore interrupts to a previous state.
 ///
+
 /// Pass the value returned by `disable_interrupts` to restore
 /// the previous interrupt state (enabled or disabled).
 @inline(always)
@@ -154,6 +166,7 @@ public fn interrupts_enabled() -> Bool;
 
 /// Save interrupt state and disable (combined operation).
 ///
+
 /// More efficient than separate read + disable on some platforms.
 @inline(always)
 @intrinsic("save_and_disable_interrupts")
@@ -165,16 +178,19 @@ public fn save_and_disable_interrupts() -> USize;
 
 /// RAII guard for critical sections.
 ///
+
 /// Disables interrupts when created, restores previous state when dropped.
 /// This is the safe way to perform atomic operations with respect to interrupts.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// fn atomic_increment(counter: &mut USize) {
-///     let _guard = CriticalSection.enter();
-///     *counter += 1;
-///     // Interrupts restored here when _guard goes out of scope
+///  let _guard = CriticalSection.enter();
+///  *counter += 1;
+///  // Interrupts restored here when _guard goes out of scope
 /// }
 /// ```
 public type CriticalSection is {
@@ -184,6 +200,7 @@ public type CriticalSection is {
 implement CriticalSection {
     /// Enter a critical section, disabling interrupts.
     ///
+
     /// Returns a guard that restores the previous interrupt state when dropped.
     @inline(always)
     public fn enter() -> CriticalSection {
@@ -208,6 +225,7 @@ implement Drop for CriticalSection {
 
 /// Execute a closure with interrupts disabled.
 ///
+
 /// Convenience function that creates a critical section, executes
 /// the closure, and restores interrupt state.
 @inline(always)
@@ -222,26 +240,31 @@ public fn with_interrupts_disabled<R, F: Fn() -> R>(f: F) -> R {
 
 /// Interrupt-safe cell for shared data between interrupts and main code.
 ///
+
 /// Unlike RefCell which is not interrupt-safe, InterruptCell ensures
 /// atomic access by disabling interrupts during access.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// static SHARED: InterruptCell<Counter> = InterruptCell.new(Counter.zero());
 ///
+
 /// @interrupt(vector = 0x20)
 /// fn timer_handler(frame: &mut ExceptionFrame) {
-///     SHARED.with_disabled(|counter| {
-///         counter.increment();
-///     });
+///  SHARED.with_disabled(|counter| {
+///  counter.increment();
+///  });
 /// }
 ///
+
 /// fn main_loop() {
-///     loop {
-///         let count = SHARED.with_disabled(|counter| counter.value());
-///         process(count);
-///     }
+///  loop {
+///  let count = SHARED.with_disabled(|counter| counter.value());
+///  process(count);
+///  }
 /// }
 /// ```
 public type InterruptCell<T> is {
@@ -257,6 +280,7 @@ implement<T> InterruptCell<T> {
 
     /// Access the value with interrupts disabled.
     ///
+
     /// The closure receives a mutable reference to the inner value.
     /// Interrupts are disabled for the duration of the closure.
     @inline(always)
@@ -269,6 +293,7 @@ implement<T> InterruptCell<T> {
 
     /// Get a raw pointer to the inner value.
     ///
+
     /// # Safety
     /// Caller must ensure no concurrent access (e.g., via critical section).
     @inline(always)
@@ -289,6 +314,7 @@ unsafe implement<T: Send> Sync for InterruptCell<T> {}
 
 /// Saved CPU context for context switching.
 ///
+
 /// Contains all callee-saved registers that must be preserved
 /// across context switches.
 @repr(C)
@@ -355,6 +381,7 @@ implement CpuContext {
 
 /// Switch from current context to next context.
 ///
+
 /// Saves current context to `from`, loads context from `to`.
 /// This is a naked function using inline assembly.
 @naked
@@ -419,6 +446,7 @@ public fn context_switch(from: &mut CpuContext, to: &CpuContext) {
 
 /// Interrupt vector table entry.
 ///
+
 /// Platform-specific format for interrupt descriptor table entries.
 @repr(C, packed)
 @cfg(target_arch = "x86_64")
@@ -480,11 +508,12 @@ public fn in_interrupt_context() -> Bool;
 
 // Verification example (ghost code - not compiled):
 //
+
 // @interrupt(vector = 0x20)
 // @verify(formal)
 // @requires(interrupts_disabled_ghost())
 // @ensures(timer_acknowledged())
 // fn verified_timer_handler(frame: &mut ExceptionFrame) {
-//     TIMER_STATUS.clear_bits(TIMER_PENDING);
-//     TIMER_COUNT.write(TIMER_RELOAD);
+//  TIMER_STATUS.clear_bits(TIMER_PENDING);
+//  TIMER_COUNT.write(TIMER_RELOAD);
 // }

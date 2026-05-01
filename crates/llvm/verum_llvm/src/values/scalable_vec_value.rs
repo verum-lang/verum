@@ -20,8 +20,10 @@ pub struct ScalableVectorValue<'ctx> {
 impl<'ctx> ScalableVectorValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type scalable vector.
     pub unsafe fn new(scalable_vector_value: LLVMValueRef) -> Self {
         assert!(!scalable_vector_value.is_null());
@@ -33,16 +35,20 @@ impl<'ctx> ScalableVectorValue<'ctx> {
 
     /// Determines whether or not a `ScalableVectorValue` is a constant.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_scalable_vec_type = i8_type.scalable_vec_type(3);
     /// let i8_scalable_vec_zero = i8_scalable_vec_type.const_zero();
     ///
+
     /// assert!(i8_scalable_vec_zero.is_const());
     /// ```
     pub fn is_const(self) -> bool {

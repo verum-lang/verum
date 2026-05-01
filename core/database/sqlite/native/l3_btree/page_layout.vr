@@ -6,55 +6,65 @@ module core.database.sqlite.native.l3_btree.page_layout;
 // Layer: 3
 // Spec: sqlite-native.md §6.2, §10.1
 //
+
 // SQLite encodes every B-tree page (except page 1, which additionally
 // carries the 100-byte DB header) with the same outer shape:
 //
-//     +-------------------------------------------------+
-//     | Page header (8 or 12 bytes)                     |
-//     +-------------------------------------------------+
-//     | Cell pointer array (2 bytes per cell, N cells)  |
-//     +-------------------------------------------------+
-//     |                                                 |
-//     |           UNALLOCATED SPACE                     |
-//     |                                                 |
-//     +-------------------------------------------------+
-//     | Cell content area (grows downward)              |
-//     +-------------------------------------------------+
-//     | Reserved region (0..255 bytes, usually 0)       |
-//     +-------------------------------------------------+
+
+//  +-------------------------------------------------+
+//  | Page header (8 or 12 bytes) |
+//  +-------------------------------------------------+
+//  | Cell pointer array (2 bytes per cell, N cells) |
+//  +-------------------------------------------------+
+//  | |
+//  | UNALLOCATED SPACE |
+//  | |
+//  +-------------------------------------------------+
+//  | Cell content area (grows downward) |
+//  +-------------------------------------------------+
+//  | Reserved region (0..255 bytes, usually 0) |
+//  +-------------------------------------------------+
 //
+
 // Page-header layout:
 //
-//     byte 0        flags = 0x02 | 0x05 | 0x0A | 0x0D
-//     byte 1..2     first-freeblock offset (u16 BE, 0 = none)
-//     byte 3..4     cell count (u16 BE)
-//     byte 5..6     cell-content-area offset (u16 BE; 0 means 65536)
-//     byte 7        # fragmented free bytes
-//     byte 8..11    right-most pointer (interior pages only, u32 BE)
+
+//  byte 0 flags = 0x02 | 0x05 | 0x0A | 0x0D
+//  byte 1..2 first-freeblock offset (u16 BE, 0 = none)
+//  byte 3..4 cell count (u16 BE)
+//  byte 5..6 cell-content-area offset (u16 BE; 0 means 65536)
+//  byte 7 # fragmented free bytes
+//  byte 8..11 right-most pointer (interior pages only, u32 BE)
 //
+
 // Cell layouts (§10.1 + §6.3):
 //
-//     0x0D (table-leaf):
-//         varint: payload_len
-//         varint: rowid
-//         payload
-//         [overflow: u32 first_overflow_page if payload spills]
+
+//  0x0D (table-leaf):
+//  varint: payload_len
+//  varint: rowid
+//  payload
+//  [overflow: u32 first_overflow_page if payload spills]
 //
-//     0x05 (table-interior):
-//         u32: left_child_page
-//         varint: rowid
+
+//  0x05 (table-interior):
+//  u32: left_child_page
+//  varint: rowid
 //
-//     0x0A (index-leaf):
-//         varint: payload_len
-//         payload
-//         [u32 first_overflow_page]
+
+//  0x0A (index-leaf):
+//  varint: payload_len
+//  payload
+//  [u32 first_overflow_page]
 //
-//     0x02 (index-interior):
-//         u32: left_child_page
-//         varint: payload_len
-//         payload
-//         [u32 first_overflow_page]
+
+//  0x02 (index-interior):
+//  u32: left_child_page
+//  varint: payload_len
+//  payload
+//  [u32 first_overflow_page]
 //
+
 // All the varints and u16/u32 multi-byte integers are big-endian.
 // =============================================================================
 
@@ -308,6 +318,7 @@ public type CellParts is
 /// `local_max` triggers overflow-chain reading. `page_size` is the
 /// enclosing page size.
 ///
+
 /// For v1 we don't resolve the overflow pages themselves — we just
 /// report the first overflow page number so the caller can chase the
 /// chain via the pager.
@@ -412,12 +423,14 @@ public fn parse_cell(
 /// Compute the `local_payload` budget for a cell given `page_size` and
 /// `reserved_bytes`. Matches SQLite's formula from §10.6:
 ///
-///     M = ((page_size - reserved) - 12) * 32 / 255   // minimum local
-///     U = page_size - reserved                       // usable page
-///     X = (U - 12) * 64 / 255 + 23                   // table-leaf max
-///                                                      table-interior doesn't spill
-///     Index-leaf / index-interior max = (U - 12) * 64 / 255 - 23
+
+///  M = ((page_size - reserved) - 12) * 32 / 255 // minimum local
+///  U = page_size - reserved // usable page
+///  X = (U - 12) * 64 / 255 + 23 // table-leaf max
+///  table-interior doesn't spill
+///  Index-leaf / index-interior max = (U - 12) * 64 / 255 - 23
 ///
+
 /// Returned values for each of the variable-length cell kinds.
 public type LocalPayloadBudget is {
     min_local: Int,
@@ -431,11 +444,12 @@ public fn compute_local_payload_budget(page_size: Int, reserved: Int) -> LocalPa
     // **SQLite spec §10.6 derivation** (canonical formula —
     // matches `overflow_page_api/layout.vr:25-28`).
     //
+
     // Pre-fix the `min_local` term was missing the trailing `- 23`;
     // every loom-written DB file was BYTE-DIFFERENT from the
     // C-SQLite-written equivalent at the overflow-threshold
-    // decision boundary.  Spec §2.1 makes file-format compatibility
-    // ABSOLUTE, so this off-by-23 is a hard correctness bug.  The
+    // decision boundary. Spec §2.1 makes file-format compatibility
+    // ABSOLUTE, so this off-by-23 is a hard correctness bug. The
     // `index_max` formula already had the `- 23` term — the two
     // were quietly inconsistent.
     let min_local = ((usable - 12) * 32) / 255 - 23;

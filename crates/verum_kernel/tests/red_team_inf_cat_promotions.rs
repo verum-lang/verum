@@ -1,20 +1,22 @@
 //! Red-team adversarial sweep for the V0 Yoneda / Cartesian-fibration /
 //! Adjoint-functor kernel modules.
 //!
+
 //! Five attack categories:
 //!
-//!   A. **Precondition bypass** — declare witness flags pathologically
-//!      and verify the kernel-level decision predicates reject the
-//!      inconsistent inputs.
-//!   B. **Algebraic identities** — composition associativity / unit
-//!      laws on adjunctions; Yoneda-lemma natural-isomorphism endpoints.
-//!   C. **Universe-ascent monotonicity** — `presheaf_category` must
-//!      strictly increase the universe under κ-tier ascent.
-//!   D. **Hierarchy crossing** — adjunctions across κ-tiers,
-//!      Grothendieck-construction κ-preservation under unstraightening.
-//!   E. **Dual/self-dual symmetry** — `BuildLeftOfRight` vs
-//!      `BuildRightOfLeft` produce the same adjunction modulo
-//!      naming convention.
+
+//!  A. **Precondition bypass** — declare witness flags pathologically
+//!  and verify the kernel-level decision predicates reject the
+//!  inconsistent inputs.
+//!  B. **Algebraic identities** — composition associativity / unit
+//!  laws on adjunctions; Yoneda-lemma natural-isomorphism endpoints.
+//!  C. **Universe-ascent monotonicity** — `presheaf_category` must
+//!  strictly increase the universe under κ-tier ascent.
+//!  D. **Hierarchy crossing** — adjunctions across κ-tiers,
+//!  Grothendieck-construction κ-preservation under unstraightening.
+//!  E. **Dual/self-dual symmetry** — `BuildLeftOfRight` vs
+//!  `BuildRightOfLeft` produce the same adjunction modulo
+//!  naming convention.
 
 use verum_kernel::adjoint_functor::{
     AdjunctionDirection, SaftPreconditions, build_adjunction,
@@ -278,7 +280,7 @@ fn d04_compose_adjunctions_rejects_mismatched_categories() {
     let e = InfinityCategory::at_canonical_universe("E", Ordinal::Finite(1));
     let cd = build_adjunction("L_CD", &c, &d, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
     let ec = build_adjunction("L_EC", &e, &c, &pre, AdjunctionDirection::BuildRightOfLeft).unwrap();
-    // cd has target=D; ec has source=E.  Composition cd ∘ ec fails.
+    // cd has target=D; ec has source=E. Composition cd ∘ ec fails.
     assert!(compose_adjunctions(&cd, &ec).is_none(),
         "Adjunction composition must reject D ≠ E mismatch");
 }
@@ -314,7 +316,7 @@ fn e01_adjunction_directions_swap_left_right() {
 #[test]
 fn e02_yoneda_embedding_is_idempotent_under_repeated_construction() {
     // yoneda_embedding(c) is a deterministic function — calling twice
-    // produces equal results.  Equivalent to "no hidden state".
+    // produces equal results. Equivalent to "no hidden state".
     let c = InfinityCategory::at_canonical_universe("C", Ordinal::Finite(1));
     let y1 = yoneda_embedding(&c);
     let y2 = yoneda_embedding(&c);
@@ -354,7 +356,7 @@ fn e04_is_cartesian_decision_matches_witness_flag() {
 #[test]
 fn e05_triangle_identities_propagate_through_composition() {
     // If both operand adjunctions satisfy their triangle identities,
-    // the composition does too.  If one breaks, so does the result.
+    // the composition does too. If one breaks, so does the result.
     let pre = SaftPreconditions::fully_satisfied("L");
     let c = InfinityCategory::at_canonical_universe("C", Ordinal::Finite(1));
     let d = InfinityCategory::at_canonical_universe("D", Ordinal::Finite(1));

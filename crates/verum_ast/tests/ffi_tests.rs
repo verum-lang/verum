@@ -14,6 +14,7 @@
 )]
 // Tests for FFI Boundary Declarations.
 //
+
 // These tests verify that FFI boundaries are properly represented in the AST
 // Tests for FFI boundary AST nodes (C ABI interop specifications).
 

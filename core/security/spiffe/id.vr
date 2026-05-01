@@ -3,12 +3,14 @@
 // =============================================================================
 // Spec: https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE-ID.md
 //
+
 // A SPIFFE ID has the form:
-//   spiffe://<trust-domain>/<path>
+//  spiffe://<trust-domain>/<path>
 //
-//   trust-domain : lowercase DNS-like label set, no trailing dot
-//   path         : URL-safe path, '/'-separated segments, empty is
-//                  allowed (trust-domain only)
+
+//  trust-domain : lowercase DNS-like label set, no trailing dot
+//  path : URL-safe path, '/'-separated segments, empty is
+//  allowed (trust-domain only)
 // =============================================================================
 
 module core.security.spiffe.id;

@@ -1,8 +1,10 @@
 //! Adaptive SMT Strategy Selection with Multi-Solver Support
 //!
+
 //! This module implements intelligent strategy selection based on problem characteristics.
 //! Supports both Z3 and CVC5 solvers with automatic fallback and portfolio solving.
 //!
+
 //! ## Performance Impact
 //! - 30-50% speedup on complex queries (benchmarked)
 //! - Automatic theory detection (QF_LIA, QF_BV, QF_NRA, etc.)
@@ -10,6 +12,7 @@
 //! - Solver redundancy: fallback to CVC5 when Z3 fails
 //! - Portfolio solving: run both solvers in parallel
 //!
+
 //! Refinement type verification uses SMT solvers to prove predicates like `Int{> 0}`.
 //! Three verification modes: @verify(runtime) = runtime checks, @verify(static) = dataflow
 //! analysis, @verify(proof) = full SMT proof. Strategy selection picks the best solver/tactic
@@ -26,6 +29,7 @@ use crate::backend_trait::SmtLogic;
 
 /// Adaptive strategy selector with multi-solver support
 ///
+
 /// Analyzes problem characteristics and selects optimal solving tactics.
 /// Supports solver selection (Z3 vs CVC5) and portfolio solving.
 pub struct StrategySelector {
@@ -55,6 +59,7 @@ impl StrategySelector {
 
     /// Select which SMT solver to use for given problem
     ///
+
     /// Returns the recommended solver based on problem characteristics:
     /// - Z3: Better for bit-vectors, quantifier-free fragments
     /// - CVC5: Better for nonlinear arithmetic, strings
@@ -132,6 +137,7 @@ impl StrategySelector {
 
     /// Select optimal tactic for given constraints
     ///
+
     /// Uses Z3 probes to analyze:
     /// - Problem size (number of assertions)
     /// - Depth (maximum formula nesting)
@@ -243,6 +249,7 @@ impl StrategySelector {
 
     /// Estimate timeout based on problem complexity
     ///
+
     /// Uses heuristics to set appropriate timeout:
     /// - Small problems: 1s
     /// - Medium problems: 5s
@@ -276,6 +283,7 @@ impl StrategySelector {
 
     /// Get recommended parallel strategies for portfolio solving
     ///
+
     /// Returns list of complementary strategies to try in parallel.
     pub fn get_parallel_strategies(&self, constraints: &[Bool]) -> List<TacticKind> {
         if constraints.is_empty() {

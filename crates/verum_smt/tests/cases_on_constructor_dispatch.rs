@@ -2,18 +2,20 @@
 //! constructors via the externally-populated `variant_map` registry, with no
 //! hardcoded stdlib type names like `"Some"` or `"None"`.
 //!
+
 //! Pre-fix the engine matched literal `"Some" | "None"` to detect Maybe
 //! constructors and emitted a fixed pair of placeholder subgoals. That
 //! violated the no-stdlib-knowledge-in-compiler rule (CLAUDE.md) and silently
 //! gave any non-Maybe variant type ("Result", "Color", user types) an
 //! unhelpful catch-all error from `cases_on`.
 //!
+
 //! These tests verify the generalized version:
 //! 1. Maybe-shaped types still split into 2 subgoals (None / Some).
 //! 2. 3-way variants (Color = Red | Green | Blue) split into 3 subgoals —
-//!    arity is no longer fixed at 2.
+//!  arity is no longer fixed at 2.
 //! 3. The engine has zero knowledge until `register_variant_type` is called —
-//!    an unregistered constructor falls through to the catch-all error arm.
+//!  an unregistered constructor falls through to the catch-all error arm.
 
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::span::Span;

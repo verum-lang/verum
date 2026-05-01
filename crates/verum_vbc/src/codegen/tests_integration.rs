@@ -1,13 +1,16 @@
 //! Integration tests for the complete VBC pipeline.
 //!
+
 //! These tests verify the full path:
 //! 1. Parse Verum source → AST
 //! 2. Compile AST → VBC bytecode
 //! 3. Execute VBC in interpreter
 //! 4. Verify results
 //!
+
 //! This validates that all components work together correctly.
 //!
+
 //! Some tests destructure `let (module, _func) = create_test_module(...)`
 //! with the `_` prefix because they only exercise `module.*`. Tests that
 //! actually inspect the function (e.g. `instr_count(&func)`) leave the
@@ -363,6 +366,7 @@ mod control_flow_tests {
         // r1 = result accumulator (starts at 0)
         // r2 = temp for comparison
         //
+
         // 0: load 5 -> r0
         // 1: load 0 -> r1
         // loop:
@@ -418,11 +422,12 @@ mod control_flow_tests {
     #[test]
     fn test_nested_if_else_structure() {
         // if a > 0 {
-        //   if b > 0 { 1 } else { 2 }
+        //  if b > 0 { 1 } else { 2 }
         // } else {
-        //   3
+        //  3
         // }
         //
+
         // r0 = a = 5
         // r1 = b = 10
         // r2 = result
@@ -889,6 +894,7 @@ mod algorithm_tests {
         // r4 = zero for comparison
         // r5 = one for decrement
         //
+
         // Note: This tests the instruction sequence structure, not execution
 
         let instructions = vec![

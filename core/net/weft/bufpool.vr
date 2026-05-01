@@ -2,9 +2,10 @@
 // core/net/weft/bufpool.vr — Registered I/O buffer pool
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §4.2.1 / §6.17
+// Spec: internal/specs/net-framework.md §4.2.1 / §6.17
 // =============================================================================
 //
+
 // A fixed-size pool of pre-allocated byte buffers. On Linux with
 // io_uring the backing memory is registered with the kernel
 // (`IORING_REGISTER_BUFFERS`), turning each recv/send into a single
@@ -13,45 +14,56 @@
 // just plain pool slots — kernel-level registration has no direct
 // analogue, so there's no additional win from the OS side there.
 //
+
 // Downstream consumer: a specialised `WeftTransport` impl that grabs
 // a buffer on read, yields it (zero-copy) through the HTTP/1.1
 // parser, then releases on response emit. Follow-up task #28 wires
 // that into connection.vr behind a feature flag.
 //
+
 // Key invariants:
 //
-//   * Buffers are power-of-two sized (default 16 KiB). Matches the
-//     page-pin granularity io_uring expects and keeps SIMD-scans in
-//     `core/simd/bytes.vr` cache-friendly.
+
+//  * Buffers are power-of-two sized (default 16 KiB). Matches the
+//  page-pin granularity io_uring expects and keeps SIMD-scans in
+//  `core/simd/bytes.vr` cache-friendly.
 //
-//   * Acquire is O(1) — Mutex-protected stack pop.
+
+//  * Acquire is O(1) — Mutex-protected stack pop.
 //
-//   * On exhaustion the pool returns `None`; the caller falls back
-//     to on-heap allocation. Never blocks the reactor thread.
+
+//  * On exhaustion the pool returns `None`; the caller falls back
+//  to on-heap allocation. Never blocks the reactor thread.
 //
-//   * Pool bytes are NOT zeroed between reuses — they're always
-//     overwritten before being observed. Safe under §4.3 arena
-//     discipline (ThinRef generation check prevents re-reading old
-//     contents from a previously leased buffer).
+
+//  * Pool bytes are NOT zeroed between reuses — they're always
+//  overwritten before being observed. Safe under §4.3 arena
+//  discipline (ThinRef generation check prevents re-reading old
+//  contents from a previously leased buffer).
 //
+
 // Kernel-side registration:
 //
-//   * On Linux, registration is performed against an existing
-//     `IoUringDriver` instance via `register_with_iouring(driver)`
-//     (cfg-gated to `target_os = "linux"`). The pool's slab is split
-//     into one `IOVec` per buffer slot; the kernel pins the pages and
-//     downstream prep_read_fixed / prep_write_fixed reference each
-//     buffer by its index (returned via `BufferHandle.fd_offset()`,
-//     which IS the `IOSQE_BUFFER_SELECT` handle).
+
+//  * On Linux, registration is performed against an existing
+//  `IoUringDriver` instance via `register_with_iouring(driver)`
+//  (cfg-gated to `target_os = "linux"`). The pool's slab is split
+//  into one `IOVec` per buffer slot; the kernel pins the pages and
+//  downstream prep_read_fixed / prep_write_fixed reference each
+//  buffer by its index (returned via `BufferHandle.fd_offset()`,
+//  which IS the `IOSQE_BUFFER_SELECT` handle).
 //
-//   * macOS / Windows do not have a kernel-level analogue so the
-//     method does not exist on those targets; `iouring_registered()`
-//     stays false.
+
+//  * macOS / Windows do not have a kernel-level analogue so the
+//  method does not exist on those targets; `iouring_registered()`
+//  stays false.
 //
-//   * The previous no-argument stub was architecturally wrong:
-//     registration requires the same io_uring fd that the executor
-//     uses, not a free-standing syscall. Removed.
+
+//  * The previous no-argument stub was architecturally wrong:
+//  registration requires the same io_uring fd that the executor
+//  uses, not a free-standing syscall. Removed.
 //
+
 // =============================================================================
 
 module core.net.weft.bufpool;
@@ -304,10 +316,12 @@ implement BufferPool {
     /// may submit operations using `prep_read_fixed` /
     /// `prep_write_fixed` referencing each handle's `fd_offset()`.
     ///
+
     /// Idempotent — if the pool is already registered, returns Ok(())
     /// without re-issuing the syscall (the kernel rejects double
     /// registration with -EBUSY otherwise).
     ///
+
     /// The pool's slab pointers are pinned by the kernel for the
     /// registration's lifetime; releasing the pool without first
     /// calling `unregister_iouring` leaves the kernel-side pin in

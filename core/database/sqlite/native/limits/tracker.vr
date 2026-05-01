@@ -3,15 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — quotas)
 //
+
 // `LimitTracker` is a per-Connection accumulator that the L4
 // interpreter, L1 pager, and L7 façade all bump as work progresses.
 // On `check(dimension, current_value)`:
 //
-//   * record the running total
-//   * compare against the configured cap
-//   * consult the policy (Permissive/SoftWarn/Strict) on a breach
-//   * record the breach in the journal
-//   * return an `EnforcementDecision` the caller acts on
+
+//  * record the running total
+//  * compare against the configured cap
+//  * consult the policy (Permissive/SoftWarn/Strict) on a breach
+//  * record the breach in the journal
+//  * return an `EnforcementDecision` the caller acts on
 // =============================================================================
 
 module core.database.sqlite.native.limits.tracker;

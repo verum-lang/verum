@@ -4,27 +4,33 @@
 // Layer: 2 (depends on core primitives only)
 // Dependencies: core
 // Reference: FIPS PUB 180-4 §6.4 — SHA-512 specification
-//            RFC 6234 (informational)
+//  RFC 6234 (informational)
 // =============================================================================
 //
+
 // SHA-512 is the 64-bit variant of the SHA-2 family. It operates on
 // 128-byte blocks, uses 64-bit words, runs 80 rounds, and produces a
 // 64-byte (512-bit) digest.
 //
+
 // It is the core primitive for:
 //
-//   * TLS 1.3 ciphersuite `TLS_AES_256_GCM_SHA384` (SHA-384 is a
-//     truncation of SHA-512; see `sha384.vr`, which is 20 lines on
-//     top of this module).
-//   * Ed25519 signatures (RFC 8032) — pre-hash stage uses SHA-512.
-//   * HKDF-SHA512 key-derivation for higher-security-margin protocols.
+
+//  * TLS 1.3 ciphersuite `TLS_AES_256_GCM_SHA384` (SHA-384 is a
+//  truncation of SHA-512; see `sha384.vr`, which is 20 lines on
+//  top of this module).
+//  * Ed25519 signatures (RFC 8032) — pre-hash stage uses SHA-512.
+//  * HKDF-SHA512 key-derivation for higher-security-margin protocols.
 //
+
 // # Usage
 //
+
 // ```verum
 // // One-shot
 // let digest: [Byte; 64] = Sha512.digest(b"hello");
 //
+
 // // Streaming
 // let mut s = Sha512.new();
 // s.update(chunk1);
@@ -32,19 +38,24 @@
 // let digest: [Byte; 64] = s.finalize();
 // ```
 //
+
 // # Performance
 //
+
 // Reference implementation runs ~150-250 MB/s on modern x86_64 with
 // `@inline`-folded rounds. For bulk workloads enable the accelerated
 // `crypto-accel` feature, which substitutes `compress_block` with
 // hand-written AVX2 / ARMv8 SHA-512 extensions (~2-4 GB/s).
 //
+
 // # Safety
 //
+
 // Constant-time by construction: no data-dependent branches, no
 // memory accesses indexed by secret data. Word constants (H_INIT,
 // K) are fixed; round loop is straight-line.
 //
+
 // =============================================================================
 
 module core.security.hash.sha512;
@@ -288,11 +299,13 @@ fn small_sigma1(x: UInt64) -> UInt64 {
 /// Merge one 128-byte block into the SHA-512 hash state. Pure,
 /// branch-free over secret data.
 ///
+
 /// Exposed `public` because SHA-384 and SHA-512/256 (FIPS 180-4 §5.3.6)
 /// all share this core compression; they only differ in the initial
 /// H-values and output-truncation rule. Downstream implementations
 /// (`sha384.vr`) call this directly instead of re-deriving it.
 ///
+
 /// When built with `@cfg(feature = "crypto-accel")`, this symbol is
 /// substituted at link-time with a hand-written AVX2 / ARMv8 SHA-512
 /// implementation. The reference below remains for correctness

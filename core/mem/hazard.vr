@@ -5,52 +5,65 @@
 // Dependencies: sys/common
 // =============================================================================
 //
+
 // This module implements a lock-free hazard pointer system that prevents the
 // race condition between CBGR validation and dereference.
 //
+
 // # Problem Statement
 //
+
 // Without hazard pointers, this race condition exists:
 //
+
 // ```
-// Thread 1                    Thread 2
-// --------                    --------
+// Thread 1 Thread 2
+// -------- --------
 // validate() - OK
-//                             deallocate(ptr)
+//  deallocate(ptr)
 // deref(ptr) - UAF!
 // ```
 //
+
 // # Solution
 //
+
 // Hazard pointers prevent deallocation while references are in use:
 //
+
 // ```
-// Thread 1                    Thread 2
-// --------                    --------
+// Thread 1 Thread 2
+// -------- --------
 // acquire_hazard(ptr)
 // validate() - OK
-//                             deallocate(ptr) - DEFERRED
+//  deallocate(ptr) - DEFERRED
 // deref(ptr) - OK
 // release_hazard(ptr)
-//                             retire_reclaim(ptr) - OK
+//  retire_reclaim(ptr) - OK
 // ```
 //
+
 // # Performance
 //
+
 // - Acquire hazard: ~5-10ns (thread-local fast path)
 // - Release hazard: ~3-5ns (thread-local operation)
 // - Retirement scan: ~100-500ns (amortized, batched)
 //
+
 // # Implementation
 //
+
 // Each thread has a fixed-size array of hazard pointer slots. When a thread
 // needs to protect a pointer:
 // 1. Store the pointer in an available slot (atomic store with Release)
 // 2. Perform validation and access
 // 3. Clear the slot (atomic store with Release)
 //
+
 // Deallocation checks all threads' hazard arrays before reclaiming memory.
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 6.4
 // =============================================================================
 
@@ -85,6 +98,7 @@ public const MAX_THREADS: Int = 256;
 
 /// Global hazard pointer domain.
 ///
+
 /// This structure manages all thread records and coordinates reclamation.
 public type HazardDomain is {
     /// Head of the thread record linked list (atomic).
@@ -99,6 +113,7 @@ public type HazardDomain is {
 
 /// Thread record in the global linked list.
 ///
+
 /// Each thread that uses hazard pointers gets one of these.
 @repr(C, align(64))  // Cache-line aligned to avoid false sharing
 public type ThreadRecord is {
@@ -120,6 +135,7 @@ public type ThreadRecord is {
 
 /// Thread-local hazard record manager.
 ///
+
 /// This structure tracks thread-local state including slot usage and
 /// retired nodes waiting for reclamation.
 public type ThreadHazardRecord is {
@@ -172,6 +188,7 @@ static mut THREAD_HAZARD_RECORD: ThreadHazardRecord = ThreadHazardRecord {
 implement HazardDomain {
     /// Register a new thread with the hazard domain.
     ///
+
     /// Allocates a ThreadRecord and adds it to the global list.
     /// Called lazily on first hazard acquisition.
     fn register_thread(&mut self) -> &mut ThreadRecord {
@@ -216,6 +233,7 @@ implement HazardDomain {
 
     /// Scan all hazard pointers to find protected addresses.
     ///
+
     /// Returns a sorted list of all currently protected pointers.
     /// Used during reclamation to determine which retired nodes are safe.
     fn scan_hazards(&self) -> List<&unsafe Byte> {
@@ -276,8 +294,10 @@ implement ThreadHazardRecord {
 
     /// Acquire a hazard pointer for an address.
     ///
+
     /// Returns a guard that automatically releases when dropped.
     ///
+
     /// Slot exhaustion contract: the per-thread slot array is
     /// fixed at `HAZARD_POINTERS_PER_THREAD` (currently 8). The
     /// previous implementation guarded slot allocation with
@@ -292,6 +312,7 @@ implement ThreadHazardRecord {
     /// Promoted to a hard `panic` so production deployments
     /// fail loudly at the actual exhaustion site.
     ///
+
     /// Release order contract: this acquire path uses the
     /// per-thread slot array as a LIFO stack — `release()` only
     /// reclaims the top slot. Out-of-order release (acquire A,
@@ -303,7 +324,7 @@ implement ThreadHazardRecord {
     fn acquire(&mut self, ptr: &unsafe Byte) -> HazardGuard {
         let record = self.get_record();
 
-        // Find available slot.  Hard-panic on exhaustion — see
+        // Find available slot. Hard-panic on exhaustion — see
         // the function-level doc for the rationale (silent OOB
         // would corrupt the ThreadRecord's adjacent fields).
         let slot = self.next_slot;
@@ -324,6 +345,7 @@ implement ThreadHazardRecord {
 
     /// Release a hazard pointer.
     ///
+
     /// LIFO contract: `next_slot` is only decremented when the
     /// released slot is the top of the stack
     /// (`slot + 1 == next_slot`). Out-of-order release leaves
@@ -333,6 +355,7 @@ implement ThreadHazardRecord {
     /// dropping them out of acquisition order leaks one slot
     /// for the duration the older guard is held.
     ///
+
     /// Mitigation: the `try_deref` usage pattern that drives
     /// every production hazard acquisition is stack-disciplined
     /// (guard is the LAST live binding in its scope), so the
@@ -364,6 +387,7 @@ implement ThreadHazardRecord {
 
     /// Retire a pointer for later reclamation.
     ///
+
     /// The pointer is not immediately freed. Instead, it's added to a
     /// retirement list and will be reclaimed when no hazard pointers
     /// reference it.
@@ -384,6 +408,7 @@ implement ThreadHazardRecord {
 
     /// Attempt to reclaim retired nodes.
     ///
+
     /// Scans all hazard pointers and frees any retired nodes that are
     /// not currently protected.
     fn reclaim(&mut self) {
@@ -416,6 +441,7 @@ implement ThreadHazardRecord {
 
 /// RAII guard for a hazard pointer.
 ///
+
 /// Automatically releases the hazard pointer when dropped.
 /// This ensures hazard pointers are properly released even on early returns
 /// or panics.
@@ -451,21 +477,24 @@ implement Drop for HazardGuard {
 
 // SOUNDNESS: HazardGuard is intentionally !Send.
 //
+
 // Drop calls `THREAD_HAZARD_RECORD.release(self.slot)`, where
-// `THREAD_HAZARD_RECORD` is thread-local.  A guard acquired on
+// `THREAD_HAZARD_RECORD` is thread-local. A guard acquired on
 // thread A and dropped on thread B would call B's
 // THREAD_HAZARD_RECORD.release(slot_from_A) — clobbering a slot
 // in B's record that may belong to a live hazard pointer of
 // B's, corrupting B's CBGR validation surface.
 //
+
 // The earlier `unsafe implement Send for HazardGuard {}` was
 // load-bearingly wrong: the doc claimed "protection is per-slot,
 // not per-thread" but the implementation does the opposite —
 // release indexes into the *dropping* thread's record, not the
-// acquiring thread's.  Even worse, `next_slot` is also per-thread
+// acquiring thread's. Even worse, `next_slot` is also per-thread
 // (LIFO stack discipline), so a cross-thread drop also breaks
 // the LIFO invariant.
 //
+
 // Removing the Send impl makes HazardGuard a thread-local RAII
 // resource, which matches every actual call site (try_deref
 // always drops the guard in the same scope it acquires it).
@@ -478,15 +507,20 @@ implement Drop for HazardGuard {
 
 /// Acquire a hazard pointer for the given address.
 ///
+
 /// This protects the address from deallocation until the returned guard
 /// is dropped. Use this before CBGR validation to prevent race conditions.
 ///
+
 /// # Performance
 ///
+
 /// ~5-10ns (thread-local operation, no synchronization on fast path)
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let guard = acquire_hazard(ptr);
 /// // ptr is now protected from deallocation
@@ -501,11 +535,14 @@ public fn acquire_hazard(ptr: &unsafe Byte) -> HazardGuard {
 
 /// Retire a pointer for later reclamation.
 ///
+
 /// The pointer will be freed once no hazard pointers reference it.
 /// This is called by the allocator during deallocation.
 ///
+
 /// # Safety
 ///
+
 /// Caller must ensure:
 /// - `ptr` was allocated by the CBGR allocator
 /// - `size` matches the original allocation size
@@ -516,6 +553,7 @@ public unsafe fn retire_hazard(ptr: &unsafe Byte, size: Int) {
 
 /// Force reclamation of all retired nodes.
 ///
+
 /// This is useful for cleanup or when memory pressure is high.
 /// Normally, reclamation happens automatically when the retirement
 /// threshold is reached.
@@ -567,6 +605,7 @@ implement HazardStats {
 
 /// Clean up hazard pointers for the current thread.
 ///
+
 /// Called automatically when a thread exits. Marks the thread record
 /// as inactive and reclaims any remaining retired nodes.
 public fn cleanup_thread_hazards() {

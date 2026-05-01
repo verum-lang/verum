@@ -5,6 +5,7 @@
 // text modifiers, composite styles with builder API, semantic themes,
 // and color space conversion utilities.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6
 // =============================================================================
 

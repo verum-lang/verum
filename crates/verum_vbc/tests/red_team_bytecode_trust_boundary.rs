@@ -1,19 +1,23 @@
 //! Red-team Round 2 §3.3 + §2.2 — VBC bytecode trust-boundary invariants.
 //!
+
 //! Pins the interpreter's defenses on hand-crafted module input:
 //!
-//!   * §3.3 (PENDING → DEFENSE) — `FunctionId(N)` out of range must
-//!     surface as `InterpreterError::FunctionNotFound`, never panic /
-//!     segfault. The defense lives in `mod.rs:136` /  `mod.rs:407` /
-//!     `mod.rs:516` where `state.module.get_function(func_id).ok_or(
-//!     FunctionNotFound)?` is the canonical lookup pattern.
+
+//!  * §3.3 (PENDING → DEFENSE) — `FunctionId(N)` out of range must
+//!  surface as `InterpreterError::FunctionNotFound`, never panic /
+//!  segfault. The defense lives in `mod.rs:136` / `mod.rs:407` /
+//!  `mod.rs:516` where `state.module.get_function(func_id).ok_or(
+//!  FunctionNotFound)?` is the canonical lookup pattern.
 //!
-//!   * §2.2 (PENDING → DEFENSE) — branch-target offsets are encoded as
-//!     `i32` in `Instruction::{Jmp, JmpIf, JmpNot, JmpCmp}` (see
-//!     `instruction.rs:8455`). Functions with 2^16+ instructions are
-//!     not a cliff; the encoding has ~2.1 billion offsets of headroom.
-//!     Pin this by exercising a Jmp with offset >= 65,536.
+
+//!  * §2.2 (PENDING → DEFENSE) — branch-target offsets are encoded as
+//!  `i32` in `Instruction::{Jmp, JmpIf, JmpNot, JmpCmp}` (see
+//!  `instruction.rs:8455`). Functions with 2^16+ instructions are
+//!  not a cliff; the encoding has ~2.1 billion offsets of headroom.
+//!  Pin this by exercising a Jmp with offset >= 65,536.
 //!
+
 //! **Audit reference:** vcs/red-team/round-2-implementation.md §2.2 + §3.3.
 
 use std::sync::Arc;
@@ -111,6 +115,7 @@ fn jmp_offset_can_express_beyond_2_pow_16() {
     // value with an offset of 100_000 (= 2^16 + 34_464) compiles. The
     // type-level invariant is that branch targets are NOT i16-bounded.
     //
+
     // We don't actually execute this jump (it would require a bytecode
     // function with 100K+ instructions); we only assert that the type
     // system accepts the i32 value.
@@ -189,17 +194,18 @@ fn conditional_jmp_offsets_are_also_i32() {
 // -----------------------------------------------------------------------------
 // Round 3 §4.1 — Long single-instruction basic-block chain
 // -----------------------------------------------------------------------------
-// PENDING → DEFENSE CONFIRMED 2026-04-28.  Adversarial input: a function
-// body of N straight-line `Mov` instructions with no branches.  Pre-fix
+// PENDING → DEFENSE CONFIRMED 2026-04-28. Adversarial input: a function
+// body of N straight-line `Mov` instructions with no branches. Pre-fix
 // concern was whether the bytecode encoder/decoder pair survives a basic
 // block far past typical real-world function sizes — the fix invariant
 // being that there's no implicit i16 cap on instruction count, only the
 // i32 branch-target cap pinned by §2.2.
 //
+
 // 100,000 Mov instructions ≈ 6 bytes each (opcode + two reg bytes) ≈
 // 600 KB of bytecode — comfortably below any reasonable per-function
 // size limit, but tens of orders of magnitude beyond what any real
-// codegen path emits.  If the encoder ever introduced a per-block
+// codegen path emits. If the encoder ever introduced a per-block
 // instruction-count cap, this test fires.
 
 #[test]
@@ -295,7 +301,7 @@ fn deserialize_validated_rejects_call_with_oor_function_id() {
     let bytes = serialize_module(&module).expect("serialize");
     let _trusted = deserialize_module(&bytes).expect("trusted load");
 
-    // Validating entry point must reject.  The exact error variant
+    // Validating entry point must reject. The exact error variant
     // can be either the bare `InvalidFunctionId(99)` or a
     // `MultipleErrors(..)` wrapping it; both are well-formed
     // surface-level rejections of the load.
@@ -333,7 +339,7 @@ fn interpreter_try_new_validated_rejects_invalid_module() {
     use verum_vbc::instruction::RegRange;
 
     // Hand-craft a module whose body calls FunctionId(99) — out of
-    // range against the 1-function table.  `Interpreter::try_new`
+    // range against the 1-function table. `Interpreter::try_new`
     // (the non-validating constructor) accepts the module; only
     // `try_new_validated` rejects, with a `ValidationFailed` error
     // carrying the rendered `VbcError`.
@@ -360,7 +366,7 @@ fn interpreter_try_new_validated_rejects_invalid_module() {
 
     let arc = Arc::new(module);
 
-    // try_new accepts (lenient — trusted source).  Use `is_ok()`
+    // try_new accepts (lenient — trusted source). Use `is_ok()`
     // since `Interpreter` doesn't implement `Debug`.
     assert!(
         Interpreter::try_new(Arc::clone(&arc)).is_ok(),
@@ -385,7 +391,7 @@ fn interpreter_try_new_validated_rejects_invalid_module() {
 #[test]
 fn interpreter_try_new_validated_accepts_well_formed_module() {
     // Sanity baseline: well-formed minimal module must construct
-    // through the validating constructor without error.  We have
+    // through the validating constructor without error. We have
     // to reify a fresh Arc with synced header counts because
     // `build_minimal_module` (shared with the other tests) doesn't
     // set the header count fields the validator checks.
@@ -405,10 +411,10 @@ fn interpreter_try_new_validated_accepts_well_formed_module() {
 // Round 1 §3.1 — Content-hash tampering detection
 // -----------------------------------------------------------------------------
 // The `VbcHeader.content_hash` field was COMPUTED at serialize time but
-// never CHECKED at deserialize time.  An attacker could edit a `.vbc`
+// never CHECKED at deserialize time. An attacker could edit a `.vbc`
 // file in place (flip a byte in the bytecode section) without
 // re-stamping the hash, and the loader wouldn't notice — silent
-// integrity bypass.  `deserialize_module_validated` now recomputes
+// integrity bypass. `deserialize_module_validated` now recomputes
 // blake3 over `data[HEADER_SIZE..]` and compares against the header.
 // Pin both directions: well-formed bytes pass; one tampered byte
 // rejects.
@@ -437,7 +443,7 @@ fn deserialize_validated_rejects_content_hash_tampering() {
     bytes[last] = bytes[last].wrapping_add(1);
 
     // Lenient `deserialize_module` MAY still accept (it doesn't
-    // hash-check).  We don't assert on its behaviour because the
+    // hash-check). We don't assert on its behaviour because the
     // tampered byte might land in a structurally-meaningful slot
     // and break decode for unrelated reasons; the contract is only
     // that the VALIDATED entry point rejects.
@@ -462,9 +468,9 @@ fn deserialize_validated_rejects_content_hash_tampering() {
         Err(other) => {
             // The tampered byte may also have corrupted a structural
             // field that fires earlier in the decode path (e.g.,
-            // truncated string-table size).  Any decode-time
+            // truncated string-table size). Any decode-time
             // rejection is acceptable as long as the load doesn't
-            // succeed silently.  But ContentHashMismatch is the
+            // succeed silently. But ContentHashMismatch is the
             // primary intended signal — log so future regressions on
             // the hash check don't silently pass behind another error.
             eprintln!(

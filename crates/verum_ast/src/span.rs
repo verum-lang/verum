@@ -1,5 +1,6 @@
 //! Source location tracking for the AST.
 //!
+
 //! This module re-exports span types from `verum_common` for backward compatibility.
 //! All new code should import from `verum_common::span` directly.
 

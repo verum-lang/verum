@@ -1,5 +1,6 @@
 //! Debug session state management.
 //!
+
 //! Tracks breakpoints, thread state, step mode, and source-to-bytecode mappings
 //! for a single debug session.
 
@@ -129,6 +130,7 @@ impl DebugSession {
 
     /// Sets breakpoints for a source file, resolving them against the VBC source map.
     ///
+
     /// Returns the list of breakpoints with verified status.
     pub fn set_breakpoints(
         &mut self,
@@ -183,6 +185,7 @@ impl DebugSession {
 
     /// Checks if the given function/instruction index hits a breakpoint.
     ///
+
     /// Returns the breakpoint ID if hit.
     pub fn check_breakpoint(&self, function_id: FunctionId, instruction_index: u32) -> Option<i64> {
         for bps in self.breakpoints.values() {
@@ -200,6 +203,7 @@ impl DebugSession {
 
     /// Resolves a source line to a VBC instruction index using the source map.
     ///
+
     /// Returns `(actual_line, function_id, instruction_index)` or None if no mapping exists.
     fn resolve_line_to_instruction(
         &self,
@@ -253,6 +257,7 @@ impl DebugSession {
 
     /// Looks up the source location for a given bytecode offset.
     ///
+
     /// Returns `(file_path, line, column)` if found.
     pub fn lookup_source_location(
         &self,

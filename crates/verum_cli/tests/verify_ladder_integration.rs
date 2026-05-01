@@ -1,13 +1,16 @@
 //! End-to-end integration tests for `verum verify --ladder`.
 //!
+
 //! Spawns the actual `verum` binary as a child process and validates
 //! the entire wiring chain:
 //!
-//!   `verum verify --ladder` (CLI clap) →
-//!     `commands::verify_ladder::run_verify_ladder` →
-//!       `verum_verification::ladder_dispatch::DefaultLadderDispatcher` →
-//!         per-theorem `LadderVerdict` (Closed / Open / DispatchPending / Timeout)
+
+//!  `verum verify --ladder` (CLI clap) →
+//!  `commands::verify_ladder::run_verify_ladder` →
+//!  `verum_verification::ladder_dispatch::DefaultLadderDispatcher` →
+//!  per-theorem `LadderVerdict` (Closed / Open / DispatchPending / Timeout)
 //!
+
 //! Together with the 11 in-handler unit tests in
 //! `commands::verify_ladder::tests`, this proves the dispatcher is
 //! actually consumable from a shell, not just from Rust unit tests.
@@ -116,7 +119,7 @@ public fn main() {}
 #[test]
 fn ladder_formal_strategy_dispatches_to_pending_not_failure() {
     // `Formal` (ω) is V0-pending in the dispatcher → emits
-    // `dispatch_pending`, NOT a hard failure.  Pending is advisory
+    // `dispatch_pending`, NOT a hard failure. Pending is advisory
     // because backends ship in V1+; it must NOT cause non-zero exit.
     let (_temp, dir) = create_project(
         "ladder_formal",
@@ -175,7 +178,7 @@ public fn main() {}
 #[test]
 fn ladder_mixed_project_runs_clean() {
     // Multiple theorems with mixed strategies — none is a hard
-    // failure, so exit 0.  Pins the success contract for the
+    // failure, so exit 0. Pins the success contract for the
     // realistic stdlib shape (mostly `formal`-pending today).
     let (_temp, dir) = create_project(
         "ladder_mixed",

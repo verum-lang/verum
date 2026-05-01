@@ -1,22 +1,26 @@
 //! Span-underlined human output for `verum lint --format human`.
 //!
+
 //! The shape of `rustc` / `clippy` / `ruff`: rule name in brackets,
 //! filename with `--> `, the offending source line, a caret
 //! underline at the column the issue points to, and a help
 //! suggestion when the rule provides one.
 //!
+
 //! Example output:
 //!
+
 //! ```text
 //! error[no-unwrap-in-prod]: use `?` or `expect("why")` instead of unwrap()
-//!   --> src/main.vr:8:13
-//!    |
-//!  8 |     let y = x.unwrap();
-//!    |             ^^^^^^^^^^
-//!    |
-//!    = help: consider matching on the variant explicitly
+//!  --> src/main.vr:8:13
+//!  |
+//!  8 | let y = x.unwrap();
+//!  | ^^^^^^^^^^
+//!  |
+//!  = help: consider matching on the variant explicitly
 //! ```
 //!
+
 //! ANSI colour is added via the existing `colored` crate which
 //! honours `NO_COLOR` automatically. CI logs that strip ANSI render
 //! the same diagnostic in monochrome.

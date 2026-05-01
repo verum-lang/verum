@@ -1,21 +1,27 @@
 //! Stage Checker for Multi-Stage Metaprogramming
 //!
+
 //! This module implements stage-level type checking for Verum's N-level staged
 //! metaprogramming system. It enforces the **Stage Coherence Rule**: a Stage N
 //! function can only directly generate Stage N-1 code.
 //!
+
 //! # Staged Metaprogramming Model
 //!
+
 //! Verum supports N-level staged metaprogramming where functions execute at
 //! different compilation stages:
 //!
+
 //! ```text
-//! Stage N   ──►  generates  ──►  Stage N-1  ──►  ...  ──►  Stage 0 (runtime)
-//! (meta(N))                       (meta(N-1))              (normal code)
+//! Stage N ──► generates ──► Stage N-1 ──► ... ──► Stage 0 (runtime)
+//! (meta(N)) (meta(N-1)) (normal code)
 //! ```
 //!
+
 //! ## Stage Semantics
 //!
+
 //! | Stage | Syntax | Execution | Description |
 //! |-------|--------|-----------|-------------|
 //! | 0 | `fn f()` | Runtime | Normal runtime functions |
@@ -23,47 +29,58 @@
 //! | 2 | `meta(2) fn f()` | Pre-compile | Generates meta functions |
 //! | N | `meta(N) fn f()` | Stage N | Generates Stage N-1 code |
 //!
+
 //! ## Stage Coherence Rule
 //!
+
 //! The fundamental rule of staged metaprogramming:
 //!
+
 //! > **A Stage N function can only DIRECTLY generate Stage N-1 code.**
 //!
+
 //! This means:
 //! - `meta(2)` can only directly generate `meta` (stage 1) code
 //! - To generate runtime (stage 0) code from `meta(2)`, the output must contain
-//!   a `meta` function that performs the final generation
+//!  a `meta` function that performs the final generation
 //! - Each `quote { ... }` lowers the stage by 1
 //!
+
 //! ## Examples
 //!
+
 //! ```verum
 //! // VALID: meta(2) generates meta(1) code
 //! meta(2) fn derive_factory() -> TokenStream {
-//!     quote {
-//!         meta fn derive_impl<T>() -> TokenStream {
-//!             quote { ... }  // This generates stage 0
-//!         }
-//!     }
+//!  quote {
+//!  meta fn derive_impl<T>() -> TokenStream {
+//!  quote { ... } // This generates stage 0
+//!  }
+//!  }
 //! }
 //!
+
 //! // INVALID: meta(2) cannot directly generate stage 0
 //! meta(2) fn bad_factory() -> TokenStream {
-//!     quote {
-//!         fn runtime() { ... }  // Error E1001: stage mismatch
-//!     }
+//!  quote {
+//!  fn runtime() { ... } // Error E1001: stage mismatch
+//!  }
 //! }
 //!
+
 //! // INVALID: cross-stage call from higher to lower
 //! meta fn helper() -> TokenStream { ... }
 //!
+
 //! meta(2) fn caller() -> TokenStream {
-//!     helper()  // Error E1002: cross-stage call
+//!  helper() // Error E1002: cross-stage call
 //! }
 //! ```
 //!
+
 //! # Diagnostic Codes
 //!
+
 //! | Code | Name | Description |
 //! |------|------|-------------|
 //! | E1001 | `stage_mismatch` | Quote generates wrong stage code |
@@ -74,8 +91,10 @@
 //! | W1001 | `unused_stage` | Defined meta(N) but never invoked |
 //! | W1002 | `stage_downgrade` | Function can use lower stage |
 //!
+
 //! # Integration
 //!
+
 //! The StageChecker integrates with:
 //! - **verum_parser**: Receives `FunctionDecl.stage_level` from parsing
 //! - **verum_types/infer**: Called during type inference for stage validation
@@ -91,15 +110,17 @@ use verum_common::{List, Text};
 pub enum StageError {
     /// E1001: Quote generates code for wrong stage
     ///
+
     /// Occurs when a `quote { ... }` in a Stage N function generates code
     /// that is not Stage N-1. The Stage Coherence Rule requires that each
     /// quote lowers the stage by exactly 1.
     ///
+
     /// # Example
     /// ```verum
     /// // Error: meta(2) should generate meta(1), not stage 0
     /// meta(2) fn bad() -> TokenStream {
-    ///     quote { fn runtime() { } }  // E1001
+    ///  quote { fn runtime() { } } // E1001
     /// }
     /// ```
     StageMismatch {
@@ -117,16 +138,19 @@ pub enum StageError {
 
     /// E1002: Cross-stage function call
     ///
+
     /// Occurs when a Stage N function tries to directly call a function
     /// from a different stage. Higher stages cannot call lower stage functions
     /// directly (they must generate code that calls them).
     ///
+
     /// # Example
     /// ```verum
     /// meta fn helper() -> TokenStream { ... }
     ///
+
     /// meta(2) fn caller() -> TokenStream {
-    ///     helper()  // E1002: cannot call stage 1 from stage 2
+    ///  helper() // E1002: cannot call stage 1 from stage 2
     /// }
     /// ```
     CrossStageCall {
@@ -144,13 +168,15 @@ pub enum StageError {
 
     /// E1003: Stage overflow
     ///
+
     /// Occurs when code uses a stage level higher than the configured
     /// `max_stage` in Verum.toml.
     ///
+
     /// # Configuration
     /// ```toml
     /// [meta]
-    /// max_stage = 3  # Default is 2
+    /// max_stage = 3 # Default is 2
     /// ```
     StageOverflow {
         /// Stage level that was used
@@ -165,14 +191,16 @@ pub enum StageError {
 
     /// E1004: Cyclic stage dependency
     ///
+
     /// Occurs when there is a circular dependency between staged functions
     /// that would create an infinite compilation loop.
     ///
+
     /// # Example
     /// ```verum
     /// // Hypothetical cyclic dependency
     /// meta(2) fn a() -> TokenStream {
-    ///     quote { meta fn b() { @a() } }  // E1004: cycle
+    ///  quote { meta fn b() { @a() } } // E1004: cycle
     /// }
     /// ```
     CyclicStage {
@@ -186,15 +214,17 @@ pub enum StageError {
 
     /// E1005: Invalid stage escape
     ///
+
     /// Occurs when `$(stage N) { ... }` escape syntax is used incorrectly.
     /// The escape stage must be between current_stage and 0.
     ///
+
     /// # Example
     /// ```verum
     /// meta(2) fn example() -> TokenStream {
-    ///     quote {
-    ///         $(stage 3) { ... }  // E1005: cannot escape to higher stage
-    ///     }
+    ///  quote {
+    ///  $(stage 3) { ... } // E1005: cannot escape to higher stage
+    ///  }
     /// }
     /// ```
     InvalidStageEscape {
@@ -214,6 +244,7 @@ pub enum StageError {
 pub enum StageWarning {
     /// W1001: Unused stage definition
     ///
+
     /// Warns when a `meta(N)` function is defined but never invoked
     /// during compilation. This may indicate dead code.
     UnusedStage {
@@ -227,6 +258,7 @@ pub enum StageWarning {
 
     /// W1002: Stage can be downgraded
     ///
+
     /// Warns when a `meta(N)` function could be lowered to `meta(N-1)`
     /// because it only generates code for stage N-2 or lower.
     /// Lower stages compile faster.
@@ -350,30 +382,38 @@ impl FunctionStageInfo {
 
 /// Stage checker for multi-stage metaprogramming
 ///
+
 /// The StageChecker validates stage-related constraints during type checking:
 /// - Stage coherence (quote generates correct stage)
 /// - Cross-stage call restrictions
 /// - Stage overflow detection
 /// - Cyclic dependency detection
 ///
+
 /// # Usage
 ///
+
 /// ```rust,ignore
 /// let config = StageConfig::default();
 /// let mut checker = StageChecker::new(config);
 ///
+
 /// // Enter a function context
 /// checker.enter_function("my_meta_fn", 2, span);
 ///
+
 /// // Check a quote expression
 /// checker.check_quote(target_stage, quote_span)?;
 ///
+
 /// // Check a function call
 /// checker.check_call("helper", callee_stage, call_span)?;
 ///
+
 /// // Exit function context
 /// checker.exit_function();
 ///
+
 /// // Collect warnings
 /// let warnings = checker.collect_warnings();
 /// ```
@@ -430,6 +470,7 @@ impl StageChecker {
 
     /// Register a function with its stage information
     ///
+
     /// Call this for each meta function before checking its body.
     pub fn register_function(&mut self, name: Text, stage: u32, span: Span) -> Result<(), StageError> {
         // Check stage overflow
@@ -449,6 +490,7 @@ impl StageChecker {
 
     /// Enter a function context for checking
     ///
+
     /// This sets the current stage and tracks nested function checking.
     pub fn enter_function(&mut self, name: &Text, stage: u32, _span: Span) {
         // Save current context
@@ -477,13 +519,16 @@ impl StageChecker {
 
     /// Check a quote expression for stage correctness
     ///
+
     /// Validates that the quote generates code for the correct stage
     /// according to the Stage Coherence Rule.
     ///
+
     /// # Arguments
     /// - `target_stage`: The stage of the code being generated (None = current - 1)
     /// - `span`: Source location of the quote expression
     ///
+
     /// # Returns
     /// - `Ok(())` if the quote is valid
     /// - `Err(StageError::StageMismatch)` if the stages don't align
@@ -533,13 +578,16 @@ impl StageChecker {
 
     /// Check a function call for stage correctness
     ///
+
     /// Validates that the callee can be called from the current stage.
     ///
+
     /// # Cross-Stage Call Rules
     /// - Same stage calls are always allowed
     /// - Higher stage cannot directly call lower stage (must generate code)
     /// - Lower stage cannot call higher stage (not yet compiled)
     ///
+
     /// # Arguments
     /// - `callee_name`: Name of the function being called
     /// - `callee_stage`: Stage of the callee function
@@ -603,6 +651,7 @@ impl StageChecker {
 
     /// Check a stage escape expression `$(stage N) { ... }`
     ///
+
     /// Validates that the escape stage is valid for the current context.
     pub fn check_stage_escape(&mut self, escape_stage: u32, span: Span) -> Result<(), StageError> {
         // Escape stage must be between 0 and current_stage (exclusive)
@@ -699,6 +748,7 @@ impl StageChecker {
 
     /// Check a variable reference for stage correctness.
     ///
+
     /// A variable at `var_stage` can only be referenced from the current stage
     /// if the stages match. Cross-stage variable references are errors.
     pub fn check_variable_reference(
@@ -727,6 +777,7 @@ impl StageChecker {
 
     /// Check that a type used in generated code is at the correct stage.
     ///
+
     /// A type at `type_stage` can be used in code generated at `target_stage`
     /// only if the type stage is at or below the target stage.
     pub fn check_quote_type(
@@ -754,6 +805,7 @@ impl StageChecker {
 
     /// Check a splice/unquote expression for stage correctness.
     ///
+
     /// A splice expression must reference the current stage.
     pub fn check_splice(&mut self, splice_stage: u32, span: Span) -> Result<(), StageError> {
         if splice_stage == self.current_stage {

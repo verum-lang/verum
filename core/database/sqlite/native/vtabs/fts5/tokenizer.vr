@@ -3,17 +3,20 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/tokenizer/
 //
+
 // A tokenizer turns a raw text input into a stream of `Fts5VtabToken` records.
 // Each token records the byte offset/length in the original input
 // (so `highlight()` / `snippet()` can re-index back into source) plus
 // the normalised term to write into the inverted index.
 //
+
 // Four built-ins ship:
-//   * `Simple`     — ASCII split on non-alphanumeric, lowercased
-//   * `Porter`     — Simple + Porter-stemmer suffix-strip
-//   * `Unicode61`  — Unicode-aware tokeniser (NFC normalise + diacritic strip)
-//   * `Trigram`    — overlapping 3-grams (used for substring search)
+//  * `Simple` — ASCII split on non-alphanumeric, lowercased
+//  * `Porter` — Simple + Porter-stemmer suffix-strip
+//  * `Unicode61` — Unicode-aware tokeniser (NFC normalise + diacritic strip)
+//  * `Trigram` — overlapping 3-grams (used for substring search)
 //
+
 // User-supplied tokenisers register themselves via
 // `register_tokenizer` on a `FnRegistry` (see core/.../ext/registry).
 // =============================================================================
@@ -141,6 +144,7 @@ fn is_separator(b: Byte, options: &TokenizerOptions) -> Bool {
 // Porter tokenizer — Simple + suffix stemming
 // -----------------------------------------------------------------------------
 //
+
 // Implements the canonical Porter algorithm's most common rules
 // (Step 1a/1b/1c, Step 2 plural forms, Step 4 suffix strip). Not the
 // full algorithm — covers ~80% of English suffixes which is the
@@ -209,6 +213,7 @@ fn bs_replace_at(_len: &mut Int, _at: Int, _new_byte: Int) {
 // Unicode61 tokenizer — UTF-8 aware
 // -----------------------------------------------------------------------------
 //
+
 // Treats every continuation byte as part of the preceding lead byte
 // (so `ëèé` is a single token regardless of separator config).
 // Diacritic stripping is via the simple "drop combining bytes 0xCC/0xCD-led"

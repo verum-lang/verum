@@ -6,10 +6,12 @@
 //! verifier toolchains against lowerer-emitted text — closing the
 //! "we lowered to syntax X but never re-checked X" loophole.
 //!
+
 //! Fixture: identity-on-Nat — type `(x : Nat) → Nat`, body `λ x => x`.
 //! Five files emitted per run; the CI workflow consumes them as the
 //! input to lake / coqc / agda / dkcheck / metamath.
 //!
+
 //! Re-running the test is idempotent — files are overwritten, never
 //! appended, so a stale emit can't poison a downstream re-check.
 
@@ -126,7 +128,7 @@ fn emit_metamath_identity_on_nat() {
     // Metamath's lowering produces a label-form expression; we emit
     // it inside a comment block in a minimal `.mm` file so downstream
     // `metamath read` exercises the file-level parse without needing
-    // the full `set.mm` include chain. V2 will emit the full $p/$.
+    // the full `set.mm` include chain. Future work will emit the full $p/$.
     // proof block with substitution chain.
     let body = metamath::lower_term(&identity_lam());
     let content = format!(
@@ -145,6 +147,7 @@ fn emit_manifest_lists_all_files() {
     // emitted once, listing every fixture path so the CI workflow
     // can iterate without hard-coding extension lookups.
     //
+
     // Tests can run in any order; if this one runs first, sibling
     // emits will be re-run (`cargo test` runs each #[test] in its
     // own process when --test-threads=1 isn't set, so each test is

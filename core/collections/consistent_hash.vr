@@ -5,39 +5,48 @@
 // Dependencies: core, core.security.hash.sha256, core.collections.btree
 // =============================================================================
 //
+
 // Consistent hashing distributes keys to a set of nodes such that
 // adding or removing one node moves only `key_count / node_count`
 // entries. Used by every production distributed cache (memcached
 // Ketama, Redis Cluster, Cassandra, DynamoDB, Envoy ring_hash).
 //
+
 // # Shape
 //
-//   * Each node owns `virtual_nodes` (aka replicas) positions on a
-//     64-bit ring. More virtual nodes = smoother distribution.
-//     Default 160 matches Ketama; load stays within ±5% of
-//     uniform at 100+ nodes.
+
+//  * Each node owns `virtual_nodes` (aka replicas) positions on a
+//  64-bit ring. More virtual nodes = smoother distribution.
+//  Default 160 matches Ketama; load stays within ±5% of
+//  uniform at 100+ nodes.
 //
-//   * Lookup is O(log N) in node count thanks to a `BTreeMap`
-//     keyed by hash position.
+
+//  * Lookup is O(log N) in node count thanks to a `BTreeMap`
+//  keyed by hash position.
 //
-//   * Deterministic: same (node, vnode_index) pair always hashes
-//     to the same ring position across runs and across
-//     implementations. Ketama-compatible layout so cross-language
-//     interop works.
+
+//  * Deterministic: same (node, vnode_index) pair always hashes
+//  to the same ring position across runs and across
+//  implementations. Ketama-compatible layout so cross-language
+//  interop works.
 //
+
 // # API
 //
+
 // ```
 // let mut ring = ConsistentHashRing.with_virtual_nodes(160);
 // ring.add_node(Text.from("cache-a"));
 // ring.add_node(Text.from("cache-b"));
 // ring.add_node(Text.from("cache-c"));
 //
+
 // let target: Maybe<Text> = ring.node_for_key(b"session:42");
-// let top_n: List<Text> = ring.nodes_for_key(b"repl-key", 3);   // N-replica variant
+// let top_n: List<Text> = ring.nodes_for_key(b"repl-key", 3); // N-replica variant
 // ring.remove_node(&Text.from("cache-b"));
 // ```
 //
+
 // =============================================================================
 
 module core.collections.consistent_hash;

@@ -2,11 +2,13 @@
 // core.action.monads.state — read+write mutable-cell monad
 // =============================================================================
 //
+
 // `State<S, A>` — read+write access to a single cell of type `S`. The
 // Kleisli shape is `S -> (A, S)`: a State-effectful computation
 // receives the current state, produces a result and a possibly-
 // modified state.
 //
+
 // **NON-commutative** by design: `write(s1) >> read` and
 // `read >> write(s1)` produce different observable behaviours. State
 // is the canonical *non-commutative* monad in the Verum effect
@@ -15,6 +17,7 @@
 // effectful programs requires explicit synchronisation (mutex,
 // transaction, …) to preserve coherence.
 //
+
 // ε-coordinate ω + 1 (one rank above the commutative monads at ω).
 // =============================================================================
 
@@ -99,12 +102,14 @@ public fn state_exec<S, A>(m: State<S, A>, initial: S) -> S {
 // Monad laws + non-commutativity (V2 — witness-parameterised theorems)
 // =============================================================================
 //
+
 // State<S, A> ≅ S -> (A, S). Like Reader, the laws hold extensionally
 // over every initial state; V2 expresses them as observational
 // equality at a concrete witness state, with the universal closure
-// derived through the K-Refine V3 fold + K-Round-Trip V2 audit
+// derived through the K-Refine Refine fold + K-Round-Trip audit
 // trail.
 //
+
 // **Negative commutativity** (state_is_not_commutative) is encoded
 // as a separating witness: the theorem CONSTRUCTS two specific
 // State-effectful programs whose run-results differ at a witness
@@ -123,12 +128,12 @@ public theorem state_left_identity<S, A, B>(
 {
     proof {
         // ── Step 1: build the unit State.
-        //   state_unit(a) = State { run: |s| (a, s) }                  (definition)
+        //  state_unit(a) = State { run: |s| (a, s) } (definition)
         let unit_a: State<S, A> = state_unit(a.clone());
         // ── Step 2: state_bind(unit_a, f).run(initial) reduces:
-        //     let (a', s1) = (unit_a.run)(initial) = (a, initial);     (β-app)
-        //     let inner = f(a') = f(a);                                 (β-let)
-        //     (inner.run)(s1) = f(a).run(initial)                       (β-app)
+        //  let (a', s1) = (unit_a.run)(initial) = (a, initial); (β-app)
+        //  let inner = f(a') = f(a); (β-let)
+        //  (inner.run)(s1) = f(a).run(initial) (β-app)
         let bound_run: (B, S) = state_run(
             state_bind(unit_a, f.clone()),
             initial.clone(),
@@ -154,9 +159,9 @@ public theorem state_right_identity<S, A>(
         // ── Step 1: extract the threaded value-state pair from m.
         let m_result: (A, S) = state_run(m.clone(), initial.clone());
         // ── Step 2: state_bind(m, state_unit).run(initial) reduces:
-        //     let (a, s1) = (m.run)(initial) = m_result;                (β-app)
-        //     let inner = state_unit(a) = State{run: |s| (a, s)};       (β-let + def)
-        //     (inner.run)(s1) = (a, s1) = m_result                       (β-app)
+        //  let (a, s1) = (m.run)(initial) = m_result; (β-app)
+        //  let inner = state_unit(a) = State{run: |s| (a, s)}; (β-let + def)
+        //  (inner.run)(s1) = (a, s1) = m_result (β-app)
         let bound_run: (A, S) = state_run(
             state_bind(m.clone(), state_unit),
             initial.clone(),
@@ -188,24 +193,24 @@ public theorem state_associativity<S, A, B, C>(
 {
     proof {
         // ── Step 1: extract the threading chain (a, s1) → (b, s2) → (c, s3)
-        //   for naming. Both sides will reduce to the same end-state.
+        //  for naming. Both sides will reduce to the same end-state.
         let m_run: (A, S) = state_run(m.clone(), initial.clone());
         let a: A = m_run.0; let s1: S = m_run.1;
         let f_run: (B, S) = state_run(f(a.clone()), s1.clone());
         let b: B = f_run.0; let s2: S = f_run.1;
         // ── Step 2: LHS — left-associated.
-        //   state_bind(state_bind(m, f), g).run(initial) reduces:
-        //     let (b', s2') = state_bind(m, f).run(initial) = (b, s2)
-        //     g(b').run(s2') = g(b).run(s2)
+        //  state_bind(state_bind(m, f), g).run(initial) reduces:
+        //  let (b', s2') = state_bind(m, f).run(initial) = (b, s2)
+        //  g(b').run(s2') = g(b).run(s2)
         let lhs_run: (C, S) = state_run(
             state_bind(state_bind(m.clone(), f.clone()), g.clone()),
             initial.clone(),
         );
         // ── Step 3: RHS — right-associated, same threading.
-        //   state_bind(m, |x| state_bind(f(x), g)).run(initial):
-        //     let (a', s1') = m.run(initial) = (a, s1)
-        //     let inner = (|x| state_bind(f(x), g))(a') = state_bind(f(a), g)
-        //     inner.run(s1') = let (b', s2') = f(a).run(s1) = (b, s2); g(b).run(s2)
+        //  state_bind(m, |x| state_bind(f(x), g)).run(initial):
+        //  let (a', s1') = m.run(initial) = (a, s1)
+        //  let inner = (|x| state_bind(f(x), g))(a') = state_bind(f(a), g)
+        //  inner.run(s1') = let (b', s2') = f(a).run(s1) = (b, s2); g(b).run(s2)
         let rhs_run: (C, S) = state_run(
             state_bind(m, |x: A| state_bind(f(x), g.clone())),
             initial,
@@ -220,11 +225,13 @@ public theorem state_associativity<S, A, B, C>(
 /// concrete witness pair `(prog1, prog2)` over `Int` state where
 /// the run-results provably differ.
 ///
+
 /// Witness: `s = 0`,
-///   prog1 = `bind(put(7), |_| get)`           — writes 7, reads 7.
-///   prog2 = `bind(get, |r| bind(put(7), |_| state_unit(r)))`
-///         — reads 0 first, then writes 7, returns the cached 0.
+///  prog1 = `bind(put(7), |_| get)` — writes 7, reads 7.
+///  prog2 = `bind(get, |r| bind(put(7), |_| state_unit(r)))`
+///  — reads 0 first, then writes 7, returns the cached 0.
 ///
+
 /// `prog1.run(0) = (7, 7)` while `prog2.run(0) = (0, 7)`. The
 /// theorem returns true because the witness pair satisfies the
 /// `lhs != rhs` precondition — i.e. State is provably NON-
@@ -245,32 +252,32 @@ public theorem state_is_not_commutative() -> Bool
 {
     proof {
         // ── Step 1: explicitly construct the witness pair.
-        //   prog1 = bind(put(7), |_| get) — writes 7, reads 7.
+        //  prog1 = bind(put(7), |_| get) — writes 7, reads 7.
         let prog1: State<Int, Int> = state_bind(
             state_put(7),
             |_unit_val: ()| state_get(),
         );
-        //   prog2 = bind(get, |r| bind(put(7), |_| unit(r)))
-        //         — reads 0 first, writes 7, returns the cached 0.
+        //  prog2 = bind(get, |r| bind(put(7), |_| unit(r)))
+        //  — reads 0 first, writes 7, returns the cached 0.
         let prog2: State<Int, Int> = state_bind(
             state_get(),
             |r: Int| state_bind(state_put(7), |_unit_val: ()| state_unit(r)),
         );
         // ── Step 2: evaluate both at the witness initial-state s = 0.
-        //   prog1.run(0):
-        //     put(7).run(0) = ((), 7);                                  (β)
-        //     get.run(7)    = (7, 7);
-        //   → (7, 7)
+        //  prog1.run(0):
+        //  put(7).run(0) = ((), 7); (β)
+        //  get.run(7) = (7, 7);
+        //  → (7, 7)
         let r1: (Int, Int) = state_run(prog1, 0);
-        //   prog2.run(0):
-        //     get.run(0) = (0, 0);                                      (β)
-        //     bind(put(7), |_| unit(0)).run(0):
-        //       put(7).run(0) = ((), 7);
-        //       unit(0).run(7) = (0, 7);
-        //   → (0, 7)
+        //  prog2.run(0):
+        //  get.run(0) = (0, 0); (β)
+        //  bind(put(7), |_| unit(0)).run(0):
+        //  put(7).run(0) = ((), 7);
+        //  unit(0).run(7) = (0, 7);
+        //  → (0, 7)
         let r2: (Int, Int) = state_run(prog2, 0);
         // ── Step 3: r1 = (7, 7) ≠ (0, 7) = r2 — separating witness
-        //   established. State is provably NON-commutative on Int.
+        //  established. State is provably NON-commutative on Int.
         r1 != r2
     }
 }
@@ -282,6 +289,7 @@ public theorem state_is_not_commutative() -> Bool
 /// composition AND the underlying State has writes, THEN explicit
 /// sync (mutex / transaction) is REQUIRED.
 ///
+
 /// Phrased as a tautology over the policy gate (which is the only
 /// honest formulation until the parallel-composition kernel rule
 /// V2 lands; tracked as M-VVA-FU follow-up).
@@ -297,17 +305,17 @@ public theorem state_requires_sync_under_parallel<S, A>(
 {
     proof {
         // ── Step 1: case-analyse the three Bool inputs (8 cases total).
-        //   The implication !(coherent ∧ writes) ∨ sync simplifies:
-        //     - if requires_coherent is false:  !(false ∧ _) = true → ensures holds
-        //     - if has_writes is false:          !(_ ∧ false) = true → ensures holds
-        //     - if has_explicit_sync is true:    has_explicit_sync = true → ensures holds
-        //     - else (coherent ∧ writes ∧ ¬sync): !(true ∧ true) ∨ false = false
-        //       — but the contract REQUIRES sync in this scenario; the
-        //       theorem documents this as a precondition the caller MUST
-        //       satisfy when @verify(coherent_concurrent) is in effect.
-        //   By Boolean LEM the disjunction holds in 7 of 8 cases; the
-        //   8th case is the precondition-violation that the policy gate
-        //   guards against.
+        //  The implication !(coherent ∧ writes) ∨ sync simplifies:
+        //  - if requires_coherent is false: !(false ∧ _) = true → ensures holds
+        //  - if has_writes is false: !(_ ∧ false) = true → ensures holds
+        //  - if has_explicit_sync is true: has_explicit_sync = true → ensures holds
+        //  - else (coherent ∧ writes ∧ ¬sync): !(true ∧ true) ∨ false = false
+        //  — but the contract REQUIRES sync in this scenario; the
+        //  theorem documents this as a precondition the caller MUST
+        //  satisfy when @verify(coherent_concurrent) is in effect.
+        //  By Boolean LEM the disjunction holds in 7 of 8 cases; the
+        //  8th case is the precondition-violation that the policy gate
+        //  guards against.
         let lhs_a: Bool = !(requires_coherent && has_writes);
         let lhs_b: Bool = has_explicit_sync;
         // ── Step 2: combined policy implication.

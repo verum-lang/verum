@@ -1,50 +1,56 @@
 //! AST to VBC code generation.
 //!
+
 //! This module transforms Verum AST into VBC bytecode that can be:
 //! - Executed directly by the VBC interpreter (Tier 0)
 //! - Lowered to MLIR for JIT compilation (Tier 1-2)
 //! - Compiled to native code via MLIR/LLVM (Tier 3)
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! AST (verum_ast)
-//!       │
-//!       ▼
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────┐
-//! │            VbcCodegen                    │
-//! │  ┌───────────────────────────────────┐  │
-//! │  │      CodegenContext               │  │
-//! │  │  - RegisterAllocator              │  │
-//! │  │  - Label management               │  │
-//! │  │  - Loop/defer stacks              │  │
-//! │  │  - Constant pool                  │  │
-//! │  └───────────────────────────────────┘  │
-//! │                                         │
-//! │  compile_module() → VbcModule          │
-//! │    ├─ compile_function()               │
-//! │    │   ├─ compile_block()              │
-//! │    │   │   ├─ compile_stmt()           │
-//! │    │   │   │   └─ compile_expr()       │
-//! │    │   │   │       ├─ literals         │
-//! │    │   │   │       ├─ binary ops       │
-//! │    │   │   │       ├─ calls            │
-//! │    │   │   │       └─ control flow     │
-//! │    │   │   └─ ...                      │
-//! │    │   └─ ...                          │
-//! │    └─ ...                              │
+//! │ VbcCodegen │
+//! │ ┌───────────────────────────────────┐ │
+//! │ │ CodegenContext │ │
+//! │ │ - RegisterAllocator │ │
+//! │ │ - Label management │ │
+//! │ │ - Loop/defer stacks │ │
+//! │ │ - Constant pool │ │
+//! │ └───────────────────────────────────┘ │
+//! │ │
+//! │ compile_module() → VbcModule │
+//! │ ├─ compile_function() │
+//! │ │ ├─ compile_block() │
+//! │ │ │ ├─ compile_stmt() │
+//! │ │ │ │ └─ compile_expr() │
+//! │ │ │ │ ├─ literals │
+//! │ │ │ │ ├─ binary ops │
+//! │ │ │ │ ├─ calls │
+//! │ │ │ │ └─ control flow │
+//! │ │ │ └─ ... │
+//! │ │ └─ ... │
+//! │ └─ ... │
 //! └─────────────────────────────────────────┘
-//!       │
-//!       ▼
+//!  │
+//!  ▼
 //! VbcModule (instructions + constants + strings)
 //! ```
 //!
+
 //! # Example
 //!
+
 //! ```ignore
 //! use verum_vbc::codegen::VbcCodegen;
 //! use verum_ast::Module;
 //!
+
 //! let ast: Module = parse_source_code(source);
 //! let mut codegen = VbcCodegen::new();
 //! let vbc_module = codegen.compile_module(&ast)?;
@@ -88,6 +94,7 @@ pub struct ProtocolInfo {
 /// A blanket protocol implementation waiting to be monomorphized onto
 /// every concrete implementor of its bound protocol.
 ///
+
 /// Shape: `implement<T: base_protocol> derived_protocol for T { ... }`.
 #[derive(Debug, Clone)]
 pub struct BlanketImpl {
@@ -125,6 +132,7 @@ use verum_ast::bitfield::ByteOrder;
 
 /// Bitfield layout information for a type.
 ///
+
 /// Tracks the bit layout of fields in a @bitfield type, enabling
 /// generation of efficient getter/setter accessors.
 #[derive(Debug, Clone)]
@@ -166,6 +174,7 @@ pub enum ContextLayer {
 
 /// FFI contract AST expressions for requires/ensures compilation.
 ///
+
 /// Stored separately from `FfiContract` (which is serializable for VBC module)
 /// because `verum_ast::Expr` can't be stored in `verum_vbc::module`.
 #[derive(Debug, Clone)]
@@ -182,22 +191,24 @@ pub struct FfiContractExprs {
 /// Detailed report of `MakeVariant` / `MakeVariantTyped`
 /// emissions across a module's bytecode (#146 Phase 3e).
 ///
+
 /// Returned by `VbcCodegen::collect_make_variant_report` to give
 /// downstream tooling (audit gates, regression ratchets, post-
 /// Phase-3 codegen telemetry) a structural view of variant
 /// construction quality:
 ///
-///   - `typed_emissions / untyped_emissions` — total counts per
-///     instruction class.  Post-Phase-3c clean compilation should
-///     drive `untyped_emissions` toward zero (only fallback paths
-///     for cross-cog forward refs / mid-pass-1 lookups remain
-///     untyped).
-///   - `typed_inconsistencies / untyped_inconsistencies` —
-///     emissions whose layout doesn't match a module-declared
-///     variant.  Untyped: the legacy Phase-2 cross-module
-///     false-positive signal.  Typed: stronger — pinned by
-///     operand-supplied type_id, so a mismatch is genuine
-///     codegen drift.
+
+///  - `typed_emissions / untyped_emissions` — total counts per
+///  instruction class. Post-Phase-3c clean compilation should
+///  drive `untyped_emissions` toward zero (only fallback paths
+///  for cross-cog forward refs / mid-pass-1 lookups remain
+///  untyped).
+///  - `typed_inconsistencies / untyped_inconsistencies` —
+///  emissions whose layout doesn't match a module-declared
+///  variant. Untyped: the legacy Phase-2 cross-module
+///  false-positive signal. Typed: stronger — pinned by
+///  operand-supplied type_id, so a mismatch is genuine
+///  codegen drift.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct MakeVariantReport {
     /// Number of legacy `MakeVariant` instructions emitted.
@@ -227,7 +238,7 @@ impl MakeVariantReport {
         self.typed_inconsistencies + self.untyped_inconsistencies
     }
 
-    /// Total variant emissions (typed + untyped).  Lets ratchet
+    /// Total variant emissions (typed + untyped). Lets ratchet
     /// tests assert that "typed/(typed+untyped)" stays above a
     /// threshold post-Phase-3.
     #[inline]
@@ -237,6 +248,7 @@ impl MakeVariantReport {
 }
 
 ///
+
 /// Transforms Verum AST into VBC bytecode modules.
 #[derive(Debug)]
 pub struct VbcCodegen {
@@ -391,9 +403,11 @@ pub struct VbcCodegen {
 
     /// Type alias registry for method resolution.
     ///
+
     /// Maps type alias name → base type name, enabling method calls like
     /// `Vec4f.splat(1.0)` to resolve to `Vec.splat` when `type Vec4f = Vec<Float32, 4>`.
     ///
+
     /// For generic aliases like `Vec<Float32, 4>`, we store the base type name `Vec`.
     /// For simple aliases like `type MyInt = Int`, we store `Int`.
     type_aliases: std::collections::HashMap<String, String>,
@@ -407,16 +421,19 @@ pub struct VbcCodegen {
 
     /// Pending default protocol method compilations.
     ///
+
     /// These are default methods registered during declaration collection that need
     /// their bodies compiled during body compilation phase. Deferred compilation is
     /// necessary because default methods may reference functions from other modules
     /// that haven't been registered yet during declaration collection.
     ///
+
     /// Stored as (func_decl, type_name) pairs.
     pending_default_methods: Vec<(verum_ast::FunctionDecl, String)>,
 
     /// Blanket protocol implementations: `implement<T: BaseProto> DerivedProto for T {}`.
     ///
+
     /// These can't be monomorphized at collection time because not every
     /// concrete implementor of BaseProto is known yet. When a concrete
     /// `implement BaseProto for ConcreteTy` is processed, we replay each
@@ -450,6 +467,7 @@ pub struct CodegenConfig {
     /// Whether to run the post-emit structural validator on the
     /// freshly-built `VbcModule` before it leaves the codegen pipeline.
     ///
+
     /// `false` (default, dev-loop): structural validation is OFF. Codegen
     /// returns whatever bytecode it builds, even if it violates internal
     /// invariants. This matches the historical pre-#1c4ddcc1 behaviour
@@ -459,6 +477,7 @@ pub struct CodegenConfig {
     /// counts that disagree with the section bodies) are triaged as
     /// separate compiler tasks.
     ///
+
     /// `true` (opt-in via `with_validation()`): runs `validate::validate_module`
     /// in strict mode at the end of `finalize_module`. Used in CI where
     /// full structural correctness must hold. Will flip to `true` by
@@ -479,15 +498,18 @@ pub struct CodegenConfig {
 
     /// Whether the module can be executed by VBC interpreter.
     ///
+
     /// - `true` for Application and Research profiles
     /// - `false` for Systems profile (VBC is intermediate IR only)
     ///
+
     /// V-LLSI: Whether the generated bytecode can run in the Tier 0 interpreter.
     /// False for Systems profile (AOT-only: uses inline asm, direct syscalls, no-libc).
     pub is_interpretable: bool,
 
     /// Whether this is a Systems profile build.
     ///
+
     /// Systems profile enables:
     /// - Raw pointers and unsafe code
     /// - Inline assembly
@@ -497,6 +519,7 @@ pub struct CodegenConfig {
 
     /// Whether this targets embedded/bare-metal.
     ///
+
     /// Embedded modules have additional restrictions:
     /// - No heap allocation
     /// - No OS dependencies
@@ -508,21 +531,24 @@ pub struct CodegenConfig {
     /// skips (`SkipClass::BugClass` — undefined function, arity mismatch,
     /// type regression, etc.) to hard compilation errors.
     ///
+
     /// `false` (default): every per-item failure surfaces as a warn-level
     /// `[lenient] SKIP` trace and the function/method is omitted from the
-    /// emitted bytecode.  Runtime calls panic with `FunctionNotFound`.
+    /// emitted bytecode. Runtime calls panic with `FunctionNotFound`.
     /// This is the dev-loop default — it lets partial / forward-referenced
     /// stdlib state still build.
     ///
+
     /// `true` (opt-in via `with_strict_codegen`): bug-class failures are
     /// converted into a hard `CodegenError` returned from
     /// `compile_module_items_lenient`, halting the build at the first
-    /// such failure.  `Irreducible` failures (FFI prototype, unimplemented
+    /// such failure. `Irreducible` failures (FFI prototype, unimplemented
     /// language feature) continue to skip silently — these represent the
     /// documented Tier-0 contract, not bugs.
     ///
+
     /// Intended for CI and release builds where any bug-class skip is a
-    /// regression that must block the merge.  Tracked under #166
+    /// regression that must block the merge. Tracked under #166
     /// (eliminate the lenient-SKIP class) — once full-stdlib bug-class
     /// counts hit zero (#176) this flag will flip to `true` by default.
     pub strict_codegen: bool,
@@ -588,19 +614,23 @@ impl CodegenConfig {
 
     /// Sets the target configuration for @cfg evaluation.
     ///
+
     /// Statements with `@cfg(...)` attributes are filtered based on the target.
     /// For example, `@cfg(target_os = "linux")` blocks are skipped when
     /// compiling for macOS.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_vbc::codegen::CodegenConfig;
     /// use verum_ast::cfg::TargetConfig;
     ///
+
     /// // Cross-compile for Linux on a macOS host
     /// let config = CodegenConfig::new("my_module")
-    ///     .with_target(TargetConfig::linux_x86_64());
+    ///  .with_target(TargetConfig::linux_x86_64());
     /// ```
     pub fn with_target(mut self, target: TargetConfig) -> Self {
         self.target_config = target;
@@ -613,12 +643,14 @@ impl CodegenConfig {
 
     /// Configures Systems profile (low-level, AOT-only).
     ///
+
     /// Systems profile modules:
     /// - Cannot be interpreted by VBC (AOT compilation required)
     /// - Can use raw pointers and unsafe code
     /// - Can use inline assembly
     /// - Target no-libc linking (direct syscalls)
     ///
+
     /// V-LLSI Systems profile: enables raw pointers, inline assembly, direct syscalls,
     /// and disables interpreter execution. Used for OS kernel / embedded development.
     pub fn with_systems_profile(mut self) -> Self {
@@ -629,6 +661,7 @@ impl CodegenConfig {
 
     /// Configures Application profile (safe, VBC-interpretable).
     ///
+
     /// This is the default profile. Application modules:
     /// - Can be interpreted by VBC for rapid development
     /// - Have full CBGR memory safety
@@ -642,6 +675,7 @@ impl CodegenConfig {
 
     /// Configures Research profile (experimental, VBC-interpretable).
     ///
+
     /// Research modules:
     /// - Can be interpreted by VBC
     /// - Enable experimental features (dependent types, etc.)
@@ -655,6 +689,7 @@ impl CodegenConfig {
 
     /// Configures embedded/bare-metal target.
     ///
+
     /// Embedded modules have additional restrictions:
     /// - No heap allocation
     /// - No OS dependencies
@@ -669,6 +704,7 @@ impl CodegenConfig {
 
     /// Explicitly sets VBC interpretability.
     ///
+
     /// Most code should use `with_systems_profile()` or `with_application_profile()`
     /// instead. This method is provided for fine-grained control.
     pub fn with_interpretable(mut self, interpretable: bool) -> Self {
@@ -678,15 +714,17 @@ impl CodegenConfig {
 
     /// Promotes `BugClass` lenient skips to hard codegen errors.
     ///
+
     /// In strict mode `compile_module_items_lenient` returns a
     /// `CodegenError` on the first item that fails with a `BugClass`
     /// error (undefined function, arity mismatch, type regression,
-    /// codegen resource exhaustion, parser/lowering bug).  `Irreducible`
+    /// codegen resource exhaustion, parser/lowering bug). `Irreducible`
     /// errors (interpreter limitation — FFI prototype, unimplemented
     /// feature) continue to skip silently because they represent the
     /// documented Tier-0 contract.
     ///
-    /// Intended for CI / release builds.  See the `strict_codegen` field
+
+    /// Intended for CI / release builds. See the `strict_codegen` field
     /// docstring for the broader rationale.
     pub fn with_strict_codegen(mut self) -> Self {
         self.strict_codegen = true;
@@ -708,6 +746,7 @@ impl VbcCodegen {
 
     /// Looks up a type name in the well-known type registry (`type_name_to_id`).
     ///
+
     /// This is the SINGLE point of truth for mapping type name strings to TypeIds.
     /// It handles both canonical names ("Int", "List") and aliases ("i64", "Int64", "Option").
     /// User-defined types registered during declaration collection are also found here.
@@ -763,6 +802,7 @@ impl VbcCodegen {
 
     /// Extracts the base type name from a type for type alias resolution.
     ///
+
     /// For generic types like `Vec<Float32, 4>`, returns `"Vec"`.
     /// For simple path types like `Int`, returns `"Int"`.
     /// For primitive types, returns the primitive name.
@@ -810,9 +850,11 @@ impl VbcCodegen {
 
     /// Resolves a type name through the type alias chain.
     ///
+
     /// If `type_name` is a type alias, returns the base type name.
     /// Otherwise, returns the original name.
     ///
+
     /// Handles alias chains: if A → B and B → C, resolving A returns C.
     pub fn resolve_type_alias(&self, type_name: &str) -> String {
         let mut current = type_name.to_string();
@@ -833,11 +875,13 @@ impl VbcCodegen {
 
     /// Strips generic arguments from a type name.
     ///
+
     /// Examples:
     /// - "Maybe<Int>" → "Maybe"
     /// - "Result<T, E>" → "Result"
     /// - "List" → "List"
     ///
+
     /// This is needed for method dispatch because methods are registered with
     /// base type names (e.g., "Maybe.is_some") but variables may have full
     /// generic type names (e.g., "Maybe<Int>").
@@ -935,10 +979,10 @@ impl VbcCodegen {
         if config.debug_info {
             // `debug_info=true` is the default in `CompilerOptions`,
             // so a `tracing::warn!` here would fire on every script
-            // compilation and drown real diagnostics.  Drop to
+            // compilation and drown real diagnostics. Drop to
             // `tracing::debug!` — visible under `RUST_LOG=debug` for
             // anyone investigating "why isn't DWARF metadata being
-            // emitted?", silent in normal use.  The comment block
+            // emitted?", silent in normal use. The comment block
             // above documents the conceptual debug_info vs source_map
             // split for readers of the source.
             tracing::debug!(
@@ -1090,16 +1134,20 @@ impl VbcCodegen {
 
     /// Imports functions from previously compiled modules.
     ///
+
     /// This is used during stdlib compilation to make functions from
     /// earlier modules (e.g., core) available when compiling later
     /// modules (e.g., collections, async).
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // After compiling core module
     /// let core_functions = core_codegen.export_functions();
     ///
+
     /// // Before compiling collections module
     /// let mut collections_codegen = VbcCodegen::new();
     /// collections_codegen.import_functions(&core_functions);
@@ -1116,6 +1164,7 @@ impl VbcCodegen {
 
     /// Imports protocols from previously compiled modules.
     ///
+
     /// This is used during stdlib compilation to make protocol default
     /// methods from earlier modules available for impl blocks in later modules.
     /// Iteration is sorted by name so that downstream codegen sees
@@ -1137,6 +1186,7 @@ impl VbcCodegen {
 
     /// Collects protocol definitions from a module.
     ///
+
     /// This should be called on all modules BEFORE collect_non_protocol_declarations
     /// to ensure protocols are available when processing impl blocks.
     pub fn collect_protocol_definitions(&mut self, module: &Module) {
@@ -1234,6 +1284,7 @@ impl VbcCodegen {
 
     /// Collects non-protocol declarations from a module.
     ///
+
     /// This calls collect_all_declarations but should be called AFTER
     /// collect_protocol_definitions has been called on all modules.
     pub fn collect_non_protocol_declarations(&mut self, module: &Module) -> CodegenResult<()> {
@@ -1253,7 +1304,7 @@ impl VbcCodegen {
         let funcs_after = self.ctx.functions.len();
         // #200 diagnostic: surface decl-collection per-module net change so
         // a silent decl-drop (returning Err that drops items mid-walk) is
-        // visible at trace level.  Triggered via `RUST_LOG=trace`.
+        // visible at trace level. Triggered via `RUST_LOG=trace`.
         match &result {
             Ok(()) => {
                 tracing::trace!(
@@ -1312,9 +1363,11 @@ impl VbcCodegen {
 
     /// Generates default method implementations for a protocol implementation.
     ///
+
     /// When `implement Eq for Point { fn eq(...) { ... } }` only defines `eq`,
     /// this method generates `Point.ne` using Eq's default `ne` implementation.
     ///
+
     /// Also handles protocol inheritance: when `Eq extends PartialEq`, implementing
     /// `Eq for Point` will also generate default methods from `PartialEq` (like `ne`).
     fn generate_default_protocol_methods(
@@ -1368,7 +1421,7 @@ impl VbcCodegen {
                 let empty = std::collections::HashSet::new();
                 let overrides = per_proto_overrides.get(&proto_name).unwrap_or(&empty);
 
-                // Iterate default methods in a deterministic order.  Without
+                // Iterate default methods in a deterministic order. Without
                 // the sort, HashMap iteration order leaks Rust's per-process
                 // random hasher seed into VBC function-ID assignment, which
                 // makes the same source emit different bytecode each run.
@@ -1434,6 +1487,7 @@ impl VbcCodegen {
 
     /// Compiles pending default protocol methods.
     ///
+
     /// Called during body compilation phase after all declarations have been collected.
     /// This ensures that functions referenced by default methods (like `range` in Iterator.advance_by)
     /// are available when the default method bodies are compiled.
@@ -1470,6 +1524,7 @@ impl VbcCodegen {
 
     /// Registers well-known stdlib constants so user code can reference them.
     ///
+
     /// These constants are defined in core/ .vr files (e.g., core/intrinsics/atomic.vr)
     /// and their values come from the Verum language specification. Without this,
     /// user code that imports `core.intrinsics.{ORDERING_SEQ_CST}` would get
@@ -2216,6 +2271,7 @@ impl VbcCodegen {
 
     /// Exports all currently registered functions.
     ///
+
     /// This is used during stdlib compilation to collect functions
     /// from this module for use by dependent modules.
     pub fn export_functions(&self) -> std::collections::HashMap<String, FunctionInfo> {
@@ -2224,6 +2280,7 @@ impl VbcCodegen {
 
     /// Returns inferred variable-to-type-name mappings from the last compiled function.
     ///
+
     /// The codegen clears `variable_type_names` between functions. This method
     /// returns the snapshot captured just before the clear, giving the playground
     /// access to types like `List<Int>`, `Map<Text, Bool>`, etc.
@@ -2234,22 +2291,28 @@ impl VbcCodegen {
 
     /// Sets tier context from escape analysis results.
     ///
+
     /// This should be called before `compile_module()` to enable
     /// tier-aware code generation for references.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_vbc::codegen::{VbcCodegen, TierContext, ExprId};
     /// use verum_vbc::types::CbgrTier;
     ///
+
     /// let mut codegen = VbcCodegen::new();
     ///
+
     /// // From escape analysis results
     /// let mut tier_context = TierContext::new();
     /// tier_context.enabled = true;
     /// tier_context.set_tier(ExprId(42), CbgrTier::Tier1);
     ///
+
     /// codegen.set_tier_context(tier_context);
     /// let module = codegen.compile_module(&ast)?;
     /// ```
@@ -2278,6 +2341,7 @@ impl VbcCodegen {
 
     /// Sets tier decisions from a map of expression IDs to tiers.
     ///
+
     /// Convenience method when you have a `Map<ExprId, CbgrTier>`.
     pub fn set_tier_decisions(&mut self, decisions: Map<ExprId, CbgrTier>) {
         self.ctx.set_tier_context(TierContext::with_decisions(decisions));
@@ -2285,6 +2349,7 @@ impl VbcCodegen {
 
     /// Gets reference statistics after compilation.
     ///
+
     /// Shows the distribution of references across tiers.
     pub fn tier_stats(&self) -> (usize, usize, usize) {
         (
@@ -2296,6 +2361,7 @@ impl VbcCodegen {
 
     /// Check if a statement should be compiled based on @cfg attributes.
     ///
+
     /// When a `CfgEvaluator` is configured (via `CodegenConfig::with_target`),
     /// this method checks if the statement's @cfg attributes match the target.
     /// Statements with non-matching @cfg are filtered out, preventing issues like:
@@ -2310,7 +2376,7 @@ impl VbcCodegen {
 
         // Use the failures-returning variant so silently-malformed
         // `@cfg(...)` predicates surface as warns (parity with
-        // `should_compile_item`).  Statements don't carry a stable
+        // `should_compile_item`). Statements don't carry a stable
         // name, so the warn site identifies the function context
         // via `current_function`.
         let (include, failures) = self
@@ -2339,6 +2405,7 @@ impl VbcCodegen {
 
     /// Check if an item should be compiled based on @cfg attributes.
     ///
+
     /// Similar to `should_compile_stmt`, but for top-level items like functions,
     /// imports, and type declarations. This is critical for proper cross-platform
     /// compilation: without it, imports like `@cfg(target_os = "linux") import ...`
@@ -2361,13 +2428,14 @@ impl VbcCodegen {
         // Critical fix (#170 / #181): the `verum_fast_parser` puts the
         // attributes for `type X` / `implement` / `function` declarations
         // on the *inner* decl (`TypeDecl.attributes`, `ImplDecl.attributes`,
-        // `Function.attributes`), leaving `Item.attributes` empty.  So
+        // `Function.attributes`), leaving `Item.attributes` empty. So
         // `Item.attributes`-only checking silently bypasses @cfg gates
         // for every type declaration in the stdlib — `@cfg(target_arch
         // = "x86_64") public type ExceptionFrame is { … };` reaches
         // codegen even on aarch64 hosts, surfacing as duplicate-id
         // findings in #170's global type-table consistency check.
         //
+
         // Walk the inner decl's attributes when present.
         match &item.kind {
             ItemKind::Type(type_decl)
@@ -2399,7 +2467,7 @@ impl VbcCodegen {
     }
 
     /// Emits a `tracing::warn!` for each `@cfg` attribute whose
-    /// predicate failed to parse cleanly.  These attributes are
+    /// predicate failed to parse cleanly. These attributes are
     /// silently ignored by `cfg_evaluator.should_include` (fail-open
     /// for forward-compatibility — see `crates/verum_ast/src/cfg.rs`),
     /// so without this surface they go unnoticed: a typo in
@@ -2408,6 +2476,7 @@ impl VbcCodegen {
     /// unparseable, returns `true` by fall-through, and the item is
     /// included unconditionally.
     ///
+
     /// `site` identifies whether the attribute lives on the `Item`
     /// itself or on the inner decl (`TypeDecl` / `Function`) — useful
     /// for the developer to locate the failure source.
@@ -2442,12 +2511,14 @@ impl VbcCodegen {
 
     /// Extracts the intrinsic name from function attributes.
     ///
+
     /// Looks for `@intrinsic("name")` attribute and returns the intrinsic name.
     /// This enables industrial-grade intrinsic resolution where:
     /// 1. Intrinsic identity is established at declaration time via @intrinsic
     /// 2. The codegen uses this stored name rather than call-site name matching
     /// 3. Imports and aliases work correctly for intrinsic functions
     ///
+
     /// # Example
     /// ```verum
     /// @intrinsic("atomic_load_u64")
@@ -2497,6 +2568,7 @@ impl VbcCodegen {
 
     /// Initialize the codegen for multi-module compilation.
     ///
+
     /// This performs the same setup as `compile_module()` (reset, register builtins)
     /// but does NOT compile any module. Use this followed by `collect_all_declarations()`,
     /// `compile_module_items()`, and `finalize_module()` when you need to compile
@@ -2511,14 +2583,17 @@ impl VbcCodegen {
 
     /// Extract optimization hints from function attributes.
     ///
+
     /// Maps AST @attributes to VBC OptimizationHints:
     /// - @inline, @inline(always), @inline(never), @inline(release)
     /// - @cold, @hot
     /// - @optimize(none|size|speed|balanced)
     /// - @align(N)
     ///
+
     /// Extract type layout hints from type declaration attributes.
     ///
+
     /// Returns (alignment, is_packed, is_repr_c):
     /// - alignment: from @align(N) or @repr(packed)→1, default 8
     /// - is_packed: true if @repr(packed)
@@ -2664,6 +2739,7 @@ impl VbcCodegen {
 
     /// Compile function bodies for a module without building the final VbcModule.
     ///
+
     /// This is the second pass of compilation. Declarations must already be registered
     /// via `collect_all_declarations()`. Unlike `compile_function_bodies()`, this does
     /// NOT call `build_module()` — call `finalize_module()` separately when done.
@@ -2686,6 +2762,7 @@ impl VbcCodegen {
 
     /// Compile function bodies for an imported module with error recovery.
     ///
+
     /// Unlike `compile_module_items`, this method catches per-item compilation errors
     /// and continues with the remaining items. This is necessary for imported stdlib
     /// modules that may contain functions referencing FFI/external symbols not available
@@ -2701,7 +2778,7 @@ impl VbcCodegen {
         for item in module.items.iter() {
             if self.should_compile_item(item) {
                 // Use lenient item compilation that skips individual functions
-                // that fail.  In strict_codegen mode, the helper returns the
+                // that fail. In strict_codegen mode, the helper returns the
                 // first `BugClass` error encountered so we can halt the build
                 // at the call site instead of papering over a real defect.
                 if let Err(e) = self.compile_item_lenient(item)
@@ -2721,6 +2798,7 @@ impl VbcCodegen {
     /// This is used for imported stdlib modules where some functions may reference
     /// FFI/external symbols not available in VBC interpreter.
     ///
+
     /// Returns `Err(CodegenError)` *only* when `config.strict_codegen` is
     /// `true` AND the per-item failure classifies as `SkipClass::BugClass`.
     /// All other failures (irreducible, or any failure in non-strict mode)
@@ -2733,7 +2811,7 @@ impl VbcCodegen {
                 self.ctx.generic_type_params.clear();
                 self.ctx.const_generic_params.clear();
                 if let Err(e) = self.compile_function(func, None) {
-                    // Symmetric with the impl-item branch below.  Promoted to
+                    // Symmetric with the impl-item branch below. Promoted to
                     // warn-level (was debug) so silent skips of user-callable
                     // top-level functions surface as "method/function not
                     // found on value" only AFTER the warning fires, instead
@@ -2806,7 +2884,7 @@ impl VbcCodegen {
                     .collect();
 
                 for impl_item in impl_decl.items.iter() {
-                    // Honour `@cfg` gates on impl items.  ImplItem and
+                    // Honour `@cfg` gates on impl items. ImplItem and
                     // its inner FunctionDecl both carry attributes;
                     // walk both so `@cfg(target_os = "linux") fn foo(…)`
                     // inside a cross-platform `implement Bar { … }`
@@ -2860,12 +2938,13 @@ impl VbcCodegen {
 
                         // Compile function individually - skip if it fails.
                         //
+
                         // Lenient skips were originally a debug-only diagnostic
                         // because most are routine (FFI prototypes, conditional
-                        // platform stubs).  But silent skips of *user-callable*
+                        // platform stubs). But silent skips of *user-callable*
                         // impl-block methods are insidious: they show up at
                         // runtime as `method 'X.Y' not found on value` with no
-                        // hint that compilation dropped the body.  Emit a
+                        // hint that compilation dropped the body. Emit a
                         // warn-level trace so the underlying cause (typically
                         // an unresolved cross-module function reference) is
                         // visible in normal CI / dev runs without RUST_LOG
@@ -2941,6 +3020,7 @@ impl VbcCodegen {
 
     /// Build and return the final VbcModule from all compiled items.
     ///
+
     /// Call this after `initialize()`, `collect_all_declarations()`, and
     /// `compile_module_items()` to produce the final bytecode module.
     pub fn finalize_module(&mut self) -> CodegenResult<VbcModule> {
@@ -2955,10 +3035,10 @@ impl VbcCodegen {
         // `field index N (offset M) exceeds object data size K` /
         // `Null pointer dereference` panics, far from the codegen site.
         self.verify_type_layout_invariants()?;
-        // Cross-module type-table consistency check (#170).  In strict
+        // Cross-module type-table consistency check (#170). In strict
         // mode (`config.strict_codegen = true`), any duplicate-id /
         // same-name-different-id / variant-tag-anomaly finding fails
-        // the build with the bundled error.  In lenient mode (default),
+        // the build with the bundled error. In lenient mode (default),
         // findings are emitted at warn-level so CI logs surface the
         // regression without blocking dev iteration.
         let report = self.verify_global_type_table_consistency();
@@ -3021,24 +3101,27 @@ impl VbcCodegen {
     }
 
     /// Verify that every `TypeDescriptor` in `self.types` satisfies the
-    /// per-variant shape invariants implied by its `VariantKind`.  Runs
+    /// per-variant shape invariants implied by its `VariantKind`. Runs
     /// at module-finalization time so misshapen descriptors fail loudly
     /// here rather than producing bytecode that crashes at runtime.
     ///
+
     /// Per-variant invariants:
-    ///   * `Unit`   → `arity == 0` and `fields` is empty.
-    ///   * `Tuple`  → `arity > 0` and `fields` is empty (the arity
-    ///                counts payload elements; tuple variants don't
-    ///                use `fields`).
-    ///   * `Record` → `arity == 0` and `fields` is non-empty (records
-    ///                track their layout in `fields`, not `arity`).
+    ///  * `Unit` → `arity == 0` and `fields` is empty.
+    ///  * `Tuple` → `arity > 0` and `fields` is empty (the arity
+    ///  counts payload elements; tuple variants don't
+    ///  use `fields`).
+    ///  * `Record` → `arity == 0` and `fields` is non-empty (records
+    ///  track their layout in `fields`, not `arity`).
     ///
+
     /// Cross-variant invariants:
-    ///   * Tags within a sum type are dense: `0..variants.len()` with
-    ///     no duplicates and no gaps.  The runtime resolves variant
-    ///     dispatch by indexing into the variants array by tag, so any
-    ///     gap or duplicate yields wrong-variant dispatch later.
+    ///  * Tags within a sum type are dense: `0..variants.len()` with
+    ///  no duplicates and no gaps. The runtime resolves variant
+    ///  dispatch by indexing into the variants array by tag, so any
+    ///  gap or duplicate yields wrong-variant dispatch later.
     ///
+
     /// Spec hooks: `verum_vbc::types::VariantKind`,
     /// `verum_vbc::types::VariantDescriptor`.
     pub fn verify_type_layout_invariants(&self) -> CodegenResult<()> {
@@ -3048,7 +3131,7 @@ impl VbcCodegen {
     /// Phase 2 of #146 — scan emitted bytecode and report when a
     /// `MakeVariant { tag, field_count }` instruction has no matching
     /// (tag, payload-width) pair in any declared type's variant
-    /// table.  Reports as a `tracing::warn!` rather than failing the
+    /// table. Reports as a `tracing::warn!` rather than failing the
     /// compile because variant constructors registered for types
     /// declared in other loaded modules (e.g. `Result.Ok` from
     /// `core.base.result` referenced from a downstream module) live
@@ -3056,15 +3139,17 @@ impl VbcCodegen {
     /// A hard fail would be a false positive for every cross-module
     /// variant emission.
     ///
+
     /// Phase 3e (#146) extension — the same scan also counts
     /// `MakeVariantTyped` emissions and validates them against the
     /// type table by `(type_id, tag, field_count)` (a stricter check
     /// since the operand-supplied type_id pins the parent sum-type
-    /// id directly, no cross-tag heuristics needed).  The returned
+    /// id directly, no cross-tag heuristics needed). The returned
     /// `MakeVariantReport` separates typed-vs-untyped emission
     /// counts so post-Phase-3 builds can ratchet on the
     /// untyped-emission count toward zero.
     ///
+
     /// Returns the number of instructions reported (zero in clean
     /// builds), useful for tests that want a structural assertion.
     pub fn report_make_variant_inconsistencies(&self) -> usize {
@@ -3073,21 +3158,23 @@ impl VbcCodegen {
 
     /// Detailed make-variant emission report (Phase 3e of #146).
     ///
+
     /// Walks every function's bytecode and counts:
-    ///   - `typed_emissions`: `MakeVariantTyped` instructions emitted
-    ///     (preferred, carry the parent sum-type id);
-    ///   - `untyped_emissions`: legacy `MakeVariant` instructions
-    ///     (fallback when codegen can't resolve the parent type);
-    ///   - `untyped_inconsistencies`: untyped emissions whose
-    ///     `(tag, field_count)` doesn't match any module-local
-    ///     declared variant (the legacy Phase-2 signal — false
-    ///     positives expected for cross-module emissions);
-    ///   - `typed_inconsistencies`: typed emissions whose
-    ///     `(type_id, tag, field_count)` doesn't match the
-    ///     declared variant of that type_id (these are stronger
-    ///     signals — the operand-supplied type_id pins the parent,
-    ///     so a mismatch is genuine codegen drift, not cross-module).
+    ///  - `typed_emissions`: `MakeVariantTyped` instructions emitted
+    ///  (preferred, carry the parent sum-type id);
+    ///  - `untyped_emissions`: legacy `MakeVariant` instructions
+    ///  (fallback when codegen can't resolve the parent type);
+    ///  - `untyped_inconsistencies`: untyped emissions whose
+    ///  `(tag, field_count)` doesn't match any module-local
+    ///  declared variant (the legacy Phase-2 signal — false
+    ///  positives expected for cross-module emissions);
+    ///  - `typed_inconsistencies`: typed emissions whose
+    ///  `(type_id, tag, field_count)` doesn't match the
+    ///  declared variant of that type_id (these are stronger
+    ///  signals — the operand-supplied type_id pins the parent,
+    ///  so a mismatch is genuine codegen drift, not cross-module).
     ///
+
     /// Performance: single O(#instructions) walk; type-table is
     /// indexed once into a HashMap for O(1) lookups during the walk.
     pub fn collect_make_variant_report(&self) -> MakeVariantReport {
@@ -3095,11 +3182,11 @@ impl VbcCodegen {
         use crate::types::{TypeId, VariantKind};
 
         // Index 1: legacy Phase-2 set of (tag, field_count) combos
-        // declared anywhere in the module.  Ratifies untyped
+        // declared anywhere in the module. Ratifies untyped
         // emissions module-locally.
         let mut valid_pairs: std::collections::HashSet<(u32, u32)> =
             std::collections::HashSet::new();
-        // Index 2: (type_id, tag) → field_count map.  Lets typed
+        // Index 2: (type_id, tag) → field_count map. Lets typed
         // emissions cross-check directly against the declared
         // variant of the same type_id.
         let mut typed_lookup: std::collections::HashMap<(TypeId, u32), u32> =
@@ -3205,13 +3292,15 @@ impl VbcCodegen {
     /// Push a `TypeDescriptor` into `self.types`, skipping when an
     /// existing descriptor already claims the same `TypeId`.
     ///
+
     /// Used at type-registration sites where the well-known TypeId
     /// map (e.g. `Heap`/`Shared` both bound to `TypeId::PTR = 14`)
     /// produces multiple `TypeDescriptor` instances at the same id.
     /// First-wins semantics: keep the first registration, drop the
-    /// rest.  Function-table registrations are independent and not
+    /// rest. Function-table registrations are independent and not
     /// affected by this dedupe.
     ///
+
     /// Safe because the runtime dispatches by `TypeId`, not by
     /// descriptor identity — two descriptors at the same id are
     /// observationally indistinguishable from one descriptor at
@@ -3221,11 +3310,11 @@ impl VbcCodegen {
     fn push_type_dedupe(&mut self, ty: crate::types::TypeDescriptor) {
         // If a descriptor with this id already exists AND it carries
         // populated structural data (variants OR fields), skip the
-        // re-push — the first wins.  But if the existing entry is
+        // re-push — the first wins. But if the existing entry is
         // an empty PLACEHOLDER (no variants and no fields, typically
         // produced by the speculative `alloc_user_type_id` path or
         // by a partial cross-module registration), REPLACE it with
-        // the new fully-populated descriptor.  Otherwise the
+        // the new fully-populated descriptor. Otherwise the
         // placeholder pins the id and downstream consumers
         // (`format_variant_for_print_depth`, `validate_make_variant_typed`)
         // see no variants — every typed variant rendered as a
@@ -3246,27 +3335,30 @@ impl VbcCodegen {
     /// Allocate a fresh user-defined `TypeId` that doesn't collide
     /// with the reserved well-known ranges.
     ///
+
     /// Reserved ranges (see `crate::types::TypeId` constants):
-    ///   * 0..16        primitives + aliases
-    ///   * 256..260     meta system (TokenStream / Token / Kind / Span)
-    ///   * 512..1024    semantic collections + dependent-type packaging
-    ///                  (LIST, MAP, …, PI, SIGMA, WITNESS)
+    ///  * 0..16 primitives + aliases
+    ///  * 256..260 meta system (TokenStream / Token / Kind / Span)
+    ///  * 512..1024 semantic collections + dependent-type packaging
+    ///  (LIST, MAP, …, PI, SIGMA, WITNESS)
     ///
+
     /// Without this guard, a stdlib build whose user-type count
     /// exceeds 240 wraps `next_type_id` into the meta range, then
     /// past 252 wraps into the semantic range — and stdlib types
-    /// silently collide with reserved IDs.  #170's global
+    /// silently collide with reserved IDs. #170's global
     /// consistency check surfaced this on `result.vr` where
     /// `OneshotInner` and `Channel` both ended up at TypeId(523).
     ///
+
     /// The function bumps `next_type_id` past every reserved range
-    /// it encounters before returning.  Idempotent in the sense
+    /// it encounters before returning. Idempotent in the sense
     /// that calling it `n` times produces `n` distinct IDs.
     fn alloc_user_type_id(&mut self) -> crate::types::TypeId {
         use crate::types::TypeId;
         loop {
             let candidate = TypeId::FIRST_USER + self.next_type_id;
-            // Meta-system range: 256..260 (TOKEN_STREAM..SPAN).  If we
+            // Meta-system range: 256..260 (TOKEN_STREAM..SPAN). If we
             // landed inside, skip to 260.
             if (256..260).contains(&candidate) {
                 self.next_type_id = 260 - TypeId::FIRST_USER;
@@ -3285,28 +3377,33 @@ impl VbcCodegen {
 
     /// Cross-module type-table consistency check (#170).
     ///
+
     /// Runs after all imported modules have been processed and the
     /// codegen's `self.types` represents the unified, whole-program
-    /// type table.  Reports the structural-hygiene classes that the
+    /// type table. Reports the structural-hygiene classes that the
     /// per-module verifier deliberately can't catch:
     ///
-    ///   1. **Duplicate `TypeId`** — two `TypeDescriptor`s with the
-    ///      same numeric id but different declaration sites.  Caused
-    ///      by a name collision where the `type_name_to_id` insert
-    ///      guard (`if !contains_key`) silently merges the second
-    ///      type's declaration into the first's slot.
+
+    ///  1. **Duplicate `TypeId`** — two `TypeDescriptor`s with the
+    ///  same numeric id but different declaration sites. Caused
+    ///  by a name collision where the `type_name_to_id` insert
+    ///  guard (`if !contains_key`) silently merges the second
+    ///  type's declaration into the first's slot.
     ///
-    ///   2. **Same name, different `TypeId`** — two descriptors
-    ///      sharing a name with distinct ids.  Indicates the codegen
-    ///      ran multiple type-allocation passes and the second pass
-    ///      didn't see the first pass's registration.
+
+    ///  2. **Same name, different `TypeId`** — two descriptors
+    ///  sharing a name with distinct ids. Indicates the codegen
+    ///  ran multiple type-allocation passes and the second pass
+    ///  didn't see the first pass's registration.
     ///
-    ///   3. **Variant-tag gaps / duplicates within a sum** — already
-    ///      checked per-module by `verify_type_layout_invariants`,
-    ///      lifted here so a global pass catches the case where two
-    ///      modules separately declare overlapping subsets of the
-    ///      same logical sum's variants.
+
+    ///  3. **Variant-tag gaps / duplicates within a sum** — already
+    ///  checked per-module by `verify_type_layout_invariants`,
+    ///  lifted here so a global pass catches the case where two
+    ///  modules separately declare overlapping subsets of the
+    ///  same logical sum's variants.
     ///
+
     /// Returns a structured `TypeTableHealthReport`; the caller
     /// decides whether to `report.assert_clean()` (hard fail), warn
     /// via tracing, or stash for downstream consumers (CI dashboards).
@@ -3318,7 +3415,7 @@ impl VbcCodegen {
 
     /// Scan every emitted function body for `MakeVariant` instructions
     /// whose `(tag, field_count)` doesn't match any variant in the
-    /// unified type table.  At the per-module level this is a warn
+    /// unified type table. At the per-module level this is a warn
     /// (cross-module variants live in other modules' descriptors); at
     /// the global level it's a real bug — every `MakeVariant` should
     /// resolve once all modules have been registered.
@@ -3326,7 +3423,7 @@ impl VbcCodegen {
         use crate::instruction::Instruction;
         use crate::types::VariantKind;
         // Build the set of valid (tag, field_count) combos across all
-        // declared types.  HashSet for O(1) membership.
+        // declared types. HashSet for O(1) membership.
         let mut valid: std::collections::HashSet<(u32, u32)> =
             std::collections::HashSet::new();
         for ty in &self.types {
@@ -3339,7 +3436,7 @@ impl VbcCodegen {
                 valid.insert((v.tag, count));
             }
         }
-        // Empty type table → can't compare; bail.  The per-module
+        // Empty type table → can't compare; bail. The per-module
         // verifier handles the empty case identically.
         if valid.is_empty() {
             return Vec::new();
@@ -3369,7 +3466,7 @@ impl VbcCodegen {
     }
 
     /// Pure helper that builds the health report from a slice of
-    /// `TypeDescriptor`s and the matching string table.  Pulled out
+    /// `TypeDescriptor`s and the matching string table. Pulled out
     /// so unit tests can construct synthetic tables without going
     /// through the full codegen lifecycle.
     fn compute_type_table_health(
@@ -3422,8 +3519,8 @@ impl VbcCodegen {
             }
         }
 
-        // Pass 3: variant-tag density.  Tags within a sum must be
-        // 0..variants.len() with no holes and no duplicates.  The
+        // Pass 3: variant-tag density. Tags within a sum must be
+        // 0..variants.len() with no holes and no duplicates. The
         // per-module verifier already checks this; we re-check here
         // because the per-module check skips empty `variants` arrays
         // (records) but a sum that lost variants in cross-module
@@ -3448,7 +3545,7 @@ impl VbcCodegen {
             }
             let n = ty.variants.len() as u32;
             // Gap detection: a dense [0..n) means seen.len() == n AND
-            // max_tag == n-1.  Anything else has gaps or out-of-range
+            // max_tag == n-1. Anything else has gaps or out-of-range
             // tags.
             let dense = seen.len() as u32 == n
                 && (n == 0 || max_tag == n - 1);
@@ -3483,7 +3580,7 @@ impl VbcCodegen {
     }
 
     /// Test-only: push a synthetic `TypeDescriptor` into the codegen's
-    /// type table.  Used by integration tests for the layout verifier
+    /// type table. Used by integration tests for the layout verifier
     /// to construct deliberately-malformed types and assert the
     /// verifier rejects them.
     #[doc(hidden)]
@@ -3597,6 +3694,7 @@ impl VbcCodegen {
         // active build cfg, return an empty VbcModule — every item in
         // this file is implicitly conditional on the module-level cfg.
         //
+
         // This complements the per-item check at `should_compile_item`
         // for cases where the @cfg appears at file scope (above the
         // module's first item) rather than on individual declarations.
@@ -3664,11 +3762,13 @@ impl VbcCodegen {
 
     /// Compiles an AST module to VBC with mount (import) resolution.
     ///
+
     /// Like `compile_module`, but first resolves `mount` declarations by finding
     /// the corresponding .vr files in `core_root`, parsing them, and registering
     /// their type/function declarations. This makes imported types, variant
     /// constructors, and function signatures available during compilation.
     ///
+
     /// # Arguments
     /// * `module` - The parsed AST module to compile
     /// * `source_path` - Path to the source .vr file (used for relative path resolution)
@@ -3738,10 +3838,12 @@ impl VbcCodegen {
 
     /// Compiles additional AST modules without resetting.
     ///
+
     /// This is used when compiling multiple .vr files into a single logical module
     /// (e.g., core/base/*.vr files). Unlike `compile_module`, this method preserves
     /// previously registered functions and imported functions from other modules.
     ///
+
     /// Call `import_functions` before the first `compile_additional_module` to make
     /// functions from previously compiled modules available.
     pub fn compile_additional_module(&mut self, module: &Module) -> CodegenResult<VbcModule> {
@@ -3793,11 +3895,13 @@ impl VbcCodegen {
 
     /// Collects all declarations from an AST module without compiling.
     ///
+
     /// This is used for two-pass compilation where all declarations from
     /// multiple files need to be registered before compiling any function bodies.
     /// This ensures type constructors (like None, Some) are available when
     /// compiling functions in any file.
     ///
+
     /// Items are filtered based on @cfg attributes to prevent cross-platform
     /// conflicts (e.g., Linux imports being processed when targeting macOS).
     pub fn collect_all_declarations(&mut self, module: &Module) -> CodegenResult<()> {
@@ -3823,18 +3927,22 @@ impl VbcCodegen {
     /// Resolves mount (import) declarations from a module by finding the corresponding
     /// .vr files, parsing them, and registering their type/function declarations.
     ///
+
     /// This enables cross-file compilation: when file A mounts types from file B,
     /// this method parses file B and registers its declarations so that A's codegen
     /// knows about the imported types, variant constructors, and function signatures.
     ///
+
     /// Only declarations (type names, variant constructors, function signatures) are
     /// registered -- function bodies from imported files are NOT compiled.
     ///
+
     /// # Arguments
     /// * `module` - The parsed AST module containing mount declarations
     /// * `source_path` - Path to the source .vr file (used to resolve relative paths)
     /// * `core_root` - Path to the `core/` directory root
     ///
+
     /// # Example
     /// ```ignore
     /// let mut codegen = VbcCodegen::new();
@@ -3874,7 +3982,7 @@ impl VbcCodegen {
         let mut to_parse: Vec<String> = Vec::new();
 
         for item in module.items.iter() {
-            // Honour the per-item @cfg gate.  A `mount` whose attribute
+            // Honour the per-item @cfg gate. A `mount` whose attribute
             // doesn't match the current TargetConfig must not pull its
             // file into the build, otherwise platform-cfg type
             // declarations from the wrong target end up in the unified
@@ -3924,6 +4032,7 @@ impl VbcCodegen {
 
     /// Extracts module path segments from a mount tree.
     ///
+
     /// For `mount core.base.protocols.{X, Y}`, returns `["core", "base", "protocols"]`.
     /// For `mount core.*`, returns `["core"]`.
     /// For `mount .atomic.*`, returns `[".", "atomic"]`.
@@ -4003,6 +4112,7 @@ impl VbcCodegen {
 
     /// Converts a module path like `["core", "base", "protocols"]` to candidate file paths.
     ///
+
     /// Tries multiple resolution strategies:
     /// 1. Direct: `core/base/protocols.vr`
     /// 2. Module dir: `core/base/protocols/mod.vr`
@@ -4100,9 +4210,11 @@ impl VbcCodegen {
 
     /// Compiles function bodies only, assuming declarations are already registered.
     ///
+
     /// This is the second pass of two-pass compilation. All declarations should
     /// have been collected via `collect_all_declarations` first.
     ///
+
     /// Items are filtered based on @cfg attributes to prevent cross-platform
     /// conflicts (e.g., Linux imports being processed when targeting macOS).
     pub fn compile_function_bodies(&mut self, module: &Module) -> CodegenResult<VbcModule> {
@@ -4164,21 +4276,25 @@ impl VbcCodegen {
     /// resolve these names — e.g. a user writing `let x = Some(42);`
     /// without declaring a `Maybe` type.
     ///
+
     /// First-wins dispatch. Real registrations from actual type
     /// declarations take precedence via two complementary guards in
     /// `register_type_constructors`:
     ///
-    ///   * User-phase (`prefer_existing_functions = false`): any existing
-    ///     variants for the redeclared type are purged via
-    ///     `clear_variants_for_type` before the new set is registered —
-    ///     this wipes these sentinels.
+
+    ///  * User-phase (`prefer_existing_functions = false`): any existing
+    ///  variants for the redeclared type are purged via
+    ///  `clear_variants_for_type` before the new set is registered —
+    ///  this wipes these sentinels.
     ///
-    ///   * Stdlib-phase (`prefer_existing_functions = true`): if a prior
-    ///     registration has already populated variants for this nominal
-    ///     type, `has_variants_for_type` short-circuits the re-registration
-    ///     so stdlib variants do not leak into a user type of the same
-    ///     name.
+
+    ///  * Stdlib-phase (`prefer_existing_functions = true`): if a prior
+    ///  registration has already populated variants for this nominal
+    ///  type, `has_variants_for_type` short-circuits the re-registration
+    ///  so stdlib variants do not leak into a user type of the same
+    ///  name.
     ///
+
     /// Sentinel IDs (`u32::MAX - tag`) never overlap with real function
     /// IDs or the `u32::MAX / 2` range reserved for newtype pass-through.
     /// Tag values are kept in lock-step with the canonical declarations
@@ -4186,6 +4302,7 @@ impl VbcCodegen {
     /// `core/base/ordering.vr` so a sentinel-seeded value is
     /// bit-compatible with a stdlib-seeded one.
     ///
+
     /// Long-term, this seed should be deleted entirely and replaced with
     /// an unconditional `ALWAYS_INCLUDE` of the relevant `core.base.*`
     /// modules. That refactor touches standalone-codegen call sites
@@ -4197,6 +4314,7 @@ impl VbcCodegen {
         // correctly even when the stdlib definition isn't in the auto-included
         // module list.
         //
+
         // Rationale: `core.base.maybe` is deliberately excluded from
         // `collect_imported_stdlib_modules`' ALWAYS_INCLUDE list because the
         // stdlib `Maybe<T>` collides with user-defined `Maybe` test fixtures.
@@ -4205,6 +4323,7 @@ impl VbcCodegen {
         // `Maybe.Some(42)` falls through to method dispatch and panics at
         // runtime with "method 'Some' not found on value".
         //
+
         // The tags here match the declaration order in `core/base/maybe.vr`,
         // `core/base/result.vr`, `core/base/ordering.vr`. When a user program
         // *does* define its own `type Maybe is None | Some(T)` (or similar),
@@ -4399,6 +4518,7 @@ impl VbcCodegen {
                 // If "AppConfig.new" already exists from inherent impl,
                 // don't let protocol impl's methods overwrite it.
                 //
+
                 // Save the previous flag value so we can restore it after the
                 // impl. Without this save/restore, the unconditional `= false`
                 // at the end of this branch corrupts pipeline-set state — e.g.
@@ -4682,12 +4802,14 @@ impl VbcCodegen {
             }
             // Proof-related items are not compiled to bytecode (proof erasure).
             //
+
             // Proofs are a purely compile-time phenomenon: they are verified by
             // the proof_verification phase (see crates/verum_compiler/src/phases/
             // proof_verification.rs) and then erased from the VBC codegen path.
             // This enforces the VBC-first architecture invariant that runtime
             // carries zero proof-term overhead.
             //
+
             // All 5 proof-item kinds MUST be listed explicitly here — relying on
             // the catch-all `_ => {}` arm would silently ignore new proof kinds
             // added to ItemKind in the future.
@@ -4707,6 +4829,7 @@ impl VbcCodegen {
 
     /// Registers a function for lookup.
     ///
+
     /// For nested functions, the name is mangled with the parent scope names
     /// using `$` as a separator (e.g., `outer$inner$deeply_nested`).
     fn register_function(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
@@ -4815,9 +4938,10 @@ impl VbcCodegen {
         // substring-filtered trace) to surface registration attempts on the
         // run-interpreter path without flooding normal runs.
         //
+
         // The substring filter is helpful for the original #201 reproduction
         // ("ZERO entries match try_alloc") — running with
-        //   VERUM_TRACE_REGISTER=try_alloc verum run --interp file.vr
+        //  VERUM_TRACE_REGISTER=try_alloc verum run --interp file.vr
         // shows whether `try_alloc` reaches register_function at all, and
         // under what `effective_module`.
         if let Ok(filter) = std::env::var("VERUM_TRACE_REGISTER") {
@@ -4845,12 +4969,13 @@ impl VbcCodegen {
         // fallback. The module_name comes from the codegen config, which is
         // set per-.vr-file from the stdlib / user build pipeline.
         //
+
         // Skip for:
-        //   - mangled nested-function names (already module-local)
-        //   - anonymous / empty module names
-        //   - names that look like already-qualified type-method registrations
-        //     ("Foo.bar") — those get their own qualified registration path
-        //     via `register_impl_function`.
+        //  - mangled nested-function names (already module-local)
+        //  - anonymous / empty module names
+        //  - names that look like already-qualified type-method registrations
+        //  ("Foo.bar") — those get their own qualified registration path
+        //  via `register_impl_function`.
         // Prefer the *source module* (from the `module X.Y.Z;` declaration at
         // the top of the current .vr file) over `config.module_name`. The
         // config's module_name is fixed per-codegen-session (`"main"` for a
@@ -4898,6 +5023,7 @@ impl VbcCodegen {
 
     /// Registers an active pattern declaration as a callable function.
     ///
+
     /// Active patterns (`pattern Even(n: Int) -> Bool = ...`) are compiled
     /// as regular functions so that `compile_pattern_test` for `PatternKind::Active`
     /// can find them via `lookup_function`.
@@ -4944,6 +5070,7 @@ impl VbcCodegen {
 
     /// Check if an AST return type is Maybe<T> (partial active pattern).
     ///
+
     /// VBC-internal: uses WKT::Maybe to recognize the stdlib Maybe type by name.
     /// Partial active patterns return Maybe<T>; the codegen must emit different
     /// bytecode (conditional branch on None vs Some) for these patterns.
@@ -5058,6 +5185,7 @@ impl VbcCodegen {
 
     /// Registers an FFI extern function for lookup WITHOUT consuming a function ID.
     ///
+
     /// FFI functions don't need regular function IDs because they're called via
     /// the FfiExtended instruction using the FFI symbol ID, not via the Call instruction.
     /// This ensures that FFI function declarations don't interfere with the function ID
@@ -5106,6 +5234,7 @@ impl VbcCodegen {
 
     /// Registers import aliases so that aliased function names can be resolved.
     ///
+
     /// This processes imports like `import sys.linux.syscall.{write as sys_write}` and
     /// registers `sys_write` as pointing to `sys.linux.syscall.write`.
     fn register_import_aliases(&mut self, import: &MountDecl) -> CodegenResult<()> {
@@ -5355,14 +5484,17 @@ impl VbcCodegen {
 
     /// Resolves pending imports that couldn't be resolved during initial processing.
     ///
+
     /// This is called after all declarations from all files in a module have been collected,
     /// allowing cross-file imports within the same module to be resolved.
     ///
+
     /// Handles path resolution for imports like `sys.intrinsics.ORDERING_ACQUIRE` where:
     /// - `sys` is the module name
     /// - `intrinsics` is the file name (not a submodule)
     /// - `ORDERING_ACQUIRE` is the constant/function name
     ///
+
     /// The constant might be registered as `ORDERING_ACQUIRE` or `sys.ORDERING_ACQUIRE`,
     /// but not as `sys.intrinsics.ORDERING_ACQUIRE`.
     pub fn resolve_pending_imports(&mut self) {
@@ -5441,6 +5573,7 @@ impl VbcCodegen {
 
     /// Extracts the type name from an impl block's ImplKind.
     ///
+
     /// For inherent impls (`implement List { ... }`), extracts "List".
     /// For protocol impls (`implement Iterator for List { ... }`), extracts "List".
     fn extract_impl_type_name(&self, kind: &verum_ast::decl::ImplKind) -> Option<String> {
@@ -5495,6 +5628,7 @@ impl VbcCodegen {
 
     /// Registers an impl function with a qualified name (e.g., "List.new").
     ///
+
     /// This allows static method calls like `List.new()` to be resolved.
     fn register_impl_function(&mut self, func: &FunctionDecl, type_name: &str) -> CodegenResult<()> {
         let func_name = func.name.name.to_string();
@@ -5600,11 +5734,13 @@ impl VbcCodegen {
 
     /// Collects nested declarations from a function body.
     ///
+
     /// This recursively walks the function body to find nested items (functions,
     /// types, etc.) and registers them. This is necessary because `collect_declarations`
     /// only processes top-level items, so nested functions would not be registered
     /// and would cause "function not registered" errors during compilation.
     ///
+
     /// The parent function name is tracked in `nested_function_scope` for name mangling.
     fn collect_nested_declarations(&mut self, body: &FunctionBody, parent_name: &str) -> CodegenResult<()> {
         // Push the parent function name onto the scope stack for name mangling
@@ -5627,10 +5763,12 @@ impl VbcCodegen {
 
     /// Collects nested declarations from a block.
     ///
+
     /// This walks all statements in the block looking for item declarations.
     /// Note: `collect_declarations` already handles recursive collection for
     /// nested functions, so we don't need to explicitly recurse here.
     ///
+
     /// Items are filtered based on @cfg attributes for consistency with
     /// top-level item collection.
     fn collect_nested_declarations_from_block(&mut self, block: &Block) -> CodegenResult<()> {
@@ -5648,6 +5786,7 @@ impl VbcCodegen {
 
     /// Registers FFI functions from an FFI boundary declaration.
     ///
+
     /// FFI functions are external functions with C ABI that can be called from Verum code.
     /// They are registered as callable functions so that VBC codegen can emit Call instructions.
     fn register_ffi_functions(&mut self, boundary: &FFIBoundary) -> CodegenResult<()> {
@@ -5733,6 +5872,7 @@ impl VbcCodegen {
 
     /// Map AST error protocol to VBC error protocol + sentinel value.
     ///
+
     /// Returns `(protocol, sentinel)`:
     /// - Errno → (NegOneErrno, -1)
     /// - ReturnCode(expr) → (ReturnCodePattern, evaluated_value)
@@ -5808,6 +5948,7 @@ impl VbcCodegen {
 
     /// Derive calling convention from a FunctionDecl's `extern_abi` field.
     ///
+
     /// `extern_abi` is a freeform string like `"C"`, `"stdcall"`, `"system"`.
     /// Absent means C ABI (the default for extern blocks).
     fn extern_abi_to_convention(abi: &verum_common::Maybe<verum_common::Text>) -> FfiCallingConvention {
@@ -5880,15 +6021,17 @@ impl VbcCodegen {
 
     /// Registers functions from an extern block declaration.
     ///
+
     /// Extern blocks contain FFI function declarations like:
     /// ```verum
     /// @ffi("libSystem.B.dylib")
     /// extern {
-    ///     fn getpid() -> Int;
-    ///     fn malloc(size: Int) -> &unsafe Byte;
+    ///  fn getpid() -> Int;
+    ///  fn malloc(size: Int) -> &unsafe Byte;
     /// }
     /// ```
     ///
+
     /// This method:
     /// 1. Extracts the library name from @ffi attribute
     /// 2. Creates FFI library and symbol entries
@@ -6061,10 +6204,12 @@ impl VbcCodegen {
 
     /// Generates bitfield layout and registers accessor functions for a @bitfield type.
     ///
+
     /// For each field with @bits(N), generates:
     /// - `TypeName.field_name(&self) -> T` - getter
     /// - `TypeName.set_field_name(&mut self, value: T)` - setter
     ///
+
     /// Bitfield accessors are generated as intrinsic-like functions that compile
     /// to efficient bit manipulation sequences (shift + mask + or/and).
     fn generate_bitfield_accessors(
@@ -6168,6 +6313,7 @@ impl VbcCodegen {
 
     /// Generates an FfiStructLayout for a @repr(C) record type.
     ///
+
     /// Calculates C-compatible struct layout with proper field alignment and padding.
     fn generate_ffi_struct_layout(
         &mut self,
@@ -6243,6 +6389,7 @@ impl VbcCodegen {
 
     /// Registers a single-function FFI declaration.
     ///
+
     /// This handles the syntax:
     /// ```verum
     /// @ffi("libSystem.B.dylib")
@@ -6353,6 +6500,7 @@ impl VbcCodegen {
 
     /// Registers callback signature symbols for function pointer parameters.
     ///
+
     /// For each parameter in an FFI function that is a function type (callback),
     /// this creates a synthetic FfiSymbol representing the callback's signature.
     /// The mapping (ffi_symbol_id, param_idx) -> callback_signature_id is stored
@@ -6412,6 +6560,7 @@ impl VbcCodegen {
 
     /// Gets the callback signature symbol ID for an FFI function parameter.
     ///
+
     /// Returns the synthetic FfiSymbol ID that contains the callback signature
     /// for the given FFI function and parameter index. Returns None if the
     /// parameter is not a function pointer type.
@@ -6516,11 +6665,13 @@ impl VbcCodegen {
 
     /// Emit context transform wrapping at function entry.
     ///
+
     /// For each context declared with transforms (e.g., `using [Database.transactional()]`):
     /// 1. CtxGet the base context
     /// 2. Call the transform method on it
     /// 3. CtxProvide the transformed value as the local context
     ///
+
     /// Returns the number of transforms emitted (for potential CtxEnd cleanup).
     fn emit_context_transforms(&mut self, func: &verum_ast::decl::FunctionDecl) -> usize {
         let mut count = 0;
@@ -6679,6 +6830,7 @@ impl VbcCodegen {
 
     /// Checks if an FFI function returns a pointer type.
     ///
+
     /// Returns true if the FFI function's return type is a pointer (Ptr, CStr,
     /// StructPtr, ArrayPtr, or FnPtr). This is used to mark result registers
     /// as containing raw pointers that need DerefRaw instructions.
@@ -6691,15 +6843,18 @@ impl VbcCodegen {
 
     /// Registers variant constructors from a type declaration.
     ///
+
     /// For sum types like `type Maybe<T> is None | Some(T)`, this registers
     /// variants with both qualified and simple names when safe.
     ///
+
     /// Registration strategy:
     /// 1. Always register `Type.Variant` (qualified) - never collides
     /// 2. Also register `Variant` (simple) if no collision exists
     /// 3. If another type defines the same variant name, mark as collision
-    ///    and remove the simple name (code must use qualified names)
+    ///  and remove the simple name (code must use qualified names)
     ///
+
     /// This allows convenient unqualified usage like `Some(x)` when there's
     /// no ambiguity, while still supporting qualified names like `Maybe.Some(x)`
     /// when disambiguation is needed.
@@ -6714,6 +6869,7 @@ impl VbcCodegen {
             TypeDeclBody::Variant(variants) => {
                 // Wholesale-replace semantics for user-defined types.
                 //
+
                 // Stdlib modules compile first with `prefer_existing_functions = true`
                 // (constructors register via `or_insert`). User-code compilation
                 // runs with `prefer_existing = false` and may redeclare a type
@@ -6721,11 +6877,13 @@ impl VbcCodegen {
                 // `type Maybe is Nothing | Just(Int);` while the stdlib's
                 // `core.base.maybe` already registered `Maybe.None`/`Maybe.Some`.
                 //
+
                 // Without this purge the user's variants coexist with the
                 // stdlib's in the function table, which lets the compiler
                 // accept `Some(x)` against a `Maybe` that has no `Some`
                 // constructor and produces surprising dispatch.
                 //
+
                 // Gate: only in the user-compilation phase
                 // (`!prefer_existing_functions`). During stdlib loading we
                 // keep first-wins semantics so two stdlib modules defining
@@ -6821,6 +6979,7 @@ impl VbcCodegen {
 
                     // 2. Handle simple name registration with collision detection.
                     //
+
                     // First-wins semantics during stdlib loading
                     // (`prefer_existing_functions = true`): if a built-in or
                     // earlier-loaded stdlib type already owns the simple
@@ -6831,6 +6990,7 @@ impl VbcCodegen {
                     // qualified `<Type>.None` registration (line 5719) —
                     // call sites that need it can use the qualified form.
                     //
+
                     // Without this gate, every stdlib type that declares
                     // `| None` (or any other commonly-named variant) would
                     // wipe the bare `None` alias, breaking every other
@@ -6839,6 +6999,7 @@ impl VbcCodegen {
                     // Stream adapter, etc.) — the lenient-skip
                     // "undefined variable: None" cluster.
                     //
+
                     // In user-mode (`prefer_existing_functions = false`)
                     // the original collision-removal stays: a user-defined
                     // `type Foo is None | ...` wins the simple name over
@@ -6886,14 +7047,14 @@ impl VbcCodegen {
                 // of falling back to a global scan that loses
                 // disambiguation across sum types sharing variant
                 // tags — e.g. `Result.Err` vs `ShellError.SpawnFailed`
-                // both tag=1).  Pre-fix the variant-arm registered
+                // both tag=1). Pre-fix the variant-arm registered
                 // each variant as a constructor function but NEVER
                 // pushed a descriptor for the parent type — codegen's
                 // type-typed emit helper would resolve the name to a
                 // TypeId via `type_name_to_id` but the runtime
                 // validator would reject it as `unknown type_id`
                 // because no descriptor matched, demoting every
-                // variant emission back to the legacy form.  Now the
+                // variant emission back to the legacy form. Now the
                 // descriptor IS pushed with kind=Sum + a complete
                 // variant table, so the typed path stays load-bearing.
                 let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
@@ -6925,7 +7086,7 @@ impl VbcCodegen {
                         verum_common::Maybe::Some(VariantData::Tuple(types)) => {
                             // Empty-payload tuple variants — `loop_path()`
                             // — are syntactically `Tuple(0 args)` but
-                            // semantically Unit.  The layout validator
+                            // semantically Unit. The layout validator
                             // rejects `Tuple` + `arity=0` ("should be
                             // Unit instead"); coerce here so the
                             // descriptor is well-formed.
@@ -6949,7 +7110,7 @@ impl VbcCodegen {
                             // validator (`type-layout invariant`)
                             // rejects the over-specified case
                             // ("variant is Record but also reports
-                            // arity=N").  Keep arity=0 here so the
+                            // arity=N"). Keep arity=0 here so the
                             // descriptor is internally consistent.
                             let fds: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> = fields
                                 .iter()
@@ -7345,6 +7506,7 @@ impl VbcCodegen {
                 // the return types match `Q` and the base carrier
                 // respectively, so no runtime coercion is required.
                 //
+
                 // The newtype-pass-through sentinel id `u32::MAX / 2`
                 // is shared with newtype / single-element-tuple
                 // constructors; the call-site codegen recognises it
@@ -7420,19 +7582,23 @@ impl VbcCodegen {
 
     /// Registers a constant or static variable for lookup, with optional value extraction.
     ///
+
     /// Constants are registered as zero-argument functions so that name
     /// resolution during codegen can find them. If the value expression is a
     /// simple integer literal, the constant is registered as an inlineable
     /// intrinsic (via `__const_val_N` naming) so the value is emitted as a
     /// `LoadI` at call sites rather than a function call.
     ///
+
     /// # Example
     ///
+
     /// For a constant declaration:
     /// ```verum
     /// const MAX_SIZE: Int = 1024;
     /// ```
     ///
+
     /// This registers `MAX_SIZE` as a callable. If the value is a literal integer,
     /// it's inlined at usage sites for zero-cost access.
     fn register_constant_with_value(
@@ -7501,6 +7667,7 @@ impl VbcCodegen {
 
     /// Compiles pending constants that couldn't be inlined.
     ///
+
     /// These are constants with complex values (like struct literals) that
     /// are compiled as zero-argument functions returning the constant value.
     fn compile_pending_constants(&mut self) -> CodegenResult<()> {
@@ -7549,10 +7716,12 @@ impl VbcCodegen {
 
     /// Compiles pending @thread_local static initializations.
     ///
+
     /// Each @thread_local static gets an init function that:
     /// 1. Evaluates the initializer expression
     /// 2. Stores the result in the TLS slot via TlsSet
     ///
+
     /// These init functions are registered as global constructors.
     fn compile_pending_tls_inits(&mut self) -> CodegenResult<()> {
         let tls_inits = std::mem::take(&mut self.pending_tls_inits);
@@ -7600,6 +7769,7 @@ impl VbcCodegen {
 
     /// Try to extract a compile-time integer value from a constant expression.
     ///
+
     /// Handles:
     /// - Integer literals: `42`, `0xFF`, `-1`
     /// - Negated integer literals: `-(42)`
@@ -7694,6 +7864,7 @@ impl VbcCodegen {
 
     /// Converts a TypeKind to VarTypeKind for instruction selection.
     ///
+
     /// This is crucial for generating correct float vs integer operations.
     fn type_kind_to_var_type(&self, type_kind: &verum_ast::ty::TypeKind) -> context::VarTypeKind {
         use verum_ast::ty::TypeKind;
@@ -7731,6 +7902,7 @@ impl VbcCodegen {
 
     /// Converts a type name string to VarTypeKind for instruction selection.
     ///
+
     /// Used when we have type information as a string (e.g., from variant payload types).
     fn type_name_to_var_type(&self, type_name: &str) -> context::VarTypeKind {
         match type_name {
@@ -7751,6 +7923,7 @@ impl VbcCodegen {
 
     /// Extracts inner type parameters from a generic type name string.
     ///
+
     /// Examples:
     /// - `"Maybe<Char>"` -> `["Char"]`
     /// - `"Result<Text, Error>"` -> `["Text", "Error"]`
@@ -7758,6 +7931,7 @@ impl VbcCodegen {
     /// - `"Map<Text, Int>"` -> `["Text", "Int"]`
     /// - `"Int"` -> `[]` (not generic)
     ///
+
     /// This is used for extracting payload types from generic containers like `Maybe<T>`
     /// when pattern matching, allowing bound variables to have the correct type.
     fn extract_inner_types(&self, type_name: &str) -> Vec<String> {
@@ -7817,6 +7991,7 @@ impl VbcCodegen {
 
     /// Converts a full AST Type to a VBC TypeRef.
     ///
+
     /// Resolves a field type, mapping generic type parameters to TypeRef::Generic.
     /// `generic_param_map` maps param names (e.g., "A") to their TypeParamId index.
     fn resolve_field_type_ref(&self, ty: &verum_ast::ty::Type, generic_param_map: &std::collections::HashMap<String, u16>) -> TypeRef {
@@ -7948,6 +8123,7 @@ impl VbcCodegen {
 
     /// Extracts the base type name from an AST Type for method dispatch tracking.
     ///
+
     /// For `Result<T, E>`, returns `Some("Result")`.
     /// For `Maybe<T>`, returns `Some("Maybe")`.
     /// For primitive types like `Int`, returns `Some("Int")`.
@@ -8013,6 +8189,7 @@ impl VbcCodegen {
 
     /// Converts a VBC TypeRef to a simple type name for method dispatch prefixing.
     ///
+
     /// This is used to determine if a function return type is a specific primitive
     /// (UInt64, Int32, Byte) that requires method name prefixing for correct dispatch.
     pub fn type_ref_to_name(&self, type_ref: &TypeRef) -> String {
@@ -8094,11 +8271,11 @@ impl VbcCodegen {
                     .collect();
 
                 for impl_item in impl_decl.items.iter() {
-                    // Honour `@cfg` gates on impl items.  Same pattern
+                    // Honour `@cfg` gates on impl items. Same pattern
                     // as `compile_item_lenient`'s impl loop — walk both
                     // ImplItem.attributes and FunctionDecl.attributes
                     // because the parser places attrs on the inner
-                    // decl when present.  Without this, an
+                    // decl when present. Without this, an
                     // `@cfg(target_os = "linux") fn …` inside a
                     // cross-platform `implement Bar { … }` was
                     // compiled on every host.
@@ -8146,6 +8323,7 @@ impl VbcCodegen {
 
     /// Compiles nested function bodies from a function body.
     ///
+
     /// This is called after the parent function is compiled to compile
     /// any nested function declarations found in its body.
     fn compile_nested_functions(&mut self, body: &FunctionBody) -> CodegenResult<()> {
@@ -8162,6 +8340,7 @@ impl VbcCodegen {
 
     /// Compiles nested function bodies from a block.
     ///
+
     /// Since the statement-level compiler (statements.rs) now handles
     /// ALL nested functions inline (with capture analysis for closures),
     /// this post-hoc pass is a no-op. Kept for API compatibility.
@@ -8172,6 +8351,7 @@ impl VbcCodegen {
 
     /// Compiles a function declaration.
     ///
+
     /// The `impl_type_name` parameter is Some for functions inside impl blocks,
     /// allowing us to look up the function by its qualified name (e.g., "List.new").
     fn compile_function(&mut self, func: &FunctionDecl, impl_type_name: Option<&String>) -> CodegenResult<()> {
@@ -8186,14 +8366,15 @@ impl VbcCodegen {
 
         // Get the pre-registered function info (for ID and properties).
         //
+
         // **Module-qualified-first lookup** to match `compile_call`'s
-        // dispatch path.  Without this, a top-level fn with a name that
+        // dispatch path. Without this, a top-level fn with a name that
         // collides across modules (e.g. `is_valid_page_size` in
         // `pager.vr`, `journal_header_api/header.vr`,
         // `wal_frame_layout/constants.vr`, `journal/writer.vr`) would
         // bind its compiled body to whichever func_info won the bare-
         // name registry slot — typically a different module's
-        // function.  Pager.vr's body would then be pushed to
+        // function. Pager.vr's body would then be pushed to
         // `self.functions` with journal's codegen-id, while pager.vr's
         // own codegen-id (resolved via qualified-first at every call
         // site inside pager.vr) would have no `self.functions` entry
@@ -8201,6 +8382,7 @@ impl VbcCodegen {
         // Call lands on whatever function happens to occupy that
         // position.
         //
+
         // Mirror compile_call's resolution: try
         // `<source_module>.<base_name>` first when we have a source
         // module and the lookup is for a bare top-level fn.
@@ -8325,6 +8507,7 @@ impl VbcCodegen {
 
         // Emit runtime Assert for each refined parameter.
         //
+
         // For `fn f(x: Int { x > 0 })` the compiler wraps entry with
         // a check of the predicate — if it fails, the interpreter
         // raises a refinement violation instead of allowing the
@@ -8333,11 +8516,13 @@ impl VbcCodegen {
         // SMT-discharged; when the verifier proved the obligation
         // during compilation they are elided at link time.
         //
+
         // Three binding shapes feed this loop:
-        //   Rule 1  `T{pred}`            — predicate uses `it`.
-        //   Rule 2  `T where |x| pred`   — predicate uses `x`.
-        //   Rule 3  `x: T where pred`    — predicate uses `x`.
+        //  Rule 1 `T{pred}` — predicate uses `it`.
+        //  Rule 2 `T where |x| pred` — predicate uses `x`.
+        //  Rule 3 `x: T where pred` — predicate uses `x`.
         //
+
         // The binding name is aliased to the parameter's register via
         // a `Mov` into a freshly-named local so `compile_expr` on the
         // predicate resolves the reference normally. When the binding
@@ -8442,10 +8627,12 @@ impl VbcCodegen {
         // makes bytecode_length > 0 and short-circuits dispatch, causing
         // the function to always return Unit instead of its typed result.
         //
+
         // Examples that need the empty-body path:
-        //   - `@intrinsic("tcp_listen") pub fn __tcp_listen_raw(port: Int) -> Int;`
-        //   - `@intrinsic("tcp_recv")   pub fn __tcp_recv_raw(fd: Int, max: Int) -> Text;`
+        //  - `@intrinsic("tcp_listen") pub fn __tcp_listen_raw(port: Int) -> Int;`
+        //  - `@intrinsic("tcp_recv") pub fn __tcp_recv_raw(fd: Int, max: Int) -> Text;`
         //
+
         // Typed-opcode intrinsics (math/SIMD/etc.) inline at the call
         // site via `compile_imported_intrinsic_call` so the body content
         // is unused — RetV is fine for them.
@@ -8624,11 +8811,13 @@ impl VbcCodegen {
     /// Emits an `Instruction::Assert` on the given return register when
     /// the function's declared return type is `Refined` or `Sigma`.
     ///
+
     /// Called at each implicit-return site (tail expression / block
     /// result). Explicit `return expr;` statements go through
     /// `compile_return` in `expressions.rs`, which invokes the same
     /// helper, so every return path exits through the predicate check.
     ///
+
     /// See the parameter-entry Assert emission (same file, around the
     /// body-compile prologue) for the binding-alias + VarType mirror
     /// idiom — the same idiom is used here so predicates like
@@ -8708,6 +8897,7 @@ impl VbcCodegen {
     /// This is separate from `intern_string` to ensure field indices start at 0
     /// and are compact, used for record field access (GetF/SetF instructions).
     ///
+
     /// NOTE: Prefer `resolve_field_index()` when the type name is known, which
     /// returns the correct type-specific position (0, 1, 2, ...) matching the
     /// declared field order. This function returns a global ID that may not match
@@ -8736,6 +8926,7 @@ impl VbcCodegen {
 
     /// Resolves the field index for a given type and field name.
     ///
+
     /// Returns the field's position within the type's declared field order
     /// (0, 1, 2, ...), which is correct for memory layout. Falls back to
     /// the global interned field ID if the type is not registered.
@@ -9030,11 +9221,12 @@ impl VbcCodegen {
 
         // **Duplicate-id collapse, the load-bearing dispatch fix.**
         //
+
         // `func_id_remap` was a HashMap<old_id → new_idx> that silently
         // collapsed duplicate `descriptor.id` entries — the second
         // function compiled with a given codegen-time id won the
         // HashMap key, and `Call(old_id)` instructions emitted from
-        // ANY caller resolved to the winner.  Live failure mode:
+        // ANY caller resolved to the winner. Live failure mode:
         // pager.vr's body emits `Call(14706)` for its local
         // `is_valid_page_size`; another module also pushes a function
         // with `descriptor.id = 14706` (because of asymmetric
@@ -9045,6 +9237,7 @@ impl VbcCodegen {
         // for a perfectly-valid 4 KiB page once `mount base.{...}`
         // pulls in enough modules to trigger the collision.
         //
+
         // The dedup keeps the LAST function for each codegen-time id,
         // matching `register_function`'s last-wins semantics in user-
         // mode compilation (`prefer_existing_functions = false`).
@@ -9062,7 +9255,7 @@ impl VbcCodegen {
             // record the dup-group count under tracing::debug; the
             // verbose per-function listing is gated on the
             // `VERUM_TRACE_DEDUP` env so it doesn't pollute stderr
-            // on every `verum run` invocation.  The pre-fix path
+            // on every `verum run` invocation. The pre-fix path
             // unconditionally `eprintln!`'d both lines, which made
             // every script invocation emit ~30 lines of dispatch
             // diagnostics that drown real script output.
@@ -9140,14 +9333,14 @@ impl VbcCodegen {
                 }
             }
             // Remap variant names AND each variant's inner field names
-            // (record-style variant payloads).  Pre-fix this remap was
+            // (record-style variant payloads). Pre-fix this remap was
             // skipped — variant.name carried the codegen-index StringId
             // while the runtime's `state.module.strings.get(StringId)`
             // expected a byte offset, so every typed-variant name
             // lookup at `format_variant_for_print_depth` either
             // returned None (rendering "Variant(N, ...)") or read from
             // the wrong offset (rendering an unrelated symbol like
-            // "tcp_connect" or "file_write_all").  This is the
+            // "tcp_connect" or "file_write_all"). This is the
             // load-bearing fix for VBC-3's user-facing display: now
             // the typed-variant TypeDescriptor's variant names
             // resolve to the same string id-space the rest of the
@@ -9449,36 +9642,37 @@ impl VbcCodegen {
     }
 }
 
-/// Cross-module type-table health (#170).  Returned by
-/// [`VbcCodegen::verify_global_type_table_consistency`].  See that
+/// Cross-module type-table health (#170). Returned by
+/// [`VbcCodegen::verify_global_type_table_consistency`]. See that
 /// method's docstring for the bug classes each field tracks.
 ///
+
 /// Note: `MakeVariant`-level orphan detection is intentionally NOT
-/// part of this report.  At a single-module-with-mounts granularity
+/// part of this report. At a single-module-with-mounts granularity
 /// the cross-module-variant case dominates — most "orphans" are
 /// legitimate references to variants whose declaring module wasn't
-/// fully loaded.  Use [`VbcCodegen::find_orphan_make_variants`] for
+/// fully loaded. Use [`VbcCodegen::find_orphan_make_variants`] for
 /// the diagnostic; treat its output as informational unless you
 /// know every transitively-referenced module is in the table.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TypeTableHealthReport {
-    /// Multiple `TypeDescriptor`s share a single `TypeId.0`.  A real
+    /// Multiple `TypeDescriptor`s share a single `TypeId.0`. A real
     /// program never has this — TypeIds are supposed to be unique.
     /// Caused by name-collision merge in `type_name_to_id`.
     pub duplicate_ids: Vec<DuplicateTypeId>,
     /// Multiple `TypeDescriptor`s share a name but report different
-    /// `TypeId.0` values.  Indicates the codegen ran multiple
+    /// `TypeId.0` values. Indicates the codegen ran multiple
     /// type-allocation passes that didn't reuse the prior pass's
     /// registration.
     pub duplicate_names_with_different_ids: Vec<DuplicateNameDifferentId>,
     /// A sum type's variant tags are not dense `0..variants.len()`
-    /// or contain duplicates.  Runtime variant dispatch indexes by
+    /// or contain duplicates. Runtime variant dispatch indexes by
     /// tag, so any gap or duplicate yields wrong-variant dispatch.
     pub variant_tag_anomalies: Vec<VariantTagAnomaly>,
 }
 
 impl TypeTableHealthReport {
-    /// `true` when every category is empty.  Use this in a CI gate:
+    /// `true` when every category is empty. Use this in a CI gate:
     /// `assert!(codegen.verify_global_type_table_consistency().is_clean())`.
     pub fn is_clean(&self) -> bool {
         self.duplicate_ids.is_empty()
@@ -9486,7 +9680,7 @@ impl TypeTableHealthReport {
             && self.variant_tag_anomalies.is_empty()
     }
 
-    /// Total number of issues across all categories.  Useful for a
+    /// Total number of issues across all categories. Useful for a
     /// "ratchet" baseline test that lets the count fall but never
     /// rise.
     pub fn issue_count(&self) -> usize {
@@ -9495,7 +9689,7 @@ impl TypeTableHealthReport {
             + self.variant_tag_anomalies.len()
     }
 
-    /// Convert to a `CodegenError` when issues exist.  Bundles every
+    /// Convert to a `CodegenError` when issues exist. Bundles every
     /// finding into a single `Internal` error so a strict-mode CI
     /// build can use `?` propagation.
     pub fn into_error(self) -> CodegenResult<()> {
@@ -9547,7 +9741,7 @@ pub struct DuplicateNameDifferentId {
 }
 
 /// Single instance of "MakeVariant references a variant that no
-/// declared TypeDescriptor carries".  Global pass equivalent of
+/// declared TypeDescriptor carries". Global pass equivalent of
 /// the per-module #146 Phase 2 warn-level check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrphanMakeVariant {
@@ -9610,15 +9804,15 @@ mod tests {
     }
 
     /// Default config is lenient — partial / forward-referenced stdlib
-    /// state still builds.  `with_strict_codegen()` opts in to promoting
-    /// bug-class skips to hard errors.  Tracked under #166.
+    /// state still builds. `with_strict_codegen()` opts in to promoting
+    /// bug-class skips to hard errors. Tracked under #166.
     #[test]
     fn validate_default_off_until_stdlib_clean() {
         // Pin: until pre-existing stdlib emit bugs are cleaned up
         // (TypeId(515) dangling refs, function-end-vs-instruction-stream
         // length divergence, archive-header counts disagreeing with
         // section bodies), the structural validator is OFF by default.
-        // CI opts in via `with_validation()`.  This pin breaks together
+        // CI opts in via `with_validation()`. This pin breaks together
         // with the default flip back to `true` once the bug class is
         // closed — that's the right time to delete it.
         let config = CodegenConfig::new("validate_default");
@@ -9638,7 +9832,7 @@ mod tests {
     fn validate_opt_in_via_with_validation_passes_clean_module() {
         // Pin: opt-in path via `with_validation()` runs the validator.
         // A clean codegen-built module passes — keeps the wiring honest
-        // even while the default is off.  When stdlib emit cleans up,
+        // even while the default is off. When stdlib emit cleans up,
         // this test stays valid (just becomes redundant with the new
         // default-on semantics).
         let mut config = CodegenConfig::new("validate_opt_in");
@@ -9727,7 +9921,7 @@ mod tests {
     }
 
     /// Synthetic-table smoke (#170): same name, different TypeIds
-    /// surfaces as `DuplicateNameDifferentId`.  Distinct from the
+    /// surfaces as `DuplicateNameDifferentId`. Distinct from the
     /// duplicate-id case: here the *name* collides while the ids
     /// disagree, indicating the codegen ran multiple type-allocation
     /// passes that didn't share state.
@@ -9754,7 +9948,7 @@ mod tests {
     /// names but pointing at the same TypeId are flagged as a
     /// duplicate-id finding — aliases should be represented by a
     /// SINGLE descriptor with multiple names in the string table,
-    /// not by two descriptors sharing an id.  The
+    /// not by two descriptors sharing an id. The
     /// duplicate-name-with-different-ids check stays silent because
     /// neither name is itself ambiguous.
     #[test]
@@ -9772,7 +9966,7 @@ mod tests {
         let report = VbcCodegen::compute_type_table_health(&types, &strings);
         // duplicate_ids fires (two descriptors share TypeId(0)) — that's
         // technically a "duplicate" by the strict definition, so the
-        // report is NOT clean.  This is the intended behaviour: aliases
+        // report is NOT clean. This is the intended behaviour: aliases
         // should be represented by a single TypeDescriptor with multiple
         // names in the string table, not two descriptors.
         assert!(!report.is_clean());
@@ -9816,14 +10010,14 @@ mod tests {
         }
         // After 1100 allocations starting from id 16, we should have
         // walked past the 4-id meta range (256..260) and the
-        // 512-id semantic range (512..=1023).  Last allocated id
+        // 512-id semantic range (512..=1023). Last allocated id
         // should therefore be FIRST_USER + 1100 + 4 + 512 - 1 =
         // 16 + 1100 + 516 - 1 = 1631 (off-by-one tolerated; the
         // strict check above is enough).
     }
 
     /// Synthetic-table smoke (#170): a sum type with a tag gap
-    /// surfaces as a `VariantTagAnomaly`.  Runtime variant dispatch
+    /// surfaces as a `VariantTagAnomaly`. Runtime variant dispatch
     /// indexes by tag, so any gap = wrong-variant dispatch.
     #[test]
     fn test_global_type_table_detects_variant_tag_gap() {

@@ -4,23 +4,27 @@
 // Layer: 5 (Network — HTTP/3 / QPACK)
 // =============================================================================
 //
+
 // QPACK reuses HPACK's integer encoding (RFC 7541 §5.1). An integer
 // is encoded in a "prefix" bit-field (within the first byte of the
 // enclosing instruction) plus optional continuation bytes:
 //
-//   if value < (2^N - 1):
-//       emit value in N prefix bits.
-//   else:
-//       emit (2^N - 1) in N prefix bits.
-//       value -= (2^N - 1)
-//       while value >= 128:
-//           emit (value % 128 | 0x80)
-//           value /= 128
-//       emit value as final byte.
+
+//  if value < (2^N - 1):
+//  emit value in N prefix bits.
+//  else:
+//  emit (2^N - 1) in N prefix bits.
+//  value -= (2^N - 1)
+//  while value >= 128:
+//  emit (value % 128 | 0x80)
+//  value /= 128
+//  emit value as final byte.
 //
+
 // The prefix bits occupy the low N bits of the first byte; the other
 // (8 - N) bits carry the instruction opcode — caller ORs it in.
 //
+
 // =============================================================================
 
 module core.net.h3.qpack.integer;

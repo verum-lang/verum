@@ -1,23 +1,28 @@
 //! Structured resolver-error model (P4.3).
 //!
+
 //! The classic shape of a dependency-resolution failure has three
 //! distinct cases — version conflict, no matching version, malformed
 //! requirement — each with its own diagnostic dimensions:
 //!
-//!   - **VersionConflict** wants to surface the *requirement chain*:
-//!     "package A wants foo ^1; package B wants foo ^2; the resolver
-//!     picked A's ^1 first, then B forced ^2 in." Without the chain,
-//!     the user sees "conflict on foo" and has to git-grep manually.
+
+//!  - **VersionConflict** wants to surface the *requirement chain*:
+//!  "package A wants foo ^1; package B wants foo ^2; the resolver
+//!  picked A's ^1 first, then B forced ^2 in." Without the chain,
+//!  the user sees "conflict on foo" and has to git-grep manually.
 //!
-//!   - **NoMatchingVersion** wants to surface what's actually
-//!     *available*: a typo'd `^99` against a registry that goes up to
-//!     `^2` is a fix-the-typo problem, not a missing-package problem.
-//!     Showing the version list lets the user spot the mistake at a
-//!     glance.
+
+//!  - **NoMatchingVersion** wants to surface what's actually
+//!  *available*: a typo'd `^99` against a registry that goes up to
+//!  `^2` is a fix-the-typo problem, not a missing-package problem.
+//!  Showing the version list lets the user spot the mistake at a
+//!  glance.
 //!
-//!   - **InvalidRequirement** wants to surface the *position* of the
-//!     parse error, not just "invalid version requirement".
+
+//!  - **InvalidRequirement** wants to surface the *position* of the
+//!  parse error, not just "invalid version requirement".
 //!
+
 //! This module collects all four into a single [`ResolverError`] enum
 //! whose [`std::fmt::Display`] renders multi-line, indented diagnostic
 //! output suitable for terminal consumption. A `From<ResolverError>`

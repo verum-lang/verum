@@ -1,8 +1,10 @@
 //! Context system and capability operation handlers for VBC interpreter dispatch.
 //!
+
 //! Handles: CtxGet (0xB0), CtxProvide (0xB1), CtxEnd (0xB2), PushContext (0xB3),
 //! PopContext (0xB4), Attenuate (0xB5), HasCapability (0xB6), RequireCapability (0xB7)
 //!
+
 //! Verum context system: capability-based dependency injection via `using [Ctx]` / `provide`.
 //! Contexts are runtime-varying dependencies stored in task-local storage (theta). Functions
 //! declare required contexts with `using [Logger, Database]`; providers are installed with
@@ -23,6 +25,7 @@ use verum_common::cbgr::caps;
 
 /// CtxGet (0xB0) - Retrieve a context value by type.
 ///
+
 /// Panics with `Context X not provided` when the context is missing.
 /// Accessing a context that was never provided is a programming error —
 /// the caller's `using [X]` clause is a hard requirement, and the
@@ -67,6 +70,7 @@ pub(in super::super) fn handle_ctx_provide(state: &mut InterpreterState) -> Inte
 
 /// CtxEnd (0xB2) / PopContext (0xB4) - End a context scope.
 ///
+
 /// Pops the most recently-provided context entry. CtxProvide + CtxEnd come
 /// in matched pairs for `provide X = v in { body }` blocks, so a LIFO pop
 /// correctly handles both flat and nested provides.
@@ -77,6 +81,7 @@ pub(in super::super) fn handle_ctx_pop(state: &mut InterpreterState) -> Interpre
 
 /// PushContext (0xB3) - Push a context handler (for advanced context patterns).
 ///
+
 /// In the simple implementation, this is a no-op.
 pub(in super::super) fn handle_ctx_push(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let _handler_offset = read_signed_varint(state)?;

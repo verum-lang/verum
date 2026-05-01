@@ -3,11 +3,14 @@
 // =============================================================================
 // Spec: sqlite-native.md §10.7
 //
+
 // Drives an integrity check via a small state machine:
 //
-//   IpInit → IpScanningPages → IpVerifyingBtree → IpScanningRecords
-//          → IpCheckingForeignKeys → IpCheckingIndexes → IpDone
+
+//  IpInit → IpScanningPages → IpVerifyingBtree → IpScanningRecords
+//  → IpCheckingForeignKeys → IpCheckingIndexes → IpDone
 //
+
 // On any per-phase fault → `IpFailed(reason)`. The caller pumps
 // the engine + records observations (errors / pages / rows) into
 // the supplied `IntegrityReport`.

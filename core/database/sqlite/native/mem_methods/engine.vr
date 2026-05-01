@@ -30,7 +30,7 @@ public fn new_engine() -> MemMethodsEngine {
 }
 
 implement MemMethodsEngine {
-    /// Accept the override iff the method set is viable.  Returns
+    /// Accept the override iff the method set is viable. Returns
     /// true on success.
     pub fn install(&mut self, m: MethodSet) -> Bool {
         if !is_viable(&m) { return false; }

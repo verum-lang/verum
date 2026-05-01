@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   Scalar    — xFunc only
-//   Aggregate — xStep + xFinal
-//   Window    — xStep + xFinal + xValue + xInverse (new in 3.25)
+
+//  Scalar — xFunc only
+//  Aggregate — xStep + xFinal
+//  Window — xStep + xFinal + xValue + xInverse (new in 3.25)
 //
+
 // The catalogue records which callbacks the runtime is expected to
 // supply; actual closures live elsewhere.
 // =============================================================================

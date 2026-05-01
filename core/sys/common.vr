@@ -9,9 +9,11 @@ mount core.base.coercion.{IntCoercible};
 // Dependencies: None
 // =============================================================================
 //
+
 // This module defines platform-independent types used by the V-LLSI
 // (Verum Low-Level System Interface) bootstrap kernel.
 //
+
 // Spec: docs/architecture/new-arch-spec.md (V-LLSI Bootstrap Kernel)
 // =============================================================================
 
@@ -48,11 +50,13 @@ implement OSError {
 
     /// Check if this is EAGAIN / EWOULDBLOCK.
     ///
+
     /// errno values for "would block" differ across platforms:
-    ///   * Linux:   EAGAIN = EWOULDBLOCK = 11
-    ///   * macOS:   EAGAIN = EWOULDBLOCK = 35
-    ///   * Windows: WSAEWOULDBLOCK = 10035 (winsock-side)
+    ///  * Linux: EAGAIN = EWOULDBLOCK = 11
+    ///  * macOS: EAGAIN = EWOULDBLOCK = 35
+    ///  * Windows: WSAEWOULDBLOCK = 10035 (winsock-side)
     ///
+
     /// Verum's `core/io/protocols.vr.from_raw_os_error` uses
     /// platform-conditioned tables (#67) — this helper accepts ALL
     /// known would-block codes since OSError is the cross-platform
@@ -68,6 +72,7 @@ implement OSError {
 
     /// Check if this is EINTR (interrupted system call).
     ///
+
     /// EINTR is 4 on Linux / macOS / Windows POSIX shim — uniform
     /// across the platforms Verum supports.
     fn interrupted(&self) -> Bool {
@@ -106,6 +111,7 @@ implement Eq for OSError {
 
 /// Newtype wrapper for file descriptors.
 ///
+
 /// On Unix the C ABI passes file descriptors as `int` (32-bit
 /// signed); valid fds are non-negative, -1 sentinels failure.
 /// Verum's surface kept this as `(Int)` historically — a 64-bit
@@ -116,6 +122,7 @@ implement Eq for OSError {
 /// FileDesc claimed 64-bit identity for an ABI-level 32-bit
 /// quantity.
 ///
+
 /// T0.4.2 — surface aligned with the C ABI. FileDesc is now a
 /// thin wrapper over `Int` (still i64 internally so existing
 /// arithmetic / comparison code carries through) but the public
@@ -127,6 +134,7 @@ implement Eq for OSError {
 /// HANDLE is pointer-sized) keep the full 64-bit storage and
 /// route through their own `core.sys.windows.handle` newtype.
 ///
+
 /// Fully migrating the storage type to Int32 is a separate sweep
 /// (T0.4.2 audit task) — every arithmetic site needs auditing
 /// for sign-extension semantics. The current wrapper preserves
@@ -347,22 +355,29 @@ implement SysMemoryOrdering {
 
 /// Allocate memory from the operating system.
 ///
+
 /// This is the lowest-level allocation function, directly calling OS APIs:
 /// - Linux: mmap(MAP_PRIVATE | MAP_ANONYMOUS)
 /// - macOS: mmap(MAP_PRIVATE | MAP_ANON) via libSystem
 /// - Windows: VirtualAlloc(MEM_COMMIT | MEM_RESERVE)
 ///
+
 /// # Arguments
 ///
+
 /// * `size` - Number of bytes to allocate
 /// * `alignment` - Required alignment (must be power of 2, at least page size for best perf)
 ///
+
 /// # Returns
 ///
+
 /// Pointer to allocated memory, or None on failure.
 ///
+
 /// # Safety
 ///
+
 /// The returned memory is uninitialized. Caller must initialize before use.
 public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
     if size <= 0 {
@@ -440,13 +455,17 @@ public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
 
 /// Free memory back to the operating system.
 ///
+
 /// # Arguments
 ///
+
 /// * `ptr` - Pointer to memory allocated with os_alloc
 /// * `size` - Size of the allocation (used for munmap on Unix)
 ///
+
 /// # Safety
 ///
+
 /// - `ptr` must have been allocated with os_alloc
 /// - `size` must match the original allocation size
 /// - Memory must not be accessed after this call
@@ -533,20 +552,23 @@ public fn get_thread_id() -> UInt64 {
 // Cross-Platform Explicit-Offset I/O (POSIX `pread` / `pwrite`)
 // =============================================================================
 //
+
 // Atomic read/write at an explicit byte offset without modifying the file
 // cursor. Required by the SQLite VFS layer (sqlite-native.md Gap 3) and
 // by any code that performs concurrent offset-keyed reads/writes on the
 // same file descriptor — `lseek`+`read` is NOT atomic relative to other
 // threads sharing the fd.
 //
+
 // Dispatches to the platform primitive:
-//   * Linux   — `SYS_pread64` / `SYS_pwrite64` via
-//               `core.sys.linux.syscall.pread` / `pwrite`.
-//   * macOS   — libSystem `pread` / `pwrite` via safe wrappers in
-//               `core.sys.darwin.libsystem.safe_pread` / `safe_pwrite`.
-//   * Windows — unimplemented in v0.1 (filesystem I/O on Windows will
-//               come with the full PosixVfs/Win32Vfs split in Phase 1).
+//  * Linux — `SYS_pread64` / `SYS_pwrite64` via
+//  `core.sys.linux.syscall.pread` / `pwrite`.
+//  * macOS — libSystem `pread` / `pwrite` via safe wrappers in
+//  `core.sys.darwin.libsystem.safe_pread` / `safe_pwrite`.
+//  * Windows — unimplemented in v0.1 (filesystem I/O on Windows will
+//  come with the full PosixVfs/Win32Vfs split in Phase 1).
 //
+
 // Partial reads at EOF return `Ok(n)` with `n < buf.len()`. Partial
 // writes return `Ok(n)` and must be looped by the caller if
 // all-or-nothing semantics are required.
@@ -554,7 +576,7 @@ public fn get_thread_id() -> UInt64 {
 
 /// Cross-platform raw-pointer pread — caller-owned buffer + count.
 /// Mirrors `pread` but bypasses the `&mut [Byte]` parameter coercion
-/// path (RUNTIME-3-DEEPER sidestep).  Caller passes the buffer's first
+/// path (RUNTIME-3-DEEPER sidestep). Caller passes the buffer's first
 /// byte plus an explicit byte count.
 public fn pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: Int) -> Result<Int, OSError> {
     @cfg(target_os = "linux")
@@ -638,12 +660,14 @@ public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError
 // Cross-Platform Durability Primitives
 // =============================================================================
 //
+
 // `full_fsync` — forces the disk to flush its write cache to persistent
 // media. Stronger than `fsync` on Darwin (where plain fsync does not
 // flush the SSD's onboard cache — a decades-old Apple design choice).
 // On Linux, `fsync` already has write-through semantics on modern
 // kernels, so this dispatches there.
 //
+
 // `sync_directory` — fsyncs the *directory* entry, not a file within
 // it. Required after `rename`/`unlink`/`creat` to guarantee the name
 // change survives a power cut; without it, the file's data may be
@@ -680,23 +704,25 @@ public fn full_fsync(fd: FileDesc) -> Result<(), OSError> {
 }
 
 /// Cross-platform `data_only_fsync(fd)` — flush DATA without
-/// requiring a metadata barrier.  Called by SQLite's WAL frame
+/// requiring a metadata barrier. Called by SQLite's WAL frame
 /// append path (every committed frame), where the metadata sync
 /// happens later at WAL header / checkpoint boundaries.
 ///
+
 /// Per-platform mapping:
-///   * Linux  → `fdatasync(fd)` (syscall 75) — skips inode-mtime
-///     update; ~5–20× faster than `fsync` on rotational + datacenter
-///     SSDs that journal metadata separately.
-///   * Darwin → `fsync(fd)` — no `fdatasync` equivalent on macOS;
-///     `fsync` is the cheapest barrier (`F_FULLFSYNC` is reserved
-///     for `full_fsync`).
-///   * Windows → `FlushFileBuffers` — NTFS journals metadata
-///     synchronously; data-only is not separately exposed.
+///  * Linux → `fdatasync(fd)` (syscall 75) — skips inode-mtime
+///  update; ~5–20× faster than `fsync` on rotational + datacenter
+///  SSDs that journal metadata separately.
+///  * Darwin → `fsync(fd)` — no `fdatasync` equivalent on macOS;
+///  `fsync` is the cheapest barrier (`F_FULLFSYNC` is reserved
+///  for `full_fsync`).
+///  * Windows → `FlushFileBuffers` — NTFS journals metadata
+///  synchronously; data-only is not separately exposed.
 ///
+
 /// **Safety**: `data_only_fsync` is only sound when the file's
 /// SIZE doesn't change between flushes (or when a separate
-/// metadata sync follows).  WAL frame append is the canonical
+/// metadata sync follows). WAL frame append is the canonical
 /// caller — it pre-allocates frame slots, so the file size is
 /// stable across the append, and a metadata sync at the WAL
 /// header boundary catches any size growth.
@@ -752,24 +778,27 @@ public fn sync_directory(path: &[Byte]) -> Result<(), OSError> {
 // Byte-Range Advisory File Locking (POSIX `fcntl(F_SETLK)` family)
 // =============================================================================
 //
+
 // Advisory locks over explicit byte ranges on a file descriptor. The
 // primary consumer is the SQLite VFS locking protocol (sqlite-native.md
 // Gap 1), which owns five disjoint bytes in the lock-page region and
 // uses SHARED/EXCLUSIVE locks to coordinate readers and writers across
 // processes.
 //
+
 // Two POSIX flavours exist:
-//   * Traditional `F_SETLK` — locks are owned by the (pid, file
-//     inode) pair. Closing ANY fd of the same file releases ALL the
-//     caller's locks on that file. This misfeature makes traditional
-//     POSIX locks hostile to library code that opens side-fd's for
-//     logging, metadata, etc.
-//   * `F_OFD_SETLK` (Linux 3.15+) — locks are owned by the
-//     (open-file-description, inode) pair. Each `open()` gets its own
-//     lock, solving the traditional problem.
+//  * Traditional `F_SETLK` — locks are owned by the (pid, file
+//  inode) pair. Closing ANY fd of the same file releases ALL the
+//  caller's locks on that file. This misfeature makes traditional
+//  POSIX locks hostile to library code that opens side-fd's for
+//  logging, metadata, etc.
+//  * `F_OFD_SETLK` (Linux 3.15+) — locks are owned by the
+//  (open-file-description, inode) pair. Each `open()` gets its own
+//  lock, solving the traditional problem.
 // Darwin does not expose F_OFD_SETLK; we use traditional F_SETLK there
 // and the SQLite-style convention of a single VFS-owned fd per db.
 //
+
 // Windows uses `LockFileEx` / `UnlockFileEx` via kernel32 — direct
 // call, no emulation layer, same non-blocking semantics as the POSIX
 // `F_OFD_SETLK` / `F_SETLK` paths. Implemented in the `@cfg(target_os
@@ -796,9 +825,10 @@ public const F_UNLCK: Int16 = 2;
 
 /// Kind of byte-range lock — the caller's side of the type.
 ///
+
 /// Renamed from the historic `LockKind` to avoid simple-name
 /// collision with `core.database.sqlite.native.l0_vfs.vfs_protocol.LockKind`
-/// (the SQLite VFS five-state protocol type).  The codegen variant
+/// (the SQLite VFS five-state protocol type). The codegen variant
 /// table is keyed by simple type name, so two stdlib types named
 /// `LockKind` first-wins each other and one set of variants
 /// (Unlocked / Reserved / Pending / …) silently drops out — see
@@ -818,20 +848,22 @@ fn lock_kind_to_ltype(k: FcntlLockKind) -> Int16 {
 
 /// Non-blocking acquire / release of an advisory byte-range lock.
 ///
+
 /// `start` / `len` are absolute byte offsets; `len == 0` means "to EOF".
 /// Returns `Err(OSError { code: EAGAIN / EWOULDBLOCK, … })` on conflict
 /// so callers can poll or wait; returns `Err` on other failures.
 ///
+
 /// Semantics:
-///   * Linux — uses `F_OFD_SETLK` (open-file-description locks). Per-fd
-///     ownership, so a stray `close()` elsewhere cannot drop the lock.
-///   * Darwin — uses `F_SETLK`. Traditional POSIX semantics apply.
-///   * Windows — uses `LockFileEx` / `UnlockFileEx` with the
-///     `LOCKFILE_FAIL_IMMEDIATELY` flag for the try-lock semantics
-///     (returns `ERROR_LOCK_VIOLATION` rather than blocking).
-///     `Exclusive` adds `LOCKFILE_EXCLUSIVE_LOCK`; `Shared` is
-///     advisory-shared.  Region offset is mapped through an
-///     `OVERLAPPED` structure (no shared file pointer mutation).
+///  * Linux — uses `F_OFD_SETLK` (open-file-description locks). Per-fd
+///  ownership, so a stray `close()` elsewhere cannot drop the lock.
+///  * Darwin — uses `F_SETLK`. Traditional POSIX semantics apply.
+///  * Windows — uses `LockFileEx` / `UnlockFileEx` with the
+///  `LOCKFILE_FAIL_IMMEDIATELY` flag for the try-lock semantics
+///  (returns `ERROR_LOCK_VIOLATION` rather than blocking).
+///  `Exclusive` adds `LOCKFILE_EXCLUSIVE_LOCK`; `Shared` is
+///  advisory-shared. Region offset is mapped through an
+///  `OVERLAPPED` structure (no shared file pointer mutation).
 public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: Int) -> Result<(), OSError> {
     let mut fl: Flock = Flock {
         l_type: lock_kind_to_ltype(kind),
@@ -926,17 +958,18 @@ public fn unlock_region(fd: FileDesc, start: Int, len: Int) -> Result<(), OSErro
 // Cross-Platform Filesystem Probes (`fstat` / `ftruncate` / `access`)
 // =============================================================================
 //
-// `file_size`  — `fstat`-via-st_size. Required by the SQLite VFS pager to
-//                size the database before reading page 1. Closes the
-//                "Unsupported" arm in PosixVfs.file_size().
-// `truncate`   — `ftruncate`. Required by VACUUM, DELETE-mode journal
-//                cleanup, and WAL TRUNCATE checkpoints.
-// `access`     — `faccessat(AT_FDCWD)` (Linux) / `access(2)` (Darwin) /
-//                `GetFileAttributesW` probe (Windows). Returns Ok(true)
-//                on success, Ok(false) for EACCES/ENOENT/ENOTDIR/EROFS,
-//                Err for actual errors. The "missing == false, not an
-//                error" convention is what every higher-level VFS
-//                wants (SQLite's xAccess, Go's os.Stat probe, etc.).
+
+// `file_size` — `fstat`-via-st_size. Required by the SQLite VFS pager to
+//  size the database before reading page 1. Closes the
+//  "Unsupported" arm in PosixVfs.file_size().
+// `truncate` — `ftruncate`. Required by VACUUM, DELETE-mode journal
+//  cleanup, and WAL TRUNCATE checkpoints.
+// `access` — `faccessat(AT_FDCWD)` (Linux) / `access(2)` (Darwin) /
+//  `GetFileAttributesW` probe (Windows). Returns Ok(true)
+//  on success, Ok(false) for EACCES/ENOENT/ENOTDIR/EROFS,
+//  Err for actual errors. The "missing == false, not an
+//  error" convention is what every higher-level VFS
+//  wants (SQLite's xAccess, Go's os.Stat probe, etc.).
 // =============================================================================
 
 /// Mode constants for `access` — bitwise-OR-able. Numeric values are
@@ -1046,6 +1079,7 @@ public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
 
 /// Probe whether `path` exists with the requested access mode.
 ///
+
 /// `mode` is a bitwise-OR of the `ACCESS_*` constants. Returns
 /// `Ok(true)` if the kernel grants the access, `Ok(false)` for the
 /// "no access" / "not present" / "read-only filesystem" errno class,
@@ -1097,20 +1131,22 @@ public fn access(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
 // Cross-Platform Cryptographic Random
 // =============================================================================
 //
+
 // Fills `buf` with kernel-grade entropy. Required by SQLite WAL header
 // salts (sqlite-native.md §6.5: salt_1 / salt_2 must be unpredictable
 // — predictable salts let an attacker craft fake WAL frames with
 // matching checksums). Closes the deterministic stub in PosixVfs.
 //
-// Linux:    getrandom(GRND_NONBLOCK) — non-blocking, uses urandom-style
-//           pool (CSPRNG seeded from kernel entropy). Loops on EINTR
-//           and short reads.
-// Darwin:   getentropy(buf, len). Hard 256-byte chunk limit per call;
-//           we loop. Returns -1/EIO on entropy starvation, which is
-//           extremely rare (and if it does happen, panic vs. silent
-//           weakness is the only honest move).
-// Windows:  BCryptGenRandom(BCRYPT_USE_SYSTEM_PREFERRED_RNG) — direct
-//           bcrypt.dll, no CryptoAPI legacy.
+
+// Linux: getrandom(GRND_NONBLOCK) — non-blocking, uses urandom-style
+//  pool (CSPRNG seeded from kernel entropy). Loops on EINTR
+//  and short reads.
+// Darwin: getentropy(buf, len). Hard 256-byte chunk limit per call;
+//  we loop. Returns -1/EIO on entropy starvation, which is
+//  extremely rare (and if it does happen, panic vs. silent
+//  weakness is the only honest move).
+// Windows: BCryptGenRandom(BCRYPT_USE_SYSTEM_PREFERRED_RNG) — direct
+//  bcrypt.dll, no CryptoAPI legacy.
 // =============================================================================
 
 /// Fill `buf` with cryptographically secure random bytes. Returns
@@ -1181,10 +1217,12 @@ pub fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
 // V-LLSI Context System provides unified access to thread-local context slots
 // across all platforms. This replaces tokio.task_local! with native TLS.
 //
+
 // Performance comparison (from new-arch-spec.md Appendix F.3):
 // - tokio HashMap lookup: ~20ns
 // - V-LLSI array index: ~2ns (10x faster)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Appendix F.3
 // =============================================================================
 
@@ -1335,19 +1373,24 @@ implement Eq for SysContextError {
 
 /// Get a value from a context slot.
 ///
+
 /// Returns None if the slot is not set or TLS is not initialized.
 /// This is the hot path - optimized for ~2ns access.
 ///
+
 /// # Arguments
 ///
+
 /// * `slot` - Slot index (0-255)
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// if let Some(db) = ctx_get(SLOT_DATABASE) {
-///     let conn = db as &DatabaseConnection;
-///     // use connection...
+///  let conn = db as &DatabaseConnection;
+///  // use connection...
 /// }
 /// ```
 @inline
@@ -1367,11 +1410,14 @@ public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
 
 /// Get a mutable value from a context slot.
 ///
+
 /// Returns the same raw pointer as ctx_get - the caller is responsible
 /// for ensuring exclusive access when modifying the value.
 ///
+
 /// # Arguments
 ///
+
 /// * `slot` - Slot index (0-255)
 @inline
 public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> {
@@ -1380,13 +1426,17 @@ public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> {
 
 /// Set a value in a context slot.
 ///
+
 /// # Arguments
 ///
+
 /// * `slot` - Slot index (0-255)
 /// * `value` - Pointer to context value
 ///
+
 /// # Safety
 ///
+
 /// The value must remain valid for the lifetime of the context scope.
 @inline
 public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
@@ -1405,6 +1455,7 @@ public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
 
 /// Check if a context slot is set.
 ///
+
 /// Uses bitmask for O(1) check (~1ns).
 @inline
 public fn ctx_has(slot: UInt8) -> Bool {
@@ -1429,6 +1480,7 @@ public fn ctx_clear(slot: UInt8) {
 
 /// Push a new context frame (for nested provide blocks).
 ///
+
 /// The new frame inherits from the current frame but allows overrides.
 /// Returns the previous frame for restoration.
 public fn ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
@@ -1552,6 +1604,7 @@ module embedded_context {
 
 /// Check if the V-LLSI runtime is initialized.
 ///
+
 /// Returns true if TLS is set up and context system is ready.
 public fn is_runtime_initialized() -> Bool {
     @cfg(target_os = "linux")
@@ -1569,11 +1622,14 @@ public fn is_runtime_initialized() -> Bool {
 
 /// Initialize the V-LLSI runtime for the main thread.
 ///
+
 /// This MUST be called before any context operations or memory allocation.
 /// Called automatically by the Verum entry point.
 ///
+
 /// # Returns
 ///
+
 /// * `Ok(())` - Runtime initialized successfully
 /// * `Err(OSError)` - Initialization failed (TLS setup error)
 public fn init_runtime() -> Result<(), OSError> {
@@ -1599,6 +1655,7 @@ public fn init_runtime() -> Result<(), OSError> {
 
 /// Clean up the V-LLSI runtime for the current thread.
 ///
+
 /// Called automatically when a thread exits.
 public fn cleanup_runtime() {
     @cfg(target_os = "linux")
@@ -1629,9 +1686,11 @@ static mut PROCESS_ENVIRON: &&Byte = unsafe { 0 as &&Byte };
 
 /// Initialize process arguments storage.
 ///
+
 /// Called by the platform-specific entry point (_start on Linux, main on macOS)
 /// with the argc/argv values received from the OS.
 ///
+
 /// On Linux, environ is the pointer after the null-terminated argv array.
 /// On macOS, environ is obtained via _NSGetEnviron().
 public fn init_process_args(argc: Int, argv: &&Byte) {
@@ -1676,6 +1735,7 @@ public fn get_environ() -> &&Byte {
 
 /// Get a command line argument by index.
 ///
+
 /// Returns None if index is out of bounds.
 public fn get_arg(index: Int) -> Maybe<Text> {
     let argc = get_argc();
@@ -1702,6 +1762,7 @@ public fn get_arg(index: Int) -> Maybe<Text> {
 
 /// Get an environment variable by name.
 ///
+
 /// Returns None if the variable is not set.
 public fn get_env(name: &[Byte]) -> Maybe<Text> {
     @cfg(target_os = "macos")
@@ -1757,6 +1818,7 @@ public fn get_env(name: &[Byte]) -> Maybe<Text> {
 
 /// Set an environment variable.
 ///
+
 /// Note: On Linux without libc, this is not supported as environ is immutable.
 /// On macOS, uses setenv from libSystem.
 public fn set_env(name: &[Byte], value: &[Byte]) -> Result<(), OSError> {

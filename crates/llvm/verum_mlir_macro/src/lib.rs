@@ -15,13 +15,15 @@ use syn::parse_macro_input;
 
 /// Generates a dialect module from a TableGen file.
 ///
+
 /// # Examples
 ///
+
 /// ```rust
 /// verum_mlir::dialect! {
-///     name: "func",
-///     files: ["IR/FuncOps.td", "TransformOps/FuncTransformOps.td", "Transforms/Passes.td"],
-///     include_directories: ["mlir/Dialect/Func"],
+///  name: "func",
+///  files: ["IR/FuncOps.td", "TransformOps/FuncTransformOps.td", "Transforms/Passes.td"],
+///  include_directories: ["mlir/Dialect/Func"],
 /// }
 /// ```
 #[proc_macro]

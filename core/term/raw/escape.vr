@@ -5,9 +5,11 @@
 // Dependencies: core.io
 // =============================================================================
 //
+
 // Protocol and types for writing ANSI escape sequences (CSI, OSC, DCS).
 // Used by all higher layers for cursor movement, clearing, colors, etc.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 4.3
 // =============================================================================
 

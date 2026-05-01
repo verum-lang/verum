@@ -4,17 +4,21 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides bitwise operation intrinsics that map directly to
 // LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
 //
+
 // # Categories
 //
+
 // - Logical operations: and, or, xor, not
 // - Shifts: shl, shr, lshr, ashr
 // - Rotations: rotl, rotr, fshl, fshr
 // - Bit counting: clz, ctz, popcnt
 // - Bit manipulation: bswap, bitreverse
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

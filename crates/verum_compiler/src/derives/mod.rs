@@ -1,5 +1,6 @@
 //! Core Derives Implementation for Verum Meta-System
 //!
+
 //! This module implements the 8 core derives required for production use:
 //! - Debug: Development, testing, debugging output
 //! - Display: Human-readable formatting for end-users
@@ -10,24 +11,31 @@
 //! - Deserialize: Data format decoding with validation
 //! - Error: Error protocol implementation with source chaining
 //!
+
 //! ## Specification Compliance
 //!
+
 //! These derives are P0 (must-have) for initial release of the unified meta-system.
 //! Without Serialize/Deserialize, no web frameworks, APIs, or data persistence
 //! can be implemented, blocking ecosystem development.
 //!
+
 //! ## Semantic Honesty (v5.1 Compliance)
 //!
+
 //! - All generated code is fully inspectable via `--show-expansions`
 //! - CBGR costs (~15ns per reference) are documented in generated code
 //! - No hidden "magic" - everything is explicit
 //! - Performance characteristics identical to hand-written code
 //!
+
 //! ## Reference Type Awareness
 //!
+
 //! Generated code handles both ThinRef (16 bytes) and FatRef (24 bytes)
 //! transparently, with explicit CBGR validation costs documented.
 //!
+
 //! The unified meta-system is the ONLY compile-time computation mechanism in Verum.
 //! All derive macros generate code via the meta-system with full inspectability
 //! (--show-expansions flag). The 9 core derives (Debug, Display, Clone, PartialEq,

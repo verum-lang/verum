@@ -6,18 +6,22 @@ module core.database.sqlite.native.l0_vfs.clock;
 // Layer: 0
 // Spec: sqlite-native.md §7.1 (VfsProtocol.current_time) + §4.10 DST tests
 //
+
 // The VFS surface returns `Timestamp { nanos, is_monotonic }` from
 // `current_time()`, used for:
 //
-//   * WAL metadata (`checkpoint_seq`, `sqlite_version_number`)
-//   * `busy_timeout` backoff + retry scheduling
-//   * `SQLITE_INSERT/UPDATE/DELETE` hook notifications (wall-clock)
+
+//  * WAL metadata (`checkpoint_seq`, `sqlite_version_number`)
+//  * `busy_timeout` backoff + retry scheduling
+//  * `SQLITE_INSERT/UPDATE/DELETE` hook notifications (wall-clock)
 //
+
 // Production VFSes back this with the platform monotonic/realtime
 // intrinsics. DST tests inject `MockClock` to drive time deterministically
 // (`MockClock.advance(delta)` lets a test skip to checkpoint-trigger
 // without sleeping).
 //
+
 // No new syscalls — we reuse `core.intrinsics.runtime.time.{monotonic_nanos,
 // realtime_nanos}` which have @intrinsic attributes and lower to
 // clock_gettime / mach_absolute_time / QueryPerformanceCounter depending
@@ -72,6 +76,7 @@ implement Clock for SystemClock {
 /// calls. No real wall-clock coupling; bit-reproducible across runs
 /// and platforms.
 ///
+
 /// Single-threaded test harness assumption: the mock is driven via
 /// `&mut` from the test body (not concurrently). The production
 /// `SystemClock` handles multi-threaded readers by default (intrinsics

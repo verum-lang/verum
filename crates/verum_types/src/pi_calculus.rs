@@ -1,5 +1,6 @@
 //! π-calculus — process algebra for concurrent computation.
 //!
+
 //! Milner's π-calculus is the canonical theoretical foundation for
 //! mobile concurrent processes: channels are first-class values
 //! that can be sent over other channels, modelling dynamic network
@@ -7,31 +8,39 @@
 //! protocol, the π-calculus describes the entire interaction
 //! pattern between concurrently executing parties.
 //!
+
 //! ## Syntax
 //!
+
 //! ```text
-//!     P, Q ::= 0                  (terminated process)
-//!            | P | Q              (parallel composition)
-//!            | (νx) P             (restriction: x is fresh in P)
-//!            | x⟨y⟩.P             (send y on x, continue as P)
-//!            | x(y).P             (recv on x, bind to y, continue as P)
-//!            | !P                 (replication: ∞ copies of P)
+//!  P, Q ::= 0 (terminated process)
+//!  | P | Q (parallel composition)
+//!  | (νx) P (restriction: x is fresh in P)
+//!  | x⟨y⟩.P (send y on x, continue as P)
+//!  | x(y).P (recv on x, bind to y, continue as P)
+//!  | !P (replication: ∞ copies of P)
 //! ```
 //!
+
 //! ## Reduction
 //!
+
 //! The single core rule is **COMM**:
 //!
+
 //! ```text
-//!     x⟨y⟩.P  |  x(z).Q   →   P  |  Q[y/z]
+//!  x⟨y⟩.P | x(z).Q → P | Q[y/z]
 //! ```
 //!
+
 //! A send and a matching receive on the same channel react,
 //! producing the residual processes with the received name
 //! substituted in.
 //!
+
 //! ## Status
 //!
+
 //! Standalone algebraic core: process AST, capture-avoiding
 //! substitution, structural-congruence simplification, single-step
 //! COMM reduction. Higher-level analyses (bisimulation, type
@@ -189,6 +198,7 @@ impl Process {
 /// reduced process, or `None` if no reduction is possible at this
 /// level.
 ///
+
 /// Looks at the **immediate** parallel structure: if `P = P₁ | P₂`
 /// where `P₁` starts with `x⟨y⟩.…` and `P₂` starts with `x(z).…`,
 /// fires the rule. More sophisticated search (under restrictions,
@@ -282,7 +292,7 @@ mod tests {
 
     #[test]
     fn recv_binder_shadows_in_continuation() {
-        // x(z). z⟨w⟩.0  — z is bound by recv, w stays free
+        // x(z). z⟨w⟩.0 — z is bound by recv, w stays free
         let inner = Process::send("z", "w", Process::Zero);
         let p = Process::recv("x", "z", inner);
         let names = p.free_names();
@@ -293,7 +303,7 @@ mod tests {
 
     #[test]
     fn restriction_binds_name() {
-        // (νa) a⟨b⟩.0  — a is bound, b is free
+        // (νa) a⟨b⟩.0 — a is bound, b is free
         let send = Process::send("a", "b", Process::Zero);
         let p = Process::restrict("a", send);
         let names = p.free_names();
@@ -364,7 +374,7 @@ mod tests {
 
     #[test]
     fn step_under_restriction_propagates() {
-        // (νx) (x⟨a⟩.0 | x(z).0)  — should reduce inside.
+        // (νx) (x⟨a⟩.0 | x(z).0) — should reduce inside.
         let send = Process::send("x", "a", Process::Zero);
         let recv = Process::recv("x", "z", Process::Zero);
         let body = Process::par(send, recv);
@@ -380,7 +390,7 @@ mod tests {
 
     #[test]
     fn step_recurses_into_left_half() {
-        // (send | recv) | unrelated  — should reduce in left half.
+        // (send | recv) | unrelated — should reduce in left half.
         let inner = Process::par(
             Process::send("x", "a", Process::Zero),
             Process::recv("x", "z", Process::Zero),
@@ -434,7 +444,7 @@ mod tests {
 
     #[test]
     fn free_names_skips_replicate_binders_correctly() {
-        // !x⟨y⟩.0  has free names {x, y}.
+        // !x⟨y⟩.0 has free names {x, y}.
         let p = Process::replicate(Process::send("x", "y", Process::Zero));
         let names = p.free_names();
         assert!(names.contains(&t("x")));

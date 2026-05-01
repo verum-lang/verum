@@ -3,19 +3,25 @@
 // =============================================================================
 // Layer: 0 (Foundation)
 //
+
 // Provides fundamental mathematical constants and refinement type aliases
 // for common mathematical domains.
 //
+
 // # Constants Precision
 //
+
 // All constants are defined to full Float64 precision (53 significant bits).
 // Constants are computed at compile-time where possible.
 //
+
 // # Refinement Types
 //
+
 // Type aliases like NonNegative, Positive, UnitInterval provide semantic
 // clarity and enable compile-time verification of mathematical preconditions.
 //
+
 // Spec: docs/architecture/math-spec.md Section 1
 // =============================================================================
 

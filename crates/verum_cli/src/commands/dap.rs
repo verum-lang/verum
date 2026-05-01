@@ -1,6 +1,7 @@
 // DAP (Debug Adapter Protocol) command
 // Starts a DAP server for IDE debugging integration (VS Code, etc.)
 //
+
 // The DAP server wraps the VBC interpreter with debug hooks, enabling
 // breakpoints, step-through, variable inspection, and stack traces.
 

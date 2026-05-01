@@ -1,39 +1,49 @@
 /// # Error Recovery Strategies
 ///
+
 /// Spec: docs/detailed/20-error-handling.md#3.2
 /// Spec: docs/detailed/26-unified-execution-architecture.md#recovery-strategies
 ///
+
 /// Industrial-grade error recovery infrastructure providing:
 ///
+
 /// 1. **Retry Policies**: Configurable retry with backoff strategies
 /// 2. **Circuit Breakers**: Prevent cascading failures with state machine
 /// 3. **Backoff Strategies**: Fixed, linear, exponential with jitter
 /// 4. **Recovery Composition**: Combine strategies for complex scenarios
 ///
+
 /// ## Zero-Allocation Design
 ///
+
 /// All recovery structures use inline storage to avoid heap allocations
 /// in the critical error recovery path:
 ///
+
 /// - InlineCircuitBreaker: 64 bytes (fits in cache line)
 /// - InlineRetryPolicy: 32 bytes
 /// - BackoffConfig: 16 bytes
 ///
+
 /// ## VBC Integration
 ///
+
 /// Recovery operations compile to efficient VBC sequences:
 /// - State checks: single atomic load (~3ns)
 /// - Timestamp access: monotonic_nanos intrinsic (~5ns)
 /// - No heap allocations in fast path
 ///
+
 /// ## Performance Targets
 ///
-/// | Operation            | Target  | Achieved |
+
+/// | Operation | Target | Achieved |
 /// |----------------------|---------|----------|
-/// | Circuit breaker check| < 20ns  | ~10ns    |
-/// | Retry policy check   | < 10ns  | ~5ns     |
-/// | Backoff calculation  | < 50ns  | ~30ns    |
-/// | State transition     | < 30ns  | ~20ns    |
+/// | Circuit breaker check| < 20ns | ~10ns |
+/// | Retry policy check | < 10ns | ~5ns |
+/// | Backoff calculation | < 50ns | ~30ns |
+/// | State transition | < 30ns | ~20ns |
 
 module runtime.recovery;
 
@@ -125,8 +135,10 @@ implement RecoveryRetryPolicy {
 
 /// Execute with retry policy
 ///
+
 /// Automatically retries failed operations according to the policy.
 ///
+
 /// ## Performance
 /// - Overhead per attempt: ~50ns (policy check + timing)
 /// - Sleep implementation: uses sys.nanosleep
@@ -195,6 +207,7 @@ public type RecoveryBackoffStrategy is
 implement RecoveryBackoffStrategy {
     /// Calculate delay for given attempt number
     ///
+
     /// ## Performance
     /// - Fixed: ~2ns (direct return)
     /// - Linear: ~5ns (addition + min)
@@ -253,6 +266,7 @@ public type JitterConfig is
 implement JitterConfig {
     /// Apply jitter to a delay value
     ///
+
     /// ## Performance
     /// - ~15ns (PRNG call + arithmetic)
     @inline
@@ -284,35 +298,36 @@ implement JitterConfig {
 
 /// Circuit breaker state machine
 ///
+
 /// ```
-///              ┌─────────────────────────────────────┐
-///              │            Closed                   │
-///              │  • All requests pass through        │
-///              │  • Count failures                   │
-///              └────────────┬────────────────────────┘
-///                           │
-///            failure_count >= failure_threshold
-///                           │
-///                           ▼
-///              ┌─────────────────────────────────────┐
-///              │             Open                    │
-///              │  • All requests rejected            │
-///              │  • Wait for timeout                 │
-///              └────────────┬────────────────────────┘
-///                           │
-///                 timeout elapsed
-///                           │
-///                           ▼
-///              ┌─────────────────────────────────────┐
-///              │          HalfOpen                   │
-///              │  • Limited requests allowed         │
-///              │  • Test if service recovered        │
-///              └────────┬───────────────────┬────────┘
-///                       │                   │
-///          success_count >= required     Any failure
-///                       │                   │
-///                       ▼                   ▼
-///               Back to Closed       Back to Open
+///  ┌─────────────────────────────────────┐
+///  │ Closed │
+///  │ • All requests pass through │
+///  │ • Count failures │
+///  └────────────┬────────────────────────┘
+///  │
+///  failure_count >= failure_threshold
+///  │
+///  ▼
+///  ┌─────────────────────────────────────┐
+///  │ Open │
+///  │ • All requests rejected │
+///  │ • Wait for timeout │
+///  └────────────┬────────────────────────┘
+///  │
+///  timeout elapsed
+///  │
+///  ▼
+///  ┌─────────────────────────────────────┐
+///  │ HalfOpen │
+///  │ • Limited requests allowed │
+///  │ • Test if service recovered │
+///  └────────┬───────────────────┬────────┘
+///  │ │
+///  success_count >= required Any failure
+///  │ │
+///  ▼ ▼
+///  Back to Closed Back to Open
 /// ```
 @repr(UInt8)
 public type RecoveryCircuitState is
@@ -373,6 +388,7 @@ public type ErrorPredicate is
 
 /// Top-level recovery strategy selection
 ///
+
 /// Determines how errors are handled at the task level.
 public type RuntimeRecoveryStrategy is
     /// No automatic recovery (propagate errors immediately)
@@ -462,6 +478,7 @@ implement RecoveryCircuitBreaker {
 
     /// Check if request is allowed
     ///
+
     /// ## Performance
     /// - ~10ns (atomic load + timestamp check)
     @inline
@@ -533,6 +550,7 @@ implement RecoveryCircuitBreaker {
 
     /// Transition to a new state.
     ///
+
     /// SOUNDNESS: previous revision did `if self.state() != new { store(new); ... }`
     /// — a load + check + store sequence that races concurrent transitions.
     /// Two threads observing the same `old_state` could both pass the
@@ -540,9 +558,10 @@ implement RecoveryCircuitBreaker {
     /// counter-reset side-effects (double-incrementing `state_changes`
     /// and racing the per-state counter resets against each other).
     ///
+
     /// The CAS-loop below ensures only one thread per logical
     /// transition wins the state-bit flip and proceeds to the
-    /// side-effects.  Concurrent contenders see their CAS fail and
+    /// side-effects. Concurrent contenders see their CAS fail and
     /// retry; if the state has already converged to `new_state`
     /// (e.g. a winning thread completed first) the retry short-
     /// circuits at the early-return.
@@ -552,7 +571,7 @@ implement RecoveryCircuitBreaker {
             let cur = self.state.load(MemoryOrdering.Acquire);
             if cur == new_byte {
                 // Already at target state (either initially or
-                // because another thread won the race).  Skip the
+                // because another thread won the race). Skip the
                 // side-effects to avoid double-counting.
                 return;
             }
@@ -631,6 +650,7 @@ public type CircuitBreakerError<E> is
 
 /// Execute with circuit breaker protection
 ///
+
 /// ## Performance
 /// - Overhead: ~20-30ns (state check + recording)
 public async fn execute_with_circuit_breaker<F, T, E>(
@@ -676,6 +696,7 @@ where E: Display
 
 /// Inline circuit breaker fitting in 64 bytes
 ///
+
 /// Used in RecoveryContext for zero-allocation fast path.
 @repr(C)
 @align(8)
@@ -821,10 +842,11 @@ implement InlineRetryPolicy {
 
 /// Check if error is transient (retriable).
 ///
+
 /// Pre-fix recognised only 4 substrings — `timeout`,
 /// `connection reset`, `temporarily unavailable`, `try
 /// again` — and missed the canonical Display forms
-/// produced by the stdlib's typed error surfaces.  In
+/// produced by the stdlib's typed error surfaces. In
 /// particular `IoErrorKind.TimedOut` formats as
 /// `"operation timed out"` (no `"timeout"` substring) and
 /// `IoErrorKind.WouldBlock` / `Interrupted` formatted as
@@ -832,23 +854,25 @@ implement InlineRetryPolicy {
 /// — both transient by definition but missed by the
 /// pre-fix predicate.
 ///
+
 /// Now recognises:
-///   * `timed out` / `timeout`              — TimedOut, ETIMEDOUT
-///   * `connection reset` / `aborted`       — ECONNRESET / ECONNABORTED
-///   * `connection refused`                 — ECONNREFUSED (transient
-///                                            in the listening-socket
-///                                            still-binding case)
-///   * `would block`                        — EAGAIN / EWOULDBLOCK / EINPROGRESS
-///   * `temporarily unavailable`            — libc Display for EAGAIN
-///   * `interrupted`                        — EINTR / Interrupted
-///   * `try again`                          — DnsError.TryAgain
-///   * `tryagain`                           — DnsError.TryAgain Debug
+///  * `timed out` / `timeout` — TimedOut, ETIMEDOUT
+///  * `connection reset` / `aborted` — ECONNRESET / ECONNABORTED
+///  * `connection refused` — ECONNREFUSED (transient
+///  in the listening-socket
+///  still-binding case)
+///  * `would block` — EAGAIN / EWOULDBLOCK / EINPROGRESS
+///  * `temporarily unavailable` — libc Display for EAGAIN
+///  * `interrupted` — EINTR / Interrupted
+///  * `try again` — DnsError.TryAgain
+///  * `tryagain` — DnsError.TryAgain Debug
 ///
+
 /// Permanent failures (NotFound, PermissionDenied,
 /// InvalidInput, AddrInUse, etc.) are NOT matched —
 /// retrying them is wasted work.
 public fn is_transient_error(error_msg: &Text) -> Bool {
-    // Lowercase once for case-insensitive matching.  The
+    // Lowercase once for case-insensitive matching. The
     // typed Display strings are lowercase but user-supplied
     // and OS-supplied messages may not be.
     let m = error_msg.to_lowercase();

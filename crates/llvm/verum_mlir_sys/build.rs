@@ -1,5 +1,6 @@
 //! Build script for verum_mlir_sys
 //!
+
 //! This script handles:
 //! 1. Using local LLVM installation from llvm/install/ (PRIMARY)
 //! 2. Optional override via VERUM_LLVM_DIR environment variable
@@ -167,8 +168,10 @@ fn verify_llvm_version(llvm_dir: &Path) {
 /// never reaches at runtime. Anything whose stem *contains* one of these
 /// substrings is excluded from the link line.
 ///
+
 /// Static archives the build deliberately skips when linking MLIR.
 ///
+
 /// **Empty by design.** `verum_mlir_sys` is a *complete* MLIR C-API
 /// binding: it exposes `mlirRegisterAll{Dialects,Extensions,Passes}` and
 /// includes `<mlir-c/RegisterEverything.h>` from the wrapper. The full
@@ -177,6 +180,7 @@ fn verify_llvm_version(llvm_dir: &Path) {
 /// `MLIRShape*`, `MLIRX86Vector*`, `MLIRArmNeon*`, `MLIRPDL*`,
 /// `MLIRIRDL`, `MLIRAsync*`), and dropping any archive breaks the link.
 ///
+
 /// Production callers in Verum's pipeline use `verum_mlir::utility::
 /// register_used_dialects` (declared in `crates/llvm/verum_mlir/src/
 /// utility.rs`) to register only the dialects the codegen targets —
@@ -187,6 +191,7 @@ fn verify_llvm_version(llvm_dir: &Path) {
 /// still references the full registration entry points and is exercised
 /// by tests and tooling.
 ///
+
 /// Shrinking the link footprint requires reducing the *binding's*
 /// surface (drop `RegisterEverything.h` from the wrapper, remove the
 /// `register_all_*` Rust functions, and migrate every test/tool caller

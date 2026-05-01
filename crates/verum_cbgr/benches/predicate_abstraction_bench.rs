@@ -1,5 +1,6 @@
 //! Performance benchmarks for predicate abstraction
 //!
+
 //! This benchmark suite measures:
 //! - Path explosion scenarios (measure reduction)
 //! - Abstraction overhead (time cost)

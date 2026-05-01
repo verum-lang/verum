@@ -1,11 +1,14 @@
 //! Stage Information Intrinsics (Tier 1 - Requires StageInfo)
 //!
+
 //! Provides compile-time information about N-level staged metaprogramming.
 //! All functions in this module require the `StageInfo` context since they
 //! access staged compilation state.
 //!
+
 //! ## Stage Query
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_current()` | `() -> Int` | Current compilation stage |
@@ -14,8 +17,10 @@
 //! | `stage_is_compile_time()` | `() -> Bool` | True if stage > 0 |
 //! | `stage_is_max_stage()` | `() -> Bool` | True if at max stage |
 //!
+
 //! ## Stage Validation
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_is_valid(n)` | `(Int) -> Bool` | Check if stage level valid |
@@ -23,22 +28,28 @@
 //! | `stage_quote_target()` | `() -> Int` | Target stage for quote |
 //! | `stage_can_generate(from, to)` | `(Int, Int) -> Bool` | Check generation validity |
 //!
+
 //! ## Stage-Aware Generation
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_unique_ident(prefix)` | `(Text) -> Text` | Generate unique identifier |
 //! | `stage_quote_depth()` | `() -> Int` | Current quote nesting depth |
 //!
+
 //! ## Function Stage Information
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_function_stage(name)` | `(Text) -> Int` | Get stage of named function |
 //! | `stage_functions_at(level)` | `(Int) -> List<Text>` | All functions at stage N |
 //!
+
 //! ## Configuration
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_is_enabled()` | `() -> Bool` | Staging enabled |
@@ -46,15 +57,19 @@
 //! | `stage_recursion_limit()` | `() -> Int` | Recursion limit |
 //! | `stage_memory_limit()` | `() -> Int` | Memory limit (bytes) |
 //!
+
 //! ## Tracing and Debugging
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_generation_chain()` | `() -> List<StageRecord>` | Generation provenance chain |
 //! | `stage_trace_marker(name, data)` | `(Text, Text) -> ()` | Add trace marker |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [StageInfo]` context.
 
 use verum_common::{List, OrderedMap, Text};
@@ -64,6 +79,7 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register stage info builtins with context requirements
 ///
+
 /// All stage info functions require StageInfo context since they access
 /// staged compilation state.
 pub fn register_builtins(map: &mut BuiltinRegistry) {
@@ -303,6 +319,7 @@ fn meta_stage_is_valid(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<
 
 /// Check if a stage transition from->to is valid
 ///
+
 /// A transition is valid when to == from - 1 (quote lowers by exactly 1)
 /// and both stages are within valid range.
 fn meta_stage_is_valid_transition(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
@@ -329,6 +346,7 @@ fn meta_stage_is_valid_transition(ctx: &mut MetaContext, args: List<ConstValue>)
 
 /// Get the target stage for a quote expression
 ///
+
 /// Returns current_stage - 1, or 0 if already at stage 0.
 fn meta_stage_quote_target(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     let target = if ctx.current_stage > 0 {
@@ -341,6 +359,7 @@ fn meta_stage_quote_target(ctx: &mut MetaContext, _args: List<ConstValue>) -> Re
 
 /// Check if current stage can generate code for target stage
 ///
+
 /// Returns true if from_stage > to_stage and both are valid.
 fn meta_stage_can_generate(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
@@ -399,6 +418,7 @@ fn meta_stage_quote_depth(ctx: &mut MetaContext, _args: List<ConstValue>) -> Res
 
 /// Get the declared stage of a function by name
 ///
+
 /// Returns the stage level, or -1 if the function is not found.
 fn meta_stage_function_stage(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
@@ -476,6 +496,7 @@ fn meta_stage_memory_limit(ctx: &mut MetaContext, _args: List<ConstValue>) -> Re
 
 /// Get the generation chain leading to current execution
 ///
+
 /// Returns a list of maps, each with keys: "stage", "function", "span".
 fn meta_stage_generation_chain(ctx: &mut MetaContext, _args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     let chain: Vec<ConstValue> = ctx
@@ -500,6 +521,7 @@ fn meta_stage_generation_chain(ctx: &mut MetaContext, _args: List<ConstValue>) -
 
 /// Add a trace marker for debugging staged compilation
 ///
+
 /// Trace markers are collected by the compiler and can be displayed
 /// with the `--trace-stages` CLI flag.
 fn meta_stage_trace_marker(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {

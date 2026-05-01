@@ -12,7 +12,7 @@ mount base.{Bool};
 public type RegistrationRequest is {
     /// The connection that is currently blocked (waiting for a lock).
     blocked: Int64,
-    /// The connection that holds the conflicting lock.  0 ⇒
+    /// The connection that holds the conflicting lock. 0 ⇒
     /// cancellation (sqlite3_unlock_notify with xNotify == NULL).
     blocker: Int64,
     /// Opaque argument the caller supplies; forwarded verbatim to

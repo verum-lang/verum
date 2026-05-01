@@ -3,47 +3,58 @@
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
 // Spec: Day "On closed categories of functors" (1970),
-//       Loregian "This is the (co)end, my only (co)friend",
-//       verum-ext-2.md §3.5 (cognitive extension via Day convolution)
+//  Loregian "This is the (co)end, my only (co)friend",
+//  verum-ext-2.md §3.5 (cognitive extension via Day convolution)
 //
+
 // **Day convolution** gives the presheaf category PSh(V) = [V^op, Set]
 // a symmetric monoidal structure when the base category V is itself a
-// small symmetric monoidal category.  The tensor product of two
+// small symmetric monoidal category. The tensor product of two
 // presheaves F, G : V^op → Set is the coend
 //
-//     (F ⊗_Day G)(c) = ∫^{a,b : V} V(a ⊗ b, c) × F(a) × G(b)
+
+//  (F ⊗_Day G)(c) = ∫^{a,b : V} V(a ⊗ b, c) × F(a) × G(b)
 //
+
 // Concretely, this is computed as the set of *factorization triples*
 //
-//     { (a, b, mor : a ⊗ b → c, fa : F(a), gb : G(b)) } / ~
+
+//  { (a, b, mor : a ⊗ b → c, fa : F(a), gb : G(b)) } / ~
 //
+
 // where ~ identifies two triples when they are related by re-indexing
 // along a morphism in V (the coend coequalization).
 //
-// This turns [V^op, Set] into a symmetric monoidal category.  The
+
+// This turns [V^op, Set] into a symmetric monoidal category. The
 // monoidal unit is the Yoneda presheaf y(e) = V(–, e) where e is the
 // monoidal unit of V.
 //
+
 // ## Cognitive extension
 //
+
 // A canonical downstream application: a cognitive
 // architecture that fuses two symmetric monoidal channels
 // — a biological information channel H_bio (sensory /
 // hippocampal memory) and a mechanical channel H_M
 // (abstract mathematical structure) — via Day convolution:
 //
-//     H_ext = H_bio ⊗_Day H_M
+
+//  H_ext = H_bio ⊗_Day H_M
 //
+
 // The coend formula is the formal definition: at each cognitive
 // "object" c (a conceptual type / attention context), the fused
 // representation is the colimit over all factorings a ⊗ b → c of the
 // paired biological–mechanical states F(a) × G(b), weighted by the
 // structural morphisms of the base category.
 //
+
 // See also:
-//   - core/math/category.vr            (MonoidalCategory, SymmetricMonoidalCategory)
-//   - core/math/infinity_category.vr   (InfinityCategory, InfinityFunctor)
-//   - core/math/kan_extension.vr       (coend as a Kan extension)
+//  - core/math/category.vr (MonoidalCategory, SymmetricMonoidalCategory)
+//  - core/math/infinity_category.vr (InfinityCategory, InfinityFunctor)
+//  - core/math/kan_extension.vr (coend as a Kan extension)
 // =============================================================================
 
 module core.math.day_convolution;
@@ -66,18 +77,21 @@ mount core.math.infinity_category.{
 // 1. SymmetricMonoidalCategory protocol (full coherence data)
 // =============================================================================
 //
+
 // `core.math.category` already exports the base `SymmetricMonoidalCategory<C>`
 // with tensor, unit, associator, left/right unitors, braiding, pentagon,
-// triangle and hexagon.  Here we introduce a *refined* version that makes
+// triangle and hexagon. Here we introduce a *refined* version that makes
 // all coherence axioms explicit as `@verify(formal)` obligations and exposes
 // the unit object as a callable accessor, so that the Day convolution unit
 // (Yoneda at e) can be stated precisely.
 //
+
 // The name `SmcFull` ("full SMC data") avoids name collision with the
 // 1-categorical version already in scope.
 
 /// Full symmetric monoidal category with explicit coherence obligations.
 ///
+
 /// Extends `SymmetricMonoidalCategory<C>` from `core.math.category` and
 /// adds verified versions of all five Mac Lane coherence diagrams.
 public type SmcFull<C: Category<Int, Int>> is protocol
@@ -117,25 +131,25 @@ public type SmcFull<C: Category<Int, Int>> is protocol
     // --- coherence axioms --------------------------------------------------
 
     /// Pentagon coherence:
-    ///   α_{a⊗b,c,d} . α_{a,b,c⊗d}
-    ///   = (id_a ⊗ α_{b,c,d}) . α_{a,b⊗c,d} . (α_{a,b,c} ⊗ id_d)
+    ///  α_{a⊗b,c,d} . α_{a,b,c⊗d}
+    ///  = (id_a ⊗ α_{b,c,d}) . α_{a,b⊗c,d} . (α_{a,b,c} ⊗ id_d)
     @verify(formal)
     fn pentagon_coherence(a: &Int, b: &Int, c: &Int, d: &Int) -> Bool;
 
     /// Triangle coherence:
-    ///   (id_a ⊗ λ_b) . α_{a,e,b} = ρ_a ⊗ id_b
+    ///  (id_a ⊗ λ_b) . α_{a,e,b} = ρ_a ⊗ id_b
     @verify(formal)
     fn triangle_coherence(a: &Int, b: &Int) -> Bool;
 
     /// Hexagon coherence (first):
-    ///   α_{b,c,a} . β_{a,b⊗c} . α_{a,b,c}
-    ///   = (id_b ⊗ β_{a,c}) . α_{b,a,c} . (β_{a,b} ⊗ id_c)
+    ///  α_{b,c,a} . β_{a,b⊗c} . α_{a,b,c}
+    ///  = (id_b ⊗ β_{a,c}) . α_{b,a,c} . (β_{a,b} ⊗ id_c)
     @verify(formal)
     fn hexagon_coherence_1(a: &Int, b: &Int, c: &Int) -> Bool;
 
     /// Hexagon coherence (second):
-    ///   α⁻¹_{c,a,b} . β_{a⊗b,c} . α⁻¹_{a,b,c}
-    ///   = (β_{a,c} ⊗ id_b) . α⁻¹_{a,c,b} . (id_a ⊗ β_{b,c})
+    ///  α⁻¹_{c,a,b} . β_{a⊗b,c} . α⁻¹_{a,b,c}
+    ///  = (β_{a,c} ⊗ id_b) . α⁻¹_{a,c,b} . (id_a ⊗ β_{b,c})
     @verify(formal)
     fn hexagon_coherence_2(a: &Int, b: &Int, c: &Int) -> Bool;
 
@@ -148,19 +162,23 @@ public type SmcFull<C: Category<Int, Int>> is protocol
 // 2. Presheaf type — a functor V^op → Set
 // =============================================================================
 //
+
 // A presheaf F on V assigns:
-//   * To each object c : V    a set F(c)       (the "sections at c")
-//   * To each morphism f : a → b in V  a restriction map F(f) : F(b) → F(a)
-//     (contravariant: f goes a→b, so restriction goes F(b)→F(a))
+//  * To each object c : V a set F(c) (the "sections at c")
+//  * To each morphism f : a → b in V a restriction map F(f) : F(b) → F(a)
+//  (contravariant: f goes a→b, so restriction goes F(b)→F(a))
 //
+
 // Functoriality: F(id) = id and F(g ∘ f) = F(f) ∘ F(g).
 //
+
 // Here we represent sections as handles (Int), and restriction as a
 // function from a morphism handle and a section handle to a new section
-// handle.  Concrete presheaves are given by implementing `PresheafImpl`.
+// handle. Concrete presheaves are given by implementing `PresheafImpl`.
 
 /// A presheaf on V: a contravariant functor V^op → Set.
 ///
+
 /// `sections(c)` is the set (represented as handle) of sections over c.
 /// `restrict(f, s)` pulls back a section s over target(f) to one over source(f).
 public type Presheaf<V: SmcFull<Int>> is {
@@ -170,11 +188,11 @@ public type Presheaf<V: SmcFull<Int>> is {
     /// Restriction map: given f : a → b and s ∈ F(b), produce F(f)(s) ∈ F(a).
     restrict: fn(f: Int, s: Int) -> Int,
 
-    /// Functoriality: F(id_c)(s) = s  (identity preservation).
+    /// Functoriality: F(id_c)(s) = s (identity preservation).
     @verify(formal)
     functoriality_id: fn(c: Int, s: Int) -> Bool,
 
-    /// Functoriality: F(g ∘ f)(s) = F(f)(F(g)(s))  (composition preservation).
+    /// Functoriality: F(g ∘ f)(s) = F(f)(F(g)(s)) (composition preservation).
     @verify(formal)
     functoriality_comp: fn(f: Int, g: Int, s: Int) -> Bool,
 };
@@ -183,15 +201,20 @@ public type Presheaf<V: SmcFull<Int>> is {
 // 3. Factorization triple — witness for the coend formula
 // =============================================================================
 //
+
 // A *factorization triple* for c ∈ V under presheaves F and G is a tuple
 //
-//     (a : V, b : V, mor : a ⊗ b → c, fa : F(a), gb : G(b))
+
+//  (a : V, b : V, mor : a ⊗ b → c, fa : F(a), gb : G(b))
 //
+
 // The coend (F ⊗_Day G)(c) is the *quotient* of the set of all such
 // triples by the coend coequalization relation:
 //
-//   (a, b, (f ⊗ g) ; mor, fa, gb)  ~  (a', b', mor', F(f)(fa), G(g)(gb))
+
+//  (a, b, (f ⊗ g) ; mor, fa, gb) ~ (a', b', mor', F(f)(fa), G(g)(gb))
 //
+
 // In a finite / computable category we enumerate all factorizations.
 
 /// A single factorization triple witnessing that a ⊗ b maps into c.
@@ -200,7 +223,7 @@ public type FactorizationTriple is {
     obj_a: Int,
     /// The second factor object b.
     obj_b: Int,
-    /// Morphism handle for  mor : a ⊗ b → c.
+    /// Morphism handle for mor : a ⊗ b → c.
     mor: Int,
     /// Section fa ∈ F(a), encoded as a handle.
     fa: Int,
@@ -227,13 +250,16 @@ public fn factorization(
 // 4. Day Convolution — the coend
 // =============================================================================
 //
+
 // (F ⊗_Day G)(c) = ∫^{a,b} V(a ⊗ b, c) × F(a) × G(b)
 //
+
 // Computed on finite V as: collect all factorization triples (a, b, mor)
 // and pair them with sections fa : F(a) and gb : G(b).
 //
+
 // The result type is a list of `FactorizationTriple`; the actual coend
-// value is this list *modulo* the coequalization relation.  For a
+// value is this list *modulo* the coequalization relation. For a
 // concrete implementation, the caller can further quotient or use the
 // list directly as a free colimit presentation.
 
@@ -262,20 +288,24 @@ public fn day_conv<V: SmcFull<Int>>(
 
 /// Compute (F ⊗_Day G)(c) on a *finite* category V.
 ///
+
 /// Returns the list of all factorization triples
 ///
-///   { (a, b, mor : a ⊗ b → c, fa ∈ F(a), gb ∈ G(b)) }
+
+///  { (a, b, mor : a ⊗ b → c, fa ∈ F(a), gb ∈ G(b)) }
 ///
+
 /// This is a free presentation of the coend; the coend proper is the
 /// quotient by the coequalization relation (which collapses triples
 /// related by re-indexing morphisms in V).
 ///
+
 /// Parameters:
-///   conv   — the Day convolution data (base category + F + G)
-///   cat    — the concrete SmcFull instance (needed for objects/hom)
-///   c      — the target object at which to evaluate
-///   sections_f — a function mapping each object a to a list of F(a) handles
-///   sections_g — a function mapping each object b to a list of G(b) handles
+///  conv — the Day convolution data (base category + F + G)
+///  cat — the concrete SmcFull instance (needed for objects/hom)
+///  c — the target object at which to evaluate
+///  sections_f — a function mapping each object a to a list of F(a) handles
+///  sections_g — a function mapping each object b to a list of G(b) handles
 public fn convolve<V: SmcFull<Int>>(
     conv: &DayConvolution<V>,
     cat: &V,
@@ -313,20 +343,26 @@ public fn convolve<V: SmcFull<Int>>(
 // 5. Yoneda presheaf — monoidal unit of Day convolution
 // =============================================================================
 //
+
 // The monoidal unit for the Day convolution tensor product on [V^op, Set]
 // is the *Yoneda presheaf* at the monoidal unit e of V:
 //
-//     y(e)(c) = V(c, e)          (the hom-set from c to e)
+
+//  y(e)(c) = V(c, e) (the hom-set from c to e)
 //
+
 // Restriction along f : a → b acts by precomposition:
 //
-//     y(e).restrict(f, mor) = mor ∘ f
+
+//  y(e).restrict(f, mor) = mor ∘ f
 //
+
 // Here morphism composition is encoded at the handle level.
 
 /// The Yoneda presheaf y(e) : V^op → Set.
 ///
-/// y(e)(c) = V(c, e)  — representable presheaf at the unit object e.
+
+/// y(e)(c) = V(c, e) — representable presheaf at the unit object e.
 public type YonedaPresheaf<V: SmcFull<Int>> is {
     /// The representing object (= monoidal unit e of V).
     unit: Int,
@@ -344,6 +380,7 @@ public fn yoneda_unit<V: SmcFull<Int>>(cat: &V) -> YonedaPresheaf<V> {
 
 /// Evaluate y(e) at object c: returns V(c, e) as a handle.
 ///
+
 /// In a concrete implementation this would return the actual hom-set;
 /// here we return an encoding (unit - c) as a distinguished handle.
 public fn yoneda_eval<V: SmcFull<Int>>(
@@ -360,6 +397,7 @@ public fn yoneda_eval<V: SmcFull<Int>>(
 
 /// Swap the two presheaves in a Day convolution (braiding symmetry).
 ///
+
 /// F ⊗_Day G ≅ G ⊗_Day F, because V carries a braiding β_{a,b} : a⊗b → b⊗a.
 /// The isomorphism sends a factorization triple (a, b, mor, fa, gb) to
 /// (b, a, β_{a,b} ; mor, gb, fa).
@@ -375,6 +413,7 @@ public fn day_conv_swap<V: SmcFull<Int>>(
 
 /// Swap a single factorization triple under the braiding.
 ///
+
 /// Sends (a, b, mor, fa, gb) to (b, a, beta ; mor, gb, fa)
 /// where beta = V.braiding(a, b).
 public fn triple_swap<V: SmcFull<Int>>(
@@ -385,7 +424,7 @@ public fn triple_swap<V: SmcFull<Int>>(
     FactorizationTriple {
         obj_a: t.obj_b,
         obj_b: t.obj_a,
-        // new morphism = β_{a,b} ; original_mor  (composition in V)
+        // new morphism = β_{a,b} ; original_mor (composition in V)
         mor:   beta + t.mor,   // handle-level encoding of composition
         fa:    t.gb,
         gb:    t.fa,
@@ -396,14 +435,17 @@ public fn triple_swap<V: SmcFull<Int>>(
 // 7. CognitiveExtension — H_bio ⊗_Day H_M
 // =============================================================================
 //
+
 // The **cognitive extension** fuses a biological information
 // channel H_bio (sensory / hippocampal memory) with a
 // mechanical / mathematical channel H_M via Day convolution
 // over a shared base category C_cog of cognitive objects
 // (conceptual types / attention contexts):
 //
-//     H_ext = H_bio ⊗_Day H_M : C_cog^op → Set
+
+//  H_ext = H_bio ⊗_Day H_M : C_cog^op → Set
 //
+
 // At each conceptual context c, H_ext(c) is the set of factorization
 // triples (a, b, mor : a ⊗ b → c, bio_a, mec_b) encoding all ways that
 // biological state bio_a and mechanical state mec_b can be "fused" via
@@ -438,15 +480,17 @@ public fn cognitive_extension<V: SmcFull<Int>>(
 
 /// Evaluate the cognitive extension H_ext at conceptual context c.
 ///
+
 /// Returns the list of factorization triples encoding all fused
 /// (biological, mechanical) pairs that factor through c.
 ///
+
 /// Parameters:
-///   ext        — the cognitive extension record
-///   cat        — the concrete SmcFull instance for C_cog
-///   c          — the target cognitive object
-///   bio_sects  — sections of H_bio at each object (fn object → List<Int>)
-///   mec_sects  — sections of H_M at each object  (fn object → List<Int>)
+///  ext — the cognitive extension record
+///  cat — the concrete SmcFull instance for C_cog
+///  c — the target cognitive object
+///  bio_sects — sections of H_bio at each object (fn object → List<Int>)
+///  mec_sects — sections of H_M at each object (fn object → List<Int>)
 public fn eval_cognitive<V: SmcFull<Int>>(
     ext: &CognitiveExtension<V>,
     cat: &V,
@@ -461,8 +505,9 @@ public fn eval_cognitive<V: SmcFull<Int>>(
 // 8. Formal theorems
 // =============================================================================
 //
+
 // The theorems below capture the key structural properties of Day
-// convolution and the cognitive extension.  All obligations are marked
+// convolution and the cognitive extension. All obligations are marked
 // @verify(formal); concrete proofs reduce to the coherence laws of the
 // underlying symmetric monoidal category.
 
@@ -472,10 +517,12 @@ public fn eval_cognitive<V: SmcFull<Int>>(
 
 /// Day convolution is symmetric: F ⊗_Day G ≅ G ⊗_Day F.
 ///
+
 /// The isomorphism is given by the braiding β of V via `triple_swap`:
 /// every factorization triple for F ⊗_Day G maps bijectively to a triple
 /// for G ⊗_Day F.
 ///
+
 /// Proof sketch: β_{a,b} is an isomorphism (by braiding_involution),
 /// so the induced map on triples is a bijection at each c.
 theorem day_conv_symmetric<V: SmcFull<Int>>(
@@ -492,12 +539,15 @@ theorem day_conv_symmetric<V: SmcFull<Int>>(
 
 /// Day convolution is associative: (F ⊗_Day G) ⊗_Day H ≅ F ⊗_Day (G ⊗_Day H).
 ///
+
 /// The isomorphism is induced by the associator α of V:
 ///
-///   α_{a,b,c} : (a ⊗ b) ⊗ c → a ⊗ (b ⊗ c)
+
+///  α_{a,b,c} : (a ⊗ b) ⊗ c → a ⊗ (b ⊗ c)
 ///
+
 /// sends a factorization triple ((ab, c, mor, fab_h, hc)) to
-/// (a, (bc, α ; mor, fa, gbc)).  Formal proof reduces to the pentagon
+/// (a, (bc, α ; mor, fa, gbc)). Formal proof reduces to the pentagon
 /// coherence axiom of V.
 theorem day_conv_associative<V: SmcFull<Int>>(
     base: Int,
@@ -515,13 +565,17 @@ theorem day_conv_associative<V: SmcFull<Int>>(
 
 /// The Yoneda embedding y : V → [V^op, Set] is a strong monoidal functor:
 ///
-///     y(a ⊗ b) ≅ y(a) ⊗_Day y(b)
+
+///  y(a ⊗ b) ≅ y(a) ⊗_Day y(b)
 ///
+
 /// Proof: By the Yoneda lemma and the coend formula, the natural
 /// isomorphism at each c ∈ V is
 ///
-///   V(c, a ⊗ b)  ≅  ∫^{x,y} V(x ⊗ y, c) × V(x, a) × V(y, b)
+
+///  V(c, a ⊗ b) ≅ ∫^{x,y} V(x ⊗ y, c) × V(x, a) × V(y, b)
 ///
+
 /// which holds by the enriched Yoneda lemma for SMCs.
 theorem yoneda_monoidal<V: SmcFull<Int>>(
     cat: V, a: Int, b: Int, c: Int,
@@ -537,6 +591,7 @@ theorem yoneda_monoidal<V: SmcFull<Int>>(
 /// The Day convolution tensor product on [V^op, Set] satisfies the
 /// pentagon identity, inherited from the pentagon of V.
 ///
+
 /// Proof: Every pentagon diagram for (F ⊗_Day G) ⊗_Day (H ⊗_Day K) ⊗_Day L
 /// reduces, via the coend manipulation ("Fubini for coends"), to the
 /// pentagon of V applied to the indexing objects a, b, c, d.
@@ -558,6 +613,7 @@ theorem day_conv_pentagon<V: SmcFull<Int>>(
 /// The Day convolution tensor product on [V^op, Set] satisfies both
 /// hexagon identities, inherited from the hexagons of V.
 ///
+
 /// Proof: The braiding of Day convolution (triple_swap) is natural and
 /// satisfies the hexagons because the underlying morphism-level operations
 /// use β of V, which satisfies hexagon_coherence_1/2.
@@ -579,6 +635,7 @@ theorem day_conv_hexagon<V: SmcFull<Int>>(
 /// The cognitive extension H_bio ⊗_Day H_M is symmetric in H_bio and H_M:
 /// fusing bio→math gives a presheaf isomorphic to math→bio.
 ///
+
 /// Proof: Immediate from day_conv_symmetric via the braiding of C_cog.
 theorem cognitive_extension_symmetric<V: SmcFull<Int>>(
     h_bio: Presheaf<V>,

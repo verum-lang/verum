@@ -1,22 +1,24 @@
 //! Stdlib quality / audit reporting.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 18). Houses the
 //! diagnostic introspection surface that quality-gate / audit
 //! tooling consumes. Five methods:
 //!
-//!   * `count_stdlib_type_errors` — header-only registration
-//!     errors (type names + function signatures + protocols +
-//!     impl blocks). Cheap; suppressed during normal compilation
-//!     but exposed here for `verum audit` and the
-//!     `core_stdlib_validation_test` ratchet.
-//!   * `count_stdlib_body_errors` — full-body type checking on
-//!     all core/ modules; the comprehensive variant that
-//!     exposes ~950 errors that were previously hidden by the
-//!     skip-stdlib-bodies gate.
-//!   * `get_stdlib_registry` / `get_stdlib_static_lib` /
-//!     `get_stdlib_bitcode` — read-only accessors for the
-//!     phase0-prepared artefacts (used by AOT linking + JIT
-//!     dispatch).
+
+//!  * `count_stdlib_type_errors` — header-only registration
+//!  errors (type names + function signatures + protocols +
+//!  impl blocks). Cheap; suppressed during normal compilation
+//!  but exposed here for `verum audit` and the
+//!  `core_stdlib_validation_test` ratchet.
+//!  * `count_stdlib_body_errors` — full-body type checking on
+//!  all core/ modules; the comprehensive variant that
+//!  exposes ~950 errors that were previously hidden by the
+//!  skip-stdlib-bodies gate.
+//!  * `get_stdlib_registry` / `get_stdlib_static_lib` /
+//!  `get_stdlib_bitcode` — read-only accessors for the
+//!  phase0-prepared artefacts (used by AOT linking + JIT
+//!  dispatch).
 
 use std::path::PathBuf;
 
@@ -33,10 +35,12 @@ use super::CompilationPipeline;
 impl<'s> CompilationPipeline<'s> {
     /// Count internal stdlib type registration errors.
     ///
+
     /// These are errors that occur when registering stdlib types, functions,
     /// protocols, and impl blocks into the type checker. They are suppressed
     /// during normal compilation but tracked for quality metrics.
     ///
+
     /// Returns (type_errors, func_errors, proto_errors, impl_errors, details)
     pub fn count_stdlib_type_errors(&mut self) -> (usize, usize, usize, usize, Vec<String>) {
         // Load stdlib modules if not yet loaded
@@ -135,10 +139,12 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Count all stdlib errors including full body type checking.
     ///
+
     /// This runs the full type checker (including function bodies, impl blocks, etc.)
     /// on all core/ modules to identify all type errors. Returns a map of
     /// error category -> count, plus detailed error messages.
     ///
+
     /// Returns (total_errors, category_counts, details)
     pub fn count_stdlib_body_errors(&mut self) -> (usize, std::collections::HashMap<String, usize>, Vec<String>) {
         // Load stdlib modules if not yet loaded
@@ -326,7 +332,7 @@ impl<'s> CompilationPipeline<'s> {
                 }
                 // Critical fix mirroring `verum_vbc::should_compile_item`:
                 // the parser puts `@cfg` on `Function.attributes` (inner
-                // decl), not on `Item.attributes`.  The outer-only check
+                // decl), not on `Item.attributes`. The outer-only check
                 // above silently bypasses every function-level @cfg gate.
                 // Walk the inner FunctionDecl's attributes too.
                 if let verum_ast::ItemKind::Function(func) = &item.kind {

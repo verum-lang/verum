@@ -8,11 +8,12 @@
 // `sqlite3_bind_parameter_index`, `sqlite3_bind_parameter_name`,
 // `sqlite3_clear_bindings`, `sqlite3_reset`.
 //
+
 // Submodules:
-//   * `param`    — TypedParam sum (Int64/Real/Text/Blob/Null/ZeroBlob)
-//   * `index`    — parameter resolution: `?` / `?N` / `:name` / `$name` / `@name`
-//   * `bindset`  — per-statement BindSet collection + resize/clear/reset
-//   * `error`    — BindError taxonomy
+//  * `param` — TypedParam sum (Int64/Real/Text/Blob/Null/ZeroBlob)
+//  * `index` — parameter resolution: `?` / `?N` / `:name` / `$name` / `@name`
+//  * `bindset` — per-statement BindSet collection + resize/clear/reset
+//  * `error` — BindError taxonomy
 // =============================================================================
 
 module core.database.sqlite.native.bind;

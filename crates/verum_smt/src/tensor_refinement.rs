@@ -1,25 +1,31 @@
 //! Tensor Refinement Type Integration
 //!
+
 //! This module integrates tensor shape verification with Verum's refinement type system,
 //! allowing tensor constraints to be verified alongside other refinement predicates.
 //!
+
 //! ## Features
 //!
+
 //! - Refinement types for tensor shapes: `Tensor<f32, [M, N]>{M > 0 && N > 0}`
 //! - Integration with existing refinement verification pipeline
 //! - Automatic shape constraint extraction from tensor operations
 //! - Compositional verification of tensor programs
 //!
+
 //! ## Examples
 //!
+
 //! ```verum
 //! type PositiveTensor<T, Shape> = Tensor<T, Shape>{
-//!     forall i in 0..len(Shape): Shape[i] > 0
+//!  forall i in 0..len(Shape): Shape[i] > 0
 //! }
 //!
+
 //! fn safe_matmul<M: meta usize, N: meta usize, K: meta usize>(
-//!     a: &PositiveTensor<f32, [M, K]>,
-//!     b: &PositiveTensor<f32, [K, N]>
+//!  a: &PositiveTensor<f32, [M, K]>,
+//!  b: &PositiveTensor<f32, [K, N]>
 //! ) -> PositiveTensor<f32, [M, N]>
 //! ```
 
@@ -31,6 +37,7 @@ use verum_common::{Heap, List, Text};
 
 /// Tensor refinement verifier
 ///
+
 /// Integrates tensor shape verification with refinement type checking,
 /// providing a unified interface for verifying both value constraints
 /// and shape constraints on tensors.
@@ -55,12 +62,15 @@ impl TensorRefinementVerifier {
 
     /// Verify a tensor type with refinement constraints
     ///
+
     /// Checks both:
     /// 1. Shape constraints (dimensions must be compatible)
     /// 2. Value constraints (refinement predicates)
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// type SquareMatrix<T, N> = Tensor<T, [N, N]>{N > 0}
     /// ```
@@ -123,11 +133,13 @@ impl TensorRefinementVerifier {
 
     /// Verify tensor operation constraints
     ///
+
     /// Given an operation (matmul, elementwise, etc.) and operand types,
     /// verifies that:
     /// 1. Shapes are compatible
     /// 2. Refinement predicates are preserved
     ///
+
     /// Returns the result type with propagated constraints.
     pub fn verify_tensor_operation(
         &mut self,
@@ -281,21 +293,22 @@ impl TensorRefinementVerifier {
         // SAFETY: The cast `&*(&*self.context as *const Context)` is
         // lifetime laundering — it converts `&'self Context` (borrow
         // tied to self) into `&'context Context` where 'context is
-        // any lifetime up to 'static.  This is sound here because:
-        //   1. `self.context` is a `Heap<Context>` (owned heap
-        //      allocation) — its address is stable for the lifetime
-        //      of `self`.
-        //   2. The resulting `context_ref` is consumed entirely
-        //      within this function: `Translator::new(context_ref)`
-        //      then `translate_tensor_type` are called and the
-        //      function returns.  No path stores `context_ref`
-        //      outside this stack frame.
-        //   3. `self` is borrowed for the entire function call, so
-        //      `self.context` cannot be dropped during the body.
+        // any lifetime up to 'static. This is sound here because:
+        //  1. `self.context` is a `Heap<Context>` (owned heap
+        //  allocation) — its address is stable for the lifetime
+        //  of `self`.
+        //  2. The resulting `context_ref` is consumed entirely
+        //  within this function: `Translator::new(context_ref)`
+        //  then `translate_tensor_type` are called and the
+        //  function returns. No path stores `context_ref`
+        //  outside this stack frame.
+        //  3. `self` is borrowed for the entire function call, so
+        //  `self.context` cannot be dropped during the body.
         //
+
         // The Translator constructor takes `&'a Context` for some
         // lifetime parameter that we can't easily express through
-        // self's borrow — hence the explicit cast.  A future
+        // self's borrow — hence the explicit cast. A future
         // refactor that eliminates the lifetime mismatch (e.g.,
         // by giving Translator an owning Heap<Context> handle)
         // would let us drop the unsafe entirely.
@@ -339,9 +352,11 @@ impl TensorRefinementVerifier {
 
     /// Get the target shape for a reshape operation
     ///
+
     /// The target shape should be stored in the operation metadata or
     /// extracted from the operation's type annotation.
     ///
+
     /// Note: In a full implementation, this would be called with operation
     /// metadata containing the target shape. For now, returns an error.
     fn get_reshape_target_shape(&self) -> Result<List<Expr>, TensorRefinementError> {
@@ -350,12 +365,14 @@ impl TensorRefinementVerifier {
         // 2. Return type annotation
         // 3. Explicit shape argument
         //
+
         // For now, return an error indicating the shape must be provided
         Err(TensorRefinementError::ReshapeTargetShapeRequired)
     }
 
     /// Verify that reshape preserves total element count
     ///
+
     /// Checks that prod(old_shape) == prod(new_shape) using SMT solving.
     fn verify_reshape_compatibility(
         &self,
@@ -404,6 +421,7 @@ impl TensorRefinementVerifier {
 
     /// Compute the product of shape dimensions as Z3 Int
     ///
+
     /// For now, this returns a constant value by extracting literal dimensions.
     /// Full implementation would handle symbolic dimensions.
     fn compute_shape_product(

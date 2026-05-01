@@ -1,25 +1,32 @@
 //! Event-based parser with comprehensive error recovery.
 //!
+
 //! This module provides the RecoveringEventParser which extends the basic
 //! EventBasedParser with industrial-grade error recovery capabilities:
 //!
+
 //! - Recovery sets for each grammar rule
 //! - ERROR node creation for unparseable content
 //! - Structured error reporting with context
 //! - Recovery statistics for quality metrics
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_parser::recovery_parser::RecoveringEventParser;
 //! use verum_ast::FileId;
 //!
+
 //! let source = "fn foo( { }"; // Missing ')'
 //! let file_id = FileId::new(0);
 //!
+
 //! let mut parser = RecoveringEventParser::new();
 //! let result = parser.parse(source, file_id);
 //!
+
 //! // Parse succeeded with recovery
 //! assert!(!result.errors.is_empty());
 //! // ERROR node was created for the malformed section

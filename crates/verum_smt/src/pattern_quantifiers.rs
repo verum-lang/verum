@@ -1,44 +1,55 @@
 //! Quantifier Instantiation Patterns for Dependent Type Verification
 //!
+
 //! Refinement types (`T{P}`) generate universally quantified SMT formulas for
 //! subtyping checks. Dependent types (Pi/Sigma) add nested quantifiers. Pattern-based
 //! instantiation guides Z3's E-matching to avoid exponential blowup on these formulas.
 //!
+
 //! This module provides pattern-based quantifier instantiation to improve
 //! Z3 performance on dependent types. Without patterns, Z3 uses heuristic
 //! quantifier instantiation which can be slow or incomplete.
 //!
+
 //! ## Pattern Benefits
 //!
+
 //! - **20-30% speedup** on dependent type verification
 //! - **Better instantiation control** - guide Z3 to relevant instances
 //! - **Reduced search space** - avoid irrelevant quantifier instantiations
 //! - **Improved completeness** - help Z3 find proofs faster
 //!
+
 //! ## Pattern Strategy
 //!
+
 //! We generate patterns for common Verum type operations:
 //! - List operations: list_len, list_get, list_contains
 //! - Map operations: map_get, map_contains_key
 //! - Set operations: set_member
 //! - Refinement predicates: type-specific constraints
 //!
+
 //! ## Usage
 //!
+
 //! ```rust,ignore
 //! use verum_smt::pattern_quantifiers::{PatternGenerator, PatternConfig};
 //!
+
 //! let config = PatternConfig::default();
 //! let generator = PatternGenerator::new(config);
 //!
+
 //! // Generate patterns for a universal quantifier
 //! let patterns = generator.create_list_patterns(&list_var);
 //!
+
 //! // Create quantified formula with patterns
 //! let quantified = generator.mk_quantified_property(
-//!     &bound_vars,
-//!     &body,
-//!     &patterns,
+//!  &bound_vars,
+//!  &body,
+//!  &patterns,
 //! );
 //! ```
 
@@ -478,6 +489,7 @@ impl PatternGenerator {
         // generates anonymous quantifier IDs by default, so the
         // operator-facing knob has no effect today.
         //
+
         // Surface a debug trace when either prefix is set to a
         // non-default value so embedders writing
         // `[smt.patterns] quantifier_id_prefix = "myproject_q"`
@@ -509,14 +521,18 @@ impl PatternGenerator {
 
     /// Generate patterns for a quantified formula
     ///
+
     /// # Arguments
     ///
+
     /// * `bound_vars` - Variables bound by the quantifier
     /// * `body` - The quantifier body (formula)
     /// * `context` - Additional context about the formula
     ///
+
     /// # Returns
     ///
+
     /// List of patterns to guide quantifier instantiation
     pub fn generate_patterns(
         &mut self,
@@ -601,6 +617,7 @@ impl PatternGenerator {
 
     /// Create patterns for List operations
     ///
+
     /// Generates patterns for:
     /// - `list.len()` - list length
     /// - `list.get(i)` - element access
@@ -639,6 +656,7 @@ impl PatternGenerator {
 
     /// Create patterns for Map operations
     ///
+
     /// Generates patterns for:
     /// - `map.get(k)` - key lookup
     /// - `map.contains_key(k)` - key membership
@@ -667,6 +685,7 @@ impl PatternGenerator {
 
     /// Create patterns for Set operations
     ///
+
     /// Generates patterns for:
     /// - `set.member(x)` - membership test
     fn create_set_patterns(&mut self, var_name: &str, body: &Expr) -> List<Pattern> {
@@ -685,6 +704,7 @@ impl PatternGenerator {
 
     /// Create patterns for refinement types
     ///
+
     /// For refinement types T{φ}, we create patterns based on the predicate φ
     fn create_refinement_patterns(
         &mut self,
@@ -698,6 +718,7 @@ impl PatternGenerator {
 
     /// Extract patterns from an expression
     ///
+
     /// Looks for function applications and operations that would benefit from patterns
     fn extract_patterns_from_expr(&mut self, var_name: &str, expr: &Expr) -> List<Pattern> {
         let mut patterns = List::new();
@@ -772,13 +793,17 @@ impl PatternGenerator {
 
     /// Create a function application pattern
     ///
+
     /// # Arguments
     ///
+
     /// * `func_name` - Name of the function
     /// * `arg_names` - Names of arguments (variables or constants)
     ///
+
     /// # Returns
     ///
+
     /// Pattern if successful, None if pattern creation fails
     fn mk_function_pattern(&self, func_name: &str, arg_names: &[&str]) -> Maybe<Pattern> {
         // Create Z3 function declaration
@@ -805,16 +830,20 @@ impl PatternGenerator {
 
     /// Create a quantified formula with patterns
     ///
+
     /// # Arguments
     ///
+
     /// * `translator` - Z3 translator for creating terms
     /// * `bound_vars` - Variables to quantify over
     /// * `body` - Formula body
     /// * `patterns` - Patterns for instantiation guidance
     /// * `universal` - True for ∀, false for ∃
     ///
+
     /// # Returns
     ///
+
     /// Quantified Z3 formula with patterns
     pub fn mk_quantified_property<'ctx>(
         &mut self,
@@ -849,15 +878,20 @@ impl PatternGenerator {
 
     /// Assign weights to patterns for priority control
     ///
+
     /// Higher weight = higher priority for instantiation
     ///
+
     /// # Arguments
     ///
+
     /// * `patterns` - Patterns to assign weights to
     /// * `weights` - Corresponding weights (must match pattern count)
     ///
+
     /// # Returns
     ///
+
     /// Indices of patterns that meet the weight threshold
     pub fn assign_pattern_weights(&self, patterns: &[Pattern], weights: &[u32]) -> List<usize> {
         assert_eq!(
@@ -878,6 +912,7 @@ impl PatternGenerator {
 
     /// Detect when patterns would help with a formula
     ///
+
     /// Returns true if the formula would benefit from pattern-based instantiation
     pub fn should_use_patterns(&self, bound_vars: &[(&str, &Type)], body: &Expr) -> bool {
         if !self.config.enable_patterns {
@@ -910,8 +945,10 @@ impl PatternGenerator {
 
     /// Estimate the complexity of a quantified formula
     ///
+
     /// Used to decide whether patterns would help
     ///
+
     /// Complexity is computed based on:
     /// - Expression depth (nested structures increase complexity)
     /// - Number of function/method calls (each adds solving difficulty)
@@ -1088,15 +1125,20 @@ pub fn needs_patterns(ty: &Type) -> bool {
 
 /// Extract function applications from an expression for pattern generation
 ///
+
 /// Traverses the expression tree and collects all function names that are applied.
 /// This is useful for determining which functions need patterns for quantifier instantiation.
 ///
+
 /// # Arguments
 ///
+
 /// * `expr` - The expression to analyze
 ///
+
 /// # Returns
 ///
+
 /// List of function names (as Text) found in the expression
 pub fn extract_function_applications(expr: &Expr) -> List<Text> {
     let mut collector = FunctionApplicationCollector::new();
@@ -1114,6 +1156,7 @@ pub fn default_patterns_for_type(_ty: &Type) -> List<Text> {
 
 /// Collects pattern-relevant terms from an expression.
 ///
+
 /// This analyzer traverses an expression and extracts:
 /// - Function calls with their arity
 /// - Method calls on the target variable
@@ -1121,6 +1164,7 @@ pub fn default_patterns_for_type(_ty: &Type) -> List<Text> {
 /// - Field accesses
 /// - Index operations
 ///
+
 /// These are used to generate SMT patterns for quantifier instantiation.
 struct PatternTermCollector {
     /// The variable name we're generating patterns for
@@ -1597,11 +1641,13 @@ impl PatternTermCollector {
             } => {
                 // for-await loop desugars to: loop { match iter.next().await { ... } }
                 //
+
                 // Pattern-relevant terms in for-await:
                 // 1. The async_iterable creates an AsyncIterator - collect patterns from it
                 // 2. Implicit .next() method call on the iterator (AsyncIterator protocol)
                 // 3. The body may contain pattern-relevant terms
                 //
+
                 // We record "next" as a method call since it's implicitly called on the
                 // async iterator. This helps generate appropriate SMT patterns for
                 // quantifiers involving async iteration.
@@ -1880,9 +1926,11 @@ impl PatternTermCollector {
 
 /// Analyzes the complexity of an expression for SMT solving.
 ///
+
 /// This is used to decide whether pattern-based quantifier instantiation
 /// would be beneficial. Higher complexity expressions benefit more from patterns.
 ///
+
 /// Complexity metrics:
 /// - Depth: Nested expressions increase complexity exponentially
 /// - Function calls: Each call adds to solving difficulty
@@ -1941,6 +1989,7 @@ impl ComplexityAnalyzer {
 
     /// Compute the final complexity score
     ///
+
     /// Returns a score where:
     /// - 0-25: Simple expression, patterns likely not needed
     /// - 26-50: Moderate complexity, patterns may help
@@ -2114,11 +2163,13 @@ impl ComplexityAnalyzer {
             } => {
                 // for-await loop desugars to: loop { match iter.next().await { ... } }
                 //
+
                 // Complexity analysis for for-await:
                 // - Control flow: for-await is a loop construct (like for/while)
                 // - Function call: Implicit .next() call on each iteration
                 // - Higher-order: Async iteration involves futures/state machines
                 //
+
                 // The async nature adds complexity beyond a regular for loop because:
                 // 1. Each iteration involves await points (state machine transitions)
                 // 2. The iterator produces futures that must be polled
@@ -2592,6 +2643,7 @@ impl ComplexityAnalyzer {
 
 /// Collects all function applications from an expression.
 ///
+
 /// This traverses the entire expression tree and extracts the names
 /// of all functions that are called. Useful for determining which
 /// SMT function symbols need pattern support.
@@ -2987,6 +3039,7 @@ impl FunctionApplicationCollector {
             } => {
                 // for-await loop desugars to: loop { match iter.next().await { ... } }
                 //
+
                 // Function application extraction for for-await:
                 // Record the implicit "next" function call from the AsyncIterator protocol.
                 // This is important for SMT pattern generation because:
@@ -3270,6 +3323,7 @@ impl FunctionApplicationCollector {
 
 /// Represents a function application extracted from a formula.
 ///
+
 /// This is used for pattern synthesis - function applications in the quantifier
 /// body are good candidates for patterns as they trigger instantiation when
 /// the function is called elsewhere.
@@ -3324,19 +3378,24 @@ impl FunctionApp {
 
 /// Synthesizes patterns from a formula for quantifier instantiation.
 ///
+
 /// This function analyzes a formula and extracts function applications
 /// that can be used as patterns. Good patterns should:
 /// - Mention all quantified variables
 /// - Be selective (not match too many terms)
 /// - Avoid arithmetic operations
 ///
+
 /// # Arguments
 ///
+
 /// * `formula` - The quantifier body formula to analyze
 /// * `bound_vars` - Names of bound variables to track
 ///
+
 /// # Returns
 ///
+
 /// List of synthesized patterns
 pub fn synthesize_patterns(formula: &Expr, bound_vars: &[Text]) -> List<Pattern> {
     let mut patterns = List::new();
@@ -3363,16 +3422,21 @@ pub fn synthesize_patterns(formula: &Expr, bound_vars: &[Text]) -> List<Pattern>
 
 /// Extract function applications from a formula with detailed type information.
 ///
+
 /// This is an enhanced version of extract_function_applications that includes
 /// type information needed for pattern creation.
 ///
+
 /// # Arguments
 ///
+
 /// * `formula` - The formula to analyze
 /// * `bound_vars` - Names of bound variables to track
 ///
+
 /// # Returns
 ///
+
 /// List of FunctionApp structures with full type information
 pub fn extract_function_applications_detailed(
     formula: &Expr,
@@ -3584,12 +3648,16 @@ fn extract_call_func_name(func: &Expr) -> Maybe<Text> {
 
 /// Create a Z3 Pattern from a FunctionApp.
 ///
+
 /// # Arguments
 ///
+
 /// * `app` - The function application to convert
 ///
+
 /// # Returns
 ///
+
 /// A Z3 Pattern if creation succeeds, None otherwise
 pub fn create_pattern_from_app(app: &FunctionApp) -> Maybe<Pattern> {
     // Create the function declaration
@@ -3612,18 +3680,23 @@ pub fn create_pattern_from_app(app: &FunctionApp) -> Maybe<Pattern> {
 
 /// Try to create a multi-pattern from multiple function applications.
 ///
+
 /// Multi-patterns help Z3 instantiate quantifiers when multiple function
 /// applications appear together. This is particularly useful for:
 /// - Map get/contains pairs
 /// - List len/get pairs
 /// - Array select/store pairs
 ///
+
 /// # Arguments
 ///
+
 /// * `apps` - List of function applications to combine
 ///
+
 /// # Returns
 ///
+
 /// A multi-pattern if creation succeeds, None otherwise
 fn try_create_multi_pattern(apps: &List<FunctionApp>) -> Maybe<Pattern> {
     if apps.len() < 2 {
@@ -3669,18 +3742,23 @@ fn try_create_multi_pattern(apps: &List<FunctionApp>) -> Maybe<Pattern> {
 
 /// Configure solver parameters for MBQI (Model-Based Quantifier Instantiation).
 ///
+
 /// This sets Z3 parameters that control how quantifiers are instantiated:
 /// - smt.mbqi: Enable/disable model-based quantifier instantiation
 /// - smt.qi.eager_threshold: Threshold for eager instantiation
 /// - smt.qi.max_instances: Maximum instances per quantifier
 ///
+
 /// # Arguments
 ///
+
 /// * `solver` - The Z3 solver to configure
 /// * `config` - Pattern configuration containing MBQI settings
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// let mut solver = Solver::new();
 /// let config = PatternConfig::default();
@@ -3713,14 +3791,17 @@ pub fn configure_mbqi(solver: &Solver, config: &PatternConfig) {
 
 /// Create a weighted quantifier with patterns, identifier, and skolem naming.
 ///
+
 /// This provides the full Z3 quantifier API including:
 /// - Pattern-based instantiation hints
 /// - Weight for instantiation priority
 /// - Named quantifier and skolem identifiers for debugging
 /// - No-pattern terms to exclude from auto-pattern generation
 ///
+
 /// # Arguments
 ///
+
 /// * `is_forall` - True for universal (forall), false for existential (exists)
 /// * `weight` - Instantiation weight (0 = default priority)
 /// * `quantifier_id` - Identifier for the quantifier (debugging/profiling)
@@ -3730,8 +3811,10 @@ pub fn configure_mbqi(solver: &Solver, config: &PatternConfig) {
 /// * `no_patterns` - Terms to exclude from auto-pattern generation
 /// * `body` - The quantifier body formula
 ///
+
 /// # Returns
 ///
+
 /// The quantified formula
 pub fn create_weighted_quantifier(
     is_forall: bool,
@@ -3757,16 +3840,21 @@ pub fn create_weighted_quantifier(
 
 /// Create a universal quantifier with patterns.
 ///
+
 /// Convenience wrapper around forall_const with pattern support.
 ///
+
 /// # Arguments
 ///
+
 /// * `bounds` - Bound variables
 /// * `patterns` - Patterns for instantiation
 /// * `body` - Quantifier body
 ///
+
 /// # Returns
 ///
+
 /// The universally quantified formula
 pub fn create_forall_with_patterns(
     bounds: &[&dyn Ast],
@@ -3778,16 +3866,21 @@ pub fn create_forall_with_patterns(
 
 /// Create an existential quantifier with patterns.
 ///
+
 /// Convenience wrapper around exists_const with pattern support.
 ///
+
 /// # Arguments
 ///
+
 /// * `bounds` - Bound variables
 /// * `patterns` - Patterns for instantiation
 /// * `body` - Quantifier body
 ///
+
 /// # Returns
 ///
+
 /// The existentially quantified formula
 pub fn create_exists_with_patterns(
     bounds: &[&dyn Ast],
@@ -3801,6 +3894,7 @@ pub fn create_exists_with_patterns(
 
 /// Weighted pattern metadata without owning the pattern.
 ///
+
 /// Since z3::Pattern doesn't implement Clone, we store the metadata separately
 /// and reconstruct the pattern when needed.
 #[derive(Debug, Clone)]
@@ -3867,19 +3961,24 @@ impl WeightedPattern {
 
 /// Assign weights to patterns based on their characteristics.
 ///
+
 /// Weight assignment heuristics:
 /// - Single function applications: weight = arity + base
 /// - Multi-patterns: weight = sum of component weights
 /// - Collection operations: higher weight (more selective)
 /// - Arithmetic operations: lower weight (less selective)
 ///
+
 /// # Arguments
 ///
+
 /// * `apps` - Function applications to weight
 /// * `config` - Configuration with default weight
 ///
+
 /// # Returns
 ///
+
 /// List of weighted patterns
 pub fn assign_weights_to_patterns(
     apps: &List<FunctionApp>,

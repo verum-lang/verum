@@ -6,38 +6,47 @@ module core.database.sqlite.native.l7_api.pragma_api;
 // Layer: 7 — public API.
 // Spec: sqlite-native.md §13 (typed pragma); §18 (PRAGMA catalogue).
 //
+
 // Until this commit the only way to read or change a SQLite PRAGMA
 // from user code was a raw SQL string:
 //
-//     db.execute("PRAGMA cache_size = 1000")?;       // write
-//     let row = db.query_first_row("PRAGMA cache_size")?;
-//     let n = match row[0] { RInt(n) => n, _ => 0 };
+
+//  db.execute("PRAGMA cache_size = 1000")?; // write
+//  let row = db.query_first_row("PRAGMA cache_size")?;
+//  let n = match row[0] { RInt(n) => n, _ => 0 };
 //
+
 // That works but loses everything types are good at: the user has to
 // remember the pragma name (typo → silent SQLITE_OK because unknown
 // PRAGMAs are no-ops in SQLite C, which is famously a footgun);
 // the result must be hand-decoded; the value must be hand-encoded.
 //
+
 // This module exposes a typed surface that goes straight through the
 // existing `pragmas/dispatch.execute` runner without round-tripping
 // SQL:
 //
-//     pragma_get_int(&db, PCacheSize)         -> Result<Int64, SqliteApiDbError>
-//     pragma_set_int(&mut db, PCacheSize, 1000) -> Result<(), SqliteApiDbError>
+
+//  pragma_get_int(&db, PCacheSize) -> Result<Int64, SqliteApiDbError>
+//  pragma_set_int(&mut db, PCacheSize, 1000) -> Result<(), SqliteApiDbError>
 //
-//     pragma_get_text(&db, PJournalMode)      -> Result<Text,  SqliteApiDbError>
-//     pragma_set_text(&mut db, PJournalMode, "WAL") -> Result<(), SqliteApiDbError>
+
+//  pragma_get_text(&db, PJournalMode) -> Result<Text, SqliteApiDbError>
+//  pragma_set_text(&mut db, PJournalMode, "WAL") -> Result<(), SqliteApiDbError>
 //
-//     pragma_get_bool(&db, PForeignKeys)      -> Result<Bool,  SqliteApiDbError>
-//     pragma_set_bool(&mut db, PForeignKeys, true) -> Result<(), SqliteApiDbError>
+
+//  pragma_get_bool(&db, PForeignKeys) -> Result<Bool, SqliteApiDbError>
+//  pragma_set_bool(&mut db, PForeignKeys, true) -> Result<(), SqliteApiDbError>
 //
+
 // Plus a uniform `pragma_get` / `pragma_set` over a tagged
 // `PragmaValue` for callers that need to hold the value abstractly
 // (CLI driver, REPL, audit-log replay).
 //
+
 // Wrong-shape access (e.g. asking for an Int when the pragma returns
 // Text) is a runtime error rather than a compile error — the pragma
-// catalogue's value-shape is data-driven, not type-encoded.  The
+// catalogue's value-shape is data-driven, not type-encoded. The
 // per-pragma kind enum still gives the user a typo-proof name handle.
 // =============================================================================
 
@@ -63,16 +72,17 @@ mount core.database.sqlite.native.l7_api.database.{
 // PragmaValue — tagged union over the three pragma value shapes
 // -----------------------------------------------------------------------------
 
-/// Typed PRAGMA value.  The three variants cover every shape the
+/// Typed PRAGMA value. The three variants cover every shape the
 /// SQLite catalogue produces or accepts:
 ///
-///   * `PvInt`  — integer pragmas (cache_size, busy_timeout, …) and
-///                boolean-as-int pragmas (foreign_keys, query_only, …).
-///   * `PvText` — text pragmas (journal_mode, encoding, locking_mode, …).
-///   * `PvBool` — sugar variant; `pragma_set` converts to `PvInt(0|1)`
-///                before dispatch.  Lets callers write
-///                `pragma_set(db, PForeignKeys, PvBool(true))`
-///                without the false-friend `PvInt(1)`.
+
+///  * `PvInt` — integer pragmas (cache_size, busy_timeout, …) and
+///  boolean-as-int pragmas (foreign_keys, query_only, …).
+///  * `PvText` — text pragmas (journal_mode, encoding, locking_mode, …).
+///  * `PvBool` — sugar variant; `pragma_set` converts to `PvInt(0|1)`
+///  before dispatch. Lets callers write
+///  `pragma_set(db, PForeignKeys, PvBool(true))`
+///  without the false-friend `PvInt(1)`.
 public type PragmaValue is
       PvNull
     | PvInt(Int64)
@@ -80,7 +90,7 @@ public type PragmaValue is
     | PvBool(Bool);
 
 implement PragmaValue {
-    /// Best-effort coerce to Int64.  PvBool maps to 0/1; PvText
+    /// Best-effort coerce to Int64. PvBool maps to 0/1; PvText
     /// returns None (the caller should use pragma_get_text).
     public fn as_int(&self) -> Maybe<Int64> {
         match self {
@@ -155,7 +165,7 @@ fn unwrap_single_row(result: PragmaResult) -> Result<PragmaValue, SqliteApiDbErr
 // Public: pragma_get / pragma_set by typed kind
 // -----------------------------------------------------------------------------
 
-/// Read a PRAGMA by typed kind.  Routes through
+/// Read a PRAGMA by typed kind. Routes through
 /// `pragmas.dispatch.execute` — same code path the SQL parser hits.
 /// Result is the first column of the first row, or `PvNull` for
 /// side-effect-only pragmas.
@@ -166,7 +176,7 @@ public fn pragma_get(db: &mut Database, kind: PragmaKind) -> Result<PragmaValue,
     unwrap_single_row(result)
 }
 
-/// Write a PRAGMA by typed kind + value.  Uses the in-memory
+/// Write a PRAGMA by typed kind + value. Uses the in-memory
 /// `PragmaConfig` writer — durable side-effects (journal_mode change
 /// rewriting WAL, page_size change rewriting header) are scheduled
 /// by the layers below the dispatcher.
@@ -193,7 +203,7 @@ public fn pragma_set(
 // Public: typed-shape convenience accessors
 // -----------------------------------------------------------------------------
 
-/// Read an Int-shaped PRAGMA.  Errors if the pragma returns Text.
+/// Read an Int-shaped PRAGMA. Errors if the pragma returns Text.
 public fn pragma_get_int(db: &mut Database, kind: PragmaKind) -> Result<Int64, SqliteApiDbError> {
     let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
     match v.as_int() {
@@ -232,7 +242,7 @@ public fn pragma_set_text(
 }
 
 /// Read a boolean-shaped PRAGMA (foreign_keys, query_only,
-/// recursive_triggers, …).  Returns the integer interpretation
+/// recursive_triggers, …). Returns the integer interpretation
 /// (0 → false, non-zero → true).
 public fn pragma_get_bool(db: &mut Database, kind: PragmaKind) -> Result<Bool, SqliteApiDbError> {
     let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
@@ -256,8 +266,8 @@ public fn pragma_set_bool(
 // Public: name lookup helper — exposed for CLI / REPL drivers
 // -----------------------------------------------------------------------------
 
-/// Map `PragmaKind` back to its canonical SQL name (lowercase).  The
-/// inverse of `pragma_from_name`.  Used by the dispatcher path above
+/// Map `PragmaKind` back to its canonical SQL name (lowercase). The
+/// inverse of `pragma_from_name`. Used by the dispatcher path above
 /// and by tracing / error-message construction.
 public fn pragma_kind_to_name(k: &PragmaKind) -> Text {
     match k {

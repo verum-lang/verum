@@ -3,28 +3,34 @@
 // =============================================================================
 // Layer: 4 (Random Numbers)
 //
+
 // Provides pseudorandom number generation and probability distributions:
 // - Key-based PRNG (functional, reproducible, parallelizable)
 // - High-quality generators (XorShift128+, PCG, SplitMix64)
 // - Probability distributions (uniform, normal, exponential, etc.)
 // - Shuffling and permutation utilities
 //
+
 // # Design Philosophy
 //
+
 // This module uses a functional, key-based approach similar to JAX's PRNG.
 // Each operation consumes a key and produces deterministic output.
 // Keys should be split before use to maintain reproducibility and
 // enable parallel sampling.
 //
+
 // # Usage
 //
+
 // ```verum
-// let key = RandomKey.new(42);          // Create from seed
-// let (k1, k2) = key.split();           // Split before use
-// let x = uniform(k1, 0.0, 1.0);        // Sample
-// let y = normal(k2, 0.0, 1.0);         // Independent sample
+// let key = RandomKey.new(42); // Create from seed
+// let (k1, k2) = key.split(); // Split before use
+// let x = uniform(k1, 0.0, 1.0); // Sample
+// let y = normal(k2, 0.0, 1.0); // Independent sample
 // ```
 //
+
 // Spec: docs/architecture/math-spec.md Section 30
 // =============================================================================
 

@@ -5,19 +5,23 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Duration represents a span of time stored as nanoseconds.
 // It provides constructors for common time units and methods for conversion.
 //
+
 // # Example
 // ```verum
 // let timeout = Duration.secs(30);
 // let delay = Duration.millis(100);
 // let combined = timeout + delay;
 //
+
 // print(f"Total: {combined.as_secs()} seconds");
 // print(f"Total: {combined.as_millis()} milliseconds");
 // ```
 //
+
 // =============================================================================
 
 module core.time.duration;
@@ -40,17 +44,20 @@ const NANOS_PER_HOUR: Int = 3_600_000_000_000;
 
 /// A duration of time, stored as nanoseconds.
 ///
+
 /// Duration is always non-negative. Attempting to create a negative
 /// duration will result in zero.
 ///
+
 /// # Example
 /// ```verum
 /// let five_secs = Duration.secs(5);
 /// let half_sec = Duration.millis(500);
-/// let total = five_secs + half_sec;  // 5.5 seconds
+/// let total = five_secs + half_sec; // 5.5 seconds
 ///
+
 /// assert(total.as_millis() == 5500);
-/// assert(total.as_secs() == 5);  // truncated
+/// assert(total.as_secs() == 5); // truncated
 /// ```
 public type Duration is {
     /// Total nanoseconds (always non-negative)
@@ -114,6 +121,7 @@ implement Duration {
 
     /// Create a duration from a floating-point number of seconds.
     ///
+
     /// Converts fractional seconds to nanosecond precision.
     /// Negative values are clamped to zero.
     public fn from_secs_f64(secs: Float) -> Duration {
@@ -168,6 +176,7 @@ implement Duration {
 
     /// Get the fractional seconds part as nanoseconds.
     ///
+
     /// This is the nanoseconds remaining after whole seconds are removed.
     /// Always in range [0, 999_999_999].
     public fn subsec_nanos(&self) -> Int {

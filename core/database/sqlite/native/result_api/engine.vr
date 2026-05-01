@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // A user-fn's context has exactly one result slot; sqlite3_result_*
-// calls overwrite it.  The engine also records the subtype byte set
+// calls overwrite it. The engine also records the subtype byte set
 // via sqlite3_result_subtype.
 // =============================================================================
 

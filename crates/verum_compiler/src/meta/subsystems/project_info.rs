@@ -1,5 +1,6 @@
 //! Project information for meta functions
 //!
+
 //! Provides project metadata from Verum.toml for compile-time access.
 
 use verum_common::{List, Map, Text};
@@ -146,6 +147,7 @@ impl ProjectInfoData {
     /// `@version_stamp` meta builtin substitutes its
     /// deterministic fallback.
     ///
+
     /// This is the canonical pipeline-driver hook: invoke once
     /// at the start of compilation, then `set_project_info` the
     /// resulting [`ProjectInfoData`] onto the [`BuildConfig`]

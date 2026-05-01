@@ -47,7 +47,7 @@ implement TraceEngine {
         !is_empty(&self.mask) && !is_null(&self.callback)
     }
 
-    /// Record an event delivery / drop.  `bit` is a single SQLITE_TRACE_*
+    /// Record an event delivery / drop. `bit` is a single SQLITE_TRACE_*
     /// constant.
     pub fn note_event(&mut self, bit: Int) -> Bool {
         if !self.is_enabled() {

@@ -1,40 +1,50 @@
 //! Bitfield accessor code generation.
 //!
+
 //! This module provides LLVM IR generation for bitfield accessor methods,
 //! implementing type-safe bit-level data manipulation.
 //!
+
 //! # Overview
 //!
+
 //! For each bitfield type, the compiler generates:
 //! - `get_<field>() -> T`: Extract field value with proper masking/shifting
 //! - `set_<field>(value: T) -> &mut Self`: Update field with bounds checking
 //! - `with_<field>(value: T) -> Self`: Builder pattern for immutable updates
 //!
+
 //! # Generated Code Patterns
 //!
+
 //! ```llvm
 //! ; Extract 4-bit field at offset 4 from 8-bit container
 //! ; Verum: let version = header.get_version();
 //! %shifted = lshr i8 %container, 4
-//! %masked = and i8 %shifted, 15  ; 0b1111 = 15
+//! %masked = and i8 %shifted, 15 ; 0b1111 = 15
 //!
+
 //! ; Set 4-bit field at offset 4 in 8-bit container
 //! ; Verum: header.set_version(7);
-//! %cleared = and i8 %container, -241  ; ~(15 << 4) = -241
+//! %cleared = and i8 %container, -241 ; ~(15 << 4) = -241
 //! %value_masked = and i8 %new_value, 15
 //! %value_shifted = shl i8 %value_masked, 4
 //! %result = or i8 %cleared, %value_shifted
 //! ```
 //!
+
 //! # Byte Order Handling
 //!
+
 //! For multi-byte containers with specified byte order:
 //! - Big-endian: Use `@llvm.bswap` intrinsic for load/store
 //! - Little-endian: Direct access (native for most platforms)
 //! - Native: Platform-dependent, may emit bswap
 //!
+
 //! # Bitfield System
 //!
+
 //! Verum provides first-class bitfield support via `@bitfield` type attribute and
 //! `@bits(N)` field attributes. Key rules:
 //! - `@bits(N)` specifies the bit width of a field within a bitfield type
@@ -79,6 +89,7 @@ pub struct BitfieldStats {
 
 /// Bitfield code generation context.
 ///
+
 /// Provides LLVM IR generation for bitfield accessor methods.
 pub struct BitfieldLowering<'ctx> {
     /// LLVM context
@@ -145,12 +156,14 @@ impl<'ctx> BitfieldLowering<'ctx> {
 
     /// Generate code to extract a bitfield value.
     ///
+
     /// # Parameters
     /// - `container`: The loaded container value
     /// - `field`: The field specification
     /// - `layout`: The overall bitfield layout
     /// - `name`: Name for the resulting value
     ///
+
     /// # Returns
     /// The extracted field value, zero-extended to the field's natural type.
     pub fn build_field_get(
@@ -197,6 +210,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
 
     /// Generate code to set a bitfield value.
     ///
+
     /// # Parameters
     /// - `container`: The loaded container value
     /// - `new_value`: The new field value to set
@@ -204,6 +218,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
     /// - `layout`: The overall bitfield layout
     /// - `name`: Name for the resulting value
     ///
+
     /// # Returns
     /// The updated container value with the field modified.
     pub fn build_field_set(

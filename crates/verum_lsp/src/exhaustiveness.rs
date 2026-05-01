@@ -1,17 +1,22 @@
 //! Exhaustiveness Checking Integration for LSP
 //!
+
 //! This module provides real-time exhaustiveness feedback in the IDE through
 //! integration with the exhaustiveness checking system in verum_types.
 //!
+
 //! ## Features
 //!
+
 //! - Non-exhaustive match warnings with witness examples
 //! - Redundant pattern detection (unreachable patterns)
 //! - Quick fixes for adding missing patterns
 //! - Hover information for pattern coverage
 //!
+
 //! ## Integration
 //!
+
 //! The module integrates with:
 //! - verum_types::exhaustiveness for the core algorithm
 //! - tower_lsp for diagnostic publishing
@@ -52,17 +57,19 @@ impl ExhaustivenessDiagnostic {
     /// Convert to LSP diagnostics, honouring every gate on the
     /// supplied config:
     ///
-    /// * `report_errors`        — toggles the non-exhaustive ERROR.
-    /// * `report_all_guarded`   — toggles the all-guarded WARNING.
-    /// * `report_redundant`     — toggles a summary "match has
-    ///   redundant patterns" WARNING when the result lists any
-    ///   redundant pattern indices. Per-pattern warnings still
-    ///   come from `create_redundant_pattern_diagnostic` because
-    ///   they need range info this struct doesn't carry.
-    /// * `max_witnesses`        — caps the number of uncovered
-    ///   cases enumerated in the error message before collapsing
-    ///   to "and N other(s) not covered".
+
+    /// * `report_errors` — toggles the non-exhaustive ERROR.
+    /// * `report_all_guarded` — toggles the all-guarded WARNING.
+    /// * `report_redundant` — toggles a summary "match has
+    ///  redundant patterns" WARNING when the result lists any
+    ///  redundant pattern indices. Per-pattern warnings still
+    ///  come from `create_redundant_pattern_diagnostic` because
+    ///  they need range info this struct doesn't carry.
+    /// * `max_witnesses` — caps the number of uncovered
+    ///  cases enumerated in the error message before collapsing
+    ///  to "and N other(s) not covered".
     ///
+
     /// Before the config-aware variant landed, every gate was inert:
     /// the ERROR + WARNING were emitted unconditionally and the
     /// witness truncation was hardcoded to 3, regardless of what
@@ -456,6 +463,7 @@ impl Default for ExhaustivenessProvider {
 // REAL-TIME INCREMENTAL EXHAUSTIVENESS CHECKING
 // ============================================================
 //
+
 // This section provides APIs for incremental exhaustiveness checking
 // that integrates with the type checker's incremental infrastructure.
 

@@ -1,18 +1,23 @@
 //! Autodiff runtime support for VBC interpreter.
 //!
+
 //! This module provides runtime gradient computation infrastructure for
 //! interpreting VBC autodiff opcodes (0xA8-0xAF).
 //!
+
 //! # Architecture
 //!
+
 //! While Verum's production autodiff is compile-time source transformation,
 //! the interpreter requires runtime gradient tape support for:
 //! - Testing compiled autodiff code
 //! - Dynamic computation graphs
 //! - Debugging and development
 //!
+
 //! # Design
 //!
+
 //! The gradient tape records operations during forward pass and replays
 //! them in reverse during backward pass. Each operation records:
 //! - Operation type (add, mul, matmul, etc.)
@@ -20,21 +25,26 @@
 //! - Output tensor ID
 //! - Saved values needed for backward
 //!
+
 //! # Example
 //!
+
 //! ```ignore
 //! let mut tape = GradientTape::new();
 //! tape.begin_scope(GradMode::Reverse);
 //!
+
 //! // Forward pass - operations are recorded
 //! let x = tape.track_tensor(tensor_x);
 //! let y = tape.track_tensor(tensor_y);
 //! let z = tape.record_op(TapeOp::Add, &[x, y])?;
 //!
+
 //! // Backward pass
 //! tape.set_grad(z, ones_like(z));
 //! tape.backward()?;
 //!
+
 //! let dx = tape.get_grad(x);
 //! let dy = tape.get_grad(y);
 //! ```
@@ -195,10 +205,12 @@ pub struct CustomRuleId(pub u32);
 
 /// A registered custom VJP (Vector-Jacobian Product) rule.
 ///
+
 /// Custom VJP rules allow users to define gradient computation for operations
 /// that either don't have automatic gradients or have more efficient custom
 /// implementations.
 ///
+
 /// The VJP rule computes: vjp(inputs, grad_output) -> grad_inputs
 #[derive(Debug, Clone)]
 pub struct CustomVjpRule {
@@ -215,9 +227,11 @@ pub struct CustomVjpRule {
 
 /// A registered custom JVP (Jacobian-Vector Product) rule.
 ///
+
 /// Custom JVP rules allow users to define tangent computation for forward-mode
 /// autodiff.
 ///
+
 /// The JVP rule computes: jvp(inputs, tangent_inputs) -> tangent_output
 #[derive(Debug, Clone)]
 pub struct CustomJvpRule {
@@ -234,6 +248,7 @@ pub struct CustomJvpRule {
 
 /// Registry for custom gradient rules.
 ///
+
 /// This registry stores user-defined VJP and JVP rules that can be looked up
 /// during backward/forward passes.
 #[derive(Debug, Default)]
@@ -261,6 +276,7 @@ impl CustomGradRegistry {
 
     /// Registers a custom VJP rule.
     ///
+
     /// Returns the assigned rule ID.
     pub fn register_vjp(&mut self, forward_fn: u32, vjp_fn: u32, name: Option<String>) -> CustomRuleId {
         let id = CustomRuleId(self.next_rule_id);
@@ -281,6 +297,7 @@ impl CustomGradRegistry {
 
     /// Registers a custom JVP rule.
     ///
+
     /// Returns the assigned rule ID.
     pub fn register_jvp(&mut self, forward_fn: u32, jvp_fn: u32, name: Option<String>) -> CustomRuleId {
         let id = CustomRuleId(self.next_rule_id);
@@ -371,6 +388,7 @@ pub enum SavedValue {
 
 /// A gradient computation scope.
 ///
+
 /// Scopes can be nested to support checkpointing and selective gradient
 /// computation.
 #[derive(Debug)]
@@ -526,6 +544,7 @@ impl GradScope {
 
     /// Creates a checkpoint of all tensors in this scope.
     ///
+
     /// This is useful for gradient checkpointing where you want to save all
     /// activations at a checkpoint boundary without specifying them explicitly.
     pub fn checkpoint_all(&mut self) -> Option<CheckpointId> {
@@ -555,6 +574,7 @@ pub struct Checkpoint {
 
 /// The main gradient tape structure.
 ///
+
 /// Manages multiple nested gradient scopes and coordinates backward pass
 /// computation.
 #[derive(Debug)]
@@ -721,6 +741,7 @@ impl GradientTape {
 
     /// Forward-mode autodiff (tangent propagation).
     ///
+
     /// Propagates tangents through the computation graph in forward order,
     /// computing Jacobian-vector products (JVPs). This is efficient when:
     /// - Number of inputs < number of outputs
@@ -782,6 +803,7 @@ impl GradientTape {
 
     /// Creates a checkpoint of all tensors in the current scope.
     ///
+
     /// This is the preferred method for gradient checkpointing when you want
     /// to save all activations at a checkpoint boundary.
     pub fn checkpoint_all(&mut self) -> Option<CheckpointId> {
@@ -817,9 +839,11 @@ impl GradientTape {
 
     /// Registers a custom VJP rule for a function.
     ///
+
     /// The VJP function signature should be:
     /// `fn(inputs: &[Tensor], grad_output: Tensor) -> Vec<Tensor>`
     ///
+
     /// Returns the assigned rule ID.
     pub fn register_custom_vjp(&mut self, forward_fn: u32, vjp_fn: u32) -> CustomRuleId {
         self.custom_rules.register_vjp(forward_fn, vjp_fn, None)
@@ -837,9 +861,11 @@ impl GradientTape {
 
     /// Registers a custom JVP rule for a function.
     ///
+
     /// The JVP function signature should be:
     /// `fn(inputs: &[Tensor], tangents: &[Tensor]) -> Tensor`
     ///
+
     /// Returns the assigned rule ID.
     pub fn register_custom_jvp(&mut self, forward_fn: u32, jvp_fn: u32) -> CustomRuleId {
         self.custom_rules.register_jvp(forward_fn, jvp_fn, None)
@@ -882,6 +908,7 @@ impl GradientTape {
 
     /// Clears all scopes and resets the tape.
     ///
+
     /// Note: This does NOT clear custom VJP/JVP rules. Use `reset_all()` to
     /// clear everything including custom rules.
     pub fn reset(&mut self) {
@@ -903,6 +930,7 @@ impl GradientTape {
 
 /// Computes the vector-Jacobian product for a tape entry.
 ///
+
 /// Returns gradients for each input tensor.
 fn compute_vjp(
     entry: &TapeEntry,
@@ -1159,7 +1187,7 @@ fn compute_vjp(
         TapeOp::Silu => {
             // SiLU(x) = x * sigmoid(x)
             // d/dx SiLU(x) = sigmoid(x) + x * sigmoid(x) * (1 - sigmoid(x))
-            //             = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+            //  = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
             if entry.saved.len() < 2 {
                 return None;
             }
@@ -1334,7 +1362,7 @@ fn compute_vjp(
         TapeOp::Softmax => {
             // d/dx softmax(x)_i = softmax(x)_i * (delta_ij - softmax(x)_j)
             // VJP: dx_i = sum_j (dout_j * softmax_j * (delta_ij - softmax_i))
-            //           = softmax_i * (dout_i - sum_j(dout_j * softmax_j))
+            //  = softmax_i * (dout_i - sum_j(dout_j * softmax_j))
             if entry.saved.is_empty() {
                 return None;
             }
@@ -1611,6 +1639,7 @@ fn compute_vjp(
 
 /// Computes the Jacobian-vector product for a tape entry (forward-mode).
 ///
+
 /// Given input tangents, computes the output tangent.
 /// JVP computes: d_out = J @ d_in where J is the Jacobian.
 fn compute_jvp(
@@ -1917,7 +1946,7 @@ fn compute_jvp(
         TapeOp::Softmax => {
             // d/dx softmax(x)_i = softmax(x)_i * (delta_ij - softmax(x)_j)
             // JVP: d_out_i = sum_j (d_x_j * softmax_j * (delta_ij - softmax_i))
-            //              = softmax_i * d_x_i - softmax_i * sum_j(d_x_j * softmax_j)
+            //  = softmax_i * d_x_i - softmax_i * sum_j(d_x_j * softmax_j)
             if entry.saved.is_empty() {
                 return None;
             }

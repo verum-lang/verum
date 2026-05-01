@@ -1,51 +1,62 @@
 //! Ownership Analysis for Compile-Time Memory Safety Detection
 //!
+
 //! This module implements ownership tracking to detect memory safety issues
 //! at compile-time, including:
 //!
+
 //! - **Double-Free Detection**: Catches deallocations of already-freed memory
 //! - **Use-After-Free Detection**: Enhanced detection beyond escape analysis
 //! - **Ownership Transfer Tracking**: Monitors move semantics across boundaries
 //! - **Resource Leak Detection**: Identifies allocations without corresponding frees
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! CFG → OwnershipAnalyzer → OwnershipAnalysisResult
-//!                                │
-//!                                ▼
-//!                    ┌───────────────────────┐
-//!                    │ Map<AllocId, AllocInfo>│
-//!                    │ Set<DoubleFreeWarning> │
-//!                    │ Set<LeakWarning>       │
-//!                    │ List<OwnershipTransfer>│
-//!                    └───────────────────────┘
+//!  │
+//!  ▼
+//!  ┌───────────────────────┐
+//!  │ Map<AllocId, AllocInfo>│
+//!  │ Set<DoubleFreeWarning> │
+//!  │ Set<LeakWarning> │
+//!  │ List<OwnershipTransfer>│
+//!  └───────────────────────┘
 //! ```
 //!
+
 //! # Algorithm Overview
 //!
+
 //! The analysis performs a forward dataflow analysis tracking:
 //! 1. **Allocation Sites**: Where memory is allocated (new, alloc, Heap::new)
 //! 2. **Deallocation Sites**: Where memory is freed (drop, free, explicit dealloc)
 //! 3. **Ownership State**: Current owner of each allocation
 //! 4. **Transfer Events**: Moves, borrows, and drops
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_cbgr::ownership_analysis::OwnershipAnalyzer;
 //!
+
 //! let analyzer = OwnershipAnalyzer::new(cfg);
 //! let result = analyzer.analyze();
 //!
+
 //! for warning in &result.double_free_warnings {
-//!     println!("Double-free at {:?}: allocated at {:?}, first free at {:?}",
-//!              warning.second_free_site,
-//!              warning.allocation_site,
-//!              warning.first_free_site);
+//!  println!("Double-free at {:?}: allocated at {:?}, first free at {:?}",
+//!  warning.second_free_site,
+//!  warning.allocation_site,
+//!  warning.first_free_site);
 //! }
 //! ```
 //!
+
 //! Phase 6 of the CBGR analysis pipeline: ownership tracking for memory safety.
 //! Detects double-free (deallocating already-freed memory), use-after-free
 //! (beyond what escape analysis catches), ownership transfer violations (move
@@ -661,28 +672,31 @@ impl OwnershipAnalyzer {
 
     /// Perform ownership analysis.
     ///
+
     /// Honours every `OwnershipAnalysisConfig` gate:
     ///
+
     /// * `track_stack` (default `false`) — already honoured at
-    ///   site-extraction.
+    ///  site-extraction.
     /// * `track_temporaries` (default `false`) — same treatment as
-    ///   `track_stack` for `AllocationKind::Temporary`. Future
-    ///   classifier paths that emit `Temporary` kinds get skipped
-    ///   by default; embedders that need to track expression-result
-    ///   allocations opt in.
+    ///  `track_stack` for `AllocationKind::Temporary`. Future
+    ///  classifier paths that emit `Temporary` kinds get skipped
+    ///  by default; embedders that need to track expression-result
+    ///  allocations opt in.
     /// * `detect_leaks` (default `true`) — already honoured.
     /// * `min_confidence` (default `0.5`) — filters every warning
-    ///   class (double-free, use-after-free, leak) whose
-    ///   `confidence` is below the threshold. One filter pass per
-    ///   detector, applied centrally so every analysis path
-    ///   honours the threshold identically.
+    ///  class (double-free, use-after-free, leak) whose
+    ///  `confidence` is below the threshold. One filter pass per
+    ///  detector, applied centrally so every analysis path
+    ///  honours the threshold identically.
     /// * `max_blocks` (default `0` = unlimited) — caps the CFG
-    ///   block walk in extraction. Once the cap is reached the
-    ///   loop returns early. Trade-off: bounded analysis cost at
-    ///   the price of potentially missing allocations in the
-    ///   truncated tail. `0` preserves the prior unlimited
-    ///   behaviour.
+    ///  block walk in extraction. Once the cap is reached the
+    ///  loop returns early. Trade-off: bounded analysis cost at
+    ///  the price of potentially missing allocations in the
+    ///  truncated tail. `0` preserves the prior unlimited
+    ///  behaviour.
     ///
+
     /// Before this wire-up `track_temporaries`, `min_confidence`,
     /// and `max_blocks` were inert — set on the config but
     /// unread.
@@ -762,11 +776,13 @@ impl OwnershipAnalyzer {
 
     /// Extract allocation sites from CFG.
     ///
+
     /// Honours `config.max_blocks`: once that many blocks have
     /// been visited, the walk returns early. `0` preserves the
     /// prior unlimited behaviour. Trade-off documented on
     /// `analyze`.
     ///
+
     /// Honours `config.track_stack` (skip Stack-kind allocations
     /// when `false`) and `config.track_temporaries` (skip
     /// Temporary-kind allocations when `false`). Both default

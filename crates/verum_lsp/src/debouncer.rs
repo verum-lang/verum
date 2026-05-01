@@ -1,11 +1,14 @@
 //! Debouncing system for real-time updates
 //!
+
 //! This module provides a debouncing mechanism to prevent excessive diagnostics
 //! updates during rapid typing. It delays updates until the user has stopped
 //! typing for a configurable duration (default: 300ms).
 //!
+
 //! # Design
 //!
+
 //! The debouncer uses a hash map of timers, one per document URI. When a change
 //! is detected, the timer is reset. Only when the timer expires without being
 //! reset is the callback executed.
@@ -68,6 +71,7 @@ impl Debouncer {
 
     /// Debounce an event for a given URI
     ///
+
     /// Returns immediately. The caller should check `should_execute` after
     /// waiting for the delay period to determine if the callback should run.
     pub fn debounce(&self, uri: Url) -> DebouncedTask {
@@ -164,6 +168,7 @@ impl DebouncerManager {
 
     /// Schedule a debounced callback for a URI
     ///
+
     /// The callback will be executed after the delay period if no new events
     /// for the same URI are received.
     pub fn schedule<F>(&self, uri: Url, callback: F)

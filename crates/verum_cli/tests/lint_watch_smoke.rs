@@ -1,5 +1,6 @@
 //! Smoke test for `verum lint --watch`.
 //!
+
 //! Spawns the watch process, modifies a fixture file, and verifies
 //! that the watcher prints a re-run banner before timeout. We can't
 //! easily assert on the *contents* of the second run's output

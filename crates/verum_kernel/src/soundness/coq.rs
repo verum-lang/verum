@@ -1,13 +1,16 @@
 //! Coq backend for kernel-soundness cross-export.
 //!
+
 //! Produces a single self-contained `.v` file that defines:
 //!
+
 //! 1. The `CoreTerm` / `CoreType` / `KernelRule` inductives.
 //! 2. The 35 per-rule soundness lemmas (with `Proof. … Qed.` for
-//!    proved lemmas, `Admitted.` with the reason for admitted ones).
+//!  proved lemmas, `Admitted.` with the reason for admitted ones).
 //! 3. The top-level `kernel_soundness` theorem that case-analyses
-//!    on `KernelRule` and discharges each case via its lemma.
+//!  on `KernelRule` and discharges each case via its lemma.
 //!
+
 //! `coqc kernel_soundness.v` re-checks Verum's claim independently.
 
 use super::{LemmaStatus, RuleSpec, SoundnessBackend};
@@ -66,7 +69,7 @@ impl SoundnessBackend for CoqBackend {
     fn render_core_term_inductive(&self) -> String {
         // The variant list is intentionally a *coarse* shape — each
         // constructor takes opaque sub-terms (`CoreTerm`) without the
-        // refined record-fields the Verum mirror carries.  This is
+        // refined record-fields the Verum mirror carries. This is
         // sufficient for the soundness theorems to type-check (they
         // quantify over `CoreTerm`, not into specific fields), and
         // keeps the Coq encoding small enough for `coqc` to digest in
@@ -172,8 +175,8 @@ impl SoundnessBackend for CoqBackend {
         );
 
         // Statement is uniform — every lemma's hypothesis chain is
-        //   (rule = K_<Name>) -> premises_well_typed _ -> side_conditions_hold _ ->
-        //   exists T, well_typed t T
+        //  (rule = K_<Name>) -> premises_well_typed _ -> side_conditions_hold _ ->
+        //  exists T, well_typed t T
         // We don't bind specific premises here because the foreign-
         // tool re-check verifies the *shape* of the soundness chain,
         // not the rule's actual conditional body (which would need

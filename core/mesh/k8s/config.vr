@@ -86,9 +86,9 @@ public type KubeConfig is {
 
 implement KubeConfig {
     /// Load the first available source in preference order:
-    ///   1. $KUBECONFIG env var (:-separated paths)
-    ///   2. ~/.kube/config
-    ///   3. /var/run/secrets/kubernetes.io/serviceaccount (in-cluster)
+    ///  1. $KUBECONFIG env var (:-separated paths)
+    ///  2. ~/.kube/config
+    ///  3. /var/run/secrets/kubernetes.io/serviceaccount (in-cluster)
     pub async fn load_default() -> Result<KubeConfig, KubeConfigError> {
         @intrinsic("verum.k8s.load_default_kubeconfig").await
     }

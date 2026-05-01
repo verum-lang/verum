@@ -14,6 +14,7 @@
 )]
 // Simplified test for protocol method dispatch fix
 //
+
 // This test verifies that protocol implementations properly register methods
 // in the ProtocolImpl structure so they can be found during method resolution.
 

@@ -5,6 +5,7 @@
 // Dependencies: mem/segment, mem/size_class, sys/{platform}/mem
 // =============================================================================
 //
+
 // Thread-local heap with lock-free fast path for small allocations.
 // Based on mimalloc's proven design:
 // - 75 page queues (73 size classes + huge + full)
@@ -12,8 +13,10 @@
 // - 3-level free list: free, local_free, xthread_free
 // - Cross-thread deallocation via atomic operations
 //
+
 // # Fast Path Performance Target: ~7-15 instructions
 //
+
 // ```
 // 1. Load page from pages_direct[wsize]
 // 2. Load free list head
@@ -24,22 +27,25 @@
 // 7. Increment used count
 // ```
 //
+
 // # Memory Layout
 //
+
 // ```
 // Thread-Local Heap
 // ┌─────────────────────────────────────────────────────────────────────┐
-// │ pages_direct[129] - Direct lookup for sizes ≤1024 bytes            │
-// │ Array of page pointers, indexed by word count                      │
+// │ pages_direct[129] - Direct lookup for sizes ≤1024 bytes │
+// │ Array of page pointers, indexed by word count │
 // ├─────────────────────────────────────────────────────────────────────┤
-// │ pages[75] - Page queues for all size classes                       │
-// │ Each queue is doubly-linked list of pages                          │
+// │ pages[75] - Page queues for all size classes │
+// │ Each queue is doubly-linked list of pages │
 // ├─────────────────────────────────────────────────────────────────────┤
-// │ segments - List of owned segments                                  │
-// │ thread_delayed_free - Cross-thread deferred frees                  │
+// │ segments - List of owned segments │
+// │ thread_delayed_free - Cross-thread deferred frees │
 // └─────────────────────────────────────────────────────────────────────┘
 // ```
 //
+
 // Spec: docs/architecture/mimalloc-allocator-plan.md
 // =============================================================================
 
@@ -341,20 +347,22 @@ implement HeapPageHeader {
 
     /// Free a block from another thread (atomic)
     ///
+
     /// SOUNDNESS: the slot-generation increment must be a single
-    /// atomic RMW (fetch_add), not a load-then-store.  The previous
+    /// atomic RMW (fetch_add), not a load-then-store. The previous
     /// implementation read old_gen, computed new_gen, then stored —
     /// which races concurrent xthread frees on the same slot and
-    /// silently LOSES generation increments.  A lost increment is a
+    /// silently LOSES generation increments. A lost increment is a
     /// CBGR soundness violation: a stale ThinRef whose slot
     /// generation matches the lost-increment value would pass
     /// validation even though the slot has been logically retired.
     /// Concurrent frees on the same slot are a double-free bug, but
     /// silently absorbing them defeats CBGR's whole purpose of
-    /// detecting use-after-free.  fetch_add gives a totally-ordered
+    /// detecting use-after-free. fetch_add gives a totally-ordered
     /// sequence and lets a downstream dedup pass surface the
     /// duplicate xthread_free push.
     ///
+
     /// `fetch_add` on UInt8 wraps mod 256 by intrinsic semantics, so
     /// the explicit `% 256` is no longer needed.
     public fn free_block_xthread(&mut self, ptr: &unsafe Byte) {
@@ -865,6 +873,7 @@ implement LocalHeap {
 
     /// Allocate huge object (dedicated segment)
     ///
+
     /// Marks the segment with `SEGMENT_HUGE` so the
     /// corresponding `free()` path can dispatch to the
     /// huge-free branch (which releases the entire segment)
@@ -900,6 +909,7 @@ implement LocalHeap {
 
     /// Free a huge allocation (releases the entire segment).
     ///
+
     /// Counterpart to `alloc_huge` — the entire dedicated
     /// segment goes back to the OS via `segment_free`. The
     /// huge allocation occupies the segment's data slices
@@ -963,6 +973,7 @@ implement LocalHeap {
 
     /// Free a pointer (determines thread ownership automatically)
     ///
+
     /// Huge allocations get a separate fast path: their segment
     /// is dedicated to a single allocation, so `free` releases
     /// the entire segment back to the OS via `free_huge`. The
@@ -1038,6 +1049,7 @@ implement LocalHeap {
 
     /// Cross-thread free
     ///
+
     /// Telemetry contract (mimalloc convention): per-heap stats
     /// are attributed to the thread that PERFORMS the operation,
     /// not the thread that originally allocated. So `dealloc_count`
@@ -1051,6 +1063,7 @@ implement LocalHeap {
     /// dealloc_count` aggregated across heaps for the true
     /// picture.
     ///
+
     /// Earlier revisions only updated `dealloc_count` here,
     /// leaving `bytes_freed` silently zero for every cross-
     /// thread free — making the per-heap "freed bytes" counter

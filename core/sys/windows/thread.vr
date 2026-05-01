@@ -8,10 +8,12 @@ module sys.windows.thread;
 // Platform: Windows (x86_64)
 // =============================================================================
 //
+
 // This module provides thread management using Windows API.
 // Uses CreateThread/WaitForSingleObject for thread operations and
 // kernel synchronization objects for primitives.
 //
+
 // Features:
 // - WindowsThread creation with automatic TLS initialization
 // - WindowsMutex (CRITICAL_SECTION equivalent via Mutant)
@@ -19,6 +21,7 @@ module sys.windows.thread;
 // - Spin lock (atomic-based for low-contention scenarios)
 // - WindowsOnce (one-time initialization)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -203,6 +206,7 @@ fn thread_entry(data: &unsafe Byte) -> UInt32 {
 implement WindowsThread {
     /// Spawn a new thread.
     ///
+
     /// The thread function will be called with TLS already initialized.
     public fn spawn(func: WindowsThreadFn, arg: &unsafe Byte) -> Result<WindowsThread, WindowsThreadError> {
         // Allocate entry data
@@ -284,6 +288,7 @@ implement WindowsThread {
 
     /// Wait for thread with timeout (milliseconds).
     ///
+
     /// Returns Ok(true) if thread finished, Ok(false) if timed out.
     public fn join_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         if self.finished {
@@ -409,6 +414,7 @@ implement WindowsMutex {
 
     /// Try to lock the mutex (non-blocking).
     ///
+
     /// Returns true if lock acquired, false if already locked.
     public fn try_lock(&mut self) -> Bool {
         let result = WaitForSingleObject(self.handle, 0);
@@ -472,6 +478,7 @@ implement WindowsCondvar {
 
     /// Wait on the condition variable.
     ///
+
     /// The mutex must be locked before calling. It will be unlocked
     /// while waiting and re-locked before returning.
     public fn wait(&mut self, mutex: &mut WindowsMutex) -> Result<(), WindowsThreadError> {
@@ -492,6 +499,7 @@ implement WindowsCondvar {
 
     /// Wait on the condition variable with timeout.
     ///
+
     /// Returns Ok(true) if signaled, Ok(false) if timed out.
     public fn wait_timeout(&mut self, mutex: &mut WindowsMutex, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         self.waiters += 1;
@@ -518,6 +526,7 @@ implement WindowsCondvar {
 
     /// Signal all waiting threads.
     ///
+
     /// Note: With auto-reset event, this will wake one thread at a time.
     /// For true broadcast, use a manual-reset event with PulseEvent.
     public fn broadcast(&mut self) {
@@ -704,6 +713,7 @@ implement Win32Semaphore {
 
     /// Try to wait with timeout.
     ///
+
     /// Returns Ok(true) if acquired, Ok(false) if timed out.
     public fn wait_timeout(&mut self, timeout_ms: UInt32) -> Result<Bool, WindowsThreadError> {
         let result = WaitForSingleObject(self.handle, timeout_ms);
@@ -748,16 +758,19 @@ implement Drop for Win32Semaphore {
 // Futex-Compatible Interface (WaitOnAddress-based)
 // =============================================================================
 //
+
 // These functions provide the same interface as Linux futex_wait/futex_wake
 // and macOS __ulock_wait/__ulock_wake, enabling cross-platform sync primitives
 // in core/sync/ to work on Windows without platform-specific branching in
 // their implementation logic.
 //
+
 // Performance characteristics:
 // - WaitOnAddress: ~50ns uncontended (compare + return), kernel-assisted sleep
 // - WakeByAddressSingle: ~30ns to wake one waiter
 // - WakeByAddressAll: ~30ns + O(n) waiter wakeup
 //
+
 // These are available on Windows 8+ (NT 6.2+). For Windows 7 compatibility,
 // a fallback using keyed events (NtWaitForKeyedEvent) would be needed, but
 // Windows 7 is EOL and not a supported target.
@@ -765,12 +778,15 @@ implement Drop for Win32Semaphore {
 
 /// Block the calling thread until the 32-bit value at `addr` changes from `expected`.
 ///
+
 /// If *addr != expected at the time of the call, returns immediately (spurious-safe).
 /// If `timeout` is Some(ns), the wait expires after the given nanoseconds.
 /// If `timeout` is None, waits indefinitely.
 ///
+
 /// Returns Ok(()) on wake (including spurious), Err(OSError) on timeout or failure.
 ///
+
 /// This is the Windows equivalent of `futex(addr, FUTEX_WAIT, expected, timeout)`.
 public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Result<(), OSError> {
     // Convert nanosecond timeout to milliseconds for WaitOnAddress.
@@ -818,11 +834,14 @@ public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Resul
 
 /// Wake `count` threads waiting on the address.
 ///
+
 /// If count == 1, wakes a single waiter (most common case for mutex/condvar).
 /// If count > 1, wakes all waiters (used by notify_all / broadcast).
 ///
+
 /// Returns Ok(n) where n is an estimate of woken threads (may be 0 if no waiters).
 ///
+
 /// This is the Windows equivalent of `futex(addr, FUTEX_WAKE, count)`.
 public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
     if count <= 1 {

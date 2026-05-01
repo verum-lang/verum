@@ -5,15 +5,17 @@
 // Spec: internal/specs/database.md §6.3
 // =============================================================================
 //
+
 // Pure-Verum MySQL 8.0 binary protocol implementation. No FFI to
 // libmysqlclient.
 //
-//   wire.{frame,frontend,backend,types}    — packet framing + taxonomies
-//   auth.caching_sha2                      — caching_sha2_password (8.0+ default)
-//   error                                  — MySQL error → DbError
-//   config                                 — MysqlConfig
-//   connection                             — handshake + COM_QUERY
-//   adapter                                — Spindle vendor identity
+
+//  wire.{frame,frontend,backend,types} — packet framing + taxonomies
+//  auth.caching_sha2 — caching_sha2_password (8.0+ default)
+//  error — MySQL error → DbError
+//  config — MysqlConfig
+//  connection — handshake + COM_QUERY
+//  adapter — Spindle vendor identity
 // =============================================================================
 
 module core.database.mysql;

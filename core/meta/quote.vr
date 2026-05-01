@@ -4,29 +4,36 @@
 // Version: 0.1.0
 // =============================================================================
 //
+
 // # Quasi-Quotation
 //
+
 // The `quote` construct enables code generation by embedding Verum syntax
 // directly in meta functions with interpolation support.
 //
+
 // ## Syntax
 //
+
 // ```verum
-// quote { <verum-code> }           // Basic quotation
-// quote { $ident }                  // Identifier interpolation
-// quote { ${expr} }                 // Expression interpolation
+// quote { <verum-code> } // Basic quotation
+// quote { $ident } // Identifier interpolation
+// quote { ${expr} } // Expression interpolation
 // quote { $[for x in iter { ... }] } // Repetition
 // ```
 //
+
 // ## Interpolation
 //
-// | Syntax     | Description                     | Example                |
+
+// | Syntax | Description | Example |
 // |------------|----------------------------------|------------------------|
-// | `$x`       | Interpolate identifier          | `let $name = 0;`       |
-// | `${expr}`  | Interpolate expression result   | `fn ${name}() { }`     |
-// | `$[...]`   | Repetition with iterator        | `$[for f in fields]`   |
-// | `$$`       | Literal dollar sign             | `let cost = $$100;`    |
+// | `$x` | Interpolate identifier | `let $name = 0;` |
+// | `${expr}` | Interpolate expression result | `fn ${name}() { }` |
+// | `$[...]` | Repetition with iterator | `$[for f in fields]` |
+// | `$$` | Literal dollar sign | `let cost = $$100;` |
 //
+
 // =============================================================================
 
 module meta.quote;
@@ -42,32 +49,39 @@ mount meta.contexts.{ToTokens};
 
 /// Quote builder for programmatic token stream construction
 ///
+
 /// While the `quote { ... }` syntax is the primary way to create token streams,
 /// `QuoteBuilder` provides a programmatic API for dynamic construction.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// meta fn build_struct(name: Text, fields: List<(Text, Text)>) -> TokenStream {
-///     let mut builder = QuoteBuilder.new();
+///  let mut builder = QuoteBuilder.new();
 ///
-///     builder
-///         .keyword("type")
-///         .ident(name)
-///         .keyword("is")
-///         .brace_open();
+
+///  builder
+///  .keyword("type")
+///  .ident(name)
+///  .keyword("is")
+///  .brace_open();
 ///
-///     for (field_name, field_type) in fields {
-///         builder
-///             .ident(field_name)
-///             .punct(':')
-///             .ident(field_type)
-///             .punct(',');
-///     }
+
+///  for (field_name, field_type) in fields {
+///  builder
+///  .ident(field_name)
+///  .punct(':')
+///  .ident(field_type)
+///  .punct(',');
+///  }
 ///
-///     builder.brace_close();
+
+///  builder.brace_close();
 ///
-///     builder.build()
+
+///  builder.build()
 /// }
 /// ```
 public type QuoteBuilder is {
@@ -337,6 +351,7 @@ implement QuoteBuilder {
 
 /// Builder for constructing delimited groups
 ///
+
 /// Created by `QuoteBuilder.paren_open()`, etc.
 public type GroupBuilder is {
     parent: QuoteBuilder,
@@ -394,33 +409,39 @@ fn keyword_from_str(s: Text) -> Keyword;
 
 /// Create token stream from format string with interpolations
 ///
+
 /// This is the implementation behind the `quote { }` syntax.
 /// The compiler transforms `quote { ... }` into calls to this function.
 ///
+
 /// ## Interpolation Syntax
 ///
+
 /// - `$ident`: Looks up `ident` in scope and interpolates its token representation
 /// - `${expr}`: Evaluates expression and interpolates result
 /// - `$[for x in iter { ... }]`: Repeats block for each item
 ///
+
 /// ## Example (what the compiler does)
 ///
+
 /// ```verum
 /// // Source:
 /// quote { let $name: $ty = $value; }
 ///
+
 /// // Transformed to:
 /// __quote_impl(
-///     List(
-///         QuotePart.Literal("let "),
-///         QuotePart.Interpolate(name),
-///         QuotePart.Literal(": "),
-///         QuotePart.Interpolate(ty),
-///         QuotePart.Literal(" = "),
-///         QuotePart.Interpolate(value),
-///         QuotePart.Literal(";"),
-///     ),
-///     Span.call_site()
+///  List(
+///  QuotePart.Literal("let "),
+///  QuotePart.Interpolate(name),
+///  QuotePart.Literal(": "),
+///  QuotePart.Interpolate(ty),
+///  QuotePart.Literal(" = "),
+///  QuotePart.Interpolate(value),
+///  QuotePart.Literal(";"),
+///  ),
+///  Span.call_site()
 /// )
 /// ```
 @compiler_intrinsic

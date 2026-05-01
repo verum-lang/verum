@@ -2,20 +2,24 @@
 // lib.math.rich_s — Reasonable Rich-Metatheory (R-S) facade
 // =============================================================================
 //
+
 // Re-exports the three sub-modules:
 //
-//   • `conditions.vr` — RichS protocol + (R1)–(R5) carriers
-//                        + Proposition 3.2 summary axiom.
-//   • `examples.vr`   — 13 canonical R-S members (ZFC, NBG,
-//                        MLTT, CIC, HoTT, Cubical HoTT, linear+!,
-//                        Eff, Lurie ∞-topos, cohesive, NCG,
-//                        motivic).
-//   • `non_examples.vr` — 6 R-S violators (Proposition 3.2
-//                          independence witnesses).
+
+//  • `conditions.vr` — RichS protocol + (R1)–(R5) carriers
+//  + Proposition 3.2 summary axiom.
+//  • `examples.vr` — 13 canonical R-S members (ZFC, NBG,
+//  MLTT, CIC, HoTT, Cubical HoTT, linear+!,
+//  Eff, Lurie ∞-topos, cohesive, NCG,
+//  motivic).
+//  • `non_examples.vr` — 6 R-S violators (Proposition 3.2
+//  independence witnesses).
 //
+
 // Downstream theorem files mount this single facade rather than
 // the three individual sub-modules.
 //
+
 // Source: A. Sereda, MSFS preprint, §3 — Reasonable Rich-S
 // metatheories.
 // =============================================================================

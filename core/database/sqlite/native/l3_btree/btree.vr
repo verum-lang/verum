@@ -6,13 +6,16 @@ module core.database.sqlite.native.l3_btree.btree;
 // Layer: 3
 // Spec: sqlite-native.md §10.2
 //
+
 // A `Btree<K, V>` is a thin handle carrying:
 //
-//   * `kind`           — table or index (different cell flavours)
-//   * `root_page`      — page number of the root page (1-based, > 0)
-//   * `page_size`      — bytes per page, carried for layout math
-//   * `reserved_bytes` — trailer reserved by PRAGMA reserve_size
+
+//  * `kind` — table or index (different cell flavours)
+//  * `root_page` — page number of the root page (1-based, > 0)
+//  * `page_size` — bytes per page, carried for layout math
+//  * `reserved_bytes` — trailer reserved by PRAGMA reserve_size
 //
+
 // Concrete operations (seek, insert, delete, balance) bind `K` and `V`
 // on the cursor — the handle itself stays light so multiple cursors
 // can share it. A cursor, on the other hand, is `affine` (§10.3)

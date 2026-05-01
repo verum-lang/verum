@@ -1,14 +1,17 @@
 //! SMT-LIB2 Export for External Verification
 //!
+
 //! This module provides facilities to export verification problems
 //! to SMT-LIB2 format for use with external solvers and tools.
 //!
+
 //! ## Use Cases
 //! - Share verification problems with other SMT solvers (CVC5, Yices, etc.)
 //! - Debug verification failures in external tools
 //! - Archive verification problems for regression testing
 //! - Generate benchmarks for SMT-COMP
 //!
+
 //! ## SMT-LIB2 Standard
 //! Complies with SMT-LIB 2.6 standard: http://smtlib.cs.uiowa.edu/
 
@@ -293,6 +296,7 @@ pub fn export_verification_problem(predicate: &Expr, var_name: &str, var_type: &
 
 /// Export refinement type check to SMT-LIB2
 ///
+
 /// Checks if a value satisfies a refinement predicate.
 /// Encodes as: ∃v. ¬predicate(v) (to check for counterexamples)
 pub fn export_refinement_check(predicate: &Expr, var_name: &str, var_type: &Type) -> Text {

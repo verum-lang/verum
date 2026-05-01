@@ -2,39 +2,44 @@
 // kernel_soundness — meta-circular soundness corpus for the Verum kernel
 // =============================================================================
 //
-// **Mission.**  Formalise the soundness of the Verum kernel *in Verum
+
+// **Mission.** Formalise the soundness of the Verum kernel *in Verum
 // itself* and cross-export the corpus to Coq + Lean for independent
-// re-checking.  The first production proof assistant where the
+// re-checking. The first production proof assistant where the
 // soundness theorem lives in the corpus AND is foreign-validated.
 //
+
 // **Module layout.**
 //
-//   * `model.vr`     — inductive Verum-side mirror of `verum_kernel::CoreTerm`,
-//                       `CoreType`, `UniverseLevel`.  The substrate the
-//                       theorems quantify over.
-//   * `judgment.vr`  — `Context`, `Judgment` (Γ ⊢ t : T), `SideCondition`,
-//                       `Derivation`, `KernelRule` (35 variants).
-//   * `rules.vr`     — premise/conclusion shape encoding for each of the
-//                       35 rules.  Drives the cross-export emitter.
-//   * `theorems.vr`  — per-rule soundness lemmas with explicit
-//                       `Proved` / `Admitted { reason }` status.  4 proved,
-//                       31 admitted with concrete IOUs.
-//   * `theorem.vr`   — the top-level `kernel_soundness` theorem +
-//                       corpus census (proved / admitted counts +
-//                       admit-reason enumeration).
-//   * `mod.vr`       — this file: re-exports the public surface.
+
+//  * `model.vr` — inductive Verum-side mirror of `verum_kernel::CoreTerm`,
+//  `CoreType`, `UniverseLevel`. The substrate the
+//  theorems quantify over.
+//  * `judgment.vr` — `Context`, `Judgment` (Γ ⊢ t : T), `SideCondition`,
+//  `Derivation`, `KernelRule` (35 variants).
+//  * `rules.vr` — premise/conclusion shape encoding for each of the
+//  35 rules. Drives the cross-export emitter.
+//  * `theorems.vr` — per-rule soundness lemmas with explicit
+//  `Proved` / `Admitted { reason }` status. 4 proved,
+//  31 admitted with concrete IOUs.
+//  * `theorem.vr` — the top-level `kernel_soundness` theorem +
+//  corpus census (proved / admitted counts +
+//  admit-reason enumeration).
+//  * `mod.vr` — this file: re-exports the public surface.
 //
-// **Audit-gate integration.**  `verum audit --kernel-soundness` walks
+
+// **Audit-gate integration.** `verum audit --kernel-soundness` walks
 // the `theorem.vr::corpus_rows()` list, runs each `Proved` lemma's
 // proof through the kernel re-checker, and emits the two foreign-
 // tool exports (`kernel_soundness.v` for Coq and `KernelSoundness.lean`
-// for Lean 4).  Foreign re-checking is OPTIONAL at audit time — the
+// for Lean 4). Foreign re-checking is OPTIONAL at audit time — the
 // gate exits 0 when Verum's own proofs typecheck; CI can run
 // `coqc` / `lean` separately and feed back the results.
 //
-// **Drift-detection.**  The Rust-side enums in `crates/verum_kernel/src/
+
+// **Drift-detection.** The Rust-side enums in `crates/verum_kernel/src/
 // term.rs` and `crates/verum_kernel/src/proof_tree.rs` are the
-// implementation of record.  This corpus is the *specification*.  The
+// implementation of record. This corpus is the *specification*. The
 // `CORE_TERM_VARIANT_COUNT` / `CORE_TYPE_VARIANT_COUNT` /
 // `KERNEL_RULE_COUNT` constants (in model.vr / judgment.vr) are
 // snapshot-tested against the Rust enums so a one-sided edit fails

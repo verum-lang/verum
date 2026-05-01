@@ -1,44 +1,56 @@
 //! FFI callback trampolines.
 //!
+
 //! This module provides support for creating callback trampolines that allow
 //! C code to call back into Verum functions. It uses libffi's closure mechanism
 //! to generate C-callable function pointers.
 //!
+
 //! # Overview
 //!
+
 //! When C code needs to call a Verum function (e.g., qsort comparator),
 //! we generate a trampoline using libffi closures that:
 //! 1. Marshals C arguments to Verum values
 //! 2. Invokes the Verum function through a registered callback handler
 //! 3. Marshals the result back to C
 //!
+
 //! # Architecture
 //!
+
 //! The callback system uses a two-tier approach:
 //! 1. `TrampolineRegistry` - manages callback metadata and lifetimes
 //! 2. `CallbackContext` - holds per-callback state passed through libffi's userdata
 //!
+
 //! The actual function invocation happens through a registered handler function
 //! that the interpreter provides when setting up callbacks.
 //!
+
 //! # Thread Safety
 //!
+
 //! Callbacks are associated with the thread that created them. A thread-local
 //! handler is used to route callbacks to the correct interpreter instance.
 //!
+
 //! # Example
 //!
+
 //! ```ignore
 //! // Create a callback for a comparator function: fn(i32, i32) -> i32
 //! let callback_id = registry.create_callback(
-//!     CTypeRuntime::I32,
-//!     vec![CTypeRuntime::I32, CTypeRuntime::I32],
-//!     42, // function ID in VBC module
+//!  CTypeRuntime::I32,
+//!  vec![CTypeRuntime::I32, CTypeRuntime::I32],
+//!  42, // function ID in VBC module
 //! )?;
 //!
+
 //! // Get the C function pointer
 //! let fn_ptr = registry.get_code_ptr(callback_id)?;
 //!
+
 //! // Pass fn_ptr to C code (e.g., qsort)
 //! // When C calls fn_ptr, our handler is invoked
 //! ```
@@ -65,15 +77,18 @@ static NEXT_TRAMPOLINE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Type alias for the callback handler function.
 ///
+
 /// The handler receives:
 /// - `function_id`: The VBC function to invoke
 /// - `args`: Marshalled arguments as Verum values
 ///
+
 /// Returns the result value, or None if the function doesn't return.
 pub type CallbackHandler = Box<dyn Fn(u32, &[Value]) -> Option<Value> + Send + Sync>;
 
 /// Context stored with each callback closure.
 ///
+
 /// This is passed through libffi's userdata mechanism and contains
 /// all information needed to handle the callback.
 pub struct CallbackContext {
@@ -93,11 +108,12 @@ unsafe impl Sync for CallbackContext {}
 
 /// A live callback with its closure and context.
 ///
+
 /// SAFETY: All heap-allocated fields use `Pin<Box<>>` to guarantee stable
 /// addresses. The libffi closure holds raw pointers to `context` and `cif`,
 /// so these must never be moved. `Pin` enforces this at the type level,
 /// preventing accidental moves even when the HashMap reallocates its entries.
-/// LiveCallback owns the resources backing an FFI callback.  Several
+/// LiveCallback owns the resources backing an FFI callback. Several
 /// fields exist solely to extend the lifetime of memory that the
 /// libffi closure (holding raw pointers) references — they're
 /// "alive-by-Drop": removing one would dangle the closure's pointers.
@@ -111,9 +127,9 @@ struct LiveCallback {
     code_ptr: *const (),
     /// The libffi CIF — must outlive the closure (SAFETY: pinned so its
     /// address is stable after `ffi_prep_closure_loc`; the closure
-    /// holds a raw pointer to this CIF).  Read by Drop only.
+    /// holds a raw pointer to this CIF). Read by Drop only.
     _cif: Pin<Box<Cif>>,
-    /// Raw closure memory — must be kept alive.  Read by Drop only.
+    /// Raw closure memory — must be kept alive. Read by Drop only.
     _closure_mem: Box<ClosureMemory>,
 }
 
@@ -138,6 +154,7 @@ impl Drop for ClosureMemory {
 
 // Thread-local callback handler.
 //
+
 // The interpreter registers a handler when setting up callbacks.
 // This handler is invoked when C code calls back through a trampoline.
 thread_local! {
@@ -146,6 +163,7 @@ thread_local! {
 
 /// Registry for callback trampolines.
 ///
+
 /// Manages the lifecycle of callbacks, including:
 /// - Creating closures with libffi
 /// - Storing context data
@@ -169,6 +187,7 @@ impl TrampolineRegistry {
 
     /// Sets the callback handler for the current thread.
     ///
+
     /// This must be called before any callbacks are invoked.
     /// The handler is responsible for invoking VBC functions.
     pub fn set_handler(handler: CallbackHandler) {
@@ -186,14 +205,18 @@ impl TrampolineRegistry {
 
     /// Creates a new callback trampoline.
     ///
+
     /// # Arguments
     ///
+
     /// * `return_type` - The C return type
     /// * `arg_types` - The C argument types
     /// * `function_id` - The VBC function ID to invoke
     ///
+
     /// # Returns
     ///
+
     /// The trampoline ID on success.
     pub fn create_callback(
         &mut self,
@@ -315,6 +338,7 @@ impl TrampolineRegistry {
 
     /// Gets the code pointer for a callback.
     ///
+
     /// This pointer can be passed to C code as a function pointer.
     pub fn get_code_ptr(&self, id: TrampolineId) -> Option<*const ()> {
         self.callbacks.get(&id).map(|cb| cb.code_ptr)
@@ -358,6 +382,7 @@ impl TrampolineRegistry {
 
     /// Looks up a TrampolineId by its code pointer.
     ///
+
     /// This is useful when you need to free a callback and only have
     /// the code pointer (e.g., stored in a Value).
     pub fn lookup_by_code_ptr(&self, code_ptr: *const ()) -> Option<TrampolineId> {
@@ -392,14 +417,17 @@ unsafe impl Sync for CallbackInfo {}
 
 /// The trampoline handler called by libffi when C code invokes a callback.
 ///
+
 /// This function:
 /// 1. Extracts callback context from userdata
 /// 2. Marshals C arguments to Verum values
 /// 3. Invokes the registered handler
 /// 4. Marshals the result back to C
 ///
+
 /// # Safety
 ///
+
 /// This is called by libffi's closure mechanism. The userdata pointer
 /// must be a valid pointer to a CallbackContext.
 unsafe extern "C" fn trampoline_handler(
@@ -444,8 +472,10 @@ unsafe extern "C" fn trampoline_handler(
 
 /// Marshal a C value to a Verum value.
 ///
+
 /// # Safety
 ///
+
 /// The `ptr` must point to valid data of the specified `ctype`.
 unsafe fn marshal_c_to_value(ptr: *mut c_void, ctype: CTypeRuntime) -> Value {
     // SAFETY: All operations below are covered by the function's safety contract
@@ -481,8 +511,10 @@ unsafe fn marshal_c_to_value(ptr: *mut c_void, ctype: CTypeRuntime) -> Value {
 
 /// Marshal a Verum value to a C result buffer.
 ///
+
 /// # Safety
 ///
+
 /// The `result_ptr` must have enough space for the C type.
 unsafe fn marshal_value_to_c(value: Value, ctype: CTypeRuntime, result_ptr: *mut c_void) {
     // SAFETY: All operations below are covered by the function's safety contract

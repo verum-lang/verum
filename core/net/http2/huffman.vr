@@ -6,15 +6,17 @@
 // Verum source, this module delegates to the canonical runtime-level
 // intrinsics; each intrinsic wraps the same constant table.
 //
+
 // # Contract
 //
+
 // - `encode` produces the minimum number of bytes with EOS padding up
-//   to the nearest byte boundary (all-ones padding, per RFC 7541 §5.2).
+//  to the nearest byte boundary (all-ones padding, per RFC 7541 §5.2).
 // - `decode` returns Err(DecodeError.Invalid) if a prefix doesn't match
-//   any code or the trailing padding exceeds 7 bits / uses EOS.
+//  any code or the trailing padding exceeds 7 bits / uses EOS.
 // - Maximum expansion during encode: a pathological string of 255-byte
-//   values (30-bit codes) produces 30/8 = 3.75× output. The decoder's
-//   `max_output` parameter caps this.
+//  values (30-bit codes) produces 30/8 = 3.75× output. The decoder's
+//  `max_output` parameter caps this.
 // =============================================================================
 
 module core.net.http2.huffman;

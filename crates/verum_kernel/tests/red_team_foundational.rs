@@ -1,9 +1,10 @@
 //! Red-team adversarial test suite for the foundational kernel
 //! infrastructure (Ordinal + InfinityCategory + DiakrisisBridge).
 //!
+
 //! These tests systematically probe boundary conditions, hidden
 //! invariants, and structural assumptions that could break under
-//! adversarial input.  Each failure is either a bug to fix or an
+//! adversarial input. Each failure is either a bug to fix or an
 //! intentional design choice that gets DOCUMENTED as a contract.
 
 use verum_kernel::diakrisis_bridge::{BridgeAudit, BridgeId};
@@ -118,8 +119,8 @@ fn ordinal_succ_strictly_greater() {
 
 #[test]
 fn ordinal_sup_empty() {
-    // Edge case: Sup of empty Vec.  Mathematically this should be the
-    // smallest ordinal (0).  Our implementation: `parts.iter().all(p)`
+    // Edge case: Sup of empty Vec. Mathematically this should be the
+    // smallest ordinal (0). Our implementation: `parts.iter().all(p)`
     // on empty iter returns true vacuously — so empty Sup < anything.
     let empty_sup = Ordinal::Sup(vec![]);
     assert!(empty_sup.lt(&Ordinal::Finite(1)),
@@ -166,7 +167,7 @@ fn ordinal_render_produces_distinct_outputs() {
 
 #[test]
 fn ordinal_finite_zero_not_regular_per_convention() {
-    // Convention: 0 is not regular.  Documented invariant.
+    // Convention: 0 is not regular. Documented invariant.
     assert!(!Ordinal::Finite(0).is_regular());
     // But Finite(1), Finite(2), ... are regular.
     assert!(Ordinal::Finite(1).is_regular());
@@ -195,9 +196,9 @@ fn ordinal_omega_pow_equality() {
     // Under lt, neither is < the other (they should be equal-ranked).
     // Currently OmegaSquared is hardcoded < OmegaPow(3) but
     // OmegaSquared vs OmegaPow(2) interaction is not directly tested.
-    // EDGE CASE: we only have OmegaPow for e ≥ 3 by convention.  The
+    // EDGE CASE: we only have OmegaPow for e ≥ 3 by convention. The
     // module docstring says "Covers ω³, ω⁴, ..." so OmegaPow(2)
-    // is technically out of contract.  Document this.
+    // is technically out of contract. Document this.
 }
 
 // =============================================================================
@@ -264,7 +265,7 @@ fn compose_with_identity_is_left_unit() {
 #[test]
 fn compose_associativity_at_higher_cell_level() {
     // 2-cell composition should still be strictly associative at the V0
-    // surface (V1 will introduce associator 2-cells).
+    // surface (Future work will introduce associator 2-cells).
     let f = InfinityMorphism {
         name: verum_common::Text::from("α"),
         source: verum_common::Text::from("A"),
@@ -352,7 +353,7 @@ fn id_x_at_finite_level_is_decidable() {
 #[test]
 fn non_identity_at_omega_records_bridge() {
     // Non-identity morphism at limit-level requires bridge admit
-    // (Theorem A.7 stabilisation).  This is the design boundary.
+    // (Theorem A.7 stabilisation). This is the design boundary.
     let mut audit = BridgeAudit::new();
     let f = InfinityMorphism {
         name: verum_common::Text::from("f"),

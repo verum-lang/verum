@@ -5,10 +5,12 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // Provides parallel_map and related utilities for processing collections
 // across multiple workers. Currently uses a sequential fallback; true
 // parallelism via spawn will be added when the runtime supports it.
 //
+
 // =============================================================================
 
 module parallel;
@@ -19,12 +21,14 @@ module parallel;
 
 /// Apply a function to each element of a list, returning a new list of results.
 ///
+
 /// `worker_count` is a hint for future parallel execution; the current
 /// implementation processes items sequentially.
 ///
+
 /// Example:
-///   let doubled = parallel_map([1, 2, 3], 4, |x| x * 2);
-///   // doubled == [2, 4, 6]
+///  let doubled = parallel_map([1, 2, 3], 4, |x| x * 2);
+///  // doubled == [2, 4, 6]
 public fn parallel_map<T, U>(
     items: List<T>,
     worker_count: Int,
@@ -42,6 +46,7 @@ public fn parallel_map<T, U>(
 
 /// Apply a function to each element, keeping only elements where f returns Some.
 ///
+
 /// Equivalent to map + filter in a single pass.
 public fn parallel_filter_map<T, U>(
     items: List<T>,
@@ -77,6 +82,7 @@ public fn parallel_for_each<T>(
 
 /// Reduce a list in parallel using an associative binary operation.
 ///
+
 /// Returns None for an empty list.
 public fn parallel_reduce<T>(
     items: List<T>,
@@ -100,41 +106,49 @@ public fn parallel_reduce<T>(
 // Parallel Exclusive Scan (Blelloch Algorithm)
 // =============================================================================
 //
+
 // The Blelloch algorithm computes an *exclusive* prefix scan in two phases:
 //
-//   up-sweep: builds a balanced binary tree of partial sums in-place, so that
-//             after this phase `xs[i]` at every internal node holds the sum of
-//             its left and right subtrees. Work: O(n); depth: O(log n).
+
+//  up-sweep: builds a balanced binary tree of partial sums in-place, so that
+//  after this phase `xs[i]` at every internal node holds the sum of
+//  its left and right subtrees. Work: O(n); depth: O(log n).
 //
-//   down-sweep: replaces the root with the identity element and walks down,
-//               placing at each left child the value currently at the parent,
-//               and at each right child the sum of the parent and the value
-//               previously at the left child. Work: O(n); depth: O(log n).
+
+//  down-sweep: replaces the root with the identity element and walks down,
+//  placing at each left child the value currently at the parent,
+//  and at each right child the sum of the parent and the value
+//  previously at the left child. Work: O(n); depth: O(log n).
 //
+
 // The resulting `xs[i]` is the fold of `identity, xs[0], xs[1], ..., xs[i-1]`
 // under `op` — the textbook exclusive prefix scan.
 //
+
 // The implementation below is correct for any associative `f` with an identity
 // element `zero`. When a real work-stealing scheduler lands, the two sweeps
 // become natural spawn/join points: each level of the tree is embarrassingly
 // parallel and touches disjoint slots, so the algorithm delivers O(log n)
 // depth on a parallel runtime without changing the external API.
 //
+
 // The array length MUST be a power of two for the textbook Blelloch scan;
 // callers that need arbitrary lengths should pad with the `zero` identity.
 
 /// Exclusive prefix scan over a power-of-two-sized `List<Int>` with the
 /// caller-supplied associative operator `f` and identity element `zero`.
 ///
+
 /// Example (addition):
-///   let xs = [1, 2, 3, 4];
-///   let scanned = parallel_scan_exclusive(xs, 0, |a, b| a + b);
-///   // scanned == [0, 1, 3, 6]
+///  let xs = [1, 2, 3, 4];
+///  let scanned = parallel_scan_exclusive(xs, 0, |a, b| a + b);
+///  // scanned == [0, 1, 3, 6]
 ///
+
 /// Example (max):
-///   let xs = [3, 1, 4, 1];
-///   let maxed = parallel_scan_exclusive(xs, 0, |a, b| if a > b { a } else { b });
-///   // maxed == [0, 3, 3, 4]
+///  let xs = [3, 1, 4, 1];
+///  let maxed = parallel_scan_exclusive(xs, 0, |a, b| if a > b { a } else { b });
+///  // maxed == [0, 3, 3, 4]
 public fn parallel_scan_exclusive(
     items: List<Int>,
     zero: Int,

@@ -1,13 +1,16 @@
 //! Comprehensive Error Handling Performance Benchmark Suite
 //!
+
 //! **CRITICAL REQUIREMENTS**: Verify all error handling performance targets
 //!
+
 //! # Performance Targets (from CLAUDE.md)
 //! - Circuit breaker check overhead: 10-50ns
 //! - Error creation and propagation: < 100ns
 //! - Context chain building: < 50ns per level
 //! - Recovery strategy execution: < 1μs
 //!
+
 //! Run with: cargo bench --package verum_error --bench error_comprehensive_bench --release
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

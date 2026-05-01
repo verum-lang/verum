@@ -6,11 +6,13 @@ module core.database.sqlite.native.l2_record.varint;
 // Layer: 2
 // Spec: sqlite-native.md §6.4
 //
+
 // Thin re-export over the production-grade SQLite varint implementation
 // already living in `core.encoding.varint`. Keeps the L2 record layer
 // self-contained (callers import `core.database.sqlite.native.l2_record`
 // and never reach directly into `core.encoding.*`).
 //
+
 // No new logic; identical semantics, identical tests. If the encoding
 // implementation ever needs to diverge (e.g., a SQLite-specific fast
 // path for i32 values), this module is where that re-specialisation

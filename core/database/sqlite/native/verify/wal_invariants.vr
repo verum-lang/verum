@@ -3,21 +3,23 @@
 // =============================================================================
 // Spec: sqlite-native.md §8.3, §21.4
 //
+
 // Five invariants govern the WAL pipeline:
 //
-//   W1  frames_are_chained          — every frame's previous-checksum
-//                                     equals the prior frame's checksum
-//   W2  commit_marker_terminates    — a non-zero db_size_after on a
-//                                     frame marks a commit; before that
-//                                     frame, no rollback is possible
-//   W3  checkpoint_idempotent       — running the checkpointer twice
-//                                     in succession produces identical
-//                                     state (no double-applied frames)
-//   W4  recovery_preserves_commits  — recover(WAL[0..crash]) =
-//                                     recover_up_to_last_commit(WAL)
-//   W5  reader_sees_committed_only  — a snapshot acquired at time t
-//                                     never observes a frame whose
-//                                     commit marker post-dates t
+
+//  W1 frames_are_chained — every frame's previous-checksum
+//  equals the prior frame's checksum
+//  W2 commit_marker_terminates — a non-zero db_size_after on a
+//  frame marks a commit; before that
+//  frame, no rollback is possible
+//  W3 checkpoint_idempotent — running the checkpointer twice
+//  in succession produces identical
+//  state (no double-applied frames)
+//  W4 recovery_preserves_commits — recover(WAL[0..crash]) =
+//  recover_up_to_last_commit(WAL)
+//  W5 reader_sees_committed_only — a snapshot acquired at time t
+//  never observes a frame whose
+//  commit marker post-dates t
 // =============================================================================
 
 module core.database.sqlite.native.verify.wal_invariants;
@@ -43,6 +45,7 @@ public type FrameRecord is {
 // W1 — chained checksums
 // -----------------------------------------------------------------------------
 //
+
 // The L1 WAL writer stores running cumulative checksum bytes after each
 // frame. The "prev checksum" of frame N is the (checksum1, checksum2)
 // of frame N-1; or the WAL header's seed checksum if N == 0.
@@ -102,6 +105,7 @@ public fn no_split_commit(frames: &List<FrameRecord>) -> Bool {
 // W3 — checkpoint idempotency
 // -----------------------------------------------------------------------------
 //
+
 // `apply_checkpoint(state, frames)` must be a function in the
 // mathematical sense: same input → same output, regardless of whether
 // it's been called before. We model state as a `List<(page_no, content)>`

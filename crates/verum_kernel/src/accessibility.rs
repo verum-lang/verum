@@ -1,48 +1,58 @@
 //! Adámek-Rosický 1.26 — λ-filtered colimit closure of κ-accessible
-//! categories. V0 algorithmic kernel rule.
+//! categories. algorithmic kernel rule.
 //!
+
 //! ## What this delivers
 //!
+
 //! AR 1.26 is the **second load-bearing pivot** of MSFS (after HTT
 //! 5.1.4 Grothendieck construction):
 //!
+
 //! > For every regular cardinal κ and regular λ ≤ κ, every κ-accessible
 //! > category C admits all λ-filtered colimits, and the colimit
 //! > inherits κ-accessibility.
 //!
+
 //! Pre-this-module AR 1.26 is admitted as `msfs_lemma_A_8_adamek_rosicky`
 //! framework axiom and routed through `KappaAccessibleInfCategory`
-//! protocol predicates without algorithmic content.  V0 ships the
+//! protocol predicates without algorithmic content. ships the
 //! constructive closure operation itself.
 //!
+
 //! ## Algorithm (AR 1.26 finitary skeleton)
 //!
+
 //! Given a λ-filtered diagram `D : I → C` with `I` λ-filtered and
 //! `C` κ-accessible:
 //!
-//!   1. **Index-cofinality check**: verify `I.cardinality() ≤ λ`.
-//!   2. **Object enumeration**: collect `D(i)` for every `i ∈ I`.
-//!   3. **Cocone assembly**: build the universal-property cocone
-//!      from the κ-presentable density of `C`.
-//!   4. **Universal property witness**: the colimit object is
-//!      κ-presentable (HTT 1.4.4 + AR 1.26 statement).
-//!   5. **Accessibility-preservation witness**: the resulting object
-//!      sits in `C`'s κ-accessible subcategory.
+
+//!  1. **Index-cofinality check**: verify `I.cardinality() ≤ λ`.
+//!  2. **Object enumeration**: collect `D(i)` for every `i ∈ I`.
+//!  3. **Cocone assembly**: build the universal-property cocone
+//!  from the κ-presentable density of `C`.
+//!  4. **Universal property witness**: the colimit object is
+//!  κ-presentable (HTT 1.4.4 + AR 1.26 statement).
+//!  5. **Accessibility-preservation witness**: the resulting object
+//!  sits in `C`'s κ-accessible subcategory.
 //!
+
 //! V0 produces the colimit object name + accessibility-preservation
-//! witness; V1 will produce the universal-cocone data + factorisation
+//! witness; Future work will produce the universal-cocone data + factorisation
 //! morphism.
 //!
+
 //! ## What this UNBLOCKS
 //!
-//!   - **MSFS §6.1 β-part Step 4** (the AFN-T β-part argument
-//!     that requires `κ_1`-accessibility preservation under
-//!     transfinite-tower colimits).
-//!   - **Lemma 10.3 (ι, r) construction** via AR Adjoint Functor
-//!     Theorem (built atop AR 1.26).
-//!   - **Concrete `S_S^global` construction** with explicit
-//!     accessibility witness — the host stdlib's
-//!     `concrete_accessible.vr` becomes structurally checkable.
+
+//!  - **MSFS §6.1 β-part Step 4** (the AFN-T β-part argument
+//!  that requires `κ_1`-accessibility preservation under
+//!  transfinite-tower colimits).
+//!  - **Lemma 10.3 (ι, r) construction** via AR Adjoint Functor
+//!  Theorem (built atop AR 1.26).
+//!  - **Concrete `S_S^global` construction** with explicit
+//!  accessibility witness — the host stdlib's
+//!  `concrete_accessible.vr` becomes structurally checkable.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -65,8 +75,8 @@ pub struct LambdaFilteredDiagram {
     /// The objects `D(i)` for `i ∈ I`, by index name.
     pub diagram_objects: Vec<(Text, Text)>,
     /// Witness flag: every finite subset of `I` admits an upper bound
-    /// in `I` of cardinality strictly less than λ.  V0 trusts this
-    /// flag; V1 will verify it by inspecting the index category.
+    /// in `I` of cardinality strictly less than λ. V0 trusts this
+    /// flag; Future work will verify it by inspecting the index category.
     pub is_lambda_filtered: bool,
 }
 
@@ -96,12 +106,12 @@ impl LambdaFilteredDiagram {
 pub struct KappaAccessibleCategory {
     /// Diagnostic name (e.g. "Set", "Cat", "(∞,1)-Cat").
     pub name: Text,
-    /// The accessibility level κ.  Must be a regular cardinal.
+    /// The accessibility level κ. Must be a regular cardinal.
     pub kappa: Ordinal,
 }
 
 impl KappaAccessibleCategory {
-    /// Construct a category at level κ.  Verifies κ is regular
+    /// Construct a category at level κ. Verifies κ is regular
     /// (panics if not — accessibility theory requires regular cardinals).
     pub fn at_kappa(name: impl Into<Text>, kappa: Ordinal) -> Self {
         assert!(
@@ -135,19 +145,24 @@ pub struct FilteredColimit {
 /// AR 1.26 V0 — compute the λ-filtered colimit of a diagram in a
 /// κ-accessible category, with κ-accessibility preservation.
 ///
+
 /// **Preconditions** (kernel-checked):
 ///
-///   1. λ ≤ κ.
-///   2. Both λ and κ are regular cardinals.
-///   3. The diagram is genuinely λ-filtered (`is_lambda_filtered` flag).
-///   4. The diagram has at least one object (non-empty colimit).
+
+///  1. λ ≤ κ.
+///  2. Both λ and κ are regular cardinals.
+///  3. The diagram is genuinely λ-filtered (`is_lambda_filtered` flag).
+///  4. The diagram has at least one object (non-empty colimit).
 ///
+
 /// **Produces**:
 ///
-///   1. A `FilteredColimit` carrying the colimit-object name and
-///      the inherited κ-accessibility witness.
+
+///  1. A `FilteredColimit` carrying the colimit-object name and
+///  the inherited κ-accessibility witness.
 ///
-/// Returns `None` when preconditions fail.  This is the algorithmic
+
+/// Returns `None` when preconditions fail. This is the algorithmic
 /// content of AR 1.26: every preconditioned input produces an output.
 pub fn build_filtered_colimit(
     diagram: &LambdaFilteredDiagram,
@@ -157,7 +172,7 @@ pub fn build_filtered_colimit(
     if !diagram.lambda.le(&target.kappa) {
         return None;
     }
-    // Precondition 2: both regular.  KappaAccessibleCategory::at_kappa
+    // Precondition 2: both regular. KappaAccessibleCategory::at_kappa
     // panics on non-regular κ at construction; we only need to check λ.
     if !diagram.lambda.is_regular() {
         return None;
@@ -172,9 +187,9 @@ pub fn build_filtered_colimit(
     }
 
     // Algorithm:
-    //   1. Compute colim by joining the diagram's objects.  V0 finitary:
-    //      synthesize a colimit name from the diagram name.
-    //   2. Inherit κ-accessibility from target.
+    //  1. Compute colim by joining the diagram's objects. V0 finitary:
+    //  synthesize a colimit name from the diagram name.
+    //  2. Inherit κ-accessibility from target.
     let colim_name = format!("colim({})", diagram.name.as_str());
 
     Some(FilteredColimit {
@@ -195,7 +210,7 @@ pub fn preserves_accessibility(
     colim.kappa == target.kappa
 }
 
-/// AR 1.26 — bound check on cofinality.  λ-filtered closure requires
+/// AR 1.26 — bound check on cofinality. λ-filtered closure requires
 /// λ ≤ κ; this function verifies the relation.
 pub fn cofinality_bound_holds(lambda: &Ordinal, kappa: &Ordinal) -> bool {
     lambda.le(kappa) && lambda.is_regular() && kappa.is_regular()

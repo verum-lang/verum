@@ -1,5 +1,6 @@
 //! Lint-engine diagnostics for the LSP.
 //!
+
 //! The Verum lint engine lives in `verum_cli`, which `verum_lsp`
 //! cannot depend on (cycle: `verum_cli` already depends on
 //! `verum_lsp` to wire the `verum lsp` subcommand). To keep the
@@ -9,6 +10,7 @@
 //! `schema_version: 1` so this client can fail loudly if the
 //! producer ever bumps the version.
 //!
+
 //! Performance: subprocess spawn + JSON decode is on the order of
 //! tens of milliseconds, well below the per-keystroke threshold.
 //! In practice we run on save and on a 300 ms debounce after the

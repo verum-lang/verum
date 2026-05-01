@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §23
 //
+
 // `BuildManifest` is the data the build system writes into the
 // `loom-info.json` artifact at compile time. The L7 façade exposes
 // it via `Database.build_info()`. It's the single source of

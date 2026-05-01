@@ -5,17 +5,21 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // RFC 3339 — the profile of ISO 8601 that every API, config file,
 // log line, and cloud service actually uses. Grammar (§5.6):
 //
-//   date-time  = full-date "T" full-time
-//   full-date  = 4DIGIT "-" 2DIGIT "-" 2DIGIT            ; YYYY-MM-DD
-//   full-time  = partial-time time-offset
-//   partial-time = 2DIGIT ":" 2DIGIT ":" 2DIGIT [ "." 1*DIGIT ]
-//   time-offset  = "Z" | ( ("+" | "-") 2DIGIT ":" 2DIGIT )
+
+//  date-time = full-date "T" full-time
+//  full-date = 4DIGIT "-" 2DIGIT "-" 2DIGIT ; YYYY-MM-DD
+//  full-time = partial-time time-offset
+//  partial-time = 2DIGIT ":" 2DIGIT ":" 2DIGIT [ "." 1*DIGIT ]
+//  time-offset = "Z" | ( ("+" | "-") 2DIGIT ":" 2DIGIT )
 //
+
 // # API
 //
+
 // ```
 // // Parse → unix seconds (UTC) + sub-second nanos + offset.
 // let ts: Rfc3339Time = rfc3339.parse(&Text.from("2026-04-22T14:30:00.123Z"))?;
@@ -23,23 +27,28 @@
 // assert(ts.nanos == 123_000_000);
 // assert(ts.offset_minutes == 0);
 //
+
 // // Build from unix seconds, emit UTC Z form.
-// let s: Text = rfc3339.format_utc(1777213800, 0);        // "2026-04-22T14:30:00Z"
+// let s: Text = rfc3339.format_utc(1777213800, 0); // "2026-04-22T14:30:00Z"
 // let s: Text = rfc3339.format_utc_with_nanos(1777213800, 123_000_000);
-//                               // "2026-04-22T14:30:00.123000000Z"
+//  // "2026-04-22T14:30:00.123000000Z"
 // ```
 //
+
 // # Timezone scope
 //
+
 // Parses and preserves the offset of the input (`offset_minutes`),
 // but `unix_seconds` is always UTC (offset applied on parse).
 // Formatting writes the offset verbatim when non-zero, `Z` for UTC.
 //
+
 // Historical UTC leap-seconds (`:60` in the seconds slot) are
 // accepted on parse for compatibility with pre-2012 datasets but
 // collapsed to `:59` in the unix-seconds output. Most callers
 // never hit this.
 //
+
 // =============================================================================
 
 module core.time.rfc3339;

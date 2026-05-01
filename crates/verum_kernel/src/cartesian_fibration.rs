@@ -1,57 +1,69 @@
 //! Cartesian fibrations (HTT 3.1) + Straightening/Unstraightening
-//! (HTT 3.2.0.1) — V0 algorithmic kernel rules.
+//! (HTT 3.2.0.1) — algorithmic kernel rules.
 //!
+
 //! ## What this delivers
 //!
+
 //! Cartesian fibrations are the ∞-categorical generalisation of
 //! Grothendieck fibrations: a functor `p : E → C` is *Cartesian*
 //! when every morphism `f : c' → p(e)` admits a *Cartesian lift*
 //! `f' : e' → e` with universal-property characterisation.
 //!
+
 //! HTT 3.2.0.1 gives the **Straightening / Unstraightening
 //! equivalence** of ∞-categories:
 //!
-//!   `St : coCart(C) ≃ Fun(C, ∞-Cat) : Un`
+
+//!  `St : coCart(C) ≃ Fun(C, ∞-Cat) : Un`
 //!
+
 //! This is the dual of (and tightly bound to) the ∞-Grothendieck
 //! construction (HTT 5.1.4) shipped in [`crate::grothendieck`].
 //! `Un` is the unstraightening functor; the Grothendieck construction
 //! is precisely `Un` applied to a `C`-indexed diagram.
 //!
+
 //! ## V0 algorithmic surface
 //!
+
 //! ### Cartesian fibrations (HTT 3.1.1)
 //!
-//!   * [`CartesianFibration`] — the data of `p : E → C` with the
-//!     Cartesian-lifting property declared as a witness flag.
-//!   * [`CartesianMorphism`] — a p-Cartesian morphism `f : e' → e`.
-//!   * [`is_cartesian`] — decidable predicate on `(p, f)` checking
-//!     that `f` is p-Cartesian.
+
+//!  * [`CartesianFibration`] — the data of `p : E → C` with the
+//!  Cartesian-lifting property declared as a witness flag.
+//!  * [`CartesianMorphism`] — a p-Cartesian morphism `f : e' → e`.
+//!  * [`is_cartesian`] — decidable predicate on `(p, f)` checking
+//!  that `f` is p-Cartesian.
 //!
+
 //! ### Straightening (HTT 3.2.0.1)
 //!
-//!   * [`StraighteningEquivalence`] — the witness pair
-//!     `(St, Un, ι, ε)` certifying the equivalence of ∞-categories.
-//!   * [`build_straightening_equivalence`] — algorithmic builder
-//!     given a base ∞-category `C`.
-//!   * [`unstraighten_to_grothendieck`] — bridge to the existing
-//!     `crate::grothendieck::build_grothendieck` showing that
-//!     `Un` agrees with the Grothendieck construction.
+
+//!  * [`StraighteningEquivalence`] — the witness pair
+//!  `(St, Un, ι, ε)` certifying the equivalence of ∞-categories.
+//!  * [`build_straightening_equivalence`] — algorithmic builder
+//!  given a base ∞-category `C`.
+//!  * [`unstraighten_to_grothendieck`] — bridge to the existing
+//!  `crate::grothendieck::build_grothendieck` showing that
+//!  `Un` agrees with the Grothendieck construction.
 //!
+
 //! ## What this UNBLOCKS in MSFS
 //!
-//!   - **Theorem 9.3 Step 1** — currently admits via host-stdlib
-//!     framework axiom `msfs_htt_3_2_straightening`.  Promotion:
-//!     invoke [`build_straightening_equivalence`] for the concrete
-//!     base category.
-//!   - **§6 β-part Step 2** — the AFN-T β-step requires Cartesian
-//!     fibrations to internalise the "fibred S-definable family"
-//!     structure.  Promotion: invoke [`is_cartesian`] on each
-//!     fibre-step morphism.
-//!   - **Lemma 3.4 V1 promotion** — the V0 [`crate::grothendieck`]
-//!     surface ships object-level data; V1 promotion uses
-//!     [`unstraighten_to_grothendieck`] to surface the universal
-//!     coCartesian-lift cells.
+
+//!  - **Theorem 9.3 Step 1** — currently admits via host-stdlib
+//!  framework axiom `msfs_htt_3_2_straightening`. Promotion:
+//!  invoke [`build_straightening_equivalence`] for the concrete
+//!  base category.
+//!  - **§6 β-part Step 2** — the AFN-T β-step requires Cartesian
+//!  fibrations to internalise the "fibred S-definable family"
+//!  structure. Promotion: invoke [`is_cartesian`] on each
+//!  fibre-step morphism.
+//!  - **Lemma 3.4 V1 promotion** — the V0 [`crate::grothendieck`]
+//!  surface ships object-level data; V1 promotion uses
+//!  [`unstraighten_to_grothendieck`] to surface the universal
+//!  coCartesian-lift cells.
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
@@ -68,9 +80,10 @@ use crate::ordinal::Ordinal;
 
 /// A Cartesian fibration `p : E → C` (HTT 3.1.1).
 ///
-/// **Algorithmic content (V0)**: the source `E`, target `C`, the
+
+/// **Algorithmic content **: the source `E`, target `C`, the
 /// functor's diagnostic name, and a witness flag asserting the
-/// Cartesian-lifting property.  V0 trusts the flag; V1 will check
+/// Cartesian-lifting property. V0 trusts the flag; Future work will check
 /// the property by inspecting the functor's lift action on each
 /// morphism.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,7 +95,7 @@ pub struct CartesianFibration {
     /// The base ∞-category `C`.
     pub base_category: InfinityCategory,
     /// Witness flag: `p` admits Cartesian lifts of all morphisms in
-    /// `C` (HTT 3.1.1.4).  V0 surface trusts caller declaration.
+    /// `C` (HTT 3.1.1.4). current surface trusts caller declaration.
     pub has_cartesian_lifts: bool,
     /// Witness flag: `p` is *coCartesian* (the dual notion — every
     /// morphism in `C` admits a *coCartesian* lift in `E`).
@@ -110,6 +123,7 @@ impl CartesianFibration {
 
 /// A p-Cartesian morphism `f : e' → e` in `E` (HTT 3.1.1.1).
 ///
+
 /// **Definition**: `f` is p-Cartesian iff for every `e'' ∈ E` and
 /// every `g : e'' → e` such that `p(g) = p(f) ∘ p(h)` for some
 /// `h : p(e'') → p(e')`, there exists a unique lift `g̃ : e'' → e'`
@@ -130,8 +144,9 @@ pub struct CartesianMorphism {
 
 /// Decide whether a morphism is p-Cartesian (HTT 3.1.1.1).
 ///
+
 /// V0 algorithmic surface: returns the witness flag stored on the
-/// `CartesianMorphism`.  V1 promotion: inspect the universal-property
+/// `CartesianMorphism`. Future work: inspect the universal-property
 /// lift directly.
 pub fn is_cartesian(_p: &CartesianFibration, f: &CartesianMorphism) -> bool {
     f.is_p_cartesian
@@ -144,14 +159,17 @@ pub fn is_cartesian(_p: &CartesianFibration, f: &CartesianMorphism) -> bool {
 /// The Straightening / Unstraightening equivalence of ∞-categories
 /// (HTT 3.2.0.1).
 ///
+
 /// **Statement**: for every ∞-category `C`, there is an equivalence
 /// of ∞-categories
 ///
-///   `St : coCart(C) ≃ Fun(C, ∞-Cat) : Un`
+
+///  `St : coCart(C) ≃ Fun(C, ∞-Cat) : Un`
 ///
+
 /// where `coCart(C)` is the ∞-category of coCartesian fibrations
 /// over `C` and `Fun(C, ∞-Cat)` is the ∞-category of `C`-indexed
-/// ∞-categorical diagrams.  The unstraightening `Un` is the
+/// ∞-categorical diagrams. The unstraightening `Un` is the
 /// ∞-Grothendieck construction.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StraighteningEquivalence {
@@ -164,7 +182,7 @@ pub struct StraighteningEquivalence {
     /// The unstraightening direction `Un : Fun(C, ∞-Cat) → coCart(C)`.
     pub unstraightening_name: Text,
     /// Witness flag: `St ∘ Un ≃ id` and `Un ∘ St ≃ id` natural
-    /// isomorphisms exist (HTT 3.2.0.1).  Always `true` by HTT;
+    /// isomorphisms exist (HTT 3.2.0.1). Always `true` by HTT;
     /// the kernel re-checks at every citation site.
     pub is_equivalence: bool,
     /// The level at which the equivalence holds — by HTT 3.2.0.1
@@ -190,9 +208,10 @@ pub fn build_straightening_equivalence(c: &InfinityCategory) -> StraighteningEqu
 /// `C`-indexed diagram coincides with the ∞-Grothendieck
 /// construction shipped in [`crate::grothendieck`].
 ///
+
 /// This makes the Grothendieck construction the *concrete
 /// algorithmic content* of the unstraightening direction of the
-/// HTT 3.2.0.1 equivalence.  V0 surface returns the constructed
+/// HTT 3.2.0.1 equivalence. current surface returns the constructed
 /// fibration's data (via `build_grothendieck`).
 pub fn unstraighten_to_grothendieck(
     diagram: &SIndexedDiagram,
@@ -201,7 +220,7 @@ pub fn unstraighten_to_grothendieck(
 }
 
 /// Verify that a Cartesian fibration arose from a `C`-indexed
-/// diagram via unstraightening.  V0 surface: checks that the
+/// diagram via unstraightening. current surface: checks that the
 /// fibration is coCartesian and has Cartesian lifts.
 pub fn fibration_is_unstraightened(p: &CartesianFibration) -> bool {
     p.has_cartesian_lifts && p.is_cocartesian
@@ -352,7 +371,7 @@ mod tests {
         assert!(st.is_equivalence);
 
         // Apply Un to a C-indexed diagram → obtain a fibration via
-        // Grothendieck.  Verify the resulting fibration preserves
+        // Grothendieck. Verify the resulting fibration preserves
         // the input diagram's accessibility level.
         let diagram = SIndexedDiagram::finite(
             "D",

@@ -6,21 +6,23 @@ module core.database.sqlite.native.l5_sql.parser.misc;
 // Layer: 5
 // Spec: sqlite.org/pragma.html, lang_transaction.html, lang_explain.html
 //
+
 // Short, self-contained statements that don't deserve their own
 // parser file:
 //
-//   pragma-stmt       = PRAGMA [schema.] name [ '=' expr | '(' expr ')' ]
-//   explain-stmt      = EXPLAIN [QUERY PLAN] stmt
-//   begin-stmt        = BEGIN [DEFERRED|IMMEDIATE|EXCLUSIVE] [TRANSACTION]
-//   commit-stmt       = (COMMIT|END) [TRANSACTION]
-//   rollback-stmt     = ROLLBACK [TRANSACTION] [TO [SAVEPOINT] name]
-//   savepoint-stmt    = SAVEPOINT name
-//   release-stmt      = RELEASE [SAVEPOINT] name
-//   vacuum-stmt       = VACUUM [schema] [INTO string-lit]
-//   reindex-stmt      = REINDEX [collation | [schema.]name]
-//   attach-stmt       = ATTACH [DATABASE] expr AS expr
-//   detach-stmt       = DETACH [DATABASE] name
-//   analyze-stmt      = ANALYZE [schema[.name]]
+
+//  pragma-stmt = PRAGMA [schema.] name [ '=' expr | '(' expr ')' ]
+//  explain-stmt = EXPLAIN [QUERY PLAN] stmt
+//  begin-stmt = BEGIN [DEFERRED|IMMEDIATE|EXCLUSIVE] [TRANSACTION]
+//  commit-stmt = (COMMIT|END) [TRANSACTION]
+//  rollback-stmt = ROLLBACK [TRANSACTION] [TO [SAVEPOINT] name]
+//  savepoint-stmt = SAVEPOINT name
+//  release-stmt = RELEASE [SAVEPOINT] name
+//  vacuum-stmt = VACUUM [schema] [INTO string-lit]
+//  reindex-stmt = REINDEX [collation | [schema.]name]
+//  attach-stmt = ATTACH [DATABASE] expr AS expr
+//  detach-stmt = DETACH [DATABASE] name
+//  analyze-stmt = ANALYZE [schema[.name]]
 // =============================================================================
 
 mount core.*;

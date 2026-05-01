@@ -69,6 +69,7 @@ public type Http3Frame is
 // Varint codec — thin re-export over core.encoding.varint.quic_*
 // =============================================================================
 //
+
 // QUIC/H3 varint lives in `core.encoding.varint` so that the full QUIC
 // transport stack (and other consumers like transport_parameters) can
 // reach for it without importing an HTTP/3-internal module. The two

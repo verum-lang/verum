@@ -5,12 +5,14 @@
 // Dependencies: core, text.regex, shell.{exec, escape, result, context}
 // =============================================================================
 //
+
 // Algebraic representation of kubectl subcommands with refinement-typed
 // resource references. KubeResource is a marker protocol so that
 // `KubectlCmd<Pod>` differs at the type level from `KubectlCmd<ConfigMap>`,
 // disallowing semantically incoherent constructions like
 // `KubectlCmd<ConfigMap>::Logs { ... }` (configmaps don't produce logs).
 //
+
 // =============================================================================
 
 module kubectl;
@@ -83,6 +85,7 @@ implement KubeResource for Namespace {
 // Refinement atoms — names, namespaces
 // =============================================================================
 //
+
 // Kubernetes DNS-1123 label/name rules: lowercase alphanumerics + dashes,
 // at most 63 chars, must start and end with alphanumeric.
 

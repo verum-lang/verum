@@ -4,24 +4,28 @@
 // Layer: 6
 // Spec: sqlite-native.md §15.4 / §16.4
 //
+
 // SELECT key, value FROM json_each('[10,20,30]');
-//   → (0, 10), (1, 20), (2, 30)
+//  → (0, 10), (1, 20), (2, 30)
 //
+
 // SELECT key, value FROM json_each('{"a": 1, "b": 2}');
-//   → ("a", 1), ("b", 2)
+//  → ("a", 1), ("b", 2)
 //
+
 // `json_each` walks the immediate children of the input;
 // `json_tree` recursively visits every node.
 //
+
 // Schema (matches SQLite):
-//   key   — element key (TEXT for objects, INTEGER for arrays, NULL for root)
-//   value — element value (any affinity)
-//   type  — "null"/"true"/"false"/"integer"/"real"/"text"/"array"/"object"
-//   atom  — non-null only for scalar leaves
-//   id    — internal sequential id of the node
-//   parent— parent's id (NULL at root)
-//   fullkey — '$' / '$.x' / '$[0]' path text
-//   path    — parent path
+//  key — element key (TEXT for objects, INTEGER for arrays, NULL for root)
+//  value — element value (any affinity)
+//  type — "null"/"true"/"false"/"integer"/"real"/"text"/"array"/"object"
+//  atom — non-null only for scalar leaves
+//  id — internal sequential id of the node
+//  parent— parent's id (NULL at root)
+//  fullkey — '$' / '$.x' / '$[0]' path text
+//  path — parent path
 // =============================================================================
 
 module core.database.sqlite.native.vtabs.json_each;

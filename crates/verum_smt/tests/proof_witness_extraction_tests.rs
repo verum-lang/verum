@@ -14,6 +14,7 @@
 )]
 //! Tests for proof witness extraction in z3_backend
 //!
+
 //! These tests verify that the proof witness extraction correctly:
 //! - Traverses the proof DAG to collect axiom references
 //! - Counts proof steps accurately
@@ -21,10 +22,12 @@
 //! - Uses structural AST comparison for formula equality
 //! - Extracts variables using Z3 AST traversal
 //!
+
 //! Refinement types (e.g., `Int{> 0}`, `Text where valid_email`) are verified via SMT.
 //! Proof witnesses are extracted from Z3's proof DAG when @verify(proof) is used,
 //! providing machine-checkable evidence that refinement predicates hold.
 //!
+
 //! Note: Proof generation requires enabling proof mode in the Z3 context.
 //! Tests that don't require proofs run without special configuration.
 //! Tests that require proofs use `with_z3_config` to enable proof generation.

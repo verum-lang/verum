@@ -2,35 +2,43 @@
 // core.action.ludics — Ludics designs as Perf(α_linear) (Theorem 120.T)
 // =============================================================================
 //
+
 // Operational treatment of Ludics-style proof-as-strategy semantics
 // realising Theorem 120.T:
 //
-//     Design ≃ Perf(α_linear),  Desseins ≃ 2-cells in >>·<<.
+
+//  Design ≃ Perf(α_linear), Desseins ≃ 2-cells in >>·<<.
 //
+
 // The Verum surface gives:
 //
-//   • `Locus<A>` — an SMCC-position (locus in Girard's sense),
-//                  parameterised by the carrier type A.
-//   • `Design<L1, L2>` — a strategy from L1 to L2, the central object
-//                        of the Ludics catalogue.
-//   • `Dessein<D1, D2>` — a 2-cell-style modification between designs.
-//   • `cut_elim(d)` — canonical-form reduction (Lemma 120.L3).
-//   • `orthogonal(d1, d2)` — gauge-incompatibility test (Lemma 120.L4).
+
+//  • `Locus<A>` — an SMCC-position (locus in Girard's sense),
+//  parameterised by the carrier type A.
+//  • `Design<L1, L2>` — a strategy from L1 to L2, the central object
+//  of the Ludics catalogue.
+//  • `Dessein<D1, D2>` — a 2-cell-style modification between designs.
+//  • `cut_elim(d)` — canonical-form reduction (Lemma 120.L3).
+//  • `orthogonal(d1, d2)` — gauge-incompatibility test (Lemma 120.L4).
 //
+
 // V0 (this file) ships protocol-level signatures + axiom-form theorems.
 // Concrete implementations of cut-elimination and orthogonality
 // procedures are deferred to V1 due to two practical considerations:
 //
-//   (a) Designs are infinite-branching trees in general; Verum needs
-//       lazy evaluation through cofix to avoid eager blow-up. The
-//       cofix infrastructure exists in core.coinductive but the
-//       Ludics-specific lazy interaction is not yet wired.
+
+//  (a) Designs are infinite-branching trees in general; Verum needs
+//  lazy evaluation through cofix to avoid eager blow-up. The
+//  cofix infrastructure exists in core.coinductive but the
+//  Ludics-specific lazy interaction is not yet wired.
 //
-//   (b) Cut-elimination should be bounded-depth (default 1000 steps)
-//       to give predictable termination; divergent computations
-//       return UNKNOWN verdicts. Bound is configurable per
-//       VVA §13.6 (Ludics caveat).
+
+//  (b) Cut-elimination should be bounded-depth (default 1000 steps)
+//  to give predictable termination; divergent computations
+//  return UNKNOWN verdicts. Bound is configurable per
+//  VVA §13.6 (Ludics caveat).
 //
+
 // Memory budget: ≤ 100 MB for typical proofs; UHM-scale corpora (223
 // theorems) may need optimization tracked separately.
 // =============================================================================
@@ -78,7 +86,7 @@ public type Dessein is protocol {};
 /// designs surface as UNKNOWN at the @verify(coherent) layer.
 public fn cut_elim_admits_normal_form_at<D: Design>(d: &D, depth_budget: Int{>= 0}) -> Bool {
     // V0 sufficient condition: the design's source and target loci
-    // exist and the budget is positive. V1 will replace with the
+    // exist and the budget is positive. Future work will replace with the
     // actual bounded-cofix reduction-checker; until then the policy
     // gate documents the surface contract.
     depth_budget > 0 && d.source().is_positive() || !d.source().is_positive()
@@ -86,6 +94,7 @@ public fn cut_elim_admits_normal_form_at<D: Design>(d: &D, depth_budget: Int{>= 
 
 /// **Cut-elimination admits canonical normal form** (Lemma 120.L3).
 ///
+
 /// V2 structural theorem: routes through the runtime classifier
 /// `cut_elim_admits_normal_form_at`. A design `d` reduces to a
 /// canonical normal form within the configured depth budget IFF
@@ -99,7 +108,7 @@ public theorem cut_elim_normal_form_exists<D: Design>(d: D, depth_budget: Int{>=
     proof {
         // Decidable by structural pattern-match on the locus polarity
         // (cut_elim_admits_normal_form_at returns true uniformly when
-        // depth_budget > 0). V1 will tighten the gate body to the
+        // depth_budget > 0). Future work will tighten the gate body to the
         // actual bounded-cofix reduction; V2 here pins the SHAPE of
         // the policy gate.
         true
@@ -123,8 +132,8 @@ public theorem cut_elim_commutes_with_composition<D: Design>(
     proof {
         // Both gates accept under the same depth_budget invariant.
         // The 2-cell witness for the commutation itself routes
-        // through Diakrisis Lemma 120.L3 — V0 surface admits
-        // structurally; V1 will produce the explicit commuting
+        // through Diakrisis Lemma 120.L3 — current surface admits
+        // structurally; Future work will produce the explicit commuting
         // 2-cell from the cofix reduction trace.
         true
     }
@@ -174,11 +183,12 @@ public theorem orthogonal_iff_cut_succeeds<D: Design>(
 /// every design corresponds to a performance morphism in the linear
 /// articulation, and the correspondence is a 2-equivalence.
 ///
+
 /// V2 structural form: the theorem returns true exactly when the
 /// design's source and target loci are well-formed (the equivalence
 /// is total over Ludics designs that admit the cofix-driven
 /// reduction premise). The witness functor Φ is constructed in the
-/// corpus source; V1 will surface it as a callable Verum function.
+/// corpus source; Future work will surface it as a callable Verum function.
 @framework(diakrisis, "Theorem 120.T (Ludics ≃ Perf(α_linear) headline equivalence)")
 public theorem ludics_perf_equivalence<D: Design>(d: D) -> Bool
     requires true

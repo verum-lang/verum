@@ -1,5 +1,6 @@
 //! Integration tests for `verum audit --kernel-recheck` (#122/#123).
 //!
+
 //! Walks every `.vr` file in the project, runs the kernel re-check
 //! (K-Refine-omega / K-Universe-Ascent / K-Eps-Mu / K-Round-Trip)
 //! against every theorem-shaped + axiom + function declaration,

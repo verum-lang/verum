@@ -1,18 +1,24 @@
 //! Affine and Linear Type System Implementation
 //!
+
 //! Higher-kinded types: type constructors parameterized by type-level functions
 //! Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 6 (Linear Types)
 //!
+
 //! This module implements compile-time verification for resource types:
 //!
+
 //! # Resource Kinds
 //!
+
 //! - **Copy**: Can be used any number of times (default for primitives)
 //! - **Affine**: Can be used at most once (heap-allocated types)
 //! - **Linear**: Must be used exactly once (resources requiring explicit cleanup)
 //!
+
 //! # Key Features
 //!
+
 //! - **At-most-once usage (Affine)**: Values can be used 0 or 1 times
 //! - **Exactly-once usage (Linear)**: Values must be used exactly once
 //! - **Move semantics**: First use consumes the value
@@ -20,23 +26,28 @@
 //! - **Linear checking**: Unused linear values cause compile error
 //! - **CBGR bypass**: Affine references promote to &checked (0ns overhead)
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! // Affine type - at most once
 //! type affine FileHandle is { fd: Int };
 //!
+
 //! // Linear type - exactly once (must be consumed)
 //! type linear MustClose is { fd: Int };
 //!
+
 //! fn good() {
-//!     let f = open_file("data.txt");  // Linear value
-//!     close_file(f);                   // OK - consumed exactly once
+//!  let f = open_file("data.txt"); // Linear value
+//!  close_file(f); // OK - consumed exactly once
 //! }
 //!
+
 //! fn bad() {
-//!     let f = open_file("data.txt");
-//!     // ERROR: linear value `f` must be consumed exactly once
+//!  let f = open_file("data.txt");
+//!  // ERROR: linear value `f` must be consumed exactly once
 //! }
 //! ```
 
@@ -53,6 +64,7 @@ use verum_common::ToText;
 
 /// Resource kind for type classification.
 ///
+
 /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 6 (Linear Types)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceKind {
@@ -101,6 +113,7 @@ impl From<ResourceModifier> for ResourceKind {
 
 /// Tracks usage of affine and linear values during type checking.
 ///
+
 /// Higher-kinded types: type constructors parameterized by type-level functions
 /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 6 (Linear Types)
 #[derive(Debug, Clone)]
@@ -158,12 +171,15 @@ impl AffineTracker {
 
     /// Create a new affine tracker with stdlib types pre-registered.
     ///
+
     /// This is the recommended constructor for production use. It automatically
     /// registers heap-allocated stdlib types (Text, List, Map, etc.) as affine,
     /// eliminating the need for users to know which types are move-only.
     ///
+
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 2 (Implicit Affine для stdlib)
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let tracker = AffineTracker::with_core();
@@ -178,6 +194,7 @@ impl AffineTracker {
 
     /// Create a new scope-local affine tracker
     ///
+
     /// This creates a fresh tracker with empty bindings but preserves
     /// the set of registered affine and linear types. Used when entering a new
     /// function scope where outer variable bindings are not accessible.
@@ -198,9 +215,11 @@ impl AffineTracker {
 
     /// Register a type as linear (exactly once)
     ///
+
     /// Linear types must be consumed exactly once. Unused linear values
     /// cause a compile-time error.
     ///
+
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 6 (Linear Types)
     pub fn register_linear_type(&mut self, type_name: impl Into<Text>) {
         self.linear_types.insert(type_name.into());
@@ -271,6 +290,7 @@ impl AffineTracker {
 
     /// Bind an affine or linear value
     ///
+
     /// Automatically determines resource kind from the type.
     pub fn bind(&mut self, name: impl Into<Text>, ty: Type, span: Span) {
         let name = name.into();
@@ -295,6 +315,7 @@ impl AffineTracker {
 
     /// Bind a value with explicit resource kind
     ///
+
     /// Used for containers or when resource kind is known.
     pub fn bind_with_kind(
         &mut self,
@@ -342,6 +363,7 @@ impl AffineTracker {
 
     /// Enter a loop context
     ///
+
     /// Records all current bindings as "pre-loop" so we can detect
     /// when affine values from outer scope are used inside the loop.
     pub fn enter_loop(&mut self) {
@@ -369,6 +391,7 @@ impl AffineTracker {
 
     /// Record a use of an affine value
     ///
+
     /// Returns an error if the value was already consumed.
     /// Also returns an error if the value is from outer scope and we're in a loop.
     /// Also returns an error if any field has been moved out (partial move).
@@ -434,6 +457,7 @@ impl AffineTracker {
 
     /// Record a use of a field from a struct containing affine values
     ///
+
     /// This is called when accessing `container.field` where `field` is an affine type.
     /// The field is marked as moved, preventing subsequent use of the whole struct.
     pub fn use_field_value(&mut self, var_name: &str, field_name: &str, span: Span) -> Result<(), TypeError> {
@@ -476,6 +500,7 @@ impl AffineTracker {
 
     /// Check if using a non-affine field from a partially moved struct is allowed
     ///
+
     /// Returns true if the access is to a non-moved, non-affine field.
     pub fn can_access_field(&self, var_name: &str, field_name: &str) -> bool {
         if let Some(binding) = self.bindings.get(&Text::from(var_name)) {
@@ -493,17 +518,20 @@ impl AffineTracker {
 
     /// Reinitialize a field that was previously moved out
     ///
+
     /// This is called when a moved field is reassigned, making the struct "whole" again.
     /// After reinitialization, the field can be accessed again and the struct can be
     /// used as a whole (if no other fields are still moved).
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut container = Container { resource: Resource { id: 42 }, name: "test" };
-    /// let old_res = container.resource;  // Move out affine field
-    /// container.resource = Resource { id: 99 };  // Reinitialize - struct is whole again
-    /// let whole = container;  // Now valid!
+    /// let old_res = container.resource; // Move out affine field
+    /// container.resource = Resource { id: 99 }; // Reinitialize - struct is whole again
+    /// let whole = container; // Now valid!
     /// ```
     pub fn reinitialize_field(&mut self, var_name: &str, field_name: &str) {
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
@@ -532,6 +560,7 @@ impl AffineTracker {
 
     /// Record a use of a tuple element from a tuple containing affine values
     ///
+
     /// This is called when accessing `tuple.N` where the element at index N is an affine type.
     /// The index is marked as moved, preventing subsequent use of the whole tuple.
     pub fn use_index_value(&mut self, var_name: &str, index: usize, span: Span) -> Result<(), TypeError> {
@@ -574,6 +603,7 @@ impl AffineTracker {
 
     /// Check if using a non-affine tuple element from a partially moved tuple is allowed
     ///
+
     /// Returns true if the access is to a non-moved, non-affine element.
     pub fn can_access_index(&self, var_name: &str, index: usize) -> bool {
         if let Some(binding) = self.bindings.get(&Text::from(var_name)) {
@@ -591,6 +621,7 @@ impl AffineTracker {
 
     /// Reinitialize a tuple element that was previously moved out
     ///
+
     /// This is called when a moved tuple element is reassigned.
     pub fn reinitialize_index(&mut self, var_name: &str, index: usize) {
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
@@ -609,6 +640,7 @@ impl AffineTracker {
 
     /// Borrow an affine value (does not consume)
     ///
+
     /// Allowed for immutable borrows that don't move the value.
     pub fn borrow_value(&mut self, name: &str, _span: Span) -> Result<(), TypeError> {
         // Borrowing is allowed as long as the value wasn't consumed
@@ -626,6 +658,7 @@ impl AffineTracker {
 
     /// Remove a binding (e.g., when leaving scope)
     ///
+
     /// This triggers cleanup for unconsumed affine values.
     pub fn unbind(&mut self, name: &str) -> Maybe<bool> {
         self.bindings
@@ -635,14 +668,18 @@ impl AffineTracker {
 
     /// Check for unconsumed linear values at scope end.
     ///
+
     /// Linear values must be consumed exactly once. This method returns errors
     /// for any linear values that were not consumed when leaving scope.
     ///
+
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 6 (Linear Types)
     ///
+
     /// # Arguments
     /// * `scope_end` - The span representing the end of the scope
     ///
+
     /// # Returns
     /// A list of errors for each unconsumed linear value
     pub fn check_linear_consumed(&self, scope_end: Span) -> List<TypeError> {
@@ -687,6 +724,7 @@ impl AffineTracker {
 
     /// Merge bindings from a branch (for control flow)
     ///
+
     /// After an if-expression or match, we need to merge the affine states
     /// from all branches. A value is consumed if it's consumed in ALL branches.
     pub fn merge_branch(&mut self, other: &AffineTracker) {
@@ -711,6 +749,7 @@ impl Default for AffineTracker {
 
 /// Helper to check if a type declaration has a resource modifier (affine or linear).
 ///
+
 /// Returns true if the modifier indicates at-most-once or exactly-once semantics.
 pub fn check_resource_modifier(modifier: &Option<ResourceModifier>) -> bool {
     matches!(
@@ -721,6 +760,7 @@ pub fn check_resource_modifier(modifier: &Option<ResourceModifier>) -> bool {
 
 /// Helper to check if a type declaration has a linear resource modifier.
 ///
+
 /// Returns true only for exactly-once (linear) types.
 pub fn check_linear_modifier(modifier: &Option<ResourceModifier>) -> bool {
     matches!(modifier, Some(ResourceModifier::Linear))

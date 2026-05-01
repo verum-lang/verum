@@ -2,11 +2,12 @@
 // core/net/weft/metrics_otlp.vr — OTLP/HTTP push exporter
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §11 (Phase 2 follow-up)
-// Refs:  https://opentelemetry.io/docs/specs/otlp/ (OTLP/HTTP §3.4)
-//        https://github.com/open-telemetry/opentelemetry-proto
+// Spec: internal/specs/net-framework.md §11 (Phase 2 follow-up)
+// Refs: https://opentelemetry.io/docs/specs/otlp/ (OTLP/HTTP §3.4)
+//  https://github.com/open-telemetry/opentelemetry-proto
 // =============================================================================
 //
+
 // Companion to `core.net.weft.metrics` — the existing scrape exporter
 // renders Prometheus text format on a `GET /metrics` endpoint.
 // OTLP-push is the inverse pattern: the application periodically
@@ -15,50 +16,61 @@
 // HTTP/1.1 (or H3 — the transport plugs through `core.net.weft.h3`'s
 // adapter-agnostic Handler stack).
 //
+
 // Why both?
 //
-//   * Scrape — operationally simple, no outbound networking, works
-//     behind every NAT, but requires a Prometheus server with reach
-//     to the application's `/metrics` endpoint.
-//   * OTLP-push — works through one-way network gates (sidecar
-//     scenarios where outbound is allowed but inbound isn't), gives
-//     the collector a uniform protobuf schema, and is the wire
-//     format every modern observability vendor speaks.
+
+//  * Scrape — operationally simple, no outbound networking, works
+//  behind every NAT, but requires a Prometheus server with reach
+//  to the application's `/metrics` endpoint.
+//  * OTLP-push — works through one-way network gates (sidecar
+//  scenarios where outbound is allowed but inbound isn't), gives
+//  the collector a uniform protobuf schema, and is the wire
+//  format every modern observability vendor speaks.
 //
+
 // Both export from the same `Registry`. Switching between them is a
 // configuration choice, not a code change.
 //
+
 // =============================================================================
 //
+
 // OTLP wire schema (simplified — full schema in
 // opentelemetry-proto/proto/metrics/v1/metrics.proto):
 //
-//   ExportMetricsServiceRequest {
-//       repeated ResourceMetrics resource_metrics = 1;
-//   }
+
+//  ExportMetricsServiceRequest {
+//  repeated ResourceMetrics resource_metrics = 1;
+//  }
 //
-//   ResourceMetrics {
-//       Resource resource = 1;
-//       repeated ScopeMetrics scope_metrics = 2;
-//   }
+
+//  ResourceMetrics {
+//  Resource resource = 1;
+//  repeated ScopeMetrics scope_metrics = 2;
+//  }
 //
-//   ScopeMetrics {
-//       InstrumentationScope scope = 1;
-//       repeated Metric metrics = 2;
-//   }
+
+//  ScopeMetrics {
+//  InstrumentationScope scope = 1;
+//  repeated Metric metrics = 2;
+//  }
 //
-//   Metric {
-//       string name = 1;
-//       string description = 2;
-//       string unit = 3;
-//       oneof data { Sum sum = 7; WeftHistogram histogram = 9; ... }
-//   }
+
+//  Metric {
+//  string name = 1;
+//  string description = 2;
+//  string unit = 3;
+//  oneof data { Sum sum = 7; WeftHistogram histogram = 9; ... }
+//  }
 //
+
 // Sum.aggregation_temporality = AGGREGATION_TEMPORALITY_CUMULATIVE
-//   for monotonic counters (the variant `core.net.weft.metrics.WeftCounter`
-//   produces).
+//  for monotonic counters (the variant `core.net.weft.metrics.WeftCounter`
+//  produces).
 // WeftHistogram with bucket bounds matches `metrics.WeftHistogram.bounds_ms`.
 //
+
 // =============================================================================
 
 module core.net.weft.metrics_otlp;
@@ -366,9 +378,9 @@ fn write_varint(buf: &mut List<Byte>, mut value: UInt64) {
 }
 
 /// Field tag: field_no << 3 | wire_type. wire types we use:
-///   0 = VARINT (counters, ints)
-///   1 = I64    (fixed 8-byte — not used here)
-///   2 = LEN    (strings, sub-messages, packed repeated)
+///  0 = VARINT (counters, ints)
+///  1 = I64 (fixed 8-byte — not used here)
+///  2 = LEN (strings, sub-messages, packed repeated)
 fn write_tag(buf: &mut List<Byte>, field_no: Int, wire_type: Int) {
     let tag: UInt64 = ((field_no as UInt64) << 3_u64) | (wire_type as UInt64);
     write_varint(buf, tag);
@@ -428,9 +440,9 @@ fn encode_counter_metric(name: &Text, value: Int) -> List<Byte> {
     let mut m: List<Byte> = [];
     write_string(&mut m, 1, name);  // name
     // Field 7: Sum. Sum has fields:
-    //   1: data_points (NumberDataPoint, repeated)
-    //   2: aggregation_temporality = 2 (CUMULATIVE)
-    //   3: is_monotonic = true
+    //  1: data_points (NumberDataPoint, repeated)
+    //  2: aggregation_temporality = 2 (CUMULATIVE)
+    //  3: is_monotonic = true
     let mut sum: List<Byte> = [];
     let dp = encode_number_data_point(value);
     write_tag_len(&mut sum, 1, &dp);
@@ -443,8 +455,8 @@ fn encode_counter_metric(name: &Text, value: Int) -> List<Byte> {
 fn encode_number_data_point(value: Int) -> List<Byte> {
     let mut dp: List<Byte> = [];
     // NumberDataPoint:
-    //   3: time_unix_nano
-    //   6: as_int (int64)
+    //  3: time_unix_nano
+    //  6: as_int (int64)
     let now_ns = Instant.now().duration_since_epoch().as_nanos() as UInt64;
     // fixed64 wire-type = 1 (8 bytes little-endian).
     write_tag(&mut dp, 3, 1);
@@ -476,11 +488,11 @@ fn encode_histogram_metric(name: &Text, snap: &OtlpHistogramSnapshot) -> List<By
 fn encode_histogram_data_point(snap: &OtlpHistogramSnapshot) -> List<Byte> {
     let mut dp: List<Byte> = [];
     // HistogramDataPoint:
-    //   3: time_unix_nano (fixed64)
-    //   4: count (uint64 fixed64? actually fixed64 per proto)
-    //   5: sum (double — fixed64)
-    //   6: bucket_counts (repeated uint64, packed)
-    //   7: explicit_bounds (repeated double, packed)
+    //  3: time_unix_nano (fixed64)
+    //  4: count (uint64 fixed64? actually fixed64 per proto)
+    //  5: sum (double — fixed64)
+    //  6: bucket_counts (repeated uint64, packed)
+    //  7: explicit_bounds (repeated double, packed)
     let now_ns = Instant.now().duration_since_epoch().as_nanos() as UInt64;
     write_tag(&mut dp, 3, 1);
     let mut k: Int = 0;

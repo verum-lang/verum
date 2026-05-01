@@ -3,19 +3,23 @@
 // =============================================================================
 // Spec: sqlite-native.md operational tooling
 //
+
 // `MigrationRunner` walks a `MigrationPlan` from low to high version,
 // skipping every step the journal already records as Applied.
 //
+
 // Three execution modes:
 //
-//   * `RmDryRun`        — validate the plan, log every step, but
-//                          don't actually run any SQL
-//   * `RmStrict`        — abort on first failure; rollback applied
-//                          steps in LIFO order if `auto_rollback`
-//                          is true
-//   * `RmContinueOnDrift` — apply checksum-mismatched steps as if
-//                          fresh (use with care)
+
+//  * `RmDryRun` — validate the plan, log every step, but
+//  don't actually run any SQL
+//  * `RmStrict` — abort on first failure; rollback applied
+//  steps in LIFO order if `auto_rollback`
+//  is true
+//  * `RmContinueOnDrift` — apply checksum-mismatched steps as if
+//  fresh (use with care)
 //
+
 // `RunDecision` lets callers see what the runner will do BEFORE it
 // runs, so deployment scripts can confirm.
 // =============================================================================

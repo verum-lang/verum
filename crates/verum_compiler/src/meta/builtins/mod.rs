@@ -1,25 +1,34 @@
 //! Builtin Meta Functions
 //!
+
 //! This module provides all compile-time intrinsic functions available
 //! in meta expressions, organized by their context requirements.
 //!
+
 //! ## Unified Context Model
 //!
+
 //! All builtins are categorized into tiers based on what external state they access:
 //!
+
 //! ### Tier 0: Core Primitives (Always Available)
 //!
+
 //! Pure functions that operate only on their input values:
 //!
+
 //! - **Arithmetic**: `abs`, `min`, `max`, `int_to_text`, `text_to_int`
 //! - **Collections**: `list_len`, `list_push`, `list_get`, `list_concat`, etc.
 //! - **Text**: `text_concat`, `text_len`, `text_split`, `text_join`, etc.
 //! - **Code Gen**: `quote`, `unquote`, `stringify`, `concat_idents`, `format_ident`
 //!
+
 //! ### Tier 1: Capability-Gated Functions (Require Context)
 //!
+
 //! Functions that access external state and require explicit context declaration:
 //!
+
 //! | Context | Module | Purpose |
 //! |---------|--------|---------|
 //! | `MetaTypes` | `reflection`, `type_props` | Type introspection and layout |
@@ -27,30 +36,35 @@
 //! | `CompileDiag` | `code_gen` | Compiler diagnostics |
 //! | `BuildAssets` | `build_assets` | File system access |
 //!
+
 //! ## Usage
 //!
+
 //! ```verum
 //! // Tier 0 - no context required
 //! meta fn pure_example() -> Int {
-//!     let x = abs(-5);       // Always available
-//!     let s = text_len("hi"); // Always available
-//!     x + s
+//!  let x = abs(-5); // Always available
+//!  let s = text_len("hi"); // Always available
+//!  x + s
 //! }
 //!
+
 //! // Tier 1 - requires explicit context
 //! meta fn reflect_example<T>() -> Text
-//!     using [MetaTypes]
+//!  using [MetaTypes]
 //! {
-//!     type_name(T)  // Requires MetaTypes context
+//!  type_name(T) // Requires MetaTypes context
 //! }
 //!
+
 //! meta fn diagnostic_example()
-//!     using [CompileDiag]
+//!  using [CompileDiag]
 //! {
-//!     compile_warning("This is deprecated")  // Requires CompileDiag
+//!  compile_warning("This is deprecated") // Requires CompileDiag
 //! }
 //! ```
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -90,23 +104,27 @@ pub use context_requirements::{
 
 /// Built-in meta function type signature
 ///
+
 /// Takes a mutable reference to MetaContext for type definition lookup
 /// and variable binding, and a list of constant value arguments.
 ///
+
 /// Returns a Result with either the computed ConstValue or a MetaError.
 pub type BuiltinMetaFn = fn(&mut MetaContext, verum_common::List<ConstValue>) -> Result<ConstValue, MetaError>;
 
 impl MetaContext {
     /// Get all built-in meta functions with their context requirements
     ///
+
     /// Returns a registry mapping function names to their implementations
     /// and required contexts.
     ///
+
     /// Compile-time intrinsics available in meta context. Organized in tiers:
     /// - Tier 0: Always available (pure computation: arithmetic, collections, debugging, testing)
     /// - Tier 1: Requires meta context (type introspection, AST manipulation, code generation)
     /// - Tier 2: Requires specific capabilities (file embedding via @embed, config access)
-    ///   All intrinsics run in the meta sandbox: no I/O, no network, no system calls.
+    ///  All intrinsics run in the meta sandbox: no I/O, no network, no system calls.
     pub fn builtins(&self) -> BuiltinRegistry {
         let mut map = BuiltinRegistry::new();
 
@@ -158,21 +176,23 @@ impl MetaContext {
 
     /// Get a builtin function by name, checking context requirements
     ///
+
     /// Returns an error if the function exists but the required context
     /// is not enabled. Returns the `BuiltinInfo` (cloned) if successful.
     ///
+
     /// Two gates apply, in order:
-    ///   1. **Reflection sandbox** — `[meta] reflection = false`
-    ///      sets `MetaContext.reflection_disabled = true`, which
-    ///      hard-rejects reflection-tagged contexts
-    ///      (`RequiredContext::is_reflection() == true` covers
-    ///      `MetaTypes` and `CompileDiag`) regardless of any
-    ///      function-level `using [...]` declaration. The user's
-    ///      explicit capability request is OVERRIDDEN by the
-    ///      language-level sandbox.
-    ///   2. **Capability declaration** — the function's
-    ///      `using [...]` clause must include the required
-    ///      context. This is the standard Tier 1 capability gate.
+    ///  1. **Reflection sandbox** — `[meta] reflection = false`
+    ///  sets `MetaContext.reflection_disabled = true`, which
+    ///  hard-rejects reflection-tagged contexts
+    ///  (`RequiredContext::is_reflection() == true` covers
+    ///  `MetaTypes` and `CompileDiag`) regardless of any
+    ///  function-level `using [...]` declaration. The user's
+    ///  explicit capability request is OVERRIDDEN by the
+    ///  language-level sandbox.
+    ///  2. **Capability declaration** — the function's
+    ///  `using [...]` clause must include the required
+    ///  context. This is the standard Tier 1 capability gate.
     pub fn get_builtin(&self, name: &Text) -> Result<BuiltinInfo, MetaError> {
         let builtins = self.builtins();
         match builtins.get(name) {
@@ -200,6 +220,7 @@ impl MetaContext {
 
     /// Check if a builtin can be called with current enabled contexts.
     ///
+
     /// Honors both gates that `get_builtin` applies: the reflection
     /// sandbox (overrides reflection-tagged contexts) and the
     /// capability declaration. Symmetrical with `get_builtin` so

@@ -34,7 +34,7 @@ public fn from_bytes_be(b: &AppIdBytes) -> Int {
 public fn is_unset(v: Int) -> Bool { v == 0 }
 
 // Convention: vendors often use ASCII-printable 4-byte magics, e.g. 0x53514c69
-// = "SQLi".  Render the raw bytes as text.
+// = "SQLi". Render the raw bytes as text.
 public fn ascii_magic_text(v: Int) -> Text {
     let bs = to_bytes_be(v);
     let mut s = Text.new();

@@ -3,14 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_stmt_busy(stmt)      → 1 if the stmt has been stepped past
-//                                     its last DONE without a reset
-//   sqlite3_stmt_readonly(stmt)  → 1 if the stmt only reads
-//   sqlite3_stmt_explain(stmt)   → 0 / 1 / 2
-//                                    0 = not EXPLAIN
-//                                    1 = EXPLAIN
-//                                    2 = EXPLAIN QUERY PLAN
-//   sqlite3_stmt_isexplain(stmt) → 1 if stmt is EXPLAIN (any variant)
+
+//  sqlite3_stmt_busy(stmt) → 1 if the stmt has been stepped past
+//  its last DONE without a reset
+//  sqlite3_stmt_readonly(stmt) → 1 if the stmt only reads
+//  sqlite3_stmt_explain(stmt) → 0 / 1 / 2
+//  0 = not EXPLAIN
+//  1 = EXPLAIN
+//  2 = EXPLAIN QUERY PLAN
+//  sqlite3_stmt_isexplain(stmt) → 1 if stmt is EXPLAIN (any variant)
 // =============================================================================
 
 module core.database.sqlite.native.stmt_introspect.flags;

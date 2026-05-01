@@ -6,6 +6,7 @@ module core.database.sqlite.native.l3_btree.cursor;
 // Layer: 3
 // Spec: sqlite-native.md §10.3
 //
+
 // A `BtreeCursor` names a unique position in a B-tree: the root-to-leaf
 // path of `(page_no, cell_index)` pairs ending at the currently-
 // referenced cell. Marked `affine` so the type system rejects
@@ -13,15 +14,18 @@ module core.database.sqlite.native.l3_btree.cursor;
 // values); two references to the same cursor is not (it represents a
 // stateful iterator whose step semantics require ownership).
 //
+
 // Operations:
 //
-//   * `cursor_new`     — fresh cursor, not yet positioned (`is_valid` = false).
-//   * `cursor_root`    — seat the cursor at the root page, cell 0.
-//                         Invalidates when the root is empty.
-//   * `cursor_is_valid` — does the cursor currently point at a real cell?
-//   * `cursor_is_at_end` — cursor exhausted past the last leaf.
-//   * `cursor_depth`    — length of the root-to-leaf path (1 = root is leaf).
+
+//  * `cursor_new` — fresh cursor, not yet positioned (`is_valid` = false).
+//  * `cursor_root` — seat the cursor at the root page, cell 0.
+//  Invalidates when the root is empty.
+//  * `cursor_is_valid` — does the cursor currently point at a real cell?
+//  * `cursor_is_at_end` — cursor exhausted past the last leaf.
+//  * `cursor_depth` — length of the root-to-leaf path (1 = root is leaf).
 //
+
 // Seek / next / prev drive the actual traversal. Their implementations
 // require page I/O through the pager, which we wire once the actor
 // loop is async-native (§8.1). For now the cursor holds structural

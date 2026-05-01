@@ -7,6 +7,7 @@
 // so header blocks on bidirectional streams can be decoded in any
 // order without head-of-line blocking.
 //
+
 // This module provides the Verum-level API; the encode / decode
 // operations call into `verum.qpack.*` intrinsics that wrap a
 // canonical QPACK implementation (typically the same quiche / lsquic

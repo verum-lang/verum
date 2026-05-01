@@ -1,5 +1,5 @@
 //! `verum llm-tactic` subcommand — LCF-style fail-closed LLM
-//! proof-proposer.  Wires the LLM tactic adapter + kernel checker +
+//! proof-proposer. Wires the LLM tactic adapter + kernel checker +
 //! audit trail into a typed CLI surface.
 
 use crate::error::{CliError, Result};
@@ -292,7 +292,7 @@ pub fn run_audit_trail(audit_path: Option<&PathBuf>, format: &str) -> Result<()>
 
 pub fn run_models(format: &str) -> Result<()> {
     validate_format(format)?;
-    // V0 ships two reference adapters; production cloud / on-device
+    // ships two reference adapters; production cloud / on-device
     // adapters land via the same trait surface.
     let entries: &[(&str, &str)] = &[
         (
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn run_propose_mock_default_sequence_passes_kernel() {
         // Mock adapter ships `intro`+`auto` — both canonical, kernel
-        // accepts.  --persist false keeps it in-memory.
+        // accepts. --persist false keeps it in-memory.
         let r = run_propose(
             "thm",
             "True",

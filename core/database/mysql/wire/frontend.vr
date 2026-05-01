@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
 //
+
 // Builds the post-header payload — caller wraps each in a packet via
 // `frame.frame_packet(seq, payload.as_slice())`.
 // =============================================================================
@@ -25,18 +26,19 @@ mount core.database.mysql.wire.types.{
 // HandshakeResponse41 (client → server, after Initial Handshake)
 // -----------------------------------------------------------------------------
 //
+
 // Layout (CLIENT_PROTOCOL_41 + CLIENT_PLUGIN_AUTH_LENENC negotiated):
-//   * 4-byte LE client capability flags
-//   * 4-byte LE max-packet (24-bit advisory)
-//   * 1-byte character set
-//   * 23 zero filler bytes
-//   * NUL-terminated user name
-//   * length-encoded auth response
-//   * NUL-terminated initial database (only if CLIENT_CONNECT_WITH_DB)
-//   * NUL-terminated auth-plugin name (only if CLIENT_PLUGIN_AUTH)
-//   * length-encoded connection-attribute key-value pairs
-//     (only if CLIENT_CONNECT_ATTRS — Spindle does NOT negotiate this
-//     in v0.1, so we omit the trailing block).
+//  * 4-byte LE client capability flags
+//  * 4-byte LE max-packet (24-bit advisory)
+//  * 1-byte character set
+//  * 23 zero filler bytes
+//  * NUL-terminated user name
+//  * length-encoded auth response
+//  * NUL-terminated initial database (only if CLIENT_CONNECT_WITH_DB)
+//  * NUL-terminated auth-plugin name (only if CLIENT_PLUGIN_AUTH)
+//  * length-encoded connection-attribute key-value pairs
+//  (only if CLIENT_CONNECT_ATTRS — Spindle does NOT negotiate this
+//  in v0.1, so we omit the trailing block).
 
 public fn handshake_response(
     user: &Text,
@@ -116,21 +118,24 @@ public fn com_reset_connection() -> List<Byte> {
 // Prepared-statement protocol (database.md §6.3.3)
 // -----------------------------------------------------------------------------
 //
+
 // Parameterised queries via the binary protocol: 3–5× faster than
 // COM_QUERY on repeated calls, and the only safe surface for user-
 // supplied values (text-protocol concatenation invites SQL injection).
 //
+
 // COM_STMT_PREPARE / EXECUTE / CLOSE / RESET cover the lifecycle:
 //
-//     prepare → server returns COM_STMT_PREPARE_OK
-//                + N ColumnDefinition41 (param descs) + EOF
-//                + M ColumnDefinition41 (column descs) + EOF
-//     execute → server returns either OK (no result-set) or
-//                ColumnDefinitions + binary-protocol rows + EOF/OK
-//     close   → no response (server frees the statement_id)
-//     reset   → server returns OK (param state cleared)
 
-/// Build a COM_STMT_PREPARE packet body.  `[0x16][sql_bytes]` —
+//  prepare → server returns COM_STMT_PREPARE_OK
+//  + N ColumnDefinition41 (param descs) + EOF
+//  + M ColumnDefinition41 (column descs) + EOF
+//  execute → server returns either OK (no result-set) or
+//  ColumnDefinitions + binary-protocol rows + EOF/OK
+//  close → no response (server frees the statement_id)
+//  reset → server returns OK (param state cleared)
+
+/// Build a COM_STMT_PREPARE packet body. `[0x16][sql_bytes]` —
 /// the SQL text is sent unframed (length comes from the surrounding
 /// MySQL packet header).
 public fn com_stmt_prepare(sql: &Text) -> List<Byte> {
@@ -160,9 +165,9 @@ public fn com_stmt_reset(statement_id: Int) -> List<Byte> {
     out
 }
 
-/// Param value for the binary EXECUTE protocol.  Each variant carries
+/// Param value for the binary EXECUTE protocol. Each variant carries
 /// the MySQL field-type byte the server expects and the encoded
-/// payload bytes.  Constructed by `param_*` helpers below; consumed
+/// payload bytes. Constructed by `param_*` helpers below; consumed
 /// by `com_stmt_execute`.
 public type StmtParam is
       SpNull
@@ -218,7 +223,7 @@ fn param_type_pair(p: &StmtParam) -> (Int, Int) {
 }
 
 /// Encode a StmtParam's value bytes (NOT including the type byte —
-/// types are written separately in the type vector).  NULLs take
+/// types are written separately in the type vector). NULLs take
 /// zero bytes (their presence is signalled by the null bitmap).
 fn encode_param_value(out: &mut List<Byte>, p: &StmtParam) {
     match p {
@@ -252,7 +257,7 @@ fn encode_param_value(out: &mut List<Byte>, p: &StmtParam) {
     }
 }
 
-/// IEEE 754 double → 64-bit little-endian.  Implementation defers
+/// IEEE 754 double → 64-bit little-endian. Implementation defers
 /// to `core.math.float_bits_f64` if available; v1 uses an intrinsic
 /// helper.
 @intrinsic("float_to_bits_f64")
@@ -261,16 +266,17 @@ fn float_to_bits_double(x: Float64) -> Int64;
 @intrinsic("float_to_bits_f32")
 fn float_to_bits_single(x: Float) -> Int;
 
-/// Build a COM_STMT_EXECUTE packet body.  Layout per MySQL docs:
+/// Build a COM_STMT_EXECUTE packet body. Layout per MySQL docs:
 ///
-///   [0x17]
-///   [statement_id u32 LE]
-///   [flags u8 = 0]                    // CURSOR_TYPE_NO_CURSOR
-///   [iteration_count u32 LE = 1]
-///   [null_bitmap]                      // ceil(num_params / 8) bytes
-///   [new_params_bound u8 = 1]          // always 1 in v0.1
-///   [for each param: u8 type, u8 unsigned_flag]
-///   [for each non-NULL param: encoded value]
+
+///  [0x17]
+///  [statement_id u32 LE]
+///  [flags u8 = 0] // CURSOR_TYPE_NO_CURSOR
+///  [iteration_count u32 LE = 1]
+///  [null_bitmap] // ceil(num_params / 8) bytes
+///  [new_params_bound u8 = 1] // always 1 in v0.1
+///  [for each param: u8 type, u8 unsigned_flag]
+///  [for each non-NULL param: encoded value]
 public fn com_stmt_execute(
     statement_id: Int,
     params: &List<StmtParam>,
@@ -282,7 +288,7 @@ public fn com_stmt_execute(
     put_u32_le(&mut out, 1);               // iteration_count = 1
 
     // null_bitmap — bit set per NULL param, packed LSB-first across
-    // ceil(N/8) bytes.  Caller's param order matches statement
+    // ceil(N/8) bytes. Caller's param order matches statement
     // placeholder order.
     let n = params.len();
     let bitmap_bytes = (n + 7) / 8;
@@ -305,7 +311,7 @@ public fn com_stmt_execute(
     while bm < bitmap.len() { put_u8(&mut out, bitmap[bm] as Int); bm = bm + 1; }
 
     // new_params_bound = 1 — every EXECUTE includes a fresh type
-    // vector.  v0.1 doesn't reuse type vectors across calls; that's
+    // vector. v0.1 doesn't reuse type vectors across calls; that's
     // a per-statement-cache optimisation deferred to a follow-up.
     put_u8(&mut out, 1);
 

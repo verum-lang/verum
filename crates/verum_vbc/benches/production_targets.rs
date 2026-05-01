@@ -1,9 +1,11 @@
 //! Production Target Benchmarks for VBC Interpreter
 //!
+
 //! Targets:
 //! - Runtime: 0.85-0.95x native C
 //! - Memory overhead: <5%
 //!
+
 //! Benchmarks VBC interpreter execution on compute-intensive workloads
 //! (fibonacci, sum loops) and compares throughput characteristics.
 

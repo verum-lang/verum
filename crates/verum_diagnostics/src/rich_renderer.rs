@@ -1,5 +1,6 @@
 //! Rich diagnostic renderer with world-class error messages.
 //!
+
 //! Provides Rust/Elm-level error rendering with:
 //! - Colored ANSI output
 //! - Code snippets with line numbers
@@ -111,7 +112,7 @@ impl RichRenderer {
         // 1. Render header (error[E0312]: message)
         self.render_header(diagnostic, output, indent);
 
-        // 2. Render location line (  --> file:line:col)
+        // 2. Render location line ( --> file:line:col)
         if !diagnostic.primary_labels().is_empty() {
             self.render_location_header(diagnostic, output, indent);
         }
@@ -186,8 +187,8 @@ impl RichRenderer {
     }
 
     /// Render the synthetic-expansion chain as a note-style line.
-    /// Format: `   = note: in @derive expansion → in macro expansion`
-    /// (chain ordered leaf-to-root).  Closes #287.
+    /// Format: ` = note: in @derive expansion → in macro expansion`
+    /// (chain ordered leaf-to-root). Closes #287.
     fn render_expansion_chain(
         &self,
         diagnostic: &Diagnostic,
@@ -213,7 +214,7 @@ impl RichRenderer {
         ));
     }
 
-    /// Render location header:   --> file.vr:42:15
+    /// Render location header: --> file.vr:42:15
     fn render_location_header(&self, diagnostic: &Diagnostic, output: &mut String, indent: usize) {
         if let Some(span) = diagnostic.primary_span() {
             let indent_str = " ".repeat(indent);
@@ -822,10 +823,10 @@ impl DiffRenderer {
         output.push(' ');
 
         // Before / after span — clamp both indices DOWN to char
-        // boundaries.  Stale or malformed Span values (e.g., from
+        // boundaries. Stale or malformed Span values (e.g., from
         // a recovery diagnostic on partially-tokenized input) can
         // land mid-codepoint; naive `&line[..n]` would panic and
-        // kill the entire diagnostic render.  Clamping degrades to
+        // kill the entire diagnostic render. Clamping degrades to
         // a slightly shorter prefix / longer suffix — strictly
         // better than the panic.
         let safe_start = verum_common::text_utf8::clamp_to_char_boundary(line, span_start);
@@ -839,7 +840,7 @@ impl DiffRenderer {
         output.push_str(&line[safe_end..]);
         output.push('\n');
 
-        // Underline the replacement.  The leading-space count must
+        // Underline the replacement. The leading-space count must
         // match the *character width* of the prefix, NOT the byte
         // length — when the prefix contains multi-byte UTF-8 the
         // byte-count produces over-indentation that visually breaks
@@ -1116,7 +1117,7 @@ mod tests {
         // content the gutter would otherwise print. Verify the
         // numeric prefix is gone — pre-wire-up output contained
         // " 2 │" (or the colorised equivalent); post-wire-up
-        // output contains "   │" (whitespace-padded).
+        // output contains " │" (whitespace-padded).
         assert!(
             !output.contains(" 2 │") && !output.contains(" 2 |"),
             "show_line_numbers=false must strip the numeric gutter prefix: {output}"

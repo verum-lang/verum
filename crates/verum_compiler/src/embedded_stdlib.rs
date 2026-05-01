@@ -1,20 +1,26 @@
 //! Embedded standard library loader.
 //!
+
 //! Provides access to the Verum stdlib (core/*.vr) source files that are
 //! embedded directly in the compiler binary at build time.
 //!
+
 //! This enables single-binary distribution: `verum` contains all stdlib
 //! sources and doesn't need a separate `core/` directory at runtime.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
-//! Build time:  core/*.vr → zstd compress → include_bytes! → binary
-//! Runtime:     binary → zstd decompress (~2ms) → in-memory archive → path lookup
+//! Build time: core/*.vr → zstd compress → include_bytes! → binary
+//! Runtime: binary → zstd decompress (~2ms) → in-memory archive → path lookup
 //! ```
 //!
+
 //! # Performance
 //!
+
 //! - Decompression: ~2ms for 4.7MB (zstd is extremely fast)
 //! - Lookup: O(log n) binary search on sorted paths
 //! - Memory: ~5MB for decompressed archive (shared, read-only)

@@ -1,34 +1,42 @@
 //! Capability Attenuation Error Diagnostics
 //!
+
 //! This module provides comprehensive diagnostics for capability attenuation errors in Verum.
 //! Capability attenuation is a security mechanism that restricts the capabilities a function
 //! can use, ensuring that code can only access the specific sub-contexts it declares.
 //!
+
 //! # Error Codes
 //!
+
 //! - **E0306**: Capability Violation - Function uses a capability not declared in `using` clause
 //! - **E0307**: Sub-Context Not Found - Reference to undefined sub-context in context hierarchy
 //! - **E0308**: Capability Not Provided - Required capability not available in environment
 //! - **E0309**: Partial Implementation Warning - Context implementation missing some sub-contexts
 //!
+
 //! # Design Philosophy
 //!
+
 //! These diagnostics emphasize:
 //! 1. **Security awareness** - Clear explanation of capability violations
 //! 2. **Precise locations** - Show exactly where capabilities are declared vs. used
 //! 3. **Actionable fixes** - Multiple suggestions for resolving capability issues
 //! 4. **Capability hierarchy** - Visual representation of context/sub-context relationships
 //!
+
 //! # Example: E0306 Capability Violation
 //!
+
 //! ```verum
 //! fn attempt_delete(id: Int) -> Result<()>
-//!     using [Database::Query]
+//!  using [Database::Query]
 //! {
-//!     db.execute(f"DELETE FROM users WHERE id = {id}")?;  // ❌ E0306
+//!  db.execute(f"DELETE FROM users WHERE id = {id}")?; // ❌ E0306
 //! }
 //! ```
 //!
+
 //! The function declares `Database::Query` but attempts to use `Database::Execute`,
 //! which is a capability violation.
 
@@ -52,17 +60,20 @@ pub mod error_codes {
 
 /// E0306: Capability Violation Error Builder
 ///
+
 /// This error occurs when a function attempts to use a capability that was not
 /// declared in its `using` clause. This is a security violation as it breaks
 /// the capability attenuation contract.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// fn process_data() -> Result<()>
-///     using [Database::Query]
+///  using [Database::Query]
 /// {
-///     db.execute("DELETE FROM logs")?;  // E0306: Execute not in using clause
+///  db.execute("DELETE FROM logs")?; // E0306: Execute not in using clause
 /// }
 /// ```
 pub struct CapabilityViolationError {
@@ -203,14 +214,17 @@ impl CapabilityViolationError {
 
 /// E0307: Sub-Context Not Found Error Builder
 ///
+
 /// This error occurs when referencing a sub-context that doesn't exist in the
 /// context hierarchy. For example, `Database.Read` when `Database` only defines
 /// `Query` and `Execute` sub-contexts.
 ///
+
 /// # Example
 ///
+
 /// ```verum
-/// using [Database.Read]  // E0307: Read not found in Database
+/// using [Database.Read] // E0307: Read not found in Database
 /// ```
 pub struct SubContextNotFoundError {
     /// The parent context name (e.g., "Database")
@@ -314,15 +328,18 @@ impl SubContextNotFoundError {
 
 /// E0308: Capability Not Provided Error Builder
 ///
+
 /// This error occurs when a function requires a capability that has not been
 /// provided in the environment. The capability is declared in the `using` clause
 /// but no provider has been installed.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// fn main() {
-///     let data = read_file("data.txt")?;  // E0308: FileSystem::Read not provided
+///  let data = read_file("data.txt")?; // E0308: FileSystem::Read not provided
 /// }
 /// ```
 pub struct CapabilityNotProvidedError {
@@ -419,14 +436,17 @@ impl CapabilityNotProvidedError {
 
 /// E0309: Partial Implementation Warning Builder
 ///
+
 /// This warning occurs when a context implementation only provides some of the
 /// sub-contexts, not all of them. This is allowed but should be documented.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// implement FileSystem for ReadOnlyFS {
-///     // Only implements Read, not Write or Admin
+///  // Only implements Read, not Write or Admin
 /// }
 /// ```
 pub struct PartialImplementationWarning {

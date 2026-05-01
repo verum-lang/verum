@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §17
 //
+
 // `SchemaDelta` records what an `AlterOp` changes. It's used by:
 //
-//   * SchemaCache — to update its in-memory shape after the engine
-//     runs the SQL
-//   * trigger / view rewriter — to surface dependent objects whose
-//     SQL must be rewritten when a column or table is renamed
-//   * EXPLAIN ALTER — render the post-ALTER schema for the user
+
+//  * SchemaCache — to update its in-memory shape after the engine
+//  runs the SQL
+//  * trigger / view rewriter — to surface dependent objects whose
+//  SQL must be rewritten when a column or table is renamed
+//  * EXPLAIN ALTER — render the post-ALTER schema for the user
 // =============================================================================
 
 module core.database.sqlite.native.alter.delta;

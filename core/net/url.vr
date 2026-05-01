@@ -5,25 +5,28 @@
 // Dependencies: core, text
 // =============================================================================
 //
+
 // General-purpose URL parser handling any RFC 3986 scheme:
-//   scheme://userinfo@host:port/path?query#fragment
+//  scheme://userinfo@host:port/path?query#fragment
 //
+
 // Percent-encoding helpers for application/x-www-form-urlencoded and
 // for building URLs safely from untrusted input:
-//   percent_encode(&Text)  — percent-encodes characters outside the
-//                            unreserved set (RFC 3986 §2.3).
-//   percent_decode(&Text)  — reverses percent-encoding, validating that
-//                            every `%` is followed by two hex digits.
+//  percent_encode(&Text) — percent-encodes characters outside the
+//  unreserved set (RFC 3986 §2.3).
+//  percent_decode(&Text) — reverses percent-encoding, validating that
+//  every `%` is followed by two hex digits.
 //
+
 // Example:
-//   let u = Url.parse("https://user:pass@example.com:443/api/v1?q=x#top")?;
-//   assert_eq(u.scheme,          "https");
-//   assert_eq(u.userinfo,        Some("user:pass"));
-//   assert_eq(u.host,            Some("example.com"));
-//   assert_eq(u.port,            Some(443));
-//   assert_eq(u.path,            "/api/v1");
-//   assert_eq(u.query,           Some("q=x"));
-//   assert_eq(u.fragment,        Some("top"));
+//  let u = Url.parse("https://user:pass@example.com:443/api/v1?q=x#top")?;
+//  assert_eq(u.scheme, "https");
+//  assert_eq(u.userinfo, Some("user:pass"));
+//  assert_eq(u.host, Some("example.com"));
+//  assert_eq(u.port, Some(443));
+//  assert_eq(u.path, "/api/v1");
+//  assert_eq(u.query, Some("q=x"));
+//  assert_eq(u.fragment, Some("top"));
 // =============================================================================
 
 module core.net.url;
@@ -113,24 +116,26 @@ implement Eq for UrlError {
     }
 }
 
-// Maximum permitted URL length in bytes.  Hostile inputs with multi-
+// Maximum permitted URL length in bytes. Hostile inputs with multi-
 // megabyte URLs would otherwise pin the parser doing per-byte scans.
 // 64 KiB is generous compared to industry norms (IE 2083, nginx 8192,
 // most CDNs 16 KiB) but covers data: URIs and modern OAuth flows that
-// embed large state parameters.  URLs over 64 KiB belong in request
+// embed large state parameters. URLs over 64 KiB belong in request
 // bodies, not in URL strings.
 public const MAX_URL_LENGTH_BYTES: Int = 64 * 1024;
 
 implement Url {
     // Parse a URL string into its components.
     //
+
     // The scheme is required; everything else is optional. The parser is
     // permissive about the path (accepts any bytes not colliding with
     // '?' / '#') to stay compatible with real-world URLs that don't
     // strictly percent-encode.
     //
+
     // SOUNDNESS: rejects inputs longer than MAX_URL_LENGTH_BYTES (64 KiB)
-    // before doing any per-byte scanning.  This bounds the parser's
+    // before doing any per-byte scanning. This bounds the parser's
     // O(N) work to a fixed budget and prevents denial-of-service via
     // attacker-supplied gigabyte-scale URL strings.
     public fn parse(s: &Text) -> Result<Url, UrlError> {

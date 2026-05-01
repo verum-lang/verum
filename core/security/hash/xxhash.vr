@@ -6,27 +6,33 @@
 // Reference: https://github.com/Cyan4973/xxHash/blob/dev/doc/xxhash_spec.md
 // =============================================================================
 //
+
 // XXH64 — the fastest 64-bit non-cryptographic hash in widespread
 // production use. Orders-of-magnitude faster than SHA-256 for
 // non-adversarial workloads. Used by:
 //
-//   * Facebook RocksDB blob-file integrity
-//   * LZ4 frame-format content checksums
-//   * ClickHouse analytics column hashing
-//   * Redis rax radix tree per-key fingerprints
-//   * Ceph object store integrity
+
+//  * Facebook RocksDB blob-file integrity
+//  * LZ4 frame-format content checksums
+//  * ClickHouse analytics column hashing
+//  * Redis rax radix tree per-key fingerprints
+//  * Ceph object store integrity
 //
+
 // NOT cryptographic — adversarial inputs can trivially produce
 // collisions. Use `Sha256` / `Blake2b` (when the latter ships)
 // for integrity checks against untrusted peers.
 //
+
 // # Expected performance
 //
+
 // Pure-Verum reference: ~3 GB/s on a modern core (4 lanes × 3
 // GHz × 8 B/cycle). SSE2 / AVX2 vectorisation arrives via
 // `@intrinsic("verum.hash.xxh64_fast", ...)` in a follow-up for
 // the hot path.
 //
+
 // =============================================================================
 
 module core.security.hash.xxhash;

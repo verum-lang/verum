@@ -4,16 +4,20 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides platform detection intrinsics evaluated at compile time.
 // All operations are zero-allocation and VBC-compatible.
 //
+
 // # Categories
 //
+
 // - Build mode: is_debug, is_release
 // - Target info: target_os, target_arch, target_pointer_width
 // - Target features: target_is_little_endian, target_has_atomic, target_has_feature
 // - CPU timing: rdtsc, rdtscp, spin_hint
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

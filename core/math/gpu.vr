@@ -3,68 +3,80 @@
 // =============================================================================
 // Layer: 5 (GPU Compute)
 //
+
 // Multi-backend GPU acceleration with device abstraction, memory management,
 // kernel execution, and stream synchronization.
 //
+
 // # Architecture
 //
+
 // ```
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │                        Device Abstraction Layer                          │
+// │ Device Abstraction Layer │
 // ├─────────────────────────────────────────────────────────────────────────┤
-// │  DeviceRegistry → DeviceInfo → ComputeCapability                        │
-// │       ↓                                                                  │
-// │  Backend Selection: CUDA | ROCm | Metal | Vulkan | SYCL                 │
+// │ DeviceRegistry → DeviceInfo → ComputeCapability │
+// │ ↓ │
+// │ Backend Selection: CUDA | ROCm | Metal | Vulkan | SYCL │
 // └─────────────────────────────────────────────────────────────────────────┘
-//                              ↓
+//  ↓
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │                         Memory Management                                │
+// │ Memory Management │
 // ├─────────────────────────────────────────────────────────────────────────┤
-// │  GPUBuffer<T>: Device memory with CBGR tracking                         │
-// │  MemorySpace: Host | HostPinned | Global | Shared | Local | Unified    │
-// │  Transfers: to_device() | to_host() | memcpy() | prefetch()            │
+// │ GPUBuffer<T>: Device memory with CBGR tracking │
+// │ MemorySpace: Host | HostPinned | Global | Shared | Local | Unified │
+// │ Transfers: to_device() | to_host() | memcpy() | prefetch() │
 // └─────────────────────────────────────────────────────────────────────────┘
-//                              ↓
+//  ↓
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │                        Kernel Execution                                  │
+// │ Kernel Execution │
 // ├─────────────────────────────────────────────────────────────────────────┤
-// │  LaunchConfig: grid, block, shared memory                               │
-// │  Stream: async execution context                                        │
-// │  GpuEvent: timing and synchronization                                      │
+// │ LaunchConfig: grid, block, shared memory │
+// │ Stream: async execution context │
+// │ GpuEvent: timing and synchronization │
 // └─────────────────────────────────────────────────────────────────────────┘
 // ```
 //
+
 // # Usage
 //
+
 // ```verum
 // mount core.math.gpu.*;
 //
+
 // // Check GPU availability
 // if has_gpu() {
-//     // Get best device
-//     let device = select_device(DeviceSelector.Best);
+//  // Get best device
+//  let device = select_device(DeviceSelector.Best);
 //
-//     // Transfer data to GPU
-//     let gpu_data = to_device(&host_data, device.index);
+
+//  // Transfer data to GPU
+//  let gpu_data = to_device(&host_data, device.index);
 //
-//     // Launch kernel
-//     let config = LaunchConfig.for_elements(gpu_data.size, 256);
-//     launch(config, my_kernel, (gpu_data,));
+
+//  // Launch kernel
+//  let config = LaunchConfig.for_elements(gpu_data.size, 256);
+//  launch(config, my_kernel, (gpu_data,));
 //
-//     // Transfer back
-//     let result = to_host(&gpu_data);
+
+//  // Transfer back
+//  let result = to_host(&gpu_data);
 // }
 // ```
 //
+
 // # Context Integration
 //
+
 // ```verum
 // // GPU operations respect ComputeDevice context
 // provide ComputeDevice = GPUDevice.best_available() {
-//     let tensor = zeros<Float>(&[1024, 1024]);  // Allocated on GPU
+//  let tensor = zeros<Float>(&[1024, 1024]); // Allocated on GPU
 // }
 // ```
 //
+
 // Spec: docs/architecture/math-spec.md#part-vi-gpu-compute
 // =============================================================================
 
@@ -1619,91 +1631,94 @@ implement ComputeDevice for GPUDevice {
 // VBC Opcodes Reference (Documentation)
 // =============================================================================
 //
+
 // GPU opcodes use 0xF8 (GpuExtended) prefix with sub-opcodes:
 //
+
 // ┌────────────┬────────────────────────┬─────────────────────────────────────┐
-// │ Sub-Opcode │ Name                   │ Description                         │
+// │ Sub-Opcode │ Name │ Description │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x00       │ GPU_LAUNCH             │ Launch kernel                       │
-// │ 0x01       │ GPU_LAUNCH_COOP        │ Cooperative kernel launch           │
-// │ 0x02       │ GPU_LAUNCH_MULTI       │ Multi-device kernel launch          │
+// │ 0x00 │ GPU_LAUNCH │ Launch kernel │
+// │ 0x01 │ GPU_LAUNCH_COOP │ Cooperative kernel launch │
+// │ 0x02 │ GPU_LAUNCH_MULTI │ Multi-device kernel launch │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x10       │ GPU_SYNC_STREAM        │ Synchronize stream                  │
-// │ 0x11       │ GPU_SYNC_DEVICE        │ Synchronize device                  │
-// │ 0x12       │ GPU_SYNC_EVENT         │ Synchronize on event                │
-// │ 0x13       │ GPU_QUERY_STREAM       │ Query stream completion             │
+// │ 0x10 │ GPU_SYNC_STREAM │ Synchronize stream │
+// │ 0x11 │ GPU_SYNC_DEVICE │ Synchronize device │
+// │ 0x12 │ GPU_SYNC_EVENT │ Synchronize on event │
+// │ 0x13 │ GPU_QUERY_STREAM │ Query stream completion │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x20       │ GPU_MEMCPY             │ Generic memcpy (with direction)     │
-// │ 0x21       │ GPU_MEMCPY_ASYNC       │ Async memcpy (with direction)       │
-// │ 0x22       │ GPU_ALLOC              │ Allocate device memory              │
-// │ 0x23       │ GPU_FREE               │ Free device memory                  │
-// │ 0x24       │ GPU_PIN                │ Pin host memory                     │
-// │ 0x25       │ GPU_UNPIN              │ Unpin host memory                   │
-// │ 0x26       │ GPU_PREFETCH           │ Prefetch unified memory             │
-// │ 0x27       │ GPU_MEMSET             │ Set memory to value                 │
-// │ 0x28       │ GPU_MEMSET_ASYNC       │ Async memset                        │
-// │ 0x29       │ GPU_MEMCPY_2D          │ 2D pitched memcpy                   │
-// │ 0x2A       │ GPU_MEMCPY_2D_ASYNC    │ 2D async pitched memcpy             │
-// │ 0x2B       │ GPU_MEMCPY_H2D         │ Host to device copy                 │
-// │ 0x2C       │ GPU_MEMCPY_D2H         │ Device to host copy                 │
-// │ 0x2D       │ GPU_MEMCPY_D2D         │ Device to device copy               │
-// │ 0x2E       │ GPU_MEMCPY_ASYNC_H2D   │ Async host to device                │
-// │ 0x2F       │ GPU_MEMCPY_ASYNC_D2H   │ Async device to host                │
+// │ 0x20 │ GPU_MEMCPY │ Generic memcpy (with direction) │
+// │ 0x21 │ GPU_MEMCPY_ASYNC │ Async memcpy (with direction) │
+// │ 0x22 │ GPU_ALLOC │ Allocate device memory │
+// │ 0x23 │ GPU_FREE │ Free device memory │
+// │ 0x24 │ GPU_PIN │ Pin host memory │
+// │ 0x25 │ GPU_UNPIN │ Unpin host memory │
+// │ 0x26 │ GPU_PREFETCH │ Prefetch unified memory │
+// │ 0x27 │ GPU_MEMSET │ Set memory to value │
+// │ 0x28 │ GPU_MEMSET_ASYNC │ Async memset │
+// │ 0x29 │ GPU_MEMCPY_2D │ 2D pitched memcpy │
+// │ 0x2A │ GPU_MEMCPY_2D_ASYNC │ 2D async pitched memcpy │
+// │ 0x2B │ GPU_MEMCPY_H2D │ Host to device copy │
+// │ 0x2C │ GPU_MEMCPY_D2H │ Device to host copy │
+// │ 0x2D │ GPU_MEMCPY_D2D │ Device to device copy │
+// │ 0x2E │ GPU_MEMCPY_ASYNC_H2D │ Async host to device │
+// │ 0x2F │ GPU_MEMCPY_ASYNC_D2H │ Async device to host │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x30       │ GPU_STREAM_CREATE      │ Create stream                       │
-// │ 0x31       │ GPU_STREAM_DESTROY     │ Destroy stream                      │
-// │ 0x32       │ GPU_STREAM_QUERY       │ Query stream completion             │
-// │ 0x33       │ GPU_STREAM_WAIT_EVENT  │ Wait for event on stream            │
-// │ 0x34       │ GPU_STREAM_CREATE_PRIO │ Create stream with priority         │
-// │ 0x35       │ GPU_STREAM_GET_PRIO    │ Get stream priority                 │
-// │ 0x36       │ GPU_STREAM_CREATE_NB   │ Create non-blocking stream          │
-// │ 0x37       │ GPU_STREAM_CALLBACK    │ Add stream callback                 │
+// │ 0x30 │ GPU_STREAM_CREATE │ Create stream │
+// │ 0x31 │ GPU_STREAM_DESTROY │ Destroy stream │
+// │ 0x32 │ GPU_STREAM_QUERY │ Query stream completion │
+// │ 0x33 │ GPU_STREAM_WAIT_EVENT │ Wait for event on stream │
+// │ 0x34 │ GPU_STREAM_CREATE_PRIO │ Create stream with priority │
+// │ 0x35 │ GPU_STREAM_GET_PRIO │ Get stream priority │
+// │ 0x36 │ GPU_STREAM_CREATE_NB │ Create non-blocking stream │
+// │ 0x37 │ GPU_STREAM_CALLBACK │ Add stream callback │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x40       │ GPU_EVENT_CREATE       │ Create event                        │
-// │ 0x41       │ GPU_EVENT_DESTROY      │ Destroy event                       │
-// │ 0x42       │ GPU_EVENT_RECORD       │ Record event on stream              │
-// │ 0x43       │ GPU_EVENT_SYNC         │ Synchronize on event                │
-// │ 0x44       │ GPU_EVENT_QUERY        │ Query event completion              │
-// │ 0x45       │ GPU_EVENT_ELAPSED      │ Elapsed time between events         │
-// │ 0x46       │ GPU_EVENT_CREATE_F     │ Create event with flags             │
-// │ 0x47       │ GPU_EVENT_RECORD_F     │ Record event with flags             │
+// │ 0x40 │ GPU_EVENT_CREATE │ Create event │
+// │ 0x41 │ GPU_EVENT_DESTROY │ Destroy event │
+// │ 0x42 │ GPU_EVENT_RECORD │ Record event on stream │
+// │ 0x43 │ GPU_EVENT_SYNC │ Synchronize on event │
+// │ 0x44 │ GPU_EVENT_QUERY │ Query event completion │
+// │ 0x45 │ GPU_EVENT_ELAPSED │ Elapsed time between events │
+// │ 0x46 │ GPU_EVENT_CREATE_F │ Create event with flags │
+// │ 0x47 │ GPU_EVENT_RECORD_F │ Record event with flags │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x50       │ GPU_GET_DEVICE         │ Get current device                  │
-// │ 0x51       │ GPU_SET_DEVICE         │ Set current device                  │
-// │ 0x52       │ GPU_DEVICE_COUNT       │ Get device count                    │
-// │ 0x53       │ GPU_DEVICE_PROP        │ Get device properties               │
-// │ 0x54       │ GPU_MEM_INFO           │ Get memory info                     │
-// │ 0x55       │ GPU_CAN_PEER           │ Check peer access capability        │
-// │ 0x56       │ GPU_ENABLE_PEER        │ Enable peer access                  │
-// │ 0x57       │ GPU_DISABLE_PEER       │ Disable peer access                 │
-// │ 0x58       │ GPU_DEVICE_RESET       │ Reset device                        │
-// │ 0x59       │ GPU_SET_FLAGS          │ Set device flags                    │
+// │ 0x50 │ GPU_GET_DEVICE │ Get current device │
+// │ 0x51 │ GPU_SET_DEVICE │ Set current device │
+// │ 0x52 │ GPU_DEVICE_COUNT │ Get device count │
+// │ 0x53 │ GPU_DEVICE_PROP │ Get device properties │
+// │ 0x54 │ GPU_MEM_INFO │ Get memory info │
+// │ 0x55 │ GPU_CAN_PEER │ Check peer access capability │
+// │ 0x56 │ GPU_ENABLE_PEER │ Enable peer access │
+// │ 0x57 │ GPU_DISABLE_PEER │ Disable peer access │
+// │ 0x58 │ GPU_DEVICE_RESET │ Reset device │
+// │ 0x59 │ GPU_SET_FLAGS │ Set device flags │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x60       │ GPU_MALLOC_MANAGED     │ Allocate managed memory             │
-// │ 0x61       │ GPU_MEM_ADVISE         │ Set memory advise hint              │
-// │ 0x62       │ GPU_PREFETCH_ASYNC     │ Async prefetch managed memory       │
-// │ 0x63       │ GPU_MEM_ATTR           │ Get memory attributes               │
+// │ 0x60 │ GPU_MALLOC_MANAGED │ Allocate managed memory │
+// │ 0x61 │ GPU_MEM_ADVISE │ Set memory advise hint │
+// │ 0x62 │ GPU_PREFETCH_ASYNC │ Async prefetch managed memory │
+// │ 0x63 │ GPU_MEM_ATTR │ Get memory attributes │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x70       │ GPU_GRAPH_CREATE       │ Create graph                        │
-// │ 0x71       │ GPU_GRAPH_BEGIN        │ Begin graph capture                 │
-// │ 0x72       │ GPU_GRAPH_END          │ End graph capture                   │
-// │ 0x73       │ GPU_GRAPH_INST         │ Instantiate graph                   │
-// │ 0x74       │ GPU_GRAPH_LAUNCH       │ Launch graph                        │
-// │ 0x75       │ GPU_GRAPH_DESTROY      │ Destroy graph                       │
-// │ 0x76       │ GPU_GRAPH_EXEC_DESTROY │ Destroy graph executable            │
-// │ 0x77       │ GPU_GRAPH_EXEC_UPDATE  │ Update graph executable             │
+// │ 0x70 │ GPU_GRAPH_CREATE │ Create graph │
+// │ 0x71 │ GPU_GRAPH_BEGIN │ Begin graph capture │
+// │ 0x72 │ GPU_GRAPH_END │ End graph capture │
+// │ 0x73 │ GPU_GRAPH_INST │ Instantiate graph │
+// │ 0x74 │ GPU_GRAPH_LAUNCH │ Launch graph │
+// │ 0x75 │ GPU_GRAPH_DESTROY │ Destroy graph │
+// │ 0x76 │ GPU_GRAPH_EXEC_DESTROY │ Destroy graph executable │
+// │ 0x77 │ GPU_GRAPH_EXEC_UPDATE │ Update graph executable │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x80       │ GPU_PROF_START         │ Start profiling range               │
-// │ 0x81       │ GPU_PROF_END           │ End profiling range                 │
-// │ 0x82       │ GPU_MARKER_PUSH        │ Push profiler marker                │
-// │ 0x83       │ GPU_MARKER_POP         │ Pop profiler marker                 │
+// │ 0x80 │ GPU_PROF_START │ Start profiling range │
+// │ 0x81 │ GPU_PROF_END │ End profiling range │
+// │ 0x82 │ GPU_MARKER_PUSH │ Push profiler marker │
+// │ 0x83 │ GPU_MARKER_POP │ Pop profiler marker │
 // ├────────────┼────────────────────────┼─────────────────────────────────────┤
-// │ 0x90       │ GPU_ENUM_CUDA          │ Enumerate CUDA devices              │
-// │ 0x91       │ GPU_ENUM_METAL         │ Enumerate Metal devices             │
-// │ 0x92       │ GPU_ENUM_ROCM          │ Enumerate ROCm devices              │
-// │ 0x93       │ GPU_ENUM_VULKAN        │ Enumerate Vulkan devices            │
+// │ 0x90 │ GPU_ENUM_CUDA │ Enumerate CUDA devices │
+// │ 0x91 │ GPU_ENUM_METAL │ Enumerate Metal devices │
+// │ 0x92 │ GPU_ENUM_ROCM │ Enumerate ROCm devices │
+// │ 0x93 │ GPU_ENUM_VULKAN │ Enumerate Vulkan devices │
 // └────────────┴────────────────────────┴─────────────────────────────────────┘
 //
+
 // =============================================================================
 
 // =============================================================================

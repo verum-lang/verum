@@ -144,7 +144,7 @@ fn test_reference_coercion_upcast() {
 
     // ALLOWED UPCASTS (forgetful coercion)
 
-    // &unsafe T → &checked T  ✓
+    // &unsafe T → &checked T ✓
     let unsafe_ref = Type::UnsafeReference {
         mutable: false,
         inner: Box::new(inner.clone()),
@@ -158,7 +158,7 @@ fn test_reference_coercion_upcast() {
         "upcast &unsafe T → &checked T should succeed"
     );
 
-    // &unsafe T → &T  ✓
+    // &unsafe T → &T ✓
     let safe_ref = Type::Reference {
         mutable: false,
         inner: Box::new(inner.clone()),
@@ -172,7 +172,7 @@ fn test_reference_coercion_upcast() {
         "upcast &unsafe T → &T should succeed"
     );
 
-    // &checked T → &T  ✓
+    // &checked T → &T ✓
     let checked_ref2 = Type::CheckedReference {
         mutable: false,
         inner: Box::new(inner.clone()),
@@ -197,7 +197,7 @@ fn test_reference_coercion_downcast_forbidden() {
 
     // FORBIDDEN DOWNCASTS
 
-    // &T → &checked T  ✗
+    // &T → &checked T ✗
     let safe_ref = Type::Reference {
         mutable: false,
         inner: Box::new(inner.clone()),
@@ -211,7 +211,7 @@ fn test_reference_coercion_downcast_forbidden() {
         "downcast &T → &checked T should fail"
     );
 
-    // &T → &unsafe T  ✓ (allowed for FFI interop)
+    // &T → &unsafe T ✓ (allowed for FFI interop)
     // The implementation allows this conversion because it's commonly needed
     // when passing buffers to FFI functions. The caller takes responsibility.
     let safe_ref2 = Type::Reference {
@@ -227,7 +227,7 @@ fn test_reference_coercion_downcast_forbidden() {
         "FFI coercion &T → &unsafe T should succeed"
     );
 
-    // &checked T → &unsafe T  ✗
+    // &checked T → &unsafe T ✗
     let checked_ref2 = Type::CheckedReference {
         mutable: false,
         inner: Box::new(inner.clone()),

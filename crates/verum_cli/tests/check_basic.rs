@@ -1,17 +1,21 @@
 //! `verum check` end-to-end exit-code + diagnostic contract.
 //!
+
 //! `verum check` runs lex → parse → type-check on the project,
 //! skipping VBC/LLVM codegen. The CLI contract this test pins down:
 //!
-//!   * Clean project → exit 0, no diagnostic-formatted output on stderr.
-//!   * Parse error → exit non-zero, stderr identifies the offending file.
-//!   * Unknown identifier (post-parse type-check) → exit non-zero,
-//!     stderr surfaces the failing name.
+
+//!  * Clean project → exit 0, no diagnostic-formatted output on stderr.
+//!  * Parse error → exit non-zero, stderr identifies the offending file.
+//!  * Unknown identifier (post-parse type-check) → exit non-zero,
+//!  stderr surfaces the failing name.
 //!
+
 //! Pre-commit hooks, CI gates, and IDE "save and check" workflows rely
 //! on the exit code being a binary signal — locking it down is the
 //! same hardening contract `fmt --check` follows.
 //!
+
 //! Test isolation: each fixture is built in `$TMPDIR/verum_check_*`
 //! with a dedicated PID-suffixed name to avoid cross-test contamination
 //! when run in parallel.

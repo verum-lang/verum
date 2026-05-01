@@ -1,9 +1,11 @@
 //! Module name and item suggestion utilities.
 //!
+
 //! Provides fuzzy matching and suggestions for improved error diagnostics.
 //! Uses Levenshtein distance for string similarity with optimizations for
 //! common module naming patterns.
 //!
+
 //! Used by import resolution and name resolution error paths to provide
 //! "did you mean?" suggestions when items or modules are not found.
 
@@ -22,9 +24,11 @@ const MIN_SIMILARITY_RATIO: f64 = 0.5;
 
 /// Compute the Levenshtein edit distance between two strings.
 ///
+
 /// This is the minimum number of single-character edits (insertions,
 /// deletions, or substitutions) required to transform `a` into `b`.
 ///
+
 /// Uses Wagner-Fischer algorithm with O(min(m,n)) space complexity.
 pub fn levenshtein_distance(a: &str, b: &str) -> usize {
     // Optimization: empty strings
@@ -75,6 +79,7 @@ pub fn levenshtein_distance(a: &str, b: &str) -> usize {
 
 /// Compute similarity ratio between two strings (0.0-1.0).
 ///
+
 /// Returns 1.0 for identical strings, 0.0 for completely different strings.
 pub fn similarity_ratio(a: &str, b: &str) -> f64 {
     if a.is_empty() && b.is_empty() {
@@ -113,6 +118,7 @@ impl Suggestion {
 
 /// Find similar strings from a list of candidates.
 ///
+
 /// Returns suggestions sorted by similarity (most similar first).
 pub fn find_similar<'a>(
     query: &str,
@@ -206,6 +212,7 @@ pub fn find_similar_modules(
 
 /// Find similar item names from a list of available items.
 ///
+
 /// Considers common naming patterns:
 /// - Case differences (HashMap vs hashmap)
 /// - Underscore vs camelCase (get_item vs getItem)
@@ -258,6 +265,7 @@ pub fn find_similar_items(query: &str, available: &[Text]) -> List<Text> {
 
 /// Normalize an identifier for comparison.
 ///
+
 /// Converts to lowercase and normalizes underscores/camelCase.
 /// Both `get_item` and `getItem` become `get item`.
 fn normalize_identifier(s: &str) -> String {

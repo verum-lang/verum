@@ -6,6 +6,7 @@ module core.time.julian;
 // Layer: 3 (I/O adjacent)
 // Spec: internal/specs/sqlite-native.md §3.3 (nice-to-have for date/time)
 //
+
 // Julian Day (JD) is the continuous count of days (including fractional
 // day) since noon UTC on 4713-01-01 BC (proleptic Julian calendar).
 // SQLite's `julianday(...)` / `date(...)` / `strftime('%J', ...)` store
@@ -13,11 +14,13 @@ module core.time.julian;
 // civil day (shifted to midnight UTC, hence the 0.5 offset) and the
 // fractional part is the time-of-day.
 //
+
 // Conversions here cover:
-//   * Unix seconds / milliseconds <-> Julian Day
-//   * Proleptic-Gregorian Y/M/D    <-> Julian Day
-//   * Hours/minutes/seconds/millis <-> fractional part of JD
+//  * Unix seconds / milliseconds <-> Julian Day
+//  * Proleptic-Gregorian Y/M/D <-> Julian Day
+//  * Hours/minutes/seconds/millis <-> fractional part of JD
 //
+
 // Algorithms: Richards (Mapping Time, 1998). Integer arithmetic for the
 // day-number path; Float64 only for the fractional time-of-day.
 // =============================================================================
@@ -91,6 +94,7 @@ public fn unix_secs_from_julian(jd: Float64) -> Int64 {
 /// Proleptic-Gregorian `(year, month, day)` at 00:00:00 UTC → Julian Day.
 /// `month` in 1..12, `day` in 1..31. No validation — caller guarantees.
 ///
+
 /// Returns a Float64 ending in `.5` (midnight UTC boundary).
 public fn julian_from_ymd(year: Int, month: Int, day: Int) -> Float64 {
     let a: Int = (14 - month) / 12;

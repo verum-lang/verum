@@ -4,48 +4,60 @@
 // Layer: 2 (core primitive)
 // Dependencies: core
 // Reference: RFC 8439 §2.5 — Poly1305
-//            DJ Bernstein — "The Poly1305-AES message-authentication code"
+//  DJ Bernstein — "The Poly1305-AES message-authentication code"
 // =============================================================================
 //
+
 // Poly1305 is a **one-time** authenticator: never call it twice with
 // the same key. When paired with ChaCha20 via the RFC 8439 AEAD
 // construction (`aead/chacha20_poly1305.vr`), the per-message key is
 // derived by running ChaCha20 with counter=0 — fresh key every nonce.
 //
+
 // # Algorithm (RFC 8439 §2.5.1)
 //
+
 // ```
-// Key = (r || s)          — 16 bytes each, together 32 bytes
+// Key = (r || s) — 16 bytes each, together 32 bytes
 // r is clamped to 0x0FFFFFFC0FFFFFFC0FFFFFFC0FFFFFFF per bit-mask below
 //
+
 // Accumulator a = 0
 // For each 16-byte block m of input:
-//     a = (a + m') * r mod (2^130 - 5)
-//     where m' = m with a leading 1 bit appended (in the next-higher
-//     byte). Short final block gets a 1 bit after its last byte.
+//  a = (a + m') * r mod (2^130 - 5)
+//  where m' = m with a leading 1 bit appended (in the next-higher
+//  byte). Short final block gets a 1 bit after its last byte.
 //
+
 // Tag = (a + s) mod 2^128
 // ```
 //
+
 // # 130-bit arithmetic
 //
+
 // Straightforward reference: represent the accumulator as five 26-bit
 // limbs in u32 (giving 130 bits of precision with carry room). We
 // reduce after each mul by subtracting 2^130 · k where k = 5.
 //
+
 // # Performance
 //
+
 // Reference is correct but slow (~50-100 MiB/s). `@cfg(feature =
 // "crypto-accel")` substitutes the multiply with AVX2 / NEON
 // implementations using wide-multiply + lazy reduction — typical
 // 2-4 GiB/s.
 //
+
 // # Constant-time
 //
+
 // All operations are over unsigned 32-bit / 64-bit words with fixed
 // iteration counts; no branches on secret data. The final reduction
 // uses a constant-time subtract-if-ge via carry-mask.
 //
+
 // =============================================================================
 
 module core.security.mac.poly1305;
@@ -207,7 +219,7 @@ implement Poly1305 {
         g[4] = (a[4] + c).wrapping_sub(1 << 26);
 
         // mask = 0xFFFFFFFF if g4 did NOT underflow (i.e. a >= p),
-        //        0x00000000 otherwise.
+        //  0x00000000 otherwise.
         let mask = (g[4] >> 31).wrapping_sub(1);
         let mut i = 0;
         while i < 5 {

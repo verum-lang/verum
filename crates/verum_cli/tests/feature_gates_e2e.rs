@@ -1,6 +1,7 @@
 //! End-to-end tests for language-feature gates exercised through the
 //! real CLI binary.
 //!
+
 //! These tests close the audit gap "no test that actually runs
 //! `verum <cmd>` against a real verum.toml and checks the observable
 //! behavior". We don't compile .vr source here (that's what
@@ -418,6 +419,7 @@ fn tier0_interp_rejects_unsafe_when_gate_off() {
 /// behavior. This proves the gate is consumed BEFORE the codegen-tier
 /// fork (in the shared type-check phase), not after.
 ///
+
 /// Additionally proves the previous "AOT fails → silently fall back
 /// to interpreter" bug is fixed: a feature-gate rejection must
 /// propagate as a non-zero exit, not quietly run the program.

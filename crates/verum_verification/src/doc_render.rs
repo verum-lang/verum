@@ -1,49 +1,59 @@
 //! Auto-paper generator from @theorem / @lemma / @corollary / @axiom
 //! declarations.
 //!
+
 //! ## Goal
 //!
+
 //! Eliminate the duplicate-source problem (#84): a Verum corpus IS
-//! the formal proof AND the paper draft.  Pre-this-module a project
+//! the formal proof AND the paper draft. Pre-this-module a project
 //! had to maintain a `paper.tex` alongside the `.vr` corpus,
-//! manually keeping the two in sync.  This module makes the corpus
+//! manually keeping the two in sync. This module makes the corpus
 //! the *single* source of truth — the renderer projects every
 //! public theorem / lemma / corollary / axiom + its docstring + its
 //! proof body into a structured [`DocItem`] and emits Markdown /
 //! LaTeX / HTML directly from that.
 //!
+
 //! ## Architectural pattern
 //!
+
 //! Same single-trait-boundary pattern as the rest of the integration
 //! arc (ladder_dispatch / tactic_combinator / proof_repair /
 //! closure_cache):
 //!
-//!   * [`DocItem`] — typed projection of one declaration.
-//!   * [`DocCorpus`] — collection + citation-graph + cross-ref
-//!     validator.
-//!   * [`RenderFormat`] — Markdown / Latex / Html.
-//!   * [`DocRenderer`] trait — single dispatch interface.
-//!   * [`DefaultDocRenderer`] — V0 reference covering all three
-//!     formats.
+
+//!  * [`DocItem`] — typed projection of one declaration.
+//!  * [`DocCorpus`] — collection + citation-graph + cross-ref
+//!  validator.
+//!  * [`RenderFormat`] — Markdown / Latex / Html.
+//!  * [`DocRenderer`] trait — single dispatch interface.
+//!  * [`DefaultDocRenderer`] — V0 reference covering all three
+//!  formats.
 //!
+
 //! Future per-format adapters (LaTeX-with-proof-tree-collapse,
 //! HTML-with-MathJax, Markdown-with-Mermaid-graphs) plug in via
 //! the same trait without touching consumers.
 //!
+
 //! ## Reproducibility envelope
 //!
+
 //! [`DocItem`] carries an optional `closure_hash` — when present,
 //! readers of the rendered paper can run `verum cache-closure decide
 //! <name> --signature … --body … --cite …` against the same kernel
 //! version to confirm the statement they're reading is the
-//! statement that was kernel-checked.  This is the "auto-paper +
+//! statement that was kernel-checked. This is the "auto-paper +
 //! re-check" envelope #84 ships.
 //!
+
 //! ## Foundation-neutral
 //!
+
 //! The renderer knows nothing about how a `.vr` file is parsed —
 //! callers (CLI / docs build) construct [`DocItem`]s from whatever
-//! AST surface they've got and hand them in.  Rendering is a pure
+//! AST surface they've got and hand them in. Rendering is a pure
 //! function of the projection.
 
 use serde::{Deserialize, Serialize};
@@ -160,7 +170,7 @@ pub struct DocItem {
 
 impl DocItem {
     /// Convenient constructor for the common case (no proof steps,
-    /// no citations, no framework markers).  Mostly used in tests.
+    /// no citations, no framework markers). Mostly used in tests.
     pub fn new(
         kind: DocItemKind,
         name: impl Into<Text>,
@@ -182,7 +192,7 @@ impl DocItem {
         }
     }
 
-    /// Stable anchor for cross-references.  Format: `<kind>:<name>`.
+    /// Stable anchor for cross-references. Format: `<kind>:<name>`.
     /// Used by every output format so refs are portable.
     pub fn anchor(&self) -> Text {
         Text::from(format!("{}:{}", self.kind.name(), self.name.as_str()))
@@ -223,8 +233,8 @@ impl DocCorpus {
         g
     }
 
-    /// Export the citation graph to Graphviz DOT.  Edge: citing →
-    /// cited.  Nodes are coloured by item kind (theorem = blue,
+    /// Export the citation graph to Graphviz DOT. Edge: citing →
+    /// cited. Nodes are coloured by item kind (theorem = blue,
     /// lemma = green, corollary = yellow, axiom = grey).
     pub fn to_dot(&self) -> Text {
         let mut out = String::from("digraph corpus_citations {\n");
@@ -280,7 +290,7 @@ impl DocCorpus {
         broken
     }
 
-    /// Roots of the citation graph (items nothing cites).  These are
+    /// Roots of the citation graph (items nothing cites). These are
     /// the "top-level" theorems a reader should start from.
     pub fn roots(&self) -> Vec<Text> {
         let mut cited: BTreeSet<&str> = BTreeSet::new();
@@ -308,33 +318,38 @@ fn escape_dot(s: &str) -> String {
 // Citation extraction — AST visitor (#92 hardening)
 // =============================================================================
 //
+
 // Pre-this-module: the CLI collected citations by `format!("{:?}",
 // proof_body)` then matching identifier suffixes (`*_lemma`,
-// `*_thm`, …).  Two correctness problems:
+// `*_thm`, …). Two correctness problems:
 //
-//   1. False positives — any string-shaped match in pretty-printed
-//      AST output (struct field names, debug-rendering of variants,
-//      span debug output) was treated as a citation.
-//   2. False negatives — citations that don't follow the naming
-//      convention (e.g. `triangle_inequality`, `comm_assoc`) were
-//      silently dropped.
+
+//  1. False positives — any string-shaped match in pretty-printed
+//  AST output (struct field names, debug-rendering of variants,
+//  span debug output) was treated as a citation.
+//  2. False negatives — citations that don't follow the naming
+//  convention (e.g. `triangle_inequality`, `comm_assoc`) were
+//  silently dropped.
 //
+
 // Both classes vanish when we walk the typed `ProofBody` AST
 // directly: every citation lives in a known position (`apply X`,
 // `rewrite X`, `exact X`, `auto with [X, Y]`, `simp [X, Y]`,
-// `unfold X`, `Named.name`).  We collect those identifier
+// `unfold X`, `Named.name`). We collect those identifier
 // references and cross-check against an allowlist derived from the
 // corpus's `Theorem`/`Lemma`/`Corollary`/`Axiom` names.
 
 /// Walk a [`verum_ast::decl::ProofBody`] and collect every cited
 /// identifier reachable from tactic-application positions.
 ///
+
 /// Identifiers are projected to their last path segment (e.g.
-/// `core.proof.foo_lemma` → `foo_lemma`).  After projection the set
+/// `core.proof.foo_lemma` → `foo_lemma`). After projection the set
 /// is filtered against `allowlist` (the corpus's known item names);
 /// non-matching identifiers (locally-bound hypotheses, anonymous
 /// arguments, framework-call patterns) are dropped.
 ///
+
 /// Returns a sorted, deduplicated list of bare names.
 pub fn collect_proof_citations(
     body: &verum_ast::decl::ProofBody,
@@ -357,7 +372,7 @@ pub fn collect_proof_citations(
 /// Build the corpus-wide name allowlist used for citation
 /// resolution: every `Theorem` / `Lemma` / `Corollary` / `Axiom`
 /// name (bare, last-segment form) the auto-paper pipeline knows
-/// about.  Pass the result into [`collect_proof_citations`].
+/// about. Pass the result into [`collect_proof_citations`].
 pub fn build_citation_allowlist(items: &[DocItem]) -> BTreeSet<String> {
     items
         .iter()
@@ -389,7 +404,7 @@ impl CitationVisitor {
 
     fn visit_proof_method(&mut self, m: &verum_ast::decl::ProofMethod) {
         // Recursively collect every TacticExpr / Expr embedded in a
-        // ProofMethod variant.  Use a serde-driven walk: the method
+        // ProofMethod variant. Use a serde-driven walk: the method
         // is `Serialize` already, and the JSON walker below picks up
         // every `"name"` field — robust under future ProofMethod
         // variants.
@@ -474,7 +489,7 @@ impl CitationVisitor {
 
             TacticExpr::Intro(idents) => {
                 // `intro h` binds a NEW hypothesis name — not a
-                // citation.  Skip.
+                // citation. Skip.
                 let _ = idents;
             }
             TacticExpr::Apply { lemma, args } => {
@@ -624,7 +639,7 @@ impl CitationVisitor {
 
     /// Fallback for AST variants we don't enumerate by hand: walk the
     /// serde-JSON projection looking for `"name"` / `"path"` /
-    /// `"segments"` keys.  Picks up any cited identifier the typed
+    /// `"segments"` keys. Picks up any cited identifier the typed
     /// visitors might miss under future AST evolution.
     fn walk_value_for_idents(&mut self, v: &serde_json::Value) {
         match v {
@@ -1492,7 +1507,7 @@ mod tests {
     fn citation_visitor_no_false_positive_from_struct_debug() {
         // Trivial body cites nothing — pre-this-module the regex
         // would match "ProofBody" / "TacticExpr" / "Span" debug
-        // strings.  The AST visitor doesn't see those.
+        // strings. The AST visitor doesn't see those.
         let body = ProofBody::Tactic(TacticExpr::Trivial);
         let allow = allowlist_of(&["TacticExpr", "ProofBody", "Span"]);
         let cites = collect_proof_citations(&body, &allow);

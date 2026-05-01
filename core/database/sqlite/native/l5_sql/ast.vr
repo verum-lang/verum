@@ -6,6 +6,7 @@ module core.database.sqlite.native.l5_sql.ast;
 // Layer: 5
 // Spec: sqlite-native.md §12.3
 //
+
 // Abstract syntax tree the parser produces and the planner consumes.
 // Intentionally conservative — we model the SQL subset we actually
 // implement, not every SQLite-specific flavour nook (FILTER clauses on

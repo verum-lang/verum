@@ -2,23 +2,26 @@
 // security/x509/ext/key_usage.vr — RFC 5280 §4.2.1.3
 // =============================================================================
 //
+
 // KeyUsage ::= BIT STRING {
-//     digitalSignature   (0),
-//     nonRepudiation     (1),   -- recent editions of X.509 use contentCommitment
-//     keyEncipherment    (2),
-//     dataEncipherment   (3),
-//     keyAgreement       (4),
-//     keyCertSign        (5),
-//     cRLSign            (6),
-//     encipherOnly       (7),
-//     decipherOnly       (8)
+//  digitalSignature (0),
+//  nonRepudiation (1), -- recent editions of X.509 use contentCommitment
+//  keyEncipherment (2),
+//  dataEncipherment (3),
+//  keyAgreement (4),
+//  keyCertSign (5),
+//  cRLSign (6),
+//  encipherOnly (7),
+//  decipherOnly (8)
 // }
 //
+
 // The BIT STRING is big-endian: bit 0 is the MSB of the first byte
 // per RFC 5280 §4.2.1.3. Typical WebPKI EE certs set digitalSignature
 // + keyEncipherment (RSA) or digitalSignature (ECDSA). CAs set
 // keyCertSign + (optionally) cRLSign.
 //
+
 // =============================================================================
 
 module core.security.x509.ext.key_usage;

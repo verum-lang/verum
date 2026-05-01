@@ -1,16 +1,20 @@
 //! FFI Boundary Constraint Translation to SMT
 //!
+
 //! This module translates FFI boundary contracts into SMT constraints for verification.
 //! FFI boundary contracts are compile-time specifications (not types) that describe
 //! cross-language interfaces via C ABI. Verum supports only C ABI for FFI.
 //!
+
 //! - **Preconditions** → Requirements (MUST check before calling FFI)
 //! - **Postconditions** → Assumptions (HOPE they hold, cannot verify)
 //! - **Memory Effects** → Frame conditions (for optimization)
 //! - **Ownership** → Allocation constraints (for memory safety)
 //!
+
 //! ## Architecture
 //!
+
 //! The translation process:
 //! 1. Parse FFI function contracts from AST
 //! 2. Encode preconditions as SMT assertions to verify
@@ -18,8 +22,10 @@
 //! 4. Encode memory effects as frame conditions using array theory
 //! 5. Encode ownership as allocation/deallocation constraints
 //!
+
 //! ## SMT Theory Usage
 //!
+
 //! - **Bitvectors (BV)**: For pointer representation (64-bit)
 //! - **Arrays**: For memory modeling (address → value mapping)
 //! - **Quantifiers**: For frame conditions (∀ addr not in range)
@@ -87,6 +93,7 @@ impl<'ctx> FFIConstraintEncoder<'ctx> {
 
     /// Encode all constraints for an FFI boundary.
     ///
+
     /// Returns a list of SMT constraints for all functions in the boundary.
     pub fn encode_boundary(&mut self, boundary: &FFIBoundary) -> Result<List<SMTConstraint>> {
         let mut constraints = List::new();
@@ -138,6 +145,7 @@ impl<'ctx> FFIConstraintEncoder<'ctx> {
 
     /// Encode a precondition expression to SMT.
     ///
+
     /// Preconditions must be verified at the Verum side before calling FFI.
     pub fn encode_precondition(
         &self,
@@ -180,6 +188,7 @@ impl<'ctx> FFIConstraintEncoder<'ctx> {
 
     /// Encode a postcondition expression to SMT.
     ///
+
     /// Postconditions are assumptions - we hope they hold but cannot verify them
     /// since the FFI implementation is opaque.
     pub fn encode_postcondition(
@@ -235,6 +244,7 @@ impl<'ctx> FFIConstraintEncoder<'ctx> {
 
     /// Encode memory effects as frame conditions.
     ///
+
     /// Frame conditions specify what memory can change across the FFI call:
     /// - Pure: No memory changes
     /// - Reads: No memory changes
@@ -918,6 +928,7 @@ pub enum VerificationResult {
 
 /// Verify an FFI call with given arguments.
 ///
+
 /// This checks that all preconditions hold before making the FFI call.
 pub fn verify_ffi_call<'ctx>(
     context: &Context,

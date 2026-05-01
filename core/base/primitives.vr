@@ -4,8 +4,9 @@
 // Layer: 0 (Core)
 // Dependencies: protocols.vr, ordering.vr, stdlib.intrinsics
 // Note: Primitive types (Int, Float, Bool, Byte, Char) are built-in.
-//       This file defines their methods and protocol implementations.
+//  This file defines their methods and protocol implementations.
 //
+
 // All intrinsic operations are imported from stdlib.intrinsics and called as
 // regular functions. This eliminates boilerplate and demonstrates the power
 // of Verum's generic intrinsic system.
@@ -229,6 +230,7 @@ implement Int {
 
     /// Overflowing multiplication. Returns (result, overflowed).
     ///
+
     /// Critical: the standard `result / rhs != self` overflow
     /// test would itself trap (SIGFPE on x86) for the
     /// `Int.MIN * -1` case — `wrapping_mul` returns `Int.MIN`,
@@ -240,8 +242,8 @@ implement Int {
         let result = self.wrapping_mul(rhs);
         // Special case 1: rhs == 0 ⇒ result == 0, never overflow.
         // Special case 2: Int.MIN * -1 is the unique sdiv-trap
-        //   pair; mathematically the product is `Int.MAX + 1`
-        //   which doesn't fit, so overflow == true.
+        //  pair; mathematically the product is `Int.MAX + 1`
+        //  which doesn't fit, so overflow == true.
         if rhs == 0 {
             (result, false)
         } else if self == -9223372036854775808 && rhs == -1 {
@@ -320,6 +322,7 @@ implement Int {
     /// two's-complement bits. Use [`to_bits`] + a custom
     /// formatter if you want the raw 64-bit pattern.
     ///
+
     /// Correctly handles `Int.MIN`: the magnitude `2^63` doesn't
     /// fit in `Int`, so we accumulate digits in `UInt64`. The
     /// previous implementation used `self.abs()` which itself
@@ -347,6 +350,7 @@ implement Int {
 
     /// Return the raw bit representation of this integer.
     ///
+
     /// For Int (i64), this is the identity function — the value already
     /// is its two's complement bit pattern.
     public fn to_bits(self) -> Int {
@@ -509,6 +513,7 @@ implement Int {
 
     /// Parse integer from string in the given radix (2-36).
     ///
+
     /// Accepts the full signed Int range, including the
     /// asymmetric `Int.MIN` (= -9223372036854775808). The
     /// magnitude `9223372036854775808` doesn't fit in `Int`
@@ -551,8 +556,8 @@ implement Int {
             i = i + 1;
         }
 
-        // Sign-aware bound check.  Positive: must fit in Int.MAX
-        // (= 9223372036854775807).  Negative: magnitude must fit
+        // Sign-aware bound check. Positive: must fit in Int.MAX
+        // (= 9223372036854775807). Negative: magnitude must fit
         // in -Int.MIN's magnitude (= 9223372036854775808 = 2^63).
         if negative {
             let neg_min_mag: UInt64 = 9223372036854775808 as UInt64;
@@ -581,9 +586,10 @@ fn char_to_digit(ch: Char, radix: Int) -> Int {
 
 /// Helper: format `n` in the given `radix` (2..=36) using math
 /// convention for negative values (`-magnitude`, not
-/// two's-complement bits).  The shared backend for
+/// two's-complement bits). The shared backend for
 /// [`Int.to_binary`], [`Int.to_hex`], and [`Int.to_octal`].
 ///
+
 /// Magnitude is computed in `UInt64` so `Int.MIN`'s magnitude
 /// (`2^63`, unrepresentable as a positive `Int`) is exact.
 /// The previous per-radix implementations called `self.abs()`,
@@ -605,12 +611,12 @@ fn format_radix_signed(n: Int, radix: Int) -> Text {
     let radix_u: UInt64 = radix as UInt64;
 
     // Collect digits low-to-high in a List<Char>, then iterate
-    // backwards into the result Text.  Earlier impl used a fixed
+    // backwards into the result Text. Earlier impl used a fixed
     // `[Byte; 64]` buffer + `Text.from_utf8_unchecked` — that path
     // doesn't survive the Tier-0 interpreter (no byte-array
     // primitive at the @intrinsic surface), causing every
     // `to_hex / to_octal / to_binary` call to silently produce
-    // empty output.  Discovered while validating task #38 (f-string
+    // empty output. Discovered while validating task #38 (f-string
     // `:x` spec wrapping); the wrap was correct, the underlying
     // formatter was the load-bearing bug.
     let mut digits = List<Char>.new();
@@ -880,6 +886,7 @@ implement Float {
 
     /// Absolute value, IEEE 754-conforming.
     ///
+
     /// Critically: `abs(-0.0) == +0.0` (IEEE 754 mandates the
     /// sign bit be cleared), `abs(NaN) == NaN`, `abs(±Inf) ==
     /// +Inf`. The previous `if self < 0.0 { -self } else { self }`
@@ -889,6 +896,7 @@ implement Float {
     /// `(-0.0).abs().is_sign_positive()` (which should be true
     /// per spec but returned false).
     ///
+
     /// Implementation clears the sign bit directly via the
     /// bit-pattern round-trip — this is the standard
     /// IEEE 754 `fabs` behaviour and matches what every other
@@ -1425,6 +1433,7 @@ implement Byte {
 
     /// Check if ASCII whitespace.
     ///
+
     /// Matches the canonical "ASCII whitespace" set defined by
     /// the WHATWG Infra spec and used by Rust's
     /// `u8.is_ascii_whitespace`: SPACE (0x20), HORIZONTAL TAB
@@ -1737,8 +1746,8 @@ implement Display for () {
 // =============================================================================
 // Following Verum's "Semantic Honesty" principle: types describe meaning.
 // Canonical names: Int8, Int16, Int32, Int64, Int128, ISize
-//                  UInt8, UInt16, UInt32, UInt64, UInt128, USize
-//                  Float32, Float64
+//  UInt8, UInt16, UInt32, UInt64, UInt128, USize
+//  Float32, Float64
 // Rust-compatible aliases (i8, u64, etc.) are handled at the compiler level.
 // =============================================================================
 

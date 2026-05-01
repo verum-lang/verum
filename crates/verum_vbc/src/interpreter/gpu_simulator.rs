@@ -1,22 +1,28 @@
 //! GPU CPU-Fallback Semantic Simulator
 //!
+
 //! This module provides a CPU-based simulation of GPU kernel execution
 //! with correct threading semantics. Each kernel launch iterates over
 //! all blocks in the grid and all threads within each block, providing
 //! each thread with its own identity (threadIdx, blockIdx) and access
 //! to per-block shared memory.
 //!
+
 //! ## Threading Model
 //!
+
 //! Threads within a block execute sequentially in the CPU simulation.
 //! This is semantically correct for well-synchronized GPU programs
 //! because `__syncthreads()` is a no-op when threads execute in order.
 //!
+
 //! Atomic operations are regular operations in single-threaded execution,
 //! which is also correct (no data races in sequential execution).
 //!
+
 //! ## Shared Memory
 //!
+
 //! Each block gets its own shared memory buffer that persists for the
 //! duration of the block's execution. All threads within a block can
 //! read and write to this shared memory.
@@ -25,6 +31,7 @@ use std::collections::HashMap;
 
 /// GPU thread context providing identity and shared resources.
 ///
+
 /// This is set before each kernel thread execution and can be queried
 /// via GPU thread intrinsic sub-opcodes (0xA0-0xAF).
 #[derive(Debug, Clone)]
@@ -103,6 +110,7 @@ impl GpuThreadContext {
 
 /// Per-block shared memory allocation.
 ///
+
 /// Each block in the grid gets its own shared memory buffer that persists
 /// for the duration of the block's execution across all threads.
 #[derive(Debug)]
@@ -231,6 +239,7 @@ impl SharedMemoryBlock {
 
 /// Parameters for a GPU kernel launch.
 ///
+
 /// Saved from the Launch instruction bytecode encoding and used
 /// to drive the CPU-fallback grid/block iteration.
 #[derive(Debug, Clone)]
@@ -269,6 +278,7 @@ impl KernelLaunchParams {
 
 /// Iterator over all (block_id, thread_id) pairs in a kernel launch.
 ///
+
 /// Iterates blocks in x,y,z order (x varies fastest), and within each
 /// block iterates threads in x,y,z order (matching CUDA semantics).
 pub struct ThreadIterator {
@@ -322,6 +332,7 @@ impl Iterator for ThreadIterator {
 
 /// Tracks global memory for GPU atomics across the entire kernel execution.
 ///
+
 /// In CPU fallback mode, "global" memory is just regular host memory.
 /// Atomic operations on global memory addresses use this tracker to
 /// ensure correct sequential semantics.

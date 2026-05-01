@@ -5,19 +5,23 @@
 // Dependencies: core.security.ecc.{x25519, p256}
 // =============================================================================
 //
+
 // Server-side (and client-side) TLS 1.3 handshakes need an ephemeral
 // (EC)DHE keypair per handshake. This module provides:
 //
-//   DhePool protocol      — abstract keypair source the server SM
-//                           consumes.
-//   LocalDhePool          — in-process default implementation that
-//                           generates a fresh keypair per call.
+
+//  DhePool protocol — abstract keypair source the server SM
+//  consumes.
+//  LocalDhePool — in-process default implementation that
+//  generates a fresh keypair per call.
 //
+
 // Applications running at scale (tens of thousands of handshakes/s)
 // can plug an alternate DhePool impl that pre-generates keypairs in
 // the background and hands them out from a lock-free ring buffer —
 // the protocol shape leaves that door open.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.dhe_pool;

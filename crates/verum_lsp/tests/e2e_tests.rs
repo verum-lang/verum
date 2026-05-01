@@ -14,9 +14,11 @@
 )]
 //! End-to-End LSP Tests
 //!
+
 //! Comprehensive E2E testing for Language Server Protocol implementation.
 //! Coverage target: 40% → 95%
 //!
+
 //! Test categories:
 //! - Full LSP workflow (initialize -> edit -> complete -> diagnostics -> shutdown)
 //! - Concurrent client requests
@@ -25,6 +27,7 @@
 //! - Code actions and refactoring
 //! - Workspace management
 //!
+
 //! The tests use a MockClient infrastructure that captures published diagnostics
 //! and other LSP notifications via channels, enabling proper verification of the
 //! full LSP protocol flow.
@@ -962,6 +965,7 @@ async fn test_syntax_error_diagnostics() {
     // 2. The document was parsed (parsing happens in did_open)
     // 3. Diagnostics would be generated for syntax errors
     //
+
     // To fully test diagnostic delivery, use the integration test module
     // with a mock transport that captures outgoing messages.
 
@@ -1000,6 +1004,7 @@ async fn test_type_error_diagnostics() {
     // 3. publish_diagnostics is called with type errors
     // 4. Client (editor) receives and displays errors
     //
+
     // Verification: The document was successfully type-checked by confirming
     // we can request hover info (requires type information)
     let hover = client

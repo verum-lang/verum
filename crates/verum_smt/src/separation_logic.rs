@@ -1,7 +1,9 @@
 //! Separation Logic for Heap Verification
 //!
+
 //! Implements separation logic for verifying heap-manipulating programs using Z3 SMT solver.
 //!
+
 //! Separation logic assertions model disjoint heap ownership:
 //! - Separating conjunction (P * Q): heap splits into disjoint regions satisfying P and Q
 //! - Magic wand (P -* Q): separating implication for frame reasoning
@@ -9,11 +11,14 @@
 //! - Frame rule: {P} c {Q} implies {P * R} c {Q * R} (frame preservation)
 //! - List segments lseg(x, y, xs) and tree predicates tree(x, t)
 //!
+
 //! SMT encoding uses Z3 array theory: heap as Array<Int, Int>, disjointness via
 //! quantified constraints over array domains.
 //!
+
 //! ## Features
 //!
+
 //! - **Separating Conjunction (P * Q)**: Disjoint heap regions encoded via Z3 array theory
 //! - **Magic Wand (P -* Q)**: Separating implication for frame reasoning
 //! - **Points-To Assertions (x |-> v)**: Single heap cell ownership
@@ -23,8 +28,10 @@
 //! - **Heap Entailment**: P |- Q verification via SMT
 //! - **Weakest Precondition**: wp(c, Q) computation
 //!
+
 //! ## Z3 Encoding
 //!
+
 //! Heaps are encoded as arrays from addresses to values:
 //! ```text
 //! Heap = Array(Address, Value)
@@ -32,8 +39,10 @@
 //! Sep(P, Q) = P(h1) AND Q(h2) AND disjoint(dom(h1), dom(h2))
 //! ```
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Assertion checking: < 10ms
 //! - Frame rule application: < 5ms
 //! - WP computation: < 20ms
@@ -87,6 +96,7 @@ impl Default for SepLogicConfig {
 
 /// Separation logic assertion about heap
 ///
+
 /// Separation logic assertions about the heap. Core assertions:
 /// - PointsTo: `x |-> v` (location x contains value v, exclusive ownership)
 /// - SepConj: `P * Q` (heap splits into disjoint regions for P and Q)
@@ -333,6 +343,7 @@ impl SepAssertion {
 
 /// Command in separation logic
 ///
+
 /// Commands in separation logic for weakest precondition computation:
 /// - Skip: no-op, wp(skip, Q) = Q
 /// - Assign: `x := e`, wp(x:=e, Q) = Q[e/x]
@@ -402,6 +413,7 @@ pub enum Command {
 
 /// Hoare triple: {P} c {Q}
 ///
+
 /// Hoare triple `{P} c {Q}`: for all states s, if P(s) holds then the weakest
 /// precondition wp(c, Q)(s) also holds. Verification checks that P implies wp(c, Q).
 #[derive(Debug, Clone)]
@@ -451,12 +463,14 @@ pub struct GenerationInfo {
 
 /// Z3-based biheap model for separation logic encoding
 ///
+
 /// This model implements a proper separation of stack and heap memory regions,
 /// with support for CBGR (Capability-Based Generational References) verification.
 ///
+
 /// Memory Layout:
 /// - Stack: [0x0000_0000_0000_0000, 0x0000_7FFF_FFFF_FFFF) - lower half
-/// - Heap:  [0x0000_8000_0000_0000, 0xFFFF_FFFF_FFFF_FFFF) - upper half
+/// - Heap: [0x0000_8000_0000_0000, 0xFFFF_FFFF_FFFF_FFFF) - upper half
 pub struct Z3HeapModel {
     /// Heap as array from addresses to values
     heap: Array,
@@ -803,6 +817,7 @@ pub enum CBGRAssertion {
 
 /// Execution tier for CBGR checking costs
 ///
+
 /// Verum uses a two-tier execution model:
 /// - Interpreter: Full runtime checks (~100ns)
 /// - Aot: Optimized checks (0ns for proven-safe, ~15ns otherwise)
@@ -1254,6 +1269,7 @@ impl SymbolicHeap {
 
 /// Encodes separation logic assertions as Z3 formulas
 ///
+
 /// This encoder implements production-grade features:
 /// - Biheap model with stack/heap separation
 /// - CBGR generation tracking for memory safety
@@ -1347,6 +1363,7 @@ impl SepLogicEncoder {
 
     /// Infer the frame for an entailment: given P, find R such that P |- Q * R
     ///
+
     /// This implements the frame inference algorithm from separation logic:
     /// 1. Compute the symbolic heap for P and Q
     /// 2. Match spatial assertions from Q against P
@@ -1657,6 +1674,7 @@ impl SepLogicEncoder {
 
     /// Encode a separation logic assertion as a Z3 formula
     ///
+
     /// The encoding uses the theory of arrays to model heaps:
     /// - Heap is an array from addresses to values
     /// - Allocated bitmap tracks which addresses are valid
@@ -1788,6 +1806,7 @@ impl SepLogicEncoder {
                 // lseg(from, to, []) = from == to AND emp
                 // lseg(from, to, x::xs) = exists next. from |-> (x, next) * lseg(next, to, xs)
                 //
+
                 // Route through `encode_with_unfolding` whenever
                 // `UnfoldingConfig.lazy_unfolding` is enabled (the
                 // documented default) so the depth cap from
@@ -1822,7 +1841,7 @@ impl SepLogicEncoder {
                 // Sibling routing for tree predicates: when
                 // `lazy_unfolding` is enabled, cap the unfolding at
                 // `max_tree_depth`; otherwise use the unbounded
-                // encoding.  See ListSegment arm for the inert-
+                // encoding. See ListSegment arm for the inert-
                 // defense rationale.
                 let unfolding = self.unfolding_state.borrow();
                 if unfolding.lazy_unfolding_enabled() {
@@ -1853,6 +1872,7 @@ impl SepLogicEncoder {
 
     /// Apply quantifier elimination for decidable fragments of separation logic
     ///
+
     /// This implements quantifier elimination for:
     /// 1. Existentials over addresses with unique points-to
     /// 2. Universals over bounded ranges
@@ -1934,6 +1954,7 @@ impl SepLogicEncoder {
 
     /// Find a witness for an existential quantifier
     ///
+
     /// Looks for patterns like:
     /// - exists x. (addr |-> x) => x = addr's value
     /// - exists x. (x == constant) => x = constant
@@ -2004,6 +2025,7 @@ impl SepLogicEncoder {
 
     /// Extract a finite domain for a universally quantified variable
     ///
+
     /// Looks for patterns like:
     /// - forall x. (0 <= x < n) => P(x) where n is small
     /// - forall x in {v1, v2, v3}. P(x)
@@ -2296,9 +2318,9 @@ impl SepLogicEncoder {
         a2: &Array,
     ) -> Bool {
         // forall addr.
-        //   result_alloc[addr] = a1[addr] OR a2[addr]
-        //   AND (a1[addr] => result_heap[addr] == h1[addr])
-        //   AND (a2[addr] => result_heap[addr] == h2[addr])
+        //  result_alloc[addr] = a1[addr] OR a2[addr]
+        //  AND (a1[addr] => result_heap[addr] == h1[addr])
+        //  AND (a2[addr] => result_heap[addr] == h2[addr])
 
         let addr = self.model.fresh_addr("compose_addr");
 
@@ -2657,6 +2679,7 @@ impl SepLogicEncoder {
 
     /// Verify heap entailment: P |- Q
     ///
+
     /// Returns Ok(true) if P entails Q, Ok(false) if not, Err on error
     pub fn verify_entailment(
         &self,
@@ -2711,6 +2734,7 @@ impl SepLogicEncoder {
 
     /// Extract counterexample from Z3 model
     ///
+
     /// This extracts heap and allocation information from the Z3 model by
     /// dynamically discovering all allocated addresses. The extraction process:
     /// 1. Iterate over all function declarations in the model
@@ -2882,6 +2906,7 @@ impl SepLogicEncoder {
 
     /// Verify frame rule application
     ///
+
     /// Given {P} c {Q}, verify that {P * R} c {Q * R} holds
     pub fn verify_frame_rule(
         &self,
@@ -2907,12 +2932,14 @@ impl SepLogicEncoder {
 
     /// Check if two footprints are disjoint using SMT-based verification
     ///
+
     /// This method uses Z3 to check if there exists any possible assignment of
     /// variables that could make two addresses from the footprints equal. If such
     /// an assignment exists (SAT), the footprints may overlap and are not provably
     /// disjoint. If no such assignment exists (UNSAT for all pairs), the footprints
     /// are provably disjoint.
     ///
+
     /// This properly handles:
     /// - Address aliasing (e.g., `x` and `y` could be equal)
     /// - Arithmetic expressions (e.g., `x + 1` and `y` could be equal if `y = x + 1`)
@@ -3125,6 +3152,7 @@ impl SeparationLogic {
 
     /// Verify Hoare triple: {P} c {Q}
     ///
+
     /// Verify Hoare triple {P} c {Q} by computing wp(c, Q) and checking P => wp(c, Q).
     /// Uses separation logic rules: frame rule for heap disjointness, weakest precondition
     /// calculus for commands, and Z3 for implication checking.
@@ -3142,6 +3170,7 @@ impl SeparationLogic {
 
     /// Compute weakest precondition
     ///
+
     /// Compute weakest precondition using Hoare logic rules:
     /// - wp(skip, Q) = Q
     /// - wp(x := e, Q) = Q[e/x] (substitution)
@@ -3355,10 +3384,10 @@ impl SeparationLogic {
                 desired,
             } => {
                 // wp(CAS(result, addr, expected, desired), Q) =
-                //   exists v. (addr |-> v) * (
-                //     (v == expected => (addr |-> desired) -* Q[result := true]) /\
-                //     (v != expected => (addr |-> v) -* Q[result := false])
-                //   )
+                //  exists v. (addr |-> v) * (
+                //  (v == expected => (addr |-> desired) -* Q[result := true]) /\
+                //  (v != expected => (addr |-> v) -* Q[result := false])
+                //  )
                 let value_var = format!("__cas_val_{}", self.fresh_var_counter());
                 let value_expr = Expr::new(
                     ExprKind::Path(Path::from_ident(Ident::new(
@@ -3501,6 +3530,7 @@ impl SeparationLogic {
 
     /// Apply frame rule
     ///
+
     /// Frame rule: {P} c {Q} => {P * R} c {Q * R}
     pub fn apply_frame_rule(&self, triple: HoareTriple, frame: SepAssertion) -> HoareTriple {
         HoareTriple {
@@ -4124,6 +4154,7 @@ impl SeparationLogic {
 
     /// Apply magic wand elimination
     ///
+
     /// If we have P * (P -* Q), we can derive Q
     pub fn apply_wand_elimination(
         &self,

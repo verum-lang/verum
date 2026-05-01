@@ -1,23 +1,28 @@
 //! Meta Registry - Global registry for meta functions and macros
 //!
+
 //! This module implements the cross-file resolution system for meta functions
 //! and macro definitions during Pass 1 of the multi-pass compilation pipeline.
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
 //! registry, Pass 3+ performs semantic analysis. Sandboxed execution (no I/O).
 //!
+
 //! # Lock Poisoning Recovery
 //!
+
 //! This module uses mutexes that may become poisoned if a thread panics
 //! while holding a lock. Recovery strategy:
 //! - **meta_functions, macros, dependencies**: Compile-time data → recover with warning
-//!   These registries hold AST data collected during compilation. If poisoned,
-//!   it means a panic during registration (e.g., during AST traversal). We recover
-//!   because the data is being built incrementally and partial data is acceptable
-//!   (compilation will fail anyway if data is incomplete).
+//!  These registries hold AST data collected during compilation. If poisoned,
+//!  it means a panic during registration (e.g., during AST traversal). We recover
+//!  because the data is being built incrementally and partial data is acceptable
+//!  (compilation will fail anyway if data is incomplete).
 //!
+
 //! See helper function for recovery rationale.
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -26,6 +31,7 @@ use verum_common::{List, Map, Maybe, Set, Text};
 
 /// Acquires lock on meta functions map, recovering from poisoned state if necessary.
 ///
+
 /// # Safety
 /// If poisoned, the Map may have partial/duplicate entries from a failed registration.
 /// We recover because:
@@ -97,6 +103,7 @@ fn lock_extern_functions_with_recovery(
 
 /// Global registry for meta functions and macros (cross-file resolution)
 ///
+
 /// Thread-safe registry that maintains all meta functions and macros
 /// discovered during Pass 1 of compilation.
 #[derive(Debug, Clone)]
@@ -289,9 +296,11 @@ impl MetaRegistry {
 
     /// Register an extern (FFI) function during Pass 1
     ///
+
     /// Extern functions are tracked so that meta function evaluation can
     /// detect and block attempts to call FFI functions at compile time.
     ///
+
     /// # Arguments
     /// - `module`: Module path where the function is defined
     /// - `name`: The function name
@@ -303,12 +312,15 @@ impl MetaRegistry {
 
     /// Check if a function is an extern (FFI) function
     ///
+
     /// Used to detect and block FFI calls in meta functions.
     ///
+
     /// # Arguments
     /// - `module`: Module path to search in
     /// - `name`: The function name to check
     ///
+
     /// # Returns
     /// `true` if the function is declared as extern in the given module
     pub fn is_extern_function(&self, module: &Text, name: &Text) -> bool {
@@ -319,6 +331,7 @@ impl MetaRegistry {
 
     /// Check if a function name is an extern function in any module
     ///
+
     /// This is a fallback check when the specific module is unknown.
     pub fn is_any_extern_function(&self, name: &Text) -> bool {
         let extern_fns = lock_extern_functions_with_recovery(&self.extern_functions);
@@ -327,10 +340,12 @@ impl MetaRegistry {
 
     /// Register a meta function during Pass 1
     ///
+
     /// # Arguments
     /// - `module`: Module path where the function is defined
     /// - `func`: The function declaration from the AST
     ///
+
     /// # Errors
     /// Returns `MetaError::DuplicateMetaFunction` if a meta function with the same
     /// name already exists in the same module.
@@ -395,23 +410,27 @@ impl MetaRegistry {
 
     /// Register a MetaFunction directly without going through FunctionDecl.
     ///
+
     /// This is used by the staged pipeline to import meta functions from an
     /// external registry with their proper stage-level routing. Unlike
     /// `register_meta_function`, this method takes a pre-constructed MetaFunction.
     ///
+
     /// # Arguments
     /// * `meta_func` - The pre-constructed MetaFunction to register
     ///
+
     /// # Errors
     /// Returns `MetaError::DuplicateMetaFunction` if a meta function with the same
     /// name already exists in the same module.
     ///
+
     /// # Example
     /// ```ignore
     /// let meta_fn = MetaFunction {
-    ///     name: Text::from("derive_impl"),
-    ///     module: Text::from("my_module"),
-    ///     // ... other fields
+    ///  name: Text::from("derive_impl"),
+    ///  module: Text::from("my_module"),
+    ///  // ... other fields
     /// };
     /// registry.register_meta_fn_direct(meta_fn)?;
     /// ```
@@ -483,6 +502,7 @@ impl MetaRegistry {
 
     /// Resolve a meta function call during Pass 2
     ///
+
     /// Attempts to find the meta function, first in the local module,
     /// then in imported modules according to the dependency graph.
     pub fn resolve_meta_call(&self, module: &Text, name: &Text) -> Maybe<MetaFunction> {
@@ -512,6 +532,7 @@ impl MetaRegistry {
 
     /// Get a user-defined meta function by name (for direct lookup)
     ///
+
     /// This is useful for executing meta functions from the expansion phase.
     pub fn get_user_meta_fn(&self, module: &Text, name: &Text) -> Maybe<MetaFunction> {
         self.resolve_meta_call(module, name)

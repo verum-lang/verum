@@ -5,10 +5,12 @@
 // Dependencies: core.sys, core.io, core.term.raw
 // =============================================================================
 //
+
 // Platform-specific event source using poll(2) on POSIX and
 // WaitForSingleObject on Windows. Provides poll_read() with timeout
 // for non-blocking terminal input reading.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
 // =============================================================================
 
@@ -25,10 +27,10 @@ mount super.super.raw.RawTerminal;
 
 // FFI signatures use C-ABI integer widths (T0.4.2 Phase 2 sweep).
 // `int poll(struct pollfd *fds, nfds_t nfds, int timeout)`:
-//   * nfds_t is `unsigned long` on Linux (UInt64) and `unsigned int`
-//     on macOS BSD (UInt32). We split the declaration per platform so
-//     LLVM emits the right ABI on each.
-//   * timeout / return value are POSIX `int` (Int32).
+//  * nfds_t is `unsigned long` on Linux (UInt64) and `unsigned int`
+//  on macOS BSD (UInt32). We split the declaration per platform so
+//  LLVM emits the right ABI on each.
+//  * timeout / return value are POSIX `int` (Int32).
 @cfg(target_os = "linux")
 @ffi("libc")
 extern {
@@ -74,6 +76,7 @@ const POLLNVAL: Int16 = 0x0020;
 /// Read from a file descriptor with a timeout.
 /// Returns the number of bytes read, or 0 if the timeout expired.
 ///
+
 /// Uses poll(2) on POSIX to wait for data availability before reading.
 @cfg(not(target_os = "windows"))
 public fn poll_read(fd: FileDesc, buf: &mut [Byte], timeout: Duration) -> Int {

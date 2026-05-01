@@ -4,18 +4,20 @@
 // Layer: 4
 // Spec: sqlite-native.md §15.3
 //
+
 // Window functions evaluate over a frame computed during the
 // sort-and-partition stage. Each window-fn call carries a
 // `WindowState` that the L4 interpreter advances at row level.
 //
+
 // We provide:
-//   ROW_NUMBER()                        — sequential counter per partition
-//   RANK() / DENSE_RANK()               — sort-aware tie semantics
-//   PERCENT_RANK() / CUME_DIST()        — distribution
-//   NTILE(N)                            — bucketise rows into N tiles
-//   LAG(X[, off[, default]])            — value `off` rows before
-//   LEAD(X[, off[, default]])           — value `off` rows after
-//   FIRST_VALUE(X) / LAST_VALUE(X) / NTH_VALUE(X, N)
+//  ROW_NUMBER() — sequential counter per partition
+//  RANK() / DENSE_RANK() — sort-aware tie semantics
+//  PERCENT_RANK() / CUME_DIST() — distribution
+//  NTILE(N) — bucketise rows into N tiles
+//  LAG(X[, off[, default]]) — value `off` rows before
+//  LEAD(X[, off[, default]]) — value `off` rows after
+//  FIRST_VALUE(X) / LAST_VALUE(X) / NTH_VALUE(X, N)
 // =============================================================================
 
 module core.database.sqlite.native.builtins.window_fns;

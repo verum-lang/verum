@@ -1,24 +1,31 @@
 //! Error Output Formatters
 //!
+
 //! Provides multiple output formats for error contexts, enabling integration
 //! with various logging, monitoring, and debugging systems.
 //!
+
 //! # Supported Formats
 //!
+
 //! - **PlainText**: Human-readable text format (default)
 //! - **Json**: Compact JSON for log aggregation
 //! - **JsonPretty**: Pretty-printed JSON for debugging
 //! - **Yaml**: Human-readable YAML format
 //! - **Logfmt**: Key-value format for structured logging
 //!
+
 //! # Examples
 //!
+
 //! ```rust,ignore
 //! use verum_error::formatters::OutputFormat;
 //!
+
 //! let formatted = error
-//!     .format_with(OutputFormat::Json);
+//!  .format_with(OutputFormat::Json);
 //!
+
 //! // Output: {"error":"...", "context":["..."], "structured":{...}}
 //! ```
 

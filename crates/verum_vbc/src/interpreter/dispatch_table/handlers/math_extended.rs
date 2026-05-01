@@ -9,11 +9,13 @@ use super::bytecode_io::*;
 
 /// MathExtended (0x29) - Transcendental and special math functions.
 ///
+
 /// Zero-cost dispatch via Rust match. Each sub-opcode maps 1:1 to:
 /// - Interpreter: Native Rust method (f64::sin, f64::cos, etc.)
 /// - AOT/LLVM: LLVM intrinsic (llvm.sin.f64, llvm.sqrt.f64, etc.)
 /// - MLIR: math dialect ops (math.sin, math.sqrt, etc.)
 ///
+
 /// Sub-opcode ranges:
 /// - 0x00-0x0F: Trigonometric F64 (sin, cos, tan, asin, acos, atan, atan2)
 /// - 0x10-0x17: Trigonometric F32

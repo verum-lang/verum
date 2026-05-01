@@ -3,13 +3,15 @@
 // =============================================================================
 // Layer: 5 (Widget Library)
 // Dependencies: protocol.vr, block.vr, paragraph.vr, render/buffer.vr,
-//               layout/rect.vr, style/style.vr, style/color.vr
+//  layout/rect.vr, style/style.vr, style/color.vr
 // =============================================================================
 //
+
 // Toast-style notification widget with level-based coloring (Info, Warning,
 // Error, Success). Renders as a bordered box, typically positioned at the
 // top-right corner of the screen.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 3
 // =============================================================================
 

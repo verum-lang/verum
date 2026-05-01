@@ -4,28 +4,32 @@
 // Layer: Foundations / Meta
 // Spec: internal/verum-ext.md §3.3 (Tactic DSL)
 //
+
 // This module provides the complete tactic infrastructure for Verum proofs:
 //
-//   § 1. Proof State Types  — TacticResult, Goal, ProofState, ProofContext
-//   § 2. Proof State API    — new_proof_state, apply_tactic, all_solved
-//   § 3. Algebraic Tactics  — ring_law, field_law, group_law, lattice_law
-//   § 4. Category Tactics   — category_law, category_simp, functor_law
-//   § 5. HoTT / Cubical     — cubical, homotopy, descent_check, topos_simp
-//   § 6. Stochastic Tactics — oracle (Giry monad LLM oracle)
-//   § 7. Meta-tactics       — norm_num, decide, assumption, contradiction
-//   § 8. Combinator Library — try/else, repeat, first, all_goals, focus
-//   § 9. Theorem Archive    — named lemmas for direct proof-term use
+
+//  § 1. Proof State Types — TacticResult, Goal, ProofState, ProofContext
+//  § 2. Proof State API — new_proof_state, apply_tactic, all_solved
+//  § 3. Algebraic Tactics — ring_law, field_law, group_law, lattice_law
+//  § 4. Category Tactics — category_law, category_simp, functor_law
+//  § 5. HoTT / Cubical — cubical, homotopy, descent_check, topos_simp
+//  § 6. Stochastic Tactics — oracle (Giry monad LLM oracle)
+//  § 7. Meta-tactics — norm_num, decide, assumption, contradiction
+//  § 8. Combinator Library — try/else, repeat, first, all_goals, focus
+//  § 9. Theorem Archive — named lemmas for direct proof-term use
 //
+
 // All `tactic` declarations compile to meta-fns executed at compile time.
 // Proof obligations annotated with @verify(formal) are sent to Z3.
 //
+
 // See also:
-//   - core/math/category.vr      (Category, Functor, NatTrans protocols)
-//   - core/math/algebra.vr       (Ring, Field, Group, Lattice protocols)
-//   - core/math/giry.vr          (Giry monad used by `oracle` tactic)
-//   - core/math/cubical.vr       (Path, transport, hcomp built-ins)
-//   - core/math/hott.vr          (HoTT constructions, Equiv, UA)
-//   - grammar/verum.ebnf §tactic_decl, §tactic_expr
+//  - core/math/category.vr (Category, Functor, NatTrans protocols)
+//  - core/math/algebra.vr (Ring, Field, Group, Lattice protocols)
+//  - core/math/giry.vr (Giry monad used by `oracle` tactic)
+//  - core/math/cubical.vr (Path, transport, hcomp built-ins)
+//  - core/math/hott.vr (HoTT constructions, Equiv, UA)
+//  - grammar/verum.ebnf §tactic_decl, §tactic_expr
 // =============================================================================
 
 module core.math.tactics;
@@ -39,15 +43,16 @@ mount core.base.protocols.{Eq, Ord};
 // § 1. Proof State Types
 // =============================================================================
 
-/// A proposition (goal) to be proved.  In the surface language, `TacticProp` is
+/// A proposition (goal) to be proved. In the surface language, `TacticProp` is
 /// an alias for the unit type of logical statements; here we model it as an
 /// opaque identifier that the SMT backend resolves.
 public type TacticProp is (Int);
 
-/// The result returned by every tactic.  A tactic either closes a goal
+/// The result returned by every tactic. A tactic either closes a goal
 /// (Success with zero remaining goals) or produces new sub-goals, or it
 /// fails with a human-readable diagnostic.
 ///
+
 /// @verify(formal): TacticResult is a discriminated union; exhaustive match
 /// is required at every call site.
 public type TacticResult is
@@ -68,6 +73,7 @@ public type Goal is {
 /// The full proof state: a list of open goals and a global context
 /// (definitions, imports, previously proved lemmas).
 ///
+
 /// Invariant: when `goals` is empty the proof is complete.
 public type ProofState is {
     /// Remaining open goals (front = current focus).
@@ -94,6 +100,7 @@ public type ProofContext is {
 
 /// Construct an initial proof state from a list of top-level propositions.
 ///
+
 /// Each proposition becomes a `Goal` with an empty hypothesis list.
 /// The state is marked `dirty = false`; no tactic has been applied yet.
 public fn new_proof_state(goals: List<TacticProp>) -> ProofState {
@@ -114,9 +121,11 @@ public fn new_proof_state(goals: List<TacticProp>) -> ProofState {
 /// Apply a tactic (represented as a function from ProofState to TacticResult)
 /// to the current proof state, returning the updated result.
 ///
+
 /// On `Success`, the state's goal list is replaced by `remaining_goals`.
 /// On `Failure`, the original state is unchanged and the failure is surfaced.
 ///
+
 /// @verify(formal): apply_tactic is monotonically decreasing on goal count
 /// for any terminating tactic.
 @verify(formal)
@@ -170,22 +179,25 @@ public fn close_goal(state: ProofState) -> ProofState {
 
 /// **ring_law** — Commutative ring simplification.
 ///
+
 /// Applies the full set of commutative ring axioms:
-///   - Additive commutativity and associativity
-///   - Multiplicative commutativity and associativity
-///   - Distributivity (both sides)
-///   - Additive identity (0) and multiplicative identity (1)
-///   - Additive inverse (negation)
+///  - Additive commutativity and associativity
+///  - Multiplicative commutativity and associativity
+///  - Distributivity (both sides)
+///  - Additive identity (0) and multiplicative identity (1)
+///  - Additive inverse (negation)
 ///
+
 /// Strategy: rewrite towards a canonical normal form (sum of monomials,
 /// descending degree), then delegate to `simp` for identity elimination,
 /// and finally to the SMT integer/bitvector theory.
 ///
+
 /// Usage in proof body:
 /// ```verum
 /// theorem add_mul_comm(a: Int, b: Int, c: Int)
-///     ensures a * (b + c) == a * b + a * c
-///     proof by ring_law();
+///  ensures a * (b + c) == a * b + a * c
+///  proof by ring_law();
 /// ```
 tactic ring_law() {
     repeat {
@@ -212,11 +224,13 @@ tactic ring_law() {
 
 /// **field_law** — Field simplification (ring + multiplicative inverse).
 ///
+
 /// Extends `ring_law` with field-specific rules:
-///   - Multiplicative inverse: `a * a⁻¹ = 1` for `a ≠ 0`
-///   - Division elimination: `a / b = a * b⁻¹`
-///   - Non-zero guard discharge via the SMT real arithmetic theory
+///  - Multiplicative inverse: `a * a⁻¹ = 1` for `a ≠ 0`
+///  - Division elimination: `a / b = a * b⁻¹`
+///  - Non-zero guard discharge via the SMT real arithmetic theory
 ///
+
 /// Precondition: All denominators appearing in the goal must be provably
 /// non-zero; otherwise the tactic emits a `Failure` with a diagnostic.
 tactic field_law() {
@@ -236,12 +250,14 @@ tactic field_law() {
 
 /// **group_law** — Group axiom normalization.
 ///
+
 /// Normalizes goals in a group (G, ·, e, ⁻¹) by:
-///   1. Reassociating products towards right-normal form
-///   2. Cancelling `g · g⁻¹ = e` and `g⁻¹ · g = e`
-///   3. Eliminating the identity: `e · g = g`, `g · e = g`
-///   4. Unfolding double inverses: `(g⁻¹)⁻¹ = g`
+///  1. Reassociating products towards right-normal form
+///  2. Cancelling `g · g⁻¹ = e` and `g⁻¹ · g = e`
+///  3. Eliminating the identity: `e · g = g`, `g · e = g`
+///  4. Unfolding double inverses: `(g⁻¹)⁻¹ = g`
 ///
+
 /// Works for both additive (Int, +, 0, neg) and multiplicative presentations.
 tactic group_law() {
     repeat {
@@ -260,14 +276,16 @@ tactic group_law() {
 
 /// **lattice_law** — Lattice distributivity and absorption.
 ///
+
 /// Discharges goals in a bounded distributive lattice (L, ∧, ∨, ⊤, ⊥) by:
-///   1. Idempotence: `a ∧ a = a`, `a ∨ a = a`
-///   2. Absorption: `a ∧ (a ∨ b) = a`, `a ∨ (a ∧ b) = a`
-///   3. Commutativity and associativity of ∧ and ∨
-///   4. Distributivity (both directions)
-///   5. De Morgan's laws
-///   6. Complement laws (Heyting: `a ∧ ¬a = ⊥`, `a ∨ ¬a = ⊤`)
+///  1. Idempotence: `a ∧ a = a`, `a ∨ a = a`
+///  2. Absorption: `a ∧ (a ∨ b) = a`, `a ∨ (a ∧ b) = a`
+///  3. Commutativity and associativity of ∧ and ∨
+///  4. Distributivity (both directions)
+///  5. De Morgan's laws
+///  6. Complement laws (Heyting: `a ∧ ¬a = ⊥`, `a ∨ ¬a = ⊤`)
 ///
+
 /// For Boolean lattices the tactic reduces to a BDD-style SAT check.
 tactic lattice_law() {
     repeat {
@@ -299,20 +317,23 @@ tactic lattice_law() {
 
 /// **category_law<C>** — Identity and associativity normalization.
 ///
+
 /// For a category `C` implementing the `Category` protocol, rewrites any
 /// goal involving `C.compose`, `C.id` towards a normal form by:
-///   1. Reassociating all compositions to right-normal form
-///   2. Eliminating left/right identity morphisms
-///   3. Calling `simp` to collapse residual equalities
+///  1. Reassociating all compositions to right-normal form
+///  2. Eliminating left/right identity morphisms
+///  3. Calling `simp` to collapse residual equalities
 ///
+
 /// The type parameter `C` is inferred from the goal context; explicit
 /// annotation is only needed when multiple categories are in scope.
 ///
+
 /// Usage:
 /// ```verum
 /// theorem assoc_example<C: Category>(f: C.Mor, g: C.Mor, h: C.Mor)
-///     ensures C.compose(C.compose(f, g), h) == C.compose(f, C.compose(g, h))
-///     proof by category_law<C>();
+///  ensures C.compose(C.compose(f, g), h) == C.compose(f, C.compose(g, h))
+///  proof by category_law<C>();
 /// ```
 tactic category_law<C: Category>() {
     repeat {
@@ -327,24 +348,28 @@ tactic category_law<C: Category>() {
 
 /// **category_simp** — Full categorical equation solver.
 ///
+
 /// The primary tactic for normalizing equations in categorical contexts.
 /// Chains five sub-tactics in order, stopping as soon as the goal is closed:
 ///
-///   1. `category_law`      — associativity + identity normalization
-///   2. `functor_law`       — functoriality normalization if functors present
-///   3. `simp`              — algebraic simplification of residual terms
-///   4. `solve_eqs`         — linear equation solving (identity elimination)
-///   5. `congr`             — congruence closure for compound expressions
-///   6. SMT fallback        — Z3 for arithmetic/equality residuals
+
+///  1. `category_law` — associativity + identity normalization
+///  2. `functor_law` — functoriality normalization if functors present
+///  3. `simp` — algebraic simplification of residual terms
+///  4. `solve_eqs` — linear equation solving (identity elimination)
+///  5. `congr` — congruence closure for compound expressions
+///  6. SMT fallback — Z3 for arithmetic/equality residuals
 ///
+
 /// The naturality square and Yoneda lemma are available as rewrite rules
 /// when the relevant natural transformations are in scope.
 ///
+
 /// Usage:
 /// ```verum
 /// theorem naturality_check<F G: Functor, eta: NatTrans<F,G>>(f: Mor)
-///     ensures G.map(f) . eta.component == eta.component . F.map(f)
-///     proof by category_simp();
+///  ensures G.map(f) . eta.component == eta.component . F.map(f)
+///  proof by category_simp();
 /// ```
 tactic category_simp() {
     try {
@@ -371,14 +396,17 @@ tactic category_simp() {
 
 /// **functor_law<F>** — Functor identity and composition laws.
 ///
+
 /// For a functor `F: C → D` verifies that:
-///   1. `F(id_A) = id_{F(A)}`   (identity preservation)
-///   2. `F(g ∘ f) = F(g) ∘ F(f)` (composition preservation)
+///  1. `F(id_A) = id_{F(A)}` (identity preservation)
+///  2. `F(g ∘ f) = F(g) ∘ F(f)` (composition preservation)
 ///
+
 /// The tactic rewrites all occurrences of `F.map(id)` and
 /// `F.map(compose(f, g))` and then delegates to `category_law` for
 /// the resulting categorical goals.
 ///
+
 /// For endofunctors that form a monad, also applies the monad coherence
 /// equations (unit / multiplication naturality).
 tactic functor_law<F: Functor>() {
@@ -408,20 +436,24 @@ tactic functor_law<F: Functor>() {
 
 /// **cubical** — Path normalization using cubical reduction rules.
 ///
+
 /// Normalizes goals involving Path types (`Path<A, a, b>`), transport,
 /// and higher composition (`hcomp`) using the De Morgan cubical type theory
 /// reduction rules:
 ///
-///   1. `transport(refl, x) ↦ x`                  (transport along refl)
-///   2. `hcomp(i. refl, x) ↦ x`                   (degenerate composition)
-///   3. `Path.refl(a).symm ↦ Path.refl(a)`         (symmetry of refl)
-///   4. `p.trans(q).symm ↦ q.symm.trans(p.symm)`   (symm of trans)
-///   5. Interval endpoint evaluation: `i₀ ↦ 0`, `i₁ ↦ 1`
-///   6. Face map reduction: `φ = 1 ↦ actual term`
+
+///  1. `transport(refl, x) ↦ x` (transport along refl)
+///  2. `hcomp(i. refl, x) ↦ x` (degenerate composition)
+///  3. `Path.refl(a).symm ↦ Path.refl(a)` (symmetry of refl)
+///  4. `p.trans(q).symm ↦ q.symm.trans(p.symm)` (symm of trans)
+///  5. Interval endpoint evaluation: `i₀ ↦ 0`, `i₁ ↦ 1`
+///  6. Face map reduction: `φ = 1 ↦ actual term`
 ///
+
 /// After reduction, delegates to `simp` and then `category_simp` for any
 /// remaining propositional equalities.
 ///
+
 /// @verify(formal): cubical reduction preserves definitional equality.
 @verify(formal)
 tactic cubical() {
@@ -445,18 +477,22 @@ tactic cubical() {
 
 /// **descent_check** — Čech descent verification.
 ///
+
 /// Verifies that a presheaf `F` satisfies the descent condition on a covering
-/// sieve `S` of an object `U`.  The tactic encodes:
+/// sieve `S` of an object `U`. The tactic encodes:
 ///
-///   1. The Čech nerve `Č(U, S)` as a cosimplicial diagram
-///   2. The matching object: sections compatible on all double overlaps
-///   3. The canonical restriction map `F(U) → Match(F, Č(U,S))`
-///   4. The cocycle condition on triple overlaps (coherence)
+
+///  1. The Čech nerve `Č(U, S)` as a cosimplicial diagram
+///  2. The matching object: sections compatible on all double overlaps
+///  3. The canonical restriction map `F(U) → Match(F, Č(U,S))`
+///  4. The cocycle condition on triple overlaps (coherence)
 ///
+
 /// For finite coverings (decidable indexing set) the tactic reduces to a
-/// finite SMT check.  For infinite coverings it emits a `Failure` and
+/// finite SMT check. For infinite coverings it emits a `Failure` and
 /// suggests manual descent data.
 ///
+
 /// @verify(formal): descent iff the canonical map is an equivalence.
 @verify(formal)
 tactic descent_check() {
@@ -480,15 +516,18 @@ tactic descent_check() {
 
 /// **topos_simp** — Heyting algebra simplification in ∞-topos internal logic.
 ///
+
 /// Simplifies goals in the internal logic of a Grothendieck ∞-topos,
 /// which is a Heyting (not necessarily Boolean) algebra:
 ///
-///   1. Heyting implication: `a → b = ¬a ∨ b` (only in Boolean toposes)
-///   2. Pseudo-complement: `¬¬a ≥ a` (not equality in general)
-///   3. Distributive laws for ∧ and ∨
-///   4. Subobject classifier axioms: `Ω` absorbs `⊤`
-///   5. Lawvere–Tierney topology: `j(j(a)) = j(a)`, `j(a ∧ b) = j(a) ∧ j(b)`
+
+///  1. Heyting implication: `a → b = ¬a ∨ b` (only in Boolean toposes)
+///  2. Pseudo-complement: `¬¬a ≥ a` (not equality in general)
+///  3. Distributive laws for ∧ and ∨
+///  4. Subobject classifier axioms: `Ω` absorbs `⊤`
+///  5. Lawvere–Tierney topology: `j(j(a)) = j(a)`, `j(a ∧ b) = j(a) ∧ j(b)`
 ///
+
 /// When the topos is Boolean (e.g., `Set`) the tactic additionally applies
 /// excluded middle and double-negation elimination.
 tactic topos_simp() {
@@ -520,17 +559,21 @@ tactic topos_simp() {
 
 /// **homotopy** — Homotopy group computation and path reasoning.
 ///
+
 /// Automates reasoning about homotopy groups πₙ(X, x₀):
 ///
-///   1. `π₀`: connected components — reduces to reflexivity + transport
-///   2. `π₁`: fundamental group — loop concatenation and inversion
-///   3. `πₙ` for n ≥ 2: abelian group laws (Eckmann–Hilton argument)
-///   4. Long exact sequence: fibration `F → E → B` gives LES of homotopy groups
-///   5. Freudenthal suspension: `πₙ(Sⁿ) ≅ ℤ` at the stable range
+
+///  1. `π₀`: connected components — reduces to reflexivity + transport
+///  2. `π₁`: fundamental group — loop concatenation and inversion
+///  3. `πₙ` for n ≥ 2: abelian group laws (Eckmann–Hilton argument)
+///  4. Long exact sequence: fibration `F → E → B` gives LES of homotopy groups
+///  5. Freudenthal suspension: `πₙ(Sⁿ) ≅ ℤ` at the stable range
 ///
+
 /// The tactic calls `cubical` for path normalization, then applies
 /// algebraic tactics for the group/abelian-group structure.
 ///
+
 /// @verify(formal): Eckmann–Hilton for n ≥ 2 (homotopy groups are abelian).
 @verify(formal)
 tactic homotopy() {
@@ -556,20 +599,24 @@ tactic homotopy() {
 
 /// **oracle** — LLM-oracle tactic via the Giry monad.
 ///
+
 /// Invokes the built-in `@llm_oracle` intrinsic to generate candidate proof
 /// terms for `goal`, then samples the Giry distribution for the highest-
-/// confidence candidate above `confidence`.  The candidate is then
+/// confidence candidate above `confidence`. The candidate is then
 /// independently verified by the SMT backend — the oracle is NOT trusted;
 /// it only proposes proof terms that Z3 must ratify.
 ///
+
 /// Parameters:
-///   `goal`       — the proposition to be proved (explicit, for logging)
-///   `confidence` — minimum acceptance threshold in (0.0, 1.0] (default 0.9)
+///  `goal` — the proposition to be proved (explicit, for logging)
+///  `confidence` — minimum acceptance threshold in (0.0, 1.0] (default 0.9)
 ///
+
 /// Failure modes:
-///   - No candidate above `confidence` → `Failure { reason: "oracle confidence below threshold" }`
-///   - Candidate rejected by SMT → `Failure { reason: "oracle candidate invalid" }`
+///  - No candidate above `confidence` → `Failure { reason: "oracle confidence below threshold" }`
+///  - Candidate rejected by SMT → `Failure { reason: "oracle candidate invalid" }`
 ///
+
 /// @verify(formal): the oracle NEVER bypasses SMT verification.
 @verify(formal)
 tactic oracle(goal: TacticProp, confidence: Float = 0.9) {
@@ -595,15 +642,17 @@ tactic oracle(goal: TacticProp, confidence: Float = 0.9) {
 
 /// **norm_num** — Numerical normalization.
 ///
+
 /// Evaluates all closed arithmetic expressions (no free variables) in the
 /// goal to their normal forms using the built-in constant-folding pass,
 /// then discharges numeric equalities/inequalities via the SMT arithmetic
-/// theory.  Works for: Int, Float, Nat, Rat (rational literals).
+/// theory. Works for: Int, Float, Nat, Rat (rational literals).
 ///
+
 /// Also handles:
-///   - Modular arithmetic: `n % m` for concrete `m`
-///   - Bit-vector arithmetic: `u8`, `u32`, `u64` operations
-///   - Comparisons: `<`, `<=`, `>`, `>=`
+///  - Modular arithmetic: `n % m` for concrete `m`
+///  - Bit-vector arithmetic: `u8`, `u32`, `u64` operations
+///  - Comparisons: `<`, `<=`, `>`, `>=`
 tactic norm_num() {
     repeat {
         first {
@@ -623,14 +672,17 @@ tactic norm_num() {
 
 /// **decide** — Decision procedure for decidable propositions.
 ///
+
 /// For propositions `P` where `P is Decidable`, reduces the proof to a
-/// compile-time evaluation of the decision procedure.  Typical uses:
+/// compile-time evaluation of the decision procedure. Typical uses:
 ///
-///   - Equality on closed terms: `3 + 2 == 5`
-///   - Finite membership: `3 is in [1, 2, 3, 4]`
-///   - Bounded quantifiers: `forall i in 0..10, P(i)`
-///   - Propositional tautologies: evaluated via BDD
+
+///  - Equality on closed terms: `3 + 2 == 5`
+///  - Finite membership: `3 is in [1, 2, 3, 4]`
+///  - Bounded quantifiers: `forall i in 0..10, P(i)`
+///  - Propositional tautologies: evaluated via BDD
 ///
+
 /// Fails (with a clear diagnostic) if the proposition is not decidable
 /// or the evaluation would be unbounded.
 tactic decide() {
@@ -647,15 +699,17 @@ tactic decide() {
 
 /// **assumption** — Close the current goal from a matching hypothesis.
 ///
+
 /// Searches the local hypothesis list of the current goal for an entry
-/// whose type is definitionally equal to the goal proposition.  If found,
-/// closes the goal immediately.  Otherwise fails with a list of the
+/// whose type is definitionally equal to the goal proposition. If found,
+/// closes the goal immediately. Otherwise fails with a list of the
 /// available hypotheses for diagnostic purposes.
 ///
+
 /// Definitional equality is checked up to:
-///   - Alpha-equivalence (bound variable renaming)
-///   - Beta/eta reduction
-///   - Delta reduction (unfolding of `let` and transparent definitions)
+///  - Alpha-equivalence (bound variable renaming)
+///  - Beta/eta reduction
+///  - Delta reduction (unfolding of `let` and transparent definitions)
 tactic assumption() {
     first {
         exact_hypothesis;
@@ -666,15 +720,17 @@ tactic assumption() {
 
 /// **contradiction** — Derive False from contradictory hypotheses.
 ///
+
 /// Searches the hypothesis list for a pair `(h₁: P, h₂: ¬P)` (or
-/// equivalently `(h₁: P, h₂: P → False)`).  On finding such a pair,
+/// equivalently `(h₁: P, h₂: P → False)`). On finding such a pair,
 /// applies `absurd(h₁, h₂)` to close the goal.
 ///
+
 /// Also handles:
-///   - `h: False` directly (trivial contradiction)
-///   - `h₁: a == b, h₂: a ≠ b` (equality contradiction)
-///   - `h₁: a < b, h₂: a >= b` (order contradiction)
-///   - SMT-detectable contradictions in the hypothesis set
+///  - `h: False` directly (trivial contradiction)
+///  - `h₁: a == b, h₂: a ≠ b` (equality contradiction)
+///  - `h₁: a < b, h₂: a >= b` (order contradiction)
+///  - SMT-detectable contradictions in the hypothesis set
 tactic contradiction() {
     first {
         exact_false_hyp;
@@ -691,27 +747,32 @@ tactic contradiction() {
 // § 8. Combinator Library
 // =============================================================================
 //
+
 // The following section documents the built-in tactic combinators from
-// grammar/verum.ebnf §tactic_expr.  They are not declared as `tactic` forms
+// grammar/verum.ebnf §tactic_expr. They are not declared as `tactic` forms
 // (they are grammar primitives), but are shown here with usage examples and
 // contracts so that proof authors have a single reference point.
 //
+
 // Combinators:
-//   try { t } else { t' }    — run t; on failure run t'
-//   repeat(N) { t }          — run t up to N times (or until fixpoint)
-//   first { t₁; t₂; ... }   — try each ti in order, stop at first success
-//   all_goals { t }          — apply t to every open goal
-//   focus(N) { t }           — apply t only to goal N (0-indexed)
+//  try { t } else { t' } — run t; on failure run t'
+//  repeat(N) { t } — run t up to N times (or until fixpoint)
+//  first { t₁; t₂; ... } — try each ti in order, stop at first success
+//  all_goals { t } — apply t to every open goal
+//  focus(N) { t } — apply t only to goal N (0-indexed)
 //
+
 // These compose freely:
-//   repeat { first { ring_law(); field_law(); group_law() } }
-//   all_goals { try { assumption() } else { smt } }
-//   focus(0) { cubical() }; focus(1) { ring_law() }
+//  repeat { first { ring_law(); field_law(); group_law() } }
+//  all_goals { try { assumption() } else { smt } }
+//  focus(0) { cubical() }; focus(1) { ring_law() }
 
 /// Helper tactic: run `t` silently; succeed regardless of `t`'s outcome.
 ///
+
 /// Equivalent to: `try { t } else { skip }`
 ///
+
 /// Useful for applying optional simplification steps that may not apply
 /// to all goals in `all_goals { ... }` contexts.
 tactic try_opt(inner: fn() -> TacticResult) {
@@ -721,6 +782,7 @@ tactic try_opt(inner: fn() -> TacticResult) {
 /// Helper tactic: apply `t` to all goals, then verify none remain unsolved
 /// unless `allow_residual` is set.
 ///
+
 /// When `allow_residual = false` (default) and goals remain after `t`,
 /// the tactic fails with a count of unsolved goals.
 tactic all_goals_strict(inner: fn() -> TacticResult, allow_residual: Bool = false) {
@@ -735,6 +797,7 @@ tactic all_goals_strict(inner: fn() -> TacticResult, allow_residual: Bool = fals
 /// Run a sequence of tactics, threading proof state through each.
 /// Short-circuits on the first `Failure`.
 ///
+
 /// Example:
 /// ```verum
 /// tactic_seq([ring_law, norm_num, smt])
@@ -750,7 +813,7 @@ tactic tactic_seq(tactics: List<fn() -> TacticResult>) {
 }
 
 /// Repeat a tactic exactly N times (unlike `repeat(N)`, which is
-/// "at most N times until fixpoint").  Fails if the tactic fails on
+/// "at most N times until fixpoint"). Fails if the tactic fails on
 /// any iteration.
 tactic repeat_exact(n: Int, inner: fn() -> TacticResult) {
     if n <= 0 {
@@ -765,8 +828,9 @@ tactic repeat_exact(n: Int, inner: fn() -> TacticResult) {
 // § 9. Named Lemma Archive (for direct proof-term use)
 // =============================================================================
 //
+
 // The theorems below are the named lemmas used as rewrite rules in the
-// tactics above.  They are also exported so that proof authors can cite
+// tactics above. They are also exported so that proof authors can cite
 // them directly (e.g., `proof by ring_add_comm`).
 
 // --- Ring laws ---------------------------------------------------------------

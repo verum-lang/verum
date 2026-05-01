@@ -1,45 +1,52 @@
 //! Lossless syntax tree infrastructure for the Verum language.
 //!
+
 //! This crate provides the foundation for lossless parsing, enabling:
 //! - Perfect source reconstruction (including comments and whitespace)
 //! - IDE-quality code actions and refactoring
 //! - Structured error recovery with ERROR nodes
 //! - Incremental parsing (partial reparse on edits)
 //!
+
 //! # Architecture
 //!
+
 //! The crate implements the **red-green tree pattern** originated in Roslyn
 //! and adopted by rust-analyzer:
 //!
+
 //! ```text
-//!                     ┌──────────────────────────────────┐
-//!                     │         RED TREE (Facade)        │
-//!                     │ ┌──────────────────────────────┐ │
-//!                     │ │ SyntaxNode {                 │ │
-//!                     │ │   green: GreenNode,          │ │
-//!                     │ │   parent: Option<SyntaxNode>,│ │◄── Built on-demand
-//!                     │ │   offset: TextSize,          │ │    (discarded per edit)
-//!                     │ │ }                            │ │
-//!                     │ └──────────────────────────────┘ │
-//!                     └───────────────┬──────────────────┘
-//!                                     │ references
-//!                     ┌───────────────▼──────────────────┐
-//!                     │       GREEN TREE (Core)          │
-//!                     │ ┌──────────────────────────────┐ │
-//!                     │ │ GreenNode {                  │ │
-//!                     │ │   kind: SyntaxKind,          │ │◄── Immutable
-//!                     │ │   width: TextSize,           │ │    (persists across edits)
-//!                     │ │   children: Vec<GreenChild>, │ │
-//!                     │ │ }                            │ │
-//!                     │ └──────────────────────────────┘ │
-//!                     └──────────────────────────────────┘
+//!  ┌──────────────────────────────────┐
+//!  │ RED TREE (Facade) │
+//!  │ ┌──────────────────────────────┐ │
+//!  │ │ SyntaxNode { │ │
+//!  │ │ green: GreenNode, │ │
+//!  │ │ parent: Option<SyntaxNode>,│ │◄── Built on-demand
+//!  │ │ offset: TextSize, │ │ (discarded per edit)
+//!  │ │ } │ │
+//!  │ └──────────────────────────────┘ │
+//!  └───────────────┬──────────────────┘
+//!  │ references
+//!  ┌───────────────▼──────────────────┐
+//!  │ GREEN TREE (Core) │
+//!  │ ┌──────────────────────────────┐ │
+//!  │ │ GreenNode { │ │
+//!  │ │ kind: SyntaxKind, │ │◄── Immutable
+//!  │ │ width: TextSize, │ │ (persists across edits)
+//!  │ │ children: Vec<GreenChild>, │ │
+//!  │ │ } │ │
+//!  │ └──────────────────────────────┘ │
+//!  └──────────────────────────────────┘
 //! ```
 //!
+
 //! Key insight: Green tree stores **widths** (relative), not offsets (absolute).
 //! This enables O(log n) updates on edit.
 //!
+
 //! # Modules
 //!
+
 //! - [`syntax_kind`] - Enum of all node and token kinds
 //! - [`trivia`] - Trivia types (whitespace, comments)
 //! - [`green`] - Immutable green tree (core)
@@ -47,11 +54,14 @@
 //! - [`event`] - Event-based parsing infrastructure
 //! - [`sink`] - Tree builders that consume events
 //!
+
 //! # Usage
 //!
+
 //! ```rust,ignore
 //! use verum_syntax::{GreenBuilder, SyntaxNode, SyntaxKind};
 //!
+
 //! // Build a green tree
 //! let mut builder = GreenBuilder::new();
 //! builder.start_node(SyntaxKind::SOURCE_FILE);
@@ -61,35 +71,44 @@
 //! builder.finish_node();
 //! let green = builder.finish();
 //!
+
 //! // Create a red tree for navigation
 //! let root = SyntaxNode::new_root(green);
 //! assert_eq!(root.text(), "let x");
 //!
+
 //! // Find token at offset
 //! let token = root.token_at_offset(0).unwrap();
 //! assert_eq!(token.text(), "let");
 //! ```
 //!
+
 //! # Event-Based Parsing
 //!
+
 //! The parser emits events instead of building trees directly:
 //!
+
 //! ```rust,ignore
 //! use verum_syntax::event::{EventBuilder, Marker};
 //! use verum_syntax::SyntaxKind;
 //!
+
 //! let mut builder = EventBuilder::new();
 //!
+
 //! // Start a node
 //! let m = builder.start();
 //! builder.token(SyntaxKind::LET_KW);
 //! builder.token(SyntaxKind::IDENT);
 //! m.complete(&mut builder, SyntaxKind::LET_STMT);
 //!
+
 //! // Get the events
 //! let events = builder.finish();
 //! ```
 //!
+
 //! Verum uses a red-green tree pattern (originated in Roslyn, adopted by rust-analyzer)
 //! for lossless syntax representation. The green tree is immutable and stores relative
 //! widths; the red tree is a facade providing parent pointers and absolute positions.

@@ -4,24 +4,30 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // RFC 9001 §5.2:
 //
-//   initial_secret = HKDF-Extract(initial_salt, client_dst_connection_id)
-//   client_initial_secret = HKDF-Expand-Label(initial_secret,
-//       "client in", "", Hash.length)
-//   server_initial_secret = HKDF-Expand-Label(initial_secret,
-//       "server in", "", Hash.length)
+
+//  initial_secret = HKDF-Extract(initial_salt, client_dst_connection_id)
+//  client_initial_secret = HKDF-Expand-Label(initial_secret,
+//  "client in", "", Hash.length)
+//  server_initial_secret = HKDF-Expand-Label(initial_secret,
+//  "server in", "", Hash.length)
 //
+
 // Per-direction key material (RFC 9001 §5.1 + §5.4):
 //
-//   key = HKDF-Expand-Label(role_secret, "quic key", "", 16)
-//   iv  = HKDF-Expand-Label(role_secret, "quic iv",  "", 12)
-//   hp  = HKDF-Expand-Label(role_secret, "quic hp",  "", 16)
+
+//  key = HKDF-Expand-Label(role_secret, "quic key", "", 16)
+//  iv = HKDF-Expand-Label(role_secret, "quic iv", "", 12)
+//  hp = HKDF-Expand-Label(role_secret, "quic hp", "", 16)
 //
+
 // Initial packets always use AES-128-GCM regardless of the suite
 // negotiated later. The hash stays SHA-256 throughout the initial
 // phase.
 //
+
 // =============================================================================
 
 module core.net.quic.crypto.initial;

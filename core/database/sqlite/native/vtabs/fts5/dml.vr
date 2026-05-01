@@ -3,18 +3,22 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/dml.vr
 //
+
 // SQLite's FTS5 maintains an external "content table" alongside the
 // inverted index. INSERT into the FTS5 vtab fires three steps:
 //
-//   1. Append `(rowid, columns…)` to the content table.
-//   2. Tokenise every TEXT column.
-//   3. Append a fresh segment per column to the index.
+
+//  1. Append `(rowid, columns…)` to the content table.
+//  2. Tokenise every TEXT column.
+//  3. Append a fresh segment per column to the index.
 //
+
 // UPDATE = DELETE old rowid + INSERT new row.
 // DELETE = mark the rowid as deleted in a "tombstone" segment so
-//          future lookups can subtract it; periodic compaction
-//          actually drops the postings.
+//  future lookups can subtract it; periodic compaction
+//  actually drops the postings.
 //
+
 // `dml` exposes those steps as pure functions on `Index` —
 // the L7 façade calls them after capturing arguments.
 // =============================================================================

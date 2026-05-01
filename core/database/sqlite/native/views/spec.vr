@@ -3,9 +3,11 @@
 // =============================================================================
 // Spec: sqlite-native.md §17.2
 //
+
 // CREATE [TEMP] VIEW [IF NOT EXISTS] name [(c1, c2, ...)] AS
-//     <select-stmt>;
+//  <select-stmt>;
 //
+
 // The planner inlines the SELECT into every reference; the view's
 // declared column list (if any) renames the SELECT projections.
 // =============================================================================

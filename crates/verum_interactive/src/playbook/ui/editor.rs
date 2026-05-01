@@ -1,5 +1,6 @@
 //! Full-featured editor widget for editing cell content
 //!
+
 //! Features:
 //! - Syntax highlighting for Verum code
 //! - Text selection with mouse/keyboard
@@ -39,6 +40,7 @@ impl Selection {
 
 /// Editor state for managing text editing.
 ///
+
 /// **Cursor convention**: `cursor.1` is a **char index** (number of Unicode
 /// scalar values from the start of the line), NOT a byte offset. All String
 /// operations convert to byte offsets via [`char_to_byte`] before slicing.

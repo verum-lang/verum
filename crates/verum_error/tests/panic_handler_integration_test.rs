@@ -14,6 +14,7 @@
 )]
 //! Integration tests for panic_handler module
 //!
+
 //! These tests validate that the panic handling infrastructure works correctly.
 
 use serial_test::serial;

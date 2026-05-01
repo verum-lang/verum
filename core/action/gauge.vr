@@ -74,6 +74,7 @@ fn enactment_eq(a: Enactment, b: Enactment) -> Bool {
 // =============================================================================
 // §11.4 (#243) — gauge invariants + audit helpers
 //
+
 // Invariants surfaced as predicates so callers can `assert(...)` them
 // in tests without poking the internal canonical-form representation.
 // All three are stable contracts that downstream code (CLI audit,

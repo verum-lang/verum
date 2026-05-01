@@ -3,6 +3,7 @@
 // =============================================================================
 // Layer: 5 (Widgets)
 //
+
 // `TermSplit` computes two pane rectangles separated by an interactive divider.
 // The divider can be dragged with the mouse or resized via keyboard shortcuts.
 // The widget itself only renders the divider — callers render their own
@@ -10,14 +11,17 @@
 // composition-oriented rather than forcing a heterogeneous child-widget
 // type parameter.
 //
+
 // Typical usage:
 //
-//     let split = TermSplit.horizontal().ratio(0.3).min_first(10);
-//     let (left, div, right) = split.layout(area, &state);
-//     split.render_divider(div, buf, &mut state);
-//     sidebar.render(left, buf);
-//     main.render(right, buf);
+
+//  let split = TermSplit.horizontal().ratio(0.3).min_first(10);
+//  let (left, div, right) = split.layout(area, &state);
+//  split.render_divider(div, buf, &mut state);
+//  sidebar.render(left, buf);
+//  main.render(right, buf);
 //
+
 // Sizing mode is either a `ratio` (0.0..1.0) or a `fixed` cell size applied
 // to the first pane. Minimum sizes (`min_first`, `min_second`) are always
 // honoured. Resize operations clamp to these bounds so the layout never

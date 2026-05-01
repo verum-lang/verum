@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for value tracking in CBGR escape analysis
 //!
+
 //! Tests cover all aspects of concrete value analysis, range tracking,
 //! and symbolic execution for more precise escape analysis.
 

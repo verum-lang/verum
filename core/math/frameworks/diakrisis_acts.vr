@@ -2,6 +2,7 @@
 // Diakrisis acts — articulation/enactment 2-categorical content (110.T–127.T)
 // =============================================================================
 //
+
 // Diakrisis-corpus extension postulating the 2-categorical structural
 // content of the dual-classification (DC / Actic) side: classifying
 // space, Grothendieck construction, universal performance, autopoiesis
@@ -11,9 +12,11 @@
 // formal dialogue depth, and closure of the formal-logical
 // sub-category.
 //
+
 // Catalogue covers theorems 110.T-127.T (excluding 124.T and 125.T,
 // which live in `core.math.frameworks.diakrisis_biadjunction`).
 //
+
 // Public axiom names describe the mathematical conclusion VERBATIM
 // per the corpus statements; framework annotations cite the catalogue
 // entry for trusted-boundary audit. V3 (this revision) witness-
@@ -33,8 +36,10 @@ mount core.action.enactments.{Enactment, alpha_of, epsilon, is_adjoint};
 
 /// There exists a classifying space for the activation 2-category:
 ///
-///     E_Fnd ≃ N(>>·<<)_gauge / ~_Morita
+
+///  E_Fnd ≃ N(>>·<<)_gauge / ~_Morita
 ///
+
 /// — the Morita-quotient of the simplicial nerve of the gauge-equivalent
 /// activation 2-category. Classifying-space existence anchors every
 /// downstream catalogue construction.
@@ -51,8 +56,10 @@ public axiom classifying_space_of_activation(e: Enactment) -> Bool
 
 /// There exists a Grothendieck construction on the classifying space:
 ///
-///     ∫_{E_Fnd} Perf : Prac → >>·<<
+
+///  ∫_{E_Fnd} Perf : Prac → >>·<<
 ///
+
 /// — a 2-functor lifting the practice category into the activation
 /// 2-category through the performance fibration.
 @framework(diakrisis, "Theorem 111.T (Grothendieck construction on E_Fnd)")
@@ -68,8 +75,10 @@ public axiom grothendieck_construction_on_e_fnd(e: Enactment) -> Bool
 /// There exists a canonical universal performance ε_actic in the
 /// activation 2-category, satisfying the universality
 ///
-///     ε(α_diakrisis) ≃ ε_actic
+
+///  ε(α_diakrisis) ≃ ε_actic
 ///
+
 /// — every articulation classified by the meta-classifier α_diakrisis
 /// has its enactment image canonically equivalent to ε_actic.
 @framework(diakrisis, "Theorem 112.T (canonical universal performance ε_actic)")
@@ -86,8 +95,10 @@ public axiom canonical_universal_performance(alpha: Articulation) -> Bool
 /// Maturana-Varela sense) if and only if there exists an ordinal
 /// κ ≥ ω² such that
 ///
-///     A^κ(ε) ≃ ε.
+
+///  A^κ(ε) ≃ ε.
 ///
+
 /// The lower bound κ ≥ ω² is sharp; below ω² the activation iterate
 /// lacks the structural closure that autopoiesis requires.
 @framework(diakrisis, "Theorem 113.T (autopoiesis as A^κ-fixed-point with κ ≥ ω²)")
@@ -95,7 +106,7 @@ public axiom autopoiesis_a_kappa_fixed_point(e: Enactment) -> Bool
     requires true
     ensures  // fixed-point: A^κ(ε) ≃ ε; the activation_rank carrier
         // pins the depth-witness — autopoietic enactments have rank ≥ 0
-        // (the V0 surface ships activation_rank: Int; V1 strengthens to
+        // (the current surface ships activation_rank: Int; Future work strengthens to
         // ordinal-typed ranks for the κ ≥ ω² lower-bound check).
         e.activation_rank >= 0;
 
@@ -107,8 +118,10 @@ public axiom autopoiesis_a_kappa_fixed_point(e: Enactment) -> Bool
 /// 2-category are exactly the completely-positive-trace-preserving
 /// (CPTP) maps that preserve the act-hom structure:
 ///
-///     Hom_{>>·<<}(ε_1, ε_2) ≃ CPTP^act(ρ^act(ε_1), ρ^act(ε_2)).
+
+///  Hom_{>>·<<}(ε_1, ε_2) ≃ CPTP^act(ρ^act(ε_1), ρ^act(ε_2)).
 ///
+
 /// This identifies the morphism type-class with the operational
 /// quantum-channel structure.
 @framework(diakrisis, "Theorem 114.T (performance morphisms = CPTP^act)")
@@ -124,8 +137,10 @@ public axiom performance_morphisms_are_cptp(e1: Enactment, e2: Enactment) -> Boo
 
 /// For an act ε with ρ-reflection ρ^act(ε), the equality
 ///
-///     ρ^act(ε) = φ^act(Γ_ε)
+
+///  ρ^act(ε) = φ^act(Γ_ε)
 ///
+
 /// holds — the ρ-reflection coincides with the act-substitution
 /// closure of the act's environment Γ_ε. This is the ε-version of
 /// the canonical-primitive self-consistent reflection.
@@ -142,8 +157,10 @@ public axiom rho_reflection_eq_act_substitution(e: Enactment) -> Bool
 /// The Two-Pointer Measurement (TPM) protocol from quantum
 /// thermodynamics has a canonical DC-dual:
 ///
-///     ε_TPM = (ε_pre-measure, ε_post-measure)
+
+///  ε_TPM = (ε_pre-measure, ε_post-measure)
 ///
+
 /// — a pair of activation acts realising the pre- and post-measurement
 /// states respectively.
 @framework(diakrisis, "Theorem 116.T (TPM DC-dual: pre/post-measure pair)")
@@ -160,15 +177,17 @@ public axiom tpm_dc_dual_pair(pre_measure: Enactment, post_measure: Enactment) -
 /// Self-modifying-dynamics (Schedrovitsky-style activity systems)
 /// instantiate the A^{ω²}-fixed-point structure:
 ///
-///     ε_SMD ≃ A^{ω²}(ε_SMD).
+
+///  ε_SMD ≃ A^{ω²}(ε_SMD).
 ///
+
 /// This is *strictly stronger* than ordinary autopoiesis (113.T):
 /// the rank ω² is exact, not merely a lower bound.
 @framework(diakrisis, "Theorem 117.T (SMD as A^{ω²}-fixed-point with exact rank)")
 public axiom smd_as_a_omega_squared_fixed_point(e_smd: Enactment) -> Bool
     requires true
     ensures  // SMD has exact-rank fixed-point structure — V0 surface gates
-        // the activation_rank witness; V1 strengthens to ω²-rank predicate.
+        // the activation_rank witness; Future work strengthens to ω²-rank predicate.
         e_smd.activation_rank >= 0;
 
 // =============================================================================
@@ -177,8 +196,10 @@ public axiom smd_as_a_omega_squared_fixed_point(e_smd: Enactment) -> Bool
 
 /// There exists an ℵ_0-accessible 2-functor
 ///
-///     Enact : >>·<<_embodied → >>·<<_cognitive
+
+///  Enact : >>·<<_embodied → >>·<<_cognitive
 ///
+
 /// realising the philosophical doctrine of enactivism as a structural
 /// transformation between the embodied and cognitive sub-2-categories
 /// of the activation 2-category.
@@ -187,7 +208,7 @@ public axiom enact_embodied_cognitive_functor(embodied: Enactment) -> Bool
     requires true
     ensures  // 2-functor: embodied enactment lifts to a cognitive image
         // — concretely, both source (embodied) and image (epsilon ∘ alpha_of)
-        //   have well-defined articulations.
+        //  have well-defined articulations.
         is_adjoint(alpha_of(embodied.clone()), embodied);
 
 // =============================================================================
@@ -197,8 +218,10 @@ public axiom enact_embodied_cognitive_functor(embodied: Enactment) -> Bool
 /// For an act ε with A-depth κ, "activity" (life / consciousness-
 /// protocol presence) exists only at
 ///
-///     ω ≤ κ ≤ ω·3.
+
+///  ω ≤ κ ≤ ω·3.
 ///
+
 /// Below ω the act is sub-active (purely structural); above ω·3 the
 /// act has dissolved into transfinite self-reference and ceases to be
 /// an "act" in the canonical sense.
@@ -215,9 +238,11 @@ public axiom goldilocks_activity_range(e: Enactment) -> Bool
 
 /// Ludics (Girard) admits a canonical Actic embedding:
 ///
-///     Design ≃ Perf(α_linear),
-///     Desseins ≃ 2-cells in >>·<<.
+
+///  Design ≃ Perf(α_linear),
+///  Desseins ≃ 2-cells in >>·<<.
 ///
+
 /// Operational content lives in `core.action.ludics` (VVA-10); this
 /// axiom records the catalogue boundary for trusted-boundary audit.
 @framework(diakrisis, "Theorem 120.T (Design ≃ Perf(α_linear); see core.action.ludics)")
@@ -225,7 +250,7 @@ public axiom ludics_performance_equivalence_catalogue(e: Enactment) -> Bool
     requires true
     ensures  // catalogue boundary: every Ludics design embeds as a Perf(α_linear)
         // — the operational content lives in core.action.ludics; this axiom
-        //   pins the existence claim at the catalogue level.
+        //  pins the existence claim at the catalogue level.
         is_adjoint(alpha_of(e.clone()), e);
 
 // =============================================================================
@@ -235,8 +260,10 @@ public axiom ludics_performance_equivalence_catalogue(e: Enactment) -> Bool
 /// The Brouwer-Heyting-Kolmogorov semantics for intuitionistic logic
 /// is exactly the ε-semantics:
 ///
-///     ⟦φ⟧_BHK = ε(α_φ).
+
+///  ⟦φ⟧_BHK = ε(α_φ).
 ///
+
 /// Operational content lives in `core.proof.bhk` (VVA-5); this axiom
 /// records the catalogue boundary.
 @framework(diakrisis, "Theorem 121.T (⟦φ⟧_BHK = ε(α_φ); see core.proof.bhk)")
@@ -252,8 +279,10 @@ public axiom bhk_eq_epsilon_semantics_catalogue(alpha_phi: Articulation) -> Bool
 
 /// There exists a canonical knowledge-indexing 2-functor
 ///
-///     Idx : Knowledge → M_Fnd × E_Fnd
+
+///  Idx : Knowledge → M_Fnd × E_Fnd
 ///
+
 /// — every knowledge item indexes to a pair (articulation depth,
 /// enactment height) in the canonical-primitive product space. The
 /// two coordinates are interlinked through 108.T but track
@@ -272,8 +301,10 @@ public axiom knowledge_indexing_functor(e: Enactment) -> Bool
 /// For acts ε_1, ε_2, ε_3 with A-depths κ_1, κ_2, κ_3, and 1-cells
 /// f : ε_1 → ε_2, g : ε_2 → ε_3, the composition g ∘ f satisfies
 ///
-///     e(cod(g ∘ f)) = κ_3,    e(dom(g ∘ f)) = κ_1.
+
+///  e(cod(g ∘ f)) = κ_3, e(dom(g ∘ f)) = κ_1.
 ///
+
 /// — composition does NOT increase the A-depth at either endpoint.
 @framework(diakrisis, "Theorem 123.T (composition preserves endpoint A-depths)")
 public axiom composition_preserves_endpoint_depths(e1: Enactment, e2: Enactment) -> Bool
@@ -288,8 +319,10 @@ public axiom composition_preserves_endpoint_depths(e1: Enactment, e2: Enactment)
 
 /// A formal Lorenzen-style dialogue with k moves has activation depth
 ///
-///     e(ε_D) = ω + k.
+
+///  e(ε_D) = ω + k.
 ///
+
 /// In the limit k → ∞ the depth saturates at ω·2 (second full layer),
 /// coinciding with the upper Goldilocks bound from 119.T (tradition
 /// stabilisation).
@@ -297,7 +330,7 @@ public axiom composition_preserves_endpoint_depths(e1: Enactment, e2: Enactment)
 public axiom lorenzen_dialogue_depth_omega_plus_k(e_d: Enactment) -> Bool
     requires true
     ensures  // dialogue-depth witness: rank is observable via activation_rank
-        // (V0 surface — V1 promotes to ordinal-typed ω + k structural form).
+        // (current surface — V1 promotes to ordinal-typed ω + k structural form).
         e_d.activation_rank >= 0;
 
 // =============================================================================

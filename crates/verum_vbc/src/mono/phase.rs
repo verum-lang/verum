@@ -1,5 +1,6 @@
 //! Monomorphization phase for the compilation pipeline.
 //!
+
 //! This module provides the main entry point for monomorphization,
 //! integrating all components:
 //! - InstantiationGraph (from type checking)
@@ -7,6 +8,7 @@
 //! - BytecodeSpecializer (bytecode transformation)
 //! - ModuleMerger (final module assembly)
 //!
+
 //! Orchestrates the full monomorphization pipeline: graph -> resolver -> specializer
 //! -> optimizer -> merger, producing a final monomorphized VBC module.
 
@@ -190,6 +192,7 @@ pub struct MonoPhaseResult {
 
 /// Main monomorphization phase.
 ///
+
 /// Orchestrates the entire monomorphization pipeline:
 /// 1. Resolve all instantiations (core/cache/pending)
 /// 2. Specialize pending functions
@@ -230,6 +233,7 @@ impl MonomorphizationPhase {
 
     /// Executes the monomorphization phase.
     ///
+
     /// Takes a user module and instantiation graph, returns a monomorphized module.
     pub fn execute(
         &mut self,
@@ -421,6 +425,7 @@ impl MonomorphizationPhase {
 
 /// Monomorphizes a module with default configuration.
 ///
+
 /// This is the main entry point for simple use cases.
 pub fn monomorphize(
     user_module: VbcModule,
@@ -1202,7 +1207,7 @@ mod tests {
         let module = create_test_module_with_generic();
         let mut graph = InstantiationGraph::new();
 
-        // Build: List<List<List<...List<Int>...>>>  (10 levels)
+        // Build: List<List<List<...List<Int>...>>> (10 levels)
         let mut current = TypeRef::Concrete(TypeId::INT);
         for _ in 0..10 {
             current = TypeRef::Instantiated {

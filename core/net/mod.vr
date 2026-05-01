@@ -6,43 +6,50 @@
 // Spec: docs/new-model/RUNTIME_CONSOLIDATION_PLAN.md Appendix B.1
 // =============================================================================
 //
+
 // This module provides networking primitives:
 //
+
 // - tcp.vr: TCP streams and listeners
 // - udp.vr: UDP sockets
 // - addr.vr: IP addresses and socket addresses
 // - resolve.vr: DNS resolution
 //
+
 // # V-LLSI Architecture (Zero FFI)
 //
+
 // All networking modules use native V-LLSI syscalls with no FFI dependencies.
 // This provides maximum control for building high-performance protocols (QUIC,
 // HTTP/2, HTTP/3).
 //
+
 // ```
 // Application Layer
-//     │
-//     ▼
+//  │
+//  ▼
 // ┌─────────────────────────────────────────┐
-// │           core/net/                    │
-// │  TcpStream, TcpListener, UdpSocket      │
-// │  dns.vr (pure DNS protocol over UDP)    │
+// │ core/net/ │
+// │ TcpStream, TcpListener, UdpSocket │
+// │ dns.vr (pure DNS protocol over UDP) │
 // └─────────────────────────────────────────┘
-//     │ V-LLSI
-//     ▼
+//  │ V-LLSI
+//  ▼
 // ┌─────────────────────────────────────────┐
-// │          sys/linux/syscall.vr           │   ← Linux: direct syscalls
-// │        sys/darwin/libsystem.vr          │   ← macOS: libSystem.B.dylib
+// │ sys/linux/syscall.vr │ ← Linux: direct syscalls
+// │ sys/darwin/libsystem.vr │ ← macOS: libSystem.B.dylib
 // └─────────────────────────────────────────┘
-//     │
-//     ▼
+//  │
+//  ▼
 // ┌─────────────────────────────────────────┐
-// │              OS Kernel                   │
+// │ OS Kernel │
 // └─────────────────────────────────────────┘
 // ```
 //
+
 // # Key Features
 //
+
 // - Platform-specific syscall implementations (Linux/macOS)
 // - FileDesc type for type-safe file descriptors
 // - SO_REUSEPORT for multi-threaded accept scaling
@@ -51,6 +58,7 @@
 // - Native async I/O via IOEngine (io_uring/kqueue)
 // - Pure DNS resolver (RFC 1035) without libc getaddrinfo
 //
+
 // =============================================================================
 
 module net;

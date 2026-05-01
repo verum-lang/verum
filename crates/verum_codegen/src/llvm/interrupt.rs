@@ -1,39 +1,47 @@
 //! Interrupt handler code generation for ISR (Interrupt Service Routine) support.
 //!
+
 //! This module provides LLVM IR generation for interrupt service routines,
 //! including prologue/epilogue generation, critical section handling, and
 //! proper return instructions for various architectures.
 //!
+
 //! # Overview
 //!
+
 //! Interrupt handlers require special treatment:
 //! - Saving/restoring all modified registers (not just callee-saved)
 //! - Using interrupt-specific return instructions (iret, rfi, eret, mret)
 //! - Proper stack alignment
 //! - Optional FPU state preservation
 //!
+
 //! # Generated Code Patterns
 //!
+
 //! ```llvm
 //! ; x86_64 interrupt handler
 //! define x86_intrcc void @timer_isr(ptr %frame) {
 //! entry:
-//!   ; prologue: save registers
-//!   ; ... handler body ...
-//!   ; epilogue: restore registers, iretq
-//!   ret void  ; with x86_intrcc, this becomes iretq
+//!  ; prologue: save registers
+//!  ; ... handler body ...
+//!  ; epilogue: restore registers, iretq
+//!  ret void ; with x86_intrcc, this becomes iretq
 //! }
 //!
+
 //! ; ARM interrupt handler
 //! define arm_aapcscc void @irq_handler() "interrupt"="IRQ" {
 //! entry:
-//!   ; ... handler body ...
-//!   ret void  ; becomes appropriate return for interrupt type
+//!  ; ... handler body ...
+//!  ret void ; becomes appropriate return for interrupt type
 //! }
 //! ```
 //!
+
 //! # Interrupt Handler Codegen
 //!
+
 //! Verum uses `@interrupt(vector = N)` attribute for ISR declarations. Interrupt
 //! handlers require special codegen: saving/restoring ALL modified registers (not
 //! just callee-saved), using architecture-specific return instructions (x86: iret,
@@ -55,6 +63,7 @@ use super::types::TypeLowering;
 
 /// Target architecture for interrupt handling.
 ///
+
 /// Different architectures have different interrupt handling conventions,
 /// register save requirements, and return instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -193,6 +202,7 @@ impl InterruptStats {
 
 /// Interrupt code generation context.
 ///
+
 /// Provides methods for configuring interrupt handler functions and
 /// generating critical section entry/exit code.
 pub struct InterruptLowering<'ctx> {
@@ -232,9 +242,11 @@ impl<'ctx> InterruptLowering<'ctx> {
 
     /// Configure a function as an interrupt handler.
     ///
+
     /// This sets the appropriate calling convention and attributes
     /// based on the target architecture and interrupt kind.
     ///
+
     /// # Parameters
     /// - `func`: The function to configure
     /// - `kind`: The type of interrupt handler
@@ -297,12 +309,15 @@ impl<'ctx> InterruptLowering<'ctx> {
 
     /// Generate critical section entry code (disable interrupts).
     ///
+
     /// Returns a value that should be passed to `exit_critical_section`
     /// to restore the previous interrupt state.
     ///
+
     /// # Parameters
     /// - `priority_mask`: Optional priority mask (None = disable all maskable)
     ///
+
     /// # Returns
     /// A pointer value holding the saved interrupt state.
     pub fn enter_critical_section(
@@ -322,6 +337,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
     /// Generate critical section exit code (restore interrupts).
     ///
+
     /// # Parameters
     /// - `saved_state`: The value returned from `enter_critical_section`
     pub fn exit_critical_section(&mut self, saved_state: PointerValue<'ctx>) -> Result<()> {
@@ -340,6 +356,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
     /// Generate a memory barrier instruction.
     ///
+
     /// Useful for ensuring memory operations complete before interrupt return.
     pub fn memory_barrier(&self) -> Result<()> {
         // Use compiler fence intrinsic
@@ -652,9 +669,11 @@ impl<'ctx> InterruptLowering<'ctx> {
 
 /// Exception frame layout for interrupt handlers.
 ///
+
 /// On x86_64, when an interrupt occurs, the CPU pushes:
 /// - SS, RSP, RFLAGS, CS, RIP (and error code for some exceptions)
 ///
+
 /// This structure represents the stack frame passed to exception handlers.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]

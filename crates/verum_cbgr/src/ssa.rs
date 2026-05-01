@@ -1,5 +1,6 @@
 //! SSA (Static Single Assignment) Representation for Escape Analysis
 //!
+
 //! Converts function representation to SSA form for precise data flow analysis.
 //! This is Phase 1 of the 4-phase escape analysis pipeline defined by the CBGR
 //! formal escape analysis specification. A reference escapes if it is: (1) returned
@@ -7,26 +8,33 @@
 //! closure, or (4) passed to a function that may retain it. SSA form enables
 //! precise tracking of these escape paths through use-def chains.
 //!
+
 //! SSA form ensures each variable is assigned exactly once, enabling precise
 //! use-def chain analysis for escape detection. This is fundamental for the
 //! 4-phase escape analysis algorithm:
 //!
+
 //! - Phase 1: Build SSA representation (this module)
 //! - Phase 2: Track reference flow
 //! - Phase 3: Dominance analysis
 //! - Phase 4: Promotion decision
 //!
+
 //! # Algorithm Overview
 //!
+
 //! The SSA construction uses the classic algorithm from Cytron et al. (1991):
 //!
+
 //! 1. Compute dominance frontiers for each basic block
 //! 2. Place phi nodes at dominance frontiers for each variable
 //! 3. Rename variables using a stack-based approach
 //! 4. Build use-def chains from the renamed program
 //!
+
 //! # Performance
 //!
+
 //! - Dominance frontier computation: O(|V| + |E|) where V = blocks, E = edges
 //! - Phi placement: O(|V| * |defs|) in worst case
 //! - Variable renaming: O(|instructions|)
@@ -40,6 +48,7 @@ use verum_common::{Map, Set};
 
 /// SSA Value representing a single definition
 ///
+
 /// Each SSA value represents exactly one assignment point in the program.
 /// For escape analysis, we track whether the value is a reference type
 /// (subject to escape analysis) and all its use sites.
@@ -78,6 +87,7 @@ pub enum DefKind {
 
 /// SSA representation of a function
 ///
+
 /// Contains all SSA values, use-def chains, def-use chains, and phi nodes.
 /// This representation enables precise data flow analysis for escape detection.
 #[derive(Debug)]
@@ -178,6 +188,7 @@ impl SsaFunction {
 
     /// Get all reference values (for escape analysis)
     ///
+
     /// Returns only SSA values that represent references, which are the
     /// candidates for escape analysis and potential promotion.
     #[must_use]
@@ -187,6 +198,7 @@ impl SsaFunction {
 
     /// Get use-def chain for a use site
     ///
+
     /// Returns the SSA value ID that provides the value at this use site.
     #[must_use]
     pub fn get_definition(&self, use_site: &UseeSite) -> Option<u32> {
@@ -196,6 +208,7 @@ impl SsaFunction {
 
     /// Get all uses of a value
     ///
+
     /// Returns all use sites that consume this SSA value.
     #[must_use]
     pub fn get_uses(&self, value_id: u32) -> Option<&Set<UseSiteKey>> {
@@ -204,6 +217,7 @@ impl SsaFunction {
 
     /// Check if value escapes via return
     ///
+
     /// A value escapes via return if it (or any value derived from it)
     /// is returned from the function.
     #[must_use]
@@ -229,6 +243,7 @@ impl SsaFunction {
 
     /// Check if value is stored to heap
     ///
+
     /// A value is stored to heap if it's written into a heap-allocated
     /// structure (Box, Heap, Arc, etc.).
     #[must_use]
@@ -340,6 +355,7 @@ impl Default for SsaFunction {
 
 /// Builder for constructing SSA form
 ///
+
 /// Uses the Cytron et al. algorithm:
 /// 1. Compute dominators and dominance frontiers
 /// 2. Place phi nodes at dominance frontiers
@@ -384,14 +400,19 @@ impl<'cfg> SsaBuilder<'cfg> {
 
     /// Build SSA form from CFG
     ///
+
     /// Implements the complete Cytron et al. algorithm for SSA construction.
     ///
+
     /// # Returns
     ///
+
     /// Returns the completed SSA function or an error if construction fails.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Compute dominators using iterative algorithm
     /// 2. Build dominator tree
     /// 3. Compute dominance frontiers
@@ -458,8 +479,10 @@ impl<'cfg> SsaBuilder<'cfg> {
 
     /// Compute dominators using the iterative algorithm
     ///
+
     /// Uses the Cooper-Harvey-Kennedy algorithm which is efficient in practice.
     ///
+
     /// # Safety
     /// Includes iteration limit to guarantee termination on malformed CFGs.
     fn compute_dominators(&mut self) {
@@ -510,6 +533,7 @@ impl<'cfg> SsaBuilder<'cfg> {
 
     /// Find the nearest common dominator (intersect in dominator algorithm)
     ///
+
     /// # Safety
     /// Includes iteration limit to prevent infinite loops on malformed CFGs.
     fn intersect(&self, mut b1: BlockId, mut b2: BlockId) -> BlockId {
@@ -650,6 +674,7 @@ impl<'cfg> SsaBuilder<'cfg> {
 
     /// Compute dominance frontiers using the Cytron algorithm
     ///
+
     /// DF(X) = {Y : X dominates a predecessor of Y but does not strictly dominate Y}
     fn compute_dominance_frontiers_algorithm(&mut self) {
         // Initialize empty frontiers
@@ -695,6 +720,7 @@ impl<'cfg> SsaBuilder<'cfg> {
 
     /// Place phi nodes using the iterated dominance frontier algorithm
     ///
+
     /// For each variable, place phi nodes at the iterated dominance frontier
     /// of all its definition sites.
     fn place_phi_nodes(&mut self) {
@@ -742,6 +768,7 @@ impl<'cfg> SsaBuilder<'cfg> {
 
     /// Rename variables using depth-first traversal of dominator tree
     ///
+
     /// This creates unique SSA values for each definition and fills in
     /// phi node operands.
     fn rename_variables(&mut self) {

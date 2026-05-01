@@ -6,21 +6,25 @@ module core.database.sqlite.native.l0_vfs.mock_vfs;
 // Layer: 0
 // Spec: sqlite-native.md §7.6 + §22.5
 //
+
 // `MockVfs` implements `VfsProtocol` over a process-local path → blob
 // registry but lets the test harness inject failures at chosen points:
 //
-//   * `inject_crash_after_fsync(n)`    — next sync after N sync-count
-//                                         power-cycles the file (all
-//                                         post-sync data lost)
-//   * `inject_partial_write(offset, k)` — next write at `offset` lands
-//                                          only the first `k` bytes
-//   * `set_disk_full_after(bytes)`      — writes past the cap fail with
-//                                          DiskFull
+
+//  * `inject_crash_after_fsync(n)` — next sync after N sync-count
+//  power-cycles the file (all
+//  post-sync data lost)
+//  * `inject_partial_write(offset, k)` — next write at `offset` lands
+//  only the first `k` bytes
+//  * `set_disk_full_after(bytes)` — writes past the cap fail with
+//  DiskFull
 //
+
 // Combined with `MockClock`, this gives the DST harness bit-reproducible
 // execution of any SQLite workload: the same seed → same sequence of
 // events → same final state. Required by §22.5.
 //
+
 // This is a single-writer, single-threaded mock (test-only); the
 // production VFS (PosixVfs) handles multi-process concurrency.
 // =============================================================================
@@ -150,6 +154,7 @@ fn blob_put(vfs: &mut MockVfs, blob: MockBlob) {
 // -----------------------------------------------------------------------------
 // VFS-level operations (test-facing — not the SqliteFile surface)
 //
+
 // MockVfs's SqliteFile bodies below re-delegate to these free functions
 // because `MockFile` doesn't own the blob directly; the VFS does.
 // Callers normally go through `SqliteFile.read/write/...`.

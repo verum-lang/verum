@@ -2,9 +2,11 @@
 // Schreiber, Differential Cohomology in a Cohesive ∞-Topos — framework axioms
 // =============================================================================
 //
+
 // Source: Urs Schreiber, "Differential cohomology in a cohesive
 // ∞-topos", arXiv:1310.7930 (DCCT).
 //
+
 // Postulates the cohesive-modality apparatus (§3.9–§3.12 of DCCT) and
 // the full differential-cohesive hexagon (§4.1). Mechanising DCCT end
 // to end would require first mechanising HTT, so we treat its headline

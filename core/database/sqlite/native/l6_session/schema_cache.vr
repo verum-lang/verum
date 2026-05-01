@@ -6,20 +6,24 @@ module core.database.sqlite.native.l6_session.schema_cache;
 // Layer: 6
 // Spec: sqlite-native.md §16.4
 //
+
 // The schema cache answers planner/codegen queries like "what is
 // table X's root page?" and "what columns does it have in what order?"
 // without a round-trip to the pager on every prepare() call.
 //
+
 // Built by scanning `sqlite_schema` on first open (or post-DDL). Our
 // v1 exposes:
 //
-//   * build_empty()            — no tables registered yet
-//   * register_table(meta)     — programmatic registration (test
-//                                harness + future sqlite_schema
-//                                replay)
-//   * lookup(name) -> Maybe<TableMeta>
-//   * invalidate(cookie)       — post-DDL refresh signal
+
+//  * build_empty() — no tables registered yet
+//  * register_table(meta) — programmatic registration (test
+//  harness + future sqlite_schema
+//  replay)
+//  * lookup(name) -> Maybe<TableMeta>
+//  * invalidate(cookie) — post-DDL refresh signal
 //
+
 // Every connection owns its own SchemaCache. Multi-process schema
 // coherency is re-checked via the schema_cookie in the DB header.
 // =============================================================================
@@ -183,10 +187,10 @@ implement SchemaCache {
     }
 
     /// Reverse lookup: locate the table whose B-tree root is
-    /// `root_page`.  Used by the L6 writeback bridge (and by anything
+    /// `root_page`. Used by the L6 writeback bridge (and by anything
     /// downstream that has a cursor's root_page in hand and needs to
     /// produce the (schema, name) pair — update_hooks, audit logs,
-    /// pgoutput-style replication events).  Linear scan over the
+    /// pgoutput-style replication events). Linear scan over the
     /// table set; the catalogue rarely exceeds 100 tables in practice
     /// and the call site fires at most once per mutated cursor per
     /// statement, so the O(N) cost is well below the cost of the

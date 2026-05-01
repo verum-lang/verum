@@ -5,24 +5,30 @@
 // Dependencies: core.security.hash.{sha256, sha384}
 // =============================================================================
 //
+
 // RFC 8446 §4.4.1:
 //
-//   Transcript-Hash(M1, M2, ... Mn) = Hash(M1 || M2 || ... || Mn)
+
+//  Transcript-Hash(M1, M2, ... Mn) = Hash(M1 || M2 || ... || Mn)
 //
+
 // except for the post-HelloRetryRequest transcript which prepends a
 // synthetic `message_hash` record:
 //
-//   Transcript-Hash(ClientHello1, HelloRetryRequest, ... Mn) =
-//       Hash(message_hash ||           /* Handshake type */
-//            00 00 Hash.length ||      /* Handshake length */
-//            Hash(ClientHello1) ||     /* Hash of ClientHello1 */
-//            HelloRetryRequest || ... || Mn)
+
+//  Transcript-Hash(ClientHello1, HelloRetryRequest, ... Mn) =
+//  Hash(message_hash || /* Handshake type */
+//  00 00 Hash.length || /* Handshake length */
+//  Hash(ClientHello1) || /* Hash of ClientHello1 */
+//  HelloRetryRequest || ... || Mn)
 //
+
 // This module maintains an incremental hasher so every message that
 // flows through the handshake SM mutates the transcript in O(bytes).
 // Snapshots (`Transcript.snapshot`) finalise a clone — cheap because
 // the SHA compression state is a fixed-size struct.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.transcript;
@@ -71,11 +77,13 @@ implement Transcript {
 
     /// Re-seed for post-HelloRetryRequest transcript (RFC 8446 §4.4.1):
     ///
-    ///   Reset the transcript to:
-    ///     message_hash (254) ||
-    ///     uint24(Hash.length) ||
-    ///     Hash(ClientHello1)
+
+    ///  Reset the transcript to:
+    ///  message_hash (254) ||
+    ///  uint24(Hash.length) ||
+    ///  Hash(ClientHello1)
     ///
+
     /// This lets the state machine carry a single incremental hash
     /// across the HRR boundary without re-hashing ClientHello1.
     public fn reseed_for_hrr(&mut self) {
@@ -91,7 +99,7 @@ implement Transcript {
         *self = new_hasher;
 
         // Prepend the synthetic message_hash record:
-        //   type = 254, length = Hash.length, value = Hash(CH1)
+        //  type = 254, length = Hash.length, value = Hash(CH1)
         let mut prefix: List<Byte> = [];
         prefix.push(254_u8);
         let len = ch1_hash.len() as UInt32;

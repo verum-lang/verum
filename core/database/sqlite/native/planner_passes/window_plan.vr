@@ -3,20 +3,24 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.6
 //
+
 // Window functions execute in a dedicated stage between the main
 // query and the final projection:
 //
-//   Main query → Sort by PARTITION/ORDER → Window evaluator → Projection
+
+//  Main query → Sort by PARTITION/ORDER → Window evaluator → Projection
 //
+
 // `WindowPlan` decorates a `PvWindow` node with:
 //
-//   * sort spec  — the (PARTITION cols, ORDER cols) tuple the
-//                   sort stage must produce
-//   * frame-buffer size — # rows the evaluator needs to keep live
-//                          for the chosen frame
-//   * ordering of fns — when multiple window fns share a partition,
-//                          they're evaluated together; otherwise
-//                          a separate Window node is needed
+
+//  * sort spec — the (PARTITION cols, ORDER cols) tuple the
+//  sort stage must produce
+//  * frame-buffer size — # rows the evaluator needs to keep live
+//  for the chosen frame
+//  * ordering of fns — when multiple window fns share a partition,
+//  they're evaluated together; otherwise
+//  a separate Window node is needed
 // =============================================================================
 
 module core.database.sqlite.native.planner_passes.window_plan;
@@ -72,10 +76,12 @@ public fn sort_specs_equal(a: &SortSpec, b: &SortSpec) -> Bool {
 // FrameBufferSize — how many rows the evaluator must keep live
 // -----------------------------------------------------------------------------
 //
+
 // We approximate from the frame_spec_sql text. Real planning needs
 // a frame parser; the L5 codegen extends this when frame parsing
 // lands.
 //
+
 // Heuristic: ROWS BETWEEN UNBOUNDED PRECEDING / UNBOUNDED FOLLOWING
 // → unbounded buffer; ROWS BETWEEN N PRECEDING AND M FOLLOWING →
 // N+M+1 buffer; CURRENT ROW only → 1.

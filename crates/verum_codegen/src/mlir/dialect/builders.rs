@@ -1,5 +1,6 @@
 //! Operation builders for the Verum dialect.
 //!
+
 //! High-level builders for constructing Verum MLIR operations with
 //! convenient APIs and proper error handling.
 
@@ -21,6 +22,7 @@ use crate::mlir::dialect::ops::*;
 
 /// Builder for constructing Verum MLIR operations.
 ///
+
 /// Provides a fluent API for building MLIR operations with proper
 /// error handling and type safety.
 pub struct VerumOpBuilder<'c> {

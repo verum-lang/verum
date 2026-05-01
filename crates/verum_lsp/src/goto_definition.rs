@@ -1,5 +1,6 @@
 //! Go to definition support
 //!
+
 //! Allows users to navigate to the definition of symbols, including:
 //! - Top-level functions, types, and protocols
 //! - Local variables and parameters

@@ -4,31 +4,37 @@
 // Layer: 5 (Network)
 // =============================================================================
 //
+
 // RFC 8446 §4.2.3: the `signature_algorithms` / `signature_algorithms_cert`
 // extensions carry a SignatureScheme vector. Distinct from TLS 1.2
 // SignatureAndHashAlgorithm — for TLS 1.3 hash + algorithm are encoded
 // as a single 16-bit identifier.
 //
+
 // Warp supports:
 //
-//   WebPKI mainstream:
-//   * ecdsa_secp256r1_sha256        (0x0403)
-//   * ecdsa_secp384r1_sha384        (0x0503)
-//   * rsa_pss_rsae_sha256           (0x0804)
-//   * rsa_pss_rsae_sha384           (0x0805)
-//   * rsa_pss_rsae_sha512           (0x0806)
-//   * ed25519                       (0x0807)
+
+//  WebPKI mainstream:
+//  * ecdsa_secp256r1_sha256 (0x0403)
+//  * ecdsa_secp384r1_sha384 (0x0503)
+//  * rsa_pss_rsae_sha256 (0x0804)
+//  * rsa_pss_rsae_sha384 (0x0805)
+//  * rsa_pss_rsae_sha512 (0x0806)
+//  * ed25519 (0x0807)
 //
-//   For certificate verification only (NOT CertificateVerify):
-//   * rsa_pkcs1_sha256              (0x0401)
-//   * rsa_pkcs1_sha384              (0x0501)
-//   * rsa_pkcs1_sha512              (0x0601)
+
+//  For certificate verification only (NOT CertificateVerify):
+//  * rsa_pkcs1_sha256 (0x0401)
+//  * rsa_pkcs1_sha384 (0x0501)
+//  * rsa_pkcs1_sha512 (0x0601)
 //
-//   PSS with an rsa_pss_pss_* keypair (generated for PSS specifically):
-//   * rsa_pss_pss_sha256            (0x0809)
-//   * rsa_pss_pss_sha384            (0x080A)
-//   * rsa_pss_pss_sha512            (0x080B)
+
+//  PSS with an rsa_pss_pss_* keypair (generated for PSS specifically):
+//  * rsa_pss_pss_sha256 (0x0809)
+//  * rsa_pss_pss_sha384 (0x080A)
+//  * rsa_pss_pss_sha512 (0x080B)
 //
+
 // =============================================================================
 
 module core.net.tls13.sig_scheme;

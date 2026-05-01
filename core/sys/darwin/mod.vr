@@ -9,12 +9,15 @@ module sys.darwin;
 // =============================================================================
 @cfg(target_os = "macos")
 //
+
 // This module provides macOS-specific system interface primitives.
 //
+
 // CRITICAL: macOS does NOT support stable syscall numbers.
 // All system calls MUST go through libSystem.B.dylib.
 // Direct syscalls are forbidden by Apple and will break between OS versions.
 //
+
 // Architecture:
 // - libsystem.vr: BSD/POSIX functions via libSystem FFI
 // - mach.vr: Mach kernel primitives (VM, ports, semaphores, time)
@@ -24,6 +27,7 @@ module sys.darwin;
 // - thread.vr: Thread creation and synchronization
 // - time.vr: Duration, Instant, and timing utilities
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 

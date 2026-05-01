@@ -1,85 +1,99 @@
 //! Recovery Strategies (Level 3: Fault Tolerance)
 //!
+
 //! Level 3 of the 5-Level Error Defense Architecture provides production-ready
 //! fault tolerance. The core design principles are: (1) fail fast when something
 //! is broken, (2) automatically attempt recovery, (3) always expose health status,
 //! (4) isolate failures to prevent cascading, and (5) make recovery behavior tunable.
 //!
+
 //! Integrates with the Unified Execution Environment (ExecutionEnv / theta+) for
 //! automatic error recovery in the async runtime, with supervision trees providing
 //! hierarchical restart semantics (OneForOne, OneForAll, RestForOne strategies).
 //!
+
 //! Provides **production-ready fault tolerance mechanisms** for building resilient systems
 //! that can recover automatically from failures. Includes:
 //!
+
 //! - **Circuit Breakers** - Stop calling failing services, detect recovery
 //! - **Retry Policies** - Retry transient errors with adaptive backoff strategies
 //! - **Supervision Trees** - Hierarchical fault tolerance with automatic restarts
 //! - **Health Monitoring** - Detect and respond to degradation
 //! - **Graceful Degradation** - Reduce functionality rather than crash
 //!
+
 //! # Integration Points
 //!
+
 //! - **ExecutionEnv** - Automatic error recovery in async runtime
 //! - **verum_runtime** - Full supervision tree implementation
 //! - **ObservabilityFramework** - Metrics and logging integration
 //! - **ConcurrencyPrimitives** - Timeout and cancellation support
 //!
+
 //! # Design Principles
 //!
+
 //! 1. **Fast failure** - Fail quickly when something is broken
 //! 2. **Eventual recovery** - Automatically attempt to recover
 //! 3. **Observable** - Always know the system's health status
 //! 4. **Cascading isolation** - Prevent failure propagation
 //! 5. **Tunable** - Configure recovery for your specific use case
 //!
+
 //! # Common Patterns
 //!
+
 //! ## Simple Retry
 //! ```rust,ignore
 //! // Retry 3 times with 100ms delay between attempts
 //! let strategy = RecoveryStrategy::Retry {
-//!     max_attempts: 3,
-//!     backoff: BackoffStrategy::Fixed {
-//!         delay: Duration::from_millis(100),
-//!     },
+//!  max_attempts: 3,
+//!  backoff: BackoffStrategy::Fixed {
+//!  delay: Duration::from_millis(100),
+//!  },
 //! };
 //! ```
 //!
+
 //! ## Exponential Backoff
 //! ```rust,ignore
 //! // Start at 100ms, double each time, max 10 seconds
 //! let strategy = RecoveryStrategy::Retry {
-//!     max_attempts: 5,
-//!     backoff: BackoffStrategy::Exponential {
-//!         base: Duration::from_millis(100),
-//!         max: Duration::from_secs(10),
-//!     },
+//!  max_attempts: 5,
+//!  backoff: BackoffStrategy::Exponential {
+//!  base: Duration::from_millis(100),
+//!  max: Duration::from_secs(10),
+//!  },
 //! };
 //! ```
 //!
+
 //! ## Circuit Breaker
 //! ```rust,ignore
 //! let strategy = RecoveryStrategy::CircuitBreaker {
-//!     config: CircuitBreakerConfig {
-//!         failure_threshold: 5,        // Fail after 5 consecutive errors
-//!         success_threshold: 2,        // Close after 2 successes
-//!         timeout: Duration::from_secs(30),  // Try again after 30s
-//!     },
+//!  config: CircuitBreakerConfig {
+//!  failure_threshold: 5, // Fail after 5 consecutive errors
+//!  success_threshold: 2, // Close after 2 successes
+//!  timeout: Duration::from_secs(30), // Try again after 30s
+//!  },
 //! };
 //! ```
 //!
+
 //! ## Supervised Task
 //! ```rust,ignore
 //! let strategy = RecoveryStrategy::Supervision {
-//!     restart: RestartStrategy::ExponentialBackoff {
-//!         initial: Duration::from_millis(100),
-//!         max: Duration::from_secs(10),
-//!         multiplier: 2.0,
-//!     },
+//!  restart: RestartStrategy::ExponentialBackoff {
+//!  initial: Duration::from_millis(100),
+//!  max: Duration::from_secs(10),
+//!  multiplier: 2.0,
+//!  },
 //! };
 //! ```
 //!
+
 //! These components integrate with ExecutionEnv for automatic error recovery.
 
 use parking_lot::RwLock;
@@ -93,6 +107,7 @@ use serde::{Deserialize, Serialize};
 
 /// Recovery strategy for error handling
 ///
+
 /// Defines how errors should be recovered from automatically.
 #[derive(Debug, Clone)]
 pub enum RecoveryStrategy {
@@ -122,6 +137,7 @@ pub enum RecoveryStrategy {
 
 /// Backoff strategy for retries
 ///
+
 /// Determines the delay between retry attempts.
 #[derive(Debug, Clone)]
 pub enum BackoffStrategy {
@@ -157,6 +173,7 @@ pub enum BackoffStrategy {
 impl BackoffStrategy {
     /// Calculate delay for the nth attempt
     ///
+
     /// # Performance
     /// - Fixed: O(1)
     /// - Exponential: O(1)
@@ -201,6 +218,7 @@ fn fibonacci(n: usize) -> usize {
 
 /// Restart strategy for supervision
 ///
+
 /// Determines when a supervised process should be restarted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -217,43 +235,52 @@ pub enum RestartStrategy {
 
 /// Error predicate function type
 ///
+
 /// Determines whether an error should count towards circuit breaker failure threshold.
 /// Returns `true` if the error should trigger circuit breaker logic.
 ///
+
 /// # Thread Safety
 /// Must be Send + Sync for use in multi-threaded contexts.
 pub type ErrorPredicate = Box<dyn Fn(&crate::error::VerumError) -> bool + Send + Sync>;
 
 /// Circuit breaker configuration
 ///
+
 /// Controls when the circuit opens and closes.
 ///
+
 /// # Error Predicates
 ///
+
 /// The `error_predicate` field allows filtering which errors count towards failures:
 /// - `None` - All errors count (default behavior)
 /// - `Some(predicate)` - Only errors matching the predicate count
 ///
+
 /// # Examples
 ///
+
 /// ```rust,ignore
 /// use verum_error::recovery::{CircuitBreakerConfig, predicates};
 /// use std::time::Duration;
 ///
+
 /// // Only network errors trigger circuit breaker
 /// let config = CircuitBreakerConfig {
-///     failure_threshold: 5,
-///     timeout: Duration::from_secs(60),
-///     required_successes: 3,
-///     error_predicate: Some(predicates::is_network_error()),
+///  failure_threshold: 5,
+///  timeout: Duration::from_secs(60),
+///  required_successes: 3,
+///  error_predicate: Some(predicates::is_network_error()),
 /// };
 ///
+
 /// // Only retriable errors trigger circuit breaker
 /// let config = CircuitBreakerConfig {
-///     failure_threshold: 3,
-///     timeout: Duration::from_secs(30),
-///     required_successes: 2,
-///     error_predicate: Some(predicates::is_retriable()),
+///  failure_threshold: 3,
+///  timeout: Duration::from_secs(30),
+///  required_successes: 2,
+///  error_predicate: Some(predicates::is_retriable()),
 /// };
 /// ```
 pub struct CircuitBreakerConfig {
@@ -268,6 +295,7 @@ pub struct CircuitBreakerConfig {
 
     /// Error predicate (determines if error should count)
     ///
+
     /// When `None`, all errors count towards the failure threshold.
     /// When `Some(predicate)`, only errors matching the predicate count.
     pub error_predicate: Option<ErrorPredicate>,
@@ -365,6 +393,7 @@ impl CircuitBreakerConfig {
 
     /// Check if an error should count based on the predicate
     ///
+
     /// # Performance
     /// - ~5-10ns when no predicate
     /// - ~20-50ns when predicate present (depends on predicate complexity)
@@ -378,28 +407,34 @@ impl CircuitBreakerConfig {
 
 /// Common error predicates for circuit breakers
 ///
+
 /// Provides pre-built predicates for common error filtering scenarios.
 ///
+
 /// # Examples
 ///
+
 /// ```rust,ignore
 /// use verum_error::recovery::{CircuitBreakerConfig, predicates};
 /// use std::time::Duration;
 ///
+
 /// // Only count network errors
 /// let config = CircuitBreakerConfig::default()
-///     .set_predicate(predicates::is_network_error());
+///  .set_predicate(predicates::is_network_error());
 ///
+
 /// // Only count retriable errors
 /// let config = CircuitBreakerConfig::default()
-///     .set_predicate(predicates::is_retriable());
+///  .set_predicate(predicates::is_retriable());
 ///
+
 /// // Custom predicate: only timeout and network errors
 /// let config = CircuitBreakerConfig::default()
-///     .set_predicate(predicates::any_of(vec![
-///         predicates::is_timeout(),
-///         predicates::is_network_error(),
-///     ]));
+///  .set_predicate(predicates::any_of(vec![
+///  predicates::is_timeout(),
+///  predicates::is_network_error(),
+///  ]));
 /// ```
 pub mod predicates {
     use super::ErrorPredicate;
@@ -408,6 +443,7 @@ pub mod predicates {
 
     /// Predicate that matches retriable errors
     ///
+
     /// Returns `true` for errors that are typically transient and worth retrying:
     /// - I/O errors
     /// - Network errors
@@ -446,12 +482,14 @@ pub mod predicates {
 
     /// Predicate that matches if ANY of the provided predicates match
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// let predicate = any_of(vec![
-    ///     is_network_error(),
-    ///     is_timeout(),
+    ///  is_network_error(),
+    ///  is_timeout(),
     /// ]);
     /// ```
     pub fn any_of(predicates: List<ErrorPredicate>) -> ErrorPredicate {
@@ -460,12 +498,14 @@ pub mod predicates {
 
     /// Predicate that matches if ALL of the provided predicates match
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// let predicate = all_of(vec![
-    ///     is_retriable(),
-    ///     custom_predicate(),
+    ///  is_retriable(),
+    ///  custom_predicate(),
     /// ]);
     /// ```
     pub fn all_of(predicates: List<ErrorPredicate>) -> ErrorPredicate {
@@ -474,8 +514,10 @@ pub mod predicates {
 
     /// Predicate that negates another predicate
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// // Count everything EXCEPT network errors
     /// let predicate = not(is_network_error());
@@ -511,12 +553,15 @@ pub enum CircuitState {
 
 /// Circuit breaker implementation
 ///
+
 /// Implements the circuit breaker pattern for fault tolerance.
 ///
+
 /// # Performance
 /// - State check: ~10ns (atomic load)
 /// - State transition: ~20-50ns (atomic CAS + lock)
 ///
+
 /// # Thread Safety
 /// All operations are thread-safe and lock-free on the fast path.
 pub struct CircuitBreaker {
@@ -555,6 +600,7 @@ impl CircuitBreaker {
 
     /// Check if circuit allows request
     ///
+
     /// # Performance
     /// ~10-20ns (lock-free on closed/open states)
     pub fn allow_request(&self) -> bool {
@@ -580,6 +626,7 @@ impl CircuitBreaker {
 
     /// Record successful request
     ///
+
     /// # Performance
     /// ~10-20ns
     pub fn record_success(&self) {
@@ -609,6 +656,7 @@ impl CircuitBreaker {
 
     /// Record failed request
     ///
+
     /// # Performance
     /// ~10-20ns
     pub fn record_failure(&self) {
@@ -636,28 +684,35 @@ impl CircuitBreaker {
 
     /// Record an error, checking the predicate before counting it as a failure
     ///
+
     /// If the config has an error predicate, only errors matching the predicate
     /// will count towards the failure threshold. Otherwise, all errors count.
     ///
+
     /// # Performance
     /// - ~10-20ns when no predicate
     /// - ~30-70ns when predicate present
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// use verum_error::recovery::{CircuitBreaker, CircuitBreakerConfig, predicates};
     /// use verum_error::error::VerumError;
     /// use std::time::Duration;
     ///
+
     /// let config = CircuitBreakerConfig::default()
-    ///     .set_predicate(predicates::is_network_error());
+    ///  .set_predicate(predicates::is_network_error());
     /// let breaker = CircuitBreaker::new(config);
     ///
+
     /// // Network error - will count
     /// let err = VerumError::network("connection refused");
     /// breaker.record_error(&err);
     ///
+
     /// // Parse error - will NOT count (not a network error)
     /// let err = VerumError::parse("invalid syntax");
     /// breaker.record_error(&err);
@@ -708,6 +763,7 @@ pub struct CircuitBreakerStats {
 
 /// Health check status
 ///
+
 /// Used to monitor the health of supervised processes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -724,6 +780,7 @@ pub enum HealthStatus {
 
 /// Health check configuration
 ///
+
 /// Defines how to monitor process health.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -776,6 +833,7 @@ impl HealthCheckConfig {
 
 /// Health check metrics
 ///
+
 /// Tracks health check history and statistics.
 #[derive(Debug, Clone, Copy)]
 pub struct HealthMetrics {
@@ -808,8 +866,10 @@ impl Default for HealthMetrics {
 
 /// Health check monitor
 ///
+
 /// Monitors process health and transitions between states.
 ///
+
 /// # Performance
 /// - Health check: ~5-10μs (excluding check operation)
 /// - Metrics access: ~10-20ns
@@ -909,6 +969,7 @@ impl HealthMonitor {
 
 /// Supervision strategy
 ///
+
 /// Determines how failures are handled in supervision trees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -923,6 +984,7 @@ pub enum SupervisionStrategy {
 
 /// Shutdown strategy
 ///
+
 /// Determines how to shutdown a child process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -941,6 +1003,7 @@ pub enum ShutdownStrategy {
 
 /// Supervision tree configuration
 ///
+
 /// Configures restart limits and behavior for supervised processes.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -1003,6 +1066,7 @@ impl SupervisionConfig {
     /// Decide whether a restart is permitted given the count of
     /// recent restarts and the start of the current window.
     ///
+
     /// Implements the OTP-style rate limit: a child can restart up
     /// to `max_restarts` times within `within` duration. When the
     /// window has elapsed, the limit resets (caller sees `true` and
@@ -1010,6 +1074,7 @@ impl SupervisionConfig {
     /// exhausted within the window, returns `false` so the
     /// supervisor escalates per `strategy`.
     ///
+
     /// Closes the inert-defense pattern around all three
     /// SupervisionConfig fields. Pre-fix `strategy`,
     /// `max_restarts`, and `within` were stored but no production
@@ -1045,6 +1110,7 @@ impl SupervisionConfig {
 
 /// Failure reason classification
 ///
+
 /// Categorizes how a process exited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -1061,6 +1127,7 @@ pub enum ExitReason {
 
 /// Restart decision logic
 ///
+
 /// Determines if a child should be restarted based on strategy and exit reason.
 pub fn should_restart(strategy: RestartStrategy, reason: ExitReason) -> bool {
     match (strategy, reason) {

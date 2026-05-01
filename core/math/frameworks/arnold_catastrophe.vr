@@ -2,10 +2,12 @@
 // Arnold–Mather catastrophe normal forms — framework axiom package
 // =============================================================================
 //
+
 // Source: V. I. Arnold, "Singularity Theory: Selected Papers" (1981);
 // J. Mather, "Stratifications and Mappings" (1973); the classical
 // A_k, D_k, E_6, E_7, E_8 classification due to Arnold (1972).
 //
+
 // Postulates the seven simple elementary catastrophes — the complete
 // list of real normal forms for smooth function germs of codimension
 // ≤ 4. Each entry asserts that any generic parametric family of

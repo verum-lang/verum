@@ -14,6 +14,7 @@
 )]
 // Test cases for mount statement parsing.
 //
+
 // Tests for mount statement: `mount module.{item1, item2}` and `mount module.*`
 
 use verum_ast::decl::{MountDecl, MountTreeKind};

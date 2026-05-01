@@ -1,6 +1,7 @@
 //! Integration tests for `verum audit --coord` per-theorem
 //! inference ().
 //!
+
 //! Per defect 2 + §A.Z.5 item 3: the audit walks
 //! every @theorem / @lemma / @corollary / @axiom in the project,
 //! infers the (Fw, ν, τ) coordinate from cited @framework(...)
@@ -127,9 +128,9 @@ public fn main() {}
 #[test]
 fn coord_audit_json_format_emits_schema_v2() {
     // Schema v2 added the `per_theorem` array (per-theorem coordinate
-    // record alongside the `frameworks` summary).  Both keys are part
+    // record alongside the `frameworks` summary). Both keys are part
     // of the contract; an emitter that only ships `frameworks` is on
-    // schema v1.  Keep the test pinning both keys present so any future
+    // schema v1. Keep the test pinning both keys present so any future
     // schema change has to choose: bump the version OR keep both keys.
     let (_temp, dir) = create_project(
         "coord_json",

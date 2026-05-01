@@ -6,24 +6,30 @@ module core.database.sqlite.native.l6_session.connection;
 // Layer: 6
 // Spec: sqlite-native.md §4.8 + §16
 //
+
 // A `Connection` is what user code holds to talk to loom. It bundles:
 //
-//   * Mode               — Read / Write / Admin capability marker
-//   * Pager actor ref    — single-writer L1 pager (v1 keeps the Pager
-//                          by value; async actor IPC lands later)
-//   * Schema cache       — L6.4
-//   * Transaction state  — autocommit / nested-savepoint counter
+
+//  * Mode — Read / Write / Admin capability marker
+//  * Pager actor ref — single-writer L1 pager (v1 keeps the Pager
+//  by value; async actor IPC lands later)
+//  * Schema cache — L6.4
+//  * Transaction state — autocommit / nested-savepoint counter
 //
+
 // Capability types (spec §4.8):
 //
-//   * Read   — SELECT + PRAGMA query_only
-//   * Write  — Read + INSERT/UPDATE/DELETE (no DDL)
-//   * Admin  — Write + DDL + writable_schema + VACUUM
+
+//  * Read — SELECT + PRAGMA query_only
+//  * Write — Read + INSERT/UPDATE/DELETE (no DDL)
+//  * Admin — Write + DDL + writable_schema + VACUUM
 //
+
 // Mode upgrades are disallowed — the type carries the capability, so
 // accidental `readonly.execute(INSERT...)` is a compile-time error at
 // the L7 facade, not a runtime SQLITE_READONLY.
 //
+
 // The v1 ships everything as a single sum type (ConnectionMode) because
 // Verum v1 doesn't yet wire phantom-type capabilities through generic
 // implements; the sum-type runtime check is the bridge. L7 will wrap
@@ -167,20 +173,20 @@ public type Connection is {
     /// Per-connection function & hook registry — holds scalar /
     /// aggregate / window function entries plus the eight observation
     /// hook slots (commit / rollback / update / pre_update /
-    /// authorizer / busy / progress / trace).  Last subscriber wins.
+    /// authorizer / busy / progress / trace). Last subscriber wins.
     /// See `core.database.sqlite.native.ext.registry`.
     registry: FnRegistry,
     /// Per-connection PRAGMA state (cache_size, journal_mode,
-    /// synchronous, …).  Driven by `pragmas/dispatch.execute`; read
+    /// synchronous, …). Driven by `pragmas/dispatch.execute`; read
     /// by every code path that wants to honour a PRAGMA the user has
     /// set (foreign_keys gate in CHECK violation, query_only gate in
     /// .execute, etc.).
     pragma_cfg: PragmaConfig,
-    /// Live `sqlite3_blob_*` handles owned by this connection.  Each
+    /// Live `sqlite3_blob_*` handles owned by this connection. Each
     /// `blob_open` call mints a stable handle_id; `blob_close` marks
     /// the slot closed but keeps the entry so subsequent calls with
     /// the same id surface a clean `BeAborted` rather than a stale
-    /// reference.  See `core.database.sqlite.native.incrblob`.
+    /// reference. See `core.database.sqlite.native.incrblob`.
     blob_engine: BlobEngine,
 };
 
@@ -276,9 +282,9 @@ implement Connection {
 
     public fn commit_tx(&mut self) -> Result<(), ConnectionError> {
         if !self.tx.active { return Err(TxNotActive); }
-        // Fire commit-hook BEFORE finalising tx.  Hook may veto
+        // Fire commit-hook BEFORE finalising tx. Hook may veto
         // (CdAbort) — in that case we treat it as a constraint
-        // violation and force a rollback instead.  Matches the SQLite
+        // violation and force a rollback instead. Matches the SQLite
         // C API semantics for sqlite3_commit_hook.
         let veto: Maybe<Text> = match &mut self.registry.commit_hook {
             None => None,
@@ -309,7 +315,7 @@ implement Connection {
         if !self.tx.active { return Err(TxNotActive); }
         self.tx = tx_state_autocommit();
         // Notify rollback-hook AFTER state transitions so observers
-        // see the post-rollback world.  Notification only — no veto.
+        // see the post-rollback world. Notification only — no veto.
         match &mut self.registry.rollback_hook {
             None => {}
             Some(h) => {
@@ -320,12 +326,12 @@ implement Connection {
         Ok(())
     }
 
-    /// Borrow the hook + function registry.  Used by the L7 façade to
+    /// Borrow the hook + function registry. Used by the L7 façade to
     /// expose `Database.set_*_hook` / `register_scalar` etc.
     public fn registry_view(&self) -> &FnRegistry { &self.registry }
     public fn registry_mut(&mut self) -> &mut FnRegistry { &mut self.registry }
 
-    /// Borrow the per-connection PRAGMA state.  Used by the L7 typed
+    /// Borrow the per-connection PRAGMA state. Used by the L7 typed
     /// pragma façade and by code paths that read pragma flags
     /// (foreign_keys, query_only, etc.) inline during execution.
     public fn pragma_cfg_view(&self) -> &PragmaConfig { &self.pragma_cfg }

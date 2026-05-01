@@ -4,6 +4,7 @@
 // ON CONFLICT action — SQLite constraint-resolution strategy.
 // Spec §17.8 — constraint handling.
 //
+
 // Five actions: ROLLBACK / ABORT / FAIL / IGNORE / REPLACE.
 // Used in CREATE TABLE (column/table constraint), INSERT OR ..., UPDATE OR ...,
 // and PRAGMA default_conflict.

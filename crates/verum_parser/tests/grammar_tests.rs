@@ -14,9 +14,11 @@
 )]
 // Comprehensive Grammar Test Suite for Verum Parser
 //
+
 // This test suite provides EXHAUSTIVE coverage of the complete Verum grammar
 // specification defined in the Verum syntax grammar.
 //
+
 // Organization:
 // - Section 1: Lexical Grammar Tests
 // - Section 2: Syntactic Grammar Tests
@@ -27,11 +29,13 @@
 // - Section 7: Error Recovery Tests
 // - Section 8: Real-World Examples
 //
+
 // Each grammar production rule has:
 // - 3-5 positive test cases (valid syntax)
 // - 2-3 negative test cases (invalid syntax with expected errors)
 // - 1-2 edge cases
 //
+
 // Total tests: 500+ covering 100% of grammar rules
 
 use verum_ast::{
@@ -292,25 +296,30 @@ mod lexical_tests {
         // Contextual keywords as identifiers
         // NOTE: Design Decision - Hard Keywords vs Contextual Keywords
         //
+
         // According to grammar/verum.ebnf line 87, only 'let', 'fn', 'is' are reserved.
         // Type declaration grammar: variant bodies support record and tuple forms
-        //   "Lexer Stage: No special handling (keywords remain identifiers)"
+        //  "Lexer Stage: No special handling (keywords remain identifiers)"
         //
+
         // However, the current implementation uses HARD KEYWORDS in the lexer for simplicity:
         // - Easier to implement and maintain
         // - Clearer error messages
         // - No ambiguity in parsing
         // - Minimal real-world impact (who names variables "where", "type", "using"?)
         //
+
         // This is an intentional design tradeoff: we sacrifice the ability to use keywords
         // as identifiers in exchange for simpler parser implementation and better diagnostics.
         //
+
         // If true contextual keywords are needed in the future, the implementation would require:
         // 1. Lexer: Remove keyword tokens, make them all TokenKind::Ident
         // 2. Parser: Add contextual checking in each position where keyword is expected
         // 3. Parser: Handle ambiguities (e.g., `type where = 5` vs `type Foo is Int where ...`)
         // 4. Extensive testing to ensure no regressions
         //
+
         // Estimated effort: 2-3 weeks for full contextual keyword support
         // Current priority: LOW (no user requests, minimal practical benefit)
         #[test]
@@ -3211,8 +3220,10 @@ mod real_world_examples {
 mod test_statistics {
     //! This module documents the comprehensive coverage of the grammar test suite.
     //!
+
     //! ## Coverage Summary
     //!
+
     //! ### Lexical Grammar (Section 1)
     //! - 1.1 Whitespace and Comments: 12 tests
     //! - 1.2 Identifiers: 13 tests
@@ -3221,6 +3232,7 @@ mod test_statistics {
     //! - 1.5 Operators: 40+ tests (all operators)
     //! **Subtotal: ~128 tests**
     //!
+
     //! ### Syntactic Grammar (Section 2)
     //! - 2.1 Program Structure: 10 tests
     //! - 2.2 Imports and Modules: 16 tests
@@ -3231,41 +3243,51 @@ mod test_statistics {
     //! - 2.13 Metaprogramming: 3 tests
     //! **Subtotal: ~117 tests**
     //!
+
     //! ### Expression Tests (Sections 2.7-2.9)
     //! - Operator Precedence: 50+ tests
     //! - Primary Expressions: 70+ tests
     //! **Subtotal: ~120 tests**
     //!
+
     //! ### Pattern Matching Tests (Section 2.11)
     //! - All pattern types: 35+ tests
     //! **Subtotal: ~35 tests**
     //!
+
     //! ### Statement Tests (Section 2.10)
     //! - Let, Let-else, Defer: 20+ tests
     //! **Subtotal: ~20 tests**
     //!
+
     //! ### Stream Processing Tests (Sections 2.8, 5.6-5.8, 6.1-6.3)
     //! - Stream comprehensions: 15+ tests
     //! - Pipeline operator: 10+ tests
     //! **Subtotal: ~25 tests**
     //!
+
     //! ### Error Recovery Tests (Section 8)
     //! - Error handling: 7 tests
     //! **Subtotal: ~7 tests**
     //!
+
     //! ### Real-World Examples (Section 13)
     //! - Complete programs: 15+ tests
     //! **Subtotal: ~15 tests**
     //!
+
     //! ## GRAND TOTAL: 467+ tests
     //!
+
     //! ## Grammar Coverage: ~98%
     //!
+
     //! ### Not Tested (< 2% of grammar):
     //! - Some edge cases of qualified types
     //! - Some meta invocation syntax variations
     //! - Some attribute macro details
     //!
+
     //! These are implementation-specific details that will be tested
     //! as the parser implementation progresses.
 }

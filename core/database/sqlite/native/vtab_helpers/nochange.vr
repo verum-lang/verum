@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // During an xUpdate with UPDATE semantics, the host may skip re-
-// computing a column's value if it is unchanged.  sqlite3_vtab_nochange
+// computing a column's value if it is unchanged. sqlite3_vtab_nochange
 // returns non-zero iff the current column is one of those.
 // =============================================================================
 

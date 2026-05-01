@@ -14,6 +14,7 @@
 )]
 // Comprehensive tensor literal parsing tests
 //
+
 // Tests for comprehensive tensor shape parsing and validation
 // This module provides exhaustive testing of tensor literal parsing:
 // - All dimensionalities (0D scalar through 4D and beyond)
@@ -22,6 +23,7 @@
 // - Type compatibility
 // - Edge cases and boundary conditions
 //
+
 // Target: ~200 tensor shape tests for comprehensive coverage
 
 use verum_ast::{Expr, ExprKind, FileId, PathSegment, TypeKind, literal::LiteralKind};

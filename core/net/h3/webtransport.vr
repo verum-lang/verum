@@ -2,55 +2,63 @@
 // core/net/h3/webtransport.vr — WebTransport over HTTP/3
 // =============================================================================
 // Layer: 5 (Network — HTTP/3)
-// Spec:  internal/specs/net-framework.md §6.10 (Phase 4 — WebTransport)
-//        draft-ietf-webtrans-http3-15
-//        RFC 9114 §4.4 (extended CONNECT method)
-//        RFC 9220 (Bootstrapping WebSockets with HTTP/3 — same CONNECT shape)
-//        RFC 9297 (HTTP Datagrams — the datagram surface)
+// Spec: internal/specs/net-framework.md §6.10 (Phase 4 — WebTransport)
+//  draft-ietf-webtrans-http3-15
+//  RFC 9114 §4.4 (extended CONNECT method)
+//  RFC 9220 (Bootstrapping WebSockets with HTTP/3 — same CONNECT shape)
+//  RFC 9297 (HTTP Datagrams — the datagram surface)
 // =============================================================================
 //
+
 // WebTransport gives applications a TCP-style ordered-stream API and a
 // UDP-style unreliable-datagram API over a single QUIC connection. Browser
 // vendors ship it; service-mesh and edge platforms use it as the WebRTC
 // data-channel replacement that doesn't require a TURN server.
 //
+
 // Wire shape:
 //
-//   1. Client opens a WebTransport "session" by sending an extended
-//      CONNECT request over an H3 request stream:
+
+//  1. Client opens a WebTransport "session" by sending an extended
+//  CONNECT request over an H3 request stream:
 //
-//        :method     = CONNECT
-//        :protocol   = webtransport          ← RFC 9220
-//        :scheme     = https
-//        :authority  = example.com
-//        :path       = /webtransport-endpoint
-//        sec-webtransport-http3-draft = draft02
+
+//  :method = CONNECT
+//  :protocol = webtransport ← RFC 9220
+//  :scheme = https
+//  :authority = example.com
+//  :path = /webtransport-endpoint
+//  sec-webtransport-http3-draft = draft02
 //
-//   2. Server replies 200 — request stream stays open as the *control*
-//      stream of the session.
-//   3. Either peer MAY open additional streams *associated* with this
-//      session (uni or bidi). The first frame on each associated stream
-//      is a varint session-id (the request-stream's stream_id) followed
-//      by application bytes.
-//   4. Datagrams (RFC 9297) carry the session-id varint + application
-//      payload; QUIC-level DATAGRAM frame transports them.
+
+//  2. Server replies 200 — request stream stays open as the *control*
+//  stream of the session.
+//  3. Either peer MAY open additional streams *associated* with this
+//  session (uni or bidi). The first frame on each associated stream
+//  is a varint session-id (the request-stream's stream_id) followed
+//  by application bytes.
+//  4. Datagrams (RFC 9297) carry the session-id varint + application
+//  payload; QUIC-level DATAGRAM frame transports them.
 //
+
 // Session lifecycle:
 //
-//   Client → CONNECT request stream
-//            ↓
-//          Server accept (200) ─→ session active
-//            ↓                       ↓
-//          Stream open events    Datagram events
-//            ↓                       ↓
-//          Application I/O       Application I/O
-//            ↓                       ↓
-//          Stream close          (datagrams are unreliable —
-//          / RESET_STREAM         no close concept)
-//            ↓
-//          Session close (peer sends a CLOSE_WEBTRANSPORT_SESSION
-//          capsule on the control stream, RFC 9297 §6).
+
+//  Client → CONNECT request stream
+//  ↓
+//  Server accept (200) ─→ session active
+//  ↓ ↓
+//  Stream open events Datagram events
+//  ↓ ↓
+//  Application I/O Application I/O
+//  ↓ ↓
+//  Stream close (datagrams are unreliable —
+//  / RESET_STREAM no close concept)
+//  ↓
+//  Session close (peer sends a CLOSE_WEBTRANSPORT_SESSION
+//  capsule on the control stream, RFC 9297 §6).
 //
+
 // =============================================================================
 
 module core.net.h3.webtransport;
@@ -101,9 +109,9 @@ public type WtConnectRequest is {
 implement WtConnectRequest {
     /// Extract a typed CONNECT request from a raw H3 header block.
     /// Returns None when:
-    ///   * :method is not CONNECT, OR
-    ///   * :protocol is not "webtransport", OR
-    ///   * :authority / :path are missing.
+    ///  * :method is not CONNECT, OR
+    ///  * :protocol is not "webtransport", OR
+    ///  * :authority / :path are missing.
     /// Conformant H3 servers MUST close the stream with
     /// H3_FRAME_UNEXPECTED in those cases (handled by the caller).
     public fn from_h3_headers(fields: &List<QpackHeaderField>) -> Maybe<WtConnectRequest> {
@@ -147,12 +155,14 @@ implement WtConnectRequest {
 // WtSession — server-side session handle
 // =============================================================================
 //
+
 // One per accepted CONNECT. Owns:
-//   * The session_id (the request-stream's stream_id).
-//   * Inbound stream events (each new bidi/uni associated stream).
-//   * Outbound bidi/uni stream factories.
-//   * Datagram send/recv queues.
+//  * The session_id (the request-stream's stream_id).
+//  * Inbound stream events (each new bidi/uni associated stream).
+//  * Outbound bidi/uni stream factories.
+//  * Datagram send/recv queues.
 //
+
 // Lifecycle is RAII: dropping the session cancels all associated streams
 // + flushes any queued datagrams + sends CLOSE_WEBTRANSPORT_SESSION on
 // the control stream. Structured concurrency through the parent nursery.
@@ -365,6 +375,7 @@ implement WtUnidirectional {
 // WebTransportHandler — application-supplied protocol
 // =============================================================================
 //
+
 // One method that the integration layer calls when the CONNECT
 // request has been validated + the server has emitted the 200
 // response. The session future runs inside the per-session nursery;

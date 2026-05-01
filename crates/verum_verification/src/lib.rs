@@ -3,35 +3,44 @@
 #![allow(unexpected_cfgs)]
 //! # Verum Gradual Verification System
 //!
+
 //! This crate implements Verum's gradual verification system, providing a smooth
 //! transition from runtime checking to compile-time formal verification.
 //!
+
 //! ## Three-Level Verification System
 //!
+
 //! 1. **Runtime (dynamic)**: Quick runtime checks with ~5-15ns overhead
-//!    - Default mode for development and prototyping
-//!    - All safety checks executed at runtime
-//!    - Immediate feedback during testing
+//!  - Default mode for development and prototyping
+//!  - All safety checks executed at runtime
+//!  - Immediate feedback during testing
 //!
+
 //! 2. **Static (compile-time)**: SMT verification at compile time, 0ns runtime
-//!    - Conservative static analysis proves safety
-//!    - Checks eliminated in AOT-compiled code when proven safe
-//!    - Fallback to runtime checks if proof incomplete
+//!  - Conservative static analysis proves safety
+//!  - Checks eliminated in AOT-compiled code when proven safe
+//!  - Fallback to runtime checks if proof incomplete
 //!
+
 //! 3. **Proof (formal)**: Full formal proofs with proof objects
-//!    - SMT solver generates complete correctness proofs
-//!    - Mathematical guarantees of safety properties
-//!    - Optional proof certificate generation
+//!  - SMT solver generates complete correctness proofs
+//!  - Mathematical guarantees of safety properties
+//!  - Optional proof certificate generation
 //!
+
 //! ## Gradual Transition Mechanism
 //!
+
 //! The system supports seamless migration between verification levels:
 //! - Start with `@verify(runtime)` for rapid prototyping
 //! - Gradually add `@verify(static)` for performance-critical code
 //! - Use `@verify(proof)` for critical safety requirements
 //!
+
 //! ## Architecture
 //!
+
 //! - [`level`]: Verification level types and traits
 //! - [`context`]: Verification context and boundary tracking
 //! - [`transition`]: Gradual transition between verification levels
@@ -39,27 +48,33 @@
 //! - [`boundary`]: Trusted/untrusted code boundaries
 //! - [`integration`]: Integration with type system and SMT
 //!
+
 //! ## Example
 //!
+
 //! ```no_run
 //! use verum_verification::{VerificationLevel, VerificationContext};
 //!
+
 //! // Create verification context
 //! let mut ctx = VerificationContext::new();
 //!
+
 //! // Verify a function with gradual verification
 //! // (Full example code omitted - see tests for complete examples)
 //! ```
 //!
+
 //! # Design Principles
 //!
+
 //! This implementation follows the Verum verification system design:
 //! - Three-level gradual verification: runtime -> static -> proof
 //! - Conservative static analysis: safety checks are either proven unnecessary
-//!   at compile time or executed at runtime; Verum never speculates on safety
+//!  at compile time or executed at runtime; Verum never speculates on safety
 //! - SMT-backed contract verification via weakest precondition calculus
 //! - Refinement types integration: types carry predicates (e.g., Int{> 0})
-//!   that compose with contract specifications for SMT solving
+//!  that compose with contract specifications for SMT solving
 
 #![deny(missing_debug_implementations)]
 #![deny(rust_2018_idioms)]
@@ -73,24 +88,24 @@ pub mod bounds_elimination;
 pub mod cbgr_elimination;
 pub mod context;
 pub mod contract;
-/// 13-strategy verification ladder dispatcher.  Foundation-neutral
+/// 13-strategy verification ladder dispatcher. Foundation-neutral
 /// trait + reference V0 dispatcher + ν-monotonicity invariant.
 pub mod ladder_dispatch;
 /// Proof-drafting infrastructure — typed proof-state view + ranked
-/// tactic-suggestion trait + reference engine.  Single boundary that
+/// tactic-suggestion trait + reference engine. Single boundary that
 /// LSP / REPL / CLI consumers all drive through.
 pub mod proof_drafting;
 /// Industrial-grade tactic combinator catalogue — single source of
 /// truth for the 15 canonical combinators (skip / fail / seq /
 /// orelse / repeat / repeat_n / try / solve / first_of / all_goals /
 /// index_focus / named_focus / per_goal_split / have / apply_with)
-/// + their algebraic laws.  Consumed by LSP / docs / `verum tactic`
+/// + their algebraic laws. Consumed by LSP / docs / `verum tactic`
 /// CLI.
 pub mod tactic_combinator;
-/// Per-theorem closure-hash incremental verification cache.  Skip
+/// Per-theorem closure-hash incremental verification cache. Skip
 /// the kernel re-check when the closure hash matches and the cached
-/// verdict was Ok.  Cache key includes `verum_kernel::VVA_VERSION`
-/// so any kernel-rule edit invalidates ALL caches.  Single trait
+/// verdict was Ok. Cache key includes `verum_kernel::VVA_VERSION`
+/// so any kernel-rule edit invalidates ALL caches. Single trait
 /// boundary [`closure_cache::IncrementalCacheStore`] +
 /// memory-backed + filesystem-backed reference impls.
 pub mod closure_cache;
@@ -99,22 +114,22 @@ pub mod closure_cache;
 /// Replaces `format!("{:?}", thm.requires)`-style payloads — which
 /// rely on Rust's explicitly-unstable `Debug` impl — with a sorted-
 /// keys JSON serialiser whose schema-stability contract is documented
-/// inline.  Single source of byte-level determinism for the cache
+/// inline. Single source of byte-level determinism for the cache
 /// fingerprint.
 pub mod canonical_repr;
-/// Auto-paper documentation generator (#84).  Projects every
+/// Auto-paper documentation generator (#84). Projects every
 /// public @theorem / @lemma / @corollary / @axiom plus its
 /// docstring + proof body into a typed [`doc_render::DocItem`]
 /// and renders to Markdown / LaTeX / HTML via the
-/// [`doc_render::DocRenderer`] trait.  Single source of truth for
+/// [`doc_render::DocRenderer`] trait. Single source of truth for
 /// the corpus → paper-draft pipeline.
 pub mod doc_render;
 /// Foreign-system theorem import (#85) — inverse of cross-format
-/// export.  Reads Coq / Lean4 / Mizar / Isabelle source files and
+/// export. Reads Coq / Lean4 / Mizar / Isabelle source files and
 /// projects each declaration into a typed
 /// [`foreign_import::ForeignTheorem`] which renders to a Verum
 /// skeleton with `@framework(<system>, "<source>:<line>")`
-/// attribution.  Single trait boundary
+/// attribution. Single trait boundary
 /// [`foreign_import::ForeignSystemImporter`] + per-system reference
 /// impls (`CoqImporter` / `Lean4Importer` / `MizarImporter` /
 /// `IsabelleImporter`).
@@ -125,23 +140,23 @@ pub mod foreign_import;
 /// every step; any rejection discards the proposal.
 pub mod llm_tactic;
 /// Live proof REPL (#75) — stepwise tactic feedback + proof-tree
-/// visualisation.  Single trait boundary
-/// [`proof_repl::ReplSession`] + reference V0 impl.  Consumed by
+/// visualisation. Single trait boundary
+/// [`proof_repl::ReplSession`] + reference V0 impl. Consumed by
 /// CLI batch mode + IDE / TUI integrations.
 pub mod proof_repl;
 /// Continuous benchmarking (#83) — head-to-head vs Coq / Lean4 /
-/// Isabelle / Agda.  Single trait boundary
+/// Isabelle / Agda. Single trait boundary
 /// [`benchmark::BenchmarkRunner`] + per-system mock + reference
 /// landscape values + `ComparisonMatrix` aggregator.
 pub mod benchmark;
 /// SMT certificate replay (#81) — backend-independent cert format
-/// + multi-backend cross-check.  Single trait boundary
+/// + multi-backend cross-check. Single trait boundary
 /// [`cert_replay::CertReplayEngine`] + `KernelOnlyReplayEngine`
 /// (the trust-boundary anchor that catches tampered certs without
 /// trusting external solvers) + mock-backed per-backend engines.
 pub mod cert_replay;
 /// Cog distribution registry (#82) — reproducibility chain +
-/// multi-mirror trust model.  Single trait boundary
+/// multi-mirror trust model. Single trait boundary
 /// [`cog_registry::RegistryClient`] + memory-backed +
 /// filesystem-backed reference impls + `MultiMirrorClient`
 /// composite that requires consensus across mirrors.
@@ -149,7 +164,7 @@ pub mod cog_registry;
 /// Cubical / HoTT first-class catalogue (#78) — typed primitive
 /// inventory (Path, Refl, J, Transp, Coe, Hcomp, Comp, Glue,
 /// Equiv, Univalence + 7 more) + computation-rule registry +
-/// face-formula validator.  The architectural foundation for
+/// face-formula validator. The architectural foundation for
 /// foundation-neutral cubical type theory in Verum.
 pub mod cubical;
 pub mod cost;

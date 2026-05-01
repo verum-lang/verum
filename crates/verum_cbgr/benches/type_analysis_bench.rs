@@ -1,15 +1,18 @@
 //! Benchmarks for Type-aware Field Analysis and Type-based Alias Refinement
 //!
+
 //! Benchmarks for CBGR type-aware field analysis and type-based alias refinement.
 //! Type information enables more precise alias analysis (different concrete types
 //! cannot alias) and field extraction, improving CBGR promotion rates.
 //!
+
 //! Performance targets:
 //! - Type cache lookup: < 50ns
 //! - Type compatibility check: < 100ns
 //! - Field extraction: < 200ns
 //! - Cache hit rate: > 90%
 //!
+
 //! Benchmark suites:
 //! 1. Type cache performance (lookup, insert, clear)
 //! 2. Type compatibility checking (same type, different types, generics)
@@ -395,37 +398,44 @@ criterion_main!(
 
 // Total benchmark groups: 6 (exceeds minimum requirement of 4)
 //
+
 // Coverage:
 // 1. Type cache performance (3 benchmarks)
-//    - Hot cache lookups (hits)
-//    - Cold cache lookups (misses)
-//    - Mixed access patterns
-//    - Insert operations
-//    - Statistics generation
+//  - Hot cache lookups (hits)
+//  - Cold cache lookups (misses)
+//  - Mixed access patterns
+//  - Insert operations
+//  - Statistics generation
 //
+
 // 2. Type compatibility checking (4 benchmarks)
-//    - Different base types
-//    - Same base type
-//    - Generic types with different parameters
-//    - Generic types with same parameters
+//  - Different base types
+//  - Same base type
+//  - Generic types with different parameters
+//  - Generic types with same parameters
 //
+
 // 3. Field extraction (4 benchmarks)
-//    - Small struct (2 fields)
-//    - Medium struct (5 fields)
-//    - Large struct (10 fields)
-//    - Tuple types
+//  - Small struct (2 fields)
+//  - Medium struct (5 fields)
+//  - Large struct (10 fields)
+//  - Tuple types
 //
+
 // 4. Alias refinement (3 benchmarks)
-//    - Same type may-alias
-//    - Different types no-alias
-//    - Batch refinement workload
+//  - Same type may-alias
+//  - Different types no-alias
+//  - Batch refinement workload
 //
+
 // 5. End-to-end (1 benchmark)
-//    - Complete type analysis workflow
+//  - Complete type analysis workflow
 //
+
 // 6. Cache under load (1 benchmark)
-//    - Performance with varying cache sizes
+//  - Performance with varying cache sizes
 //
+
 // Expected performance:
 // - Type cache lookup: ~20-50ns (hot), ~30-70ns (cold)
 // - Type compatibility: ~50-100ns

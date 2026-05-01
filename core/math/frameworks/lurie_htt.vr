@@ -2,15 +2,18 @@
 // Lurie, Higher Topos Theory — framework axiom package
 // =============================================================================
 //
+
 // Source: Jacob Lurie, "Higher Topos Theory", Annals of Mathematics
 // Studies 170, Princeton University Press (2009), arXiv:math/0608040.
 //
+
 // Every axiom in this file is a direct postulate of a theorem in HTT.
 // None are re-proved here — HTT has never been fully mechanised in any
 // proof assistant. The @framework(lurie_htt, "<citation>") attribute
 // makes the dependency visible to `verum audit --framework-axioms`
 // and to certificate consumers.
 //
+
 // Downstream code that cites these axioms is *rigorous in Verum modulo
 // HTT* — an auditor can check Lurie's original proofs against these
 // citations and decide whether to admit the dependency.

@@ -5,37 +5,44 @@
 // Dependencies: core, core.collections
 // =============================================================================
 //
+
 // RFC 8949 CBOR — compact, self-describing binary encoding. Used by
 // COSE (RFC 9052), CWT (RFC 8392), WebAuthn attestation, IoT/CoAP
 // payloads, and as the disk-cache format for the Verum compiler
 // stdlib cache itself (see core.compiler cache header).
 //
+
 // # Supported types (core subset — all common deployments need)
 //
-//   Major 0 — unsigned int (0..2^64-1)
-//   Major 1 — negative int (-1..-2^64)
-//   Major 2 — byte string
-//   Major 3 — text string (UTF-8)
-//   Major 4 — array
-//   Major 5 — map
-//   Major 6 — tag (wrapped value with u64 tag)
-//   Major 7 — simple / float (false, true, null, f16/f32/f64)
+
+//  Major 0 — unsigned int (0..2^64-1)
+//  Major 1 — negative int (-1..-2^64)
+//  Major 2 — byte string
+//  Major 3 — text string (UTF-8)
+//  Major 4 — array
+//  Major 5 — map
+//  Major 6 — tag (wrapped value with u64 tag)
+//  Major 7 — simple / float (false, true, null, f16/f32/f64)
 //
+
 // Indefinite-length arrays/maps/strings (0x5F/0x7F/0x9F/0xBF) are
 // accepted on decode but this module emits only definite-length
 // forms — they compose better with streaming consumers and most
 // production deployments prefer the tighter encoding.
 //
+
 // # Design
 //
-//   * `CborValue` — the typed ADT.
-//   * `encode(&CborValue) -> List<Byte>` — one-shot definite-length
-//     serialiser.
-//   * `decode(&[Byte]) -> Result<CborValue, CborError>` — full
-//     parser (definite + indefinite).
-//   * Canonical-encoding knob exported via `encode_canonical` —
-//     sorts map keys by their CBOR encoding per §4.2 (RFC 8949).
+
+//  * `CborValue` — the typed ADT.
+//  * `encode(&CborValue) -> List<Byte>` — one-shot definite-length
+//  serialiser.
+//  * `decode(&[Byte]) -> Result<CborValue, CborError>` — full
+//  parser (definite + indefinite).
+//  * Canonical-encoding knob exported via `encode_canonical` —
+//  sorts map keys by their CBOR encoding per §4.2 (RFC 8949).
 //
+
 // =============================================================================
 
 module core.encoding.cbor;
@@ -119,14 +126,14 @@ implement Eq for CborError {
 
 public const MAX_CBOR_NESTING: Int = 128;
 
-// Maximum number of items in a single CBOR array.  CBOR's wire format
+// Maximum number of items in a single CBOR array. CBOR's wire format
 // permits an 8-byte length argument, so a 9-byte hostile input can
 // claim an array of 2^63 elements; without this cap the decoder
 // would call decode_item that many times and OOM the process.
 // 1M elements is well above any realistic CBOR document.
 public const MAX_CBOR_ARRAY_ITEMS: Int = 1_000_000;
 
-// Maximum number of entries in a single CBOR map.  Same rationale as
+// Maximum number of entries in a single CBOR map. Same rationale as
 // the array cap — protects against attacker-supplied huge counts
 // that consume O(N) memory regardless of input size.
 public const MAX_CBOR_MAP_ENTRIES: Int = 1_000_000;
@@ -274,7 +281,7 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
             if minor == 31_u8 { return decode_indef_array(bytes, pos, depth); }
             let n = read_arg(bytes, pos, minor)? as Int;
             // SOUNDNESS: cap attacker-supplied array length BEFORE
-            // entering the alloc loop.  CBOR's 8-byte length argument
+            // entering the alloc loop. CBOR's 8-byte length argument
             // can claim 2^63 items in 9 bytes of input — without this
             // cap, decode_item would be called billions of times and
             // OOM the process.
@@ -404,7 +411,7 @@ fn decode_indef_array(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborV
         if bytes[*pos] == 0xFF_u8 { *pos = *pos + 1; return Ok(CborValue.CborArray(items)); }
         items.push(decode_item(bytes, pos, depth + 1)?);
         // SOUNDNESS: indefinite-length arrays bypass the explicit
-        // length-arg cap above.  Hostile inputs with millions of
+        // length-arg cap above. Hostile inputs with millions of
         // tiny elements followed by 0xFF would still OOM the parser
         // without this post-push cap.
         if items.len() > MAX_CBOR_ARRAY_ITEMS {

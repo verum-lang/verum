@@ -14,11 +14,13 @@
 )]
 //! Tests for Flow Functions - Per-Field Interprocedural Analysis
 //!
+
 //! Validates flow functions for per-field interprocedural CBGR escape analysis.
 //! Flow functions model escape propagation through CFG edges on a per-field
 //! basis. Per-edge flow function target: <100ns. Per-call interprocedural: <500ns.
 //! Whole-function analysis: <5ms. Complexity: O(edges * fields).
 //!
+
 //! This test suite validates the flow function implementation for
 //! field-sensitive interprocedural dataflow analysis.
 

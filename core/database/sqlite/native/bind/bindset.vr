@@ -3,14 +3,16 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // `BindSet` is the array-of-TypedParam attached to one PreparedStatement.
 // Operations:
 //
-//   * `bind(idx, param)`   — set slot
-//   * `clear()`            — sqlite3_clear_bindings — set every slot to NULL
-//   * `reset()`            — sqlite3_reset — clear executed-row state
-//                             (NOT bindings; matches SQLite semantics)
-//   * `lookup(idx)`        — read slot
+
+//  * `bind(idx, param)` — set slot
+//  * `clear()` — sqlite3_clear_bindings — set every slot to NULL
+//  * `reset()` — sqlite3_reset — clear executed-row state
+//  (NOT bindings; matches SQLite semantics)
+//  * `lookup(idx)` — read slot
 // =============================================================================
 
 module core.database.sqlite.native.bind.bindset;

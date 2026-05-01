@@ -1,7 +1,8 @@
 // PRAGMA case_sensitive_like.
 //
-// Off (default): a LIKE b   is "BINARY-fold-ASCII" — A == a, Z == z.
-// On:            a LIKE b   is byte-exact for the entire ASCII range.
+
+// Off (default): a LIKE b is "BINARY-fold-ASCII" — A == a, Z == z.
+// On: a LIKE b is byte-exact for the entire ASCII range.
 // Note: SQLite never folds non-ASCII characters even in OFF mode unless ICU.
 
 module core.database.sqlite.native.case_sensitive_like_pragma.pragma_;

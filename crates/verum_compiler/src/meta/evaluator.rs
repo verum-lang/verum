@@ -1,16 +1,20 @@
 //! Meta Expression Evaluator
 //!
+
 //! This module provides expression evaluation logic for meta-programming,
 //! including AST-to-MetaExpr conversion and MetaExpr evaluation.
 //!
+
 //! ## Responsibility
 //!
+
 //! The evaluator handles:
 //! - Converting AST expressions to MetaExpr (meta IR)
 //! - Evaluating MetaExpr to produce ConstValue
 //! - Pattern matching for meta match expressions
 //! - Type inference for meta values
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -34,6 +38,7 @@ use super::registry::MetaFunction;
 
 /// Extract a qualified path from an expression chain.
 ///
+
 /// For example, given `std.env` (parsed as Field { expr: Path("std"), field: "env" }),
 /// this returns Some("std.env"). For expressions that aren't simple namespace paths,
 /// returns None.
@@ -71,6 +76,7 @@ fn extract_qualified_path(expr: &Expr) -> Option<String> {
 
 /// Convert an AST Pattern to a MetaPattern
 ///
+
 /// MetaPattern is a comprehensive pattern representation for compile-time evaluation.
 /// Supports most pattern kinds for industrial-grade meta-programming.
 fn ast_pattern_to_meta_pattern(pattern: &Pattern) -> Result<MetaPattern, MetaError> {
@@ -1633,6 +1639,7 @@ impl MetaContext {
 
     /// Evaluate a type property (T.size, T.alignment, etc.)
     ///
+
     /// # Example
     /// ```ignore
     /// let size = ctx.eval_type_property(&ty, TypeProperty::Size)?;
@@ -1679,6 +1686,7 @@ impl MetaContext {
 
     /// Check if a value matches a pattern
     ///
+
     /// This is a comprehensive pattern matcher supporting all MetaPattern variants.
     /// Bindings are added to the context as patterns match.
     pub fn matches_pattern(
@@ -2298,13 +2306,16 @@ impl MetaContext {
 
     /// Execute a user-defined meta function
     ///
+
     /// This method binds the provided arguments to the function parameters,
     /// converts the function body to MetaExpr, evaluates it, and returns the result.
     ///
+
     /// # Arguments
     /// * `func` - The meta function to execute
     /// * `args` - The arguments to pass to the function (Vec for compatibility with callers)
     ///
+
     /// # Returns
     /// The result of evaluating the function body
     pub fn execute_user_meta_fn(&mut self, func: &MetaFunction, args: Vec<ConstValue>) -> Result<ConstValue, MetaError> {
@@ -2419,12 +2430,14 @@ impl MetaContext {
 
     /// Check quote expression for hygiene violations
     ///
+
     /// This method analyzes a quote expression to detect:
     /// - M400/M408: Unbound splice variables (${undefined_var})
     /// - M402: Accidental variable capture
     /// - M404: Scope resolution failures
     /// - M405: Stage mismatches
     ///
+
     /// Quote hygiene ensures that quoted code (quote! { ... }) does not accidentally
     /// capture variables from the expansion site. Splice expressions (#expr) are checked
     /// for proper scoping. This prevents the classic macro hygiene problem where generated
@@ -2454,28 +2467,35 @@ impl MetaContext {
 
     /// Expand splices in a quote expression
     ///
+
     /// This method walks the token tree of a quote expression and substitutes
     /// splice patterns (`$var` and `${expr}`) with their evaluated values from
     /// the meta scope.
     ///
+
     /// # Splice Patterns
     ///
+
     /// - `$ident`: Substitutes the value of `ident` from the meta scope
     /// - `${expr}`: Evaluates `expr` and substitutes the result
     /// - `$[for pattern in iter { body }]`: Repetition (handled separately)
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// meta fn generate_getter(name: Text, ty: Type) -> TokenStream {
-    ///     quote {
-    ///         fn get_$name() -> $ty { self.$name }
-    ///     }
+    ///  quote {
+    ///  fn get_$name() -> $ty { self.$name }
+    ///  }
     /// }
     /// ```
     ///
+
     /// Here, `$name` and `$ty` are substituted with the actual values.
     ///
+
     /// Splice interpolation substitutes $name and #expr placeholders in quote blocks
     /// with actual values from the meta evaluation context. $name splices identifiers,
     /// #expr splices arbitrary expressions, and #(#items),* splices repeated sequences
@@ -2490,6 +2510,7 @@ impl MetaContext {
 
             // Hygiene re-check after splice substitution.
             //
+
             // A `${expr}` splice may have brought in identifiers from
             // the splice site that the quote-site author never saw.
             // Re-walk the expanded tokens through the hygiene checker
@@ -2497,6 +2518,7 @@ impl MetaContext {
             // than surfacing as a mysterious type error later. Closes
             // master-audit finding F-1 (P0).
             //
+
             // The check is non-fatal — violations are accumulated on
             // the checker. Hard-fail is the embedder's choice via
             // `CheckerConfig::strict_mode`.
@@ -2520,6 +2542,7 @@ impl MetaContext {
     /// identifiers that would shadow bindings the quote-site author
     /// did not anticipate.
     ///
+
     /// Each violation is converted to a `verum_diagnostics::Diagnostic`
     /// (severity `Warning`, code from `violation.error_code()` —
     /// the M4xx range) and pushed onto `MetaContext.diagnostics`.
@@ -2530,6 +2553,7 @@ impl MetaContext {
     /// output, IDE diagnostics, or compilation failure decisions, so
     /// macros with capture issues silently produced wrong code.
     ///
+
     /// `&mut self` so the diagnostics list can be appended to. The
     /// caller still sees a `tracing::warn!` summary at the original
     /// site (one log line per quote with violations) for log-tailing
@@ -2551,6 +2575,7 @@ impl MetaContext {
         // wiring landed at MacroExpansionPhase boundary but the
         // detection itself was a no-op.
         //
+
         // Now: each name from `MetaContext.bindings` (the meta
         // function's lexical scope at the quote-emission site) is
         // pushed as an outer binding via `seed_outer_binding`. When
@@ -2562,6 +2587,7 @@ impl MetaContext {
         // with an outer let / param binding the macro author did
         // not anticipate".
         //
+
         // We use the quote's outer span as the placeholder for the
         // seeded binding (it represents "from outside the quote";
         // the precise location is the meta function's local-binding
@@ -2598,6 +2624,7 @@ impl MetaContext {
 
     /// Expand splices in a token tree
     ///
+
     /// Walks the token tree and processes:
     /// - `$ident` patterns: Look up ident in bindings, substitute value
     /// - `${...}` patterns: Parse inner tokens as expr, evaluate, substitute
@@ -2693,6 +2720,7 @@ impl MetaContext {
 
     /// Expand a simple identifier splice ($ident)
     ///
+
     /// Looks up the identifier in the meta scope and converts the value
     /// to tokens for substitution.
     fn expand_ident_splice(
@@ -2720,6 +2748,7 @@ impl MetaContext {
 
     /// Expand an expression splice (${expr})
     ///
+
     /// Parses the inner tokens as an expression, evaluates it in the meta
     /// context, and converts the result to tokens.
     fn expand_expr_splice(
@@ -2756,6 +2785,7 @@ impl MetaContext {
 
     /// Evaluate a simple meta expression (for splice context)
     ///
+
     /// This is an extended evaluation that handles common expression patterns
     /// without requiring mutable self. Supports:
     /// - Literals and variables
@@ -3098,6 +3128,7 @@ impl MetaContext {
 
     /// Expand a repetition splice ($[for pattern in iter { body }])
     ///
+
     /// Iterates over the collection and expands the body for each element.
     fn expand_repetition_splice(
         &self,
@@ -3306,6 +3337,7 @@ impl MetaContext {
 
     /// Expand a repetition body with bound variables
     ///
+
     /// This is the unified implementation that handles both single variable patterns
     /// (`for x in xs`) and tuple patterns (`for (a, b) in pairs`). The bindings list
     /// contains all the variables that should be substituted in the body.
@@ -3391,6 +3423,7 @@ impl MetaContext {
 
     /// Convert a ConstValue to token tree tokens
     ///
+
     /// This converts meta values back to tokens for splice substitution.
     fn const_value_to_tokens(
         &self,
@@ -3592,6 +3625,7 @@ impl MetaContext {
 
     /// Analyze token tree for hygiene violations
     ///
+
     /// Walks the token tree looking for:
     /// - `$ident` patterns where ident is not in scope
     /// - `${expr}` patterns with undefined variables
@@ -3613,7 +3647,7 @@ impl MetaContext {
             if let Some(binding_name) = local_bindings.iter().next() {
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG] M402 triggered for shadow conflict: '{}' in @transparent macro",
-//                    binding_name.as_str());
+//  binding_name.as_str());
                 violations.push(MetaError::HygieneViolation {
                     identifier: binding_name.clone(),
                     message: Text::from(format!(
@@ -3633,6 +3667,7 @@ impl MetaContext {
 
     /// Collect all identifiers that are declared within the quote's token tree
     ///
+
     /// This includes:
     /// - `let x = ...` bindings
     /// - Function parameters in `fn name(x: T, y: U)`
@@ -3793,12 +3828,14 @@ impl MetaContext {
 
     /// Analyze token tree for hygiene violations with knowledge of local bindings
     ///
+
     /// `check_double_splice` - if true, check for M407 double-splice `$$` errors.
     /// This should be true for the outermost quote but false for nested quotes,
     /// since `$$x` is valid in `quote { quote { $$x } }` (inner accesses outer).
     /// HOWEVER, if we've passed through a meta function boundary, it should be true
     /// because `$$` would be escaping past the stage boundary.
     ///
+
     /// `inside_meta_fn` - if true, we're inside a meta function body within the quote.
     /// Nested quotes inside a meta fn should still check for double-splice because
     /// `$$` would be escaping past the stage boundary.
@@ -3815,7 +3852,7 @@ impl MetaContext {
         #[cfg(debug_assertions)]
         {
             // eprintln!("[DEBUG] analyze_token_tree_hygiene: {} tokens, {} local bindings",
-//                tokens.len(), local_bindings.len());
+//  tokens.len(), local_bindings.len());
             for binding in local_bindings.iter() {
                 eprintln!("  [LOCAL] {}", binding.as_str());
             }
@@ -4164,7 +4201,7 @@ impl MetaContext {
                             if self.get(&var_name).is_some() {
                                 // #[cfg(debug_assertions)]
                                 // eprintln!("[DEBUG] M405 triggered for identifier: '{}' (stage mismatch - meta binding used in quote)",
-//                                    var_name.as_str());
+//  var_name.as_str());
                                 // M405: Quote stage error - referencing stage 1 binding from stage 0 code
                                 // The user should use $var_name (splice) or lift(var_name) to cross stages
                                 violations.push(MetaError::QuoteStageError {
@@ -4177,7 +4214,7 @@ impl MetaContext {
                                 // This is dangerous - user should use explicit splice $ or lift().
                                 // #[cfg(debug_assertions)]
                                 // eprintln!("[DEBUG] M402 triggered for identifier: '{}' (potential capture in @transparent macro)",
-//                                    var_name.as_str());
+//  var_name.as_str());
                                 violations.push(MetaError::HygieneViolation {
                                     identifier: var_name,
                                     message: Text::from(format!(
@@ -4196,7 +4233,7 @@ impl MetaContext {
                                 // splice a meta-level binding but forgot to use $
                                 // #[cfg(debug_assertions)]
                                 // eprintln!("[DEBUG] M408 triggered for identifier: '{}' (undeclared capture)",
-//                                    var_name.as_str());
+//  var_name.as_str());
                                 violations.push(MetaError::CaptureNotDeclared {
                                     identifier: var_name,
                                     span: token.span,
@@ -4233,7 +4270,7 @@ impl MetaContext {
                     let is_meta_fn_body = if *delimiter == MacroDelimiter::Brace && i >= 2 {
                         // Look back for "meta fn" pattern before this brace group
                         // The pattern could be: meta fn name (...) -> Type { }
-                        //                    or: meta fn name (...) { }
+                        //  or: meta fn name (...) { }
                         let mut saw_meta = false;
                         let mut is_meta_fn = false;
                         for j in i.saturating_sub(10)..i {
@@ -4373,6 +4410,7 @@ impl MetaContext {
 
     /// Check for M409: Repetition length mismatch in $[for ... in zip(var1, var2) {...}]
     ///
+
     /// This function analyzes the inner tokens of a $[...] repetition block to detect
     /// when zip() is called with arrays of different lengths.
     fn check_repetition_lengths(
@@ -4429,8 +4467,8 @@ impl MetaContext {
                                         if first_len != other_len {
                                             // #[cfg(debug_assertions)]
                                             // eprintln!("[DEBUG] M409 triggered: '{}' has {} elements, '{}' has {}",
-//                                                first_name.as_str(), first_len,
-//                                                other_name.as_str(), other_len);
+//  first_name.as_str(), first_len,
+//  other_name.as_str(), other_len);
 
                                             violations.push(MetaError::RepetitionMismatch {
                                                 first_name: first_name.clone(),
@@ -4476,6 +4514,7 @@ impl MetaContext {
 
 /// Convert a hygiene violation into a user-facing diagnostic.
 ///
+
 /// The diagnostic carries the violation's M4xx error code (from
 /// `HygieneViolation::error_code`) and human-readable message
 /// (from `HygieneViolation::message`). Span resolution falls back
@@ -4485,6 +4524,7 @@ impl MetaContext {
 /// `span()` returns the dummy span (e.g. internal-error
 /// `GensymCollision` produced without a real source location).
 ///
+
 /// Severity is `Warning` — hygiene violations are non-fatal by
 /// default; an embedder that wants hard-fail wires it through
 /// `CheckerConfig::strict_mode`. The session diagnostic emitter
@@ -4505,6 +4545,7 @@ pub(crate) fn hygiene_violation_to_diagnostic(
 
 /// Estimate the byte cost of a freshly-allocated `ConstValue`.
 ///
+
 /// Used by `MetaContext::track_allocation` to account for
 /// memory budget at container-construction sites in
 /// `eval_meta_expr` (ListComp result, Record→Tuple result, …).
@@ -4513,18 +4554,21 @@ pub(crate) fn hygiene_violation_to_diagnostic(
 /// nested array counts its full footprint, not just the outer
 /// Vec spine.
 ///
+
 /// Per-variant cost model (sized to the actual `ConstValue`
 /// representation in `verum_ast::MetaValue`):
 ///
-///   * `Unit`/`Bool`/`Char`/`Int`/`Float`: `WORD = 16` bytes
-///     (variant tag + payload, padded to alignment).
-///   * `Text(s)`: `WORD + s.len()` (the heap-side string body).
-///   * `Array(arr)` / `Tuple(arr)`: `VEC_HEADER = 24` bytes
-///     (ptr/cap/len) + recursive sum of element sizes.
-///   * `Map`/`Set`/`Record`/`Variant`: aggregate of fields.
-///   * `Type`/`Expr`/`Path`/`Pattern`/`Stmt`: `WORD * 4` —
-///     the AST nodes are heap-allocated and we approximate.
+
+///  * `Unit`/`Bool`/`Char`/`Int`/`Float`: `WORD = 16` bytes
+///  (variant tag + payload, padded to alignment).
+///  * `Text(s)`: `WORD + s.len()` (the heap-side string body).
+///  * `Array(arr)` / `Tuple(arr)`: `VEC_HEADER = 24` bytes
+///  (ptr/cap/len) + recursive sum of element sizes.
+///  * `Map`/`Set`/`Record`/`Variant`: aggregate of fields.
+///  * `Type`/`Expr`/`Path`/`Pattern`/`Stmt`: `WORD * 4` —
+///  the AST nodes are heap-allocated and we approximate.
 ///
+
 /// This isn't a precise allocator — it's a budget-tracking
 /// heuristic that's stable enough for the
 /// `[meta] memory_limit` knob to mean "rough megabytes

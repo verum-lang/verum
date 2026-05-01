@@ -3,17 +3,21 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2
 //
+
 // BM25 = sum over query terms q of:
 //
-//   IDF(q) * tf(q,doc) * (k1 + 1)
-//   ─────────────────────────────────────────
-//   tf(q,doc) + k1 * (1 - b + b * doc_len / avgdl)
+
+//  IDF(q) * tf(q,doc) * (k1 + 1)
+//  ─────────────────────────────────────────
+//  tf(q,doc) + k1 * (1 - b + b * doc_len / avgdl)
 //
+
 // where:
-//   k1 = 1.2 (term-saturation parameter)
-//   b  = 0.75 (length-normalisation parameter)
-//   IDF(q) = ln((N - df + 0.5) / (df + 0.5) + 1)
+//  k1 = 1.2 (term-saturation parameter)
+//  b = 0.75 (length-normalisation parameter)
+//  IDF(q) = ln((N - df + 0.5) / (df + 0.5) + 1)
 //
+
 // =============================================================================
 
 module core.database.sqlite.native.fts5.query.ranker;

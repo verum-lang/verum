@@ -2,10 +2,11 @@
 // core/net/quic/lb_cid.vr — QUIC-LB connection-ID rotation (draft-ietf-quic-load-balancers)
 // =============================================================================
 // Layer: 5 (Network — QUIC)
-// Spec:  internal/specs/net-framework.md §6.10 (Phase 4 — QUIC-LB)
-//        draft-ietf-quic-load-balancers-19
+// Spec: internal/specs/net-framework.md §6.10 (Phase 4 — QUIC-LB)
+//  draft-ietf-quic-load-balancers-19
 // =============================================================================
 //
+
 // QUIC-LB lets a stateless load balancer demultiplex inbound QUIC
 // datagrams to the right server replica without keeping any
 // per-connection state. The trick: the server bakes a *server-id*
@@ -13,23 +14,28 @@
 // (after AES-128 decrypt with a shared key) from byte offset N+1 of
 // the inbound DCID and routes accordingly.
 //
+
 // Wire layout of a QUIC-LB CID (Stream Cipher CRC variant — the
 // production-recommended profile per the draft §4.4):
 //
-//   Byte 0:    CR (1 bit) | length-config (7 bits)   ← config_id from §3.2
-//   Bytes 1+:  AES-128(key, server_id || nonce || zero_padding)
+
+//  Byte 0: CR (1 bit) | length-config (7 bits) ← config_id from §3.2
+//  Bytes 1+: AES-128(key, server_id || nonce || zero_padding)
 //
+
 // `length-config` encodes (server_id_len, nonce_len, total_cid_len)
 // in a 7-bit table — the LB uses it to decide how many bytes to
 // decrypt. This module supports 8/12/16/20-byte CIDs with 1-3 byte
 // server_ids — the canonical configuration spread.
 //
+
 // Key rotation: every server-id encryption uses a key index that
 // rolls forward on a configurable schedule. The LB and servers run
 // in lockstep — both retain N keys (default 2 — current + previous)
 // to handle the rotation overlap window. Old CIDs decrypt against
 // the previous key; new CIDs use the current key.
 //
+
 // =============================================================================
 
 module core.net.quic.lb_cid;
@@ -222,6 +228,7 @@ implement CidGenerator {
 // CidDecoder — LB-side server-id recovery
 // =============================================================================
 //
+
 // The LB holds the same key as the server replicas. Per inbound
 // datagram, it reads the first byte of the DCID to determine the
 // profile, then needs to *decrypt* the encrypted region to recover

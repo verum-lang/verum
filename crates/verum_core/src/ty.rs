@@ -1,11 +1,13 @@
 //! IR types.
 //!
+
 //! [`IrType`] is the typed-IR's type form. Covers the primitives the
 //! SMT translator recognises directly (Int, Bool, Real, Text), the
 //! common collection shapes (List, Tuple), refinement types (a base
 //! type constrained by a predicate expression), and named references
 //! to user-declared types (variants, records, aliases).
 //!
+
 //! Types with richer shape — protocols, HOT-dependent forms, cubical
 //! paths — are preserved via [`IrType::Named`] with the qualified
 //! name and generic arguments. Downstream consumers that need the

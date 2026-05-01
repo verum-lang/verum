@@ -1,5 +1,6 @@
 //! Metamath proof-replay backend.
 //!
+
 //! Lowers an [`SmtCertificate`] into a Metamath proof step
 //! (`$= ... $.` syntax). Metamath has the most explicit proof
 //! language of the five targets — every step references prior

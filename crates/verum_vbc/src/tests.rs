@@ -932,7 +932,7 @@ fn test_bytecode_bounds_checking() {
     let mut module = VbcModule::new("bytecode".to_string());
 
     // Build a real, decodable bytecode body: three `Mov r0, r0` + a
-    // `Ret r0` terminator.  `vec![0; 10]` (the original test's
+    // `Ret r0` terminator. `vec![0; 10]` (the original test's
     // approach) was opaque bytes that the per-instruction validator
     // cannot decode — for the bounds-checking invariant the test
     // intends to pin, the body must be well-formed.

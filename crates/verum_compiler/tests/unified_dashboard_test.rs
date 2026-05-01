@@ -14,6 +14,7 @@
 )]
 //! Test for unified performance dashboard
 //!
+
 //! Demonstrates the unified dashboard functionality with sample data.
 
 use std::time::Duration;

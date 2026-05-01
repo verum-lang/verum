@@ -3,15 +3,17 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_complete.
 //
+
 // The classic algorithm is a small state machine that tracks:
 //
-//   * current lexical mode (plain / single-quote / double-quote /
-//     bracket-identifier / line-comment / block-comment),
-//   * CREATE TRIGGER depth — once a CREATE TRIGGER begins, a stand-
-//     alone `;` does *not* end the outer statement until the trailing
-//     `END` is seen,
-//   * whether we have seen *any* non-whitespace character since the
-//     last terminator (empty strings are not complete).
+
+//  * current lexical mode (plain / single-quote / double-quote /
+//  bracket-identifier / line-comment / block-comment),
+//  * CREATE TRIGGER depth — once a CREATE TRIGGER begins, a stand-
+//  alone `;` does *not* end the outer statement until the trailing
+//  `END` is seen,
+//  * whether we have seen *any* non-whitespace character since the
+//  last terminator (empty strings are not complete).
 // =============================================================================
 
 module core.database.sqlite.native.complete.state;

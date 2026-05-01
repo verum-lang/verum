@@ -1,18 +1,21 @@
 //! Cross-platform FFI abstraction layer.
 //!
+
 //! This module provides a unified interface for platform-specific FFI operations:
 //! - Dynamic library loading (dlopen, LoadLibrary)
 //! - Symbol resolution (dlsym, GetProcAddress)
 //! - Errno/GetLastError access
 //! - Executable memory allocation for trampolines
 //!
+
 //! # Platform Support
 //!
+
 //! | Platform | Library Loading | Symbol Resolution | Errno |
 //! |----------|-----------------|-------------------|-------|
-//! | macOS    | dlopen          | dlsym             | __error() |
-//! | Linux    | dlopen          | dlsym             | __errno_location() |
-//! | Windows  | LoadLibraryW    | GetProcAddress    | GetLastError() |
+//! | macOS | dlopen | dlsym | __error() |
+//! | Linux | dlopen | dlsym | __errno_location() |
+//! | Windows | LoadLibraryW | GetProcAddress | GetLastError() |
 
 #[cfg(target_os = "macos")]
 pub mod darwin;
@@ -27,6 +30,7 @@ use std::fmt;
 
 /// Opaque handle to a loaded dynamic library.
 ///
+
 /// This wraps the platform-specific handle type:
 /// - Unix: `*mut c_void` from dlopen
 /// - Windows: `HMODULE` from LoadLibrary
@@ -39,8 +43,10 @@ pub struct LibraryHandle {
 impl LibraryHandle {
     /// Creates a new library handle from a raw pointer.
     ///
+
     /// # Safety
     ///
+
     /// The pointer must be a valid library handle from the platform's
     /// library loading function (dlopen, LoadLibrary, etc.).
     pub unsafe fn from_raw(ptr: *mut std::ffi::c_void) -> Self {
@@ -108,6 +114,7 @@ pub enum FfiPlatformError {
     /// time. Use `StructPtr(...)` (pass-by-pointer) instead, which is
     /// the canonical C-callback ABI for non-trivial aggregates.
     ///
+
     /// `position` is `"return"` for the return type or
     /// `"argument {index}"` (1-based) for a parameter, so the caller
     /// can produce an actionable diagnostic without re-walking the
@@ -153,33 +160,42 @@ impl std::error::Error for FfiPlatformError {}
 
 /// Cross-platform FFI abstraction trait.
 ///
+
 /// This trait provides a unified interface for FFI operations across
 /// different operating systems. Implementations handle platform-specific
 /// details like library loading, symbol resolution, and errno access.
 ///
+
 /// # Thread Safety
 ///
+
 /// All implementations must be `Send + Sync` to support multi-threaded
 /// access from the interpreter.
 pub trait FfiPlatform: Send + Sync {
     /// Load a dynamic library by name.
     ///
+
     /// The name can be:
     /// - A simple library name (e.g., "c", "System")
     /// - A full path to the library
     ///
+
     /// The implementation will normalize the name for the current platform
     /// (adding lib prefix, .so/.dylib/.dll suffix, etc.).
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if the library cannot be found or loaded.
     fn load_library(&self, name: &str) -> Result<LibraryHandle, FfiPlatformError>;
 
     /// Unload a previously loaded library.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure that:
     /// - The handle is valid (was returned by `load_library`)
     /// - No code from the library is currently executing
@@ -188,11 +204,14 @@ pub trait FfiPlatform: Send + Sync {
 
     /// Resolve a symbol in a loaded library.
     ///
+
     /// Returns a pointer to the symbol, which can be cast to the appropriate
     /// function pointer type.
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if the symbol cannot be found.
     fn resolve_symbol(
         &self,
@@ -202,40 +221,50 @@ pub trait FfiPlatform: Send + Sync {
 
     /// Get a pointer to the thread-local errno location.
     ///
+
     /// This returns a pointer that can be dereferenced to read or write
     /// the current thread's errno value.
     fn errno_location(&self) -> *mut i32;
 
     /// Normalize a library name for the current platform.
     ///
+
     /// Transforms a logical library name into a platform-specific filename:
     /// - macOS: "foo" → "libfoo.dylib" or framework path
     /// - Linux: "foo" → "libfoo.so"
     /// - Windows: "foo" → "foo.dll"
     ///
+
     /// If the name already has a platform-specific suffix, it's returned as-is.
     fn normalize_library_name(&self, name: &str) -> String;
 
     /// Allocate executable memory for trampolines.
     ///
+
     /// This allocates memory with read, write, and execute permissions
     /// for generating callback trampolines.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure that:
     /// - Code written to this memory is valid machine code
     /// - The memory is properly freed using `free_executable`
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if memory allocation fails.
     unsafe fn alloc_executable(&self, size: usize) -> Result<*mut u8, FfiPlatformError>;
 
     /// Free previously allocated executable memory.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure that:
     /// - The pointer was returned by `alloc_executable`
     /// - No code in the memory is currently executing
@@ -248,6 +277,7 @@ pub trait FfiPlatform: Send + Sync {
 
 /// Factory function to create a platform-specific FFI implementation.
 ///
+
 /// Returns the appropriate implementation for the current operating system.
 #[cfg(feature = "ffi")]
 pub fn create_platform() -> Box<dyn FfiPlatform> {

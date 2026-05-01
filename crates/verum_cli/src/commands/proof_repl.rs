@@ -1,5 +1,5 @@
 //! `verum proof-repl` subcommand — non-interactive batch driver
-//! for the proof REPL state machine.  Interactive TUI is a future
+//! for the proof REPL state machine. Interactive TUI is a future
 //! v1; this surface is what tests / IDE integrations / CI scripts
 //! consume today.
 
@@ -38,7 +38,7 @@ fn parse_lemmas(flags: &[String]) -> Result<Vec<LemmaSummary>> {
     Ok(out)
 }
 
-/// Parse a single command line from the batch script.  One command
+/// Parse a single command line from the batch script. One command
 /// per line; blank lines and `#`-comments are skipped.
 fn parse_command_line(line: &str) -> Result<Option<ReplCommand>> {
     let line = line.trim();
@@ -78,7 +78,7 @@ fn parse_command_line(line: &str) -> Result<Option<ReplCommand>> {
         return Ok(Some(ReplCommand::Hint { max }));
     }
     // Both `apply <tactic>` and a bare `<tactic>` line route to
-    // `ReplCommand::Apply { tactic }`.  The tactic string is
+    // `ReplCommand::Apply { tactic }`. The tactic string is
     // preserved verbatim — the kernel checker expects e.g.
     // "apply foo_lemma" (with prefix) for lemma application, or
     // bare keywords like "intro" / "auto" for canonical tactics.

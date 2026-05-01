@@ -1,44 +1,54 @@
 //! Level 0: Type Prevention (Compile-Time Safety)
 //!
+
 //! The best errors are the ones that cannot be written in the first place.
 //! Level 0 uses the type system to make entire classes of errors unrepresentable.
 //! Three mechanisms provide compile-time prevention:
 //!
+
 //! - **Refinement types** (`T{pred}`, `T where pred`, `var: T where pred`): extend
-//!   base types with logical predicates verified by the SMT solver at compile time,
-//!   eliminating runtime checks entirely.
+//!  base types with logical predicates verified by the SMT solver at compile time,
+//!  eliminating runtime checks entirely.
 //! - **Affine types**: linear tracking ensures values are used at most once,
-//!   preventing use-after-free, double-free, and resource leaks. Enforced by the
-//!   CBGR (Compile-time Bounded Generational References) system.
+//!  preventing use-after-free, double-free, and resource leaks. Enforced by the
+//!  CBGR (Compile-time Bounded Generational References) system.
 //! - **Context tracking**: capability-based dependency injection at the type level
-//!   ensures context requirements (e.g., `using [FileIO]`) are explicitly declared
-//!   and statically verified.
+//!  ensures context requirements (e.g., `using [FileIO]`) are explicitly declared
+//!  and statically verified.
 //!
+
 //! Errors at this level are **prevented by the type system** and should never
 //! occur in well-typed Verum programs. This level includes:
 //!
+
 //! - **Refinement types** (e.g., `x: Int{> 0}`) - prove constraints at compile time
 //! - **Affine types** - move semantics prevent use-after-free
 //! - **Context requirements** - require specific contexts to be available
 //! - **Type constraints** - use the protocol system to enforce type safety
 //!
+
 //! # When These Errors Occur
 //!
+
 //! Level 0 errors indicate a violation of type-system invariants that the
 //! compiler should have caught. If you're seeing these at runtime, it means:
 //!
+
 //! - The code bypassed type checking (e.g., via unsafe code or FFI)
 //! - The compiler had a bug
 //! - Someone used `unwrap()` on a checked result
 //!
+
 //! # Prevention Strategies
 //!
+
 //! - Use refinement types to prove constraints
 //! - Use affine types to prevent moves
 //! - Use the context system to track required state
 //! - Enable SMT verification for critical code
 //! - Avoid unsafe blocks unless absolutely necessary
 //!
+
 //! This module provides error types for type-level violations that **should
 //! never occur in well-typed programs** but may occur when safety is bypassed.
 
@@ -47,6 +57,7 @@ use verum_common::Text;
 
 /// Refinement constraint violation
 ///
+
 /// Indicates a refinement type predicate was not satisfied.
 /// This should be caught at compile-time by SMT verification.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -98,6 +109,7 @@ impl From<RefinementError> for VerumError {
 
 /// Affine type violation
 ///
+
 /// Indicates a value was used after being moved or used more than once.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Affine type violation: {message}")]
@@ -136,6 +148,7 @@ impl From<AffineError> for VerumError {
 
 /// Context requirement violation
 ///
+
 /// Indicates a function requiring a context was called without it.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Context requirement not satisfied: {context}")]

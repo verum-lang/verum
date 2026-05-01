@@ -15,19 +15,23 @@
 )]
 //! Comprehensive Tests for Field-Sensitive Heap Tracking
 //!
+
 //! Validates field-sensitive heap tracking for CBGR per-field escape analysis.
 //! Tracks which struct fields are stored to heap vs stack, enabling independent
 //! CBGR tier decisions per field. Complexity: O(fields * heap_stores).
 //!
+
 //! This test suite validates the field-sensitive heap tracking system that enables
 //! independent escape analysis for struct fields. Tests cover:
 //!
+
 //! - Core data structures (HeapSiteId, HeapStore, FieldHeapInfo)
 //! - Field heap tracker (FieldHeapTracker)
 //! - Integration with escape analysis
 //! - Performance characteristics
 //! - Edge cases and error conditions
 //!
+
 //! **Test Coverage**: 20+ comprehensive tests
 
 use verum_cbgr::analysis::{

@@ -3,14 +3,16 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Two-tier limit enforcement. `try_allocate(bytes)` walks:
 //
-//   1. If both limits disabled → succeed
-//   2. If `used + bytes ≤ soft.threshold` → succeed
-//   3. Fire SoftThresholdCrossing — handler reclaims K bytes; retry
-//   4. If `used + bytes ≤ hard.threshold` (after reclaim) → succeed
-//   5. Fire HardThresholdImminent → handler reclaims more; retry
-//   6. If still over hard → return SoftHeapAllocOutcome.Refused (NOMEM)
+
+//  1. If both limits disabled → succeed
+//  2. If `used + bytes ≤ soft.threshold` → succeed
+//  3. Fire SoftThresholdCrossing — handler reclaims K bytes; retry
+//  4. If `used + bytes ≤ hard.threshold` (after reclaim) → succeed
+//  5. Fire HardThresholdImminent → handler reclaims more; retry
+//  6. If still over hard → return SoftHeapAllocOutcome.Refused (NOMEM)
 // =============================================================================
 
 module core.database.sqlite.native.soft_heap.engine;

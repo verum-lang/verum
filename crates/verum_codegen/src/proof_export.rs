@@ -1,7 +1,8 @@
 //! Proof-term export — `verum_kernel::CoreTerm` → external proof
 //! assistant syntax (Lean 4 / Coq / Agda / Dedukti / Metamath).
-//! M-VVA-FU Sub-2.5/2.6/2.7 V0/V1 (deferred per VVA spec L1422).
+//! M-VVA-FU Sub-2.5/2.6/2.7 (deferred per VVA spec L1422).
 //!
+
 //! Pre-this-module the cross-format export emitted statement-level
 //! declarations only — the @theorem signature followed by `sorry` /
 //! `Admitted` / `postulate`. V1 (this module) lowers the structural
@@ -12,29 +13,32 @@
 //! and modal modalities (Shape / Flat / Sharp / ModalBox /
 //! ModalDiamond / EpsilonOf / AlphaOf).
 //!
+
 //! **Architectural shape.** Each target gets its own lowering module:
-//!   * `lean::lower_term(t)` — `CoreTerm → String` (Lean 4 syntax).
-//!   * `coq::lower_term(t)` — `CoreTerm → String` (Coq / Gallina).
-//!   * `agda::lower_term(t)` — `CoreTerm → String` (Agda 2.6).
-//!   * `dedukti::lower_term(t)` — `CoreTerm → String` (λΠ-modulo).
-//!   * `metamath::lower_term(t)` — `CoreTerm → String` (label form).
+//!  * `lean::lower_term(t)` — `CoreTerm → String` (Lean 4 syntax).
+//!  * `coq::lower_term(t)` — `CoreTerm → String` (Coq / Gallina).
+//!  * `agda::lower_term(t)` — `CoreTerm → String` (Agda 2.6).
+//!  * `dedukti::lower_term(t)` — `CoreTerm → String` (λΠ-modulo).
+//!  * `metamath::lower_term(t)` — `CoreTerm → String` (label form).
 //!
+
 //! All five use the same conservative-fallback strategy: when an
 //! unsupported constructor is encountered, return `sorry` (Lean) /
 //! `admit` (Coq) / `?` (Agda) / `(* unsupported *)` (Dedukti) /
 //! `( ?ctor )` (Metamath) with the constructor name embedded in a
 //! tactic-mode comment for downstream re-derivation hints.
 //!
+
 //! References:
-//!   * Lean 4 manual §6 (term mode).
-//!   * Coq reference manual ch. 11 (Gallina).
-//!   * Agda 2.6 manual ch. 4 (term language).
-//!   * Dedukti — λΠ-calculus modulo, Saillard PhD ch. 3.
-//!   * Metamath book ch. 2 — proof-substitution model.
+//!  * Lean 4 manual §6 (term mode).
+//!  * Coq reference manual ch. 11 (Gallina).
+//!  * Agda 2.6 manual ch. 4 (term language).
+//!  * Dedukti — λΠ-calculus modulo, Saillard PhD ch. 3.
+//!  * Metamath book ch. 2 — proof-substitution model.
 
 use verum_kernel::{CoreTerm, UniverseLevel};
 
-/// Lean 4 proof-term lowerer (V1).
+/// Lean 4 proof-term lowerer .
 pub mod lean {
     use super::*;
 
@@ -156,7 +160,7 @@ pub mod lean {
     }
 }
 
-/// Coq / Gallina proof-term lowerer (V1). Mirrors lean::lower_term
+/// Coq / Gallina proof-term lowerer . Mirrors lean::lower_term
 /// with Coq syntax differences.
 pub mod coq {
     use super::*;
@@ -264,7 +268,7 @@ pub mod coq {
     }
 }
 
-/// Agda 2.6 proof-term lowerer (V1).
+/// Agda 2.6 proof-term lowerer .
 pub mod agda {
     use super::*;
 
@@ -371,7 +375,7 @@ pub mod agda {
     }
 }
 
-/// Dedukti (λΠ-modulo) proof-term lowerer (V1). Dedukti is the
+/// Dedukti (λΠ-modulo) proof-term lowerer . Dedukti is the
 /// universal proof-assistant interchange format — encodes Lean,
 /// Coq, Agda, HOL via λΠ-calculus modulo β/η + rewrite rules.
 pub mod dedukti {
@@ -460,7 +464,7 @@ pub mod dedukti {
     }
 }
 
-/// Metamath proof-term lowerer (V1). Metamath uses a minimalist
+/// Metamath proof-term lowerer . Metamath uses a minimalist
 /// substitution-based proof-checking model — every step is a label
 /// + substitution. We lower CoreTerm to a Metamath-style label
 /// chain that downstream tools can translate into the actual
@@ -748,7 +752,7 @@ mod tests {
 
     #[test]
     fn lean_id_lambda_composition() {
-        // λ (x : Nat) → x  applied to itself in Pi context.
+        // λ (x : Nat) → x applied to itself in Pi context.
         let id_pi = CoreTerm::Pi {
             binder: Text::from("x"),
             domain: Heap::new(var("Nat")),

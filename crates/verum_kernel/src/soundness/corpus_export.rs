@@ -1,44 +1,53 @@
 //! Corpus-theorem cross-format export — task #138 / MSFS-L4.5.
 //!
+
 //! Sibling to the kernel-soundness export (`coq.rs` / `lean.rs`) but
 //! aimed at *corpus theorems* (the theorems users write in their
-//! `.vr` modules, not the kernel's own meta-theory).  Produces
+//! `.vr` modules, not the kernel's own meta-theory). Produces
 //! per-theorem foreign-tool source files that `coqc` / `lean` can
 //! re-check independently.
 //!
+
 //! ## Architecture (protocol-driven)
 //!
+
 //! Single trait [`CorpusBackend`] with one implementation per
-//! foreign tool.  Adding Isabelle / Agda / Dedukti is a single new
+//! foreign tool. Adding Isabelle / Agda / Dedukti is a single new
 //! [`CorpusBackend`] instance — the walker, the audit gate, and the
 //! cross-format runner are all parameterised over the trait.
 //!
+
 //! ## What gets emitted
 //!
+
 //! For every `@theorem name(...) ensures E proof { … }` declaration:
 //!
-//!   * The theorem name as the foreign-tool identifier
-//!     (sanitised — Verum `snake_case` maps directly; non-ASCII
-//!     and reserved-word collisions get a `verum_` prefix).
-//!   * The proposition rendered as a textual statement (best-effort
-//!     for the V0 surface; opaque `Prop` parameter for non-trivial
-//!     shapes — sufficient to verify the statement *type-checks* in
-//!     the foreign system).
-//!   * A `sorry` (Lean) / `Admitted.` (Coq) marker because the
-//!     proof body itself isn't being exported in this round.  The
-//!     CI-gate semantics: *the statement is well-formed in the
-//!     foreign system*.  Proof-term export is a separate piece
-//!     (proof_replay backends).
+
+//!  * The theorem name as the foreign-tool identifier
+//!  (sanitised — Verum `snake_case` maps directly; non-ASCII
+//!  and reserved-word collisions get a `verum_` prefix).
+//!  * The proposition rendered as a textual statement (best-effort
+//!  for the current surface; opaque `Prop` parameter for non-trivial
+//!  shapes — sufficient to verify the statement *type-checks* in
+//!  the foreign system).
+//!  * A `sorry` (Lean) / `Admitted.` (Coq) marker because the
+//!  proof body itself isn't being exported in this round. The
+//!  CI-gate semantics: *the statement is well-formed in the
+//!  foreign system*. Proof-term export is a separate piece
+//!  (proof_replay backends).
 //!
-//! This is the **statement-level CI gate**.  Even at this scope it
+
+//! This is the **statement-level CI gate**. Even at this scope it
 //! catches:
 //!
-//!   * Statements that don't type-check in the foreign system (e.g.,
-//!     malformed quantifier scoping, undefined operators, missing
-//!     imports).
-//!   * Tooling regressions — `coqc` / `lean` version drift surfaces
-//!     when the gate runs.
+
+//!  * Statements that don't type-check in the foreign system (e.g.,
+//!  malformed quantifier scoping, undefined operators, missing
+//!  imports).
+//!  * Tooling regressions — `coqc` / `lean` version drift surfaces
+//!  when the gate runs.
 //!
+
 //! Proof-term re-check is a strictly stronger gate that requires the
 //! kernel's CoreTerm proof to be lowered to each foreign system's
 //! tactic language; that lives in `verum_smt::proof_replay::*` and is
@@ -56,7 +65,7 @@ use super::expr_translate::{
 /// One theorem parameter — name + per-backend type text (#141).
 /// `per_backend_type_text` keys are backend ids (`"coq"`, `"lean"`);
 /// when a backend's translator succeeded, the value is the foreign-
-/// tool type syntax for the parameter.  When it fell back, the entry
+/// tool type syntax for the parameter. When it fell back, the entry
 /// for that backend is absent and the per-format renderer emits a
 /// generic `Type` placeholder so the binding still exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,12 +76,13 @@ pub struct TheoremParam {
     pub per_backend_type_text: std::collections::BTreeMap<String, String>,
 }
 
-/// One generic type parameter (#145 / MSFS-L4.11).  Theorems with
+/// One generic type parameter (#145 / MSFS-L4.11). Theorems with
 /// generic parameters like `<S: RichS>` are emitted as Coq/Lean
 /// implicit arguments (`{S : Type}`) preceding the value parameters,
 /// so foreign tools see the universe-quantified statement rather than
 /// an undeclared identifier.
 ///
+
 /// Protocol bounds (`S: RichS`) are preserved as a per-backend comment
 /// hint rather than as a typeclass instance, because instance lowering
 /// requires the protocol to be exported as a Coq Class / Lean class
@@ -85,13 +95,13 @@ pub struct TheoremGeneric {
     pub name: String,
     /// Bound text — a human-readable description of the protocol bound,
     /// preserved into the foreign-tool emission as an annotation.
-    /// Example: `"S : RichS"` for `<S: RichS>`.  Empty when the
+    /// Example: `"S : RichS"` for `<S: RichS>`. Empty when the
     /// generic carries no bound.
     pub bound_annotation: String,
 }
 
 /// One theorem's cross-format export specification — what the
-/// per-format renderer needs.  Constructed from the AST by the
+/// per-format renderer needs. Constructed from the AST by the
 /// audit walker; consumed by [`CorpusBackend::render_theorem`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TheoremSpec {
@@ -100,10 +110,10 @@ pub struct TheoremSpec {
     /// word collisions are already handled).
     pub name: String,
     /// Module path of the source file (e.g.,
-    /// `theorems.msfs.05_afnt_alpha.theorem_5_1`).  Preserved into
+    /// `theorems.msfs.05_afnt_alpha.theorem_5_1`). Preserved into
     /// the foreign-tool file's header comment.
     pub module_path: String,
-    /// Proposition rendered as text — best-effort.  When the
+    /// Proposition rendered as text — best-effort. When the
     /// statement involves Verum-specific shapes the renderer can't
     /// translate, this falls back to `Prop` and the foreign-tool
     /// re-check verifies only that the *name* binding is well-formed.
@@ -112,24 +122,25 @@ pub struct TheoremSpec {
     /// When `Some`, the corresponding [`CorpusBackend`] uses this
     /// rendered proposition as the theorem's TYPE in the foreign
     /// tool — e.g., `Theorem foo : (n = 7).` instead of
-    /// `Theorem foo : Prop.`  Keys are backend ids
+    /// `Theorem foo : Prop.` Keys are backend ids
     /// (`"coq"`, `"lean"`); values are the renderer's output.
     /// When the translation falls back, the entry stays absent and
     /// the renderer reverts to `Prop` with the original text in a
     /// comment.
     #[serde(default)]
     pub per_backend_proposition: std::collections::BTreeMap<String, String>,
-    /// **Theorem parameters (#141 / MSFS-L4.8)**.  Each entry is a
+    /// **Theorem parameters (#141 / MSFS-L4.8)**. Each entry is a
     /// (name, per-backend-type-text) pair where the inner map keys
-    /// are backend ids (`"coq"` / `"lean"`).  When a parameter's
+    /// are backend ids (`"coq"` / `"lean"`). When a parameter's
     /// type translates cleanly for a backend, the corresponding
     /// renderer emits the parameter binding before the colon-
     /// separator: `Theorem foo (n : Z) : (n = 7).` instead of
-    /// `Theorem foo : (n = 7).`  Without parameter declarations the
+    /// `Theorem foo : (n = 7).` Without parameter declarations the
     /// foreign tool rejects on undeclared identifier — so this is
     /// the load-bearing piece that makes the type-structure gate
     /// (#140) actually fire.
     ///
+
     /// Parameters whose types fall back are still emitted with a
     /// generic `Type` placeholder so the binding exists; the
     /// foreign tool then validates that the proposition's free
@@ -137,36 +148,37 @@ pub struct TheoremSpec {
     /// can't be translated faithfully.
     #[serde(default)]
     pub params: Vec<TheoremParam>,
-    /// **Generic type parameters (#145 / MSFS-L4.11)**.  Each entry
-    /// is one type-parameter binding (`<S: RichS>`-style).  Emitted as
+    /// **Generic type parameters (#145 / MSFS-L4.11)**. Each entry
+    /// is one type-parameter binding (`<S: RichS>`-style). Emitted as
     /// Coq/Lean implicit arguments preceding the value parameters:
-    /// `Theorem foo {S : Type} (s : S) : ...`.  Without this, theorems
+    /// `Theorem foo {S : Type} (s : S) : ...`. Without this, theorems
     /// like MSFS §7.1 (which bind `<S: RichS>`) emit with `S` as a
     /// free variable, producing a foreign-tool rejection.
     #[serde(default)]
     pub generics: Vec<TheoremGeneric>,
-    /// Whether the theorem has a proof body.  Statements without a
+    /// Whether the theorem has a proof body. Statements without a
     /// proof body are treated as axioms (postulates) in the foreign
     /// tool; ones with a proof body get `sorry` / `Admitted.` as a
     /// placeholder unless `per_backend_proof_tactic` carries a real
     /// translation (#153 — proof-term emission).
     pub has_proof_body: bool,
     /// **Per-backend translated proof body (#153 / Phase 2 of
-    /// proof-term emission)**.  When a backend's entry is present,
+    /// proof-term emission)**. When a backend's entry is present,
     /// the corresponding [`CorpusBackend`] uses that text in place
     /// of the `admit` / `sorry` placeholder — `Proof. <text> Qed.`
-    /// (Coq) / `theorem ... := <text>` (Lean).  Keys are backend
+    /// (Coq) / `theorem ... := <text>` (Lean). Keys are backend
     /// ids (`"coq"` / `"lean"`); values are the renderer's output.
     /// Absent entries trigger the placeholder fallback so partial
     /// translation coverage is safe — backends that haven't been
     /// taught a particular proof-body shape silently degrade to
     /// admitted-with-comment instead of producing malformed output.
     ///
+
     /// **Why a per-backend map (rather than a single proof_text)**:
     /// Coq and Lean tactic syntax diverges enough that a single
     /// canonical form would over-constrain the translator
     /// (e.g. Coq `apply X.` vs. Lean `exact X` for term-mode-leaning
-    /// dispatch).  The map keeps each backend independent and lets
+    /// dispatch). The map keeps each backend independent and lets
     /// translators land iteratively without touching the wire
     /// format.
     #[serde(default)]
@@ -179,7 +191,7 @@ pub struct TheoremSpec {
 impl TheoremSpec {
     /// Populate `per_backend_proposition` for the standard backend
     /// set (Coq + Lean) by running the corresponding [`ExprRenderer`]
-    /// over the supplied AST proposition.  Successful translations
+    /// over the supplied AST proposition. Successful translations
     /// land in the map; fallbacks are recorded as absent entries
     /// (the per-format renderer then emits `Prop` with the original
     /// text in a comment).
@@ -207,13 +219,14 @@ impl TheoremSpec {
     }
 
     /// Populate `params` by running the [`TypeRenderer`]s over each
-    /// parameter's type (#141 / MSFS-L4.8).  Per-backend translation
+    /// parameter's type (#141 / MSFS-L4.8). Per-backend translation
     /// failures leave that backend's entry absent for the parameter;
     /// the renderer then emits a generic `Type` placeholder so the
     /// binding still exists at the foreign-tool level.
     ///
+
     /// `params` is a slice of `(parameter_name, parameter_type)` pairs
-    /// extracted from the theorem's AST by the audit walker.  Names
+    /// extracted from the theorem's AST by the audit walker. Names
     /// should already be sanitised to valid foreign-tool identifiers.
     pub fn with_translated_params(
         mut self,
@@ -242,9 +255,9 @@ impl TheoremSpec {
     }
 
     /// Populate `generics` from the theorem's generic-parameter list
-    /// (#145 / MSFS-L4.11).  Each input is a `(name, bound_annotation)`
+    /// (#145 / MSFS-L4.11). Each input is a `(name, bound_annotation)`
     /// pair extracted from the AST by the audit walker; the bound is
-    /// already rendered into a single line like `"S : RichS"`.  Empty
+    /// already rendered into a single line like `"S : RichS"`. Empty
     /// bound text means a bare generic (no bound).
     pub fn with_generics(mut self, generics: &[(String, String)]) -> Self {
         for (name, bound_annotation) in generics {
@@ -258,10 +271,11 @@ impl TheoremSpec {
 
     /// **Populate `per_backend_proof_tactic` (#153 / Phase 2)** by
     /// running the [`super::proof_body_translate::ProofBodyRenderer`]s
-    /// over the supplied AST proof body.  Successful translations
+    /// over the supplied AST proof body. Successful translations
     /// land in the per-backend map; fallbacks leave the entry absent
     /// so the per-format renderer reverts to `Admitted.` / `:= by sorry`.
     ///
+
     /// **Why a builder method (vs. inline construction)**: every
     /// audit walker that builds a TheoremSpec follows the same
     /// translate-the-translatable-pieces pattern; centralising the
@@ -290,7 +304,7 @@ impl TheoremSpec {
     }
 }
 
-/// One backend's per-theorem render of [`TheoremSpec`].  Returned
+/// One backend's per-theorem render of [`TheoremSpec`]. Returned
 /// by [`CorpusBackend::render_theorem`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderedTheorem {
@@ -301,11 +315,11 @@ pub struct RenderedTheorem {
     pub content: String,
 }
 
-/// The per-format protocol.  One trait, multiple instances —
+/// The per-format protocol. One trait, multiple instances —
 /// `CoqCorpusBackend` and `LeanCorpusBackend` ship in this module.
 /// Adding Isabelle / Agda / Dedukti is a single new instance.
 pub trait CorpusBackend {
-    /// Stable identifier — `"coq"`, `"lean"`, etc.  Used as the
+    /// Stable identifier — `"coq"`, `"lean"`, etc. Used as the
     /// `certificates/<id>/` subdirectory and in audit reports.
     fn id(&self) -> &'static str;
     /// File extension WITHOUT the leading dot.
@@ -314,10 +328,10 @@ pub trait CorpusBackend {
     /// source file ready for `coqc` / `lean` invocation.
     fn render_theorem(&self, spec: &TheoremSpec) -> RenderedTheorem;
 
-    /// Canonical foreign-system handle.  Default implementation
+    /// Canonical foreign-system handle. Default implementation
     /// resolves [`id`](Self::id) via [`ForeignSystem::from_name`];
     /// override when the backend's ID doesn't match the canonical
-    /// alias set.  Lets consumers dispatch by typed enum rather
+    /// alias set. Lets consumers dispatch by typed enum rather
     /// than string comparison.
     fn foreign_system(&self) -> Option<crate::foreign_system::ForeignSystem> {
         crate::foreign_system::ForeignSystem::from_name(self.id())
@@ -328,7 +342,7 @@ pub trait CorpusBackend {
 // CoqCorpusBackend
 // =============================================================================
 
-/// Coq backend for corpus theorems.  Emits per-theorem `.v` files
+/// Coq backend for corpus theorems. Emits per-theorem `.v` files
 /// with `Axiom <name> : Prop.` for proof-less statements and
 /// `Theorem <name> : Prop. Admitted.` for proof-bearing ones.
 pub struct CoqCorpusBackend;
@@ -376,12 +390,13 @@ impl CorpusBackend for CoqCorpusBackend {
         // the AST translator (#140 / MSFS-L4.7) successfully rendered
         // the proposition into Coq syntax:
         //
-        //   * `per_backend_proposition["coq"]` is `Some(t)` → use `t`
-        //     as the theorem's TYPE.  `coqc` validates the
-        //     proposition's type structure as well as its name binding.
-        //   * Translation fell back → use `Prop` and embed the
-        //     original Verum-side text in a comment.  `coqc` validates
-        //     only the name binding.
+
+        //  * `per_backend_proposition["coq"]` is `Some(t)` → use `t`
+        //  as the theorem's TYPE. `coqc` validates the
+        //  proposition's type structure as well as its name binding.
+        //  * Translation fell back → use `Prop` and embed the
+        //  original Verum-side text in a comment. `coqc` validates
+        //  only the name binding.
         let coq_type: &str = spec
             .per_backend_proposition
             .get("coq")
@@ -396,9 +411,9 @@ impl CorpusBackend for CoqCorpusBackend {
         if spec.has_proof_body {
             // #153 / Phase 2: when a translated proof tactic is
             // available for this backend, emit it in place of
-            // `admit.` + `Admitted.`  Closes the proof normally
+            // `admit.` + `Admitted.` Closes the proof normally
             // with `Qed.` (constructive) instead of `Admitted.`
-            // (un-checked).  Coq accepts multi-line tactic bodies;
+            // (un-checked). Coq accepts multi-line tactic bodies;
             // we wrap the translation in a `Proof.`/`Qed.` block
             // and prefix each line with two-space indent so the
             // output stays readable.
@@ -441,6 +456,7 @@ impl CorpusBackend for CoqCorpusBackend {
 
 /// Compute a stable provenance signature for an emitted theorem file.
 ///
+
 /// The signature is a BLAKE3 hash over the canonical source-state
 /// fingerprint: `(kernel_version || backend_id || module_path ||
 /// theorem_name || proposition_text || has_proof_body || declared_strategy)`.
@@ -448,13 +464,15 @@ impl CorpusBackend for CoqCorpusBackend {
 /// `TheoremSpec` they have on hand and verify that the emitted file
 /// came from EXACTLY the corpus state Verum claims.
 ///
+
 /// **The trust shift**: a third-party reviewer pulls the published
 /// `theorem_5_1.v` file out of MSFS supplementary material, runs
 /// `verum verify-signature theorem_5_1.v`, and gets a binary verdict
 /// — the file is/isn't a faithful emission of the named theorem
-/// against the named kernel version.  No need to re-run the whole
+/// against the named kernel version. No need to re-run the whole
 /// pipeline to verify provenance.
 ///
+
 /// **Output format**: `<kernel_version>:<32-byte-hex-blake3>` — the
 /// kernel version is included so future Verum versions can refuse
 /// to verify signatures from incompatible kernel revisions.
@@ -476,7 +494,7 @@ pub fn compute_provenance_signature(
     hasher.update(if spec.has_proof_body { b"T" } else { b"F" });
     hasher.update(b"\x00");
     // #153: include this backend's translated proof tactic in the
-    // signature.  When the tactic changes (translator improvement,
+    // signature. When the tactic changes (translator improvement,
     // refactor, soundness fix), the signature flips — third-party
     // reviewers see a hash mismatch and know the proof body has
     // shifted, not just the proposition.
@@ -500,7 +518,7 @@ pub const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 // LeanCorpusBackend
 // =============================================================================
 
-/// Lean 4 backend for corpus theorems.  Emits per-theorem `.lean`
+/// Lean 4 backend for corpus theorems. Emits per-theorem `.lean`
 /// files with `axiom <name> : Prop` for proof-less statements and
 /// `theorem <name> : Prop := sorry` for proof-bearing ones.
 pub struct LeanCorpusBackend;
@@ -561,10 +579,10 @@ impl CorpusBackend for LeanCorpusBackend {
         if spec.has_proof_body {
             // #153 / Phase 2: when a translated proof tactic is
             // available for this backend, emit it in place of
-            // `:= by sorry`.  Lean 4 accepts both term-mode
+            // `:= by sorry`. Lean 4 accepts both term-mode
             // (`:= <expr>`) and tactic-mode (`:= by <tactics>`)
             // proofs; the translator decides which form to emit
-            // by prefixing the text with `by ` or not.  We pass
+            // by prefixing the text with `by ` or not. We pass
             // the translation through verbatim — translators are
             // responsible for emitting the leading `by ` themselves
             // when their output is a tactic block.
@@ -594,17 +612,18 @@ impl CorpusBackend for LeanCorpusBackend {
 
 /// Sanitise a string for embedding in a foreign-tool comment block.
 /// Strips characters that would close the comment delimiter
-/// prematurely.  Sufficient because comments in both Coq (`(* … *)`)
+/// prematurely. Sufficient because comments in both Coq (`(* … *)`)
 /// and Lean (`/-! … -/`) only require the closing-delimiter avoidance.
 fn sanitise_for_comment(text: &str) -> String {
     text.replace("*)", "* )").replace("-/", "- /")
 }
 
-/// Render the parameter-binding text for a given backend.  Produces
+/// Render the parameter-binding text for a given backend. Produces
 /// the form ` (n1 : T1) (n2 : T2) ...` (with a leading space)
 /// suitable for embedding between the theorem name and the colon-
-/// separator.  Empty when no params.
+/// separator. Empty when no params.
 ///
+
 /// Type-translation failures fall back to a generic `Type` placeholder
 /// (Coq) / `Type` (Lean) so the parameter binding still exists at the
 /// foreign-tool level — the foreign tool then validates that the
@@ -627,15 +646,16 @@ fn render_params_for_backend(spec: &TheoremSpec, backend_id: &str) -> String {
 }
 
 /// Render the generic-parameter binding text for a given backend
-/// (#145 / MSFS-L4.11).  Produces the form
+/// (#145 / MSFS-L4.11). Produces the form
 /// ` {S : Type} {T : Type} ...` (with a leading space) suitable for
 /// embedding between the theorem name and the value parameters.
 /// Empty when no generics.
 ///
+
 /// Both Coq and Lean accept the curly-brace implicit-argument form.
 /// Bound annotations (e.g., `S : RichS`) are preserved as a per-
 /// generic comment directly preceding the binding so foreign-tool
-/// reviewers see the constraint without it gating compilation.  Once
+/// reviewers see the constraint without it gating compilation. Once
 /// the cross-format gate emits protocols as Coq Class / Lean class,
 /// the bound can be lowered into a typeclass instance argument
 /// (`{S : Type} [SRichS : RichS S]`).
@@ -647,7 +667,7 @@ fn render_generics_for_backend(spec: &TheoremSpec, _backend_id: &str) -> String 
     for g in &spec.generics {
         if !g.bound_annotation.is_empty() {
             // Inline the bound annotation as a comment so the foreign
-            // tool's source still records the protocol bound.  Both
+            // tool's source still records the protocol bound. Both
             // Coq and Lean treat `(*…*)` (Coq) / `/-…-/` (Lean) the
             // same way at parameter-binder positions; we use Coq's
             // form because the implicit-arg syntax `{...}` is
@@ -664,7 +684,7 @@ fn render_generics_for_backend(spec: &TheoremSpec, _backend_id: &str) -> String 
 // Trait dispatcher — used by the audit gate to enumerate backends
 // =============================================================================
 
-/// Box<dyn> for dynamic dispatch over the per-format backends.  The
+/// Box<dyn> for dynamic dispatch over the per-format backends. The
 /// audit gate iterates `[Box::new(CoqCorpusBackend), …]` and calls
 /// each one's `render_theorem` over every walked corpus theorem.
 pub fn all_corpus_backends() -> Vec<Box<dyn CorpusBackend>> {
@@ -681,16 +701,17 @@ pub fn all_corpus_backends() -> Vec<Box<dyn CorpusBackend>> {
 // AgdaCorpusBackend (#156 — third backend)
 // =============================================================================
 
-/// Agda backend for corpus theorems.  Emits per-theorem `.agda`
+/// Agda backend for corpus theorems. Emits per-theorem `.agda`
 /// files using `postulate <name> : <type>` for axioms / proof-less
 /// theorems and `<name> : <type>` followed by `<name> = <expr>` for
 /// theorems whose proof body translated cleanly.
 ///
+
 /// **Architectural significance**: Agda's MLTT foundation is the
 /// only one in the multi-kernel set without UIP or impredicative
 /// hierarchies — the corpus-theorem cross-check via Agda
 /// independently exercises the constructive fragment of every
-/// emitted theorem.  Combined with Coq (CIC + UIP) and Lean 4
+/// emitted theorem. Combined with Coq (CIC + UIP) and Lean 4
 /// (CIC-derived), the three-backend cross-validation covers two
 /// distinct foundation families (MLTT + CIC).
 pub struct AgdaCorpusBackend;
@@ -721,7 +742,7 @@ impl CorpusBackend for AgdaCorpusBackend {
         let filename = format!("{}.agda", spec.name);
         let signature = compute_provenance_signature(spec, "agda");
         let mut content = String::new();
-        // Provenance signature header (#174).  Agda single-line
+        // Provenance signature header (#174). Agda single-line
         // comment is `--`; per-line is the safest form (block
         // comments `{- ... -}` nest, which is fine, but `--` is
         // simpler and the convention for one-liners).
@@ -788,7 +809,7 @@ impl CorpusBackend for AgdaCorpusBackend {
 
 /// Sanitise text for embedding in an Agda single-line comment.
 /// Replaces newlines with spaces so the comment doesn't accidentally
-/// terminate before its content ends.  Block-comment delimiters
+/// terminate before its content ends. Block-comment delimiters
 /// `{-` / `-}` aren't relevant for line comments.
 fn sanitise_for_agda_line_comment(text: &str) -> String {
     text.replace('\n', " ").replace('\r', " ")
@@ -798,14 +819,15 @@ fn sanitise_for_agda_line_comment(text: &str) -> String {
 // DeduktiCorpusBackend (#156 — fifth backend, closes the matrix)
 // =============================================================================
 
-/// Dedukti backend for corpus theorems.  Emits per-theorem `.dk`
+/// Dedukti backend for corpus theorems. Emits per-theorem `.dk`
 /// files using the λΠ-modulo declaration syntax: `name : type.`
 /// for axioms, `def name : type := body.` for definitions / proven
 /// theorems with a translation.
 ///
+
 /// **Architectural significance**: Dedukti is a **logical
 /// framework** — it embeds many proof systems uniformly via
-/// rewriting.  Adding it to the cross-format gate provides a
+/// rewriting. Adding it to the cross-format gate provides a
 /// meta-validation layer: artefacts emitted from the four upstream
 /// backends (Coq + Lean + Agda + Isabelle) all admit
 /// Dedukti-translation pipelines (Coq via Coqine, Agda via
@@ -840,7 +862,7 @@ impl CorpusBackend for DeduktiCorpusBackend {
         let filename = format!("{}.dk", spec.name);
         let signature = compute_provenance_signature(spec, "dedukti");
         let mut content = String::new();
-        // Provenance signature header.  Dedukti uses `(; ... ;)`
+        // Provenance signature header. Dedukti uses `(; ... ;)`
         // for block comments; line-by-line on `(;` is the cleanest
         // emission shape.
         content.push_str(&format!("(; verum_signature: {} ;)\n", signature));
@@ -904,7 +926,7 @@ impl CorpusBackend for DeduktiCorpusBackend {
 }
 
 /// Sanitise text for embedding in a Dedukti `(; ... ;)` block
-/// comment.  Replaces `;)` with `; )` to prevent the comment from
+/// comment. Replaces `;)` with `; )` to prevent the comment from
 /// terminating prematurely, and `(;` with `( ;` to prevent
 /// accidentally opening a nested block (Dedukti comments don't
 /// nest in older parsers).
@@ -916,16 +938,17 @@ fn sanitise_for_dedukti_comment(text: &str) -> String {
 // IsabelleCorpusBackend (#156 — fourth backend)
 // =============================================================================
 
-/// Isabelle/HOL backend for corpus theorems.  Emits per-theorem
+/// Isabelle/HOL backend for corpus theorems. Emits per-theorem
 /// `.thy` files structured around Isabelle's session-theory model:
 /// every theorem becomes one self-contained theory with the
 /// statement and proof.
 ///
+
 /// **Architectural significance**: Isabelle/HOL is classical
 /// higher-order logic — neither CIC (Coq + Lean) nor MLTT (Agda).
 /// Adding Isabelle gives the cross-format gate three distinct
 /// foundation families on the verifier side: classical HOL,
-/// constructive MLTT, and CIC.  A corpus theorem that re-checks
+/// constructive MLTT, and CIC. A corpus theorem that re-checks
 /// across all three is foundation-robust in a way no single
 /// backend can attest.
 pub struct IsabelleCorpusBackend;
@@ -970,7 +993,7 @@ impl CorpusBackend for IsabelleCorpusBackend {
         content.push('\n');
 
         // Isabelle requires every theorem to live inside a theory
-        // block — `theory X imports Main begin ... end`.  The theory
+        // block — `theory X imports Main begin ... end`. The theory
         // name must match the filename stem.
         content.push_str(&format!("theory {} imports Main begin\n\n", spec.name));
         content.push_str(&format!(
@@ -1206,7 +1229,7 @@ mod tests {
     #[test]
     fn provenance_signature_independent_per_backend() {
         // The signature for backend X depends on backend X's tactic
-        // only — not the union of all tactics.  Otherwise editing
+        // only — not the union of all tactics. Otherwise editing
         // Lean's translation would break the Coq signature.
         let mut spec = spec_proven("thm", "P");
         spec.per_backend_proof_tactic
@@ -1228,7 +1251,7 @@ mod tests {
     #[test]
     fn comment_sanitiser_escapes_coq_close_delimiter() {
         // "*)" in proposition would prematurely close the (* ... *) block
-        // and corrupt the file.  Sanitiser must escape it.
+        // and corrupt the file. Sanitiser must escape it.
         let backend = CoqCorpusBackend::new();
         let rendered = backend.render_theorem(&spec_axiom("evil", "*)"));
         assert!(!rendered.content.contains("(* Proposition (Verum source): *) *)"));
@@ -1257,8 +1280,8 @@ mod tests {
     #[test]
     fn all_corpus_backends_returns_five_known_backends() {
         // Closes #156 declared backend matrix:
-        //   Coq + Lean (CIC) + Agda (MLTT) + Isabelle (HOL) +
-        //   Dedukti (λΠ-modulo, logical framework).
+        //  Coq + Lean (CIC) + Agda (MLTT) + Isabelle (HOL) +
+        //  Dedukti (λΠ-modulo, logical framework).
         let backends = all_corpus_backends();
         let ids: Vec<&str> = backends.iter().map(|b| b.id()).collect();
         assert_eq!(ids.len(), 5);
@@ -1455,7 +1478,7 @@ mod tests {
     fn translator_lifts_coq_theorem_type_when_proposition_translates() {
         // When per_backend_proposition["coq"] is populated, the
         // emitted Coq file's `Theorem foo : <type>.` carries the
-        // translated proposition instead of `Prop`.  Pre-fix the
+        // translated proposition instead of `Prop`. Pre-fix the
         // type was always `Prop` and `coqc` only validated name
         // binding; post-fix it validates the proposition's TYPE
         // structure too.
@@ -1549,9 +1572,9 @@ mod tests {
     fn untranslated_param_type_falls_back_to_type_placeholder() {
         // Parameter whose type didn't translate (per_backend_type_text
         // for that backend is absent) → emission falls back to `Type`
-        // so the binding still exists.  Foreign tool then validates
+        // so the binding still exists. Foreign tool then validates
         // that the proposition's free variables are at least
-        // DECLARED.  Pin both Coq and Lean independently — each
+        // DECLARED. Pin both Coq and Lean independently — each
         // backend gets its own per_backend_proposition entry so the
         // test isolates param-fallback behavior from proposition
         // fallback.
@@ -1598,7 +1621,7 @@ mod tests {
     fn params_with_translated_proposition_compose_correctly() {
         // The two with_* methods compose: with_translated_params
         // populates `params`, with_translated_proposition populates
-        // `per_backend_proposition`.  Both end up in the emitted
+        // `per_backend_proposition`. Both end up in the emitted
         // theorem header.
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::{Ident as TyIdent, Path as TyPath, Type, TypeKind};
@@ -1753,7 +1776,7 @@ mod tests {
 
     #[test]
     fn empty_generics_emits_no_braces() {
-        // No generics → no leading ` {...}` text.  Pin so that simple
+        // No generics → no leading ` {...}` text. Pin so that simple
         // theorems don't accidentally pick up empty-brace artifacts.
         let spec = spec_proven("simple_thm", "true");
         let coq = CoqCorpusBackend::new().render_theorem(&spec);

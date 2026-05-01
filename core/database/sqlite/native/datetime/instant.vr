@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.6
 //
+
 // `DatetimeInstant` is the canonical internal representation: integer julian
 // day + fractional day in [0.0, 1.0). All datetime operations
 // route through DatetimeInstant (the storage forms TEXT/REAL/INTEGER convert

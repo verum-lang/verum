@@ -3,11 +3,13 @@
 //! `@extract_witness` / `@extract_contract` typed attributes
 //! ().
 //!
+
 //! Walk the project's `.vr` files, collect every item carrying an
 //! Extract* typed attribute, dispatch to the [`verum_smt::program_extraction`]
 //! pipeline at the attribute's `ExtractTarget`, and emit a per-target
 //! file at `<output>/<decl>.<ext>` (`.vr` / `.ml` / `.lean` / `.v`).
 //!
+
 //! V12 (this revision) ships the **driver scaffolding**: walks the
 //! AST, projects each marked declaration into a target-language
 //! scaffold via the existing `CodeGenerator`, writes the result to
@@ -64,6 +66,7 @@ struct ExtractRequest {
     /// body) extracted via the AST node's `Span`. `None` for
     /// declarations without a body (axioms; signatures).
     ///
+
     /// When present and the target is Verum, the emitter splices
     /// this body verbatim — the Verum extracted file is then
     /// re-checkable by `verum check`. For other targets V12.1
@@ -649,6 +652,7 @@ fn comment_for_target(target: ExtractTarget) -> &'static str {
 /// Emit a per-target wrapper that delegates to a hand-written
 /// native function. Used by the `@extract(realize="...")` directive.
 ///
+
 /// The wrapper preserves the verified surface signature; the body
 /// is a single call into `native_fn`. This pattern ships verified
 /// specifications for primitives the runtime owns (intrinsic

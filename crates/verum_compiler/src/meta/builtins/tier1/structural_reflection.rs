@@ -1,17 +1,22 @@
 //! Structural Reflection (Tier 1 - Requires MetaTypes)
 //!
+
 //! Reflection over type structure: fields, variants, methods, attributes.
 //!
+
 //! ## Structure Introspection
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `fields_of(T)` | `(Type) -> List<FieldInfo>` | Get struct fields |
 //! | `field_access(T, name)` | `(Type, Text) -> Maybe<FieldInfo>` | Get specific field |
 //! | `variants_of(T)` | `(Type) -> List<VariantInfo>` | Get enum variants |
 //!
+
 //! ## Extended Type Info
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `simple_name_of(T)` | `(Type) -> Text` | Get unqualified name |
@@ -21,8 +26,10 @@
 //! | `inner_type_of(T)` | `(Type) -> Maybe<Type>` | Get inner type |
 //! | `element_type_of(T)` | `(Type) -> Maybe<Type>` | Get element type |
 //!
+
 //! ## Function/Method Introspection
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `functions_of(T)` | `(Type) -> List<FunctionInfo>` | Get all functions |
@@ -30,16 +37,20 @@
 //! | `static_functions_of(T)` | `(Type) -> List<FunctionInfo>` | Get static functions |
 //! | `instance_methods_of(T)` | `(Type) -> List<FunctionInfo>` | Get instance methods |
 //!
+
 //! ## Memory Layout
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `field_offset(T, name)` | `(Type, Text) -> Int` | Get byte offset |
 //! | `memory_layout_of(T)` | `(Type) -> LayoutInfo` | Get layout info |
 //! | `ownership_of(T)` | `(Type) -> OwnershipInfo` | Get ownership semantics |
 //!
+
 //! ## Attribute Introspection
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `attributes_of(T)` | `(Type) -> List<Attribute>` | Get all attributes |
@@ -47,14 +58,17 @@
 //! | `get_attribute(T, name)` | `(Type, Text) -> Maybe<Attribute>` | Get attribute value |
 //! | `doc_of(T)` | `(Type) -> Maybe<Text>` | Get documentation |
 //!
+
 //! ## Associated Types
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `associated_types_of(T)` | `(Type) -> List<AssociatedType>` | Get associated types |
 //! | `super_types_of(T)` | `(Type) -> List<Type>` | Get super types |
 //! | `key_value_types_of(T)` | `(Type) -> Maybe<(Type, Type)>` | Get map key/value types |
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

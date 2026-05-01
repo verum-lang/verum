@@ -1,8 +1,10 @@
 //! Verification Boundary Management with Call Graph Analysis
 //!
+
 //! Handles trusted/untrusted code boundaries and proof obligations using
 //! full call graph analysis for boundary detection.
 //!
+
 //! Boundaries occur where code transitions between verification levels (e.g.,
 //! @verify(proof) code calling @verify(runtime) code). At each boundary, proof
 //! obligations are generated to ensure safety is maintained: the callee's
@@ -908,18 +910,21 @@ impl CallGraphBuilder {
             } => {
                 // for-await loop desugars to: loop { match iter.next().await { ... } }
                 //
+
                 // Call graph traversal for for-await:
                 // 1. The async_iterable expression may contain calls to record
                 // 2. The implicit .next() method call is on the AsyncIterator protocol
-                //    - Method resolution happens during type checking, not here
-                //    - The actual callee depends on the concrete AsyncIterator impl
+                //  - Method resolution happens during type checking, not here
+                //  - The actual callee depends on the concrete AsyncIterator impl
                 // 3. The body may contain calls that cross verification boundaries
                 //
+
                 // We traverse both the iterable and body to capture all explicit calls.
                 // The implicit next() method is a protocol method and will be resolved
                 // when the concrete type is known during type checking. At that point,
                 // boundary analysis can be performed on the resolved method.
                 //
+
                 // Note: If the AsyncIterator implementation has different verification
                 // levels, those boundaries will be detected when the method is resolved.
                 self.visit_expr(async_iterable);

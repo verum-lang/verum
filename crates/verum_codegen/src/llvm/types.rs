@@ -1,5 +1,6 @@
 //! VBC Type → LLVM Type lowering.
 //!
+
 //! This module handles the translation of VBC types to their LLVM IR
 //! representations.
 

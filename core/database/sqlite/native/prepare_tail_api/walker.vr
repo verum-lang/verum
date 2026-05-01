@@ -16,7 +16,7 @@ fn is_ws(b: u8) -> Bool {
 }
 
 /// Advance `start` past leading whitespace + `--` line comments +
-/// `/* */` block comments.  Returns the new offset (≤ bytes.len()).
+/// `/* */` block comments. Returns the new offset (≤ bytes.len()).
 public fn skip_ws_and_comments(bytes: &List<u8>, start: Int) -> Int {
     let n = bytes.len();
     let mut i: Int = start;

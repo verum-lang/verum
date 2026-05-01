@@ -3,12 +3,14 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Three coarse phases:
 //
-//   * `IpFresh`              — `sqlite3_initialize` has not been called
-//   * `IpBringing(subsys)`   — subsystem `subsys` is being initialised
-//   * `IpRunning`            — all subsystems up; calls are no-ops
-//   * `IpFailed(reason)`     — a subsystem failed during bring-up
+
+//  * `IpFresh` — `sqlite3_initialize` has not been called
+//  * `IpBringing(subsys)` — subsystem `subsys` is being initialised
+//  * `IpRunning` — all subsystems up; calls are no-ops
+//  * `IpFailed(reason)` — a subsystem failed during bring-up
 // =============================================================================
 
 module core.database.sqlite.native.initialize.phase;

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.6 (fuzz harness — format surface)
 //
+
 // Applies one byte-level perturbation per cycle. The DB will read
 // the mutated file expecting it to be valid; we want to drive the
 // recovery / integrity-check / corruption-handling paths.

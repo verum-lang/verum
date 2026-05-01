@@ -1,5 +1,6 @@
 //! Two-Level Type Theory (2LTT) — fibrant vs strict universe layers.
 //!
+
 //! In a single-universe HoTT, every type lives in the *fibrant*
 //! fragment: equality is the path type, transport computes through
 //! the cubical normalizer, and uniqueness of identity proofs (UIP)
@@ -8,6 +9,7 @@
 //! about types-as-data, where strict equality and decidable
 //! comparison are needed.
 //!
+
 //! 2LTT (Voevodsky, 2013; Annenkov–Capriotti–Kraus 2017) introduces
 //! a **second**, strict universe layer. Strict types satisfy UIP
 //! and have decidable equality; fibrant types support the cubical
@@ -15,24 +17,30 @@
 //! a constraint that fibrant terms remain fibrant under operations
 //! that mix in strict data.
 //!
+
 //! ## Layers
 //!
+
 //! ```text
-//!     UFib_n  ≼  UStrict_n
+//!  UFib_n ≼ UStrict_n
 //! ```
 //!
+
 //! Every fibrant type is a strict type at the same level (the
 //! inclusion `≼`), but not vice versa. Definitions can mix layers
 //! provided the result fits the **least permissive** layer of all
 //! contributing components.
 //!
+
 //! ## API
 //!
+
 //! The [`Layer`] enum names the two universes; [`UniverseLevel`] is
 //! the standard naturals-augmented-with-variables level used
 //! elsewhere in the type checker. [`StratifiedUniverse`] pairs a
 //! Layer with a UniverseLevel.
 //!
+
 //! [`mix_layers`] computes the layer of a composite type built
 //! from sub-types of mixed layers — the result is `Strict` if any
 //! sub-type is `Strict`, otherwise `Fibrant`. This is the central
@@ -146,7 +154,7 @@ impl StratifiedUniverse {
         }
     }
 
-    /// `UFib_n  ≼  UStrict_n` — every fibrant type at level n is
+    /// `UFib_n ≼ UStrict_n` — every fibrant type at level n is
     /// also a strict type at level n. Levels must agree.
     pub fn coerces_to(&self, other: &StratifiedUniverse) -> bool {
         if self.level != other.level {

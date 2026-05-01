@@ -1,13 +1,16 @@
 //! AST-level bounds-statistics gathering for `phase_verify`.
 //!
+
 //! Pure read-only walks over the typed AST that count `Expr::Index`
 //! sites for diagnostic statistics — never elimination. Actual
 //! bounds-check elimination happens at MIR level in
 //! `phases/verification_phase.rs` via dataflow analysis on the
 //! Control Flow Graph (full def-use chains, dominance, etc.).
 //!
+
 //! # Why a separate file
 //!
+
 //! Extracted from `pipeline.rs` (#106 crate-split) so the
 //! bounds-statistics surface is independently reviewable and
 //! `pipeline.rs` shrinks toward a thin orchestration layer. All
@@ -33,11 +36,13 @@ use super::CompilationPipeline;
 impl<'s> CompilationPipeline<'s> {
     /// Run bounds elimination analysis at AST level (statistics gathering).
     ///
+
     /// This AST-level analysis collects statistics about array index
     /// accesses. The actual bounds check elimination happens at MIR
     /// level in `verification_phase.rs` which has access to full CFG
     /// and dataflow analysis.
     ///
+
     /// This pass is retained for early statistics and potential
     /// future AST-level optimisations.
     pub(super) fn run_bounds_elimination_analysis(
@@ -79,6 +84,7 @@ impl<'s> CompilationPipeline<'s> {
 
 /// Count index accesses in a function for statistics.
 ///
+
 /// Returns `(total_index_accesses, eliminated)`. The eliminated
 /// component is always 0 at AST level — actual bounds-check
 /// elimination is implemented at MIR level via

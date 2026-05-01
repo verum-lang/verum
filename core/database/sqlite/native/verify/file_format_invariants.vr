@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §6, §21.1
 //
+
 // File-format invariants are encoded as predicates over the parsed
 // `DatabaseHeader` and per-page byte buffers. Most are also enforced
 // statically through refinement types in `l1_pager/db_header.vr`.

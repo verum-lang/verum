@@ -1,54 +1,65 @@
 //! Protocol-Based Literal Conversions
 //!
+
 //! Type aliases and newtype definitions via "type X is T" syntax
 //!
+
 //! Verum's literal system enables types to declare how they construct from
 //! literal values through compile-time protocols. This provides:
 //! - Type-directed literal interpretation
 //! - Domain-specific literals (units, tagged strings)
 //! - Compile-time validation with zero runtime overhead
 //!
+
 //! # Core Literal Protocols
 //!
+
 //! Types implement literal conversion protocols to define how literal values
 //! construct instances:
 //!
+
 //! ```verum
 //! // Integer literal conversion
 //! type FromIntegerLiteral is protocol {
-//!     fn from_integer_literal(value: i64) -> Self
-//!         where const_eval;
+//!  fn from_integer_literal(value: i64) -> Self
+//!  where const_eval;
 //! }
 //!
+
 //! // Floating-point literal conversion
 //! type FromFloatLiteral is protocol {
-//!     fn from_float_literal(value: f64) -> Self
-//!         where const_eval;
+//!  fn from_float_literal(value: f64) -> Self
+//!  where const_eval;
 //! }
 //!
+
 //! // Text literal conversion
 //! type FromTextLiteral is protocol {
-//!     fn from_text_literal(value: &str) -> Self
-//!         where const_eval;
+//!  fn from_text_literal(value: &str) -> Self
+//!  where const_eval;
 //! }
 //! ```
 //!
+
 //! # Examples
 //!
+
 //! ```verum
 //! // Custom numeric type with validation
 //! type Percentage is { value: f64 where value >= 0.0 && value <= 100.0 };
 //!
+
 //! implement FromFloatLiteral for Percentage {
-//!     fn from_float_literal(value: f64) -> Self {
-//!         if value < 0.0 || value > 100.0 {
-//!             compile_error!("Percentage must be between 0 and 100");
-//!         }
-//!         Percentage { value }
-//!     }
+//!  fn from_float_literal(value: f64) -> Self {
+//!  if value < 0.0 || value > 100.0 {
+//!  compile_error!("Percentage must be between 0 and 100");
+//!  }
+//!  Percentage { value }
+//!  }
 //! }
 //!
-//! let p: Percentage = 50.0;  // ✓ OK
+
+//! let p: Percentage = 50.0; // ✓ OK
 //! let q: Percentage = 150.0; // ✗ Compile error
 //! ```
 
@@ -129,6 +140,7 @@ impl LiteralConverter {
 
     /// Convert a literal to a target type using protocol-based conversion
     ///
+
     /// This performs compile-time evaluation of the conversion function.
     pub fn convert_literal(
         &mut self,
@@ -215,6 +227,7 @@ impl LiteralConverter {
 
     /// Validate that a literal conversion function is const_eval
     ///
+
     /// All literal conversion functions must be evaluable at compile time.
     pub fn validate_const_eval(&self, _function_name: &str, _span: Span) -> Result<(), TypeError> {
         // In a full implementation, this would check that the function

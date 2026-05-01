@@ -1,10 +1,11 @@
 //! `verum diagnose` — inspect and bundle crash reports.
 //!
+
 //! Subcommands:
-//!   - `list`     — show recent reports in `~/.verum/crashes/`.
-//!   - `show`     — print the latest (or a specified) report.
-//!   - `bundle`   — make a `.tar.gz` of recent reports for sharing.
-//!   - `env`      — print build/host environment (no crash needed).
+//!  - `list` — show recent reports in `~/.verum/crashes/`.
+//!  - `show` — print the latest (or a specified) report.
+//!  - `bundle` — make a `.tar.gz` of recent reports for sharing.
+//!  - `env` — print build/host environment (no crash needed).
 
 use crate::error::{CliError, Result};
 use crate::ui;

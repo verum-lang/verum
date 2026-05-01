@@ -3,10 +3,11 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Two cooperating pieces:
-//   1. A process-global list of auto-extensions invoked on every
-//      newly-opened connection (sqlite3_auto_extension).
-//   2. A per-connection policy gate + outcome tracker.
+//  1. A process-global list of auto-extensions invoked on every
+//  newly-opened connection (sqlite3_auto_extension).
+//  2. A per-connection policy gate + outcome tracker.
 // =============================================================================
 
 module core.database.sqlite.native.load_extension.engine;

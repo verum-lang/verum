@@ -1,18 +1,19 @@
 //! Integration tests for `verum audit --kernel-soundness` (#80 / VERUM-TRUST-1).
 //!
+
 //! Pin coverage:
-//!   - Plain output reports the canonical 38-rule corpus + IOU list.
-//!   - JSON output is structured with the schema_version=1 envelope.
-//!   - Cross-export produces both `kernel_soundness.v` (Coq) and
-//!     `KernelSoundness.lean` (Lean 4) under
-//!     `target/audit-reports/kernel-soundness/`.
-//!   - The drift-check passes (the canonical Rust rule list agrees
-//!     with `EXPECTED_KERNEL_RULE_COUNT`).
-//!   - The four structurally-proved lemmas (K-Var, K-Univ, K-FwAx,
-//!     K-Pos) appear with `Proof. … Qed.` in the Coq output and `:= by`
-//!     blocks in the Lean output.
-//!   - Every admitted lemma's IOU reason is preserved verbatim in
-//!     both the report and the foreign-tool emission.
+//!  - Plain output reports the canonical 38-rule corpus + IOU list.
+//!  - JSON output is structured with the schema_version=1 envelope.
+//!  - Cross-export produces both `kernel_soundness.v` (Coq) and
+//!  `KernelSoundness.lean` (Lean 4) under
+//!  `target/audit-reports/kernel-soundness/`.
+//!  - The drift-check passes (the canonical Rust rule list agrees
+//!  with `EXPECTED_KERNEL_RULE_COUNT`).
+//!  - The four structurally-proved lemmas (K-Var, K-Univ, K-FwAx,
+//!  K-Pos) appear with `Proof. … Qed.` in the Coq output and `:= by`
+//!  blocks in the Lean output.
+//!  - Every admitted lemma's IOU reason is preserved verbatim in
+//!  both the report and the foreign-tool emission.
 
 #![allow(unused_imports)]
 
@@ -191,7 +192,7 @@ fn proved_lemmas_carry_qed_and_admits_carry_reason() {
             .find(&format!("Lemma {}", proved))
             .unwrap_or_else(|| panic!("Coq output missing {}", proved));
         // After the Lemma keyword, the next 200 chars should contain `Qed.`
-        // (the proved lemmas are short).  Search a window to avoid
+        // (the proved lemmas are short). Search a window to avoid
         // collisions with later admitted lemmas.
         let window_end = (coq_pos + 800).min(coq_text.len());
         let window = &coq_text[coq_pos..window_end];
@@ -202,7 +203,7 @@ fn proved_lemmas_carry_qed_and_admits_carry_reason() {
             window,
         );
         // And does NOT contain Admitted. inside that window
-        // (until the NEXT lemma).  Look for the next `Lemma ` start
+        // (until the NEXT lemma). Look for the next `Lemma ` start
         // and constrain the window.
         let next_lemma_offset = coq_text[coq_pos + 5..].find("Lemma ");
         let bounded_end = match next_lemma_offset {

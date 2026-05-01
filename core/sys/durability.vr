@@ -6,20 +6,24 @@ module sys.durability;
 // Layer: 0 (Core)
 // Spec: internal/specs/sqlite-native.md §3.2 Gap 2
 //
+
 // Thin, named re-export surface over the durability primitives already
 // living in `core.sys.common`. The spec names a dedicated module so
 // callers declare their intent at the import site
 // (`mount core.sys.durability.{full_fsync, sync_directory}`) instead of
 // having to reach into the catch-all `common` namespace.
 //
+
 // No new behaviour is introduced here. The underlying implementations
 // in `common.vr` remain the single source of truth; this module merely
 // exports them through a stable, intent-named surface. Platform backends:
 //
-//   * Linux   — `fsync(fd)` / `fsync(dirfd)` via direct syscall
-//   * Darwin  — `fcntl(fd, F_FULLFSYNC)` via libSystem
-//   * Windows — `FlushFileBuffers(handle)` via kernel32
+
+//  * Linux — `fsync(fd)` / `fsync(dirfd)` via direct syscall
+//  * Darwin — `fcntl(fd, F_FULLFSYNC)` via libSystem
+//  * Windows — `FlushFileBuffers(handle)` via kernel32
 //
+
 // The `sync_directory` wrapper opens the directory read-only, fsyncs it,
 // closes it — required on POSIX after rename/unlink/creat for the
 // name-change to survive power-loss. On Windows it is a no-op because

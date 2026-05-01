@@ -1,18 +1,22 @@
 //! Stdlib (`core/`) bootstrap compilation — the `compile_core` orchestrator.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 8). This submodule
 //! handles the StdlibBootstrap mode: a one-shot compile of the
 //! `core/` standard library into the embeddable `stdlib.vbca`
 //! archive that ships inside the verum binary.
 //!
+
 //! Flow:
 //!
-//!   1. Discover all stdlib modules via `StdlibModuleResolver`.
-//!   2. Parse ALL modules to AST.
-//!   3. Register ALL types globally (multi-pass across all modules).
-//!   4. Compile each module to VBC bytecode.
-//!   5. Build and write `stdlib.vbca` archive.
+
+//!  1. Discover all stdlib modules via `StdlibModuleResolver`.
+//!  2. Parse ALL modules to AST.
+//!  3. Register ALL types globally (multi-pass across all modules).
+//!  4. Compile each module to VBC bytecode.
+//!  5. Build and write `stdlib.vbca` archive.
 //!
+
 //! Architectural distinction from `Normal` build mode: stdlib
 //! bootstrap uses GLOBAL type registration across all modules
 //! before compiling any module, eliminating cross-module
@@ -42,25 +46,32 @@ use super::CompilationPipeline;
 impl<'s> CompilationPipeline<'s> {
     /// Compile the standard library to a VBC archive.
     ///
+
     /// This method is only available in `StdlibBootstrap` mode (created via `new_core()`).
     /// It uses global type registration across ALL modules before compiling any module,
     /// which eliminates cross-module dependency constraints.
     ///
+
     /// # Flow
     ///
+
     /// 1. Discover all stdlib modules via `StdlibModuleResolver`
     /// 2. Parse ALL modules to AST
     /// 3. Register ALL types globally (multi-pass across all modules)
     /// 4. Compile each module to VBC bytecode
     /// 5. Build and write `stdlib.vbca` archive
     ///
+
     /// # Returns
     ///
+
     /// Returns `StdlibCompilationResult` containing compilation statistics,
     /// or an error if compilation fails.
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if:
     /// - The pipeline is not in `StdlibBootstrap` mode
     /// - Module discovery fails
@@ -69,20 +80,25 @@ impl<'s> CompilationPipeline<'s> {
     /// - VBC codegen fails
     /// - Archive writing fails
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_compiler::{Session, CompilationPipeline, CoreConfig};
     ///
+
     /// let config = CoreConfig::new("stdlib")
-    ///     .with_output("target/stdlib.vbca");
+    ///  .with_output("target/stdlib.vbca");
     ///
+
     /// let mut session = Session::default();
     /// let mut pipeline = CompilationPipeline::new_core(&mut session, config);
     ///
+
     /// let result = pipeline.compile_core()?;
     /// println!("Compiled {} modules with {} functions",
-    ///     result.modules_compiled, result.functions_compiled);
+    ///  result.modules_compiled, result.functions_compiled);
     /// ```
     pub fn compile_core(&mut self) -> Result<StdlibCompilationResult> {
         use verum_ast::cfg::TargetConfig;
@@ -142,13 +158,15 @@ impl<'s> CompilationPipeline<'s> {
         // STEP 2.25: Resolve file-relative mounts (#5 / P1.5)
         // ====================================================================
         //
+
         // Before module-registry registration, walk every
         // parsed module for `MountTreeKind::File` declarations
-        // (`mount ./helper.vr;`).  For each, the resolver
+        // (`mount ./helper.vr;`). For each, the resolver
         // loads the referenced file via the loader's sandbox,
         // parses it, and surfaces it as a synthetic module
         // ready to be registered alongside its peers.
         //
+
         // This plugs file mounts into the existing
         // module-path pipeline with zero new resolution
         // codepaths — the synthesised module name (alias or
@@ -157,6 +175,7 @@ impl<'s> CompilationPipeline<'s> {
         // resolution treats it identically to any other
         // module.
         //
+
         // Soft-fail strategy: file-mount resolution errors
         // surface as warnings during stdlib bootstrap (no
         // user-authored file mounts in core/ today, so any
@@ -206,7 +225,7 @@ impl<'s> CompilationPipeline<'s> {
                     // Each resolved file becomes its own
                     // module entry in `all_parsed_modules`,
                     // with the synthesised name acting as
-                    // the canonical module path.  The
+                    // the canonical module path. The
                     // existing Phase 1.5 registration loop
                     // picks them up uniformly.
                     for entry in resolved {
@@ -499,6 +518,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Global type registration across ALL stdlib modules.
     ///
+
     /// Multi-pass registration order:
     /// 1. Import aliases
     /// 2. Type names (forward declarations)
@@ -762,6 +782,7 @@ impl<'s> CompilationPipeline<'s> {
         // dedicated `stdlib_coercion_registry` module so the violation
         // lives in one identifiable spot.
         //
+
         // The unifier's register_*_type methods de-duplicate via
         // HashSet, so calling 5.5b after 5.5a is harmless when an
         // already-discovered type happens to be in the hardcoded list.
@@ -811,14 +832,15 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Compile a stdlib module from pre-parsed AST.
     ///
+
     /// # Arguments
     /// * `module` - The module to compile
     /// * `ast_modules` - Pre-parsed AST modules for this module
     /// * `config` - Stdlib compilation configuration
     /// * `target` - Target platform configuration
     /// * `later_modules` - Set of module names that will be compiled AFTER this module.
-    ///   Used for forward reference detection to suppress warnings for cross-module
-    ///   function calls that will be resolved later in the compilation sequence.
+    ///  Used for forward reference detection to suppress warnings for cross-module
+    ///  function calls that will be resolved later in the compilation sequence.
     fn compile_core_module_from_ast(
         &mut self,
         module: &StdlibModule,
@@ -951,11 +973,13 @@ impl<'s> CompilationPipeline<'s> {
     /// Checks if an undefined function error is a forward reference to a module
     /// that will be compiled later in the compilation sequence.
     ///
+
     /// # Arguments
     /// * `func_path` - The function path from the error (e.g., "darwin::tls::init_main_thread_tls")
     /// * `current_module` - The module currently being compiled (e.g., "sys")
     /// * `later_modules` - Set of modules that will be compiled after the current one
     ///
+
     /// # Returns
     /// `true` if this appears to be a forward reference to a later module
     fn is_forward_reference_to_later_module(

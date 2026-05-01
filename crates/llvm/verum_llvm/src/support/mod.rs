@@ -151,6 +151,7 @@ pub enum LoadLibraryError {
 
 /// Permanently load the dynamic library at the given `path`.
 ///
+
 /// It is safe to call this function multiple times for the same library.
 pub fn load_library_permanently(path: &Path) -> Result<(), LoadLibraryError> {
     let filename = to_c_str(path.to_str().ok_or(LoadLibraryError::UnicodeError)?);
@@ -178,6 +179,7 @@ pub fn load_visible_symbols() {
 
 /// Search through all previously loaded dynamic libraries for `symbol`.
 ///
+
 /// Returns an address of the symbol, if found
 pub fn search_for_address_of_symbol(symbol: &str) -> Option<usize> {
     let symbol = to_c_str(symbol);
@@ -210,8 +212,10 @@ pub fn enable_llvm_pretty_stack_trace() {
 
 /// This function takes in a Rust string and either:
 ///
+
 /// A) Finds a terminating null byte in the Rust string and can reference it directly like a C string.
 ///
+
 /// B) Finds no null byte and allocates a new C string based on the input Rust string.
 pub(crate) fn to_c_str(mut s: &str) -> Cow<'_, CStr> {
     if s.is_empty() {

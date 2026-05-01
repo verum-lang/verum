@@ -2,32 +2,40 @@
 // MSFS — Class S_S of S-definable categorical structures
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §3 — Definition 3.3 (Class S_S
 // of S-definable categorical structures) and the inductive closure
 // operations O1–O6.
 //
+
 // `S_S` is the smallest class of categorical structures (objects
 // of (∞, n_S)-categories) that contains the *local data*
 //
-//     base = { (M, Y) : M ⊨ S, Y ∈ Ob(M) }
-//          ∪ { (Syn(S), X) : X ∈ Ob(Syn(S)) }
+
+//  base = { (M, Y) : M ⊨ S, Y ∈ Ob(M) }
+//  ∪ { (Syn(S), X) : X ∈ Ob(Syn(S)) }
 //
+
 // and is closed under the six structural operations:
 //
-//     O1 — Kan extensions (Lan, Ran).
-//     O2 — Grothendieck constructions (∫ for fibrations, ∮ for
-//          op-fibrations).
-//     O3 — Limits and colimits (small).
-//     O4 — Slice / comma / opposite categories.
-//     O5 — Derived functors (in the Quillen sense).
-//     O6 — Symmetric monoidal tensor + internal hom.
+
+//  O1 — Kan extensions (Lan, Ran).
+//  O2 — Grothendieck constructions (∫ for fibrations, ∮ for
+//  op-fibrations).
+//  O3 — Limits and colimits (small).
+//  O4 — Slice / comma / opposite categories.
+//  O5 — Derived functors (in the Quillen sense).
+//  O6 — Symmetric monoidal tensor + internal hom.
 //
+
 // Two distinguished sub-classes:
 //
-//     `S_S_local` — the base class above (no closure applied).
-//     `S_S_global` = ⋃_{k < ω} S_S^(k) — the κ_1-accessible closure
-//                    obtained by iterating O1–O6 ω-many times.
+
+//  `S_S_local` — the base class above (no closure applied).
+//  `S_S_global` = ⋃_{k < ω} S_S^(k) — the κ_1-accessible closure
+//  obtained by iterating O1–O6 ω-many times.
 //
+
 // Both `S_S_local` and `S_S_global` are *κ_1-accessible* and live
 // inside U_2 (Adámek–Rosický 1.26 + (R5a)). This module installs
 // the class as a carrier protocol plus closure axioms; the central
@@ -76,6 +84,7 @@ public type SSMembership is protocol {
 /// `is_in_s_s_local()` and `closure_depth() == 0` (depth 0 = base
 /// stratum, no closure step applied).
 ///
+
 /// **Architectural strengthening (M1.B).** Pre-M1.B was
 /// `() -> Bool ensures true` — a documentation-only axiom. The new
 /// shape lets the kernel re-check that the base witness genuinely
@@ -89,11 +98,13 @@ public axiom msfs_s_s_local_base(m: &SSMembership) -> Bool
 // O1–O6 — closure operations (witness-parameterised, M1.B)
 // =============================================================================
 //
+
 // Each O-axiom takes:
-//   * one or more `&SSMembership` *input* witnesses (functors / diagrams /
-//     objects of S_S participating in the closure step), and
-//   * one `&SSMembership` *result* witness (the closure output),
+//  * one or more `&SSMembership` *input* witnesses (functors / diagrams /
+//  objects of S_S participating in the closure step), and
+//  * one `&SSMembership` *result* witness (the closure output),
 //
+
 // asserting that the result inhabits S_S_global at closure_depth one
 // strictly above the maximum input depth. This matches Definition 3.3's
 // inductive construction: `S_S^(k+1) := S_S^(k) ∪ ⋃_op O(S_S^(k))`.
@@ -195,7 +206,7 @@ public axiom msfs_s_s_global_kappa_1_accessible(m: &SSMembership) -> Bool
 
 /// MSFS §3 — `S_S_global<S>` is U_2-small. V3: parameterised over
 /// an SSMembership; ensures the membership's closure depth is
-/// bounded (by Convention 1.1 — V0 surface, V4 will tighten to
+/// bounded (by Convention 1.1 — current surface, V4 will tighten to
 /// strict U_2-bound predicate).
 @framework(msfs, "MSFS §3 — S_S_global<S> is U_2-small")
 public axiom msfs_s_s_global_u_2_small(m: &SSMembership) -> Bool
@@ -206,6 +217,7 @@ public axiom msfs_s_s_global_u_2_small(m: &SSMembership) -> Bool
 /// `&SSMembership` `m` whose `is_in_s_s_local()` holds, `m.is_in_s_s_global()`
 /// also holds — the base sits inside the closure at depth 0.
 ///
+
 /// **Architectural strengthening (M0.D-2).** Pre-M0.D-2 the axiom was
 /// `() -> Bool ensures true` — a documentation-only marker without
 /// propositional content over any concrete witness. The current shape
@@ -224,6 +236,7 @@ public axiom msfs_s_s_local_subset_global(m: &SSMembership) -> Bool
 /// κ_1-accessible closure because the closure already contains the
 /// base; either membership flag suffices to put `m` in `S_S`.
 ///
+
 /// **Architectural strengthening (M0.D-2).** Same reshape as
 /// `msfs_s_s_local_subset_global`: pre-M0.D-2 was a documentation-only
 /// `() -> Bool ensures true`; now carries the real disjunctive
@@ -237,6 +250,7 @@ public axiom msfs_s_s_equals_global(m: &SSMembership) -> Bool
 // @theorem promotions — kernel-checked deductions from the closure axioms
 // =============================================================================
 //
+
 // M0.D-2 promotes structural facts about S_S membership from documentation
 // to kernel-rechecked @theorem deductions. Each @theorem below applies
 // one of the strengthened closure axioms; the kernel re-checks the
@@ -244,6 +258,7 @@ public axiom msfs_s_s_equals_global(m: &SSMembership) -> Bool
 
 /// **MSFS §3 — local membership ⟹ global membership (@theorem).**
 ///
+
 /// Operational corollary of `msfs_s_s_local_subset_global`: any
 /// `&SSMembership` witness in `S_S_local` is automatically in `S_S_global`.
 /// The kernel re-checks the deduction: requires-`is_in_s_s_local()` →
@@ -261,6 +276,7 @@ public theorem msfs_ss_local_implies_global(m: &SSMembership)
 
 /// **MSFS §3 — full S_S membership via either flag (@theorem).**
 ///
+
 /// Operational corollary of `msfs_s_s_equals_global`: a witness with
 /// either local or global membership is in `S_S` (= `S_S_global`).
 /// Convenience deduction for downstream theorems that don't care which
@@ -280,6 +296,7 @@ public theorem msfs_ss_either_flag_implies_global(m: &SSMembership)
 // Refinement-typed witness — VVA §2.2 / §5
 // =============================================================================
 //
+
 // Companion to `RefinedLAbsWitness` (in `core/math/absolute_layer.vr`):
 // a record-shape SSMembership where the closure depth carries an inline
 // refinement `Int{>= 0}` enforced by K-Refine at construction time.

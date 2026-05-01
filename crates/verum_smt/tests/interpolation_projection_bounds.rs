@@ -2,12 +2,14 @@
 //! `InterpolationConfig.quantifier_elimination` actually
 //! influence the model-based interpolation projection step.
 //!
+
 //! Closes the inert-defense pattern for both fields. Previously
 //! they were declared with documented defaults but no code path
 //! consulted them: a model-based projection would always invoke
 //! the Z3 `qe` tactic regardless of the budget, and the boolean
 //! gate had no effect.
 //!
+
 //! These tests pin the wiring contract via the public API:
 //! - construct `InterpolationConfig` with extreme values
 //! - feed `interpolate(A, B)` with formulas that force projection

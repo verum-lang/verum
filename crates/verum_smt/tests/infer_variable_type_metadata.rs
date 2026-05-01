@@ -2,19 +2,23 @@
 //! `variant_map` registry + the goal's constructor occurrences, NOT
 //! off hardcoded naming heuristics like "starts with `n` → Nat".
 //!
+
 //! Pre-fix:
 //!
-//!     match var.as_str() {
-//!         name if name.starts_with('n') || name.ends_with("_nat") => Ok("Nat".into()),
-//!         name if name.starts_with('l') || name.contains("list") => Ok("List".into()),
-//!         name if name.starts_with('t') || name.contains("tree") => Ok("Tree".into()),
-//!         name if name.contains("vec") => Ok("Vec".into()),
-//!         _ => Ok("Nat".into()),
-//!     }
+
+//!  match var.as_str() {
+//!  name if name.starts_with('n') || name.ends_with("_nat") => Ok("Nat".into()),
+//!  name if name.starts_with('l') || name.contains("list") => Ok("List".into()),
+//!  name if name.starts_with('t') || name.contains("tree") => Ok("Tree".into()),
+//!  name if name.contains("vec") => Ok("Vec".into()),
+//!  _ => Ok("Nat".into()),
+//!  }
 //!
+
 //! Two architectural violations: hardcoded type names + name-prefix
 //! heuristics. Misclassified e.g. `nodes` as Nat, `tail` as Tree.
 //!
+
 //! Post-fix walks the goal/hypotheses for `var == Ctor(...)` patterns
 //! and resolves Ctor through `variant_map`. Returns a real error when
 //! no constructor is observable — no silent default.

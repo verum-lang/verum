@@ -4,23 +4,27 @@
 // Layer: 3 (depends on cipher/aes)
 // Dependencies: core.security.cipher.aes, core.security.util.constant_time
 // Reference: NIST SP 800-38D — Recommendation for Block Cipher Modes of
-//            Operation: Galois/Counter Mode (GCM) and GMAC
-//            RFC 5116 — AEAD interface
-//            RFC 5288 / RFC 8446 §5.2 — TLS 1.3 AEAD usage
-//            RFC 9001 — QUIC TLS interaction
+//  Operation: Galois/Counter Mode (GCM) and GMAC
+//  RFC 5116 — AEAD interface
+//  RFC 5288 / RFC 8446 §5.2 — TLS 1.3 AEAD usage
+//  RFC 9001 — QUIC TLS interaction
 // =============================================================================
 //
+
 // AES-128-GCM and AES-256-GCM — the default AEAD for TLS 1.3 and QUIC
 // on every major deployment. This module provides:
 //
-//   * `Aes128Gcm` / `Aes256Gcm` — keyed state; builds round keys and
-//     the GHASH sub-key H once per key change.
-//   * `aes128_gcm_encrypt` / `_decrypt` — one-shot sealed/open for
-//     the common 96-bit-IV case.
-//   * `aes256_gcm_encrypt` / `_decrypt` — likewise for AES-256.
+
+//  * `Aes128Gcm` / `Aes256Gcm` — keyed state; builds round keys and
+//  the GHASH sub-key H once per key change.
+//  * `aes128_gcm_encrypt` / `_decrypt` — one-shot sealed/open for
+//  the common 96-bit-IV case.
+//  * `aes256_gcm_encrypt` / `_decrypt` — likewise for AES-256.
 //
+
 // # 96-bit IVs only
 //
+
 // TLS 1.3 and QUIC always use 96-bit (12-byte) IVs. NIST SP 800-38D
 // permits 8..1024-bit IVs with a different J0-construction but every
 // modern protocol standardises on 96. We expose only the 96-bit path
@@ -28,28 +32,35 @@
 // non-96-bit IVs would pull in the `GHASH(IV || 0^s || len)` fallback
 // that is rarely what callers want.
 //
+
 // # Typed nonces
 //
+
 // Keys and nonces are fixed-size byte arrays — compile-time guarantee
 // on sizes (16 / 32 byte keys, 12 byte nonces, 16 byte tags). The
 // `GcmError` return on decrypt carries `Tag mismatch` vs. `Bad input
 // sizes` so callers never get a silent success on tampered data.
 //
+
 // # Constant-time verification
 //
+
 // Decryption compares the received tag with the computed tag using
 // `core.security.util.constant_time_eq`. Do NOT use `==` — a native
 // compare is timing-exploitable and would let the attacker brute-
 // force one tag byte at a time.
 //
+
 // # Performance notes
 //
+
 // Reference GHASH uses the shift-and-XOR multiplication in GF(2^128).
 // This is ~5-10x slower than a PCLMULQDQ-accelerated path. The
 // `@cfg(feature = "crypto-accel")` feature substitutes both
 // `gf_mul` and the AES block-encrypt with hardware variants
 // (PCLMULQDQ + AES-NI) — typical throughput 6-10 GiB/s.
 //
+
 // =============================================================================
 
 module core.security.aead.aes_gcm;
@@ -85,13 +96,13 @@ public type GcmError is
     /// arguments but exposed for slice-accepting entry points.
     | InvalidInput { reason: Text }
     /// Plaintext or ciphertext exceeds the NIST SP 800-38D §5.2.1.1
-    /// per-(key,IV) limit of 2^39 - 256 bits ≈ 64 GiB.  Beyond this,
+    /// per-(key,IV) limit of 2^39 - 256 bits ≈ 64 GiB. Beyond this,
     /// the GCM counter would wrap modulo 2^32 and reuse keystream —
     /// catastrophic security failure (plaintext recovery + tag
     /// forgery).
     | InputTooLarge { limit_bytes: Int };
 
-// Display + Debug + Eq for GcmError.  TagMismatch
+// Display + Debug + Eq for GcmError. TagMismatch
 // formatting deliberately avoids leaking which field
 // (key/nonce/AAD/ciphertext) failed verification — per
 // NIST SP 800-38D §6, side-channel-leaking the failure
@@ -144,17 +155,21 @@ implement Eq for GcmError {
 // NIST SP 800-38D §5.2.1.1 absolute upper bound on plaintext size for
 // a single (key, IV) pair under AES-GCM:
 //
-//     max_bits = 2^39 − 256
+
+//  max_bits = 2^39 − 256
 //
+
 // = (2^32 − 2) × 16 bytes per block × 8 bits per byte
 // = 68_719_476_704 bytes ≈ 64 GiB.
 //
+
 // Any caller wanting to encrypt more than this MUST rotate the IV
 // (RFC 8446 §5.3 nonce construction) — beyond the limit a single
 // (key, IV) pair the GTR counter wraps modulo 2^32 and the keystream
 // of block N collides with block (N − 2^32), enabling plaintext
 // recovery via XOR.
 //
+
 // The limit applies symmetrically: a decrypt of ciphertext exceeding
 // this limit is rejected as invalid input rather than silently
 // producing garbage / leaking key material.
@@ -168,6 +183,7 @@ public const GCM_MAX_PT_BYTES_PER_NONCE: Int = 68_719_476_704;
 /// reduction polynomial is x^128 + x^7 + x^2 + x + 1 (represented
 /// here as 0xE1 in the top bit-reversed byte).
 ///
+
 /// Result written into `out`. X and Y are 16-byte blocks in big-
 /// endian byte order. Operates branch-free over secret bits (the
 /// lsb-test uses &1, not an if on a secret bit, even though we do
@@ -181,8 +197,8 @@ fn gf_mul(x: &[Byte; 16], y: &[Byte; 16], out: &mut [Byte; 16]) {
     while i < 16 { v[i] = y[i]; i = i + 1; }
 
     // For each of the 128 bits of X from msb to lsb:
-    //   if X_i == 1:  Z ^= V
-    //   V := V >> 1; if lsb(V) before shift was 1: V ^= R
+    //  if X_i == 1: Z ^= V
+    //  V := V >> 1; if lsb(V) before shift was 1: V ^= R
     // where R = 0xE1<<120 in bit-reversed form = 0xe1 in byte 0 of a
     // 16-byte block.
     let mut bit = 0;
@@ -412,13 +428,14 @@ fn gcm_encrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
     tag: &mut [Byte; 16],
 ) {
     // SOUNDNESS: NIST SP 800-38D §5.2.1.1 caps per-(key,IV) plaintext
-    // at 2^39 − 256 bits ≈ 64 GiB.  Beyond this the CTR-mode counter
+    // at 2^39 − 256 bits ≈ 64 GiB. Beyond this the CTR-mode counter
     // wraps modulo 2^32 and reuses keystream — keystream-reuse
     // catastrophe: XOR-ing ciphertexts of identical-counter blocks
-    // recovers the plaintexts.  Without this guard the encrypt path
+    // recovers the plaintexts. Without this guard the encrypt path
     // silently produces broken ciphertext that LOOKS valid but leaks
     // every byte past the wraparound point.
     //
+
     // We panic rather than return Result because the existing public
     // API (`encrypt(...)` returns `()`) would have to break to expose
     // an error path, and exceeding the limit always indicates a
@@ -496,10 +513,10 @@ fn gcm_decrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
     tag: &[Byte; 16],
     plaintext: &mut List<Byte>,
 ) -> Result<(), GcmError> {
-    // SOUNDNESS: same NIST per-(key,IV) cap as encrypt.  Decrypting
+    // SOUNDNESS: same NIST per-(key,IV) cap as encrypt. Decrypting
     // ciphertext that exceeds the limit is always invalid — either
     // the producer was buggy (and the ciphertext past the cap is
-    // garbage) or the input is hostile.  Reject before doing any
+    // garbage) or the input is hostile. Reject before doing any
     // cryptographic work so an attacker can't force the verifier
     // to GHASH+AES many GiB of input as a CPU-DoS amplifier.
     if ciphertext.len() > GCM_MAX_PT_BYTES_PER_NONCE {

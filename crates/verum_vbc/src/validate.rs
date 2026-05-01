@@ -1,11 +1,14 @@
 //! VBC module validation.
 //!
+
 //! This module provides validation of VBC modules to ensure they are
 //! well-formed before execution. Validation catches errors early and
 //! provides meaningful error messages.
 //!
+
 //! # Validation Levels
 //!
+
 //! 1. **Header validation**: Magic number, version, section bounds
 //! 2. **Type table validation**: No circular types, valid references
 //! 3. **Function table validation**: Valid bytecode offsets, register counts
@@ -42,6 +45,7 @@ impl ValidationOptions {
 
     /// Creates fast validation options (skips expensive checks).
     ///
+
     /// Honored only by `deserialize_module_validated_with_options`
     /// (deserialize.rs) — the legacy `deserialize_module_validated`
     /// entry point ignores the options and always uses
@@ -108,15 +112,15 @@ impl<'a> Validator<'a> {
         self.validate_cross_references();
 
         // 7. Per-instruction bytecode validation (red-team Round 1 §3.1).
-        //    Walks every function's bytecode, decodes each instruction,
-        //    and validates cross-references (FunctionId in range,
-        //    register references within the function's register count,
-        //    branch targets land on instruction boundaries inside the
-        //    function, constant IDs in range).  This is the load-time
-        //    defense against hand-crafted bytecode that violates
-        //    type-table invariants — without it the interpreter trusts
-        //    the bytecode stream and only catches violations when
-        //    execution happens to reach the malformed instruction.
+        //  Walks every function's bytecode, decodes each instruction,
+        //  and validates cross-references (FunctionId in range,
+        //  register references within the function's register count,
+        //  branch targets land on instruction boundaries inside the
+        //  function, constant IDs in range). This is the load-time
+        //  defense against hand-crafted bytecode that violates
+        //  type-table invariants — without it the interpreter trusts
+        //  the bytecode stream and only catches violations when
+        //  execution happens to reach the malformed instruction.
         if !self.options.skip_bytecode_validation {
             self.validate_bytecode();
         }
@@ -369,24 +373,27 @@ impl<'a> Validator<'a> {
     /// Validates per-function bytecode by decoding each instruction in the
     /// function's bytecode region and verifying its cross-references.
     ///
+
     /// This is the load-time defense against hand-crafted bytecode that
-    /// the type-checker / codegen pipeline would never produce.  Catches:
+    /// the type-checker / codegen pipeline would never produce. Catches:
     ///
-    ///   * Out-of-range `FunctionId` in `Call` / `TailCall` / `CallG`
-    ///     / `CallC` — would cause `FunctionNotFound` at execution time
-    ///     in the well-defined case; here we catch it before any code
-    ///     runs.
-    ///   * Out-of-range register references — would write past the
-    ///     function's register file, corrupting an adjacent frame.
-    ///   * Branch offsets that fall outside the function's bytecode
-    ///     region or land mid-instruction — would let crafted bytecode
-    ///     decode arbitrary opcodes from the operand stream of a
-    ///     legitimate instruction.
-    ///   * Out-of-range `ConstId` / `StringId` — would return None /
-    ///     bogus interned strings at execution time.
+
+    ///  * Out-of-range `FunctionId` in `Call` / `TailCall` / `CallG`
+    ///  / `CallC` — would cause `FunctionNotFound` at execution time
+    ///  in the well-defined case; here we catch it before any code
+    ///  runs.
+    ///  * Out-of-range register references — would write past the
+    ///  function's register file, corrupting an adjacent frame.
+    ///  * Branch offsets that fall outside the function's bytecode
+    ///  region or land mid-instruction — would let crafted bytecode
+    ///  decode arbitrary opcodes from the operand stream of a
+    ///  legitimate instruction.
+    ///  * Out-of-range `ConstId` / `StringId` — would return None /
+    ///  bogus interned strings at execution time.
     ///
+
     /// Performance: walks bytecode linearly once, so cost is O(N) in
-    /// total instruction count.  Skip via
+    /// total instruction count. Skip via
     /// `ValidationOptions::skip_bytecode_validation = true` for
     /// trusted-source loads (e.g. self-emitted bytecode in the same
     /// process).
@@ -432,11 +439,12 @@ impl<'a> Validator<'a> {
         let max_reg = func.register_count;
         // Track decoded instruction-start offsets so jump-target
         // validation can verify the target lands ON an instruction
-        // boundary.  Without this check, crafted bytecode could land a
+        // boundary. Without this check, crafted bytecode could land a
         // jump in the middle of a multi-byte instruction's operand
         // stream and have the interpreter decode arbitrary opcodes
         // from those operand bytes.
         //
+
         // Worst-case capacity is the function's bytecode-byte count
         // (one-byte instructions); typical instructions average ~4-6
         // bytes so this comfortably over-allocates.
@@ -451,7 +459,7 @@ impl<'a> Validator<'a> {
             let instr_start = offset;
             instr_starts.insert(instr_start as u32);
 
-            // Decode this instruction.  Decoder failures surface as a
+            // Decode this instruction. Decoder failures surface as a
             // typed error; we log and stop walking this function (the
             // remaining bytes are unparseable as instructions).
             let instr = match decode_instruction(&self.module.bytecode, &mut offset) {
@@ -466,7 +474,7 @@ impl<'a> Validator<'a> {
             };
 
             // The decoder must not advance past the function's
-            // bytecode region.  If it did, the function descriptor's
+            // bytecode region. If it did, the function descriptor's
             // `bytecode_length` is too small for the decoded
             // instruction stream — flag and stop.
             if offset > func_end {
@@ -496,7 +504,7 @@ impl<'a> Validator<'a> {
         }
 
         // After the walk, instr_starts holds every legal instruction-
-        // boundary offset within the function.  Validate every
+        // boundary offset within the function. Validate every
         // forward-jump target against the boundary set + the function
         // bytecode range.
         let func_end_u32 = func_end as u32;
@@ -516,6 +524,7 @@ impl<'a> Validator<'a> {
 
     /// Validates a single decoded instruction's cross-references.
     ///
+
     /// Branch targets are deferred to a post-walk pass via
     /// `pending_jumps` so we can verify they land on a known
     /// instruction-start boundary.
@@ -673,7 +682,7 @@ impl<'a> Validator<'a> {
 
             // -----------------------------------------------------------
             // Closure construction — `func_id` references the function
-            // table.  Every captured-value register must also be in
+            // table. Every captured-value register must also be in
             // bounds.
             // -----------------------------------------------------------
             Instruction::NewClosure { dst, func_id, captures } => {
@@ -696,14 +705,15 @@ impl<'a> Validator<'a> {
 
             // -----------------------------------------------------------
             // Type-table cross-references — `New` / `NewG` allocate
-            // an instance of a type indexed by `type_id`.  Built-in
+            // an instance of a type indexed by `type_id`. Built-in
             // type IDs (LIST, MAP, SET, ARRAY, INT, ...) live in a
             // reserved low-numbered range; user types start at
             // `TypeId::FIRST_USER` and go up to `module.types.len()`.
             //
+
             // We accept any built-in type unconditionally (validated
             // by `TypeId::is_builtin()`); user types must index into
-            // the module's type table.  Crafted bytecode pointing at
+            // the module's type table. Crafted bytecode pointing at
             // a non-existent user type would otherwise surface only
             // when the runtime tried to consult the type's layout.
             // -----------------------------------------------------------
@@ -733,7 +743,7 @@ impl<'a> Validator<'a> {
             // All remaining instructions — register-only validation.
             // We don't enumerate every variant (the Instruction enum
             // is huge); the call-site cross-references and branch
-            // targets above cover the high-value attack surface.  Reg
+            // targets above cover the high-value attack surface. Reg
             // out-of-bounds in the residual variants is caught by the
             // interpreter's `state.get_reg` panic-free read paths.
             // -----------------------------------------------------------
@@ -756,8 +766,9 @@ impl<'a> Validator<'a> {
     /// Checks a `Call` / `TailCall` / `CallG` instruction's argument
     /// arity matches the target function's declared parameter count.
     ///
+
     /// Closes round-2 §3.2 (Mismatched arity calls) at the load-time
-    /// gate.  Pre-fix the interpreter trusted the bytecode and read
+    /// gate. Pre-fix the interpreter trusted the bytecode and read
     /// `args.count` registers directly, copying them into the new
     /// frame — a hand-crafted module with mismatched arity would
     /// silently corrupt the callee's frame (extra args overwriting
@@ -789,7 +800,7 @@ impl<'a> Validator<'a> {
     }
 
     /// Checks a contiguous register range against the function's
-    /// `register_count`.  `RegRange { start, count }` represents
+    /// `register_count`. `RegRange { start, count }` represents
     /// `[start, start + count)` — every reg in the range must be
     /// in-bounds.
     fn check_reg_range(&mut self, range: RegRange, max: u16, context: &str) {
@@ -905,7 +916,8 @@ mod tests {
     // Round 1 §3.1 — Hand-crafted bytecode validator (DEFENSE CONFIRMED)
     // =========================================================================
     //
-    // Tests pin the load-time bytecode-validation defense.  Each test
+
+    // Tests pin the load-time bytecode-validation defense. Each test
     // builds a synthetic module whose bytecode encodes a single
     // adversarial instruction and asserts the validator rejects it
     // with the expected typed error variant.
@@ -917,7 +929,7 @@ mod tests {
     use crate::FunctionId;
 
     /// Build a one-function module whose body is the supplied instruction
-    /// followed by a Ret-Unit terminator.  `register_count` configures
+    /// followed by a Ret-Unit terminator. `register_count` configures
     /// the function's register file size — used by tests that exercise
     /// register-out-of-bounds.
     fn build_module_with_instr(
@@ -962,7 +974,7 @@ mod tests {
     fn validator_rejects_call_with_oor_function_id() {
         // Function table has only function id 0; a Call to function 99
         // is hand-crafted bytecode that the codegen pipeline never
-        // emits.  Validator must reject at load time.
+        // emits. Validator must reject at load time.
         let oor_call = Instruction::Call {
             dst: Reg(0),
             func_id: 99,
@@ -1099,14 +1111,14 @@ mod tests {
     #[test]
     fn validator_rejects_try_begin_with_handler_past_function_end() {
         // TryBegin's handler_offset is a branch target; landing it
-        // far past the function's bytecode region is rejected.  The
+        // far past the function's bytecode region is rejected. The
         // offset of 0x7FFF_FFFF can surface as either:
-        //   * `JumpOutOfBounds` — our post-walk boundary check fires
-        //     after the byte walk completes, OR
-        //   * `InvalidInstructionEncoding` — the trailing Ret can't
-        //     decode because the giant signed-varint offset consumed
-        //     more bytes than the descriptor's `bytecode_length`
-        //     budgeted for.
+        //  * `JumpOutOfBounds` — our post-walk boundary check fires
+        //  after the byte walk completes, OR
+        //  * `InvalidInstructionEncoding` — the trailing Ret can't
+        //  decode because the giant signed-varint offset consumed
+        //  more bytes than the descriptor's `bytecode_length`
+        //  budgeted for.
         // Both rejections satisfy the load-time-defense invariant.
         let bad_try = Instruction::TryBegin {
             handler_offset: 0x7FFF_FFFF,
@@ -1145,7 +1157,7 @@ mod tests {
     fn validator_rejects_new_with_oor_user_type_id() {
         // `New { type_id: 9999 }` references a user-type past the
         // type-table end (the test module declares zero user types,
-        // so any user-range TypeId is out of range).  Built-in
+        // so any user-range TypeId is out of range). Built-in
         // TypeIds (< FIRST_USER) are accepted unconditionally.
         let bad_new = Instruction::New {
             dst: Reg(0),
@@ -1163,9 +1175,9 @@ mod tests {
     #[test]
     fn validator_accepts_new_with_builtin_type_id() {
         // Built-in types (TypeId::LIST, MAP, SET, etc. — id < 16)
-        // are always valid.  Pin this — a regression that lost the
+        // are always valid. Pin this — a regression that lost the
         // is_builtin() short-circuit would flag every `New` against
-        // a builtin type.  TypeId::INT = 2 is a representative
+        // a builtin type. TypeId::INT = 2 is a representative
         // builtin.
         let good_new = Instruction::New {
             dst: Reg(0),
@@ -1181,9 +1193,9 @@ mod tests {
     fn validator_rejects_call_with_arity_mismatch() {
         // Hand-crafted bytecode: the target FunctionId(0) declares
         // ZERO parameters (default `FunctionDescriptor`), but the
-        // call site passes 3 args.  Pre-fix the interpreter would
+        // call site passes 3 args. Pre-fix the interpreter would
         // copy 3 values into the callee's frame, corrupting locals
-        // beyond the formal parameter region.  The validator
+        // beyond the formal parameter region. The validator
         // catches it at load time.
         let mismatch_call = Instruction::Call {
             dst: Reg(0),
@@ -1212,14 +1224,16 @@ mod tests {
 // MakeVariantTyped layout validation (#272 — public surface).
 // =============================================================================
 //
+
 // Tier 1 (AOT) codegen path uses this from
 // `verum_codegen::llvm::instruction::Instruction::MakeVariantTyped`
 // arm to validate the (type_id, tag, field_count) tuple at codegen
-// time, BEFORE emitting any IR.  Pre-#272 the AOT path skipped the
+// time, BEFORE emitting any IR. Pre-#272 the AOT path skipped the
 // check entirely while Tier 0 (interpreter) validated via
 // `validate_make_variant_typed` at dispatch time — silent
 // divergence between the two tiers on layout-mismatched bytecode.
 //
+
 // Validating at codegen time (rather than runtime) is correct
 // architecturally: every operand of MakeVariantTyped is a compile-
 // time constant, so the check is doable without any runtime
@@ -1278,6 +1292,7 @@ impl std::error::Error for VariantLayoutError {}
 
 /// Compute the expected field count for a variant descriptor.
 ///
+
 /// Mirrors `verum_vbc::interpreter::dispatch_table::handlers::extended::
 /// expected_field_count` (which is private to the interpreter).
 /// Kept in sync with that function — they MUST agree on every
@@ -1296,13 +1311,15 @@ fn variant_expected_field_count(
 
 /// Validate a `(type_id, tag, field_count)` tuple at codegen time.
 ///
+
 /// Returns `Ok(())` when the tuple is consistent with the module's
-/// type table.  Returns `Err(VariantLayoutError)` on mismatch — the
+/// type table. Returns `Err(VariantLayoutError)` on mismatch — the
 /// codegen path converts this to a hard `LlvmLoweringError` so the
 /// build fails loud rather than emitting IR with a layout bug.
 ///
+
 /// Builtin-range type ids (`is_builtin()`) bypass the check because
-/// they don't carry a `variants` list.  This matches the Tier 0
+/// they don't carry a `variants` list. This matches the Tier 0
 /// validator's behaviour at extended.rs:62.
 pub fn validate_variant_layout(
     module: &VbcModule,

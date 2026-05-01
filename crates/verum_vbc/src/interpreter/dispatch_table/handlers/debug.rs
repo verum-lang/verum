@@ -1,5 +1,6 @@
 //! Debug, assertion, and verification/contract handlers for VBC interpreter dispatch.
 //!
+
 //! Handles: Assert (0xD6), Panic (0xD7), Unreachable (0xD8), DebugPrint (0xD9),
 //! Spec (0xD4), Guard (0xD5), Requires (0xDA), Ensures (0xDB), Invariant (0xDC)
 
@@ -17,6 +18,7 @@ use super::bytecode_io::*;
 
 /// Assert (0xC2) - Assert condition is true.
 ///
+
 /// Encoding: opcode + cond + message_id (varint)
 /// Effect: If `cond` is false, raises an assertion failure error.
 pub(in super::super) fn handle_assert(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -46,6 +48,7 @@ pub(in super::super) fn handle_assert(state: &mut InterpreterState) -> Interpret
 
 /// Panic (0xD7) - Terminate execution with error message.
 ///
+
 /// Encoding: opcode + message_id (varint)
 /// Effect: Raises a Panic error with the message from string pool.
 pub(in super::super) fn handle_panic(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -63,6 +66,7 @@ pub(in super::super) fn handle_panic(state: &mut InterpreterState) -> Interprete
 
 /// Unreachable (0xD8) - Marker for unreachable code paths.
 ///
+
 /// Encoding: opcode (no operands)
 /// Effect: Raises an Unreachable error - indicates a code path that should never execute.
 pub(in super::super) fn handle_unreachable(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -71,6 +75,7 @@ pub(in super::super) fn handle_unreachable(state: &mut InterpreterState) -> Inte
 
 /// DebugPrint (0xC5) - Print value to stdout for debugging.
 ///
+
 /// Encoding: opcode + value_reg
 /// Output: Prints the value to stdout with a newline.
 pub(in super::super) fn handle_debug_print(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -105,6 +110,7 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
 
     // ThinRef / FatRef — deref to the pointed-to value and recurse.
     //
+
     // `List.iter().next()` and related builtin iterators wrap each
     // element in a ThinRef (see `handlers/method_dispatch.rs` iterator
     // dispatch) so the caller can observe the slot without taking
@@ -114,6 +120,7 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
     // be formatted as a heap pointer and then re-interpreted as an
     // `ObjectHeader`, which SIGSEGVs on arbitrary memory.
     //
+
     // We deref into a `Value` (NaN-boxed) because that's how builtin
     // iterator slots are stored. This covers the common case of
     // `List<Int>` / `List<Float>` / `List<Text>` / `List<Bool>` etc.
@@ -173,16 +180,19 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
 
             // Heap-allocated string: type_id == TEXT (4) or 0x0001 (legacy).
             //
+
             // Two layouts can land under this type_id:
             //
-            //   **Compact** — `[header | len:u64 | bytes[len]]`.
-            //   Emitted by `load_constant` for text literals.
+
+            //  **Compact** — `[header | len:u64 | bytes[len]]`.
+            //  Emitted by `load_constant` for text literals.
             //
-            //   **Struct** — `[header | ptr:Value | len:Value | cap:Value]`.
-            //   Produced by the stdlib's `Text { ptr, len, cap }` record
-            //   literal (see `core/text/text.vr:170`). Each field is a
-            //   NaN-boxed `Value` and `header.size == 24`. Same dual-layout
-            //   dispatch is mirrored in `string_helpers::format_value_for_print`.
+
+            //  **Struct** — `[header | ptr:Value | len:Value | cap:Value]`.
+            //  Produced by the stdlib's `Text { ptr, len, cap }` record
+            //  literal (see `core/text/text.vr:170`). Each field is a
+            //  NaN-boxed `Value` and `header.size == 24`. Same dual-layout
+            //  dispatch is mirrored in `string_helpers::format_value_for_print`.
             if header.type_id == crate::types::TypeId::TEXT || header.type_id == crate::types::TypeId(0x0001) {
                 unsafe {
                     // Prefer the struct layout when the header advertises
@@ -240,15 +250,16 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
             }
 
             // Variant detection — TWO paths:
-            //   (1) Legacy synthetic-id form (`MakeVariant`): id is in
-            //       the `0x8000+tag` sentinel range.
-            //   (2) Typed form (`MakeVariantTyped`): id is the
-            //       concrete sum-type id, which lives in the user-id
-            //       range (≥ 0x100 per `alloc_user_type_id`'s skip
-            //       set, < 0x8000).  We recognise these by consulting
-            //       the module's type table for a `TypeKind::Sum`
-            //       descriptor with this id.
+            //  (1) Legacy synthetic-id form (`MakeVariant`): id is in
+            //  the `0x8000+tag` sentinel range.
+            //  (2) Typed form (`MakeVariantTyped`): id is the
+            //  concrete sum-type id, which lives in the user-id
+            //  range (≥ 0x100 per `alloc_user_type_id`'s skip
+            //  set, < 0x8000). We recognise these by consulting
+            //  the module's type table for a `TypeKind::Sum`
+            //  descriptor with this id.
             //
+
             // Both paths route to `format_variant_for_print_depth`,
             // which uses the value's own header type_id to do the
             // type-scoped variant-name lookup before falling back to
@@ -348,11 +359,11 @@ fn format_variant_for_print_depth(state: &InterpreterState, base_ptr: *const u8,
         let tag = *tag_ptr;
         let field_count = *tag_ptr.add(1) as usize;
 
-        // Type-scoped variant-name lookup.  Falls back to the legacy
+        // Type-scoped variant-name lookup. Falls back to the legacy
         // global scan ONLY when the type-scoped lookup misses (header
         // type_id == UNIT — happens for runtime-synthesised values
         // that don't carry a real type_id, like raw closure invocations
-        // from the FFI bridge).  This preserves the legacy display
+        // from the FFI bridge). This preserves the legacy display
         // for those edge cases without compromising correctness for
         // user-defined sum types, which always carry a real type_id.
         let name_from_metadata = state.module
@@ -370,25 +381,26 @@ fn format_variant_for_print_depth(state: &InterpreterState, base_ptr: *const u8,
             })
             .or_else(|| {
                 // Fallback: scoped scan limited to sum-type
-                // descriptors.  `MakeVariant` synthesises a sentinel
+                // descriptors. `MakeVariant` synthesises a sentinel
                 // type_id of `0x8000 + tag`, so the type-scoped
                 // lookup above misses for every variant emitted via
                 // that path; we then walk the type table looking for
                 // a sum-kind type with a matching variant.
                 //
+
                 // CRITICAL: Protocol-kind types ALSO carry per-method
                 // entries in their `variants` list (registered at
                 // `vbc/codegen/mod.rs:1144` as the dyn: dispatch
                 // vtable keying — method NAMES are stored as
                 // variants whose `tag` is the method's index in
-                // `ctx_decl.methods`).  Including them in this fallback
+                // `ctx_decl.methods`). Including them in this fallback
                 // walk causes a sum-type variant tag (e.g.
                 // `ShellError.SpawnFailed` tag=1) to misread as a
                 // protocol method name (e.g. `file_write_all` for the
                 // RuntimeIo context's 7th method) — the bug that
                 // produced "file_write_all(echo hello, …)" instead
                 // of the proper "SpawnFailed(echo hello, …)" display
-                // for shell-script panics.  Filter them out.
+                // for shell-script panics. Filter them out.
                 use crate::types::TypeKind;
                 state.module.types.iter()
                     .filter(|td| !matches!(td.kind, TypeKind::Protocol))
@@ -508,6 +520,7 @@ fn format_set_for_print_depth(state: &InterpreterState, base_ptr: *const u8, dep
 
 /// Spec (0xD4) - JIT specialization hint.
 ///
+
 /// Encoding: opcode + reg + type_id (varint)
 /// Effect: No-op in interpreter (JIT optimization hint).
 pub(in super::super) fn handle_spec(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -519,9 +532,11 @@ pub(in super::super) fn handle_spec(state: &mut InterpreterState) -> Interpreter
 
 /// Guard (0xD5) - Type guard (deopt if mismatch).
 ///
+
 /// Encoding: opcode + reg + expected_type_id + deopt_offset
 /// Effect: If value doesn't match expected type, deoptimize (in JIT) or continue (interpreter).
 ///
+
 /// In interpreter, this validates type compatibility but doesn't deoptimize.
 pub(in super::super) fn handle_guard(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let reg = read_reg(state)?;
@@ -538,6 +553,7 @@ pub(in super::super) fn handle_guard(state: &mut InterpreterState) -> Interprete
 
 /// Requires (0xDA) - Contract precondition check.
 ///
+
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
 pub(in super::super) fn handle_requires(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -559,6 +575,7 @@ pub(in super::super) fn handle_requires(state: &mut InterpreterState) -> Interpr
 
 /// Ensures (0xDB) - Contract postcondition check.
 ///
+
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
 pub(in super::super) fn handle_ensures(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -580,6 +597,7 @@ pub(in super::super) fn handle_ensures(state: &mut InterpreterState) -> Interpre
 
 /// Invariant (0xDC) - Loop invariant check.
 ///
+
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
 pub(in super::super) fn handle_invariant(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {

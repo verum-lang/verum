@@ -14,6 +14,7 @@
 )]
 //! Termination Verification Tests using Z3 Fixed-Point Engine
 //!
+
 //! These tests verify that recursive functions terminate using ranking functions.
 //! Tests cover various patterns: simple recursion, mutual recursion, and complex cases.
 

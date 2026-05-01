@@ -2,7 +2,7 @@
 // core/net/weft/error.vr — Error model for Weft
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §5.6
+// Spec: internal/specs/net-framework.md §5.6
 // =============================================================================
 
 module core.net.weft.error;

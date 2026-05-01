@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite EXPLAIN
 //
+
 // One row per opcode in the prepared VDBE program. Field semantics
 // match the documented sqlite3_column_* output of EXPLAIN <sql>.
 // =============================================================================

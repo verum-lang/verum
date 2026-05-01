@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_recover_step returns SQLITE_OK / DONE / ERROR;
 // sqlite3_recover_finish returns SQLITE_OK (success) or SQLITE_ERROR.
 // =============================================================================

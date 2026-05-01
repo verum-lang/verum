@@ -1,9 +1,11 @@
 //! Benchmarks for Flow Functions - Per-Field Interprocedural Analysis
 //!
+
 //! Benchmarks for CBGR flow functions (per-field interprocedural escape analysis).
 //! Flow functions model escape propagation through CFG edges on a per-field basis,
 //! enabling independent CBGR tier decisions for individual struct fields.
 //!
+
 //! Performance targets:
 //! - Per-edge flow function: < 100ns
 //! - Per-call interprocedural: < 500ns

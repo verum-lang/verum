@@ -1,13 +1,15 @@
 //! Cubical type theory instruction handlers for the VBC interpreter.
 //!
+
 //! These handlers implement the runtime semantics of cubical type theory
 //! operations. At runtime:
 //! - Path values are represented as their computational content
-//!   (refl → the point, transport → the transported value, etc.)
+//!  (refl → the point, transport → the transported value, etc.)
 //! - Interval points i0, i1 are represented as integers (0 and 1)
 //! - Most cubical operations are erased by proof_erasure.rs before
-//!   reaching the interpreter
+//!  reaching the interpreter
 //!
+
 //! The handlers support the computational residue that survives proof
 //! erasure (e.g., `transport(refl, x) → x`, `transport(ua(e), x) → e.forward(x)`).
 //! Complex cubical terms are normalized at the type-checking level by
@@ -28,6 +30,7 @@ use super::method_dispatch::call_function_sync;
 
 /// Handler for `CubicalExtended` opcode (0xDE).
 ///
+
 /// Reads the sub-opcode byte and dispatches to the appropriate cubical
 /// operation handler.
 pub(in super::super) fn handle_cubical_extended(
@@ -76,9 +79,11 @@ fn read_cubical_args(state: &mut InterpreterState) -> InterpreterResult<(crate::
 
 /// Try to call a value as a function with a single argument.
 ///
+
 /// Handles both `FuncRef` (named function) and closure pointer (heap object
 /// with `[ObjectHeader][func_id:u32][capture_count:u32][...]` layout).
 ///
+
 /// Returns `Ok(Some(result))` if the call succeeded, `Ok(None)` if the value
 /// is not callable (so the caller can fall back to an identity result).
 fn try_call_value(
@@ -101,17 +106,22 @@ fn try_call_value(
 
 /// Read a Value field from a heap object by index.
 ///
-/// Object layout:  [ObjectHeader (24 bytes)] [Value fields...]
+
+/// Object layout: [ObjectHeader (24 bytes)] [Value fields...]
 ///
+
 /// # Codegen contract
 ///
+
 /// The field indices must match the codegen output exactly:
-///   - Equiv struct: field 0 = forward, field 1 = inverse
-///   - Copattern body: fields in declaration order of coinductive destructors
-///   - Ua wrapper: field 0 = the wrapped equivalence
+///  - Equiv struct: field 0 = forward, field 1 = inverse
+///  - Copattern body: fields in declaration order of coinductive destructors
+///  - Ua wrapper: field 0 = the wrapped equivalence
 ///
+
 /// If the VBC codegen changes field layout, this handler must be updated.
 ///
+
 /// Returns `Value::unit()` for non-pointer objects or out-of-bounds access
 /// (graceful degradation).
 fn read_object_field(obj: Value, field_idx: usize) -> Value {
@@ -147,6 +157,7 @@ fn read_object_field(obj: Value, field_idx: usize) -> Value {
 
 /// `refl(x)` = λi. x — constant path at x.
 ///
+
 /// After proof erasure, `refl` carries its base point as its runtime value.
 /// `refl(x) @ r = x` for any interval `r`, so returning `x` is semantically
 /// exact for all downstream consumers.
@@ -159,6 +170,7 @@ fn handle_path_refl(state: &mut InterpreterState) -> InterpreterResult<DispatchR
 
 /// `λ(i:I). body` — path lambda.
 ///
+
 /// At runtime a path lambda is its underlying closure / function reference.
 /// The value is passed through unchanged so that `PathApp` can later invoke it.
 fn handle_path_lambda(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -170,8 +182,10 @@ fn handle_path_lambda(state: &mut InterpreterState) -> InterpreterResult<Dispatc
 
 /// `p @ r` — path application.
 ///
+
 /// Computes the value of path `p` at interval point `r`.
 ///
+
 /// - If `p` is a `FuncRef` → call `p(r)` directly.
 /// - If `p` is a closure pointer → call the closure with `r`.
 /// - Otherwise (`p` is a constant / refl) → `p` is already the point, return it.
@@ -191,6 +205,7 @@ fn handle_path_app(state: &mut InterpreterState) -> InterpreterResult<DispatchRe
 
 /// `sym(p)` = λi. p @ (1-i) — path symmetry.
 ///
+
 /// After proof erasure the computational content of `sym(p)` is the same as
 /// `p` (both endpoints are equal modulo the path direction). We preserve the
 /// path value so that any downstream `PathApp` receives the correct callable.
@@ -204,9 +219,10 @@ fn handle_path_sym(state: &mut InterpreterState) -> InterpreterResult<DispatchRe
 /// `trans(p, q)` — path transitivity: concatenate path `p` (from a to b)
 /// with path `q` (from b to c) to get a path from a to c.
 ///
+
 /// After proof erasure the destination endpoint of the composed path is the
-/// destination endpoint of `q`.  When the caller later evaluates the composed
-/// path at `i1` they get `q @ i1`, which equals the endpoint `c`.  We
+/// destination endpoint of `q`. When the caller later evaluates the composed
+/// path at `i1` they get `q @ i1`, which equals the endpoint `c`. We
 /// therefore carry `q` forward as the runtime representative of the composed
 /// path — the best approximation achievable without a live interval value.
 fn handle_path_trans(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -218,9 +234,10 @@ fn handle_path_trans(state: &mut InterpreterState) -> InterpreterResult<Dispatch
 
 /// `ap(f, p)` = λi. f(p @ i) — functorial action on paths.
 ///
-/// Applies function `f` pointwise along path `p`.  At runtime:
+
+/// Applies function `f` pointwise along path `p`. At runtime:
 /// - If `p` is callable (FuncRef or closure), compose `f ∘ p` by calling
-///   `p` at `i1` (the canonical endpoint) and then applying `f`.
+///  `p` at `i1` (the canonical endpoint) and then applying `f`.
 /// - Otherwise treat `p` as a constant and apply `f` directly.
 fn handle_path_ap(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
@@ -248,21 +265,24 @@ fn handle_path_ap(state: &mut InterpreterState) -> InterpreterResult<DispatchRes
 
 /// `transport(type_path, value)` — transport a value along a type path.
 ///
-/// This is the computational heart of cubical transport.  The surviving
+
+/// This is the computational heart of cubical transport. The surviving
 /// computational cases after proof erasure are:
 ///
+
 /// 1. **`ua`-transport**: `type_path` evaluates to an equivalence struct
-///    `{ forward, inverse, ... }`.  We extract `forward` (field 0) and apply
-///    it to `value`.
+///  `{ forward, inverse, ... }`. We extract `forward` (field 0) and apply
+///  it to `value`.
 /// 2. **Trivial / identity transport**: `type_path` is a constant (e.g. the
-///    refl path on a type), so the type does not change and `value` is
-///    returned unchanged.
+///  refl path on a type), so the type does not change and `value` is
+///  returned unchanged.
 ///
+
 /// `type_path` encoding at runtime:
 /// - A plain equivalence struct (ptr): produced by `ua(equiv)` which passes
-///   the equiv through — field 0 is the forward function.
+///  the equiv through — field 0 is the forward function.
 /// - A `FuncRef` or closure representing `λi. A` where `A` is constant:
-///   evaluating at i1 gives back the same type, so transport is identity.
+///  evaluating at i1 gives back the same type, so transport is identity.
 fn handle_transport(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
     let type_path = if !args.is_empty() { args[0] } else { Value::unit() };
@@ -281,22 +301,25 @@ fn handle_transport(state: &mut InterpreterState) -> InterpreterResult<DispatchR
     }
 
     // Case 2: type_path is a function / closure representing a constant type
-    // path (λi.A).  Evaluating at i1 gives A; since A = A the transport is
-    // the identity.  We return value unchanged.
+    // path (λi.A). Evaluating at i1 gives A; since A = A the transport is
+    // the identity. We return value unchanged.
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
 }
 
 /// `hcomp(face, walls, base)` — homogeneous composition.
 ///
+
 /// `hcomp` fills a box whose open face is given by `base` and whose walls are
-/// provided by `walls : I → I → A`.  The filler at `i1` (the lid) is:
+/// provided by `walls : I → I → A`. The filler at `i1` (the lid) is:
 ///
-///   `hcomp(face, walls, base) = walls(face)(i1)`
+
+///  `hcomp(face, walls, base) = walls(face)(i1)`
 ///
+
 /// Runtime handling:
 /// - If `walls` is callable (FuncRef or closure) → call `walls(face)` to get
-///   the wall function, then call that at `i1`.
+///  the wall function, then call that at `i1`.
 /// - Otherwise → return `base` (the open face is the best approximation).
 fn handle_hcomp(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
@@ -378,7 +401,8 @@ fn handle_interval_rev(state: &mut InterpreterState) -> InterpreterResult<Dispat
 
 /// `ua(equiv)` — univalence axiom: turn an equivalence into a path of types.
 ///
-/// At runtime, the equiv struct is the computational content.  We pass it
+
+/// At runtime, the equiv struct is the computational content. We pass it
 /// through so that `transport` can later extract `equiv.forward`.
 fn handle_ua(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let (dst, args) = read_cubical_args(state)?;
@@ -389,6 +413,7 @@ fn handle_ua(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> 
 
 /// `ua_inv(path)` — inverse of `ua`: extract equivalence from a path of types.
 ///
+
 /// The path (as produced by `ua`) carries the equiv as its runtime value.
 /// We pass it through unchanged.
 fn handle_ua_inv(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
@@ -400,8 +425,10 @@ fn handle_ua_inv(state: &mut InterpreterState) -> InterpreterResult<DispatchResu
 
 /// `equiv_fwd(equiv, value)` — apply the forward direction of an equivalence.
 ///
+
 /// Equiv struct layout: [forward: fn(A)->B, inverse: fn(B)->A, ...]
 ///
+
 /// 1. Read field 0 from the equiv object to get the forward function.
 /// 2. Call it with `value`.
 /// 3. If field 0 is not callable, return `value` unchanged (identity fallback).
@@ -425,8 +452,10 @@ fn handle_equiv_fwd(state: &mut InterpreterState) -> InterpreterResult<DispatchR
 
 /// `equiv_bwd(equiv, value)` — apply the inverse direction of an equivalence.
 ///
+
 /// Equiv struct layout: [forward: fn(A)->B, inverse: fn(B)->A, ...]
 ///
+
 /// 1. Read field 1 from the equiv object to get the inverse function.
 /// 2. Call it with `value`.
 /// 3. If field 1 is not callable, return `value` unchanged (identity fallback).

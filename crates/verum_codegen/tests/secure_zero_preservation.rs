@@ -1,47 +1,55 @@
 //! LLVM IR audit harness — `secure_zero` volatile-memset preservation.
 //!
+
 //! Closes Action #2 of the TLS/QUIC security audit
 //! (`internal/specs/tls-quic-security-audit.md` §2): "LLVM-IR audit
 //! of zeroise memset preservation — follow-up."
 //!
+
 //! # What this guards against
 //!
-//! LLVM's standard `memset` intrinsic is non-volatile.  When the
+
+//! LLVM's standard `memset` intrinsic is non-volatile. When the
 //! optimiser proves the buffer is dead immediately after the memset
 //! (which is the *exact* situation we use it for — wiping secret
 //! material just before scope exit), `MemCpyOptPass` /
-//! `DeadStoreEliminationPass` will silently elide the call.  The
+//! `DeadStoreEliminationPass` will silently elide the call. The
 //! secret stays in memory after the function returns; a coredump,
 //! swap-out, post-exit heap inspection, or use-after-free read can
 //! expose it.
 //!
+
 //! `verum_codegen::llvm::ffi::FfiLowering::lower_secure_zero` emits a
 //! *volatile* memset — the `i1 true` flag in the call signature
 //! tells LLVM the call is observable, and every optimisation pass
-//! preserves it.  This harness pins that property at two levels:
+//! preserves it. This harness pins that property at two levels:
 //!
-//!   1. **Emission level**: directly asserts `lower_secure_zero`
-//!      produces IR containing a volatile-memset call.  Catches a
-//!      future regression where someone flips the volatile bit.
-//!   2. **Optimisation survival**: runs LLVM's `default<O3>` pass
-//!      pipeline and asserts the volatile call survives.  Catches a
-//!      future regression where LLVM changes semantics of the
-//!      volatile flag for memset.
+
+//!  1. **Emission level**: directly asserts `lower_secure_zero`
+//!  produces IR containing a volatile-memset call. Catches a
+//!  future regression where someone flips the volatile bit.
+//!  2. **Optimisation survival**: runs LLVM's `default<O3>` pass
+//!  pipeline and asserts the volatile call survives. Catches a
+//!  future regression where LLVM changes semantics of the
+//!  volatile flag for memset.
 //!
+
 //! Includes a negative-control test demonstrating that an otherwise-
 //! identical NON-volatile memset IS elided at -O3 — proves the
 //! volatile flag is doing real work, not just decorating the IR.
 //!
+
 //! # Failure modes
 //!
+
 //! If this test ever fails:
-//!   * Emission test fails → someone flipped the volatile bit in
-//!     `lower_secure_zero`.  Revert.
-//!   * Survival test fails → LLVM upgrade changed optimiser
-//!     behaviour.  Investigate before merging the LLVM bump.
-//!   * Negative control fails (non-volatile memset survives) → LLVM
-//!     stopped DCE'ing dead memsets.  Less catastrophic (volatile
-//!     still works), but the framing comments may need updating.
+//!  * Emission test fails → someone flipped the volatile bit in
+//!  `lower_secure_zero`. Revert.
+//!  * Survival test fails → LLVM upgrade changed optimiser
+//!  behaviour. Investigate before merging the LLVM bump.
+//!  * Negative control fails (non-volatile memset survives) → LLVM
+//!  stopped DCE'ing dead memsets. Less catastrophic (volatile
+//!  still works), but the framing comments may need updating.
 
 use verum_codegen::llvm::ffi::FfiLowering;
 use verum_llvm::context::Context;
@@ -55,12 +63,14 @@ use verum_llvm::OptimizationLevel;
 
 /// Build a one-function LLVM module:
 ///
-///     define void @secrets() {
-///       %buf = alloca [32 x i8]
-///       call void @llvm.memset.p0.i64(ptr %buf, i8 0, i64 32, i1 true)
-///       ret void
-///     }
+
+///  define void @secrets() {
+///  %buf = alloca [32 x i8]
+///  call void @llvm.memset.p0.i64(ptr %buf, i8 0, i64 32, i1 true)
+///  ret void
+///  }
 ///
+
 /// The volatile bit on the memset is the security-critical
 /// property — without it, LLVM's optimiser elides the call once
 /// the buffer is proved dead at function exit.
@@ -151,7 +161,7 @@ fn host_target_machine() -> TargetMachine {
         .expect("create_target_machine")
 }
 
-/// Run a named pass pipeline against a module.  The pipeline string
+/// Run a named pass pipeline against a module. The pipeline string
 /// follows `opt -passes=<...>` syntax from `llvm/opt`.
 fn run_pipeline(module: &Module, pipeline: &str) {
     let tm = host_target_machine();
@@ -165,7 +175,7 @@ fn run_pipeline(module: &Module, pipeline: &str) {
 }
 
 /// Count `call void @llvm.memset` (or `tail call ...`) lines in the
-/// IR.  We tolerate the leading `tail call` form that the optimiser
+/// IR. We tolerate the leading `tail call` form that the optimiser
 /// occasionally inserts.
 fn count_memset_calls(ir: &str) -> usize {
     ir.lines()
@@ -193,7 +203,7 @@ fn assert_volatile_memset_present(label: &str, ir: &str) {
 // =============================================================================
 
 /// Baseline: the helper produces a volatile memset before any
-/// optimisation runs.  Cheapest sanity check — if this fails, the
+/// optimisation runs. Cheapest sanity check — if this fails, the
 /// source-level emission is wrong (volatile bit missing).
 #[test]
 fn secure_zero_emits_volatile_memset() {
@@ -239,7 +249,7 @@ fn secure_zero_survives_o3() {
 #[test]
 fn secure_zero_survives_dse_targeted() {
     // Run *only* DeadStoreEliminationPass — the historical pass that
-    // would elide a non-volatile dead memset.  This test pins the
+    // would elide a non-volatile dead memset. This test pins the
     // smaller property that volatile escapes DSE specifically, even
     // when other O3 passes aren't running.
     let ctx = Context::create();
@@ -253,9 +263,10 @@ fn secure_zero_survives_dse_targeted() {
 // Negative control — non-volatile memset IS elided at -O3
 // =============================================================================
 //
+
 // This test demonstrates *why* the volatile flag matters: an
 // otherwise-identical module that uses a non-volatile memset has
-// the call elided at -O3.  If this test ever STARTS FAILING (i.e.,
+// the call elided at -O3. If this test ever STARTS FAILING (i.e.,
 // the non-volatile memset survives), it means LLVM has changed
 // behaviour or the optimiser pipeline isn't running as expected —
 // the volatile-survival tests above remain valid (volatile is

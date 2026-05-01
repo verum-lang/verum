@@ -5,9 +5,11 @@
 // Dependencies: core (primitives, protocols)
 // =============================================================================
 //
+
 // This module provides utilities for working with Unicode characters (Char).
 // Char represents a single Unicode scalar value (code point).
 //
+
 // =============================================================================
 
 module core.text.char;

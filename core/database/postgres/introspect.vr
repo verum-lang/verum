@@ -5,30 +5,33 @@
 // Spec: internal/specs/database.md §5.3 (verum db:introspect)
 // =============================================================================
 //
+
 // Drives a live PgConnection through `information_schema` + `pg_catalog`
 // to populate `core.database.common.schema.SchemaSnapshot`. The full
 // snapshot survives the round-trip (tables / columns / indexes /
 // foreign keys) and can be rendered to schema.snap.vr for compile-
 // time consumption by the sql# meta-fn.
 //
+
 // Source views:
-//   * `information_schema.tables`        — table list (filter on
-//                                          `table_type = 'BASE TABLE'`)
-//   * `information_schema.columns`       — per-column metadata; the
-//                                          `is_nullable`, `data_type`,
-//                                          `column_default`, `udt_name`
-//                                          fields drive ColumnSnap
-//   * `information_schema.key_column_usage`
-//                                        — PK column membership
-//                                          (joined with table_constraints
-//                                          where constraint_type = 'PRIMARY KEY')
-//   * `pg_catalog.pg_indexes`            — index list including the
-//                                          definition string; we parse
-//                                          out columns + UNIQUE + WHERE
-//   * `information_schema.referential_constraints`
-//     + `information_schema.key_column_usage`
-//                                        — FK columns + ON DELETE / ON UPDATE
+//  * `information_schema.tables` — table list (filter on
+//  `table_type = 'BASE TABLE'`)
+//  * `information_schema.columns` — per-column metadata; the
+//  `is_nullable`, `data_type`,
+//  `column_default`, `udt_name`
+//  fields drive ColumnSnap
+//  * `information_schema.key_column_usage`
+//  — PK column membership
+//  (joined with table_constraints
+//  where constraint_type = 'PRIMARY KEY')
+//  * `pg_catalog.pg_indexes` — index list including the
+//  definition string; we parse
+//  out columns + UNIQUE + WHERE
+//  * `information_schema.referential_constraints`
+//  + `information_schema.key_column_usage`
+//  — FK columns + ON DELETE / ON UPDATE
 //
+
 // CHECK-constraint introspection (`information_schema.check_constraints`)
 // is left for a follow-up because Postgres stores them post-AST-
 // rewrite and round-tripping the text accurately requires more care.

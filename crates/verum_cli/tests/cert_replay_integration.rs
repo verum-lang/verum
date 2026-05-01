@@ -257,7 +257,7 @@ fn cross_check_explicit_backends() {
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     let verdict = &parsed["verdict"];
     let per = verdict["per_backend"].as_array().unwrap();
-    // Kernel-only + Z3 + CVC5 = 3.  Mock engines accept by
+    // Kernel-only + Z3 + CVC5 = 3. Mock engines accept by
     // default → all_available_accept = true.
     assert_eq!(per.len(), 3);
     assert_eq!(parsed["all_available_accept"], true);
@@ -288,7 +288,7 @@ fn cross_check_kernel_rejection_blocks_consensus() {
         "--cert", path.to_str().unwrap(),
         "--output", "json",
     ]);
-    // Exit 0 without --require-consensus.  But the all_available_accept
+    // Exit 0 without --require-consensus. But the all_available_accept
     // flag should be false.
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
@@ -434,7 +434,7 @@ fn replay_rejects_unknown_output() {
 fn task_81_kernel_check_is_unbypassable_trust_anchor() {
     // Pin the contract: the kernel-only check rejects a tampered
     // cert even when the user requested an external backend that
-    // would (in V0) return ToolMissing.  This is what makes SMT
+    // would (in V0) return ToolMissing. This is what makes SMT
     // solvers external to the TCB.
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("cert.json");

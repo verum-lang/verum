@@ -11,6 +11,7 @@ use super::arith_helpers::*;
 
 /// ArithExtended (0xBD) - Extended arithmetic operations.
 ///
+
 /// Sub-opcodes:
 /// - 0x00-0x03: Checked arithmetic (returns Maybe<Int>)
 /// - 0x10-0x12: Overflowing arithmetic (returns (result, overflowed))
@@ -40,8 +41,8 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                         |data| {
                             let tag_ptr = data.as_mut_ptr() as *mut u32;
                             unsafe {
-                                *tag_ptr = 0;           // tag
-                                *tag_ptr.add(1) = 1;    // field_count
+                                *tag_ptr = 0; // tag
+                                *tag_ptr.add(1) = 1; // field_count
                             }
                         },
                     )?;
@@ -60,8 +61,8 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                         |data| {
                             let tag_ptr = data.as_mut_ptr() as *mut u32;
                             unsafe {
-                                *tag_ptr = 1;           // tag
-                                *tag_ptr.add(1) = 0;    // field_count
+                                *tag_ptr = 1; // tag
+                                *tag_ptr.add(1) = 0; // field_count
                             }
                         },
                     )?;
@@ -229,8 +230,8 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                         |data| {
                             let tag_ptr = data.as_mut_ptr() as *mut u32;
                             unsafe {
-                                *tag_ptr = 0;           // tag
-                                *tag_ptr.add(1) = 1;    // field_count
+                                *tag_ptr = 0; // tag
+                                *tag_ptr.add(1) = 1; // field_count
                             }
                         },
                     )?;
@@ -247,8 +248,8 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
                         |data| {
                             let tag_ptr = data.as_mut_ptr() as *mut u32;
                             unsafe {
-                                *tag_ptr = 1;           // tag
-                                *tag_ptr.add(1) = 0;    // field_count
+                                *tag_ptr = 1; // tag
+                                *tag_ptr.add(1) = 0; // field_count
                             }
                         },
                     )?;
@@ -354,6 +355,7 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
         // ================================================================
         // Checked unary signed (#100, task #25)
         //
+
         // Both ops produce `Maybe<T>`: `Some(value)` for the typical
         // case, `None` for the unique-overflow case (`T::MIN` for
         // signed). Format mirrors WrappingNeg: `dst, src, width, signed`.
@@ -1192,9 +1194,11 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
 
 /// Emit a `Maybe<Int>` value at the given register.
 ///
-/// `ok = true`  ⇒ allocate `Some(value)` (TypeId tag 0, single payload).
-/// `ok = false` ⇒ allocate `None`        (TypeId tag 1, no payload).
+
+/// `ok = true` ⇒ allocate `Some(value)` (TypeId tag 0, single payload).
+/// `ok = false` ⇒ allocate `None` (TypeId tag 1, no payload).
 ///
+
 /// Layout matches the inline construction used by `CheckedAddI` /
 /// `CheckedSubI` / `CheckedMulI` / etc. — extracted into a helper so
 /// the new `CheckedNeg` / `CheckedAbs` arms don't duplicate ~30 lines
@@ -1215,7 +1219,7 @@ fn emit_maybe_int(
             |data| {
                 let tag_ptr = data.as_mut_ptr() as *mut u32;
                 unsafe {
-                    *tag_ptr = 0;        // tag = Some
+                    *tag_ptr = 0; // tag = Some
                     *tag_ptr.add(1) = 1; // field_count = 1
                 }
             },
@@ -1232,7 +1236,7 @@ fn emit_maybe_int(
             |data| {
                 let tag_ptr = data.as_mut_ptr() as *mut u32;
                 unsafe {
-                    *tag_ptr = 1;        // tag = None
+                    *tag_ptr = 1; // tag = None
                     *tag_ptr.add(1) = 0; // field_count = 0
                 }
             },

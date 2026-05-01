@@ -5,19 +5,24 @@
 // Dependencies: core, sys/{linux,darwin,windows}/thread, intrinsics
 // =============================================================================
 //
+
 // Provides high-level thread management, thread-local storage helpers,
 // and stack trace capture for panic diagnostics.
 //
+
 // # Architecture
 //
+
 // Thread primitives delegate to platform-specific implementations:
 // - Linux: clone + futex (via sys/linux/thread)
 // - macOS: pthread (via sys/darwin/thread)
 // - Windows: CreateThread (via sys/windows/thread)
 //
+
 // Stack traces use frame pointer walking on debug builds and
 // .eh_frame-based unwinding on release builds (via VBC intrinsics).
 //
+
 // =============================================================================
 
 module runtime.thread;
@@ -52,6 +57,7 @@ mount sys.windows.thread.{
 
 /// Unique identifier for a thread.
 ///
+
 /// Thread IDs are assigned by the runtime and are unique for the lifetime
 /// of the thread. After a thread exits, its ID may be reused.
 public type ThreadId is {
@@ -103,15 +109,18 @@ implement Copy for ThreadId {}
 
 /// A handle to a spawned thread.
 ///
+
 /// The handle can be used to wait for the thread to finish (join)
 /// or to detach the thread so it runs independently.
 ///
+
 /// # Example
 /// ```verum
 /// let handle = Thread.spawn(fn() {
-///     print("Hello from spawned thread");
+///  print("Hello from spawned thread");
 /// });
 ///
+
 /// handle.join().expect("Thread panicked");
 /// ```
 public type ThreadJoinHandle<T> is {
@@ -133,6 +142,7 @@ public type ThreadJoinHandle<T> is {
 implement ThreadJoinHandle<T> {
     /// Wait for the thread to finish and return its result.
     ///
+
     /// Returns Err if the thread panicked.
     public fn join(self) -> Result<T, ThreadError> {
         // Platform join blocks until thread exits
@@ -186,14 +196,15 @@ implement ThreadJoinHandle<T> {
 
 /// Configuration for spawning a thread.
 ///
+
 /// # Example
 /// ```verum
 /// let handle = Thread.builder()
-///     .name("worker-1")
-///     .stack_size(2 * 1024 * 1024)  // 2 MB stack
-///     .spawn(fn() {
-///         // thread body
-///     })?;
+///  .name("worker-1")
+///  .stack_size(2 * 1024 * 1024) // 2 MB stack
+///  .spawn(fn() {
+///  // thread body
+///  })?;
 /// ```
 public type ThreadBuilder is {
     name: Maybe<Text>,
@@ -216,6 +227,7 @@ implement ThreadBuilder {
 
     /// Set the stack size in bytes.
     ///
+
     /// Default is platform-dependent (typically 8 MB on Linux, 512 KB on macOS).
     public fn stack_size(self, size: Int) -> ThreadBuilder {
         ThreadBuilder { stack_size: Some(size), ..self }
@@ -256,16 +268,18 @@ implement ThreadBuilder {
 
 /// Thread operations namespace.
 ///
+
 /// Provides static methods for thread management.
 public type Thread is ();
 
 implement Thread {
     /// Spawn a new thread running the given function.
     ///
+
     /// # Example
     /// ```verum
     /// let handle = Thread.spawn(fn() -> Int {
-    ///     42
+    ///  42
     /// });
     /// let result = handle.join().unwrap();
     /// assert_eq(result, 42);
@@ -288,14 +302,15 @@ implement Thread {
 
     /// Yield the current thread's time slice.
     ///
+
     /// Signals to the OS scheduler that this thread is willing to
     /// give up its remaining time slice.
     public fn yield_now() {
         @cfg(target_os = "linux")
         {
             // sched_yield. Syscall number differs per arch:
-            //   x86_64:  24
-            //   aarch64: 124
+            //  x86_64: 24
+            //  aarch64: 124
             @cfg(target_arch = "x86_64")  { @syscall(24); }
             @cfg(target_arch = "aarch64") { @syscall(124); }
         }
@@ -328,6 +343,7 @@ implement Thread {
 
     /// Park the current thread until it is unparked.
     ///
+
     /// This is a low-level synchronization primitive. Prefer using
     /// higher-level constructs like channels, mutexes, or condvars.
     public fn park() {
@@ -482,14 +498,16 @@ implement Display for ThreadStackFrame {
 
 /// A captured stack trace.
 ///
+
 /// Stack traces are captured during panics or on demand via
 /// `StackTrace.capture()`.
 ///
+
 /// # Example
 /// ```verum
 /// let trace = StackTrace.capture();
 /// for frame in trace.frames() {
-///     print(f"  {frame}");
+///  print(f" {frame}");
 /// }
 /// ```
 public type StackTrace is {
@@ -499,9 +517,11 @@ public type StackTrace is {
 implement StackTrace {
     /// Capture the current stack trace.
     ///
+
     /// Walks the call stack from the current frame upward, collecting
     /// return addresses. Symbol resolution is deferred until display.
     ///
+
     /// # Performance
     /// - Frame walking: ~100ns per frame
     /// - Symbol resolution: ~1us per frame (deferred)

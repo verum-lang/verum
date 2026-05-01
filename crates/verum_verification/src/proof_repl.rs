@@ -1,47 +1,56 @@
 //! Live proof REPL — stepwise tactic feedback + proof-tree
 //! visualisation.
 //!
+
 //! ## Goal
 //!
+
 //! Mathematicians need a workflow where every tactic produces
 //! immediate, kernel-grade feedback: did the step type-check, what
 //! does the new goal stack look like, and what's the proof tree
-//! built so far?  This module ships the **protocol** + **state
-//! machine** that drive such a REPL.  Interactive TUI is a UI
+//! built so far? This module ships the **protocol** + **state
+//! machine** that drive such a REPL. Interactive TUI is a UI
 //! concern (`verum_interactive`); LSP integration is a separate
 //! transport — both consume the same trait surface defined here.
 //!
+
 //! ## Architectural pattern
 //!
+
 //! Same single-trait-boundary pattern as the rest of the integration
 //! arc (ladder_dispatch / proof_drafting / proof_repair / closure_cache
 //! / doc_render / foreign_import / llm_tactic):
 //!
-//!   * [`ReplCommand`] — typed enum of every command the user can
-//!     issue (`Apply` a tactic, `Undo` the last step, request a
-//!     `Hint`, ask for the `ProofTree`, etc.).
-//!   * [`ReplResponse`] — typed enum of every possible response
-//!     (Accepted / Rejected / Status / Tree / Hints / etc.).
-//!   * [`ReplSession`] trait — single dispatch interface;
-//!     `step(command) -> response`.
-//!   * [`DefaultReplSession`] — reference implementation that wires
-//!     a [`crate::llm_tactic::KernelChecker`] for step verification +
-//!     [`crate::proof_drafting::DefaultSuggestionEngine`] for hints.
-//!     Maintains an internal history stack for undo / redo.
-//!   * [`ProofTreeNode`] / [`ProofTree`] — typed DAG of accepted
-//!     steps with kernel verdicts and elapsed times.  Renders to
-//!     Graphviz DOT for `:visualise`.
+
+//!  * [`ReplCommand`] — typed enum of every command the user can
+//!  issue (`Apply` a tactic, `Undo` the last step, request a
+//!  `Hint`, ask for the `ProofTree`, etc.).
+//!  * [`ReplResponse`] — typed enum of every possible response
+//!  (Accepted / Rejected / Status / Tree / Hints / etc.).
+//!  * [`ReplSession`] trait — single dispatch interface;
+//!  `step(command) -> response`.
+//!  * [`DefaultReplSession`] — reference implementation that wires
+//!  a [`crate::llm_tactic::KernelChecker`] for step verification +
+//!  [`crate::proof_drafting::DefaultSuggestionEngine`] for hints.
+//!  Maintains an internal history stack for undo / redo.
+//!  * [`ProofTreeNode`] / [`ProofTree`] — typed DAG of accepted
+//!  steps with kernel verdicts and elapsed times. Renders to
+//!  Graphviz DOT for `:visualise`.
 //!
+
 //! ## Stepwise feedback contract
 //!
+
 //! Every tactic application produces:
 //!
-//!   * The kernel verdict (Accepted / Rejected with cause).
-//!   * Wall-clock duration in milliseconds.
-//!   * The updated proof state (open-goal stack snapshot).
-//!   * A node in the proof tree linking the step to the goal it
-//!     was applied to.
+
+//!  * The kernel verdict (Accepted / Rejected with cause).
+//!  * Wall-clock duration in milliseconds.
+//!  * The updated proof state (open-goal stack snapshot).
+//!  * A node in the proof tree linking the step to the goal it
+//!  was applied to.
 //!
+
 //! Rejected steps DO NOT mutate the proof state — the LCF
 //! fail-closed contract carries through from `llm_tactic`.
 
@@ -64,11 +73,11 @@ use verum_common::Text;
 #[serde(tag = "kind")]
 pub enum ReplCommand {
     /// Apply a tactic (e.g. `"intro"`, `"apply foo_lemma"`,
-    /// `"auto"`).  The kernel re-checks before mutating state.
+    /// `"auto"`). The kernel re-checks before mutating state.
     Apply { tactic: Text },
-    /// Undo the last accepted step.  No-op when history is empty.
+    /// Undo the last accepted step. No-op when history is empty.
     Undo,
-    /// Re-apply the most recently undone step.  No-op when the
+    /// Re-apply the most recently undone step. No-op when the
     /// redo stack is empty.
     Redo,
     /// Print the open-goal stack.
@@ -93,13 +102,13 @@ pub enum ReplCommand {
 pub struct Hypothesis {
     /// Identifier (e.g. `h`, `IH`).
     pub name: Text,
-    /// Rendered type / proposition.  V0 stores a string; V1 will
+    /// Rendered type / proposition. V0 stores a string; Future work will
     /// promote this to a typed kernel term once the kernel
     /// integration is wired through.
     pub ty: Text,
 }
 
-/// One open goal.  Goals carry typed hypotheses + a proposition,
+/// One open goal. Goals carry typed hypotheses + a proposition,
 /// not just a single rendered string — replacing the V0 stringly-
 /// typed `Vec<Text>` view.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,9 +126,9 @@ pub struct Goal {
 /// Open-goal stack with an explicit focus pointer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalStack {
-    /// Open goals.  Empty when the proof is closed.
+    /// Open goals. Empty when the proof is closed.
     pub goals: Vec<Goal>,
-    /// Index into `goals` that the next tactic targets.  `None` when
+    /// Index into `goals` that the next tactic targets. `None` when
     /// the stack is empty (proof complete).
     pub focused: Option<usize>,
     /// Next goal identifier to allocate.
@@ -171,8 +180,8 @@ impl GoalStack {
     }
 
     /// Replace the focused goal with `replacements` (in order); the
-    /// first replacement becomes the new focused goal.  Hypothesis
-    /// context is inherited from the parent goal.  No-op when the
+    /// first replacement becomes the new focused goal. Hypothesis
+    /// context is inherited from the parent goal. No-op when the
     /// stack is empty.
     pub fn split_focused(&mut self, replacements: Vec<Text>) {
         let Some(i) = self.focused else {
@@ -199,7 +208,7 @@ impl GoalStack {
             self.close_focused();
             return;
         }
-        // Replace the parent in-place with the new sub-goals.  The
+        // Replace the parent in-place with the new sub-goals. The
         // first replacement keeps the focus.
         self.goals.splice(i..=i, new_goals.drain(..));
     }
@@ -231,7 +240,8 @@ impl GoalStack {
 /// Snapshot of the open-goal stack + applied steps at a point in
 /// time.
 ///
-/// **Schema note.**  Goals are typed (`Vec<Goal>`) so consumers can
+
+/// **Schema note.** Goals are typed (`Vec<Goal>`) so consumers can
 /// inspect hypotheses + propositions independently — replacing the
 /// V0 stringly-typed `Vec<Text>` view per the #91 hardening pass.
 /// The legacy fields `focused_proposition` and `open_goals` still
@@ -240,7 +250,7 @@ impl GoalStack {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplStateSnapshot {
     pub theorem_name: Text,
-    /// Typed open-goal stack.  Empty when the proof is complete.
+    /// Typed open-goal stack. Empty when the proof is complete.
     pub goals: Vec<Goal>,
     /// Stable identifier of the focused goal (if any).
     pub focused_goal_id: Option<u64>,
@@ -256,7 +266,7 @@ pub struct ReplStateSnapshot {
 }
 
 impl ReplStateSnapshot {
-    /// Build a snapshot from a typed [`GoalStack`].  Render fields
+    /// Build a snapshot from a typed [`GoalStack`]. Render fields
     /// are derived; never set them by hand.
     pub fn from_stack(
         theorem_name: Text,
@@ -297,7 +307,7 @@ pub enum ReplResponse {
         elapsed_ms: u64,
         snapshot: ReplStateSnapshot,
     },
-    /// The kernel rejected the tactic.  State is unchanged.
+    /// The kernel rejected the tactic. State is unchanged.
     Rejected {
         tactic: Text,
         reason: Text,
@@ -385,7 +395,7 @@ pub struct ProofTree {
 }
 
 impl ProofTree {
-    /// Render the tree as Graphviz DOT.  Each accepted step is a
+    /// Render the tree as Graphviz DOT. Each accepted step is a
     /// node; edges are step-index successor pairs.
     pub fn to_dot(&self) -> Text {
         let mut s = String::from("digraph proof_tree {\n");
@@ -438,12 +448,12 @@ pub enum GoalRewriteOutcome {
     Split { count: usize },
     /// The tactic closed the focused goal.
     Closed,
-    /// The rewriter doesn't pattern-match this tactic shape.  The
+    /// The rewriter doesn't pattern-match this tactic shape. The
     /// caller should leave the state unchanged — the kernel checker
     /// has already validated the step's *soundness*; only the
     /// display-side state-mutation is unknown.
     NoMatch,
-    /// The tactic was malformed.  Reported for diagnostics; state
+    /// The tactic was malformed. Reported for diagnostics; state
     /// unchanged.
     Error { reason: Text },
 }
@@ -451,10 +461,11 @@ pub enum GoalRewriteOutcome {
 /// Single dispatch interface for surface-tactic → goal-stack
 /// rewriters.
 ///
+
 /// Implementations are display-side: they describe how the
-/// open-goal *display* mutates after a kernel-accepted tactic.  The
+/// open-goal *display* mutates after a kernel-accepted tactic. The
 /// kernel checker (`llm_tactic::KernelChecker`) is the soundness
-/// gate; the rewriter is not.  This separation keeps the rewriter
+/// gate; the rewriter is not. This separation keeps the rewriter
 /// free to over-approximate (a known textual shape is rewritten;
 /// everything else stays as `NoMatch`) without compromising
 /// soundness.
@@ -462,26 +473,28 @@ pub trait GoalRewriter: std::fmt::Debug + Send + Sync {
     fn rewrite(&self, stack: &mut GoalStack, tactic: &str) -> GoalRewriteOutcome;
 }
 
-/// V0 reference rewriter.  Recognises the canonical surface-tactic
+/// V0 reference rewriter. Recognises the canonical surface-tactic
 /// shapes:
 ///
-///   * `intro` / `intro h` / `intros h1 h2 …` — peel hypothesis off
-///     an `H -> P` shape.  When the focused proposition doesn't
-///     textually parse as an implication, falls back to appending
-///     a hypothesis with type `?` so the LLM-side context still
-///     records the bound name.
-///   * `split` — split a top-level `P ∧ Q` (or `P /\ Q`) into two
-///     sub-goals.  When the proposition isn't a textual conjunction,
-///     no-ops with `NoMatch`.
-///   * `assumption` / `assumption h` — close the focused goal when
-///     a hypothesis matches the proposition (textually).
-///   * `apply X` / `apply X with [...]` / `exact X` — close the
-///     focused goal (the kernel checker already accepted, so the
-///     application is sound).
-///   * `auto` / `simp` / `ring` / `nlinarith` / `lia` / `decide` /
-///     `congruence` / `eauto` / `smt` — decision-procedure stand-
-///     ins; close the focused goal.
+
+///  * `intro` / `intro h` / `intros h1 h2 …` — peel hypothesis off
+///  an `H -> P` shape. When the focused proposition doesn't
+///  textually parse as an implication, falls back to appending
+///  a hypothesis with type `?` so the LLM-side context still
+///  records the bound name.
+///  * `split` — split a top-level `P ∧ Q` (or `P /\ Q`) into two
+///  sub-goals. When the proposition isn't a textual conjunction,
+///  no-ops with `NoMatch`.
+///  * `assumption` / `assumption h` — close the focused goal when
+///  a hypothesis matches the proposition (textually).
+///  * `apply X` / `apply X with [...]` / `exact X` — close the
+///  focused goal (the kernel checker already accepted, so the
+///  application is sound).
+///  * `auto` / `simp` / `ring` / `nlinarith` / `lia` / `decide` /
+///  `congruence` / `eauto` / `smt` — decision-procedure stand-
+///  ins; close the focused goal.
 ///
+
 /// Anything else returns `NoMatch`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultGoalRewriter;
@@ -537,7 +550,7 @@ impl GoalRewriter for DefaultGoalRewriter {
             // ----- split / destruct on conjunction -----
             // `split` is strict — only fires on top-level
             // conjunction; non-conjunction goals return NoMatch so
-            // the suggestion engine doesn't misrank.  `destruct` is
+            // the suggestion engine doesn't misrank. `destruct` is
             // broader — also used for case-analysis on a hypothesis;
             // falls through to Rewritten on non-conjunction goals.
             "split" => rewrite_split_conjunction(stack),
@@ -583,7 +596,7 @@ impl GoalRewriter for DefaultGoalRewriter {
             // ----- constructor / branch selection -----
             "constructor" => close_focused(stack),
             "left" => {
-                // Left disjunction-introduction.  We don't track which
+                // Left disjunction-introduction. We don't track which
                 // branch we're committing to in the typed goal-stack;
                 // best-effort: leave the goal in place (Rewritten),
                 // letting the soundness gate (kernel-checker) decide
@@ -592,7 +605,7 @@ impl GoalRewriter for DefaultGoalRewriter {
             }
             "right" => GoalRewriteOutcome::Rewritten,
             "exists" => {
-                // Existential-introduction.  Like left/right, we
+                // Existential-introduction. Like left/right, we
                 // don't symbolically substitute the witness — best-
                 // effort Rewritten.
                 GoalRewriteOutcome::Rewritten
@@ -600,9 +613,9 @@ impl GoalRewriter for DefaultGoalRewriter {
 
             // ----- equality manipulation — leaves goal open -----
             // These tactics rewrite the focused proposition under
-            // some hypothesis but don't close the goal.  We mark the
+            // some hypothesis but don't close the goal. We mark the
             // outcome Rewritten so consumers know the typed view
-            // changed; an actual symbolic substitution is V2 work.
+            // changed; an actual symbolic substitution is future work.
             "unfold" | "fold" | "subst" | "rewrite" | "rw"
             | "simplify" | "compute" => GoalRewriteOutcome::Rewritten,
 
@@ -734,10 +747,10 @@ fn split_top_implication(s: &str) -> Option<(&str, &str)> {
     None
 }
 
-/// Best-effort split of a top-level conjunction.  Recognises `/\`
-/// and `∧` (U+2227).  Returns the conjuncts in source order, or a
+/// Best-effort split of a top-level conjunction. Recognises `/\`
+/// and `∧` (U+2227). Returns the conjuncts in source order, or a
 /// single-element vector when the proposition is not a top-level
-/// conjunction.  Parenthesis-aware: `(A /\ B) -> C` is *not* split.
+/// conjunction. Parenthesis-aware: `(A /\ B) -> C` is *not* split.
 fn split_top_conjunction(s: &str) -> Vec<String> {
     let s = s.trim();
     let bytes = s.as_bytes();
@@ -792,7 +805,7 @@ pub trait ReplSession: std::fmt::Debug + Send {
     /// Execute one command + return its response.
     fn step(&mut self, command: ReplCommand) -> ReplResponse;
 
-    /// Read-only view of the current proof tree.  Used by the CLI's
+    /// Read-only view of the current proof tree. Used by the CLI's
     /// `tree` mode to dump DOT after a non-interactive batch run.
     fn proof_tree(&self) -> ProofTree;
 
@@ -806,18 +819,21 @@ pub trait ReplSession: std::fmt::Debug + Send {
 
 /// V0 reference REPL session.
 ///
+
 /// Wires:
 ///
-///   * A [`PatternKernelChecker`] for step verification (the
-///     soundness gate).
-///   * A [`DefaultGoalRewriter`] for typed goal-stack mutation
-///     (the display-side state machine; #91 hardening).
-///   * A [`DefaultSuggestionEngine`] for hints.
+
+///  * A [`PatternKernelChecker`] for step verification (the
+///  soundness gate).
+///  * A [`DefaultGoalRewriter`] for typed goal-stack mutation
+///  (the display-side state machine; #91 hardening).
+///  * A [`DefaultSuggestionEngine`] for hints.
 ///
-/// Maintains an internal history stack for undo / redo.  Each
+
+/// Maintains an internal history stack for undo / redo. Each
 /// history entry snapshots the *full* `GoalStack` at the time of
 /// application, so undo restores the prior state byte-for-byte
-/// rather than heuristically reverting one rewriter step.  The
+/// rather than heuristically reverting one rewriter step. The
 /// proof-tree records every accepted step regardless.
 #[derive(Debug, Clone)]
 pub struct DefaultReplSession {
@@ -886,7 +902,7 @@ impl DefaultReplSession {
     }
 
     /// Build the goal summary used by the kernel checker + LLM
-    /// renderer.  Pulls hypotheses + proposition from the focused
+    /// renderer. Pulls hypotheses + proposition from the focused
     /// goal so the LLM sees the actual context.
     pub fn build_goal_summary(&self) -> LlmGoalSummary {
         let focused_proposition = self.current_proposition();
@@ -966,7 +982,7 @@ impl DefaultReplSession {
         match checker.check_step(&goal, tactic.as_str()) {
             Ok(()) => {
                 // Soundness gate passed — apply the rewriter to
-                // mutate the typed goal stack.  Snapshot the prior
+                // mutate the typed goal stack. Snapshot the prior
                 // stack so undo can restore it byte-exact.
                 let pre_stack = self.stack.clone();
                 let goal_at_application = self.current_proposition();
@@ -1023,7 +1039,7 @@ impl DefaultReplSession {
             Some(frame) => {
                 let reapplied = frame.node.tactic.clone();
                 // Re-apply: the rewriter mutates the stack again from
-                // the (now-restored) post-undo state.  Save the new
+                // the (now-restored) post-undo state. Save the new
                 // pre-stack snapshot so the next undo works.
                 let pre_stack = self.stack.clone();
                 let rewriter = DefaultGoalRewriter::new();
@@ -1101,7 +1117,7 @@ impl ReplSession for DefaultReplSession {
 // =============================================================================
 
 /// Run a sequence of commands against a session and return every
-/// response in order.  Used by the CLI's batch mode + tests.
+/// response in order. Used by the CLI's batch mode + tests.
 pub fn run_batch<S: ReplSession>(
     session: &mut S,
     commands: Vec<ReplCommand>,
@@ -1109,7 +1125,7 @@ pub fn run_batch<S: ReplSession>(
     commands.into_iter().map(|c| session.step(c)).collect()
 }
 
-/// Aggregate response counts across a transcript.  Used for batch-
+/// Aggregate response counts across a transcript. Used for batch-
 /// run summary output.
 pub fn summarise(responses: &[ReplResponse]) -> BTreeMap<&'static str, usize> {
     let mut by_kind: BTreeMap<&'static str, usize> = BTreeMap::new();
@@ -1233,7 +1249,7 @@ mod tests {
         });
         // Now `apply h` should fail (we don't auto-promote
         // hypotheses to lemmas — but we do record the hypothesis
-        // name).  At minimum the goal summary records `h`.
+        // name). At minimum the goal summary records `h`.
         let goal = s.build_goal_summary();
         assert!(goal.hypotheses.iter().any(|(n, _)| n.as_str() == "h"));
     }
@@ -1299,7 +1315,7 @@ mod tests {
             tactic: Text::from("intro"),
         });
         s.step(ReplCommand::Undo);
-        // Now redo_depth = 1.  Apply a fresh step.
+        // Now redo_depth = 1. Apply a fresh step.
         let r = s.step(ReplCommand::Apply {
             tactic: Text::from("auto"),
         });
@@ -1737,11 +1753,11 @@ mod tests {
         // Pin: every head in `verum_verification::llm_tactic::CANONICAL_TACTICS`
         // is recognised by the GoalRewriter (returns something other
         // than NoMatch on a goal whose textual shape lets the
-        // tactic fire).  Exceptions:
-        //   * `skip` / `fail` — combinator sentinels handled at a
-        //     higher layer (no single-goal semantic).
-        //   * `split` — strict on top-level conjunctions; tested
-        //     with a conjunction goal.
+        // tactic fire). Exceptions:
+        //  * `skip` / `fail` — combinator sentinels handled at a
+        //  higher layer (no single-goal semantic).
+        //  * `split` — strict on top-level conjunctions; tested
+        //  with a conjunction goal.
         let exempt: std::collections::BTreeSet<&str> =
             ["skip", "fail"].iter().copied().collect();
         for tac in crate::llm_tactic::canonical_tactics() {
@@ -1860,7 +1876,7 @@ mod tests {
     fn task_91_typed_goal_stack_replaces_string_state() {
         // Pin the #91 hardening contract: the snapshot is produced
         // from a `GoalStack` of typed goals, not from a single
-        // rendered string.  The stringly-typed `open_goals` /
+        // rendered string. The stringly-typed `open_goals` /
         // `focused_proposition` fields are derived projections.
         let s = DefaultReplSession::new("thm", "A -> B", Vec::new());
         let snap = s.snapshot();

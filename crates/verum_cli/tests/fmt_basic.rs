@@ -1,5 +1,6 @@
 //! Per-construct formatter contract tests.
 //!
+
 //! Each test fires `format_string` against a fixture, asserts the
 //! output is non-empty, parses cleanly, and matches the canonical
 //! formatting we want the formatter to produce. Together with the

@@ -1,23 +1,26 @@
 //! `@cfg(...)` predicate evaluation utilities.
 //!
+
 //! Extracted from `pipeline.rs` (#106 crate-split foundation) so the
 //! cfg-evaluation surface is independently reviewable / testable and
 //! pipeline.rs shrinks toward a thin orchestration layer. All
 //! functions here are pure: no `&self`, no `&mut state`. They take
 //! AST nodes + a target spec and return diagnostics-ready data.
 //!
+
 //! # Surface
 //!
-//!   * [`extract_cfg_predicates`] — walk an item's `@cfg(...)`
-//!     attributes plus the module-path platform inference, return
-//!     the list of predicate strings.
-//!   * [`target_predicates_satisfied`] — evaluate that list against
-//!     a `TargetSpec`. Non-target-axis predicates pass through so
-//!     feature-flag / custom evaluators can compose downstream.
-//!   * [`cfg_expr_to_predicate`] — single-expression conversion
-//!     (used by both `@cfg` attributes and `if cfg!(...)` style).
-//!   * Helpers `expr_to_ident_string` / `expr_to_string_literal`
-//!     handle the two literal-shape arms.
+
+//!  * [`extract_cfg_predicates`] — walk an item's `@cfg(...)`
+//!  attributes plus the module-path platform inference, return
+//!  the list of predicate strings.
+//!  * [`target_predicates_satisfied`] — evaluate that list against
+//!  a `TargetSpec`. Non-target-axis predicates pass through so
+//!  feature-flag / custom evaluators can compose downstream.
+//!  * [`cfg_expr_to_predicate`] — single-expression conversion
+//!  (used by both `@cfg` attributes and `if cfg!(...)` style).
+//!  * Helpers `expr_to_ident_string` / `expr_to_string_literal`
+//!  handle the two literal-shape arms.
 
 use verum_ast::Expr;
 use verum_common::{List, Text};
@@ -29,6 +32,7 @@ use crate::target_spec::TargetSpec;
 /// path. Returns a list of predicate strings (e.g.,
 /// `target_os = "linux"`).
 ///
+
 /// Also infers platform cfg from module paths containing platform
 /// segments (e.g., `sys.darwin.io` implies `target_os = "macos"`).
 pub fn extract_cfg_predicates(
@@ -86,9 +90,10 @@ pub fn target_predicates_satisfied(predicates: &[Text], target: &TargetSpec) -> 
 
 /// Convert a `@cfg` expression argument to a predicate string.
 ///
+
 /// Handles two shapes the grammar allows:
-///   * `target_os = "linux"` — `Binary` with `BinOp::Assign`
-///   * `unix` / `windows` — bare `Path` identifier
+///  * `target_os = "linux"` — `Binary` with `BinOp::Assign`
+///  * `unix` / `windows` — bare `Path` identifier
 pub fn cfg_expr_to_predicate(expr: &Expr) -> Option<Text> {
     use verum_ast::expr::{BinOp, ExprKind};
     match &expr.kind {

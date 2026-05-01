@@ -1,5 +1,6 @@
 //! Verum AST → Lean 4 lowerer.
 //!
+
 //! Mirrors `ocaml_lower` shape but emits Lean 4 syntax. Lean 4's
 //! term language is close to OCaml for the pure-functional core
 //! (let-in, if-then-else, applications, infix operators), so the
@@ -7,16 +8,17 @@
 //! subset, return `None` for anything else, caller falls back to
 //! V12.1 metadata comment.
 //!
+
 //! Lean 4 differences from OCaml that drive translation choices:
-//!   * `=` is propositional equality at the term level; we use
-//!     `==` (Decidable) for runtime equality which matches Verum's
-//!     `==` semantics.
-//!   * `!=` is `≠` lexically but Lean accepts the ASCII fallback
-//!     `!=` (mathlib4) — we emit `≠` for cleanliness.
-//!   * Boolean ops are `&&` / `||` (same as Verum + OCaml).
-//!   * Modulo is `%`, not `mod`.
-//!   * Bitwise operators are `&&&` / `|||` / `^^^` / `<<<` / `>>>`
-//!     (Lean 4 core).
+//!  * `=` is propositional equality at the term level; we use
+//!  `==` (Decidable) for runtime equality which matches Verum's
+//!  `==` semantics.
+//!  * `!=` is `≠` lexically but Lean accepts the ASCII fallback
+//!  `!=` (mathlib4) — we emit `≠` for cleanliness.
+//!  * Boolean ops are `&&` / `||` (same as Verum + OCaml).
+//!  * Modulo is `%`, not `mod`.
+//!  * Bitwise operators are `&&&` / `|||` / `^^^` / `<<<` / `>>>`
+//!  (Lean 4 core).
 
 use verum_ast::expr::{BinOp, Block, ConditionKind, Expr, ExprKind, IfCondition, UnOp};
 use verum_ast::literal::{LiteralKind, StringLit};

@@ -38,7 +38,7 @@ public fn verdict_name(v: &AuthorizerVerdict) -> Text {
     }
 }
 
-// Selected action-code constants.  Full set has gaps; we model the common 21
+// Selected action-code constants. Full set has gaps; we model the common 21
 // + 1 (RECURSIVE=33) for breadth.
 public fn create_index()      -> Int { 1 }
 public fn create_table()      -> Int { 2 }

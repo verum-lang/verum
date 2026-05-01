@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §6.6
 //
+
 // SQLite supports up to 5 simultaneous read-only snapshots via the
 // READMARK_0..4 slots in the shm file (slot 0 always tracks 0; slot
 // 1..4 are dynamically assigned). Each slot holds the max_frame the

@@ -14,6 +14,7 @@
 )]
 // Unit tests for counterexample.rs
 //
+
 // Migrated from src/counterexample.rs to comply with CLAUDE.md test organization.
 
 use verum_smt::counterexample::*;

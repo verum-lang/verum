@@ -5,39 +5,48 @@
 // Dependencies: core, core.time, core.collections.map
 // =============================================================================
 //
+
 // Three classic rate-limiting algorithms behind one `RateLimiter`
 // protocol, plus a `KeyedRateLimiter<K>` that fans limiters out per
 // key (per-IP, per-user, per-API-token).
 //
-//   * `TokenBucket`      — capacity C, refill rate R → allows bursts
-//                          up to C, enforces long-run rate R.
-//                          The "fair with bursts" standard.
+
+//  * `TokenBucket` — capacity C, refill rate R → allows bursts
+//  up to C, enforces long-run rate R.
+//  The "fair with bursts" standard.
 //
-//   * `LeakyBucket`      — fixed-rate drain through a queue of
-//                          capacity C. Shapes output to exactly R
-//                          tokens/sec. Bursts above R queue (up to C)
-//                          or drop. Used for output smoothing.
+
+//  * `LeakyBucket` — fixed-rate drain through a queue of
+//  capacity C. Shapes output to exactly R
+//  tokens/sec. Bursts above R queue (up to C)
+//  or drop. Used for output smoothing.
 //
-//   * `SlidingWindow`    — N events in the past W seconds with
-//                          smoothed rollover between buckets. No
-//                          bursts allowed above N — strict per-window
-//                          cap. Used for strict per-minute / per-hour
-//                          quotas.
+
+//  * `SlidingWindow` — N events in the past W seconds with
+//  smoothed rollover between buckets. No
+//  bursts allowed above N — strict per-window
+//  cap. Used for strict per-minute / per-hour
+//  quotas.
 //
+
 // # Thread-safety
 //
+
 // All limiters are single-owner by design. Higher-level dispatchers
 // can wrap them in `Shared<Mutex<Limiter>>` when the limiter needs
 // to be consulted from multiple tasks; the protocol surface below
 // takes `&mut self` so the compiler enforces exclusive access at
 // each call site.
 //
+
 // # Precision
 //
+
 // Integer-only arithmetic over microseconds and token counts.
 // Worst-case drift per second is O(1 / rate_per_sec) — negligible
 // for the typical 10/s … 10_000/s range.
 //
+
 // =============================================================================
 
 module core.net.proxy.rate_limit;
@@ -127,11 +136,13 @@ implement RateLimiter for TokenBucket {
 // LeakyBucket
 // =============================================================================
 //
+
 // Simple: the bucket holds `queued` tokens. It drips at `rate_per_s`.
 // try_admit computes the current queue depth (decrementing by
 // elapsed drip amount) and accepts if the post-admission depth ≤
 // capacity.
 //
+
 // =============================================================================
 
 public type LeakyBucket is {
@@ -185,15 +196,19 @@ implement RateLimiter for LeakyBucket {
 // SlidingWindow (2-bucket approximation)
 // =============================================================================
 //
+
 // RFC-draft "sliding-window log" is O(N) per admit; the "sliding-
 // window counter" approximation tracks the CURRENT and PREVIOUS
 // fixed-size windows and estimates the live count as:
 //
-//   live = prev_count × (1 - elapsed_in_current_window / window)
-//        + current_count
+
+//  live = prev_count × (1 - elapsed_in_current_window / window)
+//  + current_count
 //
+
 // Rejects when live + cost > limit. Constant-memory, constant-time.
 //
+
 // =============================================================================
 
 public type SlidingWindow is {
@@ -267,14 +282,17 @@ implement RateLimiter for SlidingWindow {
 // KeyedRateLimiter — fan-out per key
 // =============================================================================
 //
+
 // Wraps any `Factory<K>` that builds a fresh limiter on first
 // touch. The map is lazily populated — a never-seen key is admitted
 // freely until its first admission starts the clock.
 //
+
 // The map can grow unboundedly if `K` space is unbounded. Callers
 // that need eviction should wrap this in an LRU policy — shipped
 // in a follow-up for the common per-IP-limit-with-eviction case.
 //
+
 // =============================================================================
 
 public type LimiterFactory<L> is protocol {

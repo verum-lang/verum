@@ -8,9 +8,11 @@ module sys.linux.mem;
 // Platform: Linux (x86_64, aarch64)
 // =============================================================================
 //
+
 // This module provides comprehensive memory management operations beyond
 // basic mmap/munmap available in syscall.vr.
 //
+
 // Memory operations:
 // - mprotect: Change memory protection
 // - madvise: Advise kernel about memory usage patterns
@@ -19,6 +21,7 @@ module sys.linux.mem;
 // - msync: Synchronize mapped memory with file
 // - memfd_create: Create anonymous file for memory
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -225,6 +228,7 @@ public const MFD_EXEC: UInt32 = 0x0010;
 
 /// Change protection on a region of memory.
 ///
+
 /// # Arguments
 /// * `addr` - Start address (must be page-aligned)
 /// * `len` - Length of region
@@ -249,6 +253,7 @@ public fn mprotect(addr: &unsafe Byte, len: USize, prot: Int32) -> Result<(), OS
 
 /// Give advice about memory usage patterns.
 ///
+
 /// # Arguments
 /// * `addr` - Start address
 /// * `len` - Length of region
@@ -273,6 +278,7 @@ public fn madvise(addr: &unsafe Byte, len: USize, advice: Int32) -> Result<(), O
 
 /// Resize or relocate a memory mapping.
 ///
+
 /// # Arguments
 /// * `old_addr` - Current address
 /// * `old_size` - Current size
@@ -312,6 +318,7 @@ public fn mremap(
 
 /// Synchronize a file mapping with the underlying file.
 ///
+
 /// # Arguments
 /// * `addr` - Start address
 /// * `len` - Length
@@ -336,6 +343,7 @@ public fn msync(addr: &unsafe Byte, len: USize, flags: Int32) -> Result<(), OSEr
 
 /// Determine if pages are resident in memory.
 ///
+
 /// # Arguments
 /// * `addr` - Start address (must be page-aligned)
 /// * `len` - Length
@@ -360,9 +368,11 @@ public fn mincore(addr: &unsafe Byte, len: USize, vec: &mut [Byte]) -> Result<()
 
 /// Create an anonymous file.
 ///
+
 /// Returns a file descriptor that can be used with mmap.
 /// The file has no name in the filesystem.
 ///
+
 /// # Arguments
 /// * `name` - Name for debugging (shown in /proc/pid/fd/)
 /// * `flags` - MFD_* flags

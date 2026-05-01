@@ -1,6 +1,7 @@
 // Copyright 2023 Daan Vanoverloop
 // See the COPYRIGHT file at the top-level directory of this distribution.
 //
+
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
@@ -10,50 +11,58 @@
 //! This module contains error types used by this crate and provides additional
 //! error handling utilities for dependent crates.
 //!
+
 //! Disclaimer: this module may change significantly in the future.
 //!
+
 //! All different error types are defined in the [`TableGenError`] enum.
 //! However, most functions return a [`SourceError<TableGenError>`] (has alias
 //! [`Error`]). This error type includes a [`SourceLocation`], a reference to a
 //! line in a TableGen source file.
 //!
+
 //! To provide information about the source code at this location (e.g. code at
 //! location, file name, line and column), [`SourceInfo`] must be provided to
 //! the error. In this case, the error message will be formatted by LLVM's
 //! `SourceMgr` class.
 //!
+
 //! ```rust
 //! use verum_tblgen::{RecordKeeper, TableGenParser};
 //!
+
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let keeper: RecordKeeper = TableGenParser::new()
-//!     .add_source(
-//!         r#"
-//!         def A {
-//!             int i = 5;
-//!         }
-//!         "#,
-//!     )?
-//!     .parse()?;
+//!  .add_source(
+//!  r#"
+//!  def A {
+//!  int i = 5;
+//!  }
+//!  "#,
+//!  )?
+//!  .parse()?;
 //! if let Err(e) = keeper.def("A").unwrap().string_value("i") {
-//!     println!("{}", e);
-//!     // invalid conversion from Int to alloc::string::String
+//!  println!("{}", e);
+//!  // invalid conversion from Int to alloc::string::String
 //!
-//!     println!("{}", e.add_source_info(keeper.source_info()));
-//!     // error: invalid conversion from Int to alloc::string::String
-//!     //   int a = test;
-//!     //       ^
+
+//!  println!("{}", e.add_source_info(keeper.source_info()));
+//!  // error: invalid conversion from Int to alloc::string::String
+//!  // int a = test;
+//!  // ^
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
+
 //! Note that `add_source_info` should be called with the correct source info.
 //! This is not statically enforced, but runtime checks are implemented to check
 //! that the given [`SourceInfo`] matches the [`SourceLocation`] in the error.
 //! If it does not match, the error will be printed without information about
 //! the TableGen source file.
 //!
+
 //! Custom error types that implement [`std::error::Error`] also implement
 //! [`WithLocation`]. That way, a [`SourceLocation`] can be attached to any
 //! error by calling [`with_location`](`WithLocation::with_location`).
@@ -149,9 +158,11 @@ impl Drop for SourceLocation {
 
 /// A wrapper around error types which includes a [`SourceLocation`].
 ///
+
 /// This error is used to describe erros in the TableGen source file at a
 /// certain location.
 ///
+
 /// By calling `add_source_info`, information about the TableGen source file at
 /// the [`SourceLocation`] will be included in this error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,6 +192,7 @@ impl<E: std::error::Error> SourceError<E> {
 
     /// Replaces the inner error with the given error.
     ///
+
     /// Any source information that was previously attached with
     /// [`SourceError::add_source_info`] will be removed.
     pub fn set_error<F: std::error::Error>(self, error: F) -> SourceError<F> {
@@ -193,6 +205,7 @@ impl<E: std::error::Error> SourceError<E> {
 
     /// Replaces the location.
     ///
+
     /// Any source information that was previously attached with
     /// [`SourceError::add_source_info`] will be removed.
     pub fn set_location(mut self, location: impl SourceLoc) -> Self {
@@ -203,6 +216,7 @@ impl<E: std::error::Error> SourceError<E> {
     /// Adds information about the TableGen source file at the
     /// given [`SourceLocation`] to this error.
     ///
+
     /// A new error message will be created by `SourceMgr` class of LLVM.
     pub fn add_source_info(mut self, info: SourceInfo) -> Self {
         self.message = Some(Self::create_message(

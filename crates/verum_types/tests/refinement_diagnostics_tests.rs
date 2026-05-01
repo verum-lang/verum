@@ -14,8 +14,10 @@
 )]
 // Comprehensive tests for enhanced refinement error diagnostics
 //
+
 // Refinement type diagnostics: error messages for failed refinement checks with source location and predicate details — 8.3
 //
+
 // Tests cover:
 // 1. Actual value tracking and display
 // 2. Predicate evaluation and decomposition

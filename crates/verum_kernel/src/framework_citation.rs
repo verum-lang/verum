@@ -1,36 +1,41 @@
 //! Framework-citation manifest.
 //!
+
 //! Verum's trust extension via `@framework(<system>, "<path>")`
 //! attributes is the mechanism by which axioms cite upstream
-//! verified proofs (mathlib4, Coq stdlib, ZFC, …).  This module
+//! verified proofs (mathlib4, Coq stdlib, ZFC, …). This module
 //! walks AST items, extracts every framework citation, and emits a
 //! structured manifest that audit gates and CI pipelines can
 //! consume:
 //!
-//!   - Audit dashboards: enumerate per-system citation counts.
-//!   - Path verification: for each citation, shell out to the
-//!     upstream toolchain to verify the path exists.
-//!   - Drift detection: compare a manifest snapshot to the current
-//!     citations to flag any silent change in the trust extension.
+
+//!  - Audit dashboards: enumerate per-system citation counts.
+//!  - Path verification: for each citation, shell out to the
+//!  upstream toolchain to verify the path exists.
+//!  - Drift detection: compare a manifest snapshot to the current
+//!  citations to flag any silent change in the trust extension.
 //!
+
 //! The manifest is the data layer underneath
 //! `verum audit --framework-axioms` and
 //! `verum audit --soundness-iou`'s `DischargedByFramework` rows.
 //!
+
 //! ## Schema
 //!
+
 //! ```json
 //! {
-//!   "rows": [
-//!     {
-//!       "decl_name": "church_rosser_confluence",
-//!       "decl_kind": "theorem",
-//!       "framework": "mathlib4",
-//!       "citation": "Mathlib.Computability.Lambda.ChurchRosser"
-//!     },
-//!     ...
-//!   ],
-//!   "by_framework": { "mathlib4": 7, "zfc": 1, "coq_stdlib": 1, ... }
+//!  "rows": [
+//!  {
+//!  "decl_name": "church_rosser_confluence",
+//!  "decl_kind": "theorem",
+//!  "framework": "mathlib4",
+//!  "citation": "Mathlib.Computability.Lambda.ChurchRosser"
+//!  },
+//!  ...
+//!  ],
+//!  "by_framework": { "mathlib4": 7, "zfc": 1, "coq_stdlib": 1, ... }
 //! }
 //! ```
 
@@ -52,11 +57,11 @@ pub struct FrameworkCitation {
     /// `"axiom"`, etc.
     pub decl_kind: String,
     /// Framework name as written in source (`"mathlib4"`, `"zfc"`,
-    /// `"coq_stdlib"`, …).  Matches the canonical
+    /// `"coq_stdlib"`, …). Matches the canonical
     /// [`crate::foreign_system::ForeignSystem::framework_tag`] when
     /// the citation refers to a supported foreign system.
     pub framework: String,
-    /// Citation path / location string.  For mathlib4 citations
+    /// Citation path / location string. For mathlib4 citations
     /// this is typically a dotted module path (`"Mathlib.Computability.
     /// Lambda.ChurchRosser"`); for ZFC citations it's a free-form
     /// description.
@@ -69,7 +74,7 @@ pub struct FrameworkCitation {
 pub struct FrameworkCitationManifest {
     /// All citations in source order.
     pub rows: Vec<FrameworkCitation>,
-    /// Per-framework count.  Keys are framework names
+    /// Per-framework count. Keys are framework names
     /// (`"mathlib4"`, `"zfc"`, …); values are citation counts.
     pub by_framework: BTreeMap<String, usize>,
 }
@@ -102,18 +107,21 @@ impl FrameworkCitationManifest {
 /// **Walk a Verum module's items and collect every
 /// `@framework(<system>, "<citation>")` attribute.**
 ///
+
 /// Inspects:
-///   - Theorem / Lemma / Corollary attributes (declaration-level).
-///   - Axiom attributes.
-///   - Item-level attributes (which the AST also surfaces as
-///     `Item.attributes`).
+///  - Theorem / Lemma / Corollary attributes (declaration-level).
+///  - Axiom attributes.
+///  - Item-level attributes (which the AST also surfaces as
+///  `Item.attributes`).
 ///
+
 /// The collector handles both:
-///   - 2-arg form: `@framework(<framework>, "<citation>")`
-///     (the canonical shape).
-///   - 1-arg form: `@framework("<citation>")` (legacy / shorthand —
-///     framework defaults to `"unknown"`).
+///  - 2-arg form: `@framework(<framework>, "<citation>")`
+///  (the canonical shape).
+///  - 1-arg form: `@framework("<citation>")` (legacy / shorthand —
+///  framework defaults to `"unknown"`).
 ///
+
 /// Citations whose framework or path can't be parsed (malformed
 /// attributes) are silently skipped; the audit gate's separate
 /// validation pass flags malformed attributes via
@@ -371,7 +379,7 @@ mod tests {
 
     #[test]
     fn collect_framework_citations_handles_malformed_silent() {
-        // Zero args — malformed.  Should be silently skipped (the
+        // Zero args — malformed. Should be silently skipped (the
         // separate audit pass flags malformed attrs).
         let items = vec![make_theorem_with_attrs(
             "malformed",

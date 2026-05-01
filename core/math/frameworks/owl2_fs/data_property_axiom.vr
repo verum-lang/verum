@@ -2,9 +2,11 @@
 // owl2_fs.data_property_axiom — Shkotin 2019 Table 7 (Data Property Axioms)
 // =============================================================================
 //
+
 // §2.3.3 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 6 axioms
 // constraining data properties (the d-sort side of OWL 2).
 //
+
 // V2 status (#134, 2026-04-25): all 6 axioms ship verbatim
 // W3C OWL 2 DS §5.6 bodies.
 // =============================================================================

@@ -1,5 +1,6 @@
 //! Integration tests for the Verum language platform
 //!
+
 //! This crate contains comprehensive integration tests that verify
 //! the entire Verum compilation and execution pipeline.
 

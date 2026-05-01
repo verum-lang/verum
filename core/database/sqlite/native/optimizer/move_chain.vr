@@ -3,15 +3,20 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.5
 //
+
 // Pattern:
 //
-//   SCopy r1 → r2     // and r2 has no other use
-//   SCopy r2 → r3
+
+//  SCopy r1 → r2 // and r2 has no other use
+//  SCopy r2 → r3
 //
+
 // →
 //
-//   SCopy r1 → r3     (the first SCopy turns into Noop if r2 is dead)
+
+//  SCopy r1 → r3 (the first SCopy turns into Noop if r2 is dead)
 //
+
 // We only fold when the intermediate register has no consumer between
 // the two SCopy instructions.
 // =============================================================================

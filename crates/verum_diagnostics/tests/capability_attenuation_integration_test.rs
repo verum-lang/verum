@@ -14,6 +14,7 @@
 )]
 //! Integration tests for capability attenuation error diagnostics
 //!
+
 //! This test suite demonstrates all four capability attenuation error codes:
 //! - E0306: Capability Violation
 //! - E0307: Sub-Context Not Found

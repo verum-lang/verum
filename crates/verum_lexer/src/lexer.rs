@@ -27,21 +27,26 @@ impl LexerError {
 
 /// The main lexer for Verum source code.
 ///
+
 /// The lexer operates on a source string slice and produces tokens lazily.
 /// It wraps the `logos`-generated lexer with error handling and span tracking.
 ///
+
 /// # Example
 ///
+
 /// ```
 /// use verum_lexer::Lexer;
 /// use verum_ast::span::FileId;
 ///
+
 /// let source = "fn main() { 42 }";
 /// let file_id = FileId::new(0);
 /// let lexer = Lexer::new(source, file_id);
 ///
+
 /// for token in lexer {
-///     println!("{:?}", token);
+///  println!("{:?}", token);
 /// }
 /// ```
 pub struct Lexer<'source> {
@@ -69,22 +74,27 @@ pub struct Lexer<'source> {
 impl<'source> Lexer<'source> {
     /// Create a new lexer for the given source code.
     ///
+
     /// Two leading-trivia stages run before logos sees the input:
     ///
+
     /// 1. **UTF-8 BOM** (`EF BB BF`) is stripped if present. Cross-platform
-    ///    editors frequently prepend one and logos has no rule for it; left
-    ///    in place it would cause a lex error at byte 0 of every BOM-prefixed
-    ///    file.
+    ///  editors frequently prepend one and logos has no rule for it; left
+    ///  in place it would cause a lex error at byte 0 of every BOM-prefixed
+    ///  file.
     /// 2. **POSIX shebang** (`#!...\n`) is stripped if present after any BOM.
-    ///    The shebang must begin at the first non-BOM byte.
+    ///  The shebang must begin at the first non-BOM byte.
     ///
+
     /// All emitted token spans add back the combined BOM+shebang prefix
     /// length so diagnostics point at original-source byte positions. Use
     /// [`Lexer::had_shebang`] / [`Lexer::shebang_text`] to inspect the
     /// shebang and [`Lexer::had_bom`] to detect a stripped BOM.
     ///
+
     /// # Performance contract
     ///
+
     /// Construction cost is O(1) for BOM detection (single 3-byte compare)
     /// and O(L) for shebang detection where L is the shebang line length
     /// (typically 30-50 bytes); both branches short-circuit on absence
@@ -163,6 +173,7 @@ impl<'source> Lexer<'source> {
 
     /// Tokenize the entire input into a vector of tokens.
     ///
+
     /// This is a convenience method that consumes the lexer and collects
     /// all tokens, including the EOF token.
     pub fn tokenize(self) -> LexResult<List<Token>> {
@@ -171,6 +182,7 @@ impl<'source> Lexer<'source> {
 
     /// Skip whitespace and comments (already handled by logos).
     ///
+
     /// This method exists for API completeness but is a no-op since logos
     /// automatically skips whitespace and comments based on the `#[logos(skip)]`
     /// attributes in the TokenKind definition.
@@ -250,10 +262,12 @@ impl<'source> Iterator for Lexer<'source> {
 /// includes the trailing newline if any. CRLF line endings are honoured: a
 /// shebang ended by `\r\n` is included in full.
 ///
+
 /// A shebang must begin at byte 0; bytes elsewhere are not affected. If the
 /// file consists of only a shebang with no trailing newline, the entire input
 /// is treated as the shebang and the body is empty.
 ///
+
 /// This function does NOT skip a UTF-8 BOM (`EF BB BF`). Sources from
 /// cross-platform editors frequently start with one, and a BOM at byte 0
 /// would shift the shebang to byte 3 — invisible to this check. The Lexer
@@ -298,6 +312,7 @@ fn memchr_newline(bytes: &[u8]) -> Option<usize> {
 
 /// A stateful lexer that can look ahead multiple tokens.
 ///
+
 /// This is useful for parser implementations that need lookahead.
 pub struct LookaheadLexer<'source> {
     /// The underlying lexer

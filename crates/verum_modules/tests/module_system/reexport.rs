@@ -1,8 +1,10 @@
 //! Re-export tests.
 //!
+
 //! Tests re-exporting types and functions through module boundaries,
 //! including transitive access and API flattening patterns.
 //!
+
 //! Tests re-exports (`public import internal.Item`) for API flattening,
 //! transitive access, and the re-export pattern for version migration.
 
@@ -369,7 +371,7 @@ public import internal.public_fn;
 import crate.lib.{PublicType, public_fn};
 
 // Cannot import InternalType or internal_fn through lib
-// import crate.lib.InternalType;  // Would fail
+// import crate.lib.InternalType; // Would fail
 
 public fn example() -> PublicType {
     PublicType { value: public_fn() }

@@ -4,6 +4,7 @@
 //! Literal / Path / Binary / Unary / Paren were handled, all other
 //! expression kinds fell through to `_ => false`.
 //!
+
 //! Impact pre-fix: `try_rewrite_once` couldn't find subterm matches
 //! inside any goal containing function calls, field access, etc.
 //! Tactics like `rewrite h` on goals like `f(x) + 1 > 0` silently

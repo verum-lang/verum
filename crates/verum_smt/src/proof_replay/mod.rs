@@ -1,6 +1,7 @@
 //! Cross-target
 //! proof-replay framework.
 //!
+
 //! The certificate-export pipeline (`verum_cli::commands::export`)
 //! ships **statement-only** scaffolds today: every theorem is emitted
 //! with its target-language Pi/forall signature and an admitted /
@@ -9,22 +10,25 @@
 //! into the target language's tactic / proof-term shape so the
 //! exported file actually proves what it claims.
 //!
+
 //! This module ships the **architecture** for that lowering:
 //!
-//!   • [`ProofReplayBackend`] — the trait every per-target replayer
-//!     implements. Given a [`SmtCertificate`] and the surrounding
-//!     [`DeclarationHeader`], the backend produces a [`TargetTactic`]
-//!     in its native language.
-//!   • [`TargetTactic`] — common-format proof representation, opaque
-//!     `String` source plus optional dependency / admitted markers.
-//!   • [`ProofReplayRegistry`] — lookup table that maps target name
-//!     (`"coq"` / `"lean"` / `"agda"` / `"dedukti"` / `"metamath"`)
-//!     to the registered backend.
-//!   • [`AdmittedReplay`] — fallback backend that produces a
-//!     target-correct `Admitted` / `sorry` / `?` placeholder. This
-//!     is the V1 default; it preserves the existing statement-only
-//!     export contract when no real lowering is wired.
+
+//!  • [`ProofReplayBackend`] — the trait every per-target replayer
+//!  implements. Given a [`SmtCertificate`] and the surrounding
+//!  [`DeclarationHeader`], the backend produces a [`TargetTactic`]
+//!  in its native language.
+//!  • [`TargetTactic`] — common-format proof representation, opaque
+//!  `String` source plus optional dependency / admitted markers.
+//!  • [`ProofReplayRegistry`] — lookup table that maps target name
+//!  (`"coq"` / `"lean"` / `"agda"` / `"dedukti"` / `"metamath"`)
+//!  to the registered backend.
+//!  • [`AdmittedReplay`] — fallback backend that produces a
+//!  target-correct `Admitted` / `sorry` / `?` placeholder. This
+//!  is the V1 default; it preserves the existing statement-only
+//!  export contract when no real lowering is wired.
 //!
+
 //! V4.1+ work attaches actual SmtCertificate→target lowering for
 //! each backend; this module provides the shape both sides commit
 //! to so the integration is plug-and-play.
@@ -122,6 +126,7 @@ impl DeclKind {
 
 /// minimal context the replay backend needs.
 ///
+
 /// Carries the declaration's name, kind, and optional framework
 /// attribution. Intentionally minimal so the export pipeline can
 /// construct it from the AST without dragging additional state.
@@ -145,6 +150,7 @@ pub struct FrameworkRef {
 
 /// the lowered proof in the target language.
 ///
+
 /// `source` is opaque per-target text; the export emitter splices it
 /// into the target file verbatim. `depends_on` lists axiom / lemma
 /// names the proof cites so the emitter can ensure they're imported
@@ -193,6 +199,7 @@ impl TargetTactic {
 
 /// the trait every target backend implements.
 ///
+
 /// Implementors live in a per-target module. The framework wires
 /// them into the [`ProofReplayRegistry`] at startup (or lazily on
 /// first lookup).
@@ -210,10 +217,10 @@ pub trait ProofReplayBackend: Send + Sync {
         decl: &DeclarationHeader,
     ) -> Result<TargetTactic, ReplayError>;
 
-    /// Canonical foreign-system handle.  Default implementation
+    /// Canonical foreign-system handle. Default implementation
     /// resolves [`target_name`](Self::target_name) via
     /// [`ForeignSystem::from_name`]; override when the backend's
-    /// name doesn't match the canonical alias set.  Lets consumers
+    /// name doesn't match the canonical alias set. Lets consumers
     /// dispatch by typed enum rather than string comparison.
     fn foreign_system(&self) -> Option<verum_kernel::foreign_system::ForeignSystem> {
         verum_kernel::foreign_system::ForeignSystem::from_name(self.target_name())
@@ -258,6 +265,7 @@ impl ProofReplayRegistry {
 /// target-language Admitted / sorry / `?` placeholder for every
 /// supported target. Always succeeds, always sets `admitted = true`.
 ///
+
 /// This is the contract that lets V4 ship today without breaking
 /// statement-only exports: when no per-target replayer is
 /// registered, [`AdmittedReplay`] is the default and the existing

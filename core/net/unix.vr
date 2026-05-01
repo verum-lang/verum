@@ -5,26 +5,32 @@
 // Dependencies: core, io, net/addr, sys/{linux,darwin}
 // =============================================================================
 //
+
 // POSIX Unix-domain sockets — local IPC via filesystem or abstract namespace.
 // Zero-network overhead; per-process-credentials; fd-passing via SCM_RIGHTS.
 //
+
 // # Use cases
 //
+
 // - Sidecar IPC (SPIFFE spire-agent, Vault agent, Envoy admin API).
 // - Database-local transport (PostgreSQL /var/run/postgresql/.s.PGSQL.5432,
-//   MySQL /var/run/mysqld/mysqld.sock).
+//  MySQL /var/run/mysqld/mysqld.sock).
 // - Systemd-socket-activation + FD handoff for zero-downtime reloads
-//   (net-framework.md §7.8).
+//  (net-framework.md §7.8).
 // - In-process process-separation (unit-test harness fork-and-communicate).
 //
+
 // # Platforms
 //
+
 // - Linux: full support including abstract namespace (`\0`-prefixed path),
-//   SO_PEERCRED for peer UID/GID/PID.
+//  SO_PEERCRED for peer UID/GID/PID.
 // - macOS: filesystem paths only; LOCAL_PEERCRED for peer cred.
 // - Windows: AF_UNIX supported since Windows 10 1803. Minimal support;
-//   gated behind `@cfg(feature = "windows_unix_sockets")`.
+//  gated behind `@cfg(feature = "windows_unix_sockets")`.
 //
+
 // =============================================================================
 
 module core.net.unix;
@@ -72,11 +78,11 @@ public type UnixError is
 
 implement UnixError {
     /// Map a POSIX errno into the closest typed `UnixError`
-    /// variant.  POSIX-stable codes match identically on
+    /// variant. POSIX-stable codes match identically on
     /// Linux and Darwin; codes that diverge between
     /// platforms (ECONNRESET, ENOTCONN, ENAMETOOLONG) are
     /// gated by @cfg matches that ship the per-platform
-    /// integer values.  Unknown errnos fall through to
+    /// integer values. Unknown errnos fall through to
     /// `IoError(<formatted>)` so the caller still sees the
     /// raw code in the message.
     public fn from_os_error(e: OsError) -> UnixError {
@@ -123,14 +129,15 @@ implement UnixError {
     /// Lift a `UnixError` into the cross-stdlib `IoError`
     /// (`StreamError`) used by the async / poll surfaces.
     ///
+
     /// Each typed variant maps to the closest semantic
     /// `IoErrorKind`; the original detail is preserved
-    /// through the `message` field.  Pre-#103, async
+    /// through the `message` field. Pre-#103, async
     /// adapters (`poll_shutdown` / `poll_*`) collapsed
     /// every UnixError into `IoError.Other(f"{e}")`,
     /// throwing away the variant tag and forcing
     /// downstream callers to substring-match the message
-    /// string.  Now downstream `match err.kind { … }`
+    /// string. Now downstream `match err.kind { … }`
     /// works directly on the typed kinds.
     public fn to_io_error(self) -> IoError {
         match self {
@@ -237,11 +244,13 @@ implement Eq for UnixError {
 // sockaddr_un — POSIX Unix-domain address
 // =============================================================================
 //
+
 // struct sockaddr_un {
-//     sa_family_t sun_family;   // 2 bytes, AF_UNIX
-//     char sun_path[108];       // Linux; macOS is 104
+//  sa_family_t sun_family; // 2 bytes, AF_UNIX
+//  char sun_path[108]; // Linux; macOS is 104
 // };
 //
+
 // Total size differs per platform. Linux supports "abstract namespace" via a
 // leading null byte in sun_path — not visible on filesystem, auto-cleaned on
 // socket close. macOS does not support abstract namespace.
@@ -257,6 +266,7 @@ const SUN_PATH_MAX: Int = 108;
 
 /// Serialize an AF_UNIX path to sockaddr_un bytes.
 ///
+
 /// Supports:
 /// - Filesystem path: `"/tmp/spire-agent.sock"` (null-terminated in sun_path)
 /// - Linux abstract namespace: `"\0my-service"` (leading null byte)
@@ -273,8 +283,8 @@ fn serialize_unix_addr(path: &Text) -> Result<List<Byte>, UnixError> {
     }
 
     // struct sockaddr_un layout, platform-specific (task #5):
-    //   Linux/Windows: { u16 sun_family_le; char sun_path[SUN_PATH_MAX]; }
-    //   macOS (BSD):   { u8  sun_len; u8 sun_family; char sun_path[104]; }
+    //  Linux/Windows: { u16 sun_family_le; char sun_path[SUN_PATH_MAX]; }
+    //  macOS (BSD): { u8 sun_len; u8 sun_family; char sun_path[104]; }
     let mut buf = List.with_capacity(2 + path_bytes.len() + 1);
 
     @cfg(target_os = "macos")
@@ -320,6 +330,7 @@ public type UnixStream is {
 implement UnixStream {
     /// Connect to a Unix-domain server listening at `path`.
     ///
+
     /// Synchronous variant — blocks until connect completes or errors.
     /// Use `connect_async` in async contexts for non-blocking behavior.
     public fn connect(path: &Text) -> Result<UnixStream, UnixError> {
@@ -596,6 +607,7 @@ public type UnixListener is {
 implement UnixListener {
     /// Bind a listener to `path`. Default backlog 128.
     ///
+
     /// For filesystem paths, the file at `path` must not pre-exist — call
     /// `std.fs.remove_file(path)` before bind if recovery-after-crash
     /// matters, or use the Linux abstract namespace (`"\0name"`) which
@@ -821,6 +833,7 @@ fn deserialize_unix_path(buf: &[Byte]) -> Maybe<Text> {
 // Peer credentials — SO_PEERCRED (Linux) / LOCAL_PEERCRED (macOS)
 // =============================================================================
 //
+
 // Kernel-verified identity of the process on the other end. Useful for
 // local-only authorization (e.g., "only accept from UID 0 for admin API").
 
@@ -844,7 +857,7 @@ implement UnixStream {
         let mut buf = [0_u8; 12];
         let mut len: UInt32 = 12;
         // C: `int getsockopt(int sockfd, int level, int optname,
-        //                    void *optval, socklen_t *optlen);`
+        //  void *optval, socklen_t *optlen);`
         // T0.4.2 Phase 2 — `int` → Int32, `socklen_t *` → &mut UInt32.
         @intrinsic("libc.getsockopt")
         fn getsockopt(fd: Int32, level: Int32, optname: Int32, val: &mut Byte, len: &mut UInt32) -> Int32;
@@ -871,12 +884,12 @@ implement UnixStream {
     @cfg(target_os = "macos")
     public fn peer_cred(&self) -> Result<PeerCred, UnixError> {
         // <sys/ucred.h>:
-        //   struct xucred {
-        //       u_int   cr_version;            // 4 B  @ 0
-        //       uid_t   cr_uid;                // 4 B  @ 4
-        //       short   cr_ngroups;            // 2 B  @ 8 (+2 B pad before gid_t[])
-        //       gid_t   cr_groups[NGROUPS=16]; // 64 B @ 12
-        //   };  // total 76 B
+        //  struct xucred {
+        //  u_int cr_version; // 4 B @ 0
+        //  uid_t cr_uid; // 4 B @ 4
+        //  short cr_ngroups; // 2 B @ 8 (+2 B pad before gid_t[])
+        //  gid_t cr_groups[NGROUPS=16]; // 64 B @ 12
+        //  }; // total 76 B
         // pid is NOT in xucred — fetched separately via LOCAL_PEEREPID.
         const SOL_LOCAL: Int32 = 0;
         const LOCAL_PEERCRED: Int32 = 0x001;
@@ -892,7 +905,7 @@ implement UnixStream {
         }
         // We accept any xucred version; fields at offset 4 (uid) and 12
         // (gid_t cr_groups[0] = effective gid) have been stable since
-        // 10.4.  Reject obviously-malformed short replies.
+        // 10.4. Reject obviously-malformed short replies.
         if len < 16 {
             return Err(UnixError.IoError("LOCAL_PEERCRED short reply".into()));
         }
@@ -931,18 +944,20 @@ implement UnixStream {
 // FD-passing via SCM_RIGHTS
 // =============================================================================
 //
+
 // POSIX ancillary data sent alongside normal bytes over SOCK_STREAM. The
 // kernel atomically installs the FD in the receiving process's file
 // descriptor table. Used for:
-//   - Graceful shutdown socket hand-off (Cloudflare / HAProxy pattern):
-//     old process sends its listen-FD to the new process; new process
-//     calls listen() on the inherited FD and accepts without dropping
-//     in-flight connections.
-//   - Privilege-separation IPC (one process opens /dev/...; passes FD to
-//     unprivileged worker).
-//   - systemd socket activation: systemd opens sockets; forked service
-//     inherits them by FD number.
+//  - Graceful shutdown socket hand-off (Cloudflare / HAProxy pattern):
+//  old process sends its listen-FD to the new process; new process
+//  calls listen() on the inherited FD and accepts without dropping
+//  in-flight connections.
+//  - Privilege-separation IPC (one process opens /dev/...; passes FD to
+//  unprivileged worker).
+//  - systemd socket activation: systemd opens sockets; forked service
+//  inherits them by FD number.
 //
+
 // NOTE — implementation pending: requires `extern "C" fn sendmsg/recvmsg`
 // bindings with cmsghdr layout, which needs careful per-platform sizing
 // of the cmsghdr structure (Linux cmsg_len is size_t vs ptr-alignment).
@@ -1012,6 +1027,7 @@ implement UnixStream {
     /// Send `buf` plus file descriptors `fds` over this stream. The
     /// receiving side retrieves them via `recv_fds`.
     ///
+
     /// Currently stubbed — returns `Err(NotImplemented)`. Tracked as
     /// follow-up (net-framework.md §7.8 graceful-shutdown FD handoff).
     public fn send_fds(&self, _buf: &[Byte], _fds: &[FileDesc])

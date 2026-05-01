@@ -5,14 +5,17 @@
 // Dependencies: core, text.regex, shell.{result, escape}
 // =============================================================================
 //
+
 // Reusable refinement-typed atoms and config bundles. Values that pass the
 // refinement check at construction are guaranteed valid throughout their
 // lifetime — the type system carries the proof. Each constructor parses
 // from `Text` and returns `Result<T, ShellError>`; invalid inputs cannot
 // produce a value.
 //
+
 // All atoms are `Pure` and `ShellEscape`-implementable.
 //
+
 // =============================================================================
 
 module verify;
@@ -64,6 +67,7 @@ implement<T> NonEmpty<T> {
 // BoundedText<min, max> — length-constrained text
 // =============================================================================
 //
+
 // Until full-on dependent types land, the bounds are runtime fields rather
 // than type parameters. The `parse` constructor enforces them.
 
@@ -136,6 +140,7 @@ implement EnvValue {
 // SemVer — semantic version
 // =============================================================================
 //
+
 // Reuses core.base.semver where possible; provides a refinement-typed
 // wrapper specifically for shell-script context (deploy versions, image
 // tags, release artefacts).
@@ -203,6 +208,7 @@ implement HostName {
 // Example bundles — DeployConfig, S3Bucket
 // =============================================================================
 //
+
 // Reference patterns for shell scripts that take structured configs. Each
 // field is a refinement-typed atom; constructing the struct succeeds only
 // when every field is valid.

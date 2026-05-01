@@ -3,39 +3,46 @@
 // =============================================================================
 // Layer: 3 (Security — X.509)
 // Dependencies: core, core.net.addr, core.security.x509.certificate,
-//               core.security.x509.ext.subject_alt_name
+//  core.security.x509.ext.subject_alt_name
 // =============================================================================
 //
+
 // RFC 6125 §6 — "Verification of server identity." Given a certificate
 // and the name the caller tried to reach (the "reference identifier",
 // typically the hostname passed to `TlsConfig.server_name` or
 // `QuicConfig.client(..)`), this module returns a typed Ok / Err.
 //
+
 // The check walks:
 //
-//   1. Is the reference an IP address (IPv4 dotted-decimal or IPv6
-//      RFC 4291 text)? If yes, the certificate MUST carry a SAN
-//      iPAddress entry whose bytes match — Common Name fallback is
-//      invalid per RFC 6125 §1.7 / §7.1.
+
+//  1. Is the reference an IP address (IPv4 dotted-decimal or IPv6
+//  RFC 4291 text)? If yes, the certificate MUST carry a SAN
+//  iPAddress entry whose bytes match — Common Name fallback is
+//  invalid per RFC 6125 §1.7 / §7.1.
 //
-//   2. Otherwise the reference is a DNS name (LDH labels only):
-//      * If the cert has a SubjectAltName dNSName extension,
-//        exactly one entry MUST match (with at-most-one leftmost
-//        wildcard per RFC 6125 §6.4.3).
-//      * If no SAN is present, the check fails. RFC 6125 §6.4.4
-//        and CA/Browser Forum Baseline Requirements §7.1.4.2.2
-//        both deprecate Common-Name-only identity; this module
-//        does NOT fall back to CN.
+
+//  2. Otherwise the reference is a DNS name (LDH labels only):
+//  * If the cert has a SubjectAltName dNSName extension,
+//  exactly one entry MUST match (with at-most-one leftmost
+//  wildcard per RFC 6125 §6.4.3).
+//  * If no SAN is present, the check fails. RFC 6125 §6.4.4
+//  and CA/Browser Forum Baseline Requirements §7.1.4.2.2
+//  both deprecate Common-Name-only identity; this module
+//  does NOT fall back to CN.
 //
+
 // # Design
 //
-//   * Re-uses `SubjectAltName.matches_dns` / `matches_ip` — the
-//     wildcard + label-level matching logic already lives there.
-//   * Tags errors so callers can surface "no SAN present" vs
-//     "hostname didn't match any SAN entry" vs "IP literal +
-//     DNS-only cert" distinctly — production operators diagnose
-//     these cases differently.
+
+//  * Re-uses `SubjectAltName.matches_dns` / `matches_ip` — the
+//  wildcard + label-level matching logic already lives there.
+//  * Tags errors so callers can surface "no SAN present" vs
+//  "hostname didn't match any SAN entry" vs "IP literal +
+//  DNS-only cert" distinctly — production operators diagnose
+//  these cases differently.
 //
+
 // =============================================================================
 
 module core.security.x509.server_identity;
@@ -58,7 +65,7 @@ public type ServerIdentityError is
     | EmptyReference;                 // caller passed ""
 
 // Display + Debug + Eq for ServerIdentityError — standard
-// stdlib protocol impls.  Display surfaces the *reference*
+// stdlib protocol impls. Display surfaces the *reference*
 // the caller asked us to verify (already known to caller),
 // not anything from the cert itself.
 
@@ -107,11 +114,12 @@ implement Eq for ServerIdentityError {
 /// reference may be a DNS name (e.g. "example.com") or an IP literal
 /// (e.g. "192.0.2.1" or "2001:db8.1").
 ///
+
 /// ```
 /// match verify_server_identity(&peer_cert, &server_name) {
-///     Ok(())                                      => proceed,
-///     Err(ServerIdentityError.DnsNameMismatch(_)) => log + abort,
-///     ...
+///  Ok(()) => proceed,
+///  Err(ServerIdentityError.DnsNameMismatch(_)) => log + abort,
+///  ...
 /// }
 /// ```
 public fn verify_server_identity(

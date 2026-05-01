@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // SQLite calls the registered pressure handler with one of these
 // events when an allocation is about to push past the soft limit.
 // Handlers may return a "bytes reclaimed" count; if the engine then

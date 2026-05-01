@@ -3,29 +3,33 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, collections, core.async, core.net.quic.{
-//               transport.{abstraction, pump}, connection_sm, connection_id,
-//               crypto.initial, error}
+//  transport.{abstraction, pump}, connection_sm, connection_id,
+//  crypto.initial, error}
 // =============================================================================
 //
+
 // Servers accept many peers over one UDP socket, so every inbound
 // datagram must be routed to the correct `ConnectionPump` based on
 // its Destination QuicConnection ID. RFC 9000 §5.1 mandates:
 //
-//   * Client Initial packets carry a fresh DCID the server echoes
-//     in ServerHello; the same DCID indexes until the server issues
-//     NEW_CONNECTION_ID.
-//   * Peer migration preserves connection identity via CIDs even
-//     when the 4-tuple changes.
-//   * Stateless reset tokens let the server reject packets on a
-//     CID it no longer recognises (§10.3).
+
+//  * Client Initial packets carry a fresh DCID the server echoes
+//  in ServerHello; the same DCID indexes until the server issues
+//  NEW_CONNECTION_ID.
+//  * Peer migration preserves connection identity via CIDs even
+//  when the 4-tuple changes.
+//  * Stateless reset tokens let the server reject packets on a
+//  CID it no longer recognises (§10.3).
 //
+
 // `ServerListener` owns:
-//   * UDP transport bound to the listening address.
-//   * ConnId → ConnectionPump table.
-//   * Accept queue — freshly-handshaken connections awaiting user
-//     code's `accept().await`.
-//   * A per-listener nursery for spawning new connection pumps.
+//  * UDP transport bound to the listening address.
+//  * ConnId → ConnectionPump table.
+//  * Accept queue — freshly-handshaken connections awaiting user
+//  code's `accept().await`.
+//  * A per-listener nursery for spawning new connection pumps.
 //
+
 // =============================================================================
 
 module core.net.quic.transport.listener;
@@ -200,11 +204,11 @@ implement ServerListener {
     }
 
     /// Run the inbound-demux loop. One datagram at a time:
-    ///   * Parse first-byte header form + version + DCID.
-    ///   * If DCID matches a live connection → forward to its pump.
-    ///   * Else if Initial packet on an unknown DCID → spin up a new
-    ///     pump (subject to max_connections budget).
-    ///   * Else → drop (stateless reset / retry logic goes here).
+    ///  * Parse first-byte header form + version + DCID.
+    ///  * If DCID matches a live connection → forward to its pump.
+    ///  * Else if Initial packet on an unknown DCID → spin up a new
+    ///  pump (subject to max_connections budget).
+    ///  * Else → drop (stateless reset / retry logic goes here).
     pub async fn run_demux(&self, cancel: &CancellationToken) -> Result<(), ListenerError> {
         loop {
             if cancel.is_cancelled() { return Err(ListenerError.Closed); }

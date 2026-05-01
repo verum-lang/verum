@@ -1,29 +1,34 @@
 //! Dependency Analysis Phase for Embedded Constraints
 //!
+
 //! This module implements dependency analysis for tracking item requirements
 //! (`needs_alloc`, `needs_os`, `needs_runtime`) and validating them against
 //! target constraints for embedded and no_alloc builds.
 //!
+
 //! ## Architecture
 //!
+
 //! The unified stdlib uses compiler-driven dependency analysis rather than
 //! physical separation into separate cogs (like Rust's core/alloc/std).
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
-//! │                    STDLIB LOGICAL LAYERS                                 │
+//! │ STDLIB LOGICAL LAYERS │
 //! ├─────────────────────────────────────────────────────────────────────────┤
-//! │  Layer 3: OS-dependent (async/, io/, net/, sys/)                        │
-//! │           @requires(os) @requires(runtime)                               │
-//! │                                                                          │
-//! │  Layer 2: Allocation-dependent (collections/, text/, mem/)              │
-//! │           @requires(alloc)                                               │
-//! │                                                                          │
-//! │  Layer 1: Core (core/, intrinsics) - NO REQUIREMENTS                    │
-//! │           Primitives, Maybe, Result, Eq, Ord, Clone, etc.               │
+//! │ Layer 3: OS-dependent (async/, io/, net/, sys/) │
+//! │ @requires(os) @requires(runtime) │
+//! │ │
+//! │ Layer 2: Allocation-dependent (collections/, text/, mem/) │
+//! │ @requires(alloc) │
+//! │ │
+//! │ Layer 1: Core (core/, intrinsics) - NO REQUIREMENTS │
+//! │ Primitives, Maybe, Result, Eq, Ord, Clone, etc. │
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! Dependency analysis: validates items against target profile constraints
 //! (no_alloc, no_std, embedded, cbgr_static_only, no_gpu).
 
@@ -39,6 +44,7 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Span as DiagSpan};
 
 /// Dependency requirements for an item
 ///
+
 /// These requirements are propagated through the dependency graph during
 /// semantic analysis. Any item that uses another item inherits its requirements.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -171,6 +177,7 @@ impl ItemRequirements {
 
 /// Target profile with constraint flags
 ///
+
 /// These flags are set based on `@cfg(no_alloc)`, `@cfg(no_std)`, etc.
 #[derive(Debug, Clone, Default)]
 pub struct TargetProfile {

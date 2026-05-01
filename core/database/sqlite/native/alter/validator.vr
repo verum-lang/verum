@@ -3,16 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §17
 //
+
 // Catches authoring errors before the engine touches the schema:
 //
-//   * `VeNoSuchTable`     — operating on a table that doesn't exist
-//   * `VeNoSuchColumn`    — operating on a column that doesn't exist
-//   * `VeDuplicateName`   — would create a duplicate (table or column)
-//   * `VeNotNullWithoutDefault` — ADD COLUMN NOT NULL without DEFAULT
-//                                  on a table that already has rows
-//   * `VePrimaryKey`      — would alter a PK column (SQLite forbids)
-//   * `VeForeignKey`      — would break an inbound FK reference
+
+//  * `VeNoSuchTable` — operating on a table that doesn't exist
+//  * `VeNoSuchColumn` — operating on a column that doesn't exist
+//  * `VeDuplicateName` — would create a duplicate (table or column)
+//  * `VeNotNullWithoutDefault` — ADD COLUMN NOT NULL without DEFAULT
+//  on a table that already has rows
+//  * `VePrimaryKey` — would alter a PK column (SQLite forbids)
+//  * `VeForeignKey` — would break an inbound FK reference
 //
+
 // We model the schema as `TableShape` records — a minimal subset
 // of `SchemaCache` that's enough to validate. The L7 façade fills
 // it in from the live cache before validating.

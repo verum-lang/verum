@@ -42,10 +42,10 @@ public type TlsError is
     | IoError(Text);
 
 // Display + Debug + Eq for TlsError — standard stdlib
-// protocol impls.  Cryptographic-failure variants
+// protocol impls. Cryptographic-failure variants
 // (BadRecordMac / DecryptError) deliberately surface no
 // detail per RFC 8446 §6.2 to avoid timing/oracle
-// leakage.  Eq for the RemoteAlert(AlertDescription)
+// leakage. Eq for the RemoteAlert(AlertDescription)
 // variant compares via the wire-tag u8 from
 // `AlertDescription::to_u8()` — avoids needing a
 // separate Eq impl on AlertDescription while still

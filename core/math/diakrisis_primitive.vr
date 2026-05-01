@@ -2,11 +2,14 @@
 // Diakrisis canonical primitive — carrier protocol for Axi-0..9 + T-α / T-2f*
 // =============================================================================
 //
+
 // Source: A. Sereda, Diakrisis preprint, §02-canonical-primitive/02-axiomatics.md.
 //
+
 // Diakrisis's canonical primitive is the 4-tuple `(⟪⟫, α_math, ρ, 𝖬)`
 // satisfying 10 base axioms (Axi-0..9) plus 3 derived primitives (T-α / T-2f*).
 //
+
 // **Architectural role of this module (M0.I/M1.F).** Pre-M0.I the 13 axioms
 // of `theorems/diakrisis/02_canonical_primitive/axiomatics.vr` and the 45
 // foundational theorems of `theorems/diakrisis/03_formal_architecture/`
@@ -15,19 +18,23 @@
 // — every axiom said only "I exist" not "this primitive satisfies this
 // property".
 //
+
 // This module introduces:
 //
-//   • `DiakrisisPrimitive` — single witness protocol exposing one Bool
-//     accessor per axiomatic content claim. The protocol is the kernel-
-//     visible projection of the 4-tuple `(⟪⟫, α_math, ρ, 𝖬)`'s structural
-//     properties; concrete instances (test fixtures, downstream theorems)
-//     supply the witnesses, and Axi-N axioms assert their existence /
-//     content via the protocol's accessors.
+
+//  • `DiakrisisPrimitive` — single witness protocol exposing one Bool
+//  accessor per axiomatic content claim. The protocol is the kernel-
+//  visible projection of the 4-tuple `(⟪⟫, α_math, ρ, 𝖬)`'s structural
+//  properties; concrete instances (test fixtures, downstream theorems)
+//  supply the witnesses, and Axi-N axioms assert their existence /
+//  content via the protocol's accessors.
 //
-//   • `RefinedDiakrisisPrimitive` — refinement-typed record companion
-//     with depth-stratification rank `Int{0..=3}` (depth of T-2f* /
-//     T-α as introduced in §A.Z + the M1.B closure-depth bookkeeping).
+
+//  • `RefinedDiakrisisPrimitive` — refinement-typed record companion
+//  with depth-stratification rank `Int{0..=3}` (depth of T-2f* /
+//  T-α as introduced in §A.Z + the M1.B closure-depth bookkeeping).
 //
+
 // Downstream the corpus's `diakrisis_axi_N_*` axioms are restated as
 // witness-parameterised forms taking `&DiakrisisPrimitive` and asserting
 // `result.<accessor>()` — see M0.I follow-up.
@@ -46,6 +53,7 @@ module core.math.diakrisis_primitive;
 /// reconstructions) provide the implementations; the kernel uses the
 /// accessors to recheck every axis-N citation site.
 ///
+
 /// The accessors are intentionally unnumbered-by-name (semantic flag
 /// rather than `axi_2_witness()`) so a single witness can simultaneously
 /// satisfy multiple axioms without naming-collision when downstream code
@@ -141,6 +149,7 @@ public type DiakrisisPrimitive is protocol {
 /// (K-Refine-checked at construction). The flag fields mirror the
 /// protocol accessors as Bools.
 ///
+
 /// VVA §2.2 / §5 — three-form refinement; this record is the inline
 /// form, K-Refine validates `t_alpha_rank >= 0` at construction.
 public type RefinedDiakrisisPrimitive is {
@@ -218,6 +227,7 @@ public theorem diakrisis_refined_t_alpha_rank_nonneg(p: &RefinedDiakrisisPrimiti
 // Canonical reference instance — CanonicalDiakrisisPrimitive (M3.A)
 // =============================================================================
 //
+
 // The protocol surface above declares the *shape* of a Diakrisis
 // canonical-primitive witness; this section ships the canonical
 // reference *instance* that satisfies all 15 accessor flags. Every
@@ -226,6 +236,7 @@ public theorem diakrisis_refined_t_alpha_rank_nonneg(p: &RefinedDiakrisisPrimiti
 // integration tests, smoke tests, and end-user code now have a
 // working witness without each caller having to roll their own.
 //
+
 // The flags are all `true` because the canonical primitive is the
 // reference *satisfaction* model — the existence claim of the
 // 4-tuple `(⟪⟫, α_math, ρ, 𝖬)` per Axi-0..9 + T-α + T-2f* is
@@ -282,8 +293,10 @@ implement DiakrisisPrimitive for CanonicalDiakrisisPrimitive {
 /// `&DiakrisisPrimitive` parameter to any of the corpus's
 /// canonical-primitive @theorems.
 ///
+
 /// Example:
 ///
+
 /// ```verum
 /// let p = canonical_diakrisis_primitive();
 /// // Now invocable: every accessor returns true.

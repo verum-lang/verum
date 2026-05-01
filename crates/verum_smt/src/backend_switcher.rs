@@ -1,36 +1,42 @@
 //! SMT Backend Switcher - Transparent Backend Selection and Portfolio Solving
 //!
+
 //! This module implements intelligent backend switching with multiple strategies:
 //! - **Manual Selection**: Explicitly choose Z3 or CVC5
 //! - **Auto Selection**: Automatically pick best solver based on problem characteristics
 //! - **Fallback**: Try Z3 first, fall back to CVC5 on timeout/failure
 //! - **Portfolio**: Run both solvers in parallel, return first result
 //!
+
 //! ## Performance Characteristics
 //!
+
 //! - Manual: Zero overhead (direct backend call)
 //! - Auto: <1ms problem analysis overhead
 //! - Fallback: 2x worst-case time (sequential)
 //! - Portfolio: 0.5-0.7x average time (parallel)
 //!
+
 //! ## Architecture
 //!
+
 //! ```text
 //! ┌───────────────────────────────────┐
-//! │    SmtBackendSwitcher             │
-//! │  ┌─────────────────────────────┐  │
-//! │  │ Configuration               │  │
-//! │  │ - default_backend           │  │
-//! │  │ - fallback_enabled          │  │
-//! │  │ - portfolio_mode            │  │
-//! │  └─────────────────────────────┘  │
-//! │         ▼          ▼               │
-//! │    ┌─────┐    ┌──────┐            │
-//! │    │ Z3  │    │ CVC5 │            │
-//! │    └─────┘    └──────┘            │
+//! │ SmtBackendSwitcher │
+//! │ ┌─────────────────────────────┐ │
+//! │ │ Configuration │ │
+//! │ │ - default_backend │ │
+//! │ │ - fallback_enabled │ │
+//! │ │ - portfolio_mode │ │
+//! │ └─────────────────────────────┘ │
+//! │ ▼ ▼ │
+//! │ ┌─────┐ ┌──────┐ │
+//! │ │ Z3 │ │ CVC5 │ │
+//! │ └─────┘ └──────┘ │
 //! └───────────────────────────────────┘
 //! ```
 //!
+
 //! Refinement types (`Int{> 0}`, `Text{len(it) > 5}`, sigma-type `n: Int where n > 0`)
 //! generate SMT constraints verified by Z3 or CVC5. The switcher selects the optimal
 //! solver: Z3 excels at bitvectors and arrays, CVC5 at strings and nonlinear arithmetic.
@@ -117,6 +123,7 @@ pub struct SwitcherConfig {
     /// `[smt.z3]` settings parsed from `verum.toml` and translated
     /// via `SmtConfig::to_switcher_config()`.
     ///
+
     /// The umbrella `timeout_ms` still wins when the supplied
     /// `Z3Config.global_timeout_ms` is `Maybe::None`, so a manifest
     /// that sets `[smt] timeout_ms = N` without overriding
@@ -271,9 +278,9 @@ pub struct SmtBackendSwitcher {
     routing_stats: Arc<crate::routing_stats::RoutingStats>,
 
     /// Cache for `analyze_assertions_heuristically` results, keyed on a
-    /// stable signature of the assertion set's text rendering.  Mirror
+    /// stable signature of the assertion set's text rendering. Mirror
     /// of `tactics::TacticCache` for the CVC5 / capability-router side
-    /// (task #6 — dual-backend cache parity).  Avoids re-walking the
+    /// (task #6 — dual-backend cache parity). Avoids re-walking the
     /// AST for theory detection on identical-shape obligations.
     cvc_chars_cache: Arc<crate::capability_router::CvcStrategyCache>,
 }
@@ -282,6 +289,7 @@ impl SmtBackendSwitcher {
     /// Build per-backend solver configs that inherit the umbrella
     /// `SwitcherConfig.timeout_ms`.
     ///
+
     /// Pre-fix the constructor used `Z3Config::default()` /
     /// `Cvc5Config::default()` directly, so the umbrella
     /// `SwitcherConfig.timeout_ms` was inert: callers setting it via
@@ -290,6 +298,7 @@ impl SmtBackendSwitcher {
     /// per-backend solver budgets — both backends always ran with
     /// their own hard-coded 30-second defaults regardless.
     ///
+
     /// This helper threads `config.timeout_ms` into both per-backend
     /// configs at construction time so a single manifest setting
     /// covers every solver instance the switcher spawns.
@@ -343,7 +352,7 @@ impl SmtBackendSwitcher {
 
     /// Snapshot the CVC5-side characteristics-cache statistics —
     /// symmetric counterpart to `tactics::TacticCache::stats()` for
-    /// the Z3 side.  Useful for `verum smt-stats` telemetry.
+    /// the Z3 side. Useful for `verum smt-stats` telemetry.
     pub fn cvc_chars_cache_stats(&self) -> crate::capability_router::CvcStrategyCacheStats {
         self.cvc_chars_cache.stats()
     }
@@ -362,6 +371,7 @@ impl SmtBackendSwitcher {
 
     /// Create a switcher backed by a caller-provided shared `RoutingStats`.
     ///
+
     /// Used by the compiler's verification phases: every switcher built
     /// during a compilation session shares the session's single
     /// `RoutingStats` handle, so per-session telemetry is aggregated
@@ -385,18 +395,22 @@ impl SmtBackendSwitcher {
 
     /// Solve using a verification strategy from a `@verify(...)` attribute.
     ///
+
     /// This is the primary entry point for SMT-backed goal discharge in the
     /// compiler: the verification phase reads `@verify(...)` from function
     /// attributes, converts it to a `VerifyStrategy`, and calls this method.
     ///
+
     /// # Behavior by strategy
     ///
+
     /// - `Runtime` / `Static`: returns `None` — caller should NOT invoke SMT.
     /// - `Formal`: dispatches via capability router.
     /// - `ForceZ3` / `ForceCvc5`: dispatches to the specified backend.
     /// - `Portfolio`: runs both solvers in parallel, first-wins.
     /// - `CrossValidate`: runs both solvers to completion, requires agreement.
     ///
+
     /// The current backend is temporarily overridden for the duration of this
     /// call and restored afterward. This lets the switcher serve both its
     /// default-configured mode and per-goal overrides from attributes.
@@ -431,7 +445,7 @@ impl SmtBackendSwitcher {
                 self.solve(assertions)
             }
             VerifyStrategy::ComplexityTyped => {
-                // ComplexityTyped (Bounded-arithmetic (V0)): bounded-arithmetic obligations
+                // ComplexityTyped (Bounded-arithmetic ): bounded-arithmetic obligations
                 // are routed through the capability system; the chosen
                 // backend filters by the V_0 / V_1 / S^1_2 / V_NP / V_PH /
                 // IΔ_0 stratum that the user pinned at the pragma layer.
@@ -716,6 +730,7 @@ impl SmtBackendSwitcher {
     /// Capability-based routing: each goal is analyzed and routed to the
     /// best solver based on its theory signature.
     ///
+
     /// Decision flow (see `capability_router::CapabilityRouter::route`):
     /// 1. If CVC5 unavailable → Z3 only.
     /// 2. If goal is security-critical → cross-validate both solvers.
@@ -723,6 +738,7 @@ impl SmtBackendSwitcher {
     /// 4. If goal is complex or mixed-theory → portfolio (parallel).
     /// 5. Default → Z3.
     ///
+
     /// This is the recommended dispatch strategy for production use.
     fn solve_capability(&mut self, assertions: &List<Expr>) -> SolveResult {
         use crate::capability_router::{
@@ -795,6 +811,7 @@ impl SmtBackendSwitcher {
 
     /// Heuristic analysis of assertions for routing purposes.
     ///
+
     /// This is a lightweight AST-walk that identifies theory signatures
     /// without invoking the SMT solver. It errs on the side of portfolio
     /// mode for ambiguous cases, trusting the router to make the final call.
@@ -806,7 +823,7 @@ impl SmtBackendSwitcher {
         use crate::strategy_selection::ProblemCharacteristics;
 
         // CvcStrategyCache lookup keyed on a stable signature of the
-        // assertion-set's text rendering (task #6).  Identical-shape
+        // assertion-set's text rendering (task #6). Identical-shape
         // obligations across modules / phases hit the cache and skip
         // the AST-walk theory detection entirely — symmetric with the
         // Z3-side TacticCache that already shortcuts probe characterisation.
@@ -839,6 +856,7 @@ impl SmtBackendSwitcher {
 
     /// Scan a single expression for theory signatures.
     ///
+
     /// Performs a recursive AST walk, identifying theory-specific constructs
     /// (strings, bit-vectors, arrays, quantifiers, etc.) to feed the
     /// capability router. The detected signals are used by the router to
@@ -988,6 +1006,7 @@ impl SmtBackendSwitcher {
 
     /// Detect theory signatures from a function/method name.
     ///
+
     /// Uses a curated list of known theory-indicating identifiers. This is a
     /// heuristic that works well for Verum stdlib conventions but may miss
     /// user-defined functions that implement theory operations.
@@ -1033,6 +1052,7 @@ impl SmtBackendSwitcher {
 
     /// Cross-validate: run both solvers and require agreement.
     ///
+
     /// Divergence is reported as an error — the caller should treat this
     /// as a solver bug or encoding issue requiring investigation. All
     /// divergence events are logged in `routing_stats` for post-hoc analysis.
@@ -1220,18 +1240,22 @@ impl SmtBackendSwitcher {
 
     /// Dispatch a `Synthesize`-strategy query to CVC5's SyGuS engine.
     ///
+
     /// This is **not** a satisfiability check. The caller provides a
     /// specification (the `assertions`) and the expected output is a
     /// *synthesized function body* that makes the specification hold.
     ///
+
     /// Return contract:
     ///
+
     /// * `SolveResult::Sat { model: Some(body) }` — SyGuS succeeded;
-    ///   `body` is the synthesized function in SMT-LIB 2 format.
+    ///  `body` is the synthesized function in SMT-LIB 2 format.
     /// * `SolveResult::Error { error }` — SyGuS is unavailable (CVC5
-    ///   not linked with parser support) or the synthesis problem has
-    ///   no solution within the default grammar.
+    ///  not linked with parser support) or the synthesis problem has
+    ///  no solution within the default grammar.
     ///
+
     /// The previous implementation *silently* rerouted this to a
     /// capability-based satisfiability check. That produced Sat/Unsat
     /// answers for a caller who expected a synthesized program —
@@ -1239,16 +1263,20 @@ impl SmtBackendSwitcher {
     /// diagnostic path: either synthesis happened (Sat with body), or
     /// it didn't (Error with reason).
     ///
+
     /// ## Current coverage
     ///
+
     /// The implementation calls `cvc5_advanced::synthesize`. Under
     /// stub / no-cvc5-parser builds that entry point returns
     /// `Cvc5AdvancedError::Unsupported`, which this function maps to
     /// a `SolveResult::Error` — surfacing the unavailability to the
     /// user instead of masking it.
     ///
+
     /// Assertion-to-specification translation:
     ///
+
     /// The caller's `assertions` are serialised as a SyGuS problem
     /// preamble (`set-logic ALL`, `constraint` per assertion,
     /// `check-synth`). A user-supplied `synth-fun` declaration is
@@ -1351,13 +1379,13 @@ impl SmtBackendSwitcher {
         // tests but no dispatch path consulted it. With the
         // current two-backend topology (Z3 + CVC5) the field
         // has natural ceiling 2; useful settings are:
-        //   max_threads = 0 → skip portfolio entirely (fall
-        //                     back to auto-routing — same effect
-        //                     as `enabled = false` but distinct
-        //                     so callers can keep portfolio
-        //                     "configured but quiet")
-        //   max_threads = 1 → spawn Z3 only (CVC5 thread skipped)
-        //   max_threads ≥ 2 → spawn both (default behaviour)
+        //  max_threads = 0 → skip portfolio entirely (fall
+        //  back to auto-routing — same effect
+        //  as `enabled = false` but distinct
+        //  so callers can keep portfolio
+        //  "configured but quiet")
+        //  max_threads = 1 → spawn Z3 only (CVC5 thread skipped)
+        //  max_threads ≥ 2 → spawn both (default behaviour)
         if self.config.portfolio.max_threads == 0 {
             return self.solve_auto(assertions);
         }
@@ -1525,6 +1553,7 @@ impl SmtBackendSwitcher {
                     // thread continues running detached but the
                     // caller sees the fast-path latency.
                     //
+
                     // Closes the inert-defense pattern around
                     // `kill_on_first`: pre-fix the field was
                     // TOML-parseable + asserted in tests but no
@@ -1534,6 +1563,7 @@ impl SmtBackendSwitcher {
                     // benchmark) had no observable effect — the
                     // dispatch always returned eagerly.
                     //
+
                     // True thread cancellation isn't supported
                     // in safe Rust without a dedicated
                     // cancellation primitive, so we honour the
@@ -1772,6 +1802,7 @@ impl SwitcherStats {
 impl SwitcherConfig {
     /// Load configuration from environment variables
     ///
+
     /// Environment variables:
     /// - `VERUM_SMT_BACKEND`: Backend choice (z3, cvc5, auto, portfolio)
     /// - `VERUM_SMT_FALLBACK`: Enable fallback (true/false)
@@ -1814,12 +1845,14 @@ impl SwitcherConfig {
 
     /// Load from TOML file
     ///
+
     /// Expected TOML format:
     /// ```toml
-    /// default_backend = "z3"  # or "cvc5", "auto", "portfolio"
+    /// default_backend = "z3" # or "cvc5", "auto", "portfolio"
     /// timeout_ms = 30000
     /// verbose = false
     ///
+
     /// [fallback]
     /// enabled = true
     /// on_timeout = true
@@ -1827,13 +1860,15 @@ impl SwitcherConfig {
     /// on_error = true
     /// max_attempts = 2
     ///
+
     /// [portfolio]
     /// enabled = false
-    /// mode = "first"  # or "consensus", "vote"
+    /// mode = "first" # or "consensus", "vote"
     /// max_threads = 2
     /// timeout_per_solver = 30000
     /// kill_on_first = true
     ///
+
     /// [validation]
     /// enabled = false
     /// validate_sat = false
@@ -1940,6 +1975,7 @@ impl SwitcherConfig {
 
 /// Convert a `SolveResult` to the portfolio/telemetry `SolverVerdict` format.
 ///
+
 /// Used for cross-validation divergence event logging, where we need to
 /// record exactly what each solver returned.
 fn solve_result_to_verdict(
@@ -2046,6 +2082,7 @@ mod inert_field_pin_tests {
     /// 30-second default). Post-fix, the per-backend configs inherit
     /// the umbrella value via `build_backends`.
     ///
+
     /// We can't read the per-backend timeouts after construction
     /// without mutable access (Z3Backend doesn't expose its config),
     /// but we can pin the public contract that `build_backends`
@@ -2079,6 +2116,7 @@ mod inert_field_pin_tests {
     /// from manifest but no consumer read it — flipping it had zero
     /// effect on dispatch.
     ///
+
     /// We exercise the dispatch with empty assertions (trivially SAT
     /// for both backends) and confirm `solve_cross_validate` was the
     /// path taken by checking that the routing-stats agreement

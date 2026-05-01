@@ -1,8 +1,10 @@
 //! Performance benchmarks for automatic tactic selection
 //!
+
 //! These benchmarks verify that automatic tactic selection improves
 //! solver performance compared to the default SMT tactic.
 //!
+
 //! Performance targets:
 //! - Analysis overhead: <100us per formula
 //! - Tactic selection speedup: 2-5x for specialized problems
@@ -310,12 +312,14 @@ fn bench_characteristic_detection(c: &mut Criterion) {
 
 // ==================== Tactic Cache Speedup Benchmarks (#103) ====================
 //
+
 // Compares the cost of repeated tactic selection on the same
 // formula with and without [`TacticCache`]. The cache hit path
 // computes a blake3 digest over the formula's S-expression and
 // rebuilds the combinator tree from cached characteristics —
 // skipping the nine Z3 probes that dominate the uncached path.
 //
+
 // Expected order-of-magnitude: cached lookup is dominated by
 // `Bool::to_string` + blake3, both single-microsecond on the
 // formulas used here. Uncached `auto_select_tactic` runs the full
@@ -325,7 +329,7 @@ fn bench_cache_speedup(c: &mut Criterion) {
     group.sample_size(100);
 
     // ===== Linear-arithmetic formula (representative of refinement
-    //       VCs that dominate Verum verification load) =====
+    //  VCs that dominate Verum verification load) =====
     let a = Int::new_const("a");
     let b_var = Int::new_const("b");
     let five = Int::from_i64(5);
@@ -386,9 +390,9 @@ fn bench_cache_speedup(c: &mut Criterion) {
     }
 
     // ===== Realistic mixed workload: 16 distinct formula shapes
-    //       cycled in round-robin. Approximates the steady-state
-    //       behaviour of a verification pass that revisits a small
-    //       set of formula templates many times. =====
+    //  cycled in round-robin. Approximates the steady-state
+    //  behaviour of a verification pass that revisits a small
+    //  set of formula templates many times. =====
     let workload: Vec<Bool> = (0..16)
         .map(|i| {
             let v = Int::new_const(format!("v{}", i));

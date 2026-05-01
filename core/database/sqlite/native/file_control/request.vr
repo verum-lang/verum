@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_file_control(db, zDbName, op, pArg).
 //
+
 // `schema_name` = "main", "temp", or an ATTACH-ed name.
 // `payload_ptr` is an opaque integer handle — the catalogue does not
 // model the varargs union; downstream modules provide typed wrappers.

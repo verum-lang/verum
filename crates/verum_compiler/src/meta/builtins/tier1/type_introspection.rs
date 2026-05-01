@@ -1,17 +1,22 @@
 //! Type Introspection (Tier 1 - Requires MetaTypes)
 //!
+
 //! Basic type introspection functions: type name, ID, kind checks, and protocol checks.
 //!
+
 //! ## Basic Type Info
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `type_name(T)` | `(Type) -> Text` | Get type name |
 //! | `type_id(T)` | `(Type) -> UInt` | Get unique type identifier |
 //! | `type_of(expr)` | `(Expr) -> Type` | Get type of expression |
 //!
+
 //! ## Type Kind Checks
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `is_struct(T)` | `(Type) -> Bool` | Check if record type |
@@ -19,8 +24,10 @@
 //! | `is_tuple(T)` | `(Type) -> Bool` | Check if tuple type |
 //! | `kind_of(T)` | `(Type) -> TypeKind` | Get type kind |
 //!
+
 //! ## Protocol Checks
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `implements(T, P)` | `(Type, Protocol) -> Bool` | Check protocol implementation |
@@ -30,6 +37,7 @@
 //! | `is_sized(T)` | `(Type) -> Bool` | Check if Sized |
 //! | `needs_drop(T)` | `(Type) -> Bool` | Check if needs destructor |
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

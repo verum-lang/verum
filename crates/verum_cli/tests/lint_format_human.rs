@@ -1,5 +1,6 @@
 //! End-to-end tests for `verum lint --format human`.
 //!
+
 //! Each test runs the binary against a fixture and asserts the
 //! span-underlined output contains the expected structural pieces:
 //! rule code, file location with `--> `, source line, caret

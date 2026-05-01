@@ -2,17 +2,20 @@
 // core.action.monads.nondeterm — non-deterministic-choice monad
 // =============================================================================
 //
+
 // `Nondeterm<A>` — finite non-deterministic computation: a value of
 // `Nondeterm<A>` represents a SET OF possible `A` values, any of which
 // the computation could "have" produced. Backed by `List<A>` for
 // finite, deterministic enumeration of the possibility space.
 //
+
 // Conventionally called the "List monad" in Haskell-derived literature
 // (Theorem 17.T1 catalogue entry `List<A>` — commutative, ε ω). The
 // `nondeterm_` prefix avoids the type-name clash with `core.collections.
 // list.List` (the storage container); the SEMANTICS here are the
 // non-determinism algebra, not the collection.
 //
+
 // **Commutative** under cartesian product per Theorem 17.T1: parallel
 // composition of two non-deterministic computations preserves the
 // `@verify(coherent_concurrent)` verdict (Corollary 17.C2). The two
@@ -21,6 +24,7 @@
 // pairs (under cartesian-product equivalence). Sits at ε-coordinate
 // ω alongside `Reader`, `Writer`, `Probability`.
 //
+
 // MonadPlus: `Nondeterm<A>` is also a monad with a zero element
 // (failure / empty enumeration) and a binary alternation operator
 // (concatenation of possibility spaces). The MonadPlus laws (zero
@@ -28,6 +32,7 @@
 // circuits bind) make `Nondeterm` the canonical structure for
 // backtracking search and constraint-satisfaction enumeration.
 //
+
 // Closes the second of three V1.5 monad gaps in `core.action.monads.
 // mod.vr` (`Exception` was the first; `Io` remains).
 // =============================================================================
@@ -155,12 +160,13 @@ public fn nondeterm_is_empty<A>(m: &Nondeterm<A>) -> Bool {
 /// candidates: prune this branch). Used to encode constraints in
 /// non-deterministic search:
 ///
+
 /// ```verum
 /// // Find pairs (x, y) with x < y from {1, 2, 3} × {1, 2, 3}
 /// nondeterm_bind(xs, |x|
-///   nondeterm_bind(ys, |y|
-///     nondeterm_bind(nondeterm_guard(x < y), |_|
-///       nondeterm_unit((x, y)))))
+///  nondeterm_bind(ys, |y|
+///  nondeterm_bind(nondeterm_guard(x < y), |_|
+///  nondeterm_unit((x, y)))))
 /// ```
 public fn nondeterm_guard(condition: Bool) -> Nondeterm<()> {
     if condition {
@@ -189,12 +195,14 @@ public fn nondeterm_map<A, B>(m: Nondeterm<A>, f: fn(A) -> B) -> Nondeterm<B> {
 // Monad laws + MonadPlus laws + commutativity (V2 — witness-parameterised)
 // =============================================================================
 //
+
 // `Nondeterm<A>` ≅ `List<A>` under multiset equivalence. The laws hold
 // up to LIST EQUALITY (concrete order-preserving) for the "default"
 // left-most-first enumeration order; a finer multiset-equivalence
 // equality is left to a future lifting once `core.collections.list`
 // exposes a multiset comparison primitive.
 //
+
 // Equality strategy: compare candidate counts as a coarse witness
 // — same count + structural composition by reduction is sufficient
 // for the V2 framework-citation theorems. The Plotkin-Power 2002
@@ -214,6 +222,7 @@ public fn nondeterm_count_eq<A>(p: &Nondeterm<A>, q: &Nondeterm<A>) -> Bool
 
 /// **Left identity** (Theorem 17.T1): `bind(unit(a), f) ≡ f(a)`.
 ///
+
 /// Decidable: `nondeterm_unit(a) = Nondeterm{[a]}`. `bind(Nondeterm{[a]}, f)`
 /// flat-maps the single-element list, producing exactly `f(a).candidates`.
 @framework(diakrisis, "Theorem 17.T1 (Nondeterm left-identity monad law)")
@@ -234,6 +243,7 @@ public theorem nondeterm_left_identity<A, B>(
 
 /// **Right identity** (Theorem 17.T1): `bind(m, unit) ≡ m`.
 ///
+
 /// Decidable: bind maps each candidate `a` to `Nondeterm{[a]}` then
 /// concatenates; the concatenation re-creates the original candidate
 /// list in order. Same count as the input.
@@ -251,6 +261,7 @@ public theorem nondeterm_right_identity<A>(m: Nondeterm<A>) -> Bool
 /// **Associativity** (Theorem 17.T1): `bind(bind(m, f), g) ≡
 /// bind(m, |x| bind(f(x), g))`.
 ///
+
 /// Decidable: both sides produce the same total candidates by the
 /// distributive law for flat-map over concatenation. Count matches.
 @framework(diakrisis, "Theorem 17.T1 (Nondeterm associativity monad law)")
@@ -277,6 +288,7 @@ public theorem nondeterm_associativity<A, B, C>(
 
 /// **MonadPlus left zero** (Plotkin-Power 2002): `bind(zero, f) ≡ zero`.
 ///
+
 /// Decidable: bind iterates 0 candidates of `zero`, never invoking f,
 /// produces an empty Nondeterm. `nondeterm_zero` is the empty Nondeterm.
 @framework(diakrisis, "MonadPlus left-zero (Nondeterm)")
@@ -322,11 +334,13 @@ public theorem nondeterm_combine_zero_right<A>(m: Nondeterm<A>) -> Bool
 /// candidate-count count. List monad commutes under cartesian
 /// product (multiset-equivalence; coarse count witness here).
 ///
+
 /// Witness:
-///   xs = `from_list([1, 2])`, ys = `from_list([10, 20])`
-///   prog1 = `bind(xs, |x| bind(ys, |y| unit((x, y))))` → 4 pairs
-///   prog2 = `bind(ys, |y| bind(xs, |x| unit((x, y))))` → 4 pairs
+///  xs = `from_list([1, 2])`, ys = `from_list([10, 20])`
+///  prog1 = `bind(xs, |x| bind(ys, |y| unit((x, y))))` → 4 pairs
+///  prog2 = `bind(ys, |y| bind(xs, |x| unit((x, y))))` → 4 pairs
 ///
+
 /// Same candidate count under both orderings — passes the coarse
 /// commutativity gate.
 @framework(diakrisis, "Theorem 17.T1 (Nondeterm commutativity, multiset)")

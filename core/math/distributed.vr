@@ -3,10 +3,13 @@
 // =============================================================================
 // Layer: 8 (Distributed Computing)
 //
+
 // Multi-node, multi-GPU training infrastructure for large-scale deep learning.
 //
+
 // # Architecture
 //
+
 // - Data Parallelism: DataParallel, DDP (Distributed Data Parallel)
 // - Model Parallelism: DistributedTensor Parallelism, Pipeline Parallelism
 // - Memory Optimization: FSDP (Fully Sharded Data Parallel)
@@ -15,12 +18,15 @@
 // - Supervision: Fault-tolerant distributed training
 // - RDMA: Zero-copy remote memory access
 //
+
 // # Communication Backends
 //
+
 // - NCCL: NVIDIA Collective Communications Library (GPU)
 // - Gloo: Facebook's collective communications library (CPU)
 // - MPI: DistributedMessage Passing Interface
 //
+
 // Spec: docs/architecture/math-spec.md#41-44
 // =============================================================================
 

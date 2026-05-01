@@ -2,42 +2,48 @@
 // concrete_accessible.vr — concrete (∞,1)-cat instances + Grothendieck @ n=1
 // =============================================================================
 //
+
 // **M-INFRA Phase 3 (2026-04-28).**
 //
+
 // Phase 2 (`core/math/accessible.vr`) shipped the Adámek-Rosický
 // theory protocols (RegularCardinal, LambdaFilteredDiagram,
 // LambdaPresentable, AccessibleCategory, AccessibleInfCategory,
 // KappaAccessibleInfCategory). Phase 3 (this module) lands four
 // CONCRETE instances that satisfy the protocols:
 //
-//   1. `OmegaCardinal` — concrete inhabitant of RegularCardinal
-//      witnessing ω. Used by every classical-cat ω-accessibility proof.
-//   2. `KappaOneCardinal` / `KappaTwoCardinal` — concrete inhabitants
-//      of κ_1, κ_2 from MSFS Convention 1.1.
-//   3. `SetCategory` — the canonical example: Set is ω-accessible per
-//      Adámek-Rosický 1.20 (every set is ω-filtered colimit of finite
-//      subsets, finite sets are ω-presentable).
-//   4. `SmallCatCategory` — Cat (small categories) is ω-accessible
-//      per AR 1.31 (small cats embed into Cat as finite-presentation
-//      colimits).
-//   5. `TopCategory` — Top (compactly-generated topological spaces)
-//      is ω-accessible per AR 2.1 + Boyer's theorem.
+
+//  1. `OmegaCardinal` — concrete inhabitant of RegularCardinal
+//  witnessing ω. Used by every classical-cat ω-accessibility proof.
+//  2. `KappaOneCardinal` / `KappaTwoCardinal` — concrete inhabitants
+//  of κ_1, κ_2 from MSFS Convention 1.1.
+//  3. `SetCategory` — the canonical example: Set is ω-accessible per
+//  Adámek-Rosický 1.20 (every set is ω-filtered colimit of finite
+//  subsets, finite sets are ω-presentable).
+//  4. `SmallCatCategory` — Cat (small categories) is ω-accessible
+//  per AR 1.31 (small cats embed into Cat as finite-presentation
+//  colimits).
+//  5. `TopCategory` — Top (compactly-generated topological spaces)
+//  is ω-accessible per AR 2.1 + Boyer's theorem.
 //
+
 // Plus the constructive Grothendieck construction `∫F` at level n=1
 // — replaces the corresponding axiom in syn_mod.vr for first-order
 // Rich-S (covers ZFC, NBG, PA, KP per MSFS §3.2 examples).
 //
+
 // Each concrete instance ships with ITS OWN typed `KappaAccessibleInfCategory`
 // witness, enabling downstream consumers to reason about the underlying
 // Adámek-Rosický invariants WITHOUT a paper-citation axiom intermediary.
 //
+
 // References:
-//   * J. Adámek + J. Rosický, "Locally Presentable and Accessible
-//     Categories", LMSL 189, CUP 1994.
-//   * J. Lurie, "Higher Topos Theory", Annals of Math Studies 170,
-//     PUP 2009 — §5.4 (presentable ∞-categories).
-//   * F. Borceux, "Handbook of Categorical Algebra", Vol. 2 ch. 5
-//     (accessibility theorems).
+//  * J. Adámek + J. Rosický, "Locally Presentable and Accessible
+//  Categories", LMSL 189, CUP 1994.
+//  * J. Lurie, "Higher Topos Theory", Annals of Math Studies 170,
+//  PUP 2009 — §5.4 (presentable ∞-categories).
+//  * F. Borceux, "Handbook of Categorical Algebra", Vol. 2 ch. 5
+//  (accessibility theorems).
 // =============================================================================
 
 module core.math.concrete_accessible;
@@ -95,17 +101,20 @@ implement RegularCardinal for KappaTwoCardinal {
 
 /// **The canonical concrete example: `Set` is ω-accessible.**
 ///
+
 /// Proof sketch (AR 1.20):
 ///
-///   * Set has all ω-filtered colimits: directed colimits of sets
-///     are computed pointwise.
-///   * Finite sets `Fin_n := { 0, ..., n-1 }` form a small dense
-///     subcategory of ω-presentable objects: `Hom_Set(Fin_n, -)`
-///     preserves ω-filtered colimits because each f : Fin_n → colim X
-///     factors through some X_i (finite-source factorisation).
-///   * |Ob(Fin_*) / iso| = ω < ω + 1 (essentially countable,
-///     below the next cardinal).
+
+///  * Set has all ω-filtered colimits: directed colimits of sets
+///  are computed pointwise.
+///  * Finite sets `Fin_n := { 0, ..., n-1 }` form a small dense
+///  subcategory of ω-presentable objects: `Hom_Set(Fin_n, -)`
+///  preserves ω-filtered colimits because each f : Fin_n → colim X
+///  factors through some X_i (finite-source factorisation).
+///  * |Ob(Fin_*) / iso| = ω < ω + 1 (essentially countable,
+///  below the next cardinal).
 ///
+
 /// This concrete instance witnesses the protocol via the canonical
 /// AR 1.20 facts. Downstream consumers (MSFS Lemma 3.4 chain at
 /// `n_F = 1` for first-order R-S) can invoke this directly without
@@ -156,14 +165,16 @@ implement KappaAccessibleInfCategory<OmegaCardinal> for SetCategory {
 
 /// **`Cat` (small categories) is ω-accessible per AR 1.31.**
 ///
+
 /// Proof sketch:
 ///
-///   * Cat has all ω-filtered colimits via the standard 2-categorical
-///     construction (objects + morphisms taken pointwise).
-///   * Finitely-presented categories (FinCat) form a small dense
-///     subcategory: every category is a directed colimit of its
-///     finitely-presented subcategories.
-///   * |Ob(FinCat) / iso| = ω, essentially countable.
+
+///  * Cat has all ω-filtered colimits via the standard 2-categorical
+///  construction (objects + morphisms taken pointwise).
+///  * Finitely-presented categories (FinCat) form a small dense
+///  subcategory: every category is a directed colimit of its
+///  finitely-presented subcategories.
+///  * |Ob(FinCat) / iso| = ω, essentially countable.
 public type SmallCatCategory is { _phantom: Int };
 
 implement Category for SmallCatCategory {}
@@ -190,6 +201,7 @@ implement KappaAccessibleInfCategory<OmegaCardinal> for SmallCatCategory {
 
 /// **Compactly-generated `Top` is ω-accessible per AR 2.1.**
 ///
+
 /// Compactly-generated spaces (CGSp): topological spaces whose
 /// topology is determined by their compact subsets. The standard
 /// k-ification functor turns Top into CGSp; CGSp is closed under
@@ -219,6 +231,7 @@ implement KappaAccessibleInfCategory<OmegaCardinal> for TopCategory {
 // 5. Constructive Grothendieck construction at level n = 1
 // =============================================================================
 //
+
 // Replaces the `lurie_htt_5_1_4_syn_is_grothendieck` axiom from
 // syn_mod.vr for first-order Rich-S (covers ZFC, NBG, PA, KP per
 // MSFS §3.2 examples). At level n = 1 the Grothendieck construction
@@ -226,6 +239,7 @@ implement KappaAccessibleInfCategory<OmegaCardinal> for TopCategory {
 // with cartesian morphisms `(f, ϕ) : (b, x) → (b', x')` where
 // `f : b → b'` in B and `ϕ : F(f)(x) → x'` in `F(b')`.
 //
+
 // **This is constructive at n = 1.** The (∞, n_F)-version for higher
 // n_F still requires Lurie HTT 3.2 straightening (preprint-blocked
 // research). For all R-S examples in MSFS §3.2 first-order column
@@ -244,6 +258,7 @@ public type FirstOrderSubTheoryInclusion is protocol extends SubTheoryInclusion 
 /// **Constructive Grothendieck @ n=1 — promotes Lurie HTT 5.1.4
 /// from axiom to @theorem for first-order Rich-S.**
 ///
+
 /// Pre-Phase-3: `lurie_htt_5_1_4_syn_is_grothendieck` was an axiom
 /// for ALL n_F including n_F = 1. Phase 3: at n_F = 1 the
 /// Grothendieck construction is given by the classical 1-categorical
@@ -251,6 +266,7 @@ public type FirstOrderSubTheoryInclusion is protocol extends SubTheoryInclusion 
 /// invoked. The witness is constructed from the AR-witness for the
 /// underlying Set / SmallCat instance.
 ///
+
 /// **Net architectural improvement:** ZFC, NBG, PA, KP, ETCS, NFU,
 /// CZF, IZF (per MSFS §3.2 first-order column) now have CONSTRUCTIVE
 /// Grothendieck-construction witnesses, not axiom citations. The
@@ -272,20 +288,23 @@ public theorem grothendieck_construction_n_1_constructive(
           && membership.closure_depth() >= 1
     proof {
         // Step 1 — At n=1, Mod(F) is the 1-categorical model 2-cat.
-        //          The AR-accessible witness for Set (or SmallCat
-        //          for protocol-classified F) provides the
-        //          KappaAccessibleInfCategory<OmegaCardinal> with
-        //          n_F = 1.
+        //  The AR-accessible witness for Set (or SmallCat
+        //  for protocol-classified F) provides the
+        //  KappaAccessibleInfCategory<OmegaCardinal> with
+        //  n_F = 1.
         //
-        //          The accessibility-grounded route from
-        //          syn_mod::msfs_definition_3_3_o2_via_accessibility
-        //          chains: AR 1.26 closure + kappa-accessible bridge
-        //          → SSMembership in S_S^global.
+
+        //  The accessibility-grounded route from
+        //  syn_mod::msfs_definition_3_3_o2_via_accessibility
+        //  chains: AR 1.26 closure + kappa-accessible bridge
+        //  → SSMembership in S_S^global.
         //
-        //          For first-order R-S we instantiate via SetCategory
-        //          (the canonical model carrier for ZFC/NBG/PA at
-        //          n_F=1).
+
+        //  For first-order R-S we instantiate via SetCategory
+        //  (the canonical model carrier for ZFC/NBG/PA at
+        //  n_F=1).
         //
+
         // **Kernel discharge** (2026-04-29): the AR 1.26 closure
         // step now has a direct algorithmic counterpart in
         // `verum_kernel::accessibility::build_filtered_colimit`
@@ -296,8 +315,9 @@ public theorem grothendieck_construction_n_1_constructive(
         // Step 2 — Apply AR 1.26 closure to set_witness.
         apply accessible_closed_under_kappa_filtered_colimits(&set_witness);
         // Step 3 — Apply the kappa-accessibility bridge to land
-        //          membership in S_S^global at depth ≥ 1.
+        //  membership in S_S^global at depth ≥ 1.
         //
+
         // **Kernel discharge.** The (∞,1)-topos structure of
         // S_S^global is now backed by
         // `verum_kernel::infinity_topos::build_infinity_topos`
@@ -315,6 +335,7 @@ public theorem grothendieck_construction_n_1_constructive(
 /// `core/math/rich_s/examples.vr`) for callers wanting the underlying
 /// AR-witness directly.
 ///
+
 /// **The structural surface:** ZFC's syntactic category Syn(ZFC) is
 /// the canonical 1-categorical model carrier — its κ_S = κ_1 by
 /// MSFS Convention 1.2 (ZFC has consistency strength below the first
@@ -324,6 +345,7 @@ public type ZfcConcrete is { _phantom: Int };
 
 /// **MSFS §3.2 — ZFC ∈ R-S (concrete instance with inline accessibility).**
 ///
+
 /// Pre-Phase-3: `msfs_zfc_in_rich_s() -> Bool ensures true` paper-cited
 /// axiom. Phase 3: provides a concrete instance carrying the
 /// underlying KappaAccessibleInfCategory<KappaOneCardinal> witness

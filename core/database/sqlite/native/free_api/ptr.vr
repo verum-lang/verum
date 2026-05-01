@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_malloc returns a raw pointer; catalogue-layer code uses an
-// opaque Int64 handle to stand in.  0 is the NULL sentinel.
+// opaque Int64 handle to stand in. 0 is the NULL sentinel.
 // =============================================================================
 
 module core.database.sqlite.native.free_api.ptr;

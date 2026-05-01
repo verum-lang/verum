@@ -1,19 +1,23 @@
 //! Error recovery strategies optimized for script/REPL environments
 //!
+
 //! Script contexts have different error recovery needs than batch compilation:
 //! - More lenient on incomplete input (user is still typing)
 //! - Better suggestions for common REPL mistakes
 //! - Context-aware completions
 //! - Graceful handling of partial expressions
 //!
+
 //! # Recovery Strategies
 //!
+
 //! 1. **Incomplete Input Detection**: Recognize when user needs to continue typing
 //! 2. **Missing Semicolon Recovery**: REPL often doesn't require semicolons
 //! 3. **Unbalanced Delimiter Recovery**: Track and suggest closing braces/brackets
 //! 4. **Identifier Typo Correction**: Suggest similar names from context
 //! 5. **Type Annotation Inference**: Suggest types when inference fails
 //!
+
 //! Moved from verum_parser::script_recovery
 
 use verum_ast::Expr;

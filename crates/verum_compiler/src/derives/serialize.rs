@@ -1,7 +1,9 @@
 //! Serialize derive macro implementation
 //!
+
 //! Generates `implement Serialize for Type { fn serialize<S>(&self, serializer: S) -> Result<S.Ok, S.Error> }`
 //!
+
 //! For record types: serializes each field by name. For sum types: serializes variant
 //! tag + payload. Supports @rename("...") and @skip attributes on fields.
 //! Critical for web frameworks, APIs, and data persistence.
@@ -54,6 +56,7 @@ impl DeriveMacro for DeriveSerialize {
 impl DeriveSerialize {
     /// Generate serialize body for struct types
     ///
+
     /// Generates:
     /// ```verum
     /// let mut state = serializer.serialize_struct("TypeName", field_count)?;
@@ -187,21 +190,22 @@ impl DeriveSerialize {
 
     /// Generate serialize body for enum types
     ///
+
     /// Generates match expression that serializes each variant appropriately:
     /// ```verum
     /// match self {
-    ///     Self::Unit => serializer.serialize_unit_variant("Enum", 0, "Unit"),
-    ///     Self::Tuple(v0, v1) => {
-    ///         let mut state = serializer.serialize_tuple_variant("Enum", 1, "Tuple", 2)?;
-    ///         state.serialize_element(&v0)?;
-    ///         state.serialize_element(&v1)?;
-    ///         state.end()
-    ///     }
-    ///     Self::Struct { field } => {
-    ///         let mut state = serializer.serialize_struct_variant("Enum", 2, "Struct", 1)?;
-    ///         state.serialize_field("field", &field)?;
-    ///         state.end()
-    ///     }
+    ///  Self::Unit => serializer.serialize_unit_variant("Enum", 0, "Unit"),
+    ///  Self::Tuple(v0, v1) => {
+    ///  let mut state = serializer.serialize_tuple_variant("Enum", 1, "Tuple", 2)?;
+    ///  state.serialize_element(&v0)?;
+    ///  state.serialize_element(&v1)?;
+    ///  state.end()
+    ///  }
+    ///  Self::Struct { field } => {
+    ///  let mut state = serializer.serialize_struct_variant("Enum", 2, "Struct", 1)?;
+    ///  state.serialize_field("field", &field)?;
+    ///  state.end()
+    ///  }
     /// }
     /// ```
     fn generate_enum_serialize(

@@ -1,10 +1,12 @@
 // Format command - auto-format Verum source code using AST-based pretty printing.
 //
+
 // Architecture:
 // 1. Parse source → AST via verum_parser
 // 2. Pretty-print AST via verum_ast::PrettyPrinter (primary)
 // 3. Fallback: whitespace normalization (when parse fails)
 //
+
 // Supports: --check (dry run), --diff (show changes), --verbose, --config
 
 use crate::error::{CliError, Result};
@@ -20,13 +22,14 @@ use walkdir::WalkDir;
 
 /// Behaviour when the parser cannot turn a source file into an AST.
 ///
+
 /// - **Fallback** (default): silently apply whitespace normalisation
-///   and import sorting; print a warning naming the file. Backwards-
-///   compatible with pre-policy behaviour.
+///  and import sorting; print a warning naming the file. Backwards-
+///  compatible with pre-policy behaviour.
 /// - **Skip**: leave the file untouched; print a warning. Exit 0.
 /// - **Error**: leave the file untouched; print an error with the
-///   parse diagnostic. Exit non-zero (the rest of the corpus is
-///   still processed first, so one bad file doesn't hide others).
+///  parse diagnostic. Exit non-zero (the rest of the corpus is
+///  still processed first, so one bad file doesn't hide others).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnParseError {
     Fallback,
@@ -304,12 +307,12 @@ fn format_file(path: &Path, config: &FormatterConfig, check: bool, verbose: bool
 
     // Try AST-based formatting first. On failure, the
     // `on_parse_error` policy decides what to do:
-    //   - Fallback (default): silently fall through to whitespace
-    //     normalisation + import sorting. Print a stderr warning so
-    //     the user knows the AST formatter wasn't used.
-    //   - Skip: leave the file untouched, exit 0 from this call.
-    //   - Error: leave the file untouched, return Err. The caller
-    //     accumulates errors and propagates them via exit code.
+    //  - Fallback (default): silently fall through to whitespace
+    //  normalisation + import sorting. Print a stderr warning so
+    //  the user knows the AST formatter wasn't used.
+    //  - Skip: leave the file untouched, exit 0 from this call.
+    //  - Error: leave the file untouched, return Err. The caller
+    //  accumulates errors and propagates them via exit code.
     let formatted = match try_ast_format(&content, config) {
         Some(f) => f,
         None => match config.on_parse_error {
@@ -593,6 +596,7 @@ pub fn format_string(source: &str) -> Result<Text> {
 /// format -) implements this so an LSP / editor extension can pipe
 /// the buffer through without a temp-file dance.
 ///
+
 /// `filename_hint` is used for diagnostics and future
 /// project-config resolution; the file at that path is NOT read.
 pub fn execute_stdin(filename_hint: Option<String>) -> Result<()> {

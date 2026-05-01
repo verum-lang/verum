@@ -5,49 +5,60 @@
 // Dependencies: core, collections, base
 // =============================================================================
 //
+
 // Unified home for variable-length integer codings used across the stdlib.
 // Right now this module ships SQLite-style varints only (the one needed by
 // `core.database.sqlite.native`, spec `internal/specs/sqlite-native.md`
 // §6.4 and Gap 4 in §3.2).
 //
+
 // Two sibling encodings live in the stdlib today and are intentionally NOT
 // duplicated here — they are wire-protocol-specific and embedded in their
 // own modules:
 //
-//   * LEB128 (little-endian, Protocol Buffers style):
-//     `core.protobuf.wire.{read_varint, write_varint}`
+
+//  * LEB128 (little-endian, Protocol Buffers style):
+//  `core.protobuf.wire.{read_varint, write_varint}`
 //
-//   * QUIC varint (1/2/4/8-byte length prefixed, RFC 9000 §16):
-//     `core.net.http3.frame`
+
+//  * QUIC varint (1/2/4/8-byte length prefixed, RFC 9000 §16):
+//  `core.net.http3.frame`
 //
+
 // If future work needs a common abstraction, we'll promote one encoding here
 // and have the others re-export. Today each keeps its call-site-specific API.
 //
+
 // ## SQLite varint (this file)
 //
+
 // SQLite stores every integer in its file format as a big-endian variable-
 // length integer of 1–9 bytes. Bytes 1–8 hold 7 data bits + a continuation
 // bit in the MSB. Byte 9 (if present) holds the remaining 8 bits with no
 // continuation bit. The encoding is defined in
 // https://www.sqlite.org/fileformat2.html under "Varint".
 //
+
 // Value range: full signed 64-bit (i64). Note that signed bits are encoded
 // exactly — negative values use the full 9-byte form (their top bit is
 // always set), unlike LEB128 which zig-zags first.
 //
+
 // Examples (hex bytes → decoded):
-//   `00`                             → 0
-//   `7F`                             → 127
-//   `81 00`                          → 128
-//   `FF 7F`                          → 16383
-//   `81 80 00`                       → 16384
-//   `FF FF FF FF 7F`                 → 2^35 − 1
-//   `FF FF FF FF FF FF FF FF FF`     → -1  (full 9-byte form)
+//  `00` → 0
+//  `7F` → 127
+//  `81 00` → 128
+//  `FF 7F` → 16383
+//  `81 80 00` → 16384
+//  `FF FF FF FF 7F` → 2^35 − 1
+//  `FF FF FF FF FF FF FF FF FF` → -1 (full 9-byte form)
 //
+
 // See `internal/specs/sqlite-native.md` Appendix E.1 for canonical test
 // vectors reproduced (and exhaustively tested) in
 // `vcs/specs/L2-standard/database/sqlite/l2_record/varint_roundtrip.vr`.
 //
+
 // =============================================================================
 
 module core.encoding.varint;
@@ -149,11 +160,11 @@ public fn sqlite_encode_into(out: &mut List<Byte>, value: Int64) -> Int {
         // 9-byte form: bytes 0..7 carry 7 data bits each (plus continuation
         // bit); byte 8 carries the remaining 8 data bits, no continuation.
         // Data bits assigned to each byte (bit 63 is the top bit of u):
-        //   byte 0 → bits 57..63     byte 4 → bits 29..35
-        //   byte 1 → bits 50..56     byte 5 → bits 22..28
-        //   byte 2 → bits 43..49     byte 6 → bits 15..21
-        //   byte 3 → bits 36..42     byte 7 → bits  8..14
-        //   byte 8 → bits  0.. 7
+        //  byte 0 → bits 57..63 byte 4 → bits 29..35
+        //  byte 1 → bits 50..56 byte 5 → bits 22..28
+        //  byte 2 → bits 43..49 byte 6 → bits 15..21
+        //  byte 3 → bits 36..42 byte 7 → bits 8..14
+        //  byte 8 → bits 0.. 7
         out.push((((u >> 57) & 0x7F_u64) | 0x80_u64) as Byte);
         out.push((((u >> 50) & 0x7F_u64) | 0x80_u64) as Byte);
         out.push((((u >> 43) & 0x7F_u64) | 0x80_u64) as Byte);
@@ -195,6 +206,7 @@ public fn sqlite_encode(value: Int64) -> List<Byte> {
 /// Decode the SQLite varint starting at `buf[start]`. Returns the decoded
 /// value and the number of bytes consumed (1..9). Errors on short input.
 ///
+
 /// Note: a buffer that ends exactly at 9 data bytes with all continuation
 /// bits set decodes a full 64-bit value — this is `-1` if interpreted as
 /// i64. There is no "overflow" from the wire form itself; the return type
@@ -259,21 +271,25 @@ public fn sqlite_skip(buf: &[Byte], start: Int) -> Result<Int, VarintError> {
 // QUIC varint — encoding (RFC 9000 §16)
 // =============================================================================
 //
+
 // QUIC uses a 1/2/4/8-byte form where the most-significant two bits of the
 // first byte encode the length (00 → 1 byte, 01 → 2, 10 → 4, 11 → 8) and
 // the remaining bits form the big-endian value. Range: 0 .. 2^62 - 1.
 //
+
 // Wire form:
-//   2MSB = 00 → len 1 → 6-bit value
-//   2MSB = 01 → len 2 → 14-bit value
-//   2MSB = 10 → len 4 → 30-bit value
-//   2MSB = 11 → len 8 → 62-bit value
+//  2MSB = 00 → len 1 → 6-bit value
+//  2MSB = 01 → len 2 → 14-bit value
+//  2MSB = 10 → len 4 → 30-bit value
+//  2MSB = 11 → len 8 → 62-bit value
 //
+
 // Unlike SQLite's encoding, QUIC varints have no minimum-length requirement;
 // 0x00, 0x40 0x00, 0x80 0x00 0x00 0x00 and 0xC0 0x00 … all decode to 0.
 // Most encoders prefer the shortest form (for on-wire efficiency); this is
 // the behaviour of `quic_encode_into`.
 //
+
 // =============================================================================
 
 /// Maximum value expressible in any QUIC varint length class.
@@ -291,6 +307,7 @@ public fn quic_encoded_len(value: UInt64) -> Int {
 /// Encode `value` as a QUIC varint in its shortest form, appending 1/2/4/8
 /// bytes to `out`. Returns the number of bytes written.
 ///
+
 /// Precondition: `value <= QUIC_VARINT_MAX` (2^62 - 1). Values above the
 /// 62-bit ceiling panic — callers should validate at protocol boundaries
 /// (e.g. reject malformed transport parameters before encode). For a
@@ -342,6 +359,7 @@ public fn quic_encode(value: UInt64) -> List<Byte> {
 
 /// Fallible counterpart to `quic_encode_into`.
 ///
+
 /// Returns `Err(VarintError { kind: Overflow, ... })` instead of
 /// panicking when `value > QUIC_VARINT_MAX`. Use at protocol-message
 /// boundaries that take untrusted sizes (e.g. transport parameter
@@ -364,6 +382,7 @@ public fn quic_try_encode_into(
 /// Decode the QUIC varint at `buf[start]`. Returns the decoded value and
 /// the new cursor position (start + encoded length). Errors on short input.
 ///
+
 /// Note: the wire form never overflows 62 bits, so no `Overflow` return
 /// from this path — any 8-byte form is a valid u64.
 public fn quic_decode(buf: &[Byte], start: Int) -> Result<(UInt64, Int), VarintError> {

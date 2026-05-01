@@ -4,6 +4,7 @@
 // sqlite_stat4 sample-BLOB encoding: serialised key prefix as Record format.
 // Spec §13.2 — sqlite_stat4 sample column.
 //
+
 // The "sample" column is a BLOB with the same record-format encoding as a
 // regular row payload — see serial_type_api for the per-column tag.
 // =============================================================================

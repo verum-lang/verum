@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite source — vdbesort.c.
 //
+
 // Each spill flushes the current in-memory heap to disk as one PMA.
 // The merge phase walks every PMA in key order.
 // =============================================================================

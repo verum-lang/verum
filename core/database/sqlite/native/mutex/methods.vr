@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_mutex_methods (Posix / Win32 / Noop variants)
 //
+
 // `MutexMethods` is the OS-abstraction layer. SQLite ships three
 // reference implementations:
 //
-//   * `posix`  — pthread_mutex_t backed
-//   * `win32`  — CRITICAL_SECTION backed
-//   * `noop`   — single-threaded build; every op succeeds without
-//                touching anything (tests this here as `NoopMethods`)
+
+//  * `posix` — pthread_mutex_t backed
+//  * `win32` — CRITICAL_SECTION backed
+//  * `noop` — single-threaded build; every op succeeds without
+//  touching anything (tests this here as `NoopMethods`)
 // =============================================================================
 
 module core.database.sqlite.native.mutex.methods;

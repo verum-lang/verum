@@ -1,5 +1,6 @@
 //! Specialized error types for refinement type violations.
 //!
+
 //! This module provides rich error reporting specifically for refinement type errors,
 //! showing actual values that failed constraints and providing actionable suggestions.
 

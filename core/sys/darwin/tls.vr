@@ -8,16 +8,19 @@ module sys.darwin.tls;
 // Platform: macOS (x86_64, arm64)
 // =============================================================================
 //
+
 // This module provides TLS-based context storage for the V-LLSI bootstrap
 // kernel on macOS. Unlike Linux which uses arch_prctl(ARCH_SET_FS) for direct
 // segment register access, macOS uses pthread_key_create/pthread_getspecific
 // for TLS.
 //
+
 // The context system provides:
 // - Fixed-size context slot array for O(1) lookup
 // - DarwinThread-safe context propagation
 // - Stack-based context scoping (push/pop)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4, Appendix F.3.2.2
 // =============================================================================
 
@@ -163,6 +166,7 @@ public type DarwinContextSlots is {
 
 /// DarwinThread Control Block (TCB)
 ///
+
 /// This structure is allocated per-thread and contains all thread-local
 /// state needed by the V-LLSI runtime.
 public type DarwinThreadControlBlock is {
@@ -240,6 +244,7 @@ public fn init_tls_key() -> Result<(), SysTlsError> {
 
 /// Initialize TLS for the main thread.
 ///
+
 /// Must be called once at program startup before any context operations.
 public fn init_main_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsError> {
     // Ensure TLS key is created
@@ -257,6 +262,7 @@ public fn init_main_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTls
 
 /// Create TLS for a new thread.
 ///
+
 /// Called automatically for threads created via spawn, or manually
 /// for threads created by other means.
 public fn create_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsError> {
@@ -348,6 +354,7 @@ fn get_current_tcb_raw() -> &mut DarwinThreadControlBlock {
 
 /// Get the current thread's TCB.
 ///
+
 /// Returns None if TLS is not initialized for this thread.
 public fn get_current_tcb() -> Maybe<&mut DarwinThreadControlBlock> {
     let tcb = get_current_tcb_raw();
@@ -431,6 +438,7 @@ public fn ctx_get(slot: Int) -> Maybe<&unsafe Byte> {
 
 /// Get a mutable context value from a slot.
 ///
+
 /// Returns the same raw pointer as ctx_get - the caller is responsible
 /// for ensuring exclusive access when modifying the value.
 public fn ctx_get_mut(slot: Int) -> Maybe<&unsafe Byte> {
@@ -459,6 +467,7 @@ public fn ctx_clear(slot: Int) -> Result<(), SysTlsError> {
 
 /// Push a new context value onto a slot's stack.
 ///
+
 /// The previous value is saved and can be restored with ctx_pop.
 public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
@@ -487,6 +496,7 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
 
 /// Pop a context value from a slot's stack.
 ///
+
 /// Restores the previous value that was saved by ctx_push.
 public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, SysTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {

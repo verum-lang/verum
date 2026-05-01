@@ -3,11 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The iVersion bump history:
-//   1 — original (xRename)
-//   2 — adds xSavepoint/xRelease/xRollbackTo
-//   3 — adds xShadowName
-//   4 — adds xIntegrity (+ xFilter argv in-constraint dispatch)
+//  1 — original (xRename)
+//  2 — adds xSavepoint/xRelease/xRollbackTo
+//  3 — adds xShadowName
+//  4 — adds xIntegrity (+ xFilter argv in-constraint dispatch)
 // =============================================================================
 
 module core.database.sqlite.native.vtab_module.version;

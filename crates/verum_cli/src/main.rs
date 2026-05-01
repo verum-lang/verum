@@ -156,15 +156,17 @@ enum Commands {
         refs: Option<Text>,
         /// Verification strategy controlling formal-verification behavior.
         ///
+
         /// Semantic strategies (backend-agnostic):
-        ///   runtime     — runtime assertion only (no formal proof)
-        ///   static      — type-level check only
-        ///   formal      — balanced default (compiler picks best technique)
-        ///   fast        — prefer speed over completeness
-        ///   thorough    — maximum completeness (parallel strategies)
-        ///   certified   — produce exportable proof certificate
-        ///   synthesize  — synthesis problem (generate term from spec)
+        ///  runtime — runtime assertion only (no formal proof)
+        ///  static — type-level check only
+        ///  formal — balanced default (compiler picks best technique)
+        ///  fast — prefer speed over completeness
+        ///  thorough — maximum completeness (parallel strategies)
+        ///  certified — produce exportable proof certificate
+        ///  synthesize — synthesis problem (generate term from spec)
         ///
+
         /// Legacy values "none", "proof" are aliases for "runtime" and "formal".
         #[clap(long, value_name = "STRATEGY",
                help = "Verification strategy: runtime|static|formal|fast|thorough|certified|synthesize")]
@@ -227,11 +229,11 @@ enum Commands {
         #[clap(long, help = "Emit VBC bytecode dump (.vbc.txt)")]
         emit_vbc: bool,
 
-        /// Windows PE subsystem.  `console` (default) produces a
+        /// Windows PE subsystem. `console` (default) produces a
         /// standard CLI app that allocates a console window when
-        /// launched.  `gui` produces a Win32 GUI app — no console
+        /// launched. `gui` produces a Win32 GUI app — no console
         /// flashes on launch, suitable for desktop applications.
-        /// Ignored on non-Windows targets.  Overrides the manifest
+        /// Ignored on non-Windows targets. Overrides the manifest
         /// `[build].windows_subsystem` setting if present.
         #[clap(long, value_name = "MODE", help = "Windows subsystem: console|gui (Windows targets only)")]
         windows_subsystem: Option<Text>,
@@ -410,17 +412,18 @@ enum Commands {
     },
 
     /// Re-verify a proof-term certificate via the minimal kernel
-    /// (#157).  Reads a `.vproof` JSON file containing
+    /// (#157). Reads a `.vproof` JSON file containing
     /// `{ term, claimed_type, metadata }`; runs the 6-rule kernel in
     /// `verum_kernel::proof_checker`; exits 0 iff the term has the
     /// claimed type.
     ///
-    /// **The trusted-base reference command.**  Users who want to
+
+    /// **The trusted-base reference command.** Users who want to
     /// verify a Verum proof from first principles run this command
     /// against a published `.vproof` artifact — the verdict depends
     /// only on the 633-LOC `proof_checker.rs` module, not on the rest
-    /// of Verum's pipeline.  Compare: Coq's `coqchk`, Lean 4's
-    /// independent re-checker, HOL Light's article verifier.  Verum's
+    /// of Verum's pipeline. Compare: Coq's `coqchk`, Lean 4's
+    /// independent re-checker, HOL Light's article verifier. Verum's
     /// `check-proof` has the smallest production-shippable trust base
     /// in the proof-assistant world (633 LOC vs Coq ~10K, Lean ~5K,
     /// HOL Light ~5K).
@@ -436,15 +439,17 @@ enum Commands {
     /// `<theorem-name>.vproof` files into `<output-dir>` (default:
     /// `<source-dir>/elaborated/`).
     ///
+
     /// Together with `verum check-proof`, this command closes the
     /// round-trip from source theorem to kernel verdict: certificates
     /// are kernel-checked at construction time and can be
     /// independently re-verified by `verum check-proof`, whose
     /// trust base is the 796-LOC `proof_checker.rs`.
     ///
+
     /// Currently supports `proof { apply <lemma>(args); }` and
     /// `proof = <expr>` bodies with `Bool` / `Path` / `Call` /
-    /// `Binary` / `Unary` propositions.  Other tactic forms and
+    /// `Binary` / `Unary` propositions. Other tactic forms and
     /// proposition shapes are gracefully skipped with a structured
     /// `ElabError` diagnostic (UnsupportedTactic /
     /// UndeclaredApplyTarget / UnsupportedExpression).
@@ -452,7 +457,7 @@ enum Commands {
         /// Path to the `.vr` source file.
         #[clap(value_name = "FILE")]
         file: Text,
-        /// Output directory for emitted `.vproof` files.  Default:
+        /// Output directory for emitted `.vproof` files. Default:
         /// `<source-dir>/elaborated/`.
         #[clap(long, value_name = "DIR")]
         output_dir: Option<Text>,
@@ -480,10 +485,10 @@ enum Commands {
         #[clap(long, value_name = "N")]
         threads: Option<usize>,
         /// Behaviour when a file fails to parse:
-        ///   - `fallback` (default): silently apply whitespace
-        ///     normalisation; warn.
-        ///   - `skip`: leave the file untouched; warn.
-        ///   - `error`: leave the file untouched; fail the run.
+        ///  - `fallback` (default): silently apply whitespace
+        ///  normalisation; warn.
+        ///  - `skip`: leave the file untouched; warn.
+        ///  - `error`: leave the file untouched; fail the run.
         #[clap(long, value_name = "MODE")]
         on_parse_error: Option<Text>,
         /// Language-feature overrides (applied on top of verum.toml).
@@ -672,6 +677,7 @@ enum Commands {
 
     /// Start Verum Playbook - Interactive notebook environment
     ///
+
     /// The Playbook provides a Jupyter-like experience in your terminal,
     /// optimized for exploring Verum's capabilities including:
     /// - 9-layer math stack (tensors, autodiff, neural networks)
@@ -894,7 +900,7 @@ enum Commands {
         #[clap(long)]
         function: Option<Text>,
         /// Enable the per-theorem closure-hash incremental
-        /// verification cache (#79).  When set, theorem proofs whose
+        /// verification cache (#79). When set, theorem proofs whose
         /// closure hash is in the cache and whose cached verdict was
         /// Ok are skipped without invoking the SMT / kernel re-check.
         /// Cache root defaults to
@@ -903,8 +909,8 @@ enum Commands {
         #[clap(long)]
         closure_cache: bool,
 
-        /// Override the closure-cache root directory.  Implies
-        /// `--closure-cache` if set.  Standard CI use is to point
+        /// Override the closure-cache root directory. Implies
+        /// `--closure-cache` if set. Standard CI use is to point
         /// this at a shared NFS path so multiple agents reuse cached
         /// verdicts.
         #[clap(long, value_name = "PATH")]
@@ -984,17 +990,20 @@ enum Commands {
 
     /// Security audit of dependencies
     ///
+
     /// Default mode: supply-chain audit (vulns, checksums, signatures).
     ///
-    /// Interactive proof-drafting helper.  Given a theorem name and
+
+    /// Interactive proof-drafting helper. Given a theorem name and
     /// a description of the focused goal, emits ranked next-step
     /// tactic suggestions (lemma applications + tactic invocations +
     /// state navigation) via
     /// `verum_verification::proof_drafting::SuggestionEngine`.
     ///
+
     /// Output format:
-    ///   - `--format plain` (default) — human-readable with rationales.
-    ///   - `--format json`            — structured (LSP-friendly).
+    ///  - `--format plain` (default) — human-readable with rationales.
+    ///  - `--format json` — structured (LSP-friendly).
     ProofDraft {
         /// Theorem name (the proof body's owner — used for diagnostic
         /// labelling and history attribution).
@@ -1002,13 +1011,13 @@ enum Commands {
         theorem: String,
 
         /// The focused goal's proposition rendering (what needs to be
-        /// proved).  Pipe via stdin with `--goal -` for multi-line
+        /// proved). Pipe via stdin with `--goal -` for multi-line
         /// goals.
         #[clap(long)]
         goal: String,
 
         /// Available lemmas in scope as `name:::signature` lines (one
-        /// per `--lemma` flag, repeatable).  Or use `--lemmas-from
+        /// per `--lemma` flag, repeatable). Or use `--lemmas-from
         /// <file>` to load a `\n`-separated list from a file.
         #[clap(long, value_name = "NAME:::SIGNATURE")]
         lemma: Vec<String>,
@@ -1023,17 +1032,19 @@ enum Commands {
     },
 
     /// Structured repair suggestions for a typed proof / kernel
-    /// failure.  Wires
+    /// failure. Wires
     /// `verum_diagnostics::proof_repair::DefaultRepairEngine` so IDE /
     /// LSP / REPL consumers can request ranked drop-in code-snippet
     /// repairs without depending on the Rust API.
     ///
+
     /// Usage:
-    ///   verum proof-repair --kind unbound-name --field name=foo
-    ///   verum proof-repair --kind refine-depth \
-    ///         --field refined_type=CategoricalLevel \
-    ///         --field predicate_depth=ω·2 --max 3 --format json
+    ///  verum proof-repair --kind unbound-name --field name=foo
+    ///  verum proof-repair --kind refine-depth \
+    ///  --field refined_type=CategoricalLevel \
+    ///  --field predicate_depth=ω·2 --max 3 --format json
     ///
+
     /// Valid `--kind` values: refine-depth, positivity, universe,
     /// fwax-not-prop, adjunction, type-mismatch, unbound-name,
     /// apply-mismatch, tactic-open.
@@ -1042,7 +1053,7 @@ enum Commands {
         #[clap(long)]
         kind: String,
 
-        /// Per-kind structured fields as `key=value`.  Repeatable.
+        /// Per-kind structured fields as `key=value`. Repeatable.
         /// Required keys differ per kind; missing required keys
         /// surface as an InvalidArgument error naming the missing key.
         #[clap(long, value_name = "KEY=VALUE")]
@@ -1058,16 +1069,17 @@ enum Commands {
     },
 
     /// Foreign-system theorem import (#85) — inverse of cross-format
-    /// export.  Reads a Coq / Lean4 / Mizar / Isabelle source file
+    /// export. Reads a Coq / Lean4 / Mizar / Isabelle source file
     /// and emits a Verum `.vr` skeleton with one `@axiom`-bodied
     /// declaration per imported theorem, attributed back to the
-    /// source via `@framework(<system>, "<source>:<line>")`.  The
+    /// source via `@framework(<system>, "<source>:<line>")`. The
     /// user fills in the proof body with Verum tactics, or keeps the
     /// `@axiom` and treats the foreign system as the trust boundary.
     ///
+
     /// Usage:
-    ///   verum foreign-import --from <coq|lean4|mizar|isabelle> <FILE>
-    ///                        [--out <PATH>] [--format skeleton|json|summary]
+    ///  verum foreign-import --from <coq|lean4|mizar|isabelle> <FILE>
+    ///  [--out <PATH>] [--format skeleton|json|summary]
     ForeignImport {
         /// Foreign system: coq / rocq / lean4 / lean / mathlib /
         /// mizar / isabelle / hol.
@@ -1096,11 +1108,12 @@ enum Commands {
     /// Architectural foundation for foundation-neutral cubical
     /// type theory in Verum.
     ///
+
     /// Subcommands:
-    ///   verum cubical primitives [--category C] [--output ...]
-    ///   verum cubical explain    <name> [--output ...]
-    ///   verum cubical rules      [--output ...]
-    ///   verum cubical face       <formula> [--output ...]
+    ///  verum cubical primitives [--category C] [--output ...]
+    ///  verum cubical explain <name> [--output ...]
+    ///  verum cubical rules [--output ...]
+    ///  verum cubical face <formula> [--output ...]
     Cubical {
         #[clap(subcommand)]
         sub: CubicalSub,
@@ -1108,19 +1121,20 @@ enum Commands {
 
     /// Cog distribution registry (#82) — publish, lookup, search,
     /// verify reproducibility envelopes, and check multi-mirror
-    /// consensus.  Per-cog reproducibility hash chain (sources +
+    /// consensus. Per-cog reproducibility hash chain (sources +
     /// build env + output) plus per-cog attestation kinds
     /// (verified_ci / honesty / coord / cross_format /
-    /// framework_soundness).  Immutable releases.
+    /// framework_soundness). Immutable releases.
     ///
+
     /// Subcommands:
-    ///   verum cog-registry publish    --manifest FILE [--root DIR] [--registry-id ID] [--output ...]
-    ///   verum cog-registry lookup     --name N --version V [--root DIR] [--registry-id ID] [--output ...]
-    ///   verum cog-registry search     [--name SUB] [--paper-doi D] [--framework F] [--theorem T]
-    ///                                 [--require-attestation A] [--root DIR] [--registry-id ID] [--output ...]
-    ///   verum cog-registry verify     --name N --version V [--root DIR] [--registry-id ID] [--output ...]
-    ///   verum cog-registry consensus  --name N --version V --mirror DIR [--mirror DIR]… [--output ...]
-    ///   verum cog-registry seed-demo  [--output ...]
+    ///  verum cog-registry publish --manifest FILE [--root DIR] [--registry-id ID] [--output ...]
+    ///  verum cog-registry lookup --name N --version V [--root DIR] [--registry-id ID] [--output ...]
+    ///  verum cog-registry search [--name SUB] [--paper-doi D] [--framework F] [--theorem T]
+    ///  [--require-attestation A] [--root DIR] [--registry-id ID] [--output ...]
+    ///  verum cog-registry verify --name N --version V [--root DIR] [--registry-id ID] [--output ...]
+    ///  verum cog-registry consensus --name N --version V --mirror DIR [--mirror DIR]… [--output ...]
+    ///  verum cog-registry seed-demo [--output ...]
     CogRegistry {
         #[clap(subcommand)]
         sub: CogRegistrySub,
@@ -1132,56 +1146,59 @@ enum Commands {
     /// to the trusted computing base: even if Z3 / CVC5 emit a
     /// fake cert, the kernel catches it before commit.
     ///
+
     /// Subcommands:
-    ///   verum cert-replay replay --backend <B> [--cert FILE | --format F --theory T --conclusion C --body B]
-    ///                            [--output plain|json|markdown]
-    ///   verum cert-replay cross-check [--backend B]… [--cert FILE | --format F …]
-    ///                            [--require-consensus] [--output ...]
-    ///   verum cert-replay formats [--output ...]
-    ///   verum cert-replay backends [--output ...]
+    ///  verum cert-replay replay --backend <B> [--cert FILE | --format F --theory T --conclusion C --body B]
+    ///  [--output plain|json|markdown]
+    ///  verum cert-replay cross-check [--backend B]… [--cert FILE | --format F …]
+    ///  [--require-consensus] [--output ...]
+    ///  verum cert-replay formats [--output ...]
+    ///  verum cert-replay backends [--output ...]
     CertReplay {
         #[clap(subcommand)]
         sub: CertReplaySub,
     },
 
     /// Continuous benchmarking surface (#83) — head-to-head vs
-    /// Coq / Lean4 / Isabelle / Agda.  Emits a typed comparison
+    /// Coq / Lean4 / Isabelle / Agda. Emits a typed comparison
     /// matrix across the seven canonical metrics: kernel LOC,
     /// compilation speed, memory peak, cross-format export
     /// coverage, tactic-library coverage, trust diversification,
     /// and LLM-tactic acceptance rate.
     ///
+
     /// Subcommands:
-    ///   verum benchmark run     --system <S> --suite-name <N> [--theorem T]…
-    ///                           [--format plain|json|markdown|csv]
-    ///   verum benchmark compare [--system S]… --suite-name <N> [--theorem T]…
-    ///                           [--format plain|json|markdown|csv]
-    ///   verum benchmark metrics [--format plain|json|markdown|csv]
+    ///  verum benchmark run --system <S> --suite-name <N> [--theorem T]…
+    ///  [--format plain|json|markdown|csv]
+    ///  verum benchmark compare [--system S]… --suite-name <N> [--theorem T]…
+    ///  [--format plain|json|markdown|csv]
+    ///  verum benchmark metrics [--format plain|json|markdown|csv]
     Benchmark {
         #[clap(subcommand)]
         sub: BenchmarkSub,
     },
 
     /// Live proof REPL — stepwise tactic feedback + proof-tree
-    /// visualisation (#75).  Non-interactive batch driver: apply
+    /// visualisation (#75). Non-interactive batch driver: apply
     /// tactics, navigate with undo / redo, request hints, render
-    /// the proof tree as Graphviz DOT.  Interactive TUI is a
+    /// the proof tree as Graphviz DOT. Interactive TUI is a
     /// separate `verum_interactive` integration; the protocol
     /// shape lives in this command.
     ///
+
     /// Subcommands:
-    ///   verum proof-repl batch --theorem T --goal G [--lemma ...] \
-    ///         [--commands FILE] [--cmd LINE]… [--format plain|json]
-    ///   verum proof-repl tree  --theorem T --goal G [--lemma ...] \
-    ///         [--apply STEP]…
+    ///  verum proof-repl batch --theorem T --goal G [--lemma ...] \
+    ///  [--commands FILE] [--cmd LINE]… [--format plain|json]
+    ///  verum proof-repl tree --theorem T --goal G [--lemma ...] \
+    ///  [--apply STEP]…
     ProofRepl {
         #[clap(subcommand)]
         sub: ProofReplSub,
     },
 
-    /// LCF-style fail-closed LLM tactic proposer (#77).  An LLM may
+    /// LCF-style fail-closed LLM tactic proposer (#77). An LLM may
     /// propose tactic sequences but the kernel re-checks every step
-    /// before committing.  Any rejection discards the proposal.
+    /// before committing. Any rejection discards the proposal.
     /// Every invocation is captured in an append-only audit trail
     /// keyed by model id + prompt hash + completion hash so the
     /// proof is reproducible from the log.
@@ -1190,50 +1207,53 @@ enum Commands {
         sub: LlmTacticSub,
     },
 
-    /// Auto-paper documentation generator (#84).  Walks every
+    /// Auto-paper documentation generator (#84). Walks every
     /// `.vr` file in the project, projects every public @theorem /
     /// @lemma / @corollary / @axiom into a typed `DocItem`, and
     /// renders Markdown / LaTeX / HTML directly from the corpus.
     /// Eliminates the duplicate-source problem (paper.tex +
     /// verum-corpus): the corpus IS the paper draft.
     ///
+
     /// Subcommands:
-    ///   verum doc-render render [--format md|latex|html] [--out <PATH>] [--public]
-    ///   verum doc-render graph [--format dot|json] [--public]
-    ///   verum doc-render check-refs [--format plain|json] [--public]
+    ///  verum doc-render render [--format md|latex|html] [--out <PATH>] [--public]
+    ///  verum doc-render graph [--format dot|json] [--public]
+    ///  verum doc-render check-refs [--format plain|json] [--public]
     DocRender {
         #[clap(subcommand)]
         sub: DocRenderSub,
     },
 
-    /// Closure-hash incremental verification cache surface.  Wires
+    /// Closure-hash incremental verification cache surface. Wires
     /// `verum_verification::closure_cache::FilesystemCacheStore` to
     /// the CLI so IDE / CI / users can inspect, list, clear, and
     /// probe the per-theorem cache without depending on the Rust
     /// API.
     ///
+
     /// Subcommands:
-    ///   verum cache-closure stat    [--root <P>] [--format <F>]
-    ///   verum cache-closure list    [--root <P>] [--format <F>]
-    ///   verum cache-closure get     <theorem> [--root <P>] [--format <F>]
-    ///   verum cache-closure clear   [--root <P>] [--format <F>]
-    ///   verum cache-closure decide  <theorem> --signature <s> --body <s> \
-    ///       [--cite <c>]… [--kernel-version <v>] [--root <P>] [--format <F>]
+    ///  verum cache-closure stat [--root <P>] [--format <F>]
+    ///  verum cache-closure list [--root <P>] [--format <F>]
+    ///  verum cache-closure get <theorem> [--root <P>] [--format <F>]
+    ///  verum cache-closure clear [--root <P>] [--format <F>]
+    ///  verum cache-closure decide <theorem> --signature <s> --body <s> \
+    ///  [--cite <c>]… [--kernel-version <v>] [--root <P>] [--format <F>]
     CacheClosure {
         #[clap(subcommand)]
         sub: CacheClosureSub,
     },
 
-    /// Industrial-grade tactic combinator catalogue surface.  Wires
+    /// Industrial-grade tactic combinator catalogue surface. Wires
     /// `verum_verification::tactic_combinator::DefaultTacticCatalog`
     /// to the CLI so IDE / docs-generator / CI consumers can read
     /// the canonical 15-combinator catalogue + its algebraic laws
     /// without depending on the Rust API.
     ///
+
     /// Subcommands:
-    ///   verum tactic list [--category <C>] [--format <F>]
-    ///   verum tactic explain <name> [--format <F>]
-    ///   verum tactic laws [--format <F>]
+    ///  verum tactic list [--category <C>] [--format <F>]
+    ///  verum tactic explain <name> [--format <F>]
+    ///  verum tactic laws [--format <F>]
     Tactic {
         #[clap(subcommand)]
         sub: TacticSub,
@@ -1268,9 +1288,9 @@ enum Commands {
         /// Run the kernel re-check (K-Refine-omega / K-Universe-Ascent /
         /// K-Eps-Mu / K-Round-Trip) against every theorem-shaped +
         /// axiom + function declaration in the project, surfacing
-        /// per-name admitted / rejected outcomes.  Useful as a fast
+        /// per-name admitted / rejected outcomes. Useful as a fast
         /// first gate in CI pipelines before the verifier dispatcher
-        /// runs.  Exits non-zero on any rejection.  (#122)
+        /// runs. Exits non-zero on any rejection. (#122)
         #[clap(long)]
         kernel_recheck: bool,
 
@@ -1279,7 +1299,7 @@ enum Commands {
         /// declared rule count, enumerates per-rule proved / admitted
         /// status, and emits parallel Coq + Lean theory files into
         /// `target/audit-reports/kernel-soundness/` for independent
-        /// re-checking.  Exits non-zero only on Rust↔.vr drift;
+        /// re-checking. Exits non-zero only on Rust↔.vr drift;
         /// admitted lemmas are accountability surface, not failures.
         #[clap(long = "kernel-soundness")]
         kernel_soundness: bool,
@@ -1311,12 +1331,12 @@ enum Commands {
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
-        /// through `verum_kernel::dispatch_intrinsic`.  Reports
+        /// through `verum_kernel::dispatch_intrinsic`. Reports
         /// per-bridge: callsite count, literal vs non-literal split,
         /// dispatcher decisions, and the count of false discharges
-        /// (cases where the dispatcher rejected the args).  Exits
+        /// (cases where the dispatcher rejected the args). Exits
         /// non-zero on any false discharge or on bridges cited
-        /// without a dispatcher entry.  This is the observability
+        /// without a dispatcher entry. This is the observability
         /// layer for L4 promotion; the elaborator-time wiring that
         /// makes the verdict load-bearing at compile time is task #135.
         #[clap(long = "bridge-discharge")]
@@ -1329,7 +1349,7 @@ enum Commands {
         /// strategy, then verifies the strict-ν-monotonicity
         /// invariant: `Closes` at any strategy `S_strict` MUST imply
         /// `Closes` at every coarser backbone strategy `S_coarser ≤
-        /// S_strict`.  Exits non-zero on any inversion.  This is the
+        /// S_strict`. Exits non-zero on any inversion. This is the
         /// architectural promise the verification ladder makes by
         /// design — this audit keeps the promise honest at runtime
         /// across the live corpus.
@@ -1341,9 +1361,9 @@ enum Commands {
         /// project, emits per-theorem `.v` (Coq) and `.lean` (Lean 4)
         /// files into `target/audit-reports/cross-format-roundtrip/`,
         /// and invokes `coqc` / `lean` against each emitted file.
-        /// Aggregates per-theorem foreign-tool verdicts.  Exits
+        /// Aggregates per-theorem foreign-tool verdicts. Exits
         /// non-zero only when an AVAILABLE foreign tool reports a
-        /// real failure on at least one emitted file.  Hosts without
+        /// real failure on at least one emitted file. Hosts without
         /// the foreign tools installed get `tool_missing`
         /// observability without failing the gate.
         #[clap(long = "cross-format-roundtrip")]
@@ -1351,23 +1371,23 @@ enum Commands {
 
         /// Force docker backend for the cross-format gate (#149 / MSFS-L4.15).
         /// Without this flag the gate uses host PATH-resolved coqc/lean,
-        /// surfacing `tool_missing` if absent.  With `--docker`, foreign
+        /// surfacing `tool_missing` if absent. With `--docker`, foreign
         /// tools run inside their canonical container images
         /// (coqorg/coq:8.18.0-flambda, leanprovercommunity/lean4:4.5.0
         /// by default; override via VERUM_DOCKER_IMAGE_COQ /
-        /// VERUM_DOCKER_IMAGE_LEAN env vars).  Each emitted .v / .lean
+        /// VERUM_DOCKER_IMAGE_LEAN env vars). Each emitted .v / .lean
         /// file is mounted read-only into the container, the foreign
         /// tool runs against it, and the verdict surfaces as
-        /// `passed`/`failed` instead of `tool_missing`.  Equivalent to
+        /// `passed`/`failed` instead of `tool_missing`. Equivalent to
         /// setting `VERUM_FOREIGN_TOOL_BACKEND=docker`.
         #[clap(long = "docker")]
         docker: bool,
 
         /// Verify the canonical proof-term certificate library (#157
-        /// follow-up).  Walks `core/verify/proof_term_examples/*.vproof`
+        /// follow-up). Walks `core/verify/proof_term_examples/*.vproof`
         /// (or any directory pointed at by `VERUM_PROOF_TERM_EXAMPLES`),
         /// runs `proof_checker::Certificate::verify()` on each, exits
-        /// non-zero on any rejection.  This is the trust-base
+        /// non-zero on any rejection. This is the trust-base
         /// regression suite — the canonical proofs (identity,
         /// polymorphic identity, K combinator, transitivity) that
         /// every kernel implementation claiming Verum compatibility
@@ -1376,11 +1396,11 @@ enum Commands {
         proof_term_library: bool,
 
         /// Verify provenance signatures on emitted cross-format files
-        /// (#174).  Walks the corpus, recomputes each theorem's
+        /// (#174). Walks the corpus, recomputes each theorem's
         /// expected `verum_signature` header, and compares it to the
         /// signature actually present in
         /// `target/audit-reports/cross-format-roundtrip/{coq,lean}/*`.
-        /// Exits non-zero on any mismatch.  Reproducibility primitive:
+        /// Exits non-zero on any mismatch. Reproducibility primitive:
         /// a third-party reviewer pulls the published .v / .lean files
         /// out of supplementary material and runs this gate to confirm
         /// the files were emitted by the named kernel version against
@@ -1388,43 +1408,43 @@ enum Commands {
         #[clap(long = "signatures")]
         signatures: bool,
 
-        /// Run the kernel-soundness IOU dashboard.  Enumerates
+        /// Run the kernel-soundness IOU dashboard. Enumerates
         /// every kernel rule whose
         /// soundness lemma is admitted with an IOU reason in
         /// `core/verify/kernel_soundness/`; groups by RuleCategory
         /// (Structural / Cubical / Refinement / Quotient / Inductive /
         /// SmtAxiom / Diakrisis); emits structured JSON + plain summary.
         /// Drives discharge prioritisation: high-priority admits surface
-        /// at the top.  This is the metric-driven foundation for the
+        /// at the top. This is the metric-driven foundation for the
         /// path to "constructively verified from first principles" —
         /// each admit closed shrinks Verum's trusted base.
         #[clap(long = "soundness-iou")]
         soundness_iou: bool,
 
-        /// Run the unified audit-bundle (#151).  Executes each of the
+        /// Run the unified audit-bundle (#151). Executes each of the
         /// load-bearing L1+L2+L3+L4 gates in dependency order
         /// (`--bridge-discharge`, `--kernel-discharged-axioms`,
         /// `--apply-graph`, `--cross-format-roundtrip`) and aggregates
         /// their JSON outputs into a single `target/audit-reports/
-        /// bundle.json`.  Top-level `l4_load_bearing: bool` summarises
-        /// the corpus's L4 verdict in one boolean.  The bundle is the
+        /// bundle.json`. Top-level `l4_load_bearing: bool` summarises
+        /// the corpus's L4 verdict in one boolean. The bundle is the
         /// user-facing UX for the verum-corpus L4-readiness gate: one
         /// command, one verdict, all evidence in one place.
         #[clap(long = "bundle")]
         bundle: bool,
 
         /// Run the apply-graph transitive bridge-discharge audit
-        /// (task #150 / MSFS-L4.13).  Walks every theorem in the
+        /// (task #150 / MSFS-L4.13). Walks every theorem in the
         /// project and classifies its TRANSITIVE apply-chain leaves
         /// — each `apply <symbol>(args)` resolves through the
         /// workspace symbol table to its body; the recursion
         /// terminates at axiom leaves classified as
         /// `kernel_strict` / `framework_axiom` / `placeholder_axiom`
-        /// / `unresolved`.  This is the load-bearing complement to
+        /// / `unresolved`. This is the load-bearing complement to
         /// `--bridge-discharge` (which only checks the immediate
         /// apply): `--apply-graph` follows the chain across `_full`
         /// forms and stdlib delegates so a placeholder leak deep in
-        /// the chain surfaces.  Exits non-zero when any theorem's
+        /// the chain surfaces. Exits non-zero when any theorem's
         /// composition has `placeholder_axiom > 0` or
         /// `unresolved > 0` — those theorems are not yet L4 load-
         /// bearing.
@@ -1444,6 +1464,7 @@ enum Commands {
         /// `--framework-axioms` and additionally annotates each
         /// framework with its Diakrisis ν-rank and intensional flag.
         ///
+
         /// the per-theorem coord audit is
         /// **default-on** per `verification-architecture.md` §A.Z.4.
         /// Bare `verum audit` runs dependency-audit + coord-audit
@@ -1508,6 +1529,7 @@ enum Commands {
         /// framework names, and detects cross-foundation conflicts
         /// (UIP ⊥ univalence). Exits non-zero on any conflict.
         ///
+
         /// Output: `target/audit-reports/foundation-profiles.json`.
         #[clap(long)]
         foundation_profiles: bool,
@@ -1564,6 +1586,7 @@ enum Commands {
         /// conjunction) as `sound` (has propositional content) or
         /// `trivial-placeholder` (just `true` literal).
         ///
+
         /// Mirrors the kernel-side K-FwAx
         /// `SubsingletonRegime::ClosedPropositionOnly` gate at
         /// corpus-audit time. Emits to
@@ -1624,7 +1647,7 @@ enum Commands {
         /// Verify-ladder audit. Walks every `@verify(strategy)`
         /// annotation, projects to its ν-ordinal, classifies dispatch
         /// status (implemented / fallback / pending), and verifies the
-        /// strict-ν-monotonicity invariant.  Exits non-zero on any
+        /// strict-ν-monotonicity invariant. Exits non-zero on any
         /// monotonicity violation.
         #[clap(long)]
         verify_ladder: bool,
@@ -1659,13 +1682,14 @@ enum Commands {
         /// lineage totals (msfs / diakrisis subpath partition) to
         /// `audit-reports/proof-honesty.json` (schema_version=1).
         ///
+
         /// Mirrors the stand-alone Python walker
         /// `verum-msfs-corpus/tools/proof_honesty_audit.py` (M0.E),
         /// now first-class via the verum CLI.
         #[clap(long)]
         proof_honesty: bool,
 
-        /// Bridge-admit footprint audit (M-EXPORT V2 / K-Round-Trip V2):
+        /// Bridge-admit footprint audit (M-EXPORT V2 / K-Round-Trip):
         /// walk every public theorem / lemma / corollary, lift the
         /// proof body to a CoreTerm, run
         /// `verum_kernel::round_trip::enumerate_bridge_admits`, and
@@ -1673,6 +1697,7 @@ enum Commands {
         /// admits the proof relies on (16.10 confluence, 16.7
         /// quotient canonical-rep, 14.3 cohesive-adjunction unit/counit).
         ///
+
         /// Empty footprint = decidable corpus. Non-empty = trusted-
         /// boundary surface: external reviewers see every reliance
         /// on a preprint-blocked result without re-walking the
@@ -1683,6 +1708,7 @@ enum Commands {
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
+
         /// The `json` format is suitable for CI dashboards and
         /// supply-chain enforcement — e.g. fail the build if a PR
         /// introduces a new framework-axiom dependency.
@@ -1693,12 +1719,14 @@ enum Commands {
     /// Export the project's theorems / lemmas / axioms to an external
     /// proof assistant's certificate format.
     ///
+
     /// Walks every .vr file in the project, collects every top-level
     /// axiom / theorem / lemma / corollary declaration, and emits a
     /// per-format file containing statement-only entries (proofs are
     /// admitted). `@framework(name, "citation")` markers ride along
     /// so the trusted boundary is visible in the exported artefact.
     ///
+
     /// Full proof-term export through verum_kernel is a follow-up
     /// — it requires SMT proof-replay, which lands per-backend.
     Export {
@@ -1789,6 +1817,7 @@ enum Commands {
 
     /// Generate shell completion scripts for bash, zsh, fish, or PowerShell.
     ///
+
     /// Usage: `verum completions bash > ~/.bash_completion.d/verum`
     Completions {
         /// Shell to generate completions for.
@@ -1798,6 +1827,7 @@ enum Commands {
 
     /// Show the resolved language-feature set for the current project.
     ///
+
     /// Loads `verum.toml`, applies any CLI overrides (`--tier`, `-Z …`),
     /// runs the feature validator, and prints the final effective
     /// configuration. Useful for debugging flag interactions.
@@ -1808,6 +1838,7 @@ enum Commands {
 
     /// Show formal-verification engine capabilities and backends.
     ///
+
     /// This command diagnoses the verifier itself: which verification
     /// techniques are available, which advanced features (interpolation,
     /// synthesis, abduction, …) the current build supports. It does not
@@ -1821,6 +1852,7 @@ enum Commands {
 
     /// Show routing statistics from the most recent verification session.
     ///
+
     /// Reads telemetry: which strategy ran for each theory, portfolio race
     /// winners, cross-validation agreement rate, divergence events, and
     /// per-theory success rates.
@@ -1954,7 +1986,7 @@ enum CogRegistrySub {
         output: String,
     },
     /// Seed an in-process registry with a demo cog and dump its
-    /// metadata.  Useful for the docs generator + tutorial walks.
+    /// metadata. Useful for the docs generator + tutorial walks.
     SeedDemo {
         #[clap(long, default_value = "plain")]
         output: String,
@@ -1967,7 +1999,7 @@ enum CertReplaySub {
         #[clap(long)]
         backend: String,
         /// Read the cert from a JSON file (preferred for real
-        /// proofs).  Mutually exclusive with `--format` /
+        /// proofs). Mutually exclusive with `--format` /
         /// `--theory` / `--conclusion` / `--body`.
         #[clap(long, value_name = "FILE")]
         cert: Option<PathBuf>,
@@ -1987,7 +2019,7 @@ enum CertReplaySub {
         output: String,
     },
     CrossCheck {
-        /// Backend to invoke.  Repeatable.  When omitted, runs
+        /// Backend to invoke. Repeatable. When omitted, runs
         /// every external backend (Z3 / CVC5 / Verit / OpenSmt /
         /// Mathsat) plus the always-on kernel-only baseline.
         #[clap(long, value_name = "NAME")]
@@ -2003,7 +2035,7 @@ enum CertReplaySub {
         #[clap(long, default_value = "")]
         body: String,
         /// Fail with non-zero exit when any available backend
-        /// disagrees with the others.  This is the
+        /// disagrees with the others. This is the
         /// `@verify(certified)` semantics: every available solver
         /// must accept.
         #[clap(long)]
@@ -2035,7 +2067,7 @@ enum BenchmarkSub {
         format: String,
     },
     /// Run the suite against multiple systems and emit a
-    /// comparison matrix.  Without any `--system` flag, runs all
+    /// comparison matrix. Without any `--system` flag, runs all
     /// five canonical systems.
     Compare {
         #[clap(long, value_name = "NAME")]
@@ -2057,18 +2089,19 @@ enum BenchmarkSub {
 
 #[derive(Subcommand)]
 enum ProofReplSub {
-    /// Run a batch of REPL commands non-interactively.  Commands
+    /// Run a batch of REPL commands non-interactively. Commands
     /// can come from a file (`--commands`) and / or repeated
     /// `--cmd` flags; both are concatenated in CLI order.
     ///
+
     /// Command-script syntax (one per line):
-    ///   - `apply <tactic>` — apply a tactic.  Bare lines are
-    ///     also treated as `apply <line>`.
-    ///   - `undo` / `redo` / `status` / `show-goals` /
-    ///     `show-context` / `visualise` — REPL navigation.
-    ///   - `hint` (default 5) / `hint <N>` — proposed next steps.
-    ///   - `# comment` — skipped.
-    ///   - blank line — skipped.
+    ///  - `apply <tactic>` — apply a tactic. Bare lines are
+    ///  also treated as `apply <line>`.
+    ///  - `undo` / `redo` / `status` / `show-goals` /
+    ///  `show-context` / `visualise` — REPL navigation.
+    ///  - `hint` (default 5) / `hint <N>` — proposed next steps.
+    ///  - `# comment` — skipped.
+    ///  - blank line — skipped.
     Batch {
         #[clap(long)]
         theorem: String,
@@ -2081,7 +2114,7 @@ enum ProofReplSub {
         /// Read commands from a file.
         #[clap(long, value_name = "FILE")]
         commands: Option<PathBuf>,
-        /// Inline command.  Repeatable — concatenated after
+        /// Inline command. Repeatable — concatenated after
         /// `--commands` content.
         #[clap(long = "cmd", value_name = "LINE")]
         cmd: Vec<String>,
@@ -2089,7 +2122,7 @@ enum ProofReplSub {
         format: String,
     },
     /// Apply a sequence of tactics and emit the resulting proof
-    /// tree as Graphviz DOT (suitable for `dot -Tsvg`).  Non-zero
+    /// tree as Graphviz DOT (suitable for `dot -Tsvg`). Non-zero
     /// exit on any kernel rejection.
     Tree {
         #[clap(long)]
@@ -2098,7 +2131,7 @@ enum ProofReplSub {
         goal: String,
         #[clap(long, value_name = "NAME:::SIGNATURE[:::LINEAGE]")]
         lemma: Vec<String>,
-        /// Tactic to apply.  Repeatable; ordered as on the CLI.
+        /// Tactic to apply. Repeatable; ordered as on the CLI.
         #[clap(long, value_name = "TACTIC")]
         apply: Vec<String>,
     },
@@ -2163,7 +2196,7 @@ enum DocRenderSub {
         public: bool,
     },
     /// Audit broken cross-references; non-zero exit on any dangling
-    /// citation.  CI-friendly.
+    /// citation. CI-friendly.
     CheckRefs {
         #[clap(long, default_value = "plain")]
         format: String,
@@ -2196,7 +2229,7 @@ enum CacheClosureSub {
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// Remove every cache entry.  Idempotent.
+    /// Remove every cache entry. Idempotent.
     Clear {
         #[clap(long)]
         root: Option<String>,
@@ -2206,7 +2239,7 @@ enum CacheClosureSub {
     /// Probe the cache: report Skip / Recheck for the given fingerprint.
     Decide {
         theorem: String,
-        /// Theorem signature payload (hashed by the cache).  Pass any
+        /// Theorem signature payload (hashed by the cache). Pass any
         /// stable serialisation of the elaborated signature.
         #[clap(long)]
         signature: String,
@@ -2377,6 +2410,7 @@ fn main() {
     // Eagerly initialise the LLVM native target on the main thread,
     // before any rayon worker or Z3 context exists.
     //
+
     // WHY: phase_generate_native was hitting a ~70% SIGSEGV on arm64
     // macOS. The crash always landed in LLVM pass-registry init
     // (TargetLibraryInfoWrapperPass / CFIFixup / CallBase) under
@@ -2387,10 +2421,12 @@ fn main() {
     // rayon workers alive yet — the guards are fully released before
     // any stdlib parse spawns rayon workers or verify spawns Z3.
     //
+
     // The underlying `Target::initialize_native` is idempotent via an
     // internal `Once`; the later call inside `VbcToLlvmLowering::new`
     // becomes a no-op.
     //
+
     // Diagnosed by running `./target/release/verum build
     // ./examples/cbgr_demo.vr` 20 times: 14/20 segfaults, all in
     // phase=compiler.phase.generate_native at 307–350ms, always on
@@ -2494,6 +2530,7 @@ enum PathTarget {
 
 /// Resolve an optional path argument into either a project directory or a single file.
 ///
+
 /// For directories: validates that Verum.toml exists and changes the working directory.
 /// For files: returns the path for single-file commands.
 /// When no path is given, assumes the current directory is already a project.
@@ -2667,11 +2704,11 @@ fn run_command(cli: Cli) -> Result<()> {
             permission_flags,
         } => {
             // Tier resolution precedence:
-            //   1. `--interp` / `--aot` shortcuts on the Run command
-            //   2. `--tier` from LanguageFeatureOverrides
-            //      (accepts interpret|aot|check; "check" is invalid
-            //      for `run` and yields an error)
-            //   3. default: interpreter
+            //  1. `--interp` / `--aot` shortcuts on the Run command
+            //  2. `--tier` from LanguageFeatureOverrides
+            //  (accepts interpret|aot|check; "check" is invalid
+            //  for `run` and yields an error)
+            //  3. default: interpreter
             let tier_from_override = feature_overrides.tier.as_ref()
                 .map(|t| t.as_str().to_string());
             feature_overrides::install(feature_overrides);

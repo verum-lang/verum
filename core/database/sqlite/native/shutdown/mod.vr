@@ -4,20 +4,23 @@
 // Layer: 7+ (process-wide)
 // Spec: SQLite C API — `sqlite3_shutdown`
 //
+
 // `sqlite3_shutdown` deinitialises every subsystem that
 // `sqlite3_initialize` set up, in REVERSE init order. The five
 // subsystems:
 //
-//   1. mutex      — install / free static mutexes
-//   2. mem        — sqlite3_mem_methods alloc routines
-//   3. pcache     — sqlite3_pcache_methods2 page cache plugin
-//   4. page       — page allocator state
-//   5. heap       — global heap state (soft + hard limits)
+
+//  1. mutex — install / free static mutexes
+//  2. mem — sqlite3_mem_methods alloc routines
+//  3. pcache — sqlite3_pcache_methods2 page cache plugin
+//  4. page — page allocator state
+//  5. heap — global heap state (soft + hard limits)
 //
+
 // Submodules:
-//   * `subsystem`  — ShutdownSubsystem taxonomy + reverse-order helper
-//   * `phase`      — ShutdownPhase state machine
-//   * `engine`     — ShutdownEngine: drives the phase machine + dispatch
+//  * `subsystem` — ShutdownSubsystem taxonomy + reverse-order helper
+//  * `phase` — ShutdownPhase state machine
+//  * `engine` — ShutdownEngine: drives the phase machine + dispatch
 // =============================================================================
 
 module core.database.sqlite.native.shutdown;

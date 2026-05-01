@@ -4,11 +4,13 @@
 // Encodes a Registry snapshot into the Prometheus text exposition format
 // per https://prometheus.io/docs/instrumenting/exposition_formats/
 //
+
 // Grammar (simplified):
-//   ["# HELP" SP metric_name SP help_escaped NL]
-//   ["# TYPE" SP metric_name SP type_name NL]
-//   metric_name "{" label_name "=" "\"" value_esc "\"" {"," ...} "}" SP value NL
+//  ["# HELP" SP metric_name SP help_escaped NL]
+//  ["# TYPE" SP metric_name SP type_name NL]
+//  metric_name "{" label_name "=" "\"" value_esc "\"" {"," ...} "}" SP value NL
 //
+
 // - Counter → "counter"
 // - UpDownCounter → "gauge" (Prometheus has no direct bidirectional counter)
 // - Gauge → "gauge"

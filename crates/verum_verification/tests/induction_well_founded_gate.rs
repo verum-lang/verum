@@ -4,6 +4,7 @@
 //! syntactically identical and the IH discharges the step
 //! trivially regardless of soundness).
 //!
+
 //! Closes the inert-defense pattern: the field was documented as
 //! "Check that induction is well-founded" with default `true`,
 //! but no code path consulted it.

@@ -58,38 +58,48 @@
 #![allow(clippy::match_like_matches_macro)]
 //! # Verum SMT Solver Integration
 //!
+
 //! This crate provides Z3 SMT solver integration for the Verum compiler,
 //! enabling verification of refinement types and formal properties.
 //!
+
 //! ## Features
 //!
+
 //! - **Refinement Type Verification**: Verify that values satisfy type constraints
 //! - **Counterexample Generation**: Produce concrete values that violate constraints
 //! - **Multiple Verification Modes**:
-//!   - `@verify(runtime)` - Skip SMT, use runtime checks
-//!   - `@verify(proof)` - Full SMT verification
-//!   - `@verify(auto)` - Heuristic based on complexity
+//!  - `@verify(runtime)` - Skip SMT, use runtime checks
+//!  - `@verify(proof)` - Full SMT verification
+//!  - `@verify(auto)` - Heuristic based on complexity
 //! - **Cost Tracking**: Monitor verification time and suggest optimizations
 //! - **Timeout Handling**: Configurable timeout (default 30s) for expensive proofs
 //!
+
 //! ## Example Usage
 //!
+
 //! ```rust,no_run
 //! use verum_smt::{Context, verify_refinement, VerifyMode};
 //! use verum_ast::{Type, TypeKind, Expr};
 //!
+
 //! // Create Z3 context
 //! let ctx = Context::new();
 //!
+
 //! // Verify a refinement type
 //! // type Positive = Int{> 0}
 //! // (Full example code omitted for brevity - see tests for complete examples)
 //! ```
 //!
+
 //! ## Architecture
 //!
+
 //! The SMT integration consists of several modules:
 //!
+
 //! - [`context`]: Z3 context management and configuration
 //! - [`translate`]: Translation from Verum AST to Z3 expressions
 //! - [`verify`]: Core refinement type verification logic
@@ -100,14 +110,14 @@
 //! - [`precondition`]: Precondition assertion and validation
 //! - [`postcondition`]: Postcondition verification and `old()` handling
 //! - [`tactics`]: Z3 tactic combinators, automatic theory-aware
-//!   selection, and a [`tactics::TacticCache`] (#103) that
-//!   memoises probe-derived [`tactics::FormulaCharacteristics`]
-//!   across verification obligations. The Z3-side
-//!   `auto_select_tactic_for(goal)` on [`z3_backend::Z3Solver`]
-//!   already routes through [`tactics::global_tactic_cache`] —
-//!   typical hit-path is 2–3× faster than uncached on
-//!   refinement-VC workloads (criterion bench
-//!   `tactic_selection_bench::cache_speedup`).
+//!  selection, and a [`tactics::TacticCache`] (#103) that
+//!  memoises probe-derived [`tactics::FormulaCharacteristics`]
+//!  across verification obligations. The Z3-side
+//!  `auto_select_tactic_for(goal)` on [`z3_backend::Z3Solver`]
+//!  already routes through [`tactics::global_tactic_cache`] —
+//!  typical hit-path is 2–3× faster than uncached on
+//!  refinement-VC workloads (criterion bench
+//!  `tactic_selection_bench::cache_speedup`).
 
 // Note: missing_debug_implementations is disabled because Z3 types don't implement Debug
 //#![deny(missing_debug_implementations)]
@@ -136,7 +146,7 @@ pub mod proof_carrying_code; // PCC: serializable proof bundles attached to VBC
 // registry + AdmittedReplay fallback; per-target lowering
 // is shipped incrementally.
 pub mod proof_replay;
-/// Cross-format foreign-system runner.  Trait-bounded interface over
+/// Cross-format foreign-system runner. Trait-bounded interface over
 /// per-format external tools (coqc / lean / isabelle / kontroli) plus
 /// adapters that lift `CheckResult` → kernel-side `FormatStatus`.
 pub mod cross_format_runner;
@@ -252,6 +262,7 @@ pub mod program_extraction;
 // RESOLVED: Circular dependency broken via verum_protocol_types crate
 // STATUS: All modules fully enabled and tested.
 //
+
 // The ProtocolImpl structure uses `for_type` field (imported from
 // verum_protocol_types::protocol_base). All API migrations have been completed.
 pub mod cbgr_predicates;
@@ -478,9 +489,11 @@ pub use strategy_selection::{
 
 // ==================== Type Conversions ====================
 //
+
 // IMPORTANT: All type conversions are now centralized in verum_common::conversions
 // This eliminates duplication across verum_smt and ensures consistency.
 //
+
 // Re-export the conversion functions for internal use (crate::option_to_maybe)
 // and public use (verum_smt::option_to_maybe).
 pub use verum_common::conversions::{maybe_to_option, option_to_maybe};
@@ -662,11 +675,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Verify SMT query with automatic fallback from Z3 to CVC5
 ///
+
 /// This function provides solver redundancy:
 /// 1. First attempts verification with Z3
 /// 2. On timeout or failure, falls back to CVC5
 /// 3. Returns first successful result
 ///
+
 /// Use this for critical verification queries where reliability is paramount.
 pub fn verify_with_fallback<F>(z3_verifier: F, timeout_ms: u64) -> Result<SmtResult>
 where
@@ -699,11 +714,13 @@ where
 
 /// Portfolio solving: run Z3 and CVC5 in parallel, return first result
 ///
+
 /// This approach can significantly improve solving time on difficult queries:
 /// - Both solvers run concurrently
 /// - First solver to return a result wins
 /// - Other solver is terminated
 ///
+
 /// Performance: 2x faster on average for complex queries (benchmarked)
 pub fn verify_portfolio<F, G>(z3_verifier: F, cvc5_verifier: G) -> Result<SmtResult>
 where

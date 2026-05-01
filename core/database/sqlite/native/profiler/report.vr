@@ -3,17 +3,22 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
 //
+
 // Output shape (one line per node, one per opcode bucket):
 //
-//   ANALYZE <sql>
-//   total_time_ns=<N>
+
+//  ANALYZE <sql>
+//  total_time_ns=<N>
 //
-//   PLAN:
-//     [<node_id>] <kind>  est=<E>  actual=<A>  ms=<T>
+
+//  PLAN:
+//  [<node_id>] <kind> est=<E> actual=<A> ms=<T>
 //
-//   OPS:
-//     <opcode>  count=<C>  total_ns=<T>  worst_ns=<W>
+
+//  OPS:
+//  <opcode> count=<C> total_ns=<T> worst_ns=<W>
 //
+
 // Sufficient for a unit test or a CLI dump; the renderer is
 // deliberately simple — fancy column alignment is the host's job.
 // =============================================================================

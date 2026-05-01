@@ -3,19 +3,23 @@
 // =============================================================================
 // Layer: 7 (Session)
 // Spec: internal/specs/tls-quic.md §4.3 — typed state machines
-//       RFC 8446 §4.2 (server handshake), §5 (record layer)
+//  RFC 8446 §4.2 (server handshake), §5 (record layer)
 // =============================================================================
 //
+
 // Mirrors `client.vr`: a phase-parameterised `TlsServer<S>` wrapping
 // the existing ServerSm with:
 //
-//   * `TlsServer<Handshaking>` — new(), feed(inbound_handshake)
-//   * `TlsServer<Established>` — read(), write(), close()
-//   * `TlsServer<Closed>`      — terminal
+
+//  * `TlsServer<Handshaking>` — new(), feed(inbound_handshake)
+//  * `TlsServer<Established>` — read(), write(), close()
+//  * `TlsServer<Closed>` — terminal
 //
+
 // Wire bytes flow like on the client. Integrations with `core.net.tcp`
 // are the caller's responsibility.
 //
+
 // =============================================================================
 
 module core.net.tls13.session.server;

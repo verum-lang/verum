@@ -2,53 +2,61 @@
 // core/net/weft/http2.vr — HTTP/2 server adapter
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §6.2 / §6.16 (Rapid-Reset)
-// RFCs:  7540 (HTTP/2), 7541 (HPACK), 9113 (HTTP/2 refresh),
-//        CVE-2023-44487 mitigations built into defaults
+// Spec: internal/specs/net-framework.md §6.2 / §6.16 (Rapid-Reset)
+// RFCs: 7540 (HTTP/2), 7541 (HPACK), 9113 (HTTP/2 refresh),
+//  CVE-2023-44487 mitigations built into defaults
 // =============================================================================
 //
+
 // Phase-3 scope — a minimal, verifiable HTTP/2 server that shares the
 // same `Handler` / `Router` surface as the HTTP/1.1 pipeline. Core
 // building blocks are already in `core/net/http2/*` (frame codec,
 // HPACK, settings, stream FSM); this file is the glue that turns
 // them into a `ConnectionRunner`.
 //
+
 // Lifecycle (per connection):
 //
-//   1. Read 24-byte client PREFACE; reject other bytes with a
-//      connection-level GOAWAY(PROTOCOL_ERROR).
-//   2. Send server SETTINGS. Bound by §6.16 hard defaults:
-//        SETTINGS_MAX_CONCURRENT_STREAMS = 128
-//        SETTINGS_INITIAL_WINDOW_SIZE    = 65535  (RFC default)
-//        SETTINGS_MAX_FRAME_SIZE         = 16384  (RFC minimum)
-//   3. Read client SETTINGS; ACK immediately.
-//   4. Frame loop:
-//        HEADERS      → decode HPACK → build WeftRequest → spawn stream task
-//        DATA         → append to request body of that stream
-//        CONTINUATION → append to pending HEADERS block (serialized)
-//        SETTINGS     → apply + ACK
-//        PING         → auto-ACK
-//        RST_STREAM   → cancel the stream's task via its token
-//        GOAWAY       → drain in-flight streams, close
-//        WINDOW_UPDATE→ stub (phase-3 uses default windows only)
-//        PUSH_PROMISE → MUST-reject (server-only direction per §8.2)
+
+//  1. Read 24-byte client PREFACE; reject other bytes with a
+//  connection-level GOAWAY(PROTOCOL_ERROR).
+//  2. Send server SETTINGS. Bound by §6.16 hard defaults:
+//  SETTINGS_MAX_CONCURRENT_STREAMS = 128
+//  SETTINGS_INITIAL_WINDOW_SIZE = 65535 (RFC default)
+//  SETTINGS_MAX_FRAME_SIZE = 16384 (RFC minimum)
+//  3. Read client SETTINGS; ACK immediately.
+//  4. Frame loop:
+//  HEADERS → decode HPACK → build WeftRequest → spawn stream task
+//  DATA → append to request body of that stream
+//  CONTINUATION → append to pending HEADERS block (serialized)
+//  SETTINGS → apply + ACK
+//  PING → auto-ACK
+//  RST_STREAM → cancel the stream's task via its token
+//  GOAWAY → drain in-flight streams, close
+//  WINDOW_UPDATE→ stub (phase-3 uses default windows only)
+//  PUSH_PROMISE → MUST-reject (server-only direction per §8.2)
 //
+
 // Rapid-Reset defence (§6.16):
 //
-//   * MAX_CONCURRENT_STREAMS hard-capped at 128 (not RFC-unbounded).
-//   * RST_STREAM rate-limited per connection: 100/s hard default,
-//     excess → connection GOAWAY(ENHANCE_YOUR_CALM, error 11).
+
+//  * MAX_CONCURRENT_STREAMS hard-capped at 128 (not RFC-unbounded).
+//  * RST_STREAM rate-limited per connection: 100/s hard default,
+//  excess → connection GOAWAY(ENHANCE_YOUR_CALM, error 11).
 //
+
 // Out of scope (phase-4 / follow-up):
 //
-//   * Full flow-control accounting — WINDOW_UPDATE currently a no-op
-//     since we never split a response payload across multiple DATA
-//     frames past the initial 64 KiB per stream.
-//   * CONTINUATION concatenation across arbitrary framing.
-//   * Server-initiated PUSH_PROMISE.
-//   * Priority / dependency tree (deprecated per RFC 9218 era).
-//   * 0-RTT-safe handler gating.
+
+//  * Full flow-control accounting — WINDOW_UPDATE currently a no-op
+//  since we never split a response payload across multiple DATA
+//  frames past the initial 64 KiB per stream.
+//  * CONTINUATION concatenation across arbitrary framing.
+//  * Server-initiated PUSH_PROMISE.
+//  * Priority / dependency tree (deprecated per RFC 9218 era).
+//  * 0-RTT-safe handler gating.
 //
+
 // =============================================================================
 
 module core.net.weft.http2;
@@ -131,32 +139,38 @@ implement Clone for Http2Limits {
 // RapidResetGuard — CVE-2023-44487 + CVE-2023-45288 defence
 // =============================================================================
 //
+
 // Two attack patterns close as one:
 //
-//   * Rapid Reset (CVE-2023-44487, Cloudflare/AWS/GCP, October 2023):
-//     attacker opens a stream and immediately sends RST_STREAM,
-//     bypassing MAX_CONCURRENT_STREAMS while charging the server
-//     O(streams_per_second × work_per_stream) CPU. The defence is to
-//     bound RST_STREAM rate per connection — once the client exceeds
-//     the budget, the connection is poisoned and a
-//     GOAWAY(ENHANCE_YOUR_CALM=0x0b) is emitted.
+
+//  * Rapid Reset (CVE-2023-44487, Cloudflare/AWS/GCP, October 2023):
+//  attacker opens a stream and immediately sends RST_STREAM,
+//  bypassing MAX_CONCURRENT_STREAMS while charging the server
+//  O(streams_per_second × work_per_stream) CPU. The defence is to
+//  bound RST_STREAM rate per connection — once the client exceeds
+//  the budget, the connection is poisoned and a
+//  GOAWAY(ENHANCE_YOUR_CALM=0x0b) is emitted.
 //
-//   * MadeYouReset (CVE-2023-45288, August 2023): same effect via a
-//     malformed frame that forces the server to RST_STREAM on the
-//     client's behalf. We charge those server-emitted RSTs against
-//     the same budget so the attacker cannot route around the
-//     limiter by sending protocol violations instead of RST_STREAM.
+
+//  * MadeYouReset (CVE-2023-45288, August 2023): same effect via a
+//  malformed frame that forces the server to RST_STREAM on the
+//  client's behalf. We charge those server-emitted RSTs against
+//  the same budget so the attacker cannot route around the
+//  limiter by sending protocol violations instead of RST_STREAM.
 //
+
 // The guard is per-connection, stack-allocated alongside the frame
 // loop, and O(1) per RST event — token-bucket refill on observation,
 // no allocation, no locking. The hot request path (HEADERS/DATA frames)
 // is untouched.
 //
+
 // Design parallels `core/net/weft/backpressure.vr`'s `RateLimitLayer`,
 // but with the per-RST event surface tailored for HTTP/2 — instead of
 // dropping a single request, exhausting the budget poisons the whole
 // connection.
 //
+
 // @red-team-defense(CVE-2023-44487, CVE-2023-45288)
 
 /// Token-bucket budget for RST_STREAM events on a single HTTP/2
@@ -205,6 +219,7 @@ implement Clone for RstBudget {
 /// poisoned flag — once poisoned, the frame loop emits GOAWAY and
 /// drops further stream-creation attempts.
 ///
+
 /// Lifetime: stack-allocated inside `run_h2_session`; passed by
 /// `&mut` to every frame-loop arm that observes a RST_STREAM or
 /// detects a protocol violation.
@@ -392,6 +407,7 @@ implement<H: Handler + Send + Sync + 'static> ConnectionRunner for Http2cRunner<
 /// runner's `.run()` — lives here as a free function so TlsHttp1Runner
 /// can hand in a `TlsTransport` once ALPN-"h2" dispatch is wired.
 ///
+
 /// Current state: scaffolding. Reads the preface, writes empty
 /// SETTINGS, enters the frame loop. Each HEADERS frame spawns a
 /// stream task that currently returns 501 (Not Implemented) — enough
@@ -587,7 +603,7 @@ fn build_server_settings(limits: &Http2Limits) -> Frame {
 
 // Post-#316 follow-up: the byte-typed transport API lets callers
 // emit frames straight via `core.net.http2.encode_frame` (which
-// already targets `List<Byte>`).  The previous `encode_frame_to_ints`
+// already targets `List<Byte>`). The previous `encode_frame_to_ints`
 // adaptor (Byte→Int re-pack) is now redundant and has been removed.
 
 /// CVE-2023-45288 (MadeYouReset) classifier. Returns true for

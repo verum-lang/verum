@@ -5,31 +5,35 @@
 // Dependencies: sys/{platform}/mem
 // =============================================================================
 //
+
 // Segments are 32MiB chunks of virtual memory divided into 64KiB slices.
 // This architecture follows mimalloc's proven design for:
 // - Efficient memory layout with commit/purge masks
 // - Cross-thread segment abandonment and reclamation
 // - Lazy physical memory commitment
 //
+
 // # Architecture
 //
+
 // ```
 // MemSegment (32 MiB)
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │ SegmentHeader (4 KiB, first slice)                                      │
-// │ - thread_id, used_slices, commit_mask, purge_mask                       │
-// │ - slice_info[512] for tracking slice usage                              │
+// │ SegmentHeader (4 KiB, first slice) │
+// │ - thread_id, used_slices, commit_mask, purge_mask │
+// │ - slice_info[512] for tracking slice usage │
 // ├─────────────────────────────────────────────────────────────────────────┤
-// │ Slice 1 (64 KiB) - can be PageHeader + blocks                           │
+// │ Slice 1 (64 KiB) - can be PageHeader + blocks │
 // ├─────────────────────────────────────────────────────────────────────────┤
-// │ Slice 2 (64 KiB)                                                        │
+// │ Slice 2 (64 KiB) │
 // ├─────────────────────────────────────────────────────────────────────────┤
-// │ ...                                                                     │
+// │ ... │
 // ├─────────────────────────────────────────────────────────────────────────┤
-// │ Slice 511 (64 KiB)                                                      │
+// │ Slice 511 (64 KiB) │
 // └─────────────────────────────────────────────────────────────────────────┘
 // ```
 //
+
 // Spec: docs/architecture/mimalloc-allocator-plan.md
 // =============================================================================
 
@@ -445,24 +449,27 @@ implement MemSegment {
 
     /// Increment base generation (called on epoch advance).
     ///
+
     /// SOUNDNESS: must be a single atomic RMW, not a load-then-store.
     /// The previous implementation read old_gen, computed new_gen,
     /// then stored — which races concurrent calls and silently
-    /// LOSES increments.  Lost generation increments are a CBGR
+    /// LOSES increments. Lost generation increments are a CBGR
     /// soundness violation: a stale reference whose generation
     /// matches the lost-increment value would pass validation
     /// even though the allocation has been logically advanced.
     ///
+
     /// Uses `atomic_fetch_add_u32` so concurrent callers see a
     /// totally-ordered sequence of generation values; wraparound
     /// is detected by reading the returned old value (the post-
     /// add value wrapped to 0 iff old was UInt32.MAX).
     ///
+
     /// The `self.epoch` increment in the wraparound branch is
     /// best-effort under extreme contention because UInt16 doesn't
     /// have a direct atomic add intrinsic in this build; epoch
     /// wraparound fires once per ~4 billion increments so the
-    /// race window is empirically irrelevant.  When u16 atomics
+    /// race window is empirically irrelevant. When u16 atomics
     /// land, this branch should also be hardened.
     public fn increment_generation(&mut self) {
         let old_gen = atomic_fetch_add_u32(&mut self.base_generation, 1, ORDERING_ACQ_REL);
@@ -523,8 +530,8 @@ public fn segment_alloc(thread_id: UInt64) -> Result<&mut MemSegment, SegmentErr
 
     // Belt-and-braces: ptr_to_segment(user_ptr) recovers the
     // segment header by masking off log2(SEGMENT_SIZE) low
-    // bits of any user pointer.  That recovery is sound iff
-    // the segment base is SEGMENT_ALIGN-aligned.  The
+    // bits of any user pointer. That recovery is sound iff
+    // the segment base is SEGMENT_ALIGN-aligned. The
     // os_alloc_segment fix above guarantees this, but a
     // runtime assert here catches any future regression in
     // the OS-allocation backend immediately at the
@@ -758,11 +765,13 @@ implement Eq for SegmentError {
 /// Allocate a segment from the OS, aligned to `SEGMENT_ALIGN`
 /// (= `SEGMENT_SIZE`).
 ///
+
 /// CRITICAL alignment contract: `ptr_to_segment` recovers the
 /// segment header by masking off the low `log2(SEGMENT_SIZE)`
 /// bits of any user pointer. That recovery is sound iff the
 /// segment was allocated at a `SEGMENT_SIZE`-aligned address.
 ///
+
 /// Earlier revisions just called `mmap(0, SEGMENT_SIZE, ...)`
 /// which returns a *page-aligned* (4 KiB) address — the kernel
 /// has no obligation to honour the request size as the
@@ -774,15 +783,16 @@ implement Eq for SegmentError {
 /// connection to the real cause (a misaligned segment from
 /// startup).
 ///
+
 /// Fix (alloc-then-trim, the standard portable idiom for
 /// over-aligned allocations on POSIX):
-///   1. mmap `SEGMENT_SIZE * 2` so the resulting region is
-///      guaranteed to contain a `SEGMENT_SIZE`-aligned
-///      sub-region.
-///   2. Compute the aligned start within that region.
-///   3. munmap the unused head (before alignment) and tail
-///      (after the aligned segment) so we don't leak the 2×
-///      reservation. Net committed = `SEGMENT_SIZE` exactly.
+///  1. mmap `SEGMENT_SIZE * 2` so the resulting region is
+///  guaranteed to contain a `SEGMENT_SIZE`-aligned
+///  sub-region.
+///  2. Compute the aligned start within that region.
+///  3. munmap the unused head (before alignment) and tail
+///  (after the aligned segment) so we don't leak the 2×
+///  reservation. Net committed = `SEGMENT_SIZE` exactly.
 fn os_alloc_segment() -> Result<&unsafe Byte, SegmentError> {
     @cfg(target_os = "linux") {
         // Reserve 2× to guarantee an aligned sub-region exists.

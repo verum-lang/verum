@@ -1,5 +1,6 @@
 //! Discovery system for exploring Verum's core/ capabilities
 //!
+
 //! This module provides interactive documentation, examples, and exploration
 //! tools for the Verum standard library (core/).
 

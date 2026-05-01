@@ -1,46 +1,56 @@
 /// # Lock-Free Work-Stealing Task Queue
 ///
+
 /// Spec: docs/detailed/10-concurrency-model.md
 ///
+
 /// Implements a Chase-Lev work-stealing deque for efficient load balancing
 /// across worker threads in the async executor.
 ///
+
 /// ## Architecture
 ///
+
 /// ```
 /// ┌────────────────────────────────────────────────────────────────────────┐
-/// │                     WORK-STEALING DEQUE                                │
+/// │ WORK-STEALING DEQUE │
 /// ├────────────────────────────────────────────────────────────────────────┤
-/// │                                                                        │
-/// │      bottom (owner)                                top (stealers)      │
-/// │           ↓                                              ↓             │
-/// │  ┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐     │
-/// │  │   │   │   │ T │ T │ T │ T │ T │ T │ T │   │   │   │   │   │   │     │
-/// │  └───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘     │
-/// │                                                                        │
-/// │  Owner: push/pop from bottom (LIFO - cache-friendly)                   │
-/// │  Stealers: steal from top (FIFO - fair distribution)                   │
-/// │                                                                        │
+/// │ │
+/// │ bottom (owner) top (stealers) │
+/// │ ↓ ↓ │
+/// │ ┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐ │
+/// │ │ │ │ │ T │ T │ T │ T │ T │ T │ T │ │ │ │ │ │ │ │
+/// │ └───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘ │
+/// │ │
+/// │ Owner: push/pop from bottom (LIFO - cache-friendly) │
+/// │ Stealers: steal from top (FIFO - fair distribution) │
+/// │ │
 /// └────────────────────────────────────────────────────────────────────────┘
 /// ```
 ///
+
 /// ## Performance Targets
 ///
-/// | Operation | Target     | Achieved   |
+
+/// | Operation | Target | Achieved |
 /// |-----------|------------|------------|
-/// | Push      | < 30ns     | ~20-25ns   |
-/// | Pop       | < 30ns     | ~20-25ns   |
-/// | Steal     | < 60ns     | ~40-50ns   |
-/// | Resize    | Amortized  | ~100ns     |
+/// | Push | < 30ns | ~20-25ns |
+/// | Pop | < 30ns | ~20-25ns |
+/// | Steal | < 60ns | ~40-50ns |
+/// | Resize | Amortized | ~100ns |
 ///
+
 /// ## Zero-Allocation Design
 ///
+
 /// - Uses VBC intrinsics for atomic operations
 /// - No heap allocation for queue operations (preallocated ring buffer)
 /// - Lock-free algorithms for all operations
 ///
+
 /// ## Memory Ordering
 ///
+
 /// Critical memory ordering for correctness:
 /// - Bottom: Owner uses Relaxed (single-writer)
 /// - Top: SeqCst fence between load/store (multi-writer)
@@ -190,6 +200,7 @@ implement<T> RingBuffer<T> {
 
     /// Grow buffer to new capacity, copying existing elements
     ///
+
     /// Returns new buffer with elements copied from [top, bottom)
     public fn grow(&self, top: Int64, bottom: Int64, new_capacity: Int) -> Self {
         let new_cap = next_power_of_two(new_capacity.max(self.capacity * 2));
@@ -318,29 +329,35 @@ implement<T> Drop for DequeInner<T> {
 
 /// Work-stealing deque with owner-side push/pop operations.
 ///
+
 /// The owner (single thread) can push and pop from the bottom.
 /// Multiple stealers can steal from the top via `Stealer` handles.
 ///
+
 /// ## Example
 ///
+
 /// ```verum
 /// let deque = WorkDeque<Task>.new(256);
 /// let stealer = deque.stealer();
 ///
+
 /// // Owner pushes tasks
 /// deque.push(task1);
 /// deque.push(task2);
 ///
+
 /// // Owner pops most recent (LIFO for locality)
 /// if let Some(task) = deque.pop() {
-///     task.run();
+///  task.run();
 /// }
 ///
+
 /// // Stealers take oldest (FIFO for fairness)
 /// match stealer.steal() {
-///     Success(task) => task.run(),
-///     Empty => idle(),
-///     Retry => continue,
+///  Success(task) => task.run(),
+///  Empty => idle(),
+///  Retry => continue,
 /// }
 /// ```
 public type WorkDeque<T> is {
@@ -356,6 +373,7 @@ implement<T: Send> WorkDeque<T> {
 
     /// Create a new work-stealing deque with specified initial capacity
     ///
+
     /// Capacity will be rounded up to the next power of 2.
     public fn with_capacity(capacity: Int) -> Self {
         Self {
@@ -365,6 +383,7 @@ implement<T: Send> WorkDeque<T> {
 
     /// Create a stealer handle for this deque
     ///
+
     /// Stealers can be cloned and shared across threads.
     @inline
     public fn stealer(&self) -> Stealer<T> {
@@ -375,8 +394,10 @@ implement<T: Send> WorkDeque<T> {
 
     /// Push a value onto the bottom of the deque
     ///
+
     /// Only the owner should call this method.
     ///
+
     /// ## Performance
     /// - ~20-25ns without resize
     /// - Amortized ~30ns with resize
@@ -410,10 +431,12 @@ implement<T: Send> WorkDeque<T> {
 
     /// Slow path for push when resize is needed.
     ///
+
     /// Grows the ring buffer to double its current capacity, copies all
     /// existing elements [top, bottom), writes the new value, and updates
     /// the bottom index.
     ///
+
     /// Safety: Only the owner thread calls push, so no concurrent push_slow
     /// can occur. Stealers only access slots in [top, bottom) via CAS on top,
     /// so they will either complete their steal before or after the resize.
@@ -449,9 +472,11 @@ implement<T: Send> WorkDeque<T> {
 
     /// Pop a value from the bottom of the deque
     ///
+
     /// Only the owner should call this method.
     /// Returns `None` if the deque is empty.
     ///
+
     /// ## Performance
     /// - ~20-25ns
     @inline
@@ -498,6 +523,7 @@ implement<T: Send> WorkDeque<T> {
 
     /// Try to pop a value, returning immediately if empty
     ///
+
     /// Same as `pop()` but named for clarity with try_ convention.
     @inline
     public fn try_pop(&self) -> Maybe<T> {
@@ -506,6 +532,7 @@ implement<T: Send> WorkDeque<T> {
 
     /// Get the current length of the deque
     ///
+
     /// Note: This is approximate in the presence of concurrent operations.
     @inline
     public fn len(&self) -> Int {
@@ -516,6 +543,7 @@ implement<T: Send> WorkDeque<T> {
 
     /// Check if the deque is empty
     ///
+
     /// Note: This is approximate in the presence of concurrent operations.
     @inline
     public fn is_empty(&self) -> Bool {
@@ -535,11 +563,14 @@ implement<T: Send> WorkDeque<T> {
 
 /// Handle for stealing from a `WorkDeque` from another thread.
 ///
+
 /// Stealers can be cloned and sent to other threads.
 /// Multiple stealers can steal concurrently.
 ///
+
 /// ## Algorithm
 ///
+
 /// Stealers use a CAS loop on the top index:
 /// 1. Load top and bottom
 /// 2. If top >= bottom, queue is empty
@@ -555,11 +586,13 @@ public type Stealer<T> is {
 implement<T: Send> Stealer<T> {
     /// Attempt to steal a value from the top of the deque
     ///
+
     /// Returns:
     /// - `Success(value)`: Successfully stole a value
     /// - `Empty`: Deque was empty
     /// - `Retry`: Lost race with owner or another stealer
     ///
+
     /// ## Performance
     /// - ~40-50ns on success
     /// - ~20ns on empty/retry
@@ -594,9 +627,11 @@ implement<T: Send> Stealer<T> {
 
     /// Steal with automatic retry on contention
     ///
+
     /// Retries until success or empty. Uses spin_loop_hint()
     /// to reduce contention on failure.
     ///
+
     /// Returns `None` only if the deque is truly empty.
     public fn steal_retry(&self) -> Maybe<T> {
         loop {
@@ -613,6 +648,7 @@ implement<T: Send> Stealer<T> {
 
     /// Steal up to `max` items into a buffer
     ///
+
     /// Returns the number of items stolen.
     /// Useful for batch stealing to reduce contention.
     public fn steal_batch(&self, buffer: &mut List<T>, max: Int) -> Int {
@@ -662,6 +698,7 @@ implement<T: Send> Clone for Stealer<T> {
 
 /// A pool of work-stealing deques for a multi-threaded executor
 ///
+
 /// Each worker thread owns one deque and can steal from others.
 public type WorkStealingPool<T> is {
     /// Deques for each worker
@@ -718,6 +755,7 @@ implement<T: Send> WorkStealingPool<T> {
 
     /// Try to steal a task for the given worker
     ///
+
     /// Attempts to steal from other workers' deques in round-robin order.
     /// Returns `None` if all deques are empty.
     public fn try_steal(&self, worker_id: Int, start_index: &mut Int) -> Maybe<T> {
@@ -787,9 +825,11 @@ fn next_power_of_two(n: Int) -> Int {
 
 /// Bounded multi-producer multi-consumer queue
 ///
+
 /// Uses a ring buffer with sequence numbers for lock-free operations.
 /// Based on Dmitry Vyukov's bounded MPMC queue algorithm.
 ///
+
 /// ## Performance
 /// - Enqueue: ~30-50ns
 /// - Dequeue: ~30-50ns
@@ -825,6 +865,7 @@ type QueueSlot<T> is {
 implement<T: Send> BoundedQueue<T> {
     /// Create a new bounded queue with the given capacity
     ///
+
     /// Capacity must be a power of 2.
     public fn new(capacity: Int) -> Self {
         let cap = next_power_of_two(capacity.max(2));
@@ -869,6 +910,7 @@ implement<T: Send> BoundedQueue<T> {
 
     /// Try to enqueue a value
     ///
+
     /// Returns `Err(value)` if the queue is full.
     public fn try_push(&self, value: T) -> Result<(), T> {
         loop {
@@ -912,6 +954,7 @@ implement<T: Send> BoundedQueue<T> {
 
     /// Try to dequeue a value
     ///
+
     /// Returns `None` if the queue is empty.
     public fn try_pop(&self) -> Maybe<T> {
         loop {

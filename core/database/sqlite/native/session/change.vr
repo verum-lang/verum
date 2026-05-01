@@ -3,18 +3,21 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (CDC) — sqlite3session_changeset
 //
+
 // A `Change` is one INSERT / UPDATE / DELETE event:
 //
-//   * `op`         — what happened
-//   * `table`      — fully-qualified name (`schema.table`)
-//   * `pk_columns` — bitset of columns that form the primary key
-//                    (carried in the changeset so the applier can
-//                    skip a schema lookup)
-//   * `old_row`    — column values BEFORE the change
-//                    (empty for INSERT)
-//   * `new_row`    — column values AFTER the change
-//                    (empty for DELETE)
+
+//  * `op` — what happened
+//  * `table` — fully-qualified name (`schema.table`)
+//  * `pk_columns` — bitset of columns that form the primary key
+//  (carried in the changeset so the applier can
+//  skip a schema lookup)
+//  * `old_row` — column values BEFORE the change
+//  (empty for INSERT)
+//  * `new_row` — column values AFTER the change
+//  (empty for DELETE)
 //
+
 // `ChangeSet` is a sequence of `Change` records in commit order.
 // =============================================================================
 

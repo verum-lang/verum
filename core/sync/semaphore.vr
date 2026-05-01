@@ -5,9 +5,11 @@
 // Dependencies: core, sync/atomic
 // =============================================================================
 //
+
 // Semaphore limits the number of concurrent accesses to a resource.
 // Unlike Mutex, multiple threads can hold permits simultaneously.
 //
+
 // =============================================================================
 
 module core.sync.semaphore;
@@ -66,10 +68,11 @@ implement Semaphore {
     // Acquire a permit, blocking via futex until available.
     // Does NOT busy-wait — threads sleep via OS futex when no permits available.
     //
+
     // **Memory ordering on `waiters` counter**: `fetch_add` uses
     // `Release` (not `Relaxed`) so the waiter-registration
     // happens-before-paired with the `Acquire` load in
-    // `release()` / `release_many()` / `add_permits()`.  With
+    // `release()` / `release_many()` / `add_permits()`. With
     // `Relaxed` the registration could be invisible to a
     // concurrent releaser, leading to a missed wakeup
     // (waiter sleeps on futex(0); releaser reads waiters==0

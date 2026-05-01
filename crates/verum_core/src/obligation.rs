@@ -1,5 +1,6 @@
 //! Proof obligations.
 //!
+
 //! An [`IrObligation`] captures what the solver has to decide: a list
 //! of hypotheses and a goal, plus provenance metadata for diagnostic
 //! reporting and certificate export. It's the shared intermediate

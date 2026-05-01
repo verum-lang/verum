@@ -25,7 +25,7 @@ public fn push_column(r: &mut Text16Row, v: U16ColumnView) {
     r.columns.push(v);
 }
 
-/// Returns a clone of the column bytes (caller-owned).  None if the
+/// Returns a clone of the column bytes (caller-owned). None if the
 /// column is out of range.
 public fn sqlite3_column_text16(r: &Text16Row, col: Int) -> Maybe<List<u8>> {
     if col < 0 || col >= r.columns.len() { return Maybe.None; }

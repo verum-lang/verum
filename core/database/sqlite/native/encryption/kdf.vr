@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §23 (security)
 //
+
 // Derives a per-database master key from caller-supplied secret
 // material. Three impls:
 //
-//   * `RawKey`         — pass-through: caller already has a 32-byte
-//                         key, no KDF needed
-//   * `Pbkdf2Sha256`   — PBKDF2-HMAC-SHA256 (matches SQLCipher v3
-//                         default)
-//   * `ScryptSimple`   — scrypt with caller-controlled cost params
+
+//  * `RawKey` — pass-through: caller already has a 32-byte
+//  key, no KDF needed
+//  * `Pbkdf2Sha256` — PBKDF2-HMAC-SHA256 (matches SQLCipher v3
+//  default)
+//  * `ScryptSimple` — scrypt with caller-controlled cost params
 //
+
 // `KdfParams` carries the salt + iteration count and is persisted in
 // the file's reserved-space header so reopening a database can
 // re-derive without storing the key.
@@ -155,7 +158,7 @@ implement KeyDerivation for Pbkdf2Sha256 {
         // Pre-fix this was an XOR-only "contract-only stub" labeled
         // "NOT cryptographically safe" — using it as the SQLCipher v3
         // key-derivation primitive would have produced trivially
-        // recoverable database keys regardless of cost setting.  Now
+        // recoverable database keys regardless of cost setting. Now
         // the real RFC 8018 §5.2 PBKDF2 with HMAC-SHA256 PRF is used,
         // matching SQLCipher v3 default behaviour.
         match pbkdf2_hmac_sha256(
@@ -187,7 +190,7 @@ implement KeyDerivation for ScryptSimple {
         // weakly-derived keys from a "scrypt" surface is worse than
         // returning a typed error: callers that ask for scrypt and
         // get back garbage cannot detect the lie, and the resulting
-        // database files would be trivially decryptable.  Refuse the
+        // database files would be trivially decryptable. Refuse the
         // call instead until a real scrypt lands; downstream callers
         // either fall back to PBKDF2 (which IS correctly wired) or
         // surface the unsupported-algorithm error to the user.

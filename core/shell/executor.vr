@@ -5,17 +5,20 @@
 // Dependencies: shell.{exec, result, context}, async.{cancellation, backoff}, time
 // =============================================================================
 //
+
 // `Executor` is a builder-style facade over the raw `run`/`sh` primitives.
 // It carries:
-//   * a default timeout — applied to every dispatch unless overridden
-//   * a retry policy — exponential or fibonacci backoff via core.async.backoff,
-//     gated by user-supplied `should_retry` predicate
-//   * a cancellation token — propagated to spawned children with SIGTERM-grace-SIGKILL
-//   * idempotency contract — required marker for `run_idempotent`
+//  * a default timeout — applied to every dispatch unless overridden
+//  * a retry policy — exponential or fibonacci backoff via core.async.backoff,
+//  gated by user-supplied `should_retry` predicate
+//  * a cancellation token — propagated to spawned children with SIGTERM-grace-SIGKILL
+//  * idempotency contract — required marker for `run_idempotent`
 //
+
 // The Executor is *immutable* — every with_* method returns a fresh value.
 // This is what makes it safe to share across nursery branches.
 //
+
 // =============================================================================
 
 module executor;

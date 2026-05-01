@@ -15,6 +15,7 @@
 )]
 // Comprehensive tests for the v3.0 Revolutionary Literal System
 //
+
 // Tests cover all literal types including:
 // - Integer literals (decimal, hex, binary) with suffixes
 // - Float literals with suffixes
@@ -25,6 +26,7 @@
 // - Context-adaptive literals (#FF5733)
 // - Contract literals
 //
+
 // Tests for literal AST nodes: integers, floats, strings, tagged, composite.
 
 use verum_ast::literal::*;

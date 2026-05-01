@@ -4,6 +4,7 @@
 // Layer: 3 (Database — mysql adapter)
 // Spec: internal/specs/database.md §4.3
 //
+
 // Thin vendor binding over `core.database.common.pool_impl.ConnectionPool<C>`.
 // =============================================================================
 

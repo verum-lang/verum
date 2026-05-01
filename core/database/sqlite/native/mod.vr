@@ -7,43 +7,53 @@
 // Codename: loom
 // =============================================================================
 //
+
 // Pure-Verum reimplementation of SQLite 3.x, layer-structured per
 // sqlite-native.md §4:
 //
-//   L7  API           — Database, Statement, Transaction, Row (public surface)
-//   L6  Session       — Connection<Mode>, schema cache, function registry
-//   L5  SQL compiler  — lexer, parser, resolver, planner, codegen
-//   L4  VDBE          — register-SSA bytecode virtual machine
-//   L3  B-tree        — cursors, pages, balance, integrity
-//   L2  Record        — varint/serial types/affinity/collation (uses stdlib)
-//   L1  Pager         — actor-based, WAL + rollback journal, checkpointer
-//   L0  VFS           — VfsProtocol abstraction, MemDbVfs, PosixVfs, Win32Vfs
+
+//  L7 API — Database, Statement, Transaction, Row (public surface)
+//  L6 Session — Connection<Mode>, schema cache, function registry
+//  L5 SQL compiler — lexer, parser, resolver, planner, codegen
+//  L4 VDBE — register-SSA bytecode virtual machine
+//  L3 B-tree — cursors, pages, balance, integrity
+//  L2 Record — varint/serial types/affinity/collation (uses stdlib)
+//  L1 Pager — actor-based, WAL + rollback journal, checkpointer
+//  L0 VFS — VfsProtocol abstraction, MemDbVfs, PosixVfs, Win32Vfs
 //
+
 // Orthogonal axes:
 //
-//   S   Supervision   — supervisor-tree over pager + checkpointer
-//   O   Observability — core/tracing spans around every layer
-//   V   Verification  — @verify contracts, SMT-discharged B-tree/WAL invariants
-//   T   Testing       — DST, differential vs C-SQLite, fuzz (vcs/fuzz/sqlite/)
+
+//  S Supervision — supervisor-tree over pager + checkpointer
+//  O Observability — core/tracing spans around every layer
+//  V Verification — @verify contracts, SMT-discharged B-tree/WAL invariants
+//  T Testing — DST, differential vs C-SQLite, fuzz (vcs/fuzz/sqlite/)
 //
+
 // # Stdlib reuse
 //
+
 // loom does NOT duplicate stdlib primitives. Specifically:
 //
-//   * `core.encoding.varint`         — SQLite varint encoding (Gap 4)
-//   * `core.security.hash.crc32`     — WAL frame checksum (Gap 5)
-//   * `core.collections.{btree,map}` — in-memory ordered maps for temp tables
-//   * `core.mem.arena`               — CBGR arena for page cache
-//   * `core.async.{nursery,channel}` — background tasks + actor mailboxes
-//   * `core.runtime.supervisor`      — pager + checkpointer supervision
-//   * `core.tracing`, `core.metrics` — observability
-//   * `core.sys.*`                   — platform I/O, locking, durability
+
+//  * `core.encoding.varint` — SQLite varint encoding (Gap 4)
+//  * `core.security.hash.crc32` — WAL frame checksum (Gap 5)
+//  * `core.collections.{btree,map}` — in-memory ordered maps for temp tables
+//  * `core.mem.arena` — CBGR arena for page cache
+//  * `core.async.{nursery,channel}` — background tasks + actor mailboxes
+//  * `core.runtime.supervisor` — pager + checkpointer supervision
+//  * `core.tracing`, `core.metrics` — observability
+//  * `core.sys.*` — platform I/O, locking, durability
 //
+
 // # Status — v0.1 (2026-04-21)
 //
+
 // Scaffolded: L0 VfsProtocol, MemDbVfs; L2 Record header parse; L1 Pager
 // skeleton. See README.md in this directory for detailed status table.
 //
+
 // =============================================================================
 
 module core.database.sqlite.native;
@@ -74,9 +84,9 @@ public module l7_api;
 
 // Cross-cutting catalogues:
 // - builtins: scalar / aggregate / window / JSON1 functions (§15)
-// - pragmas:  PRAGMA registry, per-conn config, dispatch (§18)
-// - vtabs:    virtual-table protocol + built-in modules (§16)
-// - verify:   loom-side @verify contracts (§21)
+// - pragmas: PRAGMA registry, per-conn config, dispatch (§18)
+// - vtabs: virtual-table protocol + built-in modules (§16)
+// - verify: loom-side @verify contracts (§21)
 public module builtins;
 public module pragmas;
 public module vtabs;
@@ -92,7 +102,7 @@ public module concurrency;
 // - testing: DST harness / differential / fuzz / coverage (§22)
 public module testing;
 // - opcode_catalog: Appendix C — full ~180-opcode taxonomy + Appendix D
-//   error codes; complements l4_vdbe/opcode.vr without changing it.
+//  error codes; complements l4_vdbe/opcode.vr without changing it.
 public module opcode_catalog;
 // - planner_cost: cost model + statistics for the L5 planner (§13.2-§13.4)
 public module planner_cost;

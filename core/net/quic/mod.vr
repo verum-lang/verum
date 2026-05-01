@@ -5,38 +5,46 @@
 // Dependencies: core, core.time, core.net.addr, core.net.tls
 // Spec: https://datatracker.ietf.org/doc/html/rfc9000
 //
+
 // QUIC is a UDP-based, multiplexed, secure transport. This module
 // provides the Verum-level surface; the actual packet-processing
 // pipeline is implemented in the runtime via the `verum.quic.*`
 // intrinsic family (typically binding to a C implementation such as
 // quiche, msquic, or lsquic).
 //
+
 // # Module layout
 //
+
 // ```
 // core.net.quic
-// ├── mod.vr          — this file (re-exports, Config types)
-// ├── error.vr        — QuicError (transport + app error codes)
-// ├── connection.vr   — QuicConnection handle, send/recv/close
-// └── stream.vr       — QuicStream (send, recv, shutdown)
+// ├── mod.vr — this file (re-exports, Config types)
+// ├── error.vr — QuicError (transport + app error codes)
+// ├── connection.vr — QuicConnection handle, send/recv/close
+// └── stream.vr — QuicStream (send, recv, shutdown)
 // ```
 //
+
 // # Minimal usage
 //
+
 // ```verum
 // mount core.net.quic.*;
 //
+
 // // Client
 // let config = QuicConfig.client(&"example.com".into())
-//     .with_alpn(&["h3".into()])
-//     .with_initial_max_data(1 << 20)
-//     .with_initial_max_stream_data_bidi_local(1 << 16);
+//  .with_alpn(&["h3".into()])
+//  .with_initial_max_data(1 << 20)
+//  .with_initial_max_stream_data_bidi_local(1 << 16);
 // let conn = QuicConnection.connect(&peer_addr, config).await?;
 //
+
 // // Server
 // let listener = QuicListener.bind(&local_addr, server_config).await?;
 // let (conn, peer) = listener.accept().await?;
 //
+
 // // Streams
 // let stream = conn.open_bidi_stream().await?;
 // stream.write_all(&request_bytes).await?;

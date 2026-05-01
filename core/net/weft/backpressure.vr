@@ -2,30 +2,36 @@
 // core/net/weft/backpressure.vr — Concurrency / rate / load-shed layers
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §5.5
+// Spec: internal/specs/net-framework.md §5.5
 // =============================================================================
 //
+
 // Three production-grade backpressure primitives, each implementable as a
 // Weft `Layer` that wraps any Handler:
 //
-//   * `ConcurrencyLimitLayer` — hard cap on in-flight handler calls via
-//     a `core.sync.Semaphore`. Excess calls short-circuit to
-//     `WeftError.Overloaded` (→ 503). Critical for bounding memory /
-//     goroutine-style leaks on upstream stalls.
+
+//  * `ConcurrencyLimitLayer` — hard cap on in-flight handler calls via
+//  a `core.sync.Semaphore`. Excess calls short-circuit to
+//  `WeftError.Overloaded` (→ 503). Critical for bounding memory /
+//  goroutine-style leaks on upstream stalls.
 //
-//   * `RateLimitLayer` — token bucket. Allows `burst` requests
-//     instantaneously, then refills at `rate` per second. Clients that
-//     exceed their quota get `WeftError.Overloaded` immediately.
+
+//  * `RateLimitLayer` — token bucket. Allows `burst` requests
+//  instantaneously, then refills at `rate` per second. Clients that
+//  exceed their quota get `WeftError.Overloaded` immediately.
 //
-//   * `LoadShedLayer` — semantic wrapper that turns any
-//     "currently-unavailable" signal from a downstream service into
-//     `WeftError.Overloaded`. Used to keep the client-facing behaviour
-//     consistent (always 503 with Retry-After) regardless of which
-//     internal limiter tripped.
+
+//  * `LoadShedLayer` — semantic wrapper that turns any
+//  "currently-unavailable" signal from a downstream service into
+//  `WeftError.Overloaded`. Used to keep the client-facing behaviour
+//  consistent (always 503 with Retry-After) regardless of which
+//  internal limiter tripped.
 //
+
 // All three surface the same WeftErrorCategory.Transient-classed failure so
 // higher-level retry middleware can back off uniformly.
 //
+
 // =============================================================================
 
 module core.net.weft.backpressure;
@@ -94,6 +100,7 @@ implement<H: Handler> Handler for ConcurrencyLimitHandler<H> {
 /// handler. Tokens refill at `rate` per second up to `burst` capacity;
 /// each `handle` consumes one token. Empty bucket → `Overloaded`.
 ///
+
 /// Thread-safe via atomic integer ops + a single shared `last_refill`
 /// timestamp; no lock on the hot path.
 public type RateLimitLayer is {
@@ -191,6 +198,7 @@ implement<H: Handler> Handler for RateLimitHandler<H> {
 /// client's backoff. The default hint is 1 second; tune based on the
 /// measured recovery time of the shed load.
 ///
+
 /// §5.5 specifies priority-aware shedding via a `x-priority` header;
 /// phase-1 implementation treats all requests equally — priority-aware
 /// shedding is a dedicated phase-3 item once the header-classification
@@ -247,6 +255,7 @@ implement<H: Handler> Handler for LoadShedHandler<H> {
 // CoDel — Controlled-Delay sojourn-time admission (§5.5)
 // =============================================================================
 //
+
 // CoDel (RFC 8289) tracks the *sojourn time* of work items in the
 // queue — the wait between submission and dispatch. When the minimum
 // sojourn observed over a sliding window exceeds `target_ms`, CoDel
@@ -255,9 +264,10 @@ implement<H: Handler> Handler for LoadShedHandler<H> {
 // long-saturated queue sheds aggressively while a brief spike sheds
 // gently.
 //
+
 // Defaults match Linux fq_codel:
-//   target_ms   = 5    (5 ms — humans don't notice tail latency below)
-//   interval_ms = 100  (sliding window for the min-sojourn observation)
+//  target_ms = 5 (5 ms — humans don't notice tail latency below)
+//  interval_ms = 100 (sliding window for the min-sojourn observation)
 
 public type CoDelLayer is {
     target_ms:    Int,
@@ -387,11 +397,13 @@ implement<H: Handler> Handler for CoDelHandler<H> {
 // WFQ — Weighted Fair Queueing across tenants (§5.5)
 // =============================================================================
 //
+
 // Deficit-round-robin (DRR) variant — O(1) admission decision per
 // request. Each tenant has a `deficit_us` counter; on each admission
 // every tenant accrues `quantum_us * weight` micro-credits. Admission
 // is allowed when `deficit_us >= cost_us`.
 //
+
 // Tenant identity is read from the `x-weft-tenant` header. Requests
 // without a tenant land in the `_default` class (caller registers it
 // as needed). `x-weft-cost-us` overrides the default request cost.

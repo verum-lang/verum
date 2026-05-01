@@ -31,8 +31,10 @@ impl ExternalPass<'_> {
 
     /// Creates an external pass handle from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub const unsafe fn from_raw(raw: MlirExternalPass) -> Self {
         Self {
@@ -88,35 +90,43 @@ unsafe extern "C" fn callback_clone<'a, T: RunExternalPass<'a>>(pass: *mut T) ->
 
 /// A trait for MLIR passes written in Rust.
 ///
+
 /// This trait is implemented for any type that implements `FnMut`,
 /// but can be implemented for any struct that implements `Clone`.
 ///
+
 /// # Examples
 ///
+
 /// The following example pass dumps operations.
 ///
+
 /// ```
 /// use verum_mlir::{
-///     ContextRef,
-///     ir::{OperationRef, operation::OperationLike},
-///     pass::{ExternalPass, RunExternalPass},
+///  ContextRef,
+///  ir::{OperationRef, operation::OperationLike},
+///  pass::{ExternalPass, RunExternalPass},
 /// };
 ///
+
 /// #[derive(Clone, Debug)]
 /// struct ExamplePass;
 ///
+
 /// impl<'c> RunExternalPass<'c> for ExamplePass {
-///     fn construct(&mut self) {
-///         println!("Constructed pass!");
-///     }
+///  fn construct(&mut self) {
+///  println!("Constructed pass!");
+///  }
 ///
-///     fn initialize(&mut self, context: ContextRef<'c>) {
-///         println!("Initialize called!");
-///     }
+
+///  fn initialize(&mut self, context: ContextRef<'c>) {
+///  println!("Initialize called!");
+///  }
 ///
-///     fn run(&mut self, operation: OperationRef<'c, '_>, _pass: ExternalPass<'_>) {
-///         operation.dump();
-///     }
+
+///  fn run(&mut self, operation: OperationRef<'c, '_>, _pass: ExternalPass<'_>) {
+///  operation.dump();
+///  }
 /// }
 /// ```
 pub trait RunExternalPass<'c>: Sized + Clone {
@@ -136,32 +146,38 @@ impl<'c, F: FnMut(OperationRef<'c, '_>, ExternalPass<'_>) + Clone> RunExternalPa
 
 /// Creates a `Pass` object from an external pass
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_mlir::{
-///     Context,
-///     ir::{OperationRef, operation::OperationLike, r#type::TypeId},
-///     pass::{ExternalPass, create_external},
+///  Context,
+///  ir::{OperationRef, operation::OperationLike, r#type::TypeId},
+///  pass::{ExternalPass, create_external},
 /// };
 ///
+
 /// #[repr(align(8))]
 /// struct PassId;
 ///
+
 /// static EXAMPLE_PASS: PassId = PassId;
 ///
+
 /// let context = Context::new();
 ///
+
 /// create_external(
-///     |operation: OperationRef, _pass: ExternalPass| {
-///         operation.dump();
-///     },
-///     TypeId::create(&EXAMPLE_PASS),
-///     "name",
-///     "argument",
-///     "description",
-///     "",
-///     &[],
+///  |operation: OperationRef, _pass: ExternalPass| {
+///  operation.dump();
+///  },
+///  TypeId::create(&EXAMPLE_PASS),
+///  "name",
+///  "argument",
+///  "description",
+///  "",
+///  &[],
 /// );
 /// ```
 #[allow(clippy::too_many_arguments)]

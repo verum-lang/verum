@@ -5,19 +5,24 @@
 // Dependencies: core, time/duration, sys/{linux,darwin,windows}/time
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // Uses native platform monotonic time instead of verum_runtime FFI:
 // - Linux: clock_gettime(CLOCK_MONOTONIC) via sys/linux/time.monotonic_nanos
 // - macOS: mach_absolute_time() via sys/darwin/time.monotonic_nanos
 // - Windows: QueryPerformanceCounter() via sys/windows/time.monotonic_nanos
 //
+
 // =============================================================================
 //
+
 // Instant represents a point in monotonic time, useful for measuring
 // elapsed time. Unlike wall-clock time, monotonic time never goes backwards
 // and is not affected by system clock adjustments.
 //
+
 // # Example
 // ```verum
 // let start = Instant.now();
@@ -26,6 +31,7 @@
 // print(f"Work took {elapsed.as_millis()}ms");
 // ```
 //
+
 // =============================================================================
 
 module core.time.instant;
@@ -57,24 +63,29 @@ mount sys.windows.time.monotonic_nanos;
 
 /// A point in monotonic time.
 ///
+
 /// Instant is opaque: you cannot construct one directly from a number.
 /// The only way to get an Instant is via `Instant.now()`.
 ///
+
 /// Instants are guaranteed to be:
 /// - Monotonically non-decreasing (never goes backwards)
 /// - Independent of wall-clock time (unaffected by NTP, daylight saving, etc.)
 ///
+
 /// # Example
 /// ```verum
 /// let start = Instant.now();
 ///
+
 /// // Do some work...
 /// process_data();
 ///
+
 /// // Measure elapsed time
 /// let elapsed = start.elapsed();
 /// if elapsed > Duration.secs(1) {
-///     print("Warning: operation took more than 1 second");
+///  print("Warning: operation took more than 1 second");
 /// }
 /// ```
 public type Instant is {
@@ -85,11 +96,13 @@ public type Instant is {
 implement Instant {
     /// Get the current instant.
     ///
+
     /// Uses native platform time:
     /// - Linux: clock_gettime(CLOCK_MONOTONIC)
     /// - macOS: mach_absolute_time()
     /// - Windows: QueryPerformanceCounter()
     ///
+
     /// # Example
     /// ```verum
     /// let now = Instant.now();
@@ -101,6 +114,7 @@ implement Instant {
 
     /// Get the elapsed time since this instant.
     ///
+
     /// Returns the duration from `self` to `Instant.now()`. Saturates
     /// at zero if the monotonic clock somehow appears to go backwards
     /// (should never happen with a properly-functioning monotonic
@@ -108,6 +122,7 @@ implement Instant {
     /// inversion across CPU cores; saturating at zero is the safe
     /// answer).
     ///
+
     /// # Example
     /// ```verum
     /// let start = Instant.now();
@@ -126,8 +141,10 @@ implement Instant {
 
     /// Get the duration from this instant to another.
     ///
+
     /// Returns None if `earlier` is actually later than `self`.
     ///
+
     /// # Example
     /// ```verum
     /// let start = Instant.now();
@@ -150,6 +167,7 @@ implement Instant {
 
     /// Add a duration to this instant.
     ///
+
     /// # Panics
     /// May panic on overflow (far future times).
     public fn checked_add(&self, duration: Duration) -> Maybe<Instant> {
@@ -164,6 +182,7 @@ implement Instant {
 
     /// Raw nanoseconds since the monotonic clock's arbitrary epoch.
     ///
+
     /// Public read-only accessor — exposes the underlying counter
     /// for callers that need to interface with deadline-based APIs
     /// (e.g. `AsyncRuntime::register_timer(deadline_ns: UInt64,
@@ -177,6 +196,7 @@ implement Instant {
 
     /// Subtract a duration from this instant.
     ///
+
     /// Returns None if the result would be before the epoch.
     public fn checked_sub(&self, duration: Duration) -> Maybe<Instant> {
         let dur_nanos = duration.as_nanos();

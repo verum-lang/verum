@@ -1,11 +1,14 @@
 //! Structured Error Context
 //!
+
 //! Provides **structured key-value contexts** for rich error diagnostics.
 //! Extends the basic text context system with typed data that can be
 //! formatted as JSON, YAML, or Logfmt for logging and monitoring systems.
 //!
+
 //! # Core Concept
 //!
+
 //! While text contexts provide human-readable breadcrumbs, structured contexts
 //! add machine-readable data that helps with:
 //! - Automated error analysis
@@ -13,25 +16,29 @@
 //! - Debugging with specific values
 //! - Monitoring and alerting
 //!
+
 //! # Examples
 //!
+
 //! ```rust,ignore
 //! use verum_error::structured_context::{ContextValue, ToContextValue};
 //!
+
 //! // Add structured data to errors
 //! database_query()
-//!     .with_structured("user_id", 12345)
-//!     .with_structured("operation", "fetch_profile")
-//!     .with_structured("timeout_ms", 5000)?;
+//!  .with_structured("user_id", 12345)
+//!  .with_structured("operation", "fetch_profile")
+//!  .with_structured("timeout_ms", 5000)?;
 //!
+
 //! // Output as JSON:
 //! // {
-//! //   "error": "Connection timeout",
-//! //   "structured": {
-//! //     "user_id": 12345,
-//! //     "operation": "fetch_profile",
-//! //     "timeout_ms": 5000
-//! //   }
+//! // "error": "Connection timeout",
+//! // "structured": {
+//! // "user_id": 12345,
+//! // "operation": "fetch_profile",
+//! // "timeout_ms": 5000
+//! // }
 //! // }
 //! ```
 
@@ -40,6 +47,7 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// A value that can be stored in structured context
 ///
+
 /// Supports common data types and nested structures for rich error diagnostics.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContextValue {
@@ -125,6 +133,7 @@ impl ContextValue {
 
     /// Convert the value to a JSON string
     ///
+
     /// # Arguments
     /// * `pretty` - If true, format with indentation and newlines
     pub fn to_json(&self, pretty: bool) -> Text {
@@ -233,6 +242,7 @@ impl ContextValue {
 
     /// Convert the value to a YAML string
     ///
+
     /// # Arguments
     /// * `indent` - Current indentation level (use 0 for top-level)
     pub fn to_yaml(&self, indent: usize) -> Text {
@@ -311,6 +321,7 @@ impl ContextValue {
 
     /// Convert the value to Logfmt format (key=value pairs)
     ///
+
     /// Logfmt is a format popularized by Heroku that's easy for both humans
     /// and machines to parse. Values with spaces are quoted.
     pub fn to_logfmt(&self) -> Text {
@@ -376,6 +387,7 @@ impl fmt::Display for ContextValue {
 
 /// Trait for types that can be converted to ContextValue
 ///
+
 /// Implement this trait for custom types that should be usable in
 /// structured error contexts.
 pub trait ToContextValue {

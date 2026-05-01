@@ -4,29 +4,33 @@
 // Layer: 7+ (DST integration)
 // Spec: sqlite-native.md §22.5 (DST — deterministic simulation testing)
 //
+
 // Wires `DstHarness` to a live `Database` so the harness's
 // pre-computed expected state (from `oracle_replay`) can be
 // compared against the database's actual observed state after
-// each step.  Until VFS-injection lands at the Pager layer, the
+// each step. Until VFS-injection lands at the Pager layer, the
 // fault-injection bridge is incomplete — terminal faults
 // (FaultPowerLoss) trigger a Database close + reopen against the
 // same in-memory backing, while non-terminal faults are recorded
 // in the `DstReport` but not injected.
 //
+
 // **Architectural roadmap (per spec §4.10 + §22.5)**:
 //
-//   1. ✅  StepPlan.op execution against real Database via execute()
-//   2. ✅  Per-step observed-state snapshot
-//   3. ✅  Expected-vs-observed diff at the durability cut
-//   4. ⏳  VFS-injection at Pager construction so MockVfs faults
-//          actually reach the database (`pager_open_with_vfs`).
-//   5. ⏳  Power-cycle: drop in-memory pager, reopen from on-disk
-//          state (requires the file-backed VFS path with MockVfs
-//          masquerading as PosixVfs; needs the registry rework).
+
+//  1. ✅ StepPlan.op execution against real Database via execute()
+//  2. ✅ Per-step observed-state snapshot
+//  3. ✅ Expected-vs-observed diff at the durability cut
+//  4. ⏳ VFS-injection at Pager construction so MockVfs faults
+//  actually reach the database (`pager_open_with_vfs`).
+//  5. ⏳ Power-cycle: drop in-memory pager, reopen from on-disk
+//  state (requires the file-backed VFS path with MockVfs
+//  masquerading as PosixVfs; needs the registry rework).
 //
+
 // Until items 4–5 land, the DST bridge runs in "execution-replay
 // only" mode — proves the op replay is deterministic but cannot
-// validate crash-recovery invariants.  That's a step UP from the
+// validate crash-recovery invariants. That's a step UP from the
 // pre-bridge state where DST didn't touch any database at all
 // (every "test" was typecheck-pass theatre).
 // =============================================================================
@@ -59,9 +63,9 @@ public type DstStepRecord is {
     op_idx: Int,
     op_name: Text,
     /// Outcome from the live Database:
-    ///   "ok"        — execute returned Ok or query returned a row set
-    ///   "skipped"   — op was unsupported by the current SQL dialect
-    ///   "error: …"  — execute returned Err with the message captured
+    ///  "ok" — execute returned Ok or query returned a row set
+    ///  "skipped" — op was unsupported by the current SQL dialect
+    ///  "error: …" — execute returned Err with the message captured
     outcome: Text,
     fault_injected: Maybe<Text>,
 };
@@ -72,7 +76,7 @@ public fn step_record(op_idx: Int, op_name: Text, outcome: Text,
 }
 
 public type DstReport is {
-    /// Per-step trace.  Length equals harness.total_ops() unless a
+    /// Per-step trace. Length equals harness.total_ops() unless a
     /// terminal fault truncated the run.
     steps: List<DstStepRecord>,
     /// True iff a terminal fault (PowerLoss) fired.
@@ -101,9 +105,10 @@ public fn report_empty(expected: Oracle) -> DstReport {
 // SQL templates — DbOp → SQL string
 // -----------------------------------------------------------------------------
 //
-// The DST harness emits DbOp at the abstract level (id + name).  The
+
+// The DST harness emits DbOp at the abstract level (id + name). The
 // bridge materialises those into concrete SQL the L7 facade can
-// execute.  Schema is fixed: `CREATE TABLE t (id INTEGER PRIMARY KEY,
+// execute. Schema is fixed: `CREATE TABLE t (id INTEGER PRIMARY KEY,
 // name TEXT)` — the harness's `OpInsert(id, name)` etc. all reference
 // this single table.
 
@@ -133,12 +138,14 @@ public fn op_to_sql(op: &DbOp) -> Maybe<Text> {
 // Driver — walks the harness, executes ops, records outcomes
 // -----------------------------------------------------------------------------
 //
+
 // `drive` is intentionally storage-agnostic: it takes a `step_runner`
-// callback that the caller wires to a real Database.execute().  This
+// callback that the caller wires to a real Database.execute(). This
 // matches the same pattern as `session::apply` — keeps the bridge
 // independent of the L7 facade so it can be tested with a mock
 // step_runner without standing up a full database.
 //
+
 // Production callers pass a closure that captures `&mut Database`;
 // tests pass a closure that records into an in-memory map.
 

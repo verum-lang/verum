@@ -1,5 +1,6 @@
 //! Level 1: Static Verification (Proof-Based Safety)
 //!
+
 //! Level 1 uses SMT-based verification (Z3) to prove properties at compile time.
 //! Functions annotated with `@verify` directives have their preconditions,
 //! postconditions, and invariants checked by the solver. Three verification modes
@@ -8,26 +9,32 @@
 //! solver finds a counterexample, it is included in the error diagnostic. Cost
 //! transparency annotations (`@cost(O(n))`) are also verified at this level.
 //!
+
 //! Errors at this level indicate verification failures during compile-time proof checking:
 //! - **SMT solver timeouts** - solver couldn't complete in time
 //! - **Proof obligations unsatisfied** - code doesn't meet preconditions
 //! - **Verification counterexamples** - SMT found a case violating assertions
 //! - **Insufficient annotations** - need more `@verify` directives
 //!
+
 //! # When These Errors Occur
 //!
+
 //! Level 1 errors happen at compile-time when you use `@verify` annotations:
 //!
+
 //! ```rust,ignore
 //! fn divide(a: i32, b: i32) -> i32
-//! @verify(b != 0)  // Must prove b is non-zero
+//! @verify(b != 0) // Must prove b is non-zero
 //! {
-//!     a / b  // Error if b could be 0
+//!  a / b // Error if b could be 0
 //! }
 //! ```
 //!
+
 //! # Recovery Strategies
 //!
+
 //! If verification fails:
 //! 1. **Strengthen preconditions** - add more constraints
 //! 2. **Add invariants** - help the solver with hints
@@ -35,20 +42,25 @@
 //! 4. **Relax assertions** - if constraint was too strict
 //! 5. **Enable manual verification** - let proof system guide implementation
 //!
+
 //! # Integration with Refinement Types
 //!
+
 //! Level 1 verification works with refinement types:
 //!
+
 //! ```rust,ignore
 //! type Positive = Int{> 0};
 //!
+
 //! fn divide(a: i32, b: Positive) -> i32
 //! // b is proven > 0 by refinement type, no @verify needed
 //! {
-//!     a / b  // Safe
+//!  a / b // Safe
 //! }
 //! ```
 //!
+
 //! These are compile-time errors that indicate the compiler could not
 //! prove the code satisfies its formal specifications.
 
@@ -57,6 +69,7 @@ use verum_common::{List, Text};
 
 /// SMT verification error
 ///
+
 /// Indicates the SMT solver could not verify a property.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Verification failed: {property}")]

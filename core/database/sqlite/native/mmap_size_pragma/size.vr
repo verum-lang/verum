@@ -8,7 +8,7 @@ mount base.{Bool, Int64, Text};
 public fn default_value() -> Int64 { 0 as Int64 }
 
 // Hard upper bound; SQLite's SQLITE_MAX_MMAP_SIZE is platform-specific but
-// the universally safe ceiling is ~2 TiB (2^41).  We model 1 TiB.
+// the universally safe ceiling is ~2 TiB (2^41). We model 1 TiB.
 public fn hard_max_value() -> Int64 {
     1024_i64 * 1024_i64 * 1024_i64 * 1024_i64
 }

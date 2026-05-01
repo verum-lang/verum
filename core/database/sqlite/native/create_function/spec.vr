@@ -3,10 +3,11 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   name       — zero-terminated UTF-8 identifier
-//   n_arg      — 0..127 or -1 (variadic)
-//   encoding   — SQLITE_UTF8 / UTF16LE / UTF16BE / UTF16 / ANY (= UTF8|UTF16)
-//   flags      — FnFlags bundle (deterministic, direct_only, …)
+
+//  name — zero-terminated UTF-8 identifier
+//  n_arg — 0..127 or -1 (variadic)
+//  encoding — SQLITE_UTF8 / UTF16LE / UTF16BE / UTF16 / ANY (= UTF8|UTF16)
+//  flags — FnFlags bundle (deterministic, direct_only, …)
 // =============================================================================
 
 module core.database.sqlite.native.create_function.spec;

@@ -6,44 +6,55 @@
 // Reference: RFC 3720 §12.1 (iSCSI), SSE4.2 CRC32 instructions
 // =============================================================================
 //
+
 // Castagnoli polynomial 0x1EDC6F41 (reflected 0x82F63B78). Better
 // error-detection properties than classic CRC-32 over 27-bit to
 // 127-bit payloads (see Koopman & Chakravarty 2004). Used by:
 //
-//   * SCTP (RFC 4960 §6.8)
-//   * iSCSI data digest (RFC 7143 §10.4.3)
-//   * ext4, btrfs, f2fs filesystems
-//   * Google Cloud Storage object checksums
-//   * SSE4.2 CRC32 instructions on x86-64 (one cycle per 8 bytes)
+
+//  * SCTP (RFC 4960 §6.8)
+//  * iSCSI data digest (RFC 7143 §10.4.3)
+//  * ext4, btrfs, f2fs filesystems
+//  * Google Cloud Storage object checksums
+//  * SSE4.2 CRC32 instructions on x86-64 (one cycle per 8 bytes)
 //
+
 // # Wire format
 //
-//   * Initial value: 0xFFFFFFFF
-//   * Final XOR:     0xFFFFFFFF
-//   * Reflected input, reflected output
-//   * Reflected polynomial: 0x82F63B78
+
+//  * Initial value: 0xFFFFFFFF
+//  * Final XOR: 0xFFFFFFFF
+//  * Reflected input, reflected output
+//  * Reflected polynomial: 0x82F63B78
 //
+
 // Matches Python's `crc32c.crc32c`, Rust's `crc32c.crc32c`, and
 // Go's `hash/crc32` with `IEEE ^ 0x1EDC6F41` (Castagnoli table).
 //
+
 // # API
 //
+
 // ```
 // let digest: UInt32 = crc32c(b"hello world");
 //
+
 // let mut h = Crc32c.new();
 // h.update(chunk1);
 // h.update(chunk2);
 // let digest: UInt32 = h.finalize();
 // ```
 //
+
 // # Performance
 //
+
 // Pure-Verum table-driven implementation hits ~800 MiB/s on a
 // modern core. SSE4.2 / ARMv8 CRC32C hardware instructions drop
 // that to ~10× faster, behind an intrinsic that will plug in
 // behind the same `Crc32c` surface in a follow-up.
 //
+
 // =============================================================================
 
 module core.security.hash.crc32c;

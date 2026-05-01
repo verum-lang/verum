@@ -5,17 +5,21 @@
 // Dependencies: core, sys, sync, mem
 // =============================================================================
 //
+
 // Abstraction between the pager (L1) and the underlying storage. Mirrors
 // SQLite's `sqlite3_vfs` / `sqlite3_file` interfaces but expressed as native
 // Verum protocols (type-safe, no C FFI).
 //
+
 // Implementations shipped with the stdlib:
 //
-//   * `VfsProtocol`    — the trait any backend must satisfy
-//   * `MemDbVfs`       — pure in-memory (`:memory:` databases + DST)
-//   * `PosixVfs`       — pending; blocked on locking / durability gaps
-//   * `Win32Vfs`       — pending
+
+//  * `VfsProtocol` — the trait any backend must satisfy
+//  * `MemDbVfs` — pure in-memory (`:memory:` databases + DST)
+//  * `PosixVfs` — pending; blocked on locking / durability gaps
+//  * `Win32Vfs` — pending
 //
+
 // See `vfs_protocol.vr` for the contract and `memdb_vfs.vr` for the
 // reference in-memory implementation.
 // =============================================================================

@@ -3,18 +3,22 @@
 // =============================================================================
 // Layer: 0 (Foundation)
 //
+
 // Provides low-level bit manipulation operations that map directly to
 // CPU instructions. All functions are marked @inline(always) for optimal
 // performance.
 //
+
 // # Performance
 //
+
 // These operations compile to single instructions on modern CPUs:
 // - clz/ctz: LZCNT/TZCNT on x86, CLZ/CTZ on ARM
 // - popcnt: POPCNT on x86, CNT on ARM
 // - bswap: BSWAP on x86, REV on ARM
 // - rotl/rotr: ROL/ROR on x86, ROR on ARM
 //
+
 // Spec: docs/architecture/math-spec.md Section 1.3
 // =============================================================================
 

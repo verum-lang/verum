@@ -14,13 +14,16 @@
 )]
 //! Integration Tests for Backend Switcher with Real Z3/CVC5 FFI Calls
 //!
+
 //! These tests verify that the backend switcher correctly integrates with
 //! actual Z3 and CVC5 solvers, not just stubs.
 //!
+
 //! Refinement type verification: `Int{> 0}`, `Float{>= 0.0}` predicates are checked
 //! by SMT solvers. The backend switcher routes queries to Z3 or CVC5 with automatic
 //! fallback. Three modes: @verify(runtime), @verify(static), @verify(proof).
 //!
+
 //! NOTE: These tests require the `cvc5` feature to be enabled.
 
 #![cfg(feature = "cvc5")]
@@ -431,6 +434,7 @@ fn portfolio_max_threads_zero_falls_back_to_auto() {
     // callers can keep portfolio "configured but quiet" without
     // having to flip the master enable bit.
     //
+
     // Closes the inert-defense pattern around max_threads —
     // pre-fix the field was TOML-parseable + asserted in tests
     // but no dispatch path consulted it.

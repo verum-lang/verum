@@ -1,7 +1,9 @@
 //! Specialization Coherence Verification using CHC
 //!
+
 //! Verum Advanced Protocols — Specialization System
 //!
+
 //! Specialization allows multiple overlapping protocol implementations where a more
 //! specific impl takes precedence. The specialization lattice must satisfy:
 //! - Reflexivity: every impl is at least as specific as itself
@@ -10,32 +12,39 @@
 //! - Unique most-specific: for any concrete type, at most one impl is selected
 //! - Negative bounds: `T: !Protocol` restricts an impl to types that do NOT implement Protocol
 //!
+
 //! This module verifies specialization lattice properties using Constrained Horn Clauses:
 //! 1. No ambiguous specializations (unique most specific impl)
 //! 2. Lattice properties (antisymmetry, transitivity, reflexivity)
 //! 3. Overlap detection between implementations
 //! 4. Specialization precedence resolution
 //!
+
 //! # Performance Targets
 //!
+
 //! - Small lattice (<10 impls): <50ms
 //! - Medium lattice (10-50 impls): <150ms
 //! - Large lattice (>50 impls): <200ms
 //!
+
 //! # CHC Encoding
 //!
+
 //! The specialization lattice is encoded as a set of Horn clauses:
 //! ```smt2
 //! ; more_specific(I1, I2) means I1 is more specific than I2
 //! (declare-rel more_specific (Impl Impl))
 //!
+
 //! ; Transitivity
 //! (rule (=> (and (more_specific I1 I2) (more_specific I2 I3))
-//!           (more_specific I1 I3)))
+//!  (more_specific I1 I3)))
 //!
+
 //! ; Antisymmetry (no cycles)
 //! (rule (=> (and (more_specific I1 I2) (more_specific I2 I1))
-//!           false))
+//!  false))
 //! ```
 
 use std::collections::HashSet;
@@ -97,6 +106,7 @@ pub enum SpecializationError {
     AntisymmetryViolation { impl1: usize, impl2: usize },
     /// Negative bound violation
     ///
+
     /// Negative protocol bounds create mutual exclusion in the specialization lattice.
     /// A negative bound `T: !Protocol` means the impl only applies when T does NOT
     /// implement Protocol. This violation means T actually does implement the excluded protocol.
@@ -113,6 +123,7 @@ pub enum SpecializationError {
     },
     /// Contradictory bounds detected
     ///
+
     /// Example: `T: Clone + !Clone` (impossible)
     ContradictoryBounds {
         /// The type with contradictory bounds
@@ -124,6 +135,7 @@ pub enum SpecializationError {
     },
     /// Mutual exclusion violation in specialization lattice
     ///
+
     /// Two implementations that should be mutually exclusive based on
     /// negative bounds are not properly ordered.
     MutualExclusionViolation {
@@ -191,6 +203,7 @@ pub struct SpecializationVerifier {
     known_type_params: Map<usize, Set<Text>>,
     /// Protocol declaration registry, keyed by protocol short name.
     ///
+
     /// Populated externally via [`register_protocol`]. The
     /// `super_protocols` field of each `Protocol` declares the parent
     /// protocols in the hierarchy (`A : B` means B is in A's super list).
@@ -232,6 +245,7 @@ impl SpecializationVerifier {
     /// `sub_name` is reachable from `super_name` via the
     /// super-protocol graph (reflexively, transitively).
     ///
+
     /// This is the public surface over the internal `is_subprotocol`
     /// walker — useful for diagnostics, external coherence consumers, and
     /// tests that pin the hierarchy contract without having to construct
@@ -370,6 +384,7 @@ impl SpecializationVerifier {
 
     /// Check if a name looks like a type parameter
     ///
+
     /// Type parameters in Verum follow these conventions:
     /// - Single uppercase letters (T, U, V, K, V, E, etc.)
     /// - Short uppercase names (Key, Val, Item, Elem)
@@ -415,6 +430,7 @@ impl SpecializationVerifier {
 
     /// Register predicates needed for CHC encoding
     ///
+
     /// Returns Ok if CHC predicates were registered successfully.
     /// Returns Err if registration failed.
     fn register_chc_predicates(&mut self) -> Result<(), Text> {
@@ -448,6 +464,7 @@ impl SpecializationVerifier {
 
     /// Verify specialization coherence
     ///
+
     /// Checks:
     /// 1. No cycles in specialization lattice
     /// 2. No ambiguous specializations
@@ -571,6 +588,7 @@ impl SpecializationVerifier {
 
     /// Compare specificity of two implementations
     ///
+
     /// Rules (most specific to least specific):
     /// 1. Concrete type beats generic
     /// 2. More constraints beat fewer constraints
@@ -624,6 +642,7 @@ impl SpecializationVerifier {
 
     /// Check if a type is generic (contains type parameters)
     ///
+
     /// A type is generic if it contains:
     /// - Type variables (Type::Var)
     /// - Generic types with arguments (Type::Generic)
@@ -631,6 +650,7 @@ impl SpecializationVerifier {
     /// - Function types with type parameters
     /// - Any nested generic types
     ///
+
     /// This method uses the accumulated knowledge of type parameters from
     /// registered implementations to accurately identify type parameters.
     fn is_generic(&self, ty: &Type) -> bool {
@@ -639,6 +659,7 @@ impl SpecializationVerifier {
 
     /// Check if a type is generic with optional implementation context
     ///
+
     /// When `impl_idx` is provided, uses the known type parameters for that
     /// specific implementation. Otherwise, checks against all known type parameters.
     fn is_generic_with_context(&self, ty: &Type, impl_idx: Option<usize>) -> bool {
@@ -818,11 +839,13 @@ impl SpecializationVerifier {
 
     /// Encode specialization lattice as CHC rules
     ///
+
     /// Creates Constrained Horn Clauses representing:
     /// 1. Transitivity: more_specific(I1, I2) ∧ more_specific(I2, I3) => more_specific(I1, I3)
     /// 2. Antisymmetry: more_specific(I1, I2) ∧ more_specific(I2, I1) => false
     /// 3. Facts: more_specific(i, j) for each (i, j) in the lattice ordering
     ///
+
     /// These CHC rules are added to the fixedpoint engine for advanced verification
     /// capabilities, though basic verification is also done via graph algorithms.
     fn encode_lattice_as_chc(&self) -> List<CHC> {
@@ -1081,36 +1104,44 @@ impl SpecializationVerifier {
     // Negative Bounds Verification
     // ========================================================================
     //
+
     // Negative Protocol Bounds Verification
     //
+
     // Negative bounds (`T: !Protocol`) create mutual exclusion in the specialization lattice:
     // - `T: !Clone` means the implementation is only valid when T does NOT implement Clone
     // - Encoded as CHC: more_specific(I_neg, I_pos) when I_neg has `!P` and I_pos requires `P`
     // - Violations detected when a concrete type satisfies both the positive and negative bound
     // - Two impls with opposite polarities on the same protocol are mutually exclusive
     //
+
     // ## CHC Encoding for Negative Bounds
     //
+
     // ```smt2
     // ; neg_bound(Type, Protocol) - type has negative bound on protocol
     // (declare-rel neg_bound (Type Protocol))
     //
+
     // ; satisfies(Type, Protocol) - type satisfies protocol
     // (declare-rel satisfies (Type Protocol))
     //
+
     // ; Negative bound violation: type satisfies what it shouldn't
     // (rule (=> (and (neg_bound T P) (satisfies T P))
-    //           error))
+    //  error))
     //
+
     // ; Mutual exclusion: impls with opposite polarities don't overlap
     // (rule (=> (and (impl I1) (impl I2)
-    //               (neg_bound (impl_type I1) P)
-    //               (satisfies (impl_type I2) P))
-    //           (or (more_specific I1 I2) (more_specific I2 I1))))
+    //  (neg_bound (impl_type I1) P)
+    //  (satisfies (impl_type I2) P))
+    //  (or (more_specific I1 I2) (more_specific I2 I1))))
     // ```
 
     /// Check negative bounds for all implementations
     ///
+
     /// Verifies that:
     /// 1. No negative bound is violated (type doesn't implement what it claims not to)
     /// 2. No contradictory bounds exist (T: P + !P)
@@ -1136,6 +1167,7 @@ impl SpecializationVerifier {
 
     /// Check for contradictory bounds in a single implementation
     ///
+
     /// Example: `where type T: Clone + !Clone` is a contradiction
     fn check_contradictory_bounds(
         &self,
@@ -1187,6 +1219,7 @@ impl SpecializationVerifier {
 
     /// Check if any negative bounds are violated
     ///
+
     /// A negative bound `T: !Protocol` is violated if T actually implements Protocol
     fn check_negative_bound_violations(
         &self,
@@ -1227,6 +1260,7 @@ impl SpecializationVerifier {
     /// Check if a type implements a protocol (by Path)
     /// Check if a type implements a protocol (by name string)
     ///
+
     /// Full implementation using the protocol checker:
     /// 1. Query the protocol encoder for direct implementation
     /// 2. Check transitive superprotocol implementations
@@ -1249,6 +1283,7 @@ impl SpecializationVerifier {
 
     /// Local implementation check using the registered implementations
     ///
+
     /// This is the fallback when the global protocol checker doesn't have
     /// information about the protocol or type.
     fn type_implements_protocol_local(&self, ty: &Type, protocol_name: &str) -> bool {
@@ -1292,6 +1327,7 @@ impl SpecializationVerifier {
 
     /// Check if an implementation's type matches the target type
     ///
+
     /// Handles:
     /// - Concrete type matching
     /// - Generic type instantiation
@@ -1502,6 +1538,7 @@ impl SpecializationVerifier {
     /// Check if `sub_protocol` is a subprotocol of `super_protocol_name`,
     /// reflexively or transitively, by walking the super-protocol graph.
     ///
+
     /// Uses BFS over the `protocols` registry. Each protocol's
     /// `super_protocols` list provides the next frontier. A `visited` set
     /// guards against cycles in malformed declarations (e.g., user writes
@@ -1509,6 +1546,7 @@ impl SpecializationVerifier {
     /// shouldn't typecheck, but the coherence walker must still terminate
     /// rather than loop forever during checking).
     ///
+
     /// Pre-fix this returned `false` for everything except the trivial
     /// reflexive case, which silently broke `type_implements_protocol_local`:
     /// types implementing subprotocols were not recognized as satisfying
@@ -1554,10 +1592,12 @@ impl SpecializationVerifier {
 
     /// Check mutual exclusion between implementations with negative bounds
     ///
+
     /// Two implementations are mutually exclusive if:
     /// 1. One has `T: Protocol` and the other has `T: !Protocol` for the same T
     /// 2. They would otherwise overlap
     ///
+
     /// Mutual exclusion ensures at most one of them can apply to any concrete type.
     fn check_mutual_exclusion(&self) -> List<SpecializationError> {
         let mut errors = List::new();
@@ -1696,6 +1736,7 @@ impl SpecializationVerifier {
 
     /// Count the number of negative bounds in all implementations
     ///
+
     /// Useful for statistics and debugging.
     pub fn count_negative_bounds(&self) -> usize {
         let mut count = 0;
@@ -1722,11 +1763,13 @@ impl SpecializationVerifier {
 
     /// Verify negative bounds using direct checks
     ///
+
     /// This performs comprehensive verification of negative bounds:
     /// 1. No contradictory bounds (T: P + !P)
     /// 2. No violated negative bounds (type implements excluded protocol)
     /// 3. Mutual exclusion is properly enforced
     ///
+
     /// Returns true if all negative bounds are valid.
     pub fn verify_negative_bounds_complete(&self) -> Result<bool, List<SpecializationError>> {
         let errors = self.check_negative_bounds();

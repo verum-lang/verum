@@ -4,6 +4,7 @@
 // Layer: Stdlib (1)
 // Dependencies: Runtime system
 //
+
 // This module provides intrinsics that require runtime support:
 // - async: Async runtime operations (spawn, await)
 // - tls: Thread-local storage access
@@ -14,14 +15,18 @@
 // - text: Text/string operations (allocation-dependent)
 // - tier: VBC tier management
 //
+
 // These intrinsics cannot run in bare-metal/no-std environments without
 // the corresponding runtime support.
 //
+
 // # @requires_runtime Attribute
 //
+
 // Functions in these modules are implicitly @requires_runtime, meaning
 // they need the Verum runtime to be available.
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 

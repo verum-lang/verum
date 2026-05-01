@@ -14,6 +14,7 @@
 )]
 //! Comprehensive tests for GPU kernel verification using Z3
 //!
+
 //! This test suite validates:
 //! - GPU memory model encoding (global, shared, local)
 //! - Race condition detection between threads
@@ -21,6 +22,7 @@
 //! - Atomic operation semantics
 //! - Happens-before relationship tracking
 //!
+
 //! Tests GPU verification extensions to Verum type system
 
 use verum_common::Maybe;
@@ -66,8 +68,8 @@ fn test_thread_id_linearization() {
     let block_dim = (8, 4, 2);
 
     // Linear ID = x + y * dim.x + z * dim.x * dim.y
-    //           = 5 + 2 * 8 + 1 * 8 * 4
-    //           = 5 + 16 + 32 = 53
+    //  = 5 + 2 * 8 + 1 * 8 * 4
+    //  = 5 + 16 + 32 = 53
     assert_eq!(tid.to_linear(block_dim), 53);
 }
 
@@ -77,8 +79,8 @@ fn test_block_id_linearization() {
     let grid_dim = (4, 4, 1);
 
     // Linear ID = x + y * dim.x + z * dim.x * dim.y
-    //           = 1 + 2 * 4 + 0 * 4 * 4
-    //           = 1 + 8 = 9
+    //  = 1 + 2 * 4 + 0 * 4 * 4
+    //  = 1 + 8 = 9
     assert_eq!(bid.to_linear(grid_dim), 9);
 }
 
@@ -525,6 +527,7 @@ fn test_vector_addition_no_race() {
     // In our current implementation using symbolic addresses, we detect false positives
     // because the SMT solver can't prove that format!("a_{}", 0) != format!("a_{}", 1).
     //
+
     // For now, we skip this test. A full implementation would:
     // 1. Use concrete integer addresses (e.g., base + tid * sizeof(int))
     // 2. Add address non-aliasing constraints to the solver
@@ -564,6 +567,7 @@ fn test_vector_addition_no_race() {
 fn test_shared_memory_reduction() {
     // Simulate reduction with shared memory and barriers
     //
+
     // NOTE: Similar to vector addition, this test detects false positives with symbolic addresses.
     // We simplify to test the barrier mechanism with a smaller example.
 

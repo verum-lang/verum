@@ -1,23 +1,28 @@
 //! # Routing Statistics
 //!
+
 //! Tracks how the capability router dispatches proof goals to SMT solvers,
 //! enabling diagnostic analysis, performance tuning, and validation that
 //! the router's theory-winner predictions match reality.
 //!
+
 //! ## Collected Metrics
 //!
+
 //! - **Routing decisions**: how many times each `SolverChoice` variant was
-//!   selected, broken down by inferred theory.
+//!  selected, broken down by inferred theory.
 //! - **Solver wins**: for portfolio races, which solver produced the winning
-//!   verdict first.
+//!  verdict first.
 //! - **Solver timings**: distribution of wall-clock solve times per solver.
 //! - **Divergence events**: cross-validation results where Z3 and CVC5
-//!   disagreed on SAT/UNSAT (critical for detecting solver bugs).
+//!  disagreed on SAT/UNSAT (critical for detecting solver bugs).
 //! - **Confidence calibration**: for each theory, the router's predicted
-//!   confidence vs. the empirical win rate — measures routing quality.
+//!  confidence vs. the empirical win rate — measures routing quality.
 //!
+
 //! ## Usage
 //!
+
 //! `RoutingStats` is embedded in `BackendSwitcher` and updated after every
 //! `solve()` call. Call `RoutingStats::report()` for a human-readable
 //! summary, or `RoutingStats::as_json()` for machine-readable export.
@@ -97,6 +102,7 @@ impl TheoryStats {
 
 /// Theory classification for statistics purposes.
 ///
+
 /// This is a coarser categorization than `ExtendedCharacteristics` — we
 /// bucket goals into a small number of categories for reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -151,9 +157,10 @@ impl TheoryClass {
 
     /// Classify an `ExtendedCharacteristics` into a single theory bucket.
     ///
+
     /// Priority order (first match wins):
-    ///   sequences > strings > NRA > NIA > arrays > BV > datatypes >
-    ///   LRA > LIA > quantifiers > UF > propositional > mixed
+    ///  sequences > strings > NRA > NIA > arrays > BV > datatypes >
+    ///  LRA > LIA > quantifiers > UF > propositional > mixed
     pub fn classify(
         chars: &crate::capability_router::ExtendedCharacteristics,
     ) -> TheoryClass {
@@ -191,6 +198,7 @@ impl TheoryClass {
 
 /// Aggregate routing statistics.
 ///
+
 /// This struct is updated after every `solve()` call in the `BackendSwitcher`.
 /// It uses interior atomic counters for thread-safe updates without locks on
 /// the common path, and a `parking_lot::Mutex` for the per-theory breakdown.
@@ -351,6 +359,7 @@ impl RoutingStats {
 
     /// Record a cross-validation DIVERGENCE.
     ///
+
     /// This is a safety-critical event: it indicates either a solver bug or
     /// an encoding error. The event is logged (up to 100 most recent) for
     /// post-hoc analysis.

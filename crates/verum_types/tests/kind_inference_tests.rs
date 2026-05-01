@@ -14,10 +14,12 @@
 )]
 //! Comprehensive Kind Inference Tests
 //!
+
 //! Higher-kinded type (HKT) kind inference: infers kinds for type constructors
 //! (e.g., List has kind Type -> Type, Map has kind Type -> Type -> Type).
 //! Uses constraint-based kind inference with unification.
 //!
+
 //! Tests cover:
 //! 1. Basic kind inference (primitives, named types)
 //! 2. Type constructor kinds (List, Map, etc.)

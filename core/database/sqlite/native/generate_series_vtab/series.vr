@@ -55,8 +55,8 @@ public fn direction_name(d: &SeriesDirection) -> Text {
     }
 }
 
-// Number of rows produced.  For ascending: floor((stop-start)/step)+1 if
-// start <= stop, else 0.  For descending: mirror.
+// Number of rows produced. For ascending: floor((stop-start)/step)+1 if
+// start <= stop, else 0. For descending: mirror.
 public fn row_count(args: &SeriesArgs) -> Int64 {
     let zero = 0 as Int64;
     if args.step == zero { return zero; }

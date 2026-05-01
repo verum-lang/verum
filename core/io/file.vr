@@ -5,18 +5,23 @@
 // Dependencies: core, io/protocols, io/path, sys/{linux,darwin,windows}/syscall
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI system interfaces:
 // - Linux: Uses sys/linux/syscall.{open, close, read, write, lseek, fstat, fsync}
 // - macOS: Uses sys/darwin/libsystem bindings to libSystem.B.dylib
 // - Windows: Uses sys/windows/kernel32 bindings to kernel32.dll
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // This module provides file I/O operations.
 //
+
 // =============================================================================
 
 module core.io.file;
@@ -339,27 +344,31 @@ implement Drop for File {
 implement Clone for File {
     /// Clone the file handle by duplicating the underlying file descriptor.
     ///
+
     /// SOUNDNESS: previous revision had a "Fallback to shallow clone if
     /// dup fails" path that returned `File { fd: self.fd }` — a SHALLOW
-    /// COPY sharing the original fd integer.  This is a critical
+    /// COPY sharing the original fd integer. This is a critical
     /// double-close / use-after-free hazard:
     ///
-    ///   1. Both Files now hold the same fd value.
-    ///   2. Whichever is dropped first calls `sys_close(fd)`.
-    ///   3. The kernel marks fd as available for reuse.
-    ///   4. The surviving File still holds the same fd value.
-    ///   5. A concurrent `open()` (or any FD-allocating syscall) in
-    ///      another thread reuses the closed fd, pointing it at an
-    ///      UNRELATED resource (a socket, pipe, /etc/passwd, etc.).
-    ///   6. The surviving File's next read/write hits the unrelated
-    ///      resource — silent data corruption or information leak.
+
+    ///  1. Both Files now hold the same fd value.
+    ///  2. Whichever is dropped first calls `sys_close(fd)`.
+    ///  3. The kernel marks fd as available for reuse.
+    ///  4. The surviving File still holds the same fd value.
+    ///  5. A concurrent `open()` (or any FD-allocating syscall) in
+    ///  another thread reuses the closed fd, pointing it at an
+    ///  UNRELATED resource (a socket, pipe, /etc/passwd, etc.).
+    ///  6. The surviving File's next read/write hits the unrelated
+    ///  resource — silent data corruption or information leak.
     ///
+
     /// dup() failure is rare (process FD limit exceeded, kernel ENOMEM)
     /// and indicates a genuine resource-exhaustion condition the
     /// caller cannot recover from while preserving the Clone contract.
     /// Loud-failing here surfaces the real problem at the actual misuse
     /// site instead of as far-removed kernel-state corruption.
     ///
+
     /// Callers that want a fallible alternative can use `try_clone()`
     /// instead, which returns `Result<File, IoError>` and lets the
     /// caller decide how to recover.
@@ -376,9 +385,9 @@ implement Clone for File {
 
 implement File {
     /// Fallible clone — returns `Err` on dup failure instead of
-    /// panicking.  Use this when the caller can plausibly recover
+    /// panicking. Use this when the caller can plausibly recover
     /// from FD exhaustion (e.g. by closing other handles or
-    /// retrying after a backoff).  Mirrors the `Clone.clone`
+    /// retrying after a backoff). Mirrors the `Clone.clone`
     /// implementation but surfaces dup failures as IoResult errors.
     public fn try_clone(&self) -> IoResult<File> {
         let fd = FileDesc.from_raw(self.fd);
@@ -431,23 +440,29 @@ public mount core.io.buffer.BufWriter;
 // Async File Operations
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // Async file operations now use the native V-LLSI infrastructure:
 // - Linux: Uses sys/linux/io.vr IOEngine (io_uring)
 // - macOS: Uses sys/darwin/io.vr IOEngine (kqueue)
 // - Windows: Uses sys/windows/io.vr IOEngine (IOCP)
 //
+
 // The AsyncFile type wraps synchronous File operations in async context.
 // For truly non-blocking I/O, the IOEngine should be used directly.
 //
+
 // =============================================================================
 
 /// Async wrapper around File for non-blocking I/O.
 ///
+
 /// AsyncFile provides async versions of all File operations by
 /// integrating with the async executor's I/O driver.
 ///
+
 /// # Example
 /// ```verum
 /// let file = AsyncFile.open("data.txt").await?;
@@ -480,6 +495,7 @@ implement AsyncFile {
 
     /// Read data asynchronously.
     ///
+
     /// Yields to the executor while waiting for data to be available.
     /// Note: Current implementation uses synchronous read. For true async I/O,
     /// use the IOEngine directly with io_uring/kqueue/IOCP.
@@ -492,6 +508,7 @@ implement AsyncFile {
 
     /// Write data asynchronously.
     ///
+
     /// Yields to the executor while waiting for write buffer to be available.
     /// Note: Current implementation uses synchronous write. For true async I/O,
     /// use the IOEngine directly with io_uring/kqueue/IOCP.

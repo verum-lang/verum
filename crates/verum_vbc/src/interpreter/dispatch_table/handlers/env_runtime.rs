@@ -1,25 +1,30 @@
 //! High-level Rust intercepts for `core.base.env` operations.
 //!
+
 //! Sibling to `shell_runtime.rs` (VBC-1) and `file_runtime.rs`
-//! (VBC-FILE-1).  Bypasses the libSystem `getenv`/`setenv`/`unsetenv`
+//! (VBC-FILE-1). Bypasses the libSystem `getenv`/`setenv`/`unsetenv`
 //! FFI chain and dispatches directly to `std::env` from the
 //! interpreter host process.
 //!
+
 //! # Functions intercepted
 //!
-//!   * `var(key: &Text) -> Result<Text, VarError>` — `std::env::var`
-//!     mapped to `Result.Ok(text)` / `Result.Err(VarError.NotPresent)`
-//!     / `Result.Err(VarError.NotUnicode(bytes))`.
-//!   * `var_opt(key: &Text) -> Maybe<Text>` — `std::env::var` mapped
-//!     to `Maybe.Some(text)` on success, `Maybe.None` otherwise.
-//!   * `set_var(key: &Text, value: &Text) -> Unit` — `std::env::set_var`.
-//!   * `remove_var(key: &Text) -> Unit` — `std::env::remove_var`.
+
+//!  * `var(key: &Text) -> Result<Text, VarError>` — `std::env::var`
+//!  mapped to `Result.Ok(text)` / `Result.Err(VarError.NotPresent)`
+//!  / `Result.Err(VarError.NotUnicode(bytes))`.
+//!  * `var_opt(key: &Text) -> Maybe<Text>` — `std::env::var` mapped
+//!  to `Maybe.Some(text)` on success, `Maybe.None` otherwise.
+//!  * `set_var(key: &Text, value: &Text) -> Unit` — `std::env::set_var`.
+//!  * `remove_var(key: &Text) -> Unit` — `std::env::remove_var`.
 //!
+
 //! # Permission gate
 //!
+
 //! Reading env vars is unrestricted (matches the libSystem
 //! `getenv` permission policy at `ffi_extended.rs` — the symbol is
-//! NOT in `ffi_symbol_permission_scope`'s table).  Mutating env
+//! NOT in `ffi_symbol_permission_scope`'s table). Mutating env
 //! vars (`set_var`, `remove_var`) consults `PermissionScope::Process`
 //! (the same scope `setenv`/`unsetenv` are mapped to) so a
 //! `permissions = ["time"]` script can't quietly mutate
@@ -43,9 +48,9 @@ pub(in super::super) fn try_intercept_env_runtime(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let bare = func_name.rsplit('.').next().unwrap_or(func_name);
-    // Disambiguation: only catch the env-namespace versions.  `var`
+    // Disambiguation: only catch the env-namespace versions. `var`
     // and `set_var` collide with too many other surfaces; gate
-    // them on `base.env` qualifier.  `var_opt` and `remove_var`
+    // them on `base.env` qualifier. `var_opt` and `remove_var`
     // are unique enough.
     match bare {
         "var_opt" => {
@@ -72,7 +77,7 @@ pub(in super::super) fn try_intercept_env_runtime(
             }
             intercept_remove_var(state, args_start_reg, caller_base)
         }
-        // Process-state intercepts (VBC-PROC-1).  current_dir uses
+        // Process-state intercepts (VBC-PROC-1). current_dir uses
         // sys_getcwd FFI + iterator chains that fail in interpreter;
         // args/args_count/arg() rely on the C-runtime argv pointer
         // table that's not populated for `verum run` invocations.
@@ -107,13 +112,13 @@ pub(in super::super) fn try_intercept_env_runtime(
             Ok(Some(Value::from_i64(std::env::args().count() as i64)))
         }
         "arg" => {
-            // Same reasoning as `args` — 1-arg variant.  Collisions
+            // Same reasoning as `args` — 1-arg variant. Collisions
             // (Command.arg(text)) also take 1 arg but the receiver
             // would be passed as arg 0 making the actual user arg
             // index different; the env-namespace `arg(idx)` takes
             // exactly 1 arg (the index), so we accept this and
             // fall back to None on type mismatch (caller's bytecode
-            // path then takes over).  In practice this isn't
+            // path then takes over). In practice this isn't
             // ambiguous because Command.arg goes through method
             // dispatch (CallM), not plain Call.
             if arg_count != 1 {
@@ -167,7 +172,7 @@ fn intercept_var(
             // NotUnicode(List<Byte>) — payload is the raw bytes; we
             // don't have them in std::env::var (the OsString variant
             // would expose them via env::var_os, but we used var
-            // here).  Substitute an empty list so the variant
+            // here). Substitute an empty list so the variant
             // structure stays sound.
             let empty_list = alloc_byte_list(state, &[])?;
             let err = wrap_in_variant(state, "VarError", 1, &[empty_list])?;
@@ -290,7 +295,7 @@ fn intercept_arg(
 
 /// Allocate a `List<Text>` Verum value with the given Value entries
 /// (each entry must already be a Text Value — i.e. small-string or
-/// heap-string pointer).  Layout matches the codegen's List
+/// heap-string pointer). Layout matches the codegen's List
 /// representation: `[len:Value(i64)] [cap:Value(i64)] [backing_ptr:Value]`
 /// where backing is an array of Values.
 fn alloc_text_list(

@@ -1,41 +1,50 @@
 //! Attribute target definitions for the Verum AST.
 //!
+
 //! This module defines [`AttributeTarget`], a bitflag type that specifies
 //! which syntactic positions an attribute can be applied to.
 //!
+
 //! # Overview
 //!
+
 //! Verum supports attributes on many syntactic elements:
 //!
+
 //! ```verum
-//! @profile(application)                    // Module
+//! @profile(application) // Module
 //! module server {
-//!     @derive(Clone, Serialize)            // Type
-//!     type User is {
-//!         @serialize(rename = "user_id")   // Field
-//!         @validate(min = 1)
-//!         id: Int,
-//!     };
+//!  @derive(Clone, Serialize) // Type
+//!  type User is {
+//!  @serialize(rename = "user_id") // Field
+//!  @validate(min = 1)
+//!  id: Int,
+//!  };
 //!
-//!     @inline(always)                       // Function
-//!     fn process(
-//!         @unused _ctx: &Context,           // Parameter
-//!     ) -> Result<User> {
-//!         match result {
-//!             @cold Err(e) => handle(e),    // Match arm
-//!             Ok(v) => v,
-//!         }
-//!     }
+
+//!  @inline(always) // Function
+//!  fn process(
+//!  @unused _ctx: &Context, // Parameter
+//!  ) -> Result<User> {
+//!  match result {
+//!  @cold Err(e) => handle(e), // Match arm
+//!  Ok(v) => v,
+//!  }
+//!  }
 //! }
 //! ```
 //!
+
 //! # Design
 //!
+
 //! `AttributeTarget` uses bitflags to allow efficient combination and checking
 //! of valid targets. Common combinations are provided as constants.
 //!
+
 //! # Target Validation
 //!
+
 //! Each registered attribute declares which syntactic positions it can appear on
 //! using `AttributeTarget` bitflags. The compiler validates at parse time that
 //! attributes only appear on their declared targets (e.g., @inline only on functions,
@@ -48,10 +57,12 @@ use verum_common::Text;
 bitflags! {
     /// Bitflags representing valid attribute targets.
     ///
+
     /// Multiple targets can be combined using bitwise OR:
     /// ```rust
     /// use verum_ast::attr::AttributeTarget;
     ///
+
     /// let targets = AttributeTarget::Function | AttributeTarget::Type;
     /// assert!(targets.contains(AttributeTarget::Function));
     /// ```
@@ -168,14 +179,18 @@ impl<'de> Deserialize<'de> for AttributeTarget {
 impl AttributeTarget {
     /// Get a human-readable name for this target.
     ///
+
     /// For single targets, returns the specific name.
     /// For combinations, returns a generic description.
     ///
+
     /// # Examples
     ///
+
     /// ```rust
     /// use verum_ast::attr::AttributeTarget;
     ///
+
     /// assert_eq!(AttributeTarget::Function.display_name(), "function");
     /// assert_eq!(AttributeTarget::Field.display_name(), "field");
     /// ```
@@ -203,13 +218,17 @@ impl AttributeTarget {
 
     /// Format as a human-readable list for error messages.
     ///
+
     /// Produces output like "function, type, or field" for use in diagnostics.
     ///
+
     /// # Examples
     ///
+
     /// ```rust
     /// use verum_ast::attr::AttributeTarget;
     ///
+
     /// let targets = AttributeTarget::Function | AttributeTarget::Type | AttributeTarget::Field;
     /// assert_eq!(targets.format_list(), "function, type, or field");
     /// ```
@@ -269,6 +288,7 @@ impl AttributeTarget {
 
     /// Check if this target represents exactly one syntactic position.
     ///
+
     /// Returns `true` if exactly one bit is set.
     #[must_use]
     pub const fn is_single(&self) -> bool {
@@ -277,6 +297,7 @@ impl AttributeTarget {
 
     /// Check if this target represents multiple syntactic positions.
     ///
+
     /// Returns `true` if more than one bit is set.
     #[must_use]
     pub const fn is_multiple(&self) -> bool {
@@ -291,11 +312,14 @@ impl AttributeTarget {
 
     /// Iterate over individual targets in this combination.
     ///
+
     /// # Examples
     ///
+
     /// ```rust
     /// use verum_ast::attr::AttributeTarget;
     ///
+
     /// let targets = AttributeTarget::Function | AttributeTarget::Type;
     /// let individual: Vec<_> = targets.iter_individual().collect();
     /// assert_eq!(individual.len(), 2);
@@ -345,6 +369,7 @@ impl Iterator for AttributeTargetIter {
 
 /// Format a list of items with proper English grammar.
 ///
+
 /// - Empty: ""
 /// - One: "item"
 /// - Two: "item1 or item2"

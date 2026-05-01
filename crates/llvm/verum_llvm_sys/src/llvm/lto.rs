@@ -1,7 +1,9 @@
 //! Abstract link time optimization.
 //!
+
 //! ## ThinLTO
 //!
+
 //! ThinLTO is designed to do LTO while requiring fewer resources than regular
 //! LTO. It can run much faster and in less memory (comparable to linking
 //! without LTO) than regular LTO, with essentially no loss in optimization.
@@ -161,10 +163,12 @@ unsafe extern "C" {
     ) -> lto_symbol_attributes;
     /// Returns the number of asm undefined symbols in the object module.
     ///
+
     /// Available since before LTO API version 30.
     pub fn lto_module_get_num_asm_undef_symbols(mod_: lto_module_t) -> ::libc::c_uint;
     /// Returns the name of the ith asm undefined symbol in the object module.
     ///
+
     /// Available since before LTO API version 30.
     pub fn lto_module_get_asm_undef_symbol_name(
         mod_: lto_module_t,
@@ -172,9 +176,11 @@ unsafe extern "C" {
     ) -> *const ::libc::c_char;
     /// Returns the module's linker options.
     ///
+
     /// The linker options may consist of multiple flags. It is the linker's
     /// responsibility to split the flags using a platform-specific mechanism.
     ///
+
     /// Added in LLVM 3.7.
     pub fn lto_module_get_linkeropts(_mod: lto_module_t) -> *const ::libc::c_char;
     pub fn lto_module_get_macho_cputype(
@@ -185,6 +191,7 @@ unsafe extern "C" {
     /// Return true if the module has either the `@llvm.global_ctors` or the `@llvm.global_dtors`
     /// symbol.
     ///
+
     /// Added in API version 29 (LLVM 14).
     pub fn lto_module_has_ctor_dtor(mod_: lto_module_t) -> lto_bool_t;
     pub fn lto_codegen_set_diagnostic_handler(
@@ -199,6 +206,7 @@ unsafe extern "C" {
     /// Sets the object module for code gneeration. This will transfer ownership
     /// of the module to the code generator.
     ///
+
     /// Added in LLVM 3.7.
     pub fn lto_codegen_set_module(cg: lto_code_gen_t, _mod: lto_module_t);
     pub fn lto_codegen_set_debug_model(cg: lto_code_gen_t, arg1: lto_debug_model) -> lto_bool_t;
@@ -225,19 +233,24 @@ unsafe extern "C" {
     ) -> lto_bool_t;
     /// Runs optimization for the merged module.
     ///
+
     /// Returns true on error.
     ///
+
     /// Added in LLVM 3.7.
     pub fn lto_codegen_optimize(cg: lto_code_gen_t) -> lto_bool_t;
     /// Generates code for the optimized merged module into one native object file.
     ///
+
     /// Does not run IR optimizations on the merged module.
     ///
+
     /// Returns a pointer to the generated mach-o/ELF buffer with length
     /// set to the buffer size. This buffer is owned by `cg` and will be
     /// freed when `lto_codegen_dispose` is called or `lto_codegen_compile_optimized`
     /// is called again. Returns null on failure.
     ///
+
     /// Added in LLVM 3.7.
     pub fn lto_codegen_compile_optimized(
         cg: lto_code_gen_t,
@@ -245,6 +258,7 @@ unsafe extern "C" {
     ) -> *mut ::libc::c_void;
     /// Returns the runtime API version.
     ///
+
     /// Added in LLVM 3.7.
     pub fn lto_api_version() -> ::libc::c_uint;
     pub fn lto_set_debug_options(options: *mut *const ::libc::c_char, number: ::libc::c_int);
@@ -257,13 +271,16 @@ unsafe extern "C" {
     pub fn lto_initialize_disassembler();
     /// Sets if we should run the internalize pass during optimization and code generation.
     ///
+
     /// Added in LLVM 3.7.
     pub fn lto_codegen_set_should_internalize(cg: lto_code_gen_t, ShouldInternalize: lto_bool_t);
     /// Set whether to embed uselists in bitcode.
     ///
+
     /// Sets whether `lto_codegen_write_merged_modules` should embed uselists in
     /// output bitcode. This should be turned on for all -save-temps output.
     ///
+
     /// Added in LLVM 3.7.
     pub fn lto_codegen_set_should_embed_uselists(
         cg: lto_code_gen_t,
@@ -283,18 +300,22 @@ pub struct LTOObjectBuffer {
 unsafe extern "C" {
     /// Instantiates a ThinLTO code generator.
     ///
+
     /// Returns null on error (check `lto_get_error_message` for details).
     ///
+
     /// The code generator should not be reused.
     pub fn thinlto_create_codegen() -> thinlto_code_gen_t;
     /// Frees a code generator.
     pub fn thinlto_codegen_dispose(cg: thinlto_code_gen_t);
     /// Add a module to a code generator.
     ///
+
     /// Identifier must be unique among all the modules in the code generator.
     /// The data buffer remains owned by the client, and must live at least
     /// as long as the code generator.
     ///
+
     /// Returns null on failure.
     pub fn thinlto_codegen_add_module(
         cg: thinlto_code_gen_t,
@@ -304,10 +325,12 @@ unsafe extern "C" {
     );
     /// Optimize and codegen all modules attached to the code generator.
     ///
+
     /// Resulting objects are accessible with `thinlto_module_get_object`.
     pub fn thinlto_codegen_process(cg: thinlto_code_gen_t);
     /// Return the number of object files produced by the code generator.
     ///
+
     /// This usually matches the number of input files, but is not guaranteed
     /// to.
     pub fn thinlto_module_get_num_objects(cg: thinlto_code_gen_t) -> ::libc::c_int;
@@ -319,10 +342,12 @@ unsafe extern "C" {
     ) -> LTOObjectBuffer;
     /// Return the number of object files produced by the code generator.
     ///
+
     /// Usually the same as the number of input files, but not guaranteed.
     pub fn thinlto_module_get_num_object_files(cg: thinlto_code_gen_t) -> ::libc::c_uint;
     /// Return the path to the ith output object file.
     ///
+
     /// Use `thinlto_module_get_num_object_files` to get the number of available objects.
     pub fn thinlto_module_get_object_file(
         cg: thinlto_code_gen_t,
@@ -330,6 +355,7 @@ unsafe extern "C" {
     ) -> *const ::libc::c_char;
     /// Set which PIC code model to generate.
     ///
+
     /// Returns true on error.
     pub fn thinlto_codegen_set_pic_model(
         cg: thinlto_code_gen_t,
@@ -339,10 +365,12 @@ unsafe extern "C" {
     // ThinLTO cache control.
     // Set the path to a directory to use as cache for increment build.
     //
+
     // Setting this activates caching.
     pub fn thinlto_codegen_set_cache_dir(cg: thinlto_code_gen_t, cache_dir: *const ::libc::c_char);
     /// Set the cache pruning interval, in seconds.
     ///
+
     /// A negative value disables pruning, and 0 will force pruning to occur.
     pub fn thinlto_codegen_set_cache_pruning_interval(
         cg: thinlto_code_gen_t,
@@ -350,6 +378,7 @@ unsafe extern "C" {
     );
     /// Set the maximum cache size to persist across builds.
     ///
+
     /// This is expressed as a percentage of available disk space. 100 means no limit,
     /// and 50 means no more than half of the available disk space. 0 is ignored, and
     /// values over 100 will be reduced to 100.
@@ -394,6 +423,7 @@ unsafe extern "C" {
     pub fn lto_input_get_num_dependent_libraries(input: lto_input_t) -> ::libc::c_uint;
     /// Get the `i`th dependent library specifier for the given input file.
     ///
+
     /// The returned string is not null-terminated.
     pub fn lto_input_get_dependent_library(
         input: lto_input_t,
@@ -406,6 +436,7 @@ unsafe extern "C" {
 
     /// Set the path to a directory to use as temporary bitcode storage.
     ///
+
     /// This is meant to make the bitcode files available for debugging.
     pub fn thinlto_codegen_set_savetemps_dir(
         cg: thinlto_code_gen_t,
@@ -413,6 +444,7 @@ unsafe extern "C" {
     );
     /// Set the path to a directory to save generated object files.
     ///
+
     /// Set this to request on-disk rather than in-memory buffers. When set, use
     /// `thinlto_module_get_object_file` instead of `thinlto_module_get_object`.
     pub fn thinlto_set_generated_objects_dir(
@@ -423,6 +455,7 @@ unsafe extern "C" {
     pub fn thinlto_codegen_set_cpu(cg: thinlto_code_gen_t, cpu: *const ::libc::c_char);
     /// Disable code generation (running all stages until codegen).
     ///
+
     /// The output with codegen disabled is bitcode.
     pub fn thinlto_codegen_disable_codegen(cg: thinlto_code_gen_t, disable: lto_bool_t);
     /// Perform codegen only; disable all other stages.
@@ -434,6 +467,7 @@ unsafe extern "C" {
     /// Add a symbol to the list of global symbols that must exist in the
     /// final generated code.
     ///
+
     /// Functions not listed may be inlined in every usage and optimized away.
     pub fn thinlto_codegen_add_must_preserve_symbol(
         cg: thinlto_code_gen_t,
@@ -443,6 +477,7 @@ unsafe extern "C" {
     /// Add a symbol to the list of global symbols that are cross-referenced
     /// between ThinLTO files.
     ///
+
     /// Symbols listed can be discarded if every reference from a ThinLTO module
     /// to a symbol is optimized away, then the symbol can be discarded.
     pub fn thinlto_codegen_add_cross_referenced_symbol(

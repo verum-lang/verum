@@ -23,8 +23,10 @@ pub struct Value<'c, 'a> {
 impl Value<'_, '_> {
     /// Creates a value from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_raw(value: MlirValue) -> Self {
         Self {

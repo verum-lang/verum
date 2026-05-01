@@ -1,5 +1,6 @@
 //! Unified Reference Promotion System
 //!
+
 //! CBGR Reference Promotion: Manages promotion between three reference tiers:
 //! Tier 0 (&T, ~15ns CBGR check), Tier 1 (&checked T, 0ns compile-time proven),
 //! Tier 2 (&unsafe T, 0ns manual safety). Promotion from &T to &checked T requires:
@@ -7,52 +8,59 @@
 //! (3) allocation dominates all uses, (4) lifetime is stack-bounded,
 //! (5) confidence >= threshold (default 0.95).
 //!
+
 //! This module provides a unified API for reference tier promotion and degradation
 //! across all execution tiers (Tier 0-3) and reference types (&T, &checked T, &unsafe T).
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────┐
-//! │          Unified Promotion System (verum_common)          │
+//! │ Unified Promotion System (verum_common) │
 //! ├─────────────────────────────────────────────────────────┤
-//! │  PromotionStrategy (enum)                               │
-//! │  ├─ ByRefCount(u64)        - Usage-based promotion      │
-//! │  ├─ ByConfidence(f64)      - Static analysis confidence │
-//! │  ├─ ByHotness(u64)         - Runtime profiling          │
-//! │  ├─ ByAnalysis(...)        - Escape analysis result     │
-//! │  └─ ByProfile(...)         - Profile-guided optimization│
+//! │ PromotionStrategy (enum) │
+//! │ ├─ ByRefCount(u64) - Usage-based promotion │
+//! │ ├─ ByConfidence(f64) - Static analysis confidence │
+//! │ ├─ ByHotness(u64) - Runtime profiling │
+//! │ ├─ ByAnalysis(...) - Escape analysis result │
+//! │ └─ ByProfile(...) - Profile-guided optimization│
 //! ├─────────────────────────────────────────────────────────┤
-//! │  PromotionPolicy (trait)                                │
-//! │  ├─ should_promote()       - Decision engine            │
-//! │  ├─ promotion_strategy()   - Get current strategy       │
-//! │  └─ confidence_threshold() - Get threshold              │
+//! │ PromotionPolicy (trait) │
+//! │ ├─ should_promote() - Decision engine │
+//! │ ├─ promotion_strategy() - Get current strategy │
+//! │ └─ confidence_threshold() - Get threshold │
 //! ├─────────────────────────────────────────────────────────┤
-//! │  PromotionContext (struct)                              │
-//! │  ├─ ref_id                 - Reference identifier       │
-//! │  ├─ access_count           - Number of accesses         │
-//! │  ├─ confidence             - Static analysis confidence │
-//! │  ├─ escape_analysis        - Escape analysis result     │
-//! │  └─ profile_data           - Runtime profile data       │
+//! │ PromotionContext (struct) │
+//! │ ├─ ref_id - Reference identifier │
+//! │ ├─ access_count - Number of accesses │
+//! │ ├─ confidence - Static analysis confidence │
+//! │ ├─ escape_analysis - Escape analysis result │
+//! │ └─ profile_data - Runtime profile data │
 //! ├─────────────────────────────────────────────────────────┤
-//! │  Conversion Functions                                   │
-//! │  ├─ promote_managed_to_checked()    - &T → &checked T   │
-//! │  ├─ promote_checked_to_unsafe()     - &checked → &unsafe│
-//! │  ├─ degrade_checked_to_managed()    - &checked → &T     │
-//! │  └─ degrade_unsafe_to_checked()     - &unsafe → &checked│
+//! │ Conversion Functions │
+//! │ ├─ promote_managed_to_checked() - &T → &checked T │
+//! │ ├─ promote_checked_to_unsafe() - &checked → &unsafe│
+//! │ ├─ degrade_checked_to_managed() - &checked → &T │
+//! │ └─ degrade_unsafe_to_checked() - &unsafe → &checked│
 //! └─────────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Three-Tier Reference Model
 //!
+
 //! | Tier | Type | Overhead | Safety | Use Case |
 //! |------|------|----------|--------|----------|
 //! | 0 | &T | ~15ns | Runtime checked | Default, safe |
 //! | 1 | &checked T | 0ns | Compile-time proven | Optimized, verified |
 //! | 2 | &unsafe T | 0ns | Manual responsibility | FFI, performance-critical |
 //!
+
 //! # Promotion Criteria
 //!
+
 //! For &T → &checked T promotion, ALL must be true:
 //! 1. Reference doesn't escape function scope
 //! 2. No concurrent access possible
@@ -60,24 +68,28 @@
 //! 4. Lifetime is stack-bounded
 //! 5. Confidence ≥ threshold (default 0.95)
 //!
+
 //! # Example
 //!
+
 //! ```rust
 //! use verum_common::promotion::{PromotionContext, PromotionStrategy, PromotionPolicy, RefId};
 //!
+
 //! // Create promotion context
 //! let context = PromotionContext {
-//!     ref_id: Some(RefId(42)),
-//!     access_count: 150,
-//!     confidence: 0.98,
-//!     escape_analysis: None,
-//!     profile_data: None,
+//!  ref_id: Some(RefId(42)),
+//!  access_count: 150,
+//!  confidence: 0.98,
+//!  escape_analysis: None,
+//!  profile_data: None,
 //! };
 //!
+
 //! // Decide on promotion
 //! let strategy = PromotionStrategy::ByRefCount(100);
 //! if strategy.should_promote(&context) {
-//!     // Promote reference to &checked T
+//!  // Promote reference to &checked T
 //! }
 //! ```
 
@@ -96,6 +108,7 @@ impl fmt::Display for RefId {
 
 /// Promotion strategy - determines when to promote references
 ///
+
 /// Determines when to promote references between CBGR tiers. Each strategy
 /// evaluates a PromotionContext to decide if a reference should be upgraded
 /// from &T (runtime-checked) to &checked T (compile-time proven safe).
@@ -103,6 +116,7 @@ impl fmt::Display for RefId {
 pub enum PromotionStrategy {
     /// Promote after N reference accesses
     ///
+
     /// # Example
     /// ```
     /// use verum_common::promotion::PromotionStrategy;
@@ -113,6 +127,7 @@ pub enum PromotionStrategy {
 
     /// Promote if static analysis confidence ≥ threshold
     ///
+
     /// # Example
     /// ```
     /// use verum_common::promotion::PromotionStrategy;
@@ -123,8 +138,10 @@ pub enum PromotionStrategy {
 
     /// Promote if hotness score ≥ threshold
     ///
+
     /// Hotness combines call frequency and execution time.
     ///
+
     /// # Example
     /// ```
     /// use verum_common::promotion::PromotionStrategy;
@@ -135,6 +152,7 @@ pub enum PromotionStrategy {
 
     /// Promote based on escape analysis result
     ///
+
     /// # Example
     /// ```
     /// use verum_common::promotion::{PromotionStrategy, EscapeAnalysisResult};
@@ -145,13 +163,14 @@ pub enum PromotionStrategy {
 
     /// Promote based on runtime profile data
     ///
+
     /// # Example
     /// ```
     /// use verum_common::promotion::{PromotionStrategy, ProfileData};
     /// let profile = ProfileData {
-    ///     total_calls: 1000,
-    ///     avg_time_ns: 5000,
-    ///     hotness_score: 0.85,
+    ///  total_calls: 1000,
+    ///  avg_time_ns: 5000,
+    ///  hotness_score: 0.85,
     /// };
     /// let strategy = PromotionStrategy::ByProfile(profile);
     /// ```
@@ -161,12 +180,16 @@ pub enum PromotionStrategy {
 impl PromotionStrategy {
     /// Check if promotion should occur given the context
     ///
+
     /// # Arguments
     ///
+
     /// * `context` - Promotion context with all decision parameters
     ///
+
     /// # Returns
     ///
+
     /// `true` if promotion should occur, `false` otherwise
     pub fn should_promote(&self, context: &PromotionContext) -> bool {
         match self {
@@ -397,16 +420,21 @@ impl Default for PromotionContext {
 
 /// Promotion policy trait - unified interface for promotion decisions
 ///
+
 /// Implement this trait to create custom promotion policies.
 pub trait PromotionPolicy {
     /// Check if promotion should occur
     ///
+
     /// # Arguments
     ///
+
     /// * `context` - Promotion context with all decision parameters
     ///
+
     /// # Returns
     ///
+
     /// `true` if promotion should occur, `false` otherwise
     fn should_promote(&self, context: &PromotionContext) -> bool;
 
@@ -476,6 +504,7 @@ impl PromotionPolicy for StandardPromotionPolicy {
 
 /// Composite promotion policy - combines multiple strategies
 ///
+
 /// Promotes if ANY of the strategies recommend promotion.
 #[derive(Debug, Clone)]
 pub struct CompositePromotionPolicy {

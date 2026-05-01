@@ -4,24 +4,29 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // # PREFERRED: Type Properties
 //
+
 // Verum provides compile-time type properties as the preferred way to access
 // type information. Use these instead of function calls:
 //
-// | Property       | Description                    | Example          |
+
+// | Property | Description | Example |
 // |----------------|--------------------------------|------------------|
-// | `T.size`       | Size in bytes                  | `Int.size` → 8   |
-// | `T.alignment`  | Memory alignment               | `Int.alignment`  |
-// | `T.stride`     | Array element stride           | `T.stride`       |
-// | `T.bits`       | Size in bits                   | `Int.bits` → 64  |
-// | `T.min`        | Minimum value (numeric)        | `Int.min`        |
-// | `T.max`        | Maximum value (numeric)        | `Int.max`        |
-// | `T.name`       | Type name as Text              | `Int.name`       |
-// | `T.id`         | Unique type identifier (u64)   | `Int.id`         |
+// | `T.size` | Size in bytes | `Int.size` → 8 |
+// | `T.alignment` | Memory alignment | `Int.alignment` |
+// | `T.stride` | Array element stride | `T.stride` |
+// | `T.bits` | Size in bits | `Int.bits` → 64 |
+// | `T.min` | Minimum value (numeric) | `Int.min` |
+// | `T.max` | Maximum value (numeric) | `Int.max` |
+// | `T.name` | Type name as Text | `Int.name` |
+// | `T.id` | Unique type identifier (u64) | `Int.id` |
 //
+
 // # Legacy Functions
 //
+
 // The functions below are provided for compatibility. Prefer type properties:
 // - `size_of<T>()` → use `T.size` instead
 // - `align_of<T>()` → use `T.alignment` instead
@@ -30,6 +35,7 @@
 // - `type_id<T>()` → use `T.id` instead
 // - `type_name<T>()` → use `T.name` instead
 //
+
 // Spec: docs/detailed/17-meta-system.md
 // =============================================================================
 

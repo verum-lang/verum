@@ -2,12 +2,14 @@
 //! elimination in `interpolation::quantifier_eliminate` can build
 //! bound variables that match the formula's actual sorts.
 //!
+
 //! Pre-fix the QE path created `Bool::new_const(name)` for every
 //! variable. Z3 distinguishes constants by name AND sort, so when the
 //! formula contained `Int x` but the bound list had `Bool x`, the
 //! existential bound nothing — QE then operated on a vacuous
 //! quantifier and produced an unsound result.
 //!
+
 //! `collect_typed_variables_from_bool` walks the formula AST and
 //! returns `(name, Sort)` pairs by reading each constant's actual
 //! sort via `get_sort()` on the AST node.

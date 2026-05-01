@@ -1,11 +1,14 @@
 //! FFI runtime for VBC interpreter.
 //!
+
 //! This module provides the `FfiRuntime` which handles dynamic FFI calls
 //! using libffi. It manages library loading, symbol resolution, and
 //! call interface caching for optimal performance.
 //!
+
 //! # Performance
 //!
+
 //! - First call to a symbol: ~5μs (CIF preparation + symbol resolution)
 //! - Subsequent calls: ~150ns (cached CIF + direct call)
 //! - Memory: ~200 bytes per unique symbol
@@ -121,6 +124,7 @@ impl fmt::Debug for ResolvedSymbol {
 
 /// Holds a dynamically created libffi struct type.
 ///
+
 /// This struct keeps the ffi_type and its element array alive for the lifetime
 /// of the FFI runtime. The element array must be null-terminated for libffi.
 pub struct FfiStructType {
@@ -146,6 +150,7 @@ const FFI_TYPE_STRUCT: u16 = 13;
 impl FfiStructType {
     /// Creates a new libffi struct type from field types.
     ///
+
     /// The field_types should be the libffi type pointers for each field.
     pub fn new(field_types: Vec<*mut ffi_type>, size: u32, alignment: u16) -> Self {
         // libffi requires a null-terminated array of element pointers
@@ -175,6 +180,7 @@ impl FfiStructType {
 
 /// FFI runtime for the VBC interpreter.
 ///
+
 /// Manages library loading, symbol resolution, and FFI calls with
 /// caching for optimal performance.
 pub struct FfiRuntime {
@@ -212,6 +218,7 @@ impl FfiRuntime {
 
     /// Gets or creates a libffi struct type from a module's layout.
     ///
+
     /// The struct type is cached by layout index for reuse.
     pub fn get_or_create_struct_type(
         &mut self,
@@ -245,6 +252,7 @@ impl FfiRuntime {
 
     /// Gets the libffi type for a CTypeRuntime, handling struct types.
     ///
+
     /// For struct-by-value types, this uses the struct type cache.
     fn get_ffi_type(
         &mut self,
@@ -261,6 +269,7 @@ impl FfiRuntime {
 
     /// Resolves a symbol in a library.
     ///
+
     /// Note: This method doesn't handle struct-by-value types. For those,
     /// use `resolve_symbol_with_structs` which can create dynamic struct types.
     pub fn resolve_symbol(
@@ -304,6 +313,7 @@ impl FfiRuntime {
 
     /// Resolves a symbol with support for struct-by-value types.
     ///
+
     /// This method can handle StructValue types by looking up struct layouts
     /// from the module and creating dynamic libffi struct types.
     pub fn resolve_symbol_with_structs(
@@ -350,6 +360,7 @@ impl FfiRuntime {
 
     /// Loads all libraries required by a module.
     ///
+
     /// Libraries tagged with a specific platform (Darwin / Linux / Windows /
     /// FreeBSD / Ios / Android) are only loaded when the current target OS
     /// matches. Cross-platform (`Any`) libraries are always loaded. Without
@@ -514,8 +525,10 @@ impl FfiRuntime {
 
     /// Calls an FFI function with C calling convention.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure:
     /// - Arguments match the function signature
     /// - The function pointer is valid
@@ -608,25 +621,32 @@ impl FfiRuntime {
 
     /// Calls an FFI function using C calling convention with proper write-back support.
     ///
+
     /// This version uses a source register map that maps argument indices to the
     /// original variable registers, enabling proper write-back for mutable references.
     /// When `&mut y` is passed to FFI, the write-back goes to y's register, not to
     /// the temporary register holding the reference value.
     ///
+
     /// # Arguments
     ///
+
     /// * `module` - The VBC module containing FFI metadata
     /// * `symbol_id` - The FFI symbol to call
     /// * `args` - The argument values
     /// * `source_reg_map` - Maps argument index to source variable register for write-back
     /// * `ret_value` - Output parameter for return value
     ///
+
     /// # Returns
     ///
+
     /// A vector of (register_index, new_value) pairs for write-back.
     ///
+
     /// # Safety
     ///
+
     /// The caller must ensure:
     /// - Arguments match the function signature
     /// - Any pointers in arguments point to valid memory
@@ -874,17 +894,22 @@ impl FfiRuntime {
 
     /// Creates a callback trampoline that allows C code to call a Verum function.
     ///
+
     /// This uses libffi's closure mechanism to generate a C-callable function pointer
     /// that, when called, will invoke the specified Verum function.
     ///
+
     /// # Arguments
     ///
+
     /// * `return_type` - C return type for the callback
     /// * `arg_types` - C argument types for the callback
     /// * `fn_id` - The function ID to call when the callback is invoked
     ///
+
     /// # Returns
     ///
+
     /// A trampoline ID and raw function pointer that can be passed to C code.
     pub fn create_callback(
         &mut self,
@@ -903,17 +928,22 @@ impl FfiRuntime {
 
     /// Creates a callback trampoline from a module FFI symbol signature.
     ///
+
     /// This version looks up the signature from the module's FFI symbol table,
     /// which is useful when the callback signature matches an FFI function.
     ///
+
     /// # Arguments
     ///
+
     /// * `module` - The VBC module containing FFI signatures
     /// * `fn_id` - The Verum function ID to call when invoked
     /// * `signature_idx` - Index into the module's FFI symbols table
     ///
+
     /// # Returns
     ///
+
     /// A raw function pointer that can be passed to C code.
     pub fn create_callback_from_symbol(
         &mut self,
@@ -944,6 +974,7 @@ impl FfiRuntime {
 
     /// Sets the callback handler for the current thread.
     ///
+
     /// This must be called before any callbacks are invoked. The handler receives
     /// the function ID and arguments, and must return the result value.
     pub fn set_callback_handler(handler: CallbackHandler) {
@@ -957,6 +988,7 @@ impl FfiRuntime {
 
     /// Looks up a TrampolineId by code pointer.
     ///
+
     /// Returns the TrampolineId if the code pointer corresponds to a registered callback.
     pub fn lookup_callback_by_ptr(&self, code_ptr: *const ()) -> Option<TrampolineId> {
         self.trampolines.lookup_by_code_ptr(code_ptr)
@@ -964,14 +996,17 @@ impl FfiRuntime {
 
     /// Tracks an array buffer for FFI marshalling.
     ///
+
     /// When arrays are marshalled from VBC Values to C data, we allocate temporary
     /// buffers. These must be:
     /// 1. Kept alive during the FFI call
     /// 2. Written back to the original array for mutable references
     /// 3. Freed after the FFI call completes
     ///
+
     /// # Arguments
     ///
+
     /// * `buffer` - Pointer to the marshalled C data buffer
     /// * `buffer_size` - Size of the buffer in bytes
     /// * `array_ptr` - Pointer to the original VBC array (for write-back)
@@ -999,11 +1034,14 @@ impl FfiRuntime {
 
     /// Cleans up array buffers, optionally writing back mutable ones.
     ///
+
     /// For mutable array references, this converts the C data back to VBC Values
     /// and writes them to the original array.
     ///
+
     /// # Safety
     ///
+
     /// The array_ptr must still be valid and the buffer must not have been freed.
     pub unsafe fn cleanup_array_buffers(&mut self) {
         // SAFETY: caller guarantees array_ptr is valid
@@ -1019,8 +1057,10 @@ impl Default for FfiRuntime {
 
 /// Marshals a single field value from Verum to C format.
 ///
+
 /// # Safety
 ///
+
 /// The c_field_ptr must point to valid writable memory of the appropriate type.
 unsafe fn marshal_field_to_c(field_value: Value, c_type: crate::module::CType, c_field_ptr: *mut u8) {
     // SAFETY: Caller guarantees c_field_ptr points to valid writable memory of the appropriate type.
@@ -1070,8 +1110,10 @@ unsafe fn marshal_field_to_c(field_value: Value, c_type: crate::module::CType, c
 
 /// Marshals a single field value from C to Verum format.
 ///
+
 /// # Safety
 ///
+
 /// The c_field_ptr must point to valid readable memory of the appropriate type.
 pub(crate) unsafe fn marshal_field_from_c(c_type: crate::module::CType, c_field_ptr: *const u8) -> Option<Value> {
     // SAFETY: Caller guarantees c_field_ptr points to valid readable memory of the appropriate type.
@@ -1121,8 +1163,10 @@ pub(crate) unsafe fn marshal_field_from_c(c_type: crate::module::CType, c_field_
 
 /// Marshals a Verum struct (heap object) to a C struct buffer.
 ///
+
 /// # Safety
 ///
+
 /// - obj_ptr must point to a valid Verum heap object
 /// - struct_buffer must be large enough to hold the marshalled struct
 unsafe fn marshal_verum_struct_to_c(
@@ -1148,8 +1192,10 @@ unsafe fn marshal_verum_struct_to_c(
 
 /// Marshals a C struct buffer back to a Verum struct (heap object).
 ///
+
 /// # Safety
 ///
+
 /// - obj_ptr must point to a valid writable Verum heap object
 /// - struct_buffer must contain valid marshalled data
 unsafe fn marshal_c_to_verum_struct(
@@ -1176,13 +1222,17 @@ unsafe fn marshal_c_to_verum_struct(
 
 /// Converts a CTypeRuntime to a libffi type pointer.
 ///
+
 /// # Safety
 ///
+
 /// The returned pointer is valid for the lifetime of the program as it
 /// references static type descriptors.
 ///
+
 /// # Panics
 ///
+
 /// Panics if ctype is StructValue - use the struct type cache methods instead.
 fn ctype_to_ffi_type(ctype: CTypeRuntime) -> *mut ffi_type {
     use std::ptr::addr_of_mut;

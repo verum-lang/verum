@@ -1,8 +1,10 @@
 //! Z3 Optimizer Module for MaxSAT/MinSAT
 //!
+
 //! This module provides comprehensive support for optimization problems using Z3's
 //! Optimize API, including soft constraints, weighted objectives, and Pareto optimization.
 //!
+
 //! Based on experiments/z3.rs documentation
 //! Used for optimizing refinement type constraints: finding minimal/maximal values
 //! satisfying predicates like `Int{> 0 && < 100}`, solving weighted soft constraint
@@ -176,6 +178,7 @@ pub struct OptimizationStats {
 
 /// Z3 optimizer wrapper
 ///
+
 /// Note: In z3 0.19.4, Context is thread-local and doesn't need to be stored.
 pub struct Z3Optimizer {
     /// Z3 optimize instance
@@ -200,13 +203,15 @@ impl Z3Optimizer {
         // call `set_params` twice (which is destructive — second
         // call replaces first).
         //
+
         // `method` maps to Z3's `:opt.priority` parameter:
-        //   Lexicographic → "lex"     (objectives ranked by add-order)
-        //   Pareto        → "pareto"  (find Pareto frontier across all)
-        //   Box           → "box"     (independent bounding boxes)
-        //   Independent   → "box"     (maps to Z3's box semantics —
-        //                              no separate Z3 priority)
+        //  Lexicographic → "lex" (objectives ranked by add-order)
+        //  Pareto → "pareto" (find Pareto frontier across all)
+        //  Box → "box" (independent bounding boxes)
+        //  Independent → "box" (maps to Z3's box semantics —
+        //  no separate Z3 priority)
         //
+
         // Closes the inert-defense pattern around
         // `OptimizerConfig.method`: pre-fix the field landed on
         // the optimizer but no code path consulted it, so callers
@@ -390,6 +395,7 @@ impl Z3Optimizer {
 
     /// Push scope for incremental solving.
     ///
+
     /// Honours `OptimizerConfig.incremental`: when disabled,
     /// scope manipulation is a no-op so callers that build the
     /// optimizer in non-incremental mode can't accidentally rely

@@ -4,12 +4,14 @@
 // Encoding / decoding of the "traceparent" and "tracestate" HTTP headers
 // per https://www.w3.org/TR/trace-context/
 //
+
 // traceparent = <version>-<trace-id>-<parent-id>-<flags>
-//   version   = "00"      (only version currently defined)
-//   trace-id  = 32 lowercase hex chars (16 bytes)
-//   parent-id = 16 lowercase hex chars (8 bytes)
-//   flags     = 2 lowercase hex chars  (1 byte)
+//  version = "00" (only version currently defined)
+//  trace-id = 32 lowercase hex chars (16 bytes)
+//  parent-id = 16 lowercase hex chars (8 bytes)
+//  flags = 2 lowercase hex chars (1 byte)
 //
+
 // tracestate = <key1>=<val1>,<key2>=<val2>,...
 // =============================================================================
 

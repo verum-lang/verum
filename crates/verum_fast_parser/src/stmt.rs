@@ -1,5 +1,6 @@
 //! Statement parser for Verum using hand-written recursive descent.
 //!
+
 //! This module implements parsing for all statement forms:
 //! - Let bindings: `let x = expr`, `let mut x: Type = expr`
 //! - Let-else: `let Some(x) = opt else { return }`
@@ -22,6 +23,7 @@ use crate::parser::{ParseResult, RecursiveParser};
 impl<'a> RecursiveParser<'a> {
     /// Parse a single statement.
     ///
+
     /// Statements include:
     /// - Let bindings (including let-else)
     /// - Expression statements
@@ -133,10 +135,11 @@ impl<'a> RecursiveParser<'a> {
             // Block-form control flow statements (for, while, loop).
             // These end at their closing brace and should NOT allow binary operators
             // to follow without explicit grouping. This prevents:
-            //   for i in 0..n { body }
-            //   *ptr = value;
+            //  for i in 0..n { body }
+            //  *ptr = value;
             // from being parsed as: (for_loop) * (ptr = value)
             //
+
             // Note: `if`, `match`, and `unsafe` are excluded because they return values and
             // are commonly used in expressions like: let x = if cond { a } else { b };
             // or: unsafe { func() } >= threshold
@@ -195,11 +198,14 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a block: `{ stmt1; stmt2; expr }`
     ///
+
     /// A block consists of zero or more statements followed by an optional
     /// trailing expression (no semicolon).
     ///
+
     /// Parse a block `{ ... }`.
     ///
+
     /// Recursion depth is checked to prevent stack overflow from
     /// deeply nested blocks like `{ { { { ... } } } }`.
     pub fn parse_block(&mut self) -> ParseResult<Block> {
@@ -266,9 +272,9 @@ impl<'a> RecursiveParser<'a> {
                     }
                     // Only consume optional trailing semicolon for block-form statements
                     // that don't inherently end with a semicolon:
-                    // - defer { }     - ends with }, optional trailing ;
-                    // - errdefer { }  - ends with }, optional trailing ;
-                    // - let-else { }  - ends with }, optional trailing ;
+                    // - defer { } - ends with }, optional trailing ;
+                    // - errdefer { } - ends with }, optional trailing ;
+                    // - let-else { } - ends with }, optional trailing ;
                     // - provide ... in { } - ends with }, optional trailing ;
                     // DO NOT consume for let/expr statements - they already handle their own semicolons
                     // and consuming here would hide double-semicolon errors (E048 for `;;`)
@@ -561,15 +567,18 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an errdefer statement: `errdefer expr;` or `errdefer { block }`
     ///
+
     /// Errdefer is similar to defer but only executes when the scope exits
     /// via an error path (e.g., when a function returns an error or panics).
     ///
+
     /// Grammar from verum.ebnf v2.8:
     /// ```text
     /// defer_stmt = 'defer' , defer_body | 'errdefer' , defer_body ;
     /// defer_body = expression , ';' | block_expr ;
     /// ```
     ///
+
     /// Examples:
     /// - `errdefer file.close();` - expression form
     /// - `errdefer { cleanup(); log_error(); }` - block form
@@ -629,6 +638,7 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a provide statement: `provide ContextName = expr;`
     /// or block-scoped provide: `provide ContextName = expr in { block }`
     ///
+
     /// Supports both simple context names and path-based contexts:
     /// - Simple: `provide Logger = logger_impl;`
     /// - Path-based: `provide FileSystem.Write = write_impl;`
@@ -636,6 +646,7 @@ impl<'a> RecursiveParser<'a> {
     /// - Block-scoped: `provide Database = db in { query_users() }`
     /// - Block-scoped with alias: `provide Database as backup = db in { query_users() }`
     ///
+
     /// Grammar (context provide with aliases and sub-context paths):
     /// ```text
     /// provide_stmt = 'provide' , context_path , [ 'as' , identifier ] , '=' , expression , ( ';' | 'in' , block_expr ) ;
@@ -644,7 +655,7 @@ impl<'a> RecursiveParser<'a> {
     fn parse_provide_stmt(&mut self) -> ParseResult<Stmt> {
         // Consume "provide" keyword. Supports:
         // - Single: `provide Ctx = value { block }`
-        // - Multi:  `provide A = x, B = y { block }` (desugars to nested)
+        // - Multi: `provide A = x, B = y { block }` (desugars to nested)
         // - With 'in': `provide Ctx = value in { block }`
         let start_token = self.stream.expect(TokenKind::Provide)?;
         let start_span = start_token.span;
@@ -768,8 +779,8 @@ impl<'a> RecursiveParser<'a> {
 
         // Parse optional alias: 'as' identifier
         // This enables multiple instances of the same context type:
-        //   provide Database as source = PostgresHandler::connect(source_url);
-        //   provide Database as target = PostgresHandler::connect(target_url);
+        //  provide Database as source = PostgresHandler::connect(source_url);
+        //  provide Database as target = PostgresHandler::connect(target_url);
         // Alias enables multiple instances of the same context type (e.g., `provide Database as source = ...`)
         let alias = if self.stream.check(&TokenKind::As) {
             self.stream.advance(); // consume 'as'
@@ -803,8 +814,9 @@ impl<'a> RecursiveParser<'a> {
         // The 'in' operator has binding power (6, 7), so using bp=7 prevents it from
         // being consumed as a binary operator, allowing us to detect the provide scope syntax.
         //
+
         // Use full expression parsing (not no_struct) to handle named struct literals:
-        //   provide Logger = ConsoleLogger {} in { ... }
+        //  provide Logger = ConsoleLogger {} in { ... }
         // If the next token after '=' is an identifier and the token after THAT is '{',
         // we need to allow struct literal parsing. But if there's no identifier before '{',
         // the '{' is a scope block.
@@ -893,7 +905,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Check for block-scoped provide:
         // - 'in' keyword followed by block: `provide Ctx = val in { ... }`
-        // - Direct block after value:       `provide Ctx = val { ... }`
+        // - Direct block after value: `provide Ctx = val { ... }`
         let has_scope_block = if self.stream.check(&TokenKind::In) {
             self.stream.advance(); // consume 'in'
             if self.stream.check(&TokenKind::Semicolon) || self.stream.at_end() {
@@ -1024,6 +1036,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if an expression is a "block-form" expression that ends with `}`.
     ///
+
     /// Block-form expressions naturally terminate and don't require semicolons
     /// even in non-tail position. This includes:
     /// - Block expressions: `{ ... }`
@@ -1075,10 +1088,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Look ahead to determine if this is a let-else statement.
     ///
+
     /// We need to distinguish:
     /// Check if the current `@name(...)` construct looks like a macro call expression
     /// rather than an attribute attached to a declaration.
     ///
+
     /// Rules:
     /// - If followed by `;` → macro call expression statement
     /// - If followed by declaration keyword (type, fn, let, etc.) → attribute
@@ -1174,11 +1189,13 @@ impl<'a> RecursiveParser<'a> {
     /// rather than an attribute. Used by `parse_attributes()` to stop parsing
     /// attributes when it encounters something like `@asm("lfence");`.
     ///
+
     /// An `@name(...)` is a meta-expression (not attribute) when:
     /// - Followed by `;` (expression statement)
     /// - Followed by `}` (trailing expression)
     /// - At end of input
     ///
+
     /// This prevents `@cfg(...) @asm(...);` from parsing @asm as an attribute.
     pub(crate) fn looks_like_meta_expression_not_attribute(&self) -> bool {
         // We're at @ token
@@ -1228,6 +1245,7 @@ impl<'a> RecursiveParser<'a> {
     /// - `let x = expr else { ... }` (let-else)
     /// - `let x = expr;` (regular let)
     ///
+
     /// This requires scanning ahead to find the `else` keyword after the initializer.
     fn looks_like_let_else(&self) -> bool {
         let saved_pos = self.stream.position();
@@ -1340,6 +1358,7 @@ impl<'a> RecursiveParser<'a> {
     // Adapter Methods for Sub-Parsers
     // ========================================================================
     //
+
     // These methods provide a clean interface for parsing expressions, types,
     // and patterns within statement contexts.
 
@@ -1364,6 +1383,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Advance stream past an expression.
     ///
+
     /// This is a heuristic approach - we scan forward until we hit a likely
     /// expression boundary (semicolon, closing delimiter, keyword, etc.)
     fn advance_past_expr(&mut self) {

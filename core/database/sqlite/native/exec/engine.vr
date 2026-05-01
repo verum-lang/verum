@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The catalogue-layer driver takes closures from the caller for:
-//   * prepare_fn : &Text -> Int64        // statement id, or -1 on error
-//   * step_fn    : Int64 -> StepOutcome
-//   * read_row_fn: Int64 -> ExecRow
-//   * finalize_fn: Int64 -> ()
+//  * prepare_fn : &Text -> Int64 // statement id, or -1 on error
+//  * step_fn : Int64 -> StepOutcome
+//  * read_row_fn: Int64 -> ExecRow
+//  * finalize_fn: Int64 -> ()
 //
-// and loops through each non-empty statement.  Aggregated outcome
+
+// and loops through each non-empty statement. Aggregated outcome
 // reflects the first terminal event (abort / error / success).
 // =============================================================================
 
@@ -79,7 +81,7 @@ public fn exec_statement(
     outcome
 }
 
-/// Drive a list of pre-split statements.  Stops at the first non-OK
+/// Drive a list of pre-split statements. Stops at the first non-OK
 /// outcome; never calls prepare on later statements.
 public fn exec_many(
     statements: &List<Text>,

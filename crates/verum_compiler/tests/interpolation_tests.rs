@@ -13,6 +13,7 @@
     unused_assignments
 )]
 //
+
 // Safe interpolation handlers: sql"...{expr}..." uses parameterized $1,$2 (prevents injection),
 // html"...{expr}..." auto-escapes content (prevents XSS), url"...{expr}..." URL-encodes params.
 // Desugars to meta-system calls that generate safe parameterized queries/templates.

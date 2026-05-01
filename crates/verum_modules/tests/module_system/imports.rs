@@ -1,8 +1,10 @@
 //! Import pattern tests.
 //!
+
 //! Tests various import patterns including glob imports, nested imports,
 //! aliasing, and import resolution.
 //!
+
 //! Tests glob imports (path.*), nested imports (path.{A, B}), renaming
 //! (path.X as Y), relative paths (self/super), name shadowing, and the
 //! full path resolution algorithm.

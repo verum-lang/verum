@@ -5,8 +5,10 @@
 // Dependencies: core, async/future, async/poll
 // =============================================================================
 //
+
 // This module provides selection combinators for async operations:
 //
+
 // - select: Wait for the first of multiple futures to complete
 // - select_all: Wait for any of a collection of futures
 // - race: Race two futures, cancel the loser
@@ -14,9 +16,11 @@
 // - join_all: Wait for a collection of futures
 // - timeout: Add timeout to a future
 //
+
 // These combinators enable structured concurrency patterns and efficient
 // multiplexing of async operations.
 //
+
 // =============================================================================
 
 module select;
@@ -33,6 +37,7 @@ mount time.{Duration, Instant};
 
 /// Result of a select operation between two futures.
 ///
+
 /// Indicates which future completed first and its result.
 public type Either<A, B> is
     | Left(A)
@@ -40,20 +45,24 @@ public type Either<A, B> is
 
 /// Select between two futures, returning when the first completes.
 ///
+
 /// The non-completing future is NOT cancelled automatically.
 /// Use `race` if you want automatic cancellation.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let res = select(
-///     async { fetch_from_cache().await },
-///     async { fetch_from_network().await }
+///  async { fetch_from_cache().await },
+///  async { fetch_from_network().await }
 /// ).await;
 ///
+
 /// match result {
-///     Either.Left(cached) => println("Got from cache"),
-///     Either.Right(network) => println("Got from network"),
+///  Either.Left(cached) => println("Got from cache"),
+///  Either.Right(network) => println("Got from network"),
 /// }
 /// ```
 public async fn select_either<A, B, FA: Future<Output>, FB: Future<Output>>(
@@ -108,16 +117,19 @@ implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for SelectPair<A,
 
 /// Race two futures, cancelling the loser.
 ///
+
 /// Unlike `select`, `race` will drop the losing future when the winner
 /// completes. This is useful when the losing future's result is not needed.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// // Race cache lookup against network fetch
 /// let data = race(
-///     async { cache.get(key).await },
-///     async { network.fetch(key).await }
+///  async { cache.get(key).await },
+///  async { network.fetch(key).await }
 /// ).await;
 /// ```
 public async fn race<T, FA: Future<Output>, FB: Future<Output>>(
@@ -136,6 +148,7 @@ public async fn race<T, FA: Future<Output>, FB: Future<Output>>(
 
 /// Errors raised by selection combinators.
 ///
+
 /// These map cases that previously panicked (empty input list, exhausted
 /// fallback chain) into typed error values so callers can handle them with
 /// `?` instead of crashing the task.
@@ -181,19 +194,23 @@ public type SelectAllResult<T> is {
 
 /// Select from a collection of futures, completing when any one finishes.
 ///
+
 /// Returns the result along with the index && remaining futures.
 /// Returns `Err(SelectError.EmptyInput)` when the input list is empty
 /// (instead of panicking, which the previous implementation did).
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let futures = List.from([
-///     fetch_server_1(),
-///     fetch_server_2(),
-///     fetch_server_3(),
+///  fetch_server_1(),
+///  fetch_server_2(),
+///  fetch_server_3(),
 /// ]);
 ///
+
 /// let res = select_all(futures).await?;
 /// println(f"Server {res.index} responded first");
 /// ```
@@ -244,12 +261,14 @@ implement<T, F: Future<Output>> Future for SelectAll<T, F> {
 
 /// Wait for both futures to complete, returning both results.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let (user, posts) = join(
-///     fetch_user(user_id),
-///     fetch_posts(user_id),
+///  fetch_user(user_id),
+///  fetch_posts(user_id),
 /// ).await;
 /// ```
 public async fn join<A, B, FA: Future<Output>, FB: Future<Output>>(
@@ -430,6 +449,7 @@ public async fn try_join3<A, B, C, E,
 /// Race a collection of futures — returns the first one to complete.
 /// Alias for `select_all` that drops the index and the remaining futures.
 ///
+
 /// Returns `Err(SelectError.EmptyInput)` when the input list is empty
 /// (propagated from `select_all`).
 public async fn race_all<T, F: Future<Output = T>>(
@@ -454,10 +474,13 @@ public async fn join_all_settled<T, F: Future<Output = T>>(
 
 /// Wait for all futures in a collection to complete.
 ///
+
 /// Returns results in the same order as the input futures.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let futures = urls.iter().map(|url| fetch(url)).collect();
 /// let ress = join_all(futures).await;
@@ -545,14 +568,17 @@ implement Eq for SelectTimeoutError {
 
 /// Add a timeout to a future.
 ///
+
 /// If the future doesn't complete within the timeout, returns SelectTimeoutError.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// match timeout(Duration.from_secs(5), slow_operation()).await {
-///     Ok(res) => println(f"Got: {result}"),
-///     Err(_) => println("Operation timed out"),
+///  Ok(res) => println(f"Got: {result}"),
+///  Err(_) => println("Operation timed out"),
 /// }
 /// ```
 public async fn timeout<T, F: Future<Output>>(
@@ -604,21 +630,25 @@ implement<T, F: Future<Output>> Future for SelectTimeout<T, F> {
 
 /// Try futures in order, returning the first successful result.
 ///
+
 /// Unlike `race`, this tries futures sequentially && returns on first success.
 ///
+
 /// Returns:
 /// - `Ok(value)` — first future that succeeded
 /// - `Err(LastError(e))` — every future errored; `e` is the last seen
-///   error (preserves the existing per-future error type `E`)
+///  error (preserves the existing per-future error type `E`)
 /// - `Err(EmptyInput)` — input list was empty (previously panicked)
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let res = try_first(List.from([
-///     || fetch_primary().await,
-///     || fetch_secondary().await,
-///     || fetch_fallback().await,
+///  || fetch_primary().await,
+///  || fetch_secondary().await,
+///  || fetch_fallback().await,
 /// ])).await?;
 /// ```
 public type TryFirstError<E> is
@@ -667,7 +697,7 @@ implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
                 // Exhaustiveness shim: Verum's checker can't prove
                 // that `Result<T, E>` only inhabits Ok / Err, so this
                 // arm is required even though it is provably dead by
-                // construction.  We yield Pending instead of panicking
+                // construction. We yield Pending instead of panicking
                 // — if the unreachable ever fires, the executor will
                 // simply re-poll, and the deadlock-detector surfaces
                 // any hang.
@@ -676,10 +706,10 @@ implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
         }
 
         // Loop exit: only reachable when `current ≥ len` AND the list
-        // is non-empty (the empty-list path returned earlier).  This
+        // is non-empty (the empty-list path returned earlier). This
         // happens after every future errored: the final iteration
         // returned `LastError(e)`, so we can never actually reach
-        // here.  Be defensive anyway with EmptyInput rather than a
+        // here. Be defensive anyway with EmptyInput rather than a
         // panic — a hostile mutator that cleared `futures` mid-poll
         // is the only way to land here.
         Poll.Ready(Err(TryFirstError.EmptyInput))
@@ -692,17 +722,20 @@ implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
 
 /// Yield control back to the executor.
 ///
+
 /// This allows other tasks to run before this task continues.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// for i in 0..1000000 {
-///     // Yield periodically to avoid starving other tasks
-///     if i % 1000 == 0 {
-///         yield_now().await;
-///     }
-///     process(i);
+///  // Yield periodically to avoid starving other tasks
+///  if i % 1000 == 0 {
+///  yield_now().await;
+///  }
+///  process(i);
 /// }
 /// ```
 public async fn yield_now() {
@@ -733,6 +766,7 @@ implement Future for SelectYieldNow {
 
 /// A future that never completes.
 ///
+
 /// Useful as a placeholder || for testing.
 public fn pending_forever<T>() -> NeverFuture<T> {
     NeverFuture { _marker: () }
@@ -757,8 +791,10 @@ implement<T> Future for NeverFuture<T> {
 
 /// Create a future that immediately returns a value.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let fut = ready(42);
 /// assert_eq(fut.await, 42);
@@ -775,7 +811,7 @@ implement<T> Future for SelectReadyFuture<T> {
     type Output = T;
 
     /// Polls return `Ready(v)` exactly once; subsequent polls return
-    /// `Pending` indefinitely (FusedFuture semantics).  This matches
+    /// `Pending` indefinitely (FusedFuture semantics). This matches
     /// the convention used by `core/async/future.rs`'s NeverFuture
     /// and avoids panicking on the documented contract violation
     /// "don't poll after Ready" — instead the contract violation

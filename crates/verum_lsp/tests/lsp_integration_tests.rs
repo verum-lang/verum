@@ -14,6 +14,7 @@
 )]
 // Integration tests for the Verum LSP server
 //
+
 // Tests the main LSP features end-to-end.
 
 use tower_lsp::lsp_types::*;

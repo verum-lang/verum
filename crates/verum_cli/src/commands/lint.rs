@@ -56,6 +56,7 @@ struct LintRule {
 
 /// Status of a lint rule in the catalogue.
 ///
+
 /// `Active` is the default — most rules don't appear in
 /// `DEPRECATED_RULES` and are treated as Active. Rules slated for
 /// removal flip to `Deprecated { since, replacement }`; references
@@ -80,8 +81,8 @@ pub enum LintRuleStatus {
 const DEPRECATED_RULES: &[(&'static str, LintRuleStatus)] = &[
     // Empty today — populated as renames land. Example:
     // ("missing-error-context", LintRuleStatus::Deprecated {
-    //     since: "0.7.0",
-    //     replacement: Some("error-context-required"),
+    //  since: "0.7.0",
+    //  replacement: Some("error-context-required"),
     // }),
 ];
 
@@ -125,6 +126,7 @@ pub enum LintCategory {
 /// Lint groups — opt-in rule families exposed via
 /// `extends = "verum::<name>"` in the manifest.
 ///
+
 /// Group membership is computed from the LintRules table on the
 /// fly so adding a rule to a group doesn't require a table-wide
 /// edit. The deliberate trade-off is that groups become slightly
@@ -321,8 +323,8 @@ const LINT_RULES: &[LintRule] = &[
         category: LintCategory::Style,
     },
     // ── AST-driven passes (Phase B.1+) — implementations live in
-    //    `commands/lint_engine.rs`. They appear in --list-rules,
-    //    --explain, --validate-config exactly like text-scan rules. ──
+    //  `commands/lint_engine.rs`. They appear in --list-rules,
+    //  --explain, --validate-config exactly like text-scan rules. ──
     LintRule {
         name: "redundant-refinement",
         level: LintLevel::Hint,
@@ -699,18 +701,21 @@ fn is_verum_file(path: &Path) -> bool {
 /// Returns set of disabled rule names.
 /// User-configurable lint settings loaded from verum.toml [lint] section.
 ///
+
 /// Supports:
 /// - `disable = "rule1, rule2"` — Disable specific rules
 /// - `deny = "rule1, rule2"` — Promote rules to errors (fail build)
 /// - `allow = "rule1, rule2"` — Demote rules to allowed (no output)
 /// - `warn = "rule1, rule2"` — Explicitly set rules to warning level
 ///
+
 /// Custom pattern-based rules in [lint.custom] section:
 /// ```toml
 /// [lint]
 /// disable = "todo-in-code"
 /// deny = "unsafe-ref-in-public"
 ///
+
 /// [[lint.custom]]
 /// name = "no-print-in-lib"
 /// pattern = "print("
@@ -718,6 +723,7 @@ fn is_verum_file(path: &Path) -> bool {
 /// level = "warning"
 /// paths = ["src/lib/"]
 ///
+
 /// [[lint.custom]]
 /// name = "no-unwrap-in-production"
 /// pattern = ".unwrap()"
@@ -776,6 +782,7 @@ impl LintConfig {
     /// genuinely "user didn't set this — use defaults" — `None` keeps
     /// rule code clean.
     ///
+
     /// Each rule documents its own `T` shape in
     /// `crates/verum_cli/src/commands/lint_engine.rs`.
     pub fn rule_config<T: serde::de::DeserializeOwned>(&self, rule: &str) -> Option<T> {
@@ -787,11 +794,12 @@ impl LintConfig {
     /// Used by the `--severity` filter and the issue-emission paths
     /// to resolve `(rule, path, default_level) → Option<Level>`.
     ///
+
     /// Precedence (already-known stack, most-specific wins):
-    ///   1. Per-file override matching `path`
-    ///   2. severity_map
-    ///   3. disabled / allowed / denied / warned lists
-    ///   4. default_level
+    ///  1. Per-file override matching `path`
+    ///  2. severity_map
+    ///  3. disabled / allowed / denied / warned lists
+    ///  4. default_level
     pub fn effective_level_for_file(
         &self,
         rule_name: &str,
@@ -828,10 +836,12 @@ impl LintConfig {
 /// Glob match for file paths. Supports leading `**/` and trailing
 /// `/**` (or `**`), plus `*` as a single-segment wildcard. Examples:
 ///
-///   "tests/**"          ↔ "tests/x.vr", "tests/a/b.vr"     ✓
-///   "core/intrinsics/*" ↔ "core/intrinsics/foo.vr"          ✓
-///   "**/*.generated.vr" ↔ "src/foo/bar.generated.vr"        ✓
+
+///  "tests/**" ↔ "tests/x.vr", "tests/a/b.vr" ✓
+///  "core/intrinsics/*" ↔ "core/intrinsics/foo.vr" ✓
+///  "**/*.generated.vr" ↔ "src/foo/bar.generated.vr" ✓
 ///
+
 /// Heuristic implementation (no full glob crate); good enough for
 /// the patterns documented in lint-configuration.md.
 fn glob_path_match(pat: &str, path: &str) -> bool {
@@ -884,28 +894,33 @@ fn glob_path_match(pat: &str, path: &str) -> bool {
 /// regex `pattern` field. Patterns match a single AST shape; multiple
 /// shapes produce one CustomLintRule each.
 ///
-///   [[lint.custom]]
-///   name = "no-unwrap-in-prod"
-///   message = "use `?` or `expect(\"why\")` instead of unwrap()"
-///   level = "warn"
-///   [lint.custom.ast_match]            # one of:
-///   kind = "method_call"
-///   method = "unwrap"                  # specific method name
+
+///  [[lint.custom]]
+///  name = "no-unwrap-in-prod"
+///  message = "use `?` or `expect(\"why\")` instead of unwrap()"
+///  level = "warn"
+///  [lint.custom.ast_match] # one of:
+///  kind = "method_call"
+///  method = "unwrap" # specific method name
 ///
-///   # OR
-///   [lint.custom.ast_match]
-///   kind = "call"
-///   path = "core.unsafe.from_raw"      # dotted path to the callee
+
+///  # OR
+///  [lint.custom.ast_match]
+///  kind = "call"
+///  path = "core.unsafe.from_raw" # dotted path to the callee
 ///
-///   # OR
-///   [lint.custom.ast_match]
-///   kind = "attribute"
-///   name = "deprecated"                # any item with @deprecated
+
+///  # OR
+///  [lint.custom.ast_match]
+///  kind = "attribute"
+///  name = "deprecated" # any item with @deprecated
 ///
-///   # OR
-///   [lint.custom.ast_match]
-///   kind = "unsafe_block"              # any `unsafe { ... }` block
+
+///  # OR
+///  [lint.custom.ast_match]
+///  kind = "unsafe_block" # any `unsafe { ... }` block
 ///
+
 /// Multiple rules are independent — each runs as a separate AST walk
 /// inside CustomAstRulesPass.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -968,11 +983,11 @@ impl Default for LintConfig {
 impl LintConfig {
     /// Get effective level for a rule, considering user overrides.
     /// Precedence (highest → lowest):
-    ///   1. `[lint.severity].<rule>` map
-    ///   2. `disabled` / `allowed` lists  → suppressed
-    ///   3. `denied` list                 → error
-    ///   4. `warned` list                 → warning
-    ///   5. `default_level` (built-in or preset-provided)
+    ///  1. `[lint.severity].<rule>` map
+    ///  2. `disabled` / `allowed` lists → suppressed
+    ///  3. `denied` list → error
+    ///  4. `warned` list → warning
+    ///  5. `default_level` (built-in or preset-provided)
     pub fn effective_level(&self, rule_name: &str, default_level: LintLevel) -> Option<LintLevel> {
         if let Some(level) = self.severity_map.get(rule_name).copied() {
             return if matches!(level, LintLevel::Off) {
@@ -1215,6 +1230,7 @@ impl LintPreset {
 /// `[lint]`) and `[[lint.custom]]` arrays remain supported via the
 /// same parser for backwards compatibility.
 ///
+
 /// `lint_root = true` means the parsed file IS the `[lint]` block
 /// directly (used for `.verum/lint.toml`).
 fn parse_lint_config_from_toml_v2(content: &str, config: &mut LintConfig, lint_root: bool) {
@@ -1890,6 +1906,7 @@ fn build_masked_views(
         // pure ASCII spaces, and in Code regions the original
         // bytes pass through unchanged.
         //
+
         // Earlier versions of this code attempted to preserve
         // continuation bytes verbatim when the leader was blanked
         // (to "minimise garble"), but that produces invalid UTF-8
@@ -2066,6 +2083,7 @@ fn has_refinement_token(s: &str) -> bool {
 /// Rule 2: MissingContextDecl
 /// Functions using `using [X]` where X is not declared as a context in scope.
 ///
+
 /// Runs over the masked code view so a `using [` mention inside
 /// a string literal or comment doesn't fire.
 fn check_missing_context_decl(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
@@ -2122,6 +2140,7 @@ fn check_missing_context_decl(path: &Path, info: &FileInfo, issues: &mut List<Li
 /// Rule 3: UnusedImport
 /// Mount statements where the imported name is never referenced in the file.
 ///
+
 /// Search runs over the per-line code mask, so a `mount foo.{bar}`
 /// followed only by `// bar is great` no longer counts as a use —
 /// the comment is masked out in `code_lines`.
@@ -2189,6 +2208,7 @@ fn contains_word(line: &str, word: &str) -> bool {
 /// Rule 4: UnnecessaryHeap
 /// Heap(x) where x is a small type (Int, Float, Bool) literal.
 ///
+
 /// Iterates the masked code view so `let s = "Heap(5)"` (string
 /// data) doesn't match.
 fn check_unnecessary_heap(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
@@ -2290,6 +2310,7 @@ fn find_matching_paren(s: &str) -> Option<usize> {
 /// Rule 5: MissingErrorContext
 /// `?` operator usage without `.with_context()` or `.map_err()`.
 ///
+
 /// Iterates the masked code view so a `?` inside a string literal
 /// or comment doesn't trip the rule.
 fn check_missing_error_context(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
@@ -2355,6 +2376,7 @@ fn check_missing_error_context(path: &Path, info: &FileInfo, issues: &mut List<L
 /// Rule 6: LargeCopy
 /// Function parameters taking large struct types by value (>4 fields).
 ///
+
 /// Reads the masked code view so a `fn …(` mention inside a doc
 /// comment doesn't get parsed as a real signature.
 fn check_large_copy(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
@@ -2452,6 +2474,7 @@ fn split_params(params: &str) -> Vec<&str> {
 /// Rule 7: UnusedResult
 /// Function calls returning Result/Maybe whose value is not bound or propagated.
 ///
+
 /// Iterates the masked code view; comments now disappear into
 /// blanks so the rule never reads a `// foo();` as a real call.
 fn check_unused_result(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
@@ -2570,6 +2593,7 @@ fn check_missing_cleanup(path: &Path, info: &FileInfo, issues: &mut List<LintIss
 /// Rule 9: DeprecatedSyntax
 /// Check for Rust-isms: struct, impl, !, Vec<T>, etc.
 ///
+
 /// Runs over the **code-only view** of each line ([`FileInfo::code_line`]),
 /// so substrings appearing inside string literals or comments do not
 /// fire. The column positions are preserved by replacing non-code
@@ -2799,6 +2823,7 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
 /// Rule 10: CbgrHotspot
 /// Tight loops containing reference dereferences that could use &checked.
 ///
+
 /// Walks the masked code view; brace tracking is exact because
 /// strings and comments contribute only spaces to the view.
 fn check_cbgr_hotspot(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
@@ -3243,6 +3268,7 @@ pub fn clean_cache() -> Result<()> {
 /// cache lives under it so a `cargo clean` (or `verum clean`) removes
 /// stale entries with the rest of the build artefacts.
 ///
+
 /// The cache is enabled by default; set `VERUM_LINT_NO_CACHE=1`
 /// (or pass `--no-cache` on the CLI, which exports the same var) to
 /// bypass it for this run.
@@ -3261,10 +3287,10 @@ fn build_lint_cache(cfg: &LintConfig) -> super::lint_cache::LintCache {
 fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
     for line_num in 0..info.lines.len() {
         // Three views of the same line:
-        //   raw   — original bytes (used for column-1 messaging on
-        //           pure-comment lines and for indentation queries),
-        //   code  — code-only (no comments, no strings),
-        //   cc    — code + comments (no strings) — todo-in-code.
+        //  raw — original bytes (used for column-1 messaging on
+        //  pure-comment lines and for indentation queries),
+        //  code — code-only (no comments, no strings),
+        //  cc — code + comments (no strings) — todo-in-code.
         let raw = &info.lines[line_num];
         let code = info.code_line(line_num);
         let cc = info.code_or_comment_line(line_num);
@@ -3486,6 +3512,7 @@ fn print_issue(issue: &LintIssue, deny_warnings: bool) {
 /// apply `effective_level` filtering (for tests we want to see every
 /// issue at its default level).
 ///
+
 /// Used by integration tests so per-rule fires/silent assertions
 /// don't depend on disk I/O. Production code paths still go through
 /// `lint_file` to keep the on-disk caching/paralleism story
@@ -3754,10 +3781,12 @@ pub fn list_groups() -> Result<()> {
 /// `https://verum-lang.dev/docs/reference/lint-rules#<rule>` and
 /// dispatches the platform-appropriate "open URL" command:
 ///
+
 /// - macOS: `open <url>`
 /// - Linux: `xdg-open <url>`
 /// - Windows: `cmd /c start "" <url>`
 ///
+
 /// Verifies the rule name first so unknown rules return a clean
 /// error rather than opening a 404 page.
 pub fn explain_rule_open(name: &str) -> Result<()> {
@@ -3899,7 +3928,7 @@ pub fn validate_config() -> Result<()> {
     let mut errors: Vec<String> = Vec::new();
 
     // 1. extends preset must be a known name OR a `verum::<group>`
-    //    handle. Both surfaces share the same load-time pipeline.
+    //  handle. Both surfaces share the same load-time pipeline.
     if let Some(p) = &cfg.extends {
         let is_preset =
             matches!(p.as_str(), "minimal" | "recommended" | "strict" | "relaxed");
@@ -4049,21 +4078,23 @@ impl LintOutputFormat {
 
 /// Render a single issue as one NDJSON line.
 ///
+
 /// `schema_version: 1` is the stable contract — every documented
 /// field below MUST be present on every line; new fields may be
 /// added in a backward-compatible fashion. A consumer parsing this
 /// stream can rely on:
 ///
+
 /// - `event`: always `"lint"` for issue lines.
 /// - `schema_version`: integer; bump = breaking change.
 /// - `rule`, `level`, `file`, `line`, `column`, `message`, `fixable`.
 /// - `suggestion`: present only when `fixable` is true.
 /// - `fix.edits`: present only when the rule has a structured
-///   replacement available (LSP-style TextEdit ranges). Each edit
-///   is `{start_line, start_column, end_line, end_column, new_text}`.
-///   Lines / columns are 1-indexed (matching the `line` / `column`
-///   fields). Adding this field is non-breaking — consumers that
-///   only know schema_version: 1 ignore unknown keys.
+///  replacement available (LSP-style TextEdit ranges). Each edit
+///  is `{start_line, start_column, end_line, end_column, new_text}`.
+///  Lines / columns are 1-indexed (matching the `line` / `column`
+///  fields). Adding this field is non-breaking — consumers that
+///  only know schema_version: 1 ignore unknown keys.
 pub fn format_issue_json(issue: &LintIssue) -> String {
     let level = match issue.level {
         LintLevel::Error => "error",
@@ -4127,6 +4158,7 @@ pub struct FixEdit {
 /// range at `(L, end_line+1, col=1)` extends "to the start of the
 /// next line", which is how full-line drops are encoded.
 ///
+
 /// Overlapping edits are rejected up front: the caller is
 /// responsible for routing the user request through a fixer that
 /// emits non-conflicting edits, or deduplicating before the call.
@@ -4245,6 +4277,7 @@ fn line_col_to_offset(
 /// offsets). The structure mirrors LSP's TextEdit so a CI fix-bot
 /// can apply edits directly without re-parsing.
 ///
+
 /// Today's fixes are line-based — most edits have
 /// `start_line == end_line`. The structured shape leaves room for
 /// future multi-line replacements without breaking the schema.
@@ -4712,12 +4745,14 @@ fn emit_tap(issues: &[LintIssue]) {
 /// CLI entry: `verum lint --new-only-since GIT_REF`. Reports only
 /// issues present in HEAD but absent from REF. Workflow:
 ///
+
 /// 1. Lint HEAD (the working tree) → set A.
 /// 2. `git worktree add` REF in a temp dir.
 /// 3. Lint that worktree → set B.
 /// 4. Report A − B (matched by `(rule, file, line, message_hash)`).
 /// 5. Clean up the worktree.
 ///
+
 /// Worktree-based so the user's index / staging area is never
 /// disturbed and a concurrent edit on the live tree can't change
 /// the result mid-run.
@@ -4914,6 +4949,7 @@ fn collect_issues_at(path: &Path) -> Result<Vec<LintIssue>> {
 /// per-file cache as one-shot runs, so untouched files cost ~nothing
 /// per iteration.
 ///
+
 /// The loop never returns an error to the caller — Ctrl-C is the
 /// signal to exit. Lint failures are printed and the watch resumes;
 /// build crashes never abort the watch.
@@ -5048,6 +5084,7 @@ pub fn run_extended(
 
 /// Resolved baseline mode for one run.
 ///
+
 /// The CLI surface has three knobs (`--baseline FILE`, `--no-baseline`,
 /// `--write-baseline`) that combine into one of these states.
 pub enum BaselineMode {
@@ -5209,12 +5246,13 @@ fn run_extended_inner(
     // result. For 10K-file corpora this drops time-to-first-byte
     // from "whole-corpus latency" to "single-file latency".
     //
+
     // Activates only when:
-    //   - format is Json (other formats need post-hoc structure
-    //     for summaries / annotations / SARIF runs / TAP plans),
-    //   - no baseline read (issues might be filtered later),
-    //   - no `--write-baseline` (snapshot needs the full set),
-    //   - no `--fix` (rewrites need to deduplicate per file).
+    //  - format is Json (other formats need post-hoc structure
+    //  for summaries / annotations / SARIF runs / TAP plans),
+    //  - no baseline read (issues might be filtered later),
+    //  - no `--write-baseline` (snapshot needs the full set),
+    //  - no `--fix` (rewrites need to deduplicate per file).
     // The streaming consumer must sort by (file, line, column)
     // itself — it's documented in the JSON schema contract.
     let streaming_eligible = matches!(format, LintOutputFormat::Json)

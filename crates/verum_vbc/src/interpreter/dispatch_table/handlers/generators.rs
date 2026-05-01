@@ -15,6 +15,7 @@ use super::bytecode_io::*;
 pub(in super::super) fn handle_generator_create(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     // Create generator: dst = gen_create(func_id, args...)
     //
+
     // Creates a new generator instance from a generator function (fn*).
     // The generator starts in Created state and can be iterated via GenNext.
     // Arguments are stored in the generator's initial register state for use when
@@ -44,6 +45,7 @@ pub(in super::super) fn handle_generator_create(state: &mut InterpreterState) ->
 pub(in super::super) fn handle_generator_yield(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     // Yield from generator: yield value
     //
+
     // This suspends the current generator and returns control to the caller
     // with the yielded value. The generator can be resumed later.
     let value_reg = read_reg(state)?;
@@ -102,6 +104,7 @@ pub(in super::super) fn handle_generator_yield(state: &mut InterpreterState) -> 
 pub(in super::super) fn handle_generator_next(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     // Get next value: dst = gen_next(generator)
     //
+
     // Resumes the generator and returns the next yielded value.
     // Returns Some(value) if yielded, None if completed.
     let dst = read_reg(state)?;
@@ -193,6 +196,7 @@ pub(in super::super) fn handle_generator_next(state: &mut InterpreterState) -> I
 pub(in super::super) fn handle_generator_has_next(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     // Check if generator has more: dst = gen_has_next(generator)
     //
+
     // Returns true if the generator can produce more values, false otherwise.
     let dst = read_reg(state)?;
     let gen_reg = read_reg(state)?;

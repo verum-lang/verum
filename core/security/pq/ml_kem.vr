@@ -6,13 +6,15 @@
 // security target. ML-KEM-768 is the recommended default (category 3,
 // ~192-bit classical security).
 //
+
 // Wire sizes (FIPS 203 §8):
 //
-// | Variant    | Public key | Secret key | Ciphertext | Shared secret |
+
+// | Variant | Public key | Secret key | Ciphertext | Shared secret |
 // |------------|-----------|-----------|-----------|---------------|
-// | ML-KEM-512 |       800 |      1632 |       768 |            32 |
-// | ML-KEM-768 |      1184 |      2400 |      1088 |            32 |
-// | ML-KEM-1024|      1568 |      3168 |      1568 |            32 |
+// | ML-KEM-512 | 800 | 1632 | 768 | 32 |
+// | ML-KEM-768 | 1184 | 2400 | 1088 | 32 |
+// | ML-KEM-1024| 1568 | 3168 | 1568 | 32 |
 // =============================================================================
 
 module core.security.pq.ml_kem;
@@ -84,7 +86,7 @@ public type PqError is
     | BackendUnavailable
     | DecapsulationFailure;
 
-// Display + Debug + Eq for PqError.  DecapsulationFailure
+// Display + Debug + Eq for PqError. DecapsulationFailure
 // Display surfaces no detail — implicit-rejection KEMs
 // (FIPS 203 §6.3) require constant-time, value-blind
 // failure to prevent oracle attacks.

@@ -1,5 +1,6 @@
 //! Backend trait for device-agnostic tensor operations.
 //!
+
 //! This module defines the `Backend` trait that abstracts compute backends
 //! (CPU, CUDA, Metal, etc.) for tensor operations.
 
@@ -14,6 +15,7 @@ use super::device::DeviceId;
 
 /// A wrapper around NonNull<u8> that is Send + Sync.
 ///
+
 /// # Safety
 /// The user must ensure that the pointer is valid for the lifetime of this wrapper
 /// and that no data races occur when accessing the pointed-to data.
@@ -43,6 +45,7 @@ use crate::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 
 /// Backend abstraction for device-specific operations.
 ///
+
 /// Implements compute operations for a specific device type (CPU, GPU).
 /// Each backend handles memory allocation, data transfer, and compute kernels.
 pub trait Backend: Send + Sync {
@@ -143,6 +146,7 @@ impl Default for ComputeCapabilities {
 
 /// Power-of-two memory pool for reduced fragmentation.
 ///
+
 /// Maintains free lists for different allocation sizes, allowing
 /// quick reuse of recently freed allocations.
 pub struct MemoryPool {
@@ -590,7 +594,7 @@ mod tests {
 
         // Allocate — `NonNull` already guarantees non-null at the
         // type level, so checking `.is_null()` after `.unwrap()` is
-        // tautological (clippy `useless_ptr_null_checks`).  The
+        // tautological (clippy `useless_ptr_null_checks`). The
         // unwrap above already enforces "allocation succeeded".
         let ptr = pool.allocate(1024, &backend).unwrap();
 

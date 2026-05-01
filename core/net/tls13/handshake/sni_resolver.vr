@@ -3,36 +3,43 @@
 // =============================================================================
 // Layer: 5 (Network — TLS 1.3 core)
 // Dependencies: core, core.collections, core.net.tls13.handshake.extension,
-//               core.net.tls13.handshake.server_sm (CertSigner, protocol-only)
+//  core.net.tls13.handshake.server_sm (CertSigner, protocol-only)
 // =============================================================================
 //
+
 // RFC 6066 §3 — Server Name Indication. Shared-host deployments
 // terminate TLS for many authorities on one socket; SNI is the
 // client hint that tells the server which identity to present.
 //
+
 // This module ships two pieces:
 //
-//   * `ServerNameResolver` protocol — the extension point the
-//     server SM calls when it parses the `server_name` extension
-//     off an incoming ClientHello. Returns the (cert_chain, signer)
-//     pair the handshake should continue with.
+
+//  * `ServerNameResolver` protocol — the extension point the
+//  server SM calls when it parses the `server_name` extension
+//  off an incoming ClientHello. Returns the (cert_chain, signer)
+//  pair the handshake should continue with.
 //
-//   * `ExactMatchResolver` — a reference impl backed by a Map from
-//     hostname to (chain, signer). Supports one leftmost wildcard
-//     per RFC 6125 §6.4.3 (e.g. `*.example.com`) so a `*.example.com`
-//     entry matches `api.example.com` without a separate entry per
-//     subdomain.
+
+//  * `ExactMatchResolver` — a reference impl backed by a Map from
+//  hostname to (chain, signer). Supports one leftmost wildcard
+//  per RFC 6125 §6.4.3 (e.g. `*.example.com`) so a `*.example.com`
+//  entry matches `api.example.com` without a separate entry per
+//  subdomain.
 //
+
 // # Design
 //
-//   * Resolver is pure — no I/O. Caller preloads the Map at
-//     startup; dynamic cert reload rebuilds the Map and swaps it.
-//   * Signer is carried as `Heap<dyn CertSigner>` so each identity
-//     can use a different signing backend (HSM, workload identity,
-//     in-process key, etc.).
-//   * Resolution order: exact match first, then wildcard. A
-//     `*.example.com` entry never matches `example.com` itself.
+
+//  * Resolver is pure — no I/O. Caller preloads the Map at
+//  startup; dynamic cert reload rebuilds the Map and swaps it.
+//  * Signer is carried as `Heap<dyn CertSigner>` so each identity
+//  can use a different signing backend (HSM, workload identity,
+//  in-process key, etc.).
+//  * Resolution order: exact match first, then wildcard. A
+//  `*.example.com` entry never matches `example.com` itself.
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.sni_resolver;

@@ -6,29 +6,32 @@ module core.database.sqlite.native.l5_sql.codegen;
 // Layer: 5
 // Spec: sqlite-native.md §14
 // Status: see internal/website/docs/stdlib/database-sqlite-architecture.md
-//         for the L5 capability matrix and the testing-strategy table.
+//  for the L5 capability matrix and the testing-strategy table.
 //
+
 // Consumes a planner `PlanNode` and emits a `VdbeProgram`. The v1
 // subset handles:
 //
-//   * PnValues            — emits `Integer`/`Real`/`String8`/`Null`
-//                           opcodes per constant + `ResultRow`
-//   * PnProject           — expression evaluation into contiguous
-//                           registers followed by `ResultRow`
-//   * PnFilter            — `If`-jump pattern around the pipeline
-//                           body
-//   * PnLimit             — counter register + `Goto` back-edge
-//   * PnTableScan         — `OpenRead` + `Rewind` + loop
-//   * PnInsert(Values)    — for every row, lower constants + `Insert`
-//                           (cursor_id = 0 on table root — real root
-//                           resolution lands with the schema cache)
-//   * PnDelete            — `OpenWrite` + `Rewind` + loop(Delete +
-//                           Next)
-//   * PnTransaction       — Begin/Commit/Rollback/Savepoint/Release
-//                           via the corresponding opcodes
-//   * PnPragma            — currently emits a Halt(0) + comment;
-//                           pragma registry lookup lands in L6
+
+//  * PnValues — emits `Integer`/`Real`/`String8`/`Null`
+//  opcodes per constant + `ResultRow`
+//  * PnProject — expression evaluation into contiguous
+//  registers followed by `ResultRow`
+//  * PnFilter — `If`-jump pattern around the pipeline
+//  body
+//  * PnLimit — counter register + `Goto` back-edge
+//  * PnTableScan — `OpenRead` + `Rewind` + loop
+//  * PnInsert(Values) — for every row, lower constants + `Insert`
+//  (cursor_id = 0 on table root — real root
+//  resolution lands with the schema cache)
+//  * PnDelete — `OpenWrite` + `Rewind` + loop(Delete +
+//  Next)
+//  * PnTransaction — Begin/Commit/Rollback/Savepoint/Release
+//  via the corresponding opcodes
+//  * PnPragma — currently emits a Halt(0) + comment;
+//  pragma registry lookup lands in L6
 //
+
 // Unsupported nodes produce `Err(CodegenError.Unsupported)` so the
 // caller knows the compile pipeline hit a gap rather than silently
 // emitting a broken program.
@@ -142,6 +145,7 @@ public type CgState is {
     // / `emit_except` to materialise both sides of a compound SELECT
     // without inventing a new "subplan" emit path.
     //
+
     // Set to -1 in the default state; the compound emitters save and
     // restore around each side's `emit_plan` recursion.
     capture_cid: Int,
@@ -383,14 +387,14 @@ fn emit_table_scan(
 // -----------------------------------------------------------------------------
 // TableScan + Project — the common SELECT ... FROM t path.
 // Emits:
-//     OpenRead(cid, ?, n_cols)
-//     Rewind(cid, end)
-//   loop_top:
-//     <for each projected column: emit_expr into reg>
-//     ResultRow(start, n_project_cols)
-//     Next(cid, loop_top)
-//   end:
-//     Close(cid)
+//  OpenRead(cid, ?, n_cols)
+//  Rewind(cid, end)
+//  loop_top:
+//  <for each projected column: emit_expr into reg>
+//  ResultRow(start, n_project_cols)
+//  Next(cid, loop_top)
+//  end:
+//  Close(cid)
 // -----------------------------------------------------------------------------
 
 fn emit_scan_with_project(
@@ -497,15 +501,17 @@ fn emit_union_all(
 // -----------------------------------------------------------------------------
 // UNION / INTERSECT / EXCEPT — compound SELECTs with set semantics.
 //
+
 // All three share the same materialise-then-walk skeleton:
-//   1. Open ephemeral cursor sid.
-//   2. Set st.capture_cid = sid so each child's `emit_result_row` writes
-//      into the ephemeral instead of `ResultRow`.
-//   3. emit_plan(child) — child's pipeline runs normally; capture mode
-//      reroutes the row out.
-//   4. Restore capture_cid, sort + dedup the ephemeral, walk it,
-//      emitting `ResultRow` for each cell.
+//  1. Open ephemeral cursor sid.
+//  2. Set st.capture_cid = sid so each child's `emit_result_row` writes
+//  into the ephemeral instead of `ResultRow`.
+//  3. emit_plan(child) — child's pipeline runs normally; capture mode
+//  reroutes the row out.
+//  4. Restore capture_cid, sort + dedup the ephemeral, walk it,
+//  emitting `ResultRow` for each cell.
 //
+
 // UNION uses a single ephemeral that both sides write into, then a
 // single sort+dedup. INTERSECT / EXCEPT use two ephemerals (one per
 // side), sort+dedup both, then merge-walk producing rows that satisfy
@@ -513,7 +519,7 @@ fn emit_union_all(
 // -----------------------------------------------------------------------------
 
 // Materialise a child plan into an ephemeral cursor by toggling
-// capture mode around `emit_plan`.  Restores the prior capture_cid on
+// capture mode around `emit_plan`. Restores the prior capture_cid on
 // success or failure so nested compound SELECTs nest correctly.
 fn emit_subplan_to_capture(
     st: &mut CgState,
@@ -528,9 +534,10 @@ fn emit_subplan_to_capture(
 }
 
 // Walk an ephemeral cursor `sid` (sorted+deduped) emitting one
-// `ResultRow` per row.  Used by all three compound emitters as the
+// `ResultRow` per row. Used by all three compound emitters as the
 // shared "drain to user" tail.
 //
+
 // Honours the active LIMIT scope so that an outer PnLimit wrapping
 // the compound result correctly bounds emission.
 fn emit_ephemeral_drain(st: &mut CgState, sid: Int, n_proj: Int) {
@@ -581,13 +588,14 @@ fn emit_union(
     Ok(())
 }
 
-// Removed: emit_b_membership_scan / _v2 prototypes.  The inlined
+// Removed: emit_b_membership_scan / _v2 prototypes. The inlined
 // inner-scan logic in emit_intersect / emit_except subsumes both.
 //
+
 // Shared scaffold: materialise both sides of a set-binary compound
 // op into separate ephemerals (A from L, B from R); A is sorted+
 // deduped (the output is always distinct), B is left as-is (it's
-// only used for membership tests).  Returns (a_cid, b_cid).
+// only used for membership tests). Returns (a_cid, b_cid).
 fn emit_set_compound_materialize(
     st: &mut CgState,
     lhs: &PlanNode,
@@ -676,8 +684,8 @@ fn emit_intersect(
     // Pre-fix: these two Goto(0) instructions were emitted into `_` and
     // never patched, so when A was exhausted mid-scan (or after the
     // match-emit Next fell through) control jumped to PC 0 — restarting
-    // the entire program.  INTERSECT could produce duplicate result
-    // rows or hang.  Now both jumps target end_label cleanly.
+    // the entire program. INTERSECT could produce duplicate result
+    // rows or hang. Now both jumps target end_label cleanly.
     st.program.replace(after_a_exhaust_jmp, Goto(end_label));
     st.program.replace(after_match_emit_jmp, Goto(end_label));
     let mut p: Int = 0;
@@ -710,7 +718,7 @@ fn emit_except(
     };
 
     // Outer loop A: for each row a, scan B; SKIP a if a found in B,
-    // otherwise EMIT a.  (Inverse of INTERSECT.)
+    // otherwise EMIT a. (Inverse of INTERSECT.)
     let outer_rewind = st.program.emit(Rewind(a_cid, 0));
     let outer_top = st.program.instruction_count();
 
@@ -730,7 +738,7 @@ fn emit_except(
     let match_goto = st.program.emit(Goto(0));
     let next_b_label = st.program.instruction_count();
     let _ = st.program.emit(Next(b_cid, inner_top));
-    // Fall-through = no match found in B.  For EXCEPT: emit a.
+    // Fall-through = no match found in B. For EXCEPT: emit a.
     let no_match_label = st.program.instruction_count();
     let dst = st.regs.alloc_n(n_proj);
     let mut k: Int = 0;
@@ -777,24 +785,25 @@ fn emit_except(
 // -----------------------------------------------------------------------------
 // INNER / CROSS JOIN — nested-loop codegen
 //
-//   OpenRead(lcid, 0, ln); OpenRead(rcid, 0, rn);
-//   Rewind(lcid, end)
+
+//  OpenRead(lcid, 0, ln); OpenRead(rcid, 0, rn);
+//  Rewind(lcid, end)
 // outer_loop:
-//   Rewind(rcid, outer_next)
+//  Rewind(rcid, outer_next)
 // inner_loop:
-//   [optional IfNot(on_pred, inner_next)]
-//   [optional IfNot(where_pred, inner_next)]
-//   eval projection cols into dst..
-//   emit_limit_body_prefix
-//   ResultRow(dst, n_proj)
-//   emit_limit_body_counter
+//  [optional IfNot(on_pred, inner_next)]
+//  [optional IfNot(where_pred, inner_next)]
+//  eval projection cols into dst..
+//  emit_limit_body_prefix
+//  ResultRow(dst, n_proj)
+//  emit_limit_body_counter
 // inner_next:
-//   Next(rcid, inner_loop)
+//  Next(rcid, inner_loop)
 // outer_next:
-//   Next(lcid, outer_loop)
+//  Next(lcid, outer_loop)
 // end:
-//   emit_limit_finalize_patches(st, end)
-//   Close(rcid); Close(lcid)
+//  emit_limit_finalize_patches(st, end)
+//  Close(rcid); Close(lcid)
 // -----------------------------------------------------------------------------
 
 fn emit_join_with_project(
@@ -927,10 +936,12 @@ fn emit_join_with_project(
 // -----------------------------------------------------------------------------
 // Aggregates (COUNT / SUM / MIN / MAX)
 //
+
 // Only activated when EVERY projection column is an aggregate call;
 // mixed GROUP BY-style projections fall through to the non-aggregate
 // paths (pending task #68).
 //
+
 // Layout: one accumulator register per aggregate, seeded before the
 // scan. Per-row AggStep(kind, n_args, first_arg_reg, acc_reg). After
 // the scan, AggFinal + one ResultRow holding the accumulators.
@@ -1120,11 +1131,13 @@ fn emit_aggregate_scan(
 // -----------------------------------------------------------------------------
 // GROUP BY — sort-then-group aggregation
 //
+
 // Row layout in the ephemeral buffer:
-//   [group_key_0, ..., group_key_{n_keys-1}, agg_arg_0, ..., agg_arg_{m-1}]
+//  [group_key_0, ..., group_key_{n_keys-1}, agg_arg_0, ..., agg_arg_{m-1}]
 // where m is the number of aggregate calls that take an argument. COUNT(*)
 // takes no arg and so doesn't consume a buffer cell.
 //
+
 // After SortRowStore by the leading n_keys cells, we walk the buffer
 // detecting group boundaries via a Ne chain over (cur_key, prev_key).
 // On boundary we flush the previous group: AggFinal + project + emit.
@@ -1190,7 +1203,7 @@ fn emit_having_expr(
             match op {
                 UNot => {
                     // Logical NOT — `dst = 1 - src` since HAVING children
-                    // produce boolean integers in {0, 1}.  Pre-fix this
+                    // produce boolean integers in {0, 1}. Pre-fix this
                     // was an SCopy(src, dst) — a no-op masquerading as
                     // negation, so `HAVING NOT (count(*) > 5)` returned
                     // the same rows as `HAVING count(*) > 5`.
@@ -1236,7 +1249,7 @@ fn emit_having_expr(
                 BShr    => { let _ = st.program.emit(ShiftRight(ra, rb, dst)); Ok(()) }
                 BAnd | BOr => {
                     // Logical AND/OR: result is the truth value of both
-                    // operands ANDed/ORed.  Both ra/rb are already 0 or 1
+                    // operands ANDed/ORed. Both ra/rb are already 0 or 1
                     // (HAVING children produce boolean integers), so use
                     // bitwise AND/OR which yield the correct logical
                     // result for those inputs.
@@ -1277,7 +1290,7 @@ fn emit_having_expr(
                 }
                 BConcat => {
                     // SQL `||` string concat — codegen emits ScalarFn id 12
-                    // taking 2 args at consecutive registers.  Same shape
+                    // taking 2 args at consecutive registers. Same shape
                     // as the regular emit_binary BConcat path.
                     let _ = st.program.emit(ScalarFn(12, 2, ra, dst));
                     Ok(())
@@ -1874,6 +1887,7 @@ fn emit_distinct_pipeline(
 // -----------------------------------------------------------------------------
 // ORDER BY (materialise + in-place sort)
 //
+
 // Strategy: open an ephemeral cursor `sid` with `n_keys + n_proj`
 // columns. Scan the source table, and for each row evaluate the sort
 // keys AND the projection columns into a contiguous register window,
@@ -1904,8 +1918,8 @@ fn emit_sort(
         return emit_plan(st, child);
     }
     // Supported shapes:
-    //   PnProject(PnTableScan, cols)          — SELECT … FROM t ORDER BY …
-    //   PnProject(PnFilter(PnTableScan), cols) — SELECT … FROM t WHERE … ORDER BY …
+    //  PnProject(PnTableScan, cols) — SELECT … FROM t ORDER BY …
+    //  PnProject(PnFilter(PnTableScan), cols) — SELECT … FROM t WHERE … ORDER BY …
     match child {
         PnProject(ref grand, ref proj_cols) => {
             match grand {
@@ -2062,29 +2076,31 @@ fn emit_filter(
 // -----------------------------------------------------------------------------
 // Limit
 //
+
 // Strategy: set up a counter register, delegate to the child emitter via
 // `st.limit = Some(ctx)`. The inner emitters consult `st.limit`, and
 // after each ResultRow they emit:
-//     Add(count, one, count)
-//     Ge(count, limit, <patch>)     // patched to end-of-scan
+//  Add(count, one, count)
+//  Ge(count, limit, <patch>) // patched to end-of-scan
 // On finalization (emit_limit_finalize_patches), every Ge-patch is
 // rewritten to point at the scan's Close (or, for Values, one past the
 // last ResultRow) so that the cursor is still closed cleanly on early
 // exit.
 //
-// OFFSET: handled inline alongside LIMIT.  Constant integer expressions
+
+// OFFSET: handled inline alongside LIMIT. Constant integer expressions
 // (literals + unary +/-/~ + the four arithmetic ops) fold at compile
 // time via eval_int_const; parameter-bound OFFSET (`OFFSET ?`) still
 // requires the EVar / EPositional codegen path which depends on the
 // Variable VDBE opcode.
 // -----------------------------------------------------------------------------
 
-/// Evaluate a constant integer expression at compile time.  Recognises
+/// Evaluate a constant integer expression at compile time. Recognises
 /// integer literals, unary `+` / `-` / `~`, and the four common
-/// arithmetic operators on integer-folded sub-expressions.  Used by
+/// arithmetic operators on integer-folded sub-expressions. Used by
 /// LIMIT / OFFSET lowering — real SQL pagination commonly writes
 /// `LIMIT -1`, `LIMIT 50 + 50`, `OFFSET (page-1) * page_size` with
-/// constant folds.  Anything that requires a parameter binding or a
+/// constant folds. Anything that requires a parameter binding or a
 /// column reference returns `None` so the caller can route to a
 /// dynamic-evaluation path.
 fn eval_int_const(e: &Expr) -> Maybe<Int> {
@@ -2140,7 +2156,7 @@ fn emit_limit(
         return Ok(());
     }
     // For LIMIT < 0 (unlimited) without OFFSET, skip the limit machinery
-    // entirely.  With OFFSET, use a sentinel limit large enough that the
+    // entirely. With OFFSET, use a sentinel limit large enough that the
     // count register will never reach it within a single statement
     // (2^62 ~= 4.6 × 10^18 rows).
     let lim_eff: Int = if lim_val < 0 {
@@ -2198,9 +2214,9 @@ fn emit_limit(
 }
 
 /// Emit the OFFSET skip-check right before a ResultRow.
-///   Ge(skip, off, body_start)   // if skip >= offset, body emits
-///   Add(skip, one, skip)        // otherwise bump skip and bail
-///   Goto(next_iter)             // patched by body_counter
+///  Ge(skip, off, body_start) // if skip >= offset, body emits
+///  Add(skip, one, skip) // otherwise bump skip and bail
+///  Goto(next_iter) // patched by body_counter
 /// Returns the Goto patch index (or -1 when no OFFSET is active).
 fn emit_limit_body_prefix(st: &mut CgState) -> Int {
     if st.limit_reg < 0 { return -1; }
@@ -2338,18 +2354,19 @@ fn emit_delete(
 // -----------------------------------------------------------------------------
 // UPDATE
 //
-//   Transaction(1)
-//   OpenWrite(cid, root=1, n_cols)
-//   Rewind(cid, end)
+
+//  Transaction(1)
+//  OpenWrite(cid, root=1, n_cols)
+//  Rewind(cid, end)
 // loop_top:
-//   [optional] pred_reg = emit_expr(pred)   IfNot pred_reg → skip to Next
-//   for k in 0..n_cols:  Column(cid, k, data_start + k)   // snapshot row
-//   for asgn in assignments:                               // overwrite cells
-//       emit_expr(asgn.value, data_start + asgn.col_idx)
-//   UpdateRow(cid, data_start)
-//   Next(cid, loop_top)
+//  [optional] pred_reg = emit_expr(pred) IfNot pred_reg → skip to Next
+//  for k in 0..n_cols: Column(cid, k, data_start + k) // snapshot row
+//  for asgn in assignments: // overwrite cells
+//  emit_expr(asgn.value, data_start + asgn.col_idx)
+//  UpdateRow(cid, data_start)
+//  Next(cid, loop_top)
 // end:
-//   Close(cid)
+//  Close(cid)
 // -----------------------------------------------------------------------------
 
 fn emit_update(
@@ -2492,14 +2509,14 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
         EBinary(op, ref a, ref b) => emit_binary(st, op, a, b, dst),
         EVar(ref name) => {
             // Named parameter `:name` / `@name` / `$name` — parser
-            // strips the sigil before reaching codegen.  Intern the
+            // strips the sigil before reaching codegen. Intern the
             // name into the constant pool, emit `VariableNamed`.
             let idx = st.program.constants.add(KText(name.clone()));
             let _ = st.program.emit(VariableNamed(dst, idx));
             Ok(())
         }
         EPositional(n) => {
-            // Positional parameter `?N` (1-based per SQLite).  L4
+            // Positional parameter `?N` (1-based per SQLite). L4
             // interpreter reads slot `n` from `ParamBindings.positional`.
             let _ = st.program.emit(Variable(dst, n));
             Ok(())
@@ -2871,20 +2888,22 @@ fn emit_unary(
     }
     match op {
         UNot => {
-            // SQL `NOT x`: 0 → 1; anything-else → 0.  Lower via IfNot:
+            // SQL `NOT x`: 0 → 1; anything-else → 0. Lower via IfNot:
             //
-            //   IfNot(src, SET_TRUE)    # if src is 0, jump to set_true
-            //   Integer(0, dst)         # else dst = 0
-            //   Goto(AFTER)
-            //   SET_TRUE:
-            //     Integer(1, dst)
-            //   AFTER:
+
+            //  IfNot(src, SET_TRUE) # if src is 0, jump to set_true
+            //  Integer(0, dst) # else dst = 0
+            //  Goto(AFTER)
+            //  SET_TRUE:
+            //  Integer(1, dst)
+            //  AFTER:
             //
+
             // Pre-fix the body emitted Integer(1, dst) + Goto(0) +
             // Integer(0, dst) with NO IfNot guard — Goto(0) restarted
             // execution at the program start, dst was unconditionally
-            // 1.  `WHERE NOT x` produced wrong results across the
-            // board.  Same dishonest-API class as the HAVING UNot fix
+            // 1. `WHERE NOT x` produced wrong results across the
+            // board. Same dishonest-API class as the HAVING UNot fix
             // in 098b426b but in the main expression-codegen path.
             let if_not_jmp = st.program.emit(IfNot(src, 0));
             let _ = st.program.emit(Integer(0, dst));
@@ -3000,21 +3019,23 @@ fn emit_binary(
             Ok(())
         }
         BIs | BIsNot => {
-            // NULL-safe equality.  `x IS y` is true iff (a==b) treating
-            // NULL as equal to NULL.  Build:
+            // NULL-safe equality. `x IS y` is true iff (a==b) treating
+            // NULL as equal to NULL. Build:
             //
-            //   Integer(0, dst)
-            //   IfNull(ra) -> A_NULL
-            //   IfNull(rb) -> AFTER          # a non-null, b null → 0
-            //   Eq(ra, rb) -> SET_TRUE       # both non-null and equal
-            //   Goto(AFTER)
-            //   A_NULL:
-            //     IfNull(rb) -> SET_TRUE     # both null → 1
-            //     Goto(AFTER)
-            //   SET_TRUE:
-            //     Integer(1, dst)
-            //   AFTER:
+
+            //  Integer(0, dst)
+            //  IfNull(ra) -> A_NULL
+            //  IfNull(rb) -> AFTER # a non-null, b null → 0
+            //  Eq(ra, rb) -> SET_TRUE # both non-null and equal
+            //  Goto(AFTER)
+            //  A_NULL:
+            //  IfNull(rb) -> SET_TRUE # both null → 1
+            //  Goto(AFTER)
+            //  SET_TRUE:
+            //  Integer(1, dst)
+            //  AFTER:
             //
+
             // `x IS NOT y` is the bitwise inverse via `XOR 1`.
             let _ = st.program.emit(Integer(0, dst));
             let a_null_jmp = st.program.emit(IfNull(ra, 0));    // patched

@@ -1,63 +1,77 @@
 //! Type-Level Annotations for Error Handling and Optimization
 //!
+
 //! Advanced type features: existential types and type-level computation
 //!
+
 //! This module implements two key annotations:
 //! - @must_handle: Critical errors that must be explicitly handled
 //! - @cold: Optimization hint for rarely-executed code paths
 //!
+
 //! # @must_handle Annotation
 //!
+
 //! Some error types represent critical failures that should never be silently ignored.
 //! The `@must_handle` annotation ensures that any Result<T, E> where E is marked
 //! with `@must_handle` must be explicitly handled before being dropped.
 //!
+
 //! ## Example
 //!
+
 //! ```verum
 //! @must_handle
 //! type CriticalError is
-//!     | DatabaseConnectionLost
-//!     | SecurityViolation
-//!     | DataCorruption
-//!     | OutOfMemory;
+//!  | DatabaseConnectionLost
+//!  | SecurityViolation
+//!  | DataCorruption
+//!  | OutOfMemory;
 //!
+
 //! fn connect_database() -> Result<Connection, CriticalError> { ... }
 //!
+
 //! fn caller() {
-//!     let conn = connect_database(); // ERROR: must handle CriticalError
-//!     // Must use: match, ?, or explicit pattern matching
+//!  let conn = connect_database(); // ERROR: must handle CriticalError
+//!  // Must use: match, ?, or explicit pattern matching
 //! }
 //!
+
 //! fn caller_correct() {
-//!     match connect_database() {
-//!         Ok(conn) => { /* use conn */ },
-//!         Err(e) => { /* handle error */ },
-//!     }
+//!  match connect_database() {
+//!  Ok(conn) => { /* use conn */ },
+//!  Err(e) => { /* handle error */ },
+//!  }
 //! }
 //! ```
 //!
+
 //! # @cold Annotation
 //!
+
 //! Marks functions or code paths that are rarely executed, allowing the optimizer
 //! to deprioritize them in favor of hot paths.
 //!
+
 //! ## Example
 //!
+
 //! ```verum
 //! @cold
 //! fn handle_parse_error(contents: &str) -> Error {
-//!     log_error("Invalid config format");
-//!     send_telemetry("config_parse_error");
-//!     Error.InvalidFormat
+//!  log_error("Invalid config format");
+//!  send_telemetry("config_parse_error");
+//!  Error.InvalidFormat
 //! }
 //!
+
 //! fn parse_config(path: Path) -> Result<Config, Error> {
-//!     let contents = read_file(path)?;
-//!     if is_valid_format(contents) {
-//!         return Ok(parse_contents(contents));  // Hot path optimized
-//!     }
-//!     return Err(handle_parse_error(contents));  // Cold path deprioritized
+//!  let contents = read_file(path)?;
+//!  if is_valid_format(contents) {
+//!  return Ok(parse_contents(contents)); // Hot path optimized
+//!  }
+//!  return Err(handle_parse_error(contents)); // Cold path deprioritized
 //! }
 //! ```
 
@@ -144,6 +158,7 @@ impl ColdFunctionRegistry {
 
     /// Get optimization hint for code generation
     ///
+
     /// Returns true if the function should be deprioritized in optimization.
     pub fn get_optimization_hint(&self, function_name: &str) -> OptimizationHint {
         if self.is_cold(function_name) {
@@ -195,6 +210,7 @@ impl AnnotationRegistry {
 
     /// Check if we're about to drop a Result with @must_handle error type
     ///
+
     /// This should be called when:
     /// - A let binding doesn't use the Result
     /// - An expression statement evaluates to a Result

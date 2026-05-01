@@ -2,6 +2,7 @@
 // Baez–Dolan + Gordon–Power–Street — higher-coherence framework axioms
 // =============================================================================
 //
+
 // Source: R. Gordon, A. J. Power, R. Street, "Coherence for
 // tricategories", Memoirs AMS 117 (1995). J. Baez, J. Dolan,
 // "Higher-dimensional algebra and topological quantum field theory"
@@ -9,6 +10,7 @@
 // theories" (2009), arXiv:0905.0465, develops the Baez–Dolan
 // cobordism hypothesis.
 //
+
 // Postulates the canonical coherence theorems for 2-, 3-, and higher
 // n-category theories that make explicit proof-theoretic work
 // feasible without chasing every pentagon / octahedron by hand.

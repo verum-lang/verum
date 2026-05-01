@@ -1,6 +1,7 @@
 //! Rule deprecation framework — verifies the public surface is
 //! present and the lookup helpers behave correctly.
 //!
+
 //! The framework today ships with an EMPTY DEPRECATED_RULES list
 //! — no rules are actually deprecated. These tests assert the
 //! plumbing works (lookup returns Active for every existing rule,

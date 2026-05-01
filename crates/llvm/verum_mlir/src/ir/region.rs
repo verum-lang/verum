@@ -71,8 +71,10 @@ pub struct RegionRef<'c, 'a> {
 impl RegionRef<'_, '_> {
     /// Creates a region from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirRegion) -> Self {
         Self {
@@ -83,8 +85,10 @@ impl RegionRef<'_, '_> {
 
     /// Creates an optional region from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_option_raw(raw: MlirRegion) -> Option<Self> {
         if raw.ptr.is_null() {

@@ -1,22 +1,25 @@
 //! Cubical cofibration calculus — interval subsumption + face-formula algebra
 //! (M-VVA-FU Sub-2.4-cubical, V1 deferred per VVA spec L579).
 //!
+
 //! Pre-this-module the kernel's cubical rules (`HComp`, `Transp`,
 //! `Glue` at `infer.rs:431-510`) treated the face formula `φ` as
 //! "well-typed but not interval-subsumption-checked" — see the
 //! `infer.rs:422-424` deferral comment. This module ships the
 //! decidable cofibration-formula algebra:
 //!
+
 //! * **Carrier:** `FaceFormula` — a finite distributive-lattice
-//!   element over generators `(i = 0)` / `(i = 1)` for interval
-//!   variables `i`.
+//!  element over generators `(i = 0)` / `(i = 1)` for interval
+//!  variables `i`.
 //! * **Operations:** ∧ (and), ∨ (or), ⊥ (false / never), ⊤ (true /
-//!   always).
+//!  always).
 //! * **Relations:** `(i = 0) ∧ (i = 1) = ⊥` (each variable is at most
-//!   one endpoint), de Morgan, distributivity.
+//!  one endpoint), de Morgan, distributivity.
 //! * **Subsumption:** decidable `φ ≤ ψ` via DNF normalisation +
-//!   per-clause containment.
+//!  per-clause containment.
 //!
+
 //! The CCHM cubical-set semantics requires HComp / Transp / Glue to
 //! satisfy *cofibration coherence*: the wall family must be defined
 //! exactly on `φ`, and the result's restriction to `φ` must agree
@@ -24,11 +27,12 @@
 //! post-Sub-2.4 the kernel rejects walls whose support does not
 //! match φ's coverage (interval subsumption).
 //!
+
 //! References:
-//!   * Cohen, Coquand, Huber, Mörtberg (CCHM), "Cubical Type Theory:
-//!     a constructive interpretation of the univalence axiom" (2015).
-//!   * Angiuli, Brunerie, Coquand, Hou (Favonia), Harper, Licata,
-//!     "Cartesian Cubical Type Theory" (2017).
+//!  * Cohen, Coquand, Huber, Mörtberg (CCHM), "Cubical Type Theory:
+//!  a constructive interpretation of the univalence axiom" (2015).
+//!  * Angiuli, Brunerie, Coquand, Hou (Favonia), Harper, Licata,
+//!  "Cartesian Cubical Type Theory" (2017).
 
 use std::collections::BTreeSet;
 
@@ -66,7 +70,7 @@ impl FaceLit {
 /// The empty clause represents `⊤` (no constraints, always-true).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Clause {
-    /// Conjunction of face literals.  Empty set ≡ `⊤`.
+    /// Conjunction of face literals. Empty set ≡ `⊤`.
     pub lits: BTreeSet<FaceLit>,
 }
 
@@ -117,10 +121,11 @@ impl Clause {
 /// of clauses. Empty disjunction = `⊥` (never-true); single empty
 /// clause = `⊤` (always-true).
 ///
+
 /// Invariant: no clause subsumes another (canonical / minimal DNF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaceFormula {
-    /// Disjunction of conjunctive clauses.  Canonical DNF — no
+    /// Disjunction of conjunctive clauses. Canonical DNF — no
     /// clause subsumes another.
     pub clauses: Vec<Clause>,
 }
@@ -210,11 +215,13 @@ impl FaceFormula {
 
     /// **Subsumption decision: `self ⇒ other`.**
     ///
+
     /// In DNF, `self ⇒ other` iff every clause of `self` is contained
     /// in (i.e., implies) some clause of `other`. Each clause
     /// containment is itself decidable via literal-set inclusion (a
     /// clause with FEWER literals is more general).
     ///
+
     /// For HComp / Transp / Glue cofibration coherence:
     /// `walls.support ⇒ φ` means the wall family covers exactly the
     /// face φ requires — interval-subsumption verified.

@@ -1,17 +1,20 @@
 //! Error Context Protocol Implementation
 //!
+
 //! The Error Context Protocol provides a standardized, truly zero-cost mechanism for
 //! adding rich contextual information to errors as they propagate. On the success path,
 //! context operations compile to no-ops (zero allocations, zero closure instantiation).
 //! On the error path, context chains capture operational state at each call stack layer,
 //! transforming opaque errors into actionable diagnostics.
 //!
+
 //! Key guarantees:
 //! - SUCCESS PATH: absolutely zero overhead (no allocations, no string formatting)
 //! - ERROR PATH: minimal overhead (allocate only on actual errors)
 //! - with_context(|| f"...") closures are completely eliminated by dead code elimination on success
 //! - Integrates with '?' operator, async/await, and context handlers
 //!
+
 //! This module provides the complete Error Context Protocol implementation with:
 //! - Zero-cost context on success path
 //! - Full stack trace preservation
@@ -20,22 +23,27 @@
 //! - Multiple display formats
 //! - Backtrace capture (controlled by VERUM_BACKTRACE env var)
 //!
+
 //! # Performance Guarantees
 //!
+
 //! - **Success Path**: Absolutely zero overhead - no allocations, no closures
 //! - **Error Path**: Minimal overhead - only allocate on actual errors
 //! - **Backtrace**: Off by default, controlled by VERUM_BACKTRACE env var
 //!
+
 //! # Example Usage
 //!
+
 //! ```rust,ignore
 //! use verum_diagnostics::context_protocol::*;
 //!
+
 //! fn load_config(path: &str) -> Result<Config, ErrorWithContext<std::io::Error>> {
-//!     std::fs::read_to_string(path)
-//!         .context("Failed to read config file")?;
-//!     // ... parsing logic
-//!     Ok(Config::default())
+//!  std::fs::read_to_string(path)
+//!  .context("Failed to read config file")?;
+//!  // ... parsing logic
+//!  Ok(Config::default())
 //! }
 //! ```
 
@@ -49,6 +57,7 @@ use backtrace::Backtrace as StdBacktrace;
 
 /// Enhanced error with full context chain
 ///
+
 /// This type wraps any error with rich contextual information including:
 /// - Custom context messages
 /// - Source location tracking
@@ -56,8 +65,10 @@ use backtrace::Backtrace as StdBacktrace;
 /// - Optional backtrace (when VERUM_BACKTRACE=1)
 /// - Arbitrary metadata
 ///
+
 /// # Performance
 ///
+
 /// - Zero cost on success path (context only added on error)
 /// - Lazy evaluation of expensive context via closures
 /// - Backtrace capture only when explicitly enabled
@@ -123,6 +134,7 @@ pub enum ContextValue {
 
 /// Backtrace capture and formatting
 ///
+
 /// Backtrace capture is controlled by VERUM_BACKTRACE environment variable:
 /// - VERUM_BACKTRACE=0 or unset: No backtrace (default)
 /// - VERUM_BACKTRACE=1: Basic backtrace
@@ -176,6 +188,7 @@ impl SourceLocation {
 
     /// Get the caller's source location
     ///
+
     /// This uses std::panic::Location to capture the caller's location.
     /// Note: This requires the caller to use #[track_caller]
     #[track_caller]
@@ -293,15 +306,18 @@ impl<E: fmt::Debug> fmt::Debug for ErrorWithContext<E> {
 
 /// Extension trait for adding context to Results
 ///
+
 /// This trait provides ergonomic methods for adding rich contextual information
 /// to error values with zero cost on the success path.
 pub trait ResultContext<T, E> {
     /// Add static context to error
     ///
+
     /// # Performance
     /// - Success path: 0 overhead (message not evaluated)
     /// - Error path: 1 string allocation
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let result = read_file(path).context("Failed to read config file")?;
@@ -311,17 +327,20 @@ pub trait ResultContext<T, E> {
 
     /// Add lazy context via closure (true zero-cost abstraction)
     ///
+
     /// The closure is ONLY called on error - zero overhead on success path.
     /// This is the preferred method for expensive string formatting.
     ///
+
     /// # Performance
     /// - Success path: 0 overhead (closure never instantiated or called)
     /// - Error path: Closure execution + 1 allocation
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let result = query_db(sql)
-    ///     .with_context(|| format!("Query failed: {}", sql))?;
+    ///  .with_context(|| format!("Query failed: {}", sql))?;
     /// ```
     #[track_caller]
     fn with_context<C, F>(self, f: F) -> Result<T, ErrorWithContext<E>>
@@ -331,17 +350,20 @@ pub trait ResultContext<T, E> {
 
     /// Add location context
     ///
+
     /// Explicitly set the source location (useful when #[track_caller] isn't available)
     fn at(self, file: &str, line: u32, column: u32) -> Result<T, ErrorWithContext<E>>;
 
     /// Add operation context
     ///
+
     /// Add a context frame describing the operation being performed
     #[track_caller]
     fn operation(self, op: &str) -> Result<T, ErrorWithContext<E>>;
 
     /// Attach metadata
     ///
+
     /// Add arbitrary metadata to the error context
     fn meta<K, V>(self, key: K, value: V) -> Result<T, ErrorWithContext<E>>
     where
@@ -599,6 +621,7 @@ impl<E: fmt::Display> DisplayError for ErrorWithContext<E> {
 impl Backtrace {
     /// Capture backtrace if enabled via VERUM_BACKTRACE environment variable
     ///
+
     /// Default: No backtrace capture (VERUM_BACKTRACE=0 or unset)
     /// Enable: VERUM_BACKTRACE=1 (basic backtrace)
     /// Full: VERUM_BACKTRACE=full (full backtrace with inlined frames)
@@ -786,6 +809,7 @@ impl From<bool> for ContextValue {
 
 /// Convenient macro for adding context
 ///
+
 /// # Example
 /// ```rust,ignore
 /// let result = read_file(path);
@@ -800,6 +824,7 @@ macro_rules! context {
 
 /// Macro for try with context
 ///
+
 /// # Example
 /// ```rust,ignore
 /// let content = try_context!(read_file(path), "Failed to read config file");
@@ -822,6 +847,7 @@ macro_rules! try_context {
 
 /// Convert a ContextValue to its JSON string representation.
 ///
+
 /// This function recursively serializes all ContextValue variants:
 /// - Text: Escaped JSON string
 /// - Int: JSON number
@@ -878,6 +904,7 @@ fn context_value_to_json(value: &ContextValue) -> Text {
 
 /// Escape a string for JSON output.
 ///
+
 /// Handles all special characters that need escaping in JSON strings:
 /// - Backslash (`\`) -> `\\`
 /// - Double quote (`"`) -> `\"`
@@ -940,6 +967,7 @@ pub mod verum_error_integration {
 
     /// Convert ErrorWithContext to verum_error::VerumError
     ///
+
     /// This preserves the context chain by building it into the error message
     pub fn to_verum_error<E: fmt::Display>(err: ErrorWithContext<E>) -> verum_error::VerumError {
         let full_message = err.display_full();

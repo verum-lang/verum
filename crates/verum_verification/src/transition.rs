@@ -1,14 +1,17 @@
 //! Gradual Transition Between Verification Levels
 //!
+
 //! Implements the gradual transition system that allows code to smoothly
 //! migrate from runtime checking to compile-time verification.
 //!
+
 //! Key features:
 //! - Automated transition recommendation based on code stability
 //! - Migration path planning (Runtime -> Static -> Proof)
 //! - Cost-benefit analysis for transitions
 //! - Safety guarantees during transitions
 //!
+
 //! The transition system enables seamless migration between verification levels:
 //! start with @verify(runtime) for rapid prototyping, gradually add @verify(static)
 //! for performance-critical code, then use @verify(proof) for critical safety
@@ -187,6 +190,7 @@ impl TransitionStep {
 
 /// Analyzer for gradual verification transitions
 ///
+
 /// Analyzes code to recommend when and how to transition between
 /// verification levels, based on:
 /// - Code stability (test coverage, change frequency)
@@ -443,6 +447,7 @@ impl TransitionAnalyzer {
 
 /// Code metrics for transition analysis
 ///
+
 /// Captures code stability, complexity, and quality indicators used to recommend
 /// verification level transitions (runtime -> static -> proof).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

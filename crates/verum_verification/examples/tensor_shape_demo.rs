@@ -1,8 +1,10 @@
 //! Demonstration of Tensor Shape Verification
 //!
+
 //! This example shows how to use the tensor shape verification system
 //! to verify tensor operations at compile time.
 //!
+
 //! Run with: cargo run --example tensor_shape_demo
 
 use verum_common::{List, Maybe};

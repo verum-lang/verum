@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // States:
-//   CpIdle          — no write txn is committing
-//   CpPhaseOne      — journal being flushed
-//   CpPhaseTwo      — main DB being flushed
-//   CpDone          — commit succeeded
-//   CpRollback(tag) — commit aborted; caller must rollback
+//  CpIdle — no write txn is committing
+//  CpPhaseOne — journal being flushed
+//  CpPhaseTwo — main DB being flushed
+//  CpDone — commit succeeded
+//  CpRollback(tag) — commit aborted; caller must rollback
 // =============================================================================
 
 module core.database.sqlite.native.commit_phasetwo.phase;

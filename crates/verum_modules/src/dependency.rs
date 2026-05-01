@@ -1,10 +1,12 @@
 //! Module dependency graph and topological sorting.
 //!
+
 //! Manages module dependencies and determines compilation order.
 //! Circular type dependencies (via references) are allowed, but circular
 //! value dependencies (constants depending on each other) cause compile errors.
 //! Function call cycles are allowed (resolved at runtime).
 //!
+
 //! The compiler uses topological sorting for compilation order:
 //! 1. Build dependency graph from import statements
 //! 2. Detect cycles in value dependencies
@@ -46,6 +48,7 @@ impl DependencyNode {
 
 /// Module dependency graph.
 ///
+
 /// Tracks dependencies between modules and provides topological sorting
 /// for compilation order.
 #[derive(Debug)]
@@ -136,8 +139,10 @@ impl DependencyGraph {
 
     /// Get topological order for compilation.
     ///
+
     /// Returns modules in dependency order (dependencies before dependents).
     ///
+
     /// Returns modules sorted so dependencies come before dependents.
     /// Fails with a CircularDependency error if value-level cycles exist.
     pub fn topological_order(&self) -> ModuleResult<List<ModuleId>> {
@@ -233,6 +238,7 @@ impl DependencyGraph {
 
     /// Convert a cycle of module IDs to their paths.
     ///
+
     /// Used for generating informative error messages with cycle-breaking suggestions.
     pub fn cycle_to_paths(&self, cycle: &List<ModuleId>) -> List<ModulePath> {
         cycle
@@ -266,28 +272,35 @@ impl DependencyGraph {
 
     /// Find independent groups of modules that can be loaded/compiled in parallel.
     ///
+
     /// Returns modules grouped by their depth in the dependency graph.
     /// Modules at the same depth have no dependencies on each other and can
     /// be processed in parallel.
     ///
+
     /// # Algorithm
     ///
+
     /// Uses a level-based approach where:
     /// - Level 0: Modules with no dependencies (leaves)
     /// - Level N: Modules whose dependencies are all at level < N
     ///
+
     /// # Example
     ///
+
     /// ```text
     /// A → B → C
-    ///  ↘   ↗
-    ///    D
+    ///  ↘ ↗
+    ///  D
     ///
-    /// Level 0: [C]        (no dependencies)
-    /// Level 1: [B, D]     (depend only on C)
-    /// Level 2: [A]        (depends on B, D)
+
+    /// Level 0: [C] (no dependencies)
+    /// Level 1: [B, D] (depend only on C)
+    /// Level 2: [A] (depends on B, D)
     /// ```
     ///
+
     /// Uses a level-based approach: Level 0 = modules with no dependencies (leaves),
     /// Level N = modules whose dependencies are all at level < N. Modules at
     /// the same level can be loaded/compiled in parallel.
@@ -334,6 +347,7 @@ impl DependencyGraph {
 
     /// Get modules that have no dependencies (can be loaded first).
     ///
+
     /// These are the leaf modules in the dependency tree.
     pub fn root_modules(&self) -> List<ModuleId> {
         self.all_modules()
@@ -343,6 +357,7 @@ impl DependencyGraph {
 
     /// Get the in-degree (number of dependencies) for each module.
     ///
+
     /// Useful for parallel scheduling algorithms.
     pub fn in_degrees(&self) -> HashMap<ModuleId, usize> {
         let mut degrees = HashMap::new();
@@ -365,9 +380,11 @@ impl Default for DependencyGraph {
 
 /// Compilation tier achieved for a module.
 ///
+
 /// Verum uses a VBC-first architecture where all code passes through VBC
 /// (Verum Bytecode) generation, then optionally progresses to higher tiers.
 ///
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum CompilationTier {
     /// Source parsed but not yet compiled to VBC
@@ -405,10 +422,12 @@ impl CompilationTier {
 
 /// Backend-specific compilation state for dual-path architecture.
 ///
+
 /// VBC can be compiled via two paths:
 /// - CPU path: VBC → LLVM IR → native
 /// - GPU path: VBC → MLIR → GPU kernels
 ///
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct BackendState {
     /// CPU backend state (VBC → LLVM IR)
@@ -443,12 +462,14 @@ impl BackendState {
 
 /// Module state for incremental compilation.
 ///
+
 /// Tracks the VBC-first compilation pipeline state for a module:
 /// 1. Source content hash (for detecting source changes)
 /// 2. VBC hash (for detecting VBC-level changes)
 /// 3. Compilation tier achieved
 /// 4. Backend-specific state (CPU/GPU)
 ///
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleState {
     /// Content hash of the source file
@@ -515,6 +536,7 @@ impl ModuleState {
 
     /// Check if VBC needs generation.
     ///
+
     /// Returns true if VBC bytecode hasn't been generated yet.
     /// Note: When source changes, `mark_dirty()` resets tier to Parsed,
     /// so this will return true automatically.
@@ -524,6 +546,7 @@ impl ModuleState {
 
     /// Check if native code needs generation to reach the target tier.
     ///
+
     /// Returns true if current tier is below the target tier.
     /// Note: When source changes, `mark_dirty()` resets tier to Parsed,
     /// so this will return true automatically for any target tier.
@@ -534,25 +557,31 @@ impl ModuleState {
 
 /// Incremental compilation graph with change tracking.
 ///
+
 /// Extends DependencyGraph with state tracking for incremental compilation.
 /// When a module changes, all dependent modules are invalidated and need
 /// recompilation.
 ///
+
 /// # Invalidation Strategy
 ///
+
 /// When module A changes:
 /// 1. Mark A as dirty
 /// 2. Find all transitive dependents of A (modules that import A, directly or transitively)
 /// 3. Mark all dependents as dirty
 /// 4. Return the list of modules that need recompilation in topological order
 ///
+
 /// # Example
 ///
+
 /// ```text
 /// A -> B -> C
-///  \       ^
-///   -> D --+
+///  \ ^
+///  -> D --+
 ///
+
 /// If B changes: B, C, D need recompilation
 /// If A changes: A, B, C, D need recompilation
 /// ```
@@ -618,6 +647,7 @@ impl IncrementalGraph {
 
     /// Check if a module's content has changed.
     ///
+
     /// Compares the stored hash with the new hash.
     pub fn has_content_changed(&self, id: ModuleId, new_hash: u64) -> bool {
         match self.states.get(&id) {
@@ -628,6 +658,7 @@ impl IncrementalGraph {
 
     /// Update a module's content hash and mark it dirty if changed.
     ///
+
     /// Returns true if the module was marked dirty (content changed).
     pub fn update_content(&mut self, id: ModuleId, new_hash: u64) -> bool {
         if let Some(state) = self.states.get_mut(&id) {
@@ -642,9 +673,11 @@ impl IncrementalGraph {
 
     /// Invalidate a module and all its dependents.
     ///
+
     /// This marks the module and all modules that transitively depend on it
     /// as needing recompilation.
     ///
+
     /// Returns the list of invalidated module IDs.
     pub fn invalidate(&mut self, id: ModuleId) -> List<ModuleId> {
         let mut invalidated = List::new();
@@ -669,6 +702,7 @@ impl IncrementalGraph {
 
     /// Get all modules that transitively depend on the given module.
     ///
+
     /// This returns modules that need to be recompiled when the given
     /// module changes.
     pub fn transitive_dependents_of(&self, id: ModuleId) -> Set<ModuleId> {
@@ -690,6 +724,7 @@ impl IncrementalGraph {
 
     /// Get modules that need recompilation in topological order.
     ///
+
     /// This returns dirty modules ordered so that dependencies are
     /// compiled before dependents.
     pub fn dirty_modules_in_order(&self) -> ModuleResult<List<ModuleId>> {
@@ -771,6 +806,7 @@ impl Default for IncrementalGraph {
 
 /// Compute a fast hash of source content for change detection.
 ///
+
 /// Uses Blake3 for consistent hashing across the compiler pipeline.
 /// Blake3 provides:
 /// - Cryptographic security guarantees
@@ -1130,11 +1166,11 @@ mod incremental_tests {
     #[test]
     fn test_independent_groups_diamond() {
         // Diamond pattern:
-        //   A
+        //  A
         //  / \
-        // B   C
+        // B C
         //  \ /
-        //   D
+        //  D
         // A depends on B and C, both B and C depend on D
         let mut graph = DependencyGraph::new();
 

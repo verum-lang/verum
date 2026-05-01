@@ -1,22 +1,28 @@
 //! # Industrial-Grade Intrinsic Registry
 //!
+
 //! This module defines the complete intrinsic registry for Verum, mapping intrinsic
 //! names to their optimal implementation strategies across the entire execution stack:
 //!
+
 //! - **VBC Interpreter**: Direct dispatch to specialized handlers (~5-20 cycles)
 //! - **JIT Compilation**: Inline VBC sequences for hotspot compilation
 //! - **MLIR Lowering**: Zero-overhead LLVM IR generation
 //! - **AOT Compilation**: Native instruction mapping
 //!
+
 //! ## Design Principles
 //!
+
 //! 1. **Complete Coverage**: All ~150+ intrinsics from core/sys/intrinsics.vr
 //! 2. **Optimal Dispatch**: Category-based lookup with O(1) hash access
 //! 3. **Zero Overhead**: Direct VBC opcode mapping where possible
 //! 4. **LLVM Transparency**: All operations visible to LLVM optimization passes
 //!
+
 //! ## Intrinsic Categories
 //!
+
 //! | Category | Count | Primary Opcode Range | Example |
 //! |----------|-------|---------------------|---------|
 //! | Arithmetic | 20+ | 0x10-0x2F | add_i64, mul_overflow |
@@ -38,6 +44,7 @@ use crate::instruction::{
 
 /// Global intrinsic registry singleton.
 ///
+
 /// Thread-safe lazy initialization ensures the registry is built exactly once.
 pub static INTRINSIC_REGISTRY: LazyLock<IntrinsicRegistry> =
     LazyLock::new(IntrinsicRegistry::new);
@@ -148,6 +155,7 @@ pub enum IntrinsicHint {
     /// (sandboxed scripts, capability-attenuated subroutines) get
     /// a typed refusal instead of silent execution.
     ///
+
     /// Coverage rule (enforced by
     /// `tests::test_syscall_intrinsics_require_permission`): every
     /// `IntrinsicCategory::Syscall` entry MUST carry this hint —
@@ -187,8 +195,10 @@ pub enum CodegenStrategy {
     /// Maps to MathExtended opcode (0x29) with a sub-opcode.
     /// Used for transcendental and special math functions.
     ///
+
     /// Zero-cost dispatch: ~2ns interpreter, 0ns AOT (direct LLVM intrinsic).
     ///
+
     /// # Sub-opcode Ranges
     /// - 0x00-0x0F: Trigonometric F64 (sin, cos, tan, asin, acos, atan, atan2)
     /// - 0x10-0x17: Trigonometric F32
@@ -253,7 +263,7 @@ pub enum InlineSequenceId {
     Memset,
     /// secure_zero: volatile memset(0) that survives optimisation —
     /// the cryptographic-zeroise primitive used to wipe key material
-    /// before storage leaves scope.  See
+    /// before storage leaves scope. See
     /// `internal/specs/tls-quic-security-audit.md` §2 Action #2.
     SecureZero,
     /// memcmp: compare with early exit
@@ -1125,17 +1135,21 @@ impl IntrinsicRegistry {
 
     /// Looks up a generic intrinsic by base name and type suffix.
     ///
+
     /// This method supports the generic intrinsic declarations in core/sys/intrinsics.vr.
     /// When calling a generic intrinsic like `add<T>(a, b)`, the compiler monomorphizes
     /// and calls this method with the base name ("add") and type suffix ("i64" for Int).
     ///
+
     /// # Arguments
     /// * `base_name` - The generic intrinsic name (e.g., "add", "checked_add")
     /// * `type_suffix` - The type suffix (e.g., "i64", "u64", "f64", "i32", "u32")
     ///
+
     /// # Returns
     /// The specific intrinsic if found, or None.
     ///
+
     /// # Examples
     /// ```
     /// use verum_vbc::intrinsics::registry::IntrinsicRegistry;
@@ -1157,12 +1171,15 @@ impl IntrinsicRegistry {
 
     /// Resolves a generic intrinsic name to its type-specific name.
     ///
+
     /// This method returns the full intrinsic name that should be used in codegen.
     ///
+
     /// # Arguments
     /// * `base_name` - The generic intrinsic name (e.g., "add")
     /// * `type_suffix` - The type suffix (e.g., "i64" for Int)
     ///
+
     /// # Returns
     /// The resolved intrinsic name, or None if not found.
     pub fn resolve_generic_name(&self, base_name: &str, type_suffix: &str) -> Option<&'static str> {
@@ -1237,7 +1254,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         // grows a volatile-memset surface (`llvm.intr.memset` carries
         // an `is_volatile` attribute on the LLVM dialect side, but
         // the upper MLIR types we emit don't expose it yet) we'll
-        // route through that path.  For now, the AOT (LLVM) path is
+        // route through that path. For now, the AOT (LLVM) path is
         // the security-critical one — GPU codegen never sees secret
         // bytes.
         mlir_op: Some("llvm.intr.memset"),
@@ -2352,10 +2369,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // -----------------------------------------------------------------------
     // 64-bit signed atomics (#100, task #24)
     //
+
     // Closes the asymmetry where signed 64-bit code had to
     // round through `_u64` with `as UInt64` cast — the
     // bit-pattern survived but the static type information
-    // was lost at every atomic operation.  Same opcodes as
+    // was lost at every atomic operation. Same opcodes as
     // the unsigned variants (LLVM atomicrmw/load/store
     // doesn't care about signedness for add/sub/xchg/cas;
     // only max/min differ between signed and unsigned).
@@ -2427,6 +2445,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // -----------------------------------------------------------------------
     // u8 atomic counters (#100, task #24)
     //
+
     // Enables race-hardening of single-byte counters such as
     // the CBGR slot-generation rotation in heap.vr's
     // free_block_xthread (currently uses non-atomic
@@ -2456,12 +2475,13 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // -----------------------------------------------------------------------
     // u8 RMW closure (#100, task #34) — bitwise + xchg + cas.
     //
+
     // Closes the gap that core/sync/atomic.vr's AtomicU8
     // currently papers over with a u32-aligned CAS loop +
     // byte-masking emulation. That emulation is structurally
     // unsound in mixed-field layouts where the load_u32 reads
     // 3 neighbour-field bytes (concurrent neighbour writes
-    // cause infinite retry + torn neighbour reads).  Same
+    // cause infinite retry + torn neighbour reads). Same
     // pattern as task #24's fetch_add_u8/sub_u8 closure.
     // -----------------------------------------------------------------------
     Intrinsic {
@@ -2987,10 +3007,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // -------------------------------------------------------------------------
     // Saturating signed unary (#100, task #25)
     //
+
     // Closes the gap where core/intrinsics/arithmetic.vr declared
     // `saturating_neg<T>` / `saturating_abs<T>` (lines 257/260)
     // but the compiler had no lowering — calls would panic at
-    // codegen.  Both saturate `T::MIN` to `T::MAX`; the only
+    // codegen. Both saturate `T::MIN` to `T::MAX`; the only
     // value where standard negate / abs would overflow.
     // -------------------------------------------------------------------------
     Intrinsic {
@@ -3016,6 +3037,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // -------------------------------------------------------------------------
     // Checked unary signed (#100, task #25)
     //
+
     // checked_neg was declared at arithmetic.vr:127 but had no
     // compiler-side entry; checked_abs was missing entirely.
     // Both return Maybe<T>: Some(value) for the typical case,

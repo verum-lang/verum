@@ -1,5 +1,6 @@
 //! Integration Tests for Escape Analysis → Codegen Pipeline
 //!
+
 //! These tests verify that escape analysis results correctly flow through
 //! the compiler pipeline to code generation, enabling automatic promotion
 //! of references from Tier 0 (&T) to Tier 1 (&checked T).
@@ -16,8 +17,8 @@ use verum_common::{List, Map, Set};
 fn test_escape_analysis_no_escape() {
     // Create simple CFG for function:
     // fn test(x: Int) -> Int {
-    //     let y = x + 1;  // y is stack-local
-    //     y               // y doesn't escape
+    //  let y = x + 1; // y is stack-local
+    //  y // y doesn't escape
     // }
 
     let entry = BlockId(0);

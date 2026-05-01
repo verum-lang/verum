@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md PRAGMA auto_vacuum
 //
+
 // Three flavours, encoded as a sum type so per-mode dispatch is
 // exhaustive at compile time.
 // =============================================================================

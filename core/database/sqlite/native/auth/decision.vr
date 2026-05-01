@@ -3,12 +3,14 @@
 // =============================================================================
 // Spec: sqlite-native.md §19.5
 //
+
 // SQLite returns one of three decisions per action:
-//   * Allow     — proceed (compile + execute)
-//   * Deny      — surface SQLITE_AUTH (compile fails)
-//   * Ignore    — compile, but treat the value as NULL (e.g. for
-//                  read-column → returns NULL instead of the cell)
+//  * Allow — proceed (compile + execute)
+//  * Deny — surface SQLITE_AUTH (compile fails)
+//  * Ignore — compile, but treat the value as NULL (e.g. for
+//  read-column → returns NULL instead of the cell)
 //
+
 // When multiple authorizer hooks are subscribed, we combine their
 // answers by precedence: Deny > Ignore > Allow. This matches
 // SQLite's "most restrictive wins" rule.

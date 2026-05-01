@@ -2,6 +2,7 @@
 // MSFS — Convention 1.2: Key symbols
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §1.2 — "Key symbols". The paper
 // fixes a small lexicon of carriers and structural maps that every
 // downstream theorem cites by name. This module installs each as a
@@ -10,20 +11,24 @@
 // symbols by handle, and `verum audit --framework-axioms` enumerates
 // them transitively.
 //
+
 // The symbols, paired with their MSFS handles:
 //
-//   F          — the 2-category of Rich foundations.
-//   ρ          — the classification functor F → (∞, n)-Cat.
-//   gauge      — the Morita equivalence relation on F.
-//   M_stack    — the classifying 2-stack F / gauge.
-//   Aut_2(F)   — the 2-group of 2-autoequivalences of F.
-//   S_int      — the 2-category of display 2-categories.
-//   Syn^(∞,n)  — the (∞,n)-truncation of the syntactic category Syn(S).
+
+//  F — the 2-category of Rich foundations.
+//  ρ — the classification functor F → (∞, n)-Cat.
+//  gauge — the Morita equivalence relation on F.
+//  M_stack — the classifying 2-stack F / gauge.
+//  Aut_2(F) — the 2-group of 2-autoequivalences of F.
+//  S_int — the 2-category of display 2-categories.
+//  Syn^(∞,n) — the (∞,n)-truncation of the syntactic category Syn(S).
 //
+
 // MSFS Convention 1.2 also pins ZFC+2-inacc as the metatheory; that
 // fact is already shipped as `msfs_baseline_zfc_2inacc` in
 // `baseline.vr`. This file is purely the *symbol* lexicon.
 //
+
 // Carrier protocols are minimal — just enough for the axioms to
 // refer to a value of type "Rich foundation 2-category" or
 // "classification functor". Concrete encodings live downstream

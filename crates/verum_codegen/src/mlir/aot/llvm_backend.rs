@@ -1,9 +1,11 @@
 //! LLVM-based AOT backend.
 //!
+
 //! This module provides an alternative AOT compilation path that uses
 //! verum_llvm for fine-grained LLVM optimization control, LTO support,
 //! and flexible target configuration.
 //!
+
 //! Enabled with the `aot-llvm` feature.
 
 #![cfg(feature = "aot-llvm")]
@@ -23,6 +25,7 @@ use verum_llvm::{
 
 /// LLVM-based AOT backend.
 ///
+
 /// This backend provides superior optimization control compared to
 /// the default melior ExecutionEngine approach.
 pub struct LlvmBackend {
@@ -110,6 +113,7 @@ impl LlvmBackend {
 
     /// Compile MLIR module to LLVM IR text.
     ///
+
     /// This extracts the MLIR in LLVM dialect and converts it to a format
     /// that can be parsed by the LLVM IR parser.
     fn extract_llvm_ir(&self, module: &Module<'_>) -> Result<String> {
@@ -123,9 +127,9 @@ impl LlvmBackend {
 
         // The MLIR LLVM dialect text is not directly LLVM IR.
         // Proper translation requires one of:
-        //   1. melior's `translate_module_to_llvm_ir()` (not yet exposed in stable API)
-        //   2. Shelling out to `mlir-translate --mlir-to-llvmir`
-        //   3. Using mlir-sys `mlirTranslateModuleToLLVMIR` directly
+        //  1. melior's `translate_module_to_llvm_ir()` (not yet exposed in stable API)
+        //  2. Shelling out to `mlir-translate --mlir-to-llvmir`
+        //  3. Using mlir-sys `mlirTranslateModuleToLLVMIR` directly
         // For now, we return the MLIR text which is then parsed by the LLVM
         // IR parser in `compile_to_object`. This works because the lowering
         // pass pipeline has already converted all ops to the LLVM dialect,

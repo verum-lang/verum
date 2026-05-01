@@ -1,15 +1,18 @@
 //! K-FwAx subsingleton-check integration tests (V8, #217).
 //!
+
 //! Per `verification-architecture.md` §4.4 and §4.5, a framework
 //! axiom's body must be a *subsingleton* (proof-irrelevant: at
 //! most one inhabitant up to definitional equality) for subject
 //! reduction to hold. Two acceptance routes:
 //!
-//!   1. **Closed-proposition route** — body has no free vars.
-//!   2. **UIP route** — body may have free vars iff module
-//!      imports `core.math.frameworks.uip` (caller signals via
-//!      [`SubsingletonRegime::UipPermitted`]).
+
+//!  1. **Closed-proposition route** — body has no free vars.
+//!  2. **UIP route** — body may have free vars iff module
+//!  imports `core.math.frameworks.uip` (caller signals via
+//!  [`SubsingletonRegime::UipPermitted`]).
 //!
+
 //! These tests exercise both routes plus the legacy-unchecked
 //! shim used for backwards-compat with pre-V8 callers.
 
@@ -341,7 +344,7 @@ fn duplicate_name_rejected_before_subsingleton_check() {
 fn uip_shape_rejected_under_all_regimes() {
     use verum_common::Heap;
     // Construct the precise UIP shape per inductive::is_uip_shape:
-    //   Π A. Π a. Π b. Π p. Π q. PathTy(PathTy(A, a, b), p, q)
+    //  Π A. Π a. Π b. Π p. Π q. PathTy(PathTy(A, a, b), p, q)
     let path_inner = CoreTerm::PathTy {
         carrier: Heap::new(CoreTerm::Var(Text::from("A"))),
         lhs: Heap::new(CoreTerm::Var(Text::from("a"))),
@@ -454,6 +457,7 @@ fn b220_non_type_body_rejected_as_not_prop() {
     // type-checks to a non-Universe) — unbound-Var case
     // surfaces as "infer-failed".
     //
+
     // We construct a body that is provably a non-Universe under
     // empty Γ + empty axioms: a `Refl(x)` term — its inferred
     // type is `PathTy<...>(x, x)` which is NOT a Universe head.

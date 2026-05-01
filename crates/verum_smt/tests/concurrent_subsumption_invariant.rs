@@ -2,6 +2,7 @@
 //! cache must be race-correct under concurrent `check()` calls
 //! from multiple threads.
 //!
+
 //! Adversarial scenario: two threads holding `Arc<SubsumptionChecker>`
 //! both perform `check()` on the same refinement obligation in a hot
 //! loop. The cache is `Arc<RwLock<…>>`-protected; if either the read
@@ -10,18 +11,21 @@
 //! (partial CacheEntry visible), or — worst case — a cached result
 //! that refers to dropped data.
 //!
+
 //! Defense: `SubsumptionChecker.{cache, stats}` are both
 //! `Arc<RwLock<…>>`. Reads grab the read lock; writes grab the
 //! write lock. Drops are safe because the data lives behind `Arc`.
 //!
+
 //! This test pins the contract programmatically:
-//!   1. 8 threads × 5 000 checks each (40 000 total) on the same
-//!      reflexive obligation must yield the same logical answer
-//!      every time, with no panic and no test-thread divergence.
-//!   2. Stats counters are monotone non-decreasing — the sum of
-//!      `cache_hits + cache_misses + syntactic_checks` exactly
-//!      equals the number of `check()` invocations.
+//!  1. 8 threads × 5 000 checks each (40 000 total) on the same
+//!  reflexive obligation must yield the same logical answer
+//!  every time, with no panic and no test-thread divergence.
+//!  2. Stats counters are monotone non-decreasing — the sum of
+//!  `cache_hits + cache_misses + syntactic_checks` exactly
+//!  equals the number of `check()` invocations.
 //!
+
 //! The first invariant is the `Send + Sync` correctness pin.
 //! The second is the lost-update invariant (no race in stats
 //! accounting).

@@ -14,6 +14,7 @@
 )]
 // Unit tests for cost.rs
 //
+
 // Migrated from src/cost.rs to comply with CLAUDE.md test organization.
 
 use std::time::Duration;

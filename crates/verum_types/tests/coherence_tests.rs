@@ -14,8 +14,10 @@
 )]
 // Comprehensive tests for protocol coherence checking (orphan rule and overlap detection)
 //
+
 // Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — .6 - Coherence Rules (lines 10746-10966)
 //
+
 // Tests cover:
 // 1. Orphan rule validation
 // 2. Overlap detection

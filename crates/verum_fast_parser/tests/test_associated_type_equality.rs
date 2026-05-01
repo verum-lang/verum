@@ -14,6 +14,7 @@
 )]
 //! Tests for associated type equality constraints in where clauses.
 //!
+
 //! This test suite verifies that the parser correctly handles associated type equality
 //! constraints of the form: `where T.Item = Int`
 

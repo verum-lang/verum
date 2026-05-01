@@ -3,10 +3,11 @@
 // =============================================================================
 // Spec: SQLite 3.31+ sqlite_dbpage.
 //
+
 // Writes through sqlite_dbpage require:
-//   * the target schema is attached READWRITE,
-//   * PRAGMA writable_schema = ON (for page 1),
-//   * no active read txn on the target schema.
+//  * the target schema is attached READWRITE,
+//  * PRAGMA writable_schema = ON (for page 1),
+//  * no active read txn on the target schema.
 // =============================================================================
 
 module core.database.sqlite.native.dbpage_vtab_api.write_guard;

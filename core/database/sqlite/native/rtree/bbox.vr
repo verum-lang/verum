@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3 (R-Tree)
 //
+
 // `BoundingBox` carries `min[]` + `max[]` per dimension. SQLite's
 // R-Tree supports up to 5 dimensions; we don't enforce that limit
 // at the type level — the caller decides how many dimensions to

@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_complete.
 //
-// The scanner drives the state machine one byte at a time.  Callers
+
+// The scanner drives the state machine one byte at a time. Callers
 // feed the whole SQL text through `scan_text`; inspect
 // `state.last_was_semicolon` after the call.
 // =============================================================================

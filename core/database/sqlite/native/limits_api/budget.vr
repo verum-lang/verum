@@ -3,9 +3,10 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// The engine stores one budget per category.  sqlite3_limit(db, cat, n)
+
+// The engine stores one budget per category. sqlite3_limit(db, cat, n)
 // returns the PREVIOUS value and sets a new one clamped to the
-// category's hard maximum.  A negative `n` queries without writing.
+// category's hard maximum. A negative `n` queries without writing.
 // =============================================================================
 
 module core.database.sqlite.native.limits_api.budget;
@@ -77,7 +78,7 @@ implement LimitBudget {
     }
 
     /// Matches sqlite3_limit: negative `n` queries, non-negative sets
-    /// after clamping.  Returns the PREVIOUS value.
+    /// after clamping. Returns the PREVIOUS value.
     pub fn sqlite3_limit(&mut self, c: &LimitCategory, n: Int) -> Int {
         let prev = self.get(c);
         if n < 0 { return prev; }

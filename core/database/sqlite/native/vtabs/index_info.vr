@@ -4,6 +4,7 @@
 // Layer: 5–6
 // Spec: sqlite-native.md §16.1
 //
+
 // Light builders + accessors over the IndexInfo struct exported from
 // `protocol.vr`. Kept separate so call sites don't pull in the
 // protocol typeclass when all they need is the data record.

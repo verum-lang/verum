@@ -1,8 +1,10 @@
 //! Tests for order-independent (two-pass) type resolution.
 //!
+
 //! These tests verify that types can reference each other regardless of
 //! definition order, and that cyclic type definitions are properly detected.
 //!
+
 //! The implementation uses a two-pass approach:
 //! 1. Register all type names as placeholders
 //! 2. Resolve full type definitions with forward references available
@@ -180,6 +182,7 @@ fn test_mutual_forward_references() {
     // type A is { b: B };
     // type B is { a: A };
     //
+
     // Note: This test verifies cycle detection, not successful resolution
 
     let mut checker = TypeChecker::new();
@@ -380,12 +383,13 @@ fn test_batch_resolution() {
 fn test_complex_type_graph() {
     // A more realistic scenario with multiple interrelated types:
     //
+
     // type User is { profile: Profile, posts: PostList };
     // type Profile is { name: Text, settings: Settings };
     // type Settings is { theme: Theme, notifications: Bool };
     // type Theme is Light | Dark;
-    // type PostList is { items: Post };  // Simplified
-    // type Post is { author: User, content: Content };  // Note: circular reference
+    // type PostList is { items: Post }; // Simplified
+    // type Post is { author: User, content: Content }; // Note: circular reference
     // type Content is { text: Text };
 
     let mut checker = TypeChecker::new();

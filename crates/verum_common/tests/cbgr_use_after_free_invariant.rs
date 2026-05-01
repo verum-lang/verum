@@ -2,17 +2,20 @@
 //! generation-counter use-after-free invariant under multi-reader
 //! contention.
 //!
+
 //! Adversarial scenario: a single writer invalidates an
 //! allocation while N readers concurrently call `validate()` with
 //! a stale generation. The fundamental contract: every reader
 //! that calls `validate(expected_gen, expected_epoch)` must
 //! observe one of:
 //!
-//!   - `Success` if the allocation is still live AND its
-//!     `(generation, epoch)` matches the reader's expectation.
-//!   - `ExpiredReference` if the allocation has been invalidated.
-//!   - `GenerationMismatch` if the slot has been reused.
+
+//!  - `Success` if the allocation is still live AND its
+//!  `(generation, epoch)` matches the reader's expectation.
+//!  - `ExpiredReference` if the allocation has been invalidated.
+//!  - `GenerationMismatch` if the slot has been reused.
 //!
+
 //! Soundness invariant: NO reader may observe `Success` after a
 //! writer has called `invalidate()` (modulo reordering — the
 //! invalidate's `Release` store synchronises with the reader's
@@ -20,6 +23,7 @@
 //! expected_gen` must have synchronised with the pre-invalidate
 //! state).
 //!
+
 //! This is the verifier-level companion to the hazard-pointer
 //! protocol implemented in `core/mem/hazard.vr`. The Verum
 //! stdlib's hazard pointer relies on this CBGR-counter
@@ -92,6 +96,7 @@ fn concurrent_readers_respect_invalidate_release_acquire() {
             // pairs synchronise the prior invalidate). A
             // `Success` here would be a use-after-free.
             //
+
             // Loop a few times so transient scheduler effects
             // don't suppress the issue.
             for _ in 0..1000 {

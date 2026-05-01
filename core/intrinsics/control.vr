@@ -4,16 +4,20 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides control flow intrinsics that map directly to
 // LLVM/CPU instructions. All operations are zero-allocation and VBC-compatible.
 //
+
 // # Categories
 //
+
 // - Termination: trap, unreachable
 // - Debug: debugtrap, nop
 // - Branch hints: assume, likely, unlikely, expect
 // - Prefetch: prefetch_read, prefetch_write
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
@@ -28,6 +32,7 @@ mount core.base.result.{Result, Ok, Err};
 
 /// Trap (abort execution immediately).
 ///
+
 /// Unconditionally aborts the process via the LLVM `llvm.trap`
 /// intrinsic. Safe to call (no UB — abort is a defined termination
 /// path); the `Never` return type prevents any code-after-trap
@@ -36,6 +41,7 @@ public fn trap() -> Never { @intrinsic("trap") }
 
 /// Unreachable — UB-hint optimisation primitive.
 ///
+
 /// Lowers to LLVM's `unreachable` instruction, which the optimiser
 /// treats as "this code path is impossible." If control flow ever
 /// DOES reach this point, behaviour is undefined (in practice the
@@ -43,6 +49,7 @@ public fn trap() -> Never { @intrinsic("trap") }
 /// will execute whatever bytes happen to follow — typically a crash,
 /// possibly silent corruption).
 ///
+
 /// Marked `unsafe` because reaching this primitive is undefined
 /// behaviour — the same contract as `unreachable_unchecked` below
 /// (which used to be the only `unsafe` variant; the bare
@@ -71,10 +78,12 @@ public fn nop() { @intrinsic("nop") }
 
 /// Assume `condition` is true — UB-hint optimisation primitive.
 ///
+
 /// Lowers to LLVM's `llvm.assume`, telling the optimiser it may
 /// rely on `condition` being true at this program point. If
 /// `condition` is actually `false`, behaviour is undefined.
 ///
+
 /// Marked `unsafe` to match the UB-if-false contract: the
 /// previous safe declaration let arbitrary callers pass
 /// arbitrary boolean expressions and silently corrupt

@@ -1,8 +1,10 @@
 //! Proof Search and Automation Demo
 //!
+
 //! This example demonstrates the proof search engine and hints database
 //! for automated theorem proving in Verum.
 //!
+
 //! Run with: cargo run --example proof_search_demo
 
 use std::time::Duration;

@@ -2,35 +2,43 @@
 // core/net/weft/app.vr — WeftApp builder
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §9.1 (Хellо-Workld), §4.5 (Supervisor)
+// Spec: internal/specs/net-framework.md §9.1 (Хellо-Workld), §4.5 (Supervisor)
 // =============================================================================
 //
+
 // The top-level, user-facing entry point. Ties together:
 //
-//   Router / Service → Listener → Server
+
+//  Router / Service → Listener → Server
 //
+
 // and exposes a thin, fluent API so a minimal HTTP service fits in the
 // §9.1 "20 строк" target:
 //
-//     mount core.net.weft.*;
-//     mount core.net.http.{Request, Response};
+
+//  mount core.net.weft.*;
+//  mount core.net.http.{Request, Response};
 //
-//     async fn hello() -> Result<Response, WeftError> {
-//         Ok(Response.text(Text.from_str("Hello from Weft!")))
-//     }
+
+//  async fn hello() -> Result<Response, WeftError> {
+//  Ok(Response.text(Text.from_str("Hello from Weft!")))
+//  }
 //
-//     fn main() {
-//         let app = Router.new().get("/", HelloHandler {});
-//         WeftApp.new(app)
-//             .bind("0.0.0.0:8080")
-//             .serve()
-//             .await
-//             .unwrap();
-//     }
+
+//  fn main() {
+//  let app = Router.new().get("/", HelloHandler {});
+//  WeftApp.new(app)
+//  .bind("0.0.0.0:8080")
+//  .serve()
+//  .await
+//  .unwrap();
+//  }
 //
+
 // Supervisor integration (§4.5) is exposed via `.into_child_spec(name)` —
 // the returned `ChildSpec` can be dropped straight into a root supervisor.
 //
+
 // =============================================================================
 
 module core.net.weft.app;
@@ -96,18 +104,19 @@ implement<H: Handler + Send + Sync + 'static> WeftApp<H> {
     /// build the factory themselves — `async` closures capturing owned
     /// state remain a Phase-3 ergonomics item.
     ///
+
     /// Example:
     /// ```verum
-    /// let app    = WeftApp.new(router);
-    /// let spec   = app.child_spec("http-listener");
-    /// let addr   = Text.from_str("0.0.0.0:8080");
+    /// let app = WeftApp.new(router);
+    /// let spec = app.child_spec("http-listener");
+    /// let addr = Text.from_str("0.0.0.0:8080");
     /// supervisor.supervise(
-    ///     fn() -> async {
-    ///         WeftApp.new(router.clone())
-    ///             .bind(addr.clone()).unwrap()
-    ///             .serve().await
-    ///     },
-    ///     spec,
+    ///  fn() -> async {
+    ///  WeftApp.new(router.clone())
+    ///  .bind(addr.clone()).unwrap()
+    ///  .serve().await
+    ///  },
+    ///  spec,
     /// ).await
     /// ```
     public fn child_spec(&self, name: Text) -> ChildSpec {

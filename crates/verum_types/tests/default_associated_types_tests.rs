@@ -14,8 +14,10 @@
 )]
 //! Tests for default associated type semantics in protocols
 //!
+
 //! Spec: grammar/verum.ebnf lines 416-417, 932-939
 //!
+
 //! Default associated types allow protocols to provide default type implementations
 //! that are used when an implementation doesn't explicitly specify them.
 

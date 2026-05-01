@@ -5,27 +5,32 @@
 // Dependencies: core (memory, maybe, result, protocols, iterator)
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI operations:
 // - Uses core/memory.vr native allocator (CBGR-backed)
 // - UTF-8 validation implemented natively
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // Text is Verum's primary string type. It is:
 // - Always valid UTF-8
 // - Flat layout: {ptr, len, cap} — 24 bytes
 // - Null-terminated for C interop
 // - cap == 0 indicates static/immutable string literal
 //
+
 // =============================================================================
 
 module core.text.text;
 mount core.*;
 
-// Allocator primitives for typed-OOM (#65, #68).  See list.vr for
+// Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale on the explicit mount.
 mount core.base.memory.{try_alloc, try_realloc};
 
@@ -43,6 +48,7 @@ mount core.intrinsics.runtime.text.{
 
 /// Get UTF-8 character length from leading byte.
 ///
+
 /// Returns 1-4 based on the leading byte pattern:
 /// - 0xxxxxxx: 1 byte (ASCII)
 /// - 110xxxxx: 2 bytes
@@ -66,6 +72,7 @@ fn utf8_char_len(byte: Byte) -> Int {
 
 /// Decode a UTF-8 character and return both the character and its byte length.
 ///
+
 /// Wraps the `utf8_decode_char` intrinsic and computes byte length from the
 /// leading byte, returning both as a tuple.
 @inline
@@ -77,6 +84,7 @@ fn utf8_decode_char_len(bytes: &[Byte], byte_idx: Int) -> (Char, Int) {
 
 /// Validate UTF-8 byte sequence.
 ///
+
 /// Returns true if the bytes form valid UTF-8, false otherwise.
 fn utf8_validate(bytes: &[Byte]) -> Bool {
     let len = bytes.len();
@@ -151,22 +159,28 @@ fn utf8_validate(bytes: &[Byte]) -> Bool {
 
 /// UTF-8 encoded text string.
 ///
+
 /// Text is the semantic string type in Verum - it represents human-readable
 /// text as opposed to arbitrary byte sequences.
 ///
+
 /// Layout: {ptr, len, cap} — 24 bytes.
 /// - ptr: pointer to UTF-8 byte data (null-terminated for C compat)
 /// - len: byte length (not including null terminator)
 /// - cap: allocated capacity (0 = static/immutable string literal)
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// let hello = "Hello, World!";
 ///
+
 /// // Concatenation
 /// let greeting = "Hello, " + name + "!";
 ///
+
 /// // Format strings
 /// let msg = f"Value: {x}, Count: {n}";
 /// ```
@@ -183,6 +197,7 @@ public type Text is {
 /// shift the pattern by `i - table[i-1]` instead of restarting from
 /// scratch on a mismatch.
 ///
+
 /// O(m) time + space where `m = pattern.len()`. Building the table
 /// once and reusing it across repeated searches (as `replace` does)
 /// gives the search loop an amortised O(n + km) cost — linear in the
@@ -221,6 +236,7 @@ fn kmp_failure_table(pattern: &[Byte]) -> List<Int> {
 /// `-1` if no match is reachable. Empty pattern matches at `start`
 /// per convention.
 ///
+
 /// Uses the precomputed KMP failure-function table from
 /// [`kmp_failure_table`]. Each haystack byte is examined at most a
 /// constant number of times across the whole call, so total time is
@@ -268,6 +284,7 @@ implement Text {
 
     /// Create text with a given capacity.
     ///
+
     /// Panics on allocation failure with a message that carries the
     /// requested-bytes count. For a fallible counterpart see
     /// `try_with_capacity`.
@@ -289,6 +306,7 @@ implement Text {
 
     /// Fallible counterpart to `with_capacity`.
     ///
+
     /// Returns `Err(AllocError)` on allocation failure rather than
     /// panicking. Routes through `try_alloc` so all allocator-side
     /// errors (OutOfMemory, InvalidSize, InvalidAlignment, etc.)
@@ -322,7 +340,7 @@ implement Text {
     /// sequences with the Unicode replacement character (U+FFFD).
     /// Mirrors Rust's `String::from_utf8_lossy` semantics: well-formed
     /// inputs pass through verbatim; ill-formed inputs decode lossily
-    /// rather than raise an error.  Used by `core.io.process.Output`'s
+    /// rather than raise an error. Used by `core.io.process.Output`'s
     /// `stdout()` / `stderr()` accessors and by any caller that needs
     /// best-effort textification of arbitrary byte streams.
     public fn from_utf8_lossy(bytes: &[Byte]) -> Text {
@@ -332,7 +350,7 @@ implement Text {
         // Slow path: walk the bytes, replacing invalid sequences.
         // Each invalid byte (or maximal subpart of an invalid
         // sequence) becomes a single U+FFFD replacement character
-        // (3 bytes UTF-8 = 0xEF 0xBF 0xBD).  This matches the
+        // (3 bytes UTF-8 = 0xEF 0xBF 0xBD). This matches the
         // WHATWG Encoding Standard's "replacement" behaviour, which
         // is what `String::from_utf8_lossy` implements.
         let mut buf: List<Byte> = [];
@@ -423,15 +441,15 @@ implement Text {
             panic(f"Text.from_utf8_unchecked: allocator returned null for {len + 1} bytes");
         }
         // Walk the source byte-by-byte instead of `memcpy`-ing the
-        // raw `bytes.as_ptr()`.  When the source slice is backed by
+        // raw `bytes.as_ptr()`. When the source slice is backed by
         // a `List<Byte>` (the common case from FFI / file / process
         // intercepts), the backing storage is one NaN-boxed Value
         // per element, NOT packed bytes — so a bulk memcpy would
-        // copy NaN-box header bits instead of payload.  Using
+        // copy NaN-box header bits instead of payload. Using
         // `bytes[i]` lets the runtime's `GetE` handler unbox each
         // slot to a single byte, so this works for both packed-byte
         // (raw `[Byte; N]`) and Value-per-element (List<Byte>) source
-        // shapes.  `memset(_, _, 1)` is the only single-byte write
+        // shapes. `memset(_, _, 1)` is the only single-byte write
         // primitive — `ptr_write<Byte>` lowers to a generic 8-byte
         // store regardless of T and would corrupt adjacent bytes.
         let mut i: Int = 0;
@@ -483,6 +501,7 @@ implement Text {
     /// Get underlying bytes.
     /// Return self as a string slice reference.
     ///
+
     /// Since Text IS the string type in Verum, this simply returns &self.
     /// Provided for API compatibility with code that expects an `as_str()` method.
     public fn as_str(&self) -> &Text {
@@ -521,6 +540,7 @@ implement Text {
 
     /// Get character at byte index.
     ///
+
     /// Returns `None` if the byte index is out of range OR points
     /// into the middle of a multi-byte UTF-8 sequence (continuation
     /// byte). Without the boundary check, `char_at(1)` on `"é"`
@@ -566,6 +586,7 @@ implement Text {
 
     /// Collect all characters into a List.
     ///
+
     /// This is a convenience alias that eagerly collects the chars() iterator
     /// into a List<Char>.
     public fn to_chars(&self) -> List<Char> {
@@ -632,11 +653,14 @@ implement Text {
 
     /// Split the text at a byte index, returning both halves.
     ///
+
     /// The index must be a UTF-8 character boundary.
     /// Panics if the index is out of bounds or not on a char boundary.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let t = "Hello, World!";
     /// let (left, right) = t.split_at(7);
@@ -828,6 +852,7 @@ implement Text {
 
     /// Push a byte (internal, assumes valid UTF-8 context).
     ///
+
     /// Uses `memset(dst, byte, 1)` rather than `ptr_write` because the
     /// generic `ptr_write<T>` intrinsic lowers to `DerefMut`, which writes
     /// an 8-byte NaN-boxed `Value` regardless of `T`. Writing a Byte via
@@ -851,6 +876,7 @@ implement Text {
 
     /// Push a string.
     ///
+
     /// Pre-reserves capacity then bulk-copies via `memcpy`, instead of
     /// looping `push_byte` which paid the per-byte capacity probe and
     /// null-terminator memset on every byte. For an N-byte append the
@@ -871,6 +897,7 @@ implement Text {
 
     /// Grow storage to fit at least one more byte.
     ///
+
     /// Panics on allocation failure. For a fallible counterpart see
     /// `try_grow`.
     fn grow(&mut self) {
@@ -1037,6 +1064,7 @@ implement Text {
     /// previous nested-loop implementation was O(n·m) per call, which
     /// blew up on large inputs with long patterns.
     ///
+
     /// Empty pattern is a no-op: returns a clone of `self` unchanged
     /// (matches Rust's `str::replace` semantics — replacing the empty
     /// string with anything would be ill-defined).
@@ -1132,9 +1160,10 @@ implement Text {
 
     /// Split by whitespace into words. Alias for split_whitespace.
     ///
+
     /// # Example
     /// ```verum
-    /// let text = "hello world  foo";
+    /// let text = "hello world foo";
     /// assert_eq(text.words(), ["hello", "world", "foo"]);
     /// ```
     public fn words(&self) -> List<Text> {
@@ -1408,6 +1437,7 @@ implement Text {
 
     /// Parse to Int (base 10). Returns Result for error handling.
     ///
+
     /// Uses the same pure-Verum path as `parse_int_radix(10)` rather than
     /// the legacy `text_parse_int` intrinsic, which was declared
     /// `-> Maybe<Int>` and silently mis-typed its result when the caller
@@ -1419,6 +1449,7 @@ implement Text {
     /// Parse to Int directly (returns 0 on parse failure).
     /// Convenience method for cases where error handling is not needed.
     ///
+
     /// Pre-fix bug: the previous implementation accumulated
     /// magnitude in a signed `Int` and rejected `val < 0` as
     /// wrap-around. That correctly bailed on positive overflow
@@ -1561,11 +1592,14 @@ implement Text {
 
     /// Parse to Int with a given radix (2 to 36).
     ///
+
     /// Supports optional leading `-` for negative numbers.
     /// Digits above 9 use letters a-z (case insensitive).
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// assert_eq("FF".parse_int_radix(16), Ok(255));
     /// assert_eq("1010".parse_int_radix(2), Ok(10));
@@ -1667,6 +1701,7 @@ implement Text {
 
     /// Parse to Float.
     ///
+
     /// Same rationale as `parse_int`: the legacy `text_parse_float`
     /// intrinsic returns `Maybe<Float>` and would be mis-read as a
     /// `Result` variant. Uses the pure-Verum `to_float()` walker with
@@ -1732,6 +1767,7 @@ implement Text {
 
     /// Convert Int to Text (pure Verum, no C runtime).
     ///
+
     /// Int.MIN-safe: the historical `0 - n` for the negative branch
     /// wrapped back to Int.MIN for `n == Int.MIN`, leaving `val < 0`,
     /// the `while val > 0` digit loop never entered, and the result
@@ -1994,6 +2030,7 @@ implement Text {
 
     /// Case-insensitive equality comparison.
     ///
+
     /// Fast path: if both inputs are length-equal and contain only
     /// ASCII bytes, fold-and-compare in place — zero allocation,
     /// O(min(|a|, |b|)) work. The previous implementation allocated
@@ -2003,6 +2040,7 @@ implement Text {
     /// once per row / header / lookup, that allocator pressure is
     /// the cost the workload can least afford.
     ///
+
     /// Slow path: any non-ASCII byte forces fall-through to full
     /// Unicode lowercase comparison — case folding can change byte
     /// length there (e.g. Turkish dotted-İ → i + combining dot)
@@ -2074,6 +2112,7 @@ implement Text {
 
     /// Find the byte position of a substring. Alias for `find`.
     ///
+
     /// # Example
     /// ```verum
     /// let s = "hello world";
@@ -2086,6 +2125,7 @@ implement Text {
 
     /// Count non-overlapping occurrences of a substring. Alias for `count_matches`.
     ///
+
     /// # Example
     /// ```verum
     /// let s = "abcabcabc";
@@ -2097,6 +2137,7 @@ implement Text {
 
     /// Try to parse as Int, returning None on failure.
     ///
+
     /// Mirrors `to_int` for digit / sign / whitespace handling but
     /// surfaces failure as `None`. Accumulates magnitude in
     /// `UInt64` so `Int.MIN`'s magnitude (2^63 = `Int.MAX + 1`)
@@ -2104,6 +2145,7 @@ implement Text {
     /// `"-9223372036854775808"` as an apparent wrap-around even
     /// though it is the valid encoding of `Int.MIN`.
     ///
+
     /// # Example
     /// ```verum
     /// assert_eq("42".try_to_int(), Some(42));
@@ -2185,6 +2227,7 @@ implement Text {
 
     /// Try to parse as Float, returning None on failure.
     ///
+
     /// # Example
     /// ```verum
     /// assert_eq("3.14".try_to_float(), Some(3.14));
@@ -2680,6 +2723,7 @@ implement Text {
 
     /// Encode this text as UTF-16, returning a list of code units.
     ///
+
     /// Each character is encoded as one or two 16-bit code units.
     /// BMP characters (U+0000..U+FFFF) produce one code unit.
     /// Supplementary characters (U+10000..U+10FFFF) produce a surrogate pair.
@@ -2699,6 +2743,7 @@ implement Text {
 
     /// Decode a UTF-16 encoded slice into a Text.
     ///
+
     /// Returns an error if the input contains invalid surrogate pairs
     /// (unpaired surrogates or reversed pairs).
     public fn from_utf16(units: &[Int]) -> Result<Text, Utf16Error> {
@@ -2846,6 +2891,7 @@ implement Text {
 
     /// Check if all characters in the text are whitespace.
     ///
+
     /// Returns false for empty strings (must contain at least one character).
     public fn is_whitespace(&self) -> Bool {
         if self.is_empty() {
@@ -2898,6 +2944,7 @@ implement Text {
 
     /// Capitalize the first character of the text and lowercase the rest.
     ///
+
     /// # Example
     /// ```verum
     /// assert_eq("hello".capitalize(), "Hello");
@@ -2928,8 +2975,10 @@ implement Text {
 
     /// Capitalize the first character of each word.
     ///
+
     /// Words are separated by whitespace.
     ///
+
     /// # Example
     /// ```verum
     /// assert_eq("hello world".to_title_case(), "Hello World");
@@ -2970,6 +3019,7 @@ implement Text {
 
     /// Swap the case of each character (uppercase becomes lowercase and vice versa).
     ///
+
     /// # Example
     /// ```verum
     /// assert_eq("Hello World".swapcase(), "hELLO wORLD");
@@ -3003,6 +3053,7 @@ implement Text {
 
     /// Check if all cased characters are uppercase.
     ///
+
     /// Returns false for empty strings or strings with no cased characters.
     public fn is_uppercase(&self) -> Bool {
         if self.is_empty() {
@@ -3037,6 +3088,7 @@ implement Text {
 
     /// Check if all cased characters are lowercase.
     ///
+
     /// Returns false for empty strings or strings with no cased characters.
     public fn is_lowercase(&self) -> Bool {
         if self.is_empty() {
@@ -3071,6 +3123,7 @@ implement Text {
 
     /// Replace tab characters with spaces.
     ///
+
     /// Each tab is replaced with enough spaces to reach the next tab stop,
     /// where tab stops are at every `tab_size` columns.
     public fn expand_tabs(&self, tab_size: Int) -> Text {
@@ -3113,6 +3166,7 @@ implement Text {
 
     /// Pad the string on the left with zeros to fill the given width.
     ///
+
     /// If the string starts with a sign prefix ('+' or '-'), the zeros are
     /// inserted after the sign.
     public fn zfill(&self, width: Int) -> Text {
@@ -3160,6 +3214,7 @@ implement Text {
 
     /// Convert to Text (identity — Text is already text).
     ///
+
     /// Provided for protocol conformance and generic code that calls
     /// `.to_text()` on values of any type implementing Display.
     public fn to_text(&self) -> Text {
@@ -3894,6 +3949,7 @@ implement Eq for Utf8Error {
 
 /// UTF-16 decoding error.
 ///
+
 /// Indicates an invalid surrogate pair at the given index in the input slice.
 public type Utf16Error is {
     index: Int,

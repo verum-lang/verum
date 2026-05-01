@@ -1,17 +1,22 @@
 //! Shared module utilities for Verum compilation.
 //!
+
 //! This module provides common functionality used by both stdlib compilation
 //! and regular program compilation, eliminating duplication between the two modes.
 //!
+
 //! # Key Features
 //!
+
 //! - **Module-level @cfg handling**: Evaluate @cfg attributes to determine if modules
-//!   should be compiled for the current target
+//!  should be compiled for the current target
 //! - **Platform detection**: Target-aware module filtering based on target_os/target_arch
 //! - **Import validation**: Common import validation logic (to be moved here)
 //!
+
 //! # Usage
 //!
+
 //! Both `core_compiler.rs` and `pipeline.rs` should use these shared utilities
 //! instead of implementing their own versions.
 
@@ -25,28 +30,37 @@ use verum_ast::cfg::{CfgEvaluator, TargetConfig};
 
 /// Checks if a module should be compiled for the given target.
 ///
+
 /// This function uses a two-tier approach:
 /// 1. Check for module-level @cfg attributes in mod.vr (most flexible)
 /// 2. Fall back to path-based platform detection (backwards compatibility)
 ///
+
 /// # Arguments
 ///
+
 /// * `module_name` - The module path (e.g., "sys.linux", "sys.darwin.libsystem")
 /// * `target` - The target configuration to check against
 ///
+
 /// # Returns
 ///
+
 /// `true` if the module should be compiled for this target, `false` otherwise.
 ///
+
 /// # Examples
 ///
+
 /// ```ignore
 /// let target = TargetConfig::host();
 ///
+
 /// // On macOS:
 /// assert!(should_compile_module_for_target("sys.darwin", &target));
 /// assert!(!should_compile_module_for_target("sys.linux", &target));
 ///
+
 /// // Cross-platform module:
 /// assert!(should_compile_module_for_target("core", &target));
 /// ```
@@ -68,11 +82,14 @@ pub fn should_compile_module_for_target(module_name: &str, target: &TargetConfig
 
 /// Checks for module-level @cfg attribute in a mod.vr file.
 ///
+
 /// This function parses the beginning of a mod.vr file to find @cfg attributes
 /// that determine if the module should be compiled for the current target.
 ///
+
 /// # Supported @cfg Patterns
 ///
+
 /// - `@cfg(target_os = "linux")`
 /// - `@cfg(target_os = "macos")`
 /// - `@cfg(target_os = "windows")`
@@ -81,25 +98,33 @@ pub fn should_compile_module_for_target(module_name: &str, target: &TargetConfig
 /// - `@cfg(unix)` - matches linux and macos
 /// - `@cfg(windows)` - matches windows
 ///
+
 /// # Arguments
 ///
+
 /// * `mod_vr_path` - Path to the mod.vr file to check
 /// * `target` - The target configuration to evaluate against
 ///
+
 /// # Returns
 ///
+
 /// `true` if the module should be compiled (either no @cfg or @cfg matches),
 /// `false` if @cfg attribute is present and doesn't match.
 ///
+
 /// # Example
 ///
+
 /// ```ignore
 /// // core/sys/linux/mod.vr contains:
 /// // @cfg(target_os = "linux")
 ///
+
 /// let path = Path::new("core/sys/linux/mod.vr");
 /// let target = TargetConfig::host(); // On macOS
 ///
+
 /// assert!(!check_module_cfg(&path, &target)); // Returns false on macOS
 /// ```
 pub fn check_module_cfg(mod_vr_path: &Path, target: &TargetConfig) -> bool {
@@ -114,16 +139,21 @@ pub fn check_module_cfg(mod_vr_path: &Path, target: &TargetConfig) -> bool {
 
 /// Checks for module-level @cfg attribute from file content.
 ///
+
 /// Same as `check_module_cfg` but operates on file content instead of path.
 /// Useful for embedded stdlib where files are read from VFS.
 ///
+
 /// # Arguments
 ///
+
 /// * `content` - The file content to check
 /// * `target` - The target configuration to evaluate against
 ///
+
 /// # Returns
 ///
+
 /// `true` if the module should be compiled (either no @cfg or @cfg matches),
 /// `false` if @cfg attribute is present and doesn't match.
 pub fn check_module_cfg_from_content(content: &str, target: &TargetConfig) -> bool {
@@ -158,21 +188,27 @@ pub fn check_module_cfg_from_content(content: &str, target: &TargetConfig) -> bo
 
 /// Simple string-based evaluation of cfg predicates.
 ///
+
 /// This provides a lightweight alternative to full AST-based @cfg evaluation
 /// for the common case of module-level platform checks.
 ///
+
 /// Supports:
 /// - `target_os = "value"`
 /// - `target_arch = "value"`
 /// - Simple identifiers: `unix`, `windows`, `linux`, `macos`
 ///
+
 /// # Arguments
 ///
+
 /// * `predicate` - The predicate string (e.g., `target_os = "linux"`)
 /// * `target` - The target configuration to evaluate against
 ///
+
 /// # Returns
 ///
+
 /// `true` if the predicate matches the target, `false` otherwise.
 pub fn evaluate_cfg_string(predicate: &str, target: &TargetConfig) -> bool {
     let predicate = predicate.trim();
@@ -211,16 +247,21 @@ pub fn evaluate_cfg_string(predicate: &str, target: &TargetConfig) -> bool {
 
 /// Filter a type declaration's fields based on @cfg attributes.
 ///
+
 /// This is necessary because platform-specific fields (e.g., `inner: IoUringDriver`)
 /// should not be processed on platforms where the referenced type doesn't exist.
 ///
+
 /// # Arguments
 ///
+
 /// * `type_decl` - The type declaration to filter
 /// * `target` - The target configuration for @cfg evaluation
 ///
+
 /// # Returns
 ///
+
 /// A new TypeDecl with fields filtered based on @cfg attributes.
 pub fn filter_type_decl_for_target(
     type_decl: &verum_ast::TypeDecl,
@@ -301,8 +342,10 @@ pub fn filter_type_decl_for_target(
 
 /// Converts a module path from dotted notation to file system path.
 ///
+
 /// # Examples
 ///
+
 /// ```ignore
 /// assert_eq!(module_path_to_fs("sys.linux"), "sys/linux");
 /// assert_eq!(module_path_to_fs("core"), "core");
@@ -313,12 +356,16 @@ pub fn module_path_to_fs(module_path: &str) -> String {
 
 /// Converts a file system path to module path notation.
 ///
+
 /// # Arguments
 ///
+
 /// * `fs_path` - The file system path relative to stdlib root
 ///
+
 /// # Examples
 ///
+
 /// ```ignore
 /// assert_eq!(fs_path_to_module("sys/linux"), "sys.linux");
 /// assert_eq!(fs_path_to_module("core/memory.vr"), "core.memory");
@@ -332,10 +379,13 @@ pub fn fs_path_to_module(fs_path: &str) -> String {
 
 /// Derives a submodule path from the parent module name and file path.
 ///
+
 /// This is used to determine the full module path for files within a module directory.
 ///
+
 /// # Examples
 ///
+
 /// ```ignore
 /// // "core/base/memory.vr" with module_name "core" -> "core.memory"
 /// // "core/base/mod.vr" with module_name "core" -> "core"

@@ -1,50 +1,63 @@
 //! Flow Functions for Per-Field Interprocedural Analysis
 //!
+
 //! Transfer functions describe how dataflow state changes across IR operations
 //! for per-field interprocedural analysis. Each flow function maps an input
 //! escape state to an output escape state for a specific operation (assignment,
 //! store, load, call, return), enabling field-sensitive escape tracking across
 //! function boundaries for CBGR promotion decisions.
 //!
+
 //! This module implements production-grade flow functions for per-field
 //! interprocedural dataflow analysis. Flow functions represent transfer
 //! functions that describe how dataflow state changes across IR operations,
 //! enabling field-sensitive escape analysis across function boundaries.
 //!
+
 //! # Core Concepts
 //!
+
 //! **Flow Function**: Maps input dataflow state to output dataflow state
 //! for a single IR operation or control flow edge.
 //!
+
 //! **Field-Sensitive**: Tracks dataflow information separately for each
 //! field in a struct, enabling partial promotion.
 //!
+
 //! **Interprocedural**: Flow functions compose across function calls,
 //! enabling whole-program analysis.
 //!
+
 //! # Performance Target
 //!
+
 //! **O(edges × fields)** - Linear in CFG edges and struct fields
 //! - Per-edge: < 100ns typical
 //! - Per-call: < 500ns typical
 //! - Whole-function: < 5ms typical
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_cbgr::{FlowFunctionCompiler, FlowState};
 //!
+
 //! // Compile flow functions from CFG
 //! let compiler = FlowFunctionCompiler::new(cfg);
 //! let functions = compiler.compile_all();
 //!
+
 //! // Apply flow function for an edge
 //! let mut state = FlowState::new();
 //! state.set_field_safe(ref_id, field_path, true);
 //!
+
 //! let output = functions.apply_edge(edge_id, state);
 //! if output.is_field_safe(ref_id, field_path) {
-//!     // Field can be promoted!
+//!  // Field can be promoted!
 //! }
 //! ```
 
@@ -59,8 +72,10 @@ use crate::analysis::{BlockId, ControlFlowGraph, RefId};
 
 /// Field path for field-sensitive analysis
 ///
+
 /// Represents a path through nested struct fields (e.g., "foo.bar.baz")
 ///
+
 /// # Examples
 /// - "x" - Direct field access
 /// - "x.y" - Nested field access
@@ -139,9 +154,11 @@ impl fmt::Display for FieldPath {
 
 /// Per-field flow information
 ///
+
 /// Tracks escape/promotion status for individual fields within a struct.
 /// Enables partial struct promotion where some fields are safe and others aren't.
 ///
+
 /// Maps each struct field to its escape status, enabling partial promotion:
 /// field A can be promoted to &checked T even if field B escapes to heap.
 /// Safety bits are field-indexed; true means safe to promote (no escape detected).
@@ -244,10 +261,12 @@ impl FieldFlowInfo {
 
 /// Dataflow state at a program point
 ///
+
 /// Maps each reference to its per-field flow information.
 /// Represents the set of references and fields that are safe
 /// to promote at a given program point.
 ///
+
 /// Snapshot of per-field escape state at a program point. The dataflow analysis
 /// propagates this state forward through the CFG, applying flow functions at each
 /// operation to determine which references/fields remain safe to promote.
@@ -386,9 +405,11 @@ pub struct SsaId(pub u32);
 
 /// IR operation kinds for flow function generation
 ///
+
 /// Represents different types of operations in the intermediate representation
 /// that affect dataflow state.
 ///
+
 /// IR operations that affect escape state: Load propagates escape from source to
 /// destination, Store may cause heap escape, Call requires interprocedural analysis
 /// via call graph, Return marks the reference as escaping the function scope.
@@ -512,9 +533,11 @@ impl IrOperation {
 
 /// Flow function for a CFG edge or IR operation
 ///
+
 /// Represents the transfer function that maps input dataflow state
 /// to output dataflow state.
 ///
+
 /// Transfer function mapping input FlowState to output FlowState for a single
 /// IR operation. Conservative mode kills all safe fields (used when operation
 /// semantics are unknown). Otherwise, applies field-specific gen/kill sets.
@@ -547,12 +570,14 @@ impl FlowFunction {
 
     /// Apply flow function to input state
     ///
+
     /// # Algorithm
     /// 1. Start with input state
     /// 2. Apply operation-specific transfer function
     /// 3. Update field safety based on operation
     /// 4. Return output state
     ///
+
     /// # Performance
     /// O(fields) for most operations
     #[must_use]
@@ -677,9 +702,11 @@ impl FlowFunction {
 
 /// Flow function compiler
 ///
+
 /// Generates flow functions from CFG and IR operations.
 /// Builds the complete set of transfer functions for dataflow analysis.
 ///
+
 /// Traverses the CFG and IR to generate flow functions for each edge/operation.
 /// Builds the complete transfer function set consumed by the dataflow fixpoint solver.
 #[derive(Debug)]
@@ -705,9 +732,11 @@ impl FlowFunctionCompiler {
 
     /// Compile all flow functions from CFG
     ///
+
     /// # Returns
     /// Self with compiled flow functions
     ///
+
     /// # Performance
     /// O(edges + blocks) where edges/blocks are CFG size
     #[must_use]
@@ -738,18 +767,21 @@ impl FlowFunctionCompiler {
 
     /// Compile flow functions for a single block
     ///
+
     /// Analyzes the block's definitions, uses, and call sites to generate
     /// appropriate flow functions for field-sensitive escape analysis.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. For each definition (DefSite): Create flow function that initializes
-    ///    the reference as safe if stack-allocated, unsafe if heap-allocated
+    ///  the reference as safe if stack-allocated, unsafe if heap-allocated
     /// 2. For each use (UseeSite): Create flow function that tracks the use
-    ///    and potentially invalidates safety for mutable uses
+    ///  and potentially invalidates safety for mutable uses
     /// 3. For each call (CallSite): Create conservative flow function that
-    ///    invalidates safety for references passed to the call (unless we
-    ///    have interprocedural analysis showing they don't escape)
+    ///  invalidates safety for references passed to the call (unless we
+    ///  have interprocedural analysis showing they don't escape)
     fn compile_block(&mut self, block_id: BlockId) {
         let mut functions = List::new();
 
@@ -858,18 +890,23 @@ impl FlowFunctionCompiler {
 
     /// Compile flow functions for a CFG edge
     ///
+
     /// Analyzes the edge between two blocks to generate flow functions
     /// that model how dataflow state changes across the edge.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Check if edge is conditional (branch predicate)
     /// 2. For conditional edges, create flow function that models
-    ///    the condition (e.g., null check might prove reference non-null)
+    ///  the condition (e.g., null check might prove reference non-null)
     /// 3. For unconditional edges, create identity flow function
     ///
+
     /// # Future Enhancement
     ///
+
     /// - Path-sensitive analysis for branch conditions
     /// - Loop-aware analysis for back edges
     fn compile_edge(&mut self, from: BlockId, to: BlockId) {
@@ -886,6 +923,7 @@ impl FlowFunctionCompiler {
                 // For conditional edges, the condition might provide information
                 // e.g., "if ref != null" on the true branch proves ref is non-null
                 //
+
                 // For now, we use a Phi-like function to model path merging
                 // This will be refined with path-sensitive analysis
                 let flow_fn = FlowFunction::new(IrOperation::Phi {
@@ -1002,9 +1040,11 @@ pub struct FlowFunctionStats {
 
 /// Interprocedural field flow tracker
 ///
+
 /// Tracks how fields flow across function calls, enabling
 /// field-sensitive interprocedural analysis.
 ///
+
 /// Tracks how struct fields flow across function call boundaries. At each call site,
 /// records which callee parameters receive which caller fields, enabling the dataflow
 /// analysis to propagate escape state through the call graph field-sensitively.
@@ -1028,11 +1068,13 @@ impl InterproceduralFieldFlow {
 
     /// Track field flow through a function call
     ///
+
     /// # Arguments
     /// - `call_site`: Block where call occurs
     /// - `function`: Called function name
     /// - `args`: Argument field flow
     ///
+
     /// # Returns
     /// Field flow after the call
     pub fn track_call(
@@ -1099,6 +1141,7 @@ pub struct FieldFlowSummary {
 
 /// Function field summary
 ///
+
 /// Summarizes how a function affects field safety of its arguments
 /// and return value.
 #[derive(Debug, Clone)]
@@ -1187,8 +1230,10 @@ impl fmt::Display for InterproceduralFlowStats {
 
 /// Compute field flow across a function call
 ///
+
 /// Helper function for escape analyzer integration
 ///
+
 /// # Performance
 /// O(fields × args)
 #[must_use]
@@ -1204,6 +1249,7 @@ pub fn field_flow_across_call(
 
 /// Build flow function for an IR operation
 ///
+
 /// Helper function for building flow functions from IR
 #[must_use]
 pub fn build_flow_function(operation: IrOperation) -> FlowFunction {
@@ -1212,6 +1258,7 @@ pub fn build_flow_function(operation: IrOperation) -> FlowFunction {
 
 /// Merge flow states from multiple paths
 ///
+
 /// Helper for dataflow analysis meet operation
 #[must_use]
 pub fn merge_flow_states(states: &List<FlowState>) -> FlowState {

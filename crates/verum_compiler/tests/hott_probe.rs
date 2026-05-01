@@ -16,6 +16,7 @@
 
 //! HoTT (Homotopy Type Theory) expressibility probe.
 //!
+
 //! Before committing to Phase B (new cubical grammar + parser + type
 //! system), probe whether the HoTT foundation (Equiv, IsEquiv, IsContr,
 //! IsProp, IsSet, Fiber, etc.) can already be expressed in Verum using
@@ -23,11 +24,13 @@
 //! refinement types, meta parameters, rank-2 polymorphism, and
 //! higher-kinded types.
 //!
+
 //! If this probe succeeds broadly, Phase B reduces to stdlib authoring
 //! + documentation rather than language-level work. If specific HoTT
 //! constructs fail, this file documents exactly what's missing and
 //! focuses Phase B on the smallest necessary feature delta.
 //!
+
 //! The plan update from the Phase A.1 discovery (refinements + meta +
 //! HKT already give dependent types in practice) makes this probe very
 //! likely to succeed for most of the core HoTT constructs.

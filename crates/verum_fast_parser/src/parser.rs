@@ -1,16 +1,21 @@
 //! Hand-written recursive descent parser infrastructure.
 //!
+
 //! This module provides the core infrastructure for a recursive descent parser,
 //! enabling significantly faster compile times (~3 seconds).
 //!
+
 //! # Architecture
 //!
+
 //! - [`TokenStream`]: Wrapper around token slice with lookahead and position tracking
 //! - [`Parser`]: Main parser struct with helper methods for common patterns
 //! - [`ParseResult`]: Type alias for parsing results
 //!
+
 //! # Design Principles
 //!
+
 //! 1. **Zero-cost abstractions**: No heap allocations in hot paths
 //! 2. **Error recovery**: Continue parsing after errors for better IDE support
 //! 3. **Lookahead**: Support arbitrary lookahead for disambiguation
@@ -28,6 +33,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 
 /// A stream of tokens with position tracking and lookahead.
 ///
+
 /// This struct wraps a token slice and provides methods for consuming tokens,
 /// peeking ahead, and tracking the current position.
 #[derive(Debug, Clone)]
@@ -43,6 +49,7 @@ pub struct TokenStream<'a> {
 impl<'a> TokenStream<'a> {
     /// Create a new token stream from a slice of tokens.
     ///
+
     /// The file_id is extracted from the first token if available,
     /// otherwise uses a zero file ID.
     pub fn new(tokens: &'a [Token]) -> Self {
@@ -59,6 +66,7 @@ impl<'a> TokenStream<'a> {
 
     /// Create a new token stream with an explicit file ID.
     ///
+
     /// Use this when you need to ensure a specific file ID is used,
     /// especially for empty token streams.
     pub fn with_file_id(tokens: &'a [Token], file_id: FileId) -> Self {
@@ -83,8 +91,10 @@ impl<'a> TokenStream<'a> {
 
     /// Look ahead n tokens without consuming them.
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// let next = stream.peek_nth(1); // Look at next token
     /// let after_next = stream.peek_nth(2); // Look two tokens ahead
@@ -124,6 +134,7 @@ impl<'a> TokenStream<'a> {
 
     /// Consume the current token if it matches the given kind.
     ///
+
     /// Returns the consumed token, or None if no match.
     #[inline]
     pub fn consume(&mut self, kind: &TokenKind) -> Option<&Token> {
@@ -136,6 +147,7 @@ impl<'a> TokenStream<'a> {
 
     /// Expect the current token to match the given kind and consume it.
     ///
+
     /// Returns an error if the token doesn't match.
     pub fn expect(&mut self, kind: TokenKind) -> ParseResult<&Token> {
         if self.check(&kind) {
@@ -170,6 +182,7 @@ impl<'a> TokenStream<'a> {
 
     /// Get a span representing the last position in the stream.
     ///
+
     /// Returns a zero-width span at the end of the last token, or at position 0
     /// if there are no tokens. Always uses the stored file_id to ensure valid spans.
     fn last_span(&self) -> Span {
@@ -184,6 +197,7 @@ impl<'a> TokenStream<'a> {
 
     /// Create a span from a start position to the current position.
     ///
+
     /// This is useful for tracking the span of a parsed construct.
     pub fn make_span(&self, start_pos: usize) -> Span {
         if let (Some(start_token), Some(end_token)) = (
@@ -208,6 +222,7 @@ impl<'a> TokenStream<'a> {
 
     /// Reset the position to a previous state.
     ///
+
     /// This is useful for backtracking in the parser.
     #[inline]
     pub fn reset_to(&mut self, pos: usize) {
@@ -216,6 +231,7 @@ impl<'a> TokenStream<'a> {
 
     /// Get the remaining tokens as a slice from the current position.
     ///
+
     /// This is useful for accessing remaining tokens during parsing.
     #[inline]
     pub fn remaining(&self) -> &'a [Token] {
@@ -224,6 +240,7 @@ impl<'a> TokenStream<'a> {
 
     /// Get the full token slice.
     ///
+
     /// This is useful for accessing arbitrary token ranges during parsing.
     #[inline]
     pub fn all_tokens(&self) -> &'a [Token] {
@@ -252,6 +269,7 @@ const MAX_PARSER_OPERATIONS: usize = 1_000_000;
 /// Prevents stack overflow on deeply nested input like `(((((...)))))`
 /// or `List<List<List<...>>>`.
 ///
+
 /// Sized for rayon worker threads (macOS default stack = 512 KiB; Linux
 /// glibc default = 8 MiB but Rust threads often sized to 2 MiB). Each
 /// `parse_expr_bp` frame consumes ~2-3 KiB on aarch64 release builds
@@ -261,6 +279,7 @@ const MAX_PARSER_OPERATIONS: usize = 1_000_000;
 /// more than any *human-written* program needs while staying safe on
 /// the smallest worker-thread stack we ship to.
 ///
+
 /// Tuning history: the bound was 256 before T0.5; the resulting
 /// 768 KiB worst-case frame chain reliably hit SIGBUS on macOS
 /// rayon workers during stdlib loading. Halving to 128 closes the
@@ -269,6 +288,7 @@ const MAX_RECURSION_DEPTH: usize = 128;
 
 /// Main recursive descent parser with helper methods for common parsing patterns.
 ///
+
 /// This struct maintains the token stream state and provides high-level
 /// parsing utilities like comma-separated lists, delimited expressions,
 /// and error recovery.
@@ -320,6 +340,7 @@ pub struct RecursiveParser<'a> {
     /// `__verum_script_main` `FunctionDecl` carrying every collected
     /// statement in source order.
     ///
+
     /// The flag is OFF by default so library / binary modules (the
     /// vast majority) keep their stricter top-level grammar.
     /// Enable via [`Self::set_script_mode`] from the lexer / pipeline
@@ -355,6 +376,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Enable script-mode top-level parsing.
     ///
+
     /// In script mode, [`Self::parse_module`] accepts statements
     /// (let-bindings, expressions, defer, …) alongside items and
     /// synthesises every collected statement into a single
@@ -363,6 +385,7 @@ impl<'a> RecursiveParser<'a> {
     /// (P1.1 lexer hook) or whose preamble carries the
     /// `@![__verum_kind("script")]` attribute.
     ///
+
     /// Library / binary parsing leaves this off so the stricter
     /// grammar (decls only) keeps its tight error messages.
     pub fn set_script_mode(&mut self, enabled: bool) {
@@ -546,12 +569,15 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a comma-separated list of items.
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// // Parse: item1, item2, item3
     /// let items = parser.comma_separated(|p| p.parse_item())?;
     ///
+
     /// // With trailing comma: item1, item2,
     /// let items = parser.comma_separated(|p| p.parse_item())?;
     /// ```
@@ -602,14 +628,16 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse content delimited by opening and closing tokens.
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// // Parse: { expr }
     /// let expr = parser.delimited(
-    ///     TokenKind::LBrace,
-    ///     TokenKind::RBrace,
-    ///     |p| p.parse_expr()
+    ///  TokenKind::LBrace,
+    ///  TokenKind::RBrace,
+    ///  |p| p.parse_expr()
     /// )?;
     /// ```
     pub fn delimited<T>(
@@ -626,15 +654,18 @@ impl<'a> RecursiveParser<'a> {
 
     /// Try to parse something, returning None if it fails.
     ///
+
     /// This does not consume tokens on failure and does not record errors.
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// // Try to parse an optional type annotation
     /// let ty = parser.optional(|p| {
-    ///     p.stream.expect(TokenKind::Colon)?;
-    ///     p.parse_type()
+    ///  p.stream.expect(TokenKind::Colon)?;
+    ///  p.parse_type()
     /// });
     /// ```
     pub fn optional<T>(&mut self, mut parse: impl FnMut(&mut Self) -> ParseResult<T>) -> Option<T> {
@@ -660,12 +691,14 @@ impl<'a> RecursiveParser<'a> {
 
     /// Synchronize the parser to recover from errors.
     ///
+
     /// This skips tokens until a statement or item boundary is reached:
     /// - Semicolons
     /// - Closing braces
     /// - Keywords that start declarations (fn, type, etc.)
     /// - Keywords that start statements (let, return, if, while, etc.)
     ///
+
     /// Returns the number of tokens skipped for diagnostic purposes.
     pub fn synchronize(&mut self) -> usize {
         let start_pos = self.stream.position();
@@ -734,6 +767,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Synchronize to the next expression boundary.
     ///
+
     /// This is more fine-grained than `synchronize()` and is used within expressions
     /// to recover from errors like missing operators or malformed sub-expressions.
     pub fn synchronize_expr(&mut self) -> usize {
@@ -777,10 +811,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if a `.` is followed by an identifier-like token.
     ///
+
     /// This is used to determine if a `.` should be consumed as part of a qualified type
     /// path (like `Self.Item` or `module.Type`) or if it's a separator (like in
     /// `forall i: T . body` where `.` separates the binding from the body).
     ///
+
     /// Returns true if the current token is `.` and the next token is an identifier,
     /// Self, self, super, crate, or module.
     pub fn is_dot_followed_by_ident(&self) -> bool {
@@ -799,6 +835,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if semicolon omission is allowed at the current position.
     ///
+
     /// Semicolons can be omitted when followed by:
     /// - Statement-starting keywords (let, while, for, if, return, etc.)
     /// - Expression-starting keywords (Some, None, Ok, Err, true, false, etc.)
@@ -806,6 +843,7 @@ impl<'a> RecursiveParser<'a> {
     /// - Block/expression terminators (}, EOF)
     /// - Item-starting keywords (fn, type, protocol, etc.)
     ///
+
     /// This enables cleaner code without requiring semicolons everywhere.
     pub fn allows_semicolon_omission(&self) -> bool {
         match self.stream.peek_kind() {
@@ -873,6 +911,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Consume an identifier or contextual keyword that can be used as an identifier.
     ///
+
     /// This handles special cases like Some, None, Ok, Err, and proof keywords
     /// which can be used as identifiers in certain contexts (function names, field names).
     /// Does NOT include core reserved keywords like let, fn, if, match, etc.
@@ -1262,6 +1301,7 @@ impl<'a> RecursiveParser<'a> {
 
     /// Consume a `>` token, handling nested generics by splitting `>>` tokens.
     ///
+
     /// For nested generics like `List<Maybe<Int>>`, the lexer produces `GtGt` for `>>`.
     /// This method:
     /// 1. If there's a pending `>` from a previous split, consume it
@@ -1269,6 +1309,7 @@ impl<'a> RecursiveParser<'a> {
     /// 3. If current token is `GtGt`, consume it and set pending_gt = true (one `>` consumed, one pending)
     /// 4. If current token is `GtGtEq`, consume it and set pending_gt = true, then expect `Eq`
     ///
+
     /// Returns the consumed token's span for error reporting.
     pub fn expect_gt(&mut self) -> ParseResult<Span> {
         // First check if we have a pending > from a previous GtGt split
@@ -1349,8 +1390,10 @@ impl<'a> RecursiveParser<'a> {
 
 /// Merge two spans into one that covers both.
 ///
+
 /// # Panics
 ///
+
 /// Panics in debug mode if spans are from different files.
 #[inline]
 pub fn merge_spans(start: Span, end: Span) -> Span {

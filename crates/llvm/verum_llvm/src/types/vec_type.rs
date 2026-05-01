@@ -19,6 +19,7 @@ pub struct VectorType<'ctx> {
 impl<'ctx> VectorType<'ctx> {
     /// Create `VectorType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't vector type
     pub unsafe fn new(vector_type: LLVMTypeRef) -> Self {
@@ -32,11 +33,14 @@ impl<'ctx> VectorType<'ctx> {
     /// Gets the size of this `VectorType`. Value may vary depending on the target architecture.
     /// Note: Behavior is undefined if the element type contains opaque structs (LLVM limitation).
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(3);
@@ -48,15 +52,19 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Gets the size of this `VectorType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vector_type = f32_type.vec_type(3);
     ///
+
     /// assert_eq!(f32_vector_type.get_size(), 3);
     /// assert_eq!(f32_vector_type.get_element_type().into_float_type(), f32_type);
     /// ```
@@ -74,17 +82,20 @@ impl<'ctx> VectorType<'ctx> {
     // Something like: values: &[&V; self.size]. Doesn't sound possible though
     /// Creates a constant `VectorValue`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::VectorType;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_val = f32_type.const_float(0.);
     /// let f32_val2 = f32_type.const_float(2.);
     /// let f32_vec_val = VectorType::const_vector(&[f32_val, f32_val2]);
     ///
+
     /// assert!(f32_vec_val.is_constant_vector());
     /// ```
     pub fn const_vector<V: BasicValue<'ctx>>(values: &[V]) -> VectorValue<'ctx> {
@@ -94,11 +105,14 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Creates a constant zero value of this `VectorType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(7);
@@ -115,16 +129,19 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Creates an undefined instance of a `VectorType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(3);
     /// let f32_vec_undef = f32_vec_type.get_undef();
     ///
+
     /// assert!(f32_vec_undef.is_undef());
     /// ```
     pub fn get_undef(self) -> VectorValue<'ctx> {
@@ -133,16 +150,19 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Creates a poison instance of a `VectorType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(3);
     /// let f32_vec_poison = f32_vec_type.get_undef();
     ///
+
     /// assert!(f32_vec_poison.is_undef());
     /// ```
     pub fn get_poison(self) -> VectorValue<'ctx> {
@@ -152,15 +172,19 @@ impl<'ctx> VectorType<'ctx> {
     // SubType: VectorType<BT> -> BT?
     /// Gets the element type of this `VectorType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vector_type = f32_type.vec_type(3);
     ///
+
     /// assert_eq!(f32_vector_type.get_size(), 3);
     /// assert_eq!(f32_vector_type.get_element_type().into_float_type(), f32_type);
     /// ```
@@ -170,19 +194,23 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Creates a `PointerType` with this `VectorType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // This example is ignored because LLVM 21 uses opaque pointers
     /// // and get_element_type() no longer exists
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(3);
     /// let f32_vec_ptr_type = f32_vec_type.ptr_type(AddressSpace::default());
     ///
+
     /// assert_eq!(f32_vec_ptr_type.get_element_type().into_vector_type(), f32_vec_type);
     /// ```
     #[deprecated(note = "LLVM 21 uses opaque pointers. Use Context::ptr_type instead.")]
@@ -192,11 +220,14 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Creates a `FunctionType` with this `VectorType` for its return type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(3);
@@ -208,16 +239,20 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Creates an `ArrayType` with this `VectorType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(3);
     /// let f32_vec_array_type = f32_vec_type.array_type(3);
     ///
+
     /// assert_eq!(f32_vec_array_type.len(), 3);
     /// assert_eq!(f32_vec_array_type.get_element_type().into_vector_type(), f32_vec_type);
     /// ```
@@ -227,11 +262,13 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Creates a constant `ArrayValue`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::VectorType;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_val = f32_type.const_float(0.);
@@ -240,6 +277,7 @@ impl<'ctx> VectorType<'ctx> {
     /// let f32_vec_val = VectorType::const_vector(&[f32_val, f32_val2]);
     /// let f32_array = f32_vec_type.const_array(&[f32_vec_val, f32_vec_val]);
     ///
+
     /// assert!(f32_array.is_const());
     /// ```
     pub fn const_array(self, values: &[VectorValue<'ctx>]) -> ArrayValue<'ctx> {
@@ -248,15 +286,19 @@ impl<'ctx> VectorType<'ctx> {
 
     /// Gets a reference to the `Context` this `VectorType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vec_type = f32_type.vec_type(7);
     ///
+
     /// assert_eq!(f32_vec_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {

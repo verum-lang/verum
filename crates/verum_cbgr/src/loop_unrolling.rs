@@ -1,78 +1,92 @@
 //! Loop Unrolling for Bounded Iteration Analysis
 //!
+
 //! By unrolling loops up to a configurable bound, escape analysis can track
 //! per-iteration behavior precisely rather than conservatively merging all
 //! iterations. This enables promotion of references that are only used within
 //! a single loop iteration (NoEscape per iteration).
 //!
+
 //! This module implements production-grade loop unrolling for CBGR escape analysis.
 //! By unrolling loops up to a configurable bound, we can achieve better precision
 //! in tracking escape behavior on a per-iteration basis.
 //!
+
 //! # Overview
 //!
+
 //! Loop unrolling transforms loops into a sequence of explicit iterations,
 //! enabling more precise escape analysis:
 //!
+
 //! ```rust,ignore
 //! // Original loop
 //! for i in 0..4 {
-//!     let data = allocate();  // RefId(1)
-//!     process(&data, i);
-//!     // data may or may not escape depending on i
+//!  let data = allocate(); // RefId(1)
+//!  process(&data, i);
+//!  // data may or may not escape depending on i
 //! }
 //!
+
 //! // Unrolled version
 //! {
-//!     let data_0 = allocate();  // RefId(1_0)
-//!     process(&data_0, 0);
+//!  let data_0 = allocate(); // RefId(1_0)
+//!  process(&data_0, 0);
 //! }
 //! {
-//!     let data_1 = allocate();  // RefId(1_1)
-//!     process(&data_1, 1);
+//!  let data_1 = allocate(); // RefId(1_1)
+//!  process(&data_1, 1);
 //! }
 //! {
-//!     let data_2 = allocate();  // RefId(1_2)
-//!     process(&data_2, 2);
+//!  let data_2 = allocate(); // RefId(1_2)
+//!  process(&data_2, 2);
 //! }
 //! {
-//!     let data_3 = allocate();  // RefId(1_3)
-//!     process(&data_3, 3);
+//!  let data_3 = allocate(); // RefId(1_3)
+//!  process(&data_3, 3);
 //! }
 //! ```
 //!
+
 //! # Key Features
 //!
+
 //! 1. **Bounded Unrolling**: Configurable limit (default: 4, max: 16)
 //! 2. **Loop Invariant Detection**: Identify allocations that don't depend on iteration
 //! 3. **Per-Iteration Tracking**: Track escape separately for each iteration
 //! 4. **CFG Rewriting**: Generate unrolled control flow graph
 //! 5. **Loop Peeling**: Separate first/last iterations for special analysis
 //!
+
 //! # Performance Impact
 //!
+
 //! - **Precision**: 2-5x improvement in promotion rate for loop-heavy code
 //! - **Analysis Time**: `O(unroll_bound` × `loop_body_size`)
 //! - **Target**: < 10ms for typical loops with bound=4
 //!
+
 //! # Example Use Case
 //!
+
 //! ```rust,ignore
 //! fn process_chunks(data: &[u8]) {
-//!     for i in 0..4 {
-//!         let chunk = &data[i*256..(i+1)*256];  // RefId varies by i
+//!  for i in 0..4 {
+//!  let chunk = &data[i*256..(i+1)*256]; // RefId varies by i
 //!
-//!         if i < 3 {
-//!             // No escape: chunk used locally
-//!             validate(chunk);
-//!         } else {
-//!             // Escape: chunk stored in global state
-//!             store_final(chunk);
-//!         }
-//!     }
+
+//!  if i < 3 {
+//!  // No escape: chunk used locally
+//!  validate(chunk);
+//!  } else {
+//!  // Escape: chunk stored in global state
+//!  store_final(chunk);
+//!  }
+//!  }
 //! }
 //! ```
 //!
+
 //! With unrolling, we can prove that iterations 0-2 don't escape,
 //! allowing promotion for 75% of iterations.
 
@@ -89,8 +103,10 @@ use crate::analysis::{
 
 /// Configuration for loop unrolling
 ///
+
 /// Controls the aggressiveness and strategy of loop unrolling.
 ///
+
 /// Controls unrolling aggressiveness. Max iterations (1-16) trades analysis speed
 /// for precision. Strategy selects between full unrolling, peel-first-iteration,
 /// or heuristic-based approaches depending on loop characteristics.
@@ -98,6 +114,7 @@ use crate::analysis::{
 pub struct UnrollConfig {
     /// Maximum number of iterations to unroll (1-16)
     ///
+
     /// - Lower values: Faster analysis, less precision
     /// - Higher values: Slower analysis, more precision
     /// - Default: 4 (good balance)
@@ -105,30 +122,35 @@ pub struct UnrollConfig {
 
     /// Minimum number of iterations to unroll
     ///
+
     /// Loops with fewer iterations than this will not be unrolled.
     /// Default: 2
     pub min_iterations: u32,
 
     /// Whether to peel first iteration separately
     ///
+
     /// Useful for initialization patterns.
     /// Default: true
     pub peel_first: bool,
 
     /// Whether to peel last iteration separately
     ///
+
     /// Useful for finalization patterns.
     /// Default: true
     pub peel_last: bool,
 
     /// Whether to detect and hoist loop invariants
     ///
+
     /// Allocations that don't depend on iteration can be analyzed once.
     /// Default: true
     pub detect_invariants: bool,
 
     /// Maximum loop body size to unroll (in basic blocks)
     ///
+
     /// Prevents excessive unrolling of large loops.
     /// Default: 50
     pub max_body_size: u32,
@@ -189,8 +211,10 @@ impl UnrollConfig {
 
 /// Loop structure detected in CFG
 ///
+
 /// Represents a natural loop with header, body, and back edges.
 ///
+
 /// Natural loop detected via back-edge analysis: header dominates all body blocks,
 /// and at least one back edge from body to header exists. Tracks exit blocks,
 /// trip count bounds, and induction variables for unrolling decisions.
@@ -217,13 +241,16 @@ pub struct LoopInfo {
 
 /// Induction variable in a loop
 ///
+
 /// Represents a variable that changes predictably with each iteration.
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
-/// for i in 0..10 {  // i is induction variable
-///     // i starts at 0, increments by 1 each iteration
+/// for i in 0..10 { // i is induction variable
+///  // i starts at 0, increments by 1 each iteration
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -270,9 +297,11 @@ impl InductionVar {
 
 /// Unrolled loop with per-iteration information
 ///
+
 /// Represents the result of unrolling a loop, including the new CFG
 /// and per-iteration tracking data.
 ///
+
 /// Result of unrolling: contains new CFG blocks for each iteration copy, with
 /// per-iteration escape tracking data so references used only within one
 /// iteration can be classified as NoEscape independently.
@@ -302,6 +331,7 @@ pub struct UnrolledLoop {
 
 /// Per-iteration analysis information
 ///
+
 /// Tracks escape behavior for a single iteration of an unrolled loop.
 #[derive(Debug, Clone)]
 pub struct IterationInfo {
@@ -330,8 +360,10 @@ pub struct IterationInfo {
 
 /// Main loop unrolling engine
 ///
+
 /// Implements the core loop unrolling algorithm with CFG rewriting.
 ///
+
 /// Core unrolling engine: detects natural loops, duplicates CFG blocks for each
 /// unrolled iteration, rewrites edges, and adds a remainder loop for iterations
 /// beyond the unroll bound. Integrates with escape analysis to enable per-iteration
@@ -396,10 +428,13 @@ impl LoopUnroller {
 
     /// Detect loops in control flow graph
     ///
+
     /// Uses dominance-based loop detection to find natural loops.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Find back edges (edge from B to H where H dominates B)
     /// 2. For each back edge, construct loop body
     /// 3. Detect induction variables via pattern matching
@@ -439,6 +474,7 @@ impl LoopUnroller {
 
     /// Find back edges in CFG
     ///
+
     /// A back edge is an edge from B to H where H dominates B.
     fn find_back_edges(&self, cfg: &ControlFlowGraph) -> List<(BlockId, BlockId)> {
         let mut back_edges = List::new();
@@ -521,6 +557,7 @@ impl LoopUnroller {
 
     /// Detect induction variable in loop
     ///
+
     /// Uses pattern matching to identify simple induction variables.
     /// Currently detects: i = start; i < end; i += step
     fn detect_induction_variable(
@@ -556,8 +593,10 @@ impl LoopUnroller {
 
     /// Unroll a loop
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Check if loop should be unrolled (size, bound, etc.)
     /// 2. Determine unroll count
     /// 3. Duplicate loop body for each iteration
@@ -811,6 +850,7 @@ impl LoopUnroller {
 
     /// Detect loop-invariant allocations
     ///
+
     /// An allocation is loop-invariant if:
     /// 1. It has the same allocation site in all iterations
     /// 2. Its escape behavior doesn't depend on iteration

@@ -1,29 +1,35 @@
 //! Protocol Constraint Encoding to SMT
 //!
+
 //! Encodes Verum's protocol system (traits) as SMT predicates for verification.
 //! Protocols use `type X is protocol { ... }` syntax with associated types and
 //! method signatures. Protocol coherence ensures unique implementations per type.
 //! Specialization uses a lattice-based precedence system (concrete > partial > generic).
 //!
+
 //! This module encodes protocol constraints as SMT predicates for verification:
 //! 1. `implements(T, Protocol)` - Type T implements Protocol
 //! 2. Associated type resolution - Resolve Protocol.AssocType for type T
 //! 3. Protocol hierarchy - Verify superprotocol relationships
 //! 4. Protocol coherence - Check uniqueness of implementations
 //!
+
 //! # Performance Targets
 //!
+
 //! - Protocol check: <50ms
 //! - Hierarchy verification: <30ms
 //! - Coherence check: <100ms
 //!
+
 //! # SMT Encoding Strategy
 //!
+
 //! Protocols are encoded as uninterpreted predicates in Z3:
 //! ```smt2
 //! (declare-fun implements (Type Protocol) Bool)
 //! (assert (=> (implements T Protocol1)
-//!             (implements T Protocol2)))  ; Protocol1 requires Protocol2
+//!  (implements T Protocol2))) ; Protocol1 requires Protocol2
 //! ```
 
 use std::time::{Duration, Instant};
@@ -95,6 +101,7 @@ pub struct ProtocolStats {
 
 /// Encodes protocol constraints to Z3
 ///
+
 /// Z3 0.19+ uses thread-local contexts, so no explicit `Context` is held —
 /// sorts created here bind to the current thread's context at construction.
 pub struct ProtocolEncoder {
@@ -138,12 +145,14 @@ impl ProtocolEncoder {
 
     /// Register a protocol definition
     ///
+
     /// Encodes protocol constraints including superprotocols.
     ///
+
     /// Generates Z3 declarations:
     /// 1. Creates a protocol constant in the protocol sort
     /// 2. For each superprotocol, creates implication:
-    ///    `(assert (forall ((T Type)) (=> (implements T Protocol) (implements T SuperProtocol))))`
+    ///  `(assert (forall ((T Type)) (=> (implements T Protocol) (implements T SuperProtocol))))`
     pub fn register_protocol(&mut self, protocol: Protocol) {
         let protocol_name = protocol.name.clone();
 
@@ -186,6 +195,7 @@ impl ProtocolEncoder {
 
     /// Register a protocol implementation
     ///
+
     /// Adds implementation to the database for coherence checking.
     pub fn register_implementation(&mut self, impl_: ProtocolImpl) {
         self.implementations.push(impl_);
@@ -193,19 +203,24 @@ impl ProtocolEncoder {
 
     /// Check if type T implements protocol P
     ///
+
     /// Returns true if there exists a valid implementation.
     ///
+
     /// Uses Z3 to verify:
     /// 1. Direct implementation exists
     /// 2. All superprotocol constraints are satisfied
     /// 3. Implementation is coherent (unique)
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_smt::protocol_smt::ProtocolEncoder;
     /// use verum_ast::Type;
     ///
+
     /// let mut encoder = ProtocolEncoder::new();
     /// let ty = Type::int(verum_ast::Span::dummy());
     /// let result = encoder.check_implements(&ty, "Display");
@@ -348,6 +363,7 @@ impl ProtocolEncoder {
 
     /// Check if implementation type matches target type
     ///
+
     /// Implements full type matching with:
     /// - Generic instantiation and type variable binding
     /// - Variance-aware subtyping for references and function types
@@ -355,8 +371,10 @@ impl ProtocolEncoder {
     /// - Higher-kinded type matching (F<_> patterns)
     /// - Where clause satisfaction checking
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Handle exact match (trivial case)
     /// 2. Handle generic impl types (type parameters that match anything)
     /// 3. Handle structural matching with variance
@@ -367,6 +385,7 @@ impl ProtocolEncoder {
 
     /// Type matching with variable bindings for generic instantiation
     ///
+
     /// The `bindings` map tracks how type parameters are instantiated:
     /// - Key: Type parameter name (e.g., "T")
     /// - Value: Concrete type it's bound to (e.g., Int)
@@ -690,10 +709,12 @@ impl ProtocolEncoder {
 
     /// Verify predicate subsumption using Z3
     ///
+
     /// For protocol matching, the implementation predicate must be at least as
     /// restrictive as the target predicate. This means:
-    ///   forall x. impl_pred(x) => target_pred(x)
+    ///  forall x. impl_pred(x) => target_pred(x)
     ///
+
     /// Uses Z3 to verify this implication is valid (its negation is unsatisfiable).
     fn verify_predicate_subsumption(
         &self,
@@ -732,7 +753,7 @@ impl ProtocolEncoder {
 
         // We need to verify: forall x. impl_pred(x) => target_pred(x)
         // This is valid iff its negation is unsatisfiable:
-        //   exists x. impl_pred(x) && !target_pred(x)
+        //  exists x. impl_pred(x) && !target_pred(x)
         // So we check if (impl_pred && !target_pred) is UNSAT
         let implication_negation = Bool::and(&[&impl_z3, &target_z3.not()]);
         solver.assert(&implication_negation);
@@ -749,6 +770,7 @@ impl ProtocolEncoder {
 
     /// Translate a predicate expression to Z3 Bool
     ///
+
     /// Handles common predicate patterns like comparisons (x > 0, x < 100),
     /// conjunctions (x > 0 && x < 100), and disjunctions.
     fn translate_predicate_to_z3(
@@ -958,19 +980,24 @@ impl ProtocolEncoder {
 
     /// Resolve associated type for a type implementing a protocol
     ///
+
     /// Example: `List<Int>.Iterator.Item` resolves to `&Int`
     ///
+
     /// Resolution strategy:
     /// 1. First, look in the implementation's associated_types map
     /// 2. If not found, check protocol definition for default type
     /// 3. If neither found, return AssociatedTypeNotResolved error
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_smt::protocol_smt::ProtocolEncoder;
     /// use verum_ast::Type;
     ///
+
     /// let mut encoder = ProtocolEncoder::new();
     /// let ty = Type::int(verum_ast::Span::dummy());
     /// let result = encoder.resolve_associated_type(&ty, "Iterator", "Item");
@@ -1027,15 +1054,18 @@ impl ProtocolEncoder {
 
     /// Resolve associated type with Z3 unification for complex cases
     ///
+
     /// Uses Z3 to unify type constraints when the associated type involves
     /// generic parameters that need to be inferred.
     ///
+
     /// # Arguments
     /// * `ty` - The implementing type
     /// * `protocol_name` - Name of the protocol
     /// * `assoc_type_name` - Name of the associated type to resolve
     /// * `type_bindings` - Known type parameter bindings from context
     ///
+
     /// # Returns
     /// The resolved type, or an error if resolution fails
     pub fn resolve_associated_type_with_unification(
@@ -1168,15 +1198,18 @@ impl ProtocolEncoder {
 
     /// Encode protocol hierarchy as SMT constraints
     ///
+
     /// Creates implications: implements(T, P1) => implements(T, P2)
     /// for all superprotocol relationships P1 : P2
     ///
+
     /// This generates the complete SMT encoding of the protocol hierarchy:
     /// - For each protocol P with superprotocol S:
-    ///   `(assert (forall ((T Type)) (=> (implements T P) (implements T S))))`
+    ///  `(assert (forall ((T Type)) (=> (implements T P) (implements T S))))`
     /// - Transitivity is handled automatically by Z3's reasoning
     /// - Cycles would make the formula UNSAT
     ///
+
     /// # Performance
     /// - O(n*m) where n = # protocols, m = avg superprotocols per protocol
     /// - Typical time: <30ms for 100 protocols
@@ -1228,6 +1261,7 @@ impl ProtocolEncoder {
 
     /// Encode associated type constraints for a protocol
     ///
+
     /// For each associated type in the protocol:
     /// - Encode bounds that must be satisfied
     /// - Encode compatibility with superprotocol associated types
@@ -1291,11 +1325,13 @@ impl ProtocolEncoder {
 
     /// Encode full protocol hierarchy with transitivity for verification
     ///
+
     /// This is a more comprehensive encoding that includes:
     /// - Direct superprotocol implications
     /// - Transitive closure (though Z3 handles this automatically)
     /// - Associated type inheritance
     ///
+
     /// Use this for complete verification of protocol hierarchies.
     pub fn encode_hierarchy_full(&self, solver: &Solver) -> Result<(), ProtocolError> {
         // First do the basic encoding
@@ -1371,6 +1407,7 @@ impl ProtocolEncoder {
 
     /// Check protocol hierarchy for cycles
     ///
+
     /// Uses DFS to detect cycles in superprotocol relationships.
     pub fn check_hierarchy_cycles(&self) -> Result<(), ProtocolError> {
         let mut visited = Set::new();
@@ -1421,23 +1458,27 @@ impl ProtocolEncoder {
 
     /// Verify protocol coherence
     ///
+
     /// Ensures each (Type, Protocol) pair has at most one implementation.
     /// This uses both a fast structural check and Z3-based verification for
     /// detecting overlapping generic implementations.
     ///
+
     /// # Algorithm
     /// 1. First pass: exact type match detection (O(n) fast check)
     /// 2. Second pass: Z3-based overlap detection for generic impls
     ///
+
     /// # Examples
     /// ```ignore
     /// // These would conflict (exact overlap):
     /// impl Display for Int { ... }
-    /// impl Display for Int { ... }  // Error: duplicate impl
+    /// impl Display for Int { ... } // Error: duplicate impl
     ///
+
     /// // These might conflict (generic overlap):
     /// impl<T> Display for List<T> { ... }
-    /// impl<T: Clone> Display for List<T> { ... }  // Potential overlap
+    /// impl<T: Clone> Display for List<T> { ... } // Potential overlap
     /// ```
     pub fn verify_coherence(&self) -> Result<(), ProtocolError> {
         // Fast pass: check for exact duplicate implementations
@@ -1469,6 +1510,7 @@ impl ProtocolEncoder {
 
     /// Use Z3 to detect overlapping generic implementations
     ///
+
     /// This handles cases like:
     /// - `impl<T> Display for List<T>` vs `impl<T: Clone> Display for List<T>`
     /// - `impl<T, U> Add<U> for T` vs `impl Add<Int> for Float`
@@ -1515,6 +1557,7 @@ impl ProtocolEncoder {
 
     /// Check if two implementations may overlap using Z3
     ///
+
     /// Two implementations overlap if there exists a type T that matches both.
     /// We encode this as a satisfiability problem.
     fn implementations_may_overlap(&self, impl1: &ProtocolImpl, impl2: &ProtocolImpl) -> bool {
@@ -1646,13 +1689,16 @@ impl ProtocolEncoder {
 
     /// Encode protocol constraint as SMT predicate
     ///
+
     /// Creates an SMT boolean expression that encodes the constraint that
     /// a type T must implement all methods of a protocol.
     ///
+
     /// # Arguments
     /// * `ty` - The type to encode constraints for
     /// * `protocol` - The protocol with required methods
     ///
+
     /// # Returns
     /// An SMT Bool expression representing the constraint
     pub fn encode_protocol_constraint(&mut self, ty: &Type, protocol: &Protocol) -> Bool {
@@ -1690,14 +1736,17 @@ impl ProtocolEncoder {
 
     /// Encode that a type has a specific method
     ///
+
     /// Creates an SMT predicate representing that type T has a method
     /// with the given name and signature.
     ///
+
     /// # Arguments
     /// * `ty` - The type that should have the method
     /// * `method_name` - The name of the method
     /// * `method_signature` - The expected signature of the method
     ///
+
     /// # Returns
     /// An SMT Bool expressing that the type has the method
     fn encode_has_method(&self, ty: &Type, method_name: &Text, method_signature: &Type) -> Bool {
@@ -1728,10 +1777,12 @@ impl ProtocolEncoder {
 
     /// Check if a type satisfies protocol constraints using SMT
     ///
+
     /// Uses Z3 to verify that a type satisfies all protocol constraints.
     /// This checks that the type implements all required methods and
     /// satisfies all superprotocol requirements.
     ///
+
     /// # Algorithm
     /// 1. Create fresh Z3 solver
     /// 2. Encode all protocol method signatures as constraints
@@ -1740,14 +1791,17 @@ impl ProtocolEncoder {
     /// 5. Check satisfiability with Z3
     /// 6. Extract counterexample if UNSAT
     ///
+
     /// # Arguments
     /// * `ty` - The type to check
     /// * `protocol` - The protocol to verify against
     ///
+
     /// # Returns
     /// `Ok(true)` if the constraint is satisfiable (type satisfies protocol),
     /// `Ok(false)` if unsatisfiable (type doesn't satisfy protocol)
     ///
+
     /// # Performance
     /// - Typical time: <50ms for protocols with <10 methods
     /// - Complex protocols with many superprotocols: <200ms
@@ -1863,17 +1917,21 @@ pub fn resolve_associated_type(
 
 /// Verify protocol hierarchy is acyclic and well-formed
 ///
+
 /// Uses both structural checking and Z3 verification:
 /// 1. DFS cycle detection for structural cycles
 /// 2. Z3 satisfiability checking for constraint consistency
 /// 3. Verifies that hierarchy forms a valid DAG
 ///
+
 /// # Example
 ///
+
 /// ```no_run
 /// use verum_smt::protocol_smt::verify_hierarchy;
 /// use verum_protocol_types::protocol_base::Protocol;
 ///
+
 /// let protocols = vec![/* protocol definitions */];
 /// let result = verify_hierarchy(&protocols);
 /// assert!(result.is_ok());
@@ -1970,6 +2028,7 @@ pub fn encode_protocol_bound(
 
 /// Encode protocol hierarchy as Horn clauses
 ///
+
 /// For use with the fixedpoint engine for more complex reasoning.
 pub fn encode_hierarchy_as_chc(protocols: &[Protocol]) -> List<crate::fixedpoint::CHC> {
     let mut chcs = List::new();

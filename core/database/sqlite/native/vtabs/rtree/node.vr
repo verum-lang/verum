@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
-// `LeafEntry`  — (rowid, bbox)
+
+// `LeafEntry` — (rowid, bbox)
 // `InternalEntry` — (child_node_id, bbox covering all child entries)
-// `RTreeNode`       — sum type with leaf / internal payloads
+// `RTreeNode` — sum type with leaf / internal payloads
 //
+
 // Each node has a fixed capacity (16 entries by default — same as
 // SQLite's `RTREE_MAXCELLS`); when an insert would exceed it, the
 // node is split via the linear-cost heuristic in `tree.vr`.

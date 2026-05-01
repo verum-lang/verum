@@ -4,11 +4,14 @@
 // Layer: Stdlib (1)
 // Dependencies: None (compiler-provided)
 //
+
 // This module provides arithmetic intrinsics that map directly to LLVM/CPU
 // instructions. All operations are zero-allocation and VBC-compatible.
 //
+
 // # Categories
 //
+
 // - Basic arithmetic: add, sub, mul, div, rem, neg, abs
 // - Checked arithmetic: checked_add, checked_sub, etc. (returns Maybe<T>)
 // - Overflow-checked: overflowing_add, etc. (returns (T, Bool))
@@ -16,6 +19,7 @@
 // - Saturating arithmetic: saturating_add, etc. (clamps at min/max)
 // - Comparison: eq, ne, lt, le, gt, ge, min, max, clamp
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
@@ -27,6 +31,7 @@ module core.intrinsics.arithmetic;
 
 /// Integer/float addition.
 ///
+
 /// # Panics
 /// On signed-integer T, panics if `a + b` overflows the
 /// representable range. Use `checked_add` / `wrapping_add` /
@@ -37,6 +42,7 @@ public fn add<T>(a: T, b: T) -> T { @intrinsic("add", a, b) }
 
 /// Integer/float subtraction.
 ///
+
 /// # Panics
 /// On signed-integer T, panics if `a - b` underflows the
 /// representable range. Use `checked_sub` / `wrapping_sub` /
@@ -46,6 +52,7 @@ public fn sub<T>(a: T, b: T) -> T { @intrinsic("sub", a, b) }
 
 /// Integer/float multiplication.
 ///
+
 /// # Panics
 /// On signed-integer T, panics on overflow. Float follows IEEE 754
 /// (saturates to `±inf`).
@@ -53,43 +60,51 @@ public fn mul<T>(a: T, b: T) -> T { @intrinsic("mul", a, b) }
 
 /// Integer/float division.
 ///
+
 /// # Panics
 /// * Integer T: panics if `b == 0` (division by zero).
 /// * Signed-integer T: panics on `T.MIN / -1` (the only signed
-///   division that overflows; the mathematical result `|T.MIN|`
-///   is unrepresentable).
+///  division that overflows; the mathematical result `|T.MIN|`
+///  is unrepresentable).
 /// * Float T: follows IEEE 754 — `x / 0.0 = ±inf`, `0.0 / 0.0 = NaN`.
 ///
+
 /// Use `checked_div` to recover from divisor-zero / overflow without
 /// panicking.
 public fn div<T>(a: T, b: T) -> T { @intrinsic("div", a, b) }
 
 /// Integer remainder (modulo).
 ///
+
 /// # Panics
 /// * Integer T: panics if `b == 0`.
 /// * Signed-integer T: panics on `T.MIN % -1` for the same reason
-///   as `div` — the trapping operand pair.
+///  as `div` — the trapping operand pair.
 ///
+
 /// Use `checked_rem` to recover without panicking.
 public fn rem<T>(a: T, b: T) -> T { @intrinsic("rem", a, b) }
 
 /// Arithmetic negation (`-x`).
 ///
+
 /// # Panics
 /// On signed-integer T, panics on `T.MIN` because the
 /// mathematical result `|T.MIN|` is not representable in two's
 /// complement. Float negation flips the sign bit and never panics.
 ///
+
 /// Use `checked_neg` to recover from the `T.MIN` case.
 public fn neg<T>(x: T) -> T { @intrinsic("neg", x) }
 
 /// Absolute value.
 ///
+
 /// # Panics
 /// On signed-integer T, panics on `T.MIN` (same overflow as
 /// `neg`). Float `abs(NaN) = NaN`, `abs(±inf) = +inf`.
 ///
+
 /// For the safe form on integers, prefer `checked_neg` followed by
 /// a sign-aware compare, or use `saturating_abs` (clamps `T.MIN`
 /// to `T.MAX`).
@@ -127,7 +142,7 @@ public fn checked_rem<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_rem", a, 
 public fn checked_neg<T>(x: T) -> Maybe<T> { @intrinsic("checked_neg", x) }
 
 /// Checked absolute value (returns None if self is MIN — same overflow
-/// as `checked_neg`).  Symmetric counterpart added in #100/task #25.
+/// as `checked_neg`). Symmetric counterpart added in #100/task #25.
 public fn checked_abs<T>(x: T) -> Maybe<T> { @intrinsic("checked_abs", x) }
 
 /// Checked left shift (returns None if shift >= bit width)
@@ -194,6 +209,7 @@ public fn wrapping_mul<T>(a: T, b: T) -> T { @intrinsic("wrapping_mul", a, b) }
 
 /// Wrapping division.
 ///
+
 /// # Panics
 /// Panics if `b == 0`. Unlike non-wrapping `div`, the trapping
 /// signed pair `T.MIN / -1` does NOT panic — it wraps to
@@ -202,6 +218,7 @@ public fn wrapping_div<T>(a: T, b: T) -> T { @intrinsic("wrapping_div", a, b) }
 
 /// Wrapping remainder.
 ///
+
 /// # Panics
 /// Panics if `b == 0`. The trapping pair `T.MIN % -1` wraps to
 /// `0` instead of panicking.

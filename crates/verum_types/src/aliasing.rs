@@ -1,32 +1,38 @@
 //! Reference Aliasing Detection System
 //!
+
 //! Reference safety invariants: managed refs validated at dereference, checked refs proven safe at compile time, unsafe refs unchecked
 //!
+
 //! This module implements compile-time verification of Verum's borrowing rules:
 //! - At most one mutable reference to a value at any time
 //! - Multiple immutable references allowed if no mutable references exist
 //! - References cannot outlive their referents
 //! - Field-level aliasing detection for partial borrows
 //!
+
 //! # Borrow Rules
 //!
+
 //! ```verum
 //! let mut x = 42;
-//! let r1 = &x;      // OK: first immutable borrow
-//! let r2 = &x;      // OK: multiple immutable borrows allowed
+//! let r1 = &x; // OK: first immutable borrow
+//! let r2 = &x; // OK: multiple immutable borrows allowed
 //! // let r3 = &mut x; // ERROR: mutable borrow while immutable borrows active
-//! println("{}, {}", r1, r2);  // Use borrows
-//! let r3 = &mut x;  // OK: now allowed, r1 and r2 no longer used
+//! println("{}, {}", r1, r2); // Use borrows
+//! let r3 = &mut x; // OK: now allowed, r1 and r2 no longer used
 //! ```
 //!
+
 //! # Field-Level Borrowing
 //!
+
 //! ```verum
 //! type Point is { x: Int, y: Int };
 //! let mut p = Point { x: 1, y: 2 };
-//! let rx = &mut p.x;  // Borrow field x
-//! let ry = &mut p.y;  // OK: different fields, no conflict
-//! // let rp = &mut p;  // ERROR: conflicts with field borrows
+//! let rx = &mut p.x; // Borrow field x
+//! let ry = &mut p.y; // OK: different fields, no conflict
+//! // let rp = &mut p; // ERROR: conflicts with field borrows
 //! ```
 
 use crate::TypeError;
@@ -374,13 +380,15 @@ impl BorrowTracker {
         // because method calls are natural NLL release points (the borrow ends
         // at its last use, which is the prior method return).
         //
+
         // Example that must still error:
-        //   let r1 = &data;       // immutable borrow active
-        //   let r2 = &mut data;   // ERROR: cannot borrow mutably while r1 is active
+        //  let r1 = &data; // immutable borrow active
+        //  let r2 = &mut data; // ERROR: cannot borrow mutably while r1 is active
         //
+
         // Example that should work (handled by borrow_mut_for_call):
-        //   let len = data.len(); // immutable borrow released after call returns
-        //   data.push(1);         // OK: no active immutable borrows
+        //  let len = data.len(); // immutable borrow released after call returns
+        //  data.push(1); // OK: no active immutable borrows
 
         // Check: no active mutable borrows of this target
         if let Some(mut_borrows) = self.active_mut_borrows.get(&target) {
@@ -443,6 +451,7 @@ impl BorrowTracker {
 
     /// Create an *immutable* borrow for a function call argument (NLL behavior).
     ///
+
     /// Analogue of `borrow_mut_for_call` for the common `call(&value)` pattern.
     /// The returned borrow is NOT persisted in the tracker — a function call
     /// argument is live only for the duration of the call itself, and the
@@ -450,15 +459,18 @@ impl BorrowTracker {
     /// the return type explicitly contains a reference (that case is handled
     /// elsewhere by `link_holder_to_last_borrow`).
     ///
+
     /// Root fix for Issue #4 (NLL liveness over-retain): before this
     /// existed, `borrow_immut` was the only entry point and it always
     /// created a tracked, scope-lifetime borrow. A sequence like
     ///
+
     /// ```verum
-    /// let sz = call(&value);     // `&value` tracked past the call return
-    /// mutate(&mut value);        // ERROR: "previous immutable borrow"
+    /// let sz = call(&value); // `&value` tracked past the call return
+    /// mutate(&mut value); // ERROR: "previous immutable borrow"
     /// ```
     ///
+
     /// reported a false conflict because the immutable borrow was still
     /// "active" at the `&mut value` site even though it had no live holder.
     /// This function fixes the asymmetry with `borrow_mut_for_call`.
@@ -513,12 +525,13 @@ impl BorrowTracker {
         // in a named variable are no longer live — the method call boundary is a
         // natural NLL release point.
         //
+
         // However, borrows held by named variables (e.g., `let sum_ref = &numbers`)
         // are still live and MUST NOT be released — they conflict with the mutable
         // borrow attempt. This prevents the aliasing violation in patterns like:
-        //   let sum_ref = &numbers;       // immutable borrow stored in variable
-        //   modify_data(&mut numbers);    // ERROR: conflicts with sum_ref
-        //   read_data(sum_ref);           // sum_ref is still used
+        //  let sum_ref = &numbers; // immutable borrow stored in variable
+        //  modify_data(&mut numbers); // ERROR: conflicts with sum_ref
+        //  read_data(sum_ref); // sum_ref is still used
         if let Some(immut_borrows) = self.active_immut_borrows.remove(&target) {
             let mut kept_borrows = List::new();
             for borrow in immut_borrows.iter() {
@@ -727,12 +740,13 @@ impl BorrowTracker {
     /// This is the core NLL mechanism - borrows end at their last use point,
     /// not at the end of their lexical scope.
     ///
+
     /// Example:
     /// ```verum
     /// let mut data = 42;
-    /// let r = &data;     // Borrow starts
-    /// println(*r);       // Last use of r
-    /// data = 100;        // OK: borrow ended at last use of r
+    /// let r = &data; // Borrow starts
+    /// println(*r); // Last use of r
+    /// data = 100; // OK: borrow ended at last use of r
     /// ```
     pub fn release_borrow_at_last_use(&mut self, holder: &str) {
         let holder_text = Text::from(holder);
@@ -794,6 +808,7 @@ impl BorrowTracker {
     // ==================== Two-Phase Borrow Support ====================
     // Memory layout and reference representation: ThinRef (16 bytes) for sized types, FatRef (24 bytes) for unsized types — .6 - Two-phase borrows
     //
+
     // Two-phase borrows allow patterns like `vec.push(vec.len())`:
     // 1. First phase: "Reserve" mutable borrow of receiver
     // 2. During argument evaluation: Allow immutable borrows

@@ -1,53 +1,65 @@
 //! Concurrency Analysis for Compile-Time Data Race Detection
 //!
+
 //! This module implements compile-time concurrency analysis to detect potential
 //! data races and synchronization issues, including:
 //!
+
 //! - **Data Race Detection**: Finds unsynchronized shared memory access
 //! - **Happens-Before Analysis**: Tracks synchronization ordering
 //! - **Lock Ordering Analysis**: Detects potential deadlocks
 //! - **Thread Safety Verification**: Validates Send/Sync bounds
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! CFG → ConcurrencyAnalyzer → ConcurrencyAnalysisResult
-//!                                   │
-//!                                   ▼
-//!                   ┌───────────────────────────────┐
-//!                   │ HappensBeforeGraph            │
-//!                   │ Set<DataRaceWarning>          │
-//!                   │ Set<DeadlockWarning>          │
-//!                   │ Map<VarId, AccessHistory>     │
-//!                   └───────────────────────────────┘
+//!  │
+//!  ▼
+//!  ┌───────────────────────────────┐
+//!  │ HappensBeforeGraph │
+//!  │ Set<DataRaceWarning> │
+//!  │ Set<DeadlockWarning> │
+//!  │ Map<VarId, AccessHistory> │
+//!  └───────────────────────────────┘
 //! ```
 //!
+
 //! # Data Race Detection Algorithm
 //!
+
 //! Uses a variant of the Eraser algorithm combined with happens-before analysis:
 //!
+
 //! 1. Track all memory accesses with their thread context
 //! 2. Build happens-before graph from synchronization operations
 //! 3. For each pair of accesses to same location:
-//!    - If at least one is a write AND
-//!    - They are not ordered by happens-before AND
-//!    - They are not protected by the same lock
-//!    → Report potential data race
+//!  - If at least one is a write AND
+//!  - They are not ordered by happens-before AND
+//!  - They are not protected by the same lock
+//!  → Report potential data race
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_cbgr::concurrency_analysis::ConcurrencyAnalyzer;
 //!
+
 //! let analyzer = ConcurrencyAnalyzer::new(cfg);
 //! let result = analyzer.analyze();
 //!
+
 //! for race in &result.data_race_warnings {
-//!     println!("Potential data race: {:?} vs {:?}",
-//!              race.access1, race.access2);
+//!  println!("Potential data race: {:?} vs {:?}",
+//!  race.access1, race.access2);
 //! }
 //! ```
 //!
+
 //! Phase 6 of the CBGR analysis pipeline: enhanced compile-time detection of
 //! concurrency issues. Uses Eraser algorithm + happens-before analysis to find
 //! unsynchronized shared memory accesses. Feeds into tier decisions: references
@@ -734,6 +746,7 @@ impl ConcurrencyAnalyzer {
 
     /// Extract memory accesses from CFG.
     ///
+
     /// Honours `config.max_accesses`: once the analyzer has
     /// recorded that many accesses the rest of the CFG is
     /// skipped and the analysis runs on the truncated set. The
@@ -1121,6 +1134,7 @@ mod tests {
         // analyzer collected every warning regardless of the
         // configured floor.
         //
+
         // The check is at the policy layer rather than the
         // detector: we install warnings directly on a result and
         // assert the analyzer's filter would keep / drop each

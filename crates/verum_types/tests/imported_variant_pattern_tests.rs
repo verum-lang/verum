@@ -14,9 +14,11 @@
 )]
 // Comprehensive tests for pattern matching with imported variant types
 //
+
 // Sum types (variants): "type T is A | B(payload) | C { fields }" for algebraic data types (Variants)
 // Name resolution: deterministic lookup through module hierarchy, import resolution, re-exports — .1 - Cross-Module Type Resolution
 //
+
 // This test suite validates:
 // 1. Pattern matching with imported Maybe.Some/Maybe.None
 // 2. Pattern matching with imported Result.Ok/Result.Err

@@ -1,54 +1,65 @@
 //! Dominance Analysis for CBGR Escape Analysis (Phase 3)
 //!
+
 //! CBGR requires that allocation dominates all uses for safe promotion of &T to
 //! &checked T. This module determines the dominator tree so the promotion decision
 //! engine can verify criterion 3 ("allocation dominates all uses in the CFG") and
 //! works alongside atomic thread-safe generation tracking (acquire-release ordering)
 //! and explicit revocation support (CAP_REVOKE capability, atomic generation increment).
 //!
+
 //! This module implements dominance analysis using the Cooper-Harvey-Kennedy algorithm,
 //! which is the third phase of the 4-phase escape analysis pipeline:
 //!
+
 //! - Phase 1: Build SSA representation (`ssa.rs`)
 //! - Phase 2: Track reference flow (`escape_analysis.rs`)
 //! - **Phase 3: Dominance analysis (this module)**
 //! - Phase 4: Promotion decision (`promotion_decision.rs`)
 //!
+
 //! # Algorithm Overview
 //!
+
 //! Dominance analysis determines the dominator tree for a control flow graph.
 //! A block A dominates block B if every path from the entry to B must pass through A.
 //!
+
 //! The Cooper-Harvey-Kennedy algorithm computes dominators efficiently:
 //! - Time complexity: O(n * m) where n = blocks, m = edges (linear in practice)
 //! - Space complexity: O(n) for immediate dominators
 //!
+
 //! # Purpose in Escape Analysis
 //!
+
 //! Dominance is critical for safe reference promotion:
 //! - For `&T` -> `&checked T` promotion, the allocation must dominate all uses
 //! - If a use can occur on a path that doesn't include the allocation, promotion is unsafe
 //! - Dominance frontiers indicate where phi nodes are needed (merge points)
 //!
+
 //! # Example
 //!
+
 //! ```text
-//!     Entry (0)
-//!       |
-//!       v
-//!     Alloc (1)    <- allocation site
-//!       |
-//!     +---+---+
-//!     |       |
-//!     v       v
-//!   Use1(2)  Use2(3)  <- both dominated by Alloc
-//!     |       |
-//!     +---+---+
-//!         |
-//!         v
-//!      Exit (4)
+//!  Entry (0)
+//!  |
+//!  v
+//!  Alloc (1) <- allocation site
+//!  |
+//!  +---+---+
+//!  | |
+//!  v v
+//!  Use1(2) Use2(3) <- both dominated by Alloc
+//!  | |
+//!  +---+---+
+//!  |
+//!  v
+//!  Exit (4)
 //! ```
 //!
+
 //! In this example, block 1 dominates blocks 2, 3, and 4. Since the allocation
 //! in block 1 dominates all use sites, promotion is safe.
 
@@ -63,17 +74,21 @@ use verum_common::{List, Map, Set};
 
 /// Dominance information computed for a control flow graph
 ///
+
 /// Contains three key data structures:
 /// 1. `dominators`: For each block, the set of blocks that dominate it
 /// 2. `immediate_dom`: For each block, its immediate dominator (closest dominator)
 /// 3. `dominance_frontier`: For each block, blocks at its dominance frontier
 ///
+
 /// # Dominance Frontier
 ///
+
 /// The dominance frontier DF(X) of a block X contains blocks Y where:
 /// - X dominates a predecessor of Y
 /// - X does not strictly dominate Y
 ///
+
 /// Dominance frontiers are used for phi node placement in SSA construction
 /// and for determining merge points where different reference versions meet.
 #[derive(Debug, Clone)]
@@ -104,23 +119,30 @@ pub struct DominanceInfo {
 impl DominanceInfo {
     /// Compute dominance information using the Cooper-Harvey-Kennedy algorithm
     ///
+
     /// This is a simple, fast algorithm that works well in practice:
     /// 1. Initialize: entry dominates only itself, others dominated by all
     /// 2. Iterate in reverse postorder until fixed point
     /// 3. Compute immediate dominators from dominator sets
     /// 4. Build dominator tree and dominance frontiers
     ///
+
     /// # Algorithm Reference
     ///
+
     /// Cooper, Harvey, Kennedy. "A Simple, Fast Dominance Algorithm"
     /// Software Practice and Experience, 2001
     ///
+
     /// # Parameters
     ///
+
     /// - `cfg`: The control flow graph to analyze
     ///
+
     /// # Returns
     ///
+
     /// Complete dominance information for the CFG
     #[must_use]
     pub fn compute(cfg: &ControlFlowGraph) -> Self {
@@ -286,11 +308,13 @@ impl DominanceInfo {
 
     /// Compute immediate dominators from dominator sets
     ///
+
     /// The immediate dominator of block B is the unique block D such that:
     /// - D strictly dominates B (D dominates B and D != B)
     /// - D does not strictly dominate any other strict dominator of B
-    ///   (i.e., D is the closest dominator)
+    ///  (i.e., D is the closest dominator)
     ///
+
     /// Algorithm: For each block B, find the dominator D such that D has the
     /// most dominators among all dominators of B (closest in dominator tree).
     fn compute_immediate_dominators(&mut self, cfg: &ControlFlowGraph) {
@@ -348,11 +372,14 @@ impl DominanceInfo {
 
     /// Compute dominance frontiers using the algorithm from Cytron et al.
     ///
+
     /// DF(X) = { Y : X dominates a predecessor of Y but X doesn't strictly dominate Y }
     ///
+
     /// This uses the formula:
     /// DF(X) = `DF_local(X)` ∪ ∪_{Z ∈ children(X)} `DF_up(Z)`
     ///
+
     /// where:
     /// - `DF_local(X)` = { Y ∈ succ(X) : idom(Y) != X }
     /// - `DF_up(Z)` = { Y ∈ DF(Z) : idom(Y) != X }
@@ -396,16 +423,21 @@ impl DominanceInfo {
 
     /// Check if block A dominates block B
     ///
+
     /// A dominates B if every path from entry to B must pass through A.
     /// A block always dominates itself.
     ///
+
     /// # Parameters
     ///
+
     /// - `a`: Potential dominator block
     /// - `b`: Block to check for domination
     ///
+
     /// # Returns
     ///
+
     /// `true` if A dominates B, `false` otherwise
     #[must_use]
     pub fn dominates(&self, a: BlockId, b: BlockId) -> bool {
@@ -421,6 +453,7 @@ impl DominanceInfo {
 
     /// Check if block A strictly dominates block B
     ///
+
     /// A strictly dominates B if A dominates B and A != B.
     #[must_use]
     pub fn strictly_dominates(&self, a: BlockId, b: BlockId) -> bool {
@@ -429,6 +462,7 @@ impl DominanceInfo {
 
     /// Get the immediate dominator of a block
     ///
+
     /// Returns `None` for the entry block (which has no immediate dominator).
     #[must_use]
     pub fn get_immediate_dominator(&self, block: BlockId) -> Option<BlockId> {
@@ -437,6 +471,7 @@ impl DominanceInfo {
 
     /// Get the dominance frontier of a block
     ///
+
     /// Returns the set of blocks at the dominance frontier, where phi nodes
     /// may be needed for values defined in this block.
     #[must_use]
@@ -460,17 +495,22 @@ impl DominanceInfo {
 
     /// Check if an allocation site dominates all use sites
     ///
+
     /// This is a key criterion for reference promotion:
     /// - The allocation must be executed before any use
     /// - All uses must be on paths that pass through the allocation
     ///
+
     /// # Parameters
     ///
+
     /// - `allocation_block`: Block where reference is allocated
     /// - `use_blocks`: Blocks where reference is used
     ///
+
     /// # Returns
     ///
+
     /// `true` if allocation dominates all uses, `false` otherwise
     #[must_use]
     pub fn allocation_dominates_uses(
@@ -488,16 +528,21 @@ impl DominanceInfo {
 
     /// Check dominance for a reference with its definition and uses
     ///
+
     /// Verifies that the definition site dominates all use sites.
     /// This is the dominance criterion from Spec Section 0.12.1.
     ///
+
     /// # Parameters
     ///
+
     /// - `def_site`: Definition site of the reference
     /// - `use_sites`: All use sites of the reference
     ///
+
     /// # Returns
     ///
+
     /// `true` if definition dominates all uses
     #[must_use]
     pub fn check_reference_dominance(
@@ -511,15 +556,20 @@ impl DominanceInfo {
 
     /// Compute the iterated dominance frontier for a set of blocks
     ///
+
     /// This is used for phi node placement in SSA construction.
     /// IDF(S) = limit of DF^n(S) as n -> infinity
     ///
+
     /// # Parameters
     ///
+
     /// - `blocks`: Initial set of blocks
     ///
+
     /// # Returns
     ///
+
     /// The iterated dominance frontier
     #[must_use]
     pub fn iterated_dominance_frontier(&self, blocks: &Set<BlockId>) -> Set<BlockId> {
@@ -585,6 +635,7 @@ impl fmt::Display for DominanceInfo {
 
 /// Information about a reference for promotion decision
 ///
+
 /// Aggregates all information needed to decide if a reference can be promoted
 /// from `&T` (managed, ~15ns) to `&checked T` (0ns).
 #[derive(Debug, Clone)]
@@ -637,6 +688,7 @@ impl ReferenceInfo {
 
 /// Escape category for promotion decision
 ///
+
 /// This is the output from Phase 2 escape analysis, categorizing
 /// how a reference might escape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -668,6 +720,7 @@ impl EscapeCategory {
 
 /// Promotion decision integrating escape analysis and dominance
 ///
+
 /// This represents the final decision about whether to promote a reference,
 /// combining information from all phases:
 /// - Phase 1 (SSA): Use-def chains
@@ -730,26 +783,33 @@ impl fmt::Display for PromotionDecision {
 
 /// Make a promotion decision based on escape category and dominance
 ///
+
 /// This is the core Phase 4 decision logic that combines results from
 /// Phase 2 (escape analysis) and Phase 3 (dominance analysis).
 ///
+
 /// # Algorithm
 ///
+
 /// ```text
 /// if escape_category != NoEscape:
-///     return KeepManagedEscape  // May escape, need CBGR
+///  return KeepManagedEscape // May escape, need CBGR
 /// if !allocation_dominates_uses:
-///     return KeepManagedDominance  // May use before allocation
-/// return PromoteToChecked  // Safe to promote
+///  return KeepManagedDominance // May use before allocation
+/// return PromoteToChecked // Safe to promote
 /// ```
 ///
+
 /// # Parameters
 ///
+
 /// - `ref_info`: Reference information with escape category
 /// - `dominance`: Dominance information
 ///
+
 /// # Returns
 ///
+
 /// Promotion decision for the reference
 #[must_use]
 pub fn decide_promotion(ref_info: &ReferenceInfo, dominance: &DominanceInfo) -> PromotionDecision {
@@ -854,13 +914,13 @@ mod tests {
 
     fn create_simple_cfg() -> ControlFlowGraph {
         // Create a simple diamond CFG:
-        //     Entry (0)
-        //       |
-        //     Block1 (1)
-        //      / \
-        //   B2(2) B3(3)
-        //      \ /
-        //     Exit (4)
+        //  Entry (0)
+        //  |
+        //  Block1 (1)
+        //  / \
+        //  B2(2) B3(3)
+        //  \ /
+        //  Exit (4)
 
         let entry = BlockId(0);
         let block1 = BlockId(1);

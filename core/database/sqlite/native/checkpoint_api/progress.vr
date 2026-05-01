@@ -3,13 +3,16 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_wal_checkpoint_v2 populates two outputs:
 //
-//   nLog  — number of frames in the WAL at the moment of the call
-//           (-1 if the schema name did not match a WAL-mode DB)
-//   nCkpt — number of frames that were actually backfilled into the
-//           main database (-1 under the same mismatch case)
+
+//  nLog — number of frames in the WAL at the moment of the call
+//  (-1 if the schema name did not match a WAL-mode DB)
+//  nCkpt — number of frames that were actually backfilled into the
+//  main database (-1 under the same mismatch case)
 //
+
 // Both may be -1 on error paths.
 // =============================================================================
 

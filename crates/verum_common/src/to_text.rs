@@ -1,19 +1,24 @@
 //! ToText trait for converting values to Text
 //!
+
 //! This provides a convenient way to convert various types to Text.
 
 use crate::Text;
 
 /// Trait for converting values to Text.
 ///
+
 /// This trait provides a consistent way to convert types to Text strings.
 /// It is similar to `ToString` but returns `Text` instead of `String`.
 ///
+
 /// # Examples
 ///
+
 /// ```
 /// use verum_common::{Text, ToText};
 ///
+
 /// let s = "hello";
 /// let text: Text = s.to_text();
 /// assert_eq!(text.as_str(), "hello");

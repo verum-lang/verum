@@ -3,13 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §17 (AUTOINCREMENT semantics)
 //
+
 // sqlite_sequence schema:
 //
-//   CREATE TABLE sqlite_sequence (
-//       name TEXT,
-//       seq  INTEGER
-//   );
+
+//  CREATE TABLE sqlite_sequence (
+//  name TEXT,
+//  seq INTEGER
+//  );
 //
+
 // One row per table that uses AUTOINCREMENT. `seq` records the
 // HIGHEST rowid the table ever had, so a future INSERT can guarantee
 // a strictly greater rowid even after intermediate DELETEs.

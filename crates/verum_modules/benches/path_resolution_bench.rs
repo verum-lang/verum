@@ -1,13 +1,16 @@
 //! Performance benchmarks for multi-segment path resolution.
 //!
+
 //! Measures the performance impact of:
 //! - Single-segment vs multi-segment paths
 //! - Cache hits vs cache misses
 //! - Deep nesting (5+ segments)
 //! - Concurrent resolution
 //!
+
 //! Target: < 15ns per cached resolution, < 1μs per uncached resolution
 //!
+
 //! Multi-segment path resolution: resolves first segment through the standard
 //! resolution algorithm, then traverses subsequent segments through module exports.
 

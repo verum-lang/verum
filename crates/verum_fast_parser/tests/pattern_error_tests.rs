@@ -8,10 +8,12 @@
 )]
 //! Pattern Parser Error Tests
 //!
+
 //! This test suite verifies that the pattern parser produces helpful error
 //! messages for malformed patterns. Each test case documents the expected
 //! error code and message.
 //!
+
 //! Error codes tested:
 //! - E070: Invalid @ binding pattern
 //! - E071: Invalid identifier in pattern

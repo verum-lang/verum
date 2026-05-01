@@ -3,18 +3,20 @@
 // =============================================================================
 // Layer: 5 (Widgets)
 //
+
 // Industrial-grade multi-line editor with:
-//   * line-array storage (O(1) per-line access);
-//   * cursor as (row, byte_col);
-//   * grapheme-aware horizontal cursor movement;
-//   * selection (anchor row/col + cursor row/col);
-//   * word-wise and line-wise movement;
-//   * bounded undo/redo;
-//   * optional line numbers;
-//   * word/char/no-wrap modes (display only — storage is line-based);
-//   * default key dispatcher with Vim-free, Emacs-friendly bindings;
-//   * virtual scroll: only visible rows are rendered.
+//  * line-array storage (O(1) per-line access);
+//  * cursor as (row, byte_col);
+//  * grapheme-aware horizontal cursor movement;
+//  * selection (anchor row/col + cursor row/col);
+//  * word-wise and line-wise movement;
+//  * bounded undo/redo;
+//  * optional line numbers;
+//  * word/char/no-wrap modes (display only — storage is line-based);
+//  * default key dispatcher with Vim-free, Emacs-friendly bindings;
+//  * virtual scroll: only visible rows are rendered.
 //
+
 // The storage is *line-segmented* rather than a single buffer. This keeps
 // insertion/deletion O(line-length) instead of O(buffer-length) which
 // matters for long files. A gap buffer could further optimise per-line

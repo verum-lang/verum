@@ -4,12 +4,15 @@
 // Layer: 6
 // Spec: sqlite-native.md §16.4
 //
+
 // Wraps the introspection PRAGMAs (`table_info`, `index_list`,
 // `index_info`, `foreign_key_list`) as virtual tables so users can
 // JOIN against them:
 //
-//   SELECT name FROM pragma_table_info('users');
+
+//  SELECT name FROM pragma_table_info('users');
 //
+
 // Each module produces the same column-set the underlying PRAGMA
 // emits (per SQLite docs).
 // =============================================================================

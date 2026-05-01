@@ -4,10 +4,12 @@
 // Layer: 4
 // Spec: sqlite-native.md §15.1 (Math section)
 //
+
 // All math functions accept INT or REAL and produce REAL. NULL on
 // NULL. Domain errors (e.g. SQRT(-1), ACOS(2)) return NULL — this
 // matches SQLite's `SQLITE_DBCONFIG_DQS_DDL=0` default behaviour.
 //
+
 // We implement the 25 functions listed in the spec catalogue using
 // Verum's `core.math.real` floating-point primitives. Where
 // `core.math.real` lacks a primitive (e.g. ATANH), we fall back to
@@ -207,6 +209,7 @@ public fn radians(v: &Register) -> Register {
 // Local IEEE math implementations
 // -----------------------------------------------------------------------------
 //
+
 // We avoid depending on `core.math.real` here so the loom can build
 // even if a sysroot trims the math module. For higher-quality results
 // the catalogue can later be re-pointed at `core.math.real.*`.

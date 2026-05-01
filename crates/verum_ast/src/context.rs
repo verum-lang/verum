@@ -1,29 +1,37 @@
 //! Context system types for Verum's dependency injection.
 //!
+
 //! This module defines types for the context system, which provides
 //! compile-time verified dependency injection.
 //!
+
 //! # Context System Overview
 //!
+
 //! Verum provides a two-level context model for dependency injection:
 //! - Level 1 (Static): `@injectable`/`@inject` for compile-time/startup resolution (0ns overhead)
 //! - Level 2 (Dynamic): `provide`/`using` keywords for runtime-varying dependencies (~5-30ns overhead)
 //!
+
 //! Contexts are NOT types -- they are declared with `context Name { }` syntax.
 //! Functions declare required contexts after the return type: `fn foo() -> T using [Ctx]`.
 //! Context groups bundle multiple contexts: `using WebContext = [Database, Logger, Auth]`.
 //! All contexts must be explicitly provided with `provide` statements in lexical scope.
 //!
+
 //! This is dependency injection, NOT algebraic effects. Context environment (theta) is stored
 //! in task-local storage and inherited on spawn.
 //!
+
 //! # Context Requirements
 //!
+
 //! Context requirements specify what contexts a function needs:
 //!
+
 //! ```verum
 //! fn query() using [Database, Logger] -> Data { ... }
-//! fn pure_fn() using [!IO, !State<_>] -> Int { ... }  // Negative contexts
+//! fn pure_fn() using [!IO, !State<_>] -> Int { ... } // Negative contexts
 //! ```
 
 use crate::expr::Expr;
@@ -34,8 +42,10 @@ use verum_common::{Heap, List, Maybe};
 
 /// A context requirement in a function signature or type.
 ///
+
 /// # Variants
 ///
+
 /// Context requirements can be:
 /// - Simple: `Database`
 /// - With type args: `Cache<User>`
@@ -45,6 +55,7 @@ use verum_common::{Heap, List, Maybe};
 /// - Conditional: `Analytics if cfg.enabled`
 /// - Transformed: `Database.transactional()`
 ///
+
 /// Context requirements can be simple (`Database`), parameterized (`Cache<User>`),
 /// negative (`!Database` -- asserts absence), aliased (`Database as db`),
 /// named (`db: Database`), conditional (`Analytics if cfg.enabled`), or
@@ -120,8 +131,10 @@ impl Spanned for ContextRequirement {
 
 /// A transform applied to a context (e.g., `.transactional()`)
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// fn query() using [Database.transactional()] -> Data { ... }
 /// fn cached() using [Cache.scoped("user")] -> User { ... }
@@ -141,6 +154,7 @@ impl Spanned for ContextTransform {
 
 /// A list of context requirements, used in function types and declarations.
 ///
+
 /// This is a thin wrapper around `List<ContextRequirement>` that provides
 /// convenient constructors and utility methods.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

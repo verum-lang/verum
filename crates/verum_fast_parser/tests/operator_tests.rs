@@ -14,26 +14,27 @@
 )]
 // Comprehensive operator tests for Verum parser.
 //
+
 // This file tests all operators from grammar/verum.ebnf to ensure:
 // 1. All operators are recognized and parsed
 // 2. Correct precedence (low to high):
-//    1. Pipeline |>
-//    2. Assignment = += -= *= /= %= &= |= ^= <<= >>=
-//    3. Null coalesce ??
-//    4. Range .. ..=
-//    5. Logical OR ||
-//    6. Logical AND &&
-//    7. Equality == !=
-//    8. Relational < > <= >=
-//    9. Bitwise OR |
-//   10. Bitwise XOR ^
-//   11. Bitwise AND &
-//   12. Shift << >>
-//   13. Additive + -
-//   14. Multiplicative * / %
-//   15. Power **
-//   16. Unary ! - ~ & &mut * &checked &unsafe
-//   17. Postfix . ?. [] () ? as await
+//  1. Pipeline |>
+//  2. Assignment = += -= *= /= %= &= |= ^= <<= >>=
+//  3. Null coalesce ??
+//  4. Range .. ..=
+//  5. Logical OR ||
+//  6. Logical AND &&
+//  7. Equality == !=
+//  8. Relational < > <= >=
+//  9. Bitwise OR |
+//  10. Bitwise XOR ^
+//  11. Bitwise AND &
+//  12. Shift << >>
+//  13. Additive + -
+//  14. Multiplicative * / %
+//  15. Power **
+//  16. Unary ! - ~ & &mut * &checked &unsafe
+//  17. Postfix . ?. [] () ? as await
 // 3. Correct associativity (left vs right)
 // 4. Edge cases and combinations
 

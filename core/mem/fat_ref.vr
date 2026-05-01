@@ -5,37 +5,45 @@
 // Dependencies: mem/header, mem/capability, mem/hazard, mem/epoch
 // =============================================================================
 //
+
 // FatRef<T> is the reference type for unsized types (slices, trait objects)
 // in the CBGR system. It extends ThinRef with metadata for length/vtable and
 // supports offset tracking for subslice views.
 //
+
 // # Memory Layout (32 bytes total)
 //
+
 // ```
-// Offset  Size  Field             Description
+// Offset Size Field Description
 // ──────────────────────────────────────────────────────────────────────
-// 0       8     ptr               Pointer to data (non-null)
-// 8       4     generation        Expected generation counter
-// 12      4     epoch_and_caps    Packed: epoch (16-bit) + capabilities (16-bit)
-// 16      8     metadata          Length for slices, vtable for dyn traits
-// 24      4     offset_from_base  Offset from allocation base (for subslices)
-// 28      4     reserved          Reserved for future use
+// 0 8 ptr Pointer to data (non-null)
+// 8 4 generation Expected generation counter
+// 12 4 epoch_and_caps Packed: epoch (16-bit) + capabilities (16-bit)
+// 16 8 metadata Length for slices, vtable for dyn traits
+// 24 4 offset_from_base Offset from allocation base (for subslices)
+// 28 4 reserved Reserved for future use
 // ──────────────────────────────────────────────────────────────────────
 // Total: 32 bytes (cache-line half)
 // ```
 //
+
 // # Subslice Views
 //
+
 // When creating a subslice view, the offset_from_base field tracks the offset
 // from the original allocation. This enables validation against the base
 // allocation's header while allowing efficient subslice operations.
 //
+
 // # Usage
 //
+
 // FatRef is automatically selected by the compiler for:
 // - Slice types: `&[T]`, `&str`
 // - Trait objects: `&dyn Protocol`
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 6.2
 // =============================================================================
 
@@ -59,18 +67,22 @@ mount core.intrinsics.memory.{ptr_offset};
 
 /// FatRef - 32-byte generational reference for unsized types.
 ///
+
 /// This extends ThinRef with additional metadata for slices and trait objects.
 /// It provides the same CBGR safety guarantees while supporting dynamically
 /// sized types.
 ///
+
 /// # Example (Slice)
 ///
+
 /// ```verum
 /// let data = List.from([1, 2, 3, 4, 5]);
 /// let slice: FatRef<[Int]> = data.as_fat_ref();
 ///
+
 /// // Access with bounds checking
-/// let subslice = slice.slice_view(1, 3)?;  // Elements 1..4
+/// let subslice = slice.slice_view(1, 3)?; // Elements 1..4
 /// assert_eq(subslice.len(), 3);
 /// ```
 @repr(C, size(32), align(8))
@@ -101,8 +113,10 @@ implement<T> FatRef<T> {
 
     /// Create a new FatRef for a slice.
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure:
     /// - `ptr` is non-null and properly aligned for T
     /// - `ptr` points to memory with a valid AllocationHeader at base offset
@@ -128,8 +142,10 @@ implement<T> FatRef<T> {
 
     /// Create a new FatRef for a trait object (dyn Protocol).
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure:
     /// - `ptr` is non-null and properly aligned
     /// - `vtable` is a valid vtable pointer for the concrete type
@@ -153,8 +169,10 @@ implement<T> FatRef<T> {
 
     /// Create a null FatRef (for initialization/edge cases).
     ///
+
     /// # Safety
     ///
+
     /// Creates an invalid FatRef that will fail validation.
     @inline
     public unsafe fn null() -> FatRef<T> {
@@ -170,8 +188,10 @@ implement<T> FatRef<T> {
 
     /// Create from allocation header.
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure header is valid and ptr is the corresponding user data.
     @inline
     public unsafe fn from_header(
@@ -296,6 +316,7 @@ implement<T> FatRef<T> {
 
     /// Validate generation and epoch (core CBGR check).
     ///
+
     /// For subslice views, validation is performed against the base
     /// allocation's header.
     @inline
@@ -378,8 +399,10 @@ implement<T> FatRef<T> {
 
     /// Get element at index with bounds checking.
     ///
+
     /// # Performance
     ///
+
     /// ~15-20ns (validation + bounds check + element access)
     public fn get<U>(&self, index: Int) -> Result<&U, UseAfterFreeError> {
         // Acquire hazard pointer
@@ -467,28 +490,33 @@ implement<T> FatRef<T> {
 
     /// Create a subslice view into this reference.
     ///
+
     /// Returns a new FatRef pointing to a portion of the data.
     /// The subslice shares the same generation and will be invalidated
     /// when the original allocation is freed.
     ///
+
     /// # Arguments
     ///
+
     /// * `start` - Start index (inclusive)
     /// * `length` - Number of elements in subslice
     ///
+
     /// # Example
     ///
+
     /// ```verum
-    /// let arr: FatRef<[Int]> = ...;  // length 10
-    /// let sub = arr.slice_view(2, 5)?;  // elements [2, 3, 4, 5, 6]
+    /// let arr: FatRef<[Int]> = ...; // length 10
+    /// let sub = arr.slice_view(2, 5)?; // elements [2, 3, 4, 5, 6]
     /// ```
     public fn slice_view<U>(&self, start: Int, length: Int) -> Result<FatRef<T>, UseAfterFreeError> {
         self.validate_for_tier()?;
 
-        // Bounds check.  Order matters: reject negative inputs and
+        // Bounds check. Order matters: reject negative inputs and
         // out-of-range start FIRST so the subsequent
         // `length > self.metadata - start` cannot overflow (since
-        // `start <= self.metadata`, the RHS is non-negative).  The
+        // `start <= self.metadata`, the RHS is non-negative). The
         // earlier formulation `start + length > self.metadata`
         // was vulnerable to addition wraparound: `start = Int.MAX,
         // length = 1` wraps to `Int.MIN`, slipping past the
@@ -500,7 +528,7 @@ implement<T> FatRef<T> {
             return Err(UseAfterFreeError.capability_violation("bounds", "FatRef.slice_view"));
         }
 
-        // Calculate byte offset.  `start * element_size` can
+        // Calculate byte offset. `start * element_size` can
         // overflow `Int` for adversarial inputs; checked_mul
         // surfaces the overflow as a typed error rather than a
         // wraparound that derives an out-of-allocation pointer.
@@ -511,7 +539,7 @@ implement<T> FatRef<T> {
         };
 
         // The new offset_from_base must fit in UInt32 (the field
-        // type).  Adversarial nesting of subslice views could push
+        // type). Adversarial nesting of subslice views could push
         // this past 4 GiB; reject rather than silently truncate the
         // upper bits, which would corrupt subsequent
         // header-relative pointer derivation.
@@ -535,6 +563,7 @@ implement<T> FatRef<T> {
 
     /// Split into two subslices at index.
     ///
+
     /// Returns (left, right) where:
     /// - left contains elements [0, mid)
     /// - right contains elements [mid, len)
@@ -602,20 +631,23 @@ implement<T> FatRef<T> {
 
     /// Explicitly revoke this reference.
     ///
+
     /// Atomically bumps the base allocation's generation iff its
-    /// current value still matches `self.generation`.  On success,
+    /// current value still matches `self.generation`. On success,
     /// this reference, every subslice view derived from it, and
     /// every copy that shares the same generation are invalidated.
     ///
+
     /// # Concurrency
     ///
+
     /// Two threads racing on `revoke()` for the same allocation see
-    /// exactly one `Ok(())` and one `Err(already_revoked)`.  The
+    /// exactly one `Ok(())` and one `Err(already_revoked)`. The
     /// previous implementation used a verify-then-fetch_add pattern
     /// that allowed the late thread to spuriously double-bump the
     /// generation past a freshly-issued successor reference; the
     /// CAS-based `try_revoke` primitive on the header makes the
-    /// "verify and bump" atomic.  See ThinRef.revoke for the
+    /// "verify and bump" atomic. See ThinRef.revoke for the
     /// twin fix.
     public fn revoke(&self) -> Result<(), RevocationError> {
         if self.is_null() {
@@ -637,7 +669,7 @@ implement<T> FatRef<T> {
                 return Err(RevocationError.already_revoked("FatRef"));
             }
 
-            // Atomic verify-and-bump.  None means another thread
+            // Atomic verify-and-bump. None means another thread
             // already revoked.
             let new_gen = match header.try_revoke(self.generation) {
                 Some(g) => g,
@@ -664,8 +696,10 @@ implement<T> FatRef<T> {
 
     /// Get raw pointer to element without bounds checking.
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure index is in bounds.
     @inline
     public unsafe fn get_unchecked<U>(&self, index: Int) -> &U {
@@ -677,8 +711,10 @@ implement<T> FatRef<T> {
 
     /// Get raw mutable pointer to element without bounds checking.
     ///
+
     /// # Safety
     ///
+
     /// Caller must ensure index is in bounds and exclusive access.
     @inline
     public unsafe fn get_unchecked_mut<U>(&mut self, index: Int) -> &mut U {
@@ -715,8 +751,10 @@ unsafe implement<T: Sync> Sync for FatRef<T> {}
 
 /// Create a FatRef from a heap allocation.
 ///
+
 /// # Safety
 ///
+
 /// Caller must ensure `ptr` is a valid heap allocation with CBGR header.
 @inline
 public unsafe fn fat_ref_from_heap<T>(

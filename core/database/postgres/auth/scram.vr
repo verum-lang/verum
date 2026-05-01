@@ -2,39 +2,42 @@
 // core/database/postgres/auth/scram.vr — SCRAM-SHA-256 client
 // =============================================================================
 // Spec: RFC 5802 (SCRAM), RFC 7677 (SCRAM-SHA-256),
-//       postgresql.org/docs/16/sasl-authentication.html
+//  postgresql.org/docs/16/sasl-authentication.html
 //
+
 // State machine:
 //
-//   Initial ── send `client-first-message-bare`
-//      │       (gs2-header || "n=user,r=client_nonce")
-//      ▼
-//   AwaitingChallenge ── on AuthSaslContinue
-//                            * parse server-first (r=nonce || s=salt || i=iter)
-//                            * derive SaltedPassword = PBKDF2(p, s, i)
-//                            * ClientKey = HMAC(SaltedPassword, "Client Key")
-//                            * StoredKey = SHA-256(ClientKey)
-//                            * AuthMessage = client_first_bare || "," ||
-//                                             server_first || "," ||
-//                                             channel_binding || "," ||
-//                                             "r=" || final_nonce
-//                            * ClientSignature = HMAC(StoredKey, AuthMessage)
-//                            * ClientProof = ClientKey ⊕ ClientSignature
-//                            * ServerKey = HMAC(SaltedPassword, "Server Key")
-//                            * ServerSignature = HMAC(ServerKey, AuthMessage)
-//                            * send `c=base64(channel_binding) || ,r=final_nonce
-//                                    || ,p=base64(ClientProof)`
-//      ▼
-//   AwaitingFinal ── on AuthSaslFinal
-//                       * parse server-final (v=base64(server_signature))
-//                       * compare against expected ServerSignature
-//                       * if match → Authenticated; else → Failed
-//      ▼
-//   Authenticated  (or Failed)
+
+//  Initial ── send `client-first-message-bare`
+//  │ (gs2-header || "n=user,r=client_nonce")
+//  ▼
+//  AwaitingChallenge ── on AuthSaslContinue
+//  * parse server-first (r=nonce || s=salt || i=iter)
+//  * derive SaltedPassword = PBKDF2(p, s, i)
+//  * ClientKey = HMAC(SaltedPassword, "Client Key")
+//  * StoredKey = SHA-256(ClientKey)
+//  * AuthMessage = client_first_bare || "," ||
+//  server_first || "," ||
+//  channel_binding || "," ||
+//  "r=" || final_nonce
+//  * ClientSignature = HMAC(StoredKey, AuthMessage)
+//  * ClientProof = ClientKey ⊕ ClientSignature
+//  * ServerKey = HMAC(SaltedPassword, "Server Key")
+//  * ServerSignature = HMAC(ServerKey, AuthMessage)
+//  * send `c=base64(channel_binding) || ,r=final_nonce
+//  || ,p=base64(ClientProof)`
+//  ▼
+//  AwaitingFinal ── on AuthSaslFinal
+//  * parse server-final (v=base64(server_signature))
+//  * compare against expected ServerSignature
+//  * if match → Authenticated; else → Failed
+//  ▼
+//  Authenticated (or Failed)
 //
+
 // Channel binding: SCRAM-SHA-256-PLUS uses `tls-server-end-point` —
 // the hash of the server's TLS certificate. Spindle requires this
-// when the connection is TLS.  Plain SCRAM-SHA-256 (the `n` flag in
+// when the connection is TLS. Plain SCRAM-SHA-256 (the `n` flag in
 // the GS2 header) is allowed only on non-TLS connections.
 // =============================================================================
 
@@ -62,7 +65,7 @@ public type ScramError is
     | SeUnsupportedChannelBinding(Text)
     | SeKdfFailed;
 
-// Display + Debug + Eq for ScramError.  ServerSignatureMismatch
+// Display + Debug + Eq for ScramError. ServerSignatureMismatch
 // + NonceMismatch surface no detail (RFC 5802 §5.1 — value-blind
 // comparisons; surfacing detail would create a credential-probe
 // oracle for the client-side verifier).
@@ -217,6 +220,7 @@ implement ScramClient {
     /// after the mechanism name + length prefix in the
     /// SASLInitialResponse frame.
     ///
+
     /// Layout: `gs2-header || client-first-message-bare`
     public fn client_first_message(&mut self) -> List<Byte> {
         let gs2 = gs2_header(&self.channel_binding);
@@ -351,7 +355,7 @@ implement ScramClient {
         };
         self.salted_password = salted.clone();
 
-        // ClientKey  = HMAC-SHA-256(SaltedPassword, "Client Key")
+        // ClientKey = HMAC-SHA-256(SaltedPassword, "Client Key")
         let client_key_arr = hmac_sha256(salted.as_slice(), "Client Key".as_bytes());
         let client_key = arr32_to_list(&client_key_arr);
 
@@ -390,7 +394,7 @@ implement ScramClient {
         self.expected_server_signature = arr32_to_list(&server_sig_arr);
 
         // Compose the final client message:
-        //   client_final_no_proof + ",p=" + proof_b64
+        //  client_final_no_proof + ",p=" + proof_b64
         let mut out: List<Byte> = List.new();
         push_text(&mut out, &client_final_no_proof);
         push_text(&mut out, &",p=".clone());
@@ -424,7 +428,7 @@ implement ScramClient {
                 reason: "invalid utf8".clone(),
             }); }
         };
-        // server-final = "v=" base64(ServerSignature)  (or "e=" error)
+        // server-final = "v=" base64(ServerSignature) (or "e=" error)
         let trimmed = final_text;
         let bytes = trimmed.as_bytes();
         if bytes.len() < 2 {

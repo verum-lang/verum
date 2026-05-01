@@ -2,41 +2,53 @@
 // kernel_v0/lemmas — substitution lemma (discharges T-Pi-Form + T-App-Elim IOUs)
 // =============================================================================
 //
+
 // **Statement** (Hofmann 1997, *Syntax and Semantics of Dependent Types*, §3.2)
 //
-//   If Γ, A ⊢ B : Univ(m) and Γ ⊢ x : A,
-//   then Γ ⊢ B[x/0] : Univ(m).
+
+//  If Γ, A ⊢ B : Univ(m) and Γ ⊢ x : A,
+//  then Γ ⊢ B[x/0] : Univ(m).
 //
+
 // More generally for arbitrary types T:
 //
-//   If Γ, A ⊢ t : T and Γ ⊢ x : A,
-//   then Γ ⊢ t[x/0] : T[x/0].
+
+//  If Γ, A ⊢ t : T and Γ ⊢ x : A,
+//  then Γ ⊢ t[x/0] : T[x/0].
 //
+
 // **Why this is the foundational IOU**
 //
+
 // Substitution-preserves-typing is the workhorse of dependent type
-// theory metatheory.  Every β-reduction step performs a substitution;
+// theory metatheory. Every β-reduction step performs a substitution;
 // every elimination rule (App, induction recursors, projection)
-// computes via substitution.  Without it, the kernel cannot relate
+// computes via substitution. Without it, the kernel cannot relate
 // before-and-after states of any reduction.
 //
+
 // **Upstream citation**
 //
+
 // Mathlib4 path candidates (verify before use):
-//   - `Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing`
-//   - `Mathlib.CategoryTheory.DependentTypeTheory.SubstLemma`
+//  - `Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing`
+//  - `Mathlib.CategoryTheory.DependentTypeTheory.SubstLemma`
 //
+
 // Coq stdlib / community candidates:
-//   - `Coq.Logic.Substitution`
-//   - `coq-community/coq-pin-lambda` substitution lemma.
+//  - `Coq.Logic.Substitution`
+//  - `coq-community/coq-pin-lambda` substitution lemma.
 //
+
 // Original publication:
-//   Hofmann, M. (1997). Syntax and Semantics of Dependent Types.
-//   In: Semantics and Logics of Computation, CUP, §3.2.
+//  Hofmann, M. (1997). Syntax and Semantics of Dependent Types.
+//  In: Semantics and Logics of Computation, CUP, §3.2.
 //
+
 // **Discharges IOU for**: T-Pi-Form (`rules/k_pi_form.vr`),
 // T-App-Elim (`rules/k_app_elim.vr`).
 //
+
 // **Phase status**: stub — citation path needs upstream verification.
 // =============================================================================
 
@@ -48,16 +60,19 @@ mount super.super.context.{Context};
 
 /// **Substitution preserves typing.**
 ///
+
 /// `∀ ctx A B m x.
-///     Γ, A ⊢ B : Univ(m)
-///     → Γ ⊢ x : A
-///     → Γ ⊢ B[x/0] : Univ(m).`
+///  Γ, A ⊢ B : Univ(m)
+///  → Γ ⊢ x : A
+///  → Γ ⊢ B[x/0] : Univ(m).`
 ///
+
 /// **Discharge**: cited from mathlib4 (path TBD upon sourcing).
 ///
-/// This is the core dependency of T-Pi-Form's soundness lemma.  Once
+
+/// This is the core dependency of T-Pi-Form's soundness lemma. Once
 /// this discharges, T-Pi-Form's soundness flips from `Admitted` to
-/// `Proved`.  T-App-Elim's soundness then discharges via composition
+/// `Proved`. T-App-Elim's soundness then discharges via composition
 /// with Church-Rosser (`beta.vr`).
 @verify(formal)
 @framework(mathlib4, "Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing")

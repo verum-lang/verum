@@ -4,28 +4,34 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // QUIC NewReno is the MUST-implement CC for RFC 9002 conformance.
 // Pared-down TCP NewReno adapted to QUIC's ack semantics:
 //
-//   Slow Start: on every ACK, cwnd += acked_bytes until cwnd >= ssthresh.
-//   Congestion Avoidance: on every ACK, cwnd += MAX_DATAGRAM_SIZE * acked_bytes / cwnd.
-//   Recovery: triggered by loss detection; cwnd = ssthresh = cwnd / 2
-//             (bounded below by 2 × MAX_DATAGRAM_SIZE). In-flight packets
-//             sent before the recovery start time are ignored for
-//             subsequent loss events until the recovery period ends.
+
+//  Slow Start: on every ACK, cwnd += acked_bytes until cwnd >= ssthresh.
+//  Congestion Avoidance: on every ACK, cwnd += MAX_DATAGRAM_SIZE * acked_bytes / cwnd.
+//  Recovery: triggered by loss detection; cwnd = ssthresh = cwnd / 2
+//  (bounded below by 2 × MAX_DATAGRAM_SIZE). In-flight packets
+//  sent before the recovery start time are ignored for
+//  subsequent loss events until the recovery period ends.
 //
+
 // The state machine:
 //
-//   slow_start ──(cwnd >= ssthresh)──> avoidance
-//   avoidance  ──(loss detected)────> recovery
-//   recovery   ──(ack past recovery_start_time)──> avoidance
+
+//  slow_start ──(cwnd >= ssthresh)──> avoidance
+//  avoidance ──(loss detected)────> recovery
+//  recovery ──(ack past recovery_start_time)──> avoidance
 //
+
 // Persistent congestion detection (§7.6) declares all outstanding
 // packets in the PTO window lost if no ACK arrives — also handled by
 // the loss detection module, which then calls `on_packets_lost`.
 // NewReno itself has no separate hook; it just responds to the
 // cumulative lost-bytes input.
 //
+
 // =============================================================================
 
 module core.net.quic.recovery.cc.new_reno;

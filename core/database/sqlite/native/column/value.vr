@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_column_*
 //
+
 // `ColumnValue` matches SQLite's five storage classes. The five
 // type-codes:
 //
-//   SQLITE_INTEGER = 1
-//   SQLITE_FLOAT   = 2
-//   SQLITE_TEXT    = 3
-//   SQLITE_BLOB    = 4
-//   SQLITE_NULL    = 5
+
+//  SQLITE_INTEGER = 1
+//  SQLITE_FLOAT = 2
+//  SQLITE_TEXT = 3
+//  SQLITE_BLOB = 4
+//  SQLITE_NULL = 5
 //
+
 // =============================================================================
 
 module core.database.sqlite.native.column.value;

@@ -14,24 +14,28 @@
 )]
 //! Script-mode end-to-end integration tests (#8 / P1.8).
 //!
+
 //! Covers the parse → entry-detection slice that the P1.2 + P1.3
 //! commits enabled. Each test wires the real pipeline pieces (no
 //! mocks):
 //!
-//!   verum_fast_parser::FastParser::parse_module_script_str
-//!         ▼
-//!   verum_ast::Module (with @![__verum_kind("script")] tag)
-//!         ▼
-//!   verum_compiler::phases::EntryDetectionPhase::detect_entry_point
-//!         ▼
-//!   verum_compiler::phases::MainConfig
+
+//!  verum_fast_parser::FastParser::parse_module_script_str
+//!  ▼
+//!  verum_ast::Module (with @![__verum_kind("script")] tag)
+//!  ▼
+//!  verum_compiler::phases::EntryDetectionPhase::detect_entry_point
+//!  ▼
+//!  verum_compiler::phases::MainConfig
 //!
+
 //! Scenarios still gated on follow-up plumbing (process-argv, AOT
 //! linker entry-symbol parameterization, panic exit-code routing,
 //! stdlib mount, relative mount, `#!` shebang lexer hook) are
 //! tracked under task #8's continuation; this file delivers the
 //! parser-to-entry-detection pieces that are actually shipping.
 //!
+
 //! Note on parser naming: the parser's synthesized wrapper is the
 //! `__verum_script_main` `FunctionDecl`. Setting `CogKind::Script`
 //! on the module via `set_on_module` is the only contract the

@@ -38,8 +38,10 @@ pub struct GlobalValue<'ctx> {
 impl<'ctx> GlobalValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type global.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());
@@ -133,11 +135,14 @@ impl<'ctx> GlobalValue<'ctx> {
     // SubType: This should be moved into the type. GlobalValue<Initialized/Uninitialized>
     /// Determines whether or not a `GlobalValue` is a declaration or a definition.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
@@ -145,10 +150,13 @@ impl<'ctx> GlobalValue<'ctx> {
     /// let fn_type = void_type.fn_type(&[], false);
     /// let fn_value = module.add_function("my_func", fn_type, None);
     ///
+
     /// assert!(fn_value.as_global_value().is_declaration());
     ///
+
     /// context.append_basic_block(fn_value, "entry");
     ///
+
     /// assert!(!fn_value.as_global_value().is_declaration());
     /// ```
     pub fn is_declaration(self) -> bool {

@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §23 (security)
 //
+
 // `KeyRing` carries the active master key + key-rotation history.
 // Used by the pager when (de)encrypting pages.
 //
+
 // Each key has:
-//   * `key_id`     — opaque identifier; pages persist this so an
-//                     old-key page can be decrypted during rotation
-//   * `material`   — the key bytes
-//   * `valid_from_ns` / `valid_to_ns` — wall-clock window
+//  * `key_id` — opaque identifier; pages persist this so an
+//  old-key page can be decrypted during rotation
+//  * `material` — the key bytes
+//  * `valid_from_ns` / `valid_to_ns` — wall-clock window
 //
+
 // On `rekey`: encrypt every page with the new key, retain the old
 // key in history until rotation completes.
 // =============================================================================

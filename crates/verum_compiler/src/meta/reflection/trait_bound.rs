@@ -1,5 +1,6 @@
 //! Trait bound information for compile-time reflection
 //!
+
 //! Provides trait/protocol bound metadata matching core/meta/reflection.vr TraitBound.
 
 use verum_ast::MetaValue;
@@ -7,6 +8,7 @@ use verum_common::{List, Text};
 
 /// Information about a trait/protocol bound
 ///
+
 /// Matches: core/meta/reflection.vr TraitBound
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitBound {

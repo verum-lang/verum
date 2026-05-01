@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_errcode(db)           → int (primary)
-//   sqlite3_extended_errcode(db)  → int (extended)
-//   sqlite3_errmsg(db)            → Text
-//   sqlite3_error_offset(db)      → int  (-1 if N/A)
-//   sqlite3_system_errno(db)      → int
-//   sqlite3_errstr(code)          → Text (fallback)
+
+//  sqlite3_errcode(db) → int (primary)
+//  sqlite3_extended_errcode(db) → int (extended)
+//  sqlite3_errmsg(db) → Text
+//  sqlite3_error_offset(db) → int (-1 if N/A)
+//  sqlite3_system_errno(db) → int
+//  sqlite3_errstr(code) → Text (fallback)
 // =============================================================================
 
 module core.database.sqlite.native.errors.engine;

@@ -72,6 +72,7 @@ pub struct IntType<'ctx> {
 impl<'ctx> IntType<'ctx> {
     /// Create `IntType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't int type
     pub unsafe fn new(int_type: LLVMTypeRef) -> Self {
@@ -84,10 +85,12 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates an `IntValue` representing a constant value of this `IntType`. It will be automatically assigned this `IntType`'s `Context`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// // Local Context
     /// let context = Context::create();
     /// let i32_type = context.i32_type();
@@ -102,28 +105,37 @@ impl<'ctx> IntType<'ctx> {
     /// Create an `IntValue` from a string and radix. LLVM provides no error handling here,
     /// so this may produce unexpected results and should not be relied upon for validation.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use std::convert::TryFrom;
     ///
+
     /// use verum_llvm::context::Context;
     /// use verum_llvm::types::StringRadix;
     /// use verum_llvm::values::AnyValue;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_val = i8_type.const_int_from_string("0121", StringRadix::Decimal).unwrap();
     ///
+
     /// assert_eq!(i8_val.print_to_string().to_string(), "i8 121");
     ///
+
     /// let i8_val = i8_type.const_int_from_string("0121", StringRadix::try_from(10).unwrap()).unwrap();
     ///
+
     /// assert_eq!(i8_val.print_to_string().to_string(), "i8 16");
     ///
+
     /// let i8_val = i8_type.const_int_from_string("0121", StringRadix::Binary);
     /// assert!(i8_val.is_none());
     ///
+
     /// let i8_val = i8_type.const_int_from_string("ABCD", StringRadix::Binary);
     /// assert!(i8_val.is_none());
     /// ```
@@ -144,11 +156,14 @@ impl<'ctx> IntType<'ctx> {
 
     /// Create a constant `IntValue` of arbitrary precision.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i64_type = context.i64_type();
     /// let i64_val = i64_type.const_int_arbitrary_precision(&[1, 2]);
@@ -165,10 +180,12 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates an `IntValue` representing a constant value of all one bits of this `IntType`. It will be automatically assigned this `IntType`'s `Context`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// // Local Context
     /// let context = Context::create();
     /// let i32_type = context.i32_type();
@@ -180,16 +197,20 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates a constant zero value of this `IntType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::AnyValue;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_zero = i8_type.const_zero();
     ///
+
     /// assert_eq!(i8_zero.print_to_string().to_string(), "i8 0");
     /// ```
     pub fn const_zero(self) -> IntValue<'ctx> {
@@ -198,11 +219,14 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates a `FunctionType` with this `IntType` for its return type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let fn_type = i8_type.fn_type(&[], false);
@@ -213,15 +237,19 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates an `ArrayType` with this `IntType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_array_type = i8_type.array_type(3);
     ///
+
     /// assert_eq!(i8_array_type.len(), 3);
     /// assert_eq!(i8_array_type.get_element_type().into_int_type(), i8_type);
     /// ```
@@ -231,15 +259,19 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates a `VectorType` with this `IntType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_vector_type = i8_type.vec_type(3);
     ///
+
     /// assert_eq!(i8_vector_type.get_size(), 3);
     /// assert_eq!(i8_vector_type.get_element_type().into_int_type(), i8_type);
     /// ```
@@ -249,15 +281,19 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates a `ScalableVectorType` with this `IntType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_scalable_vector_type = i8_type.scalable_vec_type(3);
     ///
+
     /// assert_eq!(i8_scalable_vector_type.get_size(), 3);
     /// assert_eq!(i8_scalable_vector_type.get_element_type().into_int_type(), i8_type);
     /// ```
@@ -267,14 +303,18 @@ impl<'ctx> IntType<'ctx> {
 
     /// Gets a reference to the `Context` this `IntType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     ///
+
     /// assert_eq!(i8_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {
@@ -283,11 +323,14 @@ impl<'ctx> IntType<'ctx> {
 
     /// Gets the size of this `IntType`. Value may vary depending on the target architecture.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_type_size = i8_type.size_of();
@@ -298,18 +341,22 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates a `PointerType` with this `IntType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // This example is ignored because LLVM 21 uses opaque pointers
     /// // and get_element_type() no longer exists
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_ptr_type = i8_type.ptr_type(AddressSpace::default());
     ///
+
     /// assert_eq!(i8_ptr_type.get_element_type().into_int_type(), i8_type);
     /// ```
     #[deprecated(note = "LLVM 21 uses opaque pointers. Use Context::ptr_type instead.")]
@@ -319,13 +366,16 @@ impl<'ctx> IntType<'ctx> {
 
     /// Gets the bit width of an `IntType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let bool_type = context.bool_type();
     ///
+
     /// assert_eq!(bool_type.get_bit_width(), 1);
     /// ```
     pub fn get_bit_width(self) -> u32 {
@@ -339,15 +389,18 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates an undefined instance of an `IntType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_undef = i8_type.get_undef();
     ///
+
     /// assert!(i8_undef.is_undef());
     /// ```
     pub fn get_undef(self) -> IntValue<'ctx> {
@@ -356,16 +409,19 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates a poison instance of an `IntType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::values::AnyValue;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_poison = i8_type.get_poison();
     ///
+
     /// assert!(i8_poison.is_poison());
     /// ```
     pub fn get_poison(self) -> IntValue<'ctx> {
@@ -379,16 +435,19 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates a constant `ArrayValue`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_val = i8_type.const_int(0, false);
     /// let i8_val2 = i8_type.const_int(2, false);
     /// let i8_array = i8_type.const_array(&[i8_val, i8_val2]);
     ///
+
     /// assert!(i8_array.is_const());
     /// ```
     pub fn const_array(self, values: &[IntValue<'ctx>]) -> ArrayValue<'ctx> {

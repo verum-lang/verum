@@ -5,17 +5,20 @@
 // Dependencies: types.vr, keys.vr
 // =============================================================================
 //
+
 // Finite state machine for parsing ANSI terminal input sequences into
 // structured Event values. Handles:
-//   - Printable ASCII and UTF-8 characters
-//   - Control characters (Ctrl+A..Z, Enter, Tab, Backspace)
-//   - CSI sequences (arrow keys, function keys, mouse, focus)
-//   - SS3 sequences (F1-F4, keypad)
-//   - OSC sequences (paste, etc.)
-//   - SGR mouse protocol parsing
+//  - Printable ASCII and UTF-8 characters
+//  - Control characters (Ctrl+A..Z, Enter, Tab, Backspace)
+//  - CSI sequences (arrow keys, function keys, mouse, focus)
+//  - SS3 sequences (F1-F4, keypad)
+//  - OSC sequences (paste, etc.)
+//  - SGR mouse protocol parsing
 //
+
 // All 9 states of the parser DFA are defined here.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.2
 // =============================================================================
 
@@ -241,7 +244,7 @@ implement InputParser {
                 1
             }
             (OscString { .. }, 0x1B) => {
-                // ESC starts ST (ESC \)  — complete on next byte
+                // ESC starts ST (ESC \) — complete on next byte
                 self.complete_osc();
                 self.state = ParserState.Ground;
                 1

@@ -1,20 +1,26 @@
 //! CBGR Elimination Pass - Industrial-Grade Implementation.
 //!
+
 //! This pass performs comprehensive escape analysis to eliminate unnecessary
 //! CBGR (Compile-time Borrow and Generation-based Reference) checks.
 //!
+
 //! # Algorithm Overview
 //!
+
 //! The pass operates in multiple phases:
 //!
+
 //! 1. **Collection Phase**: Walk the IR and collect all CBGR operations
 //! 2. **Def-Use Analysis**: Build a complete def-use graph for tracked values
 //! 3. **Escape Analysis**: Categorize each value's escape behavior
 //! 4. **Optimization Phase**: Eliminate/promote checks based on analysis
 //! 5. **Cleanup Phase**: Remove dead operations and update types
 //!
+
 //! # Escape Categories
 //!
+
 //! | Category | Description | Action |
 //! |----------|-------------|--------|
 //! | NoEscape | Value stays in function | Remove check |
@@ -22,8 +28,10 @@
 //! | MayEscape | May escape to caller | Promote to Checked |
 //! | Unknown | Cannot determine | Keep check |
 //!
+
 //! # Performance Impact
 //!
+
 //! - Per-check savings: ~15ns → 0ns
 //! - Typical elimination rate: 40-70%
 //! - Net improvement: ~6-10ns average per reference access
@@ -231,6 +239,7 @@ pub enum OptimizationAction {
 
 /// The main escape analysis engine.
 ///
+
 /// This performs a flow-sensitive, interprocedural escape analysis
 /// using a worklist-based fixed-point algorithm.
 pub struct EscapeAnalysisEngine {
@@ -835,9 +844,11 @@ impl CbgrEliminationStats {
 
 /// CBGR Elimination Pass - Industrial-Grade Implementation.
 ///
+
 /// This pass removes unnecessary CBGR checks based on comprehensive
 /// escape analysis. It uses a multi-phase algorithm:
 ///
+
 /// 1. Collection: Walk IR and build value/operation databases
 /// 2. Analysis: Run fixed-point escape analysis
 /// 3. Optimization: Remove/promote checks based on analysis
@@ -866,6 +877,7 @@ impl CbgrEliminationPass {
 
     /// Enable aggressive elimination mode.
     ///
+
     /// In aggressive mode, MayEscape references are promoted to Checked
     /// tier instead of keeping the full check.
     pub fn with_aggressive(mut self, aggressive: bool) -> Self {
@@ -960,11 +972,13 @@ impl CbgrEliminationPass {
         // and careful handling. For now, we mark the operations
         // and track statistics. A full implementation would:
         //
+
         // 1. Walk the module again to find matching operations
         // 2. For removable: detach and destroy the operation
         // 3. For promotable: replace with tier-1 dereference
         // 4. Update uses of removed operation results
         //
+
         // This is a complex transformation that requires:
         // - Operation cloning (for replacements)
         // - SSA value remapping

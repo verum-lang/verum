@@ -1,9 +1,11 @@
 //! Enhanced Error Messages for GATs and Specialization
 //!
+
 //! Higher-kinded type (HKT) kind inference: infers kinds for type constructors
 //! (e.g., List has kind Type -> Type, Map has kind Type -> Type -> Type).
 //! Uses constraint-based kind inference with unification.
 //!
+
 //! This module provides detailed, actionable error messages for advanced protocol features:
 //! - GAT arity mismatches with suggestions
 //! - Specialization ambiguities with candidate listings
@@ -11,8 +13,10 @@
 //! - GAT where clause violations
 //! - Negative specialization errors
 //!
+
 //! # Design Philosophy
 //!
+
 //! All error messages follow these principles:
 //! 1. **Clear context**: What went wrong and where
 //! 2. **Actual vs Expected**: Show what was found vs what was needed
@@ -20,8 +24,10 @@
 //! 4. **Code examples**: Show correct usage patterns
 //! 5. **Rich formatting**: Use labels, notes, and help messages
 //!
+
 //! # Integration
 //!
+
 //! These error types integrate with verum_diagnostics for rich terminal output
 //! with colors, labels, and multi-line highlighting.
 
@@ -39,15 +45,18 @@ use crate::ty::{Type, TypeVar};
 
 /// GAT arity mismatch error with rich diagnostics
 ///
+
 /// Spec: Section 9.1.1
 ///
+
 /// Example:
 /// ```verum
 /// protocol Iterator {
-///     type Item<T>  // Expects 1 type parameter
+///  type Item<T> // Expects 1 type parameter
 /// }
 ///
-/// fn foo() -> Maybe<Item> { ... }  // ERROR: Missing type argument
+
+/// fn foo() -> Maybe<Item> { ... } // ERROR: Missing type argument
 /// ```
 #[derive(Debug, Clone)]
 pub struct GATArityError {
@@ -198,13 +207,16 @@ pub type ImplementId = usize;
 
 /// Specialization ambiguity error
 ///
+
 /// Spec: Section 9.1.2
 ///
+
 /// Example:
 /// ```verum
 /// implement<T: Clone> Display for List<T> { ... }
 /// implement<T: Send> Display for List<T> { ... }
 ///
+
 /// // ERROR: Both implementations are equally specific for List<SomeType>
 /// ```
 #[derive(Debug, Clone)]
@@ -328,13 +340,15 @@ impl SpecializationAmbiguityError {
 
 /// GenRef generation mismatch error (use-after-free detection)
 ///
+
 /// Spec: Section 9.1.3
 ///
+
 /// Example:
 /// ```verum
 /// let genref = GenRef::new(value);
-/// free(value);  // Object freed
-/// *genref       // ERROR: GenRef generation mismatch
+/// free(value); // Object freed
+/// *genref // ERROR: GenRef generation mismatch
 /// ```
 #[derive(Debug, Clone)]
 pub struct GenerationMismatchError {
@@ -407,15 +421,18 @@ impl GenerationMismatchError {
 
 /// GAT where clause violation error
 ///
+
 /// Spec: Section 9.1.4
 ///
+
 /// Example:
 /// ```verum
 /// protocol Collection {
-///     type Item<K, V> where K: Hash
+///  type Item<K, V> where K: Hash
 /// }
 ///
-/// let x: Collection::Item<Text, Int> = ...;  // ERROR: Text doesn't implement Hash
+
+/// let x: Collection::Item<Text, Int> = ...; // ERROR: Text doesn't implement Hash
 /// ```
 #[derive(Debug, Clone)]
 pub struct GATWhereClauseError {
@@ -512,6 +529,7 @@ impl GATWhereClauseError {
 
     /// Try to extract the missing protocol implementation from the where clause
     ///
+
     /// Production implementation that analyzes the where clause structure to provide
     /// actionable suggestions for fixing GAT constraint violations.
     fn get_missing_implementation(&self) -> Option<Text> {
@@ -603,13 +621,16 @@ impl GATWhereClauseError {
 
 /// Negative specialization error
 ///
+
 /// Spec: Section 9.1.5
 ///
+
 /// Example:
 /// ```verum
 /// @specialize(negative)
 /// implement<T: !Clone> Default for Wrapper<T> { ... }
 ///
+
 /// // ERROR: T implements Clone, violating the negative bound
 /// ```
 #[derive(Debug, Clone)]

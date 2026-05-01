@@ -5,9 +5,11 @@
 // Spec: internal/specs/tls-quic.md §1.1 HTTP/3, §12 Phase 6
 // =============================================================================
 //
+
 // Pure-Verum implementation of the QPACK field-compression format
 // used by HTTP/3 to encode request + response header fields.
 //
+
 // v0.2 scope: static-table + dynamic-table + Huffman; both instruction
 // streams (encoder + decoder) + field-section encoder/decoder.
 // Strict non-blocking mode (Required Insert Count = 0) preserves
@@ -15,21 +17,24 @@
 // while allowing peers that advertise larger capacity to actually
 // leverage dynamic compression.
 //
+
 // # Module layout
 //
+
 // ```
 // core.net.h3.qpack
-// ├── mod.vr            ← this file (re-exports)
-// ├── static_table.vr   — RFC 9204 Appendix A (99 entries)
-// ├── huffman.vr        — RFC 9204 Appendix B / RFC 7541 §B Huffman
-// ├── integer.vr        — RFC 9204 §4.1.1 prefix-integer codec
-// ├── encoder.vr        — field-section encoder (static + literal, v0.1)
-// ├── decoder.vr        — field-section decoder (static + literal, v0.1)
-// ├── dynamic_table.vr  — RFC 9204 §3.2 dynamic table + ref counting
-// ├── instructions.vr   — RFC 9204 §4.3 encoder + decoder instruction codecs
-// └── session.vr        — RFC 9204 §2 connection-scoped QPACK state machine
+// ├── mod.vr ← this file (re-exports)
+// ├── static_table.vr — RFC 9204 Appendix A (99 entries)
+// ├── huffman.vr — RFC 9204 Appendix B / RFC 7541 §B Huffman
+// ├── integer.vr — RFC 9204 §4.1.1 prefix-integer codec
+// ├── encoder.vr — field-section encoder (static + literal, v0.1)
+// ├── decoder.vr — field-section decoder (static + literal, v0.1)
+// ├── dynamic_table.vr — RFC 9204 §3.2 dynamic table + ref counting
+// ├── instructions.vr — RFC 9204 §4.3 encoder + decoder instruction codecs
+// └── session.vr — RFC 9204 §2 connection-scoped QPACK state machine
 // ```
 //
+
 // =============================================================================
 
 module core.net.h3.qpack;

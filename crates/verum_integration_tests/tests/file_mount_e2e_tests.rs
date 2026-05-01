@@ -2,6 +2,7 @@
 
 //! End-to-end tests for file-relative mount (#5 / P1.5).
 //!
+
 //! These tests build small two-/three-file `.vr` projects in
 //! a temp directory, run them through the
 //! `verum_modules::file_mount::resolve_file_mounts` walker
@@ -9,9 +10,10 @@
 //! data matches what the pipeline expects to register in
 //! `ModuleRegistry`.
 //!
+
 //! Pipeline-side wiring (insertion of resolve_file_mounts
 //! between Phase 1 and Phase 1.5) is verified separately in
-//! pipeline.rs.  These tests pin the cross-crate integration:
+//! pipeline.rs. These tests pin the cross-crate integration:
 //!  * parser emits MountTreeKind::File correctly
 //!  * loader resolves through its sandbox
 //!  * resolver synthesises module names + walks transitively
@@ -35,9 +37,9 @@ fn parse(text: &str, file_id: FileId) -> verum_ast::Module {
 #[test]
 fn two_file_project_mount_helper_resolves() {
     // Project layout:
-    //   root/
-    //     main.vr     →  mount ./helper.vr;
-    //     helper.vr   →  module helper; public fn ping() -> Int { 42 }
+    //  root/
+    //  main.vr → mount ./helper.vr;
+    //  helper.vr → module helper; public fn ping() -> Int { 42 }
     let root = tempfile::TempDir::new().unwrap();
     let main_path = root.path().join("main.vr");
     let helper_path = root.path().join("helper.vr");
@@ -204,10 +206,10 @@ fn diamond_pattern_dedupes_shared_target() {
 #[test]
 fn sibling_at_parent_directory_resolves() {
     // Project layout:
-    //   root/
-    //     util.vr
-    //     sub/
-    //       inner.vr  →  mount ../util.vr;
+    //  root/
+    //  util.vr
+    //  sub/
+    //  inner.vr → mount ../util.vr;
     let root = tempfile::TempDir::new().unwrap();
     let sub = root.path().join("sub");
     std::fs::create_dir(&sub).unwrap();
@@ -262,7 +264,7 @@ fn sandbox_blocks_escape_attempt_outside_root() {
     );
     // The string above may or may not parse depending on
     // platform path separators — the test guards against
-    // the loader-side sandbox at the very least.  We use
+    // the loader-side sandbox at the very least. We use
     // a cleaner explicit attack vector:
     let _ = escape_str; // silence dead let
     let attack = format!(
@@ -279,7 +281,7 @@ fn sandbox_blocks_escape_attempt_outside_root() {
         Err(_) => {
             // Parser may already reject some forms — if so,
             // that's the parser-side defence layer doing
-            // its job.  No further loader-side check needed.
+            // its job. No further loader-side check needed.
             return;
         }
     };

@@ -3,16 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §21.1 (SQL semantics row)
 //
+
 // Three invariants govern the loom planner + interpreter:
 //
-//   S1  filter_monotonicity         — applying an additional WHERE
-//                                     clause never adds rows
-//   S2  join_cardinality_lower_bound — INNER JOIN result size ≤
-//                                     |left| × |right|; LEFT JOIN
-//                                     ≥ |left|
-//   S3  result_shape_matches_schema — every output row's column
-//                                     count + types align with the
-//                                     SELECT list's declared shape
+
+//  S1 filter_monotonicity — applying an additional WHERE
+//  clause never adds rows
+//  S2 join_cardinality_lower_bound — INNER JOIN result size ≤
+//  |left| × |right|; LEFT JOIN
+//  ≥ |left|
+//  S3 result_shape_matches_schema — every output row's column
+//  count + types align with the
+//  SELECT list's declared shape
 // =============================================================================
 
 module core.database.sqlite.native.verify.sql_semantics;
@@ -92,6 +94,7 @@ public fn rows_match_schema(schema: &VerifyRowShape, rows: &List<VerifyRowShape>
 // Aggregation invariants — for COUNT/SUM/etc.
 // -----------------------------------------------------------------------------
 //
+
 // Property: aggregating a partition then summing equals aggregating the union.
 // Used to validate parallel/streaming execution plans.
 // =============================================================================

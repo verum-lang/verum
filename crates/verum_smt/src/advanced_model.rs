@@ -1,5 +1,6 @@
 //! Advanced Model Extraction - Complete Function Interpretations & Sort Universes
 //!
+
 //! This module provides rich model extraction capabilities beyond basic `model.eval()`:
 //! - **Complete Function Models**: Extract full function interpretations with all cases
 //! - **Constant Interpretation**: Get constant values from models
@@ -7,12 +8,14 @@
 //! - **Model Translation**: Move models between Z3 contexts
 //! - **Function Iteration**: Iterate over all functions in a model
 //!
+
 //! Based on Z3's advanced model APIs:
 //! - `Model::get_func_interp()` - Complete function interpretation
 //! - `Model::get_const_interp()` - Constant values
 //! - `FuncInterp` methods - Function cases and else values
 //! - Model iteration - Enumerate all functions
 //!
+
 //! When SMT verification fails (postcondition not provable), counterexample generation
 //! extracts a concrete model showing variable assignments that violate the property.
 //! This enables meaningful error messages showing why a refinement type constraint
@@ -32,10 +35,12 @@ use verum_common::ToText;
 
 /// Complete function model with all cases and default value
 ///
+
 /// Represents a function interpretation as:
 /// - entries: List of (args, value) pairs for specific cases
 /// - default_value: The "else" case when no entry matches
 ///
+
 /// Example:
 /// ```text
 /// f(1, 2) = 10
@@ -159,6 +164,7 @@ impl AdvancedModelExtractor {
 
     /// Extract complete model (all functions, constants, and sort universes)
     ///
+
     /// This performs a comprehensive extraction of the entire model.
     pub fn extract_complete_model(&mut self) {
         // Extract all function and constant interpretations
@@ -209,6 +215,7 @@ impl AdvancedModelExtractor {
 
     /// Extract complete function interpretation
     ///
+
     /// This method extracts the full function behavior including:
     /// - All specific cases (args -> value)
     /// - The default (else) value
@@ -260,74 +267,91 @@ impl AdvancedModelExtractor {
 
     /// Enumerate sort universe for a finite sort
     ///
+
     /// This method extracts all values of a finite sort from a Z3 model.
     /// Finite sorts include:
     /// - Enumeration types (datatypes with only nullary constructors)
     /// - Bounded integers
     /// - Custom uninterpreted sorts with finite interpretations
     ///
+
     /// # Current Implementation Status
     ///
+
     /// **Note**: As of z3-rs 0.19.5, direct sort universe enumeration is not available
     /// through the safe Rust API. The Z3 C API functions required for this operation
     /// (`Z3_model_get_num_sorts`, `Z3_model_get_sort`, `Z3_model_get_sort_universe`)
     /// are not exposed in the current z3-rs bindings.
     ///
+
     /// ## Workaround for Datatype Enumeration
     ///
+
     /// For enumeration datatypes (e.g., `type Color = Red | Green | Blue`), you can
     /// enumerate the universe by:
     /// 1. Keeping track of all datatype constructors when defining the type
     /// 2. Evaluating each constructor in the model
     /// 3. Collecting the results as the universe
     ///
+
     /// Example workaround:
     /// ```ignore
     /// use z3::{Context, Solver, SatResult, DatatypeBuilder, ast::Datatype};
     /// use verum_std::{Set, Text};
     ///
+
     /// // Get thread-local context
     /// let ctx = Context::thread_local();
     /// let solver = z3::Solver::new();
     ///
+
     /// // Define Color datatype: Red | Green | Blue
     /// let color_sort = DatatypeBuilder::new("Color")
-    ///     .variant("Red", vec![])
-    ///     .variant("Green", vec![])
-    ///     .variant("Blue", vec![])
-    ///     .finish();
+    ///  .variant("Red", vec![])
+    ///  .variant("Green", vec![])
+    ///  .variant("Blue", vec![])
+    ///  .finish();
     ///
+
     /// // Create a Color variable
     /// let c = color_sort.variants[0].constructor.apply(&[]);
     ///
-    /// solver.assert(&c._eq(&c));  // Trivially satisfiable
+
+    /// solver.assert(&c._eq(&c)); // Trivially satisfiable
     /// assert_eq!(solver.check(), SatResult::Sat);
     /// let model = solver.get_model().unwrap();
     ///
+
     /// // Manual universe enumeration: evaluate all constructors
     /// let mut universe = Set::new();
     /// for variant in &color_sort.variants {
-    ///     let value = variant.constructor.apply(&[]);
-    ///     if let Some(eval) = model.eval(&value, true) {
-    ///         universe.insert(Text::from(format!("{}", eval)));
-    ///     }
+    ///  let value = variant.constructor.apply(&[]);
+    ///  if let Some(eval) = model.eval(&value, true) {
+    ///  universe.insert(Text::from(format!("{}", eval)));
+    ///  }
     /// }
     /// // universe now contains: {"Red", "Green", "Blue"}
     /// ```
     ///
+
     /// ## Future Implementation
     ///
+
     /// A complete implementation would require either:
     /// 1. Exposing additional Z3 C API bindings in z3-sys
     /// 2. Using unsafe FFI calls directly to z3-sys (not recommended)
     /// 3. Waiting for z3-rs to expose higher-level sort universe APIs
     ///
+
     /// # Arguments
     ///
+
     /// * `sort_name` - Name of the sort to enumerate (currently unused)
     ///
+
     /// # Returns
     ///
+
     /// Currently always returns `Maybe::None` as the feature is not available.
     /// In the future, will return `Maybe::Some(Set<Text>)` containing all values
     /// of the finite sort.
@@ -335,34 +359,40 @@ impl AdvancedModelExtractor {
         // IMPLEMENTATION NOTE:
         // This function cannot be implemented with the current z3-rs 0.19.5 API because:
         //
+
         // 1. The z3::Model type does not expose its internal context pointer
         // 2. The required Z3 C API functions are not available in z3-rs:
-        //    - Z3_model_get_num_sorts(ctx, model) -> unsigned
-        //    - Z3_model_get_sort(ctx, model, i) -> Z3_sort
-        //    - Z3_model_get_sort_universe(ctx, model, sort) -> Z3_ast_vector
-        //    - Z3_ast_vector_size(ctx, vec) -> unsigned
-        //    - Z3_ast_vector_get(ctx, vec, i) -> Z3_ast
+        //  - Z3_model_get_num_sorts(ctx, model) -> unsigned
+        //  - Z3_model_get_sort(ctx, model, i) -> Z3_sort
+        //  - Z3_model_get_sort_universe(ctx, model, sort) -> Z3_ast_vector
+        //  - Z3_ast_vector_size(ctx, vec) -> unsigned
+        //  - Z3_ast_vector_get(ctx, vec, i) -> Z3_ast
         //
+
         // 3. While z3-sys 0.10.2 exposes these as FFI functions, accessing them safely
-        //    requires both a context pointer and a model pointer, neither of which are
-        //    available through the safe z3-rs API.
+        //  requires both a context pointer and a model pointer, neither of which are
+        //  available through the safe z3-rs API.
         //
+
         // ALTERNATIVE APPROACH:
         // For production use, consider:
         // - Tracking datatype constructors at compile time
         // - Using the workaround shown in the documentation above
         // - For bounded integer sorts, generate values programmatically
         //
+
         // NOTE: Z3 API Limitation
         // The z3-rs Rust bindings do not expose Model::context() or Model::get_sort_universe()
         // methods which are available in the C API. This prevents us from implementing
         // sort universe enumeration directly.
         //
+
         // Workarounds:
         // - For datatype sorts: Track constructors at compile time and enumerate them manually
         // - For finite integer sorts: Generate values programmatically within bounds
         // - For uninterpreted sorts: Return None (no finite universe exists)
         //
+
         // This is a limitation of the z3-rs bindings, not of Z3 itself.
         // See: https://github.com/prove-rs/z3.rs/issues/190
 
@@ -397,6 +427,7 @@ impl AdvancedModelExtractor {
 
     /// Translate model to another context
     ///
+
     /// This is useful for moving models between solver contexts.
     pub fn translate_model(&self, dest_ctx: &Context) -> Model {
         self.model.translate(dest_ctx)
@@ -404,6 +435,7 @@ impl AdvancedModelExtractor {
 
     /// Convert to counterexample representation
     ///
+
     /// Extracts all constant values as a counterexample.
     pub fn to_counterexample(&self) -> Map<Text, Text> {
         self.constants.clone()
@@ -454,6 +486,7 @@ impl fmt::Display for ModelSummary {
 
 /// Wrapper around Z3 FuncInterp with utility methods
 ///
+
 /// Provides convenient access to function interpretation data.
 pub struct FunctionInterpretation {
     /// Underlying Z3 function interpretation
@@ -515,6 +548,7 @@ impl FunctionInterpretation {
 
     /// Convert to formula representation
     ///
+
     /// This would generate a Z3 formula representing the function.
     /// For now, returns a string representation.
     pub fn to_formula(&self) -> Text {

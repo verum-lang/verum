@@ -2,24 +2,30 @@
 // MSFS — Absolute Layer: (F_S), (Π_4), (Π_3-max), and L_Abs
 // =============================================================================
 //
+
 // Source: A. Sereda, MSFS preprint, §4 — Definitions 4.1–4.4.
 //
+
 // `L_Abs` is the bottom (= empty) stratum of the moduli space 𝔐 of
 // formal systems. An object `X` inhabits `L_Abs` iff there exist a
 // Rich-metatheory `S` and ordinal `n` such that `X` simultaneously
 // satisfies *three* conditions:
 //
-//   • **(F_S)** — formally S-definable with an explicit sub-theory
-//     inclusion ι_F : F ↪ S, an induced model reduct ι_F^*, and a
-//     formula φ_X presenting X via Syn(F)[φ_X] ≃_(∞,n) X.
+
+//  • **(F_S)** — formally S-definable with an explicit sub-theory
+//  inclusion ι_F : F ↪ S, an induced model reduct ι_F^*, and a
+//  formula φ_X presenting X via Syn(F)[φ_X] ≃_(∞,n) X.
 //
-//   • **(Π_{4,S,n})** — irreducible: no (∞, n)-functor X → Y for any
-//     Y in S_S<S> is an equivalence onto its image.
+
+//  • **(Π_{4,S,n})** — irreducible: no (∞, n)-functor X → Y for any
+//  Y in S_S<S> is an equivalence onto its image.
 //
-//   • **(Π_{3-max,S,n})** — maximally generative: for every sub-theory
-//     F ∈ \cF there exists an (∞, n)-functor F → X that is an
-//     equivalence onto its image.
+
+//  • **(Π_{3-max,S,n})** — maximally generative: for every sub-theory
+//  F ∈ \cF there exists an (∞, n)-functor F → X that is an
+//  equivalence onto its image.
 //
+
 // MSFS Theorem 5.1 (AFN-T α-part) shows the conjunction (F_S) ∧
 // (Π_4) ∧ (Π_3-max) is internally inconsistent — `L_Abs == ∅`. This
 // module installs the three conditions as protocol-level predicates
@@ -121,6 +127,7 @@ public axiom msfs_definition_4_3_pi_3_max(witness: &ConditionPi3Max) -> Bool
 /// exist `S ∈ \RS` and ordinal `n` such that `X` jointly satisfies
 /// `(F_S) ∧ (Π_{4,S,n}) ∧ (Π_{3-max,S,n})`.
 ///
+
 /// Definitionally vacuous *until* Theorem 5.1 (AFN-T α-part) shows
 /// the joint conjunction is internally inconsistent. The framework
 /// axiom here records only the joint-membership requirement; the
@@ -138,6 +145,7 @@ public axiom msfs_definition_4_4_l_abs(candidate: &LAbsCandidate) -> Bool
 // VVA §2.2 / §5 — Refinement-typed surface (M0.B demonstration)
 // =============================================================================
 //
+
 // The protocol-typed `ConditionFS / ConditionPi4 / ConditionPi3Max`
 // above use boolean accessor methods; their level / predicate state
 // lives outside the type-level surface. M0.B introduces a parallel
@@ -145,6 +153,7 @@ public axiom msfs_definition_4_4_l_abs(candidate: &LAbsCandidate) -> Bool
 // the type itself, exercising the K-Refine rule (VVA §4.4) and
 // demonstrating Verum's inline refinement form (VVA §5).
 //
+
 // Why this matters for the corpus: with the refinement-typed surface
 // active, the L_Abs candidate's level invariant `n >= -1` is checked
 // at type-construction time rather than via a `requires` clause on
@@ -152,20 +161,26 @@ public axiom msfs_definition_4_4_l_abs(candidate: &LAbsCandidate) -> Bool
 // any theorem applies — ν=ω ν=ω+1 verifications never see negative
 // levels.
 //
+
 // ## Inline form (VVA §5, three-form refinement)
 //
-//   `CategoricalLevel = Int{>= -1}`
+
+//  `CategoricalLevel = Int{>= -1}`
 //
+
 // Reads as "Int whose value is at least -1". The kernel constructs
 // `Refined(Int, x, x >= -1)` and K-Refine checks the depth invariant
 // `dp(x >= -1) < dp(Int) + 1` (trivially: dp = 0 on both sides).
 //
+
 // ## Refined witness records — refinement on field type
 //
-//   `FSWitness    = { level: Int{>= -1}, ... }`
-//   `Pi4Witness   = { level: Int{>= -1}, ... }`
-//   `Pi3MaxWitness= { level: Int{>= -1}, ... }`
+
+//  `FSWitness = { level: Int{>= -1}, ... }`
+//  `Pi4Witness = { level: Int{>= -1}, ... }`
+//  `Pi3MaxWitness= { level: Int{>= -1}, ... }`
 //
+
 // Each constructor application checks `level` against the inline
 // refinement; the type system rejects `Pi4Witness { level: -2, ... }`
 // at the point of construction. Downstream theorems can drop the
@@ -238,6 +253,7 @@ public pure fn refined_l_abs_predicate(w: &RefinedLAbsWitness) -> Bool {
 
 /// **Refinement→protocol bridge — witness construction (M0.B-A).**
 ///
+
 /// A `&RefinedLAbsWitness` saturating `refined_l_abs_predicate` projects
 /// onto a protocol-form `&LAbsCandidate` whose three condition methods
 /// already deliver the conjunction Theorem 5.1's `requires` clause
@@ -247,6 +263,7 @@ public pure fn refined_l_abs_predicate(w: &RefinedLAbsWitness) -> Bool {
 /// Theorem 5.1 itself remains the load-bearing argument that forecloses
 /// any such candidate; the bridge merely translates the input format.
 ///
+
 /// **Why an axiom and not a @theorem.** Constructing a `&LAbsCandidate`
 /// from refinement-typed fields requires the kernel to allocate the
 /// protocol-witness object, which sits beyond the propositional proof
@@ -255,6 +272,7 @@ public pure fn refined_l_abs_predicate(w: &RefinedLAbsWitness) -> Bool {
 /// (T0.1 follow-up), this axiom is promoted to a @derive-style
 /// generated implementation.
 ///
+
 /// The pre-M0.7-A signature was `-> Bool ensures false` — i.e., the
 /// bridge axiom itself directly delivered the goal of the
 /// refinement-form theorem, making the @theorem statement vacuous (a
@@ -282,6 +300,7 @@ public axiom msfs_refined_to_protocol_l_abs_bridge(
 /// witness of L_Abs immediately invokes Lemma 3.4 on its (F_S)
 /// component, placing X in S_S<S> and contradicting (Π_4).
 ///
+
 /// Postcondition load-bearing: the returned `&FormallySDefinable`
 /// satisfies `has_phi_x_witness()`, which is *exactly* the precondition
 /// of `msfs_lemma_3_4_s_definability` and `msfs_lemma_3_4_outputs_in_s_s_global`.
@@ -301,21 +320,26 @@ public axiom msfs_f_s_implies_formal_s_definable(
 // Step-2 intermediate axiom for Theorem 5.1's structured proof body
 // =============================================================================
 //
+
 // Theorem 5.1's paper proof (paper §5, single paragraph):
 //
-//   Assume X satisfies (F_S) ∧ (Π_{4, S, n}). Then X ∈ S_S^global ⊆ S_S
-//   by Lemma 3.4, and id_X : X → X is an (∞, n)-equivalence onto its
-//   image with target in S_S, violating (Π_{4, S, n}).
+
+//  Assume X satisfies (F_S) ∧ (Π_{4, S, n}). Then X ∈ S_S^global ⊆ S_S
+//  by Lemma 3.4, and id_X : X → X is an (∞, n)-equivalence onto its
+//  image with target in S_S, violating (Π_{4, S, n}).
 //
+
 // The proof has three logical steps:
 //
-//   Step 1 — apply Lemma 3.4 to (F_S) ⟹ SSMembership witness in S_S^global.
-//   Step 2 — the identity morphism id_X : X → X is an (∞, n)-equivalence
-//            onto its image; combined with the Step-1 SSMembership witness,
-//            the existence of (Y := X) ∈ S_S<S> + (F := id_X) :
-//            (∞, n)-equivalence onto image *contradicts* (Π_{4, S, n}).
-//   Step 3 — contradiction propagates to the joint conjunction.
+
+//  Step 1 — apply Lemma 3.4 to (F_S) ⟹ SSMembership witness in S_S^global.
+//  Step 2 — the identity morphism id_X : X → X is an (∞, n)-equivalence
+//  onto its image; combined with the Step-1 SSMembership witness,
+//  the existence of (Y := X) ∈ S_S<S> + (F := id_X) :
+//  (∞, n)-equivalence onto image *contradicts* (Π_{4, S, n}).
+//  Step 3 — contradiction propagates to the joint conjunction.
 //
+
 // Steps 1 and 3 are mechanical apply / propositional unfolding. Step 2
 // is the (∞, n)-equivalence reasoning that requires kernel-V3 infra
 // (T0.1). For the M0.7 structured-proof phase, we capture step 2 as
@@ -325,18 +349,21 @@ public axiom msfs_f_s_implies_formal_s_definable(
 
 /// **Step-2 intermediate** for Theorem 5.1's structured proof.
 ///
+
 /// Given:
-///   * `candidate: &LAbsCandidate` satisfying (F_S) ∧ (Π_4) (the
-///     Theorem 5.1 hypotheses), and
-///   * `ss_witness: &SSMembership` placing the candidate's underlying
-///     X in S_S^global ⊆ S_S — produced by `msfs_lemma_3_4_s_definability`
-///     (constructor) and certified by `msfs_lemma_3_4_outputs_in_s_s_global`
-///     (operational @theorem) at the call site,
+///  * `candidate: &LAbsCandidate` satisfying (F_S) ∧ (Π_4) (the
+///  Theorem 5.1 hypotheses), and
+///  * `ss_witness: &SSMembership` placing the candidate's underlying
+///  X in S_S^global ⊆ S_S — produced by `msfs_lemma_3_4_s_definability`
+///  (constructor) and certified by `msfs_lemma_3_4_outputs_in_s_s_global`
+///  (operational @theorem) at the call site,
 ///
+
 /// the identity morphism `id_X : X → X` is an `(∞, n)`-equivalence
 /// onto its image with target Y := X ∈ S_S<S>, *which is exactly the
 /// pattern that (Π_{4, S, n}) forbids*. Hence `false`.
 ///
+
 /// **Architectural note (M0.7-A).** The signature here consumes the
 /// concrete S_S^global membership predicate — `is_in_s_s_global() &&
 /// closure_depth() >= 1` — rather than only the formal-S-definability
@@ -347,6 +374,7 @@ public axiom msfs_f_s_implies_formal_s_definable(
 /// witness without ever observing the S_S-membership content that the
 /// paper proof's "id_X has target in S_S" depends on.
 ///
+
 /// **Soundness scope.** This axiom captures step 2 of the paper proof
 /// verbatim. The (∞, n)-equivalence reasoning is the kernel-V3
 /// infrastructure tracked under T0.1; once that lands, this axiom is
@@ -356,10 +384,10 @@ public axiom msfs_f_s_implies_formal_s_definable(
 /// reduces to "Lemma 3.4 + this axiom + propositional contradiction",
 /// and *both* lemma-applications appear in the call chain.
 /// **Kernel-discharged** via Whitehead-promote at level n + n-truncation
-/// for level descent.  The two-intrinsic discharge surfaces the empty
+/// for level descent. The two-intrinsic discharge surfaces the empty
 /// `BridgeAudit` invariant of `verum_kernel::whitehead::whitehead_promote`
 /// (no preprint admit) plus the level-descent step from
-/// `verum_kernel::truncation::truncate_to_level`.  Both are
+/// `verum_kernel::truncation::truncate_to_level`. Both are
 /// machine-checked by `verum audit --kernel-discharged-axioms`.
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")

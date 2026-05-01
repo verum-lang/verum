@@ -4,31 +4,35 @@
 // Layer: Application (Theory Interoperation)
 // Spec: Theory-interop JSON-RPC protocol
 //
+
 // Implements the Model Context Protocol (MCP) JSON-RPC 2.0 server for
 // the theory-interop ∞-topos. External tools (LLM agents, IDE plug-ins, CLI)
 // communicate with the theory-interop layer through this thin JSON envelope layer.
 //
+
 // Supported methods:
-//   theory/list        — enumerate all loaded theories
-//   claim/translate    — translate a claim between theories via Kan extensions
-//   theory/audit       — audit a named theory for internal consistency
-//   meta/audit         — audit T_meta (the meta-theory)
-//   theory/load        — load a theory from a JSON parameter blob
-//   theory/coherence   — check coherence across a set of translation pairs
+//  theory/list — enumerate all loaded theories
+//  claim/translate — translate a claim between theories via Kan extensions
+//  theory/audit — audit a named theory for internal consistency
+//  meta/audit — audit T_meta (the meta-theory)
+//  theory/load — load a theory from a JSON parameter blob
+//  theory/coherence — check coherence across a set of translation pairs
 //
+
 // Error codes follow JSON-RPC 2.0 conventions extended with theory-interop-specific codes:
-//   -32700  Parse error
-//   -32600  Invalid request
-//   -32601  Method not found (404)
-//   -32602  Invalid params
-//   -32603  Internal error
-//    1001   Theory not found
-//    1002   Translation failed
-//    1003   Coherence violation
+//  -32700 Parse error
+//  -32600 Invalid request
+//  -32601 Method not found (404)
+//  -32602 Invalid params
+//  -32603 Internal error
+//  1001 Theory not found
+//  1002 Translation failed
+//  1003 Coherence violation
 //
+
 // Dependencies:
-//   core.theory_interop.core  — registry, load/translate/audit/coherence
-//   core.math.epistemic — Theory, Claim, ClaimType, EpistemicStatus
+//  core.theory_interop.core — registry, load/translate/audit/coherence
+//  core.math.epistemic — Theory, Claim, ClaimType, EpistemicStatus
 // =============================================================================
 
 module core.theory_interop.protocol;
@@ -62,6 +66,7 @@ mount core.math.epistemic.{
 
 /// A JSON-RPC 2.0 request envelope.
 ///
+
 /// `params` carries the method-specific payload as a raw JSON Text blob.
 /// Callers MUST include `id`; notifications (id = -1) are treated as fire-
 /// and-forget (the response is still returned but may be discarded).
@@ -77,6 +82,7 @@ public type JsonRpcRequest is {
 
 /// A JSON-RPC 2.0 response envelope.
 ///
+
 /// Exactly one of `result` or `error` is present (the other is None).
 public type JsonRpcResponse is {
     /// Mirrors the request id.
@@ -152,6 +158,7 @@ public type CoherenceParams is {
 
 /// Extract a JSON string field value from a minimal flat JSON object.
 ///
+
 /// Searches for `"key":"value"` or `"key": "value"` patterns.
 /// Returns None when the field is absent.
 fn extract_string_field(json: &Text, key: &Text) -> Maybe<Text> {
@@ -204,6 +211,7 @@ fn extract_int_field(json: &Text, key: &Text) -> Maybe<Int> {
 
 /// Parse "claim/translate" parameters from a JSON object text.
 ///
+
 /// Expected shape: {"source":"T1","target":"T2","map":"[]"}
 public fn parse_translate_params(params: &Text) -> Maybe<TranslateParams> {
     let source = extract_string_field(params, "source");
@@ -226,6 +234,7 @@ public fn parse_translate_params(params: &Text) -> Maybe<TranslateParams> {
 
 /// Parse "theory/audit" parameters from a JSON object text.
 ///
+
 /// Expected shape: {"theory":"MyTheory"}
 public fn parse_audit_params(params: &Text) -> Maybe<AuditParams> {
     match extract_string_field(params, "theory") {
@@ -236,6 +245,7 @@ public fn parse_audit_params(params: &Text) -> Maybe<AuditParams> {
 
 /// Parse "theory/load" parameters from a JSON object text.
 ///
+
 /// Expected shape: {"name":"MyTheory","body":"{ ... theory JSON ... }"}
 public fn parse_load_params(params: &Text) -> Maybe<LoadParams> {
     let name = extract_string_field(params, "name");
@@ -248,6 +258,7 @@ public fn parse_load_params(params: &Text) -> Maybe<LoadParams> {
 
 /// Parse "theory/coherence" parameters from a JSON object text.
 ///
+
 /// Expected shape: {"pairs":"[[\"T1\",\"T2\"],[\"T2\",\"T3\"]]"}
 public fn parse_coherence_params(params: &Text) -> Maybe<CoherenceParams> {
     match extract_string_field(params, "pairs") {
@@ -323,7 +334,7 @@ fn err_response(id: Int, code: Int, message: Text) -> JsonRpcResponse {
 // §5. TheoryInteropServer — stateful request handler
 // =============================================================================
 
-/// The theory-interop JSON-RPC server.  Wraps a `TheoryRegistry` and dispatches
+/// The theory-interop JSON-RPC server. Wraps a `TheoryRegistry` and dispatches
 /// incoming JSON-RPC requests to the appropriate core functions.
 public type TheoryInteropServer is {
     registry: TheoryRegistry,
@@ -342,6 +353,7 @@ public fn new_server() -> TheoryInteropServer {
 
 /// Handler: "theory/list"
 ///
+
 /// Returns a JSON array of all loaded theory names.
 /// Parameters: {} (none required)
 fn handle_list_theories(server: &TheoryInteropServer, id: Int) -> JsonRpcResponse {
@@ -352,6 +364,7 @@ fn handle_list_theories(server: &TheoryInteropServer, id: Int) -> JsonRpcRespons
 
 /// Handler: "claim/translate"
 ///
+
 /// Translates claims between two theories using Kan extensions.
 /// Parameters: {"source": "<name>", "target": "<name>", "map": "[]"}
 fn handle_translate(
@@ -382,6 +395,7 @@ fn handle_translate(
 
 /// Handler: "theory/audit"
 ///
+
 /// Audits a named theory for internal consistency.
 /// Parameters: {"theory": "<name>"}
 fn handle_audit_theory(
@@ -410,6 +424,7 @@ fn handle_audit_theory(
 
 /// Handler: "meta/audit"
 ///
+
 /// Audits T_meta, the built-in meta-theory.
 /// Parameters: {} (none required)
 fn handle_audit_meta(id: Int) -> JsonRpcResponse {
@@ -420,6 +435,7 @@ fn handle_audit_meta(id: Int) -> JsonRpcResponse {
 
 /// Handler: "theory/load"
 ///
+
 /// Loads a new theory from a JSON parameter blob and registers it.
 /// Parameters: {"name": "<name>", "body": "<theory-json>"}
 fn handle_load_theory(
@@ -449,6 +465,7 @@ fn handle_load_theory(
 
 /// Handler: "theory/coherence"
 ///
+
 /// Checks coherence across a set of translation pairs.
 /// Parameters: {"pairs": "[[\"T1\",\"T2\"],[\"T2\",\"T3\"]]"}
 fn handle_coherence(
@@ -515,7 +532,8 @@ fn parse_name_pairs(json: &Text) -> List<(Text, Text)> {
 
 /// Route an incoming `JsonRpcRequest` to the appropriate handler.
 ///
-/// This is the primary entry point for the MCP server.  All unknown methods
+
+/// This is the primary entry point for the MCP server. All unknown methods
 /// return error code -32601 (Method not found).
 public fn handle_request(
     server: &mut TheoryInteropServer,
@@ -547,6 +565,7 @@ public fn handle_request(
 
 /// Convenience wrapper: feed a request to the server and return the response.
 ///
+
 /// Identical to `handle_request`; provided as a named entry-point for
 /// callers that prefer a free function over method syntax.
 public fn serve_request(

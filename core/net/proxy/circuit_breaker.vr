@@ -2,27 +2,33 @@
 // core/net/proxy/circuit_breaker.vr — Hystrix-style circuit breaker
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §9.3
+// Spec: internal/specs/net-framework.md §9.3
 // =============================================================================
 //
+
 // A classic three-state circuit breaker:
 //
-//   Closed     (default)              — requests pass through.
-//   Open       (after too many fails) — requests short-circuit to
-//                                       `WeftError.Overloaded` without
-//                                       ever touching the inner handler.
-//   HalfOpen   (after `reset_timeout`) — one probe request allowed; on
-//                                       success return to Closed, on
-//                                       failure return to Open.
+
+//  Closed (default) — requests pass through.
+//  Open (after too many fails) — requests short-circuit to
+//  `WeftError.Overloaded` without
+//  ever touching the inner handler.
+//  HalfOpen (after `reset_timeout`) — one probe request allowed; on
+//  success return to Closed, on
+//  failure return to Open.
 //
+
 // The breaker considers an invocation a "failure" iff:
 //
-//   * Inner returned `Err(_)` AND the error's ErrorCategory is
-//     Transient or Upstream (retryable classes).
-//   * Response status is in {502, 503, 504}.
+
+//  * Inner returned `Err(_)` AND the error's ErrorCategory is
+//  Transient or Upstream (retryable classes).
+//  * Response status is in {502, 503, 504}.
 //
+
 // Client errors (4xx) are NOT failures — see §5.6 "category()" rule.
 //
+
 // =============================================================================
 
 module core.net.proxy.circuit_breaker;

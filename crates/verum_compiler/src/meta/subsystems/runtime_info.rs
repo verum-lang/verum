@@ -1,5 +1,6 @@
 //! Runtime information for meta functions
 //!
+
 //! Provides compile-time and build-time information that can be
 //! queried by meta functions via the MetaRuntime context.
 
@@ -7,6 +8,7 @@ use verum_common::{List, Map, Text};
 
 /// Runtime information available to meta functions via MetaRuntime context
 ///
+
 /// This struct holds all the compile-time and build-time information
 /// that can be queried by meta functions.
 #[derive(Debug, Clone)]

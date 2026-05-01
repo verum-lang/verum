@@ -1,19 +1,24 @@
 //! Lint throughput benchmarks.
 //!
+
 //! Three benchmark groups, each measuring one cost layer:
 //!
+
 //! 1. `single_file` — cost of running every rule on one ~1 KLOC
-//!    Verum file. Measures the fixed per-file overhead (parser +
-//!    AST walks + text scans).
+//!  Verum file. Measures the fixed per-file overhead (parser +
+//!  AST walks + text scans).
 //!
+
 //! 2. `repo_parallel` — cost of linting a 100-file corpus through
-//!    the parallel runner. Measures end-to-end throughput including
-//!    config load, file walk, and result merge.
+//!  the parallel runner. Measures end-to-end throughput including
+//!  config load, file walk, and result merge.
 //!
+
 //! 3. `cache_hit` — cost of the same 100-file corpus with the
-//!    cache warm. Measures the disk-read + JSON-decode hot path
-//!    that incremental CI runs depend on.
+//!  cache warm. Measures the disk-read + JSON-decode hot path
+//!  that incremental CI runs depend on.
 //!
+
 //! Run with: `cargo bench -p verum_cli --bench lint_throughput`.
 //! Compare runs with `--save-baseline` / `--baseline`.
 
@@ -34,7 +39,7 @@ fn make_kloc_source() -> String {
             "/// Item {i} — the worker for the {i}'th task.\n\
              public fn item_{i}(x: Int{{ it > 0 }}, y: Int) -> Int {{\n    \
                  let z = x + y;\n    \
-                 // TODO(#{i:04}): refine\n    \
+                 // TODO(#{i:04}): refine\n \
                  z\n\
              }}\n\n"
         ));

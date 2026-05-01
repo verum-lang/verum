@@ -1,7 +1,9 @@
 //! Complete Protocol (Trait) System Implementation
 //!
+
 //! Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Complete Protocol System
 //!
+
 //! Protocols are Verum's version of type classes/traits with:
 //! - Structural typing (duck typing)
 //! - Associated types and constants
@@ -10,8 +12,10 @@
 //! - VTable-based method dispatch (<10ns overhead)
 //! - Generic protocols with constraints
 //!
+
 //! # Architecture
 //!
+
 //! - **Protocol**: Protocol definition with methods, associated types
 //! - **ProtocolImpl**: Implementation of protocol for specific type
 //! - **ProtocolChecker**: Registry and resolution engine
@@ -65,33 +69,40 @@ pub type TypeSubstitution = Map<Text, Type>;
 /// Protocol kind - distinguishes between constraint protocols, injectable contexts,
 /// and dual-kind context protocols.
 ///
+
 /// Context system synthesis: combining static (@injectable) and dynamic (provide/using) dependency injection
 ///
+
 /// This replaces the previous `is_context: bool` field with a proper enum that captures
 /// the three distinct protocol kinds:
 ///
+
 /// 1. **Constraint**: Type bounds only (declared with `type X is protocol { }`)
-///    - Used in: generic bounds, where clauses
-///    - Cannot be: injected via `provide`, required via `using`
-///    - Examples: Eq, Ord, Show, Iterator, Functor
+///  - Used in: generic bounds, where clauses
+///  - Cannot be: injected via `provide`, required via `using`
+///  - Examples: Eq, Ord, Show, Iterator, Functor
 ///
+
 /// 2. **Injectable**: DI capability only (declared with `context X { }`)
-///    - Used in: `using [X]` requirements, `provide X = ...`
-///    - Cannot be: used as type bounds
-///    - Examples: Database, Logger, Cache
+///  - Used in: `using [X]` requirements, `provide X = ...`
+///  - Cannot be: used as type bounds
+///  - Examples: Database, Logger, Cache
 ///
+
 /// 3. **ConstraintAndInjectable** (Dual-kind): Both constraint AND injectable
-///    (declared with `context protocol X { }`)
-///    - Used in: generic bounds AND `using`/`provide`
-///    - Enables: static dispatch via bounds (0ns) OR dynamic dispatch via DI (~5-30ns)
-///    - Examples: Serializable, Validator
+///  (declared with `context protocol X { }`)
+///  - Used in: generic bounds AND `using`/`provide`
+///  - Enables: static dispatch via bounds (0ns) OR dynamic dispatch via DI (~5-30ns)
+///  - Examples: Serializable, Validator
 ///
+
 /// # Subkinding Rules
 ///
+
 /// ```text
 /// ConstraintAndInjectable <: Constraint
 /// ConstraintAndInjectable <: Injectable
-/// Constraint ⊥ Injectable  // Incompatible directly
+/// Constraint ⊥ Injectable // Incompatible directly
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProtocolKind {
@@ -129,6 +140,7 @@ impl ProtocolKind {
 
     /// Check subkinding: does `self` satisfy `required`?
     ///
+
     /// ConstraintAndInjectable satisfies both Constraint and Injectable.
     /// Constraint and Injectable are incompatible with each other.
     pub fn satisfies(&self, required: ProtocolKind) -> bool {
@@ -227,27 +239,31 @@ impl std::fmt::Display for ObjectSafetyError {
 
 /// A protocol declaration (like a trait/type class)
 ///
+
 /// Protocols define required methods, associated types, and constants
 /// that implementing types must provide.
 ///
+
 /// Now with support for:
 /// - Generic Associated Types (GATs)
 /// - Specialization metadata
 /// - Higher-kinded types
 ///
+
 /// Example:
 /// ```verum
 /// protocol Eq<T> {
-///     fn eq(self: T, other: T) -> Bool;
-///     fn ne(self: T, other: T) -> Bool {
-///         !self.eq(other)  // Default implementation
-///     }
+///  fn eq(self: T, other: T) -> Bool;
+///  fn ne(self: T, other: T) -> Bool {
+///  !self.eq(other) // Default implementation
+///  }
 /// }
 ///
+
 /// // With GATs:
 /// protocol LendingIterator {
-///     type Item<'a> where Self: 'a
-///     fn next(&mut self) -> Maybe<GenRef<Item>>
+///  type Item<'a> where Self: 'a
+///  fn next(&mut self) -> Maybe<GenRef<Item>>
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -256,10 +272,12 @@ pub struct Protocol {
     pub name: Text,
     /// Protocol kind - determines how this protocol can be used.
     ///
+
     /// - `Constraint`: Type bounds only (`type X is protocol { }`)
     /// - `Injectable`: DI capability only (`context X { }`)
     /// - `ConstraintAndInjectable`: Both (`context protocol X { }`)
     ///
+
     /// Context system synthesis: combining static (@injectable) and dynamic (provide/using) dependency injection
     pub kind: ProtocolKind,
     /// Type parameters
@@ -284,6 +302,7 @@ pub struct Protocol {
 impl Protocol {
     /// Returns true if this protocol can be used for dependency injection.
     ///
+
     /// Context protocols (`context protocol Name { }`) and pure contexts (`context Name { }`)
     /// can be used in `using [Name]` clauses and provided with `provide Name = ...`.
     #[inline]
@@ -293,6 +312,7 @@ impl Protocol {
 
     /// Returns true if this protocol can be used as a type constraint.
     ///
+
     /// Constraint protocols (`type X is protocol { }`) and context protocols (`context protocol`)
     /// can be used in `where T: X` bounds.
     #[inline]
@@ -302,6 +322,7 @@ impl Protocol {
 
     /// Returns true if this is a dual-kind context protocol.
     ///
+
     /// Context protocols (`context protocol Name { }`) can be used both as type constraints
     /// and for dependency injection.
     #[inline]
@@ -320,8 +341,10 @@ pub struct TypeParam {
 
 /// A method in a protocol
 ///
+
 /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 5.4 - Refinement Integration
 ///
+
 /// Protocol methods can include refinement constraints on parameters and return types:
 /// - Parameter constraints: `fn process(x: Int{> 0})`
 /// - Return constraints: `fn count() -> Int{>= 0}`
@@ -338,9 +361,11 @@ pub struct ProtocolMethod {
     pub doc: Maybe<Text>,
     /// Refinement constraints on parameters and return type
     ///
+
     /// Maps parameter names (and "return" for return type) to their refinement constraints.
     /// Example: {"x" -> {> 0}, "return" -> {>= 0}}
     ///
+
     /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 5.4.1-5.4.3
     pub refinement_constraints: Map<Text, crate::advanced_protocols::RefinementConstraint>,
     /// Whether this method is async (affects state machine generation)
@@ -364,6 +389,7 @@ pub struct ProtocolMethod {
 impl ProtocolMethod {
     /// Create a simple protocol method without refinement constraints
     ///
+
     /// This is the most common constructor for backward compatibility.
     pub fn simple(name: Text, ty: Type, has_default: bool) -> Self {
         Self {
@@ -382,6 +408,7 @@ impl ProtocolMethod {
 
     /// Create a protocol method with type parameter bounds
     ///
+
     /// Used for methods with bounded generic parameters like `fn map<B, F: fn(T) -> B>`.
     pub fn with_type_bounds(
         name: Text,
@@ -485,6 +512,7 @@ impl ProtocolMethod {
 
     /// Validate refinement constraints
     ///
+
     /// Checks that:
     /// 1. Parameter names in constraints match actual parameters
     /// 2. Constraint predicates are well-formed
@@ -519,18 +547,21 @@ impl ProtocolMethod {
 
 /// Associated type in a protocol (with GAT support)
 ///
+
 /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — + GATs, higher-rank bounds, specialization, coherence (future v2.0+)
 ///
+
 /// This struct now supports:
 /// - Regular associated types: `type Item`
 /// - Generic Associated Types (GATs): `type Item<T>`
 /// - Higher-kinded types: `type F<_>`
 ///
+
 /// Example:
 /// ```verum
 /// protocol Monad {
-///     type Wrapped<T>  // GAT with type parameter
-///     fn pure<T>(value: T) -> Self.Wrapped<T>
+///  type Wrapped<T> // GAT with type parameter
+///  fn pure<T>(value: T) -> Self.Wrapped<T>
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -552,21 +583,25 @@ pub struct AssociatedType {
     pub kind: crate::advanced_protocols::AssociatedTypeKind,
     /// Refinement predicate on the associated type
     ///
+
     /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 5.4 - Refinement Integration
     ///
+
     /// Example:
     /// ```verum
     /// protocol Container {
-    ///     type Size where Size >= 0    // Refinement predicate
-    ///     fn len(self) -> Self.Size
+    ///  type Size where Size >= 0 // Refinement predicate
+    ///  fn len(self) -> Self.Size
     /// }
     /// ```
     pub refinement: Maybe<crate::advanced_protocols::RefinementConstraint>,
     /// Expected variance of this associated type in implementations
     ///
+
     /// This is used to verify that implementations respect the variance
     /// declaration, enabling safe covariance/contravariance in protocol types.
     ///
+
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4 - Variance
     pub expected_variance: crate::advanced_protocols::Variance,
 }
@@ -626,6 +661,7 @@ impl AssociatedType {
 
     /// Create a covariant associated type
     ///
+
     /// Covariant types allow subtyping: if A <: B, then Container<A> <: Container<B>
     pub fn covariant(name: Text, bounds: List<ProtocolBound>) -> Self {
         Self {
@@ -642,6 +678,7 @@ impl AssociatedType {
 
     /// Create a contravariant associated type
     ///
+
     /// Contravariant types reverse subtyping: if A <: B, then F<B> <: F<A>
     pub fn contravariant(name: Text, bounds: List<ProtocolBound>) -> Self {
         Self {
@@ -673,6 +710,7 @@ impl AssociatedType {
 
     /// Check variance compatibility
     ///
+
     /// Returns true if the given variance is compatible with the expected variance.
     /// - Invariant types are only compatible with invariant
     /// - Covariant types accept covariant or invariant
@@ -709,6 +747,7 @@ impl AssociatedType {
 
     /// Validate refinement constraint against the type bounds
     ///
+
     /// Ensures the refinement predicate is compatible with any protocol bounds
     /// on the associated type.
     pub fn validate_refinement(&self) -> Result<(), Text> {
@@ -735,16 +774,20 @@ pub struct AssociatedConst {
 
 /// A protocol bound (constraint)
 ///
+
 /// Example: `T: Eq + Ord`
 ///
+
 /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .4 - Negative Reasoning
 ///
+
 /// Protocol bounds can be either positive (type must implement) or negative
 /// (type must NOT implement). Negative bounds enable mutual exclusion patterns:
 ///
+
 /// ```verum
 /// implement<T> MyProtocol for T where T: Send + !Sync {
-///     // Implementation for Send but not Sync types
+///  // Implementation for Send but not Sync types
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -755,9 +798,11 @@ pub struct ProtocolBound {
     pub args: List<Type>,
     /// Whether this is a negative bound (!Protocol syntax)
     ///
+
     /// When true, this bound requires the type to NOT implement the protocol.
     /// This is used for specialization coherence and mutual exclusion patterns.
     ///
+
     /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .4 - Negative Reasoning
     pub is_negative: bool,
 }
@@ -796,24 +841,27 @@ impl ProtocolBound {
 
 /// An implementation of a protocol for a specific type
 ///
+
 /// Now with support for:
 /// - Specialization (via @specialize attribute)
 /// - GAT instantiations
 ///
+
 /// Example:
 /// ```verum
 /// impl Eq for Int {
-///     fn eq(self: Int, other: Int) -> Bool {
-///         // implementation
-///     }
+///  fn eq(self: Int, other: Int) -> Bool {
+///  // implementation
+///  }
 /// }
 ///
+
 /// // With specialization:
 /// @specialize
 /// impl Display for List<Text> {
-///     fn fmt(self: &Self, f: &mut Formatter) -> Result<(), Error> {
-///         // Specialized implementation
-///     }
+///  fn fmt(self: &Self, f: &mut Formatter) -> Result<(), Error> {
+///  // Specialized implementation
+///  }
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -885,23 +933,27 @@ pub enum MethodSource {
 
 /// Virtual dispatch table for protocol implementation
 ///
+
 /// VTables enable dynamic dispatch with <10ns overhead through:
 /// - Hash-based method lookup (O(1) with perfect hashing)
 /// - Direct function pointers (no indirection)
 /// - Cache-friendly layout (64-byte alignment)
 /// - GAT associated type metadata (for runtime type queries)
 ///
+
 /// # GAT Support
 ///
+
 /// For protocols with Generic Associated Types (GATs), the VTable includes:
 /// - associated_type_indices: Map from associated type name to metadata index
 /// - Runtime type information pointers for each GAT instantiation
 ///
+
 /// Example:
 /// ```verum
 /// protocol Iterator {
-///     type Item<T>  // GAT with type parameter
-///     fn next(&mut self) -> Maybe<Self.Item<T>>
+///  type Item<T> // GAT with type parameter
+///  fn next(&mut self) -> Maybe<Self.Item<T>>
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -925,10 +977,12 @@ pub struct VTable {
 impl VTable {
     /// Create new VTable for protocol implementation
     ///
+
     /// CRITICAL: Method ordering MUST be deterministic for cross-compilation compatibility.
     /// This implementation uses alphabetically sorted method names to ensure that VTable
     /// indices are stable across compilations, preventing method dispatch failures.
     ///
+
     /// For protocol-based method ordering (respecting superprotocol inheritance),
     /// use `VTable::from_protocol_checker()` instead.
     pub fn new(protocol: Text, for_type: Type, methods: &Map<Text, Type>) -> Self {
@@ -958,12 +1012,15 @@ impl VTable {
 
     /// Create new VTable with GAT support
     ///
+
     /// This version takes associated types and builds the GAT metadata indices.
     ///
+
     /// CRITICAL: Method and associated type ordering MUST be deterministic for
     /// cross-compilation compatibility. This implementation uses alphabetically
     /// sorted names to ensure stable indices.
     ///
+
     /// # Parameters
     /// - protocol: Protocol name
     /// - for_type: Type implementing the protocol
@@ -1010,48 +1067,59 @@ impl VTable {
 
     /// Create VTable using ProtocolChecker for proper method ordering
     ///
+
     /// This is the RECOMMENDED constructor for production use as it respects:
     /// - Protocol definition order
     /// - Superprotocol inheritance order
     /// - Deterministic ordering across compilations
     ///
+
     /// This constructor queries the ProtocolChecker to get the complete method list
     /// including inherited methods from superprotocols, in the proper order defined
     /// by the protocol hierarchy.
     ///
+
     /// # Parameters
     /// - protocol_name: Name of the protocol
     /// - for_type: Type implementing the protocol
     /// - protocol_checker: The protocol checker with protocol definitions
     ///
+
     /// # Returns
     /// Result containing the VTable or a ProtocolError
     ///
+
     /// # Method Ordering Strategy
     ///
+
     /// 1. Query protocol_checker.all_methods() to get methods including superprotocols
     /// 2. Methods are ordered by:
-    ///    - Superprotocol methods first (in declaration order)
-    ///    - This protocol's methods last (in declaration order)
+    ///  - Superprotocol methods first (in declaration order)
+    ///  - This protocol's methods last (in declaration order)
     /// 3. Within each protocol, methods are in definition order
     ///
+
     /// This ensures that method indices are stable and respect protocol inheritance.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// protocol Comparable extends Equatable {
-    ///     fn compare(other: Self) -> Ordering  // index 1 (after eq from Equatable)
+    ///  fn compare(other: Self) -> Ordering // index 1 (after eq from Equatable)
     /// }
     ///
+
     /// protocol Equatable {
-    ///     fn eq(other: Self) -> Bool  // index 0
+    ///  fn eq(other: Self) -> Bool // index 0
     /// }
     ///
+
     /// let vtable = VTable::from_protocol_checker(
-    ///     "Comparable",
-    ///     Type::Int,
-    ///     &protocol_checker
+    ///  "Comparable",
+    ///  Type::Int,
+    ///  &protocol_checker
     /// )?;
     /// // vtable.method_indices = {"eq": 0, "compare": 1}
     /// ```
@@ -1106,6 +1174,7 @@ impl VTable {
 
     /// Get associated type index for GAT lookup
     ///
+
     /// Returns the index into the associated type metadata array.
     pub fn get_associated_type_index(&self, assoc_name: &Text) -> Maybe<usize> {
         self.associated_type_indices.get(assoc_name).copied()
@@ -1137,6 +1206,7 @@ impl VTable {
 
 /// VTable memory layout information
 ///
+
 /// Extended with GAT support to include associated type metadata offsets.
 #[derive(Debug, Clone)]
 pub struct VTableLayout {
@@ -1236,6 +1306,7 @@ impl MethodSignature {
 
     /// Freshen all TypeVars in the method signature.
     ///
+
     /// This replaces every TypeVar in params and return_type with a fresh TypeVar.
     /// This is essential for method-level type parameters (e.g., F in `map<F>`)
     /// to prevent different call sites from sharing the same TypeVar and polluting
@@ -1373,6 +1444,7 @@ pub struct MethodLookupResult {
 
 /// Result of resolving the Try protocol for a type
 ///
+
 /// Protocol-based Try resolution: ? operator uses Carrier protocol to convert between error types
 #[derive(Debug, Clone)]
 pub struct TryProtocolResolution {
@@ -1384,6 +1456,7 @@ pub struct TryProtocolResolution {
 
 /// Result of resolving the IntoIterator protocol for a type
 ///
+
 /// Used by for-loop type inference to determine the element type of iteration.
 /// Protocol-based desugaring: syntactic sugar resolved through protocol method dispatch
 #[derive(Debug, Clone)]
@@ -1396,6 +1469,7 @@ pub struct IntoIteratorResolution {
 
 /// Result of resolving the Future protocol for a type
 ///
+
 /// Used by await expression type inference to determine the output type.
 #[derive(Debug, Clone)]
 pub struct FutureResolution {
@@ -1405,6 +1479,7 @@ pub struct FutureResolution {
 
 /// Result of resolving the Index protocol for a type
 ///
+
 /// Used by index operator type inference to determine key and value types.
 /// Index operator resolution: "x[i]" desugars to Index/IndexMut protocol method calls
 #[derive(Debug, Clone)]
@@ -1417,6 +1492,7 @@ pub struct IndexResolution {
 
 /// Result of resolving the Maybe protocol for a type
 ///
+
 /// Used by `??` (null coalescing) and `?.` (optional chaining) operators.
 /// Maybe operator resolution: ? on Maybe<T> desugars to match with None -> return None propagation
 #[derive(Debug, Clone)]
@@ -1447,6 +1523,7 @@ pub struct ProtocolChecker {
     superprotocol_cache: Map<Text, List<Text>>,
     /// Cache for protocol implementation lookups (type_key, protocol_key) -> impl exists
     ///
+
     /// This cache stores the results of `implements()` checks to avoid repeated
     /// resolution when the same type/protocol pair is queried multiple times.
     /// The value is `Maybe::Some(true)` if implemented, `Maybe::Some(false)` if not,
@@ -1475,6 +1552,7 @@ pub struct ProtocolChecker {
     /// Audit-A2 coherence: per-checker identity used to scope the
     /// thread-local `IMPL_OPTIMISTIC_CACHE`.
     ///
+
     /// Without this scoping, two different `ProtocolChecker` instances
     /// running on the same OS thread (e.g. successive compilations in
     /// a long-lived process such as `vtest`, the LSP server, or a
@@ -1485,22 +1563,25 @@ pub struct ProtocolChecker {
     /// `true` and skip its own impl-set probe. Adding a checker_id
     /// dimension to the cache key isolates each checker's view.
     ///
+
     /// IDs are issued from a process-global atomic counter; collisions
     /// are impossible within the lifetime of a process and across
     /// processes the cache is fresh anyway (thread-local).
     checker_id: u64,
 
     /// `[protocols].resolution_strategy` — chooses how `find_impl`
-    /// resolves multi-candidate cases.  Threaded from manifest via
+    /// resolves multi-candidate cases. Threaded from manifest via
     /// `set_resolution_strategy`.
     ///
-    ///   * `"most_specific"` (default) — pick the most specific impl
-    ///     (current behaviour via `select_most_specific_impl`).
-    ///   * `"first_declared"` — pick the first registered candidate
-    ///     (useful in open-world plugin systems).
-    ///   * `"error"` — any overlap is an error; `find_impl` returns
-    ///     None to surface the existing ambiguity diagnostic.
+
+    ///  * `"most_specific"` (default) — pick the most specific impl
+    ///  (current behaviour via `select_most_specific_impl`).
+    ///  * `"first_declared"` — pick the first registered candidate
+    ///  (useful in open-world plugin systems).
+    ///  * `"error"` — any overlap is an error; `find_impl` returns
+    ///  None to surface the existing ambiguity diagnostic.
     ///
+
     /// Pre-fix the production resolver hardcoded "most_specific" and
     /// `[protocols].resolution_strategy` was tracing-only at
     /// session.rs:582.
@@ -1508,25 +1589,27 @@ pub struct ProtocolChecker {
     /// `[protocols].blanket_impls` — when false, candidates whose
     /// `for_type` is a bare type variable (the blanket
     /// `impl<T> Protocol for T` pattern) are excluded from
-    /// `find_impl`'s candidate set.  Threaded from manifest via
-    /// `set_blanket_impls`.  Default true (Rust-like ergonomics).
+    /// `find_impl`'s candidate set. Threaded from manifest via
+    /// `set_blanket_impls`. Default true (Rust-like ergonomics).
     blanket_impls: bool,
 
     /// `[types].instance_search` — when false, `find_impl` skips
-    /// the Stage-2 generic-candidate scan entirely.  Only the
+    /// the Stage-2 generic-candidate scan entirely. Only the
     /// O(1) exact-match path runs, so any call site that relied
     /// on the resolver finding a generic `impl<T> Protocol for
     /// List<T>` (or similar substitution-based match) for a
     /// concrete type returns `None`.
     ///
+
     /// Mirrors the Idris-style "no implicit instance search"
     /// semantic: every protocol-method dispatch must hit a
     /// concretely-registered impl for the exact type, or the
-    /// caller must thread the instance explicitly.  Useful for
+    /// caller must thread the instance explicitly. Useful for
     /// projects that want compile-time predictability (no
     /// surprising blanket-impl resolution) at the cost of more
     /// verbose impl declarations.
     ///
+
     /// Threaded from manifest via `set_instance_search_enabled`.
     /// Default true (current behaviour — the resolver runs the
     /// full multi-stage candidate scan).
@@ -1535,18 +1618,20 @@ pub struct ProtocolChecker {
     /// `[protocols].coherence` — selects how strictly the
     /// orphan-rule and overlap checks gate `register_impl`.
     ///
-    ///   * `Strict` (default) — orphan-rule violation and
-    ///     overlapping impls are hard errors; `register_impl`
-    ///     returns `Err(CoherenceError)` and the impl is dropped.
-    ///   * `Lenient` — violations downgrade to warnings collected
-    ///     in `coherence_warnings`; the impl is still inserted so
-    ///     downstream resolution can proceed.  Useful for
-    ///     plugin-style projects where the orphan rule is too
-    ///     strict and the user accepts the consequences.
-    ///   * `Off` — both checks are skipped entirely; no warnings.
-    ///     Used by tests, REPL, and codebases that have already
-    ///     audited their coherence by hand.
+
+    ///  * `Strict` (default) — orphan-rule violation and
+    ///  overlapping impls are hard errors; `register_impl`
+    ///  returns `Err(CoherenceError)` and the impl is dropped.
+    ///  * `Lenient` — violations downgrade to warnings collected
+    ///  in `coherence_warnings`; the impl is still inserted so
+    ///  downstream resolution can proceed. Useful for
+    ///  plugin-style projects where the orphan rule is too
+    ///  strict and the user accepts the consequences.
+    ///  * `Off` — both checks are skipped entirely; no warnings.
+    ///  Used by tests, REPL, and codebases that have already
+    ///  audited their coherence by hand.
     ///
+
     /// Threaded from manifest via `set_coherence_mode`.
     coherence_mode: CoherenceMode,
 
@@ -1631,6 +1716,7 @@ impl ProtocolChecker {
 
     /// Create an empty protocol checker without standard protocols (for testing)
     ///
+
     /// This is useful for tests that want to register custom protocols
     /// without interference from standard library protocols.
     pub fn new_empty() -> Self {
@@ -1686,7 +1772,7 @@ impl ProtocolChecker {
 
     /// Apply the manifest-side `[types].instance_search`. When
     /// false, `find_impl` skips the Stage-2 generic-candidate scan
-    /// — only the O(1) exact-match path runs.  Closes the
+    /// — only the O(1) exact-match path runs. Closes the
     /// inert-defense pattern around the field at session.rs:472:
     /// pre-fix the setter on `TypeChecker.set_instance_search_
     /// enabled` stored the value but no production code path
@@ -1742,6 +1828,7 @@ impl ProtocolChecker {
 
     /// Clear implementation check cache
     ///
+
     /// This should be called when new implementations are registered
     /// to ensure the cache stays consistent.
     pub fn invalidate_impl_cache(&mut self) {
@@ -1759,6 +1846,7 @@ impl ProtocolChecker {
 
     /// Get mutable access to the method registry for stdlib integration
     ///
+
     /// This enables dynamic method registration during stdlib bootstrap,
     /// allowing methods to be registered as .vr files are parsed.
     pub fn method_registry_mut(&mut self) -> &mut Map<(Text, Text), MethodSignature> {
@@ -1772,10 +1860,12 @@ impl ProtocolChecker {
 
     /// Register a variant type name mapping
     ///
+
     /// This maps a variant type signature (e.g., "Variant(None|Some)") to its
     /// declared named type (e.g., "Maybe"). This enables protocol lookups on
     /// expanded variant types by mapping them back to their named type.
     ///
+
     /// Spec: stdlib-agnostic protocol resolution
     pub fn register_variant_type_name(&mut self, signature: Text, type_name: Text) {
         // First-wins: stdlib types registered first take precedence
@@ -1789,6 +1879,7 @@ impl ProtocolChecker {
 
     /// Check if a type implements a protocol by name (string version)
     ///
+
     /// This is a convenience method for stdlib integration that doesn't
     /// require constructing a Path.
     pub fn implements_by_name(&self, ty: &Type, protocol_name: &str) -> bool {
@@ -1800,9 +1891,11 @@ impl ProtocolChecker {
 
     /// Check if a type implements any variant of a protocol (ignoring type args).
     ///
+
     /// E.g., `implements_protocol_any(Int32, "AddAssign")` returns true
     /// even though the key is `"AddAssign<Int32>"`.
     ///
+
     /// This is useful for checking compound assignment protocols where the
     /// exact type argument doesn't matter — we just want to know if the type
     /// supports the operation at all.
@@ -3284,6 +3377,7 @@ impl ProtocolChecker {
         // rather than hardcoded here. This enables a stdlib-agnostic type system where
         // the compiler doesn't have built-in knowledge of specific stdlib types.
         //
+
         // The stdlib defines:
         // - implement<T> FromResidual<Maybe<Never>> for Maybe<T>
         // - implement<T, E> FromResidual<Result<Never, E>> for Result<T, E>
@@ -3295,17 +3389,21 @@ impl ProtocolChecker {
     // =========================================================================
     // Protocol-driven method resolution: methods resolved by searching implemented protocols for matching signatures
     //
+
     // This replaces the 2000-line get_builtin_method_type function with a
     // clean, data-driven method registry.
 
     /// Register standard methods for stdlib types.
     ///
+
     /// NOTE: Method registrations have been removed as part of the stdlib-agnostic
     /// type system refactoring. Methods should now be registered dynamically by parsing
     /// stdlib files (in bootstrap mode) or loaded from stdlib.vbca metadata (in normal mode).
     ///
+
     /// See stdlib type system refactoring design for details.
     ///
+
     /// The StdlibAgnosticChecker provides:
     /// - `register_inherent_method()` - for registering methods during stdlib parsing
     /// - `register_protocol_method()` - for protocol-based method registration
@@ -3315,6 +3413,7 @@ impl ProtocolChecker {
         // 1. StdlibAgnosticChecker::bootstrap() - parses stdlib .vr files
         // 2. StdlibAgnosticChecker::with_metadata() - loads from stdlib.vbca
         //
+
         // For primitive types (Int, Float, Bool, Char, Text) that have built-in methods,
         // use register_primitive_methods() which registers only essential operations.
 
@@ -3323,9 +3422,11 @@ impl ProtocolChecker {
 
     /// Register essential methods for primitive types.
     ///
+
     /// These are truly built-in methods that cannot come from stdlib because
     /// they are needed for the language to bootstrap.
     ///
+
     /// Primitive types: Int, Float, Bool, Char, Text
     fn register_primitive_methods(&mut self) {
         // Int methods - only essential operations that can't come from stdlib
@@ -3436,19 +3537,23 @@ impl ProtocolChecker {
 
     /// Look up a method by type and name.
     ///
+
     /// This is the main entry point for protocol-based method resolution.
     /// It replaces the hardcoded get_builtin_method_type function.
     ///
+
     /// Handles:
     /// - Direct type method lookup (List.len, Map.get, etc.)
     /// - CBGR tier conversion methods (to_checked, to_managed, to_unsafe)
     /// - Universal methods (to_string, clone, into)
     /// - Reference-aware returns (first/last/get on &List return Maybe<&T>)
     ///
+
     /// # Arguments
     /// * `ty` - The receiver type
     /// * `method_name` - The method name
     ///
+
     /// # Returns
     /// * `Some(MethodLookupResult)` with the method signature and type substitution
     /// * `None` if the method is not found
@@ -3543,6 +3648,7 @@ impl ProtocolChecker {
 
     /// Look up a method by name on a type, with argument types for disambiguation.
     ///
+
     /// This is an enhanced version of `lookup_method` that passes argument type
     /// information to protocol method resolution. This enables correct selection
     /// among multiple implementations of parameterized protocols like `FromResidual<R>`.
@@ -3967,6 +4073,7 @@ impl ProtocolChecker {
 
     /// Look up a method from protocol implementations, using argument types for disambiguation.
     ///
+
     /// When a type has multiple implementations of a parameterized protocol (e.g.,
     /// `FromResidual<Maybe<Never>>` and `FromResidual<Result<Never, E>>` both for `Maybe<T>`),
     /// the `arg_types` are used to select the correct implementation by matching
@@ -3992,8 +4099,8 @@ impl ProtocolChecker {
                 // Check impl_.methods FIRST for concrete method signatures,
                 // only fall back to proto.methods for abstract signatures.
                 // This is critical for associated types like Iterator::Item where:
-                //   - proto.methods has `fn next(&mut self) -> Maybe<Self.Item>` (abstract)
-                //   - impl_.methods has `fn next(&mut self) -> Maybe<&T>` (concrete)
+                //  - proto.methods has `fn next(&mut self) -> Maybe<Self.Item>` (abstract)
+                //  - impl_.methods has `fn next(&mut self) -> Maybe<&T>` (concrete)
                 // We want the concrete signature to avoid unresolved Self.Item projections.
 
                 let (return_type, params, receiver, is_mutating, _using_impl_method) = if let Some(impl_method_ty) = impl_.methods.get(&Text::from(method_name)) {
@@ -4215,6 +4322,7 @@ impl ProtocolChecker {
 
     /// Register a protocol.
     ///
+
     /// Returns `Err(ProtocolError::CyclicInheritance)` if the new protocol
     /// introduces a cycle in the superprotocol hierarchy.
     pub fn register_protocol(&mut self, protocol: Protocol) -> Result<(), ProtocolError> {
@@ -4241,8 +4349,10 @@ impl ProtocolChecker {
 
     /// Look up a protocol by path
     ///
+
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1 - GAT protocol lookup
     ///
+
     /// Returns the protocol definition if found, None otherwise.
     /// This is used during GAT instantiation to access GAT definitions.
     pub fn lookup_protocol(&self, path: &Path) -> Option<&Protocol> {
@@ -4259,17 +4369,19 @@ impl ProtocolChecker {
 
     /// Register an implementation with coherence checking.
     ///
+
     /// Behaviour is gated by `self.coherence_mode`
     /// (`[protocols].coherence` manifest field):
     ///
-    ///   * `Strict` (default): orphan-rule violation and overlap
-    ///     are hard errors — `register_impl` returns
-    ///     `Err(CoherenceError)` and the impl is dropped.
-    ///   * `Lenient`: violations are recorded in
-    ///     `coherence_warnings` (drained later as diagnostics)
-    ///     and the impl is still inserted so downstream
-    ///     resolution can proceed.
-    ///   * `Off`: both checks are skipped entirely.
+
+    ///  * `Strict` (default): orphan-rule violation and overlap
+    ///  are hard errors — `register_impl` returns
+    ///  `Err(CoherenceError)` and the impl is dropped.
+    ///  * `Lenient`: violations are recorded in
+    ///  `coherence_warnings` (drained later as diagnostics)
+    ///  and the impl is still inserted so downstream
+    ///  resolution can proceed.
+    ///  * `Off`: both checks are skipped entirely.
     pub fn register_impl(&mut self, impl_: ProtocolImpl) -> Result<(), CoherenceError> {
         match self.coherence_mode {
             CoherenceMode::Strict => {
@@ -4316,6 +4428,7 @@ impl ProtocolChecker {
     /// Export the registered implementations as an `InstanceRegistry`
     /// suitable for the dependent-type verification orchestrator.
     ///
+
     /// The orchestrator's `InstanceRegistry` is a thinner, read-only
     /// view — it stores `(protocol, target_type)` tuples and detects
     /// coherence violations structurally. Callers that have already
@@ -4366,19 +4479,22 @@ impl ProtocolChecker {
 
     /// Check if a type implements a protocol
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Protocol Resolution
     /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — Specialization
     ///
+
     /// This method performs a comprehensive check including:
     /// 1. Auto-implemented protocols (Deref, DerefMut)
     /// 2. Exact match via index lookup
     /// 3. Generic/conditional implementations with unification
     ///
+
     /// # Examples
     /// ```verum
     /// // All of these return true for List<Int>:
-    /// checker.implements(&list_int, &show_path)  // if Show for List<Int> exists
-    /// checker.implements(&list_int, &eq_path)    // if Eq for List<T> where T: Eq exists
+    /// checker.implements(&list_int, &show_path) // if Show for List<Int> exists
+    /// checker.implements(&list_int, &eq_path) // if Eq for List<T> where T: Eq exists
     /// ```
     pub fn implements(&self, ty: &Type, protocol: &Path) -> bool {
         // Check for auto-implemented protocols first
@@ -4420,13 +4536,16 @@ impl ProtocolChecker {
 
     /// Check if a type implements a protocol with caching
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Protocol Resolution
     ///
+
     /// This is a cached version of `implements()` that stores results
     /// to avoid repeated resolution for the same type/protocol pairs.
     /// Use this when performing multiple protocol checks during type
     /// inference or constraint solving.
     ///
+
     /// # Performance
     /// First lookup: O(n) where n is the number of implementations
     /// Cached lookup: O(1) hash lookup
@@ -4451,9 +4570,11 @@ impl ProtocolChecker {
 
     /// Batch check multiple protocol implementations with caching
     ///
+
     /// Efficiently checks if a type implements multiple protocols,
     /// using the cache to avoid redundant lookups.
     ///
+
     /// # Returns
     /// A list of protocols that are NOT implemented (violations)
     pub fn check_protocols_cached(&mut self, ty: &Type, protocols: &[&Text]) -> List<Text> {
@@ -4469,23 +4590,28 @@ impl ProtocolChecker {
 
     /// Find implementation for type and protocol
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Protocol Resolution
     /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — Specialization
     ///
+
     /// This method performs a multi-stage lookup:
     /// 1. **Exact match**: Direct lookup using type key
     /// 2. **Generic match**: Match generic implementations (e.g., impl<T> for List<T>)
     /// 3. **Conditional match**: Evaluate where clauses for conditional impls
     /// 4. **Specialization**: Select most specific impl when multiple match
     ///
+
     /// # Examples
     /// ```verum
     /// // Exact match for List<Int>
     /// impl Show for List<Int> { ... }
     ///
+
     /// // Generic match for any List<T> where T: Show
     /// impl<T: Show> Show for List<T> { ... }
     ///
+
     /// // Specialization: more specific impl is preferred
     /// @specialize
     /// impl Show for List<Text> { ... }
@@ -4503,7 +4629,7 @@ impl ProtocolChecker {
         // entirely — caller must thread the instance explicitly or
         // register a concrete `impl Protocol for ConcreteType`.
         // Mirrors the Idris-style "no implicit instance search"
-        // semantic.  Performance: returns immediately on the
+        // semantic. Performance: returns immediately on the
         // exact-match miss with zero allocation.
         if !self.instance_search_enabled {
             return Maybe::None;
@@ -4549,14 +4675,14 @@ impl ProtocolChecker {
         // Multiple candidates: dispatch on `[protocols].
         // resolution_strategy`. Pre-fix the resolver hardcoded
         // most-specific selection, ignoring the manifest. Now:
-        //   * "most_specific" (default) — current behaviour via
-        //     `select_most_specific_impl` (lattice-based specificity).
-        //   * "first_declared" — pick the first registered candidate.
-        //     Useful for open-world plugin systems where ordering
-        //     reflects priority.
-        //   * "error" — return None on overlap. The compiler's
-        //     existing diagnostic path picks up the missing impl
-        //     and surfaces an ambiguity error to the user.
+        //  * "most_specific" (default) — current behaviour via
+        //  `select_most_specific_impl` (lattice-based specificity).
+        //  * "first_declared" — pick the first registered candidate.
+        //  Useful for open-world plugin systems where ordering
+        //  reflects priority.
+        //  * "error" — return None on overlap. The compiler's
+        //  existing diagnostic path picks up the missing impl
+        //  and surfaces an ambiguity error to the user.
         match self.resolution_strategy.as_str() {
             "first_declared" => Maybe::Some(candidates[0].1),
             "error" => Maybe::None,
@@ -4572,19 +4698,23 @@ impl ProtocolChecker {
 
     /// Find implementation with type substitution information
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Protocol Resolution
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — GATs
     ///
+
     /// This is like `find_impl` but also returns the type substitution map that was
     /// used to match the implementation. This is essential for:
     /// - Resolving associated types with correct type parameter substitutions
     /// - GAT instantiation with proper type arguments
     /// - Inferring types in generic contexts
     ///
+
     /// # Returns
     /// * `Some((impl, substitution))` - The matching impl and its type substitution
     /// * `None` - No matching implementation found
     ///
+
     /// # Example
     /// ```verum
     /// // For impl<T: Show> Show for List<T>, matching against List<Int>:
@@ -4667,14 +4797,17 @@ impl ProtocolChecker {
 
     /// Infer associated type from type structure and protocol context
     ///
+
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — GATs
     ///
+
     /// When we have a generic implementation like `impl<T> Iterator for List<T> { type Item = T }`,
     /// and we're looking up the associated type `Item` for `List<Int>`, this method:
     /// 1. Finds the matching implementation
     /// 2. Gets the type substitution (T -> Int)
     /// 3. Applies the substitution to the associated type definition
     ///
+
     /// This handles cases where the associated type definition uses type parameters
     /// from the impl header.
     pub fn infer_associated_type(
@@ -4730,17 +4863,21 @@ impl ProtocolChecker {
 
     /// Try to match a pattern type against a concrete type, returning substitutions if successful
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Type Matching
     ///
+
     /// This performs unification-style matching where:
     /// - Type variables in the pattern can match any type
     /// - Named types match if constructors and (recursively) arguments match
     /// - Primitive types must match exactly
     ///
+
     /// # Arguments
     /// * `pattern` - The type pattern (may contain type variables)
     /// * `concrete` - The concrete type to match against
     ///
+
     /// # Returns
     /// * `Some(substitution)` - If match succeeds, with variable bindings
     /// * `None` - If match fails
@@ -4755,6 +4892,7 @@ impl ProtocolChecker {
 
     /// Unify two types, building up a substitution map
     ///
+
     /// Returns true if unification succeeds, false otherwise.
     /// On success, the substitution map contains bindings for type variables.
     fn unify_types(&self, pattern: &Type, concrete: &Type, subst: &mut Map<Text, Type>) -> bool {
@@ -5244,16 +5382,20 @@ impl ProtocolChecker {
 
     /// Check if where clauses are satisfied given a type substitution
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Where Clauses
     ///
+
     /// Evaluates each where clause with the type substitutions applied.
     /// Returns true if all clauses are satisfied.
     ///
+
     /// CRITICAL: This uses optimistic checking for types that contain:
     /// - Unresolved type variables
     /// - Associated type projections (like `I.IntoIter`)
     /// - Generic type constructors without concrete implementations
     ///
+
     /// For such types, we assume the constraint is satisfiable if the type
     /// "looks compatible" - this allows blanket implementations to work
     /// even when full resolution isn't possible.
@@ -5286,11 +5428,13 @@ impl ProtocolChecker {
 
     /// Optimistic protocol implementation check for blanket impls.
     ///
+
     /// This is used during where clause checking for blanket implementations.
     /// For types that contain unresolved components (type variables, associated
     /// type projections, etc.), we use optimistic checking that assumes the
     /// constraint is satisfiable if there's a plausible implementation path.
     ///
+
     /// This allows code like `iter([1, 2, 3]).map(...)` to work even when
     /// the full type resolution chain isn't available.
     fn implements_optimistic(&self, ty: &Type, protocol: &Path) -> bool {
@@ -5401,10 +5545,12 @@ impl ProtocolChecker {
         // CRITICAL FIX: Be smarter about optimistic checking
         // Only be optimistic if there's a POSSIBILITY the type could implement the protocol
         //
+
         // For example:
         // - Iter<IntoIter<[Int]>>: Stream - YES, there's `impl<I: Iterator> Stream for Iter<I>`
         // - Iter<IntoIter<[Int]>>: Future - NO, there's no `impl Future for Iter<...>` anywhere
         //
+
         // We check if there's ANY impl of the protocol for the base type.
 
         // For pure type variables, be optimistic (they could be anything)
@@ -5414,7 +5560,7 @@ impl ProtocolChecker {
 
         // Type::Future intrinsically implements the Future protocol.
         // This is needed for where-clause checking on impls like
-        //   `implement<Fut1: Future, Fut2: Future> Future for Join2<Fut1, Fut2>`
+        //  `implement<Fut1: Future, Fut2: Future> Future for Join2<Fut1, Fut2>`
         // when the concrete types are `Future<A>` / `Future<B>`.
         if let Type::Future { .. } = ty {
             if let Some(proto_name) = protocol.as_ident() {
@@ -5494,6 +5640,7 @@ impl ProtocolChecker {
 
     /// Check if a type contains unresolved components.
     ///
+
     /// Returns true if the type contains:
     /// - Type variables (Type::Var)
     /// - Generic types that look like associated type projections
@@ -5654,13 +5801,16 @@ impl ProtocolChecker {
 
     /// Select the most specific implementation from candidates
     ///
+
     /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .2 - Specialization Precedence
     ///
+
     /// The precedence lattice is:
     /// 1. Concrete type (List<Int>) - most specific
     /// 2. Partially specialized (List<T> where T: Copy)
     /// 3. Generic (List<T>) - least specific
     ///
+
     /// For multiple candidates at the same level, prefer:
     /// - Implementations marked with @specialize
     /// - Implementations with more specific where clauses
@@ -5696,6 +5846,7 @@ impl ProtocolChecker {
 
     /// Compute specificity score for a type pattern
     ///
+
     /// Higher score = more specific:
     /// - Concrete types score highest
     /// - Types with more concrete parts score higher
@@ -5809,6 +5960,7 @@ impl ProtocolChecker {
 
     /// Check for cycles in the protocol inheritance hierarchy.
     ///
+
     /// Uses DFS with a "currently on stack" set to detect back-edges.
     /// Called during protocol registration so cycles are caught early.
     pub fn check_hierarchy_cycles(&self, protocol: &Text) -> Result<(), ProtocolError> {
@@ -5899,8 +6051,10 @@ impl ProtocolChecker {
 
     /// Find inherited method from superprotocols recursively
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Superprotocol inheritance
     ///
+
     /// Searches through the superprotocol hierarchy to find a default method
     /// implementation. Uses visited set to prevent infinite recursion in
     /// case of cyclic protocol hierarchies.
@@ -5946,8 +6100,10 @@ impl ProtocolChecker {
 
     /// Find inherited associated type from superprotocols recursively
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Superprotocol inheritance
     ///
+
     /// Searches through the superprotocol hierarchy to find an associated type
     /// with a default value. Uses visited set to prevent infinite recursion in
     /// case of cyclic protocol hierarchies.
@@ -5998,8 +6154,10 @@ impl ProtocolChecker {
 
     /// Check if a type satisfies protocol bounds
     ///
+
     /// Handles both positive bounds (T: Protocol) and negative bounds (T: !Protocol).
     ///
+
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     pub fn check_bounds(&self, ty: &Type, bounds: &[ProtocolBound]) -> Result<(), ProtocolError> {
         for bound in bounds {
@@ -6035,8 +6193,10 @@ impl ProtocolChecker {
 
     /// Check if a type satisfies a negative bound (T: !Protocol)
     ///
+
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     ///
+
     /// Returns true if the type does NOT implement the protocol.
     pub fn satisfies_negative_bound(&self, ty: &Type, protocol: &Path) -> bool {
         !self.implements(ty, protocol)
@@ -6074,21 +6234,25 @@ impl ProtocolChecker {
 
     /// Resolve associated type for a type implementing a protocol (with default support)
     ///
+
     /// Spec: grammar/verum.ebnf lines 416-417, 932-939
     ///
+
     /// When an implementation doesn't specify an associated type, use the default
     /// from the protocol definition if available.
     ///
+
     /// # Example
     /// ```verum
     /// protocol Container {
-    ///     default type Item = Heap<u8>;
-    ///     fn get(&self, idx: usize) -> Self.Item;
+    ///  default type Item = Heap<u8>;
+    ///  fn get(&self, idx: usize) -> Self.Item;
     /// }
     ///
+
     /// implement Container for MyType {
-    ///     // Item not specified, uses default Heap<u8>
-    ///     fn get(&self, idx: usize) -> Heap<u8> { ... }
+    ///  // Item not specified, uses default Heap<u8>
+    ///  fn get(&self, idx: usize) -> Heap<u8> { ... }
     /// }
     /// ```
     pub fn resolve_associated_type(
@@ -6246,10 +6410,12 @@ impl ProtocolChecker {
 
     /// Get all protocols implemented by a type
     ///
+
     /// This method handles both exact type matches and generic implementations.
     /// For generic implementations like `implement<T: Default> Default for Wrapper<T>`,
     /// calling get_implementations(Wrapper) will find the generic impl.
     ///
+
     /// Generic protocol implementations: "implement<T: Bound> Protocol for Container<T>" with blanket impls
     pub fn get_implementations(&self, ty: &Type) -> List<&ProtocolImpl> {
         let type_key = self.make_type_key(ty);
@@ -6384,10 +6550,12 @@ impl ProtocolChecker {
 
     /// Check structural typing: does a type have the required methods?
     ///
+
     /// This allows duck typing - if a type has the right methods, it can be used
     /// even without an explicit implementation.
     /// Spec: Protocol system - Structural typing support
     ///
+
     /// Checks if a type structurally implements a protocol by verifying
     /// that it has all required methods with compatible signatures.
     pub fn check_structural(&self, ty: &Type, _required_methods: &Map<Text, Type>) -> bool {
@@ -6426,6 +6594,7 @@ impl ProtocolChecker {
 
     /// Generate VTable for protocol implementation
     ///
+
     /// Creates a virtual dispatch table containing all methods (explicit + default)
     /// for efficient runtime dispatch with <10ns overhead.
     pub fn generate_vtable(&self, ty: &Type, protocol: &Path) -> Result<VTable, ProtocolError> {
@@ -6480,6 +6649,7 @@ impl ProtocolChecker {
 
     /// Walk the superprotocol hierarchy to find an inherited method.
     ///
+
     /// When protocol Eq extends PartialEq, methods defined in PartialEq
     /// should be available on types implementing Eq. This traverses
     /// `super_protocols` breadth-first looking for `method_name`.
@@ -6520,6 +6690,7 @@ impl ProtocolChecker {
 
     /// Get all registered protocols
     ///
+
     /// Returns a reference to the internal protocol map for iteration.
     /// This is useful for searching which protocol a method belongs to.
     pub fn get_all_protocols(&self) -> &Map<Text, Protocol> {
@@ -6528,6 +6699,7 @@ impl ProtocolChecker {
 
     /// Get protocol definition by name (string slice version)
     ///
+
     /// This is a convenience wrapper around `get_protocol` that accepts a `&str`
     /// and returns an `Option` instead of `Maybe` for more ergonomic use.
     pub fn get_protocol_definition(&self, name: &str) -> Option<&Protocol> {
@@ -6563,27 +6735,35 @@ impl ProtocolChecker {
 
     /// Look up an associated type definition from a protocol
     ///
+
     /// Given a protocol name and associated type name, returns the associated type
     /// definition from the protocol. This is used during projection resolution to
     /// understand the structure and bounds of an associated type.
     ///
+
     /// # Arguments
     ///
+
     /// * `protocol_name` - The name of the protocol to search
     /// * `assoc_name` - The name of the associated type to find
     ///
+
     /// # Returns
     ///
+
     /// * `Some(&AssociatedType)` - The associated type definition if found
     /// * `None` - If the protocol doesn't exist or doesn't have this associated type
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // Looking up Iterator.Item
     /// let assoc = checker.lookup_associated_type("Iterator", "Item");
     /// ```
     ///
+
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
     pub fn lookup_associated_type(
         &self,
@@ -6597,16 +6777,21 @@ impl ProtocolChecker {
 
     /// Look up an associated type from a protocol path
     ///
+
     /// This variant accepts a Path for the protocol, which is useful when
     /// resolving associated types from parsed AST nodes.
     ///
+
     /// # Arguments
     ///
+
     /// * `protocol` - The protocol path
     /// * `assoc_name` - The associated type name
     ///
+
     /// # Returns
     ///
+
     /// The associated type definition if found.
     pub fn lookup_associated_type_by_path(
         &self,
@@ -6619,16 +6804,21 @@ impl ProtocolChecker {
 
     /// Find all protocols that have a specific associated type
     ///
+
     /// This is useful for resolving projections when the protocol is not
     /// explicitly specified. Returns a list of protocol names that have
     /// an associated type with the given name.
     ///
+
     /// # Arguments
     ///
+
     /// * `assoc_name` - The associated type name to search for
     ///
+
     /// # Returns
     ///
+
     /// A list of protocol names that have this associated type.
     pub fn find_protocols_with_associated_type(&self, assoc_name: &str) -> List<Text> {
         let assoc_text: Text = assoc_name.into();
@@ -6641,32 +6831,41 @@ impl ProtocolChecker {
 
     /// Try to find an associated type for a given type without knowing the protocol.
     ///
+
     /// This is used for resolving projections like `T.Item` where T is a concrete type
     /// that implements some protocol with an `Item` associated type, but we don't know
     /// which protocol it is.
     ///
+
     /// The resolution process:
     /// 1. Find all protocols that the type implements
     /// 2. For each implementation, check if the protocol has the associated type
     /// 3. Return the resolved type from the first matching implementation
     ///
+
     /// # Arguments
     ///
+
     /// * `ty` - The base type (e.g., `Collection<Int>`)
     /// * `assoc_name` - The associated type name (e.g., `Item`)
     ///
+
     /// # Returns
     ///
+
     /// The resolved associated type if found, None otherwise.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // If Collection<Int> implements Iterator<Item = Int>
     /// let item_ty = checker.try_find_associated_type(&collection_ty, &"Item".into());
     /// assert_eq!(item_ty, Some(Type::Int));
     /// ```
     ///
+
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Resolution
     pub fn try_find_associated_type(&self, ty: &Type, assoc_name: &Text) -> Option<Type> {
         // Cycle detection: if we're already resolving this (type, assoc_name) pair,
@@ -6703,11 +6902,11 @@ impl ProtocolChecker {
 
         // Fast path: Type::Future { output: T } intrinsically has Output = T.
         // This avoids a full impl lookup and ensures that projection types like
-        //   ::Output[Future<Int>]   resolve to   Int
+        //  ::Output[Future<Int>] resolve to Int
         // even though there is no explicit registered `implement Future for Future<T>` impl.
         // This is required for Join2 and other combinators whose associated Output type
         // is expressed as a tuple of inner future Outputs:
-        //   type Output = (Fut1.Output, Fut2.Output);
+        //  type Output = (Fut1.Output, Fut2.Output);
         if assoc_name.as_str() == "Output" {
             if let Type::Future { output } = ty {
                 return Some(*output.clone());
@@ -6723,8 +6922,9 @@ impl ProtocolChecker {
         // just forwards the projection, while the direct impl `implement Future for ReadyFuture<T> { type Output = T; }`
         // gives a concrete answer.
         //
+
         // Pass 1: Try all impls, but if the substituted result is still a projection and
-        //         recursive resolution fails (cycle detected), skip that impl.
+        //  recursive resolution fails (cycle detected), skip that impl.
         // Pass 2: If no concrete answer found, return the best projection we have.
         let mut best_projection: Option<Type> = None;
 
@@ -6783,6 +6983,7 @@ impl ProtocolChecker {
 
     /// Substitute type parameters in an associated type based on the concrete type.
     ///
+
     /// For example:
     /// - impl_for_type = `Iter<I>` (the impl's for_type with type params)
     /// - concrete_ty = `Iter<IntoIter<[Int]>>` (the actual type we're querying)
@@ -6795,9 +6996,9 @@ impl ProtocolChecker {
 
         // Phase 2: Extract additional type bindings from function type bounds.
         // For `implement<Fut: Future, F: fn(Fut.Output) -> T, T> Future for MapFuture<Fut, F>`:
-        //   Phase 1 gives us: {Fut → ReadyFuture<Int>, F → fn(Int) -> Bool}
-        //   Phase 2: The bound F → fn(Fut.Output) -> T, after substitution and projection
-        //   resolution, becomes fn(Int) -> T. Matching against fn(Int) -> Bool gives T = Bool.
+        //  Phase 1 gives us: {Fut → ReadyFuture<Int>, F → fn(Int) -> Bool}
+        //  Phase 2: The bound F → fn(Fut.Output) -> T, after substitution and projection
+        //  resolution, becomes fn(Int) -> T. Matching against fn(Int) -> Bool gives T = Bool.
         if !impl_.type_param_fn_bounds.is_empty() {
             for (bound_tv, bound_fn_type) in &impl_.type_param_fn_bounds {
                 if let Some(concrete_fn) = substitution.get(bound_tv).cloned() {
@@ -6902,7 +7103,7 @@ impl ProtocolChecker {
             // chain of self-referential generic substitution
             // hitting the cap is observable in telemetry rather
             // than producing a mysteriously-unsubstituted Type::
-            // Generic.  Conservative fallback is correct (the
+            // Generic. Conservative fallback is correct (the
             // type is returned unchanged) but the event needs
             // to be visible.
             tracing::warn!(
@@ -6983,6 +7184,7 @@ impl ProtocolChecker {
 
     /// Check if a type contains any unresolved type variables.
     ///
+
     /// This is used to determine if a deferred projection can be resolved.
     /// A projection like `::Item[A]` can only be resolved if `A` is concrete.
     fn type_has_unresolved_vars(&self, ty: &Type) -> bool {
@@ -7029,6 +7231,7 @@ impl ProtocolChecker {
 
     /// Normalize a type by resolving all projection types (like ::Item[ListIter<Int>] -> &Int).
     ///
+
     /// This is used after substitution to resolve any remaining projections.
     /// For example, if we have `type Item = I.Item` and substitute `I = ListIter<Int>`,
     /// we get `::Item[ListIter<Int>]`. This function resolves it to `&Int`.
@@ -7101,26 +7304,33 @@ impl ProtocolChecker {
 
     /// Resolve the Try protocol for a type.
     ///
+
     /// This is used by the `?` operator to determine:
     /// - What type to extract on success (Output)
     /// - What type to propagate on failure (Residual)
     ///
+
     /// # Arguments
     ///
+
     /// * `ty` - The type to check (e.g., `Maybe<Int>`, `Result<Text, IoError>`)
     ///
+
     /// # Returns
     ///
+
     /// * `Some(TryProtocolResolution)` if the type implements Try
     /// * `None` if the type does not implement Try
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let maybe_int = Type::Generic { name: "Maybe".into(), args: vec![Type::Int].into() };
     /// if let Some(resolution) = checker.resolve_try_protocol(&maybe_int) {
-    ///     // resolution.output = Type::Int
-    ///     // resolution.residual = Type::Generic { name: "Maybe", args: vec![Never] }
+    ///  // resolution.output = Type::Int
+    ///  // resolution.residual = Type::Generic { name: "Maybe", args: vec![Never] }
     /// }
     /// ```
     pub fn resolve_try_protocol(&self, ty: &Type) -> Option<TryProtocolResolution> {
@@ -7481,21 +7691,28 @@ impl ProtocolChecker {
 
     /// Check if a type can receive a residual type via FromResidual.
     ///
+
     /// This is used to verify that the return type of a function can accept
     /// the residual from a `?` expression.
     ///
+
     /// # Arguments
     ///
+
     /// * `return_type` - The return type of the function
     /// * `residual_type` - The residual type from the ? expression
     ///
+
     /// # Returns
     ///
+
     /// * `true` if return_type implements FromResidual<residual_type>
     /// * `false` otherwise
     ///
+
     /// # Implementation
     ///
+
     /// Uses protocol-based lookup (stdlib-agnostic) rather than hardcoded type names.
     /// Searches registered FromResidual implementations to find a matching one.
     pub fn can_convert_residual(&self, return_type: &Type, residual_type: &Type) -> bool {
@@ -7610,6 +7827,7 @@ impl ProtocolChecker {
 
     /// Normalize a Variant type to its Generic equivalent if registered.
     ///
+
     /// This is used for protocol matching since implementations are typically
     /// registered with Generic types (e.g., Maybe<T>) while concrete types
     /// may be in Variant form (e.g., None | Some(Int)).
@@ -7653,9 +7871,11 @@ impl ProtocolChecker {
 
     /// Resolve the IntoIterator protocol for a type.
     ///
+
     /// Given a type used in a `for` loop, this returns the element type (Item)
     /// that the iterator will produce.
     ///
+
     /// Supports:
     /// - Arrays: `[T; N]` -> Item = T
     /// - Slices: `[T]` -> Item = T
@@ -7664,8 +7884,10 @@ impl ProtocolChecker {
     /// - Iterators: Iterator<Item = T>
     /// - References: &Collection, &mut Collection
     ///
+
     /// # Returns
     ///
+
     /// * `Some(IntoIteratorResolution)` with Item and Iter types
     /// * `None` if the type doesn't implement IntoIterator
     pub fn resolve_into_iterator_protocol(&self, ty: &Type) -> Option<IntoIteratorResolution> {
@@ -7801,11 +8023,14 @@ impl ProtocolChecker {
 
     /// Resolve the Future protocol for a type.
     ///
+
     /// Given a type used with `await`, this returns the output type
     /// that will be produced when the future completes.
     ///
+
     /// # Returns
     ///
+
     /// * `Some(FutureResolution)` with the Output type
     /// * `None` if the type doesn't implement Future
     pub fn resolve_future_protocol(&self, ty: &Type) -> Option<FutureResolution> {
@@ -7874,7 +8099,7 @@ impl ProtocolChecker {
         if let Maybe::Some(impl_) = self.find_impl(ty, &future_path) {
             // Use try_find_associated_type which correctly handles projection resolution.
             // For types like Join2<Fut1, Fut2> whose impl declares
-            //   type Output = (Fut1.Output, Fut2.Output);
+            //  type Output = (Fut1.Output, Fut2.Output);
             // this resolves each projection to the concrete awaited type and returns
             // a proper Tuple, enabling tuple-pattern destructuring of join().await results.
             if let Some(output) = self.try_find_associated_type(ty, &"Output".into()) {
@@ -7909,16 +8134,20 @@ impl ProtocolChecker {
 
     /// Resolve the AsyncIterator protocol for a type.
     ///
+
     /// Used by for-await loop type inference to determine the element type.
     ///
+
     /// Supports:
     /// - AsyncStream<T> -> Item = T
     /// - AsyncIterator<T> -> Item = T
     /// - Stream<T> -> Item = T (sync streams can be used in async context)
     /// - Future<Iterable> -> await then iterate
     ///
+
     /// # Returns
     ///
+
     /// * `Some(IntoIteratorResolution)` with Item type
     /// * `None` if the type isn't async-iterable
     pub fn resolve_async_iterator_protocol(&self, ty: &Type) -> Option<IntoIteratorResolution> {
@@ -7978,8 +8207,10 @@ impl ProtocolChecker {
 
     /// Resolve the Index protocol for a type.
     ///
+
     /// Used by index operator type inference to determine the key and output types.
     ///
+
     /// Supports:
     /// - Array/Slice: indexed by Int, returns element type
     /// - List<T>: indexed by Int, returns T
@@ -7987,8 +8218,10 @@ impl ProtocolChecker {
     /// - Text: indexed by Int, returns Char
     /// - References to indexable types
     ///
+
     /// # Returns
     ///
+
     /// * `Some(IndexResolution)` with key and output types
     /// * `None` if the type isn't indexable
     pub fn resolve_index_protocol(&self, ty: &Type) -> Option<IndexResolution> {
@@ -8115,16 +8348,20 @@ impl ProtocolChecker {
 
     /// Resolve the Maybe protocol for a type.
     ///
+
     /// Used by `??` (null coalescing) and `?.` (optional chaining) operators
     /// to extract the inner type from Maybe-like types.
     ///
+
     /// Supports:
     /// - Maybe<T> (Generic or Named) -> inner = T
     /// - Some(T) | None variants -> inner = T
     /// - Type variables -> fresh inner type
     ///
+
     /// # Returns
     ///
+
     /// * `Some(MaybeResolution)` with inner type
     /// * `None` if the type isn't Maybe-like
     pub fn resolve_maybe_protocol(&self, ty: &Type) -> Option<MaybeResolution> {
@@ -8189,12 +8426,15 @@ impl ProtocolChecker {
 
     /// Extract error type from a Try residual type.
     ///
+
     /// For Result<T, E>, residual is Result<Never, E>, so error is E.
     /// For Maybe<T>, residual is Maybe<Never>, so error is None.
     /// For IoResult<T>, residual is Result<Never, IoError>, so error is IoError.
     ///
+
     /// # Returns
     ///
+
     /// * `Some(error_type)` for Result-like residuals
     /// * `None` for Maybe-like residuals (no error type)
     pub fn extract_error_from_residual(&self, residual: &Type) -> Option<Type> {
@@ -8224,27 +8464,36 @@ impl ProtocolChecker {
 
     /// Check if a type constructor implements a protocol.
     ///
+
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Protocol checking for type constructors
     ///
+
     /// For HKT bounds like `F<_>: Functor + Monad`, this checks if the type
     /// constructor (e.g., List, Maybe) implements the required protocol.
     ///
+
     /// Unlike `implements_protocol` which checks concrete types, this method
     /// checks type constructors (e.g., List not List<Int>) for protocol
     /// implementation. This is necessary for higher-kinded type bounds.
     ///
+
     /// # Arguments
     ///
+
     /// * `constructor_name` - Name of the type constructor (e.g., "List", "Maybe")
     /// * `protocol_name` - Name of the protocol (e.g., "Functor", "Monad")
     ///
+
     /// # Returns
     ///
+
     /// * `true` if the constructor implements the protocol
     /// * `false` otherwise
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// // Check if List implements Functor
     /// let result = checker.type_constructor_implements_protocol("List", "Functor");
@@ -8326,18 +8575,24 @@ impl ProtocolChecker {
 
     /// Register a type constructor as implementing a protocol for HKT bounds.
     ///
+
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — HKT protocol registration
     ///
+
     /// This method allows explicit registration of type constructors as
     /// implementing protocols, which is necessary for HKT bounds checking.
     ///
+
     /// # Arguments
     ///
+
     /// * `constructor_name` - Name of the type constructor (e.g., "List", "Maybe")
     /// * `protocol_name` - Name of the protocol (e.g., "Functor", "Monad")
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// // Register List as implementing Functor
     /// checker.register_type_constructor_protocol("List", "Functor");
@@ -8355,13 +8610,16 @@ impl ProtocolChecker {
 
     /// Check if type implements all required methods of a protocol
     ///
+
     /// This is a helper method that verifies protocol constraints by checking
     /// if the type has all required methods with matching signatures.
     ///
+
     /// # Arguments
     /// * `ty` - The type to check
     /// * `protocol` - The protocol to check against
     ///
+
     /// # Returns
     /// `Ok(true)` if type satisfies all protocol constraints, `Ok(false)` otherwise
     pub fn check_protocol_constraint(
@@ -8388,21 +8646,26 @@ impl ProtocolChecker {
 
     /// Check if a type implements a protocol and return detailed violations if not
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Protocol System
     /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 7.3 - Error Messages
     ///
+
     /// This method performs a comprehensive check of protocol implementation,
     /// returning a detailed list of violations when the type does not fully
     /// implement the protocol. This enables actionable error messages.
     ///
+
     /// # Arguments
     /// * `ty` - The type to check
     /// * `protocol_def` - The protocol definition to check against
     ///
+
     /// # Returns
     /// * `Ok(())` - The type fully implements the protocol
     /// * `Err(violations)` - A list of specific violations
     ///
+
     /// # Example
     /// ```verum
     /// // If Ord requires Eq as a superprotocol and Eq is not implemented:
@@ -8584,6 +8847,7 @@ impl ProtocolChecker {
 
     /// Get protocol implementation with detailed error on failure
     ///
+
     /// This is a convenience method that combines `find_impl` with
     /// `check_protocol_implementation` to provide a complete error
     /// when a type doesn't implement a protocol.
@@ -8640,13 +8904,16 @@ impl ProtocolChecker {
 
     /// Check if a type has a method with a given name and signature
     ///
+
     /// This helper checks both inherent methods and protocol implementations.
     ///
+
     /// # Arguments
     /// * `ty` - The type to check
     /// * `method_name` - The name of the method
     /// * `expected_signature` - The expected type signature of the method
     ///
+
     /// # Returns
     /// `Ok(true)` if type has the method with matching signature, `Ok(false)` otherwise
     pub fn type_has_method(
@@ -8680,13 +8947,16 @@ impl ProtocolChecker {
 
     /// Lookup a method for a type, searching through protocol implementations
     ///
+
     /// This method searches for a method by name, first checking inherent methods
     /// (if available), then checking all protocol implementations.
     ///
+
     /// # Arguments
     /// * `ty` - The type to search methods for
     /// * `method_name` - The name of the method to find
     ///
+
     /// # Returns
     /// `Some(Type)` with the method's type signature if found, `None` otherwise
     pub fn lookup_protocol_method(
@@ -8702,11 +8972,13 @@ impl ProtocolChecker {
                 // CRITICAL FIX: Substitute Self and type parameters in the method type
                 // This enables T.default() pattern in generic protocol implementations.
                 //
+
                 // For a generic impl like `implement<T: Default> Default for Wrapper<T>`:
-                // - impl_.for_type = Wrapper<T>  (with T as a TypeVar after inference)
+                // - impl_.for_type = Wrapper<T> (with T as a TypeVar after inference)
                 // - method_ty might contain Self (e.g., fn default() -> Self)
                 // - lookup ty = Wrapper<Person> (concrete instantiation)
                 //
+
                 // We need to:
                 // 1. Unify impl_.for_type with ty to get bindings (T52 -> Person)
                 // 2. Substitute Self with impl_.for_type in method_ty
@@ -8750,10 +9022,12 @@ impl ProtocolChecker {
 
     /// Look up a protocol method and also return the method-level type parameter names.
     ///
+
     /// This extends `lookup_protocol_method` by also finding the original `ProtocolMethod`
     /// from the protocol definition, which stores `type_param_names` (e.g., `["C"]` for
     /// `fn collect<C: FromIterator<Self.Item>>() -> C`).
     ///
+
     /// The caller can then create fresh TypeVars for these method-level type params
     /// to avoid sharing the same TypeVar across multiple call sites.
     pub fn lookup_protocol_method_with_type_param_names(
@@ -8805,11 +9079,13 @@ impl ProtocolChecker {
 
     /// Look up all protocol methods with a given name for a type.
     ///
+
     /// Unlike `lookup_protocol_method` which returns the first match, this returns
     /// ALL matching method signatures. This is needed when a type implements multiple
     /// parameterized protocols with the same method name (e.g., FromResidual<Result<Never, E>>
     /// and FromResidual<Maybe<Never>> both have `from_residual`).
     ///
+
     /// The caller can then try each signature against actual arguments to find the correct one.
     pub fn lookup_all_protocol_methods(
         &self,
@@ -8894,20 +9170,24 @@ impl ProtocolChecker {
 
     /// Query protocol implementations by protocol name
     ///
+
     /// Returns all implementations registered for the given protocol.
     /// This is used for protocol method dispatch and specialization selection.
     ///
+
     /// # Arguments
     /// * `protocol_name` - The name of the protocol to query
     ///
+
     /// # Returns
     /// A list of all implementations for this protocol
     ///
+
     /// # Example
     /// ```ignore
     /// let impls = checker.query_implementations_by_protocol(&"Display".into());
     /// for impl_ in impls.iter() {
-    ///     println!("Type: {:?}", impl_.for_type);
+    ///  println!("Type: {:?}", impl_.for_type);
     /// }
     /// ```
     pub fn query_implementations_by_protocol(&self, protocol_name: &Text) -> List<&ProtocolImpl> {
@@ -8927,21 +9207,25 @@ impl ProtocolChecker {
 
     /// Check if a specific type implements a specific protocol
     ///
+
     /// This method performs a precise check to determine if the given type
     /// has an implementation for the given protocol.
     ///
+
     /// # Arguments
     /// * `ty` - The type to check
     /// * `protocol_name` - The protocol name to check for
     ///
+
     /// # Returns
     /// `true` if the type implements the protocol, `false` otherwise
     ///
+
     /// # Example
     /// ```ignore
     /// let implements_display = checker.check_type_implements_protocol(
-    ///     &Type::Int,
-    ///     &"Display".into()
+    ///  &Type::Int,
+    ///  &"Display".into()
     /// );
     /// ```
     pub fn check_type_implements_protocol(&self, ty: &Type, protocol_name: &Text) -> bool {
@@ -8952,9 +9236,11 @@ impl ProtocolChecker {
 
     /// Get all registered protocol implementations
     ///
+
     /// Returns a reference to all protocol implementations in the system.
     /// This is useful for testing and debugging.
     ///
+
     /// # Returns
     /// A slice of all registered protocol implementations
     pub fn all_implementations(&self) -> &[ProtocolImpl] {
@@ -8963,6 +9249,7 @@ impl ProtocolChecker {
 
     /// Extract protocol name from a protocol implementation
     ///
+
     /// Helper method to get the protocol name from an implementation.
     fn extract_protocol_name_from_impl(&self, impl_: &ProtocolImpl) -> Text {
         use verum_ast::ty::PathSegment;
@@ -8998,6 +9285,7 @@ impl ProtocolChecker {
     /// This creates a unique identifier from the sorted variant names and payload base type names.
     /// Used to look up the named type for expanded variant types.
     ///
+
     /// IMPORTANT: This must produce identical signatures to `variant_type_signature()` in infer.rs.
     /// Including payload base type names prevents collisions between different sum types that share
     /// variant names (e.g., MapEntry and BTreeEntry both have Occupied|Vacant variants).
@@ -9365,9 +9653,11 @@ impl ProtocolChecker {
 
     /// Extract the simple protocol name from a path
     ///
+
     /// For simple paths like `Iterator`, returns `Iterator`.
     /// For qualified paths like `std.iter.Iterator`, returns `Iterator` (the last segment).
     ///
+
     /// This is used when looking up protocol definitions in the registry,
     /// which uses simple names as keys.
     fn extract_protocol_name(&self, protocol: &Path) -> Text {
@@ -9390,12 +9680,14 @@ impl ProtocolChecker {
     /// Check if a type has automatic Deref/DerefMut implementation
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — .4.3 - Automatic implementations
     ///
+
     /// The following types automatically implement Deref:
     /// - &T implements Deref<Target=T>
     /// - &checked T implements Deref<Target=T>
     /// - &unsafe T implements Deref<Target=T>
     /// - Box<T> (represented as smart pointer types)
     ///
+
     /// DerefMut is automatically implemented for mutable versions:
     /// - &mut T implements DerefMut<Target=T>
     /// - &checked mut T implements DerefMut<Target=T>
@@ -9450,6 +9742,7 @@ impl ProtocolChecker {
     /// Check if a protocol is object-safe (can be used with `dyn`)
     /// Basic protocols with simple associated types (initial release) — 2 lines 11660-11666
     ///
+
     /// A protocol is object-safe if:
     /// - Methods take &self or &mut self (not self by value)
     /// - Methods don't return Self
@@ -9617,6 +9910,7 @@ impl ProtocolChecker {
     /// Check orphan rule: either protocol or type must be local to current cog
     /// Protocol coherence orphan rules: local protocol + foreign type OK, foreign protocol + local type OK, foreign protocol + foreign type NOT OK. Type parameters make the implementing type local.
     ///
+
     /// The orphan rule prevents conflicting implementations across cogs:
     /// - You can implement any local protocol for any type
     /// - You can implement any protocol for any local type
@@ -9681,6 +9975,7 @@ impl ProtocolChecker {
     /// Check for overlapping implementations
     /// Implementation overlap rules: overlapping impls are errors unless one specializes the other
     ///
+
     /// Two implementations overlap if they could apply to the same concrete type:
     /// - impl Show for Int and impl Show for Int => overlap
     /// - impl<T> Show for List<T> and impl Show for List<Int> => overlap
@@ -9914,19 +10209,23 @@ impl ProtocolChecker {
 
     /// Resolve GAT instantiation with type arguments
     ///
+
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1 lines 116-142
     ///
+
     /// Given a GAT like `type Item<T>` and type arguments like `[Int]`,
     /// resolves to the concrete type by substituting type parameters.
     ///
+
     /// Example:
     /// ```verum
     /// protocol Container {
-    ///     type Item<T>
+    ///  type Item<T>
     /// }
     ///
+
     /// impl Container for List {
-    ///     type Item<T> = T  // Resolves Item<Int> to Int
+    ///  type Item<T> = T // Resolves Item<Int> to Int
     /// }
     /// ```
     pub fn resolve_gat_instantiation(
@@ -10000,24 +10299,30 @@ impl ProtocolChecker {
 
     /// Substitute type parameters in a type with concrete type arguments
     ///
+
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1 lines 116-142
     ///
+
     /// Recursively traverses a type and substitutes any named type parameters
     /// with their corresponding concrete types from the substitution map.
     ///
+
     /// This is the core mechanism for GAT instantiation. When we have:
     /// - GAT definition: `type Item<T> = List<T>`
     /// - Type arguments: `[Int]`
     /// - Substitution map: `{T -> Int}`
     /// - Result: `List<Int>`
     ///
+
     /// # Arguments
     /// * `ty` - The type to perform substitution on
     /// * `subst_map` - Map from parameter names to concrete types
     ///
+
     /// # Returns
     /// A new type with all parameter references replaced by concrete types
     ///
+
     /// # Examples
     /// ```no_run
     /// use verum_types::Type;
@@ -10026,13 +10331,14 @@ impl ProtocolChecker {
     /// # use verum_types::protocol::ProtocolChecker;
     /// # let checker = ProtocolChecker::new();
     ///
+
     /// // Example: Substitute T -> Int in List<T>
     /// let list_t = Type::Named {
-    ///     path: Path::single(Ident::new("List", Span::default())),
-    ///     args: List::from(vec![Type::Named {
-    ///         path: Path::single(Ident::new("T", Span::default())),
-    ///         args: List::new()
-    ///     }])
+    ///  path: Path::single(Ident::new("List", Span::default())),
+    ///  args: List::from(vec![Type::Named {
+    ///  path: Path::single(Ident::new("T", Span::default())),
+    ///  args: List::new()
+    ///  }])
     /// };
     /// let mut subst_map: Map<Text, Type> = Map::new();
     /// subst_map.insert("T".into(), Type::Int);
@@ -10471,15 +10777,18 @@ impl ProtocolChecker {
 
     /// Check GAT where clause constraints
     ///
+
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4 lines 441-471
     ///
+
     /// Verifies that all where clauses on a GAT are satisfied for the given
     /// type arguments.
     ///
+
     /// Example:
     /// ```verum
     /// protocol Container {
-    ///     type Item<T> where T: Clone + Debug
+    ///  type Item<T> where T: Clone + Debug
     /// }
     /// ```
     pub fn check_gat_constraints(
@@ -10532,20 +10841,25 @@ impl ProtocolChecker {
 
     /// Resolve specialization: select most specific implementation
     ///
+
     /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — lines 549-663
     ///
+
     /// When multiple implementations apply to a type (due to specialization),
     /// selects the most specific one based on the specialization lattice.
     ///
+
     /// Example:
     /// ```verum
     /// // General implementation
     /// impl<T> Display for List<T> where T: Display { }
     ///
+
     /// // Specialized implementation (more specific)
     /// @specialize
     /// impl Display for List<Text> { }
     ///
+
     /// // For List<Text>, the specialized impl is selected
     /// ```
     pub fn resolve_specialization(
@@ -10651,8 +10965,10 @@ impl ProtocolChecker {
 
     /// Check complete protocol conformance for an implementation
     ///
+
     /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Full Conformance Verification
     ///
+
     /// This is the production-quality protocol conformance checker that validates:
     /// 1. All required methods are implemented (non-default ones)
     /// 2. Method signatures match protocol requirements
@@ -10662,13 +10978,16 @@ impl ProtocolChecker {
     /// 6. Protocol inheritance (superprotocols) is satisfied
     /// 7. Associated constants are defined with correct types
     ///
+
     /// # Arguments
     /// * `impl_` - The protocol implementation to check
     ///
+
     /// # Returns
     /// * `Ok(())` - Implementation is valid
     /// * `Err(ConformanceError)` - Specific conformance failure with details
     ///
+
     /// # Example
     /// ```ignore
     /// let impl_ = ProtocolImpl { ... };
@@ -10704,8 +11023,10 @@ impl ProtocolChecker {
 
     /// Check that all superprotocols are satisfied
     ///
+
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Protocol Inheritance
     ///
+
     /// Verifies that for each superprotocol of the implemented protocol,
     /// the implementing type also implements that superprotocol.
     fn check_superprotocol_conformance(
@@ -10751,8 +11072,10 @@ impl ProtocolChecker {
 
     /// Check that all where clauses on the implementation are satisfied
     ///
+
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4 - Where Clauses
     ///
+
     /// Validates both:
     /// 1. Where clauses declared on the impl block itself
     /// 2. Where clauses required by the protocol definition
@@ -10805,6 +11128,7 @@ impl ProtocolChecker {
 
     /// Check that a type contains free type variables
     ///
+
     /// Free type variables are type parameters that haven't been instantiated
     /// with concrete types yet. Where clause checking should be deferred for
     /// types with free variables until they're instantiated.
@@ -10833,13 +11157,16 @@ impl ProtocolChecker {
 
     /// Check that all required methods are implemented correctly
     ///
+
     /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .5 - Soundness Rules
     ///
+
     /// Validates:
     /// 1. All non-default methods are provided
     /// 2. Method signatures are compatible with protocol requirements
     /// 3. Refinement constraints are respected (implementations can strengthen, not weaken)
     ///
+
     /// Note: This only checks methods defined directly in the protocol being implemented.
     /// Superprotocol methods are checked when verifying superprotocol conformance.
     fn check_method_conformance(
@@ -10882,6 +11209,7 @@ impl ProtocolChecker {
 
     /// Check that method signatures are compatible
     ///
+
     /// The implementation signature must be compatible with the protocol signature.
     /// This means:
     /// - Same number of parameters
@@ -10983,6 +11311,7 @@ impl ProtocolChecker {
 
     /// Check that types are structurally compatible
     ///
+
     /// Two types are compatible if:
     /// - They are identical
     /// - One is a type variable (can unify with anything)
@@ -11102,8 +11431,10 @@ impl ProtocolChecker {
 
     /// Check refinement constraint compatibility
     ///
+
     /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 7.3 - Refinement Types with Protocols
     ///
+
     /// Implementations can strengthen refinements but cannot weaken them:
     /// - Parameters: can strengthen (accept more constrained types)
     /// - Return types: can strengthen (return more constrained types)
@@ -11137,8 +11468,10 @@ impl ProtocolChecker {
 
     /// Check that all required associated types are defined
     ///
+
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — GATs
     ///
+
     /// Validates:
     /// 1. All associated types without defaults are provided
     /// 2. Associated type bounds are satisfied
@@ -11245,6 +11578,7 @@ impl ProtocolChecker {
 
     /// Check that all required associated constants are defined
     ///
+
     /// Validates:
     /// 1. All associated constants are provided
     /// 2. Constant types match
@@ -11312,8 +11646,10 @@ impl Default for ProtocolChecker {
 
 /// Protocol conformance checking errors
 ///
+
 /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 7.3 - Error Messages
 ///
+
 /// These errors provide detailed information about why a protocol
 /// implementation fails conformance checking.
 #[derive(Debug, Clone)]
@@ -11625,16 +11961,20 @@ pub enum ProtocolError {
 
     /// Negative bound violated - type implements a protocol it should not
     ///
+
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     ///
+
     /// This error occurs when a type is checked against a negative bound (T: !Protocol)
     /// but the type actually implements the protocol.
     ///
+
     /// # Example
     /// ```verum
     /// fn deep_clone<T: Clone + !Copy>(value: T) -> T { ... }
     ///
-    /// deep_clone(42);  // ERROR: Int implements Copy, violating !Copy bound
+
+    /// deep_clone(42); // ERROR: Int implements Copy, violating !Copy bound
     /// ```
     #[error("Negative bound violated: {ty:?} implements {protocol:?}")]
     NegativeBoundViolated { ty: Type, protocol: Path },
@@ -11670,8 +12010,10 @@ pub enum ProtocolError {
 
 /// A collection of protocol implementation violations
 ///
+
 /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Protocol System
 ///
+
 /// This provides detailed information about why a type does not
 /// implement a protocol, enabling actionable error messages.
 #[derive(Debug, Clone)]
@@ -11701,8 +12043,10 @@ impl std::fmt::Display for ProtocolViolations {
 
 /// Detailed violation type explaining why a protocol is not implemented
 ///
+
 /// Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 7.3 - Error Messages
 ///
+
 /// Each variant provides specific information about what is missing
 /// or incorrect, enabling the developer to fix the issue.
 #[derive(Debug, Clone)]
@@ -11913,6 +12257,7 @@ impl std::fmt::Display for ProtocolViolation {
 
 /// Derivation strategy for protocol implementations
 ///
+
 /// Specifies how method implementations should be generated:
 /// - Structural: Compare/display based on type structure (fields, variants)
 /// - Lexicographic: Compare fields in declaration order
@@ -11930,6 +12275,7 @@ pub enum DerivationStrategy {
 
 /// Derived method implementation
 ///
+
 /// Represents a synthesized method body for protocol derivation.
 /// The body is stored as a structured representation that can be
 /// lowered to AST or directly to code generation.
@@ -12005,6 +12351,7 @@ pub enum DerivedBody {
 
 /// Automatic protocol derivation
 ///
+
 /// Provides automatic derivation of common protocols for user-defined types.
 /// Supports:
 /// - Eq: Structural equality comparison
@@ -12013,16 +12360,19 @@ pub enum DerivedBody {
 /// - Clone: Deep copy (requires all fields Clone)
 /// - Hash: Hashing (requires Eq)
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// @derive(Eq, Ord, Show)
 /// struct Point {
-///     x: Int,
-///     y: Int,
+///  x: Int,
+///  y: Int,
 /// }
 /// ```
 ///
+
 /// This generates:
 /// - `eq(self, other) -> Bool`: Compare x, then y
 /// - `cmp(self, other) -> Ordering`: Compare x, then y lexicographically
@@ -12049,10 +12399,13 @@ impl ProtocolDerivation {
 
     /// Derive protocol implementation for a type
     ///
+
     /// Returns a complete ProtocolImpl with synthesized method implementations.
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if:
     /// - The protocol is not derivable
     /// - Required super-protocols are not implemented
@@ -12169,6 +12522,7 @@ impl ProtocolDerivation {
 
     /// Derive Eq protocol implementation
     ///
+
     /// Generates structural equality comparison:
     /// - For records: Compare all fields with &&
     /// - For tuples: Compare all elements with &&
@@ -12236,6 +12590,7 @@ impl ProtocolDerivation {
 
     /// Derive Ord protocol implementation
     ///
+
     /// Generates lexicographic ordering:
     /// - For records: Compare fields in declaration order
     /// - For tuples: Compare elements in order
@@ -12316,6 +12671,7 @@ impl ProtocolDerivation {
 
     /// Derive Show protocol implementation
     ///
+
     /// Generates debug/display formatting:
     /// - For records: "TypeName { field1: value1, field2: value2 }"
     /// - For tuples: "(value1, value2, ...)"
@@ -12500,25 +12856,28 @@ impl ProtocolDerivation {
 
 /// Unified wrapper over all protocol-related error types in `verum_types`.
 ///
+
 /// **Phase 1 — Additive Only**: This enum consolidates the four previously-distinct
 /// protocol error families (`ProtocolError`, `ConformanceError`, `CoherenceError`,
 /// `ObjectSafetyError`) behind a single umbrella type without forcing migration of
 /// existing call sites. The original enums remain fully functional; new code can
 /// opt into the unified representation via `From` conversions.
 ///
+
 /// # Grouping Rationale
 /// - **NotImplemented**: convenience variant for the most common case (type does
-///   not implement a required protocol) — mirrors `ProtocolError::NotImplemented`
-///   but stores stringified names so callers without a `Type`/`Path` in hand can
-///   still construct it.
+///  not implement a required protocol) — mirrors `ProtocolError::NotImplemented`
+///  but stores stringified names so callers without a `Type`/`Path` in hand can
+///  still construct it.
 /// - **Protocol**: general protocol-check errors (method resolution, bounds,
-///   associated type lookup, conflicting impls, embedded `ProtocolViolations`).
+///  associated type lookup, conflicting impls, embedded `ProtocolViolations`).
 /// - **Conformance**: detailed conformance-check failures (missing methods,
-///   signature mismatches, associated type bounds, superprotocol chains).
+///  signature mismatches, associated type bounds, superprotocol chains).
 /// - **Coherence**: orphan rule + overlapping implementation diagnostics.
 /// - **ObjectSafety**: `&dyn Protocol` usability checks (returns Self, generic
-///   methods, associated constants, etc.).
+///  methods, associated constants, etc.).
 ///
+
 /// # Migration
 /// A future phase may replace direct uses of the underlying enums with this
 /// wrapper. Until then, treat `UnifiedProtocolError` as a *sink* — construct it
@@ -12530,6 +12889,7 @@ impl ProtocolDerivation {
 pub enum UnifiedProtocolError {
     /// Shortcut: a named protocol is not implemented for a named type.
     ///
+
     /// Prefer `Protocol(ProtocolError::NotImplemented { .. })` when full
     /// `Type` / `Path` context is available.
     #[error("type `{type_name}` does not implement protocol `{protocol}`")]
@@ -14054,9 +14414,10 @@ mod tests {
     // for the newly-wired manifest fields. See ProtocolChecker
     // resolution_strategy / blanket_impls fields.
     //
+
     // The multi-candidate find_impl behaviour depends on having
     // overlapping impls registered, which `register_impl` rejects
-    // via `check_overlap`.  These pin tests therefore focus on the
+    // via `check_overlap`. These pin tests therefore focus on the
     // setter/getter contract + manifest-text normalisation; the
     // dispatch behaviour is exercised end-to-end through the
     // semantic_analysis phase + actual @specialize-marked impls in
@@ -14097,7 +14458,7 @@ mod tests {
     fn resolution_strategy_unknown_falls_back_to_most_specific() {
         // Pin: `set_resolution_strategy(unknown)` normalises to
         // "most_specific" with a warning rather than storing an
-        // unrecognised value.  Sibling to
+        // unrecognised value. Sibling to
         // `PanicStrategy::from_manifest_text`.
         let mut checker = ProtocolChecker::new();
         checker.set_resolution_strategy("nonsense_strategy");
@@ -14118,7 +14479,7 @@ mod tests {
     #[test]
     fn blanket_impls_setter_round_trips() {
         // Pin: `set_blanket_impls(false)` flips the gate; setter is
-        // idempotent.  Used at semantic_analysis to wire
+        // idempotent. Used at semantic_analysis to wire
         // `[protocols].blanket_impls` from manifest.
         let mut checker = ProtocolChecker::new();
         checker.set_blanket_impls(false);
@@ -14140,7 +14501,7 @@ mod tests {
     #[test]
     fn instance_search_setter_round_trips() {
         // Pin: `set_instance_search_enabled(false)` flips the
-        // gate; setter is idempotent.  Used at semantic_analysis
+        // gate; setter is idempotent. Used at semantic_analysis
         // to wire `[types].instance_search` from manifest.
         let mut checker = ProtocolChecker::new();
         checker.set_instance_search_enabled(false);
@@ -14155,16 +14516,18 @@ mod tests {
     fn instance_search_disabled_returns_none_on_generic_match_path() {
         // Pin: with `[types].instance_search = false`, `find_impl`
         // skips Stage-2 generic-candidate scan and returns None
-        // for any non-exact match.  The exact-match path still
+        // for any non-exact match. The exact-match path still
         // works (Stage 1 is unaffected) — only implicit blanket /
         // generic resolution is gated.
         //
+
         // Setup: register a single blanket impl `impl<T>
         // CustomProto for T`. With instance_search ON,
         // find_impl(Type::Int) returns the blanket impl via
         // Stage-2. With it OFF, returns None — caller must
         // register `impl CustomProto for Int` explicitly.
         //
+
         // Use `new_empty()` so no standard protocols collide with
         // our test impl at `register_impl` time.
         let mut checker = ProtocolChecker::new_empty();
@@ -14245,6 +14608,7 @@ mod tests {
     // ============================================================
     // [protocols].coherence wire-up pins (task #263).
     //
+
     // The following tests verify that `CoherenceMode` (Strict /
     // Lenient / Off) reaches `register_impl` and gates the
     // orphan-rule + overlap checks as documented.

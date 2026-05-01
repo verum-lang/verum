@@ -1,10 +1,12 @@
 //! Benchmarks for context-sensitive analysis enhancements
 //!
+
 //! Tests performance of:
 //! 1. Flow-sensitive context tracking
 //! 2. Adaptive context depth
 //! 3. Context compression
 //!
+
 //! Performance target: 2-3x speedup vs fixed depth
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};

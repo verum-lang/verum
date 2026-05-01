@@ -1,8 +1,10 @@
 //! Compilation Session Management
 //!
+
 //! Manages state across compilation phases including source files,
 //! diagnostics, caches, and compiler options.
 //!
+
 //! Compilation session: holds compiler options, diagnostics, module registry,
 //! and file/module state for the duration of a single compilation run.
 
@@ -28,6 +30,7 @@ pub struct FunctionId(pub u64);
 
 /// A compilation session that tracks all state during compilation
 ///
+
 /// Type-erased script-permission policy. Wraps a boxed `Fn` whose
 /// signature exactly matches `PermissionRouter::set_policy`. Has a
 /// `Debug` stub so the surrounding `Session` can keep its derived
@@ -70,18 +73,21 @@ pub struct Session {
 
     /// Diagnostics accumulated during compilation.
     ///
+
     /// Audit-2.3 (event-stream): the original `Shared<RwLock<List<Diagnostic>>>`
     /// took the write lock on EVERY emit. On a 10K-function module the
     /// thousands of emissions from parallel type-check / refinement /
     /// codegen passes serialised through that single lock — a documented
     /// scalability hotspot. The fix is a hybrid:
     ///
-    ///   * **`diagnostics_queue`** — lock-free MPMC queue, all emits
-    ///     push here without contention.
-    ///   * **`diagnostics_aggregate`** — owned by readers; the list
-    ///     read-API drains the queue into this on demand and clones
-    ///     the result. Locked, but only on the cold read path.
+
+    ///  * **`diagnostics_queue`** — lock-free MPMC queue, all emits
+    ///  push here without contention.
+    ///  * **`diagnostics_aggregate`** — owned by readers; the list
+    ///  read-API drains the queue into this on demand and clones
+    ///  the result. Locked, but only on the cold read path.
     ///
+
     /// Hot-path emit cost: one atomic push (~10 ns) vs a parking_lot
     /// write lock acquire-release (~50 ns uncontended, microseconds
     /// under contention).
@@ -95,6 +101,7 @@ pub struct Session {
 
     /// Next available FileId (atomic for lock-free allocation).
     ///
+
     /// Wrapped in `Shared` so that ModuleLoaders created via
     /// `create_module_loader` hand out a single monotonic FileId
     /// sequence consistent with `Session::next_file_id()`. Without
@@ -113,10 +120,12 @@ pub struct Session {
 
     /// Tier analysis cache for reference tier decisions.
     ///
+
     /// Stores the results of tier analysis for each function, indexed by
     /// FunctionId. The codegen phase uses this cache to determine which references
     /// can be promoted from Tier 0 (~15ns) to Tier 1 (0ns).
     ///
+
     /// CBGR analysis results from escape analysis (tier promotion decisions).
     tier_analysis_cache: Shared<RwLock<Map<FunctionId, TierAnalysisResult>>>,
 
@@ -125,9 +134,11 @@ pub struct Session {
 
     /// Configuration evaluator for @cfg conditional compilation.
     ///
+
     /// This evaluator is initialized from CompilerOptions and used to filter
     /// items with @cfg attributes during compilation.
     ///
+
     /// Conditional compilation: platform-specific and feature-gated code paths.
     cfg_evaluator: CfgEvaluator,
 
@@ -137,12 +148,14 @@ pub struct Session {
 
     /// Shared SMT routing statistics.
     ///
+
     /// Populated by verification phases that dispatch through
     /// `verum_smt::SmtBackendSwitcher`. The CLI reads these at the end
     /// of compilation to drive `verum smt-stats` (persisted to
     /// `$VERUM_STATE_DIR/smt-stats.json`). The field is always present —
     /// phases that don't use SMT simply leave it empty.
     ///
+
     /// `Arc` so the switcher inside each phase can hold an owned handle
     /// without moving the session.
     routing_stats: std::sync::Arc<verum_smt::routing_stats::RoutingStats>,
@@ -153,6 +166,7 @@ pub struct Session {
     /// serialise the result into the persistent script cache without
     /// re-running the pipeline.
     ///
+
     /// `None` until the first compile-and-run succeeds; `Some` after.
     /// `Arc` so callers receive a cheap clone of the same module the
     /// interpreter just executed — no double-allocation, no re-encode.
@@ -161,30 +175,36 @@ pub struct Session {
 
     /// Script-mode permission policy installed by the CLI runner.
     ///
+
     /// `Some(closure)` when the entry source is a script and the CLI
     /// has built a policy from the script's resolved `PermissionSet`
     /// (frontmatter ∪ CLI flags). The policy is a function from
     /// `(scope, target_id)` → `Allow | Deny`.
     ///
+
     /// The pipeline transfers this into the `VbcInterpreter`'s
     /// `PermissionRouter` immediately after constructing the
     /// interpreter, so subsequent intrinsic dispatches (raw syscalls,
     /// gated FFI calls, opt-in `check_permission` calls in stdlib)
     /// hit the script's policy on cache miss.
     ///
+
     /// `None` for project-mode runs and any single-file run that
     /// isn't a script — those keep the router's default allow-all
     /// behaviour, matching pre-script-mode semantics.
     ///
+
     /// Boxed-closure type chosen to match `PermissionRouter::set_policy`'s
     /// `F: Fn(...) + Send + Sync + 'static` bound exactly.
     script_permission_policy: Shared<RwLock<Option<ScriptPermissionPolicy>>>,
 
     /// Process exit code requested by the most recent execution.
     ///
+
     /// `None` for `()` / `nil` / non-Int returns (CLI exits 0).
     /// `Some(n)` for `Int` / `Bool` returns (CLI exits with `n`).
     ///
+
     /// Writing this field instead of calling `std::process::exit`
     /// from inside the pipeline lets the CLI run post-execution work
     /// — persisting the script cache, flushing telemetry, printing
@@ -202,6 +222,7 @@ pub struct Session {
     /// then read by the pipeline when it constructs
     /// `LoweringConfig` for the AOT path.
     ///
+
     /// `None` is the trusted-application path — the AOT lowerer
     /// elides every `PermissionAssert` site (matching the
     /// interpreter's allow-all default when no policy is wired).
@@ -212,6 +233,7 @@ pub struct Session {
 impl Session {
     /// Create a new compilation session.
     ///
+
     /// Applies cross-cutting feature reconciliations once at startup
     /// (e.g., disabling SMT verification when refinement types are
     /// turned off) so downstream phases see a consistent view of the
@@ -291,6 +313,7 @@ impl Session {
     /// after the interpreter is constructed; subsequent intrinsic
     /// dispatches consult the script's grants on cache miss.
     ///
+
     /// Replacing an existing policy is supported but rare — the
     /// expected lifecycle is at-most-once per script run.
     pub fn set_script_permission_policy(&self, policy: ScriptPermissionPolicy) {
@@ -312,6 +335,7 @@ impl Session {
     /// when it builds `LoweringConfig`, baking the resolved grants
     /// into the generated binary at compile time.
     ///
+
     /// `None` (the default) is the trusted-application path —
     /// `PermissionAssert` opcodes lower to no-ops, matching the
     /// allow-all interpreter default for plain applications.
@@ -348,6 +372,7 @@ impl Session {
 
     /// Convenience accessor for the unified language-feature set.
     ///
+
     /// Equivalent to `self.options().language_features`, but callers that
     /// only need to query features shouldn't have to drag in the full
     /// `CompilerOptions` import.
@@ -361,12 +386,13 @@ impl Session {
     /// struct. Called from `Session::new*` constructors so that no
     /// caller can bypass them.
     ///
+
     /// Current reconciliations:
-    ///   1. If `types.refinement` is disabled, the refinement-type SMT
-    ///      path is a no-op — downgrade `verify_mode` to `Runtime` so
-    ///      the pipeline doesn't spin up a solver for nothing.
-    ///   2. If `codegen.proof_erasure` is disabled, `debug.show_erased_proofs`
-    ///      becomes moot but is otherwise harmless (no action).
+    ///  1. If `types.refinement` is disabled, the refinement-type SMT
+    ///  path is a no-op — downgrade `verify_mode` to `Runtime` so
+    ///  the pipeline doesn't spin up a solver for nothing.
+    ///  2. If `codegen.proof_erasure` is disabled, `debug.show_erased_proofs`
+    ///  becomes moot but is otherwise harmless (no action).
     fn reconcile_language_features(opts: &mut CompilerOptions) {
         // 1. Refinement off → no SMT solver needed.
         if !opts.language_features.refinement_typing_on()
@@ -381,80 +407,83 @@ impl Session {
             _ => {}
         }
         // 3. [runtime].panic → declared as "recorded for codegen"
-        //    but no LLVM codegen path currently consults it; the
-        //    panic-block emitter routes to the body shape selected
-        //    by `[runtime].panic` (commit 85090093 — Unwind or
-        //    Abort).  No longer tracing-only.
+        //  but no LLVM codegen path currently consults it; the
+        //  panic-block emitter routes to the body shape selected
+        //  by `[runtime].panic` (commit 85090093 — Unwind or
+        //  Abort). No longer tracing-only.
 
         // The `[runtime]` manifest section parses 8 fields. ALL
         // EIGHT are wired in Tier 0 (interpreter):
-        //   - `cbgr_mode`, `async_scheduler`, `heap_policy` flow
-        //     through `pipeline/interpreter.rs:78-83` to the VBC
-        //     interpreter state.
-        //   - `panic` flows through `pipeline/native_codegen.rs` →
-        //     `LoweringConfig.panic_strategy` → `PlatformIR::
-        //     emit_panic_ir` (commit 85090093) and selects the
-        //     `verum_panic` body shape (Unwind / Abort).
-        //   - `async_worker_threads` + `task_stack_size` flow
-        //     through `pipeline/native_codegen.rs` →
-        //     `LoweringConfig.runtime_bridge` →
-        //     `PlatformIR.emit_runtime_globals` /
-        //     `emit_runtime_bridge_getters` (architectural
-        //     prerequisite #261) — manifest values land in
-        //     `__verum_runtime_*` LLVM globals at codegen time
-        //     and reach stdlib code via `verum_get_runtime_*`
-        //     getters.  Default 0 keeps stdlib auto-detection
-        //     (num_cpus, platform stack size).
-        //   - `futures` flows through `pipeline/interpreter.rs:80`
-        //     → `InterpreterConfig.futures_enabled` →
-        //     `handle_spawn` (Spawn opcode 0xA0), which rejects
-        //     spawn operations with a manifest-citing panic when
-        //     the user opted out (`async_nursery.rs:54`).
-        //     Closes #262.
-        //   - `nurseries` flows the same path →
-        //     `InterpreterConfig.nurseries_enabled` →
-        //     `handle_nursery_init` (NurseryInit opcode 0xA8),
-        //     which rejects nursery construction with a manifest-
-        //     citing panic; downstream nursery ops become
-        //     unreachable without a handle (`async_nursery.rs:360`).
+        //  - `cbgr_mode`, `async_scheduler`, `heap_policy` flow
+        //  through `pipeline/interpreter.rs:78-83` to the VBC
+        //  interpreter state.
+        //  - `panic` flows through `pipeline/native_codegen.rs` →
+        //  `LoweringConfig.panic_strategy` → `PlatformIR::
+        //  emit_panic_ir` (commit 85090093) and selects the
+        //  `verum_panic` body shape (Unwind / Abort).
+        //  - `async_worker_threads` + `task_stack_size` flow
+        //  through `pipeline/native_codegen.rs` →
+        //  `LoweringConfig.runtime_bridge` →
+        //  `PlatformIR.emit_runtime_globals` /
+        //  `emit_runtime_bridge_getters` (architectural
+        //  prerequisite #261) — manifest values land in
+        //  `__verum_runtime_*` LLVM globals at codegen time
+        //  and reach stdlib code via `verum_get_runtime_*`
+        //  getters. Default 0 keeps stdlib auto-detection
+        //  (num_cpus, platform stack size).
+        //  - `futures` flows through `pipeline/interpreter.rs:80`
+        //  → `InterpreterConfig.futures_enabled` →
+        //  `handle_spawn` (Spawn opcode 0xA0), which rejects
+        //  spawn operations with a manifest-citing panic when
+        //  the user opted out (`async_nursery.rs:54`).
+        //  Closes #262.
+        //  - `nurseries` flows the same path →
+        //  `InterpreterConfig.nurseries_enabled` →
+        //  `handle_nursery_init` (NurseryInit opcode 0xA8),
+        //  which rejects nursery construction with a manifest-
+        //  citing panic; downstream nursery ops become
+        //  unreachable without a handle (`async_nursery.rs:360`).
         //
+
         // Tier 1 (AOT) gating for futures/nurseries also wired
         // (#262-AOT, task #281, commit follows): the LLVM lowering
         // at `verum_codegen/src/llvm/instruction.rs::lower_spawn`
         // and `Instruction::NurseryInit` arm rejects at codegen
         // time when `LoweringConfig.futures_enabled` /
-        // `nurseries_enabled` are false.  The flags thread from
+        // `nurseries_enabled` are false. The flags thread from
         // `pipeline/native_codegen.rs::language_features.runtime`.
         // Both Tier 0 (dispatch panic) and Tier 1 (codegen error)
         // produce manifest-citing diagnostics on attempted use.
         let rt = &opts.language_features.runtime;
 
         // Honest production diagnostic for #271 (multi-threaded async
-        // scheduler).  The manifest→runtime bridge already flows
+        // scheduler). The manifest→runtime bridge already flows
         // `async_worker_threads` from Verum.toml → LLVM globals →
         // stdlib's `AsyncRuntimeConfig` (#258 / #259 / #261), but
         // the .vr-side `AsyncRuntime` in `core/async/executor.vr`
-        // still runs a single-threaded cooperative event loop.  A
+        // still runs a single-threaded cooperative event loop. A
         // user setting `async_worker_threads = 4` therefore sees
         // single-threaded behaviour today.
         //
+
         // Rather than silently accept a non-functional setting,
         // surface a clear diagnostic pointing at the architectural
-        // design document.  When Phase 1 of #271 lands (worker pool
+        // design document. When Phase 1 of #271 lands (worker pool
         // foundation), this warning is removed and the field
         // becomes load-bearing.
         if rt.async_worker_threads > 1 {
             // Two-channel emission:
-            //   * tracing::warn! — keeps structured logging
-            //     (VERUM_LOG=warn) for embedders ingesting telemetry.
-            //   * eprintln! — guarantees the warning surfaces to
-            //     human users at every compile.  Without the
-            //     eprintln a non-default manifest value silently
-            //     no-ops (the user expects 4 worker threads, gets
-            //     1, never sees why).  Using stderr directly so
-            //     this works without the verum_cli `ui` module
-            //     (which would create a circular dep).
+            //  * tracing::warn! — keeps structured logging
+            //  (VERUM_LOG=warn) for embedders ingesting telemetry.
+            //  * eprintln! — guarantees the warning surfaces to
+            //  human users at every compile. Without the
+            //  eprintln a non-default manifest value silently
+            //  no-ops (the user expects 4 worker threads, gets
+            //  1, never sees why). Using stderr directly so
+            //  this works without the verum_cli `ui` module
+            //  (which would create a circular dep).
             //
+
             // VERUM_SUPPRESS_RUNTIME_WARNINGS=1 silences the
             // human-visible channel for embedders that prefer
             // tracing-only telemetry (e.g., CI environments where
@@ -484,29 +513,30 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
         // The `[codegen]` manifest section parses four fields. ALL
         // FOUR are wired:
-        //   - `monomorphization_cache` flows through pipeline.rs:
-        //     10630 / 12161 to `VbcMonomorphizationPhase::without_
-        //     cache()` — manifest `false` actually disables the
-        //     cache.
-        //   - `tail_call_optimization` flows through
-        //     `pipeline/native_codegen.rs` →
-        //     `LoweringConfig.tail_call_optimization` →
-        //     `lower_vbc_function`, which emits
-        //     `disable-tail-calls=true` LLVM string attribute on
-        //     every function when manifest sets it `false`.
-        //   - `vectorize` flows the same path; emits
-        //     `no-loop-vectorize` + `no-slp-vectorize` LLVM string
-        //     attributes when manifest sets it `false`.
-        //   - `inline_depth` (default 3) flows through
-        //     `pipeline/native_codegen.rs` →
-        //     `LoweringConfig.inline_depth` → `lower_vbc_function`,
-        //     which emits `"inline-threshold"="<N>"` per-function
-        //     string attribute (N = inline_depth * 75) when
-        //     manifest sets it ≠ 3.  Default 3 maps to LLVM's
-        //     built-in 225 threshold so default builds emit no
-        //     attribute and produce IR bit-identical to pre-wire
-        //     output.  Closes task #267.
+        //  - `monomorphization_cache` flows through pipeline.rs:
+        //  10630 / 12161 to `VbcMonomorphizationPhase::without_
+        //  cache()` — manifest `false` actually disables the
+        //  cache.
+        //  - `tail_call_optimization` flows through
+        //  `pipeline/native_codegen.rs` →
+        //  `LoweringConfig.tail_call_optimization` →
+        //  `lower_vbc_function`, which emits
+        //  `disable-tail-calls=true` LLVM string attribute on
+        //  every function when manifest sets it `false`.
+        //  - `vectorize` flows the same path; emits
+        //  `no-loop-vectorize` + `no-slp-vectorize` LLVM string
+        //  attributes when manifest sets it `false`.
+        //  - `inline_depth` (default 3) flows through
+        //  `pipeline/native_codegen.rs` →
+        //  `LoweringConfig.inline_depth` → `lower_vbc_function`,
+        //  which emits `"inline-threshold"="<N>"` per-function
+        //  string attribute (N = inline_depth * 75) when
+        //  manifest sets it ≠ 3. Default 3 maps to LLVM's
+        //  built-in 225 threshold so default builds emit no
+        //  attribute and produce IR bit-identical to pre-wire
+        //  output. Closes task #267.
         //
+
         // No runtime warn! needed — every value the user can set
         // produces observable codegen behaviour.
 
@@ -514,187 +544,194 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         // beyond `refinement` (wired via `refinement_typing_on`)
         // and `coherence_check_depth` (wired in semantic_analysis).
         // ALL 7 are wired (see below):
-        //   - `dependent` flows to `TypeChecker.dependent_enabled`
-        //     and is consulted at `infer.rs:13439` (gates
-        //     dependent pattern matching on inductive types with
-        //     indices).
-        //   - `cubical` flows to `Unifier.cubical_enabled` and
-        //     selects between strict syntactic equality and the
-        //     cubical `whnf` normaliser at `unify.rs:186`.
-        //   - `higher_kinded` flows to
-        //     `TypeChecker.higher_kinded_enabled` and is consulted
-        //     at `infer.rs:55696` (gates higher-kinded type
-        //     parameter elaboration).
-        //   - `coinductive` flows to
-        //     `TypeChecker.coinductive_enabled` and is consulted
-        //     at `infer.rs:36286` (gates `cofix` semantics).
-        //   - `instance_search` flows through
-        //     `TypeChecker.set_instance_search_enabled` →
-        //     `ProtocolChecker.instance_search_enabled` and gates
-        //     the Stage-2 generic-candidate scan in `find_impl`
-        //     at `protocol.rs:4356-4361`.
+        //  - `dependent` flows to `TypeChecker.dependent_enabled`
+        //  and is consulted at `infer.rs:13439` (gates
+        //  dependent pattern matching on inductive types with
+        //  indices).
+        //  - `cubical` flows to `Unifier.cubical_enabled` and
+        //  selects between strict syntactic equality and the
+        //  cubical `whnf` normaliser at `unify.rs:186`.
+        //  - `higher_kinded` flows to
+        //  `TypeChecker.higher_kinded_enabled` and is consulted
+        //  at `infer.rs:55696` (gates higher-kinded type
+        //  parameter elaboration).
+        //  - `coinductive` flows to
+        //  `TypeChecker.coinductive_enabled` and is consulted
+        //  at `infer.rs:36286` (gates `cofix` semantics).
+        //  - `instance_search` flows through
+        //  `TypeChecker.set_instance_search_enabled` →
+        //  `ProtocolChecker.instance_search_enabled` and gates
+        //  the Stage-2 generic-candidate scan in `find_impl`
+        //  at `protocol.rs:4356-4361`.
         // All 7 [types].* feature flags are now wired:
-        //   - `quotient` flows to `TypeChecker.quotient_enabled`
-        //     and is consulted at `infer.rs:48919` (gates the
-        //     `TypeDeclBody::Quotient` arm in
-        //     `register_type_declaration_body` — rejects the
-        //     declaration with a hard error citing the manifest
-        //     when disabled).
-        //   - `universe_polymorphism` flows to
-        //     `TypeChecker.universe_poly_enabled` and is
-        //     consulted at `infer.rs:22946` (gates the polymorphic
-        //     universe-level forms `Type(u)`, `Type(max(a,b))`,
-        //     `Type(succ u)` in `ast_to_type` — rejects with a
-        //     hard error when disabled; concrete `Type` /
-        //     `Type(N)` always allowed).
+        //  - `quotient` flows to `TypeChecker.quotient_enabled`
+        //  and is consulted at `infer.rs:48919` (gates the
+        //  `TypeDeclBody::Quotient` arm in
+        //  `register_type_declaration_body` — rejects the
+        //  declaration with a hard error citing the manifest
+        //  when disabled).
+        //  - `universe_polymorphism` flows to
+        //  `TypeChecker.universe_poly_enabled` and is
+        //  consulted at `infer.rs:22946` (gates the polymorphic
+        //  universe-level forms `Type(u)`, `Type(max(a,b))`,
+        //  `Type(succ u)` in `ast_to_type` — rejects with a
+        //  hard error when disabled; concrete `Type` /
+        //  `Type(N)` always allowed).
         //
+
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.
 
         // The `[safety]` manifest section parses 6 fields. ALL SIX
         // are wired:
-        //   - unsafe_allowed / ffi / capability_required /
-        //     forbid_stdlib_extern at pipeline.rs:6391-6393 gate
-        //     FFI emission;
-        //   - ffi_boundary at phases/safety_gate.rs:197-229 emits
-        //     the "extern fn should be marked `unsafe` under
-        //     `[safety].ffi_boundary = strict`" warning, threaded
-        //     from manifest via SafetyPolicy::from_features.
-        //   - mls_level — full ten-layer MLS classification stack
-        //     landed.  The system enforces information-flow
-        //     constraints across the call graph; classified data
-        //     cannot silently flow into lower-classification sinks
-        //     without explicit `@declassify`:
-        //       * Phase 1 (#266): declaration gate — `extern fn`
-        //         / `unsafe fn` require `@classification(<level>)`.
-        //       * Phase 2a (#282): MlsLevel lattice primitive at
-        //         `verum_common::mls` — algebraic invariants
-        //         pinned (idempotence, commutativity, associativity,
-        //         absorption laws).
-        //       * Phase 2b surface (#288): parameter-level
-        //         `@classification` triggers the gate; function-
-        //         level @classification must subsume the highest
-        //         classified parameter.
-        //       * Phase 2b foundation (#289): TypeChecker carries
-        //         a `classification_map: HashMap<Text, MlsLevel>`
-        //         sidecar tracking per-binding classification.
-        //       * Phase 2b integration (#291): sidecar seeded from
-        //         AST `@classification` attributes at
-        //         `register_function_signature` time.
-        //       * Phase 2b followup (#292): expression
-        //         classification propagation through let-bindings
-        //         (`let x = secret` taints `x`).
-        //       * Phase 2b final helper (#293):
-        //         `check_classification_downflow` API enforces
-        //         the lattice contract `param.subsumes(arg)` at
-        //         call sites.
-        //       * Phase 2b final integration (#294):
-        //         `check_module_call_classifications` walker
-        //         invokes the helper at every call expression in
-        //         a module, recursing through nested expressions.
-        //       * Phase 2b @declassify (#295): functions carrying
-        //         `@declassify` are skipped by the walker — the
-        //         user explicitly opts into the boundary.
-        //       * Phase 3a (#283): low-classification sink
-        //         detection (Logger, FS, Network, Stdout, Stderr,
-        //         Tracing, Telemetry, FileSystem) at safety_gate.
+        //  - unsafe_allowed / ffi / capability_required /
+        //  forbid_stdlib_extern at pipeline.rs:6391-6393 gate
+        //  FFI emission;
+        //  - ffi_boundary at phases/safety_gate.rs:197-229 emits
+        //  the "extern fn should be marked `unsafe` under
+        //  `[safety].ffi_boundary = strict`" warning, threaded
+        //  from manifest via SafetyPolicy::from_features.
+        //  - mls_level — full ten-layer MLS classification stack
+        //  landed. The system enforces information-flow
+        //  constraints across the call graph; classified data
+        //  cannot silently flow into lower-classification sinks
+        //  without explicit `@declassify`:
+        //  * Phase 1 (#266): declaration gate — `extern fn`
+        //  / `unsafe fn` require `@classification(<level>)`.
+        //  * Phase 2a (#282): MlsLevel lattice primitive at
+        //  `verum_common::mls` — algebraic invariants
+        //  pinned (idempotence, commutativity, associativity,
+        //  absorption laws).
+        //  * Phase 2b surface (#288): parameter-level
+        //  `@classification` triggers the gate; function-
+        //  level @classification must subsume the highest
+        //  classified parameter.
+        //  * Phase 2b foundation (#289): TypeChecker carries
+        //  a `classification_map: HashMap<Text, MlsLevel>`
+        //  sidecar tracking per-binding classification.
+        //  * Phase 2b integration (#291): sidecar seeded from
+        //  AST `@classification` attributes at
+        //  `register_function_signature` time.
+        //  * Phase 2b followup (#292): expression
+        //  classification propagation through let-bindings
+        //  (`let x = secret` taints `x`).
+        //  * Phase 2b final helper (#293):
+        //  `check_classification_downflow` API enforces
+        //  the lattice contract `param.subsumes(arg)` at
+        //  call sites.
+        //  * Phase 2b final integration (#294):
+        //  `check_module_call_classifications` walker
+        //  invokes the helper at every call expression in
+        //  a module, recursing through nested expressions.
+        //  * Phase 2b @declassify (#295): functions carrying
+        //  `@declassify` are skipped by the walker — the
+        //  user explicitly opts into the boundary.
+        //  * Phase 3a (#283): low-classification sink
+        //  detection (Logger, FS, Network, Stdout, Stderr,
+        //  Tracing, Telemetry, FileSystem) at safety_gate.
         //
+
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.
 
         // The `[test]` manifest section parses 8 fields, ALL EIGHT
         // load-bearing in `verum_cli::commands::test`:
-        //   - `timeout_secs` flows through `TestRunCfg.timeout_secs`
-        //     and bounds each test's wall-clock at run time
-        //     (commands/test.rs:215).
-        //   - `deny_warnings` flows through
-        //     `TestRunCfg.deny_warnings` to force
-        //     `CompilerOptions.warnings_as_errors = true` for
-        //     test compilation (commands/test.rs:216).
-        //   - `coverage` flows through
-        //     `TestRunCfg.coverage = opts.coverage ||
-        //     manifest.test.coverage` enabling LLVM coverage
-        //     instrumentation (commands/test.rs:217). CLI flag
-        //     and manifest value OR-combine.
-        //   - `parallel` gates the rayon worker pool at
-        //     commands/test.rs:292 — when false the harness runs
-        //     tests serially.
+        //  - `timeout_secs` flows through `TestRunCfg.timeout_secs`
+        //  and bounds each test's wall-clock at run time
+        //  (commands/test.rs:215).
+        //  - `deny_warnings` flows through
+        //  `TestRunCfg.deny_warnings` to force
+        //  `CompilerOptions.warnings_as_errors = true` for
+        //  test compilation (commands/test.rs:216).
+        //  - `coverage` flows through
+        //  `TestRunCfg.coverage = opts.coverage ||
+        //  manifest.test.coverage` enabling LLVM coverage
+        //  instrumentation (commands/test.rs:217). CLI flag
+        //  and manifest value OR-combine.
+        //  - `parallel` gates the rayon worker pool at
+        //  commands/test.rs:292 — when false the harness runs
+        //  tests serially.
         //
+
         // The remaining four are load-bearing as of
         // #298 + #273 + #299 (closes #286/#268-Infra):
-        //   - `property_testing` (#298): TestRunCfg.property_testing
-        //     gates the @property dispatcher in run_single_test;
-        //     when false, @property tests record a "disabled"
-        //     Pass without invoking the proptest runner.
-        //   - `proptest_cases` (#298): TestRunCfg.proptest_cases
-        //     is the default `runs` count when @property(runs=N)
-        //     does not override.
-        //   - `differential` (#273): TestRunCfg.differential
-        //     routes every non-property test through both Tier 0
-        //     (interpreter) and Tier 1 (AOT) and requires both
-        //     to PASS — disagreement is itself the test failure
-        //     (the load-bearing soundness gate for the language's
-        //     two execution backends).
-        //   - `fuzzing` (#299): TestRunCfg.fuzzing drives the
-        //     cargo-fuzz orchestrator (commands/fuzz.rs) — after
-        //     the regular suite, fuzz/Cargo.toml targets are
-        //     discovered and exercised; fresh crash artifacts
-        //     count as test failures.
+        //  - `property_testing` (#298): TestRunCfg.property_testing
+        //  gates the @property dispatcher in run_single_test;
+        //  when false, @property tests record a "disabled"
+        //  Pass without invoking the proptest runner.
+        //  - `proptest_cases` (#298): TestRunCfg.proptest_cases
+        //  is the default `runs` count when @property(runs=N)
+        //  does not override.
+        //  - `differential` (#273): TestRunCfg.differential
+        //  routes every non-property test through both Tier 0
+        //  (interpreter) and Tier 1 (AOT) and requires both
+        //  to PASS — disagreement is itself the test failure
+        //  (the load-bearing soundness gate for the language's
+        //  two execution backends).
+        //  - `fuzzing` (#299): TestRunCfg.fuzzing drives the
+        //  cargo-fuzz orchestrator (commands/fuzz.rs) — after
+        //  the regular suite, fuzz/Cargo.toml targets are
+        //  discovered and exercised; fresh crash artifacts
+        //  count as test failures.
 
         // The `[protocols]` manifest section parses 5 fields. ALL
         // FIVE are wired:
-        //   - `resolution_strategy` flows through
-        //     `CommonPipelineConfig.protocol_resolution_strategy` →
-        //     `SemanticAnalysisPhase::with_protocol_resolution_
-        //     strategy` → `TypeChecker::set_protocol_resolution_
-        //     strategy` → `ProtocolChecker.resolution_strategy`,
-        //     where `find_impl` consults it for multi-candidate
-        //     dispatch (most_specific / first_declared / error).
-        //   - `blanket_impls` flows the same path and gates the
-        //     candidate-collection filter on `Type::Var(_)`.
-        //   - `coherence` flows through pipeline.rs::phase_type_check
-        //     → `TypeChecker.set_protocol_coherence_mode` →
-        //     `ProtocolChecker.coherence_mode`, gating
-        //     `register_impl`'s orphan-rule + overlap checks
-        //     (strict = error, lenient = warning, unchecked = skip).
-        //   - `higher_kinded_protocols` flows through
-        //     `pipeline/phases_orchestration.rs` →
-        //     `TypeChecker.set_higher_kinded_protocols_enabled` →
-        //     `register_protocol_decl_item`, which rejects HKT
-        //     generic params on protocol declarations when the
-        //     manifest sets it false (the default).  Closes #264.
-        //   - `generic_associated_types` flows the same path →
-        //     `TypeChecker.set_generic_associated_types_enabled` →
-        //     `register_protocol_decl_item`, which rejects
-        //     `type Item<T>` inside a protocol body when the
-        //     manifest sets it false (the default).  Closes #265.
+        //  - `resolution_strategy` flows through
+        //  `CommonPipelineConfig.protocol_resolution_strategy` →
+        //  `SemanticAnalysisPhase::with_protocol_resolution_
+        //  strategy` → `TypeChecker::set_protocol_resolution_
+        //  strategy` → `ProtocolChecker.resolution_strategy`,
+        //  where `find_impl` consults it for multi-candidate
+        //  dispatch (most_specific / first_declared / error).
+        //  - `blanket_impls` flows the same path and gates the
+        //  candidate-collection filter on `Type::Var(_)`.
+        //  - `coherence` flows through pipeline.rs::phase_type_check
+        //  → `TypeChecker.set_protocol_coherence_mode` →
+        //  `ProtocolChecker.coherence_mode`, gating
+        //  `register_impl`'s orphan-rule + overlap checks
+        //  (strict = error, lenient = warning, unchecked = skip).
+        //  - `higher_kinded_protocols` flows through
+        //  `pipeline/phases_orchestration.rs` →
+        //  `TypeChecker.set_higher_kinded_protocols_enabled` →
+        //  `register_protocol_decl_item`, which rejects HKT
+        //  generic params on protocol declarations when the
+        //  manifest sets it false (the default). Closes #264.
+        //  - `generic_associated_types` flows the same path →
+        //  `TypeChecker.set_generic_associated_types_enabled` →
+        //  `register_protocol_decl_item`, which rejects
+        //  `type Item<T>` inside a protocol body when the
+        //  manifest sets it false (the default). Closes #265.
         //
+
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.
 
         // Proof-certificate emission knobs (#269 + #285): all three
         // fields are now load-bearing across both paths.
         //
-        //   - `emit_proof_certificate: bool` — the entry switch.
-        //     When true, `pipeline/phases_orchestration.rs::
-        //     emit_theorem_certificates` runs at the end of
-        //     phase_verify and writes one stub certificate file per
-        //     theorem/lemma/corollary in the manifest-selected
-        //     format.
-        //   - `proof_certificate_format: Option<Text>` — selects the
-        //     target format ("lean" | "coq" | "dedukti" |
-        //     "metamath" | "opentheory" | "json"). Default "lean".
-        //     Unknown values fall back to Lean with a tracing::warn.
-        //   - `proof_certificate_path: Option<PathBuf>` — output
-        //     directory.  Default
-        //     `<input_parent>/target/audit-reports/proof-certificates/`.
+
+        //  - `emit_proof_certificate: bool` — the entry switch.
+        //  When true, `pipeline/phases_orchestration.rs::
+        //  emit_theorem_certificates` runs at the end of
+        //  phase_verify and writes one stub certificate file per
+        //  theorem/lemma/corollary in the manifest-selected
+        //  format.
+        //  - `proof_certificate_format: Option<Text>` — selects the
+        //  target format ("lean" | "coq" | "dedukti" |
+        //  "metamath" | "opentheory" | "json"). Default "lean".
+        //  Unknown values fall back to Lean with a tracing::warn.
+        //  - `proof_certificate_path: Option<PathBuf>` — output
+        //  directory. Default
+        //  `<input_parent>/target/audit-reports/proof-certificates/`.
         //
+
         // Stub-certificate body: `Admitted.` (Coq) / `sorry` (Lean)
         // / axiom-form (Dedukti / Metamath / OpenTheory) /
-        // `proof_status="admitted"` (JSON).  Full proof-term
+        // `proof_status="admitted"` (JSON). Full proof-term
         // reconstruction (where the SMT verifier surfaces the
         // proof term it constructed) is tracked as #285-Followup.
         //
+
         // Embedder path (still load-bearing): `verum_smt::
         // certificates::CertificateGenerator::generate(&proof,
         // theorem)` for callers that have a real ProofTerm in hand.
@@ -705,14 +742,15 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         // `CompilerOptions.continue_on_error` is now load-bearing via
         // `Session::collect_phase_error` (session.rs:1043) which the
         // compilation pipeline calls at each phase site in
-        // `validate_module` (pipeline.rs).  When the flag is true,
+        // `validate_module` (pipeline.rs). When the flag is true,
         // phase errors are converted into Severity::Error diagnostics
         // and accumulated; the pipeline runs all phases and aborts at
-        // the final `abort_if_errors()` checkpoint.  When the flag is
+        // the final `abort_if_errors()` checkpoint. When the flag is
         // false (the default), `collect_phase_error` is a no-op
         // pass-through and the pipeline retains its short-circuit
-        // semantics.  Closes #270.
+        // semantics. Closes #270.
         //
+
         // The safety_gate phase deliberately bypasses
         // collect_phase_error — a safety violation is a HARD security
         // boundary that always aborts.
@@ -720,6 +758,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Access the shared SMT routing statistics handle.
     ///
+
     /// Phase code clones this `Arc` when constructing an
     /// `SmtBackendSwitcher`, so all verification work in a session
     /// shares a single stats collector. The CLI calls
@@ -740,6 +779,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Register external cog dependencies from lockfile data.
     ///
+
     /// Each entry is (name, version, root_path). This is a convenience method
     /// so CLI code doesn't need to depend on verum_modules directly.
     pub fn register_cog_dependencies(&mut self, deps: Vec<(String, String, std::path::PathBuf)>) {
@@ -753,22 +793,27 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Create a new compilation session with a pre-populated module registry.
     ///
+
     /// This is an optimization for test performance: instead of re-registering
     /// ~166 stdlib modules for every test (~500ms), tests can pass a deep_clone
     /// of a cached registry (~1ms).
     ///
+
     /// # Arguments
     ///
+
     /// * `options` - Compiler options for this session
     /// * `registry` - Pre-populated module registry (typically a deep_clone of the stdlib cache)
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // Get cached registry (returns None if not yet populated)
     /// if let Some(registry) = get_cached_stdlib_registry() {
-    ///     let session = Session::with_registry(options, registry);
-    ///     // session now has stdlib modules pre-loaded
+    ///  let session = Session::with_registry(options, registry);
+    ///  // session now has stdlib modules pre-loaded
     /// }
     /// ```
     pub fn with_registry(mut options: CompilerOptions, registry: ModuleRegistry) -> Self {
@@ -802,6 +847,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Build a TargetConfig from CompilerOptions
     ///
+
     /// Parses target_triple or detects host platform, then applies
     /// custom features and flags from options.
     fn build_target_config(options: &CompilerOptions) -> TargetConfig {
@@ -816,7 +862,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         // when callers supply one (carries `[profile.<name>].
         // debug_assertions` from Verum.toml). Falls back to the
         // auto-derive `optimization_level == 0` rule when the
-        // override is absent.  Closes the inert-defense pattern at
+        // override is absent. Closes the inert-defense pattern at
         // commands/build.rs:217-248 where the manifest value was
         // tracing-only.
         config.debug_assertions = options
@@ -851,15 +897,18 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get the cfg evaluator for conditional compilation.
     ///
+
     /// Use this to check if items with @cfg attributes should be included
     /// in compilation based on the current target configuration.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let item = // ... item with @cfg(unix) attribute
     /// if session.cfg_evaluator().should_include(&item) {
-    ///     // Process the item
+    ///  // Process the item
     /// }
     /// ```
     pub fn cfg_evaluator(&self) -> &CfgEvaluator {
@@ -928,22 +977,24 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     /// Load a SYNTHETIC source string produced by macro / derive /
     /// monomorphization / @delegate expansion (#274 + #284).
     ///
+
     /// The resulting `SourceFile` carries a `SyntheticOrigin`
     /// back-pointer at the user-source span that triggered the
-    /// expansion.  Diagnostics emitted against spans inside this
+    /// expansion. Diagnostics emitted against spans inside this
     /// file are resolved to user-visible locations via
     /// `Span::resolve_to_user_source(|fid| self.synthetic_origin(fid))`.
     ///
+
     /// `name`: human-readable label for the synthetic file (e.g.
-    ///   `"<derive:Eq for User>"`, `"<macro:assert_eq>"`,
-    ///   `"<mono:List<Int>>"`). Surfaces in diagnostic output when
-    ///   the user span is unavailable.
+    ///  `"<derive:Eq for User>"`, `"<macro:assert_eq>"`,
+    ///  `"<mono:List<Int>>"`). Surfaces in diagnostic output when
+    ///  the user span is unavailable.
     /// `parent_file`: FileId of the file the expansion was triggered
-    ///   from. May itself be synthetic — chains are walked
-    ///   transitively by `resolve_to_user_source`.
+    ///  from. May itself be synthetic — chains are walked
+    ///  transitively by `resolve_to_user_source`.
     /// `call_site_span`: the user-source span in `parent_file` that
-    ///   triggered this expansion (the @derive attribute span, the
-    ///   macro callsite, the generic call that monomorphized…).
+    ///  triggered this expansion (the @derive attribute span, the
+    ///  macro callsite, the generic call that monomorphized…).
     /// `kind`: classification of the expansion for renderer labels.
     pub fn load_synthetic_source(
         &self,
@@ -969,7 +1020,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
         // Register with global registry too — diagnostic renderers
         // that walk through verum_common::global_get_filename see
-        // the synthetic name.  The provenance chain lives on the
+        // the synthetic name. The provenance chain lives on the
         // session-side SourceFile (queried via
         // `synthetic_origin(file_id)`), since the global registry
         // doesn't carry SyntheticOrigin payload.
@@ -984,9 +1035,10 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Look up the `SyntheticOrigin` for a FileId, if any.
     ///
+
     /// Used by `Span::resolve_to_user_source(|fid| session.
     /// synthetic_origin(fid))` to walk the chain from a synthetic
-    /// span back to its user-source ancestor.  Returns `None` for
+    /// span back to its user-source ancestor. Returns `None` for
     /// user-loaded files and unknown IDs — the resolver treats
     /// `None` as "this is the user span; stop walking".
     pub fn synthetic_origin(
@@ -1016,6 +1068,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Emit a diagnostic.
     ///
+
     /// Audit-2.3: lock-free push onto `diagnostics_queue`. Concurrent
     /// emitters from parallel type-check / refinement / codegen passes
     /// don't block each other. The error flag uses an atomic for the
@@ -1032,6 +1085,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Emit multiple diagnostics (batched for efficiency).
     ///
+
     /// SegQueue has no batch-push API, so the loop is just N atomic
     /// pushes — still lock-free and faster than the prior write-lock
     /// roundtrip per diagnostic.
@@ -1150,12 +1204,14 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Phase-result reducer for the `continue_on_error` semantics.
     ///
+
     /// Pipeline phases historically used `phase.do_thing()?;` —
     /// every phase short-circuits on the first hard error. That
     /// model fails IDE / LSP / CI workflows that want ALL
     /// diagnostics in one pass: a single missing semicolon hides
     /// every subsequent type error.
     ///
+
     /// This helper lets the pipeline opt into accumulation: when
     /// `CompilerOptions.continue_on_error` is true and a phase
     /// returns `Err`, the error is converted into a Severity::Error
@@ -1164,10 +1220,12 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     /// accumulated diagnostics surface at `abort_if_errors()` at
     /// the end of the pipeline.
     ///
+
     /// When `continue_on_error` is false (the default), this
     /// function is a no-op pass-through — `result` is returned
     /// verbatim, preserving the current short-circuit behaviour.
     ///
+
     /// Closes the inert-defense pattern at session.rs:659 — pre-fix
     /// `continue_on_error` landed on the session but no production
     /// code path consulted it.
@@ -1227,8 +1285,10 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Create a module loader for the session.
     ///
+
     /// Uses the input directory (or file's parent) as the root path for module resolution.
     ///
+
     /// Module loader initialized from session root path for file-to-module mapping.
     pub fn create_module_loader(&self) -> ModuleLoader {
         // When input is a directory, use it directly as the root
@@ -1269,6 +1329,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get access to the module registry.
     ///
+
     /// Module registry: stores module exports for cross-file name resolution.
     pub fn module_registry(&self) -> Shared<RwLock<ModuleRegistry>> {
         self.module_registry.clone()
@@ -1276,6 +1337,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Register a module in the module registry.
     ///
+
     /// Module registry: stores module exports for cross-file name resolution.
     pub fn register_module(&self, module_info: verum_modules::ModuleInfo) -> ModuleId {
         self.module_registry.write().register(module_info)
@@ -1283,6 +1345,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get a module by ID from the registry.
     ///
+
     /// Module registry: stores module exports for cross-file name resolution.
     pub fn get_module_by_id(&self, id: ModuleId) -> Option<Shared<verum_modules::ModuleInfo>> {
         self.module_registry.read().get(id).into()
@@ -1290,6 +1353,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get a module by path from the registry.
     ///
+
     /// Module registry: stores module exports for cross-file name resolution.
     pub fn get_module_by_path(&self, path: &str) -> Option<Shared<verum_modules::ModuleInfo>> {
         self.module_registry.read().get_by_path(path).into()
@@ -1297,8 +1361,10 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Discover all .vr files in a directory tree.
     ///
+
     /// This enables multi-file project compilation.
     ///
+
     /// Module loader initialized from session root path for file-to-module mapping.
     pub fn discover_project_files(&self) -> Result<List<PathBuf>> {
         // When input is a directory (like 'src/'), search inside it directly
@@ -1369,27 +1435,36 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Convert AST Span (byte offsets) to Diagnostic Span (line/column).
     ///
+
     /// This method performs efficient conversion using the cached line start
     /// information in SourceFile. If the source file is not found, it returns
     /// a placeholder span to ensure diagnostics can still be displayed.
     ///
+
     /// # Performance
     ///
+
     /// - O(log n) lookup via binary search on line starts
     /// - < 1ms per conversion (typically ~100ns)
     /// - No allocations for cache hits
     ///
+
     /// # Arguments
     ///
+
     /// * `ast_span` - The byte-offset span from AST
     ///
+
     /// # Returns
     ///
+
     /// A LineColSpan with 1-indexed line/column numbers for diagnostic display.
     /// Returns placeholder "<unknown>:1:1" if source file not found.
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// let file_id = session.load_file(Path::new("test.vr"))?;
     /// let ast_span = Span::new(0, 10, file_id);
@@ -1442,11 +1517,14 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Record a compilation phase execution with timing and memory info
     ///
+
     /// This method is used to track performance of individual compilation phases
     /// for profiling and optimization purposes.
     ///
+
     /// # Arguments
     ///
+
     /// * `phase_name` - Name of the phase (e.g., "Lexing", "Parsing", "Type Checking")
     /// * `duration` - Time taken to execute the phase
     /// * `memory_allocated` - Memory allocated during this phase (in bytes)
@@ -1473,6 +1551,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Record module compilation metrics
     ///
+
     /// Tracks individual module compilation for identifying slow modules.
     pub fn record_module_metrics(
         &self,
@@ -1492,11 +1571,13 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Finalize metrics and get the complete profiling report
     ///
+
     /// This should be called at the end of compilation to:
     /// - Calculate percentages
     /// - Detect bottlenecks
     /// - Generate summary statistics
     ///
+
     /// Returns a cloned copy of the finalized metrics report.
     pub fn finalize_metrics(&self) -> CompilationProfileReport {
         let mut metrics = self.metrics.write();
@@ -1507,6 +1588,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get current (unfinalized) metrics
     ///
+
     /// Returns a snapshot of the current metrics without finalization.
     /// Useful for progress reporting during long compilations.
     pub fn current_metrics(&self) -> CompilationProfileReport {
@@ -1515,6 +1597,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get phase-specific metrics for populating BuildMetrics
     ///
+
     /// Returns durations for common phases (parse, typecheck, codegen, etc.)
     /// for backward compatibility with CLI's BuildMetrics struct.
     pub fn get_build_metrics(&self) -> BuildMetrics {
@@ -1565,14 +1648,18 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Store tier analysis result in the session cache.
     ///
+
     /// Called by the tier analysis phase to cache tier decisions for later
     /// use by the codegen phase.
     ///
+
     /// # Arguments
     ///
+
     /// * `function_id` - Unique identifier for the function
     /// * `result` - The analysis result containing tier decisions for all references
     ///
+
     /// CBGR analysis results from escape analysis (tier promotion decisions).
     pub fn cache_tier_analysis(&self, function_id: FunctionId, result: TierAnalysisResult) {
         self.tier_analysis_cache.write().insert(function_id, result);
@@ -1580,14 +1667,19 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get cached tier analysis result for a function.
     ///
+
     /// Called by the codegen phase to retrieve tier decisions for references.
     ///
+
     /// # Arguments
     ///
+
     /// * `function_id` - Unique identifier for the function
     ///
+
     /// # Returns
     ///
+
     /// The cached analysis result if available, None otherwise.
     pub fn get_tier_analysis(&self, function_id: FunctionId) -> Option<TierAnalysisResult> {
         self.tier_analysis_cache.read().get(&function_id).cloned()
@@ -1600,6 +1692,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Merge tier statistics from another analysis.
     ///
+
     /// Called after analyzing functions to accumulate statistics across
     /// all functions in the compilation unit.
     pub fn merge_tier_statistics(&self, stats: &TierStatistics) {
@@ -1613,6 +1706,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get all cached tier analysis results.
     ///
+
     /// Returns a cloned map of all function analysis results. Useful for
     /// bulk codegen operations.
     pub fn all_tier_analyses(&self) -> Map<FunctionId, TierAnalysisResult> {
@@ -1621,6 +1715,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Clear the tier analysis cache.
     ///
+
     /// Useful for incremental compilation when functions are recompiled.
     pub fn clear_tier_cache(&self) {
         self.tier_analysis_cache.write().clear();
@@ -1852,7 +1947,7 @@ mod synthetic_source_tests {
     fn load_synthetic_source_records_origin() {
         // Pin: load_synthetic_source registers a SourceFile whose
         // synthetic_origin field carries the parent FileId, the
-        // call-site span, and the SyntheticKind.  The session-side
+        // call-site span, and the SyntheticKind. The session-side
         // synthetic_origin(file_id) helper retrieves it.
         let session = Session::new(CompilerOptions::default());
 
@@ -1880,7 +1975,7 @@ mod synthetic_source_tests {
     #[test]
     fn user_source_files_have_no_synthetic_origin() {
         // Pin: load_source_string creates user-source files with
-        // synthetic_origin = None.  This is the resolve_to_user_
+        // synthetic_origin = None. This is the resolve_to_user_
         // source termination signal.
         let session = Session::new(CompilerOptions::default());
         let user_id = session
@@ -1892,7 +1987,7 @@ mod synthetic_source_tests {
     #[test]
     fn unknown_file_id_returns_none() {
         // Pin: defence — looking up an unregistered FileId returns
-        // None.  The resolver treats None as "stop walking" so
+        // None. The resolver treats None as "stop walking" so
         // gracefully terminates on out-of-band IDs.
         let session = Session::new(CompilerOptions::default());
         let bogus = FileId::new(99_999);
@@ -1903,7 +1998,7 @@ mod synthetic_source_tests {
     fn resolve_to_user_source_walks_session_origin_chain() {
         // Pin: end-to-end integration of the source-map plumbing —
         // a synthetic-FileId span resolves through the session's
-        // origin lookup back to the user-source span.  This is the
+        // origin lookup back to the user-source span. This is the
         // load-bearing path that diagnostic renderers will adopt.
         let session = Session::new(CompilerOptions::default());
 
@@ -1948,7 +2043,7 @@ mod synthetic_source_tests {
     #[test]
     fn synthetic_file_id_is_distinct_from_parent() {
         // Pin: the allocator gives each synthetic file a fresh ID
-        // disjoint from its parent.  Sharing the FileId would defeat
+        // disjoint from its parent. Sharing the FileId would defeat
         // the parent-chain walk (resolve would loop or short-circuit
         // immediately).
         let session = Session::new(CompilerOptions::default());

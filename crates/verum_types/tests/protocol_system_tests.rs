@@ -14,8 +14,10 @@
 )]
 // Comprehensive Protocol System Tests
 //
+
 // Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Complete Protocol System
 //
+
 // Tests cover:
 // - Protocol inheritance (superprotocols)
 // - Method resolution with default implementations

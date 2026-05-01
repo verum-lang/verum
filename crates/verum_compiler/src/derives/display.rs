@@ -1,28 +1,35 @@
 //! Display derive macro implementation
 //!
+
 //! Generates `implement Display for Type { fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> }`
 //!
+
 //! The Display implementation generates human-readable output suitable for end-users.
 //! For error types, consider using @derive(Error) which auto-generates Display.
 //!
+
 //! # Attribute Support
 //!
+
 //! - `@display("custom format {field}")` - Custom display message for variants
 //! - Default behavior: shows variant/type name with field values
 //!
+
 //! # Example
 //!
+
 //! ```verum
 //! @derive(Display)
 //! type Status is
-//!     | @display("Pending approval")
-//!       Pending
-//!     | @display("Completed at {timestamp}")
-//!       Completed { timestamp: DateTime }
-//!     | @display("Error: {reason}")
-//!       Failed { reason: Text };
+//!  | @display("Pending approval")
+//!  Pending
+//!  | @display("Completed at {timestamp}")
+//!  Completed { timestamp: DateTime }
+//!  | @display("Error: {reason}")
+//!  Failed { reason: Text };
 //! ```
 //!
+
 //! Generates human-readable text representation. For record types: shows type name
 //! and field values. For sum types: matches each variant with optional @display("...")
 //! attribute for custom formatting. Generated code is fully inspectable via
@@ -96,6 +103,7 @@ impl DeriveDisplay {
 
     /// Generate fmt body for struct types
     ///
+
     /// Generates: write!(f, "TypeName {{ field: {}, ... }}", self.field, ...)
     fn generate_struct_fmt(
         &self,
@@ -216,6 +224,7 @@ impl DeriveDisplay {
 
     /// Generate fmt body for newtype
     ///
+
     /// Just delegates to the inner type's Display implementation
     fn generate_newtype_fmt(
         &self,
@@ -262,6 +271,7 @@ impl DeriveDisplay {
 
     /// Generate fmt body for enum types
     ///
+
     /// Generates match expression with custom @display formats if present
     fn generate_enum_fmt(&self, ctx: &DeriveContext, span: Span) -> DeriveResult<Block> {
         let type_info = &ctx.type_info;
@@ -465,6 +475,7 @@ impl DeriveDisplay {
 
     /// Generate a format string body for interpolated display messages
     ///
+
     /// For templates like "Error: {reason}", generates code that writes the interpolated string
     fn generate_format_string_body(
         &self,

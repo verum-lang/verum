@@ -1,5 +1,6 @@
 //! VBC instruction → LLVM IR lowering.
 //!
+
 //! This module handles the translation of individual VBC instructions
 //! to their LLVM IR equivalents.
 
@@ -99,17 +100,20 @@ fn checked_malloc_instr<'ctx>(
 
 /// Get or declare a libc-free `strtol(nptr, endptr, base) -> i64` wrapper.
 ///
+
 /// **Libc-free**: open-coded base-10 integer parser emitted as
-/// `verum_internal_strtol` (internal-linkage).  Skips leading
+/// `verum_internal_strtol` (internal-linkage). Skips leading
 /// whitespace, accepts optional `+`/`-`, accumulates digits, stops
-/// at first non-digit.  Caller passes base=10 for the typical
+/// at first non-digit. Caller passes base=10 for the typical
 /// Verum `parse_int` path; non-10 bases fall through to base-10
 /// (typical caller convention).
 ///
+
 /// Signature matches libc: `(ptr nptr, ptr endptr_unused, i32 base) -> i64`.
 /// `endptr` is ignored by the wrapper since callers consistently
 /// pass NULL for it.
 ///
+
 /// See `docs/architecture/no-libc-architecture.md`.
 fn get_or_declare_internal_strtol<'ctx>(
     llvm_ctx: &'ctx verum_llvm::context::Context,
@@ -149,7 +153,7 @@ fn get_or_declare_internal_strtol<'ctx>(
     builder.build_unconditional_branch(skip_ws).expect("skip_ws br");
 
     // skip_ws: PHI(i_phi); load nptr[i]; if c is space (' '/'\t'/'\n'),
-    //   advance.  otherwise → after_ws.
+    //  advance. otherwise → after_ws.
     builder.position_at_end(skip_ws);
     let ws_i_phi = builder
         .build_phi(i64_type, "ws_i")
@@ -312,13 +316,15 @@ fn get_or_declare_internal_strtol<'ctx>(
 
 /// Get or declare a libc-free `puts(s) -> i32` wrapper.
 ///
+
 /// **Libc-free**: emits an internal-linkage wrapper that calls
 /// `verum_internal_strlen` + `verum_internal_write` (both already
-/// libc-free — see runtime.rs).  The wrapper writes the string to
+/// libc-free — see runtime.rs). The wrapper writes the string to
 /// stdout (fd=1) plus a trailing newline, matching libc puts's
-/// observable behaviour.  Returns 0 on success (non-negative;
+/// observable behaviour. Returns 0 on success (non-negative;
 /// matches libc puts's return-value contract).
 ///
+
 /// See `docs/architecture/no-libc-architecture.md`.
 fn get_or_declare_internal_puts<'ctx>(
     llvm_ctx: &'ctx verum_llvm::context::Context,
@@ -400,10 +406,11 @@ fn get_or_declare_internal_puts<'ctx>(
 
 /// Get or declare a libc-free `strcmp(a, b) -> i32` wrapper.
 ///
+
 /// **Libc-free**: emits an internal-linkage byte-by-byte
 /// comparison loop instead of declaring `extern "C" fn strcmp`.
 /// LLVM's optimiser inlines the body at -O2+ so the wrapper has
-/// zero runtime cost.  See `docs/architecture/no-libc-architecture.md`.
+/// zero runtime cost. See `docs/architecture/no-libc-architecture.md`.
 fn get_or_declare_internal_strcmp<'ctx>(
     llvm_ctx: &'ctx verum_llvm::context::Context,
     module: &Module<'ctx>,
@@ -599,6 +606,7 @@ fn as_i64<'ctx>(
 /// Emit a call to verum_text_free(text_obj) to free an owned Text object.
 /// Frees both the character buffer and the 24-byte header.
 ///
+
 /// Uses a single call to an outlined helper function rather than inlining
 /// 4 basic blocks per free. This prevents block explosion when many owned
 /// text registers are freed at function exit (Ret/RetV).
@@ -625,6 +633,7 @@ fn emit_text_free<'ctx>(
 
 /// Resolve an LLVM function by name, handling stdlib/user name collisions.
 ///
+
 /// When a compiled stdlib function and a user function share a name but
 /// have different arities, `declare_functions` renames the colliding one
 /// to `func_name__arityN`. This function first tries the primary name,
@@ -1348,6 +1357,7 @@ pub fn lower_instruction<'ctx>(
             // Free all owned text registers except the one being returned
             // — and except any register that ALIASES the return register.
             //
+
             // Aliasing happens naturally in VBC: when the source returns a
             // heap-Text from one if/else/match branch and a static literal
             // from another, the merge point MOV-chains the value through
@@ -1970,7 +1980,7 @@ pub fn lower_instruction<'ctx>(
 
         Instruction::MapGet { dst, map, key } => {
             // Route through compiled Map.get (from map.vr).
-            // Map.get(&self, key: K) -> V  (returns 0 if not found)
+            // Map.get(&self, key: K) -> V (returns 0 if not found)
             let map_val = as_i64(ctx, ctx.get_register(map.0)?, "map_val")?;
             let key_val = as_i64(ctx, ctx.get_register(key.0)?, "key_val")?;
             let i64_type = ctx.types().i64_type();
@@ -2156,30 +2166,34 @@ pub fn lower_instruction<'ctx>(
 
         // #146 Phase 3d — typed variant construction.
         //
+
         // Release builds (AOT): lowers to byte-identical IR as
-        // legacy `MakeVariant`.  The `type_id` operand is consumed
+        // legacy `MakeVariant`. The `type_id` operand is consumed
         // and discarded — Phase 3a/3b/3c have already proved the
         // (type_id, tag, field_count) tuple consistent at codegen
         // time, so the LLVM-side layout check would be redundant
-        // and pure overhead.  This is the documented zero-cost
+        // and pure overhead. This is the documented zero-cost
         // contract: typed-variant emission costs the same as the
         // legacy form in release.
         //
+
         // Debug + release builds (#272): validate the (type_id, tag,
         // field_count) tuple at codegen time via
         // `verum_vbc::validate::validate_variant_layout`.
         //
+
         // Validating at codegen (rather than runtime) is correct
         // architecturally: every operand of MakeVariantTyped is a
         // compile-time constant, so the check is doable without
-        // runtime reflection.  Tier 0 (interpreter) validates at
+        // runtime reflection. Tier 0 (interpreter) validates at
         // dispatch time in `validate_make_variant_typed`; Tier 1
         // (AOT) validates here so layout-mismatched bytecode is
         // caught at the same point in both tiers.
         //
+
         // Builtin-range type ids (`is_builtin()`) bypass the check
         // — they're scalar primitives that don't carry a `variants`
-        // list.  Mismatched tuples for user types fail loud with
+        // list. Mismatched tuples for user types fail loud with
         // a hard codegen error rather than emitting bug IR.
         Instruction::MakeVariantTyped { dst, type_id, tag, field_count } => {
             if let Some(vbc_mod) = ctx.vbc_module() {
@@ -2211,10 +2225,11 @@ pub fn lower_instruction<'ctx>(
 
         // ====================================================================
         // Dependent-type runtime packaging (T1-H, FIPS-equivalent in spirit):
-        //   MakePi (0x8D) — Π function value: {param, return_type_id}
-        //   MakeSigma (0x8E) — Σ pair: {witness, payload}
-        //   MakeWitness (0x8F) — refined value with proof hash: {value, proof_hash}
+        //  MakePi (0x8D) — Π function value: {param, return_type_id}
+        //  MakeSigma (0x8E) — Σ pair: {witness, payload}
+        //  MakeWitness (0x8F) — refined value with proof hash: {value, proof_hash}
         //
+
         // All three share the variant-shaped 2-slot payload layout
         // (OBJECT_HEADER_SIZE + 8-byte tag/len word + 2 × 8-byte slots),
         // so the same `lower_make_variant(tag=0, field_count=2)` carrier
@@ -2227,6 +2242,7 @@ pub fn lower_instruction<'ctx>(
         // `PiProj` / `SigmaFst` / `SigmaSnd` opcode lands, that opcode
         // can introspect the TypeId via the runtime.)
         //
+
         // Optimisation note: the spec allows Tier-1 to elide
         // MakeWitness once the static verifier discharged the predicate
         // — the materialisation here exists so subsequent
@@ -3217,12 +3233,14 @@ pub fn lower_instruction<'ctx>(
         Instruction::DropRef { src } => {
             // DropRef: release a CBGR reference (bump generation, decrement refcount).
             //
+
             // IMPORTANT: Only call verum_cbgr_ref_release on actual CBGR reference
             // structs (ThinRef/FatRef), NOT on plain heap pointers from New/malloc.
             // Plain heap pointers don't have the AllocationHeader that CBGR expects
             // before the pointer — calling get_header() on them reads/writes before
             // the allocation, corrupting heap metadata.
             //
+
             // In register mode (no alloca), record objects are PointerValues from
             // malloc. In alloca mode, they're stored as i64 (IntValue). Only CBGR
             // reference StructValues should be released.
@@ -3676,6 +3694,7 @@ pub fn lower_instruction<'ctx>(
         // ====================================================================
         // CubicalExtended: cubical-type-theory primitives (CCHM rules).
         //
+
         // The runtime semantics live in `verum_cubical` (a thin C-ABI
         // shim around `verum_types::cubical`). At AOT we emit a direct
         // call into the appropriate `verum_cubical_<op>` extern; the
@@ -4162,23 +4181,27 @@ pub fn lower_instruction<'ctx>(
         Instruction::SyscallLinux { dst, num, a1, a2, a3, a4, a5, a6 } => {
             // Emit raw Linux syscall via inline assembly.
             //
+
             // Per-architecture register conventions:
             //
-            //   * **x86_64**: `syscall` instruction
-            //     - syscall number in `rax`
-            //     - args 1-6 in `rdi, rsi, rdx, r10, r8, r9`
-            //     - return in `rax`
-            //     - clobbered: `rcx, r11` (kernel uses for return address /
-            //       eflags shadow), `memory`
+
+            //  * **x86_64**: `syscall` instruction
+            //  - syscall number in `rax`
+            //  - args 1-6 in `rdi, rsi, rdx, r10, r8, r9`
+            //  - return in `rax`
+            //  - clobbered: `rcx, r11` (kernel uses for return address /
+            //  eflags shadow), `memory`
             //
-            //   * **aarch64**: `svc #0` instruction (Linux trap-on-svc-0)
-            //     - syscall number in `x8`
-            //     - args 1-6 in `x0, x1, x2, x3, x4, x5`
-            //     - return in `x0`
-            //     - clobbered: `memory` (kernel may scribble caller-save
-            //       registers; LLVM marks x0-x18 as caller-save by default
-            //       so no explicit clobber needed)
+
+            //  * **aarch64**: `svc #0` instruction (Linux trap-on-svc-0)
+            //  - syscall number in `x8`
+            //  - args 1-6 in `x0, x1, x2, x3, x4, x5`
+            //  - return in `x0`
+            //  - clobbered: `memory` (kernel may scribble caller-save
+            //  registers; LLVM marks x0-x18 as caller-save by default
+            //  so no explicit clobber needed)
             //
+
             // Both forms are libc-free — no glibc syscall wrapper involved.
             // The compiler emits the trap instruction directly into the
             // user code, the kernel handles the trap, and control returns
@@ -4200,9 +4223,9 @@ pub fn lower_instruction<'ctx>(
             let (asm_str, constraints) = (
                 "svc #0",
                 // Inkwell/LLVM ARM64 register names: x0-x7 for args/return,
-                // x8 for syscall number.  Output `={x0}` binds the call's
-                // return value to x0.  Inputs in declaration order map to
-                // num→x8, a1→x0, a2→x1, …, a6→x5.  `~{memory}` mirrors the
+                // x8 for syscall number. Output `={x0}` binds the call's
+                // return value to x0. Inputs in declaration order map to
+                // num→x8, a1→x0, a2→x1, …, a6→x5. `~{memory}` mirrors the
                 // x86_64 form — kernel may write to user memory pointed
                 // to by syscall args (read/write/getsockname/etc.), so
                 // LLVM must not reorder loads/stores across the syscall.
@@ -4210,8 +4233,8 @@ pub fn lower_instruction<'ctx>(
             );
 
             // Fallback for other architectures (32-bit ARM, RISC-V, …):
-            // emit a stub that returns -ENOSYS = -38.  Linker will not
-            // fail; runtime callers see a clean errno.  Production
+            // emit a stub that returns -ENOSYS = -38. Linker will not
+            // fail; runtime callers see a clean errno. Production
             // builds for those targets need their own platform-specific
             // arm via @cfg in the calling Verum-side syscall wrapper.
             #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -4810,6 +4833,7 @@ pub fn lower_instruction<'ctx>(
         // pairs pointing at a stack-allocated i64 array. The runtime
         // returns an i64 tensor handle (or 0 on error).
         //
+
         // Optimisation hooks: each call site is annotated with the
         // operation name via the LLVM call-site metadata so the
         // optimiser can recognise tensor-handle-producing calls and
@@ -6259,6 +6283,7 @@ pub fn lower_instruction<'ctx>(
         // ====================================================================
         // Permission gates (SCRIPT-5 — AOT enforcement)
         //
+
         // The Tier-0 interpreter routes `PermissionAssert` through a
         // runtime `PermissionRouter`. The Tier-1 path bakes the same
         // policy directly into the IR via `lower_permission_assert`.
@@ -6296,26 +6321,29 @@ pub fn lower_instruction<'ctx>(
 
 /// Lower a `PermissionAssert { scope_tag, target_id }` to LLVM IR.
 ///
+
 /// Three paths, all driven by the compile-time-known policy on the
 /// `FunctionContext`:
 ///
+
 /// * **No policy installed** → trusted-application AOT run. Emit
-///   nothing; the assert is a no-op at runtime, matching the
-///   interpreter's allow-all default behaviour when no script
-///   policy is wired.
+///  nothing; the assert is a no-op at runtime, matching the
+///  interpreter's allow-all default behaviour when no script
+///  policy is wired.
 /// * **Policy unconditionally allows this scope** (always-allow set
-///   or wildcard grant) → emit nothing. The script declared this
-///   scope open; LLVM sees zero overhead at the call site.
+///  or wildcard grant) → emit nothing. The script declared this
+///  scope open; LLVM sees zero overhead at the call site.
 /// * **Policy fully denies this scope** (no grants of any shape) →
-///   emit unconditional panic with code 143. LLVM treats every
-///   following instruction as unreachable, so the gated intrinsic
-///   body is removed entirely by DCE.
+///  emit unconditional panic with code 143. LLVM treats every
+///  following instruction as unreachable, so the gated intrinsic
+///  body is removed entirely by DCE.
 /// * **Policy lists specific targets** → emit a `switch` on the
-///   target_id register. Listed values fall through to the success
-///   path; the default case panics. LLVM lowers a small switch to
-///   compact branch-on-equal sequences and folds the constants
-///   aggressively.
+///  target_id register. Listed values fall through to the success
+///  path; the default case panics. LLVM lowers a small switch to
+///  compact branch-on-equal sequences and folds the constants
+///  aggressively.
 ///
+
 /// The panic path is inlined per call site rather than routed
 /// through a runtime helper. Inlining keeps the policy sealed in
 /// the binary (no function symbol an attacker could intercept) and
@@ -6398,6 +6426,7 @@ fn lower_permission_assert<'ctx>(
 /// exact code to distinguish capability violations from logic
 /// panics (which exit 1 via `Assert` / `Panic`).
 ///
+
 /// Builder cursor is left after a terminating `unreachable` — the
 /// caller positions to a fresh block before continuing.
 fn emit_permission_panic<'ctx>(
@@ -6464,10 +6493,12 @@ fn scope_tag_name(tag: u8) -> &'static str {
 
 /// Lower ArithExtended instruction to LLVM IR.
 ///
+
 /// Handles checked, wrapping, saturating arithmetic, bit-counting, and
 /// other extended integer operations via LLVM intrinsics.
 /// Lower a CallM (method call) instruction to LLVM IR.
 ///
+
 /// This is the largest single instruction handler, covering:
 /// - Channel/Heap/Mutex constructor dispatch
 /// - Strategy 0: Inline LLVM IR for len/is_empty/capacity, text methods, sync primitives
@@ -6476,6 +6507,7 @@ fn scope_tag_name(tag: u8) -> &'static str {
 /// - Strategy 4: Direct LLVM function call
 /// Lower a Call (function call) instruction to LLVM IR.
 ///
+
 /// Handles direct function calls including:
 /// - Channel.new constructor dispatch
 /// - Compiled stdlib function calls (with func_id_base offset)
@@ -6554,7 +6586,7 @@ if func_name == "__process_spawn_raw"
     match func_name {
         "__process_spawn_raw" => {
             // __process_spawn_raw(program: Text, args_list: Int,
-            //     capture_stdout: Int, capture_stderr: Int) -> Int
+            //  capture_stdout: Int, capture_stderr: Int) -> Int
             // Returns: pointer to [pid, stdout_fd, stderr_fd] or 0 on error
             // Extract char* from Text program arg via verum_text_get_ptr
             let text_get_ptr_fn = module.get_function("verum_text_get_ptr").unwrap_or_else(|| {
@@ -7753,6 +7785,7 @@ if func_name == "__file_read_to_string_raw"
             // intrinsic call may pass fewer args than the canonical
             // signature — pad with defaults for missing trailing args.
             //
+
             // Param types must ALSO match the runtime helper canonical
             // form (some take pointer args for hosts, others take i64
             // for fd / port). Previously this site declared every
@@ -7763,6 +7796,7 @@ if func_name == "__file_read_to_string_raw"
             // args (host strings) get ptr_type slots; everything else
             // is i64.
             //
+
             // 'P' = pointer (host string), 'I' = i64 (fd, port, len, ...).
             // The string encodes the canonical parameter shape.
             let (c_name, canonical_shape, default_padding): (&str, &str, &[i64]) = match func_name {
@@ -8457,7 +8491,7 @@ if func_name == "file_open"
         }
 
         "file_read" => {
-            // file_read(path: Text) -> Text  (high-level path-based)
+            // file_read(path: Text) -> Text (high-level path-based)
             // Also supports: file_read(fd: Int, max_len: Int) -> Text (fd-based, legacy)
             if args.count <= 1 {
                 // Path-based: route to file_read_all
@@ -8782,6 +8816,7 @@ if func_name == "file_open"
         "tcp_listen_v2" => {
             // tcp_listen_v2(host: Text, port: Int, backlog: Int, flags: Int) -> Int
             //
+
             // Map @intrinsic("tcp_listen_v2") → verum_tcp_listen_v2 runtime
             // helper, the impeccable-architecture replacement for the older
             // arity-2 verum_tcp_listen. The body is emitted by
@@ -8851,7 +8886,7 @@ if func_name == "file_open"
         }
 
         "tcp_recv" => {
-            // tcp_recv(fd: Int) -> Text  (or tcp_recv(fd, max_len))
+            // tcp_recv(fd: Int) -> Text (or tcp_recv(fd, max_len))
             let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tr_fd")?;
             let max_len = if args.count > 1 {
                 as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tr_max")?
@@ -8933,7 +8968,7 @@ if func_name == "file_open"
         }
 
         "udp_recv" => {
-            // udp_recv(fd: Int) -> Text  (or udp_recv(fd, max_len))
+            // udp_recv(fd: Int) -> Text (or udp_recv(fd, max_len))
             let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "ur_fd")?;
             let max_len = if args.count > 1 {
                 as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "ur_max")?
@@ -9245,6 +9280,7 @@ if let Some(ret_val) = call_site.try_as_basic_value().basic() {
     // compiled stdlib types, so mark_register_from_return_type misses
     // them. Detect from function name prefix as fallback.
     //
+
     // Only apply when the return type is actually the container itself.
     // Methods like `Set.iter -> SetIter<T>` or `List.to_set -> Set<T>` have
     // a DIFFERENT nominal return type already tracked by
@@ -9732,9 +9768,9 @@ if resolved_func_name.is_none() {
 // Strategy 0: List method interceptions that bypass compiled list.vr.
 // These use inline LLVM IR or LLVM IR helper functions (no C runtime).
 // (A) In-place mutation via LLVM IR helpers (define_list_ir_helpers):
-//     push, insert, remove, reverse, swap, extend, sort, clone
+//  push, insert, remove, reverse, swap, extend, sort, clone
 // (B) Protocol dependency (inline LLVM IR loops):
-//     contains (needs Eq), index_of (needs Eq)
+//  contains (needs Eq), index_of (needs Eq)
 // (C) Text-specific: join (uses verum_string_join C stub)
 // (D) Simple inline: first, last, clear
 // pop goes through compiled list.vr (returns Maybe<T> properly).
@@ -10283,11 +10319,12 @@ if is_list_method {
 // types match text.vr declarations. Methods returning Maybe/Result
 // in text.vr but expected as raw values by user code use C stubs.
 //
+
 // Internal stdlib calls are detected two ways:
 // 1. VBC resolved the method with a type prefix (e.g., "Text.find")
 // 2. The calling function is itself a compiled Text method (e.g.,
-//    Text.replace calling .find() on a slice result — VBC can't
-//    type-prefix chained calls on intermediate values)
+//  Text.replace calling .find() on a slice result — VBC can't
+//  type-prefix chained calls on intermediate values)
 let caller_is_text_method = ctx.function_name().as_str().starts_with("Text.");
 // Internal stdlib call: caller is a compiled text.vr method AND
 // receiver is known to be Text (via type prefix or register tracking).
@@ -10330,6 +10367,7 @@ let method_type_prefix: Option<&str> = {
 // ============================================================
 // Unified receiver type resolution via RegisterTypeMap.
 //
+
 // Phase 1: Compute receiver_type from RegisterTypeMap, falling back
 // to method_type_prefix or legacy is_*_register() checks. This
 // provides a single canonical type for the receiver that replaces
@@ -10347,6 +10385,7 @@ let receiver_type_name: Option<&str> = {
 // ============================================================
 // Declarative dispatch table lookup.
 //
+
 // Phase 1: Look up the dispatch target from the MethodDispatchTable.
 // If a match is found, we know exactly where this method call should
 // go (CRuntime, InlineLlvm, Compiled, etc.) without needing the
@@ -10538,7 +10577,7 @@ if matches!(bare_method_early, "len" | "is_empty" | "capacity") {
 // ============================================================
 // Strategy 0a: AtomicInt / AtomicBool method intercepts.
 // Compiled atomic.vr uses `&self.value` which produces a stack
-// copy pointer instead of the struct field address.  Intercept
+// copy pointer instead of the struct field address. Intercept
 // all methods and emit LLVM atomic instructions directly.
 // ============================================================
 let is_atomic_by_prefix = matches!(method_type_prefix, Some("AtomicInt") | Some("AtomicBool"));
@@ -11767,6 +11806,7 @@ if !skip_compiled_lookup && let Some(func_desc) = vbc_mod.get_function(FunctionI
                             // (cross-module: also accept the trailing
                             // segment of a fully-qualified module path).
                             //
+
                             // Pre-fix the catch-all `map_or(true, ...)`
                             // returned true when the receiver type was
                             // None, allowing wrong-type matches under
@@ -11779,7 +11819,7 @@ if !skip_compiled_lookup && let Some(func_desc) = vbc_mod.get_function(FunctionI
                             true
                         } else {
                             // Receiver type unknown AND VBC didn't pre-
-                            // resolve.  Allow ONLY when no other
+                            // resolve. Allow ONLY when no other
                             // type-prefixed function shares the same
                             // suffix — i.e., dispatch is unambiguous.
                             // Multiple candidates → reject and fall
@@ -11915,11 +11955,11 @@ if !skip_compiled_lookup && resolved_func_name.is_none() && !method_name_str.is_
                         false
                     } else if let Some(t) = receiver_type_name.as_deref() {
                         // Receiver type IS tracked: only allow exact match
-                        // against the function's type prefix.  Pre-fix the
+                        // against the function's type prefix. Pre-fix the
                         // catch-all `map_or(true, ...)` returned true when
                         // `receiver_type_name` was None, which silently
                         // allowed `Text.to_socket_addrs` to match a
-                        // `SocketAddr` receiver — see #27.  With the
+                        // `SocketAddr` receiver — see #27. With the
                         // explicit Some(t) branch the receiver type drives
                         // a strict equality check.
                         vbc_resolved || t == func_type_prefix
@@ -11932,18 +11972,19 @@ if !skip_compiled_lookup && resolved_func_name.is_none() && !method_name_str.is_
                         true
                     } else if has_no_tracking {
                         // Receiver type fully unknown AND VBC didn't
-                        // pre-resolve.  Pre-fix this allowed any
+                        // pre-resolve. Pre-fix this allowed any
                         // suffix match through, which is wrong when
                         // multiple types implement the same method
                         // (e.g., the `Text.to_socket_addrs` /
                         // `SocketAddr.to_socket_addrs` /
                         // `(&Text,Int).to_socket_addrs` triplet for
-                        // the `ToSocketAddrs` protocol).  See #27.
+                        // the `ToSocketAddrs` protocol). See #27.
                         //
+
                         // Allow ONLY when the function is unique for
                         // its bare method name in the VBC module —
                         // i.e., no other type-prefixed function has
-                        // the same suffix.  When multiple candidates
+                        // the same suffix. When multiple candidates
                         // exist, reject and fall through to Strategy
                         // 3 / runtime dispatch (which can read the
                         // receiver's heap-header type_id at runtime).
@@ -11967,7 +12008,7 @@ if !skip_compiled_lookup && resolved_func_name.is_none() && !method_name_str.is_
                         // Receiver tracking exists but doesn't match
                         // any of the well-known cases above (e.g., a
                         // Channel-marked receiver hitting a
-                        // SomeUserType.method candidate).  Reject —
+                        // SomeUserType.method candidate). Reject —
                         // the caller has type info that doesn't match.
                         false
                     }
@@ -12207,6 +12248,7 @@ if resolved_func_name.is_none() && (ctx.is_text_register(receiver.0) || ctx.is_s
         // to_int, repeat, pad_left, pad_right: ALL REMOVED —
         // compiled text.vr via Strategy 1/2.
         //
+
         // len: MUST be intercepted inline — compiled Text.len reads from
         // VBC object header offset 32, but verum_text_alloc creates flat
         // {ptr, len, cap} at offsets 0, 8, 16.
@@ -12744,9 +12786,9 @@ let llvm_fn = ctx.get_module().get_function(&func_name).or_missing_fn(&func_name
 
 // Build argument list, handling static vs instance methods:
 // - Instance method: LLVM fn expects (self, arg0, arg1, ...)
-//   → pass [receiver, args...]
+//  → pass [receiver, args...]
 // - Static method: LLVM fn expects (arg0, arg1, ...)
-//   → skip receiver, pass [args...] only
+//  → skip receiver, pass [args...] only
 let mut receiver_val = ctx.get_register(receiver.0)?;
 let param_count = llvm_fn.count_params() as usize;
 let param_types = llvm_fn.get_type().get_param_types();
@@ -12895,6 +12937,7 @@ if let Some(ret_val) = call_site.try_as_basic_value().basic() {
         // VBC may assign non-semantic TypeIds to compiled stdlib
         // types, so mark_register_from_return_type misses them.
         //
+
         // IMPORTANT: only apply this fallback when the return type is
         // actually the container itself (e.g. `Set.clone -> Set<T>`).
         // Methods like `Set.iter -> SetIter<T>` or `Set.to_list -> List<T>`
@@ -13786,6 +13829,7 @@ fn lower_arith_extended<'ctx>(
 
 /// Lower MathExtended instruction to LLVM IR.
 ///
+
 /// Handles transcendental math functions (sin, cos, exp, log, sqrt, etc.)
 /// via LLVM intrinsics.
 fn lower_math_extended<'ctx>(
@@ -14119,7 +14163,7 @@ fn lower_text_extended<'ctx>(
 ) -> Result<()> {
     // Text operations call into the runtime
     // Sub-opcodes: ParseInt(0x10), ParseFloat(0x11), IntToText(0x20), FloatToText(0x21),
-    //              ByteLen(0x30), CharLen(0x31), IsEmpty(0x32)
+    //  ByteLen(0x30), CharLen(0x31), IsEmpty(0x32)
     match sub_op {
         0x10 => { // ParseInt
             if operands.len() < 3 { return Ok(()); }
@@ -15778,6 +15822,7 @@ fn lower_char_extended<'ctx>(
 
 /// Lower SimdExtended instruction to LLVM IR.
 ///
+
 /// Implements scalar fallback operations matching the interpreter behavior.
 /// These operate on f64 register values (NaN-boxed representation).
 /// When LLVM vector type information is available (via typed SIMD API),
@@ -16236,18 +16281,20 @@ fn lower_log_extended<'ctx>(
 
 /// Lower the generic `Opcode::Extended` (#167 Part A) instruction to LLVM IR.
 ///
+
 /// The Extended opcode carves a 256-entry secondary opcode space out of one
 /// byte (0x1F) of the primary opcode space; sub-ops here are first-class
 /// instructions that don't fit any pre-existing extension namespace
-/// (Math/Tensor/Cbgr/Ffi/...).  Currently defined sub-ops:
+/// (Math/Tensor/Cbgr/Ffi/...). Currently defined sub-ops:
 ///
-///   * `0x00` Reserved — forward-compat anchor; encoders MUST NOT emit;
-///     decoders accept it as a no-op.
-///   * `0x10` ProcessExit — first-class divergent termination
-///     primitive.  Operand is one register byte (1-2 bytes via the
-///     short/long reg-encoding) carrying the i64 exit code.  Lowers
-///     to `_exit(code)` + `unreachable` for byte-identical semantics
-///     with the Tier-0 dispatcher (`std::process::exit`).
+
+///  * `0x00` Reserved — forward-compat anchor; encoders MUST NOT emit;
+///  decoders accept it as a no-op.
+///  * `0x10` ProcessExit — first-class divergent termination
+///  primitive. Operand is one register byte (1-2 bytes via the
+///  short/long reg-encoding) carrying the i64 exit code. Lowers
+///  to `_exit(code)` + `unreachable` for byte-identical semantics
+///  with the Tier-0 dispatcher (`std::process::exit`).
 fn lower_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
@@ -16266,7 +16313,7 @@ fn lower_extended<'ctx>(
                     "ProcessExit: missing register operand",
                 ));
             }
-            // Decode the reg byte(s).  `operands[0]` is the short-form
+            // Decode the reg byte(s). `operands[0]` is the short-form
             // reg (one byte) when its top bit is clear; otherwise it's
             // the high-7 of a two-byte encoding.
             let reg_idx: u16 = if operands[0] & 0x80 == 0 {
@@ -16327,28 +16374,32 @@ fn lower_extended<'ctx>(
 
 /// Lower CubicalExtended (0xDE) instruction to LLVM IR.
 ///
+
 /// Routes the cubical-type-theory primitive to the corresponding
 /// `verum_cubical_<op>` runtime extern. The runtime is a thin C-ABI
 /// shim around `verum_types::cubical` that performs the CCHM
 /// reduction. Two ops are folded inline:
 ///
-///   * `IntervalI0` / `IntervalI1` — load the constant interval
-///     endpoint (0 / 1 stored as i64 sentinel — the runtime reads
-///     them with the same encoding).
-///   * `PathRefl(x)` — at AOT, refl is structurally just λi. x;
-///     a future optimisation pass can elide the runtime call when
-///     downstream consumers only `PathApp` it. For now we delegate
-///     to the runtime so the resulting Path carrier is well-formed
-///     for any consumer (including Transport/Hcomp folding).
+
+///  * `IntervalI0` / `IntervalI1` — load the constant interval
+///  endpoint (0 / 1 stored as i64 sentinel — the runtime reads
+///  them with the same encoding).
+///  * `PathRefl(x)` — at AOT, refl is structurally just λi. x;
+///  a future optimisation pass can elide the runtime call when
+///  downstream consumers only `PathApp` it. For now we delegate
+///  to the runtime so the resulting Path carrier is well-formed
+///  for any consumer (including Transport/Hcomp folding).
 ///
+
 /// Future improvements (#81 follow-up):
-///   * Constant-fold `Transport(refl, x) → x` when the type-path
-///     argument is known statically.
-///   * Constant-fold `Hcomp(φ, const_walls, base) → base`.
-///   * Inline `IntervalMeet/Join/Rev` as bit-and / bit-or / xor-1
-///     when interval values are Booleans, matching the runtime's
-///     semantics for the Bool model of I.
+///  * Constant-fold `Transport(refl, x) → x` when the type-path
+///  argument is known statically.
+///  * Constant-fold `Hcomp(φ, const_walls, base) → base`.
+///  * Inline `IntervalMeet/Join/Rev` as bit-and / bit-or / xor-1
+///  when interval values are Booleans, matching the runtime's
+///  semantics for the Bool model of I.
 ///
+
 /// All other sub-ops route through `verum_cubical_<op>`. The runtime
 /// signature is uniform: each takes the args by i64 (Value bits)
 /// and returns an i64 path/equiv/value handle. Variadic args are
@@ -16993,6 +17044,7 @@ fn coerce_value<'ctx>(
                     // it's not from a known float-producing instruction, use sitofp.
                     // For internal float storage, use bitcast.
                     //
+
                     // Since we can't easily distinguish at this point, we use bitcast
                     // as the default (preserves existing behavior for float registers).
                     // For explicit coercion, use the CvtIF instruction path instead.
@@ -17088,6 +17140,7 @@ fn lower_math_binary_f64<'ctx>(
 
 /// Lower FfiExtended instruction to LLVM IR.
 ///
+
 /// This implements zero-cost FFI for AOT compilation by generating direct
 /// LLVM calls and memory operations instead of libffi dynamic dispatch.
 fn lower_ffi_extended<'ctx>(
@@ -17141,15 +17194,17 @@ fn lower_ffi_extended<'ctx>(
         Some(FfiSubOpcode::CSecureZero) => {
             // Format: dst_ptr:reg, size:reg
             //
+
             // Volatile memset to 0 — survives every LLVM optimisation
-            // pass.  Used to zeroise secret material (key schedules,
+            // pass. Used to zeroise secret material (key schedules,
             // AEAD tags, PSK binders) right before the storage leaves
-            // scope.  The ordinary `CMemset` opcode emits a
+            // scope. The ordinary `CMemset` opcode emits a
             // non-volatile call which `MemCpyOptPass` /
             // `DeadStoreEliminationPass` would elide; that's a
             // catastrophic security bug, so we route the
             // security-critical zero through a separate opcode.
             //
+
             // Audit: `internal/specs/tls-quic-security-audit.md` §2
             // Action #2 ("LLVM-IR audit of zeroise memset
             // preservation").
@@ -17409,7 +17464,7 @@ fn lower_ffi_extended<'ctx>(
             // semantics match `DerefRawSigned`'s contract (the
             // interpreter is the one that historically chose
             // zero-extension as `DerefRaw`'s default — see comment
-            // there).  Reuse the same path: parse the same
+            // there). Reuse the same path: parse the same
             // `(dst, ptr, size)` operand layout and recurse into the
             // existing handler.
             return lower_ffi_extended(ctx, FfiSubOpcode::DerefRaw as u8, operands);
@@ -18267,9 +18322,11 @@ fn lower_ffi_extended<'ctx>(
         Some(FfiSubOpcode::StructFieldAddr) => {
             // Get raw heap address of a struct field — task #37 closure.
             //
+
             // Format: dst:reg, obj:reg, offset_lo:u8, offset_hi:u8
             // Result: dst = obj_ptr + OBJECT_HEADER_SIZE + field_offset
             //
+
             // Mirror of the Tier-0 interpreter handler (handlers/ffi_extended.rs).
             // GEP at i8 element type so the offset is a simple byte add.
             if operands.len() < 4 {
@@ -18651,27 +18708,29 @@ fn lower_ffi_extended<'ctx>(
 
 /// Convert VBC CType to LLVM BasicTypeEnum.
 ///
+
 /// Returns None for Void type (used for function return types).
 /// This is the core type mapping for zero-cost FFI: VBC CType → LLVM Type.
 ///
+
 /// # Type Mappings
 /// | CType | LLVM Type | Size |
 /// |-------|-----------|------|
-/// | Void  | None      | 0    |
-/// | I8    | i8        | 1    |
-/// | I16   | i16       | 2    |
-/// | I32   | i32       | 4    |
-/// | I64   | i64       | 8    |
-/// | U8    | i8        | 1    |
-/// | U16   | i16       | 2    |
-/// | U32   | i32       | 4    |
-/// | U64   | i64       | 8    |
-/// | F32   | float     | 4    |
-/// | F64   | double    | 8    |
-/// | Ptr   | ptr       | 8    |
-/// | CStr  | ptr       | 8    |
-/// | Bool  | i8        | 1    |
-/// | Size  | i64       | 8    |
+/// | Void | None | 0 |
+/// | I8 | i8 | 1 |
+/// | I16 | i16 | 2 |
+/// | I32 | i32 | 4 |
+/// | I64 | i64 | 8 |
+/// | U8 | i8 | 1 |
+/// | U16 | i16 | 2 |
+/// | U32 | i32 | 4 |
+/// | U64 | i64 | 8 |
+/// | F32 | float | 4 |
+/// | F64 | double | 8 |
+/// | Ptr | ptr | 8 |
+/// | CStr | ptr | 8 |
+/// | Bool | i8 | 1 |
+/// | Size | i64 | 8 |
 fn ctype_to_llvm_type<'ctx>(
     ctx: &'ctx verum_llvm::context::Context,
     ctype: CType,
@@ -18828,9 +18887,11 @@ fn safe_int_rem<'ctx>(
 }
 
 ///
+
 /// Implements: result = base^exp using the square-and-multiply algorithm
 /// Time complexity: O(log exp)
 ///
+
 /// For negative exponents, returns 0 (integer division truncates).
 fn lower_int_pow<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -18965,6 +19026,7 @@ fn lower_int_pow<'ctx>(
 
 /// Lower float power using llvm.pow.f64 intrinsic.
 ///
+
 /// Generates: call double @llvm.pow.f64(double %base, double %exp)
 fn lower_float_pow<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -18999,6 +19061,7 @@ fn lower_float_pow<'ctx>(
 
 /// Lower Throw instruction.
 ///
+
 /// Throws an exception by:
 /// 1. Storing the exception value in the exception slot
 /// 2. Jumping to the current exception handler (if any)
@@ -19052,10 +19115,12 @@ fn lower_throw<'ctx>(
 
 /// Lower TryBegin instruction.
 ///
+
 /// Sets up structured exception handling by:
 /// 1. Creating a handler block at the specified offset
 /// 2. Pushing the handler onto the exception handler stack
 ///
+
 /// Note: In VBC, handler_offset is relative to the current instruction.
 /// In LLVM lowering, we create a new basic block for the handler.
 fn lower_try_begin<'ctx>(
@@ -19070,6 +19135,7 @@ fn lower_try_begin<'ctx>(
 
 /// Lower TryEnd instruction.
 ///
+
 /// Ends a try block by:
 /// 1. Popping the exception handler from the stack
 /// 2. Jumping to the continuation block (normal exit)
@@ -19096,6 +19162,7 @@ fn lower_try_end<'ctx>(
 
 /// Lower GetException instruction.
 ///
+
 /// Gets the current exception value and stores it in the destination register.
 fn lower_get_exception<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -19126,9 +19193,11 @@ fn lower_get_exception<'ctx>(
 // Context System Operations (0xB0-0xB2)
 // ============================================================================
 //
+
 // The context system provides dependency injection via `using [...]` clause.
 // In AOT mode, we call into the Verum runtime for context stack management.
 //
+
 // Context System: Capability-based dependency injection. Functions declare
 // required contexts via `using [Database, Logger]`. In AOT mode, context values
 // are stored in thread-local storage as ContextEntry structs (type_id: u32,
@@ -19138,6 +19207,7 @@ fn lower_get_exception<'ctx>(
 
 /// Lower CtxGet instruction.
 ///
+
 /// Retrieves a context value by type ID from the thread-local context stack.
 /// The result is stored in the destination register.
 fn lower_ctx_get<'ctx>(
@@ -19174,6 +19244,7 @@ fn lower_ctx_get<'ctx>(
 
 /// Lower CtxProvide instruction.
 ///
+
 /// Pushes a context value onto the thread-local context stack.
 /// The value remains active until CtxEnd is called.
 /// The stack depth reflects the nesting depth of provide blocks,
@@ -19218,6 +19289,7 @@ fn lower_ctx_provide<'ctx>(
 
 /// Lower CtxEnd instruction.
 ///
+
 /// Ends a context scope, removing all context entries at or above
 /// the current stack depth. Decrements the provide depth counter
 /// so that the depth passed to the runtime matches the depth used
@@ -19251,6 +19323,7 @@ fn lower_ctx_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
 
 /// Lower CtxCheckNegative instruction.
 ///
+
 /// Emits a runtime check that a specific context is NOT present in the context
 /// stack. If the context IS present, calls `verum_panic` with an error message.
 /// This enforces `using [!Context]` negative constraints at runtime.
@@ -19377,6 +19450,7 @@ fn vbc_to_llvm_ordering(ordering: u8) -> AtomicOrdering {
 
 /// Lower AtomicLoad instruction.
 ///
+
 /// Generates LLVM atomic load with the specified ordering.
 fn lower_atomic_load<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -19434,6 +19508,7 @@ fn lower_atomic_load<'ctx>(
 
 /// Lower AtomicStore instruction.
 ///
+
 /// Generates LLVM atomic store with the specified ordering.
 fn lower_atomic_store<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -19499,6 +19574,7 @@ fn lower_atomic_store<'ctx>(
 
 /// Lower AtomicCas instruction.
 ///
+
 /// Generates LLVM cmpxchg instruction.
 fn lower_atomic_cas<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -19614,6 +19690,7 @@ fn lower_atomic_cas<'ctx>(
 
 /// Lower AtomicFence instruction.
 ///
+
 /// Generates LLVM fence instruction with the specified ordering.
 /// Special case: ordering 0xFF means spin_hint (CPU pause/yield).
 fn lower_atomic_fence<'ctx>(
@@ -19684,6 +19761,7 @@ fn lower_atomic_fence<'ctx>(
 
 /// Lower GetE instruction (array element access).
 ///
+
 /// Generates GEP + load for array element access.
 /// Array is assumed to be a pointer to elements.
 fn lower_get_element<'ctx>(
@@ -19798,6 +19876,7 @@ fn lower_get_element<'ctx>(
 
 /// Lower SetE instruction (array element assignment).
 ///
+
 /// Generates GEP + store for array element assignment.
 fn lower_set_element<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -19849,13 +19928,16 @@ fn lower_set_element<'ctx>(
 
 /// Lower Len instruction (get array length).
 ///
+
 /// Arrays are represented as:
 /// - For static arrays: length is compile-time constant
 /// - For dynamic arrays: header contains length
 ///
+
 /// For now, we support the common case of a header struct:
 /// { i64 len, [N x T] data }
 ///
+
 /// `type_hint`: 0=unknown, 1=List, 2=Map, 3=Set, 4=Deque, 5=Text, 6=Channel, 7=Slice.
 /// When non-zero, type_hint takes priority over register tracking (which can be
 /// unreliable after function calls clear type marks).
@@ -20178,11 +20260,13 @@ fn apply_ffi_memory_attributes<'ctx>(
 
 /// Emit error protocol checking after an FFI call.
 ///
+
 /// For errno-based protocols, generates LLVM IR branching:
 /// - NegOneErrno: if result == -1 → read errno, store negated errno
-/// - NullErrno:   if result == null → read errno, store negated errno
+/// - NullErrno: if result == null → read errno, store negated errno
 /// - ZeroSuccess: if result != 0 → store result as error code (negated)
 ///
+
 /// Convention: negative values in ret_reg signal errors, positive = success.
 /// User code checks via pattern matching or comparison.
 fn emit_ffi_error_protocol_check<'ctx>(
@@ -20507,6 +20591,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
 
 /// Store FFI return value with ownership tracking.
 ///
+
 /// Integer returns narrower than 64 bits are sign-extended to i64 to match
 /// the VBC value model. Without this, a libc function declared to return
 /// C `int` (i32) leaves the upper 32 bits of x0 undefined on AArch64; if a
@@ -20558,6 +20643,7 @@ fn store_ffi_void_value<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ret_reg: u16)
 // ====================================================================
 /// Marks the destination register based on a function's return type.
 ///
+
 /// This ensures that Call/CallM results are properly tracked for downstream
 /// instructions (GetE/SetE need list tracking, ToString needs float/string tracking, etc.).
 fn mark_register_from_return_type<'ctx>(
@@ -22486,18 +22572,20 @@ fn lower_mov<'ctx>(
     if let Some(type_args) = ctx.get_generic_type_args(src.0).cloned() {
         ctx.set_generic_type_args(dst.0, type_args);
     }
-    // Do NOT transfer text ownership through Mov.  Ownership stays on
+    // Do NOT transfer text ownership through Mov. Ownership stays on
     // the source register so that the *original* allocation site keeps
-    // the responsibility to free.  The destination is an alias — it
+    // the responsibility to free. The destination is an alias — it
     // shares the pointer but is NOT the owner.
     //
+
     // Previous behaviour transferred ownership (unmark src, mark dst).
     // That caused use-after-free when f-string interpolation did
-    //   Mov str_reg, user_var   // ownership moved to temp
-    //   Concat dst, dst, str_reg  // temp freed → user_var dangling
+    //  Mov str_reg, user_var // ownership moved to temp
+    //  Concat dst, dst, str_reg // temp freed → user_var dangling
     //
+
     // With this change, Concat sees str_reg as non-owned and skips
-    // freeing.  The original owner (e.g. the Concat/ToString that
+    // freeing. The original owner (e.g. the Concat/ToString that
     // created the text) is freed either by a later Concat (if a==dst
     // reuse) or at function return cleanup.
     Ok(())
@@ -23743,6 +23831,7 @@ fn lower_iter_next<'ctx>(
             // Protocol 2: next() -> Maybe<T> — standard Verum Iterator protocol
             // Returns a Maybe variant: None (tag=0) or Some(value) (tag=1, payload at field 0)
             //
+
             // Defensive fallback (#106 Path B.4): when neither has_next
             // nor next is registered for this type, the type is being
             // mis-monomorphised by an Iterator-protocol blanket impl
@@ -23754,6 +23843,7 @@ fn lower_iter_next<'ctx>(
             // Subsequent code reads tag=0 (None) and exits the
             // iteration loop cleanly.
             //
+
             // Accumulates as ~30 stdlib functions per typical
             // `mount core.*` build (Heap.product, Map.sum, List.iter
             // chains on types without proper iterator state).
@@ -23858,10 +23948,12 @@ fn lower_ref<'ctx>(
         // as i64. Downstream Deref/ChkRef/DerefMut/DropRef already handle
         // non-struct values (IntValue or PointerValue).
         //
+
         // For HEAP objects (Text, List, Map, etc.), the register value IS a
         // valid heap pointer. Methods on these objects use self directly via
         // GetF without Deref. So pass the value through as a pointer.
         //
+
         // For PRIMITIVES (Int, Float, Bool), the register value is the actual
         // data (e.g., 42). To create &x, we need the ADDRESS of the alloca
         // slot that contains this value. Methods/Deref will load through it.
@@ -23941,7 +24033,7 @@ fn lower_ref<'ctx>(
     } else {
         // Non-alloca mode: create CBGR ref struct
         // For primitives (Int, Float, Bool), the register holds the
-        // actual data value (e.g., 42), NOT a heap pointer.  We must
+        // actual data value (e.g., 42), NOT a heap pointer. We must
         // spill to a stack slot so the reference points to valid memory.
         let is_heap_type = ctx.is_text_register(src.0)
             || ctx.is_string_register(src.0)

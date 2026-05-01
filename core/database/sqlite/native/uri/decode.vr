@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: RFC 3986 §2.1
 //
+
 // Replaces `%xx` triplets with their decoded byte. Invalid sequences
 // (non-hex digit after `%`) are left as-is.
 // =============================================================================

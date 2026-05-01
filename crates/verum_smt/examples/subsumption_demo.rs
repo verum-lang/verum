@@ -1,5 +1,6 @@
 //! Demo of subsumption checking functionality
 //!
+
 //! This demonstrates the three-tiered subsumption checking system
 //! Three-tiered subsumption checking:
 //! 1. Syntactic: fast pattern matching for common refinement patterns (target >80% hit rate, <1ms)

@@ -1,23 +1,29 @@
 //! Type-Level Computation for Dependent Types
 //!
+
 //! This module provides type-level function evaluation and normalization
 //! for the dependent types extension (v2.0+).
 //!
+
 //! ## Features
 //!
+
 //! - **Type-level functions**: Compute types from values
 //! - **Beta reduction**: Normalize type-level computations
 //! - **Type application**: Apply type functions to arguments
 //! - **Evaluation cache**: Memoize expensive computations
 //!
+
 //! ## Examples
 //!
+
 //! ```rust,ignore
 //! // Type-level function: List<T, n> where n is a value
 //! let evaluator = TypeLevelEvaluator::new();
 //! let vec_type = evaluator.apply_type_function("Vec", &[int_type, nat_lit(5)])?;
 //! ```
 //!
+
 //! Type-level functions compute types from values: `fn matrix_type(rows, cols) -> Type =
 //! List<List<f64, cols>, rows>`. Beta reduction normalizes applications. Indexed types
 //! like `Fin<n>` enable safe indexing. Type-level natural number arithmetic supports
@@ -34,9 +40,11 @@ pub use verum_common::type_level::ReductionStrategy;
 
 /// User-defined type-level function
 ///
+
 /// Represents a function that computes types from values.
 /// Used for custom type-level computations.
 ///
+
 /// Type-level functions: `fn type_function(b: bool) -> Type = if b then Int else Text`.
 /// Types can be computed from values, enabling dependent return types.
 #[derive(Debug, Clone)]
@@ -53,8 +61,10 @@ pub struct TypeFunction {
 
 /// Type-level function evaluator
 ///
+
 /// Evaluates functions at the type level, enabling types that depend on values.
 ///
+
 /// Evaluates type-level functions with beta reduction and caching.
 /// Supports natural number arithmetic (`plus`, `mult`), indexed types (`Fin<n>`),
 /// and user-defined type functions.
@@ -102,20 +112,23 @@ impl TypeLevelEvaluator {
 
     /// Register a user-defined type function
     ///
+
     /// Adds a type function to the evaluator's registry, making it available
     /// for type-level computation. Type functions compute types from values.
     ///
+
     /// # Example
     /// ```ignore
     /// let func = TypeFunction {
-    ///     name: "ArrayOf".into(),
-    ///     params: vec![pattern!("T"), pattern!("n")],
-    ///     param_types: vec![Type::type_(), Type::nat()],
-    ///     body: expr!("Array<T, n>"),
+    ///  name: "ArrayOf".into(),
+    ///  params: vec![pattern!("T"), pattern!("n")],
+    ///  param_types: vec![Type::type_(), Type::nat()],
+    ///  body: expr!("Array<T, n>"),
     /// };
     /// evaluator.register_type_function(func);
     /// ```
     ///
+
     /// Type-level function registration and evaluation with depth-limited beta reduction.
     pub fn register_type_function(&mut self, func: TypeFunction) {
         self.type_functions.insert(func.name.clone(), func);
@@ -123,6 +136,7 @@ impl TypeLevelEvaluator {
 
     /// Get the current reduction strategy
     ///
+
     /// Returns the strategy used for normalizing type-level expressions.
     /// Different strategies offer trade-offs between completeness and efficiency.
     pub fn reduction_strategy(&self) -> ReductionStrategy {
@@ -131,8 +145,10 @@ impl TypeLevelEvaluator {
 
     /// Set the reduction strategy
     ///
+
     /// Changes the strategy used for type-level expression normalization.
     ///
+
     /// # Strategies
     /// - `CallByValue`: Evaluate arguments before function application
     /// - `CallByName`: Lazy evaluation, only evaluate when needed
@@ -144,12 +160,15 @@ impl TypeLevelEvaluator {
 
     /// Evaluate a type-level function application
     ///
+
     /// Given a function name and arguments, compute the resulting type.
     ///
+
     /// # Arguments
     /// * `func_name` - Name of the type-level function
     /// * `args` - Value arguments to the function
     ///
+
     /// # Returns
     /// The computed type, or an error if evaluation fails
     pub fn evaluate_type_function(
@@ -192,6 +211,7 @@ impl TypeLevelEvaluator {
 
     /// Normalize a type by reducing all type-level computations
     ///
+
     /// Performs beta reduction and simplification of type expressions.
     pub fn normalize_type(&mut self, ty: &Type) -> Result<Type, TypeLevelError> {
         self.normalize_type_depth(ty, 0)
@@ -240,6 +260,7 @@ impl TypeLevelEvaluator {
 
     /// Apply a type function to arguments
     ///
+
     /// This is the main entry point for type application.
     pub fn apply_type_function(
         &mut self,
@@ -262,6 +283,7 @@ impl TypeLevelEvaluator {
 
     /// Evaluate List<T, n> where n is a compile-time constant
     ///
+
     /// Creates an indexed list type that tracks length at the type level.
     /// Indexed types: types parameterized by values, e.g., `Fin<n>`, `List<T, n>`.
     fn eval_list_type(&mut self, args: &[Expr]) -> Result<Type, TypeLevelError> {
@@ -300,6 +322,7 @@ impl TypeLevelEvaluator {
 
     /// Evaluate Array<T, n> - fixed-size array with compile-time length
     ///
+
     /// Creates an indexed array type that tracks length at the type level.
     /// Indexed types: types parameterized by values, e.g., `Fin<n>`, `List<T, n>`.
     fn eval_array_type(&mut self, args: &[Expr]) -> Result<Type, TypeLevelError> {
@@ -338,6 +361,7 @@ impl TypeLevelEvaluator {
 
     /// Evaluate Vec<T, n> - dynamic vector with compile-time capacity
     ///
+
     /// Creates an indexed vector type that tracks capacity at the type level.
     /// Indexed types: types parameterized by values, e.g., `Fin<n>`, `List<T, n>`.
     fn eval_vec_type(&mut self, args: &[Expr]) -> Result<Type, TypeLevelError> {
@@ -376,6 +400,7 @@ impl TypeLevelEvaluator {
 
     /// Evaluate Matrix<T, rows, cols> - 2D matrix with compile-time dimensions
     ///
+
     /// Creates an indexed matrix type that tracks dimensions at the type level.
     /// Indexed types: types parameterized by values, e.g., `Fin<n>`, `List<T, n>`.
     fn eval_matrix_type(&mut self, args: &[Expr]) -> Result<Type, TypeLevelError> {
@@ -463,10 +488,12 @@ impl TypeLevelEvaluator {
 
     /// Evaluate type-level addition: plus(m, n)
     ///
+
     /// Implements natural number addition at the type level via recursion:
     /// - plus(Zero, n) = n
     /// - plus(Succ(m'), n) = Succ(plus(m', n))
     ///
+
     /// Type-level natural number arithmetic: `plus(m, n)` by structural recursion on m.
     fn eval_type_plus(&self, args: &[Expr]) -> Result<Type, TypeLevelError> {
         if args.len() != 2 {
@@ -495,10 +522,12 @@ impl TypeLevelEvaluator {
 
     /// Evaluate type-level multiplication: mult(m, n)
     ///
+
     /// Implements natural number multiplication at the type level:
     /// - mult(Zero, n) = Zero
     /// - mult(Succ(m'), n) = plus(n, mult(m', n))
     ///
+
     /// Type-level multiplication: `mult(m, n)` via repeated addition.
     fn eval_type_mult(&self, args: &[Expr]) -> Result<Type, TypeLevelError> {
         if args.len() != 2 {
@@ -539,9 +568,11 @@ impl TypeLevelEvaluator {
 
     /// Evaluate conditional type: if(cond, then_type, else_type)
     ///
+
     /// This implements type-level conditionals that select between types based on
     /// compile-time evaluable conditions.
     ///
+
     /// Type-level computation via beta reduction and normalization.
     fn eval_type_if(&mut self, args: &[Expr]) -> Result<Type, TypeLevelError> {
         if args.len() != 3 {
@@ -568,14 +599,17 @@ impl TypeLevelEvaluator {
             // ensure type soundness. This is a fundamental limitation of dependent
             // types without full dependent type theory support.
             //
+
             // For runtime-dependent branching, use sum types (Either<A, B>) or
             // refinement types with runtime validation instead.
             //
+
             // Example workaround using refinement types:
-            //   fn checked_div(x: Int, y: Int{!= 0}) -> Int  // y != 0 checked at call site
+            //  fn checked_div(x: Int, y: Int{!= 0}) -> Int // y != 0 checked at call site
             //
+
             // Example workaround using sum types:
-            //   fn try_parse(s: Text) -> Either<ParseError, Int>  // runtime branching
+            //  fn try_parse(s: Text) -> Either<ParseError, Int> // runtime branching
             Err(TypeLevelError::NonConstantArgument(
                 "conditional type requires constant condition for static evaluation; \
                  use sum types (Either<A, B>) for runtime-dependent type selection"
@@ -586,6 +620,7 @@ impl TypeLevelEvaluator {
 
     /// Convert expression to type
     ///
+
     /// Attempts to interpret an expression as a type constructor.
     fn expr_to_type(&mut self, expr: &Expr) -> Result<Type, TypeLevelError> {
         match &expr.kind {
@@ -627,8 +662,10 @@ impl TypeLevelEvaluator {
 
     /// Evaluate user-defined type function
     ///
+
     /// Looks up a user-registered type function and evaluates it with the given arguments.
     ///
+
     /// Type-level function: compute types from value arguments with memoization.
     fn eval_user_type_function(
         &mut self,
@@ -704,8 +741,10 @@ impl TypeLevelEvaluator {
 
     /// Substitute variables in an expression
     ///
+
     /// Replaces all occurrences of variables with their bound expressions.
     ///
+
     /// Beta reduction: substitute actual arguments into type-level function body.
     fn substitute_expr(
         &self,
@@ -756,8 +795,10 @@ impl TypeLevelEvaluator {
 
     /// Normalize an expression to its simplest form
     ///
+
     /// Performs full beta reduction and simplification.
     ///
+
     /// Type-level computation via beta reduction and normalization.
     fn normalize_expr(&self, expr: &Expr) -> Result<Expr, TypeLevelError> {
         // For now, normalization is the same as simplification
@@ -796,9 +837,11 @@ impl TypeLevelEvaluator {
 
     /// Simplify an expression (public wrapper for testing)
     ///
+
     /// Performs constant folding, algebraic simplification, and other optimizations
     /// to reduce expressions to their simplest form.
     ///
+
     /// Type-level computation via beta reduction and normalization.
     pub fn simplify_expr(&self, expr: &Expr) -> Result<Expr, TypeLevelError> {
         self.simplify_expr_impl(expr)
@@ -806,9 +849,11 @@ impl TypeLevelEvaluator {
 
     /// Internal implementation of expression simplification.
     ///
+
     /// Performs constant folding, algebraic simplification, and other optimizations
     /// to reduce expressions to their simplest form.
     ///
+
     /// Type-level computation via beta reduction and normalization.
     fn simplify_expr_impl(&self, expr: &Expr) -> Result<Expr, TypeLevelError> {
         match &expr.kind {
@@ -1063,6 +1108,7 @@ impl TypeLevelEvaluator {
 
     /// Evaluate natural number subtraction on expressions
     ///
+
     /// Implements natural number subtraction at the expression level.
     fn eval_nat_minus_expr(&self, args: &[Expr]) -> Result<Expr, TypeLevelError> {
         if args.len() != 2 {
@@ -1090,8 +1136,10 @@ impl TypeLevelEvaluator {
 
     /// Evaluate natural number plus (recursive helper)
     ///
+
     /// This is the public version that works with expressions.
     ///
+
     /// Type-level natural number arithmetic: `plus(m, n)` by structural recursion on m.
     pub fn eval_nat_plus(&self, m: &Expr, n: &Expr) -> Result<Expr, TypeLevelError> {
         use verum_ast::literal::LiteralKind;
@@ -1117,8 +1165,10 @@ impl TypeLevelEvaluator {
 
     /// Evaluate natural number mult (recursive helper)
     ///
+
     /// This is the public version that works with expressions.
     ///
+
     /// Type-level multiplication: `mult(m, n)` via repeated addition.
     pub fn eval_nat_mult(&self, m: &Expr, n: &Expr) -> Result<Expr, TypeLevelError> {
         use verum_ast::literal::LiteralKind;
@@ -1183,6 +1233,7 @@ impl TypeLevelEvaluator {
 
     /// Evaluate binary operation on constants
     ///
+
     /// Performs compile-time arithmetic on constant values.
     fn eval_binop(&self, op: BinOp, left: u64, right: u64) -> i64 {
         match op {
@@ -1276,11 +1327,13 @@ impl TypeLevelEvaluator {
 
     /// Clear the evaluation cache
     ///
+
     /// Removes all cached type-level computation results. Useful when:
     /// - Type function definitions have changed
     /// - Memory pressure requires cache eviction
     /// - Testing requires fresh computation
     ///
+
     /// After clearing, subsequent type-level computations will be recomputed.
     pub fn clear_cache(&mut self) {
         self.cache.clear();
@@ -1288,9 +1341,11 @@ impl TypeLevelEvaluator {
 
     /// Get the number of cached type computations
     ///
+
     /// Returns the current number of entries in the type-level computation cache.
     /// Higher values indicate more memoized results available for reuse.
     ///
+
     /// # Performance
     /// Cache hits avoid redundant type-level computation, typically saving
     /// 10-100μs per cached function application.
@@ -1323,10 +1378,12 @@ impl From<VerificationError> for TypeLevelError {
 
 /// Extract type refinements from dependent pattern matching
 ///
+
 /// Pattern matching in dependent types refines the scrutinee type based on
 /// which constructor matched. For example, matching List::Cons proves the
 /// list is non-empty.
 ///
+
 /// Dependent pattern matching: patterns refine types in branches, enabling
 /// the compiler to know `n = 0` in the `Zero` branch and `n != 0` in `Succ`.
 pub fn verify_dependent_pattern(
@@ -1414,11 +1471,13 @@ pub fn verify_dependent_pattern(
 
 /// Refine a type based on constructor match
 ///
+
 /// When we match a specific constructor, we can strengthen the type
 /// with additional knowledge. For example:
 /// - Matching List::Cons proves len(list) > 0
 /// - Matching Some(x) proves the option is not None
 ///
+
 /// Dependent pattern matching: patterns refine types in branches, enabling
 /// the compiler to know `n = 0` in the `Zero` branch and `n != 0` in `Succ`.
 fn refine_type_by_constructor(ty: &Type, constructor: &str) -> Result<Type, TypeLevelError> {
@@ -1645,15 +1704,19 @@ fn make_binary_helper(op: BinOp, left: Expr, right: Expr) -> Expr {
 
 /// Type equality checking for dependent types
 ///
+
 /// Checks if two types are definitionally equal after normalization.
 ///
+
 /// Propositional equality types: `Eq<A, x, y>` with refl, sym, trans, subst.
 /// Check if two types are equal, including refinement predicates
 ///
+
 /// This function performs structural equality checking for types, including
 /// comparison of refinement predicates. For refined types, both the base type
 /// and the predicate must match for the types to be considered equal.
 ///
+
 /// Equality type verification: reflexivity `refl<A, x> : Eq<A, x, x>`,
 /// substitution `subst(eq, px) -> P(y)`, symmetry, transitivity.
 pub fn types_equal(ty1: &Type, ty2: &Type) -> bool {
@@ -1777,6 +1840,7 @@ pub fn types_equal(ty1: &Type, ty2: &Type) -> bool {
 
 /// Compare refinement predicates for equality
 ///
+
 /// Uses structural comparison of predicate expressions.
 /// Predicates with the same binding and expression structure are considered equal.
 fn predicates_equal(
@@ -1859,6 +1923,7 @@ fn exprs_equal(e1: &Expr, e2: &Expr) -> bool {
 
 /// Compare literal values for equality
 ///
+
 /// Compares `Literal` structs by their `LiteralKind`.
 fn literals_equal(l1: &verum_ast::literal::Literal, l2: &verum_ast::literal::Literal) -> bool {
     use verum_ast::literal::LiteralKind;
@@ -1876,17 +1941,21 @@ fn literals_equal(l1: &verum_ast::literal::Literal, l2: &verum_ast::literal::Lit
 
 /// Arithmetic property proofs
 ///
+
 /// These functions verify arithmetic properties at the type level,
 /// enabling precise reasoning about type-level computations.
 ///
+
 /// Type-level commutativity proof: `plus_comm(m, n) : plus(m, n) = plus(n, m)`.
 pub mod arithmetic_proofs {
     /// Verify commutativity of addition: plus(m, n) = plus(n, m)
     ///
+
     /// Proven by induction on m:
     /// - Base: plus(Zero, n) = n = plus(n, Zero)
     /// - Step: plus(Succ(m'), n) = Succ(plus(m', n)) = plus(n, Succ(m'))
     ///
+
     /// Type-level commutativity proof: `plus_comm(m, n) : plus(m, n) = plus(n, m)`.
     #[allow(clippy::eq_op)]
     pub fn verify_plus_comm(m: u64, n: u64) -> bool {
@@ -1896,6 +1965,7 @@ pub mod arithmetic_proofs {
 
     /// Verify associativity of addition: plus(plus(m, n), p) = plus(m, plus(n, p))
     ///
+
     /// Dependent type class resolution: Monoid<A> with laws as proof obligations.
     pub fn verify_plus_assoc(m: u64, n: u64, p: u64) -> bool {
         (m + n) + p == m + (n + p)
@@ -1956,9 +2026,11 @@ pub mod arithmetic_proofs {
 
 /// Indexed types for compile-time bounds checking
 ///
+
 /// This module provides utilities for working with indexed types like Fin<n>
 /// and length-indexed lists.
 ///
+
 /// Indexed types: `Fin<n>` (bounded naturals), `List<T, n>` (length-indexed lists),
 /// `Process<State>` (state-indexed types for typed state machines).
 pub mod indexed_types {
@@ -1966,15 +2038,19 @@ pub mod indexed_types {
 
     /// Create a Fin<n> type - integers in range [0, n)
     ///
+
     /// Fin<n> is a refined type representing natural numbers less than n.
     /// It enables compile-time bounds checking for array access.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// fn safe_index<T, n: meta Nat>(list: List<T, n>, i: Fin<n>) -> T
     /// ```
     ///
+
     /// Safe indexing via `Fin<n>`: `index(list: List<T, n>, i: Fin<n>) -> T` cannot fail.
     pub fn create_fin_type(bound: u64) -> Result<Type, TypeLevelError> {
         use verum_ast::{
@@ -2066,15 +2142,18 @@ pub mod indexed_types {
 
     /// Create a length-indexed list type: List<T, n>
     ///
+
     /// Represents a list with exactly n elements of type T.
     /// The length is tracked at the type level for compile-time verification.
     ///
+
     /// # Example
     /// ```ignore
     /// let list_type = create_indexed_list(Type::int(), 5);
     /// // Creates List<Int, 5> - a list of exactly 5 integers
     /// ```
     ///
+
     /// List append with length tracking: `append(xs: List<T, m>, ys: List<T, n>) -> List<T, plus(m, n)>`.
     pub fn create_indexed_list(element_type: Type, length: u64) -> Type {
         use verum_ast::{
@@ -2111,15 +2190,18 @@ pub mod indexed_types {
 
     /// Create a matrix type: Matrix<T, rows, cols>
     ///
+
     /// Represents a 2D array with compile-time dimensions.
     /// Both dimensions are tracked at the type level for compile-time verification.
     ///
+
     /// # Example
     /// ```ignore
     /// let matrix_type = create_matrix_type(Type::float(), 3, 4);
     /// // Creates Matrix<Float, 3, 4> - a 3x4 matrix of floats
     /// ```
     ///
+
     /// Type function application: `matrix_type(rows, cols)` evaluates to concrete type.
     pub fn create_matrix_type(element_type: Type, rows: u64, cols: u64) -> Type {
         use verum_ast::{

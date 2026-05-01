@@ -1,5 +1,6 @@
 //! n-cell HIT eliminator tests.
 //!
+
 //! Higher inductive types extend 1-cells (paths) to 2-cells
 //! (homotopies between paths), 3-cells (homotopies between
 //! homotopies), …, n-cells. Per the kernel surface
@@ -7,16 +8,17 @@
 //! eliminator emit recursively nests `PathOver` `dim` times so
 //! the per-dimensional shape is recorded.
 //!
+
 //! Coverage:
-//!   • 1-cell (dim=1) — homogeneous (S¹) and heterogeneous (Interval)
-//!     cases; baseline check that nothing regresses vs the existing
-//!     dim=1 emit.
-//!   • 2-cell (dim=2) — Torus-style surface 2-cell whose endpoints
-//!     are themselves 1-cells (path expressions). Verifies the
-//!     eliminator branch is wrapped in PathOver-of-PathOver shape.
-//!   • 3-cell (dim=3) — synthetic cell to exercise the recursive
-//!     nesting beyond two levels.
-//!   • Default dim — `PathCtorSig::one_cell` constructs dim=1.
+//!  • 1-cell (dim=1) — homogeneous (S¹) and heterogeneous (Interval)
+//!  cases; baseline check that nothing regresses vs the existing
+//!  dim=1 emit.
+//!  • 2-cell (dim=2) — Torus-style surface 2-cell whose endpoints
+//!  are themselves 1-cells (path expressions). Verifies the
+//!  eliminator branch is wrapped in PathOver-of-PathOver shape.
+//!  • 3-cell (dim=3) — synthetic cell to exercise the recursive
+//!  nesting beyond two levels.
+//!  • Default dim — `PathCtorSig::one_cell` constructs dim=1.
 
 use verum_common::{List, Text};
 use verum_kernel::{

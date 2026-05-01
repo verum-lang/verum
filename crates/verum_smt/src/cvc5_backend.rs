@@ -1,50 +1,62 @@
 //! CVC5 SMT Backend - Optional Alternative to Z3
 //!
+
 //! This module provides CVC5 integration as an alternative to Z3 for SMT solving.
 //! CVC5 support is **optional** and requires the CVC5 library to be installed.
 //!
+
 //! ## Feature Flags
 //!
+
 //! - `cvc5`: Enables the CVC5 backend API (types and trait implementations)
 //! - `cvc5-ffi`: Enables actual FFI bindings to libcvc5 (requires CVC5 installed)
 //!
+
 //! ## Usage
 //!
+
 //! When `cvc5` feature is enabled but `cvc5-ffi` is not:
 //! - All types are available for API compatibility
 //! - `Cvc5Backend::new()` returns `Err(Cvc5Error::NotAvailable)`
 //! - Use Z3 as the primary solver (always available)
 //!
+
 //! When both `cvc5` and `cvc5-ffi` features are enabled:
 //! - Full CVC5 functionality is available
 //! - Requires libcvc5.so/dylib to be installed and accessible
 //!
+
 //! ## Installing CVC5
 //!
+
 //! CVC5 can be installed from:
 //! - <https://cvc5.github.io/downloads.html>
 //! - Package managers: `apt install cvc5`, `brew install cvc5`
 //!
+
 //! ## Example
 //!
+
 //! ```rust,no_run
 //! use verum_smt::cvc5_backend::{Cvc5Backend, Cvc5Config, Cvc5Error};
 //!
+
 //! let config = Cvc5Config::default();
 //! match Cvc5Backend::new(config) {
-//!     Ok(backend) => {
-//!         // Use CVC5 for SMT solving
-//!     }
-//!     Err(Cvc5Error::NotAvailable(msg)) => {
-//!         // CVC5 not installed - fall back to Z3
-//!         eprintln!("CVC5 not available: {}", msg);
-//!     }
-//!     Err(e) => {
-//!         eprintln!("CVC5 initialization error: {}", e);
-//!     }
+//!  Ok(backend) => {
+//!  // Use CVC5 for SMT solving
+//!  }
+//!  Err(Cvc5Error::NotAvailable(msg)) => {
+//!  // CVC5 not installed - fall back to Z3
+//!  eprintln!("CVC5 not available: {}", msg);
+//!  }
+//!  Err(e) => {
+//!  eprintln!("CVC5 initialization error: {}", e);
+//!  }
 //! }
 //! ```
 //!
+
 //! CVC5 backend for refinement type verification. CVC5 excels at string theory and
 //! nonlinear arithmetic. Refinement predicates are translated to SMT-LIB2 and checked
 //! for satisfiability. Supports all five refinement binding forms.
@@ -280,6 +292,7 @@ pub enum SmtLogic {
 impl SmtLogic {
     /// Return the SMT-LIB 2 logic name string (e.g., `"QF_LIA"`).
     ///
+
     /// These strings are passed directly to CVC5's `set-logic` command.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -382,6 +395,7 @@ pub enum Cvc5Error {
 
 /// CVC5 SMT Backend.
 ///
+
 /// When `--features cvc5-ffi` is enabled, holds real solver state linked
 /// against libcvc5. Without it, the struct is still defined with the
 /// same fields so the two impl blocks stay in lockstep — but no
@@ -428,6 +442,7 @@ impl std::fmt::Debug for Cvc5Backend {
 impl Cvc5Backend {
     /// Create new CVC5 backend with configuration
     ///
+
     /// Returns `Err(Cvc5Error::NotAvailable)` if CVC5 library is not installed.
     pub fn new(config: Cvc5Config) -> Result<Self, Cvc5Error> {
         // SAFETY: FFI calls to CVC5 C library functions.
@@ -647,6 +662,7 @@ impl Cvc5Backend {
     /// self-contained enough to re-verify through any
     /// SMT-LIB-compliant solver.
     ///
+
     /// Uses `cvc5_get_assertions` to read the assertion array
     /// and `cvc5_term_to_string` to serialise each one. The
     /// returned pointer is valid only until the next
@@ -1508,9 +1524,11 @@ impl Drop for Cvc5Backend {
 impl Cvc5Backend {
     /// Create new CVC5 backend
     ///
+
     /// When the `cvc5-ffi` feature is not enabled, this always returns
     /// `Err(Cvc5Error::NotAvailable)`. Use Z3 as the primary solver.
     ///
+
     /// To enable CVC5 support:
     /// 1. Install CVC5: <https://cvc5.github.io/downloads.html>
     /// 2. Enable the feature: `cargo build --features cvc5-ffi`
@@ -1746,6 +1764,7 @@ pub struct Cvc5Sort {
 impl Cvc5Sort {
     /// Returns the underlying cvc5 sort pointer.
     ///
+
     /// In stub-mode this is always null. Callers that need to pass the
     /// sort back to libcvc5 should do so only under
     /// `#[cfg(feature = "cvc5-ffi")]`.
@@ -1910,6 +1929,7 @@ pub struct Cvc5Stats {
 
 /// Create CVC5 backend with default configuration
 ///
+
 /// Returns `Err(Cvc5Error::NotAvailable)` if CVC5 is not installed or
 /// the `cvc5-ffi` feature is not enabled.
 pub fn create_cvc5_backend() -> Result<Cvc5Backend, Cvc5Error> {
@@ -1918,6 +1938,7 @@ pub fn create_cvc5_backend() -> Result<Cvc5Backend, Cvc5Error> {
 
 /// Create CVC5 backend for specific logic
 ///
+
 /// Returns `Err(Cvc5Error::NotAvailable)` if CVC5 is not installed or
 /// the `cvc5-ffi` feature is not enabled.
 pub fn create_cvc5_backend_for_logic(logic: SmtLogic) -> Result<Cvc5Backend, Cvc5Error> {
@@ -1930,6 +1951,7 @@ pub fn create_cvc5_backend_for_logic(logic: SmtLogic) -> Result<Cvc5Backend, Cvc
 
 /// Check if CVC5 backend is available
 ///
+
 /// Returns `true` if the `cvc5-ffi` feature is enabled, `false` otherwise.
 pub fn is_cvc5_available() -> bool {
     cfg!(feature = "cvc5-ffi")

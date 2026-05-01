@@ -1,17 +1,20 @@
 //! Target specification: decomposed view of a Rust-style target triple.
 //!
+
 //! The `target_triple` field on `CompilerOptions` is the canonical
 //! source of cross-compilation intent — but a triple alone (e.g.
 //! `"aarch64-unknown-linux-gnu"`) is opaque. Every `@cfg(...)`
 //! evaluation site needs the FOUR semantic axes:
 //!
-//!   * `target_os` — `"linux"`, `"macos"`, `"windows"`, `"wasi"`
-//!   * `target_arch` — `"x86_64"`, `"aarch64"`, `"riscv64"`,
-//!                     `"wasm32"`, …
-//!   * `target_pointer_width` — `"32"` / `"64"` (string per Rust's
-//!     cfg vocabulary)
-//!   * `target_endian` — `"little"` / `"big"`
+
+//!  * `target_os` — `"linux"`, `"macos"`, `"windows"`, `"wasi"`
+//!  * `target_arch` — `"x86_64"`, `"aarch64"`, `"riscv64"`,
+//!  `"wasm32"`, …
+//!  * `target_pointer_width` — `"32"` / `"64"` (string per Rust's
+//!  cfg vocabulary)
+//!  * `target_endian` — `"little"` / `"big"`
 //!
+
 //! Pre-A4 the compiler hardcoded `cfg!(target_os = "...")` —
 //! evaluating the COMPILER's host, not the target. Cross-compiling
 //! from macOS to Linux silently dropped Linux modules. This module
@@ -48,17 +51,20 @@ impl TargetSpec {
 
     /// Parse a Rust-style target triple into its semantic components.
     ///
+
     /// Supported triple shapes (the four that cover ~99 % of real
     /// cross-compile targets):
     ///
-    ///   * `<arch>-<vendor>-<os>` — three components, e.g.
-    ///     `"aarch64-unknown-linux"`.
-    ///   * `<arch>-<vendor>-<os>-<env>` — four components, e.g.
-    ///     `"aarch64-unknown-linux-gnu"`.
-    ///   * `wasm32-unknown-unknown` and friends — the special-case
-    ///     "unknown" os is normalised to `"wasi"` when the arch
-    ///     starts with `wasm`, so cfg gates targeting WASI work.
+
+    ///  * `<arch>-<vendor>-<os>` — three components, e.g.
+    ///  `"aarch64-unknown-linux"`.
+    ///  * `<arch>-<vendor>-<os>-<env>` — four components, e.g.
+    ///  `"aarch64-unknown-linux-gnu"`.
+    ///  * `wasm32-unknown-unknown` and friends — the special-case
+    ///  "unknown" os is normalised to `"wasi"` when the arch
+    ///  starts with `wasm`, so cfg gates targeting WASI work.
     ///
+
     /// Unknown components fall back to the host equivalents — a
     /// best-effort default so a partially-spelled triple still
     /// produces a usable spec.

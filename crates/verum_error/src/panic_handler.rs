@@ -1,5 +1,6 @@
 //! Panic Hook Integration for Verum Error Handling System
 //!
+
 //! Part of Level 3 (Fault Tolerance) of the 5-Level Error Defense Architecture.
 //! Panics in Verum represent programmer errors (bugs), not expected failures.
 //! Expected failures use `Result<T, E>`. This module converts panics into
@@ -8,67 +9,80 @@
 //! by default (`VERUM_BACKTRACE=0`) for zero overhead in production; enable
 //! with `VERUM_BACKTRACE=1` when debugging.
 //!
+
 //! This module provides production-ready panic handling infrastructure that integrates
 //! with the Verum error handling system, providing:
 //!
+
 //! - **Global panic hook** - Centralized panic capture and logging
 //! - **Async task panic recovery** - catch_unwind wrapper for task isolation
 //! - **PanicInfo capture** - Structured panic data with location and backtrace
 //! - **Integration with ErrorLogger** - Unified panic logging infrastructure
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌──────────────────────────────────────────────────────┐
-//! │  Panic Handler Module                                │
+//! │ Panic Handler Module │
 //! ├──────────────────────────────────────────────────────┤
-//! │  1. setup_panic_hook()                               │
-//! │     └─> std::panic::set_hook()                       │
-//! │         └─> PanicLogger::log_panic()                 │
-//! │                                                       │
-//! │  2. catch_task_panics<F>()                          │
-//! │     └─> std::panic::catch_unwind()                   │
-//! │         └─> Convert to VerumError::TaskPanicked      │
-//! │                                                       │
-//! │  3. PanicLogger (ErrorLogger integration)            │
-//! │     └─> Structured logging                           │
-//! │     └─> Metrics collection                           │
-//! │     └─> Backtrace capture                            │
+//! │ 1. setup_panic_hook() │
+//! │ └─> std::panic::set_hook() │
+//! │ └─> PanicLogger::log_panic() │
+//! │ │
+//! │ 2. catch_task_panics<F>() │
+//! │ └─> std::panic::catch_unwind() │
+//! │ └─> Convert to VerumError::TaskPanicked │
+//! │ │
+//! │ 3. PanicLogger (ErrorLogger integration) │
+//! │ └─> Structured logging │
+//! │ └─> Metrics collection │
+//! │ └─> Backtrace capture │
 //! └──────────────────────────────────────────────────────┘
 //! ```
 //!
+
 //! # Usage
 //!
+
 //! ```rust
 //! use verum_error::panic_handler::{setup_panic_hook, catch_task_panics};
 //!
+
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // 1. Setup global panic hook at application startup
 //! setup_panic_hook();
 //!
+
 //! // 2. Use catch_task_panics for async task isolation
 //! let result = catch_task_panics(|| {
-//!     // Code that might panic
-//!     panic!("Something went wrong!");
+//!  // Code that might panic
+//!  panic!("Something went wrong!");
 //! });
 //!
+
 //! match result {
-//!     Ok(value) => println!("Task succeeded: {:?}", value),
-//!     Err(panic_err) => eprintln!("Task panicked: {}", panic_err),
+//!  Ok(value) => println!("Task succeeded: {:?}", value),
+//!  Err(panic_err) => eprintln!("Task panicked: {}", panic_err),
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
+
 //! # Performance
 //!
+
 //! - **Hook installation**: ~1-2μs (one-time setup cost)
 //! - **Panic capture**: ~5-10μs overhead (only on panic path, not hot path)
 //! - **Backtrace capture**: ~100-500μs (configurable, disabled by default)
 //! - **catch_unwind**: ~50-100ns wrapper overhead (zero-cost on success path)
 //!
+
 //! # Thread Safety
 //!
+
 //! All panic handling operations are thread-safe:
 //! - Global panic hook is protected by std::panic::set_hook
 //! - PanicLogger uses atomic counters and mutexes
@@ -86,6 +100,7 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// Panic information captured from std::panic::PanicInfo
 ///
+
 /// This type provides a structured representation of panic data that can be
 /// logged, serialized, and integrated with error handling systems.
 #[derive(Debug, Clone)]
@@ -109,6 +124,7 @@ pub struct PanicData {
 impl PanicData {
     /// Create PanicData from std::panic::PanicInfo
     ///
+
     /// # Performance
     /// - Without backtrace: ~2-5μs
     /// - With backtrace: ~100-500μs
@@ -182,9 +198,11 @@ impl PanicData {
 
 /// Panic logging and statistics
 ///
+
 /// Provides centralized panic logging with metrics collection.
 /// This acts as the "ErrorLogger" infrastructure for panic handling.
 ///
+
 /// # Performance
 /// - Statistics recording: ~10-20ns (atomic operations)
 /// - History recording: ~50-100ns (mutex + allocation)
@@ -257,6 +275,7 @@ impl PanicLogger {
 
     /// Log a panic occurrence
     ///
+
     /// # Performance
     /// - Without backtrace: ~50-100ns for statistics + ~5μs for I/O
     /// - With backtrace: +100-500μs for backtrace capture
@@ -453,6 +472,7 @@ static PANIC_LOGGER: OnceLock<Arc<PanicLogger>> = OnceLock::new();
 
 /// Get global panic logger
 ///
+
 /// Creates a default logger on first access.
 pub fn panic_logger() -> &'static Arc<PanicLogger> {
     PANIC_LOGGER.get_or_init(|| Arc::new(PanicLogger::new()))
@@ -460,24 +480,31 @@ pub fn panic_logger() -> &'static Arc<PanicLogger> {
 
 /// Setup global panic hook
 ///
+
 /// This installs a custom panic hook that captures panic information and
 /// logs it through the PanicLogger infrastructure.
 ///
+
 /// # Thread Safety
 /// Safe to call multiple times (only the first call takes effect).
 ///
+
 /// # Performance
 /// - Hook installation: ~1-2μs (one-time cost)
 /// - Per-panic overhead: ~5-10μs + backtrace time
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_error::panic_handler::setup_panic_hook;
 ///
+
 /// // At application startup
 /// setup_panic_hook();
 ///
+
 /// // Now all panics will be logged automatically
 /// # #[allow(unreachable_code)]
 /// # fn example() {
@@ -491,21 +518,26 @@ pub fn setup_panic_hook() {
 
 /// Setup panic hook with custom logger
 ///
+
 /// Allows providing a custom PanicLogger with specific configuration.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_error::panic_handler::{setup_panic_hook_with_logger, PanicLogger};
 /// use std::sync::Arc;
 ///
+
 /// // Create custom logger with backtraces enabled
 /// let logger = Arc::new(PanicLogger::with_config(
-///     200,    // history size
-///     true,   // capture backtraces
-///     true,   // print to stderr
+///  200, // history size
+///  true, // capture backtraces
+///  true, // print to stderr
 /// ));
 ///
+
 /// setup_panic_hook_with_logger(logger);
 /// ```
 pub fn setup_panic_hook_with_logger(logger: Arc<PanicLogger>) {
@@ -517,27 +549,33 @@ pub fn setup_panic_hook_with_logger(logger: Arc<PanicLogger>) {
 
 /// Catch panics in a closure and convert to Result
 ///
+
 /// This is the catch_unwind wrapper for async task panic isolation.
 /// It captures panics and converts them to VerumError::TaskPanicked.
 ///
+
 /// # Performance
 /// - Wrapper overhead: ~50-100ns
 /// - Zero overhead on success path (no unwinding)
 /// - Panic path: ~5-10μs for capture and conversion
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_error::panic_handler::catch_task_panics;
 ///
+
 /// # fn risky_computation() -> i32 { 42 }
 /// let result = catch_task_panics(|| {
-///     risky_computation()
+///  risky_computation()
 /// });
 ///
+
 /// match result {
-///     Ok(value) => println!("Success: {}", value),
-///     Err(err) => eprintln!("Panic: {}", err),
+///  Ok(value) => println!("Success: {}", value),
+///  Err(err) => eprintln!("Panic: {}", err),
 /// }
 /// ```
 pub fn catch_task_panics<F, R>(f: F) -> Result<R>
@@ -579,25 +617,31 @@ where
 
 /// Catch panics in an async closure
 ///
+
 /// Async-aware version of catch_task_panics.
 ///
+
 /// # Performance
 /// Same as catch_task_panics: ~50-100ns wrapper overhead.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_error::panic_handler::catch_task_panics_async;
 ///
+
 /// # async fn async_computation() -> i32 { 42 }
 /// # async fn example() {
 /// let result = catch_task_panics_async(async {
-///     async_computation().await
+///  async_computation().await
 /// }).await;
 ///
+
 /// match result {
-///     Ok(value) => println!("Success: {}", value),
-///     Err(err) => eprintln!("Panic: {}", err),
+///  Ok(value) => println!("Success: {}", value),
+///  Err(err) => eprintln!("Panic: {}", err),
 /// }
 /// # }
 /// ```
@@ -640,22 +684,28 @@ where
 
 /// Get panic statistics
 ///
+
 /// Returns current statistics from the global panic logger.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// use verum_error::panic_handler::{setup_panic_hook, get_panic_statistics};
 ///
+
 /// setup_panic_hook();
 ///
+
 /// // ... application runs, panics may occur ...
 ///
+
 /// let stats = get_panic_statistics();
 /// println!("Total panics: {}", stats.total_panics);
 /// println!("Top locations:");
 /// for (location, count) in stats.top_panic_locations(5) {
-///     println!("  {}: {}", location, count);
+///  println!(" {}: {}", location, count);
 /// }
 /// ```
 pub fn get_panic_statistics() -> PanicStatistics {
@@ -664,6 +714,7 @@ pub fn get_panic_statistics() -> PanicStatistics {
 
 /// Get panic history
 ///
+
 /// Returns list of recent panics (bounded by max_history_size).
 pub fn get_panic_history() -> List<PanicData> {
     panic_logger().panic_history()
@@ -671,6 +722,7 @@ pub fn get_panic_history() -> List<PanicData> {
 
 /// Clear all panic statistics and history
 ///
+
 /// Useful for testing or resetting monitoring after recovery.
 pub fn clear_panic_statistics() {
     panic_logger().clear();

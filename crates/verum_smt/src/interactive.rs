@@ -1,14 +1,18 @@
 //! Interactive Theorem Proving
 //!
+
 //! Implements an interactive proof mode for step-by-step theorem proving.
 //!
+
 //! Implements the interactive proof assistant mode (`@interactive` annotation on theorems).
 //! Supports goal-directed proving with intro/split/apply/destruct tactics, induction with
 //! IH hypotheses, proof by reflection (quote goal + decision procedure), and Ltac-style
 //! scripts with repeat-match patterns. Proofs can be exported to Coq, Lean, and Dedukti.
 //!
+
 //! ## Features
 //!
+
 //! - **Goal-Directed Proving**: Track current proof goals with context
 //! - **Tactic Application**: Apply tactics interactively with pattern matching
 //! - **Proof History**: Undo/redo support with full state restoration
@@ -17,8 +21,10 @@
 //! - **Focus Management**: Focus on specific goals or subgoals
 //! - **Proof by Reflection**: Quote goals and run decision procedures
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Tactic application: < 10ms
 //! - State display: < 5ms
 //! - Undo/redo: < 1ms
@@ -38,6 +44,7 @@ use crate::proof_search::{
 
 /// Interactive theorem prover with full goal tracking and state management
 ///
+
 /// Implements interactive proof development with goal tracking, undo/redo, and focus
 /// management. Goals display hypotheses (H0, H1, ...) and turnstile notation (|-).
 /// Supports `intro x y` to introduce variables, induction with case splitting,
@@ -125,6 +132,7 @@ pub struct ProofCommand {
 
 /// Proof state for display
 ///
+
 /// Proof state display showing numbered goals with hypotheses and turnstile notation.
 /// Example: "2 goals: x: Nat, y: Nat |- P(x, y)" and "x: Nat, y: Nat |- Q(x, y)".
 #[derive(Debug, Clone)]
@@ -249,6 +257,7 @@ impl InteractiveProver {
 
     /// Apply a tactic to current goal
     ///
+
     /// Apply a tactic to the current goal, updating the proof state.
     /// Forward reasoning (have), backward reasoning (suffices), case analysis,
     /// and induction are supported. Records the step in history for undo.
@@ -358,6 +367,7 @@ impl InteractiveProver {
 
     /// Undo last tactic
     ///
+
     /// Undo last tactic application, restoring the previous proof state from history.
     pub fn undo(&mut self) -> Result<ProofState, ProofError> {
         // Pop last command from history
@@ -480,6 +490,7 @@ impl InteractiveProver {
 
     /// Focus on a specific goal
     ///
+
     /// Focus on a specific goal by index, using `{ }` brackets in proof scripts.
     /// Only the focused goal can be modified until focus is released.
     pub fn focus(&mut self, index: usize) -> Result<(), ProofError> {
@@ -531,6 +542,7 @@ impl InteractiveProver {
 
     /// Quote current goal for reflection
     ///
+
     /// Quote the current goal as an expression for proof by reflection.
     /// The quoted goal can be passed to a decision procedure for automatic solving.
     pub fn quote_goal(&self) -> Result<Expr, ProofError> {
@@ -543,9 +555,11 @@ impl InteractiveProver {
 
     /// Run decision procedure on quoted goal
     ///
+
     /// Proof by reflection: quote the goal formula, run a decision procedure
     /// (e.g., SMT solver), and if valid, close the goal automatically.
     ///
+
     /// This implements proof by reflection:
     /// 1. Translate the formula to SMT-LIB via Z3
     /// 2. Check validity by asserting ¬formula and checking for UNSAT
@@ -627,6 +641,7 @@ impl InteractiveProver {
 
     /// Apply tactic with goal pattern matching
     ///
+
     /// Apply a tactic based on goal pattern matching (Ltac-style `match goal with`).
     /// Patterns include conjunction (split), implication (intro), existential (destruct),
     /// and hypothesis patterns for automated tactic dispatch.
@@ -672,6 +687,7 @@ impl InteractiveProver {
 
 /// Pattern for matching proof goals
 ///
+
 /// Patterns for matching proof goals in Ltac-style tactic scripts.
 /// Used in `match goal with | pattern => tactic` constructs for automated
 /// tactic dispatch based on goal structure.
@@ -742,6 +758,7 @@ impl GoalPattern {
 
 /// Proof script (sequence of tactics)
 ///
+
 /// Ltac-style proof scripts: recorded sequences of tactics that can be replayed.
 /// Scripts support repeat-match patterns for automated proving and can include
 /// reflection steps that quote goals and run decision procedures.
@@ -885,6 +902,7 @@ impl ProofScript {
 
     /// Create a repeat-match script (Ltac-style)
     ///
+
     /// Create a classic Ltac-style repeat-match script:
     /// `repeat { match goal with | |- _ /\ _ => split | |- _ -> _ => intro | _ => idtac }; auto`
     pub fn ltac_style(name: Text) -> Self {
@@ -925,6 +943,7 @@ impl ProofScript {
 
     /// Create reflection script
     ///
+
     /// Create a proof-by-reflection script: quote the goal, run a decision procedure,
     /// and use the resulting proof term via `exact`.
     pub fn reflection_script(name: Text) -> Self {
@@ -1030,6 +1049,7 @@ impl Default for ScriptLibrary {
 
 /// Format proof goal for display
 ///
+
 /// Format a proof goal for display: show hypotheses (H0: ..., H1: ...) and the
 /// goal with turnstile notation (|- proposition).
 pub fn format_goal(goal: &ProofGoal, index: usize) -> Text {
@@ -1059,6 +1079,7 @@ pub fn format_goal(goal: &ProofGoal, index: usize) -> Text {
 
 /// Format proof state for display
 ///
+
 /// Format the full proof state: show completion status, remaining goal count,
 /// focused goal indicator, and per-goal hypothesis/turnstile display.
 pub fn format_state(state: &ProofState) -> Text {

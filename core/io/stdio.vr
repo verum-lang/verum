@@ -5,18 +5,23 @@
 // Dependencies: core, io/protocols, sys/{linux,darwin,windows}/syscall
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI system interfaces:
 // - Linux: Uses sys/linux/syscall.{read, write} direct syscalls
 // - macOS: Uses sys/darwin/libsystem.{safe_read, safe_write} via libSystem.B.dylib
 // - Windows: Uses sys/windows/kernel32.{ReadFile, WriteFile} via kernel32.dll
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // This module provides access to standard input/output/error streams.
 //
+
 // =============================================================================
 
 module core.io.stdio;

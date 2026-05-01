@@ -4,22 +4,25 @@
 // Layer: 4–5
 // Spec: sqlite-native.md §15
 //
+
 // `ScalarKind` enumerates every scalar function the engine recognises.
 // The numeric `kind_code(ScalarKind) -> Int` is the wire-level identifier
 // that the codegen embeds into the `ScalarFn` opcode and the interpreter
 // dispatches on.
 //
+
 // The ranges 0..27 are **stable** — they match the historic inline table
 // in `l5_sql/codegen.vr.scalar_fn_kind` and `l4_vdbe/interpreter.vr.ScalarFn`.
 // New functions extend upward; the wire codes are fixed forever.
 //
+
 // To add a new built-in:
-//   1. Add a variant here (preserve existing kind codes).
-//   2. Add it to `kind_code` and `kind_from_name`.
-//   3. Add an entry to `arity_of`.
-//   4. Implement the semantics in the matching `*_fns.vr` module.
-//   5. Register a unit test under
-//      `vcs/specs/L2-standard/database/sqlite/builtins/`.
+//  1. Add a variant here (preserve existing kind codes).
+//  2. Add it to `kind_code` and `kind_from_name`.
+//  3. Add an entry to `arity_of`.
+//  4. Implement the semantics in the matching `*_fns.vr` module.
+//  5. Register a unit test under
+//  `vcs/specs/L2-standard/database/sqlite/builtins/`.
 // =============================================================================
 
 module core.database.sqlite.native.builtins.registry;

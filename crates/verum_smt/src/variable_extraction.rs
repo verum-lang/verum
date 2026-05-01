@@ -1,16 +1,21 @@
 //! Variable Extraction Utilities for Z3 AST
 //!
+
 //! This module provides centralized utilities for extracting variable names from Z3 AST nodes.
 //! Previously, this functionality was duplicated across z3_backend.rs and interpolation.rs.
 //!
+
 //! # Features
 //!
+
 //! - **AST Traversal**: Walks Z3 AST trees to find uninterpreted constants
 //! - **Memoization**: Uses visited set to avoid traversing shared subexpressions
 //! - **Variable Filtering**: Filters out Z3 internal names (k!, !, numeric)
 //!
+
 //! # Performance
 //!
+
 //! - Linear time in AST size with memoization
 //! - Typically < 1ms for typical verification formulas
 
@@ -24,18 +29,23 @@ use verum_common::{Map, Set, Text};
 
 /// Collect all free variable names from a Z3 Boolean formula
 ///
+
 /// Traverses the Z3 AST to find all uninterpreted constants (variables).
 /// Handles:
 /// - Simple variables (x, y, z)
 /// - Variables in compound expressions (x + y, f(x))
 /// - Properly skips bound variables in quantifiers
 ///
+
 /// # Arguments
 ///
+
 /// * `formula` - The Z3 Boolean formula to extract variables from
 ///
+
 /// # Returns
 ///
+
 /// A Set of variable names found in the formula
 pub fn collect_variables_from_bool(formula: &z3::ast::Bool) -> Set<Text> {
     let mut variables: Set<Text> = Set::new();
@@ -49,14 +59,19 @@ pub fn collect_variables_from_bool(formula: &z3::ast::Bool) -> Set<Text> {
 
 /// Collect all free variable names from multiple Z3 Boolean formulas
 ///
+
 /// Efficiently processes multiple formulas with shared visited set.
 ///
+
 /// # Arguments
 ///
+
 /// * `formulas` - Slice of Z3 Boolean formulas
 ///
+
 /// # Returns
 ///
+
 /// A Set of all variable names found across all formulas
 pub fn collect_variables_from_formulas(formulas: &[z3::ast::Bool]) -> Set<Text> {
     let mut variables: Set<Text> = Set::new();
@@ -72,11 +87,14 @@ pub fn collect_variables_from_formulas(formulas: &[z3::ast::Bool]) -> Set<Text> 
 
 /// Collect variables from a Dynamic AST node (recursive implementation)
 ///
+
 /// This is the core recursive function that traverses the AST.
 /// Made public for use cases requiring custom traversal.
 ///
+
 /// # Arguments
 ///
+
 /// * `node` - The Z3 Dynamic AST node to traverse
 /// * `variables` - Output set to collect variable names into
 /// * `visited` - Memoization set to avoid revisiting nodes
@@ -120,17 +138,20 @@ pub fn collect_variables_from_dynamic(
 /// Collect all free variables paired with their Z3 sorts from a
 /// Boolean formula.
 ///
+
 /// Same traversal as [`collect_variables_from_bool`], but for each
 /// uninterpreted constant we read its declaration's range (the result
 /// sort of an arity-0 FuncDecl is the variable's own sort) and store
 /// the `(name, sort)` pair.
 ///
+
 /// Critical for callers that need to construct quantifier bindings
 /// for the same variables — Z3 distinguishes constants by both name
 /// and sort, so a bound `Bool x` does not bind a free `Int x`. Without
 /// the sort context, quantifier elimination operates on a vacuous
 /// quantifier and produces an unsound or trivially-true result.
 ///
+
 /// If the same name appears with multiple sorts (which would be a
 /// well-formedness error in the source formula), the first sort
 /// encountered during traversal wins.
@@ -199,6 +220,7 @@ fn is_variable_decl_kind(kind: DeclKind) -> bool {
 
 /// Check if a name is a user variable (not Z3 internal)
 ///
+
 /// Filters out:
 /// - Names starting with 'k!' (Z3 generated skolem constants)
 /// - Names starting with '!' (Z3 internal)

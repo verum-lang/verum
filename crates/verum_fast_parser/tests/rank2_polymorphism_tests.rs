@@ -14,6 +14,7 @@
 )]
 //! Tests for rank-2 polymorphic function types: fn<R>(...) -> R
 //!
+
 //! Rank-2 types allow universally quantified type parameters scoped
 //! within a function type. The caller cannot choose R; the function
 //! must work for ALL R.

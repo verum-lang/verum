@@ -1,28 +1,34 @@
 //! Compilation Pipeline Orchestration
 //!
+
 //! Implements the End-to-End Compiler Architecture (Tier 0-2):
 //!
+
 //! **Tier 0: Frontend**
 //! - Lexing (verum_lexer)
 //! - Parsing (verum_fast_parser)
 //! - Type checking (verum_types)
 //! - CBGR analysis (verum_cbgr)
 //!
+
 //! **Tier 1: Analysis**
 //! - Refinement checking (verum_smt)
 //! - Context resolution
 //! - Meta function expansion (meta_registry)
 //!
+
 //! **Tier 2: Backend**
 //! - Module system (verum_modules)
 //! - VBC codegen (verum_vbc::codegen)
 //! - VBC interpretation (verum_vbc::interpreter)
 //!
+
 //! This architecture enables:
 //! - Cross-file meta function resolution
 //! - Compile-time code generation
 //! - Direct interpretation and execution
 //!
+
 //! Implementation follows a dependency-driven roadmap: Tier 0 foundation
 //! (lexer, parser, AST, types, CBGR, interpreter), then Tier 1 value-proof
 //! features (protocols, refinement codegen, SMT verification, gradual verification,
@@ -94,7 +100,7 @@ use crate::staged_pipeline::{StagedPipeline, StagedConfig};
 // Phase-specific submodule extractions (#106 — pipeline.rs split).
 // Each submodule is a sibling file under `pipeline/` declaring an
 // additional `impl<'s> CompilationPipeline<'s>` block (or a set of
-// pure free helpers).  Sibling-file submodules can access this
+// pure free helpers). Sibling-file submodules can access this
 // crate's `pub(crate)` surface via `super::*`, so private fields
 // of `CompilationPipeline` remain genuinely private — only methods
 // move out of this file, not access boundaries.
@@ -128,11 +134,13 @@ mod vbc_codegen;
 // GLOBAL STDLIB MODULE CACHE
 // ═══════════════════════════════════════════════════════════════════════════
 //
+
 // Caches parsed stdlib modules at the process level so that multiple
 // CompilationPipeline instances (e.g., one per test file) don't each re-parse
 // the 166+ stdlib .vr files. The cache stores Arc<Module> so they can be
 // shared across threads and pipeline instances.
 //
+
 // Cache key: workspace root path (canonicalized)
 // Cache value: Vec<(module_path, Arc<Module>)> + ModuleRegistry entries
 // ═══════════════════════════════════════════════════════════════════════════
@@ -154,10 +162,12 @@ pub(super) fn global_stdlib_cache() -> &'static std::sync::RwLock<Option<CachedS
 
 /// Cached fully-populated ModuleRegistry for process-level reuse.
 ///
+
 /// This is the key optimization for test performance: instead of re-registering
 /// ~166 stdlib modules for every test (taking ~400-600ms), we cache the fully
 /// populated registry and deep_clone it for each pipeline instance.
 ///
+
 /// The registry stores:
 /// - All stdlib modules registered with their exports
 /// - Glob re-exports resolved
@@ -171,9 +181,11 @@ pub(super) fn global_stdlib_registry_cache() -> &'static std::sync::RwLock<Optio
 
 /// Get a deep clone of the cached stdlib registry, or None if not yet populated.
 ///
+
 /// This is the primary entry point for test executors to get a pre-populated
 /// registry without re-registering stdlib modules.
 ///
+
 /// Uses RwLock for concurrent read access — multiple compilation pipelines
 /// can clone the registry simultaneously without blocking each other.
 pub fn get_cached_stdlib_registry() -> Option<ModuleRegistry> {
@@ -187,8 +199,10 @@ pub fn get_cached_stdlib_registry() -> Option<ModuleRegistry> {
 
 /// Clear all process-level global caches to reclaim memory.
 ///
+
 /// Install the canonical set of module-path aliases into the registry.
 ///
+
 /// MOD-CRIT-1 (audit): without this, the type-resolver hosted a
 /// hardcoded alias table at `crates/verum_types/src/infer.rs::
 /// get_module_with_path_aliases`, creating an INDEPENDENT canonical-
@@ -196,12 +210,14 @@ pub fn get_cached_stdlib_registry() -> Option<ModuleRegistry> {
 /// All alias decisions now flow through `ModuleRegistry::path_aliases`
 /// — a single source of truth owned by the registry.
 ///
+
 /// The set installed here mirrors the prior hardcoded table: legacy
 /// `std.*` → `core.*` aliases, semantic shorthand (`core.memory` →
 /// `core.base.memory`), platform-specific resolution (`core.thread`
 /// → `core.sys.{darwin,linux,windows}.thread`), and channel-vs-mpsc
 /// dispatch.
 ///
+
 /// User code can register additional aliases via
 /// `ModuleRegistry::register_path_alias(...)` for project-local
 /// overrides; the registry probes user aliases AFTER the canonical
@@ -258,16 +274,19 @@ pub fn clear_global_caches() {
 // PERSISTENT STDLIB REGISTRY CACHE (DISK)
 // ═══════════════════════════════════════════════════════════════════════════
 //
+
 // Caches the fully-populated ModuleRegistry to disk so that separate process
 // invocations (e.g., repeated `verum run` commands) skip the ~500ms stdlib
 // parse + registration. Uses blake3 content hashing for invalidation.
 //
+
 // Cache location: target/.verum-cache/stdlib/registry_<hash>.bin
 // Format: bincode-serialized SerializableRegistryCache
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Serializable representation of a ModuleRegistry for disk caching.
 ///
+
 /// ModuleRegistry contains `Shared<ModuleInfo>` (custom Arc) which doesn't
 /// implement Serialize. This wrapper extracts the data into plain types.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -349,6 +368,7 @@ fn stdlib_cache_dir(workspace_root: &Path) -> PathBuf {
 
 /// Try to load a cached ModuleRegistry from disk.
 ///
+
 /// Returns `Some(registry)` if a valid cache exists matching the given content hash.
 pub(super) fn try_load_registry_from_disk(
     workspace_root: &Path,
@@ -496,15 +516,19 @@ pub enum CompilationMode {
 /// Build mode determines how the compilation pipeline handles type registration
 /// and module resolution.
 ///
+
 /// This enables unified handling of both stdlib bootstrap compilation and normal
 /// user code compilation within the same `CompilationPipeline`.
 ///
+
 /// # Design Rationale
 ///
+
 /// The key difference between stdlib and normal compilation is:
 /// - **Stdlib Bootstrap**: Global type registration across ALL modules before compiling any
 /// - **Normal**: Incremental per-file compilation with pre-loaded stdlib types
 ///
+
 /// By abstracting this into `BuildMode`, we achieve:
 /// - Single pipeline implementation (DRY principle)
 /// - Clear separation of mode-specific behavior (SRP)
@@ -513,15 +537,18 @@ pub enum CompilationMode {
 pub enum BuildMode {
     /// Normal user code compilation.
     ///
+
     /// Loads pre-compiled stdlib from `stdlib.vbca` and compiles user code
     /// incrementally on a per-file basis.
     Normal,
 
     /// Stdlib bootstrap compilation.
     ///
+
     /// Uses global type registration across ALL stdlib modules before compiling
     /// any module. This eliminates cross-module dependency constraints.
     ///
+
     /// Flow:
     /// 1. Discover all modules via `StdlibModuleResolver`
     /// 2. Parse ALL modules
@@ -597,6 +624,7 @@ impl CheckResult {
 
 /// Result of test execution with captured output.
 ///
+
 /// This is used by vtest to run tests and capture their output for comparison.
 #[derive(Debug, Clone)]
 pub struct TestExecutionResult {
@@ -638,26 +666,30 @@ impl TestExecutionResult {
 
 /// Compilation pipeline that orchestrates all compiler phases
 ///
+
 /// Supports both normal user code compilation and stdlib bootstrap compilation
 /// through the `BuildMode` abstraction. This unifies the compilation logic
 /// while allowing mode-specific behavior for type registration and module resolution.
 ///
+
 /// Module system: files map to modules (lib.vr = crate root, foo.vr = module foo,
 /// foo/bar.vr = module foo.bar). Visibility defaults to private. Name resolution
 /// is deterministic and unambiguous via hierarchical module paths.
 ///
+
 /// Result of the unified [`CompilationPipeline::run`] dispatch.
 ///
+
 /// Each variant corresponds to a distinct compilation tier: `Checked`
 /// is the type-only path (codegen and linking skipped); `Built`
-/// carries the path to a freshly-produced native executable.  Future
+/// carries the path to a freshly-produced native executable. Future
 /// tiers (Tier-0 interpret, MLIR JIT, MLIR AOT) extend this enum —
 /// by-value matching at the caller side ensures each new variant is
 /// exhaustively handled at every call site.
 #[derive(Debug, Clone)]
 pub enum RunResult {
     /// `check_only = true` — type-checking succeeded, no output
-    /// produced.  Embedders displaying build-completion UI should
+    /// produced. Embedders displaying build-completion UI should
     /// emit a "Check OK" message instead of pointing at a binary.
     Checked,
     /// AOT compilation succeeded — the path is the produced native
@@ -667,7 +699,7 @@ pub enum RunResult {
 
 impl RunResult {
     /// Path to the produced binary, or `None` for the check-only
-    /// variant.  Convenience for callers that only want the
+    /// variant. Convenience for callers that only want the
     /// happy-path build artifact.
     pub fn output_path(&self) -> Option<&Path> {
         match self {
@@ -723,6 +755,7 @@ pub struct CompilationPipeline<'s> {
 
     /// Build mode (Normal vs StdlibBootstrap)
     ///
+
     /// Determines how type registration and module resolution work:
     /// - Normal: Per-file incremental compilation with pre-loaded stdlib
     /// - StdlibBootstrap: Global type registration across all modules
@@ -747,10 +780,12 @@ pub struct CompilationPipeline<'s> {
 
     /// Stdlib metadata for NormalBuild mode.
     ///
+
     /// When set, the type checker uses pre-compiled stdlib types from embedded
     /// stdlib.vbca instead of parsing stdlib source files. This is the preferred
     /// mode for user code compilation.
     ///
+
     /// Pre-compiled stdlib type metadata from embedded stdlib.vbca archive.
     /// In NormalBuild mode, these types are loaded directly rather than re-parsing
     /// stdlib source, enabling fast compilation of user code.
@@ -813,12 +848,14 @@ pub struct CompilationPipeline<'s> {
 
     /// Staged pipeline for N-level metaprogramming with fine-grained caching.
     ///
+
     /// Replaces the simple `expand_module()` approach with full N-level staging:
     /// - meta(N) generates meta(N-1) code
     /// - Fine-grained cache invalidation (signature vs body changes)
     /// - Dependency tracking and cascade invalidation
     /// - Cache hit/miss statistics
     ///
+
     /// N-level metaprogramming: meta(N) generates meta(N-1) code, with
     /// fine-grained cache invalidation (signature vs body changes),
     /// dependency tracking, and cascade invalidation.
@@ -827,10 +864,12 @@ pub struct CompilationPipeline<'s> {
 
 /// Context for building CFG blocks in escape analysis.
 ///
+
 /// This struct holds the state needed during CFG construction for
 /// a single function, including the block ID allocator, reference
 /// counter, and pending blocks to be added to the CFG.
 ///
+
 /// Visibility: `pub(super)` so the extracted CBGR cluster
 /// (`crate::pipeline::cbgr`) can construct + match against it via
 /// `super::CfgBuildContext` (#106 Phase 9).
@@ -856,21 +895,25 @@ pub(super) struct CfgBuildContext<'a> {
 /// Decide whether `source` should be parsed in **script mode** (top-level
 /// statements allowed, folded into `__verum_script_main`).
 ///
+
 /// Two independent triggers, OR-joined:
 ///
+
 /// 1. **Shebang autodetection** — any source whose first bytes are a `#!`
-///    line (BOM-tolerant: `EF BB BF #!` is accepted) is a script regardless
-///    of CLI invocation form. This makes shebang exec (`./hello.vr`) work
-///    without any compiler-options plumbing.
+///  line (BOM-tolerant: `EF BB BF #!` is accepted) is a script regardless
+///  of CLI invocation form. This makes shebang exec (`./hello.vr`) work
+///  without any compiler-options plumbing.
 ///
+
 /// 2. **Explicit entry-source flag** — `opts.script_mode` enables script
-///    mode for the entry source identified by `opts.input`. We compare via
-///    canonicalised paths when both sides exist (handles `./hello.vr` vs
-///    `/abs/hello.vr` vs `hello.vr`); when canonicalisation fails (file
-///    deleted between load and parse), fall back to a literal match. The
-///    flag only matches the entry; stdlib and imported modules ignore it,
-///    keeping their library-mode parsing untouched.
+///  mode for the entry source identified by `opts.input`. We compare via
+///  canonicalised paths when both sides exist (handles `./hello.vr` vs
+///  `/abs/hello.vr` vs `hello.vr`); when canonicalisation fails (file
+///  deleted between load and parse), fall back to a literal match. The
+///  flag only matches the entry; stdlib and imported modules ignore it,
+///  keeping their library-mode parsing untouched.
 ///
+
 /// The function is allocation-free on the hot path (shebang check is a
 /// 5-byte slice comparison).
 pub(super) fn should_parse_as_script(
@@ -963,11 +1006,14 @@ mod script_parse_routing_tests {
 impl<'s> CompilationPipeline<'s> {
     /// Create a new compilation pipeline for normal user code compilation.
     ///
+
     /// This is the default mode that loads pre-compiled stdlib and compiles
     /// user code incrementally.
     ///
+
     /// Initializes ModuleLoader with the session's root path.
     ///
+
     /// Initializes the pipeline with module loader rooted at the session's root path,
     /// following file-to-module mapping (foo.vr = module foo, foo/mod.vr = directory module).
     pub fn new(session: &'s mut Session) -> Self {
@@ -1079,23 +1125,30 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Create a new compilation pipeline for stdlib bootstrap compilation.
     ///
+
     /// This mode uses global type registration across ALL modules before
     /// compiling any module, eliminating cross-module dependency constraints.
     ///
+
     /// # Arguments
     ///
+
     /// * `session` - The compilation session
     /// * `config` - Configuration for stdlib compilation
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_compiler::{Session, CompilationPipeline, CoreConfig};
     ///
+
     /// let config = CoreConfig::new("stdlib")
-    ///     .with_output("target/stdlib.vbca")
-    ///     .with_debug_info();
+    ///  .with_output("target/stdlib.vbca")
+    ///  .with_debug_info();
     ///
+
     /// let mut session = Session::default();
     /// let mut pipeline = CompilationPipeline::new_core(&mut session, config);
     /// let result = pipeline.compile_core()?;
@@ -1205,19 +1258,25 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Set stdlib metadata for NormalBuild mode.
     ///
+
     /// When set, the type checker uses pre-compiled stdlib types from embedded
     /// stdlib.vbca instead of parsing stdlib source files. This enables faster
     /// compilation of user code by skipping stdlib parsing.
     ///
+
     /// # Arguments
     ///
+
     /// * `metadata` - Pre-compiled stdlib types loaded from stdlib.vbca
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// use verum_compiler::core_loader;
     ///
+
     /// let stdlib_bytes = embedded_stdlib::get_embedded_stdlib().unwrap();
     /// let metadata = core_loader::load_core_metadata_from_bytes(stdlib_bytes)?;
     /// let mut pipeline = CompilationPipeline::new(&mut session);
@@ -1243,11 +1302,13 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Get incremental compilation statistics.
     ///
+
     /// Returns statistics about the incremental compiler's state, including:
     /// - Number of cached modules
     /// - Number of item hashes cached
     /// - Number of files needing verification only
     ///
+
     /// Useful for monitoring incremental compilation efficiency.
     pub fn incremental_stats(&self) -> crate::incremental_compiler::CacheStats {
         self.incremental_compiler.stats()
@@ -1264,19 +1325,22 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Get the incremental compiler for advanced usage.
     ///
+
     /// Provides direct access to the incremental compiler for:
     /// - Computing fine-grained recompilation sets
     /// - Classifying changes (signature vs body)
     /// - Managing dependency graphs
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// let (full_recompile, verify_only) = pipeline
-    ///     .incremental_compiler()
-    ///     .compute_incremental_sets_fine_grained(&all_files, |path| {
-    ///         // compute hashes
-    ///     });
+    ///  .incremental_compiler()
+    ///  .compute_incremental_sets_fine_grained(&all_files, |path| {
+    ///  // compute hashes
+    ///  });
     /// ```
     pub fn incremental_compiler(&self) -> &IncrementalCompiler {
         &self.incremental_compiler
@@ -1284,6 +1348,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Get mutable access to the incremental compiler.
     ///
+
     /// Use this for:
     /// - Registering dependencies between modules
     /// - Updating item hashes manually
@@ -1294,6 +1359,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Clear accumulated caches to reclaim memory.
     ///
+
     /// Call this between compilation batches (e.g., in test runners) to prevent
     /// unbounded growth of stdlib bootstrap registries. Normal-mode fields like
     /// `modules` are already cleared per-compilation; this targets the bootstrap-
@@ -1306,18 +1372,24 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Initialize stdlib from cache.
     ///
+
     /// This method checks for a valid cached stdlib and loads it if available.
     /// If no cache exists or it's invalid, stdlib will be compiled on first use.
     ///
+
     /// This is called automatically in `BuildMode::Normal` before compilation.
     /// In `BuildMode::StdlibBootstrap`, this method has no effect.
     ///
+
     /// # Cache Location
     ///
+
     /// The cache is stored in `<project_root>/target/.verum/core_cache/`.
     ///
+
     /// # Cache Invalidation
     ///
+
     /// The cache is invalidated when:
     /// - Verum compiler version changes
     /// - Target configuration changes (os, arch)
@@ -1453,6 +1525,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Parse generic type parameters from a cached type definition string.
     ///
+
     /// Handles definitions like:
     /// - `"type List<T> is { ... }"` -> `[GenericParam { name: "T", bounds: [], default: None }]`
     /// - `"type Map<K, V> is { ... }"` -> `[GenericParam { name: "K", ... }, GenericParam { name: "V", ... }]`
@@ -1512,6 +1585,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Register meta declarations from a parsed module.
     ///
+
     /// This extracts meta functions and macros from the module and registers them
     /// in the meta registry, enabling macro expansion and meta-fail tests.
     fn register_meta_declarations(&mut self, path: &Text, module: &Module) -> Result<()> {
@@ -1559,6 +1633,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Evaluate meta functions and @const blocks.
     ///
+
     /// This phase walks the module AST, finds `meta fn` declarations and `@const` blocks,
     /// lowers them to MetaExpr, and evaluates them using the MetaContext. Errors during
     /// evaluation (e.g., division by zero, missing context) are reported as diagnostics.
@@ -1790,17 +1865,19 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Unified pre-codegen validation.
     ///
+
     /// Runs every language-mechanism validation that must agree
     /// between the interpreter, CPU AOT, and GPU paths:
-    ///   1. `[safety]` gates (unconditional, regardless of verify_mode)
-    ///   2. Type check
-    ///   3. Target-profile / dependency analysis
-    ///   4. SMT refinement verification (if `verify_mode.use_smt()`)
-    ///   5. Context / DI validation
-    ///   6. Send/Sync boundary enforcement
-    ///   7. CBGR tier analysis
-    ///   8. FFI boundary validation
+    ///  1. `[safety]` gates (unconditional, regardless of verify_mode)
+    ///  2. Type check
+    ///  3. Target-profile / dependency analysis
+    ///  4. SMT refinement verification (if `verify_mode.use_smt()`)
+    ///  5. Context / DI validation
+    ///  6. Send/Sync boundary enforcement
+    ///  7. CBGR tier analysis
+    ///  8. FFI boundary validation
     ///
+
     /// Every pipeline entry point (`run_interpreter`,
     /// `run_native_compilation`, `run_mlir_aot`, `run_for_test`, …)
     /// should call this method to guarantee identical semantics on
@@ -1984,7 +2061,7 @@ mod resolve_super_path_tests {
     #[test]
     fn super_at_root_returns_input_unchanged() {
         // `super` from a top-level `core` module would walk past the
-        // root.  We don't try to invent a sentinel — return the path
+        // root. We don't try to invent a sentinel — return the path
         // as-is so the progressive-prefix walk fails to match (correct
         // behaviour for malformed input).
         assert_eq!(resolve("core", "super.foo"), "super.foo");
@@ -2004,7 +2081,7 @@ mod resolve_super_path_tests {
     fn exactly_root_super_returns_input_unchanged() {
         // 3-super-deep from `core.sys.time_ops` (3 components) walks
         // exactly to the root and yields an empty parent — also
-        // malformed; treat as out-of-range.  Returning "x" verbatim
+        // malformed; treat as out-of-range. Returning "x" verbatim
         // would let it match unrelated top-level modules in the
         // progressive-prefix walk, which is wrong.
         assert_eq!(

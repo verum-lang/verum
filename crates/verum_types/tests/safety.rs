@@ -14,12 +14,15 @@
 )]
 //! Safety tests for verum_types
 //!
+
 //! Tests memory safety and panic-free guarantees.
 //!
+
 //! NOTE: The verum_types crate is written in safe Rust and does not use any unsafe blocks,
 //! therefore memory safety is guaranteed by the Rust compiler. This test file exists as
 //! a placeholder for safety-related tests if needed in the future.
 //!
+
 //! Safety properties tested elsewhere:
 //! - No panics on malformed input: error_quality_tests.rs
 //! - Type system soundness: All type checker tests

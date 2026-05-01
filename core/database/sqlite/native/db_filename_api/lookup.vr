@@ -31,7 +31,7 @@ public fn path_text(o: &DbFilenameOutcome) -> Text {
 }
 
 // "main" / "temp" / attached schema names are well-known; anything else is
-// unknown.  We model only main + temp explicitly.
+// unknown. We model only main + temp explicitly.
 public type DbFilenameSchemaKind is
     | SkMain
     | SkTemp

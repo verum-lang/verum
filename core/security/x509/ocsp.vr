@@ -4,63 +4,75 @@
 // Layer: 3 (X509Certificate)
 // =============================================================================
 //
+
 // RFC 6960 Online X509Certificate Status Protocol:
 //
-//   OCSPRequest ::= SEQUENCE {
-//       tbsRequest      TBSRequest,
-//       optionalSignature [0] EXPLICIT Signature OPTIONAL
-//   }
+
+//  OCSPRequest ::= SEQUENCE {
+//  tbsRequest TBSRequest,
+//  optionalSignature [0] EXPLICIT Signature OPTIONAL
+//  }
 //
-//   OCSPResponse ::= SEQUENCE {
-//       responseStatus   OCSPResponseStatus,
-//       responseBytes  [0] EXPLICIT ResponseBytes OPTIONAL
-//   }
+
+//  OCSPResponse ::= SEQUENCE {
+//  responseStatus OCSPResponseStatus,
+//  responseBytes [0] EXPLICIT ResponseBytes OPTIONAL
+//  }
 //
-//   ResponseBytes ::= SEQUENCE {
-//       responseType  OBJECT IDENTIFIER,    -- id-pkix-ocsp-basic
-//       response      OCTET STRING          -- DER BasicOCSPResponse
-//   }
+
+//  ResponseBytes ::= SEQUENCE {
+//  responseType OBJECT IDENTIFIER, -- id-pkix-ocsp-basic
+//  response OCTET STRING -- DER BasicOCSPResponse
+//  }
 //
-//   BasicOCSPResponse ::= SEQUENCE {
-//       tbsResponseData         ResponseData,
-//       signatureAlgorithm      AlgorithmIdentifier,
-//       signature               BIT STRING,
-//       certs               [0] EXPLICIT SEQUENCE OF X509Certificate OPTIONAL
-//   }
+
+//  BasicOCSPResponse ::= SEQUENCE {
+//  tbsResponseData ResponseData,
+//  signatureAlgorithm AlgorithmIdentifier,
+//  signature BIT STRING,
+//  certs [0] EXPLICIT SEQUENCE OF X509Certificate OPTIONAL
+//  }
 //
-//   ResponseData ::= SEQUENCE {
-//       version          [0] EXPLICIT Version DEFAULT v1,
-//       responderID          ResponderID,
-//       producedAt           GeneralizedTime,
-//       responses            SEQUENCE OF SingleResponse,
-//       responseExtensions [1] EXPLICIT Extensions OPTIONAL
-//   }
+
+//  ResponseData ::= SEQUENCE {
+//  version [0] EXPLICIT Version DEFAULT v1,
+//  responderID ResponderID,
+//  producedAt GeneralizedTime,
+//  responses SEQUENCE OF SingleResponse,
+//  responseExtensions [1] EXPLICIT Extensions OPTIONAL
+//  }
 //
-//   SingleResponse ::= SEQUENCE {
-//       certID                       CertID,
-//       certStatus                   CertStatus,
-//       thisUpdate                   GeneralizedTime,
-//       nextUpdate       [0] EXPLICIT GeneralizedTime OPTIONAL,
-//       singleExtensions [1] EXPLICIT Extensions OPTIONAL
-//   }
+
+//  SingleResponse ::= SEQUENCE {
+//  certID CertID,
+//  certStatus CertStatus,
+//  thisUpdate GeneralizedTime,
+//  nextUpdate [0] EXPLICIT GeneralizedTime OPTIONAL,
+//  singleExtensions [1] EXPLICIT Extensions OPTIONAL
+//  }
 //
-//   CertStatus ::= CHOICE {
-//       good     [0] IMPLICIT NULL,
-//       revoked  [1] IMPLICIT RevokedInfo,
-//       unknown  [2] IMPLICIT UnknownInfo
-//   }
+
+//  CertStatus ::= CHOICE {
+//  good [0] IMPLICIT NULL,
+//  revoked [1] IMPLICIT RevokedInfo,
+//  unknown [2] IMPLICIT UnknownInfo
+//  }
 //
+
 // Scaffold scope:
 //
-//   * `OcspResponseStatus` / `CertStatus` enums.
-//   * `OcspResponse` + `BasicOcspResponse` + `SingleResponse` records.
-//   * `parse_ocsp_response(der)` — returns scaffold error until v1.1
-//     (the DerReader + Name/Time/Extension integration pass).
+
+//  * `OcspResponseStatus` / `CertStatus` enums.
+//  * `OcspResponse` + `BasicOcspResponse` + `SingleResponse` records.
+//  * `parse_ocsp_response(der)` — returns scaffold error until v1.1
+//  (the DerReader + Name/Time/Extension integration pass).
 //
+
 // Integration with `x509.chain`: after a chain is built, each non-
 // leaf certificate is checked against a fresh or stapled OCSP
 // response via `check_cert_status(cert, ocsp)`.
 //
+
 // =============================================================================
 
 module core.security.x509.ocsp;
@@ -192,7 +204,7 @@ public type OcspError is
     | Truncated;
 
 // Display + Debug + Eq for OcspError — standard stdlib
-// protocol impls.  SignatureNotVerified deliberately
+// protocol impls. SignatureNotVerified deliberately
 // surfaces no detail (RFC 6960 §4 — value-blind).
 
 implement Display for OcspError {

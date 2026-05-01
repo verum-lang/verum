@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// A DupHandle records the allocation site + a freed flag.  Production
+
+// A DupHandle records the allocation site + a freed flag. Production
 // SQLite uses malloc; the catalogue keeps it abstract.
 // =============================================================================
 

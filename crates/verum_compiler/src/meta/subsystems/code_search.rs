@@ -1,5 +1,6 @@
 //! Code search types for meta functions
 //!
+
 //! Provides type information and usage tracking for code search functionality.
 
 use verum_ast::Span;

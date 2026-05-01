@@ -1,5 +1,6 @@
 //! High-level Rust intercepts for `core.io.process` operations.
 //!
+
 //! Sibling to `shell_runtime.rs` (VBC-1), `file_runtime.rs`
 //! (VBC-FILE-1 + VBC-FS-2), `env_runtime.rs` (VBC-ENV-1 +
 //! VBC-PROC-1), and `stdio_runtime.rs` (VBC-STDIO-1/2).
@@ -11,23 +12,27 @@
 //! `wait_for_child` calls at the `Call` boundary and dispatching
 //! straight to `std::process::Command`.
 //!
+
 //! # Functions intercepted
 //!
-//!   * `spawn_child_with_output(cmd: &Command) -> Result<Output, Text>`
-//!     — `std::process::Command::output()`.  Constructs the full
-//!     stdlib `Output { status, stdout_bytes, stderr_bytes }` record.
-//!   * `spawn_child(cmd: &Command) -> Result<Child, Text>` — defers
-//!     to bytecode (Child stateful — not yet covered).
-//!   * `wait_for_child(pid: Int) -> Result<ExitStatus, Text>` —
-//!     defers (depends on prior spawn_child path).
+
+//!  * `spawn_child_with_output(cmd: &Command) -> Result<Output, Text>`
+//!  — `std::process::Command::output()`. Constructs the full
+//!  stdlib `Output { status, stdout_bytes, stderr_bytes }` record.
+//!  * `spawn_child(cmd: &Command) -> Result<Child, Text>` — defers
+//!  to bytecode (Child stateful — not yet covered).
+//!  * `wait_for_child(pid: Int) -> Result<ExitStatus, Text>` —
+//!  defers (depends on prior spawn_child path).
 //!
+
 //! # Command field layout
 //!
+
 //! `core/io/process.vr::Command` is a 7-field record laid out as
 //! `[ObjectHeader][program: Value][args: Value][env_vars: Value]
 //!  [working_dir: Value][stdin_cfg: Value][stdout_cfg: Value]
-//!  [stderr_cfg: Value]`.  Field i lives at `OBJECT_HEADER_SIZE +
-//! i * sizeof(Value)`.  Stdio config is a 3-arm sum (Inherit / Piped
+//!  [stderr_cfg: Value]`. Field i lives at `OBJECT_HEADER_SIZE +
+//! i * sizeof(Value)`. Stdio config is a 3-arm sum (Inherit / Piped
 //! / Null) — we read the variant tag to decide between
 //! `std::process::Stdio::inherit() / piped() / null()`.
 
@@ -299,9 +304,9 @@ fn check_process_permission(state: &mut InterpreterState) -> Option<Value> {
 // ============================================================================
 
 /// Encode `std::process::ExitStatus` into the raw waitpid() word that
-/// Verum's `ExitStatus { raw: Int }` expects.  On Unix this is the
+/// Verum's `ExitStatus { raw: Int }` expects. On Unix this is the
 /// canonical (status << 8) | sig word; on Windows it's just the exit
-/// code.  The stdlib's `success` / `is_exited` / `signal` / `code`
+/// code. The stdlib's `success` / `is_exited` / `signal` / `code`
 /// methods read these exact bits.
 #[cfg(unix)]
 fn encode_exit_status(s: &std::process::ExitStatus) -> i64 {

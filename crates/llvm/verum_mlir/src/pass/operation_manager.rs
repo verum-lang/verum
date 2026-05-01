@@ -38,8 +38,10 @@ impl OperationPassManager<'_, '_> {
 
     /// Creates an operation pass manager from a raw object.
     ///
+
     /// # Safety
     ///
+
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirOpPassManager) -> Self {
         Self {

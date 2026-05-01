@@ -1,17 +1,19 @@
 // unixepoch() — convert time-value (+ modifiers) to seconds since epoch.
 //
+
 // Time-value forms accepted by SQLite's date functions:
-//   * "now"
-//   * ISO-8601 date or datetime ("YYYY-MM-DD[ HH:MM[:SS[.SSS]]]")
-//   * Julian day (Float)
-//   * Unix timestamp (Int / "unixepoch" modifier required for raw Int input)
+//  * "now"
+//  * ISO-8601 date or datetime ("YYYY-MM-DD[ HH:MM[:SS[.SSS]]]")
+//  * Julian day (Float)
+//  * Unix timestamp (Int / "unixepoch" modifier required for raw Int input)
 //
+
 // Modifiers (selected — full set in date_modifier_grammar):
-//   "+/-N days|hours|minutes|seconds|months|years"
-//   "start of day"  "start of month"  "start of year"
-//   "weekday N"
-//   "utc"  "localtime"
-//   "auto"  "subsec"  "julianday"  "unixepoch"
+//  "+/-N days|hours|minutes|seconds|months|years"
+//  "start of day" "start of month" "start of year"
+//  "weekday N"
+//  "utc" "localtime"
+//  "auto" "subsec" "julianday" "unixepoch"
 
 module core.database.sqlite.native.unixepoch_fn.fn_;
 
@@ -28,7 +30,7 @@ public type TimeValue is
 public fn parse(input: Text) -> TimeValue {
     if input == "now".clone() { return TvNow; }
     // We don't parse the actual ISO string here — the catalogue only
-    // models the taxonomy.  Real parser is in date functions.
+    // models the taxonomy. Real parser is in date functions.
     TvIso(input)
 }
 
@@ -49,7 +51,7 @@ public fn result_seconds(r: &UnixepochResult) -> Int64 {
 }
 
 // Minimal evaluator: the taxonomy proves the result *kind*; numerical
-// conversion uses fixed deltas.  "now" → 0 sentinel for the catalogue
+// conversion uses fixed deltas. "now" → 0 sentinel for the catalogue
 // (real engine plugs in clock).
 public fn evaluate(tv: &TimeValue, now_seconds: Int64) -> UnixepochResult {
     match tv {

@@ -14,6 +14,7 @@
 )]
 // Comprehensive tests for SSA Construction module
 //
+
 // Tests cover:
 // - Basic block and CFG construction
 // - Dominance computation
@@ -22,16 +23,19 @@
 // - Variable renaming
 // - End-to-end SSA conversion
 //
+
 // SSA Construction Algorithm (Cytron et al. 1991):
 // 1. Compute dominance frontier for each basic block
 // 2. Insert phi nodes at join points: for each variable v, place phi in v's
-//    dominance frontier blocks. Phi format: v_new = phi(v_1, v_2, ..., v_n)
-//    where v_i are versions reaching from each predecessor.
+//  dominance frontier blocks. Phi format: v_new = phi(v_1, v_2, ..., v_n)
+//  where v_i are versions reaching from each predecessor.
 // 3. Rename variables to SSA form (each variable assigned exactly once)
 //
+
 // Dominance Frontier: Block Y is in DF(X) if X does not strictly dominate Y
 // but X dominates some predecessor of Y.
 //
+
 // Complexity: O(n^2 + n*m) where n = basic blocks, m = variables (linear in practice)
 
 use verum_common::Text;
@@ -702,10 +706,11 @@ fn test_to_ssa_branch_with_phi() {
     // After SSA conversion, the merge block gets a phi node x3 = phi(x1, x2)
     // selecting x1 from true branch, x2 from false branch.
     //
+
     // if condition {
-    //     x = 1;
+    //  x = 1;
     // } else {
-    //     x = 2;
+    //  x = 2;
     // }
     // y = x + 3;
 
@@ -750,9 +755,10 @@ fn test_to_ssa_loop() {
     // SSA loop example: loop header gets phi i2 = phi(i0, i1) merging
     // the initial value (i0=0) with the loop-carried value (i1 = i2 + 1).
     //
+
     // i = 0;
     // while i < 10 {
-    //     i = i + 1;
+    //  i = i + 1;
     // }
 
     let mut builder = CFGBuilder::new();
@@ -795,13 +801,13 @@ fn test_to_ssa_loop() {
 #[test]
 fn test_to_ssa_nested_branches() {
     // if a {
-    //     if b {
-    //         x = 1;
-    //     } else {
-    //         x = 2;
-    //     }
+    //  if b {
+    //  x = 1;
+    //  } else {
+    //  x = 2;
+    //  }
     // } else {
-    //     x = 3;
+    //  x = 3;
     // }
     // return x;
 

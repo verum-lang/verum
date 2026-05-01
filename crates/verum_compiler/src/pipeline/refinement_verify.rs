@@ -1,14 +1,17 @@
 //! Per-function refinement-type verification (Z3 + CVC5 portfolio).
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 4). Implements full
 //! Z3-based refinement-type verification:
 //!
-//!   1. Extracts refinement predicates from parameter / return types.
-//!   2. Generates Z3 assertions for each refinement constraint.
-//!   3. Uses `verum_smt::RefinementVerifier` to verify constraints.
-//!   4. Caches verification results for performance.
-//!   5. Reports detailed error messages with counterexamples.
+
+//!  1. Extracts refinement predicates from parameter / return types.
+//!  2. Generates Z3 assertions for each refinement constraint.
+//!  3. Uses `verum_smt::RefinementVerifier` to verify constraints.
+//!  4. Caches verification results for performance.
+//!  5. Reports detailed error messages with counterexamples.
 //!
+
 //! Fast-path for syntactic subsumption; falls back to full Z3 SMT
 //! solving for complex cases. Timeout-bounded (10-500ms per
 //! sub-check). Refinement-type subsumption via Z3: syntactic check
@@ -29,6 +32,7 @@ use super::CompilationPipeline;
 
 /// Outcome of an SMT-based refinement check at a return site.
 ///
+
 /// When a function declares a refinement on its return type
 /// (e.g., `Int{> 0}`), the compiler checks via SMT that the return
 /// expression satisfies the predicate. Three outcomes: Verified
@@ -226,13 +230,15 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Verify return refinement using full Z3 SMT integration.
     ///
+
     /// Performs comprehensive SMT-based verification:
     ///
-    ///   1. Extracts all return values from the function body.
-    ///   2. Uses syntactic checking as a fast path for simple cases.
-    ///   3. Falls back to Z3 SMT solver for complex cases.
-    ///   4. Leverages subsumption checking for type relationships.
-    ///   5. Reports detailed error messages with counterexamples.
+
+    ///  1. Extracts all return values from the function body.
+    ///  2. Uses syntactic checking as a fast path for simple cases.
+    ///  3. Falls back to Z3 SMT solver for complex cases.
+    ///  4. Leverages subsumption checking for type relationships.
+    ///  5. Reports detailed error messages with counterexamples.
     #[allow(clippy::too_many_arguments)]
     fn verify_return_refinement_smt(
         &self,
@@ -513,14 +519,17 @@ pub(super) fn extract_return_values(
 
 /// Simple syntactic check for common refinement patterns.
 ///
+
 /// Returns `Some(true)` if definitely satisfied, `Some(false)` if
 /// violated, `None` if inconclusive (needs SMT).
 ///
+
 /// Examples:
 ///
-///   * `x + 1` satisfies `result > x` (syntactic: x+1 > x always true for Int).
-///   * `5` satisfies `result > 0` (syntactic: 5 > 0 is true).
-///   * `-5` violates `result > 0` (syntactic: -5 > 0 is false).
+
+///  * `x + 1` satisfies `result > x` (syntactic: x+1 > x always true for Int).
+///  * `5` satisfies `result > 0` (syntactic: 5 > 0 is true).
+///  * `-5` violates `result > 0` (syntactic: -5 > 0 is false).
 pub(super) fn syntactic_check_refinement(
     value: &verum_ast::expr::Expr,
     predicate: &verum_ast::expr::Expr,

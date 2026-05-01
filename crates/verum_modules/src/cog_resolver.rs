@@ -1,22 +1,27 @@
 //! Cross-cog module resolution.
 //!
+
 //! Maps external cog names to their filesystem roots, enabling `mount http.client.Response`
 //! to resolve to the installed `http` cog's `client.vr` file.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! mount http.client.Response;
-//!   │
-//!   ├── "http" matches a dependency name?
-//!   │     Yes → CogResolver provides root path for "http" cog
-//!   │     No  → Local module resolution (existing behavior)
-//!   │
-//!   └── ModuleLoader searches http_root/client.vr or http_root/client/mod.vr
+//!  │
+//!  ├── "http" matches a dependency name?
+//!  │ Yes → CogResolver provides root path for "http" cog
+//!  │ No → Local module resolution (existing behavior)
+//!  │
+//!  └── ModuleLoader searches http_root/client.vr or http_root/client/mod.vr
 //! ```
 //!
+
 //! # Resolution Strategy
 //!
+
 //! The first segment of a mount path is checked against registered cog names.
 //! If it matches, the remaining segments are resolved relative to that cog's root.
 //! This requires no grammar changes — existing `mount` syntax works as-is.
@@ -40,6 +45,7 @@ pub struct CogLocation {
 
 /// Resolves external cog names to their filesystem locations.
 ///
+
 /// Built from Verum.lock (resolved dependencies) or Verum.toml (path dependencies).
 /// Used by ModuleLoader to dispatch cross-cog mount statements.
 #[derive(Debug, Clone)]
@@ -93,6 +99,7 @@ impl CogResolver {
 
     /// Build a CogResolver from a list of locked cog entries.
     ///
+
     /// For each locked cog:
     /// - Registry source: maps to ~/.verum/cache/{name}-{version}/src/
     /// - Path source: uses the path directly

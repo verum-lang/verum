@@ -1,10 +1,13 @@
 //! VBC instruction set definitions.
 //!
+
 //! VBC uses a register-based instruction set with variable-length encoding.
 //! Each function has a fixed number of registers allocated at compile time.
 //!
+
 //! # Opcode Categories (v2)
 //!
+
 //! | Range | Category | Description |
 //! |-------|----------|-------------|
 //! | 0x00-0x0F | Data Movement | MOV, LOAD_*, CVT_* |
@@ -30,6 +33,7 @@ use crate::types::TypeRef;
 
 /// Register reference.
 ///
+
 /// Registers are encoded as:
 /// - r0-r127: Single byte (0x00-0x7F)
 /// - r128-r16383: Two bytes (0x80 | high7, low8)
@@ -54,6 +58,7 @@ impl Reg {
 
 /// Register range for function calls.
 ///
+
 /// Encodes a contiguous range of registers: `start..start+count`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct RegRange {
@@ -79,6 +84,7 @@ impl RegRange {
 
 /// VBC opcode enumeration.
 ///
+
 /// All 256 opcodes are defined here, organized by category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
@@ -147,6 +153,7 @@ pub enum Opcode {
     CvtToI = 0x1A,
     /// Unsigned integer division: `dst = (a as u64) wrapping_div (b as u64)`.
     ///
+
     /// Distinct from `DivI` because signed and unsigned division
     /// disagree once either operand has the high bit set: e.g.
     /// `(u64::MAX) / 10 = 1844674407370955161` but `(i64)(-1) / 10 = 0`.
@@ -166,10 +173,11 @@ pub enum Opcode {
     IntArith1E = 0x1E,
     /// General-purpose extension opcode (#167 Part A).
     ///
-    /// Encoded as `[0x1F] [sub_op:u8] [operands...]`.  The sub-op byte
+
+    /// Encoded as `[0x1F] [sub_op:u8] [operands...]`. The sub-op byte
     /// selects the extended-instruction kind, giving us a clean
     /// 256-entry sub-op space carved out of the previously-reserved
-    /// `IntArith1F` slot.  Used as the home for new first-class
+    /// `IntArith1F` slot. Used as the home for new first-class
     /// instructions that don't fit any existing extension namespace
     /// (Math/Tensor/Cbgr/Ffi/etc.) — first occupant is
     /// `MakeVariantTyped` (#146 Phase 3, Extended sub-op `0x01`).
@@ -200,12 +208,15 @@ pub enum Opcode {
     CvtToF = 0x28,
     /// Math Extended operations prefix for transcendental and special functions.
     ///
+
     /// This opcode is followed by a sub-opcode byte (MathSubOpcode) that specifies
     /// the specific math operation. All operations use native Rust/LLVM implementations
     /// for zero-cost execution in both interpreter and AOT compilation.
     ///
+
     /// # Sub-opcode Ranges
     ///
+
     /// - 0x00-0x0F: Trigonometric (sin, cos, tan, asin, acos, atan, atan2)
     /// - 0x10-0x1F: Hyperbolic (sinh, cosh, tanh, asinh, acosh, atanh)
     /// - 0x20-0x2F: Exponential/Logarithmic (exp, exp2, expm1, log, log2, log10, log1p, pow)
@@ -214,33 +225,41 @@ pub enum Opcode {
     /// - 0x50-0x5F: Special (abs, copysign, fma, fmod, remainder, fdim, minnum, maxnum)
     /// - 0x60-0x6F: Classification (is_nan, is_inf, is_finite)
     ///
+
     /// # Encoding
     ///
+
     /// ```text
     /// [0x29] [sub_opcode:u8] [dst:reg] [src:reg] [src2:reg]?
     /// ```
     ///
+
     /// # Performance
     ///
+
     /// - Interpreter: ~2ns per operation (native Rust method call)
     /// - AOT: 0ns overhead (maps to LLVM intrinsics)
     MathExtended = 0x29,
     /// SIMD Extended operations prefix for vector operations.
     ///
+
     /// This opcode is followed by a sub-opcode byte (SimdSubOpcode) that specifies
     /// the SIMD operation. Platform-agnostic operations that lower to:
     /// - x86: AVX2/AVX-512 intrinsics
     /// - ARM: NEON intrinsics
     /// - MLIR: vector dialect
     ///
+
     /// Format: `[0x2A] [sub_opcode:u8] [operands...]`
     SimdExtended = 0x2A,
     /// Char Extended operations prefix for character operations.
     ///
+
     /// This opcode is followed by a sub-opcode byte (CharSubOpcode) that specifies
     /// the character operation. ASCII operations are inline, Unicode operations
     /// use runtime lookup.
     ///
+
     /// Format: `[0x2B] [sub_opcode:u8] [dst:reg] [src:reg]`
     CharExtended = 0x2B,
     /// Reserved float arithmetic.
@@ -323,9 +342,11 @@ pub enum Opcode {
     EqRef = 0x4E,
     /// Extended comparison operations (unsigned integer comparisons).
     ///
+
     /// Uses sub-opcodes for operations that don't fit in the primary comparison range.
     /// Encoding: `[0x4F] [sub_opcode:u8] [dst:reg] [a:reg] [b:reg]`
     ///
+
     /// Sub-opcodes:
     /// - 0x00: LtU (unsigned less than)
     /// - 0x01: LeU (unsigned less or equal)
@@ -426,18 +447,22 @@ pub enum Opcode {
     DropRef = 0x77,
     /// CBGR extended operations prefix.
     ///
+
     /// This opcode is followed by a sub-opcode byte (CbgrSubOpcode) that specifies
     /// the actual CBGR operation. This design allows extended CBGR functionality
     /// without consuming main opcode space.
     ///
+
     /// Format: `[0x78] [sub_opcode:u8] [operands...]`
     CbgrExtended = 0x78,
     /// Text Extended instruction for text parsing and conversion operations.
     ///
+
     /// This opcode is followed by a sub-opcode byte (TextSubOpcode) that specifies
     /// the actual text operation. This design provides ~2ns zero-cost dispatch
     /// for text operations instead of string-based library calls (~15ns).
     ///
+
     /// Format: `[0x79] [sub_opcode:u8] [operands...]`
     TextExtended = 0x79,
     /// Reserved CBGR.
@@ -478,6 +503,7 @@ pub enum Opcode {
     GetTag = 0x89,
     /// Create closure: `dst = closure(fn_id, captures...)`
     ///
+
     /// Creates a closure object with the specified function and captured values.
     /// The closure layout is: [function_id: u32, capture_count: u16, pad: u16, captures: Value[]]
     NewClosure = 0x8A,
@@ -489,6 +515,7 @@ pub enum Opcode {
     TypeOf = 0x8C,
     /// **MakePi** — construct a dependent function value `Π(x: T). U(x)` (T1-H).
     ///
+
     /// At Tier-0 the dependent function is represented as a closure over the
     /// parameter value plus a type-representing pointer. The opcode takes
     /// (param_value, return_type_id) and packs a PiValue for the interpreter.
@@ -498,6 +525,7 @@ pub enum Opcode {
     MakePi = 0x8D,
     /// **MakeSigma** — construct a dependent pair `Σ(x: T). U(x)` (T1-H).
     ///
+
     /// The witness is the first component (value of type T); the payload
     /// is the second component (of type `U(witness)`). The opcode takes
     /// (witness, payload) and packs a SigmaValue carrying both alongside
@@ -505,6 +533,7 @@ pub enum Opcode {
     MakeSigma = 0x8E,
     /// **MakeWitness** — attach a proof to a refined value (T1-H).
     ///
+
     /// Used for refinement-type constructs that carry a proof obligation,
     /// e.g. `Int { self > 0 }`: the opcode pairs the value with the
     /// statically-generated proof hash so the interpreter can validate
@@ -614,6 +643,7 @@ pub enum Opcode {
     MetaReflect = 0xBB,
     /// FFI Extended operations - foreign function interface.
     ///
+
     /// Uses sub-opcodes for different FFI operations:
     /// - 0x00: LoadSymbol - Resolve FFI symbol, cache address
     /// - 0x10: CallFfiC - Call with C calling convention
@@ -625,10 +655,12 @@ pub enum Opcode {
     /// - 0x21: MarshalFromC - Marshal C value to Verum
     /// - 0x30: GetErrno - Read errno after FFI call
     ///
+
     /// Format: `[0xBC] [sub_opcode:u8] [operands...]`
     FfiExtended = 0xBC,
     /// Arithmetic Extended operations - checked, overflowing, and polymorphic arithmetic.
     ///
+
     /// Uses sub-opcodes for different arithmetic operations:
     /// - 0x00-0x0F: Checked arithmetic (returns Maybe<T>)
     /// - 0x10-0x1F: Overflowing arithmetic (returns (result, overflow_flag))
@@ -636,18 +668,22 @@ pub enum Opcode {
     /// - 0x30-0x3F: Saturating arithmetic (future)
     /// - 0x40-0x4F: Wrapping arithmetic (future)
     ///
+
     /// Format: `[0xBD] [sub_opcode:u8] [operands...]`
     ArithExtended = 0xBD,
     /// Logging Extended operations prefix for structured logging.
     ///
+
     /// This opcode is followed by a sub-opcode byte (LogSubOpcode) that specifies
     /// the log level. Logging operations are low-frequency and I/O-bound, so
     /// runtime call overhead (~50ns) is acceptable.
     ///
+
     /// Format: `[0xBE] [sub_opcode:u8] [msg:reg]`
     LogExtended = 0xBE,
     /// Memory extended operations - heap allocation, swap, replace.
     ///
+
     /// Uses sub-opcodes for different memory operations:
     /// - 0x00: Alloc - allocate heap memory
     /// - 0x01: AllocZeroed - allocate zeroed heap memory
@@ -726,9 +762,11 @@ pub enum Opcode {
     NewChannel = 0xDD,
     /// Cubical type theory extended operations prefix.
     ///
+
     /// This opcode is followed by a sub-opcode byte (CubicalSubOpcode) that specifies
     /// the actual cubical type theory operation.
     ///
+
     /// Format: `[0xDE] [sub_opcode:u8] [operands...]`
     CubicalExtended = 0xDE,
     /// Reserved debug.
@@ -791,9 +829,11 @@ pub enum Opcode {
     TensorSlice = 0xF7,
     /// GPU extended operations prefix.
     ///
+
     /// This opcode is followed by a sub-opcode byte (GpuSubOpcode) that specifies
     /// the actual GPU operation.
     ///
+
     /// Format: `[0xF8] [sub_opcode:u8] [operands...]`
     GpuExtended = 0xF8,
     /// Sync GPU stream (fast path).
@@ -804,6 +844,7 @@ pub enum Opcode {
     GpuAlloc = 0xFB,
     /// Tensor extended operations prefix.
     ///
+
     /// This opcode is followed by a sub-opcode byte (TensorSubOpcode) that specifies
     /// additional tensor operations like: TensorFull, TensorArange, TensorLinspace,
     /// TensorRand, TensorClone, TensorIdentity, TensorIndex, TensorConcat, TensorStack,
@@ -813,10 +854,12 @@ pub enum Opcode {
     /// TensorSoftmax, TensorLayerNorm, TensorBatchNorm, TensorRmsNorm, TensorFlashAttention,
     /// TensorFft, TensorScatter, TensorFromSlice.
     ///
+
     /// Format: `[0xFC] [sub_opcode:u8] [operands...]`
     TensorExtended = 0xFC,
     /// ML Extended operations prefix for ML/AI operations.
     ///
+
     /// This opcode is followed by a sub-opcode byte (MlSubOpcode) that specifies
     /// ML-specific operations:
     /// - 0x00-0x0F: Tokenizer ops
@@ -824,14 +867,17 @@ pub enum Opcode {
     /// - 0x20-0x2F: Inference ops
     /// - 0x30-0x3F: Distributed ops
     ///
+
     /// Format: `[0xFD] [sub_opcode:u8] [operands...]`
     MlExtended = 0xFD,
     /// Create tensor filled with a value.
     ///
+
     /// Format: `dst:reg, dtype:u8, rank:u8, dims..., value:f64`
     TensorFull = 0xFE,
     /// Create tensor from data slice.
     ///
+
     /// Format: `dst:reg, data_reg:reg, shape_reg:reg, dtype:u8`
     TensorFromSlice = 0xFF,
 }
@@ -842,22 +888,28 @@ pub enum Opcode {
 
 /// Cubical type theory sub-opcodes for use with `CubicalExtended` (0xDE) prefix.
 ///
+
 /// These opcodes implement the runtime semantics of cubical type theory
 /// primitives: Path types, transport, homogeneous composition (hcomp),
 /// and computational univalence.
 ///
+
 /// At runtime, Path values are represented as closures (functions I → A),
 /// and cubical operations manipulate these closures according to the
 /// CCHM reduction rules implemented in `verum_types::cubical`.
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0xDE] [sub_opcode:u8] [operands...]
 /// ```
 ///
+
 /// # Sub-opcode Ranges
 ///
+
 /// - `0x00-0x0F`: Path construction (refl, lambda, app, sym, trans, ap)
 /// - `0x10-0x1F`: Transport and homogeneous composition
 /// - `0x20-0x2F`: Interval operations (i0, i1, meet, join, rev)
@@ -870,26 +922,32 @@ pub enum CubicalSubOpcode {
     // ========================================================================
     /// Create a reflexivity path: refl(x) = λi. x
     ///
+
     /// Format: `dst:reg, value:reg`
     PathRefl = 0x00,
     /// Create a path lambda: λ(i:I). body
     ///
+
     /// Format: `dst:reg, body_func:reg`
     PathLambda = 0x01,
     /// Apply a path at an interval point: p @ r
     ///
+
     /// Format: `dst:reg, path:reg, point:reg`
     PathApp = 0x02,
     /// Path symmetry: sym(p) = λi. p @ (1-i)
     ///
+
     /// Format: `dst:reg, path:reg`
     PathSym = 0x03,
     /// Path transitivity: trans(p, q) = composition
     ///
+
     /// Format: `dst:reg, path_p:reg, path_q:reg`
     PathTrans = 0x04,
     /// Action on paths: ap(f, p) = λi. f(p @ i)
     ///
+
     /// Format: `dst:reg, func:reg, path:reg`
     PathAp = 0x05,
 
@@ -898,14 +956,18 @@ pub enum CubicalSubOpcode {
     // ========================================================================
     /// Transport along a type path: transport(p, x)
     ///
+
     /// Key reductions: transport(refl, x) → x; transport(ua(e), x) → e.forward(x)
     ///
+
     /// Format: `dst:reg, type_path:reg, value:reg`
     Transport = 0x10,
     /// Homogeneous composition: hcomp(φ, walls, base)
     ///
+
     /// Key reduction: hcomp(φ, const, base) → base (trivial)
     ///
+
     /// Format: `dst:reg, face:reg, walls:reg, base:reg`
     Hcomp = 0x11,
 
@@ -914,22 +976,27 @@ pub enum CubicalSubOpcode {
     // ========================================================================
     /// Load interval endpoint i0
     ///
+
     /// Format: `dst:reg`
     IntervalI0 = 0x20,
     /// Load interval endpoint i1
     ///
+
     /// Format: `dst:reg`
     IntervalI1 = 0x21,
     /// Interval meet: i ∧ j
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     IntervalMeet = 0x22,
     /// Interval join: i ∨ j
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     IntervalJoin = 0x23,
     /// Interval reversal: 1 - i
     ///
+
     /// Format: `dst:reg, src:reg`
     IntervalRev = 0x24,
 
@@ -938,18 +1005,22 @@ pub enum CubicalSubOpcode {
     // ========================================================================
     /// Computational univalence: ua(equiv) — equivalence → type path
     ///
+
     /// Format: `dst:reg, equiv:reg`
     Ua = 0x30,
     /// Univalence inverse: ua_inv(path) — type path → equivalence
     ///
+
     /// Format: `dst:reg, path:reg`
     UaInv = 0x31,
     /// Equiv forward: e.forward(x)
     ///
+
     /// Format: `dst:reg, equiv:reg, value:reg`
     EquivFwd = 0x32,
     /// Equiv backward: e.inverse(x)
     ///
+
     /// Format: `dst:reg, equiv:reg, value:reg`
     EquivBwd = 0x33,
 }
@@ -1033,6 +1104,7 @@ impl CubicalSubOpcode {
 
 /// GPU extended sub-opcodes for use with `GpuExtended` (0xF8) prefix.
 ///
+
 /// This provides a comprehensive GPU instruction set for:
 /// - Kernel execution and cooperative launches
 /// - Stream management with priorities
@@ -1040,24 +1112,31 @@ impl CubicalSubOpcode {
 /// - Advanced memory operations (async, pinned, managed)
 /// - Multi-GPU device management and peer access
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0xF8] [sub_opcode:u8] [operands...]
 /// ```
 ///
+
 /// # Example
 ///
+
 /// ```text
 /// // Create stream with priority
 /// GpuExtended StreamCreateWithPriority dst:r0, priority:r1
 ///
+
 /// // Async memcpy on stream
 /// GpuExtended MemcpyAsync dst:r2, src:r3, size:r4, stream:r0
 ///
+
 /// // Record event
 /// GpuExtended EventRecord event:r5, stream:r0
 ///
+
 /// // Elapsed time between events
 /// GpuExtended EventElapsed dst:r6, start:r5, end:r7
 /// ```
@@ -1069,17 +1148,20 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Launch GPU kernel on stream.
     ///
+
     /// Format: `kernel_id:u32, grid:[reg;3], block:[reg;3], shared_mem:reg, stream:reg, args:vec<reg>`
     Launch = 0x00,
 
     /// Cooperative kernel launch with grid-wide synchronization.
     ///
+
     /// Enables `__syncthreads()` across entire grid. Limited by device occupancy.
     /// Format: `kernel_id:u32, grid:[reg;3], block:[reg;3], shared_mem:reg, stream:reg, args:vec<reg>`
     LaunchCooperative = 0x01,
 
     /// Launch kernel on multiple devices simultaneously.
     ///
+
     /// Format: `kernel_id:u32, device_count:u8, configs:vec<LaunchConfig>`
     LaunchMultiDevice = 0x02,
 
@@ -1088,21 +1170,25 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Synchronize specific stream.
     ///
+
     /// Format: `stream:reg`
     SyncStream = 0x10,
 
     /// Synchronize entire device (all streams).
     ///
+
     /// Format: (no operands)
     SyncDevice = 0x11,
 
     /// Wait for event to complete.
     ///
+
     /// Format: `event:reg`
     SyncEvent = 0x12,
 
     /// Check if stream is idle (non-blocking).
     ///
+
     /// Format: `dst:reg, stream:reg`
     QueryStream = 0x13,
 
@@ -1111,85 +1197,101 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Synchronous memory copy.
     ///
+
     /// Format: `dst:reg, src:reg, size:reg, direction:u8`
     /// Direction: 0=H2D, 1=D2H, 2=D2D, 3=H2H
     Memcpy = 0x20,
 
     /// Asynchronous memory copy on stream.
     ///
+
     /// Format: `dst:reg, src:reg, size:reg, direction:u8, stream:reg`
     MemcpyAsync = 0x21,
 
     /// Allocate device memory.
     ///
+
     /// Format: `dst:reg, size:reg, device:reg`
     Alloc = 0x22,
 
     /// Free device memory.
     ///
+
     /// Format: `ptr:reg`
     Free = 0x23,
 
     /// Pin host memory for faster transfers.
     ///
+
     /// Format: `ptr:reg, size:reg`
     PinMemory = 0x24,
 
     /// Unpin previously pinned host memory.
     ///
+
     /// Format: `ptr:reg`
     UnpinMemory = 0x25,
 
     /// Prefetch memory to device.
     ///
+
     /// Format: `ptr:reg, size:reg, device:reg, stream:reg`
     Prefetch = 0x26,
 
     /// Set memory to value (synchronous).
     ///
+
     /// Format: `ptr:reg, value:u8, size:reg`
     Memset = 0x27,
 
     /// Set memory to value (asynchronous).
     ///
+
     /// Format: `ptr:reg, value:u8, size:reg, stream:reg`
     MemsetAsync = 0x28,
 
     /// 2D memory copy for pitched allocations.
     ///
+
     /// Format: `dst:reg, dst_pitch:reg, src:reg, src_pitch:reg, width:reg, height:reg, direction:u8`
     Memcpy2D = 0x29,
 
     /// 2D async memory copy.
     ///
+
     /// Format: `dst:reg, dst_pitch:reg, src:reg, src_pitch:reg, width:reg, height:reg, direction:u8, stream:reg`
     Memcpy2DAsync = 0x2A,
 
     /// Host-to-device memory copy (synchronous).
     ///
+
     /// Format: `dst:reg, src:reg, size:reg`
     /// Semantic: Copy `size` bytes from host pointer `src` to device pointer `dst`.
     MemcpyH2D = 0x2B,
 
     /// Device-to-host memory copy (synchronous).
     ///
+
     /// Format: `dst:reg, src:reg, size:reg`
     /// Semantic: Copy `size` bytes from device pointer `src` to host pointer `dst`.
     MemcpyD2H = 0x2C,
 
     /// Device-to-device memory copy (synchronous).
     ///
+
     /// Format: `dst:reg, src:reg, size:reg`
     /// Semantic: Copy `size` bytes from device pointer `src` to device pointer `dst`.
     MemcpyD2D = 0x2D,
 
     /// Host-to-device async memory copy.
     ///
+
     /// Format: `dst:reg, src:reg, size:reg, stream:reg`
     MemcpyAsyncH2D = 0x2E,
 
     /// Device-to-host async memory copy.
     ///
+
     /// Format: `dst:reg, src:reg, size:reg, stream:reg`
     MemcpyAsyncD2H = 0x2F,
 
@@ -1198,43 +1300,51 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Create new stream.
     ///
+
     /// Format: `dst:reg`
     StreamCreate = 0x30,
 
     /// Destroy stream.
     ///
+
     /// Format: `stream:reg`
     StreamDestroy = 0x31,
 
     /// Query stream completion status (non-blocking).
     ///
+
     /// Format: `dst:reg, stream:reg`
     /// Returns: 1 if complete, 0 if still executing
     StreamQuery = 0x32,
 
     /// Make stream wait for event.
     ///
+
     /// Format: `stream:reg, event:reg`
     StreamWaitEvent = 0x33,
 
     /// Create stream with priority.
     ///
+
     /// Format: `dst:reg, priority:reg`
     /// Priority: lower number = higher priority
     StreamCreateWithPriority = 0x34,
 
     /// Get stream priority.
     ///
+
     /// Format: `dst:reg, stream:reg`
     StreamGetPriority = 0x35,
 
     /// Create non-blocking stream.
     ///
+
     /// Format: `dst:reg`
     StreamCreateNonBlocking = 0x36,
 
     /// Add callback to stream.
     ///
+
     /// Format: `stream:reg, callback_id:u32, user_data:reg`
     StreamAddCallback = 0x37,
 
@@ -1243,43 +1353,51 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Create event.
     ///
+
     /// Format: `dst:reg`
     EventCreate = 0x40,
 
     /// Destroy event.
     ///
+
     /// Format: `event:reg`
     EventDestroy = 0x41,
 
     /// Record event on stream.
     ///
+
     /// Format: `event:reg, stream:reg`
     EventRecord = 0x42,
 
     /// Synchronize on event (blocking).
     ///
+
     /// Format: `event:reg`
     EventSynchronize = 0x43,
 
     /// Query event status (non-blocking).
     ///
+
     /// Format: `dst:reg, event:reg`
     /// Returns: 1 if recorded event completed, 0 otherwise
     EventQuery = 0x44,
 
     /// Compute elapsed time between events (milliseconds).
     ///
+
     /// Format: `dst:reg, start_event:reg, end_event:reg`
     EventElapsed = 0x45,
 
     /// Create event with flags.
     ///
+
     /// Format: `dst:reg, flags:u8`
     /// Flags: 0x01=BlockingSync, 0x02=DisableTiming, 0x04=Interprocess
     EventCreateWithFlags = 0x46,
 
     /// Record event with flags.
     ///
+
     /// Format: `event:reg, stream:reg, flags:u8`
     EventRecordWithFlags = 0x47,
 
@@ -1288,53 +1406,63 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Get current device ID.
     ///
+
     /// Format: `dst:reg`
     GetDevice = 0x50,
 
     /// Set current device.
     ///
+
     /// Format: `device:reg`
     SetDevice = 0x51,
 
     /// Get device count.
     ///
+
     /// Format: `dst:reg`
     GetDeviceCount = 0x52,
 
     /// Get device properties.
     ///
+
     /// Format: `dst:reg, device:reg, prop_id:u8`
     /// prop_id: 0=name, 1=compute_cap, 2=multiprocessors, 3=max_threads,
-    ///          4=warp_size, 5=global_mem, 6=shared_mem, 7=max_blocks
+    ///  4=warp_size, 5=global_mem, 6=shared_mem, 7=max_blocks
     GetDeviceProperty = 0x53,
 
     /// Get device memory info.
     ///
+
     /// Format: `free:reg, total:reg, device:reg`
     GetMemoryInfo = 0x54,
 
     /// Check if device can access peer memory.
     ///
+
     /// Format: `dst:reg, device:reg, peer_device:reg`
     CanAccessPeer = 0x55,
 
     /// Enable peer memory access.
     ///
+
     /// Format: `device:reg, peer_device:reg`
     EnablePeerAccess = 0x56,
 
     /// Disable peer memory access.
     ///
+
     /// Format: `device:reg, peer_device:reg`
     DisablePeerAccess = 0x57,
 
     /// Reset device (free all allocations).
     ///
+
     /// Format: `device:reg`
     DeviceReset = 0x58,
 
     /// Set device flags.
     ///
+
     /// Format: `flags:u8`
     /// Flags: 0x01=ScheduleSpin, 0x02=ScheduleYield, 0x04=ScheduleBlocking
     SetDeviceFlags = 0x59,
@@ -1344,24 +1472,28 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Allocate managed (unified) memory.
     ///
+
     /// Format: `dst:reg, size:reg, flags:u8`
     /// Flags: 0x01=AttachGlobal, 0x02=AttachHost
     MallocManaged = 0x60,
 
     /// Set memory advise hint.
     ///
+
     /// Format: `ptr:reg, size:reg, advice:u8, device:reg`
     /// Advice: 0=SetReadMostly, 1=UnsetReadMostly, 2=SetPreferredLocation,
-    ///         3=UnsetPreferredLocation, 4=SetAccessedBy, 5=UnsetAccessedBy
+    ///  3=UnsetPreferredLocation, 4=SetAccessedBy, 5=UnsetAccessedBy
     MemAdvise = 0x61,
 
     /// Prefetch managed memory asynchronously.
     ///
+
     /// Format: `ptr:reg, size:reg, device:reg, stream:reg`
     PrefetchAsync = 0x62,
 
     /// Get memory attributes.
     ///
+
     /// Format: `dst:reg, ptr:reg, attr_id:u8`
     /// attr_id: 0=type, 1=device, 2=is_managed
     MemGetAttribute = 0x63,
@@ -1371,42 +1503,50 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Create execution graph.
     ///
+
     /// Format: `dst:reg`
     GraphCreate = 0x70,
 
     /// Begin graph capture on stream.
     ///
+
     /// Format: `graph:reg, stream:reg, mode:u8`
     /// Mode: 0=Global, 1=ThreadLocal, 2=Relaxed
     GraphBeginCapture = 0x71,
 
     /// End graph capture.
     ///
+
     /// Format: `graph:reg, stream:reg`
     GraphEndCapture = 0x72,
 
     /// Instantiate graph for execution.
     ///
+
     /// Format: `dst:reg, graph:reg`
     GraphInstantiate = 0x73,
 
     /// Launch instantiated graph.
     ///
+
     /// Format: `graph_exec:reg, stream:reg`
     GraphLaunch = 0x74,
 
     /// Destroy graph.
     ///
+
     /// Format: `graph:reg`
     GraphDestroy = 0x75,
 
     /// Destroy graph executable.
     ///
+
     /// Format: `graph_exec:reg`
     GraphExecDestroy = 0x76,
 
     /// Update graph executable with new graph.
     ///
+
     /// Format: `graph_exec:reg, graph:reg`
     GraphExecUpdate = 0x77,
 
@@ -1415,21 +1555,25 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Start profiling range.
     ///
+
     /// Format: `name_id:u32`
     ProfileRangeStart = 0x80,
 
     /// End profiling range.
     ///
+
     /// Format: (no operands)
     ProfileRangeEnd = 0x81,
 
     /// Push profiling marker.
     ///
+
     /// Format: `name_id:u32`
     ProfileMarkerPush = 0x82,
 
     /// Pop profiling marker.
     ///
+
     /// Format: (no operands)
     ProfileMarkerPop = 0x83,
 
@@ -1438,24 +1582,28 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Enumerate available CUDA devices.
     ///
+
     /// Format: `dst:reg`
     /// Returns: List of device IDs available for CUDA backend
     EnumerateCuda = 0x90,
 
     /// Enumerate available Metal devices.
     ///
+
     /// Format: `dst:reg`
     /// Returns: List of device IDs available for Metal backend
     EnumerateMetal = 0x91,
 
     /// Enumerate available ROCm devices.
     ///
+
     /// Format: `dst:reg`
     /// Returns: List of device IDs available for ROCm backend
     EnumerateRocm = 0x92,
 
     /// Enumerate available Vulkan devices.
     ///
+
     /// Format: `dst:reg`
     /// Returns: List of device IDs available for Vulkan backend
     EnumerateVulkan = 0x93,
@@ -1465,85 +1613,101 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Get thread index X within the current block.
     ///
+
     /// Format: `dst:reg`
     /// Returns: threadIdx.x (u32 as i64)
     ThreadIdX = 0xA0,
 
     /// Get thread index Y within the current block.
     ///
+
     /// Format: `dst:reg`
     ThreadIdY = 0xA1,
 
     /// Get thread index Z within the current block.
     ///
+
     /// Format: `dst:reg`
     ThreadIdZ = 0xA2,
 
     /// Get block index X within the grid.
     ///
+
     /// Format: `dst:reg`
     BlockIdX = 0xA3,
 
     /// Get block index Y within the grid.
     ///
+
     /// Format: `dst:reg`
     BlockIdY = 0xA4,
 
     /// Get block index Z within the grid.
     ///
+
     /// Format: `dst:reg`
     BlockIdZ = 0xA5,
 
     /// Get block dimension X (number of threads per block in X).
     ///
+
     /// Format: `dst:reg`
     BlockDimX = 0xA6,
 
     /// Get block dimension Y.
     ///
+
     /// Format: `dst:reg`
     BlockDimY = 0xA7,
 
     /// Get block dimension Z.
     ///
+
     /// Format: `dst:reg`
     BlockDimZ = 0xA8,
 
     /// Get grid dimension X (number of blocks in X).
     ///
+
     /// Format: `dst:reg`
     GridDimX = 0xA9,
 
     /// Get grid dimension Y.
     ///
+
     /// Format: `dst:reg`
     GridDimY = 0xAA,
 
     /// Get grid dimension Z.
     ///
+
     /// Format: `dst:reg`
     GridDimZ = 0xAB,
 
     /// Block-level barrier synchronization (__syncthreads).
     ///
+
     /// Format: (no operands)
     /// In CPU fallback: no-op (threads execute sequentially within a block).
     SyncThreads = 0xAC,
 
     /// Warp-level barrier synchronization (__syncwarp).
     ///
+
     /// Format: `mask:reg` (optional, defaults to full warp mask)
     /// In CPU fallback: no-op.
     SyncWarp = 0xAD,
 
     /// Get warp size.
     ///
+
     /// Format: `dst:reg`
     /// Returns: 32 (standard warp size for CPU simulation)
     WarpSize = 0xAE,
 
     /// Get linear thread ID (threadIdx.x + threadIdx.y * blockDim.x + ...).
     ///
+
     /// Format: `dst:reg`
     LinearThreadId = 0xAF,
 
@@ -1552,65 +1716,77 @@ pub enum GpuSubOpcode {
     // ========================================================================
     /// Allocate shared memory (returns base offset).
     ///
+
     /// Format: `dst:reg, size:reg`
     /// Returns: byte offset into shared memory block
     SharedMemAlloc = 0xB0,
 
     /// Load i64 from shared memory.
     ///
+
     /// Format: `dst:reg, offset:reg`
     SharedMemLoadI64 = 0xB1,
 
     /// Store i64 to shared memory.
     ///
+
     /// Format: `offset:reg, value:reg`
     SharedMemStoreI64 = 0xB2,
 
     /// Load f64 from shared memory.
     ///
+
     /// Format: `dst:reg, offset:reg`
     SharedMemLoadF64 = 0xB3,
 
     /// Store f64 to shared memory.
     ///
+
     /// Format: `offset:reg, value:reg`
     SharedMemStoreF64 = 0xB4,
 
     /// Atomic add on shared memory i64.
     ///
+
     /// Format: `dst:reg, offset:reg, value:reg`
     /// Returns: previous value
     SharedMemAtomicAddI64 = 0xB5,
 
     /// Atomic add on shared memory f64.
     ///
+
     /// Format: `dst:reg, offset:reg, value:reg`
     /// Returns: previous value
     SharedMemAtomicAddF64 = 0xB6,
 
     /// Atomic CAS on shared memory i64.
     ///
+
     /// Format: `dst:reg, offset:reg, expected:reg, desired:reg`
     /// Returns: previous value
     SharedMemAtomicCasI64 = 0xB7,
 
     /// Atomic max on shared memory i64.
     ///
+
     /// Format: `dst:reg, offset:reg, value:reg`
     SharedMemAtomicMaxI64 = 0xB8,
 
     /// Atomic min on shared memory i64.
     ///
+
     /// Format: `dst:reg, offset:reg, value:reg`
     SharedMemAtomicMinI64 = 0xB9,
 
     /// Load u32 from shared memory.
     ///
+
     /// Format: `dst:reg, offset:reg`
     SharedMemLoadU32 = 0xBA,
 
     /// Store u32 to shared memory.
     ///
+
     /// Format: `offset:reg, value:reg`
     SharedMemStoreU32 = 0xBB,
 }
@@ -1935,6 +2111,7 @@ impl GpuSubOpcode {
 
 /// Tensor extended sub-opcodes for use with `TensorExtended` (0xFF) prefix.
 ///
+
 /// This provides an extensible tensor instruction set for advanced operations:
 /// - Pooling operations (max, avg, adaptive)
 /// - Linear algebra decompositions (QR, SVD, LU, Cholesky)
@@ -1943,21 +2120,27 @@ impl GpuSubOpcode {
 /// - Advanced indexing (gather, scatter, permute)
 /// - Reduction variants (argmin)
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0xFF] [sub_opcode:u8] [operands...]
 /// ```
 ///
+
 /// # Example
 ///
+
 /// ```text
 /// // Pooling operation
 /// TensorExtended Pool dst:r0, src:r1, op:max, kernel:[2,2], stride:[2,2], pad:[0,0]
 ///
+
 /// // QR decomposition
 /// TensorExtended QR q:r0, r:r1, src:r2, mode:reduced
 ///
+
 /// // General linear solve
 /// TensorExtended Solve dst:r0, a:r1, b:r2
 /// ```
@@ -1969,6 +2152,7 @@ pub enum TensorSubOpcode {
     // ========================================================================
     /// Pooling operation (max, avg, sum, adaptive).
     ///
+
     /// Format: `op:u8, dst:reg, src:reg, kernel_size:vec, stride:vec, padding:vec`
     Pool = 0x00,
 
@@ -1980,16 +2164,19 @@ pub enum TensorSubOpcode {
 
     /// Create zero tensor from register args.
     ///
+
     /// Format: `dst:reg, shape_reg:reg, dtype_reg:reg`
     NewFromArgs = 0x0D,
 
     /// Fill tensor from register args.
     ///
+
     /// Format: `dst:reg, shape_reg:reg, value_reg:reg, dtype_reg:reg`
     FillFromArgs = 0x0E,
 
     /// Create tensor from data+shape registers.
     ///
+
     /// Format: `dst:reg, data_reg:reg, shape_reg:reg, dtype_reg:reg`
     FromSliceArgs = 0x0F,
 
@@ -1998,61 +2185,73 @@ pub enum TensorSubOpcode {
     // ========================================================================
     /// Argmin along axis.
     ///
+
     /// Format: `dst:reg, src:reg, axis:i8, keepdim:bool`
     Argmin = 0x10,
 
     /// Nansum (sum ignoring NaN values).
     ///
+
     /// Format: `dst:reg, src:reg, axis:i8, keepdim:bool`
     Nansum = 0x11,
 
     /// Nanmean (mean ignoring NaN values).
     ///
+
     /// Format: `dst:reg, src:reg, axis:i8, keepdim:bool`
     Nanmean = 0x12,
 
     /// Element-wise binary op from register args.
     ///
+
     /// Format: `dst:reg, a_reg:reg, b_reg:reg, op_reg:reg`
     BinopFromArgs = 0x13,
 
     /// Element-wise unary op from register args.
     ///
+
     /// Format: `dst:reg, src_reg:reg, op_reg:reg`
     UnopFromArgs = 0x14,
 
     /// Matrix multiply from register args.
     ///
+
     /// Format: `dst:reg, a_reg:reg, b_reg:reg`
     MatmulFromArgs = 0x15,
 
     /// Reduce from register args.
     ///
+
     /// Format: `dst:reg, src_reg:reg, op_reg:reg, axis_reg:reg`
     ReduceFromArgs = 0x16,
 
     /// Reshape from register args.
     ///
+
     /// Format: `dst:reg, src_reg:reg, shape_reg:reg`
     ReshapeFromArgs = 0x17,
 
     /// Transpose from register args.
     ///
+
     /// Format: `dst:reg, src_reg:reg`
     TransposeFromArgs = 0x18,
 
     /// Slice from register args.
     ///
+
     /// Format: `dst:reg, src_reg:reg, ranges_reg:reg`
     SliceFromArgs = 0x19,
 
     /// Get element at flat index from register args.
     ///
+
     /// Format: `dst:reg, src_reg:reg, index_reg:reg`
     GetElementFromArgs = 0x1A,
 
     /// Set element at flat index from register args.
     ///
+
     /// Format: `dst:reg, src_reg:reg, index_reg:reg, value_reg:reg`
     SetElementFromArgs = 0x1B,
 
@@ -2061,21 +2260,25 @@ pub enum TensorSubOpcode {
     // ========================================================================
     /// Gather elements along axis using indices.
     ///
+
     /// Format: `dst:reg, src:reg, index:reg, axis:i8`
     Gather = 0x20,
 
     /// General axis permutation.
     ///
+
     /// Format: `dst:reg, src:reg, axes:vec<u8>`
     Permute = 0x21,
 
     /// Flip tensor along axes.
     ///
+
     /// Format: `dst:reg, src:reg, axes:vec<u8>`
     Flip = 0x22,
 
     /// Roll tensor along axis.
     ///
+
     /// Format: `dst:reg, src:reg, shift:i32, axis:i8`
     Roll = 0x23,
 
@@ -2084,17 +2287,20 @@ pub enum TensorSubOpcode {
     // ========================================================================
     /// General linear system solve: A @ x = B.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     /// Solves for x given A and B matrices.
     Solve = 0x30,
 
     /// Least squares solve: minimize ||A @ x - B||.
     ///
+
     /// Format: `x:reg, residuals:reg, rank:reg, s:reg, a:reg, b:reg, rcond:f64`
     Lstsq = 0x31,
 
     /// Triangular solve with custom options.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, upper:bool, trans:bool, unit_diag:bool`
     TriSolve = 0x32,
 
@@ -2103,32 +2309,38 @@ pub enum TensorSubOpcode {
     // ========================================================================
     /// QR decomposition.
     ///
+
     /// Format: `q:reg, r:reg, src:reg, mode:u8`
     /// Mode: 0=reduced, 1=complete, 2=r_only
     QR = 0x40,
 
     /// Singular Value Decomposition.
     ///
+
     /// Format: `u:reg, s:reg, vh:reg, src:reg, full_matrices:bool, compute_uv:bool`
     SVD = 0x41,
 
     /// LU decomposition with pivoting.
     ///
+
     /// Format: `p:reg, l:reg, u:reg, src:reg`
     LU = 0x42,
 
     /// Eigenvalue decomposition (general).
     ///
+
     /// Format: `eigenvalues:reg, eigenvectors:reg, src:reg, compute_v:bool`
     Eig = 0x43,
 
     /// Symmetric/Hermitian eigenvalue decomposition.
     ///
+
     /// Format: `eigenvalues:reg, eigenvectors:reg, src:reg, upper:bool`
     EigSymmetric = 0x44,
 
     /// Schur decomposition.
     ///
+
     /// Format: `t:reg, z:reg, src:reg`
     Schur = 0x45,
 
@@ -2137,27 +2349,32 @@ pub enum TensorSubOpcode {
     // ========================================================================
     /// Matrix determinant.
     ///
+
     /// Format: `dst:reg, src:reg`
     Det = 0x60,
 
     /// Matrix rank.
     ///
+
     /// Format: `dst:reg, src:reg, tol:f64`
     Rank = 0x61,
 
     /// Matrix condition number.
     ///
+
     /// Format: `dst:reg, src:reg, p:u8`
     /// p: 1=1-norm, 2=2-norm (default), -1=inf-norm
     Cond = 0x62,
 
     /// Matrix trace.
     ///
+
     /// Format: `dst:reg, src:reg`
     Trace = 0x63,
 
     /// Matrix norm.
     ///
+
     /// Format: `dst:reg, src:reg, ord:i8`
     /// ord: -2=min singular, -1=min row sum, 0=Frobenius, 1=max row sum, 2=max singular
     Norm = 0x64,
@@ -2167,81 +2384,97 @@ pub enum TensorSubOpcode {
     // ========================================================================
     /// Kronecker product.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     Kron = 0x70,
 
     /// Cross product.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, axis:i8`
     Cross = 0x71,
 
     /// Tensor contraction.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, axes_a:vec, axes_b:vec`
     Contract = 0x72,
 
     /// Matrix power.
     ///
+
     /// Format: `dst:reg, src:reg, n:i32`
     MatrixPower = 0x73,
 
     /// Matrix exponential.
     ///
+
     /// Format: `dst:reg, src:reg`
     Expm = 0x74,
 
     /// Matrix logarithm.
     ///
+
     /// Format: `dst:reg, src:reg`
     Logm = 0x75,
 
     /// Matrix inverse.
     ///
+
     /// Format: `dst:reg, src:reg`
     Inverse = 0x76,
 
     /// Real FFT (real-to-complex).
     ///
+
     /// Format: `dst:reg, src:reg, n:u32`
     Rfft = 0x77,
 
     /// Inverse real FFT (complex-to-real).
     ///
+
     /// Format: `dst:reg, src:reg, n:u32`
     Irfft = 0x78,
 
     /// Complex multiplication.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ComplexMul = 0x79,
 
     /// Complex power.
     ///
+
     /// Format: `dst:reg, base:reg, exp:reg`
     ComplexPow = 0x7A,
 
     /// Parallel associative scan (SSM).
     ///
+
     /// Format: `dst:reg, op:u8, init:reg, elements:reg, dim:i8`
     SsmScan = 0x7B,
 
     /// Uniform random tensor.
     ///
+
     /// Format: `dst:reg, shape_len:u8, shape..., low:reg, high:reg`
     Uniform = 0x7C,
 
     /// Bincount (histogram binning).
     ///
+
     /// Format: `dst:reg, indices:reg, num_bins:u32`
     Bincount = 0x7D,
 
     /// N-dimensional gather.
     ///
+
     /// Format: `dst:reg, src:reg, indices:reg`
     GatherNd = 0x7E,
 
     /// Integer range tensor.
     ///
+
     /// Format: `dst:reg, start:reg, end:reg, step:reg`
     ArangeUsize = 0x7F,
 
@@ -2251,81 +2484,97 @@ pub enum TensorSubOpcode {
 
     /// Repeat tensor along new dimension.
     ///
+
     /// Format: `dst:reg, src:reg, times:u32`
     Repeat = 0x80,
 
     /// Element-wise hyperbolic tangent.
     ///
+
     /// Format: `dst:reg, src:reg`
     Tanh = 0x81,
 
     /// Sum all elements.
     ///
+
     /// Format: `dst:reg, src:reg`
     SumAll = 0x82,
 
     /// Create tensor from array.
     ///
+
     /// Format: `dst:reg, len:u32, values...`
     FromArray = 0x83,
 
     /// Check if in training mode.
     ///
+
     /// Format: `dst:reg`
     IsTraining = 0x84,
 
     /// Random float in [0, 1).
     ///
+
     /// Format: `dst:reg`
     RandomFloat01 = 0x85,
 
     /// Select elements from tensor using boolean mask.
     ///
+
     /// Format: `dst:reg, src:reg, mask:reg`
     MaskedSelect = 0x86,
 
     /// Leaky ReLU activation.
     ///
+
     /// Format: `dst:reg, src:reg, negative_slope:reg`
     LeakyRelu = 0x87,
 
     /// Extract diagonal from tensor or create diagonal tensor.
     ///
+
     /// Format: `dst:reg, src:reg, offset:i32`
     Diag = 0x88,
 
     /// Upper triangular matrix.
     ///
+
     /// Format: `dst:reg, src:reg, diagonal:i32`
     Triu = 0x89,
 
     /// Lower triangular matrix.
     ///
+
     /// Format: `dst:reg, src:reg, diagonal:i32`
     Tril = 0x8A,
 
     /// Indices of non-zero elements.
     ///
+
     /// Format: `dst:reg, src:reg`
     Nonzero = 0x8B,
 
     /// One-hot encoding.
     ///
+
     /// Format: `dst:reg, indices:reg, num_classes:u32`
     OneHot = 0x8C,
 
     /// Split tensor into chunks.
     ///
+
     /// Format: `dst:reg, src:reg, num_chunks:u32, dim:i8`
     Split = 0x8D,
 
     /// Split tensor at a specific index.
     ///
+
     /// Format: `dst_a:reg, dst_b:reg, src:reg, index:u32, dim:i8`
     SplitAt = 0x8E,
 
     /// Get scalar value from tensor at index.
     ///
+
     /// Format: `dst:reg, src:reg, indices:reg`
     GetScalar = 0x8F,
 
@@ -2335,36 +2584,43 @@ pub enum TensorSubOpcode {
 
     /// Load BPE tokenizer from files.
     ///
+
     /// Format: `dst:reg, vocab_path:reg, merges_path:reg`
     TokenizerLoadBpe = 0x90,
 
     /// Load pretrained tokenizer by model name.
     ///
+
     /// Format: `dst:reg, model_name:reg`
     TokenizerLoadPretrained = 0x91,
 
     /// Encode text to tokens.
     ///
+
     /// Format: `dst:reg, tokenizer:reg, text:reg`
     TokenizerEncode = 0x92,
 
     /// Decode tokens to text.
     ///
+
     /// Format: `dst:reg, tokenizer:reg, tokens:reg`
     TokenizerDecode = 0x93,
 
     /// Load SentencePiece model.
     ///
+
     /// Format: `dst:reg, model_path:reg`
     TokenizerLoadSpm = 0x94,
 
     /// Encode with SentencePiece.
     ///
+
     /// Format: `dst:reg, tokenizer:reg, text:reg`
     TokenizerSpmEncode = 0x95,
 
     /// Decode with SentencePiece.
     ///
+
     /// Format: `dst:reg, tokenizer:reg, tokens:reg`
     TokenizerSpmDecode = 0x96,
 
@@ -2374,16 +2630,19 @@ pub enum TensorSubOpcode {
 
     /// Top-p (nucleus) sampling.
     ///
+
     /// Format: `dst:reg, logits:reg, p:reg`
     SampleTopP = 0xA0,
 
     /// Temperature sampling.
     ///
+
     /// Format: `dst:reg, logits:reg, temperature:reg`
     SampleTemperature = 0xA1,
 
     /// Paged attention for KV cache.
     ///
+
     /// Format: `dst:reg, q:reg, kv_cache:reg, block_table:reg, context_len:reg`
     PagedAttention = 0xA2,
 
@@ -2393,46 +2652,55 @@ pub enum TensorSubOpcode {
 
     /// Parse tool call from action string.
     ///
+
     /// Format: `dst:reg, action:reg`
     ParseToolCall = 0xB0,
 
     /// Format value for display.
     ///
+
     /// Format: `dst:reg, value:reg`
     FormatValue = 0xB1,
 
     /// Create tensor from USize slice.
     ///
+
     /// Format: `dst:reg, values:reg`
     TensorFromSliceUsize = 0xB2,
 
     /// Quantized matrix multiplication.
     ///
+
     /// Format: `dst:reg, input:reg, weight:reg, scale:reg, zero_point:reg`
     QuantizedMatmul = 0xB3,
 
     /// Tensor norm.
     ///
+
     /// Format: `dst:reg, x:reg`
     TensorNorm = 0xB4,
 
     /// Generate unique request ID.
     ///
+
     /// Format: `dst:reg`
     GenerateRequestId = 0xB5,
 
     /// Convert JSON schema to JSON.
     ///
+
     /// Format: `dst:reg, schema:reg`
     JsonSchemaToJson = 0xB6,
 
     /// Convert function schema to JSON.
     ///
+
     /// Format: `dst:reg, schema:reg`
     FunctionSchemaToJson = 0xB7,
 
     /// Parse function calls from response.
     ///
+
     /// Format: `dst:reg, response:reg`
     ParseFunctionCalls = 0xB8,
 
@@ -2442,57 +2710,68 @@ pub enum TensorSubOpcode {
 
     /// All-reduce: reduce tensor across all ranks and distribute result.
     ///
+
     /// Format: `dst:reg, tensor:reg, group:reg, op:u8`
     /// Op: 0=Sum, 1=Mean, 2=Max, 3=Min, 4=Prod
     AllReduce = 0xC0,
 
     /// All-gather: gather tensors from all ranks to all ranks.
     ///
+
     /// Format: `dst:reg, tensor:reg, group:reg`
     AllGather = 0xC1,
 
     /// Broadcast: send tensor from src rank to all ranks.
     ///
+
     /// Format: `dst:reg, tensor:reg, src:reg, group:reg`
     Broadcast = 0xC2,
 
     /// Reduce-scatter: reduce then scatter result.
     ///
+
     /// Format: `dst:reg, tensor:reg, group:reg, op:u8`
     ReduceScatter = 0xC3,
 
     /// Barrier: synchronize all ranks.
     ///
+
     /// Format: `group:reg`
     Barrier = 0xC4,
 
     /// Pmap parallel sum collective.
     ///
+
     /// Format: `dst:reg, tensor:reg, axis_name:reg`
     PmapPsum = 0xC5,
 
     /// Pmap parallel mean collective.
     ///
+
     /// Format: `dst:reg, tensor:reg, axis_name:reg`
     PmapPmean = 0xC6,
 
     /// Pmap parallel max collective.
     ///
+
     /// Format: `dst:reg, tensor:reg, axis_name:reg`
     PmapPmax = 0xC7,
 
     /// Pmap all-gather collective.
     ///
+
     /// Format: `dst:reg, tensor:reg, axis_name:reg`
     PmapAllGather = 0xC8,
 
     /// Vmap transformation.
     ///
+
     /// Format: `dst:reg, func:reg, in_axes:reg, out_axes:reg`
     VmapTransform = 0xC9,
 
     /// Pmap transformation.
     ///
+
     /// Format: `dst:reg, func:reg, axis_name:reg, in_axes:reg, out_axes:reg`
     PmapTransform = 0xCA,
 
@@ -2502,18 +2781,21 @@ pub enum TensorSubOpcode {
 
     /// Get the world process group (all ranks).
     ///
+
     /// Format: `dst:reg`
     /// Returns a handle to the default process group containing all ranks.
     DistWorldGroup = 0xCB,
 
     /// Create a new process group from a subset of ranks.
     ///
+
     /// Format: `dst:reg, ranks:reg`
     /// ranks: List of rank IDs to include in the new group.
     DistNewGroup = 0xCC,
 
     /// Get the rank of the current process in a group.
     ///
+
     /// Format: `dst:reg, group:reg`
     /// Returns the local rank ID within the specified group.
     DistGetRank = 0xCD,
@@ -2524,12 +2806,14 @@ pub enum TensorSubOpcode {
 
     /// Send tensor to a specific rank.
     ///
+
     /// Format: `tensor:reg, dst_rank:reg, group:reg`
     /// Blocking send operation.
     P2PSend = 0xCE,
 
     /// Receive tensor from a specific rank.
     ///
+
     /// Format: `dst:reg, src_rank:reg, group:reg`
     /// Blocking receive operation.
     P2PRecv = 0xCF,
@@ -2540,12 +2824,14 @@ pub enum TensorSubOpcode {
 
     /// Collective gather: collect tensors from all ranks to one rank.
     ///
+
     /// Format: `dst:reg, tensor:reg, dst_rank:reg, group:reg`
     /// Only dst_rank receives the gathered result.
     CollectiveGather = 0xD0,
 
     /// Collective scatter: distribute tensor chunks from one rank to all ranks.
     ///
+
     /// Format: `dst:reg, tensor:reg, src_rank:reg, group:reg`
     /// Only src_rank provides the tensor to scatter.
     CollectiveScatter = 0xD1,
@@ -2556,24 +2842,28 @@ pub enum TensorSubOpcode {
 
     /// Bucket gradients for communication efficiency.
     ///
+
     /// Format: `dst:reg, gradients:reg, bucket_size:reg`
     /// Groups small gradients into larger communication buckets.
     BucketGradients = 0xD2,
 
     /// Get gradient from a parameter.
     ///
+
     /// Format: `dst:reg, param:reg`
     /// Returns the accumulated gradient for the parameter.
     GetGrad = 0xD3,
 
     /// Set gradient on a parameter.
     ///
+
     /// Format: `param:reg, grad:reg`
     /// Sets or accumulates gradient on the parameter.
     SetGrad = 0xD4,
 
     /// Execute backward pass on a module.
     ///
+
     /// Format: `dst:reg, module:reg, grad_output:reg`
     /// Returns gradients for module inputs.
     ModuleBackward = 0xD5,
@@ -2584,12 +2874,14 @@ pub enum TensorSubOpcode {
 
     /// Select actors from a mesh by coordinates.
     ///
+
     /// Format: `dst:reg, mesh:reg, coords:reg`
     /// Returns a submesh or actor set from the mesh.
     MeshSelect = 0xD6,
 
     /// Create a new actor ID.
     ///
+
     /// Format: `dst:reg`
     /// Generates a unique actor identifier.
     ActorNewId = 0xD7,
@@ -2600,24 +2892,28 @@ pub enum TensorSubOpcode {
 
     /// Create an RDMA reference to a tensor.
     ///
+
     /// Format: `dst:reg, tensor:reg`
     /// Returns a remote-accessible reference.
     RdmaCreateRef = 0xD8,
 
     /// Fetch tensor data via RDMA.
     ///
+
     /// Format: `dst:reg, rdma_ref:reg`
     /// Zero-copy read from remote memory.
     RdmaFetch = 0xD9,
 
     /// Write tensor data via RDMA.
     ///
+
     /// Format: `rdma_ref:reg, tensor:reg`
     /// Zero-copy write to remote memory.
     RdmaWrite = 0xDA,
 
     /// Check if RDMA reference is still valid.
     ///
+
     /// Format: `dst:reg, rdma_ref:reg`
     /// Returns true if the reference is valid and accessible.
     RdmaCheckValid = 0xDB,
@@ -2628,22 +2924,26 @@ pub enum TensorSubOpcode {
 
     /// Unsqueeze tensor (add dimension of size 1).
     ///
+
     /// Format: `dst:reg, src:reg, dim:i8`
     /// Adds a dimension of size 1 at the specified position.
     Unsqueeze = 0xDC,
 
     /// Set scalar value in tensor at index.
     ///
+
     /// Format: `dst:reg, src:reg, indices:reg, value:reg`
     SetScalar = 0xDD,
 
     /// Make tensor contiguous in memory.
     ///
+
     /// Format: `dst:reg, src:reg`
     Contiguous = 0xDE,
 
     /// Move tensor to specified device.
     ///
+
     /// Format: `dst:reg, src:reg, device:reg`
     ToDevice = 0xDF,
 
@@ -2653,24 +2953,28 @@ pub enum TensorSubOpcode {
 
     /// Find all matches of a regex pattern in text.
     ///
+
     /// Format: `dst:reg, pattern:reg, text:reg`
     /// Returns a list of match strings.
     RegexFindAll = 0xE0,
 
     /// Replace all matches of a regex pattern in text.
     ///
+
     /// Format: `dst:reg, pattern:reg, text:reg, replacement:reg`
     /// Returns the text with all matches replaced.
     RegexReplaceAll = 0xE1,
 
     /// Check if a regex pattern matches text.
     ///
+
     /// Format: `dst:reg, pattern:reg, text:reg`
     /// Returns true if the pattern matches anywhere in text.
     RegexIsMatch = 0xE2,
 
     /// Split text by a regex pattern.
     ///
+
     /// Format: `dst:reg, pattern:reg, text:reg`
     /// Returns a list of parts.
     RegexSplit = 0xE3,
@@ -2682,141 +2986,169 @@ pub enum TensorSubOpcode {
 
     /// Create tensor with evenly spaced values (arange).
     ///
+
     /// Format: `dst:reg, start:reg, end:reg, step:reg, dtype:u8`
     Arange = 0xE4,
 
     /// Create tensor with evenly spaced values (linspace).
     ///
+
     /// Format: `dst:reg, start:reg, end:reg, steps:reg, dtype:u8`
     Linspace = 0xE5,
 
     /// Create random tensor.
     ///
+
     /// Format: `dst:reg, shape:reg, dtype:u8`
     Rand = 0xE6,
 
     /// Clone tensor.
     ///
+
     /// Format: `dst:reg, src:reg`
     Clone = 0xE7,
 
     /// Create identity matrix.
     ///
+
     /// Format: `dst:reg, size:reg, dtype:u8`
     Identity = 0xE8,
 
     /// Index tensor with indices.
     ///
+
     /// Format: `dst:reg, src:reg, indices:reg`
     Index = 0xE9,
 
     /// Concatenate tensors along axis.
     ///
+
     /// Format: `dst:reg, tensors:reg, axis:i8`
     Concat = 0xEA,
 
     /// Stack tensors along new axis.
     ///
+
     /// Format: `dst:reg, tensors:reg, axis:i8`
     Stack = 0xEB,
 
     /// Broadcast tensor to shape.
     ///
+
     /// Format: `dst:reg, src:reg, shape:reg`
     BroadcastToShape = 0xEC,
 
     /// Squeeze tensor dimensions.
     ///
+
     /// Format: `dst:reg, src:reg, axis:i8`
     Squeeze = 0xED,
 
     /// Compare tensors element-wise.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, op:u8`
     Cmp = 0xEE,
 
     /// Conditional select (where).
     ///
+
     /// Format: `dst:reg, cond:reg, a:reg, b:reg`
     Where = 0xEF,
 
     /// Clamp tensor values.
     ///
+
     /// Format: `dst:reg, src:reg, min:reg, max:reg`
     Clamp = 0xF0,
 
     /// Cast tensor to dtype.
     ///
+
     /// Format: `dst:reg, src:reg, dtype:u8`
     Cast = 0xF1,
 
     /// Masked fill.
     ///
+
     /// Format: `dst:reg, src:reg, mask:reg, value:reg`
     MaskedFill = 0xF2,
 
     /// Linear interpolation.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, t:reg`
     Lerp = 0xF3,
 
     /// Dot product.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     Dot = 0xF4,
 
     /// Convolution.
     ///
+
     /// Format: `dst:reg, input:reg, weight:reg, stride:reg, padding:reg`
     Conv = 0xF5,
 
     /// Batch matrix multiplication.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     BatchMatmul = 0xF6,
 
     /// Einsum.
     ///
+
     /// Format: `dst:reg, equation:reg, operands:reg`
     Einsum = 0xF7,
 
     /// Outer product.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     Outer = 0xF8,
 
     /// Cholesky decomposition.
     ///
+
     /// Format: `dst:reg, src:reg, upper:bool`
     Cholesky = 0xF9,
 
     /// Argmax along axis.
     ///
+
     /// Format: `dst:reg, src:reg, axis:i8, keepdim:bool`
     Argmax = 0xFA,
 
     /// Top-k elements.
     ///
+
     /// Format: `values:reg, indices:reg, src:reg, k:reg, dim:i8`
     Topk = 0xFB,
 
     /// Cumulative operation (sum, prod, max, min).
     ///
+
     /// Format: `dst:reg, src:reg, op:u8, axis:i8`
     Cumulative = 0xFC,
 
     /// Softmax.
     ///
+
     /// Format: `dst:reg, src:reg, axis:i8`
     Softmax = 0xFD,
 
     /// Layer normalization.
     ///
+
     /// Format: `dst:reg, src:reg, normalized_shape:reg, weight:reg, bias:reg, eps:f64`
     LayerNorm = 0xFE,
 
     /// Batch normalization.
     ///
+
     /// Format: `dst:reg, src:reg, weight:reg, bias:reg, running_mean:reg, running_var:reg`
     BatchNorm = 0xFF,
 }
@@ -2824,57 +3156,68 @@ pub enum TensorSubOpcode {
 /// Additional tensor sub-opcodes that overflow the u8 range.
 /// These use a two-byte encoding: [0xFC] [0x00] [ext_opcode:u8] [operands...]
 ///
+
 /// This enum provides extended tensor operations beyond the 256-opcode limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TensorExtSubOpcode {
     /// RMS normalization.
     ///
+
     /// Format: `dst:reg, src:reg, weight:reg, eps:f64`
     RmsNorm = 0x00,
 
     /// Flash attention.
     ///
+
     /// Format: `dst:reg, q:reg, k:reg, v:reg, mask:reg, scale:f64`
     FlashAttention = 0x01,
 
     /// FFT (Fast Fourier Transform).
     ///
+
     /// Format: `dst:reg, src:reg, dim:i8`
     Fft = 0x02,
 
     /// Scatter operation.
     ///
+
     /// Format: `dst:reg, src:reg, index:reg, dim:i8`
     Scatter = 0x03,
 
     /// Create a contiguous view of tensor without copying.
     ///
+
     /// Format: `dst:reg, src:reg`
     ContiguousView = 0x04,
 
     /// Random unsigned 64-bit integer.
     ///
+
     /// Format: `dst:reg`
     RandomU64 = 0x05,
 
     /// Random float in custom range.
     ///
+
     /// Format: `dst:reg, low:reg, high:reg`
     RandomFloat = 0x06,
 
     /// Global allocator reference.
     ///
+
     /// Format: `dst:reg`
     GlobalAllocator = 0x07,
 
     /// Memory new ID allocation.
     ///
+
     /// Format: `dst:reg`
     MemNewId = 0x08,
 
     /// Memory allocate tensor.
     ///
+
     /// Format: `dst:reg, shape:reg, dtype:u8`
     MemAllocTensor = 0x09,
 
@@ -2888,12 +3231,14 @@ pub enum TensorExtSubOpcode {
 
     /// Find the FIRST regex match in text.
     ///
+
     /// Format: `dst:reg, pattern:reg, text:reg`
     /// Returns `Maybe<Text>` — the first match, or None.
     RegexFind = 0x0A,
 
     /// Replace the FIRST regex match in text.
     ///
+
     /// Format: `dst:reg, pattern:reg, text:reg, replacement:reg`
     /// Returns the text with at most one match replaced.
     RegexReplace = 0x0B,
@@ -2901,6 +3246,7 @@ pub enum TensorExtSubOpcode {
     /// Run a capturing regex and return ordered group captures of
     /// the first match.
     ///
+
     /// Format: `dst:reg, pattern:reg, text:reg`
     /// Returns `Maybe<List<Text>>` — the capture-group list (group
     /// 0 = whole match), or None if no match. Non-participating
@@ -2910,6 +3256,7 @@ pub enum TensorExtSubOpcode {
 
     /// Wire-level permission check (#12 / P3.2).
     ///
+
     /// Format: `dst:reg, scope_tag:reg, target_id:reg`
     /// Routes a (scope_tag: u32, target_id: u64) pair through the
     /// runtime `PermissionRouter` and writes the decision tag
@@ -2919,6 +3266,7 @@ pub enum TensorExtSubOpcode {
     /// gating intrinsic would create an infinite recursion in
     /// the dispatch path.
     ///
+
     /// Byte chosen at 0x1C — outside both `TensorSubOpcode`
     /// (0x00, 0x0D-0x1B, 0x20-…) and the regex window
     /// (0x0A-0x0C) so the decoder's TensorSubOpcode probe
@@ -2928,6 +3276,7 @@ pub enum TensorExtSubOpcode {
 
     /// Atomic permission assert (#12 / P3.2).
     ///
+
     /// Format: `scope_tag:u8, target_id:reg`
     /// Routes the check through `PermissionRouter`; on Allow
     /// proceeds to the next instruction with no observable
@@ -2935,12 +3284,14 @@ pub enum TensorExtSubOpcode {
     /// runtime error that surfaces to the catch frame as a
     /// typed Verum exception.
     ///
+
     /// The single-instruction shape lets the codegen emit a
     /// gate prologue without branching machinery — the dispatch
-    /// handler holds all the deny-path logic.  Designed to be
+    /// handler holds all the deny-path logic. Designed to be
     /// auto-emitted by the AST→VBC pass before any intrinsic
     /// carrying `IntrinsicHint::RequiresPermission`.
     ///
+
     /// Byte 0x1D, picked one past `PermissionCheckWire` for
     /// locality.
     PermissionAssert = 0x1D,
@@ -2948,29 +3299,32 @@ pub enum TensorExtSubOpcode {
     /// Read a single field of the runtime
     /// `PermissionRouterStats` struct (#101).
     ///
+
     /// Format: `dst:reg, selector:reg`
     /// Selector encoding (matches the field order in
     /// `verum_vbc::interpreter::permission::PermissionRouterStats`):
-    ///   * 0 → total
-    ///   * 1 → last_entry_hits
-    ///   * 2 → map_hits
-    ///   * 3 → policy_invocations
-    ///   * 4 → denials
+    ///  * 0 → total
+    ///  * 1 → last_entry_hits
+    ///  * 2 → map_hits
+    ///  * 3 → policy_invocations
+    ///  * 4 → denials
     ///
+
     /// Out-of-range selectors return 0 — the dispatch handler
     /// treats unknown selectors as "no such stat" rather than
     /// raising, so version-skew between callers and runtime
-    /// fails open instead of crashing.  Stdlib's typed
+    /// fails open instead of crashing. Stdlib's typed
     /// `permission_stats()` wrapper sources its 5 fields by
     /// calling this intrinsic five times.
     PermissionStatsRead = 0x1E,
 
     /// Clear the runtime `PermissionRouter` stats (#101).
     ///
+
     /// Format: `dst:reg`
     /// Resets total / hits / misses / denials to zero;
     /// preserves the cache itself (use the dedicated
-    /// `clear_permission_cache` API for that).  The `dst`
+    /// `clear_permission_cache` API for that). The `dst`
     /// receives Unit so the opcode round-trips through the
     /// register-allocator like every other intrinsic call.
     PermissionStatsClear = 0x1F,
@@ -3448,24 +3802,30 @@ impl TensorSubOpcode {
 
 /// ML extended sub-opcodes for use with `MlExtended` (0xFD) prefix.
 ///
+
 /// Provides specialized ML/AI operations separated from tensor ops:
 /// - Tokenizer operations for text processing
 /// - Sampling operations for inference
 /// - Inference utilities for LLM serving
 /// - Distributed training operations
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0xFD] [sub_opcode:u8] [operands...]
 /// ```
 ///
+
 /// # Example
 ///
+
 /// ```text
 /// // Encode text to tokens
 /// MlExtended TokenizerEncode dst:r0, tokenizer:r1, text:r2
 ///
+
 /// // Top-p sampling
 /// MlExtended SampleTopP dst:r0, logits:r1, p:r2
 /// ```
@@ -3478,36 +3838,43 @@ pub enum MlSubOpcode {
 
     /// Load BPE tokenizer from files.
     ///
+
     /// Format: `dst:reg, vocab_path:reg, merges_path:reg`
     TokenizerLoadBpe = 0x00,
 
     /// Load pretrained tokenizer by model name.
     ///
+
     /// Format: `dst:reg, model_name:reg`
     TokenizerLoadPretrained = 0x01,
 
     /// Encode text to tokens.
     ///
+
     /// Format: `dst:reg, tokenizer:reg, text:reg`
     TokenizerEncode = 0x02,
 
     /// Decode tokens to text.
     ///
+
     /// Format: `dst:reg, tokenizer:reg, tokens:reg`
     TokenizerDecode = 0x03,
 
     /// Load SentencePiece model.
     ///
+
     /// Format: `dst:reg, model_path:reg`
     TokenizerLoadSpm = 0x04,
 
     /// Encode with SentencePiece.
     ///
+
     /// Format: `dst:reg, tokenizer:reg, text:reg`
     TokenizerSpmEncode = 0x05,
 
     /// Decode with SentencePiece.
     ///
+
     /// Format: `dst:reg, tokenizer:reg, tokens:reg`
     TokenizerSpmDecode = 0x06,
 
@@ -3517,31 +3884,37 @@ pub enum MlSubOpcode {
 
     /// Top-p (nucleus) sampling.
     ///
+
     /// Format: `dst:reg, logits:reg, p:reg`
     SampleTopP = 0x10,
 
     /// Temperature sampling.
     ///
+
     /// Format: `dst:reg, logits:reg, temperature:reg`
     SampleTemperature = 0x11,
 
     /// Paged attention for KV cache.
     ///
+
     /// Format: `dst:reg, q:reg, kv_cache:reg, block_table:reg, context_len:reg`
     PagedAttention = 0x12,
 
     /// Top-k sampling.
     ///
+
     /// Format: `dst:reg, logits:reg, k:reg`
     SampleTopK = 0x13,
 
     /// Combined top-k + top-p sampling.
     ///
+
     /// Format: `dst:reg, logits:reg, k:reg, p:reg`
     SampleTopKTopP = 0x14,
 
     /// Repetition penalty.
     ///
+
     /// Format: `dst:reg, logits:reg, past_tokens:reg, penalty:reg`
     RepetitionPenalty = 0x15,
 
@@ -3551,47 +3924,56 @@ pub enum MlSubOpcode {
 
     /// Parse tool call from action string.
     ///
+
     /// Format: `dst:reg, action:reg`
     ParseToolCall = 0x20,
 
     /// Format value for display.
     ///
+
     /// Format: `dst:reg, value:reg`
     FormatValue = 0x21,
 
     /// Quantized matrix multiplication.
     ///
+
     /// Format: `dst:reg, input:reg, weight:reg, scale:reg, zero_point:reg`
     QuantizedMatmul = 0x22,
 
     /// Generate unique request ID.
     ///
+
     /// Format: `dst:reg`
     GenerateRequestId = 0x23,
 
     /// Convert JSON schema to JSON.
     ///
+
     /// Format: `dst:reg, schema:reg`
     JsonSchemaToJson = 0x24,
 
     /// Convert function schema to JSON.
     ///
+
     /// Format: `dst:reg, schema:reg`
     FunctionSchemaToJson = 0x25,
 
     /// Parse function calls from response.
     ///
+
     /// Format: `dst:reg, response:reg`
     ParseFunctionCalls = 0x26,
 
     /// KV cache operations.
     ///
+
     /// Format: `dst:reg, op:u8, cache:reg, [operands...]`
     /// op: 0=create, 1=append, 2=truncate, 3=clear
     KvCacheOp = 0x27,
 
     /// Speculative decoding accept/reject.
     ///
+
     /// Format: `dst:reg, draft_tokens:reg, target_probs:reg`
     SpeculativeVerify = 0x28,
 
@@ -3601,57 +3983,68 @@ pub enum MlSubOpcode {
 
     /// All-reduce: reduce tensor across all ranks and distribute result.
     ///
+
     /// Format: `dst:reg, tensor:reg, group:reg, op:u8`
     /// Op: 0=Sum, 1=Mean, 2=Max, 3=Min, 4=Prod
     AllReduce = 0x30,
 
     /// All-gather: gather tensors from all ranks to all ranks.
     ///
+
     /// Format: `dst:reg, tensor:reg, group:reg`
     AllGather = 0x31,
 
     /// Broadcast: send tensor from src rank to all ranks.
     ///
+
     /// Format: `dst:reg, tensor:reg, src:reg, group:reg`
     Broadcast = 0x32,
 
     /// Reduce-scatter: reduce then scatter result.
     ///
+
     /// Format: `dst:reg, tensor:reg, group:reg, op:u8`
     ReduceScatter = 0x33,
 
     /// Barrier: synchronize all ranks.
     ///
+
     /// Format: `group:reg`
     Barrier = 0x34,
 
     /// Pmap parallel sum collective.
     ///
+
     /// Format: `dst:reg, tensor:reg, axis_name:reg`
     PmapPsum = 0x35,
 
     /// Pmap parallel mean collective.
     ///
+
     /// Format: `dst:reg, tensor:reg, axis_name:reg`
     PmapPmean = 0x36,
 
     /// Pmap parallel max collective.
     ///
+
     /// Format: `dst:reg, tensor:reg, axis_name:reg`
     PmapPmax = 0x37,
 
     /// Pmap all-gather collective.
     ///
+
     /// Format: `dst:reg, tensor:reg, axis_name:reg`
     PmapAllGather = 0x38,
 
     /// Vmap transformation.
     ///
+
     /// Format: `dst:reg, func:reg, in_axes:reg, out_axes:reg`
     VmapTransform = 0x39,
 
     /// Pmap transformation.
     ///
+
     /// Format: `dst:reg, func:reg, axis_name:reg, in_axes:reg, out_axes:reg`
     PmapTransform = 0x3A,
 
@@ -3661,26 +4054,31 @@ pub enum MlSubOpcode {
 
     /// Get the world process group (all ranks).
     ///
+
     /// Format: `dst:reg`
     DistWorldGroup = 0x40,
 
     /// Create a new process group from a subset of ranks.
     ///
+
     /// Format: `dst:reg, ranks:reg`
     DistNewGroup = 0x41,
 
     /// Get the rank of the current process in a group.
     ///
+
     /// Format: `dst:reg, group:reg`
     DistGetRank = 0x42,
 
     /// Get the world size (total number of ranks).
     ///
+
     /// Format: `dst:reg`
     DistWorldSize = 0x43,
 
     /// Get the local rank (within a node).
     ///
+
     /// Format: `dst:reg`
     DistLocalRank = 0x44,
 
@@ -3690,26 +4088,31 @@ pub enum MlSubOpcode {
 
     /// Send tensor to a specific rank.
     ///
+
     /// Format: `tensor:reg, dst_rank:reg, group:reg`
     P2PSend = 0x50,
 
     /// Receive tensor from a specific rank.
     ///
+
     /// Format: `dst:reg, src_rank:reg, group:reg`
     P2PRecv = 0x51,
 
     /// Async send (returns handle).
     ///
+
     /// Format: `handle:reg, tensor:reg, dst_rank:reg, group:reg`
     P2PIsend = 0x52,
 
     /// Async receive (returns handle).
     ///
+
     /// Format: `handle:reg, dst:reg, src_rank:reg, group:reg`
     P2PIrecv = 0x53,
 
     /// Wait for async operation.
     ///
+
     /// Format: `handle:reg`
     P2PWait = 0x54,
 
@@ -3719,56 +4122,67 @@ pub enum MlSubOpcode {
 
     /// Bucket gradients for communication efficiency.
     ///
+
     /// Format: `dst:reg, gradients:reg, bucket_size:reg`
     BucketGradients = 0x60,
 
     /// Get gradient from a parameter.
     ///
+
     /// Format: `dst:reg, param:reg`
     GetGrad = 0x61,
 
     /// Set gradient on a parameter.
     ///
+
     /// Format: `param:reg, grad:reg`
     SetGrad = 0x62,
 
     /// Execute backward pass on a module.
     ///
+
     /// Format: `dst:reg, module:reg, grad_output:reg`
     ModuleBackward = 0x63,
 
     /// Zero gradients.
     ///
+
     /// Format: `params:reg`
     ZeroGrad = 0x64,
 
     /// Gradient clipping.
     ///
+
     /// Format: `params:reg, max_norm:reg`
     ClipGradNorm = 0x65,
 
     /// Begin forward-mode autodiff (JVP - Jacobian-Vector Product).
     ///
+
     /// Format: `dst:reg, primals:reg, tangents:reg`
     JvpBegin = 0x66,
 
     /// End forward-mode autodiff scope.
     ///
+
     /// Format: `dst:reg, scope:reg`
     JvpEnd = 0x67,
 
     /// Register custom gradient function.
     ///
+
     /// Format: `dst:reg, forward_fn:reg, backward_fn:reg`
     GradCustom = 0x68,
 
     /// Zero out tangent vectors (forward-mode specific).
     ///
+
     /// Format: `tangents:reg`
     GradZeroTangent = 0x69,
 
     /// Recompute forward pass during backward (activation checkpointing).
     ///
+
     /// Format: `dst:reg, checkpoint:reg, grad_output:reg`
     GradRecompute = 0x6A,
 
@@ -3778,21 +4192,25 @@ pub enum MlSubOpcode {
 
     /// Select actors from a mesh by coordinates.
     ///
+
     /// Format: `dst:reg, mesh:reg, coords:reg`
     MeshSelect = 0x70,
 
     /// Create a new actor ID.
     ///
+
     /// Format: `dst:reg`
     ActorNewId = 0x71,
 
     /// Create actor mesh.
     ///
+
     /// Format: `dst:reg, shape:reg`
     MeshCreate = 0x72,
 
     /// Get mesh shape.
     ///
+
     /// Format: `dst:reg, mesh:reg`
     MeshShape = 0x73,
 
@@ -3802,21 +4220,25 @@ pub enum MlSubOpcode {
 
     /// Create an RDMA reference to a tensor.
     ///
+
     /// Format: `dst:reg, tensor:reg`
     RdmaCreateRef = 0x80,
 
     /// Fetch tensor data via RDMA.
     ///
+
     /// Format: `dst:reg, rdma_ref:reg`
     RdmaFetch = 0x81,
 
     /// Write tensor data via RDMA.
     ///
+
     /// Format: `rdma_ref:reg, tensor:reg`
     RdmaWrite = 0x82,
 
     /// Check if RDMA reference is still valid.
     ///
+
     /// Format: `dst:reg, rdma_ref:reg`
     RdmaCheckValid = 0x83,
 }
@@ -4029,6 +4451,7 @@ impl MlSubOpcode {
 
 /// FFI extended sub-opcodes for use with `FfiExtended` (0xBC) prefix.
 ///
+
 /// Provides comprehensive FFI operations for:
 /// - Symbol resolution and caching
 /// - C calling convention calls
@@ -4037,18 +4460,23 @@ impl MlSubOpcode {
 /// - Value marshalling between Verum and C
 /// - Error handling (errno)
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0xBC] [sub_opcode:u8] [operands...]
 /// ```
 ///
+
 /// # Example
 ///
+
 /// ```text
 /// // Call getpid() from libc
 /// FfiExtended CallFfiC symbol_idx:u32, arg_count:0, ret_reg:r0
 ///
+
 /// // Call printf with variadic args
 /// FfiExtended CallFfiVariadic symbol_idx:u32, arg_count:2, ret_reg:r0
 /// ```
@@ -4060,18 +4488,21 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Resolve FFI symbol and cache address.
     ///
+
     /// Format: `dst:reg, symbol_idx:u32`
     /// Returns: Pointer to resolved symbol (cached for subsequent calls)
     LoadSymbol = 0x00,
 
     /// Get library handle.
     ///
+
     /// Format: `dst:reg, library_idx:u16`
     /// Returns: Library handle or null if not loaded
     GetLibrary = 0x01,
 
     /// Check if symbol is resolved.
     ///
+
     /// Format: `dst:reg, symbol_idx:u32`
     /// Returns: true if symbol is resolved, false otherwise
     IsSymbolResolved = 0x02,
@@ -4081,48 +4512,56 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Call with C calling convention.
     ///
+
     /// Format: `symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...]`
     /// The C calling convention is the default on most Unix systems.
     CallFfiC = 0x10,
 
     /// Call with stdcall convention (Windows).
     ///
+
     /// Format: `symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...]`
     /// Callee cleans up the stack.
     CallFfiStdcall = 0x11,
 
     /// Call with System V AMD64 ABI.
     ///
+
     /// Format: `symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...]`
     /// First 6 args in registers, rest on stack.
     CallFfiSysV64 = 0x12,
 
     /// Call with fastcall convention (Windows).
     ///
+
     /// Format: `symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...]`
     /// First 2 args in registers (ECX, EDX).
     CallFfiFastcall = 0x13,
 
     /// Call with variadic convention (printf-style).
     ///
+
     /// Format: `symbol_idx:u32, fixed_count:u8, variadic_count:u8, ret_reg:reg, [arg_regs...]`
     /// First fixed_count args are typed, remaining are variadic.
     CallFfiVariadic = 0x14,
 
     /// Indirect call through function pointer.
     ///
+
     /// Format: `ptr_reg:reg, signature_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...]`
     /// Calls the function at the address in ptr_reg.
     CallFfiIndirect = 0x15,
 
     /// Call with ARM64 AAPCS calling convention.
     ///
+
     /// Format: `symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...]`
     /// ARM64 Procedure Call Standard - first 8 args in X0-X7/V0-V7 registers.
     CallFfiAarch64 = 0x16,
 
     /// Call with Windows ARM64 calling convention.
     ///
+
     /// Format: `symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...]`
     /// Windows ARM64 follows a variant of AAPCS with some differences.
     CallFfiWin64Arm64 = 0x17,
@@ -4132,49 +4571,57 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Marshal Verum value to C representation.
     ///
+
     /// Format: `dst:reg, src:reg, c_type:u8`
     /// c_type: 0=i8, 1=i16, 2=i32, 3=i64, 4=u8, 5=u16, 6=u32, 7=u64,
-    ///         8=f32, 9=f64, 10=ptr, 11=bool, 12=void
+    ///  8=f32, 9=f64, 10=ptr, 11=bool, 12=void
     MarshalToC = 0x20,
 
     /// Marshal C value to Verum representation.
     ///
+
     /// Format: `dst:reg, src:reg, c_type:u8`
     /// Converts C representation back to Verum value.
     MarshalFromC = 0x21,
 
     /// Marshal string to C (null-terminated).
     ///
+
     /// Format: `dst:reg, src:reg`
     /// Returns pointer to null-terminated UTF-8 string (caller must free).
     StringToC = 0x22,
 
     /// Marshal C string to Verum Text.
     ///
+
     /// Format: `dst:reg, src:reg`
     /// Copies null-terminated C string into Verum Text.
     StringFromC = 0x23,
 
     /// Marshal array to C pointer.
     ///
+
     /// Format: `ptr:reg, len:reg, src:reg`
     /// Returns pointer to array data and length.
     ArrayToC = 0x24,
 
     /// Marshal C array to Verum List.
     ///
+
     /// Format: `dst:reg, ptr:reg, len:reg, elem_type:u8`
     /// Copies C array into Verum List.
     ArrayFromC = 0x25,
 
     /// Marshal struct to C layout.
     ///
+
     /// Format: `dst:reg, src:reg, layout_idx:u32`
     /// Converts Verum record to C struct layout.
     StructToC = 0x26,
 
     /// Marshal C struct to Verum record.
     ///
+
     /// Format: `dst:reg, src:reg, layout_idx:u32`
     /// Converts C struct to Verum record.
     StructFromC = 0x27,
@@ -4184,24 +4631,28 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Get errno value.
     ///
+
     /// Format: `dst:reg`
     /// Returns current errno value.
     GetErrno = 0x30,
 
     /// Set errno value.
     ///
+
     /// Format: `value:reg`
     /// Sets errno to the specified value.
     SetErrno = 0x31,
 
     /// Clear errno.
     ///
+
     /// Format: (no operands)
     /// Sets errno to 0.
     ClearErrno = 0x32,
 
     /// Get last Win32 error (Windows).
     ///
+
     /// Format: `dst:reg`
     /// Returns GetLastError() value.
     GetLastError = 0x33,
@@ -4211,45 +4662,53 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Allocate C memory (malloc).
     ///
+
     /// Format: `dst:reg, size:reg`
     /// Returns pointer to allocated memory.
     CAlloc = 0x40,
 
     /// Free C memory (free).
     ///
+
     /// Format: `ptr:reg`
     /// Frees memory allocated by CAlloc.
     CFree = 0x41,
 
     /// Reallocate C memory (realloc).
     ///
+
     /// Format: `dst:reg, ptr:reg, size:reg`
     /// Returns pointer to reallocated memory.
     CRealloc = 0x42,
 
     /// Copy C memory (memcpy).
     ///
+
     /// Format: `dst:reg, src:reg, size:reg`
     CMemcpy = 0x43,
 
     /// Set C memory (memset).
     ///
+
     /// Format: `dst:reg, value:reg, size:reg`
     CMemset = 0x44,
 
     /// Move C memory (memmove) - handles overlapping regions.
     ///
+
     /// Format: `dst:reg, src:reg, size:reg`
     CMemmove = 0x45,
 
     /// Compare C memory (memcmp).
     ///
+
     /// Format: `dst:reg, ptr1:reg, ptr2:reg, size:reg`
     /// Returns: negative if ptr1 < ptr2, 0 if equal, positive if ptr1 > ptr2
     CMemcmp = 0x46,
 
     /// Generate cryptographically secure random u64.
     ///
+
     /// Format: `dst:reg`
     /// Uses platform-specific secure random:
     /// - macOS: getentropy()
@@ -4259,59 +4718,71 @@ pub enum FfiSubOpcode {
 
     /// Generate random float in [0, 1).
     ///
+
     /// Format: `dst:reg`
     /// Uses RandomU64 internally with IEEE 754 conversion.
     RandomFloat = 0x48,
 
     /// Allocate a byte array (contiguous bytes, not Values).
     ///
+
     /// Format: `dst:reg, size:reg, init:reg`
     /// Allocates `size` bytes of contiguous memory with TypeId::U8.
     /// Each byte is initialized to `init` value.
     ///
+
     /// This is used for `let buf: [Byte; N] = uninit();` or `[Byte; N] = zeroed();`
     /// where we need true byte arrays, not Value arrays.
     NewByteArray = 0x49,
 
     /// Get element address in a byte array.
     ///
+
     /// Format: `dst:reg, arr:reg, idx:reg`
     /// Computes the memory address of the element at index `idx` in byte array `arr`.
     /// Returns: `dst = arr_ptr + OBJECT_HEADER_SIZE + idx`
     ///
+
     /// This is used for `&mut buf[idx] as *mut Byte` to get the actual memory address
     /// of a byte array element, rather than fetching its value (which GetE does).
     ByteArrayElementAddr = 0x4A,
 
     /// Load a byte from a byte array.
     ///
+
     /// Format: `dst:reg, arr:reg, idx:reg`
     /// Loads the byte at index `idx` from byte array `arr` into `dst`.
     ///
+
     /// This provides efficient single-byte access to byte arrays without
     /// computing element addresses.
     ByteArrayLoad = 0x4B,
 
     /// Store a byte to a byte array.
     ///
+
     /// Format: `arr:reg, idx:reg, val:reg`
     /// Stores the low 8 bits of `val` to byte array `arr` at index `idx`.
     ///
+
     /// This provides efficient single-byte writes to byte arrays without
     /// computing element addresses.
     ByteArrayStore = 0x4C,
 
     /// Get element address for typed array (with element size).
     ///
+
     /// Format: `dst:reg, arr:reg, idx:reg, elem_size:u8`
     /// Returns: Pointer to arr[idx] = base_addr + (idx * elem_size)
     ///
+
     /// This is a generalization of ByteArrayElementAddr for arrays with
     /// elements larger than 1 byte (e.g., [UInt64; N] where elem_size=8).
     TypedArrayElementAddr = 0x4D,
 
     /// Create new typed array with element size.
     ///
+
     /// Format: `dst:reg, count:reg, elem_size:u8, init:reg`
     /// Allocates: count * elem_size bytes of memory
     /// Initializes: All elements to init value (cast to element type)
@@ -4319,23 +4790,26 @@ pub enum FfiSubOpcode {
 
     /// Get raw address of a struct field.
     ///
+
     /// Format: `dst:reg, obj:reg, field_offset:u16`
     /// Returns: `obj_heap_ptr + OBJECT_HEADER_SIZE + field_offset`
-    ///   (or, for register-encoded scalars stored in a Value-typed
-    ///    field, the address of the Value's u64 storage so atomic
-    ///    sub-byte reads of the inline-int payload land correctly
-    ///    on little-endian targets)
+    ///  (or, for register-encoded scalars stored in a Value-typed
+    ///  field, the address of the Value's u64 storage so atomic
+    ///  sub-byte reads of the inline-int payload land correctly
+    ///  on little-endian targets)
     ///
+
     /// Generalises ByteArrayElementAddr / TypedArrayElementAddr to
     /// the struct-field surface so `&self.field as *const T` lowers
     /// to a real heap address — required by every atomic stdlib op
     /// (AtomicU8 / AtomicU16 / AtomicU32) that takes
     /// `&self.value as *const Byte` and feeds it to the typed
-    /// `atomic_load_*` / `atomic_cas_*` intrinsics.  Without this,
+    /// `atomic_load_*` / `atomic_cas_*` intrinsics. Without this,
     /// `&self.value` produces a register-encoded CBGR ref whose
     /// bit-pattern is meaningless when cast to a raw pointer (the
     /// historical bug — every Tier-0 atomic was a silent no-op).
     ///
+
     /// # Safety
     /// Caller must ensure obj is a valid heap-allocated object and
     /// field_offset stays within the object's data section.
@@ -4346,12 +4820,14 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Create callback trampoline.
     ///
+
     /// Format: `dst:reg, fn_id:u32, signature_idx:u32`
     /// Creates a C-callable function pointer that invokes Verum function.
     CreateCallback = 0x50,
 
     /// Free callback trampoline.
     ///
+
     /// Format: `trampoline:reg`
     /// Frees resources associated with callback.
     FreeCallback = 0x51,
@@ -4362,35 +4838,43 @@ pub enum FfiSubOpcode {
     // These operations bypass CBGR validation for FFI-returned raw pointers.
     // They provide direct memory access similar to C pointers.
     //
+
     // SAFETY: These operations are inherently unsafe. The caller must ensure:
     // - The pointer is valid and points to accessible memory
     // - The memory is properly aligned for the target type
     // - The memory is not freed or moved during the operation
     // - No data races occur when using mutable operations
     //
+
     // These are semantically equivalent to Rust's `*const T` and `*mut T`.
     // ========================================================================
 
     /// Read value through raw pointer (no CBGR validation).
     ///
+
     /// Format: `dst:reg, ptr:reg, size:u8`
     /// size: 1=i8, 2=i16, 4=i32, 8=i64 (interpreted as signed)
     ///
+
     /// Reads a primitive value from the memory address in `ptr`.
     /// This bypasses CBGR validation and directly accesses memory.
     ///
+
     /// # Safety
     /// The pointer must be valid and properly aligned.
     DerefRaw = 0x60,
 
     /// Write value through raw pointer (no CBGR validation).
     ///
+
     /// Format: `ptr:reg, value:reg, size:u8`
     /// size: 1=i8, 2=i16, 4=i32, 8=i64
     ///
+
     /// Writes a primitive value to the memory address in `ptr`.
     /// This bypasses CBGR validation and directly accesses memory.
     ///
+
     /// # Safety
     /// The pointer must be valid and properly aligned.
     /// The memory must be writable.
@@ -4398,61 +4882,75 @@ pub enum FfiSubOpcode {
 
     /// Read pointer through raw pointer (for pointer-to-pointer).
     ///
+
     /// Format: `dst:reg, ptr:reg`
     ///
+
     /// Reads a pointer value from the memory address in `ptr`.
     DerefRawPtr = 0x62,
 
     /// Pointer arithmetic: add offset.
     ///
+
     /// Format: `dst:reg, ptr:reg, offset:reg`
     ///
+
     /// Computes `ptr + offset` for raw pointer arithmetic.
     /// The offset is in bytes.
     PtrAdd = 0x63,
 
     /// Pointer arithmetic: subtract offset.
     ///
+
     /// Format: `dst:reg, ptr:reg, offset:reg`
     ///
+
     /// Computes `ptr - offset` for raw pointer arithmetic.
     PtrSub = 0x64,
 
     /// Pointer difference.
     ///
+
     /// Format: `dst:reg, ptr1:reg, ptr2:reg`
     ///
+
     /// Computes `ptr1 - ptr2` (difference in bytes).
     PtrDiff = 0x65,
 
     /// Check if pointer is null.
     ///
+
     /// Format: `dst:reg, ptr:reg`
     ///
+
     /// Sets `dst` to true if `ptr` is null, false otherwise.
     PtrIsNull = 0x66,
 
     /// Read signed primitive through raw pointer (sign-extending variant
     /// of [`DerefRaw`]).
     ///
+
     /// Format: `dst:reg, ptr:reg, size:u8`
     /// size: 1=i8, 2=i16, 4=i32, 8=i64
     ///
+
     /// Reads `size` bytes from `ptr` and **sign-extends** to i64.
     /// Mirror of `DerefRaw` for code paths that need precise C-typed
     /// pointer reads of `int8_t` / `int16_t` / `int32_t` slots.
     ///
+
     /// Why a separate opcode rather than a flag on `DerefRaw`:
     /// `DerefRaw` deliberately chose zero-extension as its default
     /// (CRC32 / unsigned-byte-array invariant — see comment at the
-    /// `DerefRaw` handler).  Adding a sign-extending opcode keeps
+    /// `DerefRaw` handler). Adding a sign-extending opcode keeps
     /// both semantics explicit at the bytecode level and lets
     /// codegen pick the right one based on the static type of the
     /// pointee (signed C type → `DerefRawSigned`, unsigned C type
     /// or byte-array element → `DerefRaw`).
     ///
+
     /// # Safety
-    /// The pointer must be valid for reads of `size` bytes.  Bypasses
+    /// The pointer must be valid for reads of `size` bytes. Bypasses
     /// CBGR validation; caller takes responsibility per the FFI
     /// contract.
     DerefRawSigned = 0x67,
@@ -4462,6 +4960,7 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Get monotonic time in nanoseconds.
     ///
+
     /// Format: `dst:reg`
     /// Returns: Current monotonic clock time in nanoseconds (i64).
     /// Uses platform-specific monotonic clock (CLOCK_MONOTONIC on macOS/Linux).
@@ -4469,12 +4968,14 @@ pub enum FfiSubOpcode {
 
     /// Get realtime (wall clock) in nanoseconds since Unix epoch.
     ///
+
     /// Format: `dst:reg`
     /// Returns: Nanoseconds since 1970-01-01T00:00:00Z (i64).
     TimeRealtimeNanos = 0x71,
 
     /// Get raw monotonic time in nanoseconds (not NTP-adjusted).
     ///
+
     /// Format: `dst:reg`
     /// Returns: Raw monotonic clock time in nanoseconds (i64).
     /// Uses CLOCK_MONOTONIC_RAW on macOS/Linux.
@@ -4482,12 +4983,14 @@ pub enum FfiSubOpcode {
 
     /// Sleep for specified nanoseconds.
     ///
+
     /// Format: `nanos:reg`
     /// Sleeps the current thread for the specified duration.
     TimeSleepNanos = 0x73,
 
     /// Get thread CPU time in nanoseconds.
     ///
+
     /// Format: `dst:reg`
     /// Returns: Thread CPU time in nanoseconds (i64).
     /// Uses CLOCK_THREAD_CPUTIME_ID.
@@ -4495,6 +4998,7 @@ pub enum FfiSubOpcode {
 
     /// Get process CPU time in nanoseconds.
     ///
+
     /// Format: `dst:reg`
     /// Returns: Process CPU time in nanoseconds (i64).
     /// Uses CLOCK_PROCESS_CPUTIME_ID.
@@ -4505,36 +5009,42 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Get process ID.
     ///
+
     /// Format: `dst:reg`
     /// Returns: Process ID as i64.
     SysGetpid = 0x80,
 
     /// Get thread ID.
     ///
+
     /// Format: `dst:reg`
     /// Returns: Thread ID as u64.
     SysGettid = 0x81,
 
     /// Memory map (mmap).
     ///
+
     /// Format: `dst:reg, addr:reg, len:reg, prot:reg, flags:reg, fd:reg, offset:reg`
     /// Returns: Result variant (Ok=pointer, Err=OSError).
     SysMmap = 0x82,
 
     /// Memory unmap (munmap).
     ///
+
     /// Format: `dst:reg, addr:reg, len:reg`
     /// Returns: Result variant (Ok=unit, Err=OSError).
     SysMunmap = 0x83,
 
     /// Memory advise (madvise).
     ///
+
     /// Format: `dst:reg, addr:reg, len:reg, advice:reg`
     /// Returns: Result variant (Ok=unit, Err=OSError).
     SysMadvise = 0x84,
 
     /// Get entropy (getentropy).
     ///
+
     /// Format: `dst:reg, buf:reg, len:reg`
     /// Returns: Result variant (Ok=unit, Err=OSError).
     SysGetentropy = 0x85,
@@ -4545,54 +5055,63 @@ pub enum FfiSubOpcode {
 
     /// Mach vm_allocate (safe wrapper).
     ///
+
     /// Format: `dst:reg, size:reg, anywhere:reg`
     /// Returns: Result variant (Ok=VmAddress as Int, Err=KernReturn as Int).
     MachVmAllocate = 0x90,
 
     /// Mach vm_deallocate (safe wrapper).
     ///
+
     /// Format: `dst:reg, addr:reg, size:reg`
     /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
     MachVmDeallocate = 0x91,
 
     /// Mach vm_protect (safe wrapper).
     ///
+
     /// Format: `dst:reg, addr:reg, size:reg, prot:reg`
     /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
     MachVmProtect = 0x92,
 
     /// Mach semaphore_create (safe wrapper).
     ///
+
     /// Format: `dst:reg, initial_value:reg`
     /// Returns: Result variant (Ok=SemaphoreT as Int, Err=KernReturn as Int).
     MachSemCreate = 0x93,
 
     /// Mach semaphore_destroy (safe wrapper).
     ///
+
     /// Format: `dst:reg, sem:reg`
     /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
     MachSemDestroy = 0x94,
 
     /// Mach semaphore_signal (safe wrapper).
     ///
+
     /// Format: `dst:reg, sem:reg`
     /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
     MachSemSignal = 0x95,
 
     /// Mach semaphore_wait (safe wrapper).
     ///
+
     /// Format: `dst:reg, sem:reg`
     /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
     MachSemWait = 0x96,
 
     /// Mach mach_error_string.
     ///
+
     /// Format: `dst:reg, kern_return:reg`
     /// Returns: Text (string).
     MachErrorString = 0x97,
 
     /// Mach mach_wait_until (sleep until deadline).
     ///
+
     /// Format: `dst:reg, deadline:reg`
     /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
     MachSleepUntil = 0x98,
@@ -4605,18 +5124,21 @@ pub enum FfiSubOpcode {
     // ========================================================================
     /// Allocate memory with CBGR tracking.
     ///
+
     /// Format: `dst:reg, size:reg, align:reg`
     /// Returns: Result tuple `(ptr, generation, epoch)` or AllocError.
     CbgrAlloc = 0xA0,
 
     /// Allocate zeroed memory with CBGR tracking.
     ///
+
     /// Format: `dst:reg, size:reg, align:reg`
     /// Returns: Result tuple `(ptr, generation, epoch)` or AllocError.
     CbgrAllocZeroed = 0xA1,
 
     /// Deallocate memory previously allocated via `CbgrAlloc`.
     ///
+
     /// Format: `dst:reg, ptr:reg, size:reg, align:reg`
     /// Returns: Result unit or AllocError.
     CbgrDealloc = 0xA2,
@@ -4624,9 +5146,11 @@ pub enum FfiSubOpcode {
     /// Cryptographically-secure zero — volatile memset(0) that
     /// survives every LLVM optimization pass.
     ///
+
     /// Format: `dst:reg, size:reg`
     /// Returns: nothing (the destination buffer is zeroed in-place).
     ///
+
     /// AOT lowering: `llvm.memset.p0.i64(dst, 0, size, isvolatile=true)`.
     /// The `i1 true` volatile flag prevents DCE elimination of the
     /// memset even when the LLVM optimiser proves the buffer is dead
@@ -4634,13 +5158,15 @@ pub enum FfiSubOpcode {
     /// op for: zeroising secret bytes (key material, AEAD tags, PSK
     /// binders) right before they leave scope.
     ///
+
     /// Interpreter lowering: writes zeros to the dst slice; volatile
     /// is moot in the interpreter since there is no optimiser pass
     /// that could elide the writes.
     ///
+
     /// Distinct from `CMemset` (0x44) because LLVM's non-volatile
     /// memset is dead-code-eliminated when the buffer is dead — a
-    /// catastrophic security property.  See audit
+    /// catastrophic security property. See audit
     /// `internal/specs/tls-quic-security-audit.md` §2 (zeroise on
     /// drop) Action #2.
     CSecureZero = 0xA3,
@@ -4886,35 +5412,44 @@ impl FfiSubOpcode {
 
 /// Arithmetic extended sub-opcodes for use with `ArithExtended` (0xBD) prefix.
 ///
+
 /// This provides extended arithmetic operations that were previously misplaced
 /// in FfiSubOpcode space. Moving them to dedicated ArithSubOpcode space provides:
 /// - Clean semantic separation (arithmetic vs FFI)
 /// - Optimized dispatch path for arithmetic operations
 /// - Room for future expansion (saturating, SIMD, etc.)
 ///
+
 /// # Sub-opcode Ranges
 ///
+
 /// - 0x00-0x0F: Checked arithmetic (returns Maybe<T>)
 /// - 0x10-0x1F: Overflowing arithmetic (returns (result, overflow_flag))
 /// - 0x20-0x2F: Polymorphic arithmetic (type-dispatched)
 /// - 0x30-0x3F: Reserved for saturating arithmetic
 /// - 0x40-0x4F: Reserved for wrapping arithmetic
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0xBD] [sub_opcode:u8] [operands...]
 /// ```
 ///
+
 /// # Example
 ///
+
 /// ```text
 /// // Checked addition: dst = Some(a + b) or None if overflow
 /// ArithExtended CheckedAddI dst:r0, a:r1, b:r2
 ///
+
 /// // Overflowing multiplication: (result, did_overflow) = a * b
 /// ArithExtended OverflowingMulI dst:r3, a:r4, b:r5
 ///
+
 /// // Polymorphic addition (dispatches based on operand type)
 /// ArithExtended PolyAdd dst:r6, a:r7, b:r8
 /// ```
@@ -4926,74 +5461,92 @@ pub enum ArithSubOpcode {
     // ========================================================================
     /// Checked integer addition returning Maybe<Int>.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns `Some(result)` if no overflow, `None` if overflow.
     /// Uses Rust's `checked_add` internally for correct overflow detection.
     CheckedAddI = 0x00,
 
     /// Checked integer subtraction returning Maybe<Int>.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns `Some(result)` if no overflow, `None` if overflow.
     CheckedSubI = 0x01,
 
     /// Checked integer multiplication returning Maybe<Int>.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns `Some(result)` if no overflow, `None` if overflow.
     CheckedMulI = 0x02,
 
     /// Checked integer division returning Maybe<Int>.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns `Some(result)` if divisor != 0 and no overflow, `None` otherwise.
     /// Handles both division by zero and MIN / -1 overflow.
     CheckedDivI = 0x03,
 
     /// Checked unsigned integer addition returning Maybe<UInt64>.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns `Some(result)` if no overflow, `None` if overflow.
     /// Uses Rust's u64::checked_add internally for correct unsigned overflow detection.
     CheckedAddU = 0x04,
 
     /// Checked unsigned integer subtraction returning Maybe<UInt64>.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns `Some(result)` if no underflow, `None` if underflow.
     CheckedSubU = 0x05,
 
     /// Checked unsigned integer multiplication returning Maybe<UInt64>.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns `Some(result)` if no overflow, `None` if overflow.
     CheckedMulU = 0x06,
 
     /// Checked signed integer negation returning Maybe<T>.
     ///
+
     /// Format: `dst:reg, src:reg, width:u8, signed:u8`
     ///
+
     /// Returns `Some(-src)` for every value EXCEPT signed `T::MIN`,
     /// for which the mathematical result `|T::MIN|` is unrepresentable
     /// in two's complement. `None` is returned for the unrepresentable
-    /// case.  The closes the gap where `core/intrinsics/arithmetic.vr`
+    /// case. The closes the gap where `core/intrinsics/arithmetic.vr`
     /// declared `checked_neg<T>` but the compiler had no lowering for
     /// it (calls would panic at codegen).
     CheckedNeg = 0x07,
 
     /// Checked signed integer absolute value returning Maybe<T>.
     ///
+
     /// Format: `dst:reg, src:reg, width:u8, signed:u8`
     ///
+
     /// Returns `Some(|src|)` for every value EXCEPT signed `T::MIN`
-    /// (same overflow as `CheckedNeg`).  Symmetric with `CheckedNeg`;
+    /// (same overflow as `CheckedNeg`). Symmetric with `CheckedNeg`;
     /// previously absent from both the .vr surface and the compiler
     /// — closes the API completeness gap.
     CheckedAbs = 0x08,
@@ -5003,23 +5556,29 @@ pub enum ArithSubOpcode {
     // ========================================================================
     /// Overflowing integer addition returning (result, overflowed).
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns a tuple (wrapped_result: Int, did_overflow: Bool).
     /// Always produces a result using wrapping semantics.
     OverflowingAddI = 0x10,
 
     /// Overflowing integer subtraction returning (result, overflowed).
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns a tuple (wrapped_result: Int, did_overflow: Bool).
     OverflowingSubI = 0x11,
 
     /// Overflowing integer multiplication returning (result, overflowed).
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Returns a tuple (wrapped_result: Int, did_overflow: Bool).
     OverflowingMulI = 0x12,
 
@@ -5032,66 +5591,82 @@ pub enum ArithSubOpcode {
 
     /// Polymorphic addition - dispatches to AddI or AddF based on operand type.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     PolyAdd = 0x20,
 
     /// Polymorphic subtraction - dispatches to SubI or SubF based on operand type.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     PolySub = 0x21,
 
     /// Polymorphic multiplication - dispatches to MulI or MulF based on operand type.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     PolyMul = 0x22,
 
     /// Polymorphic division - dispatches to DivI or DivF based on operand type.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     PolyDiv = 0x23,
 
     /// Polymorphic negation - dispatches to NegI or NegF based on operand type.
     ///
+
     /// Format: `dst:reg, src:reg`
     PolyNeg = 0x24,
 
     /// Polymorphic remainder - dispatches to ModI or ModF based on operand type.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     PolyRem = 0x25,
 
     /// Polymorphic absolute value - works for all signed numeric types.
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Returns |src|. For integers, uses wrapping_abs to handle MIN value.
     PolyAbs = 0x26,
 
     /// Polymorphic signum - returns -1, 0, or 1 based on sign.
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Returns -1 if src < 0, 0 if src == 0, 1 if src > 0.
     PolySignum = 0x27,
 
     /// Polymorphic minimum - returns the smaller of two values.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Works for all Ord types (integers and floats).
     PolyMin = 0x28,
 
     /// Polymorphic maximum - returns the larger of two values.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg`
     ///
+
     /// Works for all Ord types (integers and floats).
     PolyMax = 0x29,
 
     /// Polymorphic clamp - clamps value to a range [min, max].
     ///
+
     /// Format: `dst:reg, val:reg, min:reg, max:reg`
     ///
+
     /// Returns min if val < min, max if val > max, otherwise val.
     PolyClamp = 0x2A,
 
@@ -5104,18 +5679,22 @@ pub enum ArithSubOpcode {
 
     /// Saturating addition - clamps to MAX on overflow, MIN on underflow.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, width:u8, signed:u8`
     SaturatingAdd = 0x30,
 
     /// Saturating subtraction - clamps to MIN on underflow, MAX on overflow.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, width:u8, signed:u8`
     SaturatingSub = 0x31,
 
     /// Saturating signed negation - clamps `T::MIN` to `T::MAX`.
     ///
+
     /// Format: `dst:reg, src:reg, width:u8, signed:u8`
     ///
+
     /// Mathematically `-T::MIN = T::MAX + 1` is unrepresentable in
     /// two's complement; rather than wrapping (WrappingNeg) or
     /// returning Maybe<T> (CheckedNeg), this saturates to `T::MAX`
@@ -5125,14 +5704,17 @@ pub enum ArithSubOpcode {
 
     /// Saturating signed absolute value - clamps `T::MIN` to `T::MAX`.
     ///
+
     /// Format: `dst:reg, src:reg, width:u8, signed:u8`
     ///
+
     /// `|T::MIN|` overflows for the same reason as `-T::MIN`;
     /// saturates to `T::MAX` instead of wrapping or panicking.
     SaturatingAbs = 0x34,
 
     /// Saturating multiplication - clamps to MAX/MIN on overflow.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, width:u8, signed:u8`
     SaturatingMul = 0x32,
 
@@ -5144,31 +5726,37 @@ pub enum ArithSubOpcode {
 
     /// Wrapping addition - result mod 2^width.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, width:u8`
     WrappingAdd = 0x40,
 
     /// Wrapping subtraction - result mod 2^width.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, width:u8`
     WrappingSub = 0x41,
 
     /// Wrapping multiplication - result mod 2^width.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, width:u8`
     WrappingMul = 0x42,
 
     /// Wrapping negation - handles MIN value correctly.
     ///
+
     /// Format: `dst:reg, src:reg, width:u8, signed:u8`
     WrappingNeg = 0x43,
 
     /// Wrapping left shift - shift amount mod width.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, width:u8`
     WrappingShl = 0x44,
 
     /// Wrapping right shift - shift amount mod width.
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, width:u8`
     WrappingShr = 0x45,
 
@@ -5178,51 +5766,65 @@ pub enum ArithSubOpcode {
 
     /// Count leading zeros - number of 0 bits from MSB.
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Returns the number of leading zero bits in the 64-bit value.
     Clz = 0x50,
 
     /// Count trailing zeros - number of 0 bits from LSB.
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Returns the number of trailing zero bits in the 64-bit value.
     Ctz = 0x51,
 
     /// Population count - number of 1 bits.
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Returns the number of set bits (Hamming weight) in the 64-bit value.
     Popcnt = 0x52,
 
     /// Byte swap - reverse byte order.
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Reverses the byte order of a 64-bit value (big-endian <-> little-endian).
     Bswap = 0x53,
 
     /// Bit reverse - reverse all bits.
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Reverses the order of all 64 bits.
     BitReverse = 0x54,
 
     /// Rotate left - circular shift left.
     ///
+
     /// Format: `dst:reg, val:reg, amount:reg`
     ///
+
     /// Rotates bits left by (amount mod 64). Bits shifted out from the left
     /// wrap around to the right.
     RotateLeft = 0x55,
 
     /// Rotate right - circular shift right.
     ///
+
     /// Format: `dst:reg, val:reg, amount:reg`
     ///
+
     /// Rotates bits right by (amount mod 64). Bits shifted out from the right
     /// wrap around to the left.
     RotateRight = 0x56,
@@ -5235,60 +5837,76 @@ pub enum ArithSubOpcode {
 
     /// atan2(y, x) - Two-argument arctangent.
     ///
+
     /// Format: `dst:reg, y:reg, x:reg`
     ///
+
     /// Computes the angle in radians between the positive x-axis and the point (x, y).
     /// Returns a value in the range [-π, π].
     Atan2 = 0x60,
 
     /// hypot(x, y) - Hypotenuse calculation.
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     ///
+
     /// Computes sqrt(x² + y²) without intermediate overflow or underflow.
     /// More numerically stable than computing sqrt(x*x + y*y) directly.
     Hypot = 0x61,
 
     /// copysign(magnitude, sign) - Copy sign of a number.
     ///
+
     /// Format: `dst:reg, mag:reg, sign:reg`
     ///
+
     /// Returns a value with the magnitude of `mag` and the sign of `sign`.
     Copysign = 0x62,
 
     /// pow(base, exp) - Raise base to exponent power.
     ///
+
     /// Format: `dst:reg, base:reg, exp:reg`
     ///
+
     /// Computes base^exp for floating-point values.
     Pow = 0x63,
 
     /// log(x, base) - Logarithm with arbitrary base.
     ///
+
     /// Format: `dst:reg, x:reg, base:reg`
     ///
+
     /// Computes log_base(x) = ln(x) / ln(base).
     LogBase = 0x64,
 
     /// fmod(x, y) - Floating-point remainder (C-style).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     ///
+
     /// Returns x - n*y where n = trunc(x/y).
     /// Different from % which uses floor division.
     Fmod = 0x65,
 
     /// remainder(x, y) - IEEE 754 remainder.
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     ///
+
     /// Returns x - n*y where n = round(x/y) to nearest integer.
     Remainder = 0x66,
 
     /// fdim(x, y) - Positive difference.
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     ///
+
     /// Returns max(x - y, 0). Returns x - y if x > y, otherwise 0.
     Fdim = 0x67,
 
@@ -5300,8 +5918,10 @@ pub enum ArithSubOpcode {
 
     /// Sign-extend integer to wider type.
     ///
+
     /// Format: `dst:reg, src:reg, from_bits:u8, to_bits:u8`
     ///
+
     /// Extends a signed integer from `from_bits` to `to_bits`, preserving sign.
     /// The high bits of the result are filled with copies of the sign bit.
     /// Maps to LLVM `sext` instruction.
@@ -5309,8 +5929,10 @@ pub enum ArithSubOpcode {
 
     /// Zero-extend integer to wider type.
     ///
+
     /// Format: `dst:reg, src:reg, from_bits:u8, to_bits:u8`
     ///
+
     /// Extends an unsigned integer from `from_bits` to `to_bits`.
     /// The high bits of the result are filled with zeros.
     /// Maps to LLVM `zext` instruction.
@@ -5318,45 +5940,55 @@ pub enum ArithSubOpcode {
 
     /// Truncate float precision (f64 -> f32).
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Truncates a 64-bit float to 32-bit float, potentially losing precision.
     /// Maps to LLVM `fptrunc double to float` instruction.
     FptruncF = 0x72,
 
     /// Extend float precision (f32 -> f64).
     ///
+
     /// Format: `dst:reg, src:reg`
     ///
+
     /// Extends a 32-bit float to 64-bit float without loss of precision.
     /// Maps to LLVM `fpext float to double` instruction.
     FpextF = 0x73,
 
     /// Truncate integer to narrower type.
     ///
+
     /// Format: `dst:reg, src:reg, to_bits:u8`
     ///
+
     /// Truncates an integer to a narrower bit width by discarding high bits.
     /// Maps to LLVM `trunc` instruction.
     IntTrunc = 0x74,
 
     /// Reinterpret f32 bits as u32.
     ///
+
     /// Format: `dst:reg, src:reg`
     F32ToBits = 0x75,
 
     /// Reinterpret u32 bits as f32.
     ///
+
     /// Format: `dst:reg, src:reg`
     F32FromBits = 0x76,
 
     /// Reinterpret f64 bits as u64.
     ///
+
     /// Format: `dst:reg, src:reg`
     F64ToBits = 0x77,
 
     /// Reinterpret u64 bits as f64.
     ///
+
     /// Format: `dst:reg, src:reg`
     F64FromBits = 0x78,
 }
@@ -5583,10 +6215,13 @@ impl ArithSubOpcode {
 
 /// Comparison extended sub-opcodes for unsigned integer comparisons.
 ///
+
 /// Used with `CmpExtended` (0x4F) prefix opcode.
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0x4F] [sub_opcode:u8] [dst:reg] [a:reg] [b:reg]
 /// ```
@@ -5637,11 +6272,14 @@ impl CmpSubOpcode {
 
 /// Math Extended sub-opcodes for transcendental and special functions.
 ///
+
 /// Used with `MathExtended` (0x29) opcode prefix. All operations are implemented
 /// using native Rust methods which map directly to LLVM intrinsics for AOT compilation.
 ///
+
 /// # Sub-opcode Ranges
 ///
+
 /// - 0x00-0x07: Trigonometric F64 (sin, cos, tan, asin, acos, atan, atan2)
 /// - 0x08-0x0F: Trigonometric F32
 /// - 0x10-0x17: Hyperbolic F64 (sinh, cosh, tanh, asinh, acosh, atanh)
@@ -5657,8 +6295,10 @@ impl CmpSubOpcode {
 /// - 0x60-0x67: Classification F64 (is_nan, is_inf, is_finite)
 /// - 0x68-0x6F: Classification F32
 ///
+
 /// # Performance
 ///
+
 /// - Interpreter: ~2ns per operation (native Rust method call)
 /// - AOT (LLVM): Maps to `llvm.sin.f64`, `llvm.sqrt.f64`, etc.
 /// - AOT (MLIR): Maps to `math.sin`, `math.sqrt`, etc.
@@ -5670,30 +6310,37 @@ pub enum MathSubOpcode {
     // ========================================================================
     /// sin(x) - Sine (F64).
     ///
+
     /// Format: `dst:reg, src:reg`
     SinF64 = 0x00,
     /// cos(x) - Cosine (F64).
     ///
+
     /// Format: `dst:reg, src:reg`
     CosF64 = 0x01,
     /// tan(x) - Tangent (F64).
     ///
+
     /// Format: `dst:reg, src:reg`
     TanF64 = 0x02,
     /// asin(x) - Arc sine (F64).
     ///
+
     /// Format: `dst:reg, src:reg`
     AsinF64 = 0x03,
     /// acos(x) - Arc cosine (F64).
     ///
+
     /// Format: `dst:reg, src:reg`
     AcosF64 = 0x04,
     /// atan(x) - Arc tangent (F64).
     ///
+
     /// Format: `dst:reg, src:reg`
     AtanF64 = 0x05,
     /// atan2(y, x) - Two-argument arc tangent (F64).
     ///
+
     /// Format: `dst:reg, y:reg, x:reg`
     Atan2F64 = 0x06,
 
@@ -5766,10 +6413,12 @@ pub enum MathSubOpcode {
     Log1pF64 = 0x26,
     /// pow(base, exp) - base^exp (F64).
     ///
+
     /// Format: `dst:reg, base:reg, exp:reg`
     PowF64 = 0x27,
     /// powi(base, int_exp) - base^int_exp (F64, i32).
     ///
+
     /// Format: `dst:reg, base:reg, exp:reg`
     PowiF64 = 0x28,
 
@@ -5800,6 +6449,7 @@ pub enum MathSubOpcode {
     CbrtF64 = 0x31,
     /// hypot(x, y) - sqrt(x² + y²) without overflow (F64).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     HypotF64 = 0x32,
 
@@ -5848,30 +6498,37 @@ pub enum MathSubOpcode {
     AbsF64 = 0x50,
     /// copysign(magnitude, sign) - Copy sign (F64).
     ///
+
     /// Format: `dst:reg, mag:reg, sign:reg`
     CopysignF64 = 0x51,
     /// fma(a, b, c) - Fused multiply-add: a*b + c (F64).
     ///
+
     /// Format: `dst:reg, a:reg, b:reg, c:reg`
     FmaF64 = 0x52,
     /// fmod(x, y) - Floating-point remainder (F64).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     FmodF64 = 0x53,
     /// remainder(x, y) - IEEE 754 remainder (F64).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     RemainderF64 = 0x54,
     /// fdim(x, y) - Positive difference: max(x-y, 0) (F64).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     FdimF64 = 0x55,
     /// minnum(x, y) - Minimum (NaN-propagating) (F64).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     MinnumF64 = 0x56,
     /// maxnum(x, y) - Maximum (NaN-propagating) (F64).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     MaxnumF64 = 0x57,
 
@@ -5890,14 +6547,17 @@ pub enum MathSubOpcode {
     MaxnumF32 = 0x5C,
     /// fmod(x, y) - Floating-point remainder (F32).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     FmodF32 = 0x5D,
     /// remainder(x, y) - IEEE 754 remainder (F32).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     RemainderF32 = 0x5E,
     /// fdim(x, y) - Positive difference: max(x-y, 0) (F32).
     ///
+
     /// Format: `dst:reg, x:reg, y:reg`
     FdimF32 = 0x5F,
 
@@ -6299,31 +6959,40 @@ impl MathSubOpcode {
 
 /// SIMD Extended sub-opcodes for use with `SimdExtended` (0x2A) prefix.
 ///
+
 /// Platform-agnostic SIMD operations that lower to:
 /// - x86: AVX2/AVX-512 intrinsics
 /// - ARM: NEON intrinsics
 /// - MLIR: vector dialect
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0x2A] [sub_opcode:u8] [operands...]
 /// ```
 ///
+
 /// # Vector Widths
 ///
+
 /// Operations work on the widest available SIMD register (128/256/512-bit).
 /// The type and width are determined by operand types at compile time.
 ///
+
 /// # Example
 ///
+
 /// ```text
 /// // Vector addition: r0 = r1 + r2
 /// SimdExtended Add r0:v4f64, r1:v4f64, r2:v4f64
 ///
+
 /// // Broadcast scalar to vector
 /// SimdExtended Splat r0:v4f64, r1:f64
 ///
+
 /// // Horizontal sum
 /// SimdExtended ReduceAdd r0:f64, r1:v4f64
 /// ```
@@ -6335,18 +7004,22 @@ pub enum SimdSubOpcode {
     // ========================================================================
     /// Broadcast scalar to all lanes.
     ///
+
     /// Format: `dst:reg, src:reg`
     Splat = 0x00,
     /// Extract single lane.
     ///
+
     /// Format: `dst:reg, src:reg, lane:u8`
     Extract = 0x01,
     /// Insert into single lane.
     ///
+
     /// Format: `dst:reg, src:reg, lane:u8, val:reg`
     Insert = 0x02,
     /// Create vector from scalars.
     ///
+
     /// Format: `dst:reg, elements:reg_range`
     FromScalars = 0x03,
 
@@ -6789,6 +7462,7 @@ impl SimdSubOpcode {
 
 /// CBGR extended sub-opcodes for use with `CbgrExtended` (0x8F) prefix.
 ///
+
 /// This provides extended CBGR (Capability-Based Generational References)
 /// operations for:
 /// - Slice and interior references (fat pointers)
@@ -6796,29 +7470,38 @@ impl SimdSubOpcode {
 /// - Generation and epoch operations
 /// - Advanced reference patterns
 ///
+
 /// # Encoding
 ///
+
 /// ```text
 /// [0x8F] [sub_opcode:u8] [operands...]
 /// ```
 ///
+
 /// # Reference Types (as per CBGR spec)
 ///
+
 /// - ThinRef<T> (16 bytes): ptr:8 + generation:4 + epoch_caps:4
 /// - FatRef<T> (32 bytes): ptr:8 + generation:4 + epoch_caps:4 + metadata:8 + offset:4 + reserved:4
 ///
+
 /// # Example
 ///
+
 /// ```text
 /// // Create slice reference from array
 /// CbgrExtended RefSlice dst:r0, src:r1, start:r2, len:r3
 ///
+
 /// // Create interior reference to struct field
 /// CbgrExtended RefInterior dst:r4, base:r5, field_offset:16
 ///
+
 /// // Attenuate capabilities (remove WRITE)
 /// CbgrExtended CapAttenuate dst:r6, src:r7, mask:0x1E
 ///
+
 /// // Transfer ownership
 /// CbgrExtended CapTransfer dst:r8, src:r9
 /// ```
@@ -6830,12 +7513,14 @@ pub enum CbgrSubOpcode {
     // ========================================================================
     /// Create slice reference from array/buffer.
     ///
+
     /// Creates a FatRef with length metadata from a contiguous buffer.
     /// Format: `dst:reg, src:reg, start:reg, len:reg`
     RefSlice = 0x00,
 
     /// Create interior reference to struct field.
     ///
+
     /// Creates a reference to a field within a struct, maintaining
     /// the generation and capabilities of the parent reference.
     /// Format: `dst:reg, base:reg, field_offset:u32`
@@ -6843,28 +7528,33 @@ pub enum CbgrSubOpcode {
 
     /// Create interior reference to array element.
     ///
+
     /// Creates a reference to an element within an array/slice.
     /// Format: `dst:reg, base:reg, index:reg`
     RefArrayElement = 0x02,
 
     /// Create reference to trait object (fat pointer with vtable).
     ///
+
     /// Format: `dst:reg, src:reg, vtable_id:u32`
     RefTrait = 0x03,
 
     /// Unslice: get underlying pointer from slice reference.
     ///
+
     /// Extracts the raw pointer from a FatRef, checking bounds.
     /// Format: `dst:reg, slice_ref:reg`
     Unslice = 0x04,
 
     /// Get slice length from FatRef.
     ///
+
     /// Format: `dst:reg, slice_ref:reg`
     SliceLen = 0x05,
 
     /// Get element at index from slice (bounds-checked).
     ///
+
     /// Returns element value at the given index.
     /// Panics if index is out of bounds.
     /// Format: `dst:reg, slice_ref:reg, index:reg`
@@ -6872,6 +7562,7 @@ pub enum CbgrSubOpcode {
 
     /// Get element at index from slice (unchecked).
     ///
+
     /// Returns element value at the given index.
     /// SAFETY: Caller must ensure index is within bounds.
     /// Format: `dst:reg, slice_ref:reg, index:reg`
@@ -6879,18 +7570,21 @@ pub enum CbgrSubOpcode {
 
     /// Create subslice from existing slice.
     ///
+
     /// Creates a new FatRef pointing to a subrange of the original slice.
     /// Format: `dst:reg, src:reg, start:reg, end:reg`
     SliceSubslice = 0x08,
 
     /// Split slice at index into two slices.
     ///
+
     /// Returns two FatRefs: [0..mid) and [mid..len).
     /// Format: `dst1:reg, dst2:reg, src:reg, mid:reg`
     SliceSplitAt = 0x09,
 
     /// Create a slice reference (FatRef) directly from a raw pointer + length.
     ///
+
     /// Unlike `RefSlice`, this does not read the source's ObjectHeader to infer
     /// element size — the raw pointer may point into the middle of an allocation
     /// (e.g. past the heap string header), so reading an ObjectHeader at that
@@ -6899,11 +7593,13 @@ pub enum CbgrSubOpcode {
     /// `slice_from_raw_parts<T>` intrinsic, whose primary use sites are
     /// `Text.as_bytes()` and binary buffers indexed one byte at a time.
     ///
+
     /// Format: `dst:reg, ptr:reg, len:reg`
     RefSliceRaw = 0x0A,
 
     /// Create interior reference to a List<T> element by element-index.
     ///
+
     /// `RefArrayElement` (0x02) assumes the source is already a pointer to
     /// the first element; that contract fits raw arrays but not the List
     /// heap layout `[header][len][cap][backing_ptr]` → `[header][V0, V1, …]`.
@@ -6912,11 +7608,13 @@ pub enum CbgrSubOpcode {
     /// and stores the resulting element pointer as a `Value::from_ptr(…)`.
     /// A later `DerefMut` on that ptr writes directly into arr[index].
     ///
+
     /// This is the lowering target for `&mut arr[i]` / `&arr[i]` when the
     /// receiver is a List — without it, the generic RefMut path would
     /// produce a reference to a register holding a *copy* of the element,
     /// so `*r = v` would write to the copy instead of the underlying List.
     ///
+
     /// Format: `dst:reg, list:reg, index:reg`
     RefListElement = 0x0B,
 
@@ -6925,6 +7623,7 @@ pub enum CbgrSubOpcode {
     // ========================================================================
     /// Attenuate capabilities (remove permissions).
     ///
+
     /// Creates a new reference with reduced capabilities.
     /// Capabilities can only be removed, never added.
     /// Format: `dst:reg, src:reg, cap_mask:u16`
@@ -6932,29 +7631,34 @@ pub enum CbgrSubOpcode {
 
     /// Transfer ownership (move semantics).
     ///
+
     /// Transfers ownership and invalidates the source reference.
     /// Format: `dst:reg, src:reg`
     CapTransfer = 0x11,
 
     /// Check if reference has specific capability.
     ///
+
     /// Format: `dst:reg, src:reg, cap:u8`
     /// Capabilities: READ=0x01, WRITE=0x02, ADD=0x04, REMOVE=0x08,
-    ///               EXCLUSIVE=0x10, DELEGATE=0x20, ALIAS=0x40, DROP=0x80
+    ///  EXCLUSIVE=0x10, DELEGATE=0x20, ALIAS=0x40, DROP=0x80
     CapCheck = 0x12,
 
     /// Get current capability mask from reference.
     ///
+
     /// Format: `dst:reg, src:reg`
     CapGet = 0x13,
 
     /// Create shared reference (add ALIAS capability).
     ///
+
     /// Format: `dst:reg, src:reg`
     MakeShared = 0x14,
 
     /// Create exclusive reference (ensure EXCLUSIVE).
     ///
+
     /// Fails if reference is currently aliased.
     /// Format: `dst:reg, src:reg`
     MakeExclusive = 0x15,
@@ -6964,33 +7668,39 @@ pub enum CbgrSubOpcode {
     // ========================================================================
     /// Get generation counter from reference.
     ///
+
     /// Format: `dst:reg, src:reg`
     GetGeneration = 0x20,
 
     /// Get epoch from reference.
     ///
+
     /// Format: `dst:reg, src:reg`
     GetEpoch = 0x21,
 
     /// Validate reference against current epoch.
     ///
+
     /// Returns true if reference is valid in current epoch.
     /// Format: `dst:reg, src:reg`
     ValidateEpoch = 0x22,
 
     /// Advance thread-local epoch.
     ///
+
     /// Invalidates all references from previous epochs.
     /// Format: `(no operands)`
     AdvanceEpoch = 0x23,
 
     /// Get current thread-local epoch.
     ///
+
     /// Format: `dst:reg`
     CurrentEpoch = 0x24,
 
     /// Pin reference to current epoch.
     ///
+
     /// Prevents automatic invalidation during epoch advance.
     /// Format: `dst:reg, src:reg`
     PinToEpoch = 0x25,
@@ -7000,28 +7710,33 @@ pub enum CbgrSubOpcode {
     // ========================================================================
     /// Convert thin reference to fat reference (with metadata).
     ///
+
     /// Format: `dst:reg, src:reg, metadata:reg`
     ThinToFat = 0x30,
 
     /// Convert fat reference to thin reference (discard metadata).
     ///
+
     /// Format: `dst:reg, src:reg`
     FatToThin = 0x31,
 
     /// Create raw pointer from reference (unchecked).
     ///
+
     /// Bypasses CBGR validation. Use with caution.
     /// Format: `dst:reg, src:reg`
     ToRawPtr = 0x32,
 
     /// Create reference from raw pointer (unsafe).
     ///
+
     /// Requires explicit generation and capabilities.
     /// Format: `dst:reg, ptr:reg, generation:reg, caps:reg`
     FromRawPtr = 0x33,
 
     /// Reborrow reference with same capabilities.
     ///
+
     /// Creates a new reference that tracks the original.
     /// Format: `dst:reg, src:reg`
     Reborrow = 0x34,
@@ -7031,21 +7746,25 @@ pub enum CbgrSubOpcode {
     // ========================================================================
     /// Dump reference metadata for debugging.
     ///
+
     /// Format: `src:reg`
     DebugRef = 0x40,
 
     /// Get reference tier (0=managed, 1=checked, 2=unsafe).
     ///
+
     /// Format: `dst:reg, src:reg`
     GetTier = 0x41,
 
     /// Check if reference is valid (not dangling).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsValid = 0x42,
 
     /// Get reference count (for shared references).
     ///
+
     /// Format: `dst:reg, src:reg`
     RefCount = 0x43,
 
@@ -7054,24 +7773,28 @@ pub enum CbgrSubOpcode {
     // ========================================================================
     /// Create new generation counter.
     ///
+
     /// Allocates a new generation for tracking reference validity.
     /// Format: `dst:reg`
     NewGeneration = 0x50,
 
     /// Invalidate a reference.
     ///
+
     /// Marks the reference as invalid, preventing future access.
     /// Format: `src:reg`
     Invalidate = 0x51,
 
     /// Get epoch capabilities combined.
     ///
+
     /// Returns epoch and capabilities as combined value.
     /// Format: `dst:reg, src:reg`
     GetEpochCaps = 0x52,
 
     /// Begin CBGR bypass mode.
     ///
+
     /// Temporarily disables CBGR validation for performance.
     /// Use with extreme caution.
     /// Format: `(no operands)`
@@ -7079,12 +7802,14 @@ pub enum CbgrSubOpcode {
 
     /// End CBGR bypass mode.
     ///
+
     /// Re-enables CBGR validation.
     /// Format: `(no operands)`
     BypassEnd = 0x54,
 
     /// Get CBGR statistics.
     ///
+
     /// Returns statistics about CBGR operations.
     /// Format: `dst:reg`
     GetStats = 0x55,
@@ -7247,22 +7972,28 @@ impl CbgrSubOpcode {
 
 /// Character Extended sub-opcodes for character classification and conversion.
 ///
+
 /// The CharExtended opcode (0x2B) provides efficient character operations with
 /// ASCII fast paths (inline implementation) and Unicode fallbacks (runtime lookup).
 ///
+
 /// # Performance Characteristics
 ///
-/// | Operation      | ASCII   | Unicode |
+
+/// | Operation | ASCII | Unicode |
 /// |---------------|---------|---------|
-/// | Classification | ~2ns    | ~20ns   |
-/// | Case convert   | ~2ns    | ~50ns   |
+/// | Classification | ~2ns | ~20ns |
+/// | Case convert | ~2ns | ~50ns |
 ///
+
 /// # Example Usage
 ///
+
 /// ```text
 /// // ASCII fast path: is_alphabetic for ASCII char
 /// CharExtended IsAlphabeticAscii r0, r1
 ///
+
 /// // Unicode fallback: is_alphabetic for any char
 /// CharExtended IsAlphabeticUnicode r0, r1
 /// ```
@@ -7274,56 +8005,67 @@ pub enum CharSubOpcode {
     // ========================================================================
     /// Check if char is ASCII alphabetic (a-z, A-Z).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsAlphabeticAscii = 0x00,
 
     /// Check if char is ASCII digit (0-9).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsNumericAscii = 0x01,
 
     /// Check if char is ASCII alphanumeric (a-z, A-Z, 0-9).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsAlphanumericAscii = 0x02,
 
     /// Check if char is ASCII whitespace (space, tab, newline, etc.).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsWhitespaceAscii = 0x03,
 
     /// Check if char is ASCII control character (0x00-0x1F, 0x7F).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsControlAscii = 0x04,
 
     /// Check if char is ASCII punctuation.
     ///
+
     /// Format: `dst:reg, src:reg`
     IsPunctuationAscii = 0x05,
 
     /// Check if char is ASCII graphic (visible character).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsGraphicAscii = 0x06,
 
     /// Check if char is ASCII hexadecimal digit (0-9, a-f, A-F).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsHexDigitAscii = 0x07,
 
     /// Check if char is ASCII lowercase (a-z).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsLowercaseAscii = 0x08,
 
     /// Check if char is ASCII uppercase (A-Z).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsUppercaseAscii = 0x09,
 
     /// Check if char is ASCII (0x00-0x7F).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsAscii = 0x0A,
 
@@ -7332,18 +8074,21 @@ pub enum CharSubOpcode {
     // ========================================================================
     /// Convert char to ASCII uppercase.
     ///
+
     /// Non-ASCII chars are unchanged.
     /// Format: `dst:reg, src:reg`
     ToUppercaseAscii = 0x10,
 
     /// Convert char to ASCII lowercase.
     ///
+
     /// Non-ASCII chars are unchanged.
     /// Format: `dst:reg, src:reg`
     ToLowercaseAscii = 0x11,
 
     /// Check if char equals its ASCII uppercase form.
     ///
+
     /// Format: `dst:reg, src:reg`
     EqIgnoreCaseAscii = 0x12,
 
@@ -7352,37 +8097,44 @@ pub enum CharSubOpcode {
     // ========================================================================
     /// Check if char is Unicode alphabetic.
     ///
+
     /// Uses Unicode derived property Alphabetic.
     /// Format: `dst:reg, src:reg`
     IsAlphabeticUnicode = 0x20,
 
     /// Check if char is Unicode numeric (Nd, Nl, No categories).
     ///
+
     /// Format: `dst:reg, src:reg`
     IsNumericUnicode = 0x21,
 
     /// Check if char is Unicode alphanumeric.
     ///
+
     /// Format: `dst:reg, src:reg`
     IsAlphanumericUnicode = 0x22,
 
     /// Check if char is Unicode whitespace.
     ///
+
     /// Format: `dst:reg, src:reg`
     IsWhitespaceUnicode = 0x23,
 
     /// Check if char is Unicode control character.
     ///
+
     /// Format: `dst:reg, src:reg`
     IsControlUnicode = 0x24,
 
     /// Check if char is Unicode lowercase.
     ///
+
     /// Format: `dst:reg, src:reg`
     IsLowercaseUnicode = 0x25,
 
     /// Check if char is Unicode uppercase.
     ///
+
     /// Format: `dst:reg, src:reg`
     IsUppercaseUnicode = 0x26,
 
@@ -7391,18 +8143,21 @@ pub enum CharSubOpcode {
     // ========================================================================
     /// Convert char to Unicode uppercase.
     ///
+
     /// Returns first char of uppercase mapping.
     /// Format: `dst:reg, src:reg`
     ToUppercaseUnicode = 0x30,
 
     /// Convert char to Unicode lowercase.
     ///
+
     /// Returns first char of lowercase mapping.
     /// Format: `dst:reg, src:reg`
     ToLowercaseUnicode = 0x31,
 
     /// Convert char to Unicode titlecase.
     ///
+
     /// Returns first char of titlecase mapping.
     /// Format: `dst:reg, src:reg`
     ToTitlecaseUnicode = 0x32,
@@ -7412,22 +8167,26 @@ pub enum CharSubOpcode {
     // ========================================================================
     /// Get Unicode code point value.
     ///
+
     /// Format: `dst:reg, src:reg`
     ToCodePoint = 0x40,
 
     /// Create char from Unicode code point.
     ///
+
     /// Returns None/error if invalid code point.
     /// Format: `dst:reg, src:reg`
     FromCodePoint = 0x41,
 
     /// Get char length in UTF-8 bytes.
     ///
+
     /// Format: `dst:reg, src:reg`
     LenUtf8 = 0x42,
 
     /// Get char length in UTF-16 code units.
     ///
+
     /// Format: `dst:reg, src:reg`
     LenUtf16 = 0x43,
 
@@ -7436,24 +8195,28 @@ pub enum CharSubOpcode {
     // ========================================================================
     /// Encode char as UTF-8 bytes.
     ///
+
     /// Returns the UTF-8 byte sequence for the character.
     /// Format: `dst:reg, src:reg`
     EncodeUtf8 = 0x50,
 
     /// Decode UTF-8 bytes to char.
     ///
+
     /// Returns the character from UTF-8 byte sequence.
     /// Format: `dst:reg, src:reg`
     DecodeUtf8 = 0x51,
 
     /// Escape char for debug output.
     ///
+
     /// Returns an escaped string representation.
     /// Format: `dst:reg, src:reg`
     EscapeDebug = 0x52,
 
     /// Get Unicode general category.
     ///
+
     /// Returns the Unicode general category (Lu, Ll, Nd, etc.).
     /// Format: `dst:reg, src:reg`
     GeneralCategory = 0x53,
@@ -7618,24 +8381,30 @@ impl CharSubOpcode {
 
 /// Logging Extended sub-opcodes for structured logging operations.
 ///
+
 /// The LogExtended opcode (0xBE) provides structured logging with different
 /// severity levels. Logging is inherently I/O-bound, so the runtime call
 /// overhead (~50ns) is negligible compared to actual I/O operations.
 ///
+
 /// # Performance Characteristics
 ///
+
 /// | Operation | Overhead | Notes |
 /// |-----------|----------|-------|
-/// | Log call  | ~50ns    | Acceptable for low-frequency I/O |
-/// | Format    | ~100ns   | String interpolation |
-/// | Flush     | ~1ms+    | Actual I/O |
+/// | Log call | ~50ns | Acceptable for low-frequency I/O |
+/// | Format | ~100ns | String interpolation |
+/// | Flush | ~1ms+ | Actual I/O |
 ///
+
 /// # Example Usage
 ///
+
 /// ```text
 /// // Log info message
-/// LogExtended Info r0    // r0 contains message string
+/// LogExtended Info r0 // r0 contains message string
 ///
+
 /// // Log warning with formatted message
 /// LogExtended Warning r1
 /// ```
@@ -7644,46 +8413,55 @@ impl CharSubOpcode {
 pub enum LogSubOpcode {
     /// Log at INFO level.
     ///
+
     /// Format: `msg:reg`
     Info = 0x00,
 
     /// Log at WARNING level.
     ///
+
     /// Format: `msg:reg`
     Warning = 0x01,
 
     /// Log at ERROR level.
     ///
+
     /// Format: `msg:reg`
     Error = 0x02,
 
     /// Log at DEBUG level.
     ///
+
     /// Format: `msg:reg`
     Debug = 0x03,
 
     /// Log at TRACE level (most verbose).
     ///
+
     /// Format: `msg:reg`
     Trace = 0x04,
 
     /// Structured log with key-value pairs.
     ///
+
     /// Format: `level:u8, msg:reg, kvs:reg` (kvs is a map/object)
     Structured = 0x10,
 
     /// Flush log buffer to output.
     ///
+
     /// Format: `(no operands)`
     Flush = 0x20,
 
     /// Set current log level filter.
     ///
+
     /// Format: `level:reg`
     SetLevel = 0x21,
 
     /// Get current log level filter.
     ///
+
     /// Format: `dst:reg`
     GetLevel = 0x22,
 }
@@ -7748,16 +8526,21 @@ impl LogSubOpcode {
 
 /// Meta-reflection sub-opcodes for type introspection.
 ///
+
 /// Used with the MetaReflect opcode (0xBB) to provide zero-cost type introspection.
 ///
+
 /// # Sub-opcode Space Allocation
 ///
+
 /// - 0x00-0x0F: Type information queries
 /// - 0x10-0x1F: Type relationship queries
 /// - 0x20-0x2F: Reserved for future use
 ///
+
 /// # Performance
 ///
+
 /// - Interpreter: ~2ns per operation (direct match dispatch)
 /// - AOT (LLVM): Constant-folded at compile time when possible
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -7765,48 +8548,56 @@ impl LogSubOpcode {
 pub enum MetaReflectOp {
     /// Get type ID for a value or type.
     ///
+
     /// Format: `dst:reg, value:reg`
     /// Returns a unique u64 identifier for the type.
     TypeId = 0x00,
 
     /// Get type name as Text.
     ///
+
     /// Format: `dst:reg, value:reg`
     /// Returns the fully-qualified type name.
     TypeName = 0x01,
 
     /// Check if type requires drop (destructor).
     ///
+
     /// Format: `dst:reg, value:reg`
     /// Returns bool: true if type has non-trivial destructor.
     NeedsDrop = 0x02,
 
     /// Check if type is Copy.
     ///
+
     /// Format: `dst:reg, value:reg`
     /// Returns bool: true if type implements Copy.
     IsCopy = 0x03,
 
     /// Check if type is Send (thread-safe).
     ///
+
     /// Format: `dst:reg, value:reg`
     /// Returns bool: true if type can be sent between threads.
     IsSend = 0x04,
 
     /// Check if type is Sync (shared reference thread-safe).
     ///
+
     /// Format: `dst:reg, value:reg`
     /// Returns bool: true if shared references are thread-safe.
     IsSync = 0x05,
 
     /// Get type's minimum alignment requirement.
     ///
+
     /// Format: `dst:reg, type_id:reg`
     /// Returns usize: alignment in bytes.
     MinAlign = 0x06,
 
     /// Get type's preferred alignment for performance.
     ///
+
     /// Format: `dst:reg, type_id:reg`
     /// Returns usize: preferred alignment in bytes.
     PrefAlign = 0x07,
@@ -7854,88 +8645,104 @@ impl MetaReflectOp {
 
 /// Text Extended sub-opcodes for text parsing and conversion operations.
 ///
+
 /// The TextExtended opcode (0x79) provides zero-cost dispatch (~2ns) for text
 /// operations that would otherwise require string-based library calls (~15ns).
 ///
+
 /// # Sub-opcode Space Allocation
 ///
+
 /// - 0x00-0x0F: Text construction
 /// - 0x10-0x1F: Parse from text
 /// - 0x20-0x2F: Convert to text
 /// - 0x30-0x3F: Text manipulation
 ///
+
 /// # Performance
 ///
+
 /// | Operation | Old (LibraryCall) | New (TextExtended) |
 /// |-----------|-------------------|---------------------|
-/// | Dispatch  | ~15ns             | ~2ns               |
-/// | Parse Int | ~50ns             | ~40ns              |
-/// | Int->Text | ~100ns            | ~90ns              |
+/// | Dispatch | ~15ns | ~2ns |
+/// | Parse Int | ~50ns | ~40ns |
+/// | Int->Text | ~100ns | ~90ns |
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TextSubOpcode {
     /// Create Text from static string data.
     ///
+
     /// Format: `dst:reg, ptr:reg, len:reg`
     /// Creates a Text value from a static UTF-8 string slice.
     FromStatic = 0x00,
 
     /// Parse integer from Text.
     ///
+
     /// Format: `dst:reg, text:reg`
     /// Returns parsed integer or error.
     ParseInt = 0x10,
 
     /// Parse float from Text.
     ///
+
     /// Format: `dst:reg, text:reg`
     /// Returns parsed float or error.
     ParseFloat = 0x11,
 
     /// Convert integer to Text.
     ///
+
     /// Format: `dst:reg, value:reg`
     /// Returns decimal string representation.
     IntToText = 0x20,
 
     /// Convert float to Text.
     ///
+
     /// Format: `dst:reg, value:reg`
     /// Returns decimal string representation.
     FloatToText = 0x21,
 
     /// Get Text length in bytes.
     ///
+
     /// Format: `dst:reg, text:reg`
     /// Returns byte length of UTF-8 encoded text.
     ByteLen = 0x30,
 
     /// Get Text length in characters.
     ///
+
     /// Format: `dst:reg, text:reg`
     /// Returns number of Unicode scalar values.
     CharLen = 0x31,
 
     /// Check if Text is empty.
     ///
+
     /// Format: `dst:reg, text:reg`
     /// Returns true if text has zero length.
     IsEmpty = 0x32,
 
     /// Check if Text is valid UTF-8.
     ///
+
     /// Format: `dst:reg, text:reg`
     /// Always returns true for Text type (guaranteed valid).
     IsUtf8 = 0x33,
 
     /// Borrow the Text as a byte slice (FatRef with elem_size=1).
     ///
+
     /// Produces a proper slice value so that downstream `.len()` and
     /// `slice[i]` calls read the correct byte count / byte value regardless
     /// of whether the Text is NaN-boxed as a small string or heap-allocated.
     /// For small strings, a fresh heap buffer is materialised and copied
     /// into so the returned FatRef has a stable address.
     ///
+
     /// Format: `dst:reg, text:reg`
     AsBytes = 0x34,
 }
@@ -8003,27 +8810,29 @@ const _: () = {
 /// Sub-opcodes for the general-purpose `Opcode::Extended` (`0x1F`) instruction
 /// (#167 Part A).
 ///
+
 /// Each sub-op carves out one of 256 entries in the secondary opcode space.
 /// `Reserved` (`0x00`) is a forward-compat anchor — encoders must never emit
-/// it; decoders accept and skip the (length-prefixed) operand block.  Future
+/// it; decoders accept and skip the (length-prefixed) operand block. Future
 /// first-class instructions land here as they're wired through codegen /
 /// interpreter / LLVM (see #167 Part B for `MakeVariantTyped` 0x01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum ExtendedSubOpcode {
-    /// Reserved no-op — forward-compat anchor.  Always sub-op `0x00`.
+    /// Reserved no-op — forward-compat anchor. Always sub-op `0x00`.
     /// Encoders must not emit this; decoders must accept and skip its
     /// (length-prefixed) operand block.
     Reserved = 0x00,
 
-    /// Typed variant construction (#146 Phase 3).  Sub-op `0x01`.
+    /// Typed variant construction (#146 Phase 3). Sub-op `0x01`.
     /// Wire format: `[0x1F][0x01][reg:dst][varint:type_id]
     /// [varint:tag][varint:field_count]`.
     ///
+
     /// Behavioural superset of [`Opcode::MakeVariant`] (`0x86`):
     /// allocates the variant heap object, populates the tag, and
     /// reserves `field_count` payload slots (subsequently filled
-    /// via `SetVariantData`).  Adds the `type_id` operand so the
+    /// via `SetVariantData`). Adds the `type_id` operand so the
     /// interpreter / runtime can validate the (type_id, tag,
     /// field_count) tuple against the global type table at
     /// allocation time — closes the soundness gap where a
@@ -8031,6 +8840,7 @@ pub enum ExtendedSubOpcode {
     /// in-memory layout disagrees with what every consumer
     /// (pattern matching, GetVariantData, derive(Eq)) assumes.
     ///
+
     /// Release builds: layout-identical to MakeVariant (the
     /// type_id is consumed and discarded in zero-cost form once
     /// codegen has proved the tuple consistent).
@@ -8040,15 +8850,17 @@ pub enum ExtendedSubOpcode {
     MakeVariantTyped = 0x01,
 
     /// Process termination — reads one `Int` register and terminates
-    /// the process with that exit code.  Format: `[0x1F][0x10][reg:u16]`.
+    /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
     ///
+
     /// This is the first-class VBC primitive for `core.base.env::exit`.
     /// Under the AOT tier the codegen lowers it to a `_exit` / `exit_group`
-    /// / `ExitProcess` call (zero-cost at the OS boundary).  Under the
+    /// / `ExitProcess` call (zero-cost at the OS boundary). Under the
     /// VBC interpreter it dispatches to `std::process::exit`, giving
     /// uniform termination semantics regardless of whether the FFI
     /// runtime is linked into the interpreter binary.
     ///
+
     /// Mirrors the symmetry of `Opcode::Panic` / `Opcode::Unreachable`:
     /// every divergent control-flow primitive in the language is a
     /// dedicated VBC instruction, not a soft convention layered over
@@ -8086,8 +8898,10 @@ impl ExtendedSubOpcode {
 impl Opcode {
     /// Creates an opcode from a byte value.
     ///
+
     /// # Safety invariant
     ///
+
     /// This relies on all 256 u8 values being valid `Opcode` variants (the enum
     /// covers 0x00..=0xFF). The compile-time assertion above verifies the enum
     /// is u8-sized. If a variant is ever removed without a replacement, this
@@ -8663,6 +9477,7 @@ pub enum Instruction {
     },
     /// Unsigned integer comparison: `dst = a cmp_unsigned b`
     ///
+
     /// Interprets operands as unsigned 64-bit integers for ordering comparisons.
     /// Encoded via CmpExtended (0x4F) prefix with CmpSubOpcode.
     CmpU {
@@ -8756,6 +9571,7 @@ pub enum Instruction {
     },
     /// Create closure.
     ///
+
     /// Creates a new closure object on the heap with the specified function ID
     /// and captured values. The closure layout in memory is:
     /// - function_id: u32 (4 bytes)
@@ -8763,6 +9579,7 @@ pub enum Instruction {
     /// - padding: u16 (2 bytes)
     /// - captures: [Value; capture_count] (8 bytes each)
     ///
+
     /// # Operands
     /// - `dst`: Destination register for the closure pointer
     /// - `func_id`: Function table index for the closure body
@@ -8946,6 +9763,7 @@ pub enum Instruction {
     },
     /// Dereference mutable (write through reference).
     ///
+
     /// Stores a value through a mutable reference: `*ref_reg = value`
     DerefMut {
         /// Mutable reference register.
@@ -9066,6 +9884,7 @@ pub enum Instruction {
     // Generator Operations (Iterator Protocol)
     // ========================================================================
     //
+
     // Generator State Machine: `fn*` functions compile to generator bytecode.
     // GenCreate (0x9E) allocates a Generator struct with saved_pc/registers/contexts.
     // GenNext (0x9F) resumes execution from the saved state; Yield saves state and returns.
@@ -9074,6 +9893,7 @@ pub enum Instruction {
 
     /// Create a generator from a generator function.
     ///
+
     /// Creates a new generator instance that can be iterated via GenNext.
     /// The generator starts in Created state and must be resumed to begin execution.
     /// Arguments are stored in the generator's initial register state for use when
@@ -9089,6 +9909,7 @@ pub enum Instruction {
 
     /// Get the next value from a generator (Iterator::next).
     ///
+
     /// Returns the next yielded value wrapped in Some, or None if exhausted.
     /// The result is stored as a variant: Some(value) if yielded, None if completed.
     GenNext {
@@ -9100,6 +9921,7 @@ pub enum Instruction {
 
     /// Check if a generator has more values (Iterator::has_next).
     ///
+
     /// Returns true if the generator can produce more values, false otherwise.
     GenHasNext {
         /// Destination register for boolean result.
@@ -9283,6 +10105,7 @@ pub enum Instruction {
 
     /// Assert that a context is NOT present in the context stack (negative constraint).
     ///
+
     /// Emitted at function entry for each `!Context` in the `using` clause.
     /// At runtime, checks the context stack and panics if the excluded context
     /// is found, enforcing the negative context constraint declared by the function.
@@ -9533,12 +10356,15 @@ pub enum Instruction {
     // ========================================================================
     /// Create TokenStream from serialized token data.
     ///
+
     /// Quote expressions compile to this instruction. The serialized bytes
     /// are stored in the constant pool and decoded at runtime to create
     /// a TokenStream heap object.
     ///
+
     /// Format: `dst = quote(bytes_const_id)`
     ///
+
     /// Staged meta-compilation: captures a code fragment as a TokenStream at compile time.
     /// The serialized token data is stored in the constant pool and deserialized at expansion.
     /// Used by `@` macro invocations and `meta fn` procedural macros.
@@ -9550,6 +10376,7 @@ pub enum Instruction {
     },
     /// Splice TokenStream into code.
     ///
+
     /// Used during meta expansion to insert generated code.
     MetaSplice {
         /// TokenStream to splice.
@@ -9557,6 +10384,7 @@ pub enum Instruction {
     },
     /// Evaluate meta expression.
     ///
+
     /// Forces compile-time evaluation of the expression.
     MetaEval {
         /// Destination register for evaluated result.
@@ -9566,6 +10394,7 @@ pub enum Instruction {
     },
     /// Reflect on type information.
     ///
+
     /// Returns type metadata as a runtime value.
     MetaReflect {
         /// Destination register for type info.
@@ -9602,23 +10431,26 @@ pub enum Instruction {
     },
     /// Create variant with type-id-validated layout (#146 Phase 3).
     ///
+
     /// Encoded under `Opcode::Extended = 0x1F` with sub-op
-    /// `ExtendedSubOpcode::MakeVariantTyped = 0x01`.  Wire format:
+    /// `ExtendedSubOpcode::MakeVariantTyped = 0x01`. Wire format:
     /// `[0x1F][0x01][reg:dst][varint:type_id][varint:tag]
     /// [varint:field_count]`.
     ///
+
     /// Behaves identically to `MakeVariant` at the heap-allocation
     /// level (same object header, same field-count reservation,
-    /// same tag store).  The added `type_id` operand lets the
+    /// same tag store). The added `type_id` operand lets the
     /// interpreter cross-check the `(type_id, tag, field_count)`
     /// tuple against the global type table at allocation time —
     /// codegen drift that would otherwise produce a layout-
     /// inconsistent variant traps with `LayoutMismatch` instead of
     /// surviving until pattern-matching reads the wrong field.
     ///
+
     /// Codegen prefers this variant whenever the constructor's
     /// parent type has a stable type_id assigned (the common
-    /// case post-monomorphisation).  Falls back to `MakeVariant`
+    /// case post-monomorphisation). Falls back to `MakeVariant`
     /// when the type_id is unresolvable.
     MakeVariantTyped {
         /// Destination register for variant.
@@ -9661,6 +10493,7 @@ pub enum Instruction {
     },
     /// **MakePi** — construct a dependent function value `Π(x: T). U(x)`.
     ///
+
     /// At Tier-0 a dependent function is represented as a 2-slot heap
     /// record tagged `TypeId::PI` with layout `[header | param : Value |
     /// type_id : u64]`. The `param` slot captures the pre-image value
@@ -9669,6 +10502,7 @@ pub enum Instruction {
     /// interpreter and future reflection tactics can recover the
     /// dependent return type.
     ///
+
     /// The opcode does *not* perform any dependent-type coercion by
     /// itself — upstream typecheck has already validated the call
     /// site. This is purely the runtime packaging primitive.
@@ -9682,6 +10516,7 @@ pub enum Instruction {
     },
     /// **MakeSigma** — construct a dependent pair `Σ(x: T). U(x)`.
     ///
+
     /// At Tier-0 a dependent pair is a 2-slot heap record tagged
     /// `TypeId::SIGMA` with layout `[header | witness : Value |
     /// payload : Value]`. The `witness` is the first component (value
@@ -9699,6 +10534,7 @@ pub enum Instruction {
     },
     /// **MakeWitness** — attach a proof hash to a refined value.
     ///
+
     /// At Tier-0 a witness is a 2-slot heap record tagged
     /// `TypeId::WITNESS` with layout `[header | value : Value |
     /// proof_hash : u64]`. The hash is emitted by the static verifier
@@ -9707,6 +10543,7 @@ pub enum Instruction {
     /// (gradual verification boundaries, tier-promotion checks) can
     /// compare hashes to decide whether to re-verify or accept.
     ///
+
     /// At Tier-1 the opcode is elided when the predicate was
     /// SMT-discharged during compilation — only the underlying value
     /// survives into LLVM IR.
@@ -9885,6 +10722,7 @@ pub enum Instruction {
     /// `InterpreterState::check_permission`, and writes the
     /// decision tag (`0` = Allow, `1` = Deny) into `dst`.
     ///
+
     /// NOT itself permission-gated — gating the gating
     /// intrinsic would create an infinite recursion in the
     /// dispatch path. The Rust-side router holds the warm-path
@@ -9900,12 +10738,14 @@ pub enum Instruction {
 
     /// Atomic permission assert (#12 / P3.2).
     ///
+
     /// Routes the check through the runtime `PermissionRouter`;
     /// on Allow proceeds to the next instruction with no
     /// observable effect, on Deny raises a typed Verum
     /// `PermissionDenied` exception that the surrounding catch
     /// frame can intercept.
     ///
+
     /// The single-instruction shape lets the codegen emit a
     /// gate prologue without branching machinery — the dispatch
     /// handler holds all the deny-path logic. Designed to be
@@ -9913,7 +10753,7 @@ pub enum Instruction {
     /// carrying `IntrinsicHint::RequiresPermission`.
     PermissionAssert {
         /// Compile-time-known scope tag (0..=6 mirroring
-        /// `PermissionScope::to_wire_tag`).  Picked at the
+        /// `PermissionScope::to_wire_tag`). Picked at the
         /// emission site from the intrinsic's
         /// `IntrinsicCategory`.
         scope_tag: u8,
@@ -11225,6 +12065,7 @@ pub enum Instruction {
     // ========================================================================
     /// Arithmetic extended operations.
     ///
+
     /// Uses sub-opcodes for different arithmetic operations:
     /// - Checked arithmetic (CheckedAddI, CheckedSubI, etc.)
     /// - Overflowing arithmetic (OverflowingAddI, OverflowingSubI, etc.)
@@ -11241,6 +12082,7 @@ pub enum Instruction {
     // ========================================================================
     /// Tensor extended operations.
     ///
+
     /// Uses sub-opcodes for advanced tensor operations:
     /// - Matrix decompositions (QR, SVD, LU, Eig, etc.)
     /// - Linear algebra (Solve, TriSolve, Inverse, etc.)
@@ -11257,6 +12099,7 @@ pub enum Instruction {
     // ========================================================================
     /// Math extended operations for transcendental and special functions.
     ///
+
     /// Uses MathSubOpcode for zero-cost dispatch (~2ns) of 72+ math operations:
     /// - Trigonometric (sin, cos, tan, asin, acos, atan, atan2)
     /// - Hyperbolic (sinh, cosh, tanh, asinh, acosh, atanh)
@@ -11266,6 +12109,7 @@ pub enum Instruction {
     /// - Special (abs, copysign, fma, fmod, remainder, fdim, minnum, maxnum)
     /// - Classification (is_nan, is_infinite, is_finite)
     ///
+
     /// All operations map 1:1 to LLVM intrinsics for AOT compilation.
     MathExtended {
         /// Math sub-opcode (MathSubOpcode as u8).
@@ -11279,6 +12123,7 @@ pub enum Instruction {
     // ========================================================================
     /// SIMD extended operations for platform-agnostic vector operations.
     ///
+
     /// Uses SimdSubOpcode for zero-cost dispatch (~2ns) of SIMD operations:
     /// - Arithmetic (Add, Sub, Mul, Div, FMA)
     /// - Comparison (Min, Max, Eq, Lt, Le, Gt, Ge)
@@ -11286,6 +12131,7 @@ pub enum Instruction {
     /// - Reductions (ReduceAdd, ReduceMul, ReduceMin, ReduceMax)
     /// - Type conversion (CvtIntToFloat, CvtFloatToInt)
     ///
+
     /// Provides fallback scalar implementations for portability.
     SimdExtended {
         /// SIMD sub-opcode (SimdSubOpcode as u8).
@@ -11299,12 +12145,14 @@ pub enum Instruction {
     // ========================================================================
     /// Character extended operations for classification and conversion.
     ///
+
     /// Uses CharSubOpcode for zero-cost dispatch (~2ns) of character operations:
     /// - ASCII classification (IsAlphabetic, IsDigit, IsAlphanumeric, IsWhitespace, etc.)
     /// - Unicode classification (IsAlphabeticUnicode, IsNumericUnicode, etc.)
     /// - Case conversion (ToUpper, ToLower, ToTitlecase)
     /// - Character properties (IsControl, IsPunctuation, IsSymbol)
     ///
+
     /// Optimized for ASCII with Unicode fallbacks.
     CharExtended {
         /// Char sub-opcode (CharSubOpcode as u8).
@@ -11318,6 +12166,7 @@ pub enum Instruction {
     // ========================================================================
     /// CBGR (Capability-Based Generational References) extended operations.
     ///
+
     /// Uses CbgrSubOpcode for zero-cost dispatch (~2ns) of memory safety operations:
     /// - Reference creation (RefSlice, RefInterior, RefProject)
     /// - Capability manipulation (CapAttenuate, CapTransfer, CapRevoke)
@@ -11325,6 +12174,7 @@ pub enum Instruction {
     /// - Slice operations (SliceLen, Unslice, SplitAt)
     /// - Lifetime/epoch management (EpochBegin, EpochEnd)
     ///
+
     /// Core primitive for Verum's memory safety model.
     CbgrExtended {
         /// CBGR sub-opcode (CbgrSubOpcode as u8).
@@ -11338,12 +12188,14 @@ pub enum Instruction {
     // ========================================================================
     /// Text extended operations.
     ///
+
     /// Uses TextSubOpcode for zero-cost dispatch (~2ns) of text operations:
     /// - Text creation (FromStatic)
     /// - Parsing (ParseInt, ParseFloat)
     /// - Conversion (IntToText, FloatToText)
     /// - Properties (ByteLen, CharLen, IsEmpty, IsUtf8)
     ///
+
     /// Opcode: 0x79 (TextExtended)
     TextExtended {
         /// Text sub-opcode (TextSubOpcode as u8).
@@ -11357,6 +12209,7 @@ pub enum Instruction {
     // ========================================================================
     /// Cubical type theory extended operations.
     ///
+
     /// Uses CubicalSubOpcode for cubical type theory operations:
     /// - Path construction (PathRefl, PathLambda, PathApp, PathSym, PathTrans, PathAp)
     /// - Transport and composition (Transport, Hcomp)
@@ -11376,6 +12229,7 @@ pub enum Instruction {
     // ========================================================================
     /// GPU extended operations.
     ///
+
     /// Uses sub-opcodes for GPU operations:
     /// - Device management (GetDevice, SetDevice, DeviceReset)
     /// - Memory (Allocate, Free, CopyHostToDevice, CopyDeviceToHost)
@@ -11393,6 +12247,7 @@ pub enum Instruction {
     // ========================================================================
     /// FFI extended operations.
     ///
+
     /// Uses sub-opcodes for different FFI operations:
     /// - LoadSymbol, CallFfiC, CallFfiStdcall, etc.
     FfiExtended {
@@ -11407,17 +12262,20 @@ pub enum Instruction {
     // ========================================================================
     /// General-purpose extension instruction.
     ///
+
     /// Encoded as `[0x1F (Opcode::Extended)] [sub_op:u8] [operand_len:u8]
-    /// [operands...]`.  The `sub_op` byte selects the extended-instruction
+    /// [operands...]`. The `sub_op` byte selects the extended-instruction
     /// kind from the 256-entry sub-op space carved out of what was
-    /// previously the reserved `IntArith1F` opcode slot.  This is the
+    /// previously the reserved `IntArith1F` opcode slot. This is the
     /// home for new first-class instructions that don't fit any
     /// existing extension namespace (Math/Tensor/Cbgr/Ffi/etc.).
     ///
+
     /// Defined sub-ops:
     /// - 0x00 — reserved no-op (forward-compat anchor; encoder must
-    ///          never emit, decoder accepts and skips its operands).
+    ///  never emit, decoder accepts and skips its operands).
     ///
+
     /// Future sub-ops (#167 Part B + later work) will land here as
     /// they're wired through codegen / interpreter / LLVM.
     Extended {
@@ -11432,6 +12290,7 @@ pub enum Instruction {
     // ========================================================================
     /// Memory extended operations for heap allocation.
     ///
+
     /// Uses sub-opcodes for different memory operations:
     /// - 0x00: alloc - allocate heap memory
     /// - 0x01: alloc_zeroed - allocate zeroed heap memory
@@ -11451,9 +12310,11 @@ pub enum Instruction {
     // ========================================================================
     /// Logging extended operations.
     ///
+
     /// Uses LogSubOpcode for structured logging:
     /// - Info, Warning, Error, Debug levels
     ///
+
     /// Opcode: 0xBE (LogExtended)
     LogExtended {
         /// Log sub-opcode (LogSubOpcode as u8).
@@ -11509,6 +12370,7 @@ pub enum Instruction {
 
 /// Binary integer operations.
 ///
+
 /// Add/Sub/Mul wrap identically under signed and unsigned semantics
 /// at the bit level, so a single opcode covers both. Div/Mod do
 /// NOT — `(u64::MAX)/10 ≠ (i64)(-1)/10` — and the language exposes
@@ -11569,6 +12431,7 @@ pub enum BinaryGenericOp {
 
 /// Float to Int conversion modes.
 ///
+
 /// Specifies how floating-point values should be rounded when converting to integers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[repr(u8)]
@@ -11617,6 +12480,7 @@ pub enum UnaryIntOp {
 
 /// Unary float operations.
 ///
+
 /// Sub-opcode encoding for NegF (0x25) instruction:
 /// - Basic (0-10): Neg, Abs, Sqrt, Exp, Log, Sin, Cos, Tan, Floor, Ceil, Round
 /// - Inverse trig (11-13): Asin, Acos, Atan

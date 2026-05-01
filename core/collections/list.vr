@@ -5,26 +5,31 @@
 // Dependencies: core (memory, maybe, result, protocols, iterator)
 // =============================================================================
 //
+
 // # V-LLSI Migration Status
 //
+
 // This module has been migrated to use native V-LLSI memory operations:
 // - Uses core/memory.vr native allocator (CBGR-backed)
 // - No FFI dependencies on verum_runtime
 //
+
 // =============================================================================
 //
+
 // List<T> is Verum's primary dynamic array type, corresponding to Vec<T>
 // in Rust but with semantic naming.
 //
+
 // =============================================================================
 
 module core.collections.list;
 mount core.*;
 mount core.base.coercion.{IntCoercible, Indexable};
-// Allocator primitives for typed-OOM (#65, #68).  `mount core.*`
+// Allocator primitives for typed-OOM (#65, #68). `mount core.*`
 // alone doesn't surface these because the glob expansion currently
 // doesn't chase through the `public mount` re-export chain in
-// `core/base/mod.vr` for unqualified function references.  Direct
+// `core/base/mod.vr` for unqualified function references. Direct
 // mount keeps `try_alloc` / `try_realloc` resolvable in
 // `try_with_capacity` and friends.
 mount core.base.memory.{try_alloc, try_realloc};
@@ -38,19 +43,24 @@ type Ordering is Less | Equal | Greater;
 
 // Dynamic array that grows as needed.
 //
+
 // # Performance
 //
+
 // - Push: O(1) amortized
 // - Pop: O(1)
 // - Insert: O(n)
 // - Remove: O(n)
 // - Index access: O(1)
 //
+
 // # Capacity Management
 //
+
 // List uses exponential growth (factor 2) when capacity is exceeded.
 // Initial capacity is 0 (no allocation until first element).
 //
+
 public type List<T> is {
     // Pointer to data (null when cap == 0)
     ptr: &unsafe T,
@@ -67,19 +77,22 @@ implement<T> Indexable for List<T> {}
 
 // Maximum allowed `List<T>` length / capacity given an element size.
 //
+
 // Computed so every derived index expression in the hot path stays
 // within `Int` (i.e. never wraps), which is the load-bearing soundness
 // invariant for `insert` / `remove`'s `idx + 1` arithmetic and for the
 // byte-count multiplications inside `resize_buffer` and the
 // `memmove`s.
 //
+
 // Bound: `Int.MAX / 4 / max(elem_size, 1)`:
-//   - `/ elem_size` keeps `cap * elem_size` from overflowing.
-//   - `/ 4` headroom keeps `cap * 2` (grow doubling) and `len + 1`
-//     (insert) safe even after a doubling step.  In practice this
-//     caps a `List<Int>` at ~2^59 elements, which is >>> any
-//     addressable physical memory.
+//  - `/ elem_size` keeps `cap * elem_size` from overflowing.
+//  - `/ 4` headroom keeps `cap * 2` (grow doubling) and `len + 1`
+//  (insert) safe even after a doubling step. In practice this
+//  caps a `List<Int>` at ~2^59 elements, which is >>> any
+//  addressable physical memory.
 //
+
 // For zero-sized types the bound saturates to `Int.MAX / 4`, which
 // is still well below the wraparound boundary.
 fn list_max_len(elem_size: Int) -> Int {
@@ -112,7 +125,7 @@ implement<T> List<T> {
         }
 
         // Capacity-overflow guard so the byte-size multiplication
-        // below cannot wrap.  Match the panicking discipline of this
+        // below cannot wrap. Match the panicking discipline of this
         // constructor; recoverable callers use `try_with_capacity`.
         if capacity < 0 || capacity > list_max_len(T.size) {
             panic(f"List.with_capacity({capacity}) capacity overflow (max {list_max_len(T.size)})");
@@ -143,7 +156,7 @@ implement<T> List<T> {
             return Ok(List.new());
         }
 
-        // Capacity-overflow guard.  Same role as in
+        // Capacity-overflow guard. Same role as in
         // `try_resize_buffer`, repeated here because direct callers
         // of `try_with_capacity` skip the resize path.
         if capacity < 0 || capacity > list_max_len(T.size) {
@@ -374,6 +387,7 @@ implement<T> List<T> {
 
     // Insert at index, shifting elements right.
     //
+
     // SOUNDNESS: relies on the `self.len ≤ max_len()` invariant
     // maintained by `resize_buffer` / `try_resize_buffer`, so
     // `idx + 1` (with `idx ≤ self.len`) and `(self.len - idx) * T.size`
@@ -399,6 +413,7 @@ implement<T> List<T> {
 
     // Remove at index, shifting elements left.
     //
+
     // SOUNDNESS: same invariant as `insert` — `self.len ≤ max_len()`,
     // so `idx + 1` cannot overflow and the byte-count computation is
     // safe.
@@ -565,7 +580,7 @@ implement<T> List<T> {
         }
     }
 
-    // Grow capacity (double || minimum 4).  Saturates at
+    // Grow capacity (double || minimum 4). Saturates at
     // `max_len()` so the doubling step itself can't overflow Int.
     // `try_resize_buffer` is the chokepoint that finally rejects
     // anything past the bound, but doing the saturation here lets
@@ -584,7 +599,7 @@ implement<T> List<T> {
         self.try_resize_buffer(new_cap)
     }
 
-    // Computes the next capacity (saturating doubling).  Saturating
+    // Computes the next capacity (saturating doubling). Saturating
     // at `max_len()` rather than wrapping ensures the multiplication
     // can never overflow Int; the subsequent `try_resize_buffer`
     // either accepts the saturated value or rejects with
@@ -609,7 +624,7 @@ implement<T> List<T> {
     // origin rather than the deref site.
     fn resize_buffer(&mut self, new_cap: Int) {
         // Capacity-overflow guard: a `cap > max_len` would wrap the
-        // byte-size multiplication below.  Panic here matches the
+        // byte-size multiplication below. Panic here matches the
         // panicking discipline of this whole path; callers wanting
         // recoverability use `try_resize_buffer` instead.
         if new_cap < 0 || new_cap > list_max_len(T.size) {
@@ -857,11 +872,14 @@ implement<T> List<T> {
     /// the list were fully sorted. All elements before `index` will be <= it,
     /// and all elements after will be >= it.
     ///
+
     /// Uses quickselect (Hoare's selection) with median-of-three pivot.
     /// Average O(n), worst case O(n^2) but very unlikely with good pivoting.
     ///
+
     /// Panics if `index >= len()`.
     ///
+
     /// Returns a reference to the element at the given index after partitioning.
     public fn select_nth_unstable(&mut self, index: Int) -> &T
     where T: Ord
@@ -1138,6 +1156,7 @@ implement<T> List<T> {
     /// Replace elements in the range [start, end) with the replacement elements.
     /// Returns the removed elements as a new list.
     ///
+
     /// # Panics
     /// Panics if start > end or end > len.
     public fn splice<I: IntoIterator<Item = T>>(&mut self, start: Int, end: Int, replacement: I) -> List<T> {
@@ -1612,8 +1631,10 @@ implement<T> List<T> {
     /// Adjacent elements a, b are in the same group while predicate(a, b) returns true.
     /// Returns a list of groups (each group is a List<T>).
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let list = [1, 1, 2, 3, 3, 3, 1];
     /// let groups = list.chunk_by(|a, b| *a == *b);
@@ -1689,6 +1710,7 @@ implement<T> List<T> {
 
     /// Apply a function to each element, producing a new list.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3]);
@@ -1706,6 +1728,7 @@ implement<T> List<T> {
 
     /// Filter elements, keeping only those satisfying the predicate.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4, 5]);
@@ -1727,6 +1750,7 @@ implement<T> List<T> {
 
     /// Filter and map in one pass — apply f to each element, keeping only Some results.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4, 5]);
@@ -1748,6 +1772,7 @@ implement<T> List<T> {
     /// Collect Some values from a List<Maybe<T>>, discarding None.
     /// Returns a new list containing only the unwrapped Some values.
     ///
+
     /// # Example
     /// ```verum
     /// let maybes: List<Maybe<Int>> = list([Some(1), None, Some(3)]);
@@ -1769,6 +1794,7 @@ implement<T> List<T> {
 
     /// Find the first element matching a predicate.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4]);
@@ -1789,6 +1815,7 @@ implement<T> List<T> {
 
     /// Find the index of the first element matching a predicate.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([10, 20, 30, 40]);
@@ -1807,6 +1834,7 @@ implement<T> List<T> {
 
     /// Take the first n elements.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4, 5]);
@@ -1826,6 +1854,7 @@ implement<T> List<T> {
 
     /// Skip the first n elements.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4, 5]);
@@ -1845,6 +1874,7 @@ implement<T> List<T> {
 
     /// Partition elements by predicate into (matching, non-matching).
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4, 5]);
@@ -1870,6 +1900,7 @@ implement<T> List<T> {
 
     /// Group elements by a key function, returning a Map from keys to lists of elements.
     ///
+
     /// # Example
     /// ```verum
     /// let words = list(["hello", "hi", "world", "wow"]);
@@ -1899,6 +1930,7 @@ implement<T> List<T> {
 
     /// Map each element to a list and flatten into a single list.
     ///
+
     /// # Example
     /// ```verum
     /// let nested = list([1, 2, 3]);
@@ -1919,6 +1951,7 @@ implement<T> List<T> {
 
     /// Fold all elements into a single accumulator value.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4]);
@@ -1995,8 +2028,10 @@ implement<T> List<T> {
     /// Returns the first element and the rest of the list as a slice,
     /// or `None` if the list is empty.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let v = list([1, 2, 3]);
     /// let (first, rest) = v.split_first().unwrap();
@@ -2017,8 +2052,10 @@ implement<T> List<T> {
     /// Returns the last element and the rest of the list as a slice,
     /// or `None` if the list is empty.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let v = list([1, 2, 3]);
     /// let (last, init) = v.split_last().unwrap();
@@ -2038,8 +2075,10 @@ implement<T> List<T> {
 
     /// Returns `true` if the list is sorted in ascending order.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// assert(list([1, 2, 3]).is_sorted());
     /// assert(!list([1, 3, 2]).is_sorted());
@@ -2095,11 +2134,14 @@ implement<T> List<T> {
 
     /// Removes all elements matching the predicate and returns them.
     ///
+
     /// The retained elements preserve their order.
     /// Similar to Rust's `extract_if` / `drain_filter`.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let mut v = list([1, 2, 3, 4, 5]);
     /// let removed = v.extract_if(|x| *x % 2 == 0);
@@ -2154,6 +2196,7 @@ implement<T> List<T> {
 
     /// Deduplicate consecutive elements using a key function.
     ///
+
     /// Only the first element in each group of consecutive equal keys is kept.
     public fn dedup_by_key<K: Eq>(&mut self, key_fn: fn(&T) -> K) {
         if self.len <= 1 {
@@ -2179,8 +2222,10 @@ implement<T> List<T> {
     /// Returns exact-sized chunks. Unlike `chunks()`, this only returns
     /// full chunks; any remainder at the end is excluded.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// let v = list([1, 2, 3, 4, 5]);
     /// let c = v.chunks_exact(2);
@@ -2354,6 +2399,7 @@ implement<T> List<T> {
     /// Sum all elements in the list.
     /// Returns 0 for an empty list.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4]);
@@ -2373,6 +2419,7 @@ implement<T> List<T> {
     /// Multiply all elements together.
     /// Returns the multiplicative identity (1) for empty lists.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([2, 3, 4]);
@@ -2391,6 +2438,7 @@ implement<T> List<T> {
 
     /// Take elements from the front while the predicate returns true.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4, 5]);
@@ -2414,6 +2462,7 @@ implement<T> List<T> {
 
     /// Skip elements from the front while the predicate returns true.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4, 5]);
@@ -2441,6 +2490,7 @@ implement<T> List<T> {
 
     /// Combine elements with a running accumulator, returning all intermediate results.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3]);
@@ -2460,6 +2510,7 @@ implement<T> List<T> {
 
     /// Zip two lists together using a combining function.
     ///
+
     /// # Example
     /// ```verum
     /// let a = list([1, 2, 3]);
@@ -2481,6 +2532,7 @@ implement<T> List<T> {
     /// Return all elements except the first.
     /// Returns an empty list if the list has 0 or 1 elements.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3]);
@@ -2502,6 +2554,7 @@ implement<T> List<T> {
 
     /// Flatten a list of lists into a single list.
     ///
+
     /// # Example
     /// ```verum
     /// let nested: List<List<Int>> = list([list([1, 2]), list([3, 4])]);
@@ -2517,6 +2570,7 @@ implement<T> List<T> {
 
     /// Get element by index, returning a default value if out of bounds.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([10, 20, 30]);
@@ -2533,6 +2587,7 @@ implement<T> List<T> {
 
     /// Produce (index, element) pairs. Alias for enumerate_list.
     ///
+
     /// # Example
     /// ```verum
     /// let items = list(["a", "b", "c"]);
@@ -2548,6 +2603,7 @@ implement<T> List<T> {
     /// Remove all duplicate elements, keeping only the first occurrence.
     /// Requires Eq on the element type.
     ///
+
     /// # Example
     /// ```verum
     /// let nums = list([1, 3, 2, 1, 3, 4]);
@@ -3036,6 +3092,7 @@ public fn list<T>(items: [T; _]) -> List<T> {
 
 /// Flatten a list of lists into a single list.
 ///
+
 /// # Example
 /// ```verum
 /// let nested = [[1, 2], [3, 4], [5]];
@@ -3057,6 +3114,7 @@ public fn flatten_list<T: Clone>(lists: &List<List<T>>) -> List<T> {
 
 /// Unzip a list of pairs into two separate lists.
 ///
+
 /// # Example
 /// ```verum
 /// let pairs = [(1, "a"), (2, "b"), (3, "c")];
@@ -3078,6 +3136,7 @@ public fn unzip_list<A: Clone, B: Clone>(pairs: &List<(A, B)>) -> (List<A>, List
 
 /// Join a list of Text values with a separator.
 ///
+
 /// # Example
 /// ```verum
 /// let words = ["hello", "world", "foo"];
@@ -3099,6 +3158,7 @@ public fn join_text(items: &List<Text>, separator: &Text) -> Text {
 
 /// Join a list of Int values with a separator, converting each to text.
 ///
+
 /// # Example
 /// ```verum
 /// let nums = [1, 2, 3];
@@ -3120,9 +3180,11 @@ public fn join_ints(items: &List<Int>, separator: &Text) -> Text {
 
 /// Group consecutive elements by a key function.
 ///
+
 /// Returns a list of (key, group) pairs where each group contains
 /// consecutive elements that share the same key.
 ///
+
 /// # Example
 /// ```verum
 /// let items = [1, 1, 2, 2, 2, 3, 1, 1];
@@ -3152,8 +3214,10 @@ public fn group_by<T: Clone, K: Eq + Clone>(items: &List<T>, key_fn: fn(&T) -> K
 
 /// Interleave two lists element by element.
 ///
+
 /// If one list is longer, the remaining elements are appended.
 ///
+
 /// # Example
 /// ```verum
 /// let a = [1, 3, 5];

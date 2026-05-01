@@ -1,18 +1,22 @@
 //! `verum cache` — inspect and manage the script-mode VBC cache.
 //!
+
 //! P5.2 — surfaces the [`crate::script::cache::ScriptCache`] persistent
 //! cache (default: `~/.verum/script-cache/`) to end users via four
 //! subcommands:
 //!
-//!   - `path`     — print the cache root.
-//!   - `list`     — table of cached entries with size and last-access.
-//!   - `clear`    — delete every cache entry (`--yes` to skip prompt).
-//!   - `gc`       — evict least-recently-used until under a budget.
-//!   - `show`     — dump meta.toml for one entry by hex key prefix.
+
+//!  - `path` — print the cache root.
+//!  - `list` — table of cached entries with size and last-access.
+//!  - `clear` — delete every cache entry (`--yes` to skip prompt).
+//!  - `gc` — evict least-recently-used until under a budget.
+//!  - `show` — dump meta.toml for one entry by hex key prefix.
 //!
+
 //! All subcommands accept `--root <PATH>` to point at a non-default
 //! cache root (test-rigs and CI invocations rely on this).
 //!
+
 //! The on-disk format is documented in [`crate::script::cache`]; this
 //! module is purely UX glue.
 

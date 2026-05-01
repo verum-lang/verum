@@ -3,11 +3,14 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
+
 // SQLite's R-tree virtual table is queried via:
 //
-//   SELECT id FROM points WHERE x_min >= ? AND x_max <= ?
-//                           AND y_min >= ? AND y_max <= ?
+
+//  SELECT id FROM points WHERE x_min >= ? AND x_max <= ?
+//  AND y_min >= ? AND y_max <= ?
 //
+
 // The vtab implementation translates this into a `RangeQuery`. The
 // query reduces to "find all rowids whose MBB is fully inside the
 // query box" (covers semantics) or "intersects the query box"

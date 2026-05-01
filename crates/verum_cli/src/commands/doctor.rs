@@ -1,16 +1,19 @@
 //! `verum doctor` — surveys the user's Verum installation and reports
 //! actionable health-check results.
 //!
+
 //! Each check returns a [`CheckResult`] with a status (`Pass` /
 //! `Warn` / `Fail`), a one-line summary, and an optional hint
 //! pointing at the documented remediation. Output is human-readable
 //! by default; `--json` emits one NDJSON object per check. Exit
 //! codes:
 //!
-//!   - `0` — every check passed
-//!   - `1` — at least one warning (only when `--strict`)
-//!   - `2` — at least one failure
+
+//!  - `0` — every check passed
+//!  - `1` — at least one warning (only when `--strict`)
+//!  - `2` — at least one failure
 //!
+
 //! Without `--strict`, warnings exit 0 — useful for CI gates that
 //! only want to fail on hard breakage.
 

@@ -6,23 +6,28 @@ module core.database.sqlite.native.l1_pager.actor;
 // Layer: 1
 // Spec: sqlite-native.md §4.3 + §8.1
 //
+
 // Split design:
 //
-//   * `PagerActor` — the private state owned by exactly one task.
-//                    Never shared mutably; readers go through
-//                    SnapshotView instead (§4.3).
+
+//  * `PagerActor` — the private state owned by exactly one task.
+//  Never shared mutably; readers go through
+//  SnapshotView instead (§4.3).
 //
-//   * `PagerRequest` / `PagerReply` — the typed request surface. Every
-//                                      mutation and every read travels
-//                                      across the mailbox as a value
-//                                      of one of these variants.
+
+//  * `PagerRequest` / `PagerReply` — the typed request surface. Every
+//  mutation and every read travels
+//  across the mailbox as a value
+//  of one of these variants.
 //
-//   * `pager_apply(actor, req) → reply` — the pure request processor.
-//                                          Synchronous; stateless with
-//                                          respect to the mailbox
-//                                          plumbing. The async harness
-//                                          wraps this.
+
+//  * `pager_apply(actor, req) → reply` — the pure request processor.
+//  Synchronous; stateless with
+//  respect to the mailbox
+//  plumbing. The async harness
+//  wraps this.
 //
+
 // The async harness (spawn + loop on bounded Mailbox) will land once
 // `core.async.channel.Sender/Receiver<PagerRequest>` Send/Sync bounds
 // through `core.database.sqlite.native.l1_pager.actor` reliably in
@@ -113,12 +118,13 @@ implement PagerActor {
 /// Execute a single request. Synchronous; the async harness will wrap
 /// this in `while let Some(req) = mailbox.recv().await { ... }`.
 ///
+
 /// Routing:
-///   Read       → cache.get then pager_read; stamp cache on miss.
-///   Write      → cache.put (dirty=true), pager_write (passthrough).
-///   Commit     → bump cache generation; reset pending counter.
-///   Checkpoint → mode-specific; all modes bump generation and clear
-///                cache (for :memory: Pager there's no WAL to drain).
+///  Read → cache.get then pager_read; stamp cache on miss.
+///  Write → cache.put (dirty=true), pager_write (passthrough).
+///  Commit → bump cache generation; reset pending counter.
+///  Checkpoint → mode-specific; all modes bump generation and clear
+///  cache (for :memory: Pager there's no WAL to drain).
 public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
     match req {
         Read(page, tok) => {

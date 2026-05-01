@@ -1,51 +1,64 @@
 //! Field-Sensitive Heap Tracking for CBGR Escape Analysis
 //!
+
 //! Enables per-field promotion decisions: if struct field A escapes to heap but
 //! field B stays local, field B can still be promoted to &checked T (0ns) while
 //! field A keeps full CBGR tracking (~15ns). This is critical for structs where
 //! only some fields are stored in heap-allocated containers.
 //!
+
 //! This module implements production-grade field-sensitive heap tracking that
 //! enables independent escape analysis for struct fields with respect to heap
 //! allocations. This allows promotion of field references even when other fields
 //! of the same struct escape to the heap.
 //!
+
 //! # Key Innovation
 //!
+
 //! Traditional heap escape analysis treats entire structs atomically. If any
 //! field escapes to heap, the whole struct is marked as escaping. Field-sensitive
 //! heap tracking analyzes each field independently, significantly improving
 //! promotion opportunities.
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! struct Data {
-//!     cache: Vec<u8>,  // Stored in heap container → escapes to heap
-//!     count: i32,      // Only accessed locally → does NOT escape
+//!  cache: Vec<u8>, // Stored in heap container → escapes to heap
+//!  count: i32, // Only accessed locally → does NOT escape
 //! }
 //!
+
 //! fn process(d: &Data) -> i32 {
-//!     // Without field-sensitive heap tracking:
-//!     // - Entire &Data cannot be promoted (conservative)
+//!  // Without field-sensitive heap tracking:
+//!  // - Entire &Data cannot be promoted (conservative)
 //!
-//!     // With field-sensitive heap tracking:
-//!     // - d.cache: escapes to heap (CBGR required)
-//!     // - d.count: does NOT escape (can promote to &checked i32)
+
+//!  // With field-sensitive heap tracking:
+//!  // - d.cache: escapes to heap (CBGR required)
+//!  // - d.count: does NOT escape (can promote to &checked i32)
 //!
-//!     d.count  // 0ns access with promotion!
+
+//!  d.count // 0ns access with promotion!
 //! }
 //! ```
 //!
+
 //! # Core Components
 //!
+
 //! - [`FieldHeapInfo`]: Per-field heap escape information
 //! - [`HeapStore`]: Tracks heap store operations
 //! - [`FieldHeapTracker`]: Main tracking engine
 //! - [`FieldHeapResult`]: Complete analysis results
 //!
+
 //! # Performance
 //!
+
 //! - **Complexity**: O(fields × `heap_stores`)
 //! - **Typical overhead**: 2-5x base heap escape analysis
 //! - **Memory**: ~120 bytes per field + heap store tracking
@@ -58,6 +71,7 @@ use crate::analysis::{EscapeResult, FieldPath, RefId};
 
 /// Heap allocation site identifier
 ///
+
 /// Uniquely identifies a heap allocation location in the program.
 /// Used to track which heap allocations a reference may flow to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,16 +85,19 @@ impl fmt::Display for HeapSiteId {
 
 /// Heap store operation
 ///
+
 /// Represents a store operation that writes a reference to a heap-allocated
 /// memory location. Field-sensitive tracking analyzes which specific fields
 /// flow into which heap stores.
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// let data = Data { x: 1, y: 2 };
 /// let boxed = Box::new(Container::default());
-/// boxed.field = &data.x;  // HeapStore targeting data.x to boxed.field
+/// boxed.field = &data.x; // HeapStore targeting data.x to boxed.field
 /// ```
 #[derive(Debug, Clone)]
 pub struct HeapStore {
@@ -137,6 +154,7 @@ impl HeapStore {
 
     /// Check if this store affects a specific field path
     ///
+
     /// Returns true if the stored field path aliases with the queried path.
     /// Uses field aliasing rules (prefix relationships).
     #[must_use]
@@ -147,33 +165,39 @@ impl HeapStore {
 
 /// Per-field heap escape information
 ///
+
 /// Tracks whether a specific field of a reference escapes to heap,
 /// independent of other fields in the same struct.
 ///
+
 /// # Properties
 ///
+
 /// - `escapes_to_heap`: Whether this field flows to heap storage
 /// - `heap_sites`: Set of heap allocation sites this field escapes to
 /// - `store_operations`: List of heap store operations affecting this field
 /// - `is_conservative`: Whether analysis is conservative (unknown stores)
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// // Field d.cache escapes to multiple heap sites
 /// let cache_info = FieldHeapInfo {
-///     field_path: FieldPath::named("cache"),
-///     escapes_to_heap: true,
-///     heap_sites: vec![HeapSiteId(1), HeapSiteId(2)].into_iter().collect(),
-///     // ...
+///  field_path: FieldPath::named("cache"),
+///  escapes_to_heap: true,
+///  heap_sites: vec![HeapSiteId(1), HeapSiteId(2)].into_iter().collect(),
+///  // ...
 /// };
 ///
+
 /// // Field d.count does NOT escape
 /// let count_info = FieldHeapInfo {
-///     field_path: FieldPath::named("count"),
-///     escapes_to_heap: false,
-///     heap_sites: Set::new(),
-///     // ...
+///  field_path: FieldPath::named("count"),
+///  escapes_to_heap: false,
+///  heap_sites: Set::new(),
+///  // ...
 /// };
 /// ```
 #[derive(Debug, Clone)]
@@ -276,30 +300,37 @@ impl FieldHeapInfo {
 
 /// Field-sensitive heap tracking result
 ///
+
 /// Complete analysis result tracking heap escape status for all fields
 /// of a reference. Enables independent promotion decisions per field.
 ///
+
 /// # Statistics
 ///
+
 /// - `total_fields`: Number of fields analyzed
 /// - `escaping_fields`: Number of fields that escape to heap
 /// - `promotable_fields`: Number of fields that can be promoted
 /// - `heap_sites_accessed`: Total unique heap sites referenced
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// let result = tracker.analyze(reference);
 ///
+
 /// // Check specific field
 /// if result.can_promote_field(&FieldPath::named("count")) {
-///     println!("Can promote count field!");
+///  println!("Can promote count field!");
 /// }
 ///
+
 /// // Get statistics
 /// println!("Promotable: {}/{} fields",
-///     result.promotable_count(),
-///     result.total_fields()
+///  result.promotable_count(),
+///  result.total_fields()
 /// );
 /// ```
 #[derive(Debug, Clone)]
@@ -357,6 +388,7 @@ impl FieldHeapResult {
 
     /// Check if a specific field escapes to heap
     ///
+
     /// For field-sensitive analysis, unknown fields are assumed NOT to escape.
     /// If the caller wants conservative behavior for unknown fields, they should
     /// check `base_escapes_to_heap` separately.
@@ -460,40 +492,51 @@ impl FieldHeapResult {
 
 /// Field-sensitive heap tracker
 ///
+
 /// Main engine for tracking heap allocations per field. Analyzes store
 /// operations to determine which fields escape to heap independently.
 ///
+
 /// # Algorithm
 ///
+
 /// 1. **Extract field paths** - Identify all field accesses for reference
 /// 2. **Track heap stores** - Collect all store operations to heap locations
 /// 3. **Analyze per field** - For each field, check which heap stores affect it
 /// 4. **Compute results** - Generate per-field heap escape information
 ///
+
 /// # Performance
 ///
+
 /// - **Complexity**: O(fields × stores)
 /// - **Typical case**: 5 fields × 10 stores = 50 checks
 /// - **Target**: <100µs for typical struct
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// use verum_cbgr::field_heap_tracking::FieldHeapTracker;
 ///
+
 /// let mut tracker = FieldHeapTracker::new();
 ///
+
 /// // Track heap allocation site
 /// let heap_site = tracker.register_heap_allocation("Box::new");
 ///
+
 /// // Record heap store
 /// tracker.add_heap_store(
-///     reference,
-///     FieldPath::named("cache"),
-///     heap_site,
-///     true  // definite escape
+///  reference,
+///  FieldPath::named("cache"),
+///  heap_site,
+///  true // definite escape
 /// );
 ///
+
 /// // Analyze
 /// let result = tracker.analyze(reference);
 /// assert!(result.field_escapes_to_heap(&FieldPath::named("cache")));
@@ -532,10 +575,13 @@ impl FieldHeapTracker {
 
     /// Register a heap allocation site
     ///
+
     /// Returns a unique `HeapSiteId` for this allocation.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let box_site = tracker.register_heap_allocation("Box::new");
     /// let vec_site = tracker.register_heap_allocation("Vec::push");
@@ -550,10 +596,13 @@ impl FieldHeapTracker {
 
     /// Add a heap store operation
     ///
+
     /// Records that a reference field is stored to a heap location.
     ///
+
     /// # Parameters
     ///
+
     /// - `reference`: The reference whose field is being stored
     /// - `field_path`: The specific field being stored
     /// - `heap_site`: The heap allocation site receiving the store
@@ -579,10 +628,13 @@ impl FieldHeapTracker {
 
     /// Register field paths for a reference
     ///
+
     /// Should be called before analysis to establish which fields exist.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let mut paths = Set::new();
     /// paths.insert(FieldPath::named("x"));
@@ -595,20 +647,25 @@ impl FieldHeapTracker {
 
     /// Track heap allocations for all fields of a reference
     ///
+
     /// Main analysis entry point. Analyzes all heap stores and determines
     /// which fields escape to heap.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Get or extract field paths for reference
     /// 2. For each field path:
-    ///    - Create `FieldHeapInfo`
-    ///    - Find all heap stores affecting this field
-    ///    - Record escape information
+    ///  - Create `FieldHeapInfo`
+    ///  - Find all heap stores affecting this field
+    ///  - Record escape information
     /// 3. Build and return `FieldHeapResult`
     ///
+
     /// # Returns
     ///
+
     /// Complete field-sensitive heap analysis result
     #[must_use]
     pub fn track_field_heap_allocations(&self, reference: RefId) -> FieldHeapResult {
@@ -644,6 +701,7 @@ impl FieldHeapTracker {
 
     /// Check if a specific field escapes to heap
     ///
+
     /// Convenience method for quick field escape queries.
     #[must_use]
     pub fn field_escapes_to_heap(&self, reference: RefId, field_path: &FieldPath) -> bool {
@@ -654,18 +712,23 @@ impl FieldHeapTracker {
 
     /// Refine field escape using heap tracking
     ///
+
     /// Integrates field heap tracking with existing escape analysis results.
     /// If a field escapes to heap according to heap tracking, the escape
     /// result is updated to `EscapesViaHeap`.
     ///
+
     /// # Parameters
     ///
+
     /// - `reference`: The reference being analyzed
     /// - `field_path`: The specific field
     /// - `current_result`: Current escape analysis result
     ///
+
     /// # Returns
     ///
+
     /// Refined escape result incorporating heap tracking
     #[must_use]
     pub fn refine_field_escape_with_heap(

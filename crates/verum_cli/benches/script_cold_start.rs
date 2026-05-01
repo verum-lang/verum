@@ -1,23 +1,28 @@
 //! Script-mode cold-start latency budget.
 //!
+
 //! Two layers:
 //!
+
 //! 1. `script_first_run` — full pipeline: parse, typecheck, verify,
-//!    codegen, interpret. Dominant cost is stdlib loading (~2 K
-//!    files) plus per-script frontend work. This is the figure that
-//!    matters for "first ever run of this script" — and the headline
-//!    number we want to drive down.
+//!  codegen, interpret. Dominant cost is stdlib loading (~2 K
+//!  files) plus per-script frontend work. This is the figure that
+//!  matters for "first ever run of this script" — and the headline
+//!  number we want to drive down.
 //!
+
 //! 2. `script_warm_cache` — subsequent run with the persistent VBC
-//!    cache populated. Skips every front-end phase: just deserialise
-//!    + execute. The 40-60× speedup over the first run is the value
-//!    proposition of `ScriptContext::cache_lookup` / `cache_store`.
+//!  cache populated. Skips every front-end phase: just deserialise
+//!  + execute. The 40-60× speedup over the first run is the value
+//!  proposition of `ScriptContext::cache_lookup` / `cache_store`.
 //!
+
 //! Both shell out to the built `verum` binary so the measurement
 //! includes process spawn, stdlib decompression from the embedded
 //! archive, allocator warmup, and every other step a real user
 //! invocation pays. That's the honest number to track.
 //!
+
 //! Run with: `cargo bench -p verum_cli --bench script_cold_start`.
 //! Compare runs with `--save-baseline` / `--baseline`.
 

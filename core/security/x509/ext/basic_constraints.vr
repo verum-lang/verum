@@ -2,20 +2,24 @@
 // security/x509/ext/basic_constraints.vr — RFC 5280 §4.2.1.9
 // =============================================================================
 //
+
 // BasicConstraints ::= SEQUENCE {
-//     cA                 BOOLEAN DEFAULT FALSE,
-//     pathLenConstraint  INTEGER (0..MAX) OPTIONAL
+//  cA BOOLEAN DEFAULT FALSE,
+//  pathLenConstraint INTEGER (0..MAX) OPTIONAL
 // }
 //
+
 // For CA certs, `cA = TRUE` MUST be present and MUST be critical.
 // `pathLenConstraint` limits the number of intermediate CAs below
 // this cert in a chain. Absence = unlimited.
 //
+
 // For EE certs, this extension SHOULD be absent; if present, `cA` is
 // FALSE and `pathLenConstraint` is absent. Many real-world EE certs
 // include it explicitly for belt-and-braces reasons — accept and
 // ignore.
 //
+
 // =============================================================================
 
 module core.security.x509.ext.basic_constraints;

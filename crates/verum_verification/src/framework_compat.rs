@@ -1,5 +1,6 @@
 //! Framework-compatibility matrix — V0.
 //!
+
 //! metatheory table delegates "axiom bundle's mutual
 //! consistency" to "the bundle's citation" — an honest soundness
 //! escape hatch. A user who imports two contradictory framework
@@ -7,28 +8,32 @@
 //! `core.math.frameworks.univalence` with the wrong cube
 //! interpretation) gets `False` in their kernel without warning.
 //!
+
 //! This module ports the well-known compatibility table from
 //! corpus folklore (Coquand 1990 paradox; HoTT Book chapter 4;
 //! Awodey-Bauer-Hofmann 2018) into a Rust data structure that the
 //! verification pipeline can query.
 //!
-//! # V0 surface
+
+//! # current surface
 //!
-//!   * [`IncompatiblePair`] — one (framework_a, framework_b)
-//!     conflict, with reason + literature citation.
-//!   * [`KNOWN_INCOMPATIBLE_PAIRS`] — the static table. V0 ships
-//!     four documented incompatibilities.
-//!   * [`audit_framework_set`] — given a list of corpus identifiers
-//!     used in a module, return a diagnostic for every incompatible
-//!     pair found.
+
+//!  * [`IncompatiblePair`] — one (framework_a, framework_b)
+//!  conflict, with reason + literature citation.
+//!  * [`KNOWN_INCOMPATIBLE_PAIRS`] — the static table. ships
+//!  four documented incompatibilities.
+//!  * [`audit_framework_set`] — given a list of corpus identifiers
+//!  used in a module, return a diagnostic for every incompatible
+//!  pair found.
 //!
-//! V1 will:
-//!   * Wire `audit_framework_set` into `HygieneRecheckPass` so the
-//!     check fires on every `verum verify`.
-//!   * Provide a CLI surface `verum audit --framework-conflicts`.
-//!   * Accept stdlib-side declarative additions (each framework
-//!     package can declare its own conflicts in
-//!     `core.math.frameworks.<name>::CONFLICTS_WITH`).
+
+//! Future work will:
+//!  * Wire `audit_framework_set` into `HygieneRecheckPass` so the
+//!  check fires on every `verum verify`.
+//!  * Provide a CLI surface `verum audit --framework-conflicts`.
+//!  * Accept stdlib-side declarative additions (each framework
+//!  package can declare its own conflicts in
+//!  `core.math.frameworks.<name>::CONFLICTS_WITH`).
 
 use verum_common::Text;
 
@@ -55,6 +60,7 @@ pub struct IncompatiblePair {
 /// non-controversial entries only — entries that have a clear
 /// literature citation.
 ///
+
 /// Adding to this table is a *trust-boundary action*: every entry
 /// should reference a peer-reviewed result (either directly or via
 /// a textbook reproduction). Stdlib authors can extend this set
@@ -111,10 +117,12 @@ pub const KNOWN_INCOMPATIBLE_PAIRS: &[IncompatiblePair] = &[
 /// annotations) against [`KNOWN_INCOMPATIBLE_PAIRS`]. Returns one
 /// `HygieneDiagnostic` per incompatible pair found.
 ///
+
 /// Severity is always `Error` — a pair listed in the matrix has a
 /// formal proof of inconsistency; admitting both packages derives
 /// `False` and breaks every theorem in the module.
 ///
+
 /// O(n × m) where n = corpus count and m = matrix size. Matrix is
 /// O(10) entries today, so the audit is effectively O(n).
 pub fn audit_framework_set(corpora: &[Text]) -> Vec<HygieneDiagnostic> {

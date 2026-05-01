@@ -1,8 +1,10 @@
 //! Directory module tests.
 //!
+
 //! Tests directory-based module structures with mod.vr files
 //! and child modules in subdirectories.
 //!
+
 //! Tests directory-based modules (foo/mod.vr), mixed hierarchy (file + directory),
 //! and module tree organization with public/private child modules.
 
@@ -41,10 +43,10 @@ fn test_directory_module_with_mod_file() {
 
     // Create directory structure:
     // src/
-    //   utils/
-    //     mod.vr
-    //     string.vr
-    //     math.vr
+    //  utils/
+    //  mod.vr
+    //  string.vr
+    //  math.vr
 
     project.create_file(
         "utils/mod.vr",
@@ -106,12 +108,12 @@ fn test_nested_directory_modules() {
 
     // Create nested structure:
     // network/
-    //   mod.vr
-    //   tcp.vr
-    //   udp/
-    //     mod.vr
-    //     socket.vr
-    //     stream.vr
+    //  mod.vr
+    //  tcp.vr
+    //  udp/
+    //  mod.vr
+    //  socket.vr
+    //  stream.vr
 
     project.create_file(
         "network/mod.vr",

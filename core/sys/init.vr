@@ -7,29 +7,35 @@ module sys.init;
 // Dependencies: sys/common, sys/{platform}/tls, mem/allocator
 // =============================================================================
 //
+
 // This module provides the runtime initialization sequence for Verum programs.
 // It sets up TLS, the context system, and the CBGR allocator before calling
 // the user's main function.
 //
+
 // # Initialization Sequence
 //
+
 // ```
 // _start (platform-specific) → verum_init() → user_main()
-//                                  │
-//                                  ├── 1. Initialize TLS
-//                                  ├── 2. Initialize context system
-//                                  ├── 3. Initialize CBGR allocator
-//                                  ├── 4. Initialize panic handler
-//                                  └── 5. Call user_main
+//  │
+//  ├── 1. Initialize TLS
+//  ├── 2. Initialize context system
+//  ├── 3. Initialize CBGR allocator
+//  ├── 4. Initialize panic handler
+//  └── 5. Call user_main
 // ```
 //
+
 // # Platform-Specific Entry Points
 //
+
 // - Linux x86_64: _start → verum_init (direct syscall to set TLS)
 // - macOS: _main → verum_init (via dyld initialization)
 // - Windows: mainCRTStartup → verum_init (via TLS callbacks)
 // - Embedded: Reset_Handler → verum_init (no TLS needed)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 9 (Bootstrap Kernel)
 // =============================================================================
 
@@ -133,30 +139,35 @@ implement Eq for InitError {
 
 /// Initialize the V-LLSI runtime.
 ///
+
 /// This is the main entry point called by platform-specific startup code.
 /// It initializes all runtime subsystems in the correct order.
 ///
+
 /// # Returns
 ///
+
 /// * `Ok(())` - Runtime initialized successfully
 /// * `Err(InitError)` - Initialization failed
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// // Called automatically by _start
 /// fn _start() {
-///     match verum_init() {
-///         Ok(()) => {
-///             let exit_code = user_main();
-///             exit(exit_code);
-///         }
-///         Err(e) => {
-///             // Emergency write to stderr
-///             write_stderr(e.message());
-///             exit(1);
-///         }
-///     }
+///  match verum_init() {
+///  Ok(()) => {
+///  let exit_code = user_main();
+///  exit(exit_code);
+///  }
+///  Err(e) => {
+///  // Emergency write to stderr
+///  write_stderr(e.message());
+///  exit(1);
+///  }
+///  }
 /// }
 /// ```
 public fn verum_init() -> Result<(), InitError> {
@@ -188,6 +199,7 @@ public fn verum_init() -> Result<(), InitError> {
 
 /// Shutdown the V-LLSI runtime.
 ///
+
 /// Called automatically at program exit or on thread termination.
 /// Performs cleanup in reverse initialization order.
 public fn verum_shutdown() {
@@ -397,12 +409,16 @@ fn shutdown_panic_handler() {
 
 /// Set a custom panic handler.
 ///
+
 /// # Arguments
 ///
+
 /// * `handler` - Function to call on panic
 ///
+
 /// # Safety
 ///
+
 /// The handler must not panic itself (double-panic is undefined behavior).
 public unsafe fn set_panic_handler(handler: fn(&SysInitPanicInfo)) {
     PANIC_HANDLER = handler;
@@ -410,6 +426,7 @@ public unsafe fn set_panic_handler(handler: fn(&SysInitPanicInfo)) {
 
 /// Trigger a panic with the given message.
 ///
+
 /// This is called by the panic() built-in function.
 @cold
 @no_inline
@@ -452,6 +469,7 @@ public fn panic_impl(message: Text, file: Text, line: Int, column: Int) -> ! {
 
 /// Initialize runtime for a new thread.
 ///
+
 /// Called by the thread spawn implementation before running thread function.
 public fn init_thread() -> Result<(), InitError> {
     // Step 1: TLS is set up by clone() with CLONE_SETTLS on Linux
@@ -468,6 +486,7 @@ public fn init_thread() -> Result<(), InitError> {
 
 /// Clean up runtime for exiting thread.
 ///
+
 /// Called by the thread implementation before thread exits.
 public fn cleanup_thread() {
     cleanup_thread_allocator();
@@ -508,14 +527,14 @@ fn cleanup_thread_allocator() {
 // =============================================================================
 
 // Entry-point declarations use the C ABI for `int main(int argc, char **argv)`:
-//   * argc is `int` (Int32) — the kernel / dyld places it in EDI's low 32
-//     bits with the high 32 bits *undefined* per System V AMD64 ABI.
-//     Declaring `argc: Int` (i64) made LLVM emit `define i32 @main(i64
-//     %argc, ptr %argv)` and the prologue read RDI as 64-bit, picking
-//     up whatever the calling convention left in the high half — usually
-//     a stale pointer value masquerading as an enormous argc.
-//   * The return type is `int` (Int32) — process exit codes are 32-bit.
-//   * argv stays `&&Byte` (pointer-width on every supported platform).
+//  * argc is `int` (Int32) — the kernel / dyld places it in EDI's low 32
+//  bits with the high 32 bits *undefined* per System V AMD64 ABI.
+//  Declaring `argc: Int` (i64) made LLVM emit `define i32 @main(i64
+//  %argc, ptr %argv)` and the prologue read RDI as 64-bit, picking
+//  up whatever the calling convention left in the high half — usually
+//  a stale pointer value masquerading as an enormous argc.
+//  * The return type is `int` (Int32) — process exit codes are 32-bit.
+//  * argv stays `&&Byte` (pointer-width on every supported platform).
 // T0.4.3 — surface aligned with the C ABI. init_process_args takes the
 // Verum-side `Int` (i64) — the Int32→Int widening at the boundary is
 // absorbed by the typechecker.
@@ -531,6 +550,7 @@ module linux_entry {
 
     /// Linux x86_64 entry point.
     ///
+
     /// Called by _start before stack is fully set up.
     /// Initializes TLS first (required for @thread_local).
     @naked

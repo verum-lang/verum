@@ -5,6 +5,7 @@
 // styles. Includes Catppuccin-inspired dark and light factory methods, plus
 // auto-detection via OSC 11 background color query.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.3
 // =============================================================================
 
@@ -21,6 +22,7 @@ mount super.modifier.Modifier;
 /// Theme defines visual styles through semantic roles, not concrete colors.
 /// Switching between dark() and light() changes the entire application palette.
 ///
+
 /// Roles are organized into categories:
 /// - Surface: background areas and text on them
 /// - Interactive: primary/secondary accent colors
@@ -65,16 +67,17 @@ public type Theme is {
 implement Theme {
     /// Standard dark theme (Catppuccin Mocha inspired).
     ///
+
     /// Base palette:
-    ///   Surface:   #1E1E2E (Mocha Base)
-    ///   Surface2:  #181825 (Mocha Mantle)
-    ///   Text:      #CDD6F4 (Mocha Text)
-    ///   Primary:   #89B4FA (Mocha Blue)
-    ///   Secondary: #B4BEFE (Mocha Lavender)
-    ///   Error:     #F38BA8 (Mocha Red)
-    ///   Warning:   #F9E2AF (Mocha Yellow)
-    ///   Success:   #A6E3A1 (Mocha Green)
-    ///   Info:      #94E2D5 (Mocha Teal)
+    ///  Surface: #1E1E2E (Mocha Base)
+    ///  Surface2: #181825 (Mocha Mantle)
+    ///  Text: #CDD6F4 (Mocha Text)
+    ///  Primary: #89B4FA (Mocha Blue)
+    ///  Secondary: #B4BEFE (Mocha Lavender)
+    ///  Error: #F38BA8 (Mocha Red)
+    ///  Warning: #F9E2AF (Mocha Yellow)
+    ///  Success: #A6E3A1 (Mocha Green)
+    ///  Info: #94E2D5 (Mocha Teal)
     public fn dark() -> Theme {
         Theme {
             // Surface
@@ -115,16 +118,17 @@ implement Theme {
 
     /// Standard light theme (Catppuccin Latte inspired).
     ///
+
     /// Base palette:
-    ///   Surface:   #EFF1F5 (Latte Base)
-    ///   Surface2:  #DCE0E8 (Latte Mantle)
-    ///   Text:      #4C4F69 (Latte Text)
-    ///   Primary:   #1E66F5 (Latte Blue)
-    ///   Secondary: #7287FD (Latte Lavender)
-    ///   Error:     #D20F39 (Latte Red)
-    ///   Warning:   #DF8E1D (Latte Yellow)
-    ///   Success:   #40A02B (Latte Green)
-    ///   Info:      #179299 (Latte Teal)
+    ///  Surface: #EFF1F5 (Latte Base)
+    ///  Surface2: #DCE0E8 (Latte Mantle)
+    ///  Text: #4C4F69 (Latte Text)
+    ///  Primary: #1E66F5 (Latte Blue)
+    ///  Secondary: #7287FD (Latte Lavender)
+    ///  Error: #D20F39 (Latte Red)
+    ///  Warning: #DF8E1D (Latte Yellow)
+    ///  Success: #40A02B (Latte Green)
+    ///  Info: #179299 (Latte Teal)
     public fn light() -> Theme {
         Theme {
             // Surface

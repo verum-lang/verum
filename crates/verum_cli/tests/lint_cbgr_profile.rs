@@ -1,5 +1,6 @@
 //! Profile-driven CBGR-budget enforcement contract.
 //!
+
 //! When `[lint.cbgr_budgets].measurements` points at a profile
 //! file, `cbgr-budget-exceeded` fires when the *measured*
 //! `deref_ns_p99` for a module exceeds the configured

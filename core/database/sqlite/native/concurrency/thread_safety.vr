@@ -3,15 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §20.1
 //
+
 // Three modes inherited from SQLite:
 //
-//   SingleThread     — connection bound to its creating thread
-//                      (Send/Sync impls deny cross-thread access)
-//   MultiThread      — connection bound to one thread, but the
-//                      Database handle may have many such connections
-//   Serialized       — connection may be passed across threads
-//                      (default — uses actor-based pager arbitration)
+
+//  SingleThread — connection bound to its creating thread
+//  (Send/Sync impls deny cross-thread access)
+//  MultiThread — connection bound to one thread, but the
+//  Database handle may have many such connections
+//  Serialized — connection may be passed across threads
+//  (default — uses actor-based pager arbitration)
 //
+
 // We expose this as a phantom-typed marker on `Connection<T, S>`,
 // where `S: ThreadSafetyMode`. The marker constrains the Send/Sync
 // impls so misuse is a type error rather than a runtime panic.

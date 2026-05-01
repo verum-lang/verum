@@ -5,20 +5,24 @@
 // Dependencies: core, encoding.varint, quic.connection_id
 // =============================================================================
 //
+
 // Transport Parameters ride inside the TLS 1.3 `quic_transport_parameters`
 // extension (RFC 9001 §8.2). Each parameter is:
 //
-//   Transport Parameter {
-//       Parameter ID (i),
-//       Parameter Length (i),
-//       Parameter Value (..),
-//   }
+
+//  Transport Parameter {
+//  Parameter ID (i),
+//  Parameter Length (i),
+//  Parameter Value (..),
+//  }
 //
+
 // Both ID and Length are QUIC varints. Values are either varints, raw
 // byte sequences, or a zero-length presence flag. Unknown parameter
 // IDs MUST be silently ignored (§18 paragraph 4) — that's what
 // forward-compat greasing relies on.
 //
+
 // =============================================================================
 
 module core.net.quic.transport_params;
@@ -85,7 +89,7 @@ implement TransportParams {
     /// `initial_max_streams_uni` are ≤ 2^60 per RFC 9000 §18.2;
     /// `ack_delay_exponent` ≤ 20; `active_connection_id_limit` ≥ 2;
     /// `max_udp_payload_size` ≥ 1200. Returns `true` iff every
-    /// invariant holds.  Used both as a validation gate after decode
+    /// invariant holds. Used both as a validation gate after decode
     /// (TransportError.ProtocolViolation on false) and as the SMT
     /// obligation for V9.
     public fn bounds_ok(&self) -> Bool {
@@ -271,7 +275,7 @@ fn encode_fixed16_param(out: &mut List<Byte>, id: UInt64, tok: &[Byte; 16]) {
 
 fn encode_preferred_address(out: &mut List<Byte>, pa: &PreferredAddress) {
     // Inner body layout: ipv4 (4) | port (2) | ipv6 (16) | port (2)
-    //                  | cid_len (1) | cid | reset_token (16)
+    //  | cid_len (1) | cid | reset_token (16)
     let cid_s = pa.connection_id.as_slice();
     let body_len = 4 + 2 + 16 + 2 + 1 + cid_s.len() + 16;
     let mut body: List<Byte> = List.with_capacity(body_len);

@@ -46,9 +46,9 @@ public fn action_for(shape: &PatchValueShape) -> MergeAction {
 }
 
 // Outcome for the whole patch at the root:
-//   patch is object        → merge into target
-//   patch is array/scalar  → replace target entirely
-//   patch is null          → delete / null-out the target
+//  patch is object → merge into target
+//  patch is array/scalar → replace target entirely
+//  patch is null → delete / null-out the target
 public type RootVerdict is
     | RvMergeInto
     | RvReplaceEntire

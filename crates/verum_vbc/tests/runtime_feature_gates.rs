@@ -2,6 +2,7 @@
 //! `[runtime].nurseries` opt-out gates on the VBC interpreter
 //! dispatch surface.
 //!
+
 //! Pin: when the user disables a feature via `verum.toml` the
 //! corresponding dispatch handler must REJECT, not silently honour
 //! the operation. Before the wire-up,
@@ -10,6 +11,7 @@
 //! propagated the manifest values into the slots but the handlers
 //! never consulted them, so opt-out was advisory at best.
 //!
+
 //! The check shape is the cheapest possible: a single boolean read
 //! at the head of `handle_spawn` / `handle_nursery_init` before any
 //! operand decode. Cost is one branch on the warm path; nothing on

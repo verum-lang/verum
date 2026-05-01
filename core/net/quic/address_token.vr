@@ -3,43 +3,52 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, core.time, core.net.addr,
-//               core.security.aead.aes_gcm, core.security.util.rng
+//  core.security.aead.aes_gcm, core.security.util.rng
 // =============================================================================
 //
+
 // RFC 9000 §8.1.3 — a server-issued opaque cookie that lets a client
 // skip address validation on future handshakes. The server hands one
 // out in two cases:
 //
-//   * Retry — included in the Retry packet's `retry_token` field
-//     to mitigate amplification attacks (§8.1.2). Token is short-
-//     lived (seconds) and bound to the client's original DCID so
-//     a replay from a different CID is detectable.
+
+//  * Retry — included in the Retry packet's `retry_token` field
+//  to mitigate amplification attacks (§8.1.2). Token is short-
+//  lived (seconds) and bound to the client's original DCID so
+//  a replay from a different CID is detectable.
 //
-//   * NEW_TOKEN frame — post-handshake, the server hands out a
-//     longer-lived token. A subsequent connection from the same
-//     peer prepends this token to its first Initial packet, letting
-//     the server grant the peer a pre-validated-address amplification
-//     budget.
+
+//  * NEW_TOKEN frame — post-handshake, the server hands out a
+//  longer-lived token. A subsequent connection from the same
+//  peer prepends this token to its first Initial packet, letting
+//  the server grant the peer a pre-validated-address amplification
+//  budget.
 //
+
 // Wire format (implementation-private — the RFC says tokens are
 // opaque to the client, so we pick a format that:
 //
-//   key_id (8)  || version (1) || kind (1) || issued_unix (8)
-//   || client_ip_len (1) || client_ip (≤16) || orig_dcid_len (1)
-//   || orig_dcid (≤20) || AEAD_AES_128_GCM ciphertext+tag
+
+//  key_id (8) || version (1) || kind (1) || issued_unix (8)
+//  || client_ip_len (1) || client_ip (≤16) || orig_dcid_len (1)
+//  || orig_dcid (≤20) || AEAD_AES_128_GCM ciphertext+tag
 //
+
 // AAD = key_id || version || kind so ciphertext is bound to the
 // envelope. Fresh 12-byte nonce per token.
 //
+
 // # Security properties
 //
-//   * Unforgeable — AES-128-GCM over a 128-bit secret key.
-//   * Client-IP bound — validation fails if the client presents
-//     the token from a different source address.
-//   * Lifetime bound — issued_unix + max_age checked on verify.
-//   * Key-rotatable — 8-byte key_id prefix enables multiple
-//     active STEK-style keys during rotation windows.
+
+//  * Unforgeable — AES-128-GCM over a 128-bit secret key.
+//  * Client-IP bound — validation fails if the client presents
+//  the token from a different source address.
+//  * Lifetime bound — issued_unix + max_age checked on verify.
+//  * Key-rotatable — 8-byte key_id prefix enables multiple
+//  active STEK-style keys during rotation windows.
 //
+
 // =============================================================================
 
 module core.net.quic.address_token;
@@ -86,7 +95,7 @@ public type TokenError is
     | WrongKind
     | ClientIpMismatch;
 
-// Display + Debug + Eq for TokenError.  SealFailure +
+// Display + Debug + Eq for TokenError. SealFailure +
 // OpenFailure surface no detail — QUIC address-validation
 // AEAD opens MUST be value-blind to avoid an oracle
 // for the token-key material (RFC 9000 §8.1.3 same
@@ -288,12 +297,15 @@ public fn verify(
 // Wire encoding of plaintext (post-AEAD)
 // =============================================================================
 //
-//   kind(1) || issued_unix(8 BE) || ip_len(1) || ip_bytes
-//   || dcid_len(1) || dcid_bytes
+
+//  kind(1) || issued_unix(8 BE) || ip_len(1) || ip_bytes
+//  || dcid_len(1) || dcid_bytes
 //
+
 // `kind` is duplicated here so a plaintext parsed from a corrupt
 // key_id still carries the kind — defense-in-depth.
 //
+
 // =============================================================================
 
 fn encode_plaintext(p: &TokenPlaintext) -> List<Byte> {

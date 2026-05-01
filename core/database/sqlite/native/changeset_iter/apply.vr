@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3changeset_apply's xFilter + xConflict callbacks return
 // integers; we wrap them into typed verdicts.
 // =============================================================================
@@ -29,7 +30,7 @@ public fn filter_numeric(f: &FilterVerdict) -> Int {
 public type ApplyFlags is {
     /// SQLITE_CHANGESETAPPLY_NOSAVEPOINT (1 << 0)
     no_savepoint: Bool,
-    /// SQLITE_CHANGESETAPPLY_INVERT     (1 << 1)
+    /// SQLITE_CHANGESETAPPLY_INVERT (1 << 1)
     invert: Bool,
     /// SQLITE_CHANGESETAPPLY_IGNORENOOP (1 << 2)
     ignore_noop: Bool,

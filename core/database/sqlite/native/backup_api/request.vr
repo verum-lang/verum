@@ -3,10 +3,11 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_backup_step(p, nPage):
-//   * nPage > 0  → copy exactly N pages (or fewer if source exhausts)
-//   * nPage < 0  → copy the entire remaining source in one step
-//   * nPage == 0 → documented as a no-op; catalogue preserves that shape
+//  * nPage > 0 → copy exactly N pages (or fewer if source exhausts)
+//  * nPage < 0 → copy the entire remaining source in one step
+//  * nPage == 0 → documented as a no-op; catalogue preserves that shape
 // =============================================================================
 
 module core.database.sqlite.native.backup_api.request;

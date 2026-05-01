@@ -5,15 +5,18 @@
 // Dependencies: none (foundational)
 // =============================================================================
 //
+
 // This module defines protocols that enable language constructs to work with
 // user-defined types. These are "carrier" protocols - they carry semantics
 // for operators like ?, for loops, await, etc.
 //
+
 // Key protocols:
 // - Try: Enables the ? operator for error/option propagation
 // - FromResidual: Enables error type conversion in ? chains
 // - ControlFlow: Result of Try.branch() for control flow decisions
 //
+
 // =============================================================================
 
 // =============================================================================
@@ -22,9 +25,11 @@
 
 /// Result of a control flow decision.
 ///
+
 /// Used by the `?` operator to determine whether to continue execution
 /// or break early with an error/none value.
 ///
+
 /// - `Continue(C)`: Continue execution with the success value
 /// - `Break(B)`: Break early with the residual value
 
@@ -125,31 +130,37 @@ implement<B: Debug, C: Debug> Debug for ControlFlow<B, C> {
 
 /// Protocol for types that support the `?` operator.
 ///
+
 /// The `?` operator provides early return on failure. When applied to a value
 /// of type `T: Try`, it:
 /// 1. Calls `T.branch()` to check success/failure
 /// 2. On `Continue(output)`: extracts the output value
 /// 3. On `Break(residual)`: converts residual and returns early
 ///
+
 /// # Associated Types
 ///
+
 /// - `Output`: The success value type extracted by `?`
 /// - `Residual`: The type used for early return conversion
 ///
+
 /// # Example Implementation
 ///
+
 /// ```verum
 /// implement Try for Maybe<T> {
-///     type Output = T;
-///     type Residual = Maybe<Never>;
+///  type Output = T;
+///  type Residual = Maybe<Never>;
 ///
-///     fn from_output(output: T) -> Maybe<T> { Some(output) }
-///     fn branch(self) -> ControlFlow<Maybe<Never>, T> {
-///         match self {
-///             Some(v) => Continue(v),
-///             None => Break(None),
-///         }
-///     }
+
+///  fn from_output(output: T) -> Maybe<T> { Some(output) }
+///  fn branch(self) -> ControlFlow<Maybe<Never>, T> {
+///  match self {
+///  Some(v) => Continue(v),
+///  None => Break(None),
+///  }
+///  }
 /// }
 /// ```
 public type Try is protocol {
@@ -164,6 +175,7 @@ public type Try is protocol {
 
     /// Decide whether to continue or break early.
     ///
+
     /// - Returns `Continue(output)` for success cases
     /// - Returns `Break(residual)` for failure cases
     fn branch(self) -> ControlFlow<Self.Residual, Self.Output>;
@@ -175,32 +187,37 @@ public type Try is protocol {
 
 /// Protocol for converting residual types in `?` chains.
 ///
+
 /// When the `?` operator encounters a `Break(residual)`, it needs to convert
 /// that residual into the return type of the enclosing function. This protocol
 /// enables that conversion.
 ///
+
 /// # Type Parameter
 ///
+
 /// - `R`: The residual type being converted from
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// // Allows: fn foo() -> Result<T, OuterError> { inner()?; ... }
 /// // where inner() returns Result<U, InnerError>
 /// implement FromResidual<Result<Never, InnerError>> for Result<T, OuterError>
 /// where OuterError: From<InnerError> {
-///     fn from_residual(residual: Result<Never, InnerError>) -> Result<T, OuterError> {
-///         match residual {
-///             Err(e) => Err(OuterError.from(e)),
-///             // `Never` is genuinely uninhabited (alias to `!`),
-///             // so the `Ok(_)` arm is provably dead at every
-///             // call site. Use the UB-hint variant so the
-///             // optimiser elides the tag test on the
-///             // `?`-propagation hot path.
-///             Ok(_) => unsafe { unreachable_unchecked() },
-///         }
-///     }
+///  fn from_residual(residual: Result<Never, InnerError>) -> Result<T, OuterError> {
+///  match residual {
+///  Err(e) => Err(OuterError.from(e)),
+///  // `Never` is genuinely uninhabited (alias to `!`),
+///  // so the `Ok(_)` arm is provably dead at every
+///  // call site. Use the UB-hint variant so the
+///  // optimiser elides the tag test on the
+///  // `?`-propagation hot path.
+///  Ok(_) => unsafe { unreachable_unchecked() },
+///  }
+///  }
 /// }
 /// ```
 public type FromResidual<R> is protocol {
@@ -214,12 +231,14 @@ public type FromResidual<R> is protocol {
 
 /// The never type — a type with no values (the "bottom" type).
 ///
+
 /// Used in residual types to indicate "this branch is
 /// impossible". For example, `Maybe<Never>` can only be `None`
 /// (since `Some(Never)` would require constructing a value of
 /// `Never`, which is impossible). Similarly, `Result<Never, E>`
 /// can only be `Err(e)`.
 ///
+
 /// Implementation: this is a transparent alias to the
 /// compiler's built-in `!` (bang) type, which is genuinely
 /// uninhabited at the type-system level. Earlier revisions
@@ -239,6 +258,7 @@ public type Never is !;
 
 /// Protocol for residual types to specify their "output" carrier type.
 ///
+
 /// This is used for type inference in complex `?` chains where the
 /// return type needs to be inferred from the residual.
 public type Residual is protocol {
@@ -254,18 +274,21 @@ public type Residual is protocol {
 /// value goes out of scope. This is the foundation for RAII-style
 /// resource management (file handles, GPU buffers, locks, etc.).
 ///
+
 /// When a value implementing `Drop` goes out of scope, its `drop()`
 /// method is called automatically by the CBGR runtime. The compiler
 /// guarantees that `drop()` is called exactly once for each owned
 /// value.
 ///
+
 /// ```verum
 /// type FileHandle is { fd: Int };
 ///
+
 /// implement Drop for FileHandle {
-///     fn drop(&mut self) {
-///         close(self.fd);
-///     }
+///  fn drop(&mut self) {
+///  close(self.fd);
+///  }
 /// }
 /// ```
 public type Drop is protocol {

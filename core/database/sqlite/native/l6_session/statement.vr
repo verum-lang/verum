@@ -6,19 +6,23 @@ module core.database.sqlite.native.l6_session.statement;
 // Layer: 6
 // Spec: sqlite-native.md §16.3
 //
+
 // `PreparedStatement` is the compiled VdbeProgram + its execution
 // state. SQLite's public API exposes it as `sqlite3_stmt`; in loom it
 // is an affine record owned by the caller.
 //
+
 // Lifecycle:
 //
-//     prepare(sql)    → PreparedStatement { program, state, ... }
-//     bind_int(n, v)  → patch a ?N parameter
-//     step()          → StepResult (Row | Done | ExecError)
-//     current_row()   → &RegisterFile view on the row registers
-//     reset()         → rewind pc to 0, clear bindings
-//     finalize()      → consume the statement
+
+//  prepare(sql) → PreparedStatement { program, state, ... }
+//  bind_int(n, v) → patch a ?N parameter
+//  step() → StepResult (Row | Done | ExecError)
+//  current_row() → &RegisterFile view on the row registers
+//  reset() → rewind pc to 0, clear bindings
+//  finalize() → consume the statement
 //
+
 // A fresh `state` is built by `prepare`; `reset` replaces it with a
 // new one while preserving the compiled program.
 // =============================================================================

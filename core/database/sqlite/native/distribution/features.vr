@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §23
 //
+
 // Each feature has a stable string ID that maps onto:
-//   * `pragma compile_options`   row format
-//   * `Database.feature_enabled(name)` query
+//  * `pragma compile_options` row format
+//  * `Database.feature_enabled(name)` query
 //
+
 // The default `loom_features()` mirrors what a stock `verum build`
 // of loom enables: every loom-native subsystem on, loadable
 // extensions off (security default).

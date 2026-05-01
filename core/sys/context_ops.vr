@@ -7,9 +7,11 @@ module sys.context_ops;
 // Dependencies: sys/raw
 // =============================================================================
 //
+
 // Pure Verum implementation of the context system (dependency injection)
 // and TLS slot management. These compile through VBC → LLVM.
 //
+
 // =============================================================================
 
 mount super.raw.*;

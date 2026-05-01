@@ -5,18 +5,21 @@
 // Spec: internal/specs/database.md §4.1
 // =============================================================================
 //
+
 // The contract every adapter implements. Two design pillars:
 //
-//   1. `Transaction` is `affine` — the value MUST be consumed by exactly
-//      one of `commit` / `rollback`. The compiler refuses to drop a
-//      live transaction; the runtime issues an implicit ROLLBACK on
-//      panic before the affine destructor fires.
+
+//  1. `Transaction` is `affine` — the value MUST be consumed by exactly
+//  one of `commit` / `rollback`. The compiler refuses to drop a
+//  live transaction; the runtime issues an implicit ROLLBACK on
+//  panic before the affine destructor fires.
 //
-//   2. Errors are associated types per protocol — `Connection.Error`,
-//      `Transaction.Error`. Adapter authors stitch their vendor error
-//      type into `DbError` via `From`. This keeps a `match` on a
-//      Postgres SQLSTATE working without a dyn-cast at the cost of one
-//      generic parameter on the handler.
+
+//  2. Errors are associated types per protocol — `Connection.Error`,
+//  `Transaction.Error`. Adapter authors stitch their vendor error
+//  type into `DbError` via `From`. This keeps a `match` on a
+//  Postgres SQLSTATE working without a dyn-cast at the cost of one
+//  generic parameter on the handler.
 // =============================================================================
 
 module core.database.common.protocol;
@@ -131,6 +134,7 @@ public type Connection is protocol {
 
 /// A live database transaction.
 ///
+
 /// `affine`: the value MUST be consumed by exactly one terminal call —
 /// either `commit` or `rollback`. The compiler refuses to drop a
 /// `Transaction` value out of scope. On panic the runtime emits
@@ -168,9 +172,9 @@ public type affine Transaction is protocol {
 // -----------------------------------------------------------------------------
 
 /// Nested-transaction savepoint, also affine. Vendor support:
-///   * Postgres: SAVEPOINT name / RELEASE SAVEPOINT name / ROLLBACK TO SAVEPOINT name
-///   * SQLite:   identical syntax
-///   * MySQL:    SAVEPOINT name / RELEASE / ROLLBACK TO — with caveats on DDL.
+///  * Postgres: SAVEPOINT name / RELEASE SAVEPOINT name / ROLLBACK TO SAVEPOINT name
+///  * SQLite: identical syntax
+///  * MySQL: SAVEPOINT name / RELEASE / ROLLBACK TO — with caveats on DDL.
 public type affine Savepoint is protocol {
     async fn release(self) -> Result<(), DbError>;
     async fn rollback_to(self) -> Result<(), DbError>;

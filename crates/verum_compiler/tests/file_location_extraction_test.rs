@@ -14,6 +14,7 @@
 )]
 //! Test for FileLocation extraction from function spans
 //!
+
 //! This test verifies that the verification profiler correctly extracts
 //! file location information (path, line, column) from function spans.
 

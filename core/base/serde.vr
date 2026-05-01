@@ -5,26 +5,33 @@
 // Dependencies: protocols.vr, result.vr, maybe.vr
 // =============================================================================
 //
+
 // Provides the standard Serialize and Deserialize protocols for converting
 // Verum values to and from external formats (JSON, MessagePack, CBOR, etc.).
 //
+
 // The design follows a visitor pattern where Serializer/Deserializer
 // implementations drive the format, while Serialize/Deserialize
 // implementations describe the data structure.
 //
+
 // # Usage
 //
+
 // ```verum
 // @derive(Serialize, Deserialize)
 // type Point is { x: Float, y: Float };
 //
+
 // // Serialize to JSON
 // let json = Json.serialize(&point)?;
 //
+
 // // Deserialize from JSON
 // let point: Point = Json.deserialize(&json)?;
 // ```
 //
+
 // =============================================================================
 
 module core.base.serde;
@@ -111,12 +118,15 @@ implement Eq for SerdeError {
 
 /// Protocol for types that can be serialized to an external format.
 ///
+
 /// Implementations describe how to break a value down into its components
 /// using the Serializer interface. The format (JSON, binary, etc.) is
 /// determined by the Serializer implementation.
 ///
+
 /// # Deriving
 ///
+
 /// Most types can derive Serialize automatically:
 /// ```verum
 /// @derive(Serialize)
@@ -133,11 +143,14 @@ public type Serialize is protocol {
 
 /// Protocol for types that can be deserialized from an external format.
 ///
+
 /// Implementations describe how to reconstruct a value from its components
 /// using the Deserializer interface.
 ///
+
 /// # Deriving
 ///
+
 /// Most types can derive Deserialize automatically:
 /// ```verum
 /// @derive(Deserialize)
@@ -154,11 +167,14 @@ public type Deserialize is protocol {
 
 /// Protocol for format-specific serialization drivers.
 ///
+
 /// A Serializer receives calls describing a value's structure and produces
 /// the serialized output in the target format.
 ///
+
 /// # Implementors
 ///
+
 /// Serializer is implemented by format libraries:
 /// - `JsonSerializer` - JSON output
 /// - `MsgpackSerializer` - MessagePack binary
@@ -206,11 +222,14 @@ public type Serializer is protocol {
 
 /// Protocol for format-specific deserialization drivers.
 ///
+
 /// A Deserializer reads from the serialized format and produces values
 /// of the requested types.
 ///
+
 /// # Implementors
 ///
+
 /// Deserializer is implemented by format libraries:
 /// - `JsonDeserializer` - JSON input
 /// - `MsgpackDeserializer` - MessagePack binary

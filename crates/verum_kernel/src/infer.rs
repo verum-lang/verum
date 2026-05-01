@@ -1,5 +1,6 @@
 //! Kernel typing judgment — `infer` / `check` / `verify` / `verify_full`.
 //!
+
 //! Split . The core LCF-style judgment `Γ ⊢ t : T` of the
 //! kernel. Every proof term that reaches the kernel is either accepted
 //! with a concrete inferred type, or rejected with a [`KernelError`].
@@ -14,49 +15,54 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 /// Infer the type of a [`CoreTerm`], returning the full type as a
 /// [`CoreTerm`] on success.
 ///
+
 /// This is the core LCF-style judgment `Γ ⊢ t : T` of the kernel.
 /// Every proof term that reaches the kernel is either accepted with a
 /// concrete inferred type, or rejected with a [`KernelError`]. There
 /// is no third option — no "unknown", no "probably", no fallback.
 ///
+
 /// The returned [`CoreTerm`] is the actual dependent type, **not** a
 /// shape abstraction: applying `infer` to a lambda yields the Π-type
 /// with the exact domain and codomain terms, so downstream App checks
 /// can destructure it. Use [`shape_of`] when only the head is needed
 /// (e.g. for error messages).
 ///
+
 /// ## Implemented rules
 ///
-/// * `Var x`         — lookup in `ctx`; error if unbound.
-/// * `Universe l`    — `Type(l+1)` (predicative hierarchy; Prop lives
-///   at level 0 for the current bring-up).
-/// * `Pi (x:A) B`    — both `A` and `B` must check in some universe;
-///   result is the universe of the larger level (max rule).
-/// * `Lam (x:A) b`   — extends ctx with `x:A`, checks `b` to get `B`,
-///   returns `Pi (x:A) B`.
-/// * `App f a`       — `f` must be a `Pi (x:A) B`; `a` must check at
-///   `A`; result is `B[x := a]` (capture-avoiding).
-/// * `Axiom {name}`  — looked up in [`AxiomRegistry`]; result is the
-///   registered type.
-/// * `Sigma`         — fst_ty and snd_ty (extended ctx) in universes;
-///   result in max of the two.
-/// * `Pair`          — synthesizes a non-dependent Σ; dependent-Σ
-///   introduction lands with bidirectional check-mode.
-/// * `Fst` / `Snd`   — destructure a Σ; `Snd` substitutes `fst(pair)`
-///   into the second component's binder.
-/// * `PathTy`        — carrier in universe, lhs/rhs check at carrier.
-/// * `Refl`          — `x : A ⇒ refl(x) : Path<A>(x, x)`.
-/// * `Refine`        — base in universe, predicate well-typed under
-///   extended ctx (full `predicate : Bool` gate lands once the Bool
-///   primitive is canonically registered).
-/// * `Inductive`     — lives in `Type(0)` at bring-up; universe
-///   annotations arrive with the type-registry bridge.
-/// * `HComp`         — returns base's type (bring-up; full cubical
-///   reduction on top).
-/// * `Transp`        — returns path's right-hand endpoint type.
-/// * `Glue`          — lives in carrier's universe.
-/// * `Elim`          — shape-level; returns `motive(scrutinee)`.
+
+/// * `Var x` — lookup in `ctx`; error if unbound.
+/// * `Universe l` — `Type(l+1)` (predicative hierarchy; Prop lives
+///  at level 0 for the current bring-up).
+/// * `Pi (x:A) B` — both `A` and `B` must check in some universe;
+///  result is the universe of the larger level (max rule).
+/// * `Lam (x:A) b` — extends ctx with `x:A`, checks `b` to get `B`,
+///  returns `Pi (x:A) B`.
+/// * `App f a` — `f` must be a `Pi (x:A) B`; `a` must check at
+///  `A`; result is `B[x := a]` (capture-avoiding).
+/// * `Axiom {name}` — looked up in [`AxiomRegistry`]; result is the
+///  registered type.
+/// * `Sigma` — fst_ty and snd_ty (extended ctx) in universes;
+///  result in max of the two.
+/// * `Pair` — synthesizes a non-dependent Σ; dependent-Σ
+///  introduction lands with bidirectional check-mode.
+/// * `Fst` / `Snd` — destructure a Σ; `Snd` substitutes `fst(pair)`
+///  into the second component's binder.
+/// * `PathTy` — carrier in universe, lhs/rhs check at carrier.
+/// * `Refl` — `x : A ⇒ refl(x) : Path<A>(x, x)`.
+/// * `Refine` — base in universe, predicate well-typed under
+///  extended ctx (full `predicate : Bool` gate lands once the Bool
+///  primitive is canonically registered).
+/// * `Inductive` — lives in `Type(0)` at bring-up; universe
+///  annotations arrive with the type-registry bridge.
+/// * `HComp` — returns base's type (bring-up; full cubical
+///  reduction on top).
+/// * `Transp` — returns path's right-hand endpoint type.
+/// * `Glue` — lives in carrier's universe.
+/// * `Elim` — shape-level; returns `motive(scrutinee)`.
 ///
+
 /// The **only** constructor that still returns
 /// [`KernelError::NotImplemented`] is `SmtProof` — its dedicated
 /// replay path lives in [`replay_smt_cert`] and lands per-backend
@@ -69,6 +75,7 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 /// universe level for the named inductive instead of the
 /// pre-V8 hardcoded `Universe(Concrete(0))` fallback.
 ///
+
 /// The original [`infer`] is preserved as a backwards-compat
 /// shim that delegates here with an empty registry — pre-V8
 /// callers see exactly the same behaviour because empty-registry
@@ -100,15 +107,17 @@ pub fn infer(
 /// a [`CoreTerm::Axiom`] reference, the K-Coord-Cite rule
 ///  automatically fires:
 ///
-///   * If the axiom has a registered coord and the calling
-///     theorem has a coord, [`crate::check_coord_cite`] is
-///     invoked. On rejection,
-///     [`crate::KernelError::CoordViolation`] propagates.
-///   * If either coord is absent, the K-Coord-Cite rule
-///     silently passes (axiom is unannotated or theorem
-///     context disabled — graceful degradation, preserves
-///     pre-V8 behaviour for legacy callers).
+
+///  * If the axiom has a registered coord and the calling
+///  theorem has a coord, [`crate::check_coord_cite`] is
+///  invoked. On rejection,
+///  [`crate::KernelError::CoordViolation`] propagates.
+///  * If either coord is absent, the K-Coord-Cite rule
+///  silently passes (axiom is unannotated or theorem
+///  context disabled — graceful degradation, preserves
+///  pre-V8 behaviour for legacy callers).
 ///
+
 /// `allow_tier_jump` corresponds to the
 /// `@require_extension(vfe_3)` (Categorical coherence K-Universe-Ascent)
 /// escape: when the calling module imports the κ-tier-jump
@@ -116,6 +125,7 @@ pub fn infer(
 /// admitted. The kernel itself cannot detect the import; the
 /// caller signals via this flag.
 ///
+
 /// This is the production-path entry: gradual-verification
 /// drivers + audit walkers should call this when they have
 /// the calling theorem's coord in hand. Backwards-compat
@@ -179,6 +189,7 @@ fn infer_inner_with_coord(
     // populated), preventing accidental recursion-level
     // double-firing on nested axioms inside compound types.
     //
+
     // This is sound: a theorem T at coord ν cites axiom A at
     // coord ν' — the rule fires once for the outermost T→A
     // edge. Inner sub-terms that recursively reach axioms are
@@ -192,6 +203,7 @@ fn infer_inner_with_coord(
 
         // Universe `Type(n)` inhabits `Type(n+1)`; `Prop` inhabits `Type(0)`.
         //
+
         //  soundness fix: `saturating_add(1)` at u32::MAX
         // silently returns u32::MAX, yielding the type-in-type rule
         // `Universe(Concrete(MAX)) : Universe(Concrete(MAX))`. Detect
@@ -242,14 +254,15 @@ fn infer_inner_with_coord(
             })
         }
 
-        // App-elimination: f : Pi (x:A) B,  a : A  ⇒  f a : B[x := a].
+        // App-elimination: f : Pi (x:A) B, a : A ⇒ f a : B[x := a].
         //
+
         // domain-against-arg-type comparison uses
         // `definitional_eq` (β-aware) instead of `structural_eq`
         // (byte-identity). Pre-V8 a Π whose domain has a β-redex
         // (e.g., `(λT:Type. T) Nat ≡_β Nat`) and an arg typed at
         // `Nat` would FALSELY REJECT — the domain's redex never got
-        // reduced before the equality check. Mirrors the 
+        // reduced before the equality check. Mirrors the
         // PathTy fix; same monotone strengthening (only widens
         // acceptance, never weakens).
         CoreTerm::App(f, arg) => {
@@ -291,9 +304,10 @@ fn infer_inner_with_coord(
         // both components check in some type and synthesize a
         // non-dependent Σ with binder `_`.
         //
+
         // A fully dependent `Pair (a, b) : Sigma (x : A) B` rule needs
         // an expected-type channel (`check` mode), which lands with
-        // bidirectional elaboration.  Until then we keep the simpler
+        // bidirectional elaboration. Until then we keep the simpler
         // rule here and tag the restriction.
         CoreTerm::Pair(fst, snd) => {
             let fst_ty = infer_inner(ctx,fst, axioms, inductives)?;
@@ -329,6 +343,7 @@ fn infer_inner_with_coord(
         // (i.e. inhabits some universe) and lhs, rhs both check at A.
         // Result lives in A's universe, same as carrier.
         //
+
         // endpoint-against-carrier comparison uses
         // `definitional_eq` (β-aware) instead of `structural_eq`
         // (byte-identity). Pre-V8 a path with carrier = `App(Lam,
@@ -370,11 +385,13 @@ fn infer_inner_with_coord(
 
         // K-PathOver-Form:
         //
-        //   Γ ⊢ motive : B → U     Γ ⊢ p : Path<B>(b₀, b₁)
-        //   Γ ⊢ lhs : motive(b₀)   Γ ⊢ rhs : motive(b₁)
-        //   ───────────────────────────────────────────────
-        //   Γ ⊢ PathOver(motive, p, lhs, rhs) : U
+
+        //  Γ ⊢ motive : B → U Γ ⊢ p : Path<B>(b₀, b₁)
+        //  Γ ⊢ lhs : motive(b₀) Γ ⊢ rhs : motive(b₁)
+        //  ───────────────────────────────────────────────
+        //  Γ ⊢ PathOver(motive, p, lhs, rhs) : U
         //
+
         // Conservative shape-only validation today: motive must be
         // a Pi (B → U), path must be a PathTy. The endpoint-image
         // check (`lhs : motive(b₀)`, `rhs : motive(b₁)`) is the
@@ -418,13 +435,15 @@ fn infer_inner_with_coord(
         // inhabits the same type as `base` — composition does not
         // change the carrier.
         //
+
         // Checks performed:
-        //   * `phi` is well-typed — conservative, no interval
-        //     subsumption yet; full cofibration-calculus lands with
-        //     the dedicated cubical-kernel pass (task #89-adjacent).
-        //   * `walls` is well-typed as some family.
-        //   * `base` is well-typed; its type is returned.
+        //  * `phi` is well-typed — conservative, no interval
+        //  subsumption yet; full cofibration-calculus lands with
+        //  the dedicated cubical-kernel pass (task #89-adjacent).
+        //  * `walls` is well-typed as some family.
+        //  * `base` is well-typed; its type is returned.
         //
+
         // Rejected shapes: ill-typed subterms surface the underlying
         // `KernelError` rather than being swallowed, so a spurious
         // composition cannot sneak into the TCB.
@@ -438,12 +457,14 @@ fn infer_inner_with_coord(
         // `r : I` (regularity endpoint), `t : A` — result inhabits
         // `B`, the path's right-hand endpoint.
         //
+
         // Checks performed:
-        //   * `path` is well-typed and its type is `PathTy { lhs, rhs }`
-        //     (not just some arbitrary term).
-        //   * `regular` is well-typed (interval-subsumption deferred).
-        //   * `value` is well-typed; result type is the path's `rhs`.
+        //  * `path` is well-typed and its type is `PathTy { lhs, rhs }`
+        //  (not just some arbitrary term).
+        //  * `regular` is well-typed (interval-subsumption deferred).
+        //  * `value` is well-typed; result type is the path's `rhs`.
         //
+
         // On a non-PathTy path type (e.g. a neutral whose head is
         // still an unsolved type-meta), we conservatively fall back
         // to the `value`'s own type — the alternative would be
@@ -464,12 +485,14 @@ fn infer_inner_with_coord(
         // type family on φ, and e is the equivalence family between
         // T and A on φ.
         //
+
         // Checks performed:
-        //   * `carrier` is in a universe; its level determines the
-        //     Glue type's universe.
-        //   * `phi`, `fiber`, `equiv` are each well-typed under the
-        //     current context.
+        //  * `carrier` is in a universe; its level determines the
+        //  Glue type's universe.
+        //  * `phi`, `fiber`, `equiv` are each well-typed under the
+        //  current context.
         //
+
         // Full univalence computation (Glue-beta, φ-equiv coherence,
         // unglue) lands in the cubical-kernel follow-up — at this
         // phase the kernel certifies that the Glue constructor was
@@ -488,6 +511,7 @@ fn infer_inner_with_coord(
         // predicate must check under the extended ctx (bound to Bool at
         // full-rule closure; shape-level at bring-up).
         //
+
         // K-Refine (/ §4.4 / Diakrisis T-2f*): the predicate's
         // M-iteration depth MUST be strictly less than base's depth + 1.
         // Per Yanofsky 2003 this closes every self-referential paradox
@@ -624,6 +648,7 @@ fn infer_inner_with_coord(
         // `elim e motive cases`. The result inhabits `motive` applied
         // to the scrutinee.
         //
+
         // V0 (bring-up — pre-V8): only inferred motive's type, then
         // returned `App(motive, scrutinee)` syntactically without
         // verifying motive was a function or that scrutinee fit its
@@ -632,14 +657,17 @@ fn infer_inner_with_coord(
         // `Int` would return a malformed result that the App rule
         // surfaced only on later use.
         //
+
         // V1 (this revision) — adopt the same *well-formedness*
         // check the App rule does:
         //
-        //   1. motive's TYPE must be a Π (motive is a function from
-        //      some domain to some universe).
-        //   2. scrutinee's type must structurally match the Π's
-        //      domain.
+
+        //  1. motive's TYPE must be a Π (motive is a function from
+        //  some domain to some universe).
+        //  2. scrutinee's type must structurally match the Π's
+        //  domain.
         //
+
         // The *result type* is still the syntactic application
         // `motive scrutinee` — semantically motive(scrutinee), with
         // β-reduction left to downstream definitional equality.
@@ -650,6 +678,7 @@ fn infer_inner_with_coord(
         // exhaustiveness + typing remains the dedicated Elim-rule
         // pass's job.
         //
+
         // M-VVA Sub-2.3 (definitional_eq lifting, 2026-04-28): use
         // β-/ι-/δ-aware `definitional_eq_with_axioms` instead of
         // `structural_eq` so an Elim whose scrutinee type is a β-redex
@@ -678,6 +707,7 @@ fn infer_inner_with_coord(
         // rule-tag + obligation hash), a witness term is constructed,
         // and the witness's conservative type is returned.
         //
+
         // Until the full step-by-step Z3 `(proof …)` / CVC5 ALETHE
         // reconstruction lands (task #89), the witness type is
         // `Inductive("Bool")` — the standing convention for
@@ -720,7 +750,7 @@ fn infer_inner_with_coord(
         // articulation/enactment duality. They inherit the type of
         // their argument (ε and α are endo-2-functors at the term
         // level — the M⊣A biadjunction structure shows up only at
-        // the 2-cell level). V1 will refine the type to track
+        // the 2-cell level). Future work will refine the type to track
         // whether the result lives in the articulation 2-category
         // or the enactment 2-category.
         CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => {
@@ -751,6 +781,7 @@ fn infer_inner_with_coord(
         // operand must be in some universe (Type_i / Prop); the
         // kernel reports `KernelError::TypeMismatch` otherwise.
         //
+
         // The triple-adjunction laws ∫ ⊣ ♭ ⊣ ♯ are framework
         // axioms (`schreiber_dcct`); the kernel admits the type
         // formers unconditionally, leaving the algebraic content
@@ -783,6 +814,7 @@ pub fn check(
 /// definitional comparison of the two types (not shape-head). This is
 /// the LCF-style verification gate that downstream crates call.
 ///
+
 /// **M-VVA Sub-2.3 (2026-04-28):** uses `definitional_eq_with_axioms`
 /// instead of `structural_eq`. Lifting is monotone — every pair
 /// admitted by `structural_eq` is admitted by `definitional_eq` per

@@ -1,12 +1,15 @@
 //! Module merging for monomorphization.
 //!
+
 //! The ModuleMerger combines:
 //! - User module VBC
 //! - Stdlib precompiled specializations
 //! - Newly monomorphized functions
 //!
+
 //! Into a final monomorphized VBC module ready for execution.
 //!
+
 //! Key responsibilities:
 //! 1. Copy user module structure (types, strings, constants)
 //! 2. Copy user bytecode with offset remapping
@@ -14,6 +17,7 @@
 //! 4. Add newly specialized functions
 //! 5. **CRITICAL: Fixup all function references in bytecode**
 //!
+
 //! Final phase of monomorphization: produces a self-contained VBC module with all
 //! generic instantiations resolved to concrete specialized functions.
 
@@ -371,9 +375,11 @@ impl ModuleMerger {
 
     /// Fixes up function references in bytecode.
     ///
+
     /// This is **CRITICAL** for correctness - rewrites all CALL, CALL_G, CALL_V,
     /// TAIL_CALL instructions to point to the correct function IDs in the merged module.
     ///
+
     /// The algorithm:
     /// 1. For each function's bytecode range
     /// 2. Scan for call-related opcodes
@@ -826,6 +832,7 @@ impl ModuleMerger {
 
 /// Incremental module merger for hot-reload scenarios.
 ///
+
 /// Supports adding new specializations without rebuilding the entire module.
 pub struct IncrementalMerger {
     /// Base merged module.

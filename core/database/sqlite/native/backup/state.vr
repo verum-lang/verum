@@ -3,18 +3,22 @@
 // =============================================================================
 // Spec: sqlite-native.md §22
 //
+
 // A `BackupEngineHandle` walks a source database page-by-page into a target
 // database. The state machine has four phases:
 //
-//   * `Initialised`  — handle created, no pages copied yet
-//   * `Streaming`    — `copied_pages > 0`, more pages remain
-//   * `Done`         — `copied_pages == total_pages`
-//   * `Failed`       — IO error or source change rendering snapshot invalid
+
+//  * `Initialised` — handle created, no pages copied yet
+//  * `Streaming` — `copied_pages > 0`, more pages remain
+//  * `Done` — `copied_pages == total_pages`
+//  * `Failed` — IO error or source change rendering snapshot invalid
 //
+
 // `step(n_pages)` advances the cursor by up to `n_pages`, returns
 // the new state. Calling `step` after `Done` or `Failed` is a no-op
 // (returns the current state).
 //
+
 // Throttling is the caller's responsibility — see `policy.vr`.
 // =============================================================================
 

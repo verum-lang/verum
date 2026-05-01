@@ -5,10 +5,12 @@
 // Dependencies: core.io, raw/escape.vr, raw/capabilities.vr, layout/rect.vr
 // =============================================================================
 //
+
 // Protocol and implementations for rendering images in the terminal.
 // Supports Kitty graphics protocol, Sixel, iTerm2 inline images, and
 // a Unicode Braille fallback for terminals without graphics support.
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.1
 // =============================================================================
 
@@ -266,10 +268,10 @@ implement GraphicsRenderer for BrailleGraphics {
     fn render_image(&mut self, data: &[Byte], format: ImageFormat, area: Rect) -> IoResult<()> {
         // Each braille character is 2 columns x 4 rows of dots (U+2800..U+28FF)
         // Braille dot positions:
-        //   bit 0  bit 3     (col 0, col 1)
-        //   bit 1  bit 4
-        //   bit 2  bit 5
-        //   bit 6  bit 7
+        //  bit 0 bit 3 (col 0, col 1)
+        //  bit 1 bit 4
+        //  bit 2 bit 5
+        //  bit 6 bit 7
         // Only supports Rgb24 input; threshold luminance to determine dot on/off
         let pixel_width = area.width * 2;
         let pixel_height = area.height * 4;

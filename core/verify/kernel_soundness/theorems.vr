@@ -2,46 +2,55 @@
 // kernel_soundness.theorems — per-rule soundness lemmas (35 statements)
 // =============================================================================
 //
-// One soundness lemma per `KernelRule`.  The shape is:
+
+// One soundness lemma per `KernelRule`. The shape is:
 //
-//   lemma K_<Rule>_sound: forall d: Derivation.
-//       d.rule == KernelRule.K<Rule>
-//       /\ premises_well_typed(d)
-//       /\ side_conditions_hold(d)
-//       -> conclusion_well_typed(d)
+
+//  lemma K_<Rule>_sound: forall d: Derivation.
+//  d.rule == KernelRule.K<Rule>
+//  /\ premises_well_typed(d)
+//  /\ side_conditions_hold(d)
+//  -> conclusion_well_typed(d)
 //
-// **Audit-able TCB principle.**  Every lemma is either:
+
+// **Audit-able TCB principle.** Every lemma is either:
 //
-//   * **Proved structurally** in Verum, the proof being a function
-//     consuming the `Derivation` evidence and producing a
-//     `WellTyped(d.conclusion)` witness.  The proof is run by
-//     `verum audit --kernel-soundness` so any code drift surfaces
-//     immediately.
+
+//  * **Proved structurally** in Verum, the proof being a function
+//  consuming the `Derivation` evidence and producing a
+//  `WellTyped(d.conclusion)` witness. The proof is run by
+//  `verum audit --kernel-soundness` so any code drift surfaces
+//  immediately.
 //
-//   * **Admitted with a concrete cost annotation** via `Admit { reason }`.
-//     The reason names the missing meta-theory (e.g., "requires
-//     positivity-of-W-types decision procedure" for K-Pos in full
-//     generality) and is preserved verbatim into the Coq `Admitted.`
-//     and Lean `sorry` emissions, so a foreign reviewer sees the
-//     same gap Verum sees.  Admits are *not* hand-waves — they are
-//     load-bearing IOUs against future meta-theoretic work, and the
-//     audit gate's report enumerates them so they can never be
-//     forgotten.
+
+//  * **Admitted with a concrete cost annotation** via `Admit { reason }`.
+//  The reason names the missing meta-theory (e.g., "requires
+//  positivity-of-W-types decision procedure" for K-Pos in full
+//  generality) and is preserved verbatim into the Coq `Admitted.`
+//  and Lean `sorry` emissions, so a foreign reviewer sees the
+//  same gap Verum sees. Admits are *not* hand-waves — they are
+//  load-bearing IOUs against future meta-theoretic work, and the
+//  audit gate's report enumerates them so they can never be
+//  forgotten.
 //
+
 // **What's proved here vs. admitted.**
 //
+
 // Proved (4): K-Var, K-Univ, K-FwAx (Prop side-condition discharge),
-//             K-Pos (Berardi-shape rejection by structural check on
-//             constructor signatures).
+//  K-Pos (Berardi-shape rejection by structural check on
+//  constructor signatures).
 //
-// Admitted (31): the remaining rules.  Each admit names exactly the
-// piece of meta-theory it depends on.  See the per-lemma reasons.
+
+// Admitted (31): the remaining rules. Each admit names exactly the
+// piece of meta-theory it depends on. See the per-lemma reasons.
 //
-// **Cross-export contract.**  The Coq emitter walks
+
+// **Cross-export contract.** The Coq emitter walks
 // `lemma_admit_reason` for each lemma; if `Some(reason)`, the .v file
-// emits `Admitted.` with `(* reason: <reason> *)`.  If `None`, the
-// .v file emits the proof tactics from `lemma_coq_proof`.  Same for
-// Lean.  This is what makes the cross-export an *honest* foreign
+// emits `Admitted.` with `(* reason: <reason> *)`. If `None`, the
+// .v file emits the proof tactics from `lemma_coq_proof`. Same for
+// Lean. This is what makes the cross-export an *honest* foreign
 // re-check rather than a rubber-stamp.
 // =============================================================================
 
@@ -64,17 +73,18 @@ mount core.verify.kernel_soundness.rules.{
 
 /// The proof status of a per-rule soundness lemma.
 ///
-///   * `Proved` — Verum has a structural proof in this corpus.  The
-///     audit gate runs the proof and the cross-export emits the
-///     corresponding tactic chain in Coq/Lean.
-///   * `Admitted { reason }` — a concrete IOU.  `reason` describes
-///     the meta-theoretic prerequisite; it appears in audit reports
-///     and is preserved into Coq `Admitted.` / Lean `sorry`.
+
+///  * `Proved` — Verum has a structural proof in this corpus. The
+///  audit gate runs the proof and the cross-export emits the
+///  corresponding tactic chain in Coq/Lean.
+///  * `Admitted { reason }` — a concrete IOU. `reason` describes
+///  the meta-theoretic prerequisite; it appears in audit reports
+///  and is preserved into Coq `Admitted.` / Lean `sorry`.
 public type LemmaStatus is
     | Proved
     | Admitted { reason: Text };
 
-/// Project the soundness status of a kernel rule.  This is the
+/// Project the soundness status of a kernel rule. This is the
 /// public accountability surface: every admit is enumerated, every
 /// proof is named, and the cross-export uses the result to decide
 /// whether to emit a tactic chain or an `Admitted` marker.
@@ -327,26 +337,29 @@ public pure fn lemma_admit_reason(r: KernelRule) -> Maybe<Text> {
 // Per-rule statement skeletons
 // =============================================================================
 //
+
 // `lemma_statement(r)` produces the statement text for the soundness
-// lemma corresponding to rule `r` — pure data, no proof.  The cross-
+// lemma corresponding to rule `r` — pure data, no proof. The cross-
 // export emitter uses this to generate the `Lemma K_<Name>_sound : ...`
-// in Coq / `theorem K_<Name>_sound : ...` in Lean.  Every emitted
+// in Coq / `theorem K_<Name>_sound : ...` in Lean. Every emitted
 // statement carries the same shape:
 //
-//   forall d: Derivation,
-//     d.rule = K<Name> ->
-//     all_premises_well_typed(d) ->
-//     all_side_conditions_hold(d) ->
-//     well_typed(d.conclusion)
+
+//  forall d: Derivation,
+//  d.rule = K<Name> ->
+//  all_premises_well_typed(d) ->
+//  all_side_conditions_hold(d) ->
+//  well_typed(d.conclusion)
 //
+
 // We render the *uniform* shape rather than per-rule custom text so
-// the foreign-tool import is mechanical.  The per-rule meaning is
+// the foreign-tool import is mechanical. The per-rule meaning is
 // recovered from `rule_premises_required(d)` and
 // `rule_side_conditions_required(d)`, which the emitter walks
 // alongside.
 // =============================================================================
 
-/// Stable lemma-name for kernel rule `r`.  Format: `K_<Name>_sound`.
+/// Stable lemma-name for kernel rule `r`. Format: `K_<Name>_sound`.
 /// Used by the cross-export emitter as the foreign-tool identifier.
 public pure fn lemma_name(r: KernelRule) -> Text {
     let rule_text = kernel_rule_name(r);
@@ -357,25 +370,27 @@ public pure fn lemma_name(r: KernelRule) -> Text {
 // Proof discharge for the structurally-proved lemmas
 // =============================================================================
 //
+
 // For each proved lemma we record:
-//   * `coq_proof_text(r)` — the exact tactic chain the cross-export
-//     should emit between `Proof.` and `Qed.` in the .v file.
-//   * `lean_proof_text(r)` — the exact tactic block for the .lean file.
+//  * `coq_proof_text(r)` — the exact tactic chain the cross-export
+//  should emit between `Proof.` and `Qed.` in the .v file.
+//  * `lean_proof_text(r)` — the exact tactic block for the .lean file.
 //
+
 // The proofs themselves are short because the propositions reduce to
 // inspections of structural data (a context lookup, a universe-level
-// comparison, a structural-positivity scan).  Verum's own elaborator
+// comparison, a structural-positivity scan). Verum's own elaborator
 // would also discharge these — they're admit-free here, and the
 // cross-export ensures Coq + Lean agree.
 // =============================================================================
 
-/// Coq proof tactic for a structurally-proved lemma.  Empty string
+/// Coq proof tactic for a structurally-proved lemma. Empty string
 /// for admitted lemmas (the emitter will use `Admitted.` instead).
 public pure fn coq_proof_text(r: KernelRule) -> Text {
     match r {
-        // K-Var: variable lookup is deterministic.  In Coq the proof is:
-        //   Proof. intros d Hrule Hctx Hwf. apply ctx_lookup_sound;
-        //   [exact Hrule | exact Hctx | exact Hwf]. Qed.
+        // K-Var: variable lookup is deterministic. In Coq the proof is:
+        //  Proof. intros d Hrule Hctx Hwf. apply ctx_lookup_sound;
+        //  [exact Hrule | exact Hctx | exact Hwf]. Qed.
         KernelRule.KVar => Text.from(
             "  intros d Hrule Hwf. apply ctx_lookup_sound; auto."
         ),
@@ -392,7 +407,7 @@ public pure fn coq_proof_text(r: KernelRule) -> Text {
             \  destruct Hside as [body_prop _].\n\
             \  exact (axiom_body_typed_in_prop body_prop)."
         ),
-        // K-Pos: strict-positivity rejection is a structural scan.  The
+        // K-Pos: strict-positivity rejection is a structural scan. The
         // side condition produces a `StrictlyPositive` witness; the proof
         // wraps it.
         KernelRule.KPos => Text.from(
@@ -404,7 +419,7 @@ public pure fn coq_proof_text(r: KernelRule) -> Text {
     }
 }
 
-/// Lean 4 proof tactic for a structurally-proved lemma.  Same role as
+/// Lean 4 proof tactic for a structurally-proved lemma. Same role as
 /// `coq_proof_text` but in Lean syntax.
 public pure fn lean_proof_text(r: KernelRule) -> Text {
     match r {

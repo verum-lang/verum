@@ -3,14 +3,17 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.2 (output of `EXPLAIN QUERY PLAN`)
 //
+
 // Produces the rows the user sees from
 //
-//   EXPLAIN QUERY PLAN SELECT ... ;
+
+//  EXPLAIN QUERY PLAN SELECT ... ;
 //
+
 // SQLite emits rows of the form
-//   id INT, parent INT, notused INT, detail TEXT
+//  id INT, parent INT, notused INT, detail TEXT
 // where `detail` is a human-readable description like
-//   "SCAN TABLE users", "SEARCH INDEX users_email", "USE TEMP B-TREE FOR GROUP BY".
+//  "SCAN TABLE users", "SEARCH INDEX users_email", "USE TEMP B-TREE FOR GROUP BY".
 // =============================================================================
 
 module core.database.sqlite.native.planner_cost.explain;

@@ -14,6 +14,7 @@
 )]
 //! Test for bisimulation verification of coinductive types
 //!
+
 //! This test demonstrates the full bisimulation verification algorithm
 //! for Stream<Int> coinductive type using Z3.
 

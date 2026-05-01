@@ -2,8 +2,10 @@
 // session.vr — Session-typed channel protocols
 // =============================================================================
 //
+
 // Layer: Standard Library / Concurrency
 //
+
 // User-facing surface for the session-types analysis core
 // (`verum_types.session_types`). A session type describes the
 // sequence of sends, receives, and choices that two communicating
@@ -11,26 +13,33 @@
 // statically rule out deadlocks, protocol mismatches, and
 // linearity violations.
 //
+
 // ## Design
 //
+
 // Each protocol step is exposed as a value-level constructor on the
 // `Protocol` type. A channel handle carries a *phantom protocol*
 // type-parameter that advances after each operation, so the type
 // system tracks remaining-protocol statically.
 //
+
 // ## Example
 //
+
 // ```verum
 // // A simple echo protocol: client sends Int, server replies Int.
 // let echo: Protocol = Protocol.send("Int", Protocol.recv("Int", Protocol.end()));
 //
+
 // // The dual is an automatic compute:
 // let server: Protocol = echo.dual();
 //
+
 // // Compatibility is the deadlock-freedom predicate.
 // assert(echo.compatible_with(server));
 // ```
 //
+
 // =============================================================================
 
 module core.concurrency.session;
@@ -150,7 +159,7 @@ public fn protocols_equal(a: Protocol, b: Protocol) -> Bool {
 
 implement Eq for Protocol {
     /// Structural equality — delegates to the existing
-    /// `protocols_equal` recursive walk.  Two `Protocol` values are
+    /// `protocols_equal` recursive walk. Two `Protocol` values are
     /// equal iff their step sequences match operator-for-operator.
     fn eq(&self, other: &Protocol) -> Bool {
         match (self, other) {
@@ -174,11 +183,11 @@ implement Eq for Protocol {
 
 implement Display for Protocol {
     /// Renders a session-type protocol in the standard notation:
-    ///   `Send  { payload, rest }`   → `!payload.<rest>`
-    ///   `Recv  { payload, rest }`   → `?payload.<rest>`
-    ///   `Offer { left, right }`     → `<left> ⊕ <right>`   (external choice)
-    ///   `Select { left, right }`    → `<left> & <right>`   (internal choice)
-    ///   `End`                       → `end`
+    ///  `Send { payload, rest }` → `!payload.<rest>`
+    ///  `Recv { payload, rest }` → `?payload.<rest>`
+    ///  `Offer { left, right }` → `<left> ⊕ <right>` (external choice)
+    ///  `Select { left, right }` → `<left> & <right>` (internal choice)
+    ///  `End` → `end`
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             Protocol.Send { payload, rest } => {

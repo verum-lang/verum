@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: https://www.sqlite.org/eqp.html
 //
+
 // Two renderers:
 //
-//   * `format_vdbe(table)`     — one row per opcode, fixed-column-width text
-//   * `format_query_plan(tree)` — indented tree shape with `--` connectors
+
+//  * `format_vdbe(table)` — one row per opcode, fixed-column-width text
+//  * `format_query_plan(tree)` — indented tree shape with `--` connectors
 // =============================================================================
 
 module core.database.sqlite.native.explain.formatter;
@@ -107,7 +109,7 @@ fn push_text(dst: &mut Text, s: &Text) {
 fn push_int(dst: &mut Text, n: Int) {
     if n == 0 { dst.push_byte(48 as Byte); return; }
     let mut digits: List<Byte> = List.new();
-    // UInt64 magnitude — Int.MIN-safe.  See canonical fix in
+    // UInt64 magnitude — Int.MIN-safe. See canonical fix in
     // core/text/format.int_to_string.
     let mut mag: UInt64 = if n < 0 {
         (((!n) as UInt64) + 1_u64)

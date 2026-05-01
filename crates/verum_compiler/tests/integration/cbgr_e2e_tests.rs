@@ -1,10 +1,13 @@
 //! End-to-End CBGR Integration Tests
 //!
+
 //! These tests verify the complete CBGR pipeline from source code through
 //! parsing, type checking, escape analysis, MIR, and codegen.
 //!
+
 //! # Test Coverage
 //!
+
 //! 1. Simple reference promotion
 //! 2. Path-sensitive conditional promotion
 //! 3. Field-sensitive struct field promotion
@@ -16,6 +19,7 @@
 //! 9. Performance regression test
 //! 10. LSP hints integration
 //!
+
 //! CBGR (Capability-Based Generational References) implementation:
 //! Three-tier references: &T (managed, ~15ns CBGR check), &checked T (compiler-proven,
 //! 0ns), &unsafe T (manual proof, 0ns). Escape analysis promotes &T to &checked T

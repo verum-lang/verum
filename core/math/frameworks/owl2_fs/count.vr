@@ -2,34 +2,38 @@
 // owl2_fs.count — count_o quantifier-of-quantity primitive (VVA §21.5 / C9 V1)
 // =============================================================================
 //
+
 // Shkotin 2019 introduces a quantifier of quantity `#y:o P(y)` that
 // returns the number of OWL 2 Individuals satisfying the predicate
 // P. The HOL semantics is `|{y : Individual | P(y)}|` — only
 // well-defined when the comprehension set is finite.
 //
+
 // V1 (this commit) ships:
-//   * the `count_o(domain, pred)` Verum-side function — a *bounded*
-//     fold over a user-supplied finite domain witness;
-//   * the `count_o_unbounded` companion that returns a Maybe<Int>
-//     when the SMT backend cannot decide finiteness;
-//   * the `E_OWL2_UNBOUNDED_COUNT` diagnostic *name* (compile-time
-//     guard surfaced by user code via `assert_finite_domain`).
+//  * the `count_o(domain, pred)` Verum-side function — a *bounded*
+//  fold over a user-supplied finite domain witness;
+//  * the `count_o_unbounded` companion that returns a Maybe<Int>
+//  when the SMT backend cannot decide finiteness;
+//  * the `E_OWL2_UNBOUNDED_COUNT` diagnostic *name* (compile-time
+//  guard surfaced by user code via `assert_finite_domain`).
 //
+
 // V2 wires CVC5 Finite Model Finding into the SMT routing so
 // `count_o_unbounded` is decided automatically when the domain has a
 // CVC5-discoverable cardinality bound; the diagnostic is then promoted
 // to a hard error from a user-emittable warning.
 //
+
 // This file deliberately keeps `count_o` as a *parameterised* fold
 // over an explicit domain `List<Individual>` — V1 chooses
 // constructive correctness (the user supplies the universe) over
-// black-box SMT decidability (V2). Production code mounts the
+// black-box SMT decidability . Production code mounts the
 // closed-domain helper from `core.math.frameworks.owl2_fs.types`.
 // =============================================================================
 
 mount core.math.frameworks.owl2_fs.types;
 
-/// `E_OWL2_UNBOUNDED_COUNT` diagnostic name.  Returned as part of a
+/// `E_OWL2_UNBOUNDED_COUNT` diagnostic name. Returned as part of a
 /// `Maybe.None` from `count_o_unbounded` and surfaced by the typed
 /// elaboration layer (`verum_ast.attr.typed.Owl2ClassAttr`) when a
 /// `count_o` query is issued against a class that lacks
@@ -38,12 +42,14 @@ mount core.math.frameworks.owl2_fs.types;
 public let E_OWL2_UNBOUNDED_COUNT: Text = "E_OWL2_UNBOUNDED_COUNT";
 
 /// Bounded count: walks `domain` and returns the number of
-/// individuals for which `pred` holds.  Total because `domain` is
+/// individuals for which `pred` holds. Total because `domain` is
 /// finite by construction (`List<I>` has a finite length).
 ///
+
 /// Generic over any `Individual` implementor — concrete consumers
 /// instantiate `I` with their own NamedIndividual / AnonymousID type.
 ///
+
 /// The fold is the constructive image of Shkotin's `#y:o P(y)`:
 /// when the OWL 2 universe is presented as an explicit list of
 /// individuals (the closed-domain assumption per VVA §21.4), the
@@ -67,7 +73,7 @@ public fn count_o<I: Individual>(
 
 /// Unbounded count: returns `Maybe.Some(n)` iff the domain witness
 /// can be supplied; otherwise `Maybe.None` to signal
-/// `E_OWL2_UNBOUNDED_COUNT`. V1 always requires a witness; V2 will
+/// `E_OWL2_UNBOUNDED_COUNT`. V1 always requires a witness; Future work will
 /// dispatch to CVC5 FMF when the witness is `Maybe.None` and the
 /// surrounding `@owl2_class` carries `semantics = ClosedWorld`.
 public fn count_o_unbounded<I: Individual>(
@@ -84,6 +90,7 @@ public fn count_o_unbounded<I: Individual>(
 /// the count's domain is not bounded. Use at the top of a function
 /// that issues a `count_o` query so the failure mode is loud.
 ///
+
 /// The panic body cites the spec's @owl2_class opt-in as the fix:
 /// add `@owl2_class(semantics = ClosedWorld)` to the consuming
 /// class declaration to commit to the closed-domain interpretation.

@@ -3,12 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.6
 //
+
 // Three fuzz mutators ship with the testing module:
 //
-//   * `GrammarFuzzer` — SQL grammar-guided generator (PEG-driven)
-//   * `FormatFuzzer`  — bit-flips on a SQLite database file image
-//   * `WalFuzzer`     — frame-sequence permutation / drop / duplicate
+
+//  * `GrammarFuzzer` — SQL grammar-guided generator (PEG-driven)
+//  * `FormatFuzzer` — bit-flips on a SQLite database file image
+//  * `WalFuzzer` — frame-sequence permutation / drop / duplicate
 //
+
 // All three implement `Mutator<I>` for some input type `I`. The
 // shrinker interface (`shrink`) lets a failing input be reduced
 // to a minimal repro — implementers return a `List<I>` of strictly
@@ -218,6 +221,7 @@ fn clone_action(a: &WalFuzzAction) -> WalFuzzAction {
 // GrammarFuzzer — token-level SQL generator
 // -----------------------------------------------------------------------------
 //
+
 // A minimal token-level generator emitting valid-shape DML / DDL.
 // Real coverage comes from the corpus replayer — this exists for
 // quick smoke tests and as a worked example of the Mutator protocol

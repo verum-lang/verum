@@ -5,26 +5,30 @@
 // Dependencies: core, io, async, text, time
 // =============================================================================
 //
+
 // Single-import surface for shell scripting. After `mount core.shell.*;` a
 // caller has access to:
 //
-//   * sh#"..." — tagged-literal shell dispatch (parser-level, see grammar)
-//   * sh()   / sh_check() / run() — function-level executors
-//   * Executor with timeout/retry/cancel
-//   * background() / parallel() / fanout() / fail_fast() — concurrency
-//   * stream_lines() / stream_lines_bounded() / LineStream — streaming
-//   * Pipeline<A,B> — typed builder
-//   * Transducer<A,B> — composable stream operators
-//   * GitCmd / DockerCmd — typed command DSLs
-//   * cp / mv / rm / mkdir_p / cat / write / which — built-ins
-//   * Fd / TempFile / FileLock — CBGR resources
-//   * ShellContext / PermissionSet / MockLayer — DI primitives
-//   * Escaper / ShellEscape / ShellRaw — escape protocol
-//   * ShellResult / ShellError — return / error types
+
+//  * sh#"..." — tagged-literal shell dispatch (parser-level, see grammar)
+//  * sh() / sh_check() / run() — function-level executors
+//  * Executor with timeout/retry/cancel
+//  * background() / parallel() / fanout() / fail_fast() — concurrency
+//  * stream_lines() / stream_lines_bounded() / LineStream — streaming
+//  * Pipeline<A,B> — typed builder
+//  * Transducer<A,B> — composable stream operators
+//  * GitCmd / DockerCmd — typed command DSLs
+//  * cp / mv / rm / mkdir_p / cat / write / which — built-ins
+//  * Fd / TempFile / FileLock — CBGR resources
+//  * ShellContext / PermissionSet / MockLayer — DI primitives
+//  * Escaper / ShellEscape / ShellRaw — escape protocol
+//  * ShellResult / ShellError — return / error types
 //
+
 // The expectation is that scripts only need this one mount line plus
 // `mount core.*;` for primitives.
 //
+
 // =============================================================================
 
 module shell;

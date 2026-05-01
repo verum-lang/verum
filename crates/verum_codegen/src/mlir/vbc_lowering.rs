@@ -1,21 +1,24 @@
 //! VBC → MLIR Lowering for GPU Path
 //!
+
 //! Converts VBC (Verum Bytecode) instructions to MLIR operations with proper
 //! operand wiring. The GPU path handles tensor operations, GPU kernel launches,
 //! and scalar pass-through for hybrid CPU+GPU functions.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! VBC Module (GPU functions)
-//!     │
-//!     ▼
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────────────────────────────────┐
-//! │                    VBC → MLIR LOWERING (this module)                │
-//! │                                                                     │
-//! │  VBC tensors → verum.tensor / linalg / arith dialect               │
-//! │  VBC GPU ops → gpu dialect                                         │
-//! │  VBC scalar  → arith dialect (hybrid CPU+GPU pass-through)         │
+//! │ VBC → MLIR LOWERING (this module) │
+//! │ │
+//! │ VBC tensors → verum.tensor / linalg / arith dialect │
+//! │ VBC GPU ops → gpu dialect │
+//! │ VBC scalar → arith dialect (hybrid CPU+GPU pass-through) │
 //! └─────────────────────────────────────────────────────────────────────┘
 //! ```
 
@@ -247,6 +250,7 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
         // (or any non-default value of these four) silently fell
         // through to the hardcoded MLIR pass behaviour.
         //
+
         // Emit at construction time, gated on any non-default value
         // so the default path stays log-quiet. Operators see the gap
         // ("manifest knob set, codegen ignored it") in logs rather

@@ -1,47 +1,58 @@
 //! Production-Grade Array Index Analysis for CBGR Escape Analysis
 //!
+
 //! Symbolic array index tracking enables independent analysis of array elements.
 //! Traditional escape analysis treats all array elements conservatively: if any
 //! element escapes, all elements are marked as escaping. This module tracks
 //! symbolic indices (constants, ranges, induction variables) to distinguish
 //! elements, allowing per-element promotion decisions for CBGR optimization.
 //!
+
 //! This module implements symbolic array index tracking to enable independent
 //! analysis of array elements, dramatically improving promotion opportunities.
 //!
+
 //! # Overview
 //!
+
 //! Traditional escape analysis treats array elements conservatively: if any
 //! element escapes, all elements are considered to escape. This module enables
 //! fine-grained tracking through symbolic index representation.
 //!
+
 //! # Core Algorithm
 //!
+
 //! 1. **Index Extraction**: Parse array accesses from CFG instructions
 //! 2. **Symbolic Representation**: Build symbolic index expressions (i+1, 2*i, etc.)
 //! 3. **Range Analysis**: Infer min/max bounds for indices
 //! 4. **Aliasing Analysis**: Determine if two indices may refer to same element
 //! 5. **Integration**: Enhance field-sensitive analysis with array indices
 //!
+
 //! # Performance Characteristics
 //!
+
 //! - Index extraction: O(instructions)
 //! - Range inference: O(loop depth)
 //! - Aliasing check: O(1) for constants, O(expr depth) for symbolic
 //! - Total overhead: < 5% of escape analysis time
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! fn process(arr: &[i32]) -> i32 {
-//!     let x = arr[0];  // Index 0
-//!     let y = arr[1];  // Index 1
+//!  let x = arr[0]; // Index 0
+//!  let y = arr[1]; // Index 1
 //!
-//!     // Traditional: arr[0] and arr[1] may alias (conservative)
-//!     // This module: arr[0] and arr[1] don't alias (precise)
-//!     //
-//!     // Result: Both accesses can be promoted independently
-//!     x + y
+
+//!  // Traditional: arr[0] and arr[1] may alias (conservative)
+//!  // This module: arr[0] and arr[1] don't alias (precise)
+//!  //
+//!  // Result: Both accesses can be promoted independently
+//!  x + y
 //! }
 //! ```
 
@@ -92,32 +103,40 @@ impl fmt::Display for BinOp {
 
 /// Symbolic index expression representing array indices at compile time
 ///
+
 /// Enables tracking of non-constant indices like `i`, `i+1`, `2*i` without
 /// knowing concrete values. This is essential for loop-based array access.
 ///
+
 /// # Precision Levels
 ///
+
 /// - **Constant**: Exact index known (arr[5])
 /// - **Variable**: Simple variable (arr[i])
 /// - **`BinaryOp`**: Arithmetic expression (arr[i+1], arr[2*i])
 /// - **Top**: Unknown/any index (conservative fallback)
 ///
+
 /// # Examples
 ///
+
 /// ```rust,ignore
 /// use verum_cbgr::array_analysis::{SymbolicIndex, VarId, BinOp};
 ///
+
 /// // arr[5]
 /// let constant = SymbolicIndex::Constant(5);
 ///
+
 /// // arr[i]
 /// let variable = SymbolicIndex::Variable(VarId(0));
 ///
+
 /// // arr[i+1]
 /// let offset = SymbolicIndex::BinaryOp(
-///     BinOp::Add,
-///     Box::new(SymbolicIndex::Variable(VarId(0))),
-///     Box::new(SymbolicIndex::Constant(1)),
+///  BinOp::Add,
+///  Box::new(SymbolicIndex::Variable(VarId(0))),
+///  Box::new(SymbolicIndex::Constant(1)),
 /// );
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -138,6 +157,7 @@ pub enum SymbolicIndex {
 impl SymbolicIndex {
     /// Simplify this symbolic index expression
     ///
+
     /// Applies algebraic simplifications:
     /// - i + 0 → i
     /// - i - 0 → i
@@ -146,8 +166,10 @@ impl SymbolicIndex {
     /// - 0 + i → i
     /// - constant folding: 2 + 3 → 5
     ///
+
     /// # Performance
     ///
+
     /// - O(expression depth)
     /// - Typically < 10ns per simplification
     #[must_use]
@@ -207,27 +229,33 @@ impl SymbolicIndex {
 
     /// Check if this index may equal another index
     ///
+
     /// Returns conservative approximation:
     /// - `true`: Indices may be equal (must assume aliasing)
     /// - `false`: Indices provably different (no aliasing)
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Simplify both expressions
     /// 2. If both constant: compare values
     /// 3. If same variable: may be equal
     /// 4. If structurally identical: may be equal
     /// 5. Otherwise: conservative (may be equal)
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// # use verum_cbgr::array_analysis::{SymbolicIndex, VarId};
     /// let idx0 = SymbolicIndex::Constant(0);
     /// let idx1 = SymbolicIndex::Constant(1);
     /// let idx_i = SymbolicIndex::Variable(VarId(0));
     ///
-    /// assert!(!idx0.may_equal(&idx1));  // 0 != 1
+
+    /// assert!(!idx0.may_equal(&idx1)); // 0 != 1
     /// assert!(idx_i.may_equal(&idx_i)); // i may equal i
     /// ```
     #[must_use]
@@ -256,16 +284,20 @@ impl SymbolicIndex {
 
     /// Check if this index is definitely different from another
     ///
+
     /// Returns `true` only if we can prove indices never equal.
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// # use verum_cbgr::array_analysis::{SymbolicIndex, VarId, BinOp};
     /// let idx0 = SymbolicIndex::Constant(0);
     /// let idx1 = SymbolicIndex::Constant(1);
     ///
-    /// assert!(idx0.definitely_different(&idx1));  // 0 != 1
+
+    /// assert!(idx0.definitely_different(&idx1)); // 0 != 1
     /// ```
     #[must_use]
     pub fn definitely_different(&self, other: &Self) -> bool {
@@ -297,28 +329,35 @@ impl fmt::Display for SymbolicIndex {
 
 /// Index range representing min/max bounds
 ///
+
 /// Tracks the possible range of values an index expression may take.
 /// Used to determine bounds checking and optimize out impossible cases.
 ///
+
 /// # Precision
 ///
+
 /// - **definite**: Range is guaranteed (proven by analysis)
 /// - **!definite**: Range is approximate (conservative estimate)
 ///
+
 /// # Examples
 ///
+
 /// ```rust,ignore
 /// use verum_cbgr::array_analysis::IndexRange;
 ///
+
 /// // Constant: [5, 5]
 /// let r1 = IndexRange::from_constant(5);
 /// assert_eq!(r1.min, 5);
 /// assert_eq!(r1.max, 5);
 /// assert!(r1.definite);
 ///
+
 /// // Variable in loop: [0, 99]
 /// let r2 = IndexRange::from_bounds(0, 99);
-/// assert!(!r2.may_overlap(&r1));  // [0, 99] and [5, 5] overlap
+/// assert!(!r2.may_overlap(&r1)); // [0, 99] and [5, 5] overlap
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IndexRange {
@@ -335,8 +374,10 @@ pub struct IndexRange {
 impl IndexRange {
     /// Create a range for a constant index
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// # use verum_cbgr::array_analysis::IndexRange;
     /// let r = IndexRange::from_constant(42);
@@ -355,14 +396,16 @@ impl IndexRange {
 
     /// Create a range from min/max bounds
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// # use verum_cbgr::array_analysis::IndexRange;
     /// let r = IndexRange::from_bounds(0, 10);
     /// assert_eq!(r.min, 0);
     /// assert_eq!(r.max, 10);
-    /// assert!(!r.definite);  // Conservative estimate
+    /// assert!(!r.definite); // Conservative estimate
     /// ```
     #[must_use]
     pub fn from_bounds(min: i64, max: i64) -> Self {
@@ -385,10 +428,13 @@ impl IndexRange {
 
     /// Intersect two ranges
     ///
+
     /// Returns the most precise range that satisfies both constraints.
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// # use verum_cbgr::array_analysis::IndexRange;
     /// let r1 = IndexRange::from_bounds(0, 10);
@@ -408,18 +454,22 @@ impl IndexRange {
 
     /// Check if two ranges may overlap
     ///
+
     /// Returns `true` if there exists a value in both ranges.
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// # use verum_cbgr::array_analysis::IndexRange;
     /// let r1 = IndexRange::from_bounds(0, 5);
     /// let r2 = IndexRange::from_bounds(10, 15);
-    /// assert!(!r1.may_overlap(&r2));  // Disjoint ranges
+    /// assert!(!r1.may_overlap(&r2)); // Disjoint ranges
     ///
+
     /// let r3 = IndexRange::from_bounds(3, 12);
-    /// assert!(r1.may_overlap(&r3));  // [0, 5] ∩ [3, 12] = [3, 5]
+    /// assert!(r1.may_overlap(&r3)); // [0, 5] ∩ [3, 12] = [3, 5]
     /// ```
     #[must_use]
     pub fn may_overlap(&self, other: &IndexRange) -> bool {
@@ -428,6 +478,7 @@ impl IndexRange {
 
     /// Check if this range is definitely disjoint from another
     ///
+
     /// Two ranges are definitely disjoint if they cannot possibly overlap,
     /// even considering their full range of possible values.
     #[must_use]
@@ -438,12 +489,16 @@ impl IndexRange {
 
     /// Check if index is within array bounds
     ///
+
     /// # Arguments
     ///
+
     /// * `len` - Array length
     ///
+
     /// # Returns
     ///
+
     /// - `true`: Index guaranteed in bounds [0, len)
     /// - `false`: May be out of bounds
     #[must_use]
@@ -464,20 +519,24 @@ impl fmt::Display for IndexRange {
 
 /// Array access with symbolic index
 ///
+
 /// Represents a single array element access in the program.
 /// Combines the base array reference with the symbolic index expression.
 ///
+
 /// # Examples
 ///
+
 /// ```rust,ignore
 /// use verum_cbgr::array_analysis::{ArrayAccess, SymbolicIndex};
 /// use verum_cbgr::analysis::RefId;
 ///
+
 /// // arr[0]
 /// let access = ArrayAccess::new(
-///     RefId(1),
-///     SymbolicIndex::Constant(0),
-///     Some((0, 10)),  // Array bounds [0, 10)
+///  RefId(1),
+///  SymbolicIndex::Constant(0),
+///  Some((0, 10)), // Array bounds [0, 10)
 /// );
 /// ```
 #[derive(Debug, Clone)]
@@ -532,14 +591,17 @@ impl ArrayAccess {
 
 /// Induction variable for loop index tracking
 ///
+
 /// Tracks variables that increment by a constant amount each iteration.
 /// Essential for analyzing array accesses in loops.
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// // for i in 0..n {
-/// //     arr[i] = ...  // i is induction variable
+/// // arr[i] = ... // i is induction variable
 /// // }
 /// ```
 #[derive(Debug, Clone)]
@@ -596,28 +658,36 @@ impl InductionVariable {
 
 /// Array index analyzer for escape analysis
 ///
+
 /// Tracks array element accesses with symbolic indices, enabling independent
 /// escape analysis for different array elements.
 ///
+
 /// # Algorithm
 ///
+
 /// 1. **Extract accesses**: Find all array[index] operations in CFG
 /// 2. **Build symbolic indices**: Parse index expressions (i, i+1, 2*i, etc.)
 /// 3. **Infer ranges**: Use loop bounds and constraints to bound indices
 /// 4. **Check aliasing**: Determine if two accesses may refer to same element
 ///
+
 /// # Performance
 ///
+
 /// - Extraction: O(instructions)
 /// - Range inference: O(variables × blocks)
 /// - Aliasing check: O(1) amortized
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// use verum_cbgr::array_analysis::ArrayIndexAnalyzer;
 /// use verum_cbgr::analysis::ControlFlowGraph;
 ///
+
 /// let mut analyzer = ArrayIndexAnalyzer::new();
 /// // ... populate CFG ...
 /// // let accesses = analyzer.extract_array_accesses(&cfg);
@@ -658,19 +728,24 @@ impl ArrayIndexAnalyzer {
 
     /// Extract all array accesses from a CFG
     ///
+
     /// Scans all blocks and instructions to find array element accesses.
     /// Builds symbolic index expressions for each access.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Iterate through all blocks in CFG
     /// 2. For each block, scan for array access patterns
     /// 3. Parse index expressions (constants, variables, binary ops)
     /// 4. Infer bounds from loop structure
     /// 5. Store access information for aliasing analysis
     ///
+
     /// # Performance
     ///
+
     /// - O(blocks × `instructions_per_block`)
     /// - Typically < 1ms for functions with 100-1000 instructions
     pub fn extract_array_accesses(&mut self, cfg: &ControlFlowGraph) -> List<ArrayAccess> {
@@ -738,6 +813,7 @@ impl ArrayIndexAnalyzer {
 
     /// Identify loop headers in the CFG
     ///
+
     /// A loop header is a block that has a backedge (an edge from a block
     /// that appears later in DFS order, or a self-loop).
     fn identify_loop_headers(&self, cfg: &ControlFlowGraph) -> List<BlockId> {
@@ -759,6 +835,7 @@ impl ArrayIndexAnalyzer {
 
     /// Estimate loop iteration bound from CFG structure
     ///
+
     /// Uses heuristics based on:
     /// 1. Number of successors (more = likely conditional exit)
     /// 2. Depth in CFG (nested loops typically have smaller bounds)
@@ -810,6 +887,7 @@ impl ArrayIndexAnalyzer {
 
     /// Infer the symbolic index from execution context
     ///
+
     /// Uses multiple signals to determine the most likely index pattern:
     /// 1. If in a loop, use the loop's induction variable
     /// 2. If multiple accesses in same block, use offsets (i, i+1, i+2...)
@@ -866,6 +944,7 @@ impl ArrayIndexAnalyzer {
 
     /// Infer array bounds from the use context
     ///
+
     /// Tries to determine [min, max] bounds for the array being accessed.
     fn infer_array_bounds(
         &self,
@@ -892,10 +971,13 @@ impl ArrayIndexAnalyzer {
 
     /// Infer range for a symbolic index
     ///
+
     /// Uses control flow and loop analysis to bound index values.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. If constant: exact range
     /// 2. If variable: check for induction variable
     /// 3. If binary op: combine ranges of operands
@@ -947,34 +1029,43 @@ impl ArrayIndexAnalyzer {
 
     /// Check if two array accesses may alias
     ///
+
     /// Returns `true` if accesses may refer to the same array element.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. If different base arrays: no alias
     /// 2. If same base:
-    ///    a. Get index ranges for both accesses
-    ///    b. If ranges disjoint: no alias
-    ///    c. If indices provably different: no alias
-    ///    d. Otherwise: may alias (conservative)
+    ///  a. Get index ranges for both accesses
+    ///  b. If ranges disjoint: no alias
+    ///  c. If indices provably different: no alias
+    ///  d. Otherwise: may alias (conservative)
     ///
+
     /// # Performance
     ///
+
     /// - O(1) for different bases
     /// - O(1) for constant indices
     /// - O(expr depth) for symbolic indices
     ///
+
     /// # Examples
     ///
+
     /// ```rust,ignore
     /// # use verum_cbgr::array_analysis::{ArrayIndexAnalyzer, ArrayAccess, SymbolicIndex};
     /// # use verum_cbgr::analysis::RefId;
     /// let analyzer = ArrayIndexAnalyzer::new();
     ///
+
     /// let access1 = ArrayAccess::new(RefId(1), SymbolicIndex::Constant(0), None);
     /// let access2 = ArrayAccess::new(RefId(1), SymbolicIndex::Constant(1), None);
     ///
-    /// assert!(!analyzer.may_alias(&access1, &access2));  // arr[0] and arr[1] don't alias
+
+    /// assert!(!analyzer.may_alias(&access1, &access2)); // arr[0] and arr[1] don't alias
     /// ```
     #[must_use]
     pub fn may_alias(&self, access1: &ArrayAccess, access2: &ArrayAccess) -> bool {
@@ -1034,6 +1125,7 @@ impl ArrayIndexAnalyzer {
 
     /// Insert accesses for testing purposes
     ///
+
     /// This method allows tests to manually set up access patterns
     /// for testing aliasing analysis without needing a full CFG.
     pub fn insert_accesses(&mut self, base: RefId, accesses: Vec<ArrayAccess>) {
@@ -1099,6 +1191,7 @@ impl fmt::Display for ArrayAnalysisStats {
 impl FieldComponent {
     /// Create array element field component with symbolic index
     ///
+
     /// Extends the existing `FieldComponent` enum to include symbolic indices.
     /// This enables field paths like `obj.field[i+1]`.
     #[must_use]
@@ -1112,14 +1205,18 @@ impl FieldComponent {
 impl FieldPath {
     /// Extend field path with array index
     ///
+
     /// Creates a new field path representing array element access.
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// use verum_cbgr::analysis::FieldPath;
     /// use verum_cbgr::array_analysis::SymbolicIndex;
     ///
+
     /// let base = FieldPath::named("data".to_string());
     /// let indexed = base.with_array_index(SymbolicIndex::Constant(0));
     /// // Represents: obj.data[0]
@@ -1133,15 +1230,18 @@ impl FieldPath {
 
     /// Check if this path may alias with another considering array indices
     ///
+
     /// Enhanced aliasing check that uses symbolic index information.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. If paths have different prefixes: check standard field aliasing
     /// 2. If both have array elements:
-    ///    a. Extract symbolic indices
-    ///    b. Check if indices may be equal
-    ///    c. Return aliasing result
+    ///  a. Extract symbolic indices
+    ///  b. Check if indices may be equal
+    ///  c. Return aliasing result
     /// 3. Otherwise: use standard field aliasing
     #[must_use]
     pub fn may_alias_with_array(&self, other: &FieldPath) -> bool {

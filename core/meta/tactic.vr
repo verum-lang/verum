@@ -2,40 +2,48 @@
 // tactic.vr — Tactic Metaprogramming (quote / splice / reflect)
 // =============================================================================
 //
+
 // Layer: Standard Library / Meta
 //
+
 // User-facing surface for the tactic-metaprogramming analysis core
 // (`verum_types.tactic_meta`). Lean-4-style proof procedures
 // written *as Verum data*: quote expressions, splice them back,
 // reflect goals into inspectable values, register custom
 // elaborators that transform meta terms.
 //
+
 // Distinct from `core/meta/quote.vr` — that module exposes the
 // compiler's quasi-quotation operator on actual AST nodes; this
 // module exposes the abstract metaprogramming algebra over the
 // `MetaTerm` analysis type, suitable for *modeling* and
 // *reasoning about* tactic combinators.
 //
+
 // ## The metalanguage
 //
+
 // ```text
-//     M ::= ⌜e⌝          quote an expression as data
-//         | ▸M           splice data back to expression
-//         | reflect(g)   reify a goal as data
-//         | custom(F, M) invoke a registered elaborator
-//         | M₁ ; M₂      sequence
-//         | const(v)     opaque constant
+//  M ::= ⌜e⌝ quote an expression as data
+//  | ▸M splice data back to expression
+//  | reflect(g) reify a goal as data
+//  | custom(F, M) invoke a registered elaborator
+//  | M₁ ; M₂ sequence
+//  | const(v) opaque constant
 // ```
 //
+
 // ## Reductions
 //
+
 // ```text
-//     splice(quote(e))  ↦ quote(e)        (β-cancellation)
-//     custom(F, arg)    ↦ F(arg)          (when F registered)
-//     reflect(g)        ↦ cached(g)       (when cached)
-//     seq(M₁, M₂)       ↦ M₂              (after evaluating M₁)
+//  splice(quote(e)) ↦ quote(e) (β-cancellation)
+//  custom(F, arg) ↦ F(arg) (when F registered)
+//  reflect(g) ↦ cached(g) (when cached)
+//  seq(M₁, M₂) ↦ M₂ (after evaluating M₁)
 // ```
 //
+
 // =============================================================================
 
 module core.meta.tactic;
@@ -163,6 +171,7 @@ fn seq_eliminate(t: MetaTerm) -> MetaTerm {
 /// Reflect lookups — those depend on external state held by the
 /// analyzer core and are out of scope for this surface module.
 ///
+
 /// Strategy: bottom-up — normalise children first, then apply the
 /// local rewrite at the current node. Continues to a fixed point
 /// at each node; the function as a whole reaches a fixed point in

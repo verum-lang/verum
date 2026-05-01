@@ -5,16 +5,18 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 12 (Commands)
 // =============================================================================
 //
+
 // A Command describes a deferred side effect that ultimately produces a Msg.
 // The application runtime is responsible for executing commands:
-//   * `Noop`      — no effect.
-//   * `Perform`   — a synchronous thunk executed on the main loop tick.
-//   * `Async`     — a future spawned on the async runtime; result becomes Msg.
-//   * `Batch`     — several commands fanned out in parallel.
-//   * `Sequence`  — commands chained; each waits for the previous to finish.
-//   * `Tick`      — a one-shot timer that fires a Msg after `Duration`.
-//   * `Quit`      — signal the runtime to exit cleanly.
+//  * `Noop` — no effect.
+//  * `Perform` — a synchronous thunk executed on the main loop tick.
+//  * `Async` — a future spawned on the async runtime; result becomes Msg.
+//  * `Batch` — several commands fanned out in parallel.
+//  * `Sequence` — commands chained; each waits for the previous to finish.
+//  * `Tick` — a one-shot timer that fires a Msg after `Duration`.
+//  * `Quit` — signal the runtime to exit cleanly.
 //
+
 // Commands are values, not side effects — they are reified descriptions that
 // the runtime interprets. This keeps `update` pure and deterministic.
 // =============================================================================

@@ -1,16 +1,17 @@
 //! End-to-end integration tests for the PermissionCheckWire
 //! opcode (#12 / P3.2). Verifies that:
 //!
-//!   1. The bytecode encoder writes a `TensorExtended` opcode +
-//!      `PermissionCheckWire` sub-opcode + three register bytes
-//!      that round-trip through the decoder.
-//!   2. The dispatch handler routes through the runtime
-//!      `PermissionRouter` and writes the decision tag back.
-//!   3. Default allow-all routes return `0` into dst.
-//!   4. A configured deny-all policy routes return `1` into dst
-//!      and back-fills the warm-path cache.
-//!   5. Cached decisions short-circuit subsequent dispatches
-//!      without invoking the policy callback.
+
+//!  1. The bytecode encoder writes a `TensorExtended` opcode +
+//!  `PermissionCheckWire` sub-opcode + three register bytes
+//!  that round-trip through the decoder.
+//!  2. The dispatch handler routes through the runtime
+//!  `PermissionRouter` and writes the decision tag back.
+//!  3. Default allow-all routes return `0` into dst.
+//!  4. A configured deny-all policy routes return `1` into dst
+//!  and back-fills the warm-path cache.
+//!  5. Cached decisions short-circuit subsequent dispatches
+//!  without invoking the policy callback.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -29,8 +30,8 @@ fn empty_state() -> InterpreterState {
 #[test]
 fn permission_assert_encodes_and_decodes_round_trip() {
     // PermissionAssert encoding shape:
-    //   TensorExtended (0xFC) + 0x1D sub-opcode + scope_tag (1B
-    //   immediate) + target_id (1B short reg).
+    //  TensorExtended (0xFC) + 0x1D sub-opcode + scope_tag (1B
+    //  immediate) + target_id (1B short reg).
     let instr = Instruction::PermissionAssert {
         scope_tag: 1, // FileSystem
         target_id: Reg(7),
@@ -335,10 +336,10 @@ fn permission_stats_field_selector_mapping_matches_router() {
     );
 
     // Drive deterministic activity:
-    //   * 1 deny-policy invocation (Network/80)
-    //   * 4 repeats of the deny → 4 last-entry hits
-    //   * 1 allow-policy invocation (Syscall/1)
-    //   * 1 last-entry hit on the allow
+    //  * 1 deny-policy invocation (Network/80)
+    //  * 4 repeats of the deny → 4 last-entry hits
+    //  * 1 allow-policy invocation (Syscall/1)
+    //  * 1 last-entry hit on the allow
     let _ = router.check(PermissionScope::Network, 80);
     for _ in 0..4 {
         let _ = router.check(PermissionScope::Network, 80);

@@ -2,46 +2,59 @@
 // kernel_v0 — T-Eta (η-conversion) inference rule + soundness lemma (ADMITTED)
 // =============================================================================
 //
+
 // **Rule**
 //
-//   ┌─────────────────────────────────────────────────────────┐
-//   │ Γ ⊢ t : T1                                                 │
-//   │ T1 ≡_η T2                                                  │
-//   │ ────────────────────────────────────────  T-Eta             │
-//   │ Γ ⊢ t : T2                                                 │
-//   └─────────────────────────────────────────────────────────┘
+
+//  ┌─────────────────────────────────────────────────────────┐
+//  │ Γ ⊢ t : T1 │
+//  │ T1 ≡_η T2 │
+//  │ ──────────────────────────────────────── T-Eta │
+//  │ Γ ⊢ t : T2 │
+//  └─────────────────────────────────────────────────────────┘
 //
+
 // **What this captures**
 //
+
 // η-conversion identifies `Lam(A, App(f, Var(0)))` with `f` whenever
 // `Var(0) ∉ FV(f)` — the extensionality principle for functions.
 // Unlike β-conversion (which is computational), η is the
 // extensionality move: two functions are equal iff they agree on
 // every input.
 //
+
 // **Soundness lemma** (ADMITTED — extensionality IOU)
 //
-//   For every Γ, t, T1, T2 satisfying the premises, the term t
-//   inhabits T2 in the categorical model.
+
+//  For every Γ, t, T1, T2 satisfying the premises, the term t
+//  inhabits T2 in the categorical model.
 //
+
 // **Why admitted (not yet proved)**
 //
+
 // η-soundness reduces to FUNCTION EXTENSIONALITY:
 //
-//     ⟦Lam(A, App(f, Var(0)))⟧ = ⟦f⟧  when  Var(0) ∉ FV(f)
+
+//  ⟦Lam(A, App(f, Var(0)))⟧ = ⟦f⟧ when Var(0) ∉ FV(f)
 //
+
 // In set-theoretic models this is automatic (functions ARE their
-// graph).  In intensional type theory it requires a separate
+// graph). In intensional type theory it requires a separate
 // extensionality axiom or a propositional extensionality principle.
 // In CIC + UIP it's a derived rule; in HoTT it's funext (a
 // well-known univalence consequence).
 //
+
 // **Discharge plan** (#173 Phase 2)
 //
-//   - In ZFC + 2-inacc model: trivial (function = graph).
-//   - In HoTT model: derive from univalence axiom.
-//   - In bare CIC: import from mathlib (#155 Phase 4).
+
+//  - In ZFC + 2-inacc model: trivial (function = graph).
+//  - In HoTT model: derive from univalence axiom.
+//  - In bare CIC: import from mathlib (#155 Phase 4).
 //
+
 // Companion to T-Beta — both are conversions through
 // `DefinitionalEquality` witnesses; they share infrastructure.
 // =============================================================================
@@ -56,11 +69,13 @@ mount super.super.judgment.{Derivation, DefinitionalEquality};
 /// Construct a T-Eta derivation from a base derivation and an
 /// η-equality witness.
 ///
+
 /// The `equality_witness` is a `DefinitionalEquality::Eta` (or a
 /// composition via `Trans`) proving `original_type ≡_η new_type`.
 ///
+
 /// **Side condition**: the witness's `function` field must NOT have
-/// `Var(0)` free.  The elaborator checks this before constructing
+/// `Var(0)` free. The elaborator checks this before constructing
 /// the witness; this function trusts the contract.
 public fn introduce_eta(
     ctx: Context,
@@ -78,23 +93,27 @@ public fn introduce_eta(
 
 /// **Soundness lemma — ADMITTED.**
 ///
+
 /// `∀ ctx t T1 T2.
-///     Γ ⊢ t : T1
-///     → T1 ≡_η T2
-///     → Γ ⊢ t : T2.`
+///  Γ ⊢ t : T1
+///  → T1 ≡_η T2
+///  → Γ ⊢ t : T2.`
 ///
+
 /// **IOU** (recorded in audit bundle `soundness-iou.json`):
 /// function-extensionality — `λx.(f x) = f` requires the model to
-/// validate functional extensionality.  Trivial in set-theoretic
+/// validate functional extensionality. Trivial in set-theoretic
 /// models; derived from univalence in HoTT models; an axiom in bare
 /// intensional CIC.
 ///
+
 /// **Discharge target**: lemma `funext_at_pi` in
 /// `core/verify/kernel_v0/lemmas/eta.vr` (Phase-1 work).
 ///
+
 /// **Note**: η-equivalence in `verum_kernel::proof_checker` is
 /// already implemented constructively (commit 5b6c97a9 added the
-/// `is_free_in` + `shift_down` + `eta_match` helpers).  This
+/// `is_free_in` + `shift_down` + `eta_match` helpers). This
 /// admitted lemma covers the SEMANTIC soundness step, not the
 /// syntactic check.
 @verify(formal)

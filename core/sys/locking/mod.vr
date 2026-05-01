@@ -6,16 +6,19 @@ module sys.locking;
 // Layer: 0 (Core)
 // Spec: internal/specs/sqlite-native.md §3.2 Gap 1
 //
+
 // High-level, typed wrapper around the per-platform fcntl/LockFileEx
 // primitives in `core.sys.common`. Gives callers:
 //
-//   * `LockRegion`       — explicit start/length (length == -1 ≡ to EOF)
-//   * `FileLockKind`     — Shared | Exclusive (no Unlock variant; unlock
-//                          is expressed by consuming the affine handle)
-//   * `LockError`        — Conflict(owner_pid) | IoError(OSError); the
-//                          backend's EAGAIN/EWOULDBLOCK maps to Conflict
-//   * `LockHandle`       — @affine RAII resource; `unlock` consumes it
+
+//  * `LockRegion` — explicit start/length (length == -1 ≡ to EOF)
+//  * `FileLockKind` — Shared | Exclusive (no Unlock variant; unlock
+//  is expressed by consuming the affine handle)
+//  * `LockError` — Conflict(owner_pid) | IoError(OSError); the
+//  backend's EAGAIN/EWOULDBLOCK maps to Conflict
+//  * `LockHandle` — @affine RAII resource; `unlock` consumes it
 //
+
 // The 5-state SQLite locking protocol (SHARED / RESERVED / PENDING /
 // EXCLUSIVE) is built on top of these primitives in
 // `core/database/sqlite/native/l0_vfs/locking.vr`. Advisory-only on
@@ -33,19 +36,23 @@ mount core.base.result.Result;
 
 /// Caller-facing kind of a byte-range lock.
 ///
+
 /// `Shared` — many holders permitted, compatible with other Shared.
 /// `Exclusive` — sole holder, incompatible with any other lock.
 ///
+
 /// There is no `Unlock` variant: unlocking is expressed by consuming
 /// the affine `LockHandle` returned from `try_lock`.
 ///
+
 /// Renamed from the historic `LockKind` to avoid simple-name
 /// collision with `core.database.sqlite.native.l0_vfs.vfs_protocol.LockKind`
-/// (the SQLite VFS five-state protocol type).  See task #160.
+/// (the SQLite VFS five-state protocol type). See task #160.
 public type FileLockKind is Shared | Exclusive;
 
 /// Absolute byte range to lock.
 ///
+
 /// `length == -1` means "from `start` to end-of-file" (forwarded to the
 /// backend as the platform's "to EOF" sentinel — POSIX `l_len == 0`,
 /// Windows `bytes_high:bytes_low == MAXUINT64`).
@@ -56,6 +63,7 @@ public type LockRegion is {
 
 /// Errors from `try_lock` / `unlock`.
 ///
+
 /// `Conflict(owner_pid)` — another holder has an incompatible lock.
 /// The owning PID is `Some(pid)` when the platform can report it via
 /// `F_GETLK` / `F_OFD_GETLK`, otherwise `None`. `IoError` wraps any
@@ -99,6 +107,7 @@ implement Eq for LockError {
 
 /// RAII handle to an acquired byte-range lock.
 ///
+
 /// Marked `affine`: may be moved, but not copied, and must be consumed
 /// by exactly one call to `unlock`. Dropping the handle without calling
 /// `unlock` is a compile error under the affine-checker — the lock
@@ -165,11 +174,13 @@ implement LockHandle {
 
 /// Non-blocking acquire of an advisory byte-range lock.
 ///
+
 /// On success returns a fresh `LockHandle` that must be consumed by
 /// `unlock`. On conflict (EAGAIN / EWOULDBLOCK / ERROR_LOCK_VIOLATION)
 /// returns `Err(Conflict(...))`. Any other OS failure returns
 /// `Err(IoError(OSError))`.
 ///
+
 /// Implementation: dispatches to `core.sys.try_lock_region`,
 /// which selects `F_OFD_SETLK` on Linux, `F_SETLK` on Darwin, and
 /// `LockFileEx` on Windows.
@@ -200,6 +211,7 @@ public fn try_lock(
 
 /// Release a held lock. Consumes the handle (affine).
 ///
+
 /// Idempotent in the degenerate sense: if the handle was previously
 /// invalidated (theoretically impossible under the affine checker, but
 /// guarded defensively for FFI-adjacent use), this is a no-op.

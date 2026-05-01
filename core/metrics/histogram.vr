@@ -16,6 +16,7 @@ mount core.metrics.value.{AtomicF64};
 // Default exponential buckets — Prometheus client_golang default
 // =============================================================================
 //
+
 // Covers ~1 µs to ~10 s in 2× steps, suitable for HTTP / RPC latency
 // distributions. Users specialise via HistogramConfig.buckets.
 
@@ -92,6 +93,7 @@ implement HistogramBuckets {
 // Histogram — atomic per-bucket counters + atomic sum
 // =============================================================================
 //
+
 // A histogram with N buckets uses N+2 atomics (per bucket + count + sum).
 // +Inf bucket is implicit via `count` minus the last bound's count.
 // All atomics are MemoryOrdering.Relaxed for maximum throughput; Prometheus

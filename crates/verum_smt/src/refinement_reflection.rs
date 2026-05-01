@@ -1,42 +1,53 @@
 //! Refinement Reflection — User Functions as SMT Axioms.
 //!
+
 //! When a Verum function `f` is **pure** and **total**, its definition
 //! `f(x₁, …, xₙ) = body` can be safely reflected into the SMT context
 //! as a universally-quantified equality:
 //!
+
 //! ```text
-//!     ∀ x₁ … xₙ.  f(x₁, …, xₙ) = ⟦body⟧
+//!  ∀ x₁ … xₙ. f(x₁, …, xₙ) = ⟦body⟧
 //! ```
 //!
+
 //! With this axiom installed, downstream proof obligations that
 //! mention `f(...)` can be discharged by *unfolding* the call rather
 //! than treating `f` as an uninterpreted symbol — the same technique
 //! Liquid Haskell calls *refinement reflection*.
 //!
+
 //! ## Soundness gate
 //!
+
 //! Reflection is only sound for functions that are:
 //!
+
 //! * **Pure** — no `Mutates`, `IO`, `Async`, `Fallible` properties
-//!   (all of which would let `f(x)` denote different values on
-//!   different calls).
+//!  (all of which would let `f(x)` denote different values on
+//!  different calls).
 //! * **Total** — terminate on every input; do not call `panic`,
-//!   `unreachable`, or partial primitives.
+//!  `unreachable`, or partial primitives.
 //! * **Closed** — body uses only its formal parameters and other
-//!   already-reflected functions.
+//!  already-reflected functions.
 //!
+
 //! The `Reflectability` predicate enforces these conditions before
 //! a function is admitted to the registry.
 //!
+
 //! ## Registry
 //!
+
 //! [`RefinementReflectionRegistry`] holds the reflected definitions
 //! keyed by qualified function name. Proof verifiers obtain a borrow
 //! of the registry and call [`apply_to_solver`] before discharging
 //! a goal — this asserts every relevant axiom into the Z3 context.
 //!
+
 //! ## Why it matters
 //!
+
 //! Refinement reflection is what makes SMT-backed proofs over
 //! arbitrary user data structures feasible at scale: without it,
 //! every helper function is opaque to Z3 and the user has to
@@ -119,6 +130,7 @@ impl ReflectedFunction {
 
 /// The registry of reflected user-function definitions.
 ///
+
 /// Indexed by qualified function name for O(1) lookup. The verifier
 /// applies the registry to its solver context once per proof goal,
 /// so the cost of accumulating axioms is proportional to the number
@@ -248,6 +260,7 @@ impl std::error::Error for ReflectionError {}
 
 /// Soundness gate: returns `Ok` iff the function may be reflected.
 ///
+
 /// Pure callers pass simple booleans for each property; in the full
 /// integration these will be derived from the type checker's
 /// `PropertySet` analysis.

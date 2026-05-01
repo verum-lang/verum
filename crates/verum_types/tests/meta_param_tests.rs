@@ -14,9 +14,11 @@
 )]
 // Tests for Meta Parameters
 //
+
 // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Unified compile-time computation
 // Meta parameters replace const generics with unified meta-system.
 //
+
 // Examples:
 // - `N: meta usize` - compile-time usize value
 // - `Shape: meta [usize]` - compile-time usize array

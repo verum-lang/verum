@@ -6,21 +6,25 @@
 // Spec: sqlite-native.md §7.5
 // =============================================================================
 //
+
 // Self-contained in-memory file implementation. Used for:
 //
-//   1. `:memory:` URI databases (no persistence).
-//   2. Deterministic simulation testing — tests that would otherwise touch
-//      the filesystem run against MemDbVfs under `core/context` injection.
-//      Latency, crashes, concurrency races are reproducible bit-for-bit.
-//   3. Bootstrapping — lets L1 / L2 / L3 / L4 development proceed before
-//      PosixVfs / Win32Vfs are merged.
+
+//  1. `:memory:` URI databases (no persistence).
+//  2. Deterministic simulation testing — tests that would otherwise touch
+//  the filesystem run against MemDbVfs under `core/context` injection.
+//  Latency, crashes, concurrency races are reproducible bit-for-bit.
+//  3. Bootstrapping — lets L1 / L2 / L3 / L4 development proceed before
+//  PosixVfs / Win32Vfs are merged.
 //
+
 // API note: v0.1 exposes free functions rather than methods because cross-
 // module method dispatch currently has an outstanding VBC interpreter issue
 // (see project_sqlite_native_spec.md). The signature shape mirrors what a
 // protocol-based version will look like once dispatch is fixed — callers
 // can migrate by replacing `memdb_read(&f, ...)` with `f.read(...)`.
 //
+
 // =============================================================================
 
 module core.database.sqlite.native.l0_vfs.memdb_vfs;
@@ -205,6 +209,7 @@ public fn memdb_close(f: &mut MemDbFile) -> Result<(), VfsError> {
 // Protocol conformance
 // =============================================================================
 //
+
 // `MemDbFile` implements `SqliteFile`; `MemDbVfs` implements `VfsProtocol`.
 // Bodies delegate to the free-function implementations above — the
 // two surfaces coexist during migration (free-functions for legacy
@@ -332,7 +337,7 @@ implement VfsProtocol for MemDbVfs {
 
     fn random_bytes(&self, len: Int) -> Result<List<Byte>, VfsError> {
         // Deterministic placeholder — DST tests should inject a
-        // MockVfs.  Production randomness MUST plumb through a real
+        // MockVfs. Production randomness MUST plumb through a real
         // CSPRNG (PosixVfs.random_bytes); using MemDbVfs for SQL
         // features that depend on randomness (`RANDOMBLOB()`, WAL
         // salts in shared-cache memory mode) is exploitable, so the
@@ -341,6 +346,7 @@ implement VfsProtocol for MemDbVfs {
         // the deterministic counter (DST replay) can ignore the
         // error variant by predicate-matching on `MemDbVfs` first.
         //
+
         // Pre-fix the bare counter masqueraded as randomness without
         // any signal that it was deterministic — combined with the
         // pre-fix `random_bytes` protocol returning `List<Byte>`

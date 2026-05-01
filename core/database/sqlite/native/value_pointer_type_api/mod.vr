@@ -1,10 +1,10 @@
 // =============================================================================
 // core/database/sqlite/native/value_pointer_type_api/mod.vr
 // =============================================================================
-// sqlite3_value_pointer(value, type) — added 3.20.  Returns the opaque pointer
+// sqlite3_value_pointer(value, type) — added 3.20. Returns the opaque pointer
 // stashed by sqlite3_bind_pointer / sqlite3_result_pointer if and only if the
-// type-tag string matches.  Otherwise returns NULL — engine never coerces
-// or reinterprets the pointer.  Spec App E.V.
+// type-tag string matches. Otherwise returns NULL — engine never coerces
+// or reinterprets the pointer. Spec App E.V.
 // =============================================================================
 
 module core.database.sqlite.native.value_pointer_type_api;

@@ -5,10 +5,11 @@
 // subscriptions (LDS/CDS/RDS/EDS/SDS) over a single bidirectional gRPC
 // stream. We offer two modes:
 //
-//   - sotw (State-of-the-World) via StreamAggregatedResources — legacy,
-//     every response contains the full resource set per type.
-//   - delta via DeltaAggregatedResources — only resources that changed.
-//     Preferred (Envoy 1.15+ / Istio 1.8+).
+
+//  - sotw (State-of-the-World) via StreamAggregatedResources — legacy,
+//  every response contains the full resource set per type.
+//  - delta via DeltaAggregatedResources — only resources that changed.
+//  Preferred (Envoy 1.15+ / Istio 1.8+).
 // =============================================================================
 
 module core.mesh.xds.client;

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22.4
 //
+
 // One result captures everything observable from running a single
 // case against ONE end (loom or C-SQLite). The comparator pairs
 // two results and decides whether they "agree".

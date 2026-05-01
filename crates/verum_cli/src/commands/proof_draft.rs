@@ -2,13 +2,15 @@
 //! `verum_verification::proof_drafting::SuggestionEngine` for IDE /
 //! REPL / CLI use.
 //!
+
 //! Given a theorem name + a focused-goal description + an
 //! `--lemma name:::signature` list, the command returns ranked
 //! next-step tactic suggestions.
 //!
+
 //! Output formats:
-//!   * `plain` — human-readable with rationales.
-//!   * `json`  — LSP-friendly structured payload.
+//!  * `plain` — human-readable with rationales.
+//!  * `json` — LSP-friendly structured payload.
 
 use crate::error::{CliError, Result};
 use verum_common::Text;
@@ -17,7 +19,7 @@ use verum_verification::proof_drafting::{
     SuggestionEngine,
 };
 
-/// Run the proof-draft command.  Returns `Ok(())` on success;
+/// Run the proof-draft command. Returns `Ok(())` on success;
 /// errors propagate up the CLI dispatcher.
 pub fn run_proof_draft(
     theorem: &str,
@@ -118,7 +120,7 @@ pub fn run_proof_draft(
 }
 
 /// Parse `--lemma name:::signature[:::lineage]` flags into typed
-/// `LemmaSummary`s.  `lineage` defaults to `"corpus"` when absent.
+/// `LemmaSummary`s. `lineage` defaults to `"corpus"` when absent.
 fn parse_lemma_flags(flags: &[String]) -> Result<Vec<LemmaSummary>> {
     flags
         .iter()
@@ -188,7 +190,7 @@ mod tests {
 
     #[test]
     fn run_proof_draft_smoke() {
-        // No-lemma run, plain format.  Smoke test: should not panic.
+        // No-lemma run, plain format. Smoke test: should not panic.
         let r = run_proof_draft(
             "test_theorem",
             "forall x. P(x)",
@@ -220,7 +222,7 @@ mod tests {
     #[test]
     fn run_proof_draft_with_lemma_finds_suggestion() {
         // The default engine should rank the relevant lemma above
-        // the unrelated one.  This is the integration test that
+        // the unrelated one. This is the integration test that
         // proves the proof_draft → SuggestionEngine wiring works
         // end-to-end.
         let lemmas = vec![

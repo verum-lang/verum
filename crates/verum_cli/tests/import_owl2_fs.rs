@@ -1,6 +1,7 @@
 //! Integration tests for `verum import --from owl2-fs <file.ofn>`
 //! (follow-up, Task B5).
 //!
+
 //! Exercises the OWL 2 Functional-Style Syntax importer end-to-end:
 //! tokeniser → parser → Owl2Graph → `.vr` emitter, and verifies the
 //! emitted source contains the expected `@owl2_*` typed attributes.

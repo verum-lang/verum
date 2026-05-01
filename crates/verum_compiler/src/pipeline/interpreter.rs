@@ -1,26 +1,29 @@
 //! VBC interpreter dispatch (Phase 7, Tier 0 execution).
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 11). Houses the
 //! interpreter-side execution path: AST → VBC codegen → VBC
 //! interpreter, plus the main-function discovery and exit-code
 //! propagation helpers it depends on.
 //!
+
 //! Methods:
 //!
-//!   * `phase_interpret` — primary AST-driven entry; compiles to
-//!     VBC, builds an interpreter, finds main, runs.
-//!   * `phase_interpret_with_args` — args-bearing variant; passes
-//!     argv into `main(args: List<Text>) -> Int`.
-//!   * `phase_interpret_for_test` — captured-stdout/stderr variant
-//!     for the test harness; threads the same script-mode policy
-//!     into the interpreter's PermissionRouter.
-//!   * `find_main_function_id` — script vs application entry-point
-//!     selection (`__verum_script_main` vs `main`).
-//!   * `propagate_main_exit_code` — int-return → `Session::pending_exit_code`.
-//!   * `finalize_run_result` — common error-shaping for all three
-//!     dispatch entry points.
-//!   * `run_for_test` — public test-harness entry that wraps the
-//!     full compile + interpret-for-test flow.
+
+//!  * `phase_interpret` — primary AST-driven entry; compiles to
+//!  VBC, builds an interpreter, finds main, runs.
+//!  * `phase_interpret_with_args` — args-bearing variant; passes
+//!  argv into `main(args: List<Text>) -> Int`.
+//!  * `phase_interpret_for_test` — captured-stdout/stderr variant
+//!  for the test harness; threads the same script-mode policy
+//!  into the interpreter's PermissionRouter.
+//!  * `find_main_function_id` — script vs application entry-point
+//!  selection (`__verum_script_main` vs `main`).
+//!  * `propagate_main_exit_code` — int-return → `Session::pending_exit_code`.
+//!  * `finalize_run_result` — common error-shaping for all three
+//!  dispatch entry points.
+//!  * `run_for_test` — public test-harness entry that wraps the
+//!  full compile + interpret-for-test flow.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -84,11 +87,11 @@ impl<'s> CompilationPipeline<'s> {
         }
         // Production `verum run` has no wall-clock budget — long-running
         // services (HTTP servers, daemons, REPL loops) must not be killed
-        // by the interpreter's default 30s deadline.  The deadline is a
+        // by the interpreter's default 30s deadline. The deadline is a
         // test-runner safety net; production execution opts out by
         // setting `timeout_ms = 0` (the dispatch loop interprets 0 as
         // "no deadline" — see
-        // `crates/verum_vbc/.../dispatch_table/mod.rs:1284`).  Same for
+        // `crates/verum_vbc/.../dispatch_table/mod.rs:1284`). Same for
         // `max_instructions = 0` so server accept-loops can run for
         // billions of iterations without hitting the test-mode cap.
         interpreter.state.config.timeout_ms = 0;
@@ -119,18 +122,21 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Tier-parity exit-code propagation.
     ///
+
     /// When the entry point returns an `Int`, surface it to the OS as the
     /// process exit status — matching what AOT compilation produces (where
     /// `main`'s return value lands directly in `_exit`). Without this, the
     /// interpreter would run `fn main() -> Int { 1 }` to completion but
     /// the process would exit 0, silently masking failures.
     ///
+
     /// Behaviour:
     /// - `Int` value → record exit code = `value as i32`.
     /// - `Bool` → record 0 for true, 1 for false (Unix convention).
     /// - `Unit` / `Nil` / anything else → leave exit code as `None`,
-    ///   which the CLI maps to `0`.
+    ///  which the CLI maps to `0`.
     ///
+
     /// **Why record instead of `std::process::exit`?** The pipeline runs
     /// inside a CLI driver that needs to perform post-execution work —
     /// persisting the script-mode VBC cache, flushing telemetry, printing
@@ -141,6 +147,7 @@ impl<'s> CompilationPipeline<'s> {
     /// code from `Session::take_exit_code()` after housekeeping and
     /// translates to `process::exit` there.
     ///
+
     /// Called from BOTH `phase_interpret` (no-args entry) and
     /// `phase_interpret_with_args` (args-aware entry) so behaviour is
     /// uniform across `verum run file.vr` and `verum run file.vr a b`.
@@ -188,6 +195,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 5b: Interpretation with arguments
     ///
+
     /// VBC-first architecture: AST → VBC Codegen → VBC Interpreter with args
     pub(super) fn phase_interpret_with_args(&mut self, module: &Module, args: List<Text>) -> Result<()> {
         debug!("Interpreting module with {} args via VBC-first architecture", args.len());
@@ -253,14 +261,17 @@ impl<'s> CompilationPipeline<'s> {
     /// Find the program entry function in the VBC module and return
     /// its function ID.
     ///
+
     /// Strict mode separation (matches the AST-level
     /// `EntryDetectionPhase::detect_entry_point`):
     ///
-    ///   • **Application** entry = `main` (in a non-script module).
-    ///     Prefer it when present.
-    ///   • **Script** entry = `__verum_script_main` (the synthesised
-    ///     wrapper from script-tagged modules).
+
+    ///  • **Application** entry = `main` (in a non-script module).
+    ///  Prefer it when present.
+    ///  • **Script** entry = `__verum_script_main` (the synthesised
+    ///  wrapper from script-tagged modules).
     ///
+
     /// The two are not interchangeable. A `fn main` declared *inside*
     /// a script module is a regular callable function, not the
     /// program entry — the AST-level pass already filtered such
@@ -300,9 +311,11 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run test execution with output capture.
     ///
+
     /// This executes the program via the VBC interpreter with stdout/stderr captured.
     /// Used by vtest for running `run` and `run-panic` tests.
     ///
+
     /// Returns:
     /// - `Ok(TestExecutionResult)` on successful execution (even if panic)
     /// - `Err` only for compilation errors
@@ -353,15 +366,17 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 5b: Interpret with output capture for test execution.
     ///
+
     /// Supports two modes:
     /// 1. **main() mode**: If the module has a `main` function, execute it (traditional).
     /// 2. **@test mode**: If no `main` exists, discover all `@test`-annotated functions
-    ///    and run them sequentially as a test suite.
+    ///  and run them sequentially as a test suite.
     pub(super) fn phase_interpret_for_test(&mut self, module: &Module) -> Result<(String, String, i32)> {
         debug!("Interpreting module for test via VBC-first architecture");
 
         // Step 0: Reset global VBC value side-tables for test isolation.
         //
+
         // `Value` uses process-global `Mutex<Vec<_>>` side tables to hold
         // boxed integers and CBGR ThinRef/FatRef payloads. In batch test
         // runs these tables accumulate entries across tests and retain
@@ -496,11 +511,14 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 7 (Tier 1): Compile to native executable (AOT mode)
     ///
+
     /// This compiles the source to a standalone native executable that can be run
     /// independently. Uses the VBC → LLVM IR path (NOT MLIR, which is GPU-only).
     ///
+
     /// Pipeline: Source → AST → TypedAST → VBC → LLVM IR → Object → Executable
     ///
+
     /// See the Phase 7 architecture comment above `phase_interpret()` for details.
     pub fn run_native_compilation(&mut self) -> Result<PathBuf> {
         let start = Instant::now();
@@ -568,16 +586,19 @@ impl<'s> CompilationPipeline<'s> {
         // ════════════════════════════════════════════════════════════
         // POST-TYPECHECK PARALLEL FAN-OUT (#104, parallel-monad pipeline)
         //
+
         // The six post-typecheck gates are pure read-only walks over
         // the typed AST that share NO mutable data:
         //
-        //   * dependency_analysis — target-profile enforcement
-        //   * verify              — refinement + theorem SMT (Z3+CVC5)
-        //   * context_validation  — DI / negative-constraint checks
-        //   * send_sync_validation — Send/Sync compile-time enforcement
-        //   * cbgr_analysis       — tier promotion (~15ns→0ns refs)
-        //   * ffi_validation      — boundary checks
+
+        //  * dependency_analysis — target-profile enforcement
+        //  * verify — refinement + theorem SMT (Z3+CVC5)
+        //  * context_validation — DI / negative-constraint checks
+        //  * send_sync_validation — Send/Sync compile-time enforcement
+        //  * cbgr_analysis — tier promotion (~15ns→0ns refs)
+        //  * ffi_validation — boundary checks
         //
+
         // Each gate's only sink is `Session::*` writers, which are all
         // `&self` with internal locking (lock-free SegQueue for
         // diagnostics post-#105; RwLock-protected metrics/cache).
@@ -586,15 +607,19 @@ impl<'s> CompilationPipeline<'s> {
         // proves there are no aliased mutable references to compiler
         // state across worker threads.
         //
+
         // Wall-clock model for production builds:
         //
-        //   Sequential (pre-#104):    Σ phase_i  (~6 fully serialised)
-        //   Parallel    (post-#104): max phase_i (slowest dominates)
+
+        //  Sequential (pre-#104): Σ phase_i (~6 fully serialised)
+        //  Parallel (post-#104): max phase_i (slowest dominates)
         //
+
         // For SMT-heavy modules, `phase_verify` dominates by 5-10× over
         // every other gate, so the overall win is "every other gate is
         // free" — the slowest call sets the floor.
         //
+
         // Opt-out: `VERUM_NO_PARALLEL_POST_TYPECHECK=1` falls back to
         // the sequential chain for diagnostic-ordering reproducibility.
         // ════════════════════════════════════════════════════════════
@@ -731,6 +756,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Phase 5c: rayon fence before LLVM codegen.
         //
+
         // LLVM registers backend passes lazily via function-local
         // statics guarded by __cxa_guard_acquire (Itanium C++ ABI).
         // While the main thread was inside that guard, rayon workers
@@ -739,6 +765,7 @@ impl<'s> CompilationPipeline<'s> {
         // observable as a ~70% SIGSEGV in phase_generate_native in
         // release builds.
         //
+
         // `rayon::broadcast(|_| ())` dispatches a no-op to every
         // worker and waits for completion, which is a true fence: all
         // workers run, exit their wake path, and re-park *before* we
@@ -747,6 +774,7 @@ impl<'s> CompilationPipeline<'s> {
         // pre-populates the IR-pass half of the same registry), this
         // eliminates the race.
         //
+
         // Diagnosed via `verum diagnose` crash reports showing 14/14
         // stacks at `__os_semaphore_wait` → `callDefaultCtor<*Pass>`.
         {

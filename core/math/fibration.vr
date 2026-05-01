@@ -4,21 +4,24 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: Lurie "Higher Topos Theory" §2, Grothendieck SGA 1
 //
+
 // Builds the fibration / (op)fibration / cartesian fibration framework
 // on top of core/math/infinity_category.vr. Fibrations are the primary
 // mechanism for organising families of ∞-categories indexed by a base
 // ∞-category, and the straightening/unstraightening correspondence
 // turns them into ∞-functors valued in ∞-Cat.
 //
+
 // As with the rest of Phase C, this module exposes the mathematical
 // shape as protocols with `@verify(formal)` obligations. The hard
 // theorems (straightening/unstraightening, Grothendieck construction)
 // are surfaced as axiomatic equivalences; concrete implementations
 // discharge the obligations.
 //
+
 // See also:
-//   - core/math/infinity_category.vr   (InfinityCategory, InfinityFunctor)
-//   - core/math/category.vr            (Category, Pullback)
+//  - core/math/infinity_category.vr (InfinityCategory, InfinityFunctor)
+//  - core/math/category.vr (Category, Pullback)
 // =============================================================================
 
 module core.math.fibration;
@@ -42,6 +45,7 @@ mount core.math.category.{Category, Pullback};
 /// `g : z → y` with `p(g)` factoring through `p(f) ∘ h` for some
 /// `h : p(z) → p(x)`, there is a unique lift `z → x`.
 ///
+
 /// Cartesian morphisms are the "nice" lifts in a Grothendieck fibration.
 public type CartesianMorphism<E, B> is protocol {
     /// Is this a cartesian morphism of the functor `p : E → B`?
@@ -71,6 +75,7 @@ public type CoCartesianMorphism<E, B> is protocol {
 /// and every `y` in the fibre `E_b`, there exists a cartesian
 /// morphism `f^* : y' → y` in `E` whose image under `p` is `f`.
 ///
+
 /// Fibrations are equivalent (via straightening) to ∞-functors
 /// `B^op → ∞-Cat`, i.e. contravariant presheaves of ∞-categories.
 public type GrothendieckFibration<E, B> is protocol extends InfinityFunctor<E, B> {
@@ -111,6 +116,7 @@ public type Bifibration<E, B> is protocol
 /// `b : B` is the ∞-subcategory of `E` consisting of objects mapping
 /// to `b` and morphisms mapping to `id_b`.
 ///
+
 /// In the ∞-case, the fibre is itself an ∞-category, and assignment
 /// `b ↦ E_b` extends to an ∞-functor `B^op → ∞-Cat` via the
 /// straightening correspondence below.
@@ -134,6 +140,7 @@ public type Fibre<E, B> is protocol extends InfinityCategory {
 /// fibres `F(b)` into a single total ∞-category, and the cartesian
 /// morphisms encode the functoriality of `F`.
 ///
+
 /// Unstraightening is the inverse construction. Together they form an
 /// equivalence between the ∞-category of fibrations over `B` and the
 /// ∞-functor ∞-category `Fun(B^op, ∞-Cat)`.

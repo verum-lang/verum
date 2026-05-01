@@ -5,42 +5,52 @@
 // Dependencies: core, core.collections, core.encoding.{json, json_pointer}
 // =============================================================================
 //
+
 // RFC 6902 JSON Patch — the operational-transform format for JSON
 // documents. Expressed as an array of operations, each with `op`,
 // `path`, and operation-specific fields. Paths are RFC 6901 JSON
 // Pointers.
 //
+
 // Used by Kubernetes strategic merge patch (for the primitive
 // `json` strategy), OpenAPI schema-diff tooling, CRDT libraries
 // emitting delta updates, VS Code's `jsonc-parser` edits API.
 //
+
 // # Operations (§4)
 //
-//   add     — insert / replace at `path`
-//   remove  — delete value at `path`
-//   replace — existing value at `path` is replaced
-//   move    — remove `from` + add at `path`
-//   copy    — add at `path` with value from `from`
-//   test    — verify `path` holds `value`; fail the whole patch otherwise
+
+//  add — insert / replace at `path`
+//  remove — delete value at `path`
+//  replace — existing value at `path` is replaced
+//  move — remove `from` + add at `path`
+//  copy — add at `path` with value from `from`
+//  test — verify `path` holds `value`; fail the whole patch otherwise
 //
+
 // # API
 //
+
 // ```
 // // Parse a JSON Patch document.
 // let patch: JsonPatch = json_patch.parse(&patch_json)?;
 //
+
 // // Apply to a target; any failing op rolls the whole patch back.
 // let mut doc = json.parse_value(&document)?;
 // json_patch.apply(&mut doc, &patch)?;
 // ```
 //
+
 // # Atomicity
 //
+
 // RFC 6902 §5 requires that the patch either apply in its
 // entirety or not at all. We honour this by deep-cloning `doc`
 // before applying; on error, the original is restored. The
 // caller sees mutation only on complete success.
 //
+
 // =============================================================================
 
 module core.encoding.json_patch;
@@ -252,12 +262,14 @@ fn apply_op(doc: &mut JsonValue, op: &JsonPatchOp) -> Result<(), JsonPatchError>
 // JsonValue path primitives
 // =============================================================================
 //
+
 // The MVP implementation re-clones the document for each walk — this
 // trades linear memory during apply for code clarity. A follow-up
 // will thread mutable cursors through `JsonValue.JsonObject` /
 // `JsonValue.JsonArray` children once the stdlib exposes stable
 // entry iterators.
 //
+
 // =============================================================================
 
 fn exists_at(doc: &JsonValue, path: &JsonPointer) -> Bool {

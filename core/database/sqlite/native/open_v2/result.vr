@@ -1,7 +1,7 @@
 // =============================================================================
 // open_v2/result.vr — outcome of sqlite3_open_v2
 // =============================================================================
-// Spec: SQLite C API.  A successful open returns SQLITE_OK + a db
+// Spec: SQLite C API. A successful open returns SQLITE_OK + a db
 // handle; failures surface a primary-code error (possibly with
 // extended extension).
 // =============================================================================

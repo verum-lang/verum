@@ -14,6 +14,7 @@
 )]
 //! Tests for the `is` operator in if/while conditions
 //!
+
 //! The `is` operator is used for pattern testing in Verum.
 //! Tests for is operator: pattern testing via x is Pattern syntax
 

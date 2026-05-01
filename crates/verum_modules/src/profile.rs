@@ -1,5 +1,6 @@
 //! Language profile system for module-level control.
 //!
+
 //! Implements the profile system from Section 13 of the specification:
 //! - Module-level profile declarations (@profile attribute)
 //! - Profile inheritance from parent modules
@@ -7,27 +8,33 @@
 //! - Profile compatibility validation
 //! - Profile-aware module resolution
 //!
+
 //! # Overview
 //!
+
 //! Verum supports three language profiles:
 //! - **Application**: Safe, productive, async-first (default)
 //! - **Systems**: Unsafe allowed, manual memory management
 //! - **Research**: Formal verification, dependent types, proofs
 //!
+
 //! # Profile Hierarchy
 //!
+
 //! ```text
 //! Research (most permissive)
-//!     ↓
+//!  ↓
 //! Systems (intermediate)
-//!     ↓
+//!  ↓
 //! Application (most restrictive, default)
 //! ```
 //!
+
 //! Research profile can access everything.
 //! Systems profile can access Systems and Application modules.
 //! Application profile can only access Application modules.
 //!
+
 //! Profile hierarchy (most permissive to most restrictive):
 //! Research > Systems > Application (default)
 
@@ -40,6 +47,7 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// Language profile - determines what features are available in a module.
 ///
+
 /// Determines what features are available in a module. Declared with
 /// @profile(application|systems|research). Default is Application.
 #[derive(
@@ -58,6 +66,7 @@ use verum_common::{List, Map, Maybe, Text};
 pub enum LanguageProfile {
     /// Application profile: Safe, productive, async-first (default).
     ///
+
     /// Features:
     /// - Full async/await support
     /// - Context system (using/provide)
@@ -68,6 +77,7 @@ pub enum LanguageProfile {
 
     /// Systems profile: Maximum control for low-level programming.
     ///
+
     /// Features (in addition to Application):
     /// - Unsafe blocks and raw pointers
     /// - Manual memory management
@@ -78,6 +88,7 @@ pub enum LanguageProfile {
 
     /// Research profile: Formal verification and dependent types.
     ///
+
     /// Features (in addition to Systems):
     /// - Dependent types (Pi/Sigma)
     /// - Formal proofs (@verify)
@@ -90,11 +101,13 @@ pub enum LanguageProfile {
 impl LanguageProfile {
     /// Check if this profile can access modules with the target profile.
     ///
+
     /// Profile compatibility follows the hierarchy:
     /// - Research can access: Research, Systems, Application
     /// - Systems can access: Systems, Application
     /// - Application can access: Application only
     ///
+
     /// Profile compatibility follows the hierarchy:
     /// Research can access everything, Systems can access Systems+Application,
     /// Application can only access Application.
@@ -113,8 +126,10 @@ impl LanguageProfile {
 
     /// Check if a child module can have this profile given the parent profile.
     ///
+
     /// Child modules can be MORE restrictive (lower in hierarchy) but NOT less restrictive.
     ///
+
     /// Profile inheritance rules: child modules can be MORE restrictive
     /// (lower in hierarchy) but NOT less restrictive than parent.
     pub fn can_be_child_of(&self, parent: LanguageProfile) -> bool {
@@ -152,6 +167,7 @@ impl LanguageProfile {
 
     /// Get unavailable features when accessing from this profile to target.
     ///
+
     /// Lists features unavailable when accessing from a less permissive profile.
     pub fn unavailable_features(&self, _target: LanguageProfile) -> List<Text> {
         let mut features = List::new();
@@ -187,9 +203,11 @@ impl std::fmt::Display for LanguageProfile {
 
 /// Optional features that can be enabled within a profile.
 ///
+
 /// Features are independent of profiles and can be selectively enabled
 /// using `@feature(enable: [...])` attribute.
 ///
+
 /// Features are independent of profiles and can be selectively enabled
 /// using `@feature(enable: [...])`. Features must be compatible with the
 /// base profile and are additive (don't remove profile capabilities).
@@ -249,6 +267,7 @@ impl ModuleFeature {
 
     /// Check if this feature is compatible with the given profile.
     ///
+
     /// Some features require certain profiles to be used.
     pub fn is_compatible_with(&self, profile: LanguageProfile) -> bool {
         match self {
@@ -296,6 +315,7 @@ impl std::fmt::Display for ModuleFeature {
 
 /// Profile configuration for a module.
 ///
+
 /// Stores the declared profile and any enabled features.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModuleProfile {
@@ -399,12 +419,14 @@ impl Default for ModuleProfile {
 
 /// Profile checker - validates profile compatibility across modules.
 ///
+
 /// Implements profile validation from Section 13.5-13.6:
 /// - Validates module profile declarations
 /// - Checks profile inheritance rules
 /// - Validates import compatibility
 /// - Generates detailed error messages
 ///
+
 /// Validates profile compatibility across modules using the profile
 /// resolution algorithm: (1) check module declaration, (2) check
 /// inheritance chain, (3) check feature gates, (4) validate imports,
@@ -441,6 +463,7 @@ impl ProfileChecker {
 
     /// Extract profile from module's attributes.
     ///
+
     /// Parses @profile() and @feature() attributes from the module AST.
     /// Attributes are stored in each Item's attributes field, not as separate items.
     pub fn extract_profile(
@@ -611,8 +634,10 @@ impl ProfileChecker {
 
     /// Check if importing from target module is allowed.
     ///
+
     /// Validates that the current module's profile can access the target module.
     ///
+
     /// Profile compatibility follows the hierarchy:
     /// Research can access everything, Systems can access Systems+Application,
     /// Application can only access Application.
@@ -641,6 +666,7 @@ impl ProfileChecker {
 
     /// Get the effective profile for a module.
     ///
+
     /// Returns the module's declared profile, inherited profile, or compilation default.
     pub fn get_effective_profile(&self, path: &ModulePath) -> LanguageProfile {
         if let Maybe::Some(profile) = self.get_profile(path) {
@@ -671,6 +697,7 @@ impl ProfileChecker {
 
     /// Validate all registered module profiles.
     ///
+
     /// Checks:
     /// 1. Profile inheritance is valid (child not less restrictive than parent)
     /// 2. All enabled features are compatible with profile
@@ -720,6 +747,7 @@ impl ProfileChecker {
 
     /// Generate detailed error message for profile incompatibility.
     ///
+
     /// Generates detailed error including: required profile, current profile,
     /// unavailable features list, and resolution suggestions (change verum.toml,
     /// move module, or use compatible public APIs).

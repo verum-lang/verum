@@ -14,6 +14,7 @@
 )]
 // Unit tests for emitter.rs
 //
+
 // Migrated from src/emitter.rs to comply with CLAUDE.md test organization.
 
 use verum_diagnostics::{

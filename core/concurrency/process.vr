@@ -2,35 +2,43 @@
 // process.vr — π-calculus Process Algebra
 // =============================================================================
 //
+
 // Layer: Standard Library / Concurrency
 //
+
 // User-facing surface for the π-calculus analysis core
 // (`verum_types.pi_calculus`). Milner's π-calculus models mobile
 // concurrent processes where channels are first-class values that
 // can be sent over other channels — modelling dynamic network
 // topology, not just a fixed set of communication paths.
 //
+
 // Where `core/concurrency/session.vr` describes a *single channel's
 // protocol*, this module describes the *entire interaction
 // pattern* between concurrently executing parties.
 //
+
 // ## Syntax
 //
+
 // ```text
-//     P, Q ::= 0                  (terminated process)
-//            | P | Q              (parallel composition)
-//            | (νx) P             (restriction: x is fresh in P)
-//            | x⟨y⟩.P             (send y on x, continue as P)
-//            | x(y).P             (recv on x, bind to y, continue as P)
-//            | !P                 (replication: ∞ copies of P)
+//  P, Q ::= 0 (terminated process)
+//  | P | Q (parallel composition)
+//  | (νx) P (restriction: x is fresh in P)
+//  | x⟨y⟩.P (send y on x, continue as P)
+//  | x(y).P (recv on x, bind to y, continue as P)
+//  | !P (replication: ∞ copies of P)
 // ```
 //
+
 // ## COMM rule
 //
+
 // ```text
-//     x⟨y⟩.P  |  x(z).Q   →   P  |  Q[y/z]
+//  x⟨y⟩.P | x(z).Q → P | Q[y/z]
 // ```
 //
+
 // =============================================================================
 
 module core.concurrency.process;
@@ -92,6 +100,7 @@ public fn proc_replicate(inner: Process) -> Process {
 
 /// Collect free names of a process into `out`.
 ///
+
 /// A name is *free* iff it occurs as a channel / message / object
 /// position outside the scope of any (νx) or x(y) that binds it.
 /// `substitute` uses this to detect — and α-rename around — binders
@@ -156,6 +165,7 @@ fn alpha_rename_avoiding(
 
 /// Substitute `from` with `to` in every free position of `p`.
 ///
+
 /// SOUNDNESS: capture-avoiding. When a binder `(νx)` or `x(y)` would
 /// otherwise capture a substituted occurrence (i.e. `binder == to`
 /// and `binder != from`), the binder is α-renamed to a fresh name
@@ -211,13 +221,16 @@ public fn substitute(p: Process, from: Text, to: Text) -> Process {
 // 4. α-equivalence (proper notion of process equality)
 // =============================================================================
 //
+
 // `Eq` (below) is structural / syntactic — `(νx) P` and `(νy) P[x:=y]`
 // compare unequal even though they denote the same process. The
 // canonical π-calculus equivalence is α-equivalence: two processes
 // are equal iff they differ only in the choice of bound names.
 //
+
 // ## Algorithm
 //
+
 // De Bruijn levels by parallel walk: as the walker descends into
 // `Restrict { name, body }` or `Recv { binder, cont }`, the binder
 // in `p` and the binder in `q` are bound to the SAME fresh
@@ -227,20 +240,25 @@ public fn substitute(p: Process, from: Text, to: Text) -> Process {
 // binder, so syntactically-different bound names that occupy
 // the same de Bruijn position compare equal.
 //
+
 // ## Properties
 //
-//   * Reflexive:  `alpha_eq(p, p)`               for every `p`.
-//   * Symmetric:  `alpha_eq(p, q) ↔ alpha_eq(q, p)`.
-//   * Transitive: `alpha_eq(p, q) ∧ alpha_eq(q, r) → alpha_eq(p, r)`.
-//   * Substitutive: `alpha_eq(p, substitute(p, b, fresh))` whenever
-//     `b` is a binder in `p` and `fresh` is fresh for `p`.
+
+//  * Reflexive: `alpha_eq(p, p)` for every `p`.
+//  * Symmetric: `alpha_eq(p, q) ↔ alpha_eq(q, p)`.
+//  * Transitive: `alpha_eq(p, q) ∧ alpha_eq(q, r) → alpha_eq(p, r)`.
+//  * Substitutive: `alpha_eq(p, substitute(p, b, fresh))` whenever
+//  `b` is a binder in `p` and `fresh` is fresh for `p`.
 //
+
 // All four follow from the parallel-walk structure: every binder
 // in either side gets the same depth, and every leaf compares the
 // same depth-or-textual rule on both sides.
 //
+
 // ## Complexity
 //
+
 // O(min(|p|, |q|)) walks with O(d) per-binder cost where `d` is
 // nesting depth — env extension is a `Map<Text, Int>` insert. No
 // allocation beyond the per-binder cloning of the immutable env
@@ -248,14 +266,17 @@ public fn substitute(p: Process, from: Text, to: Text) -> Process {
 
 /// Alpha-equivalence on π-calculus processes.
 ///
+
 /// Returns `true` iff `p` and `q` denote the same process up to
 /// renaming of bound names. Use this in preference to `==` when
 /// comparing processes that may have been α-renamed by
 /// `substitute`'s capture-avoiding logic, or when comparing
 /// theorems / lemmas that quantify over processes.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Different binder names, same denotation.
 /// let p = proc_restrict("x", proc_send("x", "msg", proc_zero()));
@@ -263,6 +284,7 @@ public fn substitute(p: Process, from: Text, to: Text) -> Process {
 /// assert(alpha_eq(&p, &q));
 /// assert(p != q); // structural Eq disagrees, as documented.
 ///
+
 /// // Free names must still match textually.
 /// let r = proc_send("free_chan", "msg", proc_zero());
 /// let s = proc_send("other_chan", "msg", proc_zero());
@@ -276,6 +298,7 @@ public fn alpha_eq(p: &Process, q: &Process) -> Bool {
 
 /// Internal walker — see the section header for the algorithm.
 ///
+
 /// `env_p[name] = level` means `name` is bound in `p` at the given
 /// de Bruijn level. Same for `env_q`. Levels are only meaningful
 /// across MATCHING positions in the two terms — the parallel walk
@@ -337,12 +360,13 @@ fn alpha_eq_inner(
 /// Compare two leaf names under the parallel walk's binding
 /// environments.
 ///
-///   * Both bound at same level → equal (the binders introduced
-///     them at the same parallel depth).
-///   * Both free (not in env)   → must match textually (free
-///     names are a global namespace shared across both sides).
-///   * One bound, one free      → unequal (different binding
-///     status).
+
+///  * Both bound at same level → equal (the binders introduced
+///  them at the same parallel depth).
+///  * Both free (not in env) → must match textually (free
+///  names are a global namespace shared across both sides).
+///  * One bound, one free → unequal (different binding
+///  status).
 fn name_eq_under_env(
     a: &Text,
     b: &Text,
@@ -380,7 +404,7 @@ implement Eq for Process {
     /// Structural (syntactic) equality on π-calculus processes.
     /// Note: this is *not* α-equivalence — `(νx) P` and `(νy) P[x:=y]`
     /// compare unequal under this Eq even though they denote the
-    /// same process.  Use `alpha_eq` (section 4 above) for the
+    /// same process. Use `alpha_eq` (section 4 above) for the
     /// proper π-calculus equivalence; callers that need α-canonical
     /// form should normalise via `substitute` first.
     fn eq(&self, other: &Process) -> Bool {
@@ -408,13 +432,14 @@ implement Eq for Process {
 
 implement Display for Process {
     /// Renders a process in standard π-calculus notation:
-    ///   `0`           — terminated
-    ///   `P | Q`       — parallel
-    ///   `(νx)P`       — restriction
-    ///   `x<y>.P`      — send
-    ///   `x(z).P`      — receive
-    ///   `!P`          — replication
+    ///  `0` — terminated
+    ///  `P | Q` — parallel
+    ///  `(νx)P` — restriction
+    ///  `x<y>.P` — send
+    ///  `x(z).P` — receive
+    ///  `!P` — replication
     ///
+
     /// Parentheses are inserted around `Par` arguments to disambiguate
     /// from outer combinators; the default left-association of `|`
     /// is preserved.

@@ -4,13 +4,16 @@
 // Layer: Stdlib (1)
 // Dependencies: Operating system threading
 //
+
 // Efficient blocking synchronization using OS primitives.
 //
+
 // Implementation:
 // - Linux: futex syscall
 // - macOS: __ulock_wait/__ulock_wake
 // - Windows: WaitOnAddress/WakeByAddressSingle
 //
+
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
@@ -22,11 +25,13 @@ module core.intrinsics.runtime.sync;
 
 /// Wait on a memory address until value changes.
 ///
+
 /// Blocks until:
 /// - The value at `addr` differs from `expected`
 /// - The timeout expires (if timeout_ns > 0)
 /// - Another thread calls futex_wake
 ///
+
 /// Returns: 0 on success, -1 on timeout
 /// Requires: Operating system
 @intrinsic("futex_wait")
@@ -35,6 +40,7 @@ public fn futex_wait(addr: *const UInt32, expected: UInt32, timeout_ns: UInt64) 
 
 /// Wake threads waiting on a memory address.
 ///
+
 /// Wakes up to `count` threads.
 /// Returns: Number of threads woken
 /// Requires: Operating system
@@ -59,6 +65,7 @@ public fn futex_wake_all(addr: *const UInt32) -> Int32;
 
 /// Try to acquire spinlock without blocking.
 ///
+
 /// Returns: true if lock acquired, false if already held
 @intrinsic("spinlock_try_lock")
 @inline(always)
@@ -67,6 +74,7 @@ public fn spinlock_try_lock(lock: *mut UInt32) -> Bool;
 
 /// Acquire spinlock, spinning until available.
 ///
+
 /// Uses spin_hint() for power efficiency.
 @intrinsic("spinlock_lock")
 @vbc_direct_lowering

@@ -2,19 +2,23 @@
 // continuation.vr — Delimited Continuations (shift/reset)
 // =============================================================================
 //
+
 // Layer: Standard Library / Control
 //
+
 // User-facing surface for the continuation-calculus analysis core
 // (`verum_types.continuation_calculus`). Delimited control as a
 // first-class computational primitive: `reset { e }` installs a
 // prompt; `shift k. e` captures the surrounding computation up to
 // the nearest reset and binds it to `k`.
 //
+
 // With shift/reset, programmers can express coroutines,
 // non-deterministic search, backtracking, and full algebraic-
 // effect handlers as a library — without language-level effect
 // machinery.
 //
+
 // Verum chose contexts + specialized constructs (async / fn* /
 // Result) over general handlers. This module exposes the
 // continuation calculus as data structures + reduction so
@@ -22,14 +26,17 @@
 // properties about it, or translate other languages with shift/
 // reset can do so within Verum.
 //
+
 // ## Reductions
 //
+
 // ```text
-//     (λx. M) N                  ↦  M[x := N]                (β)
-//     reset v                    ↦  v                         (reset-value)
-//     reset (shift k. M)         ↦  reset (M[k := λx. reset x])  (shift)
+//  (λx. M) N ↦ M[x := N] (β)
+//  reset v ↦ v (reset-value)
+//  reset (shift k. M) ↦ reset (M[k := λx. reset x]) (shift)
 // ```
 //
+
 // =============================================================================
 
 module core.control.continuation;
@@ -145,6 +152,7 @@ fn cc_fresh_name(base: Text, t1: CcTerm, t2: CcTerm) -> Text {
 
 /// Substitute `from` with `to` everywhere it appears free in `t`.
 ///
+
 /// CAPTURE-AVOIDING: when descending under a binder `λparam. body` (or
 /// `shift param. body`), if `param` would capture a free variable in
 /// `to`, the binder is first α-renamed to a fresh name. Without this
@@ -197,6 +205,7 @@ public fn cc_substitute(t: CcTerm, from: Text, to: CcTerm) -> CcTerm {
 
 /// Outcome of one reduction attempt.
 ///
+
 /// Returns the term back in either branch so the caller can iterate
 /// without cloning — the `CcTerm` ADT has Heap<T> children and no
 /// `@derive(Clone)`, matching the convention of this module.
@@ -208,24 +217,27 @@ public type CcStep is
 
 /// One reduction step in left-to-right delimited-control order:
 ///
+
 /// ```text
-///     (λx. M) N                ↦  M[x := N]                       (β)
-///     reset v                  ↦  v                               (reset-value)
-///     reset (shift k. M)       ↦  reset (M[k := λx. reset x])     (shift)
+///  (λx. M) N ↦ M[x := N] (β)
+///  reset v ↦ v (reset-value)
+///  reset (shift k. M) ↦ reset (M[k := λx. reset x]) (shift)
 /// ```
 ///
+
 /// Reduction proceeds beneath congruences: under `App` head, then
 /// argument; under `Reset`. The `Shift` reduction only fires when
 /// `Shift` is in the immediate scope of a `Reset` — outside any
 /// reset, a `shift` is stuck (matching the operational semantics
 /// of delimited control).
 ///
+
 /// The captured continuation `λx. reset x` is the standard
 /// reification: a one-argument λ that re-installs the prompt at
 /// the call site so the captured context is replayable.
 public fn cc_step(t: CcTerm) -> CcStep {
     match t {
-        // β: (λx. body) N  ↦  body[x := N]
+        // β: (λx. body) N ↦ body[x := N]
         CcTerm.App { func, arg } => {
             match *func {
                 CcTerm.Lam { param, body } =>
@@ -245,13 +257,13 @@ public fn cc_step(t: CcTerm) -> CcStep {
                 },
             }
         },
-        // reset v             ↦ v                       (reset-value)
-        // reset (shift k. M)  ↦ reset (M[k := …])       (shift)
+        // reset v ↦ v (reset-value)
+        // reset (shift k. M) ↦ reset (M[k := …]) (shift)
         CcTerm.Reset { inner } => {
             match *inner {
                 CcTerm.Shift { binder, body } => {
                     // Reify the captured continuation as
-                    //     λx. reset x
+                    //  λx. reset x
                     // — pick a fresh `x` so we don't accidentally
                     // shadow a free variable inside `body`.
                     let x = cc_fresh_name(
@@ -288,6 +300,7 @@ public fn cc_step(t: CcTerm) -> CcStep {
 /// `gas` bounds the number of reduction steps to guarantee
 /// termination on inputs whose reduction diverges.
 ///
+
 /// Returns `(final, steps)`; `steps < gas` means a normal form was
 /// reached.
 public fn cc_normalise(t: CcTerm, gas: Int) -> (CcTerm, Int) {
@@ -388,9 +401,9 @@ fn cc_alpha_eq_ctx(
 // =============================================================================
 
 implement Eq for CcTerm {
-    /// Syntactic equality on continuation-calculus terms.  Not
+    /// Syntactic equality on continuation-calculus terms. Not
     /// α-equivalence — for that use `cc_alpha_eq` /
-    /// `cc_alpha_eq_ctx`.  `λx.x` and `λy.y` compare unequal under
+    /// `cc_alpha_eq_ctx`. `λx.x` and `λy.y` compare unequal under
     /// `==`; the doc-comment matches the same convention applied to
     /// `Process` (commit c1089b69) and `CbpvTerm` (commit 1a6243aa).
     fn eq(&self, other: &CcTerm) -> Bool {
@@ -418,16 +431,16 @@ implement Eq for CcTerm {
 
 implement Display for CcTerm {
     /// Renders in standard delimited-control notation:
-    ///   `Const { payload }`              → `'<payload>`   (single-quote prefix
-    ///                                                       distinguishes a
-    ///                                                       value-level constant
-    ///                                                       from a Var of the
-    ///                                                       same name)
-    ///   `Var { name }`                   → `<name>`
-    ///   `Lam { param, body }`            → `λ<param>. <body>`
-    ///   `App { func, arg }`              → `(<func> <arg>)`
-    ///   `Reset { inner }`                → `reset <inner>`
-    ///   `Shift { binder, body }`         → `shift <binder>. <body>`
+    ///  `Const { payload }` → `'<payload>` (single-quote prefix
+    ///  distinguishes a
+    ///  value-level constant
+    ///  from a Var of the
+    ///  same name)
+    ///  `Var { name }` → `<name>`
+    ///  `Lam { param, body }` → `λ<param>. <body>`
+    ///  `App { func, arg }` → `(<func> <arg>)`
+    ///  `Reset { inner }` → `reset <inner>`
+    ///  `Shift { binder, body }` → `shift <binder>. <body>`
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             CcTerm.Const { payload } =>

@@ -3,14 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §7.4
 //
+
 // Five lock states (matches xLock/xUnlock taxonomy in VFS):
 //
-//   * `LkNone`       — no lock held; no I/O permitted
-//   * `LkShared`     — readers only; many holders allowed
-//   * `LkReserved`   — one reader signalling intent to write
-//   * `LkPending`    — held briefly during shared→exclusive upgrade;
-//                       blocks new shared lockers
-//   * `LkExclusive`  — sole writer; all other holders evicted
+
+//  * `LkNone` — no lock held; no I/O permitted
+//  * `LkShared` — readers only; many holders allowed
+//  * `LkReserved` — one reader signalling intent to write
+//  * `LkPending` — held briefly during shared→exclusive upgrade;
+//  blocks new shared lockers
+//  * `LkExclusive` — sole writer; all other holders evicted
 // =============================================================================
 
 module core.database.sqlite.native.lockfile.state;

@@ -5,24 +5,27 @@
 // Dependencies: core, base.env, io.fs, sync, shell.escape
 // =============================================================================
 //
+
 // `ShellContext` is the runtime configuration carried implicitly through
 // every `using [ShellContext]` function. It centralises:
-//   * working directory (cwd) — overrides per-call rather than mutating
-//     process global state, which keeps shell calls referentially clean
-//     across nursery scopes
-//   * env-var overrides — additive, applied just before spawn, never
-//     leaked into the parent process
-//   * shell flavour (Posix / Cmd / Fish / PowerShell) — drives both auto-
-//     escape and the `-c` invocation
-//   * verbosity / dry-run knobs for diagnostics
-//   * mock layer (used by tests) — short-circuits real spawns
-//   * permission set — runtime gate before kernel-level dispatch
+//  * working directory (cwd) — overrides per-call rather than mutating
+//  process global state, which keeps shell calls referentially clean
+//  across nursery scopes
+//  * env-var overrides — additive, applied just before spawn, never
+//  leaked into the parent process
+//  * shell flavour (Posix / Cmd / Fish / PowerShell) — drives both auto-
+//  escape and the `-c` invocation
+//  * verbosity / dry-run knobs for diagnostics
+//  * mock layer (used by tests) — short-circuits real spawns
+//  * permission set — runtime gate before kernel-level dispatch
 //
+
 // The context is a value type. Mutation happens through `provide` /
 // `with_context` rather than in-place writes; this means parallel branches
 // of a nursery never observe each other's cwd or env changes — exactly the
 // invariant `using [...]` exists to enforce.
 //
+
 // =============================================================================
 
 module context;
@@ -39,6 +42,7 @@ mount core.shell.result.{ShellResult, ShellError};
 // PermissionKind / PermissionSet — capability declarations
 // =============================================================================
 //
+
 // Permissions are declarative. Frontmatter `// !@permission(run: [...])`
 // is parsed into a `PermissionSet` that is attached to the ShellContext.
 // Each spawn cross-references the requested program against `run` (or any
@@ -159,6 +163,7 @@ fn basename_of(p: &Text) -> Text {
 // MockResponse / MockLayer — enables unit-testable scripts
 // =============================================================================
 //
+
 // When a `MockLayer` is set, every `run()` / `sh()` checks for a matching
 // pattern in the layer first; if hit, no real process is spawned and the
 // canned `ShellResult` is returned. Patterns match by exact command first,

@@ -47,6 +47,7 @@ fn is_digit(b: u8) -> Bool {
 
 // sqlite3_uri_int64 — strict integer parse (digits only after optional sign).
 //
+
 // Three-layer overflow defense (#70-#74 recipe). URI parameters arrive
 // from connection-string text — a hostile string with a digit-run > 19
 // chars must be rejected at the bridge rather than silently wrap.

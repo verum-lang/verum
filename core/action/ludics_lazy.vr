@@ -2,22 +2,25 @@
 // core.action.ludics_lazy — cofix-based lazy ludics designs (VVA-10 V1)
 // =============================================================================
 //
+
 // Concrete implementation atop the V0 ludics.vr protocol surface,
 // using `core.base.coinductive` for cofix-friendly observation
 // semantics. Wires the three V0 caveats from VVA §13.5:
 //
-//   (a) Designs are infinite-branching trees → lazy observation
-//       through ObservationTrace rather than eager tree
-//       materialisation.
-//   (b) Cut-elimination is bounded-depth (default 1000 steps);
-//       divergent computations return UNKNOWN verdict via
-//       BisimulationResult.Unknown.
-//   (c) Orthogonality is decided via finite-depth bisimulation —
-//       the limit-as-depth → ∞ relation is genuine; the bounded
-//       check is sound for all observable contexts up to that
-//       depth.
+
+//  (a) Designs are infinite-branching trees → lazy observation
+//  through ObservationTrace rather than eager tree
+//  materialisation.
+//  (b) Cut-elimination is bounded-depth (default 1000 steps);
+//  divergent computations return UNKNOWN verdict via
+//  BisimulationResult.Unknown.
+//  (c) Orthogonality is decided via finite-depth bisimulation —
+//  the limit-as-depth → ∞ relation is genuine; the bounded
+//  check is sound for all observable contexts up to that
+//  depth.
 //
-// V1 ships the operational layer (this file). V2 will lift the
+
+// ships the operational layer (this file). Future work will lift the
 // productivity-checked cut-elim + bisimulation through a kernel
 // rule (`K-Cut-Elim`) so the verifier can certify orthogonality
 // without runtime depth bounds.
@@ -108,6 +111,7 @@ public type CutElimVerdict is
 /// when the depth runs out; `NotBisimilar` when prefixes diverge
 /// before the bound.
 ///
+
 /// Operational form: traces both designs to depth `depth_bound`
 /// via observation prefixes, then routes through
 /// `bisimilar_up_to`. UNKNOWN verdict from the bisimulation maps
@@ -184,6 +188,7 @@ public fn orthogonal(
 /// verdict witnesses genuine cut-elimination in the underlying
 /// ludics calculus, GATED on productivity.
 ///
+
 /// V2 structural form: the theorem returns true exactly when the
 /// productivity precondition holds — i.e. soundness is **conditional
 /// on productivity**. A non-productive design's `Normalised` would
@@ -207,6 +212,7 @@ public theorem bounded_cut_elim_sound(d: LazyDesign) -> Bool
 /// preserves the distinction between "definitely incompatible"
 /// and "couldn't decide in time".
 ///
+
 /// V2 form: structural separator over BisimulationResult variants.
 /// The ensures clause asserts that the two variants are
 /// type-system-distinct — pattern-match on the result discriminates
@@ -272,9 +278,9 @@ implement Eq for CutElimVerdict {
 
 implement Display for CutElimVerdict {
     /// Renders the verdict for diagnostic surfaces:
-    ///   `Normalised { steps_taken }`  → `normalised after <N> steps`
-    ///   `DepthExceeded`               → `depth-exceeded`
-    ///   `NotBisimilar`                → `not-bisimilar`
+    ///  `Normalised { steps_taken }` → `normalised after <N> steps`
+    ///  `DepthExceeded` → `depth-exceeded`
+    ///  `NotBisimilar` → `not-bisimilar`
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             CutElimVerdict.Normalised { steps_taken } =>

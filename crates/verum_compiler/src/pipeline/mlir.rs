@@ -1,19 +1,22 @@
 //! MLIR JIT/AOT compilation (GPU code path).
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 15). Houses the
 //! AST → Verum MLIR dialect → LLVM dialect → JIT/AOT path used
 //! exclusively for GPU targets (`@device(GPU)` annotation or
-//! tensor-op threshold detection).  CPU code never touches MLIR;
+//! tensor-op threshold detection). CPU code never touches MLIR;
 //! it uses LLVM IR directly via `pipeline/native_codegen.rs`.
 //!
+
 //! Methods:
 //!
-//!   * `run_mlir_jit` — JIT-compile + execute the module via
-//!     MLIR ExecutionEngine; entry point for `verum run --mlir`.
-//!   * `execute_mlir_jit` — internal helper that drives the
-//!     ExecutionEngine after lowering.
-//!   * `run_mlir_aot` — AOT-compile to a GPU binary (PTX,
-//!     HSACO, SPIR-V, Metal); entry point for `verum build --gpu`.
+
+//!  * `run_mlir_jit` — JIT-compile + execute the module via
+//!  MLIR ExecutionEngine; entry point for `verum run --mlir`.
+//!  * `execute_mlir_jit` — internal helper that drives the
+//!  ExecutionEngine after lowering.
+//!  * `run_mlir_aot` — AOT-compile to a GPU binary (PTX,
+//!  HSACO, SPIR-V, Metal); entry point for `verum build --gpu`.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -32,17 +35,20 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run MLIR-based JIT compilation (experimental)
     ///
+
     /// This compilation path uses:
     /// 1. AST → Verum MLIR dialect lowering
     /// 2. CBGR elimination and context monomorphization passes
     /// 3. Progressive lowering to LLVM dialect
     /// 4. JIT compilation via ExecutionEngine
     ///
+
     /// Benefits over direct LLVM:
     /// - Domain-specific optimizations via custom MLIR passes
     /// - Better debugging via MLIR's verifier
     /// - Reusable transformations for different backends
     ///
+
     /// MLIR is used for GPU targets only; CPU code uses LLVM IR directly.
     pub fn run_mlir_jit(&mut self, args: List<Text>) -> Result<()> {
         use verum_codegen::mlir::MlirContext;
@@ -184,6 +190,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run MLIR-based AOT compilation (experimental)
     ///
+
     /// Similar to run_mlir_jit but produces an executable instead of running directly.
     /// Uses VBC → MLIR path for GPU tensor operations.
     pub fn run_mlir_aot(&mut self) -> Result<PathBuf> {
@@ -329,6 +336,7 @@ impl<'s> CompilationPipeline<'s> {
 
                 // Phase 10: Compile host LLVM IR + link with GPU binaries
                 //
+
                 // Write the host LLVM IR to a temp file, then pass it to
                 // the native compilation pipeline which handles LLVM IR → object → link.
                 let build_dir = std::env::temp_dir().join("verum_gpu_build");

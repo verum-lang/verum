@@ -1,49 +1,59 @@
 //! High-level Rust intercepts for `core.shell.exec.{sh, sh_check}`.
 //!
+
 //! Architecture (Tier-0 / interpreter):
 //!
+
 //! Verum's shell-scripting surface (`sh#"..."` literals, `ShellCommand.run`,
 //! `Command.output` etc.) ultimately bottoms out at `sh_check(cmd_text) ->
-//! Result<ShellResult, ShellError>` in `core/shell/exec.vr`.  The Verum
+//! Result<ShellResult, ShellError>` in `core/shell/exec.vr`. The Verum
 //! implementation routes through `Command::output()` →
 //! `spawn_child_with_output()` → `native_spawn()` → `make_pipe()` → the
 //! libSystem `pipe(2)` syscall via FFI.
 //!
+
 //! At Tier-0 the FFI dispatch chain for libSystem.B.dylib syscalls is
 //! brittle (libloading + libffi pointer marshaling for `int*` out-params
 //! has subtle ABI gotchas that bite on kqueue/inotify-style fd-array
-//! sentinels).  Rather than chase reliability through the FFI stack,
+//! sentinels). Rather than chase reliability through the FFI stack,
 //! this module bypasses the entire chain by intercepting `sh_check` at
 //! the call dispatch boundary and running the command directly via
 //! `std::process::Command` — the exact same primitive a Tier-1 AOT
 //! lowering would emit, just executed in the interpreter host process.
 //!
+
 //! This is the canonical Tier-0 architecture for "complex syscall
 //! sequence" surfaces: interpret high-level intrinsics in Rust;
 //! reserve FFI dispatch for genuinely-foreign cases that don't have a
 //! Rust equivalent.
 //!
+
 //! # Marshaling
 //!
+
 //! Args:
-//!   * `sh_check(cmd_text: &Text) -> Result<ShellResult, ShellError>` —
-//!     arg 0 is the command text (passed by reference; we extract via
-//!     `string_helpers::extract_string`).
+//!  * `sh_check(cmd_text: &Text) -> Result<ShellResult, ShellError>` —
+//!  arg 0 is the command text (passed by reference; we extract via
+//!  `string_helpers::extract_string`).
 //!
-//! Returns: `Result<ShellResult, ShellError>`.  We construct the
+
+//! Returns: `Result<ShellResult, ShellError>`. We construct the
 //! variant value with a real type_id resolved from the module's type
 //! table (`state.module.types.iter().find(|td|
 //! state.module.get_string(td.name) == Some("Result"))`), so
 //! `format_variant_for_print_depth` and pattern-match dispatch see the
 //! correct constructor name.
 //!
+
 //! On success: `Result.Ok(ShellResult { stdout_bytes, stderr_bytes,
 //! status: ExitStatus { raw }, command, duration: Duration { nanos } })`.
 //! On failure (spawn error): `Result.Err(ShellError.SpawnFailed
 //! { command, reason })`.
 //!
+
 //! # Permission gate
 //!
+
 //! The interpreter's PermissionRouter is consulted before spawning —
 //! a script declaring `permissions = ["time"]` (no `run`) is denied
 //! with the same `Process` scope check that `ffi_extended.rs::
@@ -57,14 +67,15 @@ use super::super::super::error::InterpreterResult;
 use super::heap_helpers::{alloc_byte_list, alloc_record_n_fields, wrap_in_variant};
 use super::string_helpers::{alloc_string_value, extract_string};
 
-/// Try to intercept a high-level shell-runtime call.  Returns `Some(value)`
+/// Try to intercept a high-level shell-runtime call. Returns `Some(value)`
 /// when the interception fires (caller must store the value into the
 /// destination register and short-circuit normal call dispatch);
 /// returns `None` for any function name that doesn't match.
 ///
+
 /// Hot-path invariant: this function does ONE string equality check
 /// (`func_name == "sh_check"`) and returns `None` for every other
-/// function call in the program.  No allocation on the miss path.
+/// function call in the program. No allocation on the miss path.
 pub(in super::super) fn try_intercept_shell_runtime(
     state: &mut InterpreterState,
     func_name: &str,
@@ -73,7 +84,7 @@ pub(in super::super) fn try_intercept_shell_runtime(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     // Match the FUNCTION-NAME suffix against the canonical entry
-    // points.  Codegen registers functions under fully-qualified
+    // points. Codegen registers functions under fully-qualified
     // names (`core.shell.exec.sh_check`), so we strip the prefix
     // before comparing — module-relative resolution and direct
     // bare-name calls both reach this intercept identically.

@@ -3,14 +3,16 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.4 / §18 (PRAGMA table_info)
 //
+
 // `pragma_table_info('t')` returns one row per column:
 //
-//   cid      INTEGER  -- 0-based column index
-//   name     TEXT     -- column name
-//   type     TEXT     -- declared type (BLOB / TEXT / INTEGER / ...)
-//   notnull  INTEGER  -- 1 if NOT NULL, else 0
-//   dflt_value TEXT   -- DEFAULT clause text (NULL if none)
-//   pk       INTEGER  -- 0 = not PK, 1+ = position in PK
+
+//  cid INTEGER -- 0-based column index
+//  name TEXT -- column name
+//  type TEXT -- declared type (BLOB / TEXT / INTEGER / ...)
+//  notnull INTEGER -- 1 if NOT NULL, else 0
+//  dflt_value TEXT -- DEFAULT clause text (NULL if none)
+//  pk INTEGER -- 0 = not PK, 1+ = position in PK
 // =============================================================================
 
 module core.database.sqlite.native.dbstat.table_info;

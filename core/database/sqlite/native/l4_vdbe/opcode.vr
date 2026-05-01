@@ -6,18 +6,22 @@ module core.database.sqlite.native.l4_vdbe.opcode;
 // Layer: 4
 // Spec: sqlite-native.md §11.2
 //
+
 // SQLite's VDBE has ~180 opcodes; we enumerate the v1 subset sufficient
 // to execute simple SELECT / INSERT / UPDATE / DELETE + transactions.
 // Each variant carries its operand-shape as a record; the interpreter
 // dispatches on the tag.
 //
+
 // Operand naming conventions (mirrors SQLite's p1..p5):
 //
-//   * `reg_*`       — register index (0-based, not 1-based like SQLite)
-//   * `jump_target` — instruction index to jump to
-//   * `cursor_id`   — slot in the VdbeProgram's cursor table
-//   * `const_idx`   — index into the program's constant pool
+
+//  * `reg_*` — register index (0-based, not 1-based like SQLite)
+//  * `jump_target` — instruction index to jump to
+//  * `cursor_id` — slot in the VdbeProgram's cursor table
+//  * `const_idx` — index into the program's constant pool
 //
+
 // Not a full bijection with C-SQLite opcodes; missing ones are
 // tracked in internal/specs/sqlite-opcodes.md as they land.
 // =============================================================================
@@ -130,8 +134,8 @@ public type Opcode is
     | Function(n_args: Int, reg_first_arg: Int, reg_dst: Int, func_const_idx: Int)
     // Built-in scalar functions dispatched by a small kind tag so the
     // interpreter doesn't need a constant-pool lookup.
-    //   0  LENGTH   1  ABS      2  LOWER   3  UPPER
-    //   4  COALESCE  5  IFNULL  6  NULLIF
+    //  0 LENGTH 1 ABS 2 LOWER 3 UPPER
+    //  4 COALESCE 5 IFNULL 6 NULLIF
     | ScalarFn(kind: Int, n_args: Int, reg_first_arg: Int, reg_dst: Int)
     // CAST(src AS <target>). target_kind: 0 INTEGER / 1 REAL / 2 TEXT /
     // 3 BLOB / 4 NUMERIC (affinity coerce).
@@ -145,10 +149,11 @@ public type Opcode is
 
     // Parameter binding ------------------------------------------------------
     //
+
     // `Variable(reg_dst, param_idx)` — copy positional parameter `?N`
     // (1-based) from the active `ParamBindings` into `reg_dst`.
     // `VariableNamed(reg_dst, name_const_idx)` — copy named parameter
-    // `:foo` (or `@foo` / `$foo`) into `reg_dst`.  Unbound slots
+    // `:foo` (or `@foo` / `$foo`) into `reg_dst`. Unbound slots
     // evaluate to NULL (matching SQLite semantics).
     | Variable(reg_dst: Int, param_idx: Int)
     | VariableNamed(reg_dst: Int, name_const_idx: Int)

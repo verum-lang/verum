@@ -1,8 +1,10 @@
 //! Code formatting support with trivia preservation
 //!
+
 //! Formats Verum code according to style guidelines.
 //! Uses the lossless syntax tree to preserve comments and meaningful whitespace.
 //!
+
 //! Features:
 //! - Trivia-preserving formatting (comments, doc comments)
 //! - Consistent indentation (4 spaces by default)
@@ -695,6 +697,7 @@ impl TriviaPreservingFormatter {
 
     /// Format a field list.
     ///
+
     /// Honours `VerumFormatConfig.trailing_commas`: when `true`
     /// (the default), every field emission terminates with `,\n`,
     /// including the last one — matching the documented house style
@@ -939,6 +942,7 @@ pub fn format_document(text: &str) -> List<TextEdit> {
 
 /// Format a document honouring caller-supplied formatting config.
 ///
+
 /// The LSP `formatting` request carries `FormattingOptions` (tab
 /// size, insert-spaces) that the editor sourced from the user's
 /// own settings. The fallback formatter previously hardcoded
@@ -1412,14 +1416,16 @@ pub fn format_on_type(text: &str, position: Position, ch: char) -> List<TextEdit
 
 /// Format after `|>` (pipeline operator): align continuation to pipeline start.
 ///
+
 /// Verum's pipeline operator chains expressions vertically. When the user
 /// types `|>` we indent the continuation to one level deeper than the
 /// expression that started the pipeline chain, producing:
 ///
+
 /// ```verum
 /// data
-///     |> transform
-///     |> filter
+///  |> transform
+///  |> filter
 /// ```
 fn format_pipeline_operator(text: &str, position: Position) -> List<TextEdit> {
     let lines: Vec<&str> = text.lines().collect();
@@ -1628,15 +1634,17 @@ fn calculate_indent_for_closing_brace(lines: &[&str], current_line: usize) -> us
 
 /// Calculate the proper indentation for a new line.
 ///
+
 /// The logic mirrors Verum's block structure:
 ///
+
 /// | Previous line ends with | Indent change |
 /// |-------------------------|---------------|
-/// | `{` or `[`              | +1 level      |
-/// | `=>`                    | +1 level (match arm body) |
-/// | `\|>`                   | same (pipeline continuation) |
-/// | `}` or `]`              | same (already dedented) |
-/// | anything else           | same |
+/// | `{` or `[` | +1 level |
+/// | `=>` | +1 level (match arm body) |
+/// | `\|>` | same (pipeline continuation) |
+/// | `}` or `]` | same (already dedented) |
+/// | anything else | same |
 pub fn calculate_indent_for_new_line(prev_line: &str) -> usize {
     let base_indent = prev_line.chars().take_while(|c| c.is_whitespace()).count() / 4;
     let trimmed = prev_line.trim();
@@ -1689,6 +1697,7 @@ mod tests {
         // `indent_size` must produce different output for any
         // input the formatter re-indents.
         //
+
         // The check is on the lower-level formatter directly so
         // this test isn't gated on the `format_document` /
         // `format_document_with_config` choice of fallback path —

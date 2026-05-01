@@ -2,6 +2,7 @@
 // core.action.monads.pure — identity (no-effect) monad
 // =============================================================================
 //
+
 // `Pure<A>` — the identity monad: no side effect at all. Trivially
 // commutative; ε-coordinate 0. Acts as the unit of the Kleisli
 // composition law and as the canonical baseline against which the
@@ -45,12 +46,14 @@ public fn pure_extract<A>(m: Pure<A>) -> A {
 // Monad laws (V2 — witness-parameterised structural theorems)
 // =============================================================================
 //
+
 // The IDENTITY monad's laws are FULLY DECIDABLE — every law reduces
 // to a trivial pattern-match on `Identity(_)` plus β-equivalence. V2
 // (this module) promotes each from the V1 tautological framework-
 // citation axiom to a structural @theorem with a witness-parameterised
 // signature whose proof body executes the structural reduction.
 //
+
 // Witness-equality: we encode "≡" as Bool-valued `eq_pure(a, b)` since
 // Verum's Pure<A> is concretely Identity(A) and Eq composes; the
 // equality is decidable for any A: Eq.
@@ -69,6 +72,7 @@ public fn pure_eq<A>(p: Pure<A>, q: Pure<A>) -> Bool
 
 /// **Left identity** (Theorem 17.T1): `bind(pure(a), f) ≡ f(a)`.
 ///
+
 /// Decidable: by structural pattern-match on `pure_unit(a) =
 /// Identity(a)`, `pure_bind(Identity(a), f)` reduces to `f(a)`.
 /// The theorem returns true exactly when this reduction holds —
@@ -81,12 +85,12 @@ public theorem pure_left_identity<A, B>(a: A, f: fn(A) -> Pure<B>) -> Bool
 {
     proof {
         // ── Step 1: unfold pure_unit to its constructor form.
-        //   pure_unit(a) = Identity(a)                         (definition)
+        //  pure_unit(a) = Identity(a) (definition)
         let unit_a: Pure<A> = pure_unit(a.clone());
         // ── Step 2: unfold pure_bind on the constructor.
-        //   pure_bind(Identity(a), f)
-        //     = let Identity(a') = Identity(a); f(a')          (β on bind)
-        //     = f(a)                                            (β on let)
+        //  pure_bind(Identity(a), f)
+        //  = let Identity(a') = Identity(a); f(a') (β on bind)
+        //  = f(a) (β on let)
         let bound: Pure<B> = pure_bind(unit_a, f.clone());
         // ── Step 3: bound is structurally f(a). pure_eq is reflexive on this.
         let direct: Pure<B> = f(a);
@@ -98,6 +102,7 @@ public theorem pure_left_identity<A, B>(a: A, f: fn(A) -> Pure<B>) -> Bool
 
 /// **Right identity** (Theorem 17.T1): `bind(m, pure) ≡ m`.
 ///
+
 /// Decidable: pattern-match on `m = Identity(a)`. `pure_bind(Identity(a),
 /// pure_unit) = pure_unit(a) = Identity(a) = m`. Reflexive.
 @framework(diakrisis, "Theorem 17.T1 (Pure right-identity monad law)")
@@ -109,10 +114,10 @@ public theorem pure_right_identity<A>(m: Pure<A>) -> Bool
         // ── Step 1: pattern-extract the wrapped value.
         let Identity(a): Pure<A> = m.clone();
         // ── Step 2: pure_bind unfolds:
-        //   pure_bind(Identity(a), pure_unit)
-        //     = let Identity(a') = Identity(a); pure_unit(a')   (β)
-        //     = pure_unit(a)                                     (β-let)
-        //     = Identity(a)                                      (definition)
+        //  pure_bind(Identity(a), pure_unit)
+        //  = let Identity(a') = Identity(a); pure_unit(a') (β)
+        //  = pure_unit(a) (β-let)
+        //  = Identity(a) (definition)
         let bound: Pure<A> = pure_bind(m.clone(), pure_unit);
         let reconstructed: Pure<A> = Identity(a);
         // ── Step 3: bound = reconstructed = m structurally.
@@ -123,6 +128,7 @@ public theorem pure_right_identity<A>(m: Pure<A>) -> Bool
 /// **Associativity** (Theorem 17.T1): `bind(bind(m, f), g) ≡
 /// bind(m, |x| bind(f(x), g))`.
 ///
+
 /// Decidable: pattern-match on `m = Identity(a)`. LHS reduces to
 /// `pure_bind(f(a), g)`. RHS reduces to `pure_bind(Identity(a), |x|
 /// pure_bind(f(x), g))` = `pure_bind(f(a), g)`. Equal.
@@ -142,16 +148,16 @@ public theorem pure_associativity<A, B, C>(
         // ── Step 1: pattern-extract the wrapped value.
         let Identity(a): Pure<A> = m.clone();
         // ── Step 2: LHS reduction chain.
-        //   pure_bind(pure_bind(Identity(a), f), g)
-        //     = pure_bind(f(a), g)                              (β on inner)
+        //  pure_bind(pure_bind(Identity(a), f), g)
+        //  = pure_bind(f(a), g) (β on inner)
         let lhs: Pure<C> = pure_bind(pure_bind(m.clone(), f.clone()), g.clone());
         // ── Step 3: RHS reduction chain.
-        //   pure_bind(Identity(a), |x| pure_bind(f(x), g))
-        //     = (|x| pure_bind(f(x), g))(a)                     (β on outer)
-        //     = pure_bind(f(a), g)                              (β-app)
+        //  pure_bind(Identity(a), |x| pure_bind(f(x), g))
+        //  = (|x| pure_bind(f(x), g))(a) (β on outer)
+        //  = pure_bind(f(a), g) (β-app)
         let rhs: Pure<C> = pure_bind(m, |x: A| pure_bind(f(x), g.clone()));
         // ── Step 4: both sides reduce to pure_bind(f(a), g).
-        //   The kernel's β-rule discharges the equality.
+        //  The kernel's β-rule discharges the equality.
         let _ = a;  // a is the witness extracted in Step 1
         pure_eq(lhs, rhs)
     }
@@ -160,9 +166,11 @@ public theorem pure_associativity<A, B, C>(
 /// **Commutativity** (Corollary 17.C2): the tensor of two `Pure<_>`
 /// computations is symmetric.
 ///
-///   `bind(m1, |a| bind(m2, |b| pure((a,b))))
-///    ≡ bind(m2, |b| bind(m1, |a| pure((a,b))))`
+
+///  `bind(m1, |a| bind(m2, |b| pure((a,b))))
+///  ≡ bind(m2, |b| bind(m1, |a| pure((a,b))))`
 ///
+
 /// Decidable: both sides reduce to `Identity((a, b))` for the unique
 /// `a`, `b` extracted from `m1 = Identity(a)`, `m2 = Identity(b)`.
 @framework(diakrisis, "Corollary 17.C2 (Pure tensor-commutativity)")
@@ -178,11 +186,11 @@ public theorem pure_commutativity<A, B>(m1: Pure<A>, m2: Pure<B>) -> Bool
         let Identity(a): Pure<A> = m1.clone();
         let Identity(b): Pure<B> = m2.clone();
         // ── Step 2: LHS reduction (m1 outer, m2 inner).
-        //   pure_bind(Identity(a), |x| pure_bind(Identity(b), |y| pure_unit((x, y))))
-        //     = (|x| pure_bind(Identity(b), |y| pure_unit((x, y))))(a)
-        //     = pure_bind(Identity(b), |y| pure_unit((a, y)))
-        //     = pure_unit((a, b))
-        //     = Identity((a, b))
+        //  pure_bind(Identity(a), |x| pure_bind(Identity(b), |y| pure_unit((x, y))))
+        //  = (|x| pure_bind(Identity(b), |y| pure_unit((x, y))))(a)
+        //  = pure_bind(Identity(b), |y| pure_unit((a, y)))
+        //  = pure_unit((a, b))
+        //  = Identity((a, b))
         let lhs: Pure<(A, B)> = pure_bind(
             m1.clone(),
             |x: A| pure_bind(m2.clone(), |y: B| pure_unit((x, y))),

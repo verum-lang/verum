@@ -56,7 +56,7 @@ implement MutexAssertEngine {
     }
 
     /// sqlite3_mutex_held: 1 if the mutex is currently held (debug) or
-    /// always 1 (release).  On debug + unknown mutex, returns 1 (safe).
+    /// always 1 (release). On debug + unknown mutex, returns 1 (safe).
     pub fn sqlite3_mutex_held(&self, mutex_id: Int64) -> Int {
         if always_true_in_release(&self.mode) { return 1; }
         let mut i: Int = 0;

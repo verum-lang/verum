@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API — sqlite3_vtab_config + xBestIndex.
 //
+
 // SQLITE_INDEX_CONSTRAINT_{EQ,GT,LE,LT,GE,MATCH,LIKE,GLOB,REGEXP,NE,
 // ISNOT,ISNOTNULL,ISNULL,IS,LIMIT,OFFSET,FUNCTION}
 // =============================================================================

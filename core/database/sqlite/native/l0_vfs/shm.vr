@@ -6,21 +6,25 @@ module core.database.sqlite.native.l0_vfs.shm;
 // Layer: 0
 // Spec: sqlite-native.md §6.6 + §7.2
 //
+
 // SQLite's WAL-index (`<db>-shm` file) is a mmap(MAP_SHARED) region
 // holding 2 header copies and 32 hash-tables of 4096 slots each.
 // Cross-process WAL requires every reader/writer to see the same
 // bytes — hence shared memory, not a plain file.
 //
+
 // This module defines the protocol `ShmSegment` that every shm backend
 // implements, plus two backends:
 //
-//   * `InMemoryShm`    — process-local emulation; used on `:memory:`
-//                        databases and in single-process DST tests.
-//   * `MappedFileShm`  — mmap-backed, POSIX `mmap(MAP_SHARED, fd)` or
-//                        Windows `CreateFileMapping/MapViewOfFile`.
-//                        Platform wiring is deferred to L1 once the
-//                        pager consumes it; v1 exposes the API shape.
+
+//  * `InMemoryShm` — process-local emulation; used on `:memory:`
+//  databases and in single-process DST tests.
+//  * `MappedFileShm` — mmap-backed, POSIX `mmap(MAP_SHARED, fd)` or
+//  Windows `CreateFileMapping/MapViewOfFile`.
+//  Platform wiring is deferred to L1 once the
+//  pager consumes it; v1 exposes the API shape.
 //
+
 // Regions are addressed by `(region_index, size)`; the spec fixes each
 // region at 32 KiB (`SQLITE_SHM_REGION_SIZE`). Backends grow the file
 // lazily as new regions are requested.
@@ -74,15 +78,17 @@ public type ShmSegment is protocol {
 /// Single-process shm emulator. Holds region blobs by index in a Map.
 /// Sufficient for:
 ///
-///   * `:memory:` databases (there's no cross-process story anyway).
-///   * DST tests where every "process" is a simulated task sharing the
-///     same address space.
+
+///  * `:memory:` databases (there's no cross-process story anyway).
+///  * DST tests where every "process" is a simulated task sharing the
+///  same address space.
 ///
+
 /// Production cross-process use requires `MappedFileShm` below.
 public type InMemoryShm is {
     regions: Map<Int, List<Byte>>,
     slot_locks: List<Int>,            // SHM_NLOCK counters; +1 per shared, -1 per shared release;
-                                      //                    large neg for exclusive.
+                                      //  large neg for exclusive.
     deleted: Bool,
 };
 
@@ -144,8 +150,8 @@ implement ShmSegment for InMemoryShm {
 
         // Exclusive acquire → require all slots clear, set each to -1.
         // Exclusive release → set back to 0.
-        // Shared acquire    → require slot >= 0, increment.
-        // Shared release    → decrement (assumes outstanding shared ref).
+        // Shared acquire → require slot >= 0, increment.
+        // Shared release → decrement (assumes outstanding shared ref).
         let mut i: Int = start;
         if flags.lock {
             if flags.exclusive {
@@ -219,19 +225,22 @@ implement ShmSegment for InMemoryShm {
 // MappedFileShm — file-path-tagged shm with process-local backing
 // -----------------------------------------------------------------------------
 //
+
 // Backend that records the shm path and stores region blobs in a
-// process-local Map.  Functionally equivalent to `InMemoryShm` for
+// process-local Map. Functionally equivalent to `InMemoryShm` for
 // single-process deployments; the path tag lets process-local actors
 // rendezvous on the same backing structure when a higher level routes
 // them through the same Vfs instance.
 //
+
 // Cross-process mmap(MAP_SHARED, fd) coherency is not yet wired — the
 // runtime needs a file-backed mmap intrinsic that returns a `&[Byte]`
-// view into kernel-managed memory.  Until then this backend behaves
+// view into kernel-managed memory. Until then this backend behaves
 // like `InMemoryShm` for the WAL-index consumer; the protocol shape +
 // path-tracking surface stays stable so callers don't need to change
 // when real mmap lands.
 //
+
 // Contract differences from InMemoryShm: same lock semantics
 // (process-local fcntl emulation via slot counters), same map
 // semantics (zero-on-extend, error if !extend && !present), but
@@ -355,7 +364,7 @@ implement ShmSegment for MappedFileShm {
     fn barrier(&self) {
         // Process-local backing — every cross-thread pair already shares
         // the same address space, so the next acquire-load on this
-        // process sees the most recent release-store.  When file-backed
+        // process sees the most recent release-store. When file-backed
         // mmap lands, this becomes an `mfence` / acquire-release fence.
     }
 
@@ -364,7 +373,7 @@ implement ShmSegment for MappedFileShm {
             self.regions = Map.new();
             self.deleted = true;
             // When the file-backed mmap path is wired, this is also
-            // where `unlink(self.path)` happens.  Process-local backing
+            // where `unlink(self.path)` happens. Process-local backing
             // has no on-disk artefact to remove.
             let _ = self.path;
         }

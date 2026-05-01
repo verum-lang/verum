@@ -1,6 +1,7 @@
 //! Foundation profile — classification of the logical foundation
 //! a corpus of theorems assumes.
 //!
+
 //! Verum's "foundation-neutral" claim — that the same proof
 //! infrastructure works across **ZFC**, **HoTT** (Homotopy Type
 //! Theory), **Cubical** (CCHM cubical type theory), and other
@@ -9,26 +10,29 @@
 //! audit gates / corpus organizers must be able to filter by
 //! foundation profile.
 //!
+
 //! This module establishes the canonical `FoundationProfile`
-//! enum + classification helpers.  It plugs into the existing
+//! enum + classification helpers. It plugs into the existing
 //! [`crate::zfc_self_recognition`] machinery for ZFC-specific
 //! axiom decomposition while extending the surface to non-ZFC
 //! foundations.
 //!
+
 //! ## Architectural alignment with Verum philosophy
 //!
+
 //! - **Foundation-neutral**: the same kernel rules and certificate
-//!   format work across all foundations.  `FoundationProfile`
-//!   classifies which foundation a corpus chooses, without
-//!   privileging any single one.
+//!  format work across all foundations. `FoundationProfile`
+//!  classifies which foundation a corpus chooses, without
+//!  privileging any single one.
 //! - **Semantic honesty**: every theorem's foundation is explicit
-//!   data — not "the kernel just trusts ZFC".  Cross-foundation
-//!   audits surface incompatibilities (e.g., a theorem requiring
-//!   univalence ported to a UIP corpus).
+//!  data — not "the kernel just trusts ZFC". Cross-foundation
+//!  audits surface incompatibilities (e.g., a theorem requiring
+//!  univalence ported to a UIP corpus).
 //! - **Gradual safety**: foundation-mixed corpora are expressible
-//!   (a body of mathematics with both ZFC-tagged and HoTT-tagged
-//!   theorems); the audit gate flags theorems that depend on a
-//!   foundation incompatible with their consumers.
+//!  (a body of mathematics with both ZFC-tagged and HoTT-tagged
+//!  theorems); the audit gate flags theorems that depend on a
+//!  foundation incompatible with their consumers.
 
 use std::collections::BTreeMap;
 
@@ -43,8 +47,10 @@ use crate::zfc_self_recognition::InaccessibleLevel;
 
 /// Logical foundation a corpus assumes.
 ///
+
 /// **Stable serde tags** (snake_case) for JSON pipelines.
 ///
+
 /// Variants are ordered by historical adoption: ZFC (set-theoretic,
 /// classical) first, then HoTT (type-theoretic with univalence),
 /// then Cubical (constructive HoTT with computational univalence),
@@ -53,33 +59,33 @@ use crate::zfc_self_recognition::InaccessibleLevel;
 #[serde(rename_all = "snake_case")]
 pub enum FoundationProfile {
     /// **ZFC + 0 inaccessibles** — pure Zermelo-Fraenkel set theory
-    /// with axiom of choice.  Sufficient for first-order logic and
+    /// with axiom of choice. Sufficient for first-order logic and
     /// elementary mathematics; insufficient for Grothendieck
     /// universes or (∞,1)-category theory.
     Zfc,
     /// **ZFC + 1 inaccessible (κ_1)** — adds a Grothendieck universe
-    /// at level κ_1.  Sufficient for Verum's basic universe tower
+    /// at level κ_1. Sufficient for Verum's basic universe tower
     /// and HTT (Higher Topos Theory).
     ZfcOneInaccessible,
     /// **ZFC + 2 inaccessibles (κ_1 < κ_2)** — Verum's default
-    /// meta-theory.  Sufficient for the (∞,1)-category meta-classifier
+    /// meta-theory. Sufficient for the (∞,1)-category meta-classifier
     /// and the universe stratification `Type_0 ∈ Type_1 ∈ Type_2`.
     ZfcTwoInaccessibles,
     /// **ZFC + 3 inaccessibles** — extension for MSFS §11
     /// trinitarian construction.
     ZfcThreeInaccessibles,
-    /// **MLTT** — pure Martin-Löf type theory.  No univalence axiom,
+    /// **MLTT** — pure Martin-Löf type theory. No univalence axiom,
     /// no UIP axiom; identity types are intensional.
     Mltt,
     /// **MLTT + UIP** — Martin-Löf type theory extended with
-    /// uniqueness of identity proofs.  Compatible with classical
+    /// uniqueness of identity proofs. Compatible with classical
     /// equality reasoning; incompatible with univalence.
     MlttUip,
     /// **HoTT** — Homotopy Type Theory: MLTT + univalence + higher
-    /// inductive types.  Identity types are weak (proof-relevant);
+    /// inductive types. Identity types are weak (proof-relevant);
     /// univalence is an axiom (no computational rule).
     Hott,
-    /// **Cubical** — CCHM Cubical Type Theory.  Constructive
+    /// **Cubical** — CCHM Cubical Type Theory. Constructive
     /// implementation of HoTT: univalence, function extensionality,
     /// and HITs all have computational rules.
     Cubical,
@@ -87,8 +93,8 @@ pub enum FoundationProfile {
     /// Foundation for predicative mathematics (Bishop-style
     /// constructive analysis).
     PredicativeMltt,
-    /// **CIC** — Calculus of Inductive Constructions.  The kernel
-    /// of Coq.  Impredicative `Prop` + predicative `Type` hierarchy
+    /// **CIC** — Calculus of Inductive Constructions. The kernel
+    /// of Coq. Impredicative `Prop` + predicative `Type` hierarchy
     /// + inductive types.
     Cic,
 }
@@ -126,7 +132,7 @@ impl FoundationProfile {
         }
     }
 
-    /// Verum's default foundation — `ZfcTwoInaccessibles`.  Used as
+    /// Verum's default foundation — `ZfcTwoInaccessibles`. Used as
     /// the implicit profile for theorems that don't declare one.
     pub const fn default_profile() -> Self {
         FoundationProfile::ZfcTwoInaccessibles
@@ -175,18 +181,19 @@ impl FoundationProfile {
     }
 
     /// Whether this profile assumes univalence (the type-theoretic
-    /// equivalence-equals-equality axiom).  Univalence is
+    /// equivalence-equals-equality axiom). Univalence is
     /// incompatible with UIP.
     pub fn assumes_univalence(self) -> bool {
         matches!(self, FoundationProfile::Hott | FoundationProfile::Cubical)
     }
 
     /// Whether this profile is **incompatible** with another — they
-    /// can't both be assumed simultaneously.  Used by the
+    /// can't both be assumed simultaneously. Used by the
     /// `--framework-conflicts` audit gate.
     ///
+
     /// Conflict cases:
-    ///   - UIP + univalence are mutually exclusive.
+    ///  - UIP + univalence are mutually exclusive.
     pub fn conflicts_with(self, other: FoundationProfile) -> bool {
         if self.assumes_uip() && other.assumes_univalence() {
             return true;
@@ -198,7 +205,7 @@ impl FoundationProfile {
     }
 
     /// Number of Grothendieck universes (inaccessible cardinals)
-    /// this profile requires.  Returns 0 for non-ZFC profiles
+    /// this profile requires. Returns 0 for non-ZFC profiles
     /// (which use type-theoretic universe hierarchies instead).
     pub fn required_inaccessibles(self) -> usize {
         match self {
@@ -211,7 +218,7 @@ impl FoundationProfile {
     }
 
     /// Iterate the explicit ZFC inaccessibles this profile requires.
-    /// Empty for non-ZFC profiles.  Reuses
+    /// Empty for non-ZFC profiles. Reuses
     /// [`crate::zfc_self_recognition::InaccessibleLevel`] for
     /// integration with the existing self-recognition audit.
     pub fn required_zfc_inaccessibles(self) -> Vec<InaccessibleLevel> {
@@ -233,23 +240,26 @@ impl FoundationProfile {
     }
 
     /// **Bridge to existing `@framework(<tag>, "...")` citations** in
-    /// `core/math/`.  Maps a citation tag (as written in the
+    /// `core/math/`. Maps a citation tag (as written in the
     /// `@framework` attribute argument) to its foundation profile.
     ///
+
     /// Recognised tags from the existing corpus:
     ///
-    ///   - `"hott"` → `FoundationProfile::Hott`
-    ///   - `"cubical"` → `FoundationProfile::Cubical`
-    ///   - `"zfc"` → `FoundationProfile::Zfc` (default — no inaccessibles)
-    ///   - `"zfc_one_inaccessible"` / `"htt"` (Lurie HTT requires
-    ///     ZFC + 1 inaccessible) → `FoundationProfile::ZfcOneInaccessible`
-    ///   - `"zfc_two_inaccessibles"` / `"msfs"` (MSFS requires ZFC + 2
-    ///     inaccessibles) → `FoundationProfile::ZfcTwoInaccessibles`
-    ///   - `"mltt"` → `FoundationProfile::Mltt`
-    ///   - `"mltt_uip"` / `"uip"` → `FoundationProfile::MlttUip`
-    ///   - `"cic"` / `"coq"` → `FoundationProfile::Cic`
-    ///   - `"predicative_mltt"` / `"predicative"` → `FoundationProfile::PredicativeMltt`
+
+    ///  - `"hott"` → `FoundationProfile::Hott`
+    ///  - `"cubical"` → `FoundationProfile::Cubical`
+    ///  - `"zfc"` → `FoundationProfile::Zfc` (default — no inaccessibles)
+    ///  - `"zfc_one_inaccessible"` / `"htt"` (Lurie HTT requires
+    ///  ZFC + 1 inaccessible) → `FoundationProfile::ZfcOneInaccessible`
+    ///  - `"zfc_two_inaccessibles"` / `"msfs"` (MSFS requires ZFC + 2
+    ///  inaccessibles) → `FoundationProfile::ZfcTwoInaccessibles`
+    ///  - `"mltt"` → `FoundationProfile::Mltt`
+    ///  - `"mltt_uip"` / `"uip"` → `FoundationProfile::MlttUip`
+    ///  - `"cic"` / `"coq"` → `FoundationProfile::Cic`
+    ///  - `"predicative_mltt"` / `"predicative"` → `FoundationProfile::PredicativeMltt`
     ///
+
     /// Tags not in this list (e.g., framework names like
     /// `"lurie_htt"`, `"schreiber_dcct"`, `"baez_dolan"`) are
     /// FRAMEWORKS WITHIN a foundation — they cite specific results
@@ -273,7 +283,7 @@ impl FoundationProfile {
     }
 
     /// **Framework → foundation map** for citations naming a
-    /// specific body of mathematical literature.  Where
+    /// specific body of mathematical literature. Where
     /// [`from_framework_tag`](Self::from_framework_tag) recognises
     /// foundation-level tags (`"hott"`, `"cubical"`, `"zfc"`),
     /// this method recognises FRAMEWORK-level tags (specific
@@ -281,33 +291,39 @@ impl FoundationProfile {
     /// `"schreiber_dcct"`, `"baez_dolan"`, …) and returns the
     /// foundation each framework lives in.
     ///
+
     /// **Recognised frameworks** (drawn from the actual `core/math/`
     /// corpus inventory — `verum audit --framework-axioms` lists every
     /// citation):
     ///
+
     /// ZFC + 2 inaccessibles family:
-    ///   - `"msfs"` (107 uses) — Moduli Space of Formal Systems.
-    ///   - `"diakrisis"` (53 uses) — Yanofsky-style self-reference
-    ///     paradox-blocking.
-    ///   - `"connes_reconstruction"` (8) — non-commutative geometry.
-    ///   - `"baez_dolan"` (4) — n-category cobordism hypothesis.
-    ///   - `"schreiber_dcct"` (5) — differential cohesive ∞-topos.
-    ///   - `"petz_classification"` (4) — quantum-information ordering.
-    ///   - `"adamek_rosicky"` (3) — locally-presentable categories.
-    ///   - `"lair_makkai_pare"` — accessibility theory.
-    ///   - `"lambek_scott"` — cartesian-closed categories ↔ STLC.
+    ///  - `"msfs"` (107 uses) — Moduli Space of Formal Systems.
+    ///  - `"diakrisis"` (53 uses) — Yanofsky-style self-reference
+    ///  paradox-blocking.
+    ///  - `"connes_reconstruction"` (8) — non-commutative geometry.
+    ///  - `"baez_dolan"` (4) — n-category cobordism hypothesis.
+    ///  - `"schreiber_dcct"` (5) — differential cohesive ∞-topos.
+    ///  - `"petz_classification"` (4) — quantum-information ordering.
+    ///  - `"adamek_rosicky"` (3) — locally-presentable categories.
+    ///  - `"lair_makkai_pare"` — accessibility theory.
+    ///  - `"lambek_scott"` — cartesian-closed categories ↔ STLC.
     ///
+
     /// ZFC + 1 inaccessible:
-    ///   - `"lurie_htt"` (11 uses) — Higher Topos Theory.
+    ///  - `"lurie_htt"` (11 uses) — Higher Topos Theory.
     ///
+
     /// ZFC (no inaccessibles needed):
-    ///   - `"arnold_catastrophe"` (8) — singularity theory.
-    ///   - `"bounded_arithmetic_*"` (~10 uses) — proof-complexity
-    ///     fragments (I_Δ_0 / S_2^1 / V_0 / V_1 / V_NP / V_PH).
+    ///  - `"arnold_catastrophe"` (8) — singularity theory.
+    ///  - `"bounded_arithmetic_*"` (~10 uses) — proof-complexity
+    ///  fragments (I_Δ_0 / S_2^1 / V_0 / V_1 / V_NP / V_PH).
     ///
+
     /// Domain-specific (return `None` — not foundations):
-    ///   - `"owl2_fs"` (66 uses) — OWL 2 functional syntax (DL fragment).
+    ///  - `"owl2_fs"` (66 uses) — OWL 2 functional syntax (DL fragment).
     ///
+
     /// Unknown tags return `None`.
     pub fn from_known_framework(framework: &str) -> Option<Self> {
         match framework {
@@ -354,13 +370,14 @@ impl FoundationProfile {
     /// ([`from_known_framework`](Self::from_known_framework)).
     /// Returns `None` only when neither recognises the tag.
     ///
+
     /// This is the canonical entry point for "given a citation
     /// `@framework(<tag>, ...)`, what foundation does it imply?".
     pub fn resolve_citation(tag: &str) -> Option<Self> {
         Self::from_framework_tag(tag).or_else(|| Self::from_known_framework(tag))
     }
 
-    /// All known foundation profiles, in canonical order.  Used by
+    /// All known foundation profiles, in canonical order. Used by
     /// the audit gate's "list-all-foundations" emission.
     pub fn all() -> [FoundationProfile; 10] {
         [
@@ -398,6 +415,7 @@ impl std::fmt::Display for FoundationProfile {
 /// either [`FoundationProfile::from_framework_tag`] or
 /// [`FoundationProfile::from_known_framework`].
 ///
+
 /// Surfaced by the audit gate so the corpus author can either add
 /// the framework to the recognised set or correct the citation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -429,21 +447,23 @@ pub struct FoundationConflict {
 /// Distribution of `@framework(...)` citations across foundation
 /// profiles, with conflict detection.
 ///
+
 /// The data layer underneath
 /// `verum audit --foundation-profiles`: takes the citation manifest
 /// produced by [`crate::framework_citation::collect_framework_citations`]
 /// and partitions it by foundation, surfacing unresolved citations
 /// and cross-foundation conflicts.
 ///
+
 /// **Why a separate analyzer (vs. a method on `FrameworkCitationManifest`)**:
 /// the citation manifest knows nothing about foundations — it's
-/// purely structural.  The classification is a separate concern that
-/// lives where foundations are defined.  This keeps
+/// purely structural. The classification is a separate concern that
+/// lives where foundations are defined. This keeps
 /// `framework_citation` reusable for audit gates that don't care
 /// about foundations (e.g., `--framework-axioms` enumeration).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct FoundationDistribution {
-    /// Per-foundation citation count.  Keys are foundation profiles
+    /// Per-foundation citation count. Keys are foundation profiles
     /// that appeared at least once; missing keys mean zero citations.
     pub by_foundation: BTreeMap<FoundationProfile, usize>,
     /// Citations whose framework name matched neither bridge.
@@ -456,7 +476,7 @@ pub struct FoundationDistribution {
 impl FoundationDistribution {
     /// Classify every citation in the manifest into a foundation,
     /// accumulating the per-foundation count and recording
-    /// unresolved citations.  Detects pairwise conflicts among the
+    /// unresolved citations. Detects pairwise conflicts among the
     /// distinct foundations present.
     pub fn from_manifest(manifest: &FrameworkCitationManifest) -> Self {
         Self::from_citations(&manifest.rows)
@@ -508,7 +528,7 @@ impl FoundationDistribution {
     }
 
     /// Whether the corpus is foundation-coherent: no detected
-    /// conflicts.  Unresolved citations don't count as conflicts —
+    /// conflicts. Unresolved citations don't count as conflicts —
     /// they're observability data, not logical contradictions.
     pub fn is_coherent(&self) -> bool {
         self.conflicts.is_empty()
@@ -522,8 +542,8 @@ impl FoundationDistribution {
 }
 
 /// Detect every pairwise incompatibility among the distinct
-/// foundations present.  Returns at most `n*(n-1)/2` conflicts
-/// where `n = by_foundation.len()`.  Order is canonical
+/// foundations present. Returns at most `n*(n-1)/2` conflicts
+/// where `n = by_foundation.len()`. Order is canonical
 /// (lexicographic by tag) so reports are reproducible.
 fn detect_pairwise_conflicts(
     by_foundation: &BTreeMap<FoundationProfile, usize>,
@@ -546,7 +566,7 @@ fn detect_pairwise_conflicts(
     conflicts
 }
 
-/// Human-readable explanation for a detected conflict.  Currently
+/// Human-readable explanation for a detected conflict. Currently
 /// only UIP + univalence is detectable; the match is exhaustive on
 /// the conflict cases enumerated by [`FoundationProfile::conflicts_with`].
 fn conflict_reason(a: FoundationProfile, b: FoundationProfile) -> String {
@@ -712,7 +732,7 @@ mod tests {
     fn from_framework_tag_bridges_existing_corpus() {
         // These tags appear in the actual core/math/ corpus
         // (`@framework(hott, "...")`, `@framework(cubical, "...")`,
-        // `@framework(msfs, "...")`).  The bridge maps each to its
+        // `@framework(msfs, "...")`). The bridge maps each to its
         // foundation.
         assert_eq!(
             FoundationProfile::from_framework_tag("hott"),
@@ -756,7 +776,7 @@ mod tests {
     fn from_framework_tag_returns_none_for_framework_names() {
         // Framework names (specific corpora WITHIN a foundation) are
         // not foundations themselves — they cite results in the
-        // foundation's literature.  Return None so consumers
+        // foundation's literature. Return None so consumers
         // dispatch through a separate framework→foundation map.
         assert!(FoundationProfile::from_framework_tag("lurie_htt").is_none());
         assert!(FoundationProfile::from_framework_tag("schreiber_dcct").is_none());
@@ -858,7 +878,7 @@ mod tests {
     #[test]
     fn from_known_framework_does_not_overlap_foundation_tags() {
         // Foundation-level tags belong to `from_framework_tag`, not
-        // `from_known_framework`.  Keep the boundary clean so
+        // `from_known_framework`. Keep the boundary clean so
         // `resolve_citation` always picks the foundation-tag bridge
         // first when both could match.
         assert!(FoundationProfile::from_known_framework("hott").is_none());
@@ -1014,7 +1034,7 @@ mod tests {
     fn resolve_citation_msfs_tag_prefers_foundation_bridge() {
         // The string `"msfs"` is recognised by BOTH bridges (the
         // foundation-tag bridge as ZfcTwoInaccessibles, the framework
-        // bridge as ZfcTwoInaccessibles).  `resolve_citation` picks
+        // bridge as ZfcTwoInaccessibles). `resolve_citation` picks
         // the foundation-tag bridge first; both must agree.
         let from_tag = FoundationProfile::from_framework_tag("msfs");
         let from_known = FoundationProfile::from_known_framework("msfs");

@@ -4,14 +4,17 @@
 // Layer: 6
 // Spec: sqlite-native.md §16.4
 //
+
 // Surfaces page-level statistics over a single database file.
 // Each row corresponds to one storage page; columns mirror the
 // upstream SQLite dbstat schema:
 //
-//   name TEXT, path TEXT, pageno INT, pagetype TEXT,
-//   ncell INT, payload INT, unused INT, mx_payload INT,
-//   pgoffset INT, pgsize INT
+
+//  name TEXT, path TEXT, pageno INT, pagetype TEXT,
+//  ncell INT, payload INT, unused INT, mx_payload INT,
+//  pgoffset INT, pgsize INT
 //
+
 // Phase-0 implementation backs the cursor with a synthetic
 // per-page sample list — the L1 pager will populate the real
 // statistics during a B-tree traversal pass once

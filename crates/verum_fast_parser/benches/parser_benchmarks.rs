@@ -1,7 +1,9 @@
 //! Performance benchmarks for verum_fast_parser
 //!
+
 //! Run with: cargo bench -p verum_fast_parser
 //!
+
 //! Benchmark categories:
 //! - Lexer throughput (tokenization speed)
 //! - Parser throughput (AST construction speed)

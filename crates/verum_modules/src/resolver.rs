@@ -1,5 +1,6 @@
 //! Name resolution across modules.
 //!
+
 //! Resolves identifiers to their definitions using the path resolution algorithm:
 //! 1. Check local scope (explicit bindings)
 //! 2. Check explicit imports
@@ -7,6 +8,7 @@
 //! 4. Check prelude (std.prelude.*)
 //! 5. Error if ambiguous (no "last import wins")
 //!
+
 //! Resolution rules: explicit imports take precedence over glob imports,
 //! local bindings shadow all imports, ambiguous names are compile errors,
 //! absolute paths (crate.*) bypass local scope, and visibility is checked
@@ -158,6 +160,7 @@ impl std::fmt::Display for NameKind {
 
 /// A scope for name resolution.
 ///
+
 /// Scopes are organized hierarchically with imports and local bindings.
 #[derive(Debug, Clone)]
 pub struct Scope {
@@ -244,14 +247,17 @@ impl Scope {
 
 /// Name resolver - resolves identifiers to definitions.
 ///
+
 /// Implements the resolution algorithm from Section 6 of the spec:
 ///
+
 /// 1. Check local scope
 /// 2. Check explicit imports
 /// 3. Check glob imports
 /// 4. Check prelude
 /// 5. Error if ambiguous
 ///
+
 #[derive(Debug)]
 pub struct NameResolver {
     /// Scopes by module
@@ -324,16 +330,19 @@ impl NameResolver {
 
     /// Resolve a name in a module's scope.
     ///
+
     /// Follows the resolution priority:
     /// 1. Local scope (explicit bindings)
     /// 2. Glob imports (import path.*)
     /// 3. Prelude
     ///
+
     /// Resolution priority:
     /// 1. Local scope (explicit bindings)
     /// 2. Glob imports (import path.*)
     /// 3. Prelude (std.prelude.*)
     ///
+
     /// Note: Module resolution is typically not deeply nested, so we rely on
     /// sufficient stack size (RUST_MIN_STACK=16MB) rather than dynamic stack growth.
     pub fn resolve_name(&self, name: &str, in_module: ModuleId) -> ModuleResult<ResolvedName> {
@@ -398,8 +407,10 @@ impl NameResolver {
 
     /// Resolve a path (qualified name).
     ///
+
     /// Implements multi-segment path resolution per Spec 14.6.
     ///
+
     /// # Examples
     /// - `List` → single segment resolution
     /// - `std.collections.List` → multi-segment resolution
@@ -407,20 +418,23 @@ impl NameResolver {
     /// - `super.sibling.Type` → relative path
     /// - `self.child.Type` → relative path from current module
     ///
+
     /// # Algorithm
     /// 1. Check cache for previously resolved paths
     /// 2. Resolve first segment through 6-step resolution
     /// 3. For each subsequent segment:
-    ///    - Lookup in previous result's module
-    ///    - Check visibility
-    ///    - Continue chain
+    ///  - Lookup in previous result's module
+    ///  - Check visibility
+    ///  - Continue chain
     /// 4. Cache result
     ///
+
     /// Multi-segment path resolution: resolves first segment through the
     /// standard resolution algorithm, then traverses subsequent segments
     /// through module exports, checking visibility at each step. Results
     /// are cached for performance.
     ///
+
     /// Note: Path resolution is typically not deeply nested, so we rely on
     /// sufficient stack size (RUST_MIN_STACK=16MB) rather than dynamic stack growth.
     pub fn resolve_path(&self, path: &Path, in_module: ModuleId) -> ModuleResult<ResolvedName> {
@@ -555,6 +569,7 @@ impl NameResolver {
 
     /// Resolve a multi-segment path.
     ///
+
     /// Resolves a multi-segment path by resolving the first segment, then
     /// traversing remaining segments through module exports.
     fn resolve_multi_segment(
@@ -611,6 +626,7 @@ impl NameResolver {
 
     /// Resolve the first segment of a path.
     ///
+
     /// Uses the 6-step resolution algorithm:
     /// 1. Local scope
     /// 2. Explicit imports
@@ -619,6 +635,7 @@ impl NameResolver {
     /// 5. Parent modules (if enabled)
     /// 6. Error if not found
     ///
+
     /// Uses the resolution algorithm: local scope, explicit imports, glob
     /// imports, prelude. Special segments: `cog` -> root, `self` -> current,
     /// `super` -> parent.
@@ -712,9 +729,11 @@ impl NameResolver {
 
     /// Resolve a name within a specific module's exports.
     ///
+
     /// This looks up the name in the module's exported items and checks
     /// visibility from the accessing module.
     ///
+
     /// Looks up a name in a module's exported items and checks visibility
     /// from the accessing module using the five-level visibility system.
     fn resolve_in_module(
@@ -777,6 +796,7 @@ impl NameResolver {
 
     /// Register a module's exports for path resolution.
     ///
+
     /// This must be called after a module is loaded to enable path resolution
     /// through that module.
     pub fn register_module_exports(
@@ -789,6 +809,7 @@ impl NameResolver {
 
     /// Clear the path resolution cache.
     ///
+
     /// This should be called when modules are reloaded or modified.
     pub fn clear_path_cache(&self) {
         self.path_cache.clear();

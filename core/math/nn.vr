@@ -3,6 +3,7 @@
 // =============================================================================
 // Layer: 7 (Neural Networks)
 //
+
 // Production-ready neural network building blocks:
 // - Module protocol and parameter management
 // - Common layers (Linear, Conv2d, Embedding)
@@ -11,19 +12,24 @@
 // - Optimizers (SGD, AdamW)
 // - Training utilities (schedulers, gradient clipping)
 //
+
 // # Design Philosophy
 //
+
 // The module system uses protocols for composability:
 // - Module<In, Out>: Core forward pass interface
 // - Trainable: Adds backward pass and optimizer support
 // - Serializable: Checkpoint save/load
 //
+
 // # Context System Integration
 //
+
 // Layers use Verum's context system for:
 // - Random: Dropout masks, weight initialization
 // - ComputeDevice: Device placement
 //
+
 // Spec: docs/architecture/math-spec.md Part VIII (L7)
 // =============================================================================
 
@@ -53,6 +59,7 @@ mount super.linalg.{Vector, Matrix, Numeric};
 
 // Core module protocol for neural network layers
 //
+
 // All neural network layers implement this protocol to provide
 // a uniform interface for forward pass and parameter access.
 public type Module<In, Out> is protocol {
@@ -98,6 +105,7 @@ public type Serializable is protocol {
 
 // Learnable parameter with gradient tracking
 //
+
 // Parameters are the learnable weights of neural network layers.
 // They store both the current value and accumulated gradient.
 public type Parameter is {
@@ -130,6 +138,7 @@ implement Parameter {
 
     // Kaiming uniform initialization (He et al.)
     //
+
     // Suitable for layers followed by ReLU activation.
     // Variance = 2 / fan_in
     public fn kaiming_uniform(&mut self, fan_in: USize) using [Random, ComputeDevice] {
@@ -139,6 +148,7 @@ implement Parameter {
 
     // Xavier/Glorot uniform initialization
     //
+
     // Suitable for layers with linear/tanh activation.
     // Variance = 2 / (fan_in + fan_out)
     public fn xavier_uniform(&mut self, fan_in: USize, fan_out: USize) using [Random, ComputeDevice] {
@@ -171,10 +181,11 @@ implement Parameter {
 
 // Fully connected (linear) layer: y = xW^T + b
 //
+
 // # Example
 // ```verum
 // let linear = Linear.new(512, 256, true);
-// let output = linear.forward(input);  // [batch, 512] -> [batch, 256]
+// let output = linear.forward(input); // [batch, 512] -> [batch, 256]
 // ```
 public type Linear is {
     weight: Parameter,       // [out_features, in_features]
@@ -233,12 +244,14 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for Linear {
 
 // Embedding lookup table
 //
+
 // Maps integer indices to dense vectors.
 //
+
 // # Example
 // ```verum
-// let embed = Embedding.new(10000, 512);  // vocab_size=10000, dim=512
-// let vectors = embed.forward(token_ids);  // [batch, seq] -> [batch, seq, 512]
+// let embed = Embedding.new(10000, 512); // vocab_size=10000, dim=512
+// let vectors = embed.forward(token_ids); // [batch, seq] -> [batch, seq, 512]
 // ```
 public type Embedding is {
     weight: Parameter,       // [num_embeddings, embedding_dim]
@@ -289,10 +302,11 @@ implement Module<DynTensor<USize>, DynTensor<Float>> for Embedding {
 
 // 2D Convolution layer
 //
+
 // # Example
 // ```verum
 // let conv = Conv2d.new(3, 64, (3, 3)).with_padding((1, 1));
-// let output = conv.forward(input);  // [N, 3, H, W] -> [N, 64, H, W]
+// let output = conv.forward(input); // [N, 3, H, W] -> [N, 64, H, W]
 // ```
 public type Conv2d is {
     weight: Parameter,       // [out_channels, in_channels, kH, kW]
@@ -465,6 +479,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for Conv1d {
 
 // Layer Normalization
 //
+
 // Normalizes across the last N dimensions (normalized_shape).
 // Used in Transformers.
 public type LayerNorm is {
@@ -528,6 +543,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for LayerNorm {
 
 // RMS Normalization (used in LLaMA, Gemma, etc.)
 //
+
 // Simpler than LayerNorm: no mean subtraction, no bias.
 // y = x / RMS(x) * weight
 public type RMSNorm is {
@@ -566,6 +582,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for RMSNorm {
 
 // Batch Normalization
 //
+
 // Normalizes across batch dimension. Uses running statistics during inference.
 public type BatchNorm is {
     weight: Parameter,
@@ -725,6 +742,7 @@ public fn softplus(x: &DynTensor<Float>) -> DynTensor<Float> {
 
 // Dropout layer
 //
+
 // Randomly zeros elements during training with probability p.
 // Uses inverted dropout (scales by 1/(1-p)) so inference is unchanged.
 public type Dropout is {
@@ -792,6 +810,7 @@ public fn dropout(
 
 // Multi-Head Self-Attention
 //
+
 // Implements scaled dot-product attention with multiple heads.
 public type MultiHeadAttention is {
     q_proj: Linear,
@@ -892,6 +911,7 @@ implement Module<AttentionInput, DynTensor<Float>> for MultiHeadAttention {
 
 // Feed-Forward Network (MLP)
 //
+
 // Two-layer MLP with activation: x -> Linear -> Activation -> Linear -> output
 public type FeedForward is {
     w1: Linear,
@@ -942,6 +962,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for FeedForward {
 
 // Transformer Block (Pre-Norm architecture)
 //
+
 // Standard transformer block: LayerNorm -> Attention -> Residual -> LayerNorm -> FFN -> Residual
 public type TransformerBlock is {
     ln1: LayerNorm,
@@ -1024,6 +1045,7 @@ public fn sinusoidal_encoding(max_len: USize, dim: USize) -> DynTensor<Float> {
 
 // Rotary Position Embedding (RoPE)
 //
+
 // Used in LLaMA, Mistral, etc.
 public type RoPE is {
     dim: USize,
@@ -1297,6 +1319,7 @@ implement LRScheduler for LinearWarmup {
 
 // Clip gradients by global norm
 //
+
 // Returns the original global norm (before clipping).
 public fn clip_grad_norm(params: &mut [Parameter], max_norm: Float) -> Float {
     // Compute global norm
@@ -1355,6 +1378,7 @@ public fn clip_grad_value(params: &mut [Parameter], clip_value: Float) {
 
 // Cross-entropy loss for classification
 //
+
 // Input: logits [batch, num_classes], targets [batch] (class indices)
 public fn cross_entropy_loss(
     logits: &DynTensor<Float>,
@@ -1591,6 +1615,7 @@ type CompareOp is Eq | Ne | Lt | Le | Gt | Ge;
 // Neural-network protocol inheritance theorems (SMT-discharged)
 // =============================================================================
 //
+
 // Lock in the `protocol extends` chain of the neural-network stack
 // at build time. These theorems catch accidental regressions in the
 // NN protocol graph during stdlib evolution.

@@ -6,44 +6,55 @@
 // Reference: https://github.com/ulid/spec
 // =============================================================================
 //
+
 // ULID — 128-bit identifier that sorts lexicographically by time.
 // Canonical form is 26 characters of Crockford Base32. Used by:
 //
-//   * CockroachDB row IDs (when users opt out of UUIDv4).
-//   * SurrealDB primary keys.
-//   * Several popular ORMs (Prisma ULID, Ent, TypeORM ulid column).
-//   * Log-ingestion pipelines that need monotone IDs without a
-//     coordinator.
+
+//  * CockroachDB row IDs (when users opt out of UUIDv4).
+//  * SurrealDB primary keys.
+//  * Several popular ORMs (Prisma ULID, Ent, TypeORM ulid column).
+//  * Log-ingestion pipelines that need monotone IDs without a
+//  coordinator.
 //
+
 // Layout (128 bits total):
 //
-//   ┌───────────────────────────────┬──────────────────────────────┐
-//   │      48-bit unix-ms timestamp │    80-bit CSPRNG randomness  │
-//   └───────────────────────────────┴──────────────────────────────┘
+
+//  ┌───────────────────────────────┬──────────────────────────────┐
+//  │ 48-bit unix-ms timestamp │ 80-bit CSPRNG randomness │
+//  └───────────────────────────────┴──────────────────────────────┘
 //
+
 // Canonical encoding:
 //
-//   ┌──────────────┬──────────────────────┐
-//   │  10 chars    │       16 chars       │
-//   │ time-part    │   randomness-part    │
-//   └──────────────┴──────────────────────┘
+
+//  ┌──────────────┬──────────────────────┐
+//  │ 10 chars │ 16 chars │
+//  │ time-part │ randomness-part │
+//  └──────────────┴──────────────────────┘
 //
+
 // Both halves encoded in Crockford Base32 (0-9, A-Z minus I, L, O, U)
 // so there's no human-confusion on copy-paste (same rationale as
 // Base58 but fits power-of-two alignment).
 //
+
 // # Comparison with UUID v7 and Snowflake
 //
-// | Primitive | Bits | Canonical form    | Time resolution | Ordered |
+
+// | Primitive | Bits | Canonical form | Time resolution | Ordered |
 // | --------- | ---- | ----------------- | --------------- | ------- |
-// | UUID v4   | 128  | 36 chars dashed   | —               | no      |
-// | UUID v7   | 128  | 36 chars dashed   | ms              | yes     |
-// | ULID      | 128  | 26 chars Crockford| ms              | yes     |
-// | Snowflake |  64  | decimal / hex     | ms              | yes     |
+// | UUID v4 | 128 | 36 chars dashed | — | no |
+// | UUID v7 | 128 | 36 chars dashed | ms | yes |
+// | ULID | 128 | 26 chars Crockford| ms | yes |
+// | Snowflake | 64 | decimal / hex | ms | yes |
 //
+
 // ULID trades the cross-system canonicalism of UUID for a tighter
 // 26-char string that's both URL-safe and copy-paste-friendly.
 //
+
 // =============================================================================
 
 module core.base.ulid;
@@ -124,6 +135,7 @@ public type Ulid is {
 implement Ulid {
     /// Generate a fresh ULID — 48-bit unix-ms + 80-bit CSPRNG.
     ///
+
     /// Pre-fix bug: the timestamp came from a non-existent
     /// `core.time.instant.unix_millis()` (the monotonic-clock
     /// surface doesn't expose unix-ms). Lenient codegen silently

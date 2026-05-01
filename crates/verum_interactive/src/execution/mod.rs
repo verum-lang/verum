@@ -1,20 +1,23 @@
 //! Execution module for the Verum Playground.
 //!
+
 //! This module provides the bridge between parsed Verum code and the VBC interpreter,
 //! enabling actual code execution in the playbook environment.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────┐
-//! │                    EXECUTION PIPELINE                               │
+//! │ EXECUTION PIPELINE │
 //! ├─────────────────────────────────────────────────────────────────────┤
-//! │  Source → Parse → Codegen → VbcModule → Interpreter → Value        │
-//! │                                                                     │
-//! │  Components:                                                        │
-//! │  - ExecutionPipeline: Orchestrates parse → execute flow             │
-//! │  - ExecutionContext:  Preserves state across cells                  │
-//! │  - ValueFormatter:    Renders Values for display                    │
+//! │ Source → Parse → Codegen → VbcModule → Interpreter → Value │
+//! │ │
+//! │ Components: │
+//! │ - ExecutionPipeline: Orchestrates parse → execute flow │
+//! │ - ExecutionContext: Preserves state across cells │
+//! │ - ValueFormatter: Renders Values for display │
 //! └─────────────────────────────────────────────────────────────────────┘
 //! ```
 

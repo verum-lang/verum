@@ -30,6 +30,7 @@ implement Counter {
     /// Add `v`. Panics if `v < 0` (counters are monotonic per Prometheus
     /// spec). Callers that need decrement semantics use UpDownCounter.
     ///
+
     /// Silently ignores `NaN` and infinite inputs: a single
     /// `Counter.add(NaN)` would otherwise contaminate the value
     /// permanently (NaN absorbs every subsequent fetch_add) and any

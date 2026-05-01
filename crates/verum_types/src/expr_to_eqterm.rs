@@ -1,22 +1,25 @@
 //! Structured lowering from `verum_ast::Expr` to `EqTerm`.
 //!
+
 //! `EqTerm` is the term language understood by the equality-type and
 //! cubical normalizer. Many AST expression shapes have direct
 //! counterparts:
 //!
-//! | `ExprKind`                 | `EqTerm`                              |
+
+//! | `ExprKind` | `EqTerm` |
 //! |----------------------------|---------------------------------------|
-//! | `Path(p)` (single ident)   | `Var(name)`                           |
-//! | `Path(p)` (multi-segment)  | `Var(joined-by-dot)`                  |
-//! | `Literal(Int(n))`          | `Const(EqConst::Int(n))`              |
-//! | `Literal(Bool(b))`         | `Const(EqConst::Bool(b))`             |
-//! | `Literal(Text(s))`         | `Const(EqConst::Named(s))`            |
-//! | `Literal(_)` (other)       | `Const(EqConst::Named("<lit>"))`      |
-//! | `Call { func, args }`      | `App { func, args }`                  |
-//! | `Lambda { params, body }`  | `Lambda { param: first, body }`       |
-//!                                  (curried for multi-param)
-//! | other                      | `Var("<expr>")` opaque fallback       |
+//! | `Path(p)` (single ident) | `Var(name)` |
+//! | `Path(p)` (multi-segment) | `Var(joined-by-dot)` |
+//! | `Literal(Int(n))` | `Const(EqConst::Int(n))` |
+//! | `Literal(Bool(b))` | `Const(EqConst::Bool(b))` |
+//! | `Literal(Text(s))` | `Const(EqConst::Named(s))` |
+//! | `Literal(_)` (other) | `Const(EqConst::Named("<lit>"))` |
+//! | `Call { func, args }` | `App { func, args }` |
+//! | `Lambda { params, body }` | `Lambda { param: first, body }` |
+//!  (curried for multi-param)
+//! | other | `Var("<expr>")` opaque fallback |
 //!
+
 //! The fallback is always safe: opaque `EqTerm::Var` values compare
 //! syntactically, matching the conservative behaviour the type checker
 //! has used historically for non-canonical equality terms.

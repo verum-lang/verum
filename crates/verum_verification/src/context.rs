@@ -1,11 +1,13 @@
 //! Verification Context and Boundary Tracking
 //!
+
 //! Implements the verification context system that tracks:
 //! - Current verification level for each scope
 //! - Verification boundaries between trusted/untrusted code
 //! - Proof obligations at boundaries
 //! - Context propagation through function calls
 //!
+
 //! The verification context tracks per-scope verification levels, boundaries between
 //! trusted and untrusted code, and proof obligations that arise at those boundaries.
 //! Context propagates through function calls so callee verification levels are
@@ -36,6 +38,7 @@ impl ScopeId {
 
 /// Verification scope representing a lexical region with a verification level
 ///
+
 /// Scopes form a tree structure matching the program's lexical structure.
 /// Each scope has a verification level that determines how code in that
 /// scope is verified.
@@ -106,12 +109,14 @@ impl VerificationScope {
 
 /// Verification context managing all verification scopes
 ///
+
 /// The context tracks:
 /// - All verification scopes in the program
 /// - Current scope during analysis
 /// - Verification boundaries
 /// - Proof obligations
 ///
+
 /// This is the central data structure for gradual verification analysis.
 #[derive(Debug)]
 pub struct VerificationContext {
@@ -336,6 +341,7 @@ impl BoundaryId {
 
 /// Verification boundary between code at different verification levels
 ///
+
 /// Boundaries occur when:
 /// - Calling from verified code into unverified code
 /// - Returning from unverified code to verified code
@@ -428,6 +434,7 @@ impl ProofObligationId {
 
 /// Proof obligation at a verification boundary
 ///
+
 /// Represents a property that must be proven when crossing from less
 /// restrictive to more restrictive verification.
 #[derive(Debug, Clone, Serialize, Deserialize)]

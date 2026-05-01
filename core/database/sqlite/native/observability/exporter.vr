@@ -3,16 +3,18 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
+
 // Three exporter shapes ship out of the box:
 //
-//   * `PrometheusExporter` — text-format scrape rendering
-//                            (HELP/TYPE/value lines)
-//   * `SqliteOtlpExporter`       — pre-shaped record matching the OTLP
-//                            metric data-point schema (no actual
-//                            wire encoding — that's the host's
-//                            responsibility)
-//   * `JsonLineExporter`   — one JSON-lines row per metric, useful
-//                            for ad-hoc ingestion
+
+//  * `PrometheusExporter` — text-format scrape rendering
+//  (HELP/TYPE/value lines)
+//  * `SqliteOtlpExporter` — pre-shaped record matching the OTLP
+//  metric data-point schema (no actual
+//  wire encoding — that's the host's
+//  responsibility)
+//  * `JsonLineExporter` — one JSON-lines row per metric, useful
+//  for ad-hoc ingestion
 // =============================================================================
 
 module core.database.sqlite.native.observability.exporter;

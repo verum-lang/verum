@@ -1,42 +1,53 @@
 //! Code Search Intrinsics (Tier 1 - Requires MetaTypes)
 //!
+
 //! Provides compile-time code search functionality for meta-programming.
 //! Uses the type registry, usage indices, and module registry from MetaContext
 //! to search for functions, types, usages, and module contents.
 //!
+
 //! ## Function Search
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `search_find_functions_with_attr(attr)` | `(Text) -> List<Map>` | Find functions with attribute |
 //! | `search_find_functions_by_pattern(pattern)` | `(Text) -> List<Map>` | Find functions by name pattern |
 //! | `search_find_functions_in_module(module)` | `(Text) -> List<Map>` | Find functions in module |
 //!
+
 //! ## Type Search
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `search_find_types_implementing(protocol)` | `(Text) -> List<Map>` | Find types implementing protocol |
 //! | `search_find_types_with_attr(attr)` | `(Text) -> List<Map>` | Find types with attribute |
 //! | `search_find_types_in_module(module)` | `(Text) -> List<Map>` | Find types in module |
 //!
+
 //! ## Usage Search
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `search_find_function_usages(path)` | `(Text) -> List<Map>` | Find function usages |
 //! | `search_find_type_usages(path)` | `(Text) -> List<Map>` | Find type usages |
 //!
+
 //! ## Module Search
 //!
+
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `search_all_modules()` | `() -> List<Text>` | List all modules |
 //! | `search_module_public_items(module)` | `(Text) -> List<Map>` | List public items in module |
 //! | `search_module_dependencies(module)` | `(Text) -> List<Text>` | List module dependencies |
 //!
+
 //! ## Context Requirements
 //!
+
 //! **Tier 1**: All functions require `using [MetaTypes]` context.
 
 use verum_common::{List, OrderedMap, Text};

@@ -1,28 +1,35 @@
 //! Associated Type Projection Resolution
 //!
+
 //! This module implements resolution and normalization of associated type projections
 //! like `T.Item` where `T` implements `Iterator`.
 //!
+
 //! # Overview
 //!
+
 //! Associated type projections occur when accessing an associated type through a
 //! type parameter or concrete type. For example:
 //!
+
 //! ```verum
 //! fn process<I>(iter: I) -> List<I.Item>
-//!     where type I: Iterator,
-//!           type I.Item: Display
+//!  where type I: Iterator,
+//!  type I.Item: Display
 //! {
-//!     iter.map(|x| x.to_string()).collect()
+//!  iter.map(|x| x.to_string()).collect()
 //! }
 //! ```
 //!
+
 //! In this example, `I.Item` is a projection that must be resolved:
 //! 1. When `I = List<Int>`, resolve `List<Int>.Item` to `Int`
 //! 2. When `I` is still a type variable, create a deferred projection constraint
 //!
+
 //! # Spec References
 //!
+
 //! - Associated type bounds: constraining associated types in where clauses (where T.Item: Display)
 //! - GATs: associated types with their own type parameters for lending iterators and monadic patterns
 //! - Protocol system: method resolution, default impls, associated types, protocol objects
@@ -247,6 +254,7 @@ pub struct DeferredProjection {
 
 /// Projection resolver for associated type projections
 ///
+
 /// This struct handles the resolution of associated type projections like `T.Item`,
 /// working with the ProtocolChecker to look up implementations and resolve types.
 pub struct ProjectionResolver<'a> {
@@ -283,18 +291,23 @@ impl<'a> ProjectionResolver<'a> {
 
     /// Resolve a projection to a concrete type
     ///
+
     /// This is the main entry point for resolving projections like `T.Item`.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Apply current substitution to the base type
     /// 2. If base is a type variable, return deferred projection
     /// 3. Find implementation that provides the associated type
     /// 4. Look up the associated type in the implementation
     /// 5. Apply substitution from implementation matching
     ///
+
     /// # Returns
     ///
+
     /// * `Ok(ProjectionResult::Resolved(ty))` - Successfully resolved to concrete type
     /// * `Ok(ProjectionResult::Deferred(proj))` - Base type not yet resolved
     /// * `Err(ProjectionError)` - Resolution failed
@@ -384,6 +397,7 @@ impl<'a> ProjectionResolver<'a> {
 
     /// Resolve a projection when the protocol needs to be inferred
     ///
+
     /// This searches for protocols that the base type implements and that
     /// have the requested associated type.
     fn resolve_without_protocol(
@@ -457,6 +471,7 @@ impl<'a> ProjectionResolver<'a> {
 
     /// Resolve a nested projection like `T.Item.SubItem`
     ///
+
     /// This resolves each projection step by step, applying the result
     /// of each step as the base for the next.
     pub fn resolve_nested_projection(
@@ -497,6 +512,7 @@ impl<'a> ProjectionResolver<'a> {
 
     /// Normalize a type by resolving all projections within it
     ///
+
     /// This walks through a type and resolves any projection types
     /// (represented as `Type::Generic { name: "T::Item", ... }`) to their
     /// concrete types.
@@ -665,17 +681,22 @@ impl<'a> ProjectionResolver<'a> {
 
 /// Check if a projection's result satisfies a bound
 ///
+
 /// This is used to verify constraints like `I.Item: Display`.
 ///
+
 /// # Arguments
 ///
+
 /// * `projection` - The projection to check
 /// * `bound` - The protocol bound to verify
 /// * `protocol_checker` - Protocol checker for implementation lookup
 /// * `span` - Source span for error messages
 ///
+
 /// # Returns
 ///
+
 /// * `Ok(())` - The bound is satisfied
 /// * `Err(ProjectionError)` - The bound is not satisfied
 pub fn check_associated_type_bound(
@@ -715,6 +736,7 @@ pub fn check_associated_type_bound(
 
 /// Try to parse a type as a projection
 ///
+
 /// This converts types like `Type::Generic { name: "T.Item", ... }`
 /// into a `Projection` structure for resolution.
 pub fn parse_projection(ty: &Type, span: Span) -> Option<Projection> {

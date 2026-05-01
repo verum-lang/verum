@@ -1,48 +1,57 @@
 //! Tier Analysis for VBC Integration
 //!
+
 //! This module provides the main tier analysis API that integrates:
 //! - Escape analysis (does reference escape?)
 //! - Dominance analysis (allocation dominates uses?)
 //! - Async/exception path analysis
 //!
+
 //! The output is consumed by VBC codegen to emit tier-appropriate instructions.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! CFG → TierAnalyzer → TierAnalysisResult
-//!                           │
-//!                           ▼
-//!                   Map<RefId, ReferenceTier>
-//!                           │
-//!                           ▼
-//!                   VBC Codegen (via to_vbc_tier())
+//!  │
+//!  ▼
+//!  Map<RefId, ReferenceTier>
+//!  │
+//!  ▼
+//!  VBC Codegen (via to_vbc_tier())
 //! ```
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! use verum_cbgr::tier_analysis::{TierAnalyzer, TierAnalysisResult};
 //! use verum_cbgr::tier_types::{ReferenceTier, Tier0Reason};
 //!
+
 //! let analyzer = TierAnalyzer::new(cfg);
 //! let result = analyzer.analyze();
 //!
+
 //! for (ref_id, tier) in &result.decisions {
-//!     match tier {
-//!         ReferenceTier::Tier1 => {
-//!             // Emit RefChecked instruction
-//!         }
-//!         ReferenceTier::Tier0 { reason } => {
-//!             // Emit Ref instruction with ChkRef
-//!         }
-//!         ReferenceTier::Tier2 => {
-//!             // Emit RefUnsafe instruction
-//!         }
-//!     }
+//!  match tier {
+//!  ReferenceTier::Tier1 => {
+//!  // Emit RefChecked instruction
+//!  }
+//!  ReferenceTier::Tier0 { reason } => {
+//!  // Emit Ref instruction with ChkRef
+//!  }
+//!  ReferenceTier::Tier2 => {
+//!  // Emit RefUnsafe instruction
+//!  }
+//!  }
 //! }
 //! ```
 //!
+
 //! Integrates escape analysis results into VBC codegen via a unified API. Escape
 //! analysis produces Map<ExprId, CbgrTier> decisions; VBC codegen uses these to emit
 //! tier-appropriate instructions: Ref (Tier 0, full CBGR ~15ns), RefChecked (Tier 1,
@@ -65,9 +74,11 @@ use verum_common::{Map, Set};
 
 /// Result of tier analysis for a function.
 ///
+
 /// Contains tier decisions keyed by RefId, with optional span mapping for VBC codegen.
 /// The span_map allows VBC codegen to look up tier decisions by source location.
 ///
+
 /// VBC codegen uses ExprId-based lookup but escape analysis uses RefId internally.
 /// The ref_to_span map bridges this: VBC codegen looks up tier decisions by source
 /// span when direct RefId matching is unavailable, resolving the ExprId/RefId mismatch.
@@ -188,6 +199,7 @@ impl TierAnalysisResult {
 
     /// Get tier decision by span (for VBC codegen integration).
     ///
+
     /// This is the preferred lookup method when source spans are available.
     /// Returns None if no mapping exists for the span.
     #[must_use]
@@ -319,6 +331,7 @@ impl TierAnalysisConfig {
 
 /// Tier analyzer that produces tier decisions for VBC codegen.
 ///
+
 /// This is the main entry point for tier analysis. It coordinates:
 /// 1. Escape analysis (does reference escape?)
 /// 2. Dominance analysis (allocation dominates uses?)
@@ -376,6 +389,7 @@ impl TierAnalyzer {
         // declarations like `[cbgr.tier] confidence_threshold = 0.7`
         // silently fell through.
         //
+
         // Same fail-open recorder pattern as 270b84c8 / 2baa6500 /
         // the sibling PromotionConfig.confidence_threshold surface
         // landing in this commit. When the tier-analysis pipeline
@@ -567,6 +581,7 @@ impl TierAnalyzer {
 
     /// Collect all reference IDs from the CFG and build span mapping.
     ///
+
     /// This is the preferred method for VBC codegen integration as it
     /// extracts span information from DefSite/UseeSite for later lookup.
     fn collect_references_with_spans(&self, ref_to_span: &mut Map<RefId, Span>) -> Set<RefId> {
@@ -780,14 +795,17 @@ impl TierAnalyzer {
 
 /// Analyze a function and produce tier decisions.
 ///
+
 /// This is a convenience function for simple use cases.
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// let result = analyze_tiers(&cfg);
 /// for (ref_id, tier) in &result.decisions {
-///     println!("{:?}: {}", ref_id, tier);
+///  println!("{:?}: {}", ref_id, tier);
 /// }
 /// ```
 pub fn analyze_tiers(cfg: &ControlFlowGraph) -> TierAnalysisResult {

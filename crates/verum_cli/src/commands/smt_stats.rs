@@ -1,9 +1,11 @@
 //! `verum smt-stats` — show verification routing telemetry.
 //!
+
 //! Reads statistics from the session-local stats cache (written during the
 //! most recent `verum build`, `verum check`, or `verum verify` run) and
 //! prints either a human-readable report or machine-readable JSON.
 //!
+
 //! The stats cache lives at `$VERUM_STATE_DIR/smt-stats.json` (defaults to
 //! `~/.verum/state/smt-stats.json` or the project's `.verum/state/` directory).
 
@@ -195,6 +197,7 @@ fn print_human_report(raw: &str, path: &Path) -> Result<()> {
 
 /// Find the stats file using this search order:
 ///
+
 /// 1. `VERUM_STATS_FILE` environment variable (explicit override)
 /// 2. `$VERUM_STATE_DIR/smt-stats.json`
 /// 3. `<project-root>/.verum/state/smt-stats.json` (if in a Verum project)
@@ -223,6 +226,7 @@ fn find_stats_file() -> PathBuf {
 
 /// Write `RoutingStats` to the on-disk state file.
 ///
+
 /// Called by the compiler at the end of a verification session so that
 /// `verum smt-stats` can retrieve the data in a later CLI invocation.
 pub fn persist_stats(stats_json: &serde_json::Value) -> Result<()> {

@@ -4,21 +4,26 @@
 // Layer: 5 (Network — QUIC)
 // =============================================================================
 //
+
 // RFC 9000 §5.1: A QuicConnection ID (CID) is an opaque sequence of
 // 0..=20 bytes. Length-0 CIDs appear in Short-header packets when the
 // peer knows which connection the packet belongs to by other means
 // (typically 4-tuple for a short-lived client).
 //
+
 // CIDs act as opaque routing tags for middleboxes; peers MAY issue
 // multiple CIDs per connection via NEW_CONNECTION_ID frames for
 // migration resilience (§5.1.1), and MUST retire previous CIDs via
 // RETIRE_CONNECTION_ID (§19.16).
 //
+
 // # Refinement — length bound
 //
+
 // All CID constructors check len ≤ 20 at entry; the typed
 // ConnectionId value is then never out of bounds.
 //
+
 // =============================================================================
 
 module core.net.quic.connection_id;

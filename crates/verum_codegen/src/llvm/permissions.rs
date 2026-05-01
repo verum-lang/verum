@@ -1,6 +1,7 @@
 //! AOT permission policy lowering — closes the script-mode security
 //! gap on the Tier-1 path.
 //!
+
 //! The Tier-0 interpreter enforces script permissions through a runtime
 //! [`PermissionRouter`](verum_vbc::interpreter::permission::PermissionRouter)
 //! installed by the CLI before script execution. The same source
@@ -9,6 +10,7 @@
 //! `Unimplemented VBC instruction` arm and either failed to build or
 //! ran without checks (depending on whether the build pipeline saw it).
 //!
+
 //! This module fixes that by baking the resolved policy into the
 //! generated binary at compile time. The CLI still computes the same
 //! `PermissionSet`, but instead of passing only a closure to the
@@ -16,29 +18,34 @@
 //! [`AotPermissionPolicy`] which the LLVM lowerer consumes when
 //! emitting each `PermissionAssert` site.
 //!
+
 //! ## Why bake into the binary
 //!
+
 //! Three alternatives were considered:
 //!
+
 //! * A separate `verum_runtime_permissions` cdylib that the binary
-//!   loads at process start — adds a build-time and link-time
-//!   dependency, complicates packaging, and the env-var hand-off
-//!   protocol is itself an attack surface (anyone able to set the
-//!   process environment could relax the policy).
+//!  loads at process start — adds a build-time and link-time
+//!  dependency, complicates packaging, and the env-var hand-off
+//!  protocol is itself an attack surface (anyone able to set the
+//!  process environment could relax the policy).
 //! * A runtime helper function defined in IR that scans a global
-//!   table — works but pays an indirect call on every gated
-//!   intrinsic.
+//!  table — works but pays an indirect call on every gated
+//!  intrinsic.
 //! * **Compile-time inlining at every call site** (chosen). Each
-//!   `PermissionAssert` becomes a small `switch` over the constant
-//!   set of allowed `target_id` values. LLVM optimises the entire
-//!   structure: scopes that are unconditionally allowed have **zero**
-//!   runtime overhead (the assert is elided); scopes with no grants
-//!   become an unconditional panic that LLVM can hoist or merge with
-//!   neighbours. The policy is sealed in the binary — there is no
-//!   env-var or external table to tamper with.
+//!  `PermissionAssert` becomes a small `switch` over the constant
+//!  set of allowed `target_id` values. LLVM optimises the entire
+//!  structure: scopes that are unconditionally allowed have **zero**
+//!  runtime overhead (the assert is elided); scopes with no grants
+//!  become an unconditional panic that LLVM can hoist or merge with
+//!  neighbours. The policy is sealed in the binary — there is no
+//!  env-var or external table to tamper with.
 //!
+
 //! ## What is enforced
 //!
+
 //! Permission grants live in
 //! [`PermissionScope`](verum_vbc::interpreter::permission::PermissionScope)
 //! space and are tagged via
@@ -47,17 +54,20 @@
 //! FileSystem=1, Network=2, Process=3, Memory=4, Cryptography=5,
 //! Time=6) is the contract this module assumes.
 //!
+
 //! Policy semantics:
 //!
+
 //! * `always_allow` — scope is passed through with no check (script
-//!   policy treats Memory and Cryptography this way today).
+//!  policy treats Memory and Cryptography this way today).
 //! * `wildcards` — any `target_id` for the scope is allowed (matches
-//!   `permissions = ["net"]` shape — no specific target listed).
+//!  `permissions = ["net"]` shape — no specific target listed).
 //! * `specific` — only the listed `(scope, target_id)` pairs allow
-//!   the call site (matches `permissions = ["net=api.example.com"]`
-//!   after target hashing).
+//!  the call site (matches `permissions = ["net=api.example.com"]`
+//!  after target hashing).
 //! * Anything else → deny → panic with code 143.
 //!
+
 //! Exit code 143 mirrors `SIGTERM` semantics — the binary is being
 //! shut down because it stepped outside its declared capability
 //! envelope, not because of a logic error in the script. Tooling can
@@ -67,10 +77,12 @@ use std::collections::BTreeSet;
 
 /// Compile-time-known permission policy baked into an AOT binary.
 ///
+
 /// Constructed by the CLI from the resolved `PermissionSet` that
 /// frontmatter + `--allow*` flags produce. Passed to the LLVM
 /// lowerer through `LoweringConfig::permission_policy`.
 ///
+
 /// `None` (the absence of this whole policy at the lowering site)
 /// is the trusted-application path — no script-mode enforcement is
 /// needed because the source has neither frontmatter nor CLI

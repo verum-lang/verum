@@ -1,23 +1,27 @@
 //! Macro / meta-function invocation collection + expansion.
 //!
+
 //! Extracted from `pipeline.rs` (#106 Phase 21). Houses the
 //! AST-visitor that walks a module to find macro / meta-function
 //! invocations and expands them via the meta registry.
 //!
+
 //! Surface:
 //!
-//!   * `InvocationArgs` — enum distinguishing traditional
-//!     `macro!()` token-tree args from `@meta()` parsed-Expr args.
-//!   * `MacroInvocation` — record for a single found invocation
-//!     (name + args + span).
-//!   * `MacroExpander<'a>` — visitor that holds the meta registry,
-//!     a meta-execution context, the current module path, and a
-//!     list of found invocations.
-//!   * `Visitor for MacroExpander<'a>` — AST walk that records
-//!     each `Macro` / `Meta` expression as a `MacroInvocation`.
-//!   * `MacroExpander::collect_macro_invocations` /
-//!     `MacroExpander::expand_macro` — driver methods.
+
+//!  * `InvocationArgs` — enum distinguishing traditional
+//!  `macro!()` token-tree args from `@meta()` parsed-Expr args.
+//!  * `MacroInvocation` — record for a single found invocation
+//!  (name + args + span).
+//!  * `MacroExpander<'a>` — visitor that holds the meta registry,
+//!  a meta-execution context, the current module path, and a
+//!  list of found invocations.
+//!  * `Visitor for MacroExpander<'a>` — AST walk that records
+//!  each `Macro` / `Meta` expression as a `MacroInvocation`.
+//!  * `MacroExpander::collect_macro_invocations` /
+//!  `MacroExpander::expand_macro` — driver methods.
 //!
+
 //! Plus: `reset_test_isolation()` — public test-harness helper
 //! lives at the bottom of this concern (it resets the same global
 //! tables the macro expander touches).
@@ -351,6 +355,7 @@ impl<'a> verum_ast::visitor::Visitor for MacroExpander<'a> {
 
 /// Reset all mutable global state between test executions.
 ///
+
 /// Called by the test executor before each test to prevent state leakage
 /// between tests in batch runs. Clears VBC value side-tables, exhaustiveness
 /// cache, and other per-compilation global state, while preserving expensive

@@ -2,8 +2,9 @@
 // core/database/postgres/error/mod.vr — translate PG ErrorResponse → DbError
 // =============================================================================
 // Spec: internal/specs/database.md §5.6 (DbError taxonomy),
-//       postgresql.org/docs/16/errcodes-appendix.html
+//  postgresql.org/docs/16/errcodes-appendix.html
 //
+
 // `Diagnostic` is the structured Postgres error from `wire/backend.vr`;
 // this module folds it into the unified `core.database.common.error.
 // DbError` so portable retry / IntoResponse code paths Just Work.
@@ -21,13 +22,14 @@ mount core.database.postgres.wire.backend.Diagnostic;
 
 /// Fold a Postgres `Diagnostic` into a Spindle `DbError`.
 ///
-///   * 08xxx → ConnectionFailed
-///   * 28xxx → AuthFailed
-///   * 40xxx (rollback / serialization / deadlock) → QueryFailed
-///     with retryable=true via `SqlState.is_retryable()`
-///   * 23xxx (integrity) / 22xxx (data) → QueryFailed with
-///     `is_constraint_violation` true via `SqlState.is_integrity()`
-///   * everything else → QueryFailed
+
+///  * 08xxx → ConnectionFailed
+///  * 28xxx → AuthFailed
+///  * 40xxx (rollback / serialization / deadlock) → QueryFailed
+///  with retryable=true via `SqlState.is_retryable()`
+///  * 23xxx (integrity) / 22xxx (data) → QueryFailed with
+///  `is_constraint_violation` true via `SqlState.is_integrity()`
+///  * everything else → QueryFailed
 public fn dberr_from_pg(d: Diagnostic) -> DbError {
     let class = if d.code.len() >= 2 { take_first_two(&d.code) } else { "".clone() };
     if class == "08" {

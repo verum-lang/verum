@@ -3,9 +3,10 @@
 // =============================================================================
 // Layer: 5 (Network — TLS 1.3 core)
 // Dependencies: core, core.security.{mac, kdf}, core.net.tls13.{cipher_suite,
-//               keyschedule.{hkdf_label, derive_secret, schedule}}
+//  keyschedule.{hkdf_label, derive_secret, schedule}}
 // =============================================================================
 //
+
 // RFC 8446 §4.2.11 — a resuming ClientHello carries an `OfferedPsks`
 // extension (aka pre_shared_key) listing identity blobs + per-PSK
 // HMAC-based binders. Each binder is computed over a synthetic
@@ -13,19 +14,23 @@
 // identities field — the binders themselves are excluded from the
 // transcript that's hashed.
 //
+
 // Binder key derivation (§7.1 + §4.2.11.2):
 //
-//   binder_key = HKDF-Expand-Label(early_secret,
-//                                  "res binder" | "ext binder",
-//                                  "",
-//                                  Hash.length)
-//   finished_key = HKDF-Expand-Label(binder_key, "finished", "", Hash.length)
-//   binder = HMAC-Hash(finished_key,
-//                      Transcript-Hash(Truncate(ClientHello1)))
+
+//  binder_key = HKDF-Expand-Label(early_secret,
+//  "res binder" | "ext binder",
+//  "",
+//  Hash.length)
+//  finished_key = HKDF-Expand-Label(binder_key, "finished", "", Hash.length)
+//  binder = HMAC-Hash(finished_key,
+//  Transcript-Hash(Truncate(ClientHello1)))
 //
+
 // "res binder" for a resumption PSK (from NewSessionTicket);
 // "ext binder" for an external PSK (out-of-band provisioning).
 //
+
 // =============================================================================
 
 module core.net.tls13.handshake.psk;
@@ -54,7 +59,7 @@ public type PskIdentity is {
     /// NewSessionTicket.ticket).
     identity:        List<Byte>,
     /// obfuscated_ticket_age = (elapsed_millis + ticket_age_add)
-    ///                          mod 2^32
+    ///  mod 2^32
     /// Peer recovers the real age by subtracting the peer-supplied
     /// ticket_age_add that was delivered inside NewSessionTicket.
     obfuscated_age:  UInt32,
@@ -137,7 +142,7 @@ implement BinderFlavor {
 }
 
 /// Derive the binder_key from an EarlySecret — per RFC 8446 §7.1:
-///   binder_key = Derive-Secret(early_secret, "{res|ext} binder", "")
+///  binder_key = Derive-Secret(early_secret, "{res|ext} binder", "")
 /// i.e. HKDF-Expand-Label(early_secret, label, Hash(""), hash_len).
 public fn derive_binder_key(
     early: &EarlySecret,
@@ -166,12 +171,13 @@ public fn derive_binder_finished_key(
 // =============================================================================
 
 /// Compute one PSK binder value given:
-///   hash              — the cipher-suite hash (SHA-256 or SHA-384).
-///   binder_key        — derived via `derive_binder_key`.
-///   truncated_ch_hash — Transcript-Hash over the truncated
-///                       ClientHello (everything before the
-///                       binder list).
+///  hash — the cipher-suite hash (SHA-256 or SHA-384).
+///  binder_key — derived via `derive_binder_key`.
+///  truncated_ch_hash — Transcript-Hash over the truncated
+///  ClientHello (everything before the
+///  binder list).
 ///
+
 /// Returns the raw HMAC bytes to drop into OfferedPsks.binders.
 public fn compute_binder(
     hash: HashKind,
@@ -202,6 +208,7 @@ public fn compute_binder(
 /// MAC matches; Ok(false) when it doesn't. Server SM rejects a
 /// false result with HandshakeFailure (RFC 8446 §4.2.11.2).
 ///
+
 /// Constant-time comparison via `diff | byte` accumulator — no
 /// short-circuit on first-byte mismatch.
 public fn verify_binder(
@@ -226,7 +233,7 @@ fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
 // =============================================================================
 
 /// Compute the obfuscated_ticket_age per RFC 8446 §4.2.11.1:
-///   obfuscated_age = (elapsed_millis + ticket_age_add) mod 2^32
+///  obfuscated_age = (elapsed_millis + ticket_age_add) mod 2^32
 public fn obfuscated_ticket_age(elapsed_ms: UInt64, ticket_age_add: UInt32) -> UInt32 {
     (elapsed_ms as UInt32) + ticket_age_add
 }

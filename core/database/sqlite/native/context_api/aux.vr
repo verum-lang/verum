@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // Functions store per-argument auxiliary data keyed by argument index;
 // SQLite frees each slot when the statement is reset or when the same
 // slot is overwritten.

@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// sqlite3_str is a resizable text builder.  It silently truncates at
+
+// sqlite3_str is a resizable text builder. It silently truncates at
 // `max_len` bytes if one is configured; otherwise grows as needed.
 // =============================================================================
 
@@ -15,7 +16,7 @@ mount collections.List;
 
 public type SqliteStr is {
     buffer: Text,
-    /// 0 => unlimited.  Matches the SQLITE_LIMIT_LENGTH ceiling.
+    /// 0 => unlimited. Matches the SQLITE_LIMIT_LENGTH ceiling.
     max_len: Int,
     /// True once the builder overflowed past max_len.
     overflow: Bool,

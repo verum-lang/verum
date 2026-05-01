@@ -2,27 +2,33 @@
 // kernel_soundness.theorem — the main meta-circular soundness statement
 // =============================================================================
 //
+
 // **The theorem.**
 //
-//   theorem kernel_soundness:
-//     forall d: Derivation.
-//       evidence_well_formed(d)
-//       -> well_typed(d.conclusion)
+
+//  theorem kernel_soundness:
+//  forall d: Derivation.
+//  evidence_well_formed(d)
+//  -> well_typed(d.conclusion)
 //
+
 // "Every derivation the kernel accepts witnesses a well-typed conclusion."
 //
+
 // The proof decomposes into 35 cases — one per `KernelRule` — each
 // discharged by the corresponding `K_<Rule>_sound` lemma in
-// `theorems.vr`.  The 4 structurally-proved lemmas (K-Var, K-Univ,
+// `theorems.vr`. The 4 structurally-proved lemmas (K-Var, K-Univ,
 // K-FwAx, K-Pos) discharge directly; the 31 admitted lemmas
 // propagate their admit-reasons to the main theorem's
 // "soundness-modulo-prerequisites" rendering.
 //
+
 // **What this theorem is NOT.**
 //
+
 // It is not a paper-pencil meta-theoretic argument like "Theorem 3.4
-// of CIC's Coq paper."  It is a piece of *Verum source code* the
-// kernel itself runs.  The cross-export pipeline mechanically
+// of CIC's Coq paper." It is a piece of *Verum source code* the
+// kernel itself runs. The cross-export pipeline mechanically
 // produces parallel statements in Coq + Lean for independent re-
 // checking, so a foreign reviewer can verify that the kernel-soundness
 // theorem typechecks in three independent type-theory implementations.
@@ -42,7 +48,7 @@ mount core.verify.kernel_soundness.theorems.{
 // CorpusReport — one row per kernel rule, surfaced to the audit gate
 // =============================================================================
 
-/// A single row of the kernel-soundness report.  One per rule;
+/// A single row of the kernel-soundness report. One per rule;
 /// `lemma_status` records whether Verum has discharged it
 /// structurally or whether it's pinned to a concrete IOU.
 public type CorpusRow is {
@@ -62,7 +68,7 @@ public pure fn corpus_row(r: KernelRule) -> CorpusRow {
     }
 }
 
-/// All 35 rows in canonical (definition) order.  The cross-export
+/// All 35 rows in canonical (definition) order. The cross-export
 /// pipeline walks this list to produce the per-rule
 /// `Lemma K_<Name>_sound …` blocks in the foreign-tool output.
 public pure fn corpus_rows() -> List<CorpusRow> {
@@ -126,7 +132,7 @@ public pure fn proved_rule_count() -> Int {
 }
 
 /// Project: count of rules whose soundness lemma is admitted with a
-/// concrete reason.  Sum with `proved_rule_count()` must equal
+/// concrete reason. Sum with `proved_rule_count()` must equal
 /// `KERNEL_RULE_COUNT` from `judgment.vr`.
 public pure fn admitted_rule_count() -> Int {
     let mut n: Int = 0;
@@ -140,7 +146,7 @@ public pure fn admitted_rule_count() -> Int {
 }
 
 /// Audit-side rendering: list of (rule_name, admit_reason) pairs for
-/// every admitted lemma.  The audit gate emits this verbatim into its
+/// every admitted lemma. The audit gate emits this verbatim into its
 /// JSON report so the trusted-base IOUs are always enumerable.
 public pure fn admitted_lemma_iou_list() -> List<Tuple2<Text, Text>> {
     let mut out: List<Tuple2<Text, Text>> = List.empty();
@@ -161,23 +167,25 @@ public pure fn admitted_lemma_iou_list() -> List<Tuple2<Text, Text>> {
 
 /// The kernel-soundness theorem statement at the corpus level.
 ///
-/// **Decomposition contract.**  The proof of `kernel_soundness`
+
+/// **Decomposition contract.** The proof of `kernel_soundness`
 /// proceeds by case-analysis on `d.rule`; every case is discharged
-/// by the corresponding per-rule lemma in `theorems.vr`.  The corpus
+/// by the corresponding per-rule lemma in `theorems.vr`. The corpus
 /// is *complete* in the sense that every value of `KernelRule` has a
 /// matching lemma — the audit gate enforces this by walking
 /// `corpus_rows()` and confirming each row's `lemma_name` resolves.
 ///
-/// **Status.**  The theorem holds *modulo* the IOUs in
-/// `admitted_lemma_iou_list()`.  When all admits clear, this becomes
-/// an unconditional theorem.  The audit gate prints both numbers
+
+/// **Status.** The theorem holds *modulo* the IOUs in
+/// `admitted_lemma_iou_list()`. When all admits clear, this becomes
+/// an unconditional theorem. The audit gate prints both numbers
 /// (`proved_rule_count` / `admitted_rule_count`) so progress is
 /// continuously visible.
 public pure fn kernel_soundness_holds_unconditionally() -> Bool {
     admitted_rule_count() == 0
 }
 
-/// Project: the corpus-level admit count.  Used by the audit gate's
+/// Project: the corpus-level admit count. Used by the audit gate's
 /// non-zero-exit logic — currently exits 0 when all rules typecheck
 /// (whether proved or admitted-with-reason); a future hardening pass
 /// could flip this to require `admitted_rule_count() == 0` for green.

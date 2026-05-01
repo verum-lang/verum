@@ -1,10 +1,13 @@
 //! Stdlib Type Registration Pipeline
 //!
+
 //! This module provides the infrastructure for registering types from the Verum
 //! standard library in dependency order.
 //!
+
 //! ## Overview
 //!
+
 //! The stdlib pipeline processes pre-parsed ASTs in a specific order:
 //! 1. core/primitives.vr - primitive type methods
 //! 2. core/protocols.vr - core protocols (Eq, Ord, Clone)
@@ -13,28 +16,35 @@
 //! 5. collections/*.vr - List, Map, Set
 //! 6. And so on...
 //!
+
 //! Each module's exports (types, protocols, functions) are registered before
 //! subsequent modules are processed, enabling forward references within the stdlib.
 //!
+
 //! ## Usage
 //!
+
 //! ```ignore
 //! use verum_types::core_pipeline::{StdlibTypeRegistry, ModuleOrder};
 //! use verum_types::infer::TypeChecker;
 //!
+
 //! let mut checker = TypeChecker::with_minimal_context();
 //! checker.register_builtins();
 //!
+
 //! let registry = StdlibTypeRegistry::new();
 //!
+
 //! // Register types from pre-parsed modules in order
 //! for module_name in ModuleOrder::default_order() {
-//!     if let Some(ast) = parsed_modules.get(module_name) {
-//!         registry.register_module(&mut checker, ast, module_name)?;
-//!     }
+//!  if let Some(ast) = parsed_modules.get(module_name) {
+//!  registry.register_module(&mut checker, ast, module_name)?;
+//!  }
 //! }
 //! ```
 //!
+
 //! Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files
 
 use std::time::{Duration, Instant};
@@ -49,16 +59,20 @@ use crate::infer::TypeChecker;
 
 /// Extract intrinsic name from a function's @intrinsic("name") attribute.
 ///
+
 /// Returns `Maybe::Some(name)` if the function has an @intrinsic attribute,
 /// `Maybe::None` otherwise.
 ///
+
 /// # Attribute Format
 ///
+
 /// ```verum
 /// @intrinsic("memcpy")
 /// public unsafe fn memcpy(dst: *mut Byte, src: *const Byte, len: Int);
 /// ```
 ///
+
 /// The attribute argument must be a string literal containing the intrinsic name.
 fn extract_intrinsic_name(func: &FunctionDecl) -> Maybe<Text> {
     for attr in &func.attributes {
@@ -217,6 +231,7 @@ impl std::fmt::Display for RegistrationPhase {
 
 /// Module compilation order for stdlib
 ///
+
 /// This defines the canonical order in which stdlib modules should be processed
 /// to ensure dependencies are available before dependents.
 pub struct ModuleOrder;
@@ -224,6 +239,7 @@ pub struct ModuleOrder;
 impl ModuleOrder {
     /// Get the canonical module compilation order
     ///
+
     /// This order ensures dependencies are compiled before dependents.
     /// Stdlib layer dependencies: ordered compilation of core modules respecting dependency graph - Layer Dependencies
     pub fn default_order() -> &'static [&'static str] {
@@ -335,6 +351,7 @@ impl ModuleOrder {
 
 /// Stdlib type registry
 ///
+
 /// Handles incremental type registration from stdlib modules.
 pub struct StdlibTypeRegistry {
     /// Statistics
@@ -371,6 +388,7 @@ impl StdlibTypeRegistry {
 
     /// Register types from a module into the type checker
     ///
+
     /// This performs three passes:
     /// 1. Register type names (for forward references)
     /// 2. Resolve full type definitions
@@ -484,6 +502,7 @@ impl StdlibTypeRegistry {
 
     /// Type check a module after registration
     ///
+
     /// This should be called after all modules have had their types registered.
     pub fn typecheck_module(
         &mut self,
@@ -528,12 +547,14 @@ impl StdlibTypeRegistry {
 
     /// Register all modules using global passes
     ///
+
     /// This method processes all modules in four global passes:
     /// 1. Register ALL type names from all modules first
     /// 2. Register ALL protocols from all modules
     /// 3. Resolve ALL type definitions from all modules
     /// 4. Register ALL impl blocks from all modules
     ///
+
     /// This approach handles circular dependencies between modules by ensuring
     /// that type names are available before type definitions are resolved.
     pub fn register_all_global_passes(
@@ -703,7 +724,7 @@ impl StdlibTypeRegistry {
         // CRITICAL: We must register ALL functions (not just public) because:
         // 1. function_required_params map needs to know about default values
         // 2. Some stdlib functions like assert/assert_eq are not public but are
-        //    called from test code within the same module
+        //  called from test code within the same module
         // ═══════════════════════════════════════════════════════════════
         let mut functions_registered = 0;
         for (_module_name, ast) in ordered_modules.iter().chain(extra_modules.iter()) {
@@ -881,6 +902,7 @@ mod tests {
 
     /// Comprehensive stdlib typecheck test
     ///
+
     /// This test:
     /// 1. Parses all stdlib .vr files
     /// 2. Runs global pass registration (type names, protocols, types, impls, functions)

@@ -4,11 +4,14 @@
 // Layer: Stdlib (1)
 // Dependencies: LLVM AOT compilation
 //
+
 // x86_64-specific intrinsics that require AOT compilation.
 // Most functions in this module are @llvm_only.
 //
+
 // # Categories
 //
+
 // - CPU Feature Detection: cpuid
 // - SSE/SSE2: sqrtps, rcpps, rsqrtps, dpps
 // - AVX/AVX2: haddps_256, phaddd, permd, gatherd_ps_256, fmadd_ps_256
@@ -19,11 +22,14 @@
 // - Timing: rdtsc, rdtscp, mfence, lfence, sfence, pause
 // - Port I/O: inb, outb, inw, outw, inl, outl
 //
+
 // # Safety
 //
+
 // Most intrinsics are unsafe as they directly manipulate hardware state.
 // Ensure proper context (kernel mode, correct privilege level) before use.
 //
+
 // Spec: docs/architecture/low-level-features.md Section 5.4
 // =============================================================================
 
@@ -298,6 +304,7 @@ public fn sha256rnds2(a: Vec4i, b: Vec4i, k: Vec4i) -> Vec4i;
 
 /// Read Model-Specific Register.
 ///
+
 /// # Safety
 /// Requires kernel mode (Ring 0). Reading invalid MSR causes #GP fault.
 @inline(always)
@@ -307,6 +314,7 @@ public unsafe fn rdmsr(msr: UInt32) -> UInt64;
 
 /// Write Model-Specific Register.
 ///
+
 /// # Safety
 /// Requires kernel mode (Ring 0). Writing invalid MSR causes #GP fault.
 @inline(always)
@@ -378,6 +386,7 @@ public fn pause();
 
 /// Read byte from I/O port.
 ///
+
 /// # Safety
 /// Requires appropriate I/O permissions (IOPL or TSS bitmap).
 @inline(always)

@@ -1,50 +1,65 @@
 //! Context Group Resolution for Type Checking
 //!
+
 //! This module integrates context group expansion into the type checking phase.
 //! It bridges the parser's ContextGroupDecl AST nodes with the type checker's
 //! context requirement system.
 //!
+
 //! # Overview
 //!
+
 //! The parser can parse context group declarations:
 //!
+
 //! ```verum
 //! using WebContext = [Database, Logger, FileSystem];
 //! ```
 //!
+
 //! Or the alternative syntax:
 //!
+
 //! ```verum
 //! context group WebContext {
-//!     Database,
-//!     Logger,
-//!     FileSystem
+//!  Database,
+//!  Logger,
+//!  FileSystem
 //! }
 //! ```
 //!
+
 //! When type checking a function that uses a context group:
 //!
+
 //! ```verum
 //! fn handler() using WebContext { }
 //! ```
 //!
+
 //! This module expands `WebContext` to `[Database, Logger, FileSystem]` and
 //! validates that all referenced contexts exist.
 //!
+
 //! # Architecture
 //!
+
 //! 1. **Registration Phase**: During type checking of program items, context group
-//!    declarations are registered in a ContextGroupRegistry.
+//!  declarations are registered in a ContextGroupRegistry.
 //!
+
 //! 2. **Resolution Phase**: When type checking function signatures, context
-//!    requirements are resolved. If a requirement references a group name,
-//!    it's expanded to the full list of contexts.
+//!  requirements are resolved. If a requirement references a group name,
+//!  it's expanded to the full list of contexts.
 //!
+
 //! 3. **Validation Phase**: Each expanded context is validated to ensure it
-//!    references a valid context type.
+//!  references a valid context type.
 //!
+
 //! # Integration with Type Checker
 //!
+
 //! The TypeChecker maintains a ContextGroupRegistry field that stores all
 //! defined context groups. During the check_item phase, ContextGroup items
 //! populate this registry. During check_function, context requirements are
@@ -62,6 +77,7 @@ use crate::{Result, Type, TypeError};
 
 /// Context resolution engine for type checking
 ///
+
 /// This integrates the DI module's ContextGroupRegistry with the type checker.
 /// It provides methods to:
 /// - Register context groups from AST declarations
@@ -69,18 +85,21 @@ use crate::{Result, Type, TypeError};
 /// - Validate that all referenced contexts exist
 /// - Evaluate compile-time conditions for conditional contexts
 ///
-/// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage —  (advanced context patterns: negative contexts, transitive verification)
+
+/// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — (advanced context patterns: negative contexts, transitive verification)
 pub struct ContextResolver {
     /// Registry of all defined context groups
     registry: ContextGroupRegistry,
 
     /// Set of all defined context types (for validation)
     ///
+
     /// During type checking, we track context names (not runtime TypeIds) because:
     /// - TypeId is a runtime concept resolved during code generation
     /// - Type checking only needs to validate that context names are defined
     /// - Actual TypeIds are assigned when contexts are instantiated at runtime
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — Context Declarations
     defined_contexts: Set<Text>,
 
@@ -101,10 +120,12 @@ pub struct ContextResolver {
 
     /// Configuration environment for compile-time condition evaluation
     ///
+
     /// Stores configuration flags that can be used in conditional contexts:
     /// - `using [Analytics if cfg.analytics_enabled]`
     /// - `using [Profiler if DEBUG]`
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     config: condition_eval::ConfigEnv,
 
@@ -184,11 +205,14 @@ impl ContextResolver {
 
     /// Set a configuration flag
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The flag name (e.g., "analytics_enabled")
     /// * `value` - The boolean value
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     pub fn set_config_flag(&mut self, name: impl Into<Text>, value: bool) {
         self.config.set_flag(name, value);
@@ -196,12 +220,16 @@ impl ContextResolver {
 
     /// Check if a configuration flag is enabled
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The flag name to check
     ///
+
     /// # Returns
     ///
+
     /// `Some(true)` if enabled, `Some(false)` if explicitly disabled,
     /// `None` if the flag is not defined
     pub fn is_config_flag_enabled(&self, name: &str) -> Option<bool> {
@@ -210,16 +238,20 @@ impl ContextResolver {
 
     /// Register a context type as defined
     ///
+
     /// This should be called when processing context declarations:
     ///
+
     /// ```verum
     /// context Database {
-    ///     fn query(...) -> ...;
+    ///  fn query(...) -> ...;
     /// }
     /// ```
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context type name (e.g., "Database")
     /// * `ty` - The type of the context (typically a Record with method fields)
     pub fn register_context_type(&mut self, name: Text, ty: Type) {
@@ -229,28 +261,35 @@ impl ContextResolver {
 
     /// Register a protocol as a valid context type.
     ///
+
     /// In Verum's dependency injection system, protocols can serve as context types.
     /// This enables patterns like:
     ///
+
     /// ```verum
     /// type Database is protocol {
-    ///     async fn query(self, sql: Text) -> Result<List<Row>, Error>;
+    ///  async fn query(self, sql: Text) -> Result<List<Row>, Error>;
     /// }
     ///
+
     /// pub async fn get_user(id: Int) -> Result<User, Error>
-    ///     using [Database]  // Database protocol as context
+    ///  using [Database] // Database protocol as context
     /// {
-    ///     Database.query(f"SELECT * FROM users WHERE id = {id}").await
+    ///  Database.query(f"SELECT * FROM users WHERE id = {id}").await
     /// }
     /// ```
     ///
+
     /// This is essential for cross-file context resolution where protocols are
     /// defined in one module and used in `using` clauses in another.
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The protocol name (e.g., "Database", "Storage", "Auth")
     ///
+
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
     pub fn register_protocol_as_context(&mut self, name: Text) {
         self.defined_contexts.insert(name.clone());
@@ -259,10 +298,13 @@ impl ContextResolver {
 
     /// Register multiple protocols as valid context types.
     ///
+
     /// Convenience method for registering multiple protocols from module exports.
     ///
+
     /// # Arguments
     ///
+
     /// * `names` - Iterator of protocol names to register
     pub fn register_protocols_as_contexts<I>(&mut self, names: I)
     where
@@ -275,16 +317,21 @@ impl ContextResolver {
 
     /// Register a protocol as a constraint protocol (not injectable).
     ///
+
     /// Constraint protocols are used in `where T: Protocol` bounds but cannot be
     /// used in `using [Protocol]` dependency injection clauses.
     ///
+
     /// This is used to provide better error messages when a constraint protocol
     /// is mistakenly used in a `using [...]` clause.
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The protocol name (e.g., "Comparable", "Hashable")
     ///
+
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Context Protocol Validation
     pub fn register_constraint_protocol(&mut self, name: Text) {
         self.constraint_protocols.insert(name.clone());
@@ -293,12 +340,16 @@ impl ContextResolver {
 
     /// Check if a name is a known constraint protocol (not injectable).
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The name to check
     ///
+
     /// # Returns
     ///
+
     /// `true` if the name is a constraint protocol, `false` otherwise
     pub fn is_constraint_protocol(&self, name: &Text) -> bool {
         self.constraint_protocols.contains(name)
@@ -306,12 +357,16 @@ impl ContextResolver {
 
     /// Check if a context name is registered (either as context or protocol).
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context name to check
     ///
+
     /// # Returns
     ///
+
     /// `true` if the context is registered, `false` otherwise
     pub fn is_context_defined(&self, name: &Text) -> bool {
         self.defined_contexts.contains(name)
@@ -319,8 +374,10 @@ impl ContextResolver {
 
     /// Get all registered context names (for diagnostics).
     ///
+
     /// # Returns
     ///
+
     /// List of all registered context and protocol names
     pub fn all_context_names(&self) -> List<&Text> {
         self.defined_contexts.iter().collect()
@@ -328,12 +385,16 @@ impl ContextResolver {
 
     /// Get the type of a registered context
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context name to look up
     ///
+
     /// # Returns
     ///
+
     /// `Maybe::Some(Type)` if the context is registered, `Maybe::None` otherwise
     pub fn get_context_type(&self, name: &Text) -> Maybe<&Type> {
         self.context_types.get(name)
@@ -341,19 +402,26 @@ impl ContextResolver {
 
     /// Register a context group from an AST declaration
     ///
+
     /// Converts a parser-level ContextGroupDecl into a runtime ContextGroup
     /// and registers it in the registry.
     ///
+
     /// # Arguments
     ///
+
     /// * `decl` - The AST context group declaration
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if successful, `Err(TypeError)` if the group is invalid
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if:
     /// - The group name is already defined
     /// - The group is empty
@@ -361,15 +429,18 @@ impl ContextResolver {
     pub fn register_group(&mut self, decl: &ContextGroupDecl) -> Result<()> {
         // Convert AST context requirements to ContextRefs
         //
+
         // During type checking phase, we use a sentinel TypeId (unit type) because:
         // 1. Type checking validates context names exist in the scope
         // 2. Actual TypeIds are runtime artifacts created during code generation
         // 3. The ContextRef structure requires a TypeId for runtime dispatch,
-        //    but type checking only needs name-based validation
+        //  but type checking only needs name-based validation
         //
+
         // At runtime, the context provider resolves actual TypeIds via:
-        //   provider.get::<T>() where T is the concrete context type
+        //  provider.get::<T>() where T is the concrete context type
         //
+
         // Context requirements: functions declare needed contexts with "using [Ctx1, Ctx2]" after return type, callers must provide all — Context Resolution
         let sentinel_type_id = std::any::TypeId::of::<()>();
         let contexts: List<ContextRef> = decl
@@ -441,32 +512,42 @@ impl ContextResolver {
 
     /// Resolve a context requirement, expanding any group references
     ///
+
     /// If the requirement references a single identifier that matches a
     /// registered group name, expand it to the group's contexts.
     /// Otherwise, return the contexts as-is.
     ///
+
     /// # Arguments
     ///
+
     /// * `req` - The AST context requirement to resolve
     ///
+
     /// # Returns
     ///
+
     /// A fully expanded `ContextRequirement` with all groups resolved
     ///
+
     /// # Errors
     ///
+
     /// Returns an error if:
     /// - A referenced group doesn't exist
     /// - A referenced context type doesn't exist
     ///
+
     /// # Examples
     ///
+
     /// ```ignore
     /// // Given: using WebContext = [Database, Logger]
-    /// // Input:  using WebContext
+    /// // Input: using WebContext
     /// // Output: ContextRequirement { Database, Logger }
     ///
-    /// // Input:  using [Database, Logger]
+
+    /// // Input: using [Database, Logger]
     /// // Output: ContextRequirement { Database, Logger }
     /// ```
     pub fn resolve_requirement(
@@ -557,6 +638,7 @@ impl ContextResolver {
             // 1. Type instantiation when the context is provided
             // 2. Method resolution with substituted type parameters
             //
+
             // Context provision: "provide ContextName = implementation" installs a provider in lexical scope via task-local storage (theta) — Parameterized Contexts
             // ============================================================================
             if !ctx.args.is_empty() {
@@ -641,22 +723,29 @@ impl ContextResolver {
 
     /// Validate that a context type is defined
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - The context name to validate
     /// * `span` - Source location for error reporting
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if the context exists, `Err(TypeError)` otherwise
     ///
+
     /// # Errors
     ///
+
     /// Returns:
     /// - `TypeError::NonContextProtocolInUsing` if the name is a constraint protocol
-    ///   (not declared with `context protocol`)
+    ///  (not declared with `context protocol`)
     /// - `TypeError::UndefinedContext` if the name is not a known context or protocol
     ///
+
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Context Protocol Validation
     fn validate_context(&self, name: &Text, span: Span) -> Result<()> {
         if !self.defined_contexts.contains(name) {
@@ -720,6 +809,7 @@ impl Default for ContextResolver {
 /// Standard context transforms and their requirements
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
 ///
+
 /// These transforms are built-in and can be applied to contexts.
 /// Each transform has specific requirements about what contexts it applies to.
 pub mod transforms {
@@ -763,8 +853,10 @@ pub mod transforms {
 
     /// Expected type for a transform argument.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
     ///
+
     /// Each transform can accept arguments with specific type requirements.
     /// This enum describes the expected types for transform arguments.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -816,12 +908,16 @@ pub mod transforms {
 
         /// Check if a type name matches this expected type
         ///
+
         /// # Arguments
         ///
+
         /// * `type_name` - The actual type name to check
         ///
+
         /// # Returns
         ///
+
         /// `true` if the type matches or is compatible
         pub fn matches(&self, type_name: &str) -> bool {
             match self {
@@ -874,6 +970,7 @@ pub mod transforms {
 
     /// Transform argument specification.
     ///
+
     /// Describes a single argument that a transform can accept.
     #[derive(Debug, Clone)]
     pub struct TransformArgSpec {
@@ -919,8 +1016,10 @@ pub mod transforms {
 
     /// Transform signature describing expected arguments.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
     ///
+
     /// Each built-in transform has a defined signature specifying:
     /// - Expected argument types
     /// - Optional vs required arguments
@@ -937,14 +1036,19 @@ pub mod transforms {
 
     /// Get the signature for a built-in transform.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
     ///
+
     /// # Arguments
     ///
+
     /// * `name` - Transform name
     ///
+
     /// # Returns
     ///
+
     /// `Some(TransformSignature)` if the transform is known, `None` otherwise
     pub fn get_transform_signature(name: &str) -> Option<TransformSignature> {
         // Static signatures - could be moved to const when const fn is more powerful
@@ -1097,15 +1201,20 @@ pub mod transforms {
 
     /// Validate transform argument count.
     ///
+
     /// Checks that the number of arguments provided matches the expected count.
     ///
+
     /// # Arguments
     ///
+
     /// * `transform_name` - Name of the transform
     /// * `arg_count` - Number of arguments provided
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if argument count is valid, `Err(TransformArgError)` otherwise
     pub fn validate_arg_count(transform_name: &str, arg_count: usize) -> std::result::Result<(), TransformArgError> {
         let signature = match get_transform_signature(transform_name) {
@@ -1158,13 +1267,17 @@ pub mod transforms {
 
     /// Get the expected type for a specific argument position.
     ///
+
     /// # Arguments
     ///
+
     /// * `transform_name` - Name of the transform
     /// * `arg_index` - Index of the argument (0-based)
     ///
+
     /// # Returns
     ///
+
     /// `Some(TransformArgType)` if the argument exists, `None` otherwise
     pub fn get_expected_arg_type(transform_name: &str, arg_index: usize) -> Option<TransformArgType> {
         let signature = get_transform_signature(transform_name)?;
@@ -1173,16 +1286,21 @@ pub mod transforms {
 
     /// Check if a type matches the expected type for a transform argument.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
     ///
+
     /// # Arguments
     ///
+
     /// * `transform_name` - Name of the transform
     /// * `arg_index` - Index of the argument (0-based)
     /// * `actual_type` - The actual type of the argument
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if the type matches, `Err(TransformArgError)` otherwise
     pub fn check_arg_type(
         transform_name: &str,
@@ -1210,20 +1328,26 @@ pub mod transforms {
 
 /// Validate context transforms
 ///
+
 /// Checks that:
 /// 1. Transform names are known standard transforms
 /// 2. Transforms are applicable to the given context type
 ///
+
 /// # Arguments
 ///
+
 /// * `context_name` - The name of the context being transformed
 /// * `transform_names` - List of transform names to validate
 /// * `span` - Source location for error reporting
 ///
+
 /// # Returns
 ///
+
 /// `Ok(())` if all transforms are valid, `Err(TypeError)` otherwise
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
 pub fn validate_transforms(
     context_name: &str,
@@ -1271,30 +1395,38 @@ pub fn validate_transforms(
 
 /// Validate context transforms with full argument type checking.
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
 ///
+
 /// Checks that:
 /// 1. Transform names are known standard transforms
 /// 2. Transforms are applicable to the given context type
 /// 3. Transform argument counts are correct
 /// 4. Transform argument types match expected types
 ///
+
 /// # Arguments
 ///
+
 /// * `context_name` - The name of the context being transformed
 /// * `transforms_with_args` - List of (transform_name, argument_types) pairs
 /// * `span` - Source location for error reporting
 ///
+
 /// # Returns
 ///
+
 /// `Ok(())` if all transforms and their arguments are valid, `Err(TypeError)` otherwise
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// // These transforms will be validated:
-/// using [Database.timed(Duration.seconds(30))]  // Duration argument expected
-/// using [Database.encrypted(key)]                // EncryptionKey argument expected
+/// using [Database.timed(Duration.seconds(30))] // Duration argument expected
+/// using [Database.encrypted(key)] // EncryptionKey argument expected
 /// ```
 pub fn validate_transforms_with_args(
     context_name: &str,
@@ -1355,6 +1487,7 @@ pub fn validate_transforms_with_args(
 
 /// Extract type name from an expression for transform argument type checking.
 ///
+
 /// This function attempts to determine the type of an expression used as
 /// a transform argument. It handles common patterns like:
 /// - `Duration.seconds(30)` -> "Duration"
@@ -1363,12 +1496,16 @@ pub fn validate_transforms_with_args(
 /// - String literals -> "Text"
 /// - Boolean literals -> "Bool"
 ///
+
 /// # Arguments
 ///
+
 /// * `expr` - The expression to extract type from
 ///
+
 /// # Returns
 ///
+
 /// The type name as a string, or "Unknown" if the type cannot be determined
 pub fn extract_transform_arg_type(expr: &verum_ast::expr::Expr) -> Text {
     use verum_ast::expr::ExprKind;
@@ -1426,18 +1563,24 @@ pub fn extract_transform_arg_type(expr: &verum_ast::expr::Expr) -> Text {
 
 /// Validate a single transform with its AST arguments.
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
 ///
+
 /// This is a higher-level function that takes the AST representation of
 /// transform arguments and validates them.
 ///
+
 /// # Arguments
 ///
+
 /// * `transform` - The AST ContextTransform node
 /// * `context_name` - The name of the context being transformed
 ///
+
 /// # Returns
 ///
+
 /// `Ok(())` if the transform and its arguments are valid, `Err(TypeError)` otherwise
 pub fn validate_ast_transform(
     transform: &verum_ast::decl::ContextTransform,
@@ -1508,6 +1651,7 @@ pub fn validate_ast_transform(
 /// Compile-time condition evaluator for conditional contexts
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
 ///
+
 /// Evaluates conditions like:
 /// - `cfg.feature_enabled` - Configuration flags
 /// - `T: Protocol` - Type constraint checking
@@ -1559,19 +1703,24 @@ pub mod condition_eval {
 
     /// Type constraint environment for compile-time type bound evaluation.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     ///
+
     /// This environment tracks type parameters and their protocol bounds,
     /// enabling compile-time evaluation of conditions like `T: Protocol`.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// fn foo<T>() using [Validator if T: Validatable] {
-    ///     // Validator only available when T implements Validatable
+    ///  // Validator only available when T implements Validatable
     /// }
     /// ```
     ///
+
     /// During type checking, when T is instantiated with a concrete type,
     /// we can evaluate `T: Validatable` at compile time.
     #[derive(Debug, Clone, Default)]
@@ -1597,10 +1746,13 @@ pub mod condition_eval {
 
         /// Register a type parameter with its protocol bounds.
         ///
+
         /// Called when entering a generic function scope with type parameters.
         ///
+
         /// # Arguments
         ///
+
         /// * `type_param` - Name of the type parameter (e.g., "T")
         /// * `bounds` - List of protocol names the type is bounded by
         pub fn register_type_param(&mut self, type_param: impl Into<Text>, bounds: List<Text>) {
@@ -1609,11 +1761,14 @@ pub mod condition_eval {
 
         /// Register a concrete type substitution for a type parameter.
         ///
+
         /// Called during monomorphization when a generic function is
         /// instantiated with concrete types.
         ///
+
         /// # Arguments
         ///
+
         /// * `type_param` - Name of the type parameter (e.g., "T")
         /// * `concrete_type` - Name of the concrete type (e.g., "User")
         pub fn substitute_type(&mut self, type_param: impl Into<Text>, concrete_type: impl Into<Text>) {
@@ -1622,11 +1777,14 @@ pub mod condition_eval {
 
         /// Register a protocol implementation for a concrete type.
         ///
+
         /// This allows the constraint checker to know which protocols
         /// a concrete type implements.
         ///
+
         /// # Arguments
         ///
+
         /// * `type_name` - Name of the concrete type (e.g., "User")
         /// * `protocol` - Name of the protocol implemented (e.g., "Validatable")
         pub fn register_impl(&mut self, type_name: impl Into<Text>, protocol: impl Into<Text>) {
@@ -1644,15 +1802,20 @@ pub mod condition_eval {
 
         /// Check if a type parameter satisfies a protocol bound.
         ///
+
         /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
         ///
+
         /// # Arguments
         ///
+
         /// * `type_param` - Name of the type parameter to check
         /// * `protocol` - Protocol name to check against
         ///
+
         /// # Returns
         ///
+
         /// - `Some(true)` if the bound is definitely satisfied
         /// - `Some(false)` if the bound is definitely not satisfied
         /// - `None` if the bound cannot be determined at compile time
@@ -1742,13 +1905,17 @@ pub mod condition_eval {
 
     /// Evaluate a condition expression at compile time
     ///
+
     /// # Arguments
     ///
+
     /// * `expr` - The condition expression to evaluate
     /// * `config` - Configuration environment for cfg lookups
     ///
+
     /// # Returns
     ///
+
     /// `ConditionResult` indicating if the condition is known true/false,
     /// or if it depends on runtime values
     pub fn evaluate_condition(expr: &Expr, config: &ConfigEnv) -> ConditionResult {
@@ -1758,32 +1925,41 @@ pub mod condition_eval {
 
     /// Evaluate a condition expression at compile time with type constraint checking.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     ///
+
     /// This is the full version of condition evaluation that supports:
     /// - Configuration flags (`cfg.feature_enabled`)
     /// - Type constraint conditions (`T: Protocol`)
     /// - Boolean expressions
     ///
+
     /// # Arguments
     ///
+
     /// * `expr` - The condition expression to evaluate
     /// * `config` - Configuration environment for cfg lookups
     /// * `type_env` - Type constraint environment for protocol bound checking
     ///
+
     /// # Returns
     ///
+
     /// `ConditionResult` indicating if the condition is known true/false,
     /// or if it depends on runtime values
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// fn foo<T>() using [Validator if T: Validatable] {
-    ///     // Validator only available when T implements Validatable
+    ///  // Validator only available when T implements Validatable
     /// }
     /// ```
     ///
+
     /// When `foo` is instantiated with `User` which implements `Validatable`,
     /// the condition evaluates to `Known(true)`.
     pub fn evaluate_condition_with_types(
@@ -1814,9 +1990,11 @@ pub mod condition_eval {
                         // known at compile time (e.g., during testing or when configs
                         // are provided at deployment time).
                         //
+
                         // At runtime, if the flag is not set, the conditional context
                         // will not be included.
                         //
+
                         // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
                         // ================================================================
                         None => ConditionResult::Runtime,
@@ -1898,17 +2076,22 @@ pub mod condition_eval {
 
     /// Evaluate a type constraint expression: `T: Protocol`
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     ///
+
     /// # Arguments
     ///
+
     /// * `type_expr` - The type parameter expression (e.g., `T`)
     /// * `protocol_expr` - The protocol expression (e.g., `Validatable`)
     /// * `type_env` - Type constraint environment
     /// * `negated` - Whether the constraint is negated (`T: !Protocol`)
     ///
+
     /// # Returns
     ///
+
     /// `ConditionResult` based on whether the type satisfies the protocol bound
     fn evaluate_type_constraint(
         type_expr: &Expr,
@@ -1967,21 +2150,27 @@ pub mod condition_eval {
 
     /// Evaluate an `is` expression: `T is Protocol`
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     ///
+
     /// This function handles type constraint conditions in conditional contexts.
     /// The pattern can be a Variant pattern (for protocol/type names) or an
     /// identifier pattern.
     ///
+
     /// # Arguments
     ///
+
     /// * `type_expr` - The type expression being tested
     /// * `pattern` - The pattern (protocol) being matched
     /// * `negated` - Whether the expression is negated (`T is not Protocol`)
     /// * `type_env` - Type constraint environment
     ///
+
     /// # Returns
     ///
+
     /// `ConditionResult` based on whether the type matches the pattern
     fn evaluate_is_expression(
         type_expr: &Expr,
@@ -2121,13 +2310,17 @@ pub mod condition_eval {
 
     /// Evaluate a condition and determine if the context should be included
     ///
+
     /// # Arguments
     ///
+
     /// * `condition` - Optional condition expression
     /// * `config` - Configuration environment
     ///
+
     /// # Returns
     ///
+
     /// - `Ok(true)` - Include the context
     /// - `Ok(false)` - Exclude the context (condition evaluated to false)
     /// - `Err(_)` - Error evaluating the condition
@@ -2151,6 +2344,7 @@ pub mod condition_eval {
 
 /// Convert an AST Path to a simple string name
 ///
+
 /// For now, we only support simple identifiers in context requirements.
 /// Future work: support module-qualified paths like `my_module.Database`
 fn path_to_string(path: &verum_ast::ty::Path) -> Text {
@@ -2184,11 +2378,14 @@ fn path_to_string(path: &verum_ast::ty::Path) -> Text {
 
 /// Convert an AST Type to a text representation for storage in context requirements.
 ///
+
 /// This is used to preserve type arguments for generic contexts in using clauses.
 /// The text representation can later be resolved to actual types during type checking.
 ///
+
 /// # Examples
 ///
+
 /// ```ignore
 /// // Type::Named { path: "Text", args: [] } -> "Text"
 /// // Type::Named { path: "List", args: [Int] } -> "List<Int>"
@@ -2306,8 +2503,8 @@ mod tests {
     fn test_register_protocol_as_context() {
         // Test that protocols can be registered as valid context types.
         // This enables patterns like:
-        //   type Database is protocol { ... }
-        //   fn handler() using [Database] { ... }
+        //  type Database is protocol { ... }
+        //  fn handler() using [Database] { ... }
         let mut resolver = ContextResolver::new();
 
         // Register a protocol as a context (without a full Type - protocols

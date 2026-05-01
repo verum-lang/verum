@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §6.6
 //
+
 // SQLite organises the WAL-index hash table in 32K-frame "groups";
 // each group has 8192 hash slots + 4096 frame-index slots. We model
 // a single group; multi-group lookup is `group_idx = (frame - 1) / 4096`.
 //
+
 // Hash function: `(page_no * 383) % HASHTABLE_SIZE`. Linear probe
 // on collision. On every insert we record (frame_index, page_no);
 // on lookup we walk slots until either a match or the sentinel 0.

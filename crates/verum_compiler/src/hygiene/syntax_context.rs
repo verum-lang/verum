@@ -1,16 +1,20 @@
 //! Syntax Context for Hygiene Tracking
 //!
+
 //! Every identifier in Verum carries a SyntaxContext that tracks where it was introduced.
 //! This enables hygienic macro expansion where identifiers introduced by macros
 //! don't accidentally capture user bindings.
 //!
+
 //! ## Design
 //!
+
 //! Based on Racket's sets-of-scopes model with additional support for:
 //! - Multi-stage metaprogramming (stages 0, 1, 2+)
 //! - Transparency modes (opaque, semi-transparent, transparent)
 //! - Expansion chain tracking for error messages
 //!
+
 //! Syntax context tracking for hygienic macro expansion.
 //! Each identifier carries a syntax context marking its expansion origin.
 
@@ -54,6 +58,7 @@ impl Default for SyntaxContextId {
 
 /// A mark represents a scope boundary introduced by macro expansion
 ///
+
 /// Marks are used to distinguish identifiers introduced at different
 /// points in macro expansion, enabling hygienic scoping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,6 +72,7 @@ impl Mark {
 
     /// Create a mark from a raw ID
     ///
+
     /// Use this when reconstructing marks from stored IDs.
     /// For new marks, prefer `fresh()`.
     pub fn new(id: u64) -> Self {
@@ -88,6 +94,7 @@ impl Mark {
 
     /// Create a mark for a specific stage
     ///
+
     /// Stage-specific marks help track which stage an identifier belongs to
     /// in multi-stage metaprogramming. The mark is derived from the stage
     /// number to ensure uniqueness across stages.
@@ -100,6 +107,7 @@ impl Mark {
 
     /// Extract the stage from a stage-specific mark
     ///
+
     /// Returns None if this is not a stage-specific mark (normal marks
     /// don't encode stage information in their high bits).
     pub fn stage(&self) -> Option<u32> {
@@ -149,6 +157,7 @@ impl MarkSet {
 
     /// Flip operation: add if not present, remove if present
     ///
+
     /// This is the key operation for hygienic expansion - entering a quote
     /// adds a mark, exiting removes it, making the marks flip in nested quotes.
     pub fn flip(&mut self, mark: Mark) {
@@ -166,6 +175,7 @@ impl MarkSet {
 
     /// Check if two mark sets are compatible for binding
     ///
+
     /// Compatible if one is a subset of the other, which means the binding
     /// and reference were introduced at compatible macro expansion points.
     pub fn compatible(&self, other: &MarkSet) -> bool {
@@ -238,11 +248,13 @@ impl MarkSet {
 
 /// Hygiene transparency modes
 ///
+
 /// Controls how a macro expansion interacts with the caller's scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Transparency {
     /// Fully transparent: inherits caller's scope (like inline functions)
     ///
+
     /// Identifiers in the expansion can see and capture bindings from
     /// the call site. Use for code that should behave like it was
     /// written inline at the call site.
@@ -250,6 +262,7 @@ pub enum Transparency {
 
     /// Semi-transparent: can see caller's types but not values
     ///
+
     /// The expansion can reference types from the call site, but cannot
     /// capture local variable bindings. Useful for derive-like macros
     /// that need to use caller's types.
@@ -257,6 +270,7 @@ pub enum Transparency {
 
     /// Opaque: fully hygienic (default for macros)
     ///
+
     /// The expansion is completely isolated from the call site.
     /// Identifiers in the expansion cannot accidentally capture
     /// caller bindings, and caller references cannot see macro-internal
@@ -355,6 +369,7 @@ impl ExpansionInfo {
 
 /// A syntax context tracks the hygiene information for an identifier
 ///
+
 /// Every identifier in the AST carries a SyntaxContext that records:
 /// - The chain of macro expansions that produced it
 /// - The current stage level
@@ -585,6 +600,7 @@ impl SyntaxContext {
 
     /// Get the effective scopes for this context
     ///
+
     /// Converts the syntax context to a ScopeSet for integration with
     /// the sets-of-scopes resolution algorithm.
     pub fn to_scope_set(&self) -> ScopeSet {
@@ -639,6 +655,7 @@ impl Default for SyntaxContext {
 
 /// Registry for syntax contexts
 ///
+
 /// Stores all syntax contexts and provides lookup by ID.
 #[derive(Debug, Default)]
 pub struct SyntaxContextRegistry {

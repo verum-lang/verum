@@ -1,8 +1,10 @@
 //! LLVM Lowering Regression Benchmark
 //!
+
 //! Criterion-based benchmarks for detecting performance regressions in the
 //! VBC-to-LLVM lowering path and CBGR escape analysis overhead.
 //!
+
 //! Benchmarks:
 //! - LLVM lowering speed (lower a VBC module with 20 functions)
 //! - CBGR check elimination (measure escape analysis overhead)

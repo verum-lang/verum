@@ -150,6 +150,7 @@ fn returned_usage_map_records_observed_counts() {
 // Red-team Round 1 §6.2 — Erased-vs-reified consistency exhaustive cases
 // =============================================================================
 //
+
 // Round 1 §6.2 PARTIAL DEFENSE → DEFENSE CONFIRMED. The Quantity type
 // system distinguishes Zero (erased, compile-time only) from Omega
 // (reified, runtime-usable). Mixing them inconsistently — flowing an
@@ -233,7 +234,7 @@ fn red_team_1_6_2_three_quantities_compose_consistently() {
     decl.insert(Text::from("omega_value"), Quantity::Omega);
     // omega_value used 3 times; linear_resource used 1 time;
     // erased_phantom unused. Body: linear_resource + omega_value
-    //                      + omega_value + omega_value (4 references)
+    //  + omega_value + omega_value (4 references)
     let omv = path_expr("omega_value");
     let outer_left = Expr {
         kind: ExprKind::Binary {

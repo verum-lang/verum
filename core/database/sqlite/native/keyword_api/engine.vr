@@ -25,7 +25,7 @@ public fn sqlite3_keyword_name(index: Int) -> Maybe<Text> {
     Maybe.Some(kw.get(index).clone())
 }
 
-/// Case-insensitive membership test.  Byte length `n` matches
+/// Case-insensitive membership test. Byte length `n` matches
 /// sqlite3_keyword_check(name, n) — caller may pass n > word.len()
 /// because the canonical table uses NUL-terminated C strings.
 public fn sqlite3_keyword_check(name: &Text, n: Int) -> Int {

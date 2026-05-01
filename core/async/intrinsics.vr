@@ -5,12 +5,15 @@
 // Dependencies: core, async/future, async/poll, async/waker
 // =============================================================================
 //
+
 // Low-level async runtime intrinsics that bridge the gap between
 // Verum async constructs and the underlying runtime.
 //
+
 // These functions are used by the executor and the compiler to implement
 // async/await, spawn, and other concurrency primitives.
 //
+
 // =============================================================================
 
 module intrinsics;
@@ -27,6 +30,7 @@ mount super.task.{Task, JoinHandle};
 
 /// Low-level executor handle for direct task management.
 ///
+
 /// This provides the intrinsic API used by the compiler when
 /// lowering async/await expressions. User code should prefer
 /// the higher-level `Runtime` from async/executor.vr.
@@ -78,16 +82,19 @@ implement Executor {
 
 /// Spawn a future with inherited execution environment.
 ///
+
 /// This is the low-level spawn used by the compiler when translating
 /// `spawn expr` syntax. The spawned task inherits the current
 /// execution context (TLS context slots).
 ///
+
 /// For user-facing API, prefer `async.task.spawn()`.
 @intrinsic("async_spawn")
 public fn spawn_with_env<F: Future>(future: F) -> JoinHandle<F.Output>;
 
 /// Spawn a future on a specific executor.
 ///
+
 /// Used when the target executor is known at compile time
 /// (e.g., spawning on main thread's executor).
 @intrinsic("async_executor_spawn")
@@ -95,6 +102,7 @@ public fn executor_spawn<F: Future>(executor: &Executor, future: F) -> JoinHandl
 
 /// Block on a future using an executor.
 ///
+
 /// Drives the future to completion on the current thread.
 /// This is the intrinsic backing `block_on()`.
 @intrinsic("async_block_on")
@@ -106,10 +114,12 @@ public fn executor_block_on<F: Future>(future: F) -> F.Output;
 
 /// Synchronously poll a future once.
 ///
+
 /// Returns Some(result) if the future completed, None if it's pending.
 /// Does NOT register a waker — the future won't make progress unless
 /// polled again.
 ///
+
 /// Use cases:
 /// - Checking if a future has completed
 /// - Driving futures in a manual event loop
@@ -129,6 +139,7 @@ public fn future_poll_sync<F: Future>(future: &mut F) -> Maybe<F.Output> {
 
 /// Low-level async sleep in milliseconds.
 ///
+
 /// The intrinsic version uses the C runtime's sleep mechanism.
 /// For Verum-native sleep, use `async.timer.sleep_ms()`.
 @intrinsic("async_sleep_ms")
@@ -144,6 +155,7 @@ public fn async_sleep_ns(ns: Int);
 
 /// Create a no-op waker that does nothing when woken.
 ///
+
 /// Useful for:
 /// - Synchronous polling (future_poll_sync)
 /// - Testing
@@ -178,6 +190,7 @@ fn noop_drop(_data: &unsafe Byte) {}
 
 /// Yield execution back to the executor.
 ///
+
 /// The current task will be re-queued and other tasks get a chance to run.
 /// This is the intrinsic backing `yield_now()`.
 public type IntrinsicsYieldNow is {

@@ -1,35 +1,41 @@
 //! Native ordinal arithmetic for the kernel — Cantor normal form with
 //! large-cardinal extensions.
 //!
+
 //! Pre-this-module the kernel encoded ordinals via raw `u32` placeholders
 //! (`KappaTier::KappaN(u32)`, bounded-arithmetic markers `999_999 = ω-1`,
 //! `1_000_000 = ω`). This module replaces those encodings with a
 //! mathematically-honest [`Ordinal`] type carrying:
 //!
-//!   * **Finite ordinals** `0, 1, 2, ...` (every natural number).
-//!   * **Limit ordinals** at `ω, ω·2, ω·3, ..., ω², ω²·2, ..., ω³, ...`
-//!     up to but not including `ε_0` (the supremum of the Cantor-normal-
-//!     form fragment). Higher recursive ordinals are reachable via
-//!     [`Ordinal::Sup`] (countable supremum).
-//!   * **Inaccessible cardinals** `κ_n` for any `n: u32` — the
-//!     large-cardinal extension. `κ_1` is the first inaccessible
-//!     above ω, `κ_2` is the second, etc. Used by the (∞,2)-stack
-//!     model and Drake reflection.
+
+//!  * **Finite ordinals** `0, 1, 2, ...` (every natural number).
+//!  * **Limit ordinals** at `ω, ω·2, ω·3, ..., ω², ω²·2, ..., ω³, ...`
+//!  up to but not including `ε_0` (the supremum of the Cantor-normal-
+//!  form fragment). Higher recursive ordinals are reachable via
+//!  [`Ordinal::Sup`] (countable supremum).
+//!  * **Inaccessible cardinals** `κ_n` for any `n: u32` — the
+//!  large-cardinal extension. `κ_1` is the first inaccessible
+//!  above ω, `κ_2` is the second, etc. Used by the (∞,2)-stack
+//!  model and Drake reflection.
 //!
+
 //! The `lt` / `succ` / `is_regular` / `is_limit` operations are
 //! decidable on the Cantor-normal-form fragment; for `Sup` of an
 //! arbitrary countable family, decidability is delegated to the
 //! Sup operands.
 //!
+
 //! ## Design rationale
 //!
-//! Many kernel rules need ordinal comparison: K-Universe-Ascent V2
+
+//! Many kernel rules need ordinal comparison: K-Universe-Ascent
 //! checks `source ≤ target`, K-Refine-omega reasons about modal
 //! depth, Diakrisis 113.T autopoiesis requires `κ ≥ ω²`, MSFS
 //! Theorem A.7 needs the `(∞, ∞)` ↪ `(∞, ∞ + 1)` stabilisation.
 //! Each of those operations needs Bool-valued decidable comparison,
 //! not opaque `Int` predicates.
 //!
+
 //! By centralising ordinal arithmetic here we (a) avoid scattered ad-
 //! hoc encodings, (b) get a single point at which Drake reflection
 //! / κ-tower extensions land cleanly, (c) match the literature's
@@ -42,23 +48,23 @@ use std::fmt;
 /// plus inaccessible cardinals plus countable suprema.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Ordinal {
-    /// A finite ordinal `n`.  `Finite(0)` is the smallest ordinal,
+    /// A finite ordinal `n`. `Finite(0)` is the smallest ordinal,
     /// `Finite(1)` is its successor, etc.
     Finite(u32),
 
     /// The first transfinite ordinal `ω`.
     Omega,
 
-    /// `ω + n` for `n ≥ 1`.  Convention: `OmegaPlus(1)` is `ω + 1`,
-    /// `OmegaPlus(2)` is `ω + 2`, etc.  `OmegaPlus(0)` is normalised
+    /// `ω + n` for `n ≥ 1`. Convention: `OmegaPlus(1)` is `ω + 1`,
+    /// `OmegaPlus(2)` is `ω + 2`, etc. `OmegaPlus(0)` is normalised
     /// to plain `Omega`.
     OmegaPlus(u32),
 
-    /// `ω·k` for `k ≥ 2`.  `OmegaTimes(2)` is `ω·2`, `OmegaTimes(3)`
-    /// is `ω·3`, etc.  `OmegaTimes(1)` is normalised to `Omega`.
+    /// `ω·k` for `k ≥ 2`. `OmegaTimes(2)` is `ω·2`, `OmegaTimes(3)`
+    /// is `ω·3`, etc. `OmegaTimes(1)` is normalised to `Omega`.
     OmegaTimes(u32),
 
-    /// `ω·k + n` for `k ≥ 1`, `n ≥ 1`.  Supports values like `ω·3 + 5`.
+    /// `ω·k + n` for `k ≥ 1`, `n ≥ 1`. Supports values like `ω·3 + 5`.
     /// Lower-bound-normalisation: when `k == 1` we use `OmegaPlus(n)`
     /// and when `n == 0` we collapse to `OmegaTimes(k)`.
     OmegaTimesPlus {
@@ -74,16 +80,16 @@ pub enum Ordinal {
     /// `ω² + α` for any smaller ordinal `α < ω²`.
     OmegaSquaredPlus(Box<Ordinal>),
 
-    /// `ω^e` for `e ≥ 3`.  Covers ω³, ω⁴, ...
+    /// `ω^e` for `e ≥ 3`. Covers ω³, ω⁴, ...
     OmegaPow(u32),
 
-    /// The `n`-th inaccessible cardinal `κ_n`.  Convention: `κ_0` is
+    /// The `n`-th inaccessible cardinal `κ_n`. Convention: `κ_0` is
     /// undefined (use `Omega` instead); `κ_1` is the first inaccessible
-    /// above ω, `κ_2` is the second.  Lying above every Cantor-normal-
+    /// above ω, `κ_2` is the second. Lying above every Cantor-normal-
     /// form ordinal.
     Kappa(u32),
 
-    /// Countable supremum of an arbitrary family of ordinals.  Used to
+    /// Countable supremum of an arbitrary family of ordinals. Used to
     /// represent ordinals beyond the Cantor-normal-form fragment
     /// (e.g. `ε_0 = sup(ω, ω^ω, ω^ω^ω, ...)`) without committing to
     /// a particular limit form.
@@ -91,7 +97,7 @@ pub enum Ordinal {
 }
 
 impl Ordinal {
-    /// Successor ordinal `α + 1`.  Saturates at `Kappa(u32::MAX)`
+    /// Successor ordinal `α + 1`. Saturates at `Kappa(u32::MAX)`
     /// (defensive — exhausting `u32::MAX` inaccessibles is impossible
     /// in any practical proof).
     pub fn succ(&self) -> Self {
@@ -133,14 +139,15 @@ impl Ordinal {
         }
     }
 
-    /// Strict less-than on ordinals.  Decidable on the Cantor-normal-
+    /// Strict less-than on ordinals. Decidable on the Cantor-normal-
     /// form fragment + inaccessibles; for `Sup` operands the comparison
     /// reduces to all-pairs comparison on the family.
     ///
-    /// **Normalisation contract.**  `lt` first canonicalises both
+
+    /// **Normalisation contract.** `lt` first canonicalises both
     /// operands via [`Ordinal::normalize`] so that semantic-equivalents
     /// like `OmegaPow(2)` and `OmegaSquared` are correctly handled
-    /// as equal.  This avoids the "asymmetric lt" bug that pre-fix
+    /// as equal. This avoids the "asymmetric lt" bug that pre-fix
     /// allowed `OmegaSquared < OmegaPow(2)` to return true.
     pub fn lt(&self, other: &Self) -> bool {
         let a = self.normalize();
@@ -149,7 +156,7 @@ impl Ordinal {
     }
 
     /// Raw lt without normalisation — used internally by `lt` after
-    /// both operands have been normalised.  Public for callers that
+    /// both operands have been normalised. Public for callers that
     /// have already normalised.
     pub fn lt_raw(&self, other: &Self) -> bool {
         use Ordinal::*;
@@ -253,6 +260,7 @@ impl Ordinal {
     /// > 0 is regular trivially, ω is regular, every successor cardinal
     /// > is regular; singular limit cardinals are not.
     ///
+
     /// In our normalised form: ω is regular, every κ_n is regular
     /// (inaccessibles are by construction regular limit cardinals),
     /// `Sup` is conservatively NOT regular (a sup-of-smaller construction).
@@ -284,23 +292,26 @@ impl Ordinal {
     /// dependent universe hierarchies, and Grothendieck-universe
     /// stratification.
     ///
+
     /// Distinguished from [`Ordinal::succ`] which returns the
     /// *successor ordinal* `α + 1` (a small step within the same
-    /// universe).  `next_inaccessible` performs a *universe* step:
+    /// universe). `next_inaccessible` performs a *universe* step:
     /// it bumps to the next strongly-inaccessible cardinal `κ`,
     /// which is the smallest cardinal that bounds *all* small
     /// constructions on the source universe.
     ///
+
     /// Behaviour:
-    ///   * `Finite(_)` / `Omega` / sub-ω² ordinals → `Kappa(0)`
-    ///     (the first inaccessible, sometimes denoted `U`).
-    ///   * `Kappa(n)` → `Kappa(n + 1)` (saturating at `u32::MAX`
-    ///     defensively; in practice κ-towers of arbitrary finite
-    ///     height are admitted via `Kappa(n)` plus framework-axiom
-    ///     extension).
-    ///   * `Sup(_)` → `Kappa(0)` if the supremum is below κ-tower,
-    ///     otherwise the next κ above the largest part.
+    ///  * `Finite(_)` / `Omega` / sub-ω² ordinals → `Kappa(0)`
+    ///  (the first inaccessible, sometimes denoted `U`).
+    ///  * `Kappa(n)` → `Kappa(n + 1)` (saturating at `u32::MAX`
+    ///  defensively; in practice κ-towers of arbitrary finite
+    ///  height are admitted via `Kappa(n)` plus framework-axiom
+    ///  extension).
+    ///  * `Sup(_)` → `Kappa(0)` if the supremum is below κ-tower,
+    ///  otherwise the next κ above the largest part.
     ///
+
     /// This is the operation invoked by `presheaf_category` to
     /// realise the HTT 5.5 universe ascent in the kernel surface.
     pub fn next_inaccessible(&self) -> Self {
@@ -324,7 +335,7 @@ impl Ordinal {
         }
     }
 
-    /// Render the ordinal in standard mathematical notation.  Used for
+    /// Render the ordinal in standard mathematical notation. Used for
     /// diagnostics and audit reports.
     pub fn render(&self) -> String {
         match self {
@@ -369,23 +380,26 @@ impl Ordinal {
     }
 
     /// Normalise an ordinal to its canonical Cantor-normal-form
-    /// representation.  Resolves the OmegaPow(2) ≡ OmegaSquared and
+    /// representation. Resolves the OmegaPow(2) ≡ OmegaSquared and
     /// degenerate Sup cases.
     ///
+
     /// # Normalisation rules
     ///
-    ///   * `OmegaPow(0)` → `Finite(1)` (ω^0 = 1)
-    ///   * `OmegaPow(1)` → `Omega` (ω^1 = ω)
-    ///   * `OmegaPow(2)` → `OmegaSquared` (ω^2 = ω²)
-    ///   * `OmegaTimes(0)` → `Finite(0)`
-    ///   * `OmegaTimes(1)` → `Omega`
-    ///   * `OmegaPlus(0)` → `Omega`
-    ///   * `OmegaTimesPlus { k: 1, n }` → `OmegaPlus(n)`
-    ///   * `OmegaTimesPlus { k, n: 0 }` → `OmegaTimes(k)`
-    ///   * `Sup(parts)` → if any part is the maximum, return that
-    ///     directly when the rest are strictly less; otherwise leave
-    ///     as Sup.  Empty Sup → `Finite(0)`.
+
+    ///  * `OmegaPow(0)` → `Finite(1)` (ω^0 = 1)
+    ///  * `OmegaPow(1)` → `Omega` (ω^1 = ω)
+    ///  * `OmegaPow(2)` → `OmegaSquared` (ω^2 = ω²)
+    ///  * `OmegaTimes(0)` → `Finite(0)`
+    ///  * `OmegaTimes(1)` → `Omega`
+    ///  * `OmegaPlus(0)` → `Omega`
+    ///  * `OmegaTimesPlus { k: 1, n }` → `OmegaPlus(n)`
+    ///  * `OmegaTimesPlus { k, n: 0 }` → `OmegaTimes(k)`
+    ///  * `Sup(parts)` → if any part is the maximum, return that
+    ///  directly when the rest are strictly less; otherwise leave
+    ///  as Sup. Empty Sup → `Finite(0)`.
     ///
+
     /// Idempotent: `α.normalize().normalize() == α.normalize()`.
     pub fn normalize(&self) -> Self {
         match self {
@@ -526,7 +540,7 @@ mod tests {
     #[test]
     fn next_inaccessible_distinct_from_succ() {
         // For κ_n, succ goes to Sup([κ_n, 1]) (ordinal step), but
-        // next_inaccessible goes to κ_{n+1} (universe step).  These
+        // next_inaccessible goes to κ_{n+1} (universe step). These
         // are *not* the same operation.
         let k = Ordinal::Kappa(3);
         assert_ne!(k.succ(), k.next_inaccessible());

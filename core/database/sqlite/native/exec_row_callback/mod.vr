@@ -5,8 +5,9 @@
 // convention.
 // Spec §15.7 — sqlite3_exec.
 //
+
 // sqlite3_exec(db, sql, callback(user, argc, argv, colnames), user, &err)
-//   callback returns 0 to continue, non-zero to abort with SQLITE_ABORT.
+//  callback returns 0 to continue, non-zero to abort with SQLITE_ABORT.
 // =============================================================================
 
 module core.database.sqlite.native.exec_row_callback;

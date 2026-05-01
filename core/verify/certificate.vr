@@ -1,12 +1,14 @@
 // core.verify.certificate — user-facing view of
 // `verum_kernel.SmtCertificate`.
 //
+
 // Lets user code read / construct SMT certificates —
 // primarily for test code that wants to verify the certificate
 // envelope shape, and for libraries that want to attach
 // metadata ("I tried with timeout=30s", "strategy=Thorough")
 // to the proofs they generate.
 //
+
 // The kernel rejects any certificate whose `schema_version` is
 // greater than `CERTIFICATE_SCHEMA_VERSION_MAX` — bump the
 // constant below in lockstep with the kernel's
@@ -14,6 +16,7 @@
 
 // Current certificate envelope schema version.
 //
+
 // Kept in sync with `verum_kernel.CERTIFICATE_SCHEMA_VERSION`.
 // A newer kernel accepts any certificate at version
 // `[0, CERTIFICATE_SCHEMA_VERSION_MAX]` — version 0 is the
@@ -22,6 +25,7 @@ let CERTIFICATE_SCHEMA_VERSION_MAX: Int = 1;
 
 // Summary view of an SMT certificate.
 //
+
 // This is the stdlib's minimal-footprint mirror of the kernel's
 // `SmtCertificate` type. Library code that only needs to read
 // the envelope metadata (schema_version / verum_version /
@@ -43,6 +47,7 @@ type CertificateSummary is {
 // Check that a certificate's schema version is within the
 // supported range for the current kernel build.
 //
+
 // Matches `verum_kernel.SmtCertificate.validate_schema` —
 // user libraries should call this before trusting a
 // certificate loaded from disk / received over the wire.
@@ -53,6 +58,7 @@ fn validate_schema(cert: CertificateSummary) -> Bool {
 
 // Look up a metadata value by key.
 //
+
 // Returns `None` if the key is not present. The order of
 // metadata pairs is preserved from construction; if the same
 // key appears twice, the first occurrence wins.

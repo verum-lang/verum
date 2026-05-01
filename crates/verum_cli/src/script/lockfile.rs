@@ -1,5 +1,6 @@
 //! Per-script lockfile (P2.2).
 //!
+
 //! A `<script>.lock` sidecar pins the resolved-dependency graph for a
 //! single `.vr` script so subsequent runs (a) skip dependency resolution
 //! when the source + compiler are unchanged, and (b) reproduce identical
@@ -8,32 +9,39 @@
 //! the cog root and tracks a multi-cog graph; this module is its single-
 //! file analogue.
 //!
+
 //! # On-disk layout
 //!
+
 //! ```text
-//! version           = 1
-//! source_path       = "/abs/path/to/script.vr"
-//! source_hash       = "<blake3 hex>"
+//! version = 1
+//! source_path = "/abs/path/to/script.vr"
+//! source_hash = "<blake3 hex>"
 //! compiler_version = "0.1.0"
-//! created_at        = 1714161000
-//! updated_at        = 1714161000
+//! created_at = 1714161000
+//! updated_at = 1714161000
 //!
+
 //! [[deps]]
-//! name      = "json"
-//! version   = "1.4.0"
-//! source    = "registry+https://cogs.verum-lang.org"
+//! name = "json"
+//! version = "1.4.0"
+//! source = "registry+https://cogs.verum-lang.org"
 //! integrity = "<blake3 hex>"
 //! ```
 //!
+
 //! # Verification
 //!
+
 //! [`ScriptLockfile::verify_against`] returns a [`VerifyOutcome`] that
 //! tells the caller whether the lockfile is fresh or must be regenerated.
 //! Schema-skew is silent (treated as "regenerate"), matching the
 //! script-cache convention.
 //!
+
 //! # Atomicity
 //!
+
 //! [`ScriptLockfile::write_to`] uses a tempfile + rename so a crash never
 //! leaves a partially-written lockfile.
 
@@ -55,9 +63,9 @@ pub struct LockedDep {
     /// Resolved exact version (e.g. `"1.4.0"`).
     pub version: String,
     /// Source descriptor:
-    ///   - `registry+<url>` for the public registry
-    ///   - `git+<url>#<sha>` for git-pinned cogs
-    ///   - `path+<dir>` for filesystem-local cogs
+    ///  - `registry+<url>` for the public registry
+    ///  - `git+<url>#<sha>` for git-pinned cogs
+    ///  - `path+<dir>` for filesystem-local cogs
     pub source: String,
     /// blake3 hex digest of the resolved cog tarball / source tree.
     /// Mismatch at install time = supply-chain integrity failure.
@@ -119,6 +127,7 @@ impl ScriptLockfile {
 
     /// Conventional sidecar path: `<script>.lock`.
     ///
+
     /// Note: when `script` is a relative path, the result is too — the
     /// caller is responsible for canonicalisation if reproducibility
     /// across CWDs matters.
@@ -153,6 +162,7 @@ impl ScriptLockfile {
     /// Atomically write the lockfile to disk. Uses a tempfile +
     /// rename so a crash mid-write never leaves a partial file.
     ///
+
     /// Refreshes `updated_at` to "now" before serialising.
     pub fn write_to(&mut self, path: &Path) -> io::Result<()> {
         self.updated_at = now_secs();
@@ -184,6 +194,7 @@ impl ScriptLockfile {
     /// Compare this lockfile against a candidate `(source_bytes,
     /// compiler_version)` and decide whether it is still fresh.
     ///
+
     /// The check is intentionally conservative: any mismatch — schema,
     /// source-hash, or compiler — yields a regenerate verdict. Callers
     /// downstream don't need to inspect the discriminant unless they

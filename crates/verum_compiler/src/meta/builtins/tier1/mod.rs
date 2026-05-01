@@ -1,17 +1,22 @@
 //! Tier 1: Capability-Gated Builtins (Require Context)
 //!
+
 //! These functions access external state and require explicit context
 //! declaration via `using [...]` clause.
 //!
+
 //! ## Modules
 //!
+
 //! - [`type_introspection`] - Type name, ID, kind checks (MetaTypes)
 //! - [`structural_reflection`] - Fields, variants, methods (MetaTypes)
 //! - [`constraint_reflection`] - Bounds, lifetimes, where clauses (MetaTypes)
 //! - [`diagnostics`] - compile_error, compile_warning (CompileDiag)
 //!
+
 //! ## Context Requirements
 //!
+
 //! | Context | Module | Purpose |
 //! |---------|--------|---------|
 //! | `MetaTypes` | type_introspection, structural_reflection, constraint_reflection | Type introspection |
@@ -19,6 +24,7 @@
 //! | `CompileDiag` | diagnostics | Compiler diagnostics |
 //! | `BuildAssets` | build_assets (in parent) | File system access |
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

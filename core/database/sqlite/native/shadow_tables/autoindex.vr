@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §17 (UNIQUE / PRIMARY KEY constraint indexes)
 //
+
 // SQLite generates an implicit unique index for each PRIMARY KEY (when
 // not INTEGER PRIMARY KEY) and each UNIQUE constraint. The index name
 // is `sqlite_autoindex_<table_name>_<n>` where `n` is monotonically

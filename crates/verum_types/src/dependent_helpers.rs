@@ -1,8 +1,10 @@
 //! Helper methods for integrating dependent types into the type checker
 //!
+
 //! This module provides extension methods and utilities that the TypeChecker
 //! can use to verify dependent type constraints when checking types.
 //!
+
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Dependent Types Extension (v2.0+)
 
 use verum_ast::ContextList;
@@ -22,6 +24,7 @@ use crate::{Result, TypeError};
 pub trait DependentTypeCheckerExt {
     /// Verify a dependent type constraint
     ///
+
     /// This is called by the type checker when it encounters types that
     /// require dependent type verification:
     /// - Pi types: (x: A) -> B(x)
@@ -38,6 +41,7 @@ pub trait DependentTypeCheckerExt {
 
     /// Extract dependent type constraint from a type
     ///
+
     /// Returns Some(constraint) if the type contains dependent constraints,
     /// None otherwise.
     fn extract_dependent_constraint(
@@ -188,8 +192,10 @@ impl DependentTypeCheckerExt for TypeChecker {
 
 /// Collect all type variables from a type
 ///
+
 /// Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Dependent function type analysis
 ///
+
 /// This recursively traverses a type to find all type variables it contains.
 /// Used to detect dependent function types where the return type references
 /// type variables from the parameter types.
@@ -303,8 +309,10 @@ pub fn collect_type_vars(ty: &InternalType) -> Set<crate::ty::TypeVar> {
 
 /// Convert internal Type to AST Type
 ///
+
 /// Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Type representation bridge
 ///
+
 /// This is a complete conversion from verum_types::ty::Type to verum_ast::Type,
 /// handling all type variants for proper dependent type checking.
 pub fn convert_internal_to_ast(ty: &InternalType) -> Type {
@@ -497,9 +505,11 @@ pub fn convert_internal_to_ast(ty: &InternalType) -> Type {
 
 /// Extract an expression from a type argument
 ///
+
 /// In dependent types, type arguments may contain expression-level values.
 /// This function converts a type argument to an expression representation.
 ///
+
 /// For example:
 /// - Eq<Int, x, y> has x and y as expression arguments
 /// - Fin<5> has 5 as an expression argument (literal)
@@ -540,6 +550,7 @@ fn extract_expr_from_type_arg(ty: &InternalType, span: Span) -> Expr {
 
 /// Create a placeholder variable expression
 ///
+
 /// Used when we need an expression but only have type information.
 /// The placeholder will be substituted with the actual value during checking.
 fn create_placeholder_var(name: &str, span: Span) -> Expr {
@@ -559,6 +570,7 @@ fn create_placeholder_var(name: &str, span: Span) -> Expr {
 
 /// Helper to enable dependent types in a type checker
 ///
+
 /// Call this during type checker initialization to enable dependent type
 /// verification.
 pub fn enable_dependent_types(checker: &mut TypeChecker) {

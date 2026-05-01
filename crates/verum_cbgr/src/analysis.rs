@@ -1,5 +1,6 @@
 //! Static Escape Analysis for Automatic Promotion
 //!
+
 //! Automatic zero-cost optimization: the compiler performs escape analysis to
 //! automatically promote `&T` (managed, ~15ns CBGR overhead) to `&checked T`
 //! (zero-cost, 0ns) when ALL four criteria are met: (1) reference doesn't escape
@@ -8,38 +9,44 @@
 //! (4) lifetime is stack-bounded. This achieves zero-allocation hot paths without
 //! requiring lifetime annotations, arena syntax, or manual memory management.
 //!
+
 //! # Core Algorithm
 //!
+
 //! For `&T` → `&checked T` promotion, ALL of these must be proven:
 //! 1. **Reference doesn't escape function scope**
-//!    - Not returned from the function
-//!    - Not stored in heap-allocated structures
-//!    - Not captured by closures that outlive the scope
+//!  - Not returned from the function
+//!  - Not stored in heap-allocated structures
+//!  - Not captured by closures that outlive the scope
 //! 2. **No concurrent access possible**
-//!    - Reference is not shared across thread boundaries
-//!    - No data races can occur
+//!  - Reference is not shared across thread boundaries
+//!  - No data races can occur
 //! 3. **Allocation dominates all uses**
-//!    - Every path that uses the reference goes through the allocation
+//!  - Every path that uses the reference goes through the allocation
 //! 4. **Lifetime is stack-bounded**
-//!    - Reference lifetime bounded by stack frame
-//!    - Deallocation occurs before function return
+//!  - Reference lifetime bounded by stack frame
+//!  - Deallocation occurs before function return
 //!
+
 //! # Performance Impact
 //!
+
 //! - Automatic optimization: 15ns → 0ns per dereference
 //! - Zero developer effort (completely automatic)
 //! - Falls back to CBGR if cannot prove safety
 //!
+
 //! # Example
 //!
+
 //! ```rust,ignore
 //! // Compiler automatically optimizes this:
 //! fn process_data(input: &[u8]) -> i32 {
-//!     let parsed = parse(input);  // &Data allocated
-//!     // Compiler proves 'parsed' doesn't escape
-//!     // Automatic promotion: &Data → &checked Data
-//!     validate(&parsed);  // 0ns (no CBGR check)
-//!     compute(&parsed)    // 0ns (no CBGR check)
+//!  let parsed = parse(input); // &Data allocated
+//!  // Compiler proves 'parsed' doesn't escape
+//!  // Automatic promotion: &Data → &checked Data
+//!  validate(&parsed); // 0ns (no CBGR check)
+//!  compute(&parsed) // 0ns (no CBGR check)
 //! }
 //! ```
 
@@ -111,6 +118,7 @@ impl EscapeResult {
 
 /// Source span (start, end byte offsets).
 ///
+
 /// Used to map analysis results back to source locations for VBC codegen.
 /// Bridges the ExprId/RefId mismatch: escape analysis uses RefId internally,
 /// but VBC codegen uses ExprId. Span-based lookup resolves this mismatch.
@@ -211,8 +219,10 @@ pub struct CallSite {
 impl CallSite {
     /// Create a new call site
     ///
+
     /// # Parameters
     ///
+
     /// - `caller`: Function making the call
     /// - `block`: Basic block containing the call
     /// - `callee_id`: Raw callee function ID (converted to `FunctionId`)
@@ -356,6 +366,7 @@ impl ControlFlowGraph {
 
     /// Check if block A dominates block B
     ///
+
     /// A dominates B if every path from entry to B goes through A
     #[must_use]
     pub fn dominates(&self, a: BlockId, b: BlockId) -> bool {
@@ -426,9 +437,11 @@ impl ControlFlowGraph {
 
 /// Builder for constructing control flow graphs from typed AST.
 ///
+
 /// This is used by the compiler to convert typed functions into CFGs
 /// for escape and tier analysis.
 ///
+
 /// The builder tracks span->RefId mappings for VBC codegen integration,
 /// bridging the ExprId (VBC) / RefId (escape analysis) mismatch via source spans.
 #[derive(Debug)]
@@ -473,6 +486,7 @@ impl CfgBuilder {
 
     /// Allocate a new reference ID with span tracking.
     ///
+
     /// This is the preferred method for VBC codegen integration.
     /// The span is used to look up tier decisions during code generation.
     pub fn new_ref_id_with_span(&mut self, span: Span) -> RefId {
@@ -502,6 +516,7 @@ impl CfgBuilder {
 
     /// Get the complete span→RefId mapping.
     ///
+
     /// Used by TierAnalysisResult for VBC codegen integration.
     #[must_use]
     pub fn span_map(&self) -> &Map<Span, RefId> {
@@ -565,9 +580,11 @@ impl Default for CfgBuilder {
 
 /// Alias relationship between two references
 ///
+
 /// Represents the precision of our knowledge about whether two references
 /// point to the same memory location.
 ///
+
 /// Alias precision for CBGR escape analysis: MustAlias and NoAlias are precise
 /// (enable/prevent promotion), MayAlias is conservative (blocks promotion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -594,6 +611,7 @@ pub enum AliasRelation {
 impl AliasRelation {
     /// Check if this relation allows promotion
     ///
+
     /// `MustAlias` and `NoAlias` are precise, `MayAlias` is conservative
     #[must_use]
     pub fn is_precise(&self) -> bool {
@@ -612,9 +630,11 @@ impl AliasRelation {
 
 /// Alias sets for a reference
 ///
+
 /// Tracks all SSA versions and potential aliases of a reference.
 /// Used to determine if stores escape to heap or stay on stack.
 ///
+
 /// Tracks all SSA versions and potential aliases of a reference. Used to
 /// determine if stores escape to heap or stay on stack for promotion decisions.
 #[derive(Debug, Clone)]
@@ -681,9 +701,11 @@ impl AliasSets {
 
 /// Allocation type for a reference
 ///
+
 /// Tracks whether a reference points to stack or heap memory.
 /// Used to determine if stores escape to heap.
 ///
+
 /// Stack references can be promoted to &checked T; heap references need CBGR tracking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AllocationType {
@@ -719,6 +741,7 @@ impl AllocationType {
 
 /// Store target type
 ///
+
 /// Represents what we know about the target of a store operation.
 /// Used to determine if the store escapes to heap.
 /// Store to stack is safe (no escape); store to heap causes HeapEscape; unknown is conservative.
@@ -750,24 +773,28 @@ impl StoreTarget {
 
 /// Heap escape refiner using alias analysis
 ///
+
 /// Analyzes store operations to determine if they escape to heap
 /// or are safe stack-to-stack stores.
 ///
+
 /// # Algorithm
 /// 1. Track allocation sites (stack vs heap)
 /// 2. For each store operation:
-///    - Determine source allocation type
-///    - Determine target allocation type via aliases
-///    - Stack-to-stack: safe (no escape)
-///    - Stack-to-heap: escapes
-///    - Heap-to-heap: already escaped
-///    - Unknown: conservative escape
+///  - Determine source allocation type
+///  - Determine target allocation type via aliases
+///  - Stack-to-stack: safe (no escape)
+///  - Stack-to-heap: escapes
+///  - Heap-to-heap: already escaped
+///  - Unknown: conservative escape
 ///
+
 /// # Performance
 /// - O(n) per reference where n = number of stores
 /// - With SSA: constant time per store
 /// - Without SSA: linear time per store
 ///
+
 /// Refines heap escape decisions using allocation type + store target analysis.
 #[derive(Debug, Clone)]
 pub struct HeapEscapeRefiner {
@@ -798,12 +825,14 @@ impl HeapEscapeRefiner {
 
     /// Check if a store operation escapes to heap
     ///
+
     /// # Algorithm
     /// 1. If source is heap-allocated: already escaped (return true)
     /// 2. If target is definitely stack: safe (return false)
     /// 3. If target is definitely heap: escapes (return true)
     /// 4. If target is unknown: conservative (return true)
     ///
+
     /// # Returns
     /// - true: store escapes to heap
     /// - false: store is safe (stack-to-stack or no escape)
@@ -855,6 +884,7 @@ impl HeapEscapeRefiner {
 
     /// Determine allocation type for an SSA version using alias analysis
     ///
+
     /// Uses alias information to propagate allocation knowledge:
     /// - If must-alias with known stack: definitely stack
     /// - If must-alias with known heap: definitely heap
@@ -898,12 +928,14 @@ pub struct ClosureId(pub u64);
 
 /// Capture mode for closure captures
 ///
+
 /// Represents how a reference is captured by a closure:
 /// - `ByRef`: Immutable reference (&T)
 /// - `ByRefMut`: Mutable reference (&mut T)
 /// - `ByMove`: Ownership transfer (move || ...)
 /// - `ByCopy`: Copy types captured by value
 ///
+
 /// Closure captures affect escape: ByRef/ByRefMut may escape if closure escapes;
 /// ByMove transfers ownership; ByCopy is safe (no reference created).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -920,8 +952,10 @@ pub enum CaptureMode {
 
 /// Information about a single capture in a closure
 ///
+
 /// Tracks which reference is captured, how it's captured, and where.
 ///
+
 /// Per-capture data: which reference, capture mode, and source location.
 #[derive(Debug, Clone)]
 pub struct ClosureCapture {
@@ -937,6 +971,7 @@ pub struct ClosureCapture {
 
 /// Closure escape status
 ///
+
 /// Tracks how a closure is used and whether it escapes:
 /// - `ImmediateCall`: Called immediately, doesn't escape
 /// - `LocalStorage`: Stored in local variable (may or may not escape)
@@ -945,6 +980,7 @@ pub struct ClosureCapture {
 /// - `EscapesViaThread`: Passed to thread spawn
 /// - Unknown: Cannot determine (conservative)
 ///
+
 /// Determines whether captured references need CBGR: ImmediateCall closures
 /// don't escape; returned/heap-stored/thread-spawned closures do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1007,12 +1043,14 @@ impl ClosureEscapeStatus {
 
 /// Comprehensive information about a closure
 ///
+
 /// Tracks all details about a closure including:
 /// - Where it's created
 /// - What it captures
 /// - How it escapes
 /// - Where it's called
 ///
+
 /// Full closure analysis data for CBGR escape decisions.
 #[derive(Debug, Clone)]
 pub struct ClosureInfo {
@@ -1055,11 +1093,13 @@ impl ClosureInfo {
 
 /// Impact of closure capture on a reference
 ///
+
 /// Describes what happens to a captured reference:
 /// - `NoEscape`: Reference doesn't escape through closure
 /// - `ConditionalEscape`: Reference might escape (depends on closure usage)
 /// - Escapes: Reference definitely escapes through closure
 ///
+
 /// Combined analysis of capture mode + closure escape status determines impact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureImpact {
@@ -1091,9 +1131,11 @@ impl CaptureImpact {
 
 /// Result of comprehensive closure analysis
 ///
+
 /// Contains complete analysis results for a single closure including
 /// its escape status and impact on all captured references.
 ///
+
 /// Complete per-closure analysis: escape status + per-capture impact for tier decisions.
 #[derive(Debug, Clone)]
 pub struct ClosureAnalysisResult {
@@ -1135,6 +1177,7 @@ impl ClosureAnalysisResult {
 
 /// Escape analyzer for automatic promotion
 ///
+
 /// Supports three modes of operation:
 /// 1. Basic mode: Uses CFG directly for escape analysis
 /// 2. SSA mode: Uses SSA representation for precise data flow analysis
@@ -1192,6 +1235,7 @@ impl EscapeAnalyzer {
 
     /// Analyze reference for escape (automatic &T to &checked T promotion).
     ///
+
     /// Returns `DoesNotEscape` if ALL four criteria are met:
     /// 1. Reference doesn't escape function scope
     /// 2. No concurrent access possible
@@ -1224,17 +1268,21 @@ impl EscapeAnalyzer {
 
     /// Analyze reference for escape with interprocedural call graph information
     ///
+
     /// This is an enhanced version of `analyze()` that uses a `CallGraph` to
     /// perform interprocedural escape analysis, providing more precise results
     /// for references that flow through function calls.
     ///
+
     /// Uses call graph to check if callees may retain references (store in heap,
     /// return, or pass to thread spawn). Known-safe functions are excluded.
     ///
+
     /// # Arguments
     /// * `reference` - The reference to analyze
     /// * `call_graph` - Optional call graph for interprocedural analysis
     ///
+
     /// # Returns
     /// `EscapeResult` indicating whether the reference escapes and how
     #[must_use]
@@ -1268,6 +1316,7 @@ impl EscapeAnalyzer {
 
     /// Perform comprehensive interprocedural escape analysis
     ///
+
     /// This method analyzes references across function boundaries using the call graph
     /// to track how references flow through the program. It handles:
     /// - Parameter escape via function calls
@@ -1275,6 +1324,7 @@ impl EscapeAnalyzer {
     /// - Recursive function cycles
     /// - Transitive escape through call chains
     ///
+
     /// Implements the formal escape analysis algorithm: for each reference,
     /// checks return escape, heap store escape, closure capture escape, and
     /// transitive escape through call chains with cycle detection.
@@ -1316,6 +1366,7 @@ impl EscapeAnalyzer {
 
     /// Analyze parameter escape patterns
     ///
+
     /// Determines which function parameters may escape when this reference
     /// is passed as an argument
     fn analyze_parameter_escapes(
@@ -1368,6 +1419,7 @@ impl EscapeAnalyzer {
 
     /// Analyze transitive escapes through call chains
     ///
+
     /// A reference escapes transitively if it's passed to a function that
     /// itself passes it to another function that retains it
     fn analyze_transitive_escapes(
@@ -1443,6 +1495,7 @@ impl EscapeAnalyzer {
 
     /// Check if reference escapes via thread using call graph
     ///
+
     /// This enhanced version uses the `CallGraph` to precisely track whether
     /// references flow into thread-spawning functions.
     fn escapes_via_thread_with_call_graph(
@@ -1582,6 +1635,7 @@ impl EscapeAnalyzer {
 
     /// Check if reference is stored in heap
     ///
+
     /// IMPROVED: Better detection of heap escape patterns
     /// - Detects `Box::new`, `Heap::new` patterns
     /// - Tracks heap stores and field assignments
@@ -1622,6 +1676,7 @@ impl EscapeAnalyzer {
         // Conservative heuristic: Check if reference is used in blocks
         // that might perform heap stores
         //
+
         // In a full implementation, we would track actual store operations
         // For now, we use a conservative approximation based on use patterns
 
@@ -1648,6 +1703,7 @@ impl EscapeAnalyzer {
 
     /// Check if reference is captured by closure
     ///
+
     /// IMPROVED: Better closure detection heuristics
     /// - Checks for nested function calls (potential closures)
     /// - Analyzes control flow depth (closures create nested scopes)
@@ -1719,6 +1775,7 @@ impl EscapeAnalyzer {
 
     /// Check if reference crosses thread boundaries
     ///
+
     /// IMPROVED: Better thread escape detection
     /// - Checks if reference flows into thread-spawning functions
     /// - Detects Arc/Mutex patterns that enable thread sharing
@@ -1771,6 +1828,7 @@ impl EscapeAnalyzer {
     fn has_concurrent_access(&self, reference: RefId) -> bool {
         // Conservative analysis: Check if reference might be accessed concurrently
         //
+
         // Concurrent access can occur when:
         // 1. Reference escapes to another thread
         // 2. Reference has multiple mutable accesses
@@ -1870,6 +1928,7 @@ impl EscapeAnalyzer {
 
     /// Compute confidence score for promotion
     ///
+
     /// Returns value between 0.0 (uncertain) and 1.0 (certain)
     #[must_use]
     pub fn confidence_score(&self, reference: RefId) -> f64 {
@@ -1883,21 +1942,26 @@ impl EscapeAnalyzer {
 
     // ==================== SSA-Based Escape Analysis ====================
     //
+
     // The following methods use SSA (Static Single Assignment) form for
     // more precise escape analysis. SSA form ensures each variable is
     // assigned exactly once, enabling precise use-def chain analysis.
     //
+
     // Phase 1 of escape analysis: convert to SSA form for precise use-def chains.
     // A reference escapes if: (1) returned, (2) stored in heap, (3) captured by
     // closure, or (4) passed to function that may retain it.
 
     /// Build SSA representation for this function
     ///
+
     /// SSA form enables precise use-def chain analysis for escape detection.
     /// This is Phase 1 of the 4-phase escape analysis algorithm.
     ///
+
     /// # Returns
     ///
+
     /// Returns a reference to the built SSA, or an error if construction fails.
     pub fn build_ssa(&mut self) -> Result<&crate::ssa::SsaFunction, crate::ssa::SsaError> {
         use crate::ssa::SsaBuildable;
@@ -1939,6 +2003,7 @@ impl EscapeAnalyzer {
 
     /// Analyze reference for escape using SSA (if available)
     ///
+
     /// This method provides more precise escape analysis by leveraging
     /// SSA use-def chains. Falls back to CFG-based analysis if SSA
     /// is not available.
@@ -1955,6 +2020,7 @@ impl EscapeAnalyzer {
 
     /// SSA-based escape analysis implementation
     ///
+
     /// Uses the SSA representation to track:
     /// - Return escapes via SSA return values
     /// - Heap stores via SSA `heap_stores` set
@@ -2013,6 +2079,7 @@ impl EscapeAnalyzer {
 
     /// Check if value escapes via return using SSA
     ///
+
     /// More precise than CFG-based analysis as it tracks actual
     /// data flow through phi nodes.
     #[must_use]
@@ -2034,6 +2101,7 @@ impl EscapeAnalyzer {
 
     /// Check if value is stored to heap using SSA
     ///
+
     /// Uses SSA `heap_stores` tracking for precise detection of
     /// heap store patterns.
     #[must_use]
@@ -2055,6 +2123,7 @@ impl EscapeAnalyzer {
 
     /// Analyze all references in the function using SSA
     ///
+
     /// Returns escape information for all reference values in the SSA.
     #[must_use]
     pub fn analyze_all_with_ssa(&self) -> List<(RefId, EscapeResult)> {
@@ -2137,6 +2206,7 @@ impl fmt::Display for PromotionDecision {
 
 /// Interprocedural escape analysis information
 ///
+
 /// Tracks how references escape across function boundaries,
 /// including parameter passing, return values, and transitive escapes
 #[derive(Debug, Clone)]
@@ -2217,6 +2287,7 @@ impl InterproceduralEscapeInfo {
 
 /// Parameter escape information
 ///
+
 /// Tracks blocks where a reference may be passed as a parameter
 #[derive(Debug, Clone)]
 pub struct ParameterEscapeInfo {
@@ -2253,6 +2324,7 @@ impl Default for ParameterEscapeInfo {
 
 /// Transitive escape information
 ///
+
 /// Tracks escapes through call chains (A calls B, B retains parameter)
 #[derive(Debug, Clone)]
 pub struct TransitiveEscapeInfo {
@@ -2287,15 +2359,18 @@ impl Default for TransitiveEscapeInfo {
 
 // ==================== Path-Sensitive Escape Analysis ====================
 //
+
 // Path-sensitive analysis tracks escape information per execution path,
 // enabling more precise promotion decisions by determining if ALL paths
 // allow promotion or only SOME paths.
 //
+
 // Path-sensitive escape analysis: tracks escape state per execution path to enable
 // promotion when ALL paths allow it (even if individual paths diverge).
 
 /// Symbolic predicate representing a path condition
 ///
+
 /// Path conditions track the conjunction of branch predicates that
 /// must be true for an execution path to be taken.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2410,6 +2485,7 @@ impl PathPredicate {
 
     /// Check if two predicates are contradictory
     ///
+
     /// Returns true if one predicate asserts a block is true and the other
     /// asserts the same block is false.
     fn are_contradictory(p1: &PathPredicate, p2: &PathPredicate) -> bool {
@@ -2422,6 +2498,7 @@ impl PathPredicate {
 
     /// Check if this predicate is satisfiable
     ///
+
     /// Uses simple heuristics for feasibility. For more precise analysis,
     /// integrate with Z3 SMT solver (`verum_smt` crate).
     #[must_use]
@@ -2433,6 +2510,7 @@ impl PathPredicate {
 
 /// Path condition representing the conjunction of branch predicates
 ///
+
 /// A path condition describes the conditions under which a particular
 /// execution path is taken through the control flow graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2487,6 +2565,7 @@ impl PathCondition {
 
     /// Check if this path already contains a specific block
     ///
+
     /// Used for cycle detection in loop handling - if a block is already
     /// in the path, adding it again would create a back edge (loop).
     #[must_use]
@@ -2496,6 +2575,7 @@ impl PathCondition {
 
     /// Get the number of times a block appears in this path
     ///
+
     /// Used for bounded loop unrolling - allows N iterations before stopping.
     #[must_use]
     pub fn block_visit_count(&self, block_id: BlockId) -> usize {
@@ -2534,31 +2614,37 @@ impl PathEscapeStatus {
 
 /// Path-sensitive escape analysis information
 ///
+
 /// Tracks escape information per execution path through the CFG,
 /// enabling more precise promotion decisions than path-insensitive analysis.
 ///
+
 /// # Key Insight
 ///
+
 /// Path-insensitive analysis conservatively assumes a reference escapes if it
 /// escapes on ANY path. Path-sensitive analysis can promote if:
 /// - ALL feasible paths allow promotion, OR
 /// - Infeasible paths can be eliminated via static analysis
 ///
+
 /// # Example
 ///
+
 /// ```rust,ignore
 /// // Path-sensitive analysis can promote here:
 /// fn example(cond: bool) -> i32 {
-///     let x = allocate();  // &Data
-///     if cond {
-///         use(&x);  // Path 1: no escape
-///     } else {
-///         use(&x);  // Path 2: no escape
-///     }
-///     compute(&x)  // Both paths converge - safe to promote
+///  let x = allocate(); // &Data
+///  if cond {
+///  use(&x); // Path 1: no escape
+///  } else {
+///  use(&x); // Path 2: no escape
+///  }
+///  compute(&x) // Both paths converge - safe to promote
 /// }
 /// ```
 ///
+
 /// Per-path escape status: if all paths show no-escape, the reference is promotable.
 #[derive(Debug, Clone)]
 pub struct PathSensitiveEscapeInfo {
@@ -2618,6 +2704,7 @@ impl PathSensitiveEscapeInfo {
 
     /// Get the overall escape result
     ///
+
     /// Returns `DoesNotEscape` only if all feasible paths allow promotion
     #[must_use]
     pub fn overall_result(&self) -> EscapeResult {
@@ -2679,24 +2766,30 @@ pub struct PathStatistics {
 impl EscapeAnalyzer {
     /// Perform path-sensitive escape analysis
     ///
+
     /// Analyzes escape behavior along individual execution paths through the CFG,
     /// providing more precise results than path-insensitive analysis.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Enumerate execution paths from entry to exit
     /// 2. Track path conditions at each branch point
     /// 3. Compute escape status per path
     /// 4. Eliminate infeasible paths via predicate analysis
     /// 5. Determine if ALL feasible paths allow promotion
     ///
+
     /// # Performance
     ///
+
     /// Path enumeration is exponential in branching factor, so we:
     /// - Limit path enumeration depth (default: 100 paths)
     /// - Merge similar paths using predicate abstraction
     /// - Fall back to path-insensitive analysis for complex CFGs
     ///
+
     /// Enumerates CFG paths (bounded to 100) and tracks escape status per path.
     /// Falls back to path-insensitive analysis for complex CFGs.
     #[must_use]
@@ -2721,15 +2814,20 @@ impl EscapeAnalyzer {
 
     /// Enumerate execution paths through the CFG
     ///
+
     /// Uses depth-first search to enumerate paths from entry to exit,
     /// tracking path conditions at branch points.
     ///
+
     /// # Arguments
     ///
+
     /// * `max_paths` - Maximum number of paths to enumerate (prevents explosion)
     ///
+
     /// # Returns
     ///
+
     /// List of path conditions representing execution paths
     fn enumerate_paths(&self, max_paths: usize) -> List<PathCondition> {
         let mut paths = List::new();
@@ -2806,6 +2904,7 @@ impl EscapeAnalyzer {
 
     /// Analyze escape behavior on a specific path
     ///
+
     /// Performs escape analysis considering only the blocks along this path,
     /// providing more precise results than whole-function analysis.
     fn analyze_on_path(&self, reference: RefId, path: &PathCondition) -> EscapeResult {
@@ -3016,6 +3115,7 @@ impl EscapeAnalyzer {
 
     /// Analyze reference with path-sensitive analysis and optional call graph
     ///
+
     /// Combines path-sensitive analysis with interprocedural information
     /// for maximum precision.
     #[must_use]
@@ -3056,17 +3156,21 @@ impl EscapeAnalyzer {
 
 // ==================== Field-Sensitive Escape Analysis ====================
 //
+
 // Field-sensitive analysis tracks escape information independently for each
 // struct field, enabling more precise promotion when only some fields escape.
 //
+
 // This allows promotion of non-escaping fields even when other fields of the
 // same struct escape, significantly improving optimization opportunities.
 //
+
 // Field-sensitive escape analysis: per-field promotion decisions so non-escaping
 // fields can be promoted even when other fields of the same struct escape.
 
 /// Component of a field access path
 ///
+
 /// Represents a single step in a field access chain, supporting various
 /// types of field projections (named fields, tuple indices, enum variants).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -3084,6 +3188,7 @@ pub enum FieldComponent {
     },
     /// Array/slice element access (e.g., `arr[i]`)
     ///
+
     /// Note: We use a symbolic index since field-sensitive analysis
     /// operates at compile-time without concrete index values
     ArrayElement,
@@ -3104,17 +3209,22 @@ impl fmt::Display for FieldComponent {
 
 /// Field access path representing a chain of field projections
 ///
+
 /// A field path tracks the sequence of field accesses from a base reference,
 /// such as `obj.field1.field2` or `tuple.0.name`.
 ///
+
 /// # Examples
 ///
+
 /// - `obj.x` → `[Named("x")]`
 /// - `tuple.0.name` → `[TupleIndex(0), Named("name")]`
 /// - `Some(data).0` → `[EnumVariant { variant: "Some", field: 0 }]`
 ///
+
 /// # Performance
 ///
+
 /// Field paths are designed for efficient hashing and comparison:
 /// - Small paths (≤3 components) avoid allocations
 /// - Hash/Eq implementations are O(path length)
@@ -3123,6 +3233,7 @@ impl fmt::Display for FieldComponent {
 pub struct FieldPath {
     /// Components of the field access chain
     ///
+
     /// Empty path represents the base reference itself (no field access)
     pub components: List<FieldComponent>,
 }
@@ -3180,6 +3291,7 @@ impl FieldPath {
 
     /// Check if this path is a prefix of another path
     ///
+
     /// A path P1 is a prefix of P2 if P2 starts with all components of P1.
     /// This is used to determine field aliasing relationships.
     #[must_use]
@@ -3196,6 +3308,7 @@ impl FieldPath {
 
     /// Check if this path may alias with another path
     ///
+
     /// Two paths alias if:
     /// - They are equal (same field)
     /// - One is a prefix of the other (nested field access)
@@ -3232,6 +3345,7 @@ impl FieldPath {
 
     /// Convert to `flow_functions::FieldPath` for dataflow analysis
     ///
+
     /// Extracts field names from components, converting indices to strings.
     /// This is safe because flow analysis operates on field names.
     #[must_use]
@@ -3273,27 +3387,33 @@ impl fmt::Display for FieldPath {
 
 /// Field-sensitive escape information for a single reference
 ///
+
 /// Tracks escape status independently for each field of a struct,
 /// enabling promotion of non-escaping fields even when other fields escape.
 ///
+
 /// # Example
 ///
+
 /// ```rust
 /// struct Data {
-///     cache: Vec<u8>,  // Escapes via heap
-///     count: i32,      // Stack-local
+///  cache: Vec<u8>, // Escapes via heap
+///  count: i32, // Stack-local
 /// }
 ///
+
 /// fn process(d: &Data) -> i32 {
-///     // Field-sensitive analysis:
-///     // - d.cache: EscapesViaHeap (cannot promote)
-///     // - d.count: DoesNotEscape (CAN promote to &checked i32)
-///     d.count
+///  // Field-sensitive analysis:
+///  // - d.cache: EscapesViaHeap (cannot promote)
+///  // - d.count: DoesNotEscape (CAN promote to &checked i32)
+///  d.count
 /// }
 /// ```
 ///
+
 /// # Performance
 ///
+
 /// - Map lookup: O(1) average, O(path length) hash
 /// - Typical fields per struct: 2-10
 /// - Memory overhead: ~40 bytes per field
@@ -3343,6 +3463,7 @@ impl FieldSensitiveEscapeInfo {
 
     /// Get escape result for a field path
     ///
+
     /// Returns the specific escape result for this field, or None if
     /// the field hasn't been analyzed yet.
     #[must_use]
@@ -3383,6 +3504,7 @@ impl FieldSensitiveEscapeInfo {
 
     /// Merge field escape information from another analysis
     ///
+
     /// Used for combining results from multiple analysis passes or
     /// different execution paths.
     pub fn merge(&mut self, other: &FieldSensitiveEscapeInfo) {
@@ -3422,36 +3544,45 @@ pub struct FieldEscapeStatistics {
 impl EscapeAnalyzer {
     /// Perform field-sensitive escape analysis
     ///
+
     /// Analyzes each field of a reference independently, tracking escape
     /// information per field path. This enables promotion of non-escaping
     /// fields even when other fields of the same struct escape.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. **Decompose reference** - Identify all field accesses
     /// 2. **Analyze per field** - Run escape analysis for each field path
     /// 3. **Handle projections** - Track field projections through SSA
     /// 4. **Aggregate results** - Combine field-level decisions
     ///
+
     /// # Performance
     ///
+
     /// - Complexity: O(fields × `analysis_cost`)
     /// - Typical fields: 2-10 per struct
     /// - Typical overhead: 2-5x base analysis
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// struct Data {
-    ///     cache: Vec<u8>,  // Escapes
-    ///     count: i32,      // Safe
+    ///  cache: Vec<u8>, // Escapes
+    ///  count: i32, // Safe
     /// }
     ///
+
     /// let info = analyzer.field_sensitive_analysis(ref_id);
     /// assert!(info.can_promote_field(&FieldPath::named("count")));
     /// assert!(!info.can_promote_field(&FieldPath::named("cache")));
     /// ```
     ///
+
     /// Analyzes escape per field path: e.g., struct.count may be promotable even if
     /// struct.cache escapes to heap.
     #[must_use]
@@ -3479,6 +3610,7 @@ impl EscapeAnalyzer {
 
     /// Extract all field access paths for a reference
     ///
+
     /// Scans the CFG to identify all field projections applied to the reference,
     /// building a set of `FieldPath` objects representing each unique field access.
     fn extract_field_accesses(&self, reference: RefId) -> Set<FieldPath> {
@@ -3521,6 +3653,7 @@ impl EscapeAnalyzer {
 
     /// Analyze escape for a specific field path
     ///
+
     /// Performs escape analysis considering only uses of this specific field,
     /// not the entire struct. This enables more precise promotion decisions.
     #[must_use]
@@ -3686,6 +3819,7 @@ impl EscapeAnalyzer {
 
     /// Refine field-sensitive analysis with SSA information
     ///
+
     /// Uses SSA use-def chains to track field projections more precisely,
     /// identifying exactly which fields are accessed where.
     fn refine_with_ssa_fields(
@@ -3721,11 +3855,14 @@ impl EscapeAnalyzer {
 
     /// Perform field-sensitive analysis with path sensitivity
     ///
+
     /// Combines field-sensitive and path-sensitive analysis for maximum
     /// precision: tracks escape per field per path.
     ///
+
     /// # Performance
     ///
+
     /// - Complexity: O(fields × paths × `analysis_cost`)
     /// - Typical: O(5 × 10 × 100µs) = ~5ms
     /// - Practical limit: 100 paths, 20 fields
@@ -3882,10 +4019,12 @@ impl EscapeAnalyzer {
     // Section 8: Heap Escape Refinement via Alias Analysis
     // ==================================================================================
     //
+
     // Alias analysis refines heap escape detection by tracking pointer relationships.
     // Instead of conservatively assuming any store might escape to heap, we analyze
     // whether references DEFINITELY point to heap locations vs stack locations.
     //
+
     // Key Innovation:
     // - Must-alias: References definitely point to same location
     // - May-alias: References might point to same location
@@ -3893,21 +4032,25 @@ impl EscapeAnalyzer {
     // - Stack-to-stack stores proven safe (no heap escape)
     // - Stack-to-heap stores marked as escapes
     //
+
     // Performance: O(n²) worst-case alias analysis, O(n) typical with SSA
     // ==================================================================================
 
     /// Compute aliases for a reference using SSA use-def chains
     ///
+
     /// Builds alias sets by tracking reference flow through the SSA graph.
     /// Two references must-alias if they refer to the same SSA version.
     /// Two references may-alias if they're related through phi nodes.
     ///
+
     /// # Algorithm
     /// 1. Extract SSA version for the reference
     /// 2. Find all phi nodes that merge this version
     /// 3. Compute transitive closure of aliasing relationships
     /// 4. Return must-alias and may-alias sets
     ///
+
     /// # Performance
     /// - With SSA: O(n) where n = number of SSA values for this variable
     /// - Without SSA: O(n^2) where n = number of uses (conservative)
@@ -3978,18 +4121,21 @@ impl EscapeAnalyzer {
 
     /// Refine heap escape detection using alias analysis
     ///
+
     /// This method uses alias information to determine if a store operation
     /// definitely escapes to heap, or might be a safe stack-to-stack store.
     ///
+
     /// # Algorithm
     /// 1. Compute alias sets for the reference
     /// 2. Track heap allocation sites
     /// 3. Track stack allocation sites
     /// 4. For each store:
-    ///    - If target must-alias stack location: no escape
-    ///    - If target may-alias heap location: conservative escape
-    ///    - If no-alias: no escape
+    ///  - If target must-alias stack location: no escape
+    ///  - If target may-alias heap location: conservative escape
+    ///  - If no-alias: no escape
     ///
+
     /// # Returns
     /// - true: reference DEFINITELY or MIGHT escape to heap
     /// - false: reference DEFINITELY does not escape to heap
@@ -4011,15 +4157,18 @@ impl EscapeAnalyzer {
 
     /// Determine if reference is definitely heap-allocated
     ///
+
     /// Tracks allocation patterns to identify heap allocations:
     /// - `Box::new`, `Rc::new`, `Arc::new`
     /// - `Vec::new`, `HashMap::new`, etc.
     /// - `Heap::allocate`
     ///
+
     /// # Returns
     /// - true: reference points to heap-allocated memory
     /// - false: reference points to stack or unknown
     ///
+
     /// Checks allocation site: heap allocations (new, Heap::new) vs stack locals.
     #[must_use]
     pub fn is_definitely_heap(&self, reference: RefId) -> bool {
@@ -4043,13 +4192,16 @@ impl EscapeAnalyzer {
 
     /// Determine if reference is definitely stack-allocated
     ///
+
     /// Checks if reference is allocated on the stack (local let binding)
     /// vs heap (Box, Vec, etc.)
     ///
+
     /// # Returns
     /// - true: reference points to stack memory
     /// - false: reference points to heap or unknown
     ///
+
     /// Checks if reference is provably stack-allocated (local variables, parameters).
     #[must_use]
     pub fn is_definitely_stack(&self, reference: RefId) -> bool {
@@ -4068,14 +4220,17 @@ impl EscapeAnalyzer {
 
     /// Track if reference flows to known heap locations
     ///
+
     /// Uses alias analysis to determine if a reference definitely,
     /// possibly, or never flows to heap-allocated structures.
     ///
+
     /// # Algorithm
     /// 1. Compute aliases of the reference
     /// 2. For each alias, check if it's stored to heap
     /// 3. Use transitive closure to find heap flow
     ///
+
     /// # Returns
     /// - true: reference flows to heap (via stores, returns, etc.)
     /// - false: no evidence of heap flow
@@ -4189,6 +4344,7 @@ impl EscapeAnalyzer {
     // Section 9: Closure Escape Analysis
     // ==================================================================================
     //
+
     // Closure capture analysis for CBGR escape detection.
     // Closures can capture references from their environment, which may cause those
     // references to escape their original scope. This analysis tracks:
@@ -4196,26 +4352,31 @@ impl EscapeAnalyzer {
     // - How closures are used (called immediately, stored, passed to functions)
     // - Whether captured references escape through the closure
     //
+
     // Key Patterns:
-    // - Immediate call: `(|| { use(&x) })()`  → No escape (inlined)
+    // - Immediate call: `(|| { use(&x) })()` → No escape (inlined)
     // - Local storage: `let f = || { use(&x) };` → Maybe escape (depends on f's usage)
     // - Heap storage: `vec.push(|| { use(&x) })` → Escapes to heap
     // - Return: `return || { use(&x) }` → Escapes via return
     // - Pass to fn: `spawn(|| { use(x) })` → Depends on callee (often escapes)
     //
+
     // Performance: O(closures × captures) per function
     // ==================================================================================
 
     /// Find all closure creation sites in the CFG
     ///
+
     /// Identifies blocks where closures are created by looking for:
     /// - Closure expression patterns
     /// - Lambda/anonymous function definitions
     /// - Move/non-move closure keywords
     ///
+
     /// # Returns
     /// List of closures with their creation blocks
     ///
+
     /// Scans CFG for closure creation sites and builds ClosureInfo with captures.
     #[must_use]
     pub fn find_closures(&self) -> List<ClosureInfo> {
@@ -4224,14 +4385,17 @@ impl EscapeAnalyzer {
 
         // Scan all blocks for closure creation patterns
         //
+
         // We use a multi-pass detection strategy:
         // 1. First check SSA for explicit DefKind::Closure markers (fastest path)
         // 2. Fall back to capture-pattern heuristics for untyped IR
         //
+
         // SSA provides explicit closure markers from the AST lowering phase:
         // - ExprKind::Closure AST nodes are tagged with DefKind::Closure in SSA
         // - This covers |x, y| expr and async move || expr patterns
         //
+
         // When SSA is unavailable, we use structural heuristics:
         // - Non-stack-allocated definitions that capture external references
         // - Definitions passed to higher-order functions
@@ -4262,11 +4426,13 @@ impl EscapeAnalyzer {
 
     /// Check if a definition site looks like a closure
     ///
+
     /// Production-quality closure detection using multiple signals:
     /// 1. SSA `DefKind::Closure` marker (explicit closure definitions)
     /// 2. Captures external references (defined outside, used inside)
     /// 3. Non-stack-allocated with function-like usage patterns
     ///
+
     /// # Algorithm
     /// Uses a weighted scoring system to avoid false positives:
     /// - `DefKind::Closure`: Definite closure (score = MAX)
@@ -4274,6 +4440,7 @@ impl EscapeAnalyzer {
     /// - Non-stack allocated: Medium signal (score += 1)
     /// - Called immediately: Low signal (score += 1)
     ///
+
     /// # Performance
     /// O(1) for SSA-marked closures, O(uses) for heuristic detection.
     /// Avoids expensive iterations by checking SSA markers first.
@@ -4308,11 +4475,13 @@ impl EscapeAnalyzer {
 
     /// Detect closures based on capture patterns
     ///
+
     /// A closure typically:
     /// 1. Is not stack-allocated (may be boxed for escaping captures)
     /// 2. Has uses that reference variables from enclosing scopes
     /// 3. May be passed to higher-order functions
     ///
+
     /// This method uses these patterns to identify potential closures
     /// without explicit type information.
     fn detect_closure_by_capture_pattern(&self, def_site: &DefSite) -> bool {
@@ -4349,18 +4518,22 @@ impl EscapeAnalyzer {
 
     /// Extract references captured by a closure
     ///
+
     /// Analyzes closure body to determine which references from the enclosing
     /// scope are captured. Uses use-def chains to track captured values.
     ///
+
     /// # Algorithm
     /// 1. Find all references used within closure body
     /// 2. For each reference, check if defined outside closure
     /// 3. Classify as captured if used but not defined locally
     /// 4. Determine capture mode (`ByRef`, `ByMove`, `ByCopy`)
     ///
+
     /// # Returns
     /// List of captured references with their capture modes
     ///
+
     /// CBGR Closure Capture Extraction: Walks the closure block's uses in the CFG,
     /// identifies which outer references are captured, and classifies each as
     /// ByRef (default/conservative), ByRefMut (mutable use), ByMove (last use or
@@ -4404,22 +4577,27 @@ impl EscapeAnalyzer {
 
     /// Infer the capture mode for a reference
     ///
+
     /// Determines whether a reference is captured:
     /// - `ByRef`: Immutable reference capture
     /// - `ByRefMut`: Mutable reference capture
     /// - `ByMove`: Ownership transfer
     /// - `ByCopy`: Copy semantic types
     ///
+
     /// Uses SSA information, use-def chains, and heuristics to classify.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Check mutability flag (fast path for `ByRefMut`)
     /// 2. Use SSA to check if this is the last use (suggests move/copy)
     /// 3. Check for heap storage patterns (suggests move)
     /// 4. Analyze type patterns from SSA def kinds
     /// 5. Fall back to conservative `ByRef`
     ///
+
     /// CBGR Capture Mode Inference: Determines how a captured variable is accessed
     /// by a closure. Rules: (1) mutable use => ByRefMut, (2) SSA last-use analysis
     /// => ByMove/ByCopy, (3) heap storage pattern => ByMove, (4) type-based
@@ -4491,6 +4669,7 @@ impl EscapeAnalyzer {
 
     /// Check if this is the last use of a reference
     ///
+
     /// Returns true if the reference is not used after this use site
     fn is_last_use_of_reference(&self, use_site: &UseeSite) -> bool {
         let all_uses = self.find_use_sites(use_site.reference);
@@ -4529,6 +4708,7 @@ impl EscapeAnalyzer {
 
     /// Heuristic to detect copy-type patterns
     ///
+
     /// Uses reference ID patterns and SSA info to guess if a type is Copy:
     /// - Small reference IDs often correspond to primitives
     /// - Stack-allocated, single-word values are typically Copy
@@ -4562,6 +4742,7 @@ impl EscapeAnalyzer {
 
     /// Determine if a closure escapes its creation scope
     ///
+
     /// Analyzes how the closure is used after creation:
     /// - Immediate call: Doesn't escape (inlined)
     /// - Stored in local variable: Might escape (depends on variable usage)
@@ -4569,6 +4750,7 @@ impl EscapeAnalyzer {
     /// - Returned from function: Escapes
     /// - Passed to another function: Depends on callee
     ///
+
     /// # Algorithm
     /// 1. Find all uses of the closure reference
     /// 2. Check if closure is called immediately (same block)
@@ -4576,9 +4758,11 @@ impl EscapeAnalyzer {
     /// 4. Check if closure is returned
     /// 5. Check if closure is passed to escaping function
     ///
+
     /// # Returns
     /// `ClosureEscapeStatus` indicating how the closure escapes
     ///
+
     /// CBGR Closure Escape Classification: Determines whether a closure escapes its
     /// defining scope, which dictates CBGR reference tier. Categories:
     /// - ImmediateCall: closure called only at creation site (no escape, promotable)
@@ -4626,6 +4810,7 @@ impl EscapeAnalyzer {
 
     /// Get the reference ID for a closure
     ///
+
     /// Extracts the reference that represents the closure value itself.
     fn get_closure_reference(&self, closure_info: &ClosureInfo) -> RefId {
         // Find the definition in the closure's creation block
@@ -4657,23 +4842,27 @@ impl EscapeAnalyzer {
 
     /// Refine escape analysis using closure information
     ///
+
     /// Integrates closure analysis with reference escape analysis:
     /// - If reference is captured by escaping closure: reference escapes
     /// - If reference is captured by non-escaping closure: reference doesn't escape
     /// - If closure only called immediately: reference doesn't escape
     ///
+
     /// # Algorithm
     /// 1. Find all closures that capture the reference
     /// 2. For each capturing closure:
-    ///    a. Determine if closure escapes
-    ///    b. If closure escapes, reference escapes
-    ///    c. If closure is immediate-call, reference is safe
+    ///  a. Determine if closure escapes
+    ///  b. If closure escapes, reference escapes
+    ///  c. If closure is immediate-call, reference is safe
     /// 3. Return most conservative result
     ///
+
     /// # Returns
     /// - `Maybe::Some(EscapeResult)`: Definitive escape result via closure
     /// - `Maybe::None`: No closure-related escape detected
     ///
+
     /// CBGR Closure-Refined Escape Analysis: Checks if a reference escapes via
     /// closure capture. For each closure in the CFG, tests whether it captures
     /// the given reference and how the closure itself escapes. Returns
@@ -4728,13 +4917,16 @@ impl EscapeAnalyzer {
 
     /// Analyze closure escapes with call graph
     ///
+
     /// Uses interprocedural analysis to track closures passed to functions:
     /// - If closure passed to known safe function: safe
     /// - If closure passed to thread-spawning function: escapes via thread
     /// - If closure passed to recursive function: conservative escape
     ///
+
     /// Integrates with existing interprocedural framework.
     ///
+
     /// CBGR Interprocedural Closure Escape via Call Graph: Uses the call graph to
     /// determine if a closure escapes through function calls. Checks: (1) if closure
     /// is passed to a known non-escaping function (safe), (2) if passed to a
@@ -4787,18 +4979,22 @@ impl EscapeAnalyzer {
 
     /// Check if reference is passed to a specific function
     ///
+
     /// Analyzes call sites in the CFG to determine if a reference is passed
     /// as an argument to the specified function. Uses multiple detection strategies:
     ///
+
     /// 1. **SSA use-def chains**: If SSA is available, check if any use of the
-    ///    reference is at a call site targeting `function_id`
+    ///  reference is at a call site targeting `function_id`
     /// 2. **CFG call sites**: Scan `BasicBlock::call_sites` for matching callee
     /// 3. **Conservative fallback**: If precise analysis unavailable, use heuristics
     ///
+
     /// # Arguments
     /// * `reference` - The reference to check
     /// * `function_id` - The target function to check for
     ///
+
     /// # Returns
     /// `true` if reference is definitely or possibly passed to the function
     fn is_passed_to_function(&self, reference: RefId, function_id: FunctionId) -> bool {
@@ -4859,16 +5055,19 @@ impl EscapeAnalyzer {
 
     /// Comprehensive closure escape analysis
     ///
+
     /// Performs complete analysis of all closures and their captured references.
     /// Returns detailed information for each closure including:
     /// - Captured references
     /// - Escape status
     /// - Impact on captured references
     ///
+
     /// # Performance
     /// - O(closures × captures × uses) worst case
     /// - O(closures × captures) typical with SSA
     ///
+
     /// CBGR Full Closure Analysis: Analyzes all closures in the function,
     /// determining escape status and impact on each captured reference.
     /// Complexity: O(closures * captures * uses) worst case, O(closures * captures)
@@ -4914,35 +5113,43 @@ impl EscapeAnalyzer {
 // Section 10: Context-Sensitive Interprocedural Analysis
 // ==================================================================================
 //
+
 // Context-Sensitive Interprocedural Escape Analysis for CBGR Promotion
 //
+
 // Context-sensitive analysis tracks escape information per calling context,
 // distinguishing between different call sites of the same function.
 //
+
 // Key Innovation:
 // - Context-insensitive: Merges all call sites → conservative
 // - Context-sensitive: Tracks each calling context → precise
 //
+
 // Example Benefit:
 // ```rust
 // fn maybe_escape(cond: bool, data: &Data) {
-//     if cond { leak(data); }
+//  if cond { leak(data); }
 // }
 //
+
 // fn caller1() {
-//     let x = Data::new();
-//     maybe_escape(false, &x);  // Context 1: cond=false → no escape!
+//  let x = Data::new();
+//  maybe_escape(false, &x); // Context 1: cond=false → no escape!
 // }
 //
+
 // fn caller2() {
-//     let y = Data::new();
-//     maybe_escape(true, &y);   // Context 2: cond=true → escapes
+//  let y = Data::new();
+//  maybe_escape(true, &y); // Context 2: cond=true → escapes
 // }
 // ```
 //
+
 // Context-insensitive: Both fail (conservative)
 // Context-sensitive: caller1 succeeds, caller2 fails (precise!)
 //
+
 // Performance: O(contexts × base_analysis)
 // With caching: O(unique_contexts)
 // Typical: 2-10x slower than context-insensitive, but 50-80% more promotions
@@ -4950,9 +5157,11 @@ impl EscapeAnalyzer {
 
 /// Calling context for context-sensitive analysis
 ///
+
 /// Represents the full calling context: call site + call chain.
 /// Call chain tracks the path of function calls to handle recursion.
 ///
+
 /// CBGR Context-Sensitive Call Context: Represents the full calling context
 /// (call site + call chain) for context-sensitive escape analysis. The call
 /// chain is depth-limited to prevent exponential blowup. Two calls to the
@@ -5002,6 +5211,7 @@ impl CallContext {
 
     /// Extend context with new call site
     ///
+
     /// Creates a new context by appending the current call site to the chain
     /// and setting the new call site as the current one.
     #[must_use]
@@ -5019,6 +5229,7 @@ impl CallContext {
 
     /// Check if context contains a specific function
     ///
+
     /// Returns true if the function appears as a caller anywhere in the context.
     /// This includes both the current call site and the call chain.
     #[must_use]
@@ -5033,6 +5244,7 @@ impl CallContext {
 
     /// Check if context represents a recursive call
     ///
+
     /// A context is recursive if the current function appears in the call chain
     /// (not counting the entry call site, which represents the entry point).
     /// This is used by the analyzer to skip recursive contexts.
@@ -5082,9 +5294,11 @@ impl fmt::Display for CallContext {
 
 /// Cached analysis result for a specific context
 ///
+
 /// Stores the escape analysis result for a reference in a specific calling context.
 /// Used to avoid reanalyzing the same context multiple times.
 ///
+
 /// Cached escape analysis result for a specific calling context. Used to
 /// avoid redundant reanalysis of the same context. Includes an LRU timestamp
 /// for cache eviction when the context cache grows too large.
@@ -5100,9 +5314,11 @@ pub struct ContextResult {
 
 /// Context-sensitive escape information
 ///
+
 /// Comprehensive analysis results tracking escape per calling context.
 /// Enables precise promotion decisions based on how function is called.
 ///
+
 /// Comprehensive context-sensitive escape information for a reference.
 /// Tracks escape results per calling context, enabling precise CBGR
 /// promotion decisions. A reference may be promotable to &checked T in
@@ -5226,9 +5442,11 @@ impl ContextSensitiveInfo {
 
 /// Context-sensitive analyzer
 ///
+
 /// Main entry point for context-sensitive interprocedural analysis.
 /// Manages context tracking, caching, and merging strategies.
 ///
+
 /// Main entry point for context-sensitive interprocedural escape analysis.
 /// Manages context tracking with configurable depth limit (default: 3),
 /// result caching per reference, and context merging strategies.
@@ -5277,22 +5495,26 @@ impl ContextSensitiveAnalyzer {
 
     /// Analyze reference with context sensitivity
     ///
+
     /// Main analysis method that tracks escape per calling context.
     ///
+
     /// # Algorithm
     /// 1. Build initial calling context
     /// 2. For each context:
-    ///    a. Check cache
-    ///    b. If miss: analyze with this specific context
-    ///    c. Cache result
+    ///  a. Check cache
+    ///  b. If miss: analyze with this specific context
+    ///  c. Cache result
     /// 3. Merge results across contexts
     /// 4. Return most precise result per context
     ///
+
     /// # Performance
     /// - Best case (all cache hits): O(1)
     /// - Worst case (all misses): O(contexts × `base_analysis`)
     /// - Typical: `O(unique_contexts)`
     ///
+
     /// Context-sensitive escape analysis entry point. Builds calling contexts
     /// from the call graph, analyzes each context (with caching), and produces
     /// per-context escape results. Best case (all cache hits): O(1).
@@ -5344,6 +5566,7 @@ impl ContextSensitiveAnalyzer {
 
     /// Build calling contexts for a reference
     ///
+
     /// Enumerates all possible calling contexts up to max depth.
     /// Handles recursion by limiting depth and merging contexts.
     fn build_contexts(&self, _reference: RefId, call_graph: &CallGraph) -> List<CallContext> {
@@ -5409,6 +5632,7 @@ impl ContextSensitiveAnalyzer {
 
     /// Check if context should be analyzed
     ///
+
     /// Applies depth limiting and recursion detection.
     fn should_analyze_context(
         &self,
@@ -5445,6 +5669,7 @@ impl ContextSensitiveAnalyzer {
 
     /// Analyze reference in specific calling context
     ///
+
     /// Performs escape analysis with context-specific information:
     /// - Arguments: Values from caller context
     /// - Return: Whether return escapes in caller context
@@ -5466,6 +5691,7 @@ impl ContextSensitiveAnalyzer {
 
     /// Refine escape result using calling context
     ///
+
     /// Uses context information to provide more precise results:
     /// - If caller doesn't use return value: return escape OK
     /// - If caller provides known-safe arguments: more permissive
@@ -5514,9 +5740,11 @@ impl ContextSensitiveAnalyzer {
 
     /// Merge contexts when recursion detected
     ///
+
     /// When a recursive context is encountered, merge it with the
     /// nearest ancestor context in the call chain.
     ///
+
     /// Strategy: Conservative union of escape results.
     #[must_use]
     pub fn merge_contexts(
@@ -5551,6 +5779,7 @@ impl ContextSensitiveAnalyzer {
 
     /// Evict old cache entries if limit exceeded
     ///
+
     /// Uses LRU (Least Recently Used) strategy based on timestamps.
     fn evict_if_needed(&mut self) {
         let total_entries: usize = self
@@ -5630,10 +5859,12 @@ pub struct CacheStats {
 
 // ==================== Z3-Enhanced Path Analysis ====================
 //
+
 // Z3 SMT solver integration for precise path feasibility checking.
 // This eliminates false positives from infeasible paths that simple
 // boolean simplification cannot detect.
 //
+
 // Z3 SMT-based path feasibility checking for CBGR escape analysis.
 // Uses Z3 to precisely eliminate infeasible execution paths that simple
 // boolean simplification cannot detect, reducing false positives in
@@ -5642,33 +5873,44 @@ pub struct CacheStats {
 impl EscapeAnalyzer {
     /// Enumerate execution paths with Z3-based feasibility checking
     ///
+
     /// This is an enhanced version of `enumerate_paths()` that uses Z3 to
     /// precisely eliminate infeasible paths, improving analysis precision.
     ///
+
     /// # Arguments
     ///
+
     /// - `max_paths`: Maximum number of paths to enumerate
     /// - `z3_checker`: Z3 feasibility checker for path validation
     ///
+
     /// # Returns
     ///
+
     /// List of feasible path conditions
     ///
+
     /// # Performance
     ///
+
     /// - With cache hits: ~1-10μs per path (similar to heuristic)
     /// - With cache misses: ~100μs - 10ms per path (Z3 solver invocation)
     /// - Cache hit rate: >90% in typical workloads
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// use verum_cbgr::analysis::EscapeAnalyzer;
     /// use verum_cbgr::z3_feasibility::Z3FeasibilityChecker;
     ///
+
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let mut z3 = Z3FeasibilityChecker::new();
     ///
+
     /// let paths = analyzer.enumerate_paths_with_z3(100, &mut z3);
     /// // Only feasible paths are returned
     /// ```
@@ -5744,26 +5986,34 @@ impl EscapeAnalyzer {
 
     /// Path-sensitive analysis with Z3-based feasibility checking
     ///
+
     /// Enhanced version of `path_sensitive_analysis()` that uses Z3 to
     /// eliminate infeasible paths, reducing false positives.
     ///
+
     /// # Arguments
     ///
+
     /// - `reference`: Reference to analyze
     /// - `z3_checker`: Z3 feasibility checker for path validation
     ///
+
     /// # Returns
     ///
+
     /// Path-sensitive escape information with only feasible paths
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let mut z3 = Z3FeasibilityChecker::new();
     /// let info = analyzer.path_sensitive_analysis_with_z3(ref_id, &mut z3);
     ///
+
     /// if info.all_paths_safe() {
-    ///     // Can promote to &checked T
+    ///  // Can promote to &checked T
     /// }
     /// ```
     pub fn path_sensitive_analysis_with_z3(
@@ -5791,21 +6041,28 @@ impl EscapeAnalyzer {
 
     /// Combined interprocedural and path-sensitive analysis with Z3
     ///
+
     /// Enhanced version of `analyze_with_call_graph()` that uses Z3 for
     /// precise path feasibility checking.
     ///
+
     /// # Arguments
     ///
+
     /// - `reference`: Reference to analyze
     /// - `call_graph`: Optional call graph for interprocedural analysis
     /// - `z3_checker`: Z3 feasibility checker for path validation
     ///
+
     /// # Returns
     ///
+
     /// Path-sensitive escape information refined with Z3 feasibility
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let cg = CallGraph::new();
     /// let mut z3 = Z3FeasibilityChecker::new();
@@ -5848,28 +6105,36 @@ impl EscapeAnalyzer {
 
     /// Field-sensitive and path-sensitive analysis with Z3
     ///
+
     /// Enhanced version that combines field sensitivity with Z3-based
     /// path feasibility checking for maximum precision.
     ///
+
     /// # Arguments
     ///
+
     /// - `reference`: Reference to analyze
     /// - `z3_checker`: Z3 feasibility checker for path validation
     ///
+
     /// # Returns
     ///
+
     /// Map from field paths to path-sensitive escape information
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let mut z3 = Z3FeasibilityChecker::new();
     /// let field_info = analyzer.field_and_path_sensitive_analysis_with_z3(ref_id, &mut z3);
     ///
+
     /// for (field_path, path_info) in field_info.iter() {
-    ///     if path_info.all_paths_safe() {
-    ///         println!("Field {} can be promoted", field_path);
-    ///     }
+    ///  if path_info.all_paths_safe() {
+    ///  println!("Field {} can be promoted", field_path);
+    ///  }
     /// }
     /// ```
     pub fn field_and_path_sensitive_analysis_with_z3(
@@ -5922,16 +6187,21 @@ impl EscapeAnalyzer {
 impl crate::predicate_abstraction::PathAbstractionExt for EscapeAnalyzer {
     /// Enumerate paths with abstraction to prevent explosion
     ///
+
     /// This enhanced version of `enumerate_paths()` uses predicate abstraction
     /// to prevent exponential path explosion while maintaining precision.
     ///
+
     /// # Arguments
     ///
+
     /// * `max_paths` - Maximum number of paths before triggering abstraction
     /// * `abstractor` - Predicate abstractor for path merging
     ///
+
     /// # Returns
     ///
+
     /// List of path conditions (potentially abstracted if explosion occurs)
     fn enumerate_paths_with_abstraction(
         &self,
@@ -6039,16 +6309,21 @@ impl crate::predicate_abstraction::PathAbstractionExt for EscapeAnalyzer {
 
     /// Path-sensitive analysis with abstraction
     ///
+
     /// This enhanced version of `path_sensitive_analysis()` uses predicate
     /// abstraction to prevent exponential path explosion.
     ///
+
     /// # Arguments
     ///
+
     /// * `reference` - Reference to analyze
     /// * `abstractor` - Predicate abstractor for path merging
     ///
+
     /// # Returns
     ///
+
     /// Path-sensitive escape information
     fn path_sensitive_analysis_with_abstraction(
         &self,
@@ -6080,38 +6355,45 @@ impl crate::predicate_abstraction::PathAbstractionExt for EscapeAnalyzer {
 impl EscapeAnalyzer {
     /// Track concrete values through CFG for more precise escape analysis
     ///
+
     /// This method performs dataflow analysis to track concrete values, ranges,
     /// and symbolic expressions through the control flow graph. The resulting
     /// value information can be used to refine escape decisions.
     ///
+
     /// # Algorithm
     /// 1. Initialize value state at function entry
     /// 2. Propagate values through CFG using worklist algorithm
     /// 3. Handle phi nodes at merge points
     /// 4. Track both concrete and symbolic values
     ///
+
     /// # Returns
     /// - `ValueTrackingResult` containing value states at each block
     ///
+
     /// # Performance
     /// - Target: < 200μs for typical functions
     /// - Complexity: O(n × i) where n = blocks, i = iterations (typically < 10)
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let result = analyzer.track_concrete_values();
     ///
+
     /// // Check if size is bounded
     /// if let Some(state) = result.get_state(block_id) {
-    ///     if let Some(range) = state.get_range(size_ssa) {
-    ///         if range.max < 100 {
-    ///             // Small allocation, can prove no escape
-    ///         }
-    ///     }
+    ///  if let Some(range) = state.get_range(size_ssa) {
+    ///  if range.max < 100 {
+    ///  // Small allocation, can prove no escape
+    ///  }
+    ///  }
     /// }
     /// ```
     ///
+
     /// Concrete value tracking for CBGR escape analysis refinement. Uses
     /// worklist-based dataflow analysis to propagate concrete values through
     /// the CFG. Tracked values help prove path infeasibility (e.g., a branch
@@ -6126,16 +6408,18 @@ impl EscapeAnalyzer {
 
     /// Concrete value tracking with explicit configuration.
     ///
+
     /// Honours every documented field on `ValueTrackingConfig`:
     ///
+
     ///  * `enable_constant_propagation` / `enable_range_analysis` /
-    ///    `enable_symbolic_execution` — flow into the propagator
-    ///    via `ValuePropagator::with_config`, gating per-domain
-    ///    transfer-function paths.
+    ///  `enable_symbolic_execution` — flow into the propagator
+    ///  via `ValuePropagator::with_config`, gating per-domain
+    ///  transfer-function paths.
     ///  * `max_iterations` — caps the worklist iteration count to
-    ///    prevent runaway analysis on pathological CFGs. When
-    ///    exceeded, propagation stops with whatever block states
-    ///    have been recorded so far (best-effort partial result).
+    ///  prevent runaway analysis on pathological CFGs. When
+    ///  exceeded, propagation stops with whatever block states
+    ///  have been recorded so far (best-effort partial result).
     #[must_use]
     pub fn track_concrete_values_with_config(
         &self,
@@ -6204,29 +6488,35 @@ impl EscapeAnalyzer {
 
     /// Refine escape analysis using concrete value information
     ///
+
     /// Takes value tracking results and uses them to make more precise
     /// escape decisions. For example:
     /// - If allocation size is bounded, may not escape
     /// - If index is constant, can prove no out-of-bounds
     /// - If condition is always true/false, can eliminate paths
     ///
+
     /// # Arguments
     /// - `reference`: Reference to analyze
     /// - `value_result`: Results from `track_concrete_values()`
     ///
+
     /// # Returns
     /// - More precise `EscapeResult` based on value information
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let value_result = analyzer.track_concrete_values();
     /// let escape = analyzer.refine_with_values(ref_id, &value_result);
     ///
+
     /// if escape == EscapeResult::DoesNotEscape {
-    ///     // Promotion proved safe with value tracking
+    ///  // Promotion proved safe with value tracking
     /// }
     /// ```
     ///
+
     /// Refine escape analysis using concrete value tracking results.
     /// If basic analysis says DoesNotEscape, value tracking validates by
     /// checking that no value-dependent escape paths exist. Combines
@@ -6257,36 +6547,42 @@ impl EscapeAnalyzer {
 
     /// Evaluate path predicate using concrete values
     ///
+
     /// Determines if a path predicate is satisfiable given the concrete
     /// value information. Used to prune infeasible paths early.
     ///
+
     /// # Arguments
     /// - `predicate`: Path predicate to evaluate
     /// - `value_result`: Value tracking results
     ///
+
     /// # Returns
     /// - `Maybe::Some(true)`: Predicate is definitely satisfiable
     /// - `Maybe::Some(false)`: Predicate is definitely unsatisfiable
     /// - `Maybe::None`: Satisfiability unknown
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let predicate = PathPredicate::new(condition, true, block_id);
     /// let value_result = analyzer.track_concrete_values();
     ///
+
     /// match analyzer.evaluate_predicate(&predicate, &value_result) {
-    ///     Maybe::Some(true) => {
-    ///         // Path is feasible, analyze it
-    ///     }
-    ///     Maybe::Some(false) => {
-    ///         // Path is infeasible, skip it
-    ///     }
-    ///     Maybe::None => {
-    ///         // Unknown, conservatively analyze
-    ///     }
+    ///  Maybe::Some(true) => {
+    ///  // Path is feasible, analyze it
+    ///  }
+    ///  Maybe::Some(false) => {
+    ///  // Path is infeasible, skip it
+    ///  }
+    ///  Maybe::None => {
+    ///  // Unknown, conservatively analyze
+    ///  }
     /// }
     /// ```
     ///
+
     /// Evaluate a path predicate using tracked concrete values. Returns
     /// Some(true/false) if the predicate can be definitively evaluated,
     /// or None if unknown. Used to prune infeasible paths in
@@ -6307,31 +6603,38 @@ impl EscapeAnalyzer {
 
     /// Path-sensitive analysis enhanced with value tracking
     ///
+
     /// Combines path enumeration with concrete value analysis to:
     /// 1. Prune infeasible paths early
     /// 2. Refine escape decisions with value constraints
     /// 3. Prove allocation size bounds
     ///
+
     /// # Arguments
     /// - `reference`: Reference to analyze
     ///
+
     /// # Returns
     /// - Enhanced path-sensitive escape information
     ///
+
     /// # Performance
     /// - Typical: < 500μs (base analysis + value tracking)
     /// - Large functions: < 2ms
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let info = analyzer.path_sensitive_analysis_with_values(ref_id);
     ///
+
     /// if info.all_paths_promote {
-    ///     // All feasible paths proved safe with value tracking
-    ///     promote_to_checked(ref_id);
+    ///  // All feasible paths proved safe with value tracking
+    ///  promote_to_checked(ref_id);
     /// }
     /// ```
     ///
+
     /// Path-sensitive escape analysis enhanced with concrete value tracking.
     /// Enumerates execution paths (up to 100), evaluates feasibility using
     /// tracked values, and analyzes escape per feasible path. If all feasible
@@ -6385,6 +6688,7 @@ impl EscapeAnalyzer {
 // ==================================================================================
 // Section 10: Loop Unrolling Integration
 //
+
 // Loop Unrolling for CBGR Escape Analysis: Detects loops and unrolls them
 // up to a configurable bound, enabling per-iteration escape analysis that
 // is more precise than analyzing the loop as a single unit.
@@ -6393,28 +6697,37 @@ impl EscapeAnalyzer {
 impl EscapeAnalyzer {
     /// Unroll loops in the control flow graph
     ///
+
     /// Detects loops and unrolls them up to a configurable bound, enabling
     /// more precise per-iteration escape analysis.
     ///
+
     /// # Arguments
     ///
+
     /// * `config` - Unrolling configuration (bound, peeling, etc.)
     ///
+
     /// # Returns
     ///
+
     /// List of unrolled loops (empty if no loops detected)
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// use verum_cbgr::{EscapeAnalyzer, UnrollConfig};
     ///
+
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let config = UnrollConfig::with_bound(4);
     /// let unrolled = analyzer.unroll_loops(config);
     ///
+
     /// for loop_info in unrolled {
-    ///     println!("Unrolled {} iterations", loop_info.unroll_count);
+    ///  println!("Unrolled {} iterations", loop_info.unroll_count);
     /// }
     /// ```
     #[must_use]
@@ -6442,30 +6755,39 @@ impl EscapeAnalyzer {
 
     /// Analyze reference with loop unrolling
     ///
+
     /// Performs escape analysis with loop unrolling for better precision.
     /// If the reference is allocated within a loop, analyzes each iteration
     /// separately and returns the most conservative result.
     ///
+
     /// # Arguments
     ///
+
     /// * `reference` - Reference to analyze
     /// * `unroll_config` - Loop unrolling configuration
     ///
+
     /// # Returns
     ///
+
     /// Escape result (most conservative across all iterations)
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// use verum_cbgr::{EscapeAnalyzer, RefId, UnrollConfig};
     ///
+
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let config = UnrollConfig::default();
     /// let result = analyzer.analyze_with_unrolling(RefId(1), config);
     ///
+
     /// if result.can_promote() {
-    ///     println!("Safe to promote across all loop iterations");
+    ///  println!("Safe to promote across all loop iterations");
     /// }
     /// ```
     #[must_use]
@@ -6507,6 +6829,7 @@ impl EscapeAnalyzer {
 
     /// Analyze escape across loop iterations
     ///
+
     /// Helper method that analyzes escape for a reference across all
     /// unrolled loop iterations and returns the most conservative result.
     fn analyze_loop_iterations(
@@ -6566,29 +6889,38 @@ impl EscapeAnalyzer {
 
     /// Detect loop-invariant allocations
     ///
+
     /// Identifies references that are allocated outside a loop but used
     /// within it, or allocated in a loop-invariant position.
     ///
+
     /// # Arguments
     ///
+
     /// * `unroll_config` - Loop unrolling configuration
     ///
+
     /// # Returns
     ///
+
     /// Map from reference ID to whether it's loop-invariant
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// use verum_cbgr::{EscapeAnalyzer, UnrollConfig};
     ///
+
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let invariants = analyzer.detect_loop_invariants(UnrollConfig::default());
     ///
+
     /// for (ref_id, is_invariant) in invariants {
-    ///     if is_invariant {
-    ///         println!("RefId({}) is loop-invariant", ref_id.0);
-    ///     }
+    ///  if is_invariant {
+    ///  println!("RefId({}) is loop-invariant", ref_id.0);
+    ///  }
     /// }
     /// ```
     #[must_use]
@@ -6622,15 +6954,20 @@ impl EscapeAnalyzer {
 
     /// Get loop unrolling statistics
     ///
+
     /// Returns statistics about loop detection and unrolling for the
     /// current CFG.
     ///
+
     /// # Arguments
     ///
+
     /// * `config` - Unrolling configuration
     ///
+
     /// # Returns
     ///
+
     /// Unrolling statistics (loops detected, unrolled, etc.)
     #[must_use]
     pub fn loop_unrolling_stats(
@@ -6656,32 +6993,40 @@ impl EscapeAnalyzer {
 
     /// Extract call sites from IR representation
     ///
+
     /// Parses actual IR instructions to find function calls, providing more
     /// precise call site information than CFG-based heuristics.
     ///
+
     /// # Arguments
     /// - `ir_function`: IR representation of the function to analyze
     ///
+
     /// # Returns
     /// - Vector of call sites extracted from IR
     ///
+
     /// # Performance
     /// - Complexity: O(n) where n = number of instructions
     /// - Typical: <10µs for 1000-instruction function
     ///
+
     /// # Example
     /// ```rust,ignore
     /// use verum_cbgr::ir_call_extraction::{IrFunction, IrInstruction, IrOperand};
     ///
+
     /// let mut ir_func = IrFunction::new(FunctionId(1), "process");
     /// // ... add instructions ...
     ///
+
     /// let call_sites = analyzer.extract_call_sites_from_ir(&ir_func);
     /// for site in &call_sites {
-    ///     println!("Call to {} at {}", site.callee_name, site);
+    ///  println!("Call to {} at {}", site.callee_name, site);
     /// }
     /// ```
     ///
+
     /// Extract call sites from IR function representation for interprocedural
     /// CBGR analysis. Identifies all function calls in the IR, including their
     /// arguments and call locations, to feed into context-sensitive analysis.
@@ -6696,24 +7041,29 @@ impl EscapeAnalyzer {
 
     /// Map call site to calling context
     ///
+
     /// Creates a calling context from a call site for use in context-sensitive
     /// interprocedural analysis.
     ///
+
     /// # Arguments
     /// - `call_site`: Call site to map to context
     ///
+
     /// # Returns
     /// - Call context representing this call site
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let call_sites = analyzer.extract_call_sites_from_ir(&ir_func);
     /// for site in &call_sites {
-    ///     let context = analyzer.map_call_to_context(site);
-    ///     // Use context for context-sensitive analysis
+    ///  let context = analyzer.map_call_to_context(site);
+    ///  // Use context for context-sensitive analysis
     /// }
     /// ```
     ///
+
     /// Map an IR call site to a CallContext for context-sensitive analysis.
     /// Converts IR-level call site information into the internal CallSite
     /// representation used by the escape analyzer.
@@ -6727,38 +7077,47 @@ impl EscapeAnalyzer {
 
     /// Refine context-sensitive analysis with IR call information
     ///
+
     /// Enhances context-sensitive interprocedural analysis by using precise
     /// IR call site information instead of heuristic CFG-based call detection.
     ///
+
     /// # Arguments
     /// - `reference`: Reference to analyze
     /// - `ir_function`: IR representation of the function
     /// - `call_graph`: Call graph for interprocedural analysis
     ///
+
     /// # Returns
     /// - Enhanced interprocedural escape information
     ///
+
     /// # Performance
     /// - Typical: <50µs for small functions
     /// - Large functions: <500µs
     ///
+
     /// # Example
     /// ```rust,ignore
     /// use verum_cbgr::ir_call_extraction::IrFunction;
     /// use verum_cbgr::call_graph::CallGraph;
     ///
+
     /// let mut ir_func = IrFunction::new(FunctionId(1), "process");
     /// // ... add instructions ...
     ///
+
     /// let call_graph = CallGraph::new();
     /// // ... build call graph ...
     ///
+
     /// let info = analyzer.refine_context_with_ir(ref_id, &ir_func, &call_graph);
     /// if !info.escapes() {
-    ///     // Can promote to &checked T
+    ///  // Can promote to &checked T
     /// }
     /// ```
     ///
+
     /// Refine context-sensitive escape analysis using IR call information.
     /// Extracts precise call sites from IR, maps them to analysis contexts,
     /// and performs context-sensitive analysis with the refined information.
@@ -6811,16 +7170,20 @@ impl EscapeAnalyzer {
 
     /// Extract all call sites that pass a specific reference
     ///
+
     /// Finds all IR call sites where a specific reference is passed as an argument.
     /// Useful for tracking reference flow across function boundaries.
     ///
+
     /// # Arguments
     /// - `reference`: Reference to track
     /// - `ir_function`: IR representation of the function
     ///
+
     /// # Returns
     /// - Vector of call sites that pass the reference
     ///
+
     /// # Example
     /// ```rust,ignore
     /// let call_sites = analyzer.extract_calls_with_reference(ref_id, &ir_func);
@@ -6838,20 +7201,24 @@ impl EscapeAnalyzer {
 
     /// Check if reference flows to return using IR analysis
     ///
+
     /// Uses IR instructions to precisely determine if a reference flows to
     /// the return value of the function.
     ///
+
     /// # Arguments
     /// - `reference`: Reference to check
     /// - `ir_function`: IR representation of the function
     ///
+
     /// # Returns
     /// - `true` if reference flows to return value
     ///
+
     /// # Example
     /// ```rust,ignore
     /// if analyzer.ir_flows_to_return(ref_id, &ir_func) {
-    ///     // Reference escapes via return
+    ///  // Reference escapes via return
     /// }
     /// ```
     #[must_use]
@@ -6870,48 +7237,60 @@ impl EscapeAnalyzer {
 
     /// Track heap allocations per field independently
     ///
+
     /// Performs field-sensitive heap escape analysis by tracking which specific
     /// fields of a reference are stored to heap locations. This enables promotion
     /// of fields that don't escape to heap even when other fields do.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. **Extract field paths** - Identify all field accesses for the reference
     /// 2. **Track heap stores** - Find all store operations to heap locations
     /// 3. **Analyze per field** - Determine which fields escape to which heap sites
     /// 4. **Generate results** - Create per-field heap escape information
     ///
+
     /// # Performance
     ///
+
     /// - **Complexity**: O(fields × `heap_stores`)
     /// - **Typical**: 5 fields × 10 stores = 50 operations
     /// - **Target**: <100µs for typical struct
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// use verum_cbgr::analysis::EscapeAnalyzer;
     /// use verum_cbgr::field_heap_tracking::FieldHeapTracker;
     ///
+
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let mut tracker = FieldHeapTracker::new();
     ///
+
     /// // Register heap allocation
     /// let heap_site = tracker.register_heap_allocation("Box::new");
     ///
+
     /// // Track field store
     /// tracker.add_heap_store(
-    ///     RefId(1),
-    ///     FieldPath::named("cache"),
-    ///     heap_site,
-    ///     true
+    ///  RefId(1),
+    ///  FieldPath::named("cache"),
+    ///  heap_site,
+    ///  true
     /// );
     ///
+
     /// // Analyze
     /// let result = tracker.track_field_heap_allocations(RefId(1));
     /// assert!(result.field_escapes_to_heap(&FieldPath::named("cache")));
     /// ```
     ///
+
     /// Field-sensitive heap allocation tracking for CBGR. Tracks which struct
     /// fields are stored to heap vs stack, enabling per-field escape analysis.
     /// A struct may have some fields that escape to heap (require &T with CBGR)
@@ -6967,26 +7346,34 @@ impl EscapeAnalyzer {
 
     /// Check if a specific field escapes to heap
     ///
+
     /// Convenience method for quick field-level heap escape queries.
     ///
+
     /// # Parameters
     ///
+
     /// - `reference`: The reference being checked
     /// - `field_path`: The specific field to check
     ///
+
     /// # Returns
     ///
+
     /// - `true`: Field escapes to heap (cannot promote)
     /// - `false`: Field does not escape to heap (can promote)
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// if !analyzer.field_escapes_to_heap(ref_id, &FieldPath::named("count")) {
-    ///     // Can promote field to &checked
+    ///  // Can promote field to &checked
     /// }
     /// ```
     ///
+
     /// Check if a specific struct field escapes to heap. Returns true if the
     /// field has been stored to a heap-allocated location. Used to determine
     /// if individual fields can be promoted to &checked T independently.
@@ -6998,42 +7385,53 @@ impl EscapeAnalyzer {
 
     /// Refine field escape result using heap tracking
     ///
+
     /// Integrates field-sensitive heap tracking with existing escape analysis.
     /// If heap tracking detects that a field escapes to heap, the escape result
     /// is refined to `EscapesViaHeap`.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. If current result already indicates escape, keep it (fast path)
     /// 2. Check heap tracking for this specific field
     /// 3. If field escapes to heap, return `EscapesViaHeap`
     /// 4. Otherwise, return original result
     ///
+
     /// # Parameters
     ///
+
     /// - `reference`: The reference being analyzed
     /// - `field_path`: The specific field
     /// - `current_result`: Current escape analysis result
     ///
+
     /// # Returns
     ///
+
     /// Refined escape result incorporating heap tracking
     ///
+
     /// # Example
     ///
+
     /// ```rust,ignore
     /// let initial_result = analyzer.analyze_field_path(ref_id, &field_path);
     /// let refined_result = analyzer.refine_field_escape_with_heap(
-    ///     ref_id,
-    ///     &field_path,
-    ///     initial_result
+    ///  ref_id,
+    ///  &field_path,
+    ///  initial_result
     /// );
     ///
+
     /// if refined_result.can_promote() {
-    ///     // Field can be promoted to &checked
+    ///  // Field can be promoted to &checked
     /// }
     /// ```
     ///
+
     /// Refine a field's escape result using heap tracking. If the current
     /// result indicates escape but heap tracking proves the field never
     /// reaches heap, downgrades the escape result. Enables per-field
@@ -7065,12 +7463,15 @@ impl EscapeAnalyzer {
 
     /// Compute flow functions for all CFG edges
     ///
+
     /// Generates transfer functions that describe how dataflow state changes
     /// across control flow edges, enabling field-sensitive interprocedural analysis.
     ///
+
     /// # Returns
     /// Compiled flow functions for the CFG
     ///
+
     /// # Performance
     /// O(edges) where edges = number of CFG edges
     #[must_use]
@@ -7103,18 +7504,21 @@ impl EscapeAnalyzer {
 
     /// Perform field-sensitive escape analysis using flow functions
     ///
+
     /// This method combines field-sensitive analysis with interprocedural dataflow
     /// to track individual field escapes through the CFG and across function calls.
     ///
+
     /// # Algorithm
     /// 1. Decompose reference into field paths (identified from CFG)
     /// 2. For each field path:
-    ///    a. Compile flow functions for the CFG
-    ///    b. Track field safety through dataflow analysis
-    ///    c. Determine if field escapes
+    ///  a. Compile flow functions for the CFG
+    ///  b. Track field safety through dataflow analysis
+    ///  c. Determine if field escapes
     /// 3. Aggregate per-field escape results
     /// 4. Return field-sensitive escape information
     ///
+
     /// # Performance
     /// - Complexity: O(fields × edges × iterations)
     /// - Typical fields: 2-10 per struct
@@ -7122,21 +7526,25 @@ impl EscapeAnalyzer {
     /// - Typical iterations: 2-5 until fixpoint
     /// - Overall: < 5ms for typical functions
     ///
+
     /// # Example
     /// ```rust,ignore
     /// use verum_cbgr::{EscapeAnalyzer, RefId};
     ///
+
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let field_info = analyzer.analyze_field_sensitive(RefId(1));
     ///
+
     /// // Check individual field promotion
     /// for (field_path, escape_result) in &field_info.field_escapes {
-    ///     if escape_result.can_promote() {
-    ///         println!("Field {} can be promoted", field_path);
-    ///     }
+    ///  if escape_result.can_promote() {
+    ///  println!("Field {} can be promoted", field_path);
+    ///  }
     /// }
     /// ```
     ///
+
     /// Field-sensitive interprocedural escape analysis using flow functions.
     /// Combines base escape analysis with per-field flow tracking to determine
     /// which individual struct fields can be promoted to &checked T. Flow
@@ -7193,6 +7601,7 @@ impl EscapeAnalyzer {
 
     /// Analyze a specific field using dataflow analysis
     ///
+
     /// Performs worklist-based dataflow analysis to track field safety
     /// through the control flow graph.
     fn analyze_field_with_dataflow(
@@ -7287,37 +7696,44 @@ impl EscapeAnalyzer {
 
     /// Build interprocedural field flow tracker
     ///
+
     /// Creates an interprocedural field flow tracker that can track field-level
     /// dataflow across function boundaries. This enables whole-program field-sensitive
     /// escape analysis.
     ///
+
     /// # Algorithm
     /// 1. Create `InterproceduralFieldFlow` tracker
     /// 2. Extract all function calls from the CFG
     /// 3. For each call:
-    ///    a. Extract argument field flows
-    ///    b. Register call site with tracker
-    ///    c. Build conservative function summary
+    ///  a. Extract argument field flows
+    ///  b. Register call site with tracker
+    ///  c. Build conservative function summary
     /// 4. Return configured tracker
     ///
+
     /// # Performance
     /// - Initialization: O(blocks × calls)
     /// - Typical blocks: 10-100
     /// - Typical calls per block: 0-3
     /// - Overall: < 1ms for typical functions
     ///
+
     /// # Example
     /// ```rust,ignore
     /// use verum_cbgr::EscapeAnalyzer;
     ///
+
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let tracker = analyzer.build_interprocedural_field_flow();
     ///
+
     /// // Use tracker for cross-function analysis
     /// let stats = tracker.statistics();
     /// println!("Tracked {} call sites", stats.call_site_count);
     /// ```
     ///
+
     /// Build interprocedural field flow tracker for cross-function CBGR
     /// analysis. Creates per-function field summaries and an interprocedural
     /// tracker that propagates field escape information across call boundaries.
@@ -7366,6 +7782,7 @@ impl EscapeAnalyzer {
 
     /// Extract function calls from a basic block
     ///
+
     /// Conservatively identifies potential function calls in a block.
     /// In production, this would parse actual IR call instructions.
     fn extract_function_calls(&self, block_id: BlockId) -> List<Text> {
@@ -7376,6 +7793,7 @@ impl EscapeAnalyzer {
         // 2. Identify Call instructions
         // 3. Extract function names
         //
+
         // For now, we return empty list (conservative - no calls identified)
         // Tests will pass because they don't depend on specific call extraction
 
@@ -7485,16 +7903,20 @@ impl EscapeAnalyzer {
  * IMPLEMENTED ENHANCEMENTS
  * ============================================================================
  *
+
  * STATUS: ✓ ALL ENHANCEMENTS IMPLEMENTED
  *
+
  * The following enhancements from the original roadmap have been fully
  * implemented and are production-ready. All code below is active and tested.
  *
+
  * Implementation Summary:
- *   - Lifetime Integration: Complete lifetime tracking system
- *   - Region Analysis: Full region-based safety analysis
- *   - SMT Integration: Z3-based alias verification
+ *  - Lifetime Integration: Complete lifetime tracking system
+ *  - Region Analysis: Full region-based safety analysis
+ *  - SMT Integration: Z3-based alias verification
  *
+
  * Completion Date: 2025-12-18
  */
 
@@ -7504,6 +7926,7 @@ impl EscapeAnalyzer {
 
 /// Lifetime identifier for tracking reference lifetimes
 ///
+
 /// Represents the lifetime of a reference in the program. Lifetimes can be
 /// named, anonymous, static, or inferred during analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -7565,6 +7988,7 @@ impl fmt::Display for Lifetime {
 
 /// Lifetime constraint between two lifetimes
 ///
+
 /// Represents an outlives relationship: `longer: shorter` means
 /// `longer` must outlive `shorter`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7610,6 +8034,7 @@ impl LifetimeConstraint {
 
 /// Lifetime information for a function
 ///
+
 /// Tracks all lifetimes used in a function, constraints between them,
 /// and the outlives relationships.
 #[derive(Debug, Clone)]
@@ -7733,6 +8158,7 @@ impl Default for LifetimeInfo {
 
 /// Lifetime analyzer for escape analysis integration
 ///
+
 /// Infers lifetimes for references and checks that escape analysis
 /// results are consistent with lifetime constraints.
 #[derive(Debug)]
@@ -7752,16 +8178,19 @@ impl LifetimeAnalyzer {
 
     /// Infer lifetimes for all references in a function
     ///
+
     /// This method performs lifetime inference by:
     /// 1. Assigning fresh inferred lifetimes to all references
     /// 2. Generating constraints from the CFG structure
     /// 3. Solving constraints to determine concrete lifetimes
     /// 4. Computing transitive outlives relationships
     ///
+
     /// # Arguments
     /// * `function_id` - Function to analyze
     /// * `cfg` - Control flow graph
     ///
+
     /// # Returns
     /// Lifetime information for the function
     pub fn infer_lifetimes(
@@ -7900,14 +8329,17 @@ impl LifetimeAnalyzer {
 
     /// Check if escape is safe given lifetime constraints
     ///
+
     /// Verifies that if a reference doesn't escape according to escape analysis,
     /// its lifetime constraints support that conclusion.
     ///
+
     /// # Arguments
     /// * `reference` - Reference being checked
     /// * `escape_result` - Result from escape analysis
     /// * `lifetime_info` - Lifetime information for the function
     ///
+
     /// # Returns
     /// true if lifetime constraints are consistent with escape analysis
     #[must_use]
@@ -7942,6 +8374,7 @@ impl LifetimeAnalyzer {
 
     /// Integrate lifetime analysis with region-based escape analysis
     ///
+
     /// Regions provide finer-grained tracking than basic block lifetimes.
     /// This method maps lifetimes to regions for more precise analysis.
     pub fn analyze_regions(
@@ -7994,9 +8427,11 @@ impl Default for LifetimeAnalyzer {
 
 /// Computational effect tracked by the effect system
 ///
+
 /// Represents side effects that a function may perform. These effects interact
 /// with escape analysis to determine reference safety.
 ///
+
 /// Computational property (side effect) tracked for CBGR escape analysis.
 /// Verum's type system tracks computational properties (NOT algebraic effects)
 /// at compile time with 0ns overhead. These properties interact with escape
@@ -8074,6 +8509,7 @@ impl EffectConstraint {
 
 /// Effect information for a function
 ///
+
 /// Tracks all computational effects performed by a function and constraints
 /// on how those effects interact with references.
 #[derive(Debug, Clone)]
@@ -8160,6 +8596,7 @@ impl EffectInfo {
 
     /// Mark a reference as used in a thread spawn operation
     ///
+
     /// Records that the given reference may escape via thread spawn,
     /// adding a constraint that links the reference to the `SpawnsThread` effect.
     pub fn mark_thread_spawn_use(&mut self, reference: RefId) {
@@ -8172,6 +8609,7 @@ impl EffectInfo {
 
     /// Mark a reference as sent to a channel
     ///
+
     /// Records that the given reference may escape via channel send,
     /// adding a constraint that links the reference to the `SendsToChannel` effect.
     pub fn mark_channel_send(&mut self, reference: RefId) {
@@ -8209,6 +8647,7 @@ impl Default for EffectInfo {
 
 /// Effect analyzer for escape analysis integration
 ///
+
 /// Analyzes computational effects performed by functions and determines
 /// how they interact with reference escape analysis.
 #[derive(Debug)]
@@ -8231,6 +8670,7 @@ impl EffectAnalyzer {
 
     /// Register a function as spawning threads
     ///
+
     /// Call this to inform the analyzer about known thread-spawning functions.
     pub fn register_thread_spawn(&mut self, function_id: FunctionId) {
         self.thread_spawns.insert(function_id);
@@ -8238,14 +8678,17 @@ impl EffectAnalyzer {
 
     /// Analyze effects performed by a function
     ///
+
     /// This method walks through the function body and identifies all
     /// computational effects performed. Effects are categorized and
     /// constraints on references are extracted.
     ///
+
     /// # Arguments
     /// * `function_id` - The function to analyze
     /// * `cfg` - Control flow graph of the function
     ///
+
     /// # Returns
     /// Effect information for the function
     pub fn analyze_function_effects(
@@ -8273,11 +8716,13 @@ impl EffectAnalyzer {
 
     /// Analyze effects in a basic block
     ///
+
     /// Performs comprehensive effect analysis on a basic block by examining:
     /// 1. **Definitions**: Stack vs heap allocations, closure captures
     /// 2. **Uses**: Mutable accesses, shared state mutations
     /// 3. **Call sites**: Thread spawns, channel sends, escape patterns
     ///
+
     /// This analysis informs escape analysis by identifying operations that
     /// may cause references to escape their lexical scope.
     fn analyze_block_effects(&self, block: &BasicBlock, effect_info: &mut EffectInfo) {
@@ -8349,16 +8794,19 @@ impl EffectAnalyzer {
 
     /// Check if effects are compatible with escape analysis results
     ///
+
     /// Verifies that the effects performed by a function don't violate
     /// the escape analysis conclusions. For example, if escape analysis
     /// says a reference doesn't escape, but effects show it's captured
     /// in a spawned thread, that's an error.
     ///
+
     /// # Arguments
     /// * `effect_info` - Effect information for the function
     /// * `reference` - Reference being checked
     /// * `escape_result` - Result from escape analysis
     ///
+
     /// # Returns
     /// Ok if effects are compatible, Err with description if not
     pub fn verify_effect_safety(
@@ -8400,15 +8848,18 @@ impl EffectAnalyzer {
 
     /// Analyze effects across await points for async functions
     ///
+
     /// Async functions have complex escape patterns because references
     /// may be captured across await points. This method tracks reference
     /// lifetimes through async suspension and resumption.
     ///
+
     /// # Arguments
     /// * `function_id` - Async function to analyze
     /// * `cfg` - Control flow graph
     /// * `reference` - Reference to track
     ///
+
     /// # Returns
     /// Whether reference safely spans await points
     #[must_use]
@@ -8457,6 +8908,7 @@ impl Default for EffectAnalyzer {
 
 /// Features extracted from a reference for ML prediction
 ///
+
 /// These features capture the structural and contextual properties
 /// of a reference that correlate with escape behavior.
 #[derive(Debug, Clone)]
@@ -8549,6 +9001,7 @@ impl EscapeExample {
 pub trait EscapePredictor {
     /// Predict escape probability
     ///
+
     /// Returns value in [0.0, 1.0] where:
     /// - 0.0 = definitely doesn't escape
     /// - 1.0 = definitely escapes
@@ -8573,6 +9026,7 @@ pub trait EscapePredictor {
 
 /// Simple decision tree for escape prediction
 ///
+
 /// Uses hand-crafted rules based on common escape patterns.
 /// This is a baseline model that can be replaced with more
 /// sophisticated ML models.
@@ -8668,6 +9122,7 @@ impl EscapePredictor for DecisionTreePredictor {
 
 /// ML-based escape predictor
 ///
+
 /// Uses machine learning to predict which references are likely to escape.
 /// Predictions can guide analysis ordering (analyze likely escapes first)
 /// and provide hints for optimization.
@@ -8733,6 +9188,7 @@ impl MLPredictor {
 
             // Analyze store patterns by examining definitions and their allocation sites
             //
+
             // Store analysis determines if a reference escapes to heap by checking:
             // 1. Definition site allocation type (stack vs heap)
             // 2. Whether the reference is stored to a non-local location
@@ -8768,6 +9224,7 @@ impl MLPredictor {
 
     /// Compute control flow depth for reference uses
     ///
+
     /// Estimates the nesting level of loops and conditionals that contain
     /// uses of the reference. Higher nesting suggests more complex escape patterns.
     fn compute_control_flow_depth(
@@ -8819,6 +9276,7 @@ impl MLPredictor {
 
     /// Predict if reference will escape
     ///
+
     /// Returns probability in [0.0, 1.0]
     #[must_use]
     pub fn predict_escape(&self, reference: RefId, cfg: &ControlFlowGraph) -> f64 {
@@ -8865,6 +9323,7 @@ impl MLPredictor {
 
     /// Priority-order references by escape likelihood
     ///
+
     /// Returns references sorted by predicted escape probability (descending).
     /// Useful for analyzing likely escapes first.
     #[must_use]
@@ -8995,6 +9454,7 @@ impl FunctionEscapeInfo {
 
 /// Cross-crate escape analysis metadata
 ///
+
 /// Contains escape analysis results for all public functions in a crate.
 /// This metadata is exported during compilation and imported by dependent crates.
 #[derive(Debug, Clone)]
@@ -9042,6 +9502,7 @@ impl CrossCrateInfo {
 
 /// Cross-crate escape analyzer
 ///
+
 /// Manages escape analysis across crate boundaries by:
 /// 1. Exporting escape analysis results as metadata
 /// 2. Importing metadata from dependencies
@@ -9066,14 +9527,17 @@ impl CrossCrateAnalyzer {
 
     /// Export escape analysis results for the current crate
     ///
+
     /// Collects escape information for all public functions and creates
     /// metadata that can be imported by dependent crates.
     ///
+
     /// # Arguments
     /// * `analyzer` - Escape analyzer with analyzed functions
     /// * `cfg_map` - Map from function ID to CFG
     /// * `public_functions` - List of public function IDs and names
     ///
+
     /// # Returns
     /// Cross-crate metadata for this crate
     pub fn export_metadata(
@@ -9106,6 +9570,7 @@ impl CrossCrateAnalyzer {
 
     /// Analyze a function for cross-crate export
     ///
+
     /// Performs comprehensive analysis of a function's escape behavior for
     /// cross-crate metadata export, including:
     /// - Parameter escape analysis
@@ -9131,11 +9596,13 @@ impl CrossCrateAnalyzer {
 
             // Analyze return value escape behavior
             //
+
             // A function's return escapes if any of the following conditions hold:
             // 1. A parameter or local reference is returned (flows to return)
             // 2. A heap-allocated reference is returned
             // 3. A closure capturing references is returned
             //
+
             // We detect this by:
             // a) Checking SSA return_values set if available
             // b) Analyzing exit block's uses for return patterns
@@ -9144,6 +9611,7 @@ impl CrossCrateAnalyzer {
 
             // Analyze purity (no observable side effects)
             //
+
             // A function is pure if:
             // 1. No heap allocations escape the function
             // 2. No mutable state is modified
@@ -9156,6 +9624,7 @@ impl CrossCrateAnalyzer {
 
     /// Check if the function returns escaping references
     ///
+
     /// Analyzes the exit block and return paths to determine if any
     /// references escape via the return value.
     fn check_return_escapes(&self, cfg: &ControlFlowGraph, analyzer: &EscapeAnalyzer) -> bool {
@@ -9231,9 +9700,11 @@ impl CrossCrateAnalyzer {
 
     /// Import escape analysis metadata from a dependency
     ///
+
     /// # Arguments
     /// * `metadata` - Cross-crate metadata from dependency
     ///
+
     /// # Returns
     /// Ok if import successful, Err if incompatible
     pub fn import_metadata(&mut self, metadata: CrossCrateInfo) -> Result<(), Text> {
@@ -9254,10 +9725,12 @@ impl CrossCrateAnalyzer {
 
     /// Query escape information for an external function
     ///
+
     /// # Arguments
     /// * `crate_name` - Name of the external crate
     /// * `function_name` - Name of the function
     ///
+
     /// # Returns
     /// Escape information if available
     #[must_use]
@@ -9273,14 +9746,17 @@ impl CrossCrateAnalyzer {
 
     /// Use external escape information to improve local analysis
     ///
+
     /// When analyzing a call to an external function, use imported metadata
     /// to determine how parameters escape.
     ///
+
     /// # Arguments
     /// * `crate_name` - External crate name
     /// * `function_name` - External function name
     /// * `arguments` - References passed as arguments
     ///
+
     /// # Returns
     /// Map from argument reference to whether it escapes via the call
     #[must_use]
@@ -9451,17 +9927,21 @@ impl SmtEncoding {
 
 /// Formal verifier for escape analysis
 ///
+
 /// Uses SMT solver (Z3) to verify that escape analysis is sound.
 /// Encodes escape analysis as SMT constraints and checks for counterexamples.
 ///
+
 /// # Soundness Property
 ///
+
 /// For all references r:
 /// ```text
 /// If escape_analysis(r) = DoesNotEscape, then
-///   ∀ paths p: r is not live at function exit in p
+///  ∀ paths p: r is not live at function exit in p
 /// ```
 ///
+
 /// We verify this by:
 /// 1. Encoding the CFG as SMT constraints
 /// 2. Encoding escape analysis results as assumptions
@@ -9499,13 +9979,16 @@ impl FormalVerifier {
 
     /// Verify soundness of escape analysis for a function
     ///
+
     /// This method encodes the escape analysis problem as SMT constraints
     /// and uses Z3 to verify that the analysis is sound.
     ///
+
     /// # Arguments
     /// * `cfg` - Control flow graph of the function
     /// * `escape_results` - Results from escape analysis
     ///
+
     /// # Returns
     /// Verification result indicating soundness or counterexample
     pub fn verify_soundness(
@@ -9533,6 +10016,7 @@ impl FormalVerifier {
         // For each promotable reference, we construct an escape predicate and verify
         // that no escape path exists using Z3's satisfiability checking.
         //
+
         // Formal verification via Z3 SMT solver. For each promotable reference,
         // constructs an escape predicate and verifies no escape path exists using
         // Z3's satisfiability checking. The CBGR generation check algorithm
@@ -9619,22 +10103,27 @@ impl FormalVerifier {
 
     /// Check soundness using Z3 solver
     ///
+
     /// This method verifies that the escape analysis results are sound by
     /// encoding the escape problem as SMT constraints and checking if any
     /// promotable reference can actually escape.
     ///
+
     /// # Algorithm
     ///
+
     /// For each reference marked as `DoesNotEscape`:
     /// 1. Encode reference properties (allocation type, use sites, def sites)
     /// 2. Encode escape conditions as negation (can this ref escape?)
     /// 3. Query Z3 for satisfiability:
-    ///    - SAT: Found a counterexample (escape is possible)
-    ///    - UNSAT: No escape possible (analysis is sound for this ref)
-    ///    - Unknown: Timeout, conservatively report as sound
+    ///  - SAT: Found a counterexample (escape is possible)
+    ///  - UNSAT: No escape possible (analysis is sound for this ref)
+    ///  - Unknown: Timeout, conservatively report as sound
     ///
+
     /// # Performance
     ///
+
     /// - Per-reference check: ~100us (cache hit) to ~10ms (complex case)
     /// - Total: `O(promotable_refs` * `check_time`)
     fn check_soundness(
@@ -9664,10 +10153,12 @@ impl FormalVerifier {
 
         // Step 2: Z3-based verification for promotable references
         //
+
         // Construct an SMT problem that checks if any promotable reference
         // can actually escape. The problem is:
-        //   exists(path, ref) : promotable(ref) AND escapes_on_path(ref, path)
+        //  exists(path, ref) : promotable(ref) AND escapes_on_path(ref, path)
         //
+
         // If SAT, we have a counterexample. If UNSAT, the analysis is sound.
         for (ref_id, result) in escape_results {
             if !result.can_promote() {
@@ -9705,12 +10196,14 @@ impl FormalVerifier {
 
     /// Build an escape predicate for Z3 verification
     ///
+
     /// Constructs a predicate that is satisfiable iff the reference can escape.
     /// The predicate encodes escape conditions as a disjunction:
     /// - Reference used at exit block (may be returned)
     /// - Reference passed to call site (may escape via callee)
     /// - Reference stored to heap (escapes local scope)
     ///
+
     /// Returns `PathPredicate::False` if no escape is possible.
     fn build_escape_predicate(&self, reference: RefId, cfg: &ControlFlowGraph) -> PathPredicate {
         let mut escape_conditions: Vec<PathPredicate> = Vec::new();
@@ -9771,6 +10264,7 @@ impl FormalVerifier {
 
     /// Extract counterexample from verification failure
     ///
+
     /// When Z3 finds that a reference can escape, this method constructs
     /// a human-readable counterexample explaining the escape path.
     fn extract_counterexample(&self, reference: RefId, cfg: &ControlFlowGraph) -> Text {
@@ -9803,6 +10297,7 @@ impl FormalVerifier {
 
     /// Generate verification report
     ///
+
     /// Produces a human-readable report of the verification results,
     /// including any counterexamples found.
     #[must_use]
@@ -9840,13 +10335,16 @@ impl FormalVerifier {
 
     /// Verify a single reference promotion
     ///
+
     /// Checks if promoting a specific reference is sound.
     ///
+
     /// # Arguments
     /// * `reference` - Reference to verify
     /// * `cfg` - Control flow graph
     /// * `escape_result` - Escape analysis result for this reference
     ///
+
     /// # Returns
     /// true if promotion is sound, false otherwise
     pub fn verify_promotion(
@@ -9960,10 +10458,12 @@ impl CachedEscapeInfo {
 
 /// Incremental escape analysis engine
 ///
+
 /// Caches escape analysis results per function and reuses them across
 /// incremental compilations. Only re-analyzes functions that have changed
 /// or whose dependencies have changed.
 ///
+
 /// # Algorithm
 /// 1. For each function, compute hash of its IR
 /// 2. Check if cached result exists and hash matches
@@ -9971,6 +10471,7 @@ impl CachedEscapeInfo {
 /// 4. If cache valid, reuse result; otherwise re-analyze
 /// 5. Update cache with new results
 ///
+
 /// # Performance
 /// - Cache hit: O(1) (just hash lookup)
 /// - Cache miss: O(n) where n = function size
@@ -10006,14 +10507,17 @@ impl IncrementalAnalysis {
 
     /// Analyze function with caching
     ///
+
     /// First checks if a valid cached result exists. If so, returns it.
     /// Otherwise, performs full analysis and caches the result.
     ///
+
     /// # Arguments
     /// * `function_id` - Function to analyze
     /// * `cfg` - Control flow graph
     /// * `analyzer` - Escape analyzer to use for analysis
     ///
+
     /// # Returns
     /// Map from references to their escape results
     pub fn analyze_incremental(
@@ -10122,19 +10626,24 @@ impl IncrementalAnalysis {
 
     /// Extract function dependencies from CFG
     ///
+
     /// Analyzes all basic blocks in the CFG to extract called function IDs.
     /// This enables accurate incremental analysis by tracking which functions
     /// depend on which other functions.
     ///
+
     /// # Algorithm
     ///
+
     /// 1. Iterate through all basic blocks in the CFG
     /// 2. For each block, collect all call sites
     /// 3. Extract unique callee function IDs
     /// 4. Return the set of all called functions
     ///
+
     /// # Performance
     ///
+
     /// - Time: O(n) where n is total number of instructions
     /// - Space: O(m) where m is number of unique callees
     fn extract_dependencies(&self, cfg: &ControlFlowGraph) -> Set<FunctionId> {
@@ -10198,10 +10707,12 @@ impl IncrementalAnalysis {
 
     /// Invalidate cache for a function and all its dependents
     ///
+
     /// This is called when a function's source code changes. It invalidates
     /// the cache for that function and recursively invalidates all functions
     /// that depend on it.
     ///
+
     /// # Arguments
     /// * `changed_func` - Function that changed
     pub fn invalidate(&mut self, changed_func: FunctionId) {
@@ -10271,6 +10782,7 @@ impl IncrementalAnalysis {
 
     /// Prune old cache entries based on age
     ///
+
     /// Removes cache entries older than the specified age in milliseconds.
     /// Useful for limiting memory usage in long-running compilations.
     pub fn prune_old_entries(&mut self, max_age_ms: u64) {
@@ -10292,6 +10804,7 @@ impl IncrementalAnalysis {
 
     /// Export cache to disk (for persistent caching across compiler runs)
     ///
+
     /// Returns a serializable representation of the cache.
     #[must_use]
     pub fn export_cache(&self) -> IncrementalCacheSnapshot {

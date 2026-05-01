@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_changes(db)              → int    (statement changes, 32-bit)
-//   sqlite3_changes64(db)            → sqlite3_int64
-//   sqlite3_total_changes(db)        → int
-//   sqlite3_total_changes64(db)      → sqlite3_int64
-//   sqlite3_last_insert_rowid(db)    → sqlite3_int64
-//   sqlite3_set_last_insert_rowid(…) → void
+
+//  sqlite3_changes(db) → int (statement changes, 32-bit)
+//  sqlite3_changes64(db) → sqlite3_int64
+//  sqlite3_total_changes(db) → int
+//  sqlite3_total_changes64(db) → sqlite3_int64
+//  sqlite3_last_insert_rowid(db) → sqlite3_int64
+//  sqlite3_set_last_insert_rowid(…) → void
 //
+
 // The 32-bit variants truncate via the standard cast (`as Int`).
 // =============================================================================
 

@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §13.4
 //
+
 // For ≤ 8 tables we run full bottom-up DP over subsets; for >8 we
 // fall back to greedy with 2-step look-ahead. The chooser returns
 // an ordered list of relation indices and the predicted total cost.
@@ -110,6 +111,7 @@ public fn greedy(
 // Small-N DP — bottom-up over bitmask subsets.
 // -----------------------------------------------------------------------------
 //
+
 // For up to 8 relations we enumerate every join order. The cost
 // metric is `cost_total`; ties broken by lexicographic order id.
 // =============================================================================

@@ -4,11 +4,13 @@
 // Layer: 3 (Database — sqlite façade)
 // Spec: internal/specs/database.md §4.3
 //
+
 // Thin vendor binding over `core.database.common.pool_impl.ConnectionPool<C>`.
 // Holds a `SqliteConfig` clone plus the generic pool; `acquire` returns a
 // `PooledConnection<SqliteConnection>` whose `release_healthy` /
 // `release_discard` decide recycling vs reopen.
 //
+
 // SQLite-specific quirk: in-memory databases (`StMemory`) cannot be
 // genuinely shared across pool members — each new connection brings up a
 // fresh process-private DB. The pool surface still works (each acquire

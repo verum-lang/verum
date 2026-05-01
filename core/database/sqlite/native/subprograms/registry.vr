@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §11.4
 //
+
 // Allocates `SubProgramId`s, looks them up by id or by source name,
 // and supports cascade invalidation when a table is dropped.
 // =============================================================================
@@ -62,6 +63,7 @@ implement Eq for SubProgramError {
 // Configuration
 // -----------------------------------------------------------------------------
 //
+
 // SQLite caps the per-program register window at SQLITE_MAX_COLUMN
 // (default 2000). loom mirrors that ceiling.
 // =============================================================================

@@ -14,6 +14,7 @@
 )]
 // Unit tests for repl.rs
 //
+
 // Migrated from src/repl.rs to comply with CLAUDE.md test organization.
 
 use std::path::PathBuf;

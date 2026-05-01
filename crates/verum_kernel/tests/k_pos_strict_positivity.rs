@@ -1,5 +1,6 @@
 //! K-Pos strict-positivity check integration tests .
 //!
+
 //! Strict positivity: an inductive type `T` is well-formed only when
 //! every recursive occurrence of `T` in any constructor's argument
 //! types appears strictly positively. Berardi 1998 establishes that
@@ -8,6 +9,7 @@
 //! enforces strict positivity at registration time so `False` is not
 //! reachable through ill-formed inductives.
 //!
+
 //! The accept paths cover the standard inductive zoo (`Nat`, `List<A>`,
 //! `Tree<A>`, `Vec<A, n>`); the reject paths cover Berardi-shaped
 //! definitions (`Bad = Wrap(Bad → A)`, indirect non-positive via
@@ -56,8 +58,8 @@ fn ctx(name: &str, idx: usize) -> PositivityCtx<'_> {
 #[test]
 fn nat_is_strictly_positive() {
     // type Nat = Zero | Succ(Nat)
-    //   Zero       — no args
-    //   Succ(Nat)  — one arg, the type's own name in a non-arrow position
+    //  Zero — no args
+    //  Succ(Nat) — one arg, the type's own name in a non-arrow position
     let succ_arg = ind("Nat");
     let result = check_strict_positivity("Nat", &succ_arg, &ctx("Succ", 0));
     assert!(result.is_ok(), "Succ(Nat) is the canonical strict-positive use");
@@ -66,7 +68,7 @@ fn nat_is_strictly_positive() {
 #[test]
 fn list_is_strictly_positive() {
     // type List<A> = Nil | Cons(A, List<A>)
-    //   Cons        — args A and List<A>
+    //  Cons — args A and List<A>
     let cons_a   = CoreTerm::Var(Text::from("A"));
     let cons_lst = ind_with("List", vec![CoreTerm::Var(Text::from("A"))]);
 
@@ -77,7 +79,7 @@ fn list_is_strictly_positive() {
 #[test]
 fn tree_is_strictly_positive() {
     // type Tree<A> = Leaf(A) | Branch(Tree<A>, Tree<A>)
-    //   Branch — two args, both Tree<A> (in non-arrow positions)
+    //  Branch — two args, both Tree<A> (in non-arrow positions)
     let tree_a = ind_with("Tree", vec![CoreTerm::Var(Text::from("A"))]);
 
     assert!(check_strict_positivity("Tree", &tree_a, &ctx("Branch", 0)).is_ok());
@@ -124,8 +126,8 @@ fn registry_admits_well_formed_inductive() {
 #[test]
 fn direct_non_positive_recursion_rejected() {
     // type Bad = Wrap(Bad -> A)
-    //   Wrap — one arg with type Bad → A; Bad appears in the negative
-    //   position of an arrow. Strict positivity must reject.
+    //  Wrap — one arg with type Bad → A; Bad appears in the negative
+    //  position of an arrow. Strict positivity must reject.
     let bad_arrow = pi(ind("Bad"), CoreTerm::Var(Text::from("A")));
     match check_strict_positivity("Bad", &bad_arrow, &ctx("Wrap", 0)) {
         Err(KernelError::PositivityViolation { type_name, constructor, position }) => {
@@ -145,10 +147,10 @@ fn direct_non_positive_recursion_rejected() {
 #[test]
 fn second_order_non_positive_recursion_rejected() {
     // type Bad2 = Wrap((Bad2 -> A) -> A)
-    //   The outer arrow's domain is itself an arrow whose domain
-    //   contains Bad2 — even though there's a double-negation, the
-    //   strict-positivity rule rejects ANY occurrence of the type in
-    //   ANY arrow domain, not just the outermost.
+    //  The outer arrow's domain is itself an arrow whose domain
+    //  contains Bad2 — even though there's a double-negation, the
+    //  strict-positivity rule rejects ANY occurrence of the type in
+    //  ANY arrow domain, not just the outermost.
     let inner_arrow = pi(ind("Bad2"), CoreTerm::Var(Text::from("A")));
     let outer_arrow = pi(inner_arrow, CoreTerm::Var(Text::from("A")));
     match check_strict_positivity("Bad2", &outer_arrow, &ctx("Wrap", 0)) {
@@ -160,9 +162,10 @@ fn second_order_non_positive_recursion_rejected() {
 #[test]
 fn non_positive_inside_inductive_arg_rejected() {
     // type BadList = Cons(BadFn, BadList)
-    //   where BadFn smuggles BadList into a function-arrow domain.
-    //   The walker must descend into Cons's args and detect the violation.
+    //  where BadFn smuggles BadList into a function-arrow domain.
+    //  The walker must descend into Cons's args and detect the violation.
     //
+
     // Concretely: type BadList = Cons(BadList -> A)
     let bad_arrow = pi(ind("BadList"), CoreTerm::Var(Text::from("A")));
     match check_strict_positivity("BadList", &bad_arrow, &ctx("Cons", 0)) {
@@ -234,12 +237,12 @@ fn variable_is_vacuously_strictly_positive() {
 #[test]
 fn arrow_in_codomain_position_is_admitted() {
     // type Curried = Curry(Int → Curried)
-    //   Codomain of an arrow is a strictly-positive position.
-    //   Note: this MUST be rejected because Curried also appears in the
-    //   NEGATIVE position (the arrow's domain `Int` does NOT contain
-    //   Curried, but the WHOLE arg type IS `Int → Curried` — the outer
-    //   walker sees Int as the negative position which is fine, then
-    //   recurses into Curried as the codomain which is fine).
+    //  Codomain of an arrow is a strictly-positive position.
+    //  Note: this MUST be rejected because Curried also appears in the
+    //  NEGATIVE position (the arrow's domain `Int` does NOT contain
+    //  Curried, but the WHOLE arg type IS `Int → Curried` — the outer
+    //  walker sees Int as the negative position which is fine, then
+    //  recurses into Curried as the codomain which is fine).
     let arr = pi(CoreTerm::Var(Text::from("Int")), ind("Curried"));
     assert!(
         check_strict_positivity("Curried", &arr, &ctx("Curry", 0)).is_ok(),

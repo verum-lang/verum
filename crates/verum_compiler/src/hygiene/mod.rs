@@ -1,10 +1,13 @@
 //! Hygiene System for Macro Expansion
 //!
+
 //! Implements proper sets-of-scopes hygiene (Scheme/Racket model) for
 //! hygienic macro expansion.
 //!
+
 //! ## Module Structure
 //!
+
 //! - `scope` - Scope, ScopeSet, ScopeId, HygienicIdent
 //! - `marks` - ScopeMark for expansion phases
 //! - `gensym` - Unique identifier generation
@@ -13,19 +16,24 @@
 //! - `expander` - Quote expansion with hygiene enforcement
 //! - `checker` - Post-expansion hygiene verification
 //!
+
 //! ## Design
 //!
+
 //! The hygiene system ensures that:
 //! 1. Identifiers introduced by macros don't capture user bindings
 //! 2. User references to bindings aren't captured by macro-introduced bindings
 //! 3. Macros can intentionally introduce hygiene-breaking bindings when needed
 //!
+
 //! This is achieved through the sets-of-scopes model where each identifier
 //! carries a set of scopes, and resolution finds the binding whose scopes
 //! are a subset of the identifier's scopes (preferring the most specific).
 //!
+
 //! ## Pipeline
 //!
+
 //! The quote expansion pipeline consists of:
 //! 1. **Parse Quote** - Parse quote { ... } into QuoteAST
 //! 2. **Mark Phase** - Assign fresh marks to introduced bindings
@@ -33,6 +41,7 @@
 //! 4. **Hygiene Check** - Verify no accidental capture occurs
 //! 5. **Emit Code** - Generate TokenStream with hygiene metadata
 //!
+
 //! Hygienic macro system: ensures macro expansion preserves lexical scoping
 //! through syntax context marks, preventing accidental name capture.
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
@@ -114,6 +123,7 @@ impl HygieneContext {
 
     /// Enter a new scope
     ///
+
     /// Creates a new scope of the given kind and pushes it onto the stack.
     pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
         let scope_id = self.fresh_scope_id();
@@ -159,6 +169,7 @@ impl HygieneContext {
 
     /// Enter a macro expansion
     ///
+
     /// Pushes a macro expansion mark and scope.
     pub fn enter_macro_expansion(&mut self, macro_name: &str) -> ExpansionInfo {
         let mark = self.marks.push(MarkKind::MacroExpansion);
@@ -214,6 +225,7 @@ impl HygieneContext {
 
     /// Generate a unique identifier (gensym)
     ///
+
     /// The generated identifier is guaranteed to not conflict with any
     /// user-written code.
     pub fn gensym(&self, base: &str) -> Text {
@@ -237,6 +249,7 @@ impl HygieneContext {
 
     /// Generate a hygienic identifier using suffix format (legacy)
     ///
+
     /// This creates a unique identifier based on the given name that
     /// won't conflict with user code, using the simple `name__id` format.
     pub fn generate(&self, base_name: &str) -> Text {

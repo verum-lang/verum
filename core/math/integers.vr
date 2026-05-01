@@ -3,18 +3,23 @@
 // =============================================================================
 // Layer: 0 (Foundation)
 //
+
 // Provides integer division with various rounding modes, modular arithmetic,
 // and number-theoretic operations.
 //
+
 // # Division Modes
 //
+
 // Different languages use different conventions for integer division:
 // - Truncate (toward zero): C, C++, Java, Rust
 // - Floor (toward -∞): Python, Ruby
 // - Euclidean (non-negative remainder): mathematical convention
 //
+
 // This module provides all three for interoperability.
 //
+
 // Spec: docs/architecture/math-spec.md Section 1.2
 // =============================================================================
 
@@ -51,6 +56,7 @@ fn check_signed_div_overflow(a: Int, b: Int, fn_name: &Text) {
 // Floor division (rounds toward -∞)
 // Result satisfies: result * b <= a < (result + 1) * b for b > 0
 //
+
 // Refinement type guarantees non-zero divisor at compile time.
 // Panics on `Int.MIN / -1` (the only signed-division overflow case).
 @inline(always)
@@ -164,6 +170,7 @@ public fn divmod(a: Int, b: Int{!= 0}) -> (Int, Int) {
 
 // Internal: absolute value with explicit Int.MIN handling.
 //
+
 // `if x < 0 { -x } else { x }` silently wraps for x == Int.MIN
 // (-2^63): -Int.MIN overflows back to Int.MIN. The whole gcd / lcm
 // family normalizes inputs via abs, so this wrap historically
@@ -183,6 +190,7 @@ fn safe_abs_or_panic(x: Int, fn_name: &Text) -> Int {
 // Greatest common divisor using Euclidean algorithm
 // gcd(a, 0) = |a|, gcd(0, 0) = 0
 //
+
 // Panics if either input is `Int.MIN` (its absolute value is
 // unrepresentable). Use `try_gcd` for fallible failure handling.
 public fn gcd(a: Int, b: Int) -> Int{>= 0} {
@@ -208,6 +216,7 @@ public fn try_gcd(a: Int, b: Int) -> Maybe<Int> {
 
 // Binary GCD (Stein's algorithm) - more efficient for large integers
 //
+
 // Panics if either input is `Int.MIN`. Use `try_gcd_binary` for
 // fallible failure handling.
 public fn gcd_binary(a: Int, b: Int) -> Int{>= 0} {
@@ -238,6 +247,7 @@ public fn gcd_binary(a: Int, b: Int) -> Int{>= 0} {
 // Least common multiple
 // lcm(a, b) = |a * b| / gcd(a, b)
 //
+
 // Panics if either input is `Int.MIN`. Use `try_lcm` for
 // fallible failure handling.
 public fn lcm(a: Int, b: Int) -> Int{>= 0} {
@@ -260,6 +270,7 @@ public fn try_lcm(a: Int, b: Int) -> Maybe<Int> {
 // Extended Euclidean algorithm
 // Returns (g, x, y) such that a*x + b*y = g = gcd(a, b)
 //
+
 // Panics if `a == Int.MIN` (its absolute value is needed for the
 // b == 0 fast path's normalization). Other Int.MIN handling
 // concerns are subsumed by the loop's arithmetic, but we conservatively
@@ -457,6 +468,7 @@ public fn isqrt(n: Int{>= 0}) -> Int{>= 0} {
 
 // Integer cube root (floor of cbrt)
 //
+
 // Panics on `Int.MIN` since its absolute value (2^63) is
 // unrepresentable in signed Int. The cube root of Int.MIN would be
 // floor(-2097152) but the abs-then-Newton path can't reach that
@@ -540,18 +552,23 @@ public fn rising_factorial(n: Int, k: Int{>= 0}) -> Int {
 
 /// Euler totient φ(n) — number of integers in [1, n] coprime to n.
 ///
+
 /// Computed via trial-division factorisation + Euler product formula:
 ///
-///     φ(n) = n · ∏_{p | n} (1 − 1/p)
+
+///  φ(n) = n · ∏_{p | n} (1 − 1/p)
 ///
+
 /// where the product runs over the *distinct* prime divisors of n.
 ///
+
 /// Properties (verified by SMT in companion theorems):
-///   • φ(1) = 1.
-///   • φ(p) = p − 1 for prime p.
-///   • φ(p^k) = p^(k−1) · (p − 1).
-///   • Multiplicativity: gcd(a, b) = 1 ⇒ φ(a · b) = φ(a) · φ(b).
+///  • φ(1) = 1.
+///  • φ(p) = p − 1 for prime p.
+///  • φ(p^k) = p^(k−1) · (p − 1).
+///  • Multiplicativity: gcd(a, b) = 1 ⇒ φ(a · b) = φ(a) · φ(b).
 ///
+
 /// Trial division is O(√n) — adequate for n up to ≈ 10⁹.
 /// Refinement type bounds the input strictly positive.
 public fn euler_phi(n: Int{>= 1}) -> Int{>= 1} {
@@ -599,6 +616,7 @@ public fn prev_prime(n: Int) -> Maybe<Int> {
 /// collect each (d, n/d) pair, sort + dedupe (the perfect-square case
 /// n = d² yields only one entry, not two).
 ///
+
 /// Refinement type bounds n strictly positive; divisors of negative
 /// integers are handled by callers via abs() preprocessing.
 public fn divisors(n: Int{>= 1}) -> List<Int> {

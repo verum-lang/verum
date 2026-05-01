@@ -3,19 +3,22 @@
 //! exported by `verum verify --dump-smt` / `--solver-protocol`
 //! (task #67).
 //!
+
 //! This module is the single shared surface that solver
 //! backends (z3_backend, cvc5_backend, smtlib_check) call to
 //! emit per-query dumps and per-command protocol traces.
 //! Centralising the protocol in one module means:
 //!
-//!   1. The env-var names live in exactly one place — future
-//!      renames touch one module.
-//!   2. Every solver emits the same format, so an IDE that
-//!      scrapes the dump dir / protocol log doesn't have to
-//!      special-case each backend.
-//!   3. The CLI's flag → env-var → consumer contract is
-//!      testable end-to-end.
+
+//!  1. The env-var names live in exactly one place — future
+//!  renames touch one module.
+//!  2. Every solver emits the same format, so an IDE that
+//!  scrapes the dump dir / protocol log doesn't have to
+//!  special-case each backend.
+//!  3. The CLI's flag → env-var → consumer contract is
+//!  testable end-to-end.
 //!
+
 //! The helpers are no-ops when the env vars are absent — calling
 //! `dump_smt_query` in a release build without `--dump-smt` set
 //! is pay-for-only-what-you-use.
@@ -52,11 +55,13 @@ pub fn protocol_enabled() -> bool {
 
 /// Dump an SMT-LIB query to the configured directory.
 ///
+
 /// `prefix` names the caller (e.g. `"z3-obligation"` or
 /// `"cvc5-subgoal"`); the filename is
 /// `<prefix>-<counter>.smt2`. Silently no-ops when the env var
 /// is unset — safe to call unconditionally.
 ///
+
 /// Returns the path written to (for callers that want to log
 /// the location), or None if dumping is disabled / the write
 /// failed.

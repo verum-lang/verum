@@ -18,7 +18,7 @@ public fn sqlite3_extended_result_codes(s: &mut ExtendedCodeState, onoff: Int) -
 }
 
 /// Given the wire (extended) 32-bit error code, project to the form
-/// the caller expects per `state`.  Enabled ⇒ extended, disabled ⇒
+/// the caller expects per `state`. Enabled ⇒ extended, disabled ⇒
 /// primary (low 8 bits).
 public fn project_code(s: &ExtendedCodeState, extended: Int) -> Int {
     if is_enabled(s) { return extended; }

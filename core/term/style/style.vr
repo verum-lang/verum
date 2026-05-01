@@ -5,6 +5,7 @@
 // text modifiers into a single value. Builder-chain API allows concise
 // style construction: `Style.new().fg(Color.Red).bold().underlined()`
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.2
 // =============================================================================
 
@@ -20,6 +21,7 @@ mount super.modifier.Modifier;
 /// Style represents the complete visual appearance of a terminal cell:
 /// foreground color, background color, underline color, and text modifiers.
 ///
+
 /// Styles are immutable values. Builder methods return new Style instances.
 /// Use `patch()` to overlay one style on top of another.
 public type Style is {
@@ -171,11 +173,12 @@ implement Style {
     /// Fields set in `other` override those in `self`; unset fields are inherited.
     /// Modifiers are merged: add_modifiers are unioned, sub_modifiers are unioned.
     ///
+
     /// Example:
-    ///   let base = Style.new().fg(Color.White).bold();
-    ///   let overlay = Style.new().fg(Color.Red);
-    ///   let result = base.patch(overlay);
-    ///   // result: fg=Red, bold=true (inherited from base)
+    ///  let base = Style.new().fg(Color.White).bold();
+    ///  let overlay = Style.new().fg(Color.Red);
+    ///  let result = base.patch(overlay);
+    ///  // result: fg=Red, bold=true (inherited from base)
     public fn patch(self, other: Style) -> Style {
         Style {
             fg: match other.fg {

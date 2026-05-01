@@ -2,32 +2,40 @@
 // core/net/proxy/upstream_pool.vr — Upstream connection pool
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §9.3, §8.9
+// Spec: internal/specs/net-framework.md §9.3, §8.9
 // =============================================================================
 //
+
 // Per-origin connection pool with reuse, bounded capacity, idle-timeout
 // expiration, and optional active health-check. The heart of any L7
 // reverse proxy (see §9.3 Pingora-class example).
 //
+
 // Phase-2 scope:
 //
-//   * `Upstream` — an origin identified by `(scheme, host, port)` plus a
-//     human label; the refinement-keyed invariants from §8.9 are
-//     expressed as `ReusableConnection` checks on release.
+
+//  * `Upstream` — an origin identified by `(scheme, host, port)` plus a
+//  human label; the refinement-keyed invariants from §8.9 are
+//  expressed as `ReusableConnection` checks on release.
 //
-//   * `UpstreamPool` — `Map<UpstreamKey, List<IdleConn>>`. Acquire pulls
-//     the freshest idle connection, opens a new TCP stream if empty.
-//     Release returns the connection iff still healthy; otherwise drops.
+
+//  * `UpstreamPool` — `Map<UpstreamKey, List<IdleConn>>`. Acquire pulls
+//  the freshest idle connection, opens a new TCP stream if empty.
+//  Release returns the connection iff still healthy; otherwise drops.
 //
-//   * `ConnectionLease` — RAII guard; on drop, returns the connection
-//     to its pool (via a weak reference to the UpstreamPool).
+
+//  * `ConnectionLease` — RAII guard; on drop, returns the connection
+//  to its pool (via a weak reference to the UpstreamPool).
 //
+
 // Out of scope for phase 2 — deferred to phase 3:
 //
-//   * HTTP-aware acquire (e.g. pool per (upstream, ALPN)).
-//   * HTTP/2 multiplexing — currently one request per TCP conn.
-//   * KTLS / io_uring send-zc hand-off (§6.17).
+
+//  * HTTP-aware acquire (e.g. pool per (upstream, ALPN)).
+//  * HTTP/2 multiplexing — currently one request per TCP conn.
+//  * KTLS / io_uring send-zc hand-off (§6.17).
 //
+
 // =============================================================================
 
 module core.net.proxy.upstream_pool;

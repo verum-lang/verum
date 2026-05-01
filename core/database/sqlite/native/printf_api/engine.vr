@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3_snprintf(n, buf, ...) — matches classical snprintf behaviour:
-// at most n-1 bytes are written into buf, followed by a NUL.  The
+// at most n-1 bytes are written into buf, followed by a NUL. The
 // return value is the pointer to the buffer (just like the C API).
 //
+
 // sqlite3_str_finish returns the malloc'd Text AND resets the builder;
 // the catalogue returns just the Text.
 // =============================================================================
@@ -25,7 +27,7 @@ public fn sqlite3_str_finish(s: &mut SqliteStr) -> Text {
     out
 }
 
-/// Truncate `rendered` to fit into a buffer of capacity `n`.  Mimics
+/// Truncate `rendered` to fit into a buffer of capacity `n`. Mimics
 /// sqlite3_snprintf's "at most n-1 bytes" guarantee — n<=0 yields
 /// empty; otherwise take at most n-1 bytes.
 public fn sqlite3_snprintf_truncate(n: Int, rendered: &Text) -> Text {
@@ -42,7 +44,7 @@ public fn sqlite3_snprintf_truncate(n: Int, rendered: &Text) -> Text {
 }
 
 /// Escape a string for the %q / %Q specifier: single-quote-escape all
-/// internal `'` bytes by doubling.  For %Q the caller is expected to
+/// internal `'` bytes by doubling. For %Q the caller is expected to
 /// handle the NULL case.
 public fn escape_sql_string(s: &Text) -> Text {
     let bytes = s.as_bytes();

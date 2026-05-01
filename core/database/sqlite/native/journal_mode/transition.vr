@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: sqlite-native.md §18.4
 //
+
 // SQLite's `PRAGMA journal_mode = X;` accepts (almost) any
 // transition; the catch is WAL → non-WAL (or vice versa) requires
 // taking an EXCLUSIVE lock so no other connection holds the
 // database open.
 //
+
 // `TransitionPlan` enumerates the steps required.
 // =============================================================================
 

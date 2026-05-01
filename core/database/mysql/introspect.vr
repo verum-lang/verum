@@ -5,22 +5,25 @@
 // Spec: internal/specs/database.md §5.3 (verum db:introspect)
 // =============================================================================
 //
+
 // Drives a live MysqlConnection through `information_schema` to populate
 // `core.database.common.schema.SchemaSnapshot`.
 //
+
 // Source views:
-//   * `information_schema.tables`        — table list scoped by
-//                                          `table_schema = current_database()`
-//   * `information_schema.columns`       — declared_type via column_type
-//                                          (preserves length / precision),
-//                                          is_nullable, column_default,
-//                                          extra (carries 'auto_increment')
-//   * `information_schema.statistics`    — index list with non_unique,
-//                                          column_name, seq_in_index
-//   * `information_schema.key_column_usage`
-//     + `information_schema.referential_constraints`
-//                                        — FK columns + ON DELETE / ON UPDATE
+//  * `information_schema.tables` — table list scoped by
+//  `table_schema = current_database()`
+//  * `information_schema.columns` — declared_type via column_type
+//  (preserves length / precision),
+//  is_nullable, column_default,
+//  extra (carries 'auto_increment')
+//  * `information_schema.statistics` — index list with non_unique,
+//  column_name, seq_in_index
+//  * `information_schema.key_column_usage`
+//  + `information_schema.referential_constraints`
+//  — FK columns + ON DELETE / ON UPDATE
 //
+
 // CHECK-constraint introspection (`information_schema.check_constraints`,
 // MySQL 8.0+) is left for a follow-up so this module stays stable
 // against the 5.7 corpus the docker rig still tests against.

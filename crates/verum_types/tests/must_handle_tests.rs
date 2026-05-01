@@ -14,8 +14,10 @@
 )]
 //! Comprehensive tests for @must_handle annotation flow-sensitive analysis
 //!
+
 //! Error handling: Result<T, E> and Maybe<T> types, try (?) operator with automatic From conversion, error propagation — Section 2.6
 //!
+
 //! This test suite validates that the flow-sensitive control flow analysis correctly
 //! enforces @must_handle annotation requirements across various code patterns.
 
@@ -94,7 +96,7 @@ fn expr(kind: ExprKind) -> Expr {
 fn test_1_direct_drop_error() {
     // Test: let _ = result → E0317
     // @must_handle type CriticalError
-    // fn bad() { let _ = risky(); }  // ❌ E0317
+    // fn bad() { let _ = risky(); } // ❌ E0317
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -138,7 +140,7 @@ fn test_1_direct_drop_error() {
 #[test]
 fn test_2_try_operator_ok() {
     // Test: result? → OK
-    // fn good() -> Result<(), E> { let x = risky()?; Ok(()) }  // ✅ OK
+    // fn good() -> Result<(), E> { let x = risky()?; Ok(()) } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -175,7 +177,7 @@ fn test_2_try_operator_ok() {
 #[test]
 fn test_3_unwrap_ok() {
     // Test: result.unwrap() → OK
-    // fn good() { risky().unwrap(); }  // ✅ OK
+    // fn good() { risky().unwrap(); } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -203,7 +205,7 @@ fn test_3_unwrap_ok() {
 #[test]
 fn test_4_match_ok() {
     // Test: match result { ... } → OK
-    // fn good() { match risky() { Ok(x) => {}, Err(e) => {} } }  // ✅ OK
+    // fn good() { match risky() { Ok(x) => {}, Err(e) => {} } } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -265,9 +267,9 @@ fn test_4_match_ok() {
 fn test_5_is_err_check_ok() {
     // Test: if result.is_err() { drop(result) } → OK
     // fn good() {
-    //     let result = risky();
-    //     if result.is_err() { /* checked */ }
-    // }  // ✅ OK
+    //  let result = risky();
+    //  if result.is_err() { /* checked */ }
+    // } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -320,13 +322,13 @@ fn test_5_is_err_check_ok() {
 fn test_6_conditional_branches_both_handle() {
     // Test: Both branches handle → OK
     // fn good() {
-    //     let result = risky();
-    //     if condition {
-    //         result.unwrap();  // Handled
-    //     } else {
-    //         result.unwrap();  // Handled
-    //     }
-    // }  // ✅ OK
+    //  let result = risky();
+    //  if condition {
+    //  result.unwrap(); // Handled
+    //  } else {
+    //  result.unwrap(); // Handled
+    //  }
+    // } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -384,12 +386,12 @@ fn test_6_conditional_branches_both_handle() {
 fn test_7_conditional_branches_partial_handle() {
     // Test: Only one branch handles → E0317
     // fn bad() {
-    //     let result = risky();
-    //     if condition {
-    //         result.unwrap();  // Handled
-    //     }
-    //     // else branch: not handled
-    // }  // ❌ E0317
+    //  let result = risky();
+    //  if condition {
+    //  result.unwrap(); // Handled
+    //  }
+    //  // else branch: not handled
+    // } // ❌ E0317
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -442,11 +444,11 @@ fn test_7_conditional_branches_partial_handle() {
 fn test_8_loop_with_early_return() {
     // Test: Loop with early return → OK
     // fn good() -> Result<(), E> {
-    //     loop {
-    //         let result = risky()?;  // Handled via ?
-    //         if done { return Ok(()); }
-    //     }
-    // }  // ✅ OK
+    //  loop {
+    //  let result = risky()?; // Handled via ?
+    //  if done { return Ok(()); }
+    //  }
+    // } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -502,11 +504,11 @@ fn test_8_loop_with_early_return() {
 fn test_9_nested_scopes() {
     // Test: Nested scopes with proper handling → OK
     // fn good() {
-    //     {
-    //         let result = risky();
-    //         result.unwrap();
-    //     }
-    // }  // ✅ OK
+    //  {
+    //  let result = risky();
+    //  result.unwrap();
+    //  }
+    // } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -560,11 +562,11 @@ fn test_9_nested_scopes() {
 fn test_10_multiple_results() {
     // Test: Multiple Results, all handled → OK
     // fn good() {
-    //     let r1 = risky();
-    //     let r2 = risky();
-    //     r1.unwrap();
-    //     r2.unwrap();
-    // }  // ✅ OK
+    //  let r1 = risky();
+    //  let r2 = risky();
+    //  r1.unwrap();
+    //  r2.unwrap();
+    // } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -629,11 +631,11 @@ fn test_10_multiple_results() {
 fn test_11_multiple_results_one_unhandled() {
     // Test: Multiple Results, one not handled → E0317
     // fn bad() {
-    //     let r1 = risky();
-    //     let r2 = risky();
-    //     r1.unwrap();
-    //     // r2 not handled
-    // }  // ❌ E0317
+    //  let r1 = risky();
+    //  let r2 = risky();
+    //  r1.unwrap();
+    //  // r2 not handled
+    // } // ❌ E0317
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -689,7 +691,7 @@ fn test_11_multiple_results_one_unhandled() {
 #[test]
 fn test_12_expect_ok() {
     // Test: result.expect("msg") → OK
-    // fn good() { risky().expect("critical operation failed"); }  // ✅ OK
+    // fn good() { risky().expect("critical operation failed"); } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");
@@ -722,7 +724,7 @@ fn test_13_non_must_handle_result_ignored_ok() {
     // Test: Non-@must_handle Result can be ignored
     // type RegularError is | NotFound;
     // fn regular() -> Result<Data, RegularError> { ... }
-    // fn ok() { let _ = regular(); }  // ✅ OK (not @must_handle)
+    // fn ok() { let _ = regular(); } // ✅ OK (not @must_handle)
 
     let registry = MustHandleRegistry::new(); // Don't register RegularError
 
@@ -817,10 +819,10 @@ fn test_15_is_must_handle_result_detection() {
 fn test_16_if_let_ok_pattern() {
     // Test: if let Ok(x) = result { ... } → OK
     // fn good() {
-    //     if let Ok(x) = risky() {
-    //         use(x);
-    //     }
-    // }  // ✅ OK
+    //  if let Ok(x) = risky() {
+    //  use(x);
+    //  }
+    // } // ✅ OK
 
     let mut registry = MustHandleRegistry::new();
     registry.register("CriticalError");

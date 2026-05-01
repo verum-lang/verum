@@ -1,10 +1,10 @@
 // =============================================================================
 // core/database/sqlite/native/octet_length_fn/mod.vr
 // =============================================================================
-// octet_length(X) — added 3.43.  Returns the number of bytes used to store X
+// octet_length(X) — added 3.43. Returns the number of bytes used to store X
 // in its serialised form on disk (BLOB → byte count, TEXT → byte count of
 // the encoded representation, INTEGER/FLOAT → varint/encoding length, NULL
-// → NULL).  Spec §15.5.
+// → NULL). Spec §15.5.
 // =============================================================================
 
 module core.database.sqlite.native.octet_length_fn;

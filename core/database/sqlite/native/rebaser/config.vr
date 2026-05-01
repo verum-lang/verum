@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // sqlite3rebaser_configure accepts the opaque "rebase blob" emitted
 // by sqlite3changeset_apply_v2 so the rebaser knows which remote
 // operations were previously replaced / omitted.

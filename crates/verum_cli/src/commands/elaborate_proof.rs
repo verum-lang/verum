@@ -1,29 +1,35 @@
 //! `verum elaborate-proof <file.vr>` — walk Verum source and emit
 //! kernel-checkable certificates.
 //!
+
 //! ## What this command does
 //!
+
 //! Walks every theorem / lemma / corollary in a `.vr` source file.
 //! For each declaration with a supported proof body, runs
 //! [`verum_kernel::tactic_elaborator::elaborate_theorem`] to construct
 //! a [`Certificate`] and writes it to disk as a `.vproof` file.
 //!
+
 //! The emitted `.vproof` files are kernel-checked at construction
 //! time — the de Bruijn criterion is enforced before the file is
-//! written.  Independent re-verification is available via
+//! written. Independent re-verification is available via
 //! `verum check-proof <file.vproof>`.
 //!
+
 //! Together with `verum check-proof`, this command closes the
 //! round-trip from source theorem to kernel verdict: the elaborator
 //! exercises the tactic_elaborator on real Verum source rather than
 //! the hand-built ASTs the unit tests use.
 //!
+
 //! ## Output
 //!
+
 //! Per-theorem `.vproof` files in `<source-dir>/elaborated/` (the
-//! `--output-dir` flag overrides the destination).  Stdout reports
+//! `--output-dir` flag overrides the destination). Stdout reports
 //! per-theorem outcomes: `✓ verified` / `✗ FAILED <reason>` /
-//! `⊘ skipped <reason>`.  Exit code is non-zero only on
+//! `⊘ skipped <reason>`. Exit code is non-zero only on
 //! [`ElabError::KernelRejection`] (the elaborator produced an
 //! ill-typed term — a contract violation); UnsupportedTactic and
 //! UndeclaredApplyTarget are graceful skips.
@@ -53,7 +59,7 @@ pub struct ElaborationRow {
 /// Per-theorem outcome of elaboration.
 #[derive(Debug, Clone)]
 pub enum ElaborationStatus {
-    /// Certificate produced + re-verified.  Paths to the emitted
+    /// Certificate produced + re-verified. Paths to the emitted
     /// `.vproof` certificate and the `.vgoal` unified
     /// VerificationGoal export (when goal translation succeeded;
     /// `None` when the proposition fell back to placeholder).
@@ -67,11 +73,11 @@ pub enum ElaborationStatus {
     },
     /// Tactic form not yet supported by the elaborator (graceful
     /// skip — `UnsupportedTactic`, `UndeclaredApplyTarget`, or
-    /// `UnsupportedExpression`).  Reason carries the diagnostic.
+    /// `UnsupportedExpression`). Reason carries the diagnostic.
     Skipped { reason: String },
-    /// Elaborator produced a term that the kernel rejected.  This
+    /// Elaborator produced a term that the kernel rejected. This
     /// is a CONTRACT VIOLATION (the elaborator is supposed to
-    /// produce well-typed terms).  Non-graceful failure.
+    /// produce well-typed terms). Non-graceful failure.
     Failed { reason: String },
 }
 
@@ -84,6 +90,7 @@ impl ElaborationStatus {
 
 /// Entry point for `verum elaborate-proof <file>`.
 ///
+
 /// `output_dir` is the destination directory for `.vproof` files.
 /// When `None`, defaults to `<source-dir>/elaborated/`.
 pub fn execute(path: &str, output_dir: Option<&str>) -> Result<()> {
@@ -173,7 +180,7 @@ pub fn execute(path: &str, output_dir: Option<&str>) -> Result<()> {
 }
 
 /// Walk one `.vr` source file and elaborate every theorem-shaped
-/// declaration.  Writes `.vproof` files for verified theorems;
+/// declaration. Writes `.vproof` files for verified theorems;
 /// returns one [`ElaborationRow`] per theorem.
 fn walk_and_elaborate(
     source_path: &Path,
@@ -206,9 +213,9 @@ fn walk_and_elaborate(
 
     // Emit the module-level verification surface — one JSON file
     // listing every theorem / lemma / corollary / fn-with-contract's
-    // unified VerificationGoal.  This is the dashboard view that an
+    // unified VerificationGoal. This is the dashboard view that an
     // audit gate consumes when answering "what is this module
-    // proving?".  Per-theorem .vproof + .vgoal artifacts continue to
+    // proving?". Per-theorem .vproof + .vgoal artifacts continue to
     // emit individually below.
     let surface_ctx = {
         let mut c = ElabContext::new();
@@ -246,17 +253,18 @@ fn walk_and_elaborate(
         // Pre-register the canonical axiom families so theorems can
         // resolve their apply-targets without per-call wiring.
         //
-        //   - propositional connectives — `a == b`, `a && b`, `!x`
-        //     translate to opaque connective-axiom App chains.
-        //   - kernel_v0 lemma stubs — `apply
-        //     core.verify.kernel_v0.lemmas.beta.church_rosser_confluence`
-        //     and friends resolve to the registered axiom slots
-        //     carrying their `@framework(<system>, "<path>")`
-        //     citations.
-        //   - kernel bridge dispatchers — `apply kernel_<rule>_strict`
-        //     resolves to the registered bridge axiom; the audit
-        //     gate's apply-graph walker classifies the leaf as
-        //     `kernel_strict`.
+
+        //  - propositional connectives — `a == b`, `a && b`, `!x`
+        //  translate to opaque connective-axiom App chains.
+        //  - kernel_v0 lemma stubs — `apply
+        //  core.verify.kernel_v0.lemmas.beta.church_rosser_confluence`
+        //  and friends resolve to the registered axiom slots
+        //  carrying their `@framework(<system>, "<path>")`
+        //  citations.
+        //  - kernel bridge dispatchers — `apply kernel_<rule>_strict`
+        //  resolves to the registered bridge axiom; the audit
+        //  gate's apply-graph walker classifies the leaf as
+        //  `kernel_strict`.
         register_propositional_connectives(&mut ctx);
         register_kernel_v0_lemmas(&mut ctx);
         register_kernel_bridge_dispatchers(&mut ctx);
@@ -276,7 +284,7 @@ fn walk_and_elaborate(
                 // Also emit the unified VerificationGoal alongside
                 // the certificate so audit-gate dashboards and
                 // downstream verification pipelines have access to
-                // the source-agnostic verification surface.  This is
+                // the source-agnostic verification surface. This is
                 // best-effort: the goal export is `None` when the
                 // theorem's proposition shape isn't yet supported by
                 // proposition_to_term (the matching certificate
@@ -379,7 +387,7 @@ mod tests {
     }
 
     /// Pin: a verifiable theorem produces both a .vproof certificate
-    /// and a .vgoal VerificationGoal export.  Round-trip verifies the
+    /// and a .vgoal VerificationGoal export. Round-trip verifies the
     /// .vgoal JSON parses back into a VerificationGoal.
     #[test]
     fn elaborate_proof_emits_vproof_and_vgoal_for_verifiable_theorem() {

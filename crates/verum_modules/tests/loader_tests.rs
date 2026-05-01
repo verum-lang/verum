@@ -86,7 +86,7 @@ fn test_path_collision_file_form_vs_directory_form() {
 
 /// `E_MODULE` in the test name preserves the link to the
 /// diagnostic-code family (`E_MODULE_PATH_COLLISION` /
-/// `E_MODULE_NOT_FOUND`).  `#[allow(non_snake_case)]` documents the
+/// `E_MODULE_NOT_FOUND`). `#[allow(non_snake_case)]` documents the
 /// intentional deviation from the snake_case convention.
 #[test]
 #[allow(non_snake_case)]

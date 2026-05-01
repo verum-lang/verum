@@ -23,6 +23,7 @@ pub struct FloatType<'ctx> {
 impl<'ctx> FloatType<'ctx> {
     /// Create `FloatType` from [`LLVMTypeRef`]
     ///
+
     /// # Safety
     /// Undefined behavior, if referenced type isn't float type
     pub unsafe fn new(float_type: LLVMTypeRef) -> Self {
@@ -35,11 +36,14 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates a `FunctionType` with this `FloatType` for its return type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], false);
@@ -50,15 +54,19 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates an `ArrayType` with this `FloatType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_array_type = f32_type.array_type(3);
     ///
+
     /// assert_eq!(f32_array_type.len(), 3);
     /// assert_eq!(f32_array_type.get_element_type().into_float_type(), f32_type);
     /// ```
@@ -68,15 +76,19 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates a `VectorType` with this `FloatType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_scalable_vector_type = f32_type.vec_type(3);
     ///
+
     /// assert_eq!(f32_scalable_vector_type.get_size(), 3);
     /// assert_eq!(f32_scalable_vector_type.get_element_type().into_float_type(), f32_type);
     /// ```
@@ -86,15 +98,19 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates a scalable `VectorType` with this `FloatType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_vector_type = f32_type.scalable_vec_type(3);
     ///
+
     /// assert_eq!(f32_vector_type.get_size(), 3);
     /// assert_eq!(f32_vector_type.get_element_type().into_float_type(), f32_type);
     /// ```
@@ -105,10 +121,12 @@ impl<'ctx> FloatType<'ctx> {
     /// Creates a `FloatValue` representing a constant value of this `FloatType`.
     /// It will be automatically assigned this `FloatType`'s `Context`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// // Local Context
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
@@ -123,28 +141,38 @@ impl<'ctx> FloatType<'ctx> {
     /// provides no error handling here, so this may produce undefined behavior if an invalid
     /// string is used.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::AnyValue;
     ///
+
     /// let context = Context::create();
     /// let f64_type = context.f64_type();
     /// let f64_val = unsafe { f64_type.const_float_from_string("3.6") };
     ///
+
     /// assert_eq!(f64_val.print_to_string().to_string(), "double 3.600000e+00");
     ///
+
     /// let f64_val = unsafe { f64_type.const_float_from_string("3.") };
     ///
+
     /// assert_eq!(f64_val.print_to_string().to_string(), "double 3.000000e+00");
     ///
+
     /// let f64_val = unsafe { f64_type.const_float_from_string("3") };
     ///
+
     /// assert_eq!(f64_val.print_to_string().to_string(), "double 3.000000e+00");
     ///
+
     /// let f64_val = unsafe { f64_type.const_float_from_string("3.asd") };
     ///
+
     /// assert_eq!(f64_val.print_to_string().to_string(), "double 0x7FF0000000000000");
     /// ```
     pub unsafe fn const_float_from_string(self, slice: &str) -> FloatValue<'ctx> {
@@ -161,16 +189,20 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates a constant zero value of this `FloatType`.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::AnyValue;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_zero = f32_type.const_zero();
     ///
+
     /// assert_eq!(f32_zero.print_to_string().to_string(), "float 0.000000e+00");
     /// ```
     pub fn const_zero(self) -> FloatValue<'ctx> {
@@ -179,11 +211,14 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Gets the size of this `FloatType`. Value may vary depending on the target architecture.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_type_size = f32_type.size_of();
@@ -194,14 +229,18 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Gets a reference to the `Context` this `FloatType` was created in.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     ///
+
     /// assert_eq!(f32_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {
@@ -210,18 +249,22 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates a `PointerType` with this `FloatType` for its element type.
     ///
+
     /// # Example
     ///
+
     /// ```ignore
     /// // This example is ignored because LLVM 21 uses opaque pointers
     /// // and get_element_type() no longer exists
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_ptr_type = f32_type.ptr_type(AddressSpace::default());
     ///
+
     /// assert_eq!(f32_ptr_type.get_element_type().into_float_type(), f32_type);
     /// ```
     #[deprecated(note = "Starting from version 15.0, LLVM doesn't differentiate between pointer types. Use Context::ptr_type instead.")]
@@ -231,13 +274,16 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Gets the bit width of a `FloatType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f128_type = context.f128_type();
     ///
+
     /// assert_eq!(f128_type.get_bit_width(), 128);
     /// ```
     pub fn get_bit_width(self) -> u32 {
@@ -261,14 +307,17 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates an undefined instance of a `FloatType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_undef = f32_type.get_undef();
     ///
+
     /// assert!(f32_undef.is_undef());
     /// ```
     pub fn get_undef(&self) -> FloatValue<'ctx> {
@@ -277,15 +326,18 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates a poison instance of a `FloatType`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::AnyValue;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_poison = f32_type.get_poison();
     ///
+
     /// assert!(f32_poison.is_poison());
     /// ```
     pub fn get_poison(&self) -> FloatValue<'ctx> {
@@ -299,16 +351,19 @@ impl<'ctx> FloatType<'ctx> {
 
     /// Creates a constant `ArrayValue`.
     ///
+
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_val = f32_type.const_float(0.);
     /// let f32_val2 = f32_type.const_float(2.);
     /// let f32_array = f32_type.const_array(&[f32_val, f32_val2]);
     ///
+
     /// assert!(f32_array.is_const());
     /// ```
     pub fn const_array(self, values: &[FloatValue<'ctx>]) -> ArrayValue<'ctx> {

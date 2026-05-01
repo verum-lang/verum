@@ -3,6 +3,7 @@
 // =============================================================================
 // Layer: 6 (Autodiff)
 //
+
 // Compile-time source transformation for gradients:
 // - VJP (Vector-Jacobian Product) for reverse-mode AD
 // - JVP (Jacobian-Vector Product) for forward-mode AD
@@ -10,19 +11,24 @@
 // - Higher-order derivatives (Hessian, Jacobian)
 // - Memory optimizations (checkpointing, recomputation)
 //
+
 // # Design Philosophy
 //
+
 // Verum uses compile-time source transformation, not runtime tape recording:
 // - Zero runtime overhead for gradient tracking
 // - O(1) memory for simple functions (no tape storage)
 // - Source-level debugging of gradients
 //
+
 // # Context System Integration
 //
+
 // Operations use Verum's context system for:
 // - AutodiffContext: Gradient recording state and mode
 // - GradientAccumulation: Micro-batching support
 //
+
 // Spec: docs/architecture/math-spec.md Part VII (L6)
 // =============================================================================
 
@@ -68,6 +74,7 @@ implement DiffMode {
 
 // Protocol for types that support automatic differentiation
 //
+
 // Types implementing this protocol can participate in gradient computation.
 // The compiler automatically implements this for @differentiable functions.
 public type Differentiable is protocol {
@@ -176,6 +183,7 @@ implement Differentiable for Matrix<Float> {
 
 // Result of VJP computation
 //
+
 // Contains the primal (forward) output and a pullback function
 // that computes gradients with respect to inputs.
 public type VJPResult<In: Differentiable, Out: Differentiable> is {
@@ -187,13 +195,15 @@ public type VJPResult<In: Differentiable, Out: Differentiable> is {
 
 // Compute Vector-Jacobian Product (reverse mode AD)
 //
+
 // For f: R^n -> R^m, computes v^T * J where J is the Jacobian.
 // This is the foundation of backpropagation.
 //
+
 // # Example
 // ```verum
 // let result = vjp(|x| x * x, 3.0);
-// let grad = result.pullback(1.0);  // grad = 6.0
+// let grad = result.pullback(1.0); // grad = 6.0
 // ```
 public fn vjp<F, In, Out>(f: F, x: In) -> VJPResult<In, Out>
 where
@@ -213,6 +223,7 @@ where
 
 // Result of JVP computation
 //
+
 // Contains the primal output and the tangent (directional derivative).
 public type JVPResult<Out: Differentiable> is {
     // Forward pass result
@@ -223,9 +234,11 @@ public type JVPResult<Out: Differentiable> is {
 
 // Compute Jacobian-Vector Product (forward mode AD)
 //
+
 // For f: R^n -> R^m, computes J * v where J is the Jacobian.
 // Efficient when output dimension >> input dimension.
 //
+
 // # Example
 // ```verum
 // let result = jvp(|x| x * x, 3.0, 1.0);
@@ -249,8 +262,10 @@ where
 
 // Compute gradient of scalar function
 //
+
 // Transforms a scalar-valued function into a function returning gradients.
 //
+
 // # Example
 // ```verum
 // let loss_fn = |x: &Tensor<Float, [N]>| x.sum();
@@ -270,9 +285,11 @@ where
 
 // Compute value and gradient together
 //
+
 // More efficient than computing f(x) and grad(f)(x) separately
 // when both values are needed.
 //
+
 // # Example
 // ```verum
 // let (loss, grads) = value_and_grad(loss_fn)(&params);
@@ -290,6 +307,7 @@ where
 
 // Gradient with respect to specific argument indices
 //
+
 // Useful when only gradients for some arguments are needed.
 public fn grad_argnums<F, Args>(f: F, argnums: &[USize]) -> fn(Args) -> List<Args.Cotangent>
 where
@@ -305,6 +323,7 @@ where
 
 // Stop gradient propagation (detach from computation graph)
 //
+
 // Returns value unchanged but stops gradient flow through it.
 // Useful for implementing stop-gradient in RL algorithms.
 public fn stop_gradient<T: Differentiable>(x: T) -> T {
@@ -313,6 +332,7 @@ public fn stop_gradient<T: Differentiable>(x: T) -> T {
 
 // Create a function with custom gradient
 //
+
 // Allows specifying custom VJP rule for functions that need
 // non-standard gradient behavior.
 public fn custom_vjp<F, VJP, In, Out>(f: F, vjp_fn: VJP) -> fn(In) -> Out
@@ -331,6 +351,7 @@ where
 
 // Compute Jacobian matrix of vector function
 //
+
 // For f: R^n -> R^m, returns the m x n Jacobian matrix.
 // Uses forward mode AD (one pass per input dimension).
 public fn jacobian<F>(f: F, x: &Vector<Float>) -> Matrix<Float>
@@ -356,6 +377,7 @@ where
 
 // Compute Hessian matrix (second derivative)
 //
+
 // For f: R^n -> R, returns the n x n Hessian matrix.
 // Computed as Jacobian of gradient.
 public fn hessian<F>(f: F) -> fn(&Vector<Float>) -> Matrix<Float>
@@ -370,6 +392,7 @@ where
 
 // Compute Hessian-vector product efficiently
 //
+
 // For f: R^n -> R and vector v, computes H*v without
 // materializing the full Hessian matrix.
 // Memory: O(n) instead of O(n²)
@@ -384,6 +407,7 @@ where
 
 // Compute Gauss-Newton matrix-vector product
 //
+
 // For f: R^n -> R^m with loss L(f(x)), computes J^T J v.
 // Used in second-order optimization (Levenberg-Marquardt).
 public fn gnvp<F>(f: F, x: &Vector<Float>, v: &Vector<Float>) -> Vector<Float>
@@ -750,6 +774,7 @@ fn attention_vjp<T: Numeric>(
 
 // Gradient scope - enables/disables gradient tracking
 //
+
 // RAII-style scope guard for controlling gradient computation.
 public type GradientScope is {
     previous_recording: Bool,
@@ -759,6 +784,7 @@ public type GradientScope is {
 implement GradientScope {
     // Enter no-gradient scope (like PyTorch's torch.no_grad())
     //
+
     // Disables gradient tracking within the scope.
     // Useful for inference and evaluation.
     public fn no_grad() -> Self using [AutodiffContext] {
@@ -770,6 +796,7 @@ implement GradientScope {
 
     // Enter gradient-enabled scope
     //
+
     // Ensures gradient tracking is enabled within the scope.
     public fn enable_grad() -> Self using [AutodiffContext] {
         let prev_recording = AutodiffContext.is_recording();
@@ -780,6 +807,7 @@ implement GradientScope {
 
     // Enter inference mode (optimized for no gradients)
     //
+
     // More aggressive optimizations than no_grad() since
     // tensors won't need gradient tracking metadata.
     public fn inference_mode() -> Self using [AutodiffContext] {
@@ -798,10 +826,11 @@ implement Drop for GradientScope {
 
 // Execute function without gradient tracking
 //
+
 // # Example
 // ```verum
 // let output = with_no_grad(|| {
-//     model.forward(&input)
+//  model.forward(&input)
 // });
 // ```
 public fn with_no_grad<T, F: Fn() -> T>(f: F) -> T using [AutodiffContext] {
@@ -821,12 +850,15 @@ public fn with_inference<T, F: Fn() -> T>(f: F) -> T using [AutodiffContext] {
 
 // Gradient checkpoint - recompute forward pass during backward
 //
+
 // Trades compute for memory: saves only inputs, recomputes
 // intermediate activations during backward pass.
 //
+
 // Memory: O(1) for checkpointed region
 // Compute: 2x forward pass cost
 //
+
 // # Example
 // ```verum
 // let output = checkpoint(expensive_forward, &input);
@@ -842,6 +874,7 @@ where
 
 // Mark tensor for recomputation instead of storage
 //
+
 // During backward pass, the tensor will be recomputed
 // from its inputs rather than retrieved from memory.
 public fn recompute<T: Differentiable>(x: T) -> T {
@@ -850,6 +883,7 @@ public fn recompute<T: Differentiable>(x: T) -> T {
 
 // Automatic checkpointing for sequential layers
 //
+
 // Applies checkpointing every `checkpoint_every` layers,
 // achieving sublinear memory usage.
 @differentiable
@@ -864,6 +898,7 @@ public fn checkpointed_sequential<T: Numeric>(
 
 // Optimal checkpointing for O(√n) memory
 //
+
 // Uses binomial checkpointing strategy to achieve
 // √n memory with 2x compute overhead.
 public fn optimal_checkpoint<T: Numeric>(
@@ -879,6 +914,7 @@ public fn optimal_checkpoint<T: Numeric>(
 
 // Compute optimal checkpoint schedule
 //
+
 // Returns checkpoint positions for given layer count
 // and memory budget.
 public fn compute_checkpoint_schedule(n: USize, memory_budget: USize) -> List<USize> {
@@ -896,9 +932,11 @@ public fn compute_checkpoint_schedule(n: USize, memory_budget: USize) -> List<US
 
 // Memory-efficient attention with recomputation
 //
+
 // Avoids storing the full attention matrix by recomputing
 // it during the backward pass.
 //
+
 // Memory: O(batch * heads * seq_len * head_dim)
 // Compute: 2x attention cost during backward
 @differentiable
@@ -935,6 +973,7 @@ context GradientAccumulation {
 
 // Backward pass with gradient accumulation
 //
+
 // Scales gradients by 1/accumulation_steps and only
 // synchronizes on the final micro-batch.
 public fn accumulated_backward<T: Numeric>(
@@ -1275,26 +1314,27 @@ type CompareOp is
 // VBC Autodiff Opcodes Reference
 // =============================================================================
 //
+
 // ┌────────┬──────────────────────┬────────────────────────────────────────┐
-// │ Opcode │ Name                 │ Description                            │
+// │ Opcode │ Name │ Description │
 // ├────────┼──────────────────────┼────────────────────────────────────────┤
-// │ 0xA8   │ GRAD_BEGIN           │ Begin gradient computation region      │
-// │ 0xA9   │ GRAD_END             │ End region, return pullback function   │
-// │ 0xAA   │ GRAD_CHECKPOINT      │ Mark checkpoint for recomputation      │
-// │ 0xAB   │ GRAD_ACCUMULATE      │ Accumulate gradients (for fan-out)     │
-// │ 0xAC   │ GRAD_STOP            │ Stop gradient (detach)                 │
-// │ 0xAD   │ GRAD_CUSTOM          │ Register custom VJP rule               │
-// │ 0xAE   │ JVP_BEGIN            │ Begin forward-mode AD                  │
-// │ 0xAF   │ JVP_END              │ End forward-mode, return tangent       │
-// │ 0xB0   │ GRAD_SCOPE_PUSH      │ Push gradient scope                    │
-// │ 0xB1   │ GRAD_SCOPE_POP       │ Pop gradient scope                     │
-// │ 0xB2   │ GRAD_SCOPE_PUSH_INF  │ Push inference mode scope              │
-// │ 0xB3   │ GRAD_RECOMPUTE       │ Mark tensor for recomputation          │
-// │ 0xB4   │ GRAD_SYNC            │ Synchronize gradients                  │
-// │ 0xB5   │ GRAD_BACKWARD        │ Execute backward pass                  │
-// │ 0xB6   │ GRAD_ZERO_TANGENT    │ Create zero tangent                    │
-// │ 0xB7   │ GRAD_GET_VJP_RULE    │ Get VJP rule for operation             │
-// │ 0xB8   │ GRAD_GET_JVP_RULE    │ Get JVP rule for operation             │
+// │ 0xA8 │ GRAD_BEGIN │ Begin gradient computation region │
+// │ 0xA9 │ GRAD_END │ End region, return pullback function │
+// │ 0xAA │ GRAD_CHECKPOINT │ Mark checkpoint for recomputation │
+// │ 0xAB │ GRAD_ACCUMULATE │ Accumulate gradients (for fan-out) │
+// │ 0xAC │ GRAD_STOP │ Stop gradient (detach) │
+// │ 0xAD │ GRAD_CUSTOM │ Register custom VJP rule │
+// │ 0xAE │ JVP_BEGIN │ Begin forward-mode AD │
+// │ 0xAF │ JVP_END │ End forward-mode, return tangent │
+// │ 0xB0 │ GRAD_SCOPE_PUSH │ Push gradient scope │
+// │ 0xB1 │ GRAD_SCOPE_POP │ Pop gradient scope │
+// │ 0xB2 │ GRAD_SCOPE_PUSH_INF │ Push inference mode scope │
+// │ 0xB3 │ GRAD_RECOMPUTE │ Mark tensor for recomputation │
+// │ 0xB4 │ GRAD_SYNC │ Synchronize gradients │
+// │ 0xB5 │ GRAD_BACKWARD │ Execute backward pass │
+// │ 0xB6 │ GRAD_ZERO_TANGENT │ Create zero tangent │
+// │ 0xB7 │ GRAD_GET_VJP_RULE │ Get VJP rule for operation │
+// │ 0xB8 │ GRAD_GET_JVP_RULE │ Get JVP rule for operation │
 // └────────┴──────────────────────┴────────────────────────────────────────┘
 
 // =============================================================================
@@ -1345,6 +1385,7 @@ public context GradientTape {
 // Autodiff graph as a canonical DAG view
 // =============================================================================
 //
+
 // An autodiff computation is a DAG of tensor operations — exactly a
 // labelled directed acyclic graph where nodes are GraphNode operations
 // and edges are GraphEdge tensor-valued data-flow arrows. Exposing it

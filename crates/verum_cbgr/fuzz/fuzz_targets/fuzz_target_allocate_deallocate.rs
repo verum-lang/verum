@@ -1,10 +1,12 @@
 //! Fuzz target for allocation/deallocation sequences
 //!
+
 //! This fuzzer tests:
 //! - Random allocation and deallocation patterns
 //! - Various sizes and alignments
 //! - Detection of: memory leaks, double-free, use-after-free
 //!
+
 //! The fuzzer generates random sequences of allocate/deallocate operations
 //! and verifies that CBGR correctly detects all safety violations.
 

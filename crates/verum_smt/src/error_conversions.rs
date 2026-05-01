@@ -1,5 +1,6 @@
 //! Conversions from verum_smt::Error to verum_error::VerumError
 //!
+
 //! This module implements the `From` trait to convert SMT verification errors
 //! to the unified VerumError type, enabling seamless error propagation across
 //! crate boundaries.

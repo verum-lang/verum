@@ -1,21 +1,24 @@
 //! Verum dialect types.
 //!
+
 //! Custom MLIR types for Verum language constructs. These types are
 //! represented using MLIR's opaque type system with custom parsing/printing.
 //!
+
 //! # Type Hierarchy
 //!
+
 //! ```text
 //! VerumType
-//! ├── RefType<T, tier>      - CBGR three-tier reference
-//! ├── ListType<T>           - Semantic list (Vec equivalent)
-//! ├── MapType<K, V>         - Semantic map (HashMap equivalent)
-//! ├── SetType<T>            - Semantic set (HashSet equivalent)
-//! ├── TextType              - Semantic text (String equivalent)
-//! ├── MaybeType<T>          - Optional value (Option equivalent)
-//! ├── FutureType<T>         - Async future
-//! ├── ContextType           - Context value for DI
-//! └── HeapType<T>           - Heap-allocated value (Box equivalent)
+//! ├── RefType<T, tier> - CBGR three-tier reference
+//! ├── ListType<T> - Semantic list (Vec equivalent)
+//! ├── MapType<K, V> - Semantic map (HashMap equivalent)
+//! ├── SetType<T> - Semantic set (HashSet equivalent)
+//! ├── TextType - Semantic text (String equivalent)
+//! ├── MaybeType<T> - Optional value (Option equivalent)
+//! ├── FutureType<T> - Async future
+//! ├── ContextType - Context value for DI
+//! └── HeapType<T> - Heap-allocated value (Box equivalent)
 //! ```
 
 use verum_mlir::{
@@ -78,6 +81,7 @@ impl std::fmt::Display for RefTier {
 
 /// Verum type representation.
 ///
+
 /// Wraps MLIR types with Verum-specific semantics.
 #[derive(Debug, Clone)]
 pub enum VerumType {
@@ -244,6 +248,7 @@ impl RefType {
 
     /// Get MLIR type string representation.
     ///
+
     /// References are lowered to LLVM struct types:
     /// - ThinRef: { ptr, i32 generation, i32 epoch_caps } = 16 bytes
     /// - FatRef: { ptr, i32 gen, i32 epoch_caps, i64 metadata } = 24 bytes
@@ -346,6 +351,7 @@ impl TextType {
 
     /// Get MLIR type string.
     ///
+
     /// Text is represented as { ptr: i8*, len: i64 }
     pub fn to_mlir_type_string(&self) -> Text {
         Text::from("!llvm.struct<(ptr, i64)>")
@@ -375,6 +381,7 @@ impl MaybeType {
 
     /// Get MLIR type string.
     ///
+
     /// Maybe is represented as { tag: i1, value: T }
     pub fn to_mlir_type_string(&self) -> Text {
         let inner_str = self.inner.to_mlir_type_string();
@@ -580,6 +587,7 @@ impl VariantType {
 
     /// Get MLIR type string.
     ///
+
     /// Variants are represented as { tag: i32, payload: max_payload_size }
     pub fn to_mlir_type_string(&self) -> Text {
         // Simplified: tag + pointer to payload

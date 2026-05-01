@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §22
 //
+
 // Wraps a `BackupEngineHandle` with a per-step counter ledger and an ETA
 // estimator (constant-throughput model). The L7 façade exposes
 // `Database.backup_progress(handle) -> ProgressSnapshot` so callers
@@ -92,6 +93,7 @@ implement ProgressTracker {
 // Convenience: render a snapshot as a single-line summary
 // -----------------------------------------------------------------------------
 //
+
 // Format: "main->dest 47%/2000pp (2.4 Mp/s)" — caller chooses
 // whether to print + when.
 // =============================================================================

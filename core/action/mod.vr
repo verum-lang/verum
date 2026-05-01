@@ -2,57 +2,67 @@
 // core.action — the Actic dual to core.math (VVA §11.2)
 // =============================================================================
 //
+
 // DC-side stdlib (dependency-centric enactments) — mirror of core.math
 // on the object-centric side. Per Diakrisis 108.T (AC/OC Morita-duality),
 // every articulation has a canonical enactment. This module exposes
 // the DC layer as a first-class stdlib, the headline differentiator of
 // Verum per VVA §2.6.
 //
+
 // Sub-packages:
 //
-//   core.action.primitives   — seven primitive acts (ε_math, ε_compute,
-//                              ε_observe, ε_prove, ε_decide, ε_translate,
-//                              ε_construct)
+
+//  core.action.primitives — seven primitive acts (ε_math, ε_compute,
+//  ε_observe, ε_prove, ε_decide, ε_translate,
+//  ε_construct)
 //
-//   core.action.enactments   — composition, activation modality A,
-//                              autopoietic closure at A^{ω^2}
+
+//  core.action.enactments — composition, activation modality A,
+//  autopoietic closure at A^{ω^2}
 //
-//   core.action.gauge        — gauge freedom on enactments;
-//                              canonicalise picks a canonical
-//                              representative per equivalence class
+
+//  core.action.gauge — gauge freedom on enactments;
+//  canonicalise picks a canonical
+//  representative per equivalence class
 //
-//   core.action.verify       — ε-audit helpers consumed by
-//                              `verum audit --epsilon`
+
+//  core.action.verify — ε-audit helpers consumed by
+//  `verum audit --epsilon`
 //
-//   core.action.effects      — Kleisli-category effect catalogue per
-//                              Theorem 17.T1: 8 standard effects with
-//                              commutativity classification + ε-coords
+
+//  core.action.effects — Kleisli-category effect catalogue per
+//  Theorem 17.T1: 8 standard effects with
+//  commutativity classification + ε-coords
 //
-//   core.action.ludics       — Ludics designs as Perf(α_linear) per
-//                              Theorem 120.T: Locus / Design / Dessein
-//                              + cut-elimination + orthogonality
+
+//  core.action.ludics — Ludics designs as Perf(α_linear) per
+//  Theorem 120.T: Locus / Design / Dessein
+//  + cut-elimination + orthogonality
 //
-//   core.action.monads       — concrete strong-monad implementations
-//                              per VVA-9 V1.5 (COMPLETE): Pure,
-//                              Reader, Writer, State (V1) +
-//                              Probability, Quantum (Tier-A V0) +
-//                              Exception, Nondeterm (List monad,
-//                              renamed to avoid collection-type
-//                              clash), Io. Every effect in the
-//                              Theorem 17.T1 catalogue ships
-//                              concrete monad data + operators +
-//                              monad-law theorems (left/right
-//                              identity, associativity) +
-//                              commutativity (positive for the
-//                              commutative effects, negative
-//                              separating witnesses for State /
-//                              Exception / Io)
+
+//  core.action.monads — concrete strong-monad implementations
+//  per VVA-9 V1.5 (COMPLETE): Pure,
+//  Reader, Writer, State +
+//  Probability, Quantum (Tier-A V0) +
+//  Exception, Nondeterm (List monad,
+//  renamed to avoid collection-type
+//  clash), Io. Every effect in the
+//  Theorem 17.T1 catalogue ships
+//  concrete monad data + operators +
+//  monad-law theorems (left/right
+//  identity, associativity) +
+//  commutativity (positive for the
+//  commutative effects, negative
+//  separating witnesses for State /
+//  Exception / Io)
 //
-//   core.action.ludics_lazy  — cofix-based lazy ludics designs per
-//                              VVA-10 V1: LazyDesign + bounded
-//                              cut-elim + productivity-gated
-//                              orthogonality (UNKNOWN third verdict
-//                              when depth-bound exceeded)
+
+//  core.action.ludics_lazy — cofix-based lazy ludics designs per
+//  VVA-10 V1: LazyDesign + bounded
+//  cut-elim + productivity-gated
+//  orthogonality (UNKNOWN third verdict
+//  when depth-bound exceeded)
 // =============================================================================
 
 public mount core.action.primitives;

@@ -546,10 +546,12 @@ implement<T, E> Result<T, E> {
 
     /// Retry an operation with exponential backoff.
     ///
+
     /// Retries the operation up to `max_attempts` times with exponential
     /// backoff between retries. Initial delay is `initial_delay_ms`,
     /// doubling each retry up to `max_delay_ms`.
     ///
+
     /// # Example
     /// ```verum
     /// let result = Result.retry(3, 100, 5000, || fetch_data());
@@ -577,12 +579,13 @@ implement<T, E> Result<T, E> {
 
     /// Retry with a custom retry configuration.
     ///
+
     /// # Example
     /// ```verum
     /// let config = RetryOptions {
-    ///     max_attempts: 5,
-    ///     strategy: RetryBackoff.Linear { delay_ms: 500 },
-    ///     should_retry: |e| e.is_retryable(),
+    ///  max_attempts: 5,
+    ///  strategy: RetryBackoff.Linear { delay_ms: 500 },
+    ///  should_retry: |e| e.is_retryable(),
     /// };
     /// let result = Result.retry_with_strategy(|| risky_op(), config);
     /// ```
@@ -637,6 +640,7 @@ implement<T, E> Result<T, E> {
 
     /// Retry with linear backoff.
     ///
+
     /// Retries with constant delay between attempts.
     fn retry_linear<F: fn() -> Result<T, E>>(
         max_attempts: Int,
@@ -672,6 +676,7 @@ implement<T, E> Result<T, E> {
 
     /// Retry with jittered exponential backoff.
     ///
+
     /// Adds random jitter to prevent thundering herd problem.
     fn retry_jittered<F: fn() -> Result<T, E>>(
         max_attempts: Int,
@@ -701,13 +706,15 @@ implement<T, E> Result<T, E> {
 
     /// Execute side effect on Ok value, returning self unchanged.
     ///
+
     /// Alias for `inspect` - provided for consistency with other languages.
     ///
+
     /// # Example
     /// ```verum
     /// let result = fetch_user(id)
-    ///     .tap(|user| log(f"Fetched user: {user.name}"))
-    ///     .map(|user| user.profile);
+    ///  .tap(|user| log(f"Fetched user: {user.name}"))
+    ///  .map(|user| user.profile);
     /// ```
     public fn tap<F: fn(&T)>(self, f: F) -> Self {
         self.inspect(f)
@@ -715,6 +722,7 @@ implement<T, E> Result<T, E> {
 
     /// Execute side effect on Err value, returning self unchanged.
     ///
+
     /// Alias for `inspect_err` - provided for consistency.
     public fn tap_err<F: fn(&E)>(self, f: F) -> Self {
         self.inspect_err(f)
@@ -722,13 +730,14 @@ implement<T, E> Result<T, E> {
 
     /// Execute side effect regardless of Ok or Err.
     ///
+
     /// # Example
     /// ```verum
     /// fetch_data()
-    ///     .tap_both(
-    ///         |data| log(f"Got data: {data}"),
-    ///         |err| log(f"Error: {err}")
-    ///     )
+    ///  .tap_both(
+    ///  |data| log(f"Got data: {data}"),
+    ///  |err| log(f"Error: {err}")
+    ///  )
     /// ```
     public fn tap_both<F: fn(&T), G: fn(&E)>(self, on_ok: F, on_err: G) -> Self {
         match &self {
@@ -744,12 +753,14 @@ implement<T, E> Result<T, E> {
 
     /// Recover from error with a default value.
     ///
+
     /// Converts `Err(e)` to `Ok(default)`.
     ///
+
     /// # Example
     /// ```verum
     /// let config = load_config()
-    ///     .recover(default_config());
+    ///  .recover(default_config());
     /// ```
     public fn recover(self, default: T) -> Result<T, E> {
         match self {
@@ -760,10 +771,11 @@ implement<T, E> Result<T, E> {
 
     /// Recover from error using a function.
     ///
+
     /// # Example
     /// ```verum
     /// let result = fetch_remote()
-    ///     .recover_with(|e| load_cached());
+    ///  .recover_with(|e| load_cached());
     /// ```
     public fn recover_with<F: fn(E) -> T>(self, f: F) -> Result<T, E> {
         match self {
@@ -798,6 +810,7 @@ implement<T, E> Result<T, E> {
 
     /// Swap Ok and Err.
     ///
+
     /// # Example
     /// ```verum
     /// let flipped: Result<E, T> = result.flip();
@@ -815,12 +828,14 @@ implement<T, E> Result<T, E> {
 
     /// Add context to an error.
     ///
+
     /// Wraps the error with additional context information.
     ///
+
     /// # Example
     /// ```verum
     /// let result = parse_config(path)
-    ///     .context(f"Failed to parse config at {path}");
+    ///  .context(f"Failed to parse config at {path}");
     /// ```
     public fn context(self, ctx: Text) -> Result<T, ResultContextError<E>> {
         match self {
@@ -843,11 +858,12 @@ implement<T, E> Result<T, E> {
 
     /// Fold Result into a single value.
     ///
+
     /// # Example
     /// ```verum
     /// let message = result.fold(
-    ///     |v| f"Success: {v}",
-    ///     |e| f"Error: {e}"
+    ///  |v| f"Success: {v}",
+    ///  |e| f"Error: {e}"
     /// );
     /// ```
     public fn fold<U, F: fn(T) -> U, G: fn(E) -> U>(self, on_ok: F, on_err: G) -> U {
@@ -961,6 +977,7 @@ implement<E> RetryOptions<E> {
 
 /// Error wrapped with additional context.
 ///
+
 /// Forms a chain of errors preserving the full error history.
 public type ResultContextError<E> is {
     /// Human-readable context description.
@@ -1023,11 +1040,13 @@ implement<E: Clone> Clone for ResultContextError<E> {
 
 /// Two-channel exit result: Expected errors vs Defects (bugs).
 ///
+
 /// Unlike Result which conflates all errors, Exit distinguishes:
 /// - `Success(A)`: Successful completion
 /// - `Failure(E)`: Expected/recoverable error
 /// - `Defect(Defect)`: Unexpected error (bug, panic, assertion failure)
 ///
+
 /// This enables different handling strategies for recoverable vs fatal errors.
 public type Exit<E, A> is
     | Success(A)
@@ -1197,6 +1216,7 @@ implement Clone for DefectInfo {
 
 /// Lossless error chain preserving full error history.
 ///
+
 /// Unlike simple error wrapping which loses information, Cause maintains
 /// the complete tree of errors that contributed to a failure.
 public type Cause<E> is
@@ -1348,19 +1368,21 @@ implement<E: Clone> Clone for Cause<E> {
 
 /// Validated result that accumulates all errors instead of short-circuiting.
 ///
+
 /// Unlike Result which stops at first error, Validated collects ALL errors.
 /// Perfect for validation scenarios where you want to report all problems.
 ///
+
 /// # Example
 /// ```verum
 /// let validated = Validated.validate_all([
-///     validate_name(form.name),
-///     validate_email(form.email),
-///     validate_age(form.age),
+///  validate_name(form.name),
+///  validate_email(form.email),
+///  validate_age(form.age),
 /// ]);
 /// match validated {
-///     Valid(data) => save(data),
-///     Invalid(errors) => show_errors(errors),
+///  Valid(data) => save(data),
+///  Invalid(errors) => show_errors(errors),
 /// }
 /// ```
 public type Validated<E, A> is
@@ -1439,6 +1461,7 @@ implement<E, A> Validated<E, A> {
 
     /// Combine with another Validated using applicative semantics.
     ///
+
     /// If both are valid, combines values with the function.
     /// If either or both are invalid, accumulates all errors.
     public fn zip_with<B, C, F: fn(A, B) -> C>(
@@ -1592,17 +1615,21 @@ public module Validated {
 
 /// Transpose Result<Maybe<T>, E> to Maybe<Result<T, E>>.
 ///
+
 /// This is a standalone function because Verum does not support
 /// specialized impl blocks (e.g., `implement<T, E> Result<Maybe<T>, E>`).
 ///
+
 /// # Example
 /// ```verum
 /// let x: Result<Maybe<Int>, Text> = Ok(Some(42));
 /// assert_eq(transpose_result(x), Some(Ok(42)));
 ///
+
 /// let y: Result<Maybe<Int>, Text> = Ok(None);
 /// assert_eq(transpose_result(y), None);
 ///
+
 /// let z: Result<Maybe<Int>, Text> = Err("error");
 /// assert_eq(transpose_result(z), Some(Err("error")));
 /// ```
@@ -1620,14 +1647,17 @@ public fn transpose_result<T, E>(result: Result<Maybe<T>, E>) -> Maybe<Result<T,
 
 /// Transpose Maybe<Result<T, E>> to Result<Maybe<T>, E>.
 ///
+
 /// # Example
 /// ```verum
 /// let x: Maybe<Result<Int, Text>> = Some(Ok(42));
 /// assert_eq(transpose_maybe(x), Ok(Some(42)));
 ///
+
 /// let y: Maybe<Result<Int, Text>> = None;
 /// assert_eq(transpose_maybe(y), Ok(None));
 ///
+
 /// let z: Maybe<Result<Int, Text>> = Some(Err("error"));
 /// assert_eq(transpose_maybe(z), Err("error"));
 /// ```
@@ -1650,12 +1680,15 @@ public fn transpose_maybe<T, E>(maybe: Maybe<Result<T, E>>) -> Result<Maybe<T>, 
 /// Collects an iterator of Results into a Result of a List.
 /// Returns the first Err encountered, or Ok(List) if all are Ok.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let results = [Ok(1), Ok(2), Ok(3)];
 /// assert_eq(collect_results(results.iter()), Ok([1, 2, 3]));
 ///
+
 /// let results = [Ok(1), Err("bad"), Ok(3)];
 /// assert_eq(collect_results(results.iter()), Err("bad"));
 /// ```
@@ -1687,8 +1720,10 @@ public fn collect_results<T, E, I: Iterator<Item = Result<T, E>>>(mut iter: I) -
 /// Partitions an iterator of Results into two lists:
 /// a list of Ok values and a list of Err values.
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// let results = [Ok(1), Err("a"), Ok(2), Err("b")];
 /// let (oks, errs) = partition_results(results.iter());

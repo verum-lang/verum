@@ -3,6 +3,7 @@
 // =============================================================================
 // Layer: 1 (Scalar Mathematics)
 //
+
 // Provides high-precision implementations of elementary mathematical functions:
 // - Trigonometric: sin, cos, tan, asin, acos, atan, atan2
 // - Exponential: exp, exp2, expm1
@@ -11,22 +12,28 @@
 // - Rounding: floor, ceil, round, trunc, fract
 // - Utilities: abs, min, max, clamp, fma, copysign
 //
+
 // # Precision
 //
+
 // All functions aim for < 1 ULP (unit in last place) error.
 // Implementations use range reduction, polynomial approximation,
 // and careful reconstruction.
 //
+
 // # Refinement Types
 //
+
 // Domain restrictions are enforced via refinement types:
 // - sqrt(x: Float{>= 0.0}) -> Float{>= 0.0}
 // - log(x: Float{> 0.0}) -> Float
 // - asin(x: Float{it >= -1.0 && it <= 1.0}) -> Float
 //
+
 // Safe variants (log_safe, sqrt_safe, asin_safe) return Maybe<T>
 // for use when domain cannot be statically verified.
 //
+
 // Spec: docs/architecture/math-spec.md Section 3
 // =============================================================================
 
@@ -679,12 +686,14 @@ public fn ln(x: Float{> 0.0}) -> Float {
 // Hyperbolic Functions (V8 #249)
 // =============================================================================
 //
+
 // Identities:
-//   sinh(x) = (eˣ − e⁻ˣ) / 2
-//   cosh(x) = (eˣ + e⁻ˣ) / 2
-//   tanh(x) = sinh(x) / cosh(x)
-//   cosh²(x) − sinh²(x) = 1
+//  sinh(x) = (eˣ − e⁻ˣ) / 2
+//  cosh(x) = (eˣ + e⁻ˣ) / 2
+//  tanh(x) = sinh(x) / cosh(x)
+//  cosh²(x) − sinh²(x) = 1
 //
+
 // Numerical-stability care for large |x|: the e⁻ˣ (resp. eˣ) term
 // underflows below ≈ 2⁻¹⁰²² near x ≈ 745, so the naive formula
 // becomes ill-conditioned. We branch on |x| > 22 (≈ ln 2⁵³) and

@@ -1,5 +1,6 @@
 //! Strict-positivity check for user-declared inductive types.
 //!
+
 //! K-Pos / Coquand & Paulin 1990: an inductive type `T` is
 //! well-formed only when every recursive occurrence of `T` in any
 //! constructor's argument types appears strictly positively. Berardi
@@ -8,6 +9,7 @@
 //! the kernel therefore must reject every constructor whose argument
 //! type contains `T` to the LEFT of an arrow.
 //!
+
 //! Audit-derived task: C2 V1 shipped the kernel-side
 //! `verum_kernel::InductiveRegistry::register` + `check_strict_
 //! positivity` walker, but they had ZERO call sites in the type-
@@ -17,13 +19,15 @@
 //! type-decl registration time, parallel to the kernel's CoreTerm-
 //! level walker. Both are needed because:
 //!
+
 //! - The AST walker runs BEFORE elaboration (so an ill-formed
-//!   declaration is rejected with a useful span pointing at the
-//!   offending constructor argument).
+//!  declaration is rejected with a useful span pointing at the
+//!  offending constructor argument).
 //! - The kernel walker runs AT elaboration (so any path that
-//!   bypasses the AST walker — direct CoreTerm construction by
-//!   tactics, derive macros, etc. — still gets the same guarantee).
+//!  bypasses the AST walker — direct CoreTerm construction by
+//!  tactics, derive macros, etc. — still gets the same guarantee).
 //!
+
 //! Discipline mirrors `verum_kernel::check_strict_positivity`: walk
 //! every type-tree position, forbid `target` in any Function/Pi
 //! domain, descend into return-types, sub-tuples, sub-records,
@@ -162,6 +166,7 @@ pub fn check_record_body_positivity(
 /// are acceptable (would under-report); false-positives are not
 /// (would over-flag legitimate code).
 ///
+
 /// `self_var` is the placeholder TypeVar (if any) the type-decl
 /// pre-pass installed for this name; the walker treats `Type::Var`
 /// of that variable as a target reference, which is necessary to

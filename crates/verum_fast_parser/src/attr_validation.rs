@@ -1,33 +1,43 @@
 //! Attribute validation integration for the parser.
 //!
+
 //! This module provides infrastructure for validating attributes during parsing.
 //! It is designed to work without creating circular dependencies by using a
 //! trait-based abstraction that can be implemented by higher-level crates.
 //!
+
 //! # Design
 //!
+
 //! The validation system uses a trait-based approach:
 //!
+
 //! 1. [`AttributeValidatorTrait`] - The trait that validators must implement
 //! 2. [`AttributeValidator`] - A concrete validator that can be configured
 //! 3. [`ValidationConfig`] - Configuration for validation behavior
 //!
+
 //! By default, the parser uses a permissive validator that allows all attributes.
 //! Higher-level crates (like verum_compiler) can provide a strict validator that
 //! uses the attribute registry from verum_types.
 //!
+
 //! # Usage
 //!
+
 //! ```rust,ignore
 //! use verum_parser::{RecursiveParser, attr_validation::ValidationConfig};
 //!
+
 //! // Create parser with validation enabled
 //! let mut parser = RecursiveParser::with_attr_validation(&tokens, file_id);
 //!
+
 //! // Or enable it later
 //! let mut parser = RecursiveParser::new(&tokens, file_id);
 //! parser.enable_attr_validation();
 //!
+
 //! // Parse and get warnings
 //! let module = parser.parse_module()?;
 //! let warnings = parser.take_attr_warnings();
@@ -155,12 +165,14 @@ impl std::fmt::Display for AttributeValidationWarning {
 
 /// Trait for attribute validation.
 ///
+
 /// This trait allows external crates to provide custom validation logic
 /// without creating circular dependencies. The parser uses this trait
 /// to validate attributes during parsing.
 pub trait AttributeValidatorTrait: Send + Sync {
     /// Validate attributes for a specific target.
     ///
+
     /// Returns a list of validation warnings. Validation should not fail
     /// hard - instead, issues should be returned as warnings for backward
     /// compatibility.
@@ -176,10 +188,12 @@ pub trait AttributeValidatorTrait: Send + Sync {
 
 /// Default attribute validator for the parser.
 ///
+
 /// This validator can be configured to either:
 /// - Allow all attributes (default, for backward compatibility)
 /// - Validate against a basic built-in set of known attributes
 ///
+
 /// For full validation with the attribute registry, use the validator
 /// from verum_types (via the compiler).
 #[derive(Debug, Clone)]
@@ -331,6 +345,7 @@ impl AttributeValidator {
 
     /// Core validation logic for any target.
     ///
+
     /// This method provides basic validation against known attribute targets.
     /// For full validation, use the registry-based validator from verum_types.
     pub fn validate_attrs(
@@ -406,7 +421,7 @@ impl AttributeValidator {
 
             // ShellRender derive markers — see crates/verum_compiler/src/derives/shell_render.rs
             // @flag("-x") / @flag("--key") — prefix the field with this flag
-            // @positional               — emit value as bare positional arg
+            // @positional — emit value as bare positional arg
             "flag" | "positional" => target.contains(AttributeTarget::Field),
 
             // Bitfield attributes for hardware register layouts and protocol headers
@@ -517,14 +532,16 @@ impl AttributeValidator {
             // Unknown attributes — behaviour gated on
             // `allow_unknown` and `warn_unknown`:
             //
-            //   * `allow_unknown == true`  + `warn_unknown` → W0400 (warn, accept).
-            //   * `allow_unknown == true`  + !warn_unknown  → silently accept.
-            //   * `allow_unknown == false`                  → W0402 (reject as
-            //     "unknown attribute, no extension installed"); the
-            //     attribute fails validation regardless of the warn
-            //     gate so strict mode (`disabled()` /
-            //     `strict()` constructors) actually rejects.
+
+            //  * `allow_unknown == true` + `warn_unknown` → W0400 (warn, accept).
+            //  * `allow_unknown == true` + !warn_unknown → silently accept.
+            //  * `allow_unknown == false` → W0402 (reject as
+            //  "unknown attribute, no extension installed"); the
+            //  attribute fails validation regardless of the warn
+            //  gate so strict mode (`disabled()` /
+            //  `strict()` constructors) actually rejects.
             //
+
             // Before this wire-up `allow_unknown` was inert — every
             // unknown attribute fell through to the warn-or-pass
             // path regardless of the configured stance.
@@ -666,6 +683,7 @@ impl AttributeValidatorTrait for AttributeValidator {
 
 /// Convenience function to validate attributes with default configuration.
 ///
+
 /// This is useful for quick validation without creating a validator instance.
 #[must_use]
 pub fn validate_parsed_attributes(

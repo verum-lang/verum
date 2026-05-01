@@ -1,5 +1,6 @@
 //! Declaration nodes in the AST.
 //!
+
 //! This module defines top-level declarations including:
 //! - Functions
 //! - Types (records, variants, newtypes, aliases)
@@ -115,26 +116,30 @@ pub enum ItemKind {
 
     /// Active pattern declaration (F#-style custom pattern matchers).
     ///
+
     /// # Examples
     /// ```verum
     /// // Simple active pattern
     /// pattern Even(n: Int) -> Bool = n % 2 == 0;
     ///
+
     /// // Parameterized active pattern
     /// pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n <= hi;
     ///
+
     /// // Partial active pattern
     /// pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
     /// ```
     Pattern(PatternDecl),
 }
 
-/// Payload-free **proof-item discriminator**.  Surfaces the four
+/// Payload-free **proof-item discriminator**. Surfaces the four
 /// proof-bearing item shapes (Theorem / Lemma / Corollary / Axiom)
 /// as a single typed enum so consumers that classify but don't walk
 /// the payload — audit gates, JSON exporters, diagnostic renderers,
 /// CLI dispatch — work uniformly across all four sources.
 ///
+
 /// Stable serde tags (`"theorem"` / `"lemma"` / `"corollary"` /
 /// `"axiom"`) make this safe for round-trip pipelines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -157,7 +162,7 @@ pub enum ProofItemKind {
 
 impl ProofItemKind {
     /// Stable string tag — used by audit gates, JSON exporters,
-    /// CLI flag parsers.  One of `"theorem"`, `"lemma"`,
+    /// CLI flag parsers. One of `"theorem"`, `"lemma"`,
     /// `"corollary"`, `"axiom"`.
     pub fn tag(self) -> &'static str {
         match self {
@@ -168,7 +173,7 @@ impl ProofItemKind {
         }
     }
 
-    /// Whether this item kind requires a proof body.  Theorem /
+    /// Whether this item kind requires a proof body. Theorem /
     /// lemma / corollary do; axiom does not (it IS the trust
     /// extension).
     pub fn requires_proof(self) -> bool {
@@ -176,7 +181,7 @@ impl ProofItemKind {
     }
 
     /// Whether this item kind contributes to the trust extension
-    /// (i.e., is admitted without proof).  True only for `Axiom`.
+    /// (i.e., is admitted without proof). True only for `Axiom`.
     pub fn is_trust_extension(self) -> bool {
         matches!(self, ProofItemKind::Axiom)
     }
@@ -200,7 +205,7 @@ impl ItemKind {
     }
 
     /// Whether this is a theorem-shaped item (Theorem / Lemma /
-    /// Corollary).  All three share `TheoremDecl` and produce
+    /// Corollary). All three share `TheoremDecl` and produce
     /// `ProofBody`-bearing obligations; consumers that walk proof
     /// bodies typically want all three uniformly.
     pub fn is_theorem_shaped(&self) -> bool {
@@ -222,7 +227,7 @@ impl ItemKind {
     }
 
     /// Common projection for proof-bearing items: the underlying
-    /// `TheoremDecl`.  Returns `None` for axioms (they use
+    /// `TheoremDecl`. Returns `None` for axioms (they use
     /// `AxiomDecl`) and non-proof items.
     pub fn as_theorem_decl(&self) -> Option<&TheoremDecl> {
         match self {
@@ -243,7 +248,7 @@ impl ItemKind {
     }
 
     /// **Uniform name accessor** for proof items — works regardless
-    /// of which of the four variants the item carries.  Returns
+    /// of which of the four variants the item carries. Returns
     /// `None` for non-proof items.
     pub fn proof_item_name(&self) -> Option<&Ident> {
         match self {
@@ -255,8 +260,8 @@ impl ItemKind {
         }
     }
 
-    /// **Uniform attribute accessor** for proof items.  Returns the
-    /// attribute list regardless of variant.  Returns `None` for
+    /// **Uniform attribute accessor** for proof items. Returns the
+    /// attribute list regardless of variant. Returns `None` for
     /// non-proof items.
     pub fn proof_item_attributes(&self) -> Option<&List<Attribute>> {
         match self {
@@ -299,7 +304,7 @@ impl ItemKind {
         }
     }
 
-    /// **Uniform name accessor** for type / protocol items.  Returns
+    /// **Uniform name accessor** for type / protocol items. Returns
     /// the declaration name regardless of which variant carries it.
     /// `None` for non-type-or-protocol items.
     pub fn type_or_protocol_name(&self) -> Option<&Ident> {
@@ -313,12 +318,14 @@ impl ItemKind {
     /// **Uniform classification** of any type-or-protocol item by
     /// its body shape.
     ///
+
     /// - `ItemKind::Type(d)` returns `Some(d.body.kind())`.
     /// - `ItemKind::Protocol(_)` returns `Some(TypeDeclBodyKind::Protocol)`
-    ///   (the legacy standalone form is semantically equivalent to a
-    ///   `type Foo is protocol { ... }` body).
+    ///  (the legacy standalone form is semantically equivalent to a
+    ///  `type Foo is protocol { ... }` body).
     /// - Other variants return `None`.
     ///
+
     /// This is the load-bearing accessor for code that walks
     /// `Module.items` and classifies type declarations by shape
     /// (record / variant / protocol / newtype / inductive / etc.) —
@@ -335,17 +342,18 @@ impl ItemKind {
 
 /// A function declaration.
 ///
+
 /// # Syntax Order
 /// ```text
 /// @std(ContextGroup)?
 /// fn name<T>(params) -> ReturnType
-///     using [Context1, Context2]       // Context clause (optional)
-///     where type T: Protocol           // Generic constraints (optional)
-///     where meta N > 0                 // Meta constraints (optional)
-///     requires EXPR                    // Preconditions (optional, repeatable)
-///     ensures EXPR                     // Postconditions (optional, repeatable)
+///  using [Context1, Context2] // Context clause (optional)
+///  where type T: Protocol // Generic constraints (optional)
+///  where meta N > 0 // Meta constraints (optional)
+///  requires EXPR // Preconditions (optional, repeatable)
+///  ensures EXPR // Postconditions (optional, repeatable)
 /// {
-///     body
+///  body
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -355,72 +363,93 @@ pub struct FunctionDecl {
 
     /// Meta function flag - indicates compile-time execution.
     ///
+
     /// # Staged Metaprogramming
     ///
+
     /// Verum supports N-level staged metaprogramming where functions execute
     /// at different compilation stages:
     ///
+
     /// - **Stage 0**: Runtime execution (normal functions, `is_meta = false`)
     /// - **Stage 1**: Compile-time execution (`meta fn`, most common)
     /// - **Stage N**: N-th level meta (`meta(N) fn`, generates Stage N-1 code)
     ///
+
     /// # Stage Semantics
     ///
+
     /// A Stage N function generates code for Stage N-1. This creates a
     /// compilation cascade:
     ///
+
     /// ```text
     /// meta(3) fn → generates → meta(2) fn → generates → meta fn → generates → runtime fn
-    /// Stage 3        →        Stage 2        →        Stage 1      →        Stage 0
+    /// Stage 3 → Stage 2 → Stage 1 → Stage 0
     /// ```
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// // Stage 1: generates runtime code at compile time
     /// meta fn derive_eq<T>() -> TokenStream { ... }
     ///
+
     /// // Stage 2: generates Stage 1 (meta) functions
     /// meta(2) fn create_derivation_family() -> TokenStream {
-    ///     quote {
-    ///         meta fn derive_X<T>() { ... }
-    ///     }
+    ///  quote {
+    ///  meta fn derive_X<T>() { ... }
+    ///  }
     /// }
     ///
+
     /// // Stage 3: meta-meta-programming (rare but powerful)
     /// meta(3) fn domain_compiler() { ... }
     /// ```
     ///
+
     /// # Stage Coherence Rule
     ///
+
     /// A Stage N function can only DIRECTLY generate Stage N-1 code.
     /// To generate lower-stage code, the output must contain meta functions
     /// that perform further generation.
     ///
+
     /// See also: `stage_level` field for the numeric stage.
     pub is_meta: bool,
 
     /// Stage level for multi-stage metaprogramming.
     ///
+
     /// # Values
     ///
+
     /// - `0`: Runtime function (default, `is_meta = false`)
     /// - `1`: Standard meta function (`meta fn`, `is_meta = true`)
     /// - `N`: N-th level meta (`meta(N) fn`, `is_meta = true`, N ≥ 2)
     ///
+
     /// # Invariants
     ///
+
     /// - If `is_meta = false`, then `stage_level = 0`
     /// - If `is_meta = true` and no explicit level, then `stage_level = 1`
     /// - If `is_meta = true` with explicit `meta(N)`, then `stage_level = N`
     ///
+
     /// # Quote Target Stage
     ///
+
     /// Inside a Stage N function, `quote { ... }` targets Stage N-1 by default.
     /// Use `quote(M) { ... }` to target explicit Stage M where M < N.
     ///
+
     /// # Type Checking
     ///
+
     /// The stage checker (`StageChecker`) enforces:
     /// - No cross-stage value leakage
     /// - Proper stage coherence
@@ -446,50 +475,62 @@ pub struct FunctionDecl {
 
     /// Transparent meta function - disables hygienic macro expansion.
     ///
+
     /// # Hygiene Semantics
     ///
+
     /// By default, meta functions (macros) in Verum use **hygienic expansion**:
     /// - Identifiers in `quote { ... }` are gensym'd (renamed with unique suffixes)
     /// - This prevents accidental variable capture from the expansion site
     /// - The macro's internal bindings don't leak to callers
     ///
+
     /// When `@transparent` is applied to a meta function:
     /// - Identifiers in `quote { ... }` are NOT renamed
     /// - The macro can intentionally capture variables from the expansion site
     /// - M402 (Accidental Capture) errors are enabled for safety
     ///
+
     /// # Use Cases
     ///
+
     /// - **Anaphoric macros**: `@aif(cond) { ... }` that bind `it` to the condition result
     /// - **DSL builders**: Where explicit capture is part of the design
     /// - **Code generation**: That needs exact identifier matching
     ///
+
     /// # Examples
     ///
+
     /// ```verum
     /// // Hygienic (default) - 'x' is gensym'd, no capture possible
     /// meta fn hygienic_macro() -> TokenStream {
-    ///     quote { let x = 1; x + 1 }  // x becomes x_gensym_123
+    ///  quote { let x = 1; x + 1 } // x becomes x_gensym_123
     /// }
     ///
+
     /// // Transparent - 'x' is NOT gensym'd, captures from expansion site
     /// @transparent
     /// meta fn aif(cond: Expr) -> TokenStream {
-    ///     quote {
-    ///         let it = $cond;        // 'it' captures into caller scope
-    ///         if it { ... }
-    ///     }
+    ///  quote {
+    ///  let it = $cond; // 'it' captures into caller scope
+    ///  if it { ... }
+    ///  }
     /// }
     /// ```
     ///
+
     /// # Hygiene Checks
     ///
+
     /// For `@transparent` macros, the compiler checks:
     /// - M402: Bare identifiers that might accidentally capture
     /// - M408: Undeclared captures (meta bindings used without $var or lift())
     ///
+
     /// # Related
     ///
+
     /// - `is_meta`: Whether this is a meta function
     /// - `stage_level`: Compilation stage for multi-stage metaprogramming
     pub is_transparent: bool,
@@ -670,25 +711,30 @@ pub enum FunctionBody {
 
 /// A throws clause specifying error types a function can throw.
 ///
+
 /// Throws clauses declare the error types that a function may propagate.
 /// This enables explicit error type tracking and inference of the Fallible
 /// computational property.
 ///
+
 /// # Syntax (Spec: grammar/verum.ebnf v2.8)
 /// ```text
 /// throws_clause = 'throws' , '(' , error_type_list , ')' ;
 /// error_type_list = type_expr , { '|' , type_expr } ;
 /// ```
 ///
+
 /// # Example
 /// ```verum
 /// fn parse(input: Text) throws(ParseError | ValidationError) -> AST {
-///     // function body
+///  // function body
 /// }
 /// ```
 ///
+
 /// # Computational Properties
 ///
+
 /// A function with a throws clause has the `Fallible` computational property,
 /// meaning it may fail and propagate errors. This is tracked at compile-time
 /// for effect inference.
@@ -726,9 +772,11 @@ impl Spanned for ThrowsClause {
 
 /// A predicate declaration for named refinement type predicates.
 ///
+
 /// Predicates are reusable boolean expressions that can be used in refinement types.
 /// They define constraints that values of a type must satisfy.
 ///
+
 /// # Example
 /// ```verum
 /// predicate NonZero(x: Int) -> Bool { x != 0 }
@@ -757,54 +805,64 @@ pub use crate::context::{ContextList, ContextRequirement, ContextTransform};
 
 /// Resource modifier for type declarations.
 ///
+
 /// Resource modifiers control how values of a type can be used and ensure
 /// compile-time safety for resource management.
 ///
+
 /// # Specification
 ///
+
 /// Affine types provide compile-time resource safety guarantees:
 /// - Values MUST be consumed at most once
 /// - Prevents resource leaks (files, network connections, etc.)
 /// - Zero runtime overhead (single-use proven statically)
 ///
+
 /// Type Checking Rule:
 /// ```text
-/// Γ, x: τ^affine ⊢ e : U    x used at most once in e
+/// Γ, x: τ^affine ⊢ e : U x used at most once in e
 /// ────────────────────────────────────────────────────
 /// Γ ⊢ let x: τ^affine = e₁ in e₂ : U
 /// ```
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// type affine FileHandle is {
-///     fd: Int,
-///     path: Path,
+///  fd: Int,
+///  path: Path,
 /// }
 ///
+
 /// fn process_file(path: Path) -> Result<Data> {
-///     let handle = FileHandle.open(path)?;  // Affine value
-///     let data = handle.read_all()?;         // handle consumed
-///     // handle.cleanup() called automatically - GUARANTEED
-///     Ok(data)
+///  let handle = FileHandle.open(path)?; // Affine value
+///  let data = handle.read_all()?; // handle consumed
+///  // handle.cleanup() called automatically - GUARANTEED
+///  Ok(data)
 /// }
 /// ```
 ///
+
 /// Error case:
 /// ```verum
 /// fn leak_file(path: Path) {
-///     let handle = FileHandle.open(path)?;
-///     let data1 = handle.read()?;  // First use - OK
-///     let data2 = handle.read()?;  // ERROR: affine value used more than once
+///  let handle = FileHandle.open(path)?;
+///  let data1 = handle.read()?; // First use - OK
+///  let data2 = handle.read()?; // ERROR: affine value used more than once
 /// }
 /// ```
 ///
+
 /// Affine types can be used at most once (moved or dropped).
 /// Linear types must be used exactly once (compile error if dropped unused).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceModifier {
     /// Affine type: use at most once
     ///
+
     /// Values can be:
     /// - Used once (moved/consumed)
     /// - Not used (dropped with cleanup)
@@ -813,6 +871,7 @@ pub enum ResourceModifier {
 
     /// Linear type: use exactly once (future feature)
     ///
+
     /// Values must be:
     /// - Used exactly once (moved/consumed)
     /// - Never dropped without use (compile error)
@@ -847,43 +906,54 @@ impl std::fmt::Display for ResourceModifier {
 
 /// A type declaration.
 ///
+
 /// # Unified 'is' Syntax
 ///
+
 /// All type definitions use the unified `type ... is` pattern:
 /// ```text
 /// type [affine] Name<T> where meta N > 0 is Body;
 /// ```
 ///
+
 /// # Resource Modifiers
 ///
+
 /// Type declarations can have resource modifiers that control how values
 /// of the type are used and managed:
 ///
+
 /// - `affine`: Values can be used at most once (prevents double-free, use-after-move)
 /// - `linear` (future): Values must be used exactly once
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// // Affine type - use at most once
 /// type affine FileHandle is {
-///     fd: Int,
+///  fd: Int,
 /// }
 ///
+
 /// // Type with meta constraints
 /// type Matrix<M: meta usize, N: meta usize>
-///     where meta M > 0, meta N > 0
+///  where meta M > 0, meta N > 0
 /// is {
-///     data: [[Float; N]; M]
+///  data: [[Float; N]; M]
 /// }
 ///
+
 /// fn read_file(handle: FileHandle) -> Text {
-///     // handle consumed here
+///  // handle consumed here
 /// }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Supports affine types (use at most once) and linear types (use exactly once).
 /// Type declarations use unified 'is' syntax: type Name is { fields } or type Name is A | B.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -919,7 +989,7 @@ impl Spanned for TypeDecl {
     }
 }
 
-/// Payload-free **type-decl body discriminator**.  Surfaces the
+/// Payload-free **type-decl body discriminator**. Surfaces the
 /// 11 type-decl shapes (Alias / Record / Variant / Protocol /
 /// Newtype / Tuple / SigmaTuple / Unit / Inductive / Coinductive /
 /// Quotient) as a single typed enum so consumers that classify
@@ -927,6 +997,7 @@ impl Spanned for TypeDecl {
 /// doc generators, IDE outlines — work uniformly without
 /// pattern-matching against all 11 variants.
 ///
+
 /// Stable serde tags (snake_case form of each variant name) make
 /// this safe for round-trip pipelines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1042,22 +1113,25 @@ pub enum TypeDeclBody {
 
     /// Quotient type: `type Q is T / R` — T1-T.
     ///
+
     /// Identifies elements of `base` that are related by the
     /// equivalence relation `relation`. The relation is a lambda
     /// expression of type `fn(base, base) -> Bool` that must be
     /// provably reflexive, symmetric, and transitive (the type
     /// checker emits proof obligations at elaboration time).
     ///
+
     /// Example:
     /// ```verum
     /// type ZmodN<N: Int{self > 0}> is Int / (|a, b| (a - b) % N == 0);
     /// ```
     ///
+
     /// Semantically equivalent to the HIT:
     /// ```verum
     /// type Q is
-    ///     | of(rep: T)
-    ///     | quot: fn(a: T, b: T) -> Path<Q>(of(a), of(b));
+    ///  | of(rep: T)
+    ///  | quot: fn(a: T, b: T) -> Path<Q>(of(a), of(b));
     /// ```
     /// The quotient-type parser is the ergonomic surface; the type
     /// system lowers Q into the HIT form for universal-property
@@ -1148,21 +1222,25 @@ impl TypeDeclBody {
 /// Protocol body containing optional extends clause, where clause, and items.
 /// Spec: grammar/verum.ebnf:289 - protocol_def with extends and where clause support
 ///
+
 /// # Context Protocol Modifier
 ///
+
 /// Protocol bodies can be marked as context protocols using the `context` modifier.
 /// This is used with the unified `type ... is protocol { ... }` syntax:
 ///
+
 /// ```verum
 /// // Alternative syntax (compatible with existing type declarations)
 /// pub context type Database is protocol {
-///     async fn query(self, sql: Text) -> Result<Rows, Error>;
+///  async fn query(self, sql: Text) -> Result<Rows, Error>;
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProtocolBody {
     /// Whether this is a context protocol (`context type X is protocol { ... }`)
     ///
+
     /// Context protocols are used for dependency injection via `using [...]` clauses,
     /// as opposed to constraint protocols which are used in `where T: Protocol` bounds.
     pub is_context: bool,
@@ -1243,36 +1321,42 @@ impl ProtocolBody {
 
 /// A field in a record type.
 ///
+
 /// # Default Values (Builder Pattern)
 ///
+
 /// Fields can have optional default values for use with @builder:
 /// ```verum
 /// @builder
 /// type HttpRequest is {
-///     method: HttpMethod,                    // Required (no default)
-///     url: Url,                              // Required (no default)
-///     headers: Map<Text, Text> = Map.new(),  // Optional with default
-///     timeout: Duration = 30.seconds,        // Optional with default
+///  method: HttpMethod, // Required (no default)
+///  url: Url, // Required (no default)
+///  headers: Map<Text, Text> = Map.new(), // Optional with default
+///  timeout: Duration = 30.seconds, // Optional with default
 /// };
 /// ```
 ///
+
 /// # Bitfield Support
 ///
+
 /// Fields can have bit specifications for packed bitfield types:
 /// ```verum
 /// @bitfield
 /// @endian(big)
 /// type IpHeader is {
-///     @bits(4) version: U8,
-///     @bits(4) ihl: U8,
-///     @bits(16) total_length: U16,
+///  @bits(4) version: U8,
+///  @bits(4) ihl: U8,
+///  @bits(16) total_length: U16,
 /// };
 /// ```
 ///
+
 /// When a field has a `bit_spec`, it represents a bitfield member with:
 /// - `width`: Number of bits the field occupies
 /// - `offset`: Optional explicit bit offset from container start
 ///
+
 /// The type system validates that:
 /// - Bit width does not exceed the storage type's bit width
 /// - No overlapping fields (unless explicitly allowed)
@@ -1368,15 +1452,18 @@ impl RecordField {
 
     /// Create a new bitfield member with bit specification.
     ///
+
     /// Used for fields in @bitfield types that have @bits(N) attributes.
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// @bitfield
     /// type Flags is {
-    ///     @bits(4) version: U8,
-    ///     @bits(4) ihl: U8,
+    ///  @bits(4) version: U8,
+    ///  @bits(4) ihl: U8,
     /// };
     /// ```
     pub fn with_bit_spec(
@@ -1510,6 +1597,7 @@ impl Spanned for Variant {
 pub enum VariantData {
     /// Tuple variant: Some(T)
     ///
+
     /// Also represents HIT path-constructors at the AST level — the
     /// parser accepts the `Foo(args) = from..to` syntax and stores
     /// the args as the tuple payload. The path-endpoint metadata
@@ -1522,34 +1610,40 @@ pub enum VariantData {
 
 /// A protocol declaration.
 ///
+
 /// # Protocol Declaration Syntax
 /// ```text
 /// protocol Name<T>: BaseProtocol
-///     where type T: Ord
-///     where meta N > 0
+///  where type T: Ord
+///  where meta N > 0
 /// {
-///     items
+///  items
 /// }
 /// ```
 ///
+
 /// # Context Protocol Modifier
 ///
+
 /// Protocols can be marked as context protocols using the `context` modifier.
 /// This distinguishes between constraint protocols and injectable protocols:
 ///
+
 /// - **Constraint protocols**: `protocol Comparable { ... }` - used in `where T: Comparable`
 /// - **Injectable protocols**: `context protocol Database { ... }` - used in `using [Database]`
 ///
+
 /// # Examples
 /// ```verum
 /// // Constraint protocol (default)
 /// protocol Comparable {
-///     fn compare(&self, other: &Self) -> Ordering;
+///  fn compare(&self, other: &Self) -> Ordering;
 /// }
 ///
+
 /// // Context protocol (injectable)
 /// context protocol Database {
-///     async fn query(self, sql: Text) -> Result<Rows, Error>;
+///  async fn query(self, sql: Text) -> Result<Rows, Error>;
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1557,6 +1651,7 @@ pub struct ProtocolDecl {
     pub visibility: Visibility,
     /// Whether this is a context protocol (`context protocol Database { ... }`)
     ///
+
     /// Context protocols are used for dependency injection via `using [...]` clauses,
     /// as opposed to constraint protocols which are used in `where T: Protocol` bounds.
     pub is_context: bool,
@@ -1585,6 +1680,7 @@ impl Spanned for ProtocolDecl {
 impl ProtocolDecl {
     /// Check if this is a context protocol (injectable via `using [...]`)
     ///
+
     /// Context protocols are used for dependency injection, as opposed to
     /// constraint protocols which are used in `where T: Protocol` bounds.
     pub fn is_context_protocol(&self) -> bool {
@@ -1627,6 +1723,7 @@ pub enum ProtocolItemKind {
     Const { name: Ident, ty: Type },
     /// Protocol-level axiom — T1-R foundation.
     ///
+
     /// A protocol axiom is a proposition universally quantified over the
     /// protocol's parameters AND the implementing type's associated types.
     /// Every `implement` block for this protocol generates a proof
@@ -1635,14 +1732,15 @@ pub enum ProtocolItemKind {
     /// the SMT backend or can be discharged with explicit `proof name by tactic`
     /// clauses inside the implement block.
     ///
+
     /// Example:
     /// ```verum
     /// type Group is protocol {
-    ///     type Elem;
-    ///     fn unit() -> Self.Elem;
-    ///     fn mul(a: Self.Elem, b: Self.Elem) -> Self.Elem;
-    ///     axiom left_unit(x: Self.Elem)
-    ///         ensures Self.mul(Self.unit(), x) == x;
+    ///  type Elem;
+    ///  fn unit() -> Self.Elem;
+    ///  fn mul(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    ///  axiom left_unit(x: Self.Elem)
+    ///  ensures Self.mul(Self.unit(), x) == x;
     /// };
     /// ```
     Axiom(AxiomDecl),
@@ -1656,29 +1754,34 @@ impl Spanned for ProtocolItem {
 
 /// An implementation block.
 ///
+
 /// # Implementation Block Syntax
 /// ```text
 /// implement<T> Protocol for Type
-///     where type T: Ord
-///     where meta N > 0
+///  where type T: Ord
+///  where meta N > 0
 /// {
-///     items
+///  items
 /// }
 /// ```
 ///
+
 /// # Specialization (v2.0+ planned)
 /// ```text
 /// @specialize
 /// implement Protocol for SpecificType {
-///     // More specific implementation
+///  // More specific implementation
 /// }
 ///
+
 /// @specialize(negative)
 /// implement<T: !Clone> Protocol for List<T> { }
 ///
+
 /// @specialize(rank = 10)
 /// implement Protocol for Int { }
 ///
+
 /// @specialize(when(T: Clone + Send))
 /// implement<T> Protocol for Heap<T> { }
 /// ```
@@ -1757,22 +1860,24 @@ pub enum ImplItemKind {
     Const { name: Ident, ty: Type, value: Expr },
     /// Axiom proof clause — `proof axiom_name by tactic;`
     ///
+
     /// Inside an `implement P for T { ... }` block, discharges the
     /// named axiom from protocol `P` using the given tactic. The
     /// model-verification phase (T1-R) matches the name against `P`'s
     /// axiom list and runs the tactic against the self-substituted
     /// proposition instead of the default `auto_prove`.
     ///
+
     /// Example:
     /// ```verum
     /// implement Group for IntGroup {
-    ///     type Elem = Int;
-    ///     fn unit() -> Int { 0 }
-    ///     fn mul(a: Int, b: Int) -> Int { a + b }
-    ///     fn inv(a: Int) -> Int { -a }
-    ///     proof assoc     by ring;
-    ///     proof left_unit by ring;
-    ///     proof left_inv  by ring;
+    ///  type Elem = Int;
+    ///  fn unit() -> Int { 0 }
+    ///  fn mul(a: Int, b: Int) -> Int { a + b }
+    ///  fn inv(a: Int) -> Int { -a }
+    ///  proof assoc by ring;
+    ///  proof left_unit by ring;
+    ///  proof left_inv by ring;
     /// }
     /// ```
     Proof {
@@ -1789,27 +1894,35 @@ impl Spanned for ImplItem {
 
 /// A module declaration.
 ///
+
 /// # Profile Support
 ///
+
 /// Modules can declare which language profiles they support using the @profile() attribute.
 /// This enables fine-grained control over language features within a single project.
 ///
+
 /// # Examples
 ///
+
 /// ```verum
 /// @profile(application)
 /// module web_server { }
 ///
+
 /// @profile(systems)
 /// module low_level { }
 ///
+
 /// @profile(application)
 /// @feature(enable: ["unsafe"])
 /// module ffi_bindings { }
 /// ```
 ///
+
 /// # Specification
 ///
+
 /// Language profiles control which features are available in a module.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleDecl {
@@ -1841,15 +1954,19 @@ impl Spanned for ModuleDecl {
 
 /// A const declaration.
 ///
+
 /// # Generic Constants
 ///
+
 /// Constants can have generic parameters:
 ///
+
 /// ```verum
 /// const ZERO<T: Default>: T = T.default();
 /// const IDENTITY<T>: fn(T) -> T = |x| x;
 /// ```
 ///
+
 /// Mount statement for importing names into scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstDecl {
@@ -1887,11 +2004,13 @@ impl Spanned for StaticDecl {
 
 /// A mount declaration.
 ///
+
 /// Supports re-exports with visibility modifiers:
 /// - `import std.io.File;` - private import
 /// - `public mount std.io.File;` - re-export as public
 /// - `public mount std.io.File as MyFile;` - re-export with rename
 ///
+
 /// Re-export statement for making imported items publicly visible.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MountDecl {
@@ -1932,6 +2051,7 @@ pub enum MountTreeKind {
     /// Relative file-path mount: `mount ./foo.vr;` or
     /// `mount ../shared/util.vr as Util;` (#5 / P1.5).
     ///
+
     /// Distinguishes file-system-relative module loading from
     /// the module-path lookup used by `Path` / `Glob` /
     /// `Nested`. The string carries the literal source-relative
@@ -1940,11 +2060,12 @@ pub enum MountTreeKind {
     /// and the importing source file's directory as the
     /// resolution base.
     ///
+
     /// Path constraints (enforced at parse time):
-    ///   * must start with `./` or `../`
-    ///   * must end with `.vr`
-    ///   * must NOT contain `\0`, `\n`, `\r`
-    ///   * must NOT escape the cog root via excessive `..`
+    ///  * must start with `./` or `../`
+    ///  * must end with `.vr`
+    ///  * must NOT contain `\0`, `\n`, `\r`
+    ///  * must NOT escape the cog root via excessive `..`
     File {
         /// Source-relative path as written, e.g. `./foo.vr` or
         /// `../shared/util.vr`. Preserved verbatim so error
@@ -2015,32 +2136,38 @@ impl Spanned for MetaRule {
 
 /// A context declaration.
 ///
+
 /// Contexts define dependency injection containers that can be used to provide
 /// values to functions. This enables better testability and separation of concerns.
 ///
+
 /// # Example
 /// ```verum
 /// context Database {
-///     fn query(sql: Text) -> Result<Rows>
-///     fn execute(sql: Text) -> Result<Unit>
+///  fn query(sql: Text) -> Result<Rows>
+///  fn execute(sql: Text) -> Result<Unit>
 /// }
 /// ```
 ///
+
 /// # Sub-Contexts
 ///
+
 /// Contexts can define nested sub-contexts for fine-grained capability control:
 ///
+
 /// ```verum
 /// context FileSystem {
-///     context Read {
-///         fn read(path: Text) -> Result<List<u8>>
-///     }
-///     context Write {
-///         fn write(path: Text, data: List<u8>) -> Result<()>
-///     }
+///  context Read {
+///  fn read(path: Text) -> Result<List<u8>>
+///  }
+///  context Write {
+///  fn write(path: Text, data: List<u8>) -> Result<()>
+///  }
 /// }
 /// ```
 ///
+
 /// Sub-context declaration: derives a new context from an existing one with restrictions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextDecl {
@@ -2093,18 +2220,21 @@ impl Spanned for ContextDecl {
 
 /// A context group declaration.
 ///
+
 /// Context groups allow multiple contexts to be used together as a unit,
 /// simplifying function signatures that require multiple contexts.
 ///
+
 /// # Example
 /// ```verum
 /// context group WebApp {
-///     Database,
-///     Logger,
-///     Cache
+///  Database,
+///  Logger,
+///  Cache
 /// }
 /// ```
 ///
+
 /// Context groups can also use extended syntax with negation and type arguments:
 /// ```verum
 /// using Pure = [!IO, !State<_>, !Random];
@@ -2126,18 +2256,21 @@ impl Spanned for ContextGroupDecl {
 
 /// Context layer declaration — composable context bundles.
 ///
+
 /// Layers group `provide` statements with dependency ordering.
 /// Composition via `+` enables modular application assembly.
 ///
+
 /// Grammar: layer_def = visibility 'layer' identifier layer_body
-///          layer_body = '{' { provide_stmt } '}' | '=' layer_expr ';'
-///          layer_expr = identifier { '+' identifier }
+///  layer_body = '{' { provide_stmt } '}' | '=' layer_expr ';'
+///  layer_expr = identifier { '+' identifier }
 ///
+
 /// # Examples
 /// ```verum
 /// layer DatabaseLayer {
-///     provide ConnectionPool = ConnectionPool.new(Config.get_url());
-///     provide QueryExecutor = QueryExecutor.new(ConnectionPool);
+///  provide ConnectionPool = ConnectionPool.new(Config.get_url());
+///  provide QueryExecutor = QueryExecutor.new(ConnectionPool);
 /// }
 /// layer AppLayer = DatabaseLayer + LoggingLayer;
 /// ```
@@ -2175,8 +2308,10 @@ impl Spanned for LayerDecl {
 
 /// Visibility modifier.
 ///
+
 /// Visibility modifiers: public, public(crate), public(super), public(in path), or private (default).
 ///
+
 /// | Modifier | Visibility |
 /// |----------|------------|
 /// | `public` | Public to all users |
@@ -2248,32 +2383,36 @@ impl Visibility {
 
 /// A theorem declaration.
 ///
+
 /// Theorems are named propositions with proofs. They represent mathematical
 /// truths that have been verified through formal proof.
 ///
+
 /// # Theorem/Lemma/Corollary Syntax
 /// ```text
 /// theorem name<T>(params) -> Type
-///     requires precondition1, precondition2
-///     ensures postcondition1, postcondition2
+///  requires precondition1, precondition2
+///  ensures postcondition1, postcondition2
 /// {
-///     proof by tactic
+///  proof by tactic
 /// }
 /// ```
 ///
+
 /// # Examples
 /// ```verum
 /// theorem plus_comm(m: Int, n: Int)
-///     ensures m + n == n + m
+///  ensures m + n == n + m
 /// {
-///     proof by ring
+///  proof by ring
 /// }
 ///
+
 /// theorem division_valid(a: Int, b: Int)
-///     requires b != 0
-///     ensures a / b * b + a % b == a
+///  requires b != 0
+///  ensures a / b * b + a % b == a
 /// {
-///     proof by auto
+///  proof by auto
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2405,22 +2544,27 @@ impl Spanned for TheoremDecl {
 
 /// An axiom declaration.
 ///
+
 /// Axioms are unproven propositions that are assumed to be true.
 /// They form the foundational assumptions of the proof system.
 ///
+
 /// # Syntax
 /// ```text
 /// axiom name<T>(params) -> Type;
 /// ```
 ///
+
 /// # Examples
 /// ```verum
 /// // Excluded middle (classical logic axiom)
 /// axiom excluded_middle(p: Bool) -> Bool;
 /// ```
 ///
+
 /// # Warning
 ///
+
 /// Axioms should be used sparingly as they introduce unproven assumptions.
 /// Inconsistent axioms can lead to proving False.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2482,34 +2626,38 @@ impl Spanned for AxiomDecl {
 
 /// A tactic declaration.
 ///
+
 /// Tactics are proof automation strategies that can be defined by users.
 /// They compose basic proof steps into reusable automation.
 ///
+
 /// # Tactic Declaration Syntax
 /// ```text
 /// tactic name is {
-///     tactic_body
+///  tactic_body
 /// }
 /// ```
 ///
+
 /// # Examples
 /// ```verum
 /// // Automated proof search
 /// tactic auto is {
-///     first [
-///         assumption,
-///         reflexivity,
-///         { intro; auto },
-///         { split; auto },
-///         { apply_hypothesis; auto },
-///         { unfold_definition; auto }
-///     ]
+///  first [
+///  assumption,
+///  reflexivity,
+///  { intro; auto },
+///  { split; auto },
+///  { apply_hypothesis; auto },
+///  { unfold_definition; auto }
+///  ]
 /// }
 ///
+
 /// // Induction with automation
 /// tactic induction_auto is {
-///     induction *;
-///     all_goals auto
+///  induction *;
+///  all_goals auto
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2547,6 +2695,7 @@ impl Spanned for TacticDecl {
 
 /// A tactic parameter.
 ///
+
 /// Tactics take typed parameters, much like functions. The `kind` field
 /// captures the classical tactic-parameter classification (Expr, Type,
 /// Tactic, Hypothesis, Int, Prop); the `ty` field carries the concrete
@@ -2601,19 +2750,23 @@ pub enum TacticBody {
 
 /// A proof body.
 ///
+
 /// Proof bodies can be explicit proof terms, tactics, or a combination.
 ///
+
 /// # Proof Tactics Syntax
 /// ```text
 /// proof {
-///     have h1: P by tactic
-///     have h2: Q by assumption
-///     show R by apply lemma[h1, h2]
+///  have h1: P by tactic
+///  have h2: Q by assumption
+///  show R by apply lemma[h1, h2]
 /// }
 /// ```
 ///
+
 /// # Discriminator
 ///
+
 /// Use [`ProofBody::kind`] when you only need to know which mode
 /// (Term/Tactic/Structured/ByMethod) without unpacking the payload —
 /// audit-gate JSON, diagnostic rendering, hash-based deduplication.
@@ -2634,9 +2787,9 @@ pub enum ProofBody {
     ByMethod(ProofMethod),
 }
 
-/// Payload-free discriminator for [`ProofBody`].  Lets consumers
+/// Payload-free discriminator for [`ProofBody`]. Lets consumers
 /// classify proof bodies by mode without pattern-matching on the
-/// payload variants.  Stable JSON tags (`"term"` / `"tactic"` /
+/// payload variants. Stable JSON tags (`"term"` / `"tactic"` /
 /// `"structured"` / `"by_method"`) make this safe for audit-gate
 /// emission and round-trip via serde.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2698,9 +2851,9 @@ impl ProofBody {
     }
 
     /// Whether this proof is **constructive** in the Curry-Howard sense
-    /// — i.e., directly produces a term.  Currently `Term` is
+    /// — i.e., directly produces a term. Currently `Term` is
     /// constructive; the others may or may not be depending on the
-    /// tactic / method used.  This conservative test returns `true`
+    /// tactic / method used. This conservative test returns `true`
     /// only when the elaborator can guarantee a term is produced
     /// without further reduction.
     pub fn is_directly_constructive(&self) -> bool {
@@ -2779,14 +2932,15 @@ pub enum ProofStepKind {
 
 /// A calculation chain (equational reasoning).
 ///
+
 /// # Algebraic Structure Syntax
 /// ```text
 /// calc {
-///     op(a, id)
-///         = op(a, op(inv(a), a))     by left_inv
-///         = op(op(a, inv(a)), a)     by assoc
-///         = op(id, a)                by left_inv
-///         = a                        by left_id
+///  op(a, id)
+///  = op(a, op(inv(a), a)) by left_inv
+///  = op(op(a, inv(a)), a) by assoc
+///  = op(id, a) by left_inv
+///  = a by left_id
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2901,8 +3055,10 @@ pub enum ProofMethod {
 
 /// A tactic expression.
 ///
+
 /// Tactic expressions are the primitive proof automation steps.
 ///
+
 /// # Proof Tactics Syntax
 /// ```text
 /// tactic ::= intro | apply expr | simp | ring | omega | ...
@@ -3012,14 +3168,17 @@ pub enum TacticExpr {
 
     /// Named tactic invocation.
     ///
+
     /// Tactics may be generic (e.g. `tactic category_law<C: Category>()`)
     /// and can therefore be called with explicit type arguments:
     ///
+
     /// ```verum
     /// category_law<F.Source>();
     /// functor_law<Identity>();
     /// ```
     ///
+
     /// `generic_args` is empty when no type arguments are supplied.
     Named {
         name: Ident,
@@ -3040,6 +3199,7 @@ pub enum TacticExpr {
     /// Pattern-match on a value inside a tactic body:
     /// `match x { P₁ => t₁, P₂ => t₂, … }`
     ///
+
     /// Each arm's body is itself a tactic expression, allowing tactics to
     /// branch on the shape of an auxiliary value (e.g. a `Maybe<Proof>`).
     Match {
@@ -3112,41 +3272,46 @@ impl TacticExpr {
 
 /// A view declaration.
 ///
+
 /// Views provide alternative pattern matching interfaces for types.
 /// They allow matching on computed properties rather than constructors.
 ///
+
 /// # View Pattern Syntax (v2.0+ planned)
 /// ```text
 /// view Name : ParamType -> ReturnType {
-///     Constructor1 : (params) -> ReturnType(index1),
-///     Constructor2 : (params) -> ReturnType(index2)
+///  Constructor1 : (params) -> ReturnType(index1),
+///  Constructor2 : (params) -> ReturnType(index2)
 /// }
 /// ```
 ///
+
 /// # Examples
 /// ```verum
 /// view Parity : Nat -> Type {
-///     Even : (n: Nat) -> Parity(2 * n),
-///     Odd : (n: Nat) -> Parity(2 * n + 1)
+///  Even : (n: Nat) -> Parity(2 * n),
+///  Odd : (n: Nat) -> Parity(2 * n + 1)
 /// }
 ///
+
 /// fn parity(n: Nat) : Parity(n) = {
-///     match n {
-///         Zero => Even(Zero),
-///         Succ(Zero) => Odd(Zero),
-///         Succ(Succ(n')) =>
-///             match parity(n') {
-///                 Even(k) => Even(Succ(k)),
-///                 Odd(k) => Odd(Succ(k))
-///             }
-///     }
+///  match n {
+///  Zero => Even(Zero),
+///  Succ(Zero) => Odd(Zero),
+///  Succ(Succ(n')) =>
+///  match parity(n') {
+///  Even(k) => Even(Succ(k)),
+///  Odd(k) => Odd(Succ(k))
+///  }
+///  }
 /// }
 ///
+
 /// fn is_even(n: Nat) -> bool =
-///     match parity(n) {
-///         Even(_) => true,
-///         Odd(_) => false
-///     }
+///  match parity(n) {
+///  Even(_) => true,
+///  Odd(_) => false
+///  }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ViewDecl {
@@ -3226,23 +3391,26 @@ impl Spanned for ViewDecl {
 
 /// A constructor in a view declaration.
 ///
+
 /// View constructors define how to construct values of the view type
 /// from the parameter type.
 ///
+
 /// # Examples
 /// ```verum
 /// // Even constructor: (n: Nat) -> Parity(2 * n)
 /// ViewConstructor {
-///     name: "Even",
-///     params: [(n, Nat)],
-///     result_index: 2 * n  // The index in the dependent type
+///  name: "Even",
+///  params: [(n, Nat)],
+///  result_index: 2 * n // The index in the dependent type
 /// }
 ///
+
 /// // Odd constructor: (n: Nat) -> Parity(2 * n + 1)
 /// ViewConstructor {
-///     name: "Odd",
-///     params: [(n, Nat)],
-///     result_index: 2 * n + 1
+///  name: "Odd",
+///  params: [(n, Nat)],
+///  result_index: 2 * n + 1
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3300,21 +3468,25 @@ impl Spanned for ViewConstructor {
 
 /// Extern block declaration - groups FFI function declarations with a common ABI.
 ///
+
 /// Extern block groups FFI function declarations under a shared calling convention.
 ///
+
 /// # Syntax
 /// ```verum
 /// extern "C" {
-///     fn malloc(size: Int) -> &unsafe Byte;
-///     fn free(ptr: &unsafe Byte);
+///  fn malloc(size: Int) -> &unsafe Byte;
+///  fn free(ptr: &unsafe Byte);
 /// }
 ///
+
 /// extern {
-///     // Uses default platform ABI
-///     fn custom_func();
+///  // Uses default platform ABI
+///  fn custom_func();
 /// }
 /// ```
 ///
+
 /// Functions inside an extern block are implicitly extern with the block's ABI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExternBlockDecl {
@@ -3371,36 +3543,42 @@ impl Spanned for ExternBlockDecl {
 
 /// Active pattern declaration (F#-style custom pattern matcher).
 ///
+
 /// Active patterns allow defining custom pattern matchers that can be used
 /// in match expressions, providing a more expressive pattern matching system.
 ///
+
 /// # Syntax
 /// ```verum
 /// // Simple active pattern
 /// pattern Even(n: Int) -> Bool = n % 2 == 0;
 ///
+
 /// // Parameterized active pattern
 /// pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n <= hi;
 ///
+
 /// // Partial active pattern (returns Maybe for extraction)
 /// pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
 /// ```
 ///
+
 /// # Usage in Match Expressions
 /// ```verum
 /// match n {
-///     Even() => "even",
-///     InRange(0, 100)() => "in valid range",
-///     _ => "other",
+///  Even() => "even",
+///  InRange(0, 100)() => "in valid range",
+///  _ => "other",
 /// }
 /// ```
 ///
+
 /// # Pattern Combination
 /// Active patterns can be combined with `&` for conjunction:
 /// ```verum
 /// match n {
-///     Even() & Positive() => "positive even",
-///     _ => "other",
+///  Even() & Positive() => "positive even",
+///  _ => "other",
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

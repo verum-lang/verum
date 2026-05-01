@@ -5,32 +5,36 @@
 // Dependencies: core, collections, core.net.quic.{frame, recovery, stream_sm, error}
 // =============================================================================
 //
+
 // Walks decoded frames from a decrypted packet payload and routes each
 // to the correct subsystem handler:
 //
-//   PADDING                    — no-op
-//   PING                       — sets ack_eliciting flag, no further action
-//   ACK                        — recovery.on_ack_received + CC feedback + RTT sample
-//   RESET_STREAM               — recv-side stream → ResetRecvd
-//   STOP_SENDING               — send-side stream → should send RESET
-//   CRYPTO                     — forwarded to TLS handshake buffer
-//   NEW_TOKEN                  — stored (client only)
-//   STREAM                     — recv-side stream ingestion
-//   MAX_DATA / MAX_STREAM_DATA — flow-control updates
-//   MAX_STREAMS_*              — stream-count FC updates
-//   DATA_BLOCKED / …_BLOCKED   — diagnostic; may trigger our MAX_* send
-//   NEW_CONNECTION_ID          — add to CID pool
-//   RETIRE_CONNECTION_ID       — retire + potentially issue replacement
-//   PATH_CHALLENGE             — echo back as PATH_RESPONSE
-//   PATH_RESPONSE              — path validation complete
-//   CONNECTION_CLOSE_{tpt,app} — transition to Draining
-//   HANDSHAKE_DONE             — drop handshake keys, confirm handshake
-//   DATAGRAM                   — surface to app via app datagram queue
+
+//  PADDING — no-op
+//  PING — sets ack_eliciting flag, no further action
+//  ACK — recovery.on_ack_received + CC feedback + RTT sample
+//  RESET_STREAM — recv-side stream → ResetRecvd
+//  STOP_SENDING — send-side stream → should send RESET
+//  CRYPTO — forwarded to TLS handshake buffer
+//  NEW_TOKEN — stored (client only)
+//  STREAM — recv-side stream ingestion
+//  MAX_DATA / MAX_STREAM_DATA — flow-control updates
+//  MAX_STREAMS_* — stream-count FC updates
+//  DATA_BLOCKED / …_BLOCKED — diagnostic; may trigger our MAX_* send
+//  NEW_CONNECTION_ID — add to CID pool
+//  RETIRE_CONNECTION_ID — retire + potentially issue replacement
+//  PATH_CHALLENGE — echo back as PATH_RESPONSE
+//  PATH_RESPONSE — path validation complete
+//  CONNECTION_CLOSE_{tpt,app} — transition to Draining
+//  HANDSHAKE_DONE — drop handshake keys, confirm handshake
+//  DATAGRAM — surface to app via app datagram queue
 //
+
 // Returns a structured `DispatchOutcome` carrying any resulting
 // outbound frames the connection should emit in response (ACKs,
 // PATH_RESPONSE echoes, RESET_STREAM from stop_sending).
 //
+
 // =============================================================================
 
 module core.net.quic.connection_sm.dispatch;
@@ -328,12 +332,13 @@ fn find_or_create_recv<'a>(
     // uni → uni limit. Caller validates the stream-id kind against
     // transport params elsewhere.
     //
+
     // The per-stream initial budget should come from the local
     // transport-params (`initial_max_stream_data_{bidi_local,bidi_remote,uni}`
     // per RFC 9000 §18.2), not from the connection-level
-    // `max_data_local` byte-count.  Those params are not carried in
+    // `max_data_local` byte-count. Those params are not carried in
     // `ConnFlowControl` today; refining the type to thread them
-    // through is tracked as the integration-layer follow-up.  Using
+    // through is tracked as the integration-layer follow-up. Using
     // a conservative 64 KiB bound keeps the lazy-open path correct
     // for the common case (stream stays small) and a peer can lift
     // it via MAX_STREAM_DATA frames.

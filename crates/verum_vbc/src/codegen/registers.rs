@@ -1,15 +1,18 @@
 //! Register allocator for VBC codegen.
 //!
+
 //! Uses a simple linear scan allocator that assigns virtual registers
 //! to variables and temporaries. The register file is unlimited during
 //! codegen; the final register count is stored in the function descriptor.
 //!
+
 //! # Register Layout
 //!
+
 //! ```text
-//! r0..rN-1    : Function parameters (N = param count)
-//! rN..rM-1    : Local variables
-//! rM..rK-1    : Temporaries
+//! r0..rN-1 : Function parameters (N = param count)
+//! rN..rM-1 : Local variables
+//! rM..rK-1 : Temporaries
 //! ```
 
 use crate::instruction::Reg;
@@ -20,6 +23,7 @@ pub const MAX_REGISTERS: u16 = 16384;
 
 /// Register allocator for VBC code generation.
 ///
+
 /// Manages allocation of virtual registers for parameters, locals,
 /// and temporaries within a function.
 #[derive(Debug)]
@@ -54,6 +58,7 @@ pub struct RegisterInfo {
 
     /// Whether this binding has been initialized.
     ///
+
     /// `false` for `let x: T;` (no initializer) — allows one assignment
     /// as initialization even when `!is_mutable`. After the first assignment,
     /// this is set to `true`.
@@ -125,6 +130,7 @@ impl RegisterAllocator {
 
     /// Allocates registers for function parameters.
     ///
+
     /// Parameters are allocated in order starting from r0.
     /// Each parameter is a tuple of (name, is_mutable).
     /// Returns the register assigned to each parameter.
@@ -155,6 +161,7 @@ impl RegisterAllocator {
 
     /// Allocates a register for a local variable.
     ///
+
     /// The variable is bound in the current scope. If a variable with the same
     /// name already exists (shadowing), the old binding is saved and will be
     /// restored when the scope exits.
@@ -190,6 +197,7 @@ impl RegisterAllocator {
 
     /// Allocates a register for a named variable (alias for alloc_local with default mutability).
     ///
+
     /// Returns a Result to match the expected API.
     pub fn alloc_named(&mut self, name: &str) -> Result<Reg, super::error::CodegenError> {
         Ok(self.alloc_local(name, true))
@@ -197,6 +205,7 @@ impl RegisterAllocator {
 
     /// Allocates a fresh register (for temporary values).
     ///
+
     /// May recycle from free list if recycling is enabled.
     pub fn alloc_temp(&mut self) -> Reg {
         if self.recycle_temps
@@ -219,6 +228,7 @@ impl RegisterAllocator {
 
     /// Allocates a fresh register (never recycled).
     ///
+
     /// Use this when you need to guarantee consecutive registers,
     /// such as for function call arguments.
     pub fn alloc_fresh(&mut self) -> Reg {
@@ -255,6 +265,7 @@ impl RegisterAllocator {
 
     /// Enters a new scope.
     ///
+
     /// Variables defined in the new scope will be removed when the scope exits.
     /// Any shadowed variables will be restored to their previous bindings.
     pub fn enter_scope(&mut self) {
@@ -266,6 +277,7 @@ impl RegisterAllocator {
 
     /// Exits the current scope.
     ///
+
     /// Removes all variables defined in this scope and restores any shadowed
     /// variable bindings to their previous values.
     /// Returns the variables that were removed (for potential drop calls).
@@ -295,6 +307,7 @@ impl RegisterAllocator {
 
     /// Returns the current scope level.
     ///
+
     /// # Panics
     /// Panics if the scope stack is empty, which indicates a bug in scope management
     /// (either missing `begin_function`/`reset()` call, or improper restoration after
@@ -309,6 +322,7 @@ impl RegisterAllocator {
 
     /// Returns the total number of registers used.
     ///
+
     /// This is the peak usage, which should be stored in the function descriptor.
     pub fn register_count(&self) -> u16 {
         self.peak_usage
@@ -316,6 +330,7 @@ impl RegisterAllocator {
 
     /// Collects debug variable information for DWARF emission.
     ///
+
     /// Returns a list of (variable_name, register, is_parameter, arg_index) tuples
     /// for all named variables (excludes temporaries).
     pub fn collect_debug_variables(&self) -> Vec<(String, u16, bool, u16)> {
@@ -349,6 +364,7 @@ impl RegisterAllocator {
 
     /// Reserves a specific number of additional registers.
     ///
+
     /// Useful for pre-allocating space for call arguments.
     pub fn reserve(&mut self, count: u16) -> Reg {
         let start = Reg(self.next_reg);
@@ -380,6 +396,7 @@ impl RegisterAllocator {
 
     /// Creates a snapshot of current register state.
     ///
+
     /// This saves the full state including variables and scope_stack, which is needed
     /// for closure compilation where we need to restore the parent's
     /// variable bindings and scope state after the closure is compiled.
@@ -395,6 +412,7 @@ impl RegisterAllocator {
 
     /// Restores from a snapshot (full state restoration).
     ///
+
     /// This is used after closure compilation to restore the parent function's
     /// full state including variables and scope_stack that were cleared by
     /// `begin_function` -> `reset()`.
@@ -422,6 +440,7 @@ impl RegisterAllocator {
 
 /// Snapshot of register allocator state.
 ///
+
 /// This is used to save/restore state when compiling closures.
 /// The full state is saved including scope_stack, which is critical for
 /// correct restoration after nested closure compilation.

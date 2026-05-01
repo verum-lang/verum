@@ -5,36 +5,45 @@
 // Dependencies: core, core.collections, core.net.addr
 // =============================================================================
 //
+
 // CIDR (Classless Inter-Domain Routing) notation — the `prefix/len`
 // syntax every firewall rule, BGP route, ACL, allowlist, and
 // container-network spec uses:
 //
-//   10.0.0.0/8              — IPv4 /8
-//   192.168.1.0/24          — IPv4 /24
-//   2001:db8::/32           — IPv6 /32
-//   ::ffff:10.0.0.0/104     — IPv4-mapped v6
+
+//  10.0.0.0/8 — IPv4 /8
+//  192.168.1.0/24 — IPv4 /24
+//  2001:db8::/32 — IPv6 /32
+//  ::ffff:10.0.0.0/104 — IPv4-mapped v6
 //
+
 // This module ships:
 //
-//   * `Cidr` — one typed prefix with an IP + mask width.
-//   * `Cidr.contains(&ip)` — O(1) membership test.
-//   * `CidrSet` — collection of prefixes with O(log N) or O(N)
-//     lookup depending on configuration.
+
+//  * `Cidr` — one typed prefix with an IP + mask width.
+//  * `Cidr.contains(&ip)` — O(1) membership test.
+//  * `CidrSet` — collection of prefixes with O(log N) or O(N)
+//  lookup depending on configuration.
 //
+
 // # Design
 //
+
 // Byte-wise mask comparison — portable across v4 and v6 without
 // platform-specific bit intrinsics. The common cases (4-byte v4,
 // 16-byte v6) unroll at the compiler's discretion.
 //
+
 // # API
 //
+
 // ```
 // let net: Cidr = cidr.parse(&Text.from("10.0.0.0/8"))?;
 // let ip = IpAddr.V4(Ipv4Addr.parse(&Text.from("10.42.7.1"))?);
 // assert(net.contains(&ip));
 // ```
 //
+
 // =============================================================================
 
 module core.net.cidr;
@@ -240,10 +249,12 @@ fn clone_cidr(c: &Cidr) -> Cidr {
 // Bitwise mask comparison
 // =============================================================================
 //
+
 // `a` and `b` are the raw byte representations (big-endian network
 // order). Compares the first `prefix_len` bits; anything past is
 // host-bits and must be ignored.
 //
+
 // =============================================================================
 
 fn mask_equal(a: &[Byte], b: &[Byte], prefix_len: Int) -> Bool {

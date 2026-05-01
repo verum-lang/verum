@@ -14,6 +14,7 @@
 )]
 //! Tests for capability attenuation AST nodes
 //!
+
 //! Tests for context-based capability system.
 
 use verum_ast::expr::{Capability, CapabilitySet, Expr, ExprKind};

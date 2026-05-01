@@ -3,11 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // LIKE (case-insensitive by default):
-//   %       — zero or more characters
-//   _       — exactly one character
-//   escape  — optional byte that literalises the next one
+//  % — zero or more characters
+//  _ — exactly one character
+//  escape — optional byte that literalises the next one
 //
+
 // Iterative two-pointer walk with a single saved "last-%" position.
 // =============================================================================
 

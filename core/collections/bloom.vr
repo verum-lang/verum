@@ -5,33 +5,42 @@
 // Dependencies: core, core.security.mac.hmac, core.security.util.rng
 // =============================================================================
 //
+
 // Classic Bloom filter with HMAC-SHA256-keyed Kirsch-Mitzenmacher
 // double hashing (one HMAC gives two 64-bit halves → `k` probe
 // offsets). Covers the general-purpose user-facing case: cache-key
 // dedup, URL-seen tracking, log-line dedup, etc.
 //
+
 // The TLS 0-RTT anti-replay module ships its own specialised two-
 // bucket rotating Bloom (it needs time-based eviction the general
 // case doesn't); that module and this one intentionally don't share
 // implementation so each can evolve independently.
 //
+
 // # Sizing
 //
+
 // `BloomFilter.with_target(capacity, fp_rate_ppm)` picks
 //
-//   m = -n·ln(p) / ln(2)^2        // bits
-//   k = m/n · ln(2)                // hash count
+
+//  m = -n·ln(p) / ln(2)^2 // bits
+//  k = m/n · ln(2) // hash count
 //
+
 // approximated from a small table (no floats). For `fp_rate_ppm =
 // 1000` (0.1% = 2^-10), m ≈ 14.4 n and k ≈ 10.
 //
+
 // # Performance
 //
+
 // `insert` / `contains` = O(k) — typically 7–10 probe operations.
 // One HMAC-SHA256 call per op, split into k offsets by the
 // Kirsch-Mitzenmacher trick. At ~100 ns per HMAC, a single Bloom
 // op is under 150 ns on a modern CPU.
 //
+
 // =============================================================================
 
 module core.collections.bloom;

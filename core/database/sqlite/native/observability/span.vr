@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
+
 // Spans bracket significant operations — query compile, query
 // execute, transaction, sub-program invocation. They surface to
 // any subscribed `SpanSink` (Jaeger / OTLP / println-style).
 //
+
 // `TraceCtx` is the per-Connection trace context — carries the
 // trace ID + parent span ID so spans across thread / RPC boundaries
 // remain correlated.

@@ -24,10 +24,11 @@ const MYSQL_ER_PARSE_ERROR:      Int = 1064;
 
 /// Fold an `ErrPacket` (post-decode) into the unified Spindle DbError.
 ///
-///   * 1213 / 1205           → Adapter(retryable=true)  — retry combinator picks them up
-///   * 1045                  → AuthFailed(role-not-permitted with ER_ACCESS_DENIED message)
-///   * 1062 (dup entry)      → QueryFailed with SQLSTATE 23000 — is_constraint_violation = true
-///   * everything else       → QueryFailed with the decoded SQLSTATE if the server provided one
+
+///  * 1213 / 1205 → Adapter(retryable=true) — retry combinator picks them up
+///  * 1045 → AuthFailed(role-not-permitted with ER_ACCESS_DENIED message)
+///  * 1062 (dup entry) → QueryFailed with SQLSTATE 23000 — is_constraint_violation = true
+///  * everything else → QueryFailed with the decoded SQLSTATE if the server provided one
 public fn dberr_from_mysql(err: ErrPacket) -> DbError {
     if err.code == MYSQL_ER_LOCK_DEADLOCK || err.code == MYSQL_ER_LOCK_WAIT_TIMEOUT {
         return DbError.Adapter(AdapterSpecific {

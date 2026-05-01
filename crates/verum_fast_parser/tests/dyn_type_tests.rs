@@ -14,6 +14,7 @@
 )]
 //! Tests for dynamic protocol types (dyn Display, dyn Iterator<Item = Int>, etc.)
 //!
+
 //! Tests for dyn type syntax: dyn Protocol + Bound, with associated type bindings
 //! Tests for syntax grammar compliance
 

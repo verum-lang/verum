@@ -1,7 +1,9 @@
 //! Performance Benchmarks for Specialization Selection
 //!
+
 //! Measures the performance of specialization selection under various scenarios.
 //!
+
 //! Run with: cargo bench --bench specialization_selection_bench
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -266,11 +268,11 @@ fn bench_lattice_selection_diamond(c: &mut Criterion) {
         let mut lattice = SpecializationLattice::new();
 
         // Diamond:
-        //       0
-        //      / \
-        //     1   2
-        //      \ /
-        //       3
+        //  0
+        //  / \
+        //  1 2
+        //  \ /
+        //  3
         lattice.add_impl(0);
         lattice.add_impl(1);
         lattice.add_impl(2);
@@ -325,6 +327,7 @@ fn bench_cache_operations(c: &mut Criterion) {
 // NOTE: bench_specificity_comparison is disabled because is_more_specific_type is private
 // If needed for performance testing, the method would need to be made pub(crate) or pub
 /*
+
 fn bench_specificity_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("specificity_comparison");
 

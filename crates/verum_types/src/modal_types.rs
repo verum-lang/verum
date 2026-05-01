@@ -1,13 +1,16 @@
 //! Modal Types — security labels and information-flow control.
 //!
+
 //! A *modal type* annotates a value with a **security label** drawn
 //! from a lattice of labels, and the type system enforces that
 //! labeled values only flow to contexts permitted by the lattice
 //! ordering. This is the foundation of static information-flow
 //! control (IFC) as pioneered by Denning, Myers, and Pottier.
 //!
+
 //! ## The label lattice
 //!
+
 //! Security labels form a **lattice**: any two labels have a
 //! least upper bound (join) and a greatest lower bound (meet).
 //! A typical default lattice is the totally-ordered
@@ -15,29 +18,35 @@
 //! supports arbitrary user-defined lattices through explicit
 //! parent relations.
 //!
+
 //! ## Flows-to
 //!
+
 //! The central predicate is `label_a.flows_to(&label_b)` — true iff
 //! values labeled `a` may be used in contexts of label `b` without
 //! leaking information. In a chain lattice this is simply "a ≤ b",
 //! but the general lattice case requires comparing through the
 //! explicit parent chain.
 //!
+
 //! ## Composition rules
 //!
+
 //! * **Binary ops** on labeled values yield the **join** of their
-//!   labels. `Secret(x) + Secret(y) : Secret`, and
-//!   `Public(x) + Secret(y) : Secret` — the more sensitive label
-//!   wins.
+//!  labels. `Secret(x) + Secret(y) : Secret`, and
+//!  `Public(x) + Secret(y) : Secret` — the more sensitive label
+//!  wins.
 //! * **Conditional flow**: when the condition of an `if` has label
-//!   `L`, both branches' results are **implicitly** labeled at
-//!   least `L` (preventing implicit channel leaks).
+//!  `L`, both branches' results are **implicitly** labeled at
+//!  least `L` (preventing implicit channel leaks).
 //! * **Downgrading** (lowering a secret value's label to public)
-//!   is only permitted through explicit declassification, which is
-//!   outside this module's scope — it must be authorized externally.
+//!  is only permitted through explicit declassification, which is
+//!  outside this module's scope — it must be authorized externally.
 //!
+
 //! ## Modal operators (optional, future)
 //!
+
 //! The "modal" naming anticipates full modal type theory: `□_L T`
 //! for "T necessarily at label L" and `◇_L T` for "T possibly at L".
 //! The current module realises the simpler label-annotated
@@ -81,6 +90,7 @@ impl Label {
 
 /// A lattice of labels, keyed by name, with explicit parent links.
 ///
+
 /// `parent_of[L]` names a label that `L` flows into (i.e., `L ⊑
 /// parent_of[L]`). Labels without a parent entry are maximal.
 /// Reflexivity (`L ⊑ L`) and transitivity (`L ⊑ M ⊑ N ⇒ L ⊑ N`)
@@ -283,9 +293,10 @@ mod tests {
         // Two independent classifications that both flow into a
         // common Classified label.
         //
-        //        Classified
-        //       /          \
-        //    Medical    Financial
+
+        //  Classified
+        //  / \
+        //  Medical Financial
         let mut l = LabelLattice::new();
         l.add_flow("Medical", "Classified");
         l.add_flow("Financial", "Classified");

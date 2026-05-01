@@ -1,8 +1,10 @@
 //! Postcondition handling and verification.
 //!
+
 //! Postconditions are constraints that the function guarantees to hold
 //! at exit. They are what we verify using the SMT solver.
 //!
+
 //! Verum uses contract literals (`contract#"requires ...; ensures ...;"`) embedded
 //! in functions annotated with `@verify(proof)`. Postconditions (ensures clauses) are
 //! the proof obligations verified by the SMT solver. The weakest-precondition calculus
@@ -50,16 +52,19 @@ pub enum PostconditionError {
 
 /// Verify a postcondition using the SMT solver.
 ///
+
 /// Postconditions must be proven to hold given the preconditions and
 /// function semantics. We check if there exists an input where the
 /// preconditions hold but the postcondition doesn't.
 ///
+
 /// # Arguments
 /// * `translator` - The SMT translator
 /// * `solver` - The Z3 solver (with preconditions already asserted)
 /// * `clause` - The postcondition clause to verify
 /// * `input_vars` - Names of input variables for counterexample extraction
 ///
+
 /// # Returns
 /// * `Ok(())` if the postcondition is proven
 /// * `Err(PostconditionError)` if verification fails
@@ -125,6 +130,7 @@ pub fn verify_postcondition(
 
 /// Verify multiple postconditions.
 ///
+
 /// Returns the first violation found, or Ok if all pass.
 pub fn verify_postconditions(
     translator: &Translator<'_>,
@@ -140,6 +146,7 @@ pub fn verify_postconditions(
 
 /// Validate that a postcondition uses valid constructs.
 ///
+
 /// Postconditions can reference:
 /// - `result` (the return value)
 /// - `old(expr)` (values at function entry)
@@ -151,10 +158,12 @@ pub fn validate_postcondition(_expr: &Expr) -> PostconditionResult<()> {
 
 /// Handle `old()` expressions in postconditions.
 ///
+
 /// The `old()` function captures the value of an expression at function entry.
 /// During verification, we need to substitute `old(x)` with the original value
 /// of `x` before any modifications.
 ///
+
 /// This struct tracks the mapping from expressions to their "old" values.
 #[derive(Debug, Clone)]
 pub struct OldValueTracker {
@@ -194,6 +203,7 @@ impl Default for OldValueTracker {
 
 /// Extract `result` references from a postcondition.
 ///
+
 /// Returns true if the expression references `result`.
 pub fn references_result(expr: &Expr) -> bool {
     match &expr.kind {
@@ -229,6 +239,7 @@ pub fn references_result(expr: &Expr) -> bool {
 
 /// Extract all `old()` calls from a postcondition.
 ///
+
 /// Returns a list of expressions wrapped in `old()`.
 pub fn extract_old_calls(expr: &Expr) -> List<Expr> {
     let mut old_calls = List::new();

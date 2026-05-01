@@ -2,32 +2,39 @@
 // core/net/weft/adaptive.vr — AdaptiveConcurrencyLayer (Vegas)
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §5.5 "Adaptive concurrency"
+// Spec: internal/specs/net-framework.md §5.5 "Adaptive concurrency"
 // =============================================================================
 //
+
 // TCP Vegas-style adaptive concurrency: tracks the observed minimum
 // request latency (min-RTT) and the current latency, adjusting the
 // permitted concurrency to keep the system at the "knee" of the
 // latency/throughput curve.
 //
+
 // Algorithm (Netflix concurrency-limits / TCP Vegas):
 //
-//   diff     = limit − no_load_limit                where
-//   alpha    = floor(log2(limit))                    no_load_limit =
-//   beta     = alpha + floor(log2(limit) / 2)        inflight × (rtt_min / rtt)
+
+//  diff = limit − no_load_limit where
+//  alpha = floor(log2(limit)) no_load_limit =
+//  beta = alpha + floor(log2(limit) / 2) inflight × (rtt_min / rtt)
 //
-//   if   diff < alpha      → limit + 1               (have capacity)
-//   elif diff > beta       → limit − 1               (queueing detected)
-//   else                   → unchanged
+
+//  if diff < alpha → limit + 1 (have capacity)
+//  elif diff > beta → limit − 1 (queueing detected)
+//  else → unchanged
 //
+
 // Updates happen on every completed request; a simple atomic CAS on
 // the `limit` counter keeps the hot path lock-free. Requests that
 // arrive when `inflight >= limit` short-circuit to `Overloaded`.
 //
+
 // Observed behaviour: the limit grows gracefully under healthy load,
 // clamps down quickly under upstream slowness, and oscillates by ±1
 // at steady state — precisely the Vegas pattern.
 //
+
 // =============================================================================
 
 module core.net.weft.adaptive;

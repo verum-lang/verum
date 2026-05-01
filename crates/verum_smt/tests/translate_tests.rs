@@ -14,6 +14,7 @@
 )]
 // Unit tests for translate.rs
 //
+
 // Migrated from src/translate.rs to comply with CLAUDE.md test organization.
 
 use verum_ast::{BinOp, Expr, ExprKind, Literal, Span, Type, UnOp};
@@ -250,13 +251,15 @@ fn test_translate_complex_expr() {
 
 // ==================== TranslatorExt Tests ====================
 //
+
 // Tests for the TranslatorExt trait that provides scope management
 // for dependent type checking.
 //
+
 // Pi type verification: `(x: A) -> B(x)` — return type depends on input value,
-//   translated to Z3 forall_const() with pattern-guided instantiation.
+//  translated to Z3 forall_const() with pattern-guided instantiation.
 // Sigma type verification: `(x: A, B(x))` — second component depends on first,
-//   translated to Z3 exists_const() for existential quantification.
+//  translated to Z3 exists_const() for existential quantification.
 
 use verum_smt::dependent::TranslatorExt;
 use verum_common::Text;
@@ -527,6 +530,7 @@ fn test_scope_for_sigma_type_simulation() {
 
 // ==================== IEEE 754 Floating-Point Theory Tests ====================
 //
+
 // Tests for precise FPA (Floating-Point Arithmetic) support.
 // These tests verify the IEEE 754 compliant translation using Z3's FPA theory.
 
@@ -802,6 +806,7 @@ fn test_rounding_mode_conversion() {
 // Quantifier Pattern Extraction Tests
 // ============================================================================
 //
+
 // Tests for pattern extraction and generation for Z3 quantifier instantiation.
 // These patterns guide Z3's MBQI (Model-Based Quantifier Instantiation) to
 // find relevant ground instances of quantified formulas.

@@ -4,37 +4,43 @@
 // Version: 0.1.0
 // =============================================================================
 //
+
 // # Token Streams
 //
+
 // Token streams are the primary data structure for meta programming.
 // They represent source code as a sequence of tokens, enabling:
 //
+
 // - Code generation via quasi-quotation
 // - Macro input/output
 // - AST manipulation at token level
 //
+
 // ## Token Stream Operations
 //
+
 // ```
 // ┌─────────────────────────────────────────────────────────────────────────────┐
-// │                       TOKEN STREAM OPERATIONS                               │
+// │ TOKEN STREAM OPERATIONS │
 // ├─────────────────────────────────────────────────────────────────────────────┤
-// │                                                                             │
-// │  INPUT                    MANIPULATION                  OUTPUT             │
-// │  ─────                    ────────────                  ──────             │
-// │                                                                             │
-// │  TokenStream ──────►  parse() ──────►  AST  ──────►  emit()  ──► Output   │
-// │                           │             │                                   │
-// │                           └── transform ┘                                   │
-// │                                                                             │
-// │  quote { ... } ──►  TokenStream  ──►  append/prepend  ──►  TokenStream    │
-// │                                                                             │
-// │  $ident ──────────────────────────────────────────────────►  Substitution │
-// │  ${expr} ─────────────────────────────────────────────────►  Evaluation   │
-// │                                                                             │
+// │ │
+// │ INPUT MANIPULATION OUTPUT │
+// │ ───── ──────────── ────── │
+// │ │
+// │ TokenStream ──────► parse() ──────► AST ──────► emit() ──► Output │
+// │ │ │ │
+// │ └── transform ┘ │
+// │ │
+// │ quote { ... } ──► TokenStream ──► append/prepend ──► TokenStream │
+// │ │
+// │ $ident ──────────────────────────────────────────────────► Substitution │
+// │ ${expr} ─────────────────────────────────────────────────► Evaluation │
+// │ │
 // └─────────────────────────────────────────────────────────────────────────────┘
 // ```
 //
+
 // =============================================================================
 
 module meta.token;
@@ -48,37 +54,47 @@ mount meta.span.{Span};
 
 /// Stream of tokens representing source code
 ///
+
 /// TokenStream is the primary input/output type for meta functions.
 /// It represents a sequence of tokens that can be manipulated and
 /// converted to/from AST nodes.
 ///
+
 /// ## Creation
 ///
+
 /// ```verum
 /// // From quote (most common)
 /// let tokens = quote { fn foo() -> Int { 42 } };
 ///
+
 /// // From string (parse at compile-time)
 /// let tokens = TokenStream.from_str("let x = 1;")?;
 ///
+
 /// // Empty stream
 /// let empty = TokenStream.empty();
 ///
+
 /// // Single token
 /// let single = TokenStream.from_token(Token.ident("foo"));
 /// ```
 ///
+
 /// ## Manipulation
 ///
+
 /// ```verum
 /// // Concatenation
 /// let combined = tokens1.append(tokens2);
 ///
+
 /// // Iteration
 /// for token in tokens.iter() {
-///     process(token);
+///  process(token);
 /// }
 ///
+
 /// // Conversion
 /// let trees = tokens.to_trees();
 /// ```
@@ -135,9 +151,11 @@ implement TokenStream {
 
     /// Parse string as token stream
     ///
+
     /// # Arguments
     /// - `source`: Verum source code as string
     ///
+
     /// # Returns
     /// - `Ok(TokenStream)`: Parsed tokens
     /// - `Err(LexError)`: Lexer error
@@ -406,6 +424,7 @@ public type Group is {
 
 /// Token tree: either a single token or a delimited group
 ///
+
 /// Token trees preserve the balanced structure of delimiters,
 /// making them easier to work with than flat token sequences.
 @repr(UInt8)

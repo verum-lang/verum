@@ -1,8 +1,10 @@
 //! Demonstration of incremental compilation
 //!
+
 //! This example shows how the incremental compiler tracks changes
 //! and minimizes recompilation work.
 //!
+
 //! Run with:
 //! ```bash
 //! cargo run --example incremental_demo

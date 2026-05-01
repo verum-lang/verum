@@ -1,23 +1,29 @@
 //! Incremental Meta Evaluation Cache
 //!
+
 //! This module implements a content-addressed LRU cache for meta-programming
 //! evaluation results, providing 2-10x speedup for incremental builds by
 //! avoiding redundant meta function executions.
 //!
+
 //! ## Cached Items
 //!
+
 //! - Meta function call results (pure functions only)
 //! - Builtin function call results (for deterministic builtins)
 //! - Type definition lookups
 //! - AST-to-MetaExpr conversion results
 //!
+
 //! ## Cache Invalidation
 //!
+
 //! The cache uses content hashing for automatic invalidation:
 //! - Source file changes invalidate dependent entries
 //! - Type definition changes invalidate type lookup entries
 //! - All entries expire after a configurable TTL
 //!
+
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
@@ -126,6 +132,7 @@ fn hash_args(args: &[MetaValue]) -> u64 {
 
 /// Hash a MetaValue for cache key generation using Blake3.
 ///
+
 /// MetaValue variants (from verum_ast/src/meta_value.rs):
 /// - Primitives: Unit, Bool, Int, UInt, Float, Char, Text, Bytes
 /// - Collections: Array, Tuple, Maybe
@@ -521,6 +528,7 @@ impl Default for MetaCacheConfig {
 
 /// Thread-safe incremental meta evaluation cache.
 ///
+
 /// Caches results of pure meta function calls and deterministic builtin
 /// function calls to speed up incremental compilation.
 pub struct MetaEvalCache {
@@ -595,6 +603,7 @@ impl MetaEvalCache {
 
     /// Cache a builtin function call result.
     ///
+
     /// Only deterministic builtins should be cached. Non-deterministic
     /// builtins (e.g., current_time, random) should NOT be cached.
     pub fn insert_builtin_call(
@@ -656,6 +665,7 @@ impl MetaEvalCache {
 
     /// Check if a builtin is deterministic and should be cached.
     ///
+
     /// Non-deterministic builtins are NOT cached:
     /// - Time-related: current_time, timestamp, etc.
     /// - Random: random_int, random_float, etc.

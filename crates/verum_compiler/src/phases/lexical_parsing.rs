@@ -1,23 +1,29 @@
 //! Phase 1: Lexical Analysis & Parsing
 //!
+
 //! Converts source text to Abstract Syntax Tree (AST).
 //!
+
 //! ## Responsibilities
 //!
+
 //! 1. **Tokenization**: Convert source text to token stream
-//!    - Profile-aware keyword recognition
-//!    - Tagged literal recognition (contract#"...", sql#"...")
-//!    - Numeric suffix recognition (100_km, 5_seconds)
+//!  - Profile-aware keyword recognition
+//!  - Tagged literal recognition (contract#"...", sql#"...")
+//!  - Numeric suffix recognition (100_km, 5_seconds)
 //! 2. **Parsing**: Build AST from tokens
-//!    - LL(k) predictive recursive descent
-//!    - Error recovery with synchronization
-//!    - Preserve meta annotations
+//!  - LL(k) predictive recursive descent
+//!  - Error recovery with synchronization
+//!  - Preserve meta annotations
 //!
+
 //! ## Performance Targets
 //!
+
 //! - Lexing + Parsing: ~50-100ms per 10K LOC
 //! - Parallel parsing of independent modules
 //!
+
 //! Phase 1: Lexical analysis and parsing. Tokenizes source with profile awareness,
 //! parses LL(k) grammar, recognizes tagged literals and numeric suffixes.
 //! Output: AST with preserved meta annotations.

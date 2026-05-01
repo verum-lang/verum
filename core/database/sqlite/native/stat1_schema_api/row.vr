@@ -50,6 +50,7 @@ public fn rows_for_prefix(r: &Stat1SchemaRow, prefix_cols: Int) -> Int64 {
 
 // Quick decimal-digit formatter used by Stat1 text roundtrip.
 //
+
 // Int.MIN-safe: the naive `0 - n` for the negative branch overflows
 // to Int.MIN for Int.MIN itself, then `while v > 0` never enters and
 // the formatter emits empty digits → just "-" (no magnitude). Use the

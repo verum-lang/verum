@@ -3,12 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-//   sqlite3_db_handle(stmt)      → connection id (caller threads stmt→conn)
-//   sqlite3_db_filename(db, n)   → path (empty if n not found)
-//   sqlite3_db_name(db, N)       → name at slot N (empty if out of range)
-//   sqlite3_db_readonly(db, n)   → 0 / 1 / -1
-//   sqlite3_db_mutex(db)         → mutex id (0 if none)
-//   sqlite3_db_cacheflush(db)    → SQLITE_OK (count maintained)
+
+//  sqlite3_db_handle(stmt) → connection id (caller threads stmt→conn)
+//  sqlite3_db_filename(db, n) → path (empty if n not found)
+//  sqlite3_db_name(db, N) → name at slot N (empty if out of range)
+//  sqlite3_db_readonly(db, n) → 0 / 1 / -1
+//  sqlite3_db_mutex(db) → mutex id (0 if none)
+//  sqlite3_db_cacheflush(db) → SQLITE_OK (count maintained)
 // =============================================================================
 
 module core.database.sqlite.native.db_handle.engine;

@@ -148,10 +148,10 @@ pub(super) fn resolve_string_value(v: &Value, state: &InterpreterState) -> Strin
 
                 // Text objects come in two runtime shapes sharing
                 // `TypeId::TEXT`:
-                //   * static / intrinsic-built heap string — data is
-                //     `[len:u64][bytes…]` right after the header.
-                //   * stdlib builder `Text {ptr, len, cap}` — three
-                //     NaN-boxed Value fields (exactly 24 bytes).
+                //  * static / intrinsic-built heap string — data is
+                //  `[len:u64][bytes…]` right after the header.
+                //  * stdlib builder `Text {ptr, len, cap}` — three
+                //  NaN-boxed Value fields (exactly 24 bytes).
                 // Reading a u64 at offset 0 for a builder Text returns
                 // the `ptr` field NaN-boxed form, i.e. garbage. Detect
                 // the builder case by size + field tags.
@@ -209,9 +209,11 @@ pub(super) fn is_array_type_id(type_id: u32) -> bool {
 
 /// Recursively compares two values for deep equality.
 ///
+
 /// Handles primitives, strings, and nested variant types (Maybe<T>, Result<T,E>, etc.).
 /// Variant layout: ObjectHeader + [tag:u32][padding:u32][payload:Value]
 ///
+
 /// NOTE: This function calls `get_array_length` and `get_array_element` which remain
 /// in dispatch_table.rs. When those are extracted, the imports here will need updating.
 pub(super) fn deep_value_eq(va: &Value, vb: &Value, state: &InterpreterState) -> bool {

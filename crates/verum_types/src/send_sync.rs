@@ -1,28 +1,36 @@
 //! Send and Sync Thread-Safety Marker Protocol Implementation
 //!
+
 //! Basic protocols with simple associated types (initial release) — 4 - Thread-Safety Protocols
 //!
+
 //! This module implements the Send and Sync marker protocols that enable
 //! thread-safe programming in Verum. These protocols have no methods but
 //! encode critical semantic contracts enforced at thread boundaries.
 //!
+
 //! # Key Concepts
 //!
+
 //! - **Send**: Type can be safely transferred between threads
 //! - **Sync**: Type can be safely shared between threads via &T
 //! - **Duality**: T: Sync ⟺ &T: Send
 //! - **Composability**: Automatic derivation for compound types
 //!
+
 //! # Automatic Derivation Rules
 //!
+
 //! 1. **Primitives**: All primitives are Send + Sync
 //! 2. **Tuples/Records**: Send/Sync if all fields are
 //! 3. **References**: &T is Send if T: Sync
 //! 4. **Functions**: !Send + !Sync (default)
 //! 5. **Generic types**: Conditional on type parameters
 //!
+
 //! # Thread Boundaries
 //!
+
 //! - `spawn()` requires captured types to be Send
 //! - `Shared<T>` requires T: Send + Sync
 //! - `Mutex<T>` requires T: Send (provides Sync)
@@ -42,6 +50,7 @@ use crate::ty::Type;
 
 /// Automatic Send/Sync derivation engine
 ///
+
 /// This module determines whether a type is Send and/or Sync based on
 /// structural rules defined in the specification.
 pub struct SendSyncDerivation<'a> {
@@ -56,8 +65,10 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Check if a type is Send
     ///
+
     /// Basic protocols with simple associated types (initial release) — 4.1 - Send Protocol
     ///
+
     /// A type is Send if ownership can be safely transferred between threads.
     pub fn is_send(&self, ty: &Type) -> bool {
         match ty {
@@ -242,17 +253,21 @@ impl<'a> SendSyncDerivation<'a> {
 
             // 33. Placeholder types - conservative assumption during two-pass resolution
             //
+
             // Spec: Forward references during order-independent type resolution
             // (see infer.rs - two-pass resolution pattern)
             //
+
             // During the first pass of two-pass type resolution, types may be
             // represented as Placeholder types before their full definitions are
             // processed. At this stage, we conservatively assume not Send because:
             //
+
             // 1. We cannot know the actual type's Send status until resolved
             // 2. Returning false triggers a re-check after resolution completes
             // 3. This prevents incorrectly allowing unsafe cross-thread sharing
             //
+
             // After pass 2 completes, all Placeholder types should be resolved.
             // If a Placeholder reaches Send checking, it indicates either:
             // - Resolution is incomplete (will be caught by verify_no_placeholders)
@@ -280,8 +295,10 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Check if a type is Sync
     ///
+
     /// Basic protocols with simple associated types (initial release) — 4.2 - Sync Protocol
     ///
+
     /// A type is Sync if &T can be safely shared between threads.
     /// Equivalently: T: Sync ⟺ &T: Send
     pub fn is_sync(&self, ty: &Type) -> bool {
@@ -455,17 +472,21 @@ impl<'a> SendSyncDerivation<'a> {
 
             // 33. Placeholder types - conservative assumption during two-pass resolution
             //
+
             // Spec: Forward references during order-independent type resolution
             // (see infer.rs - two-pass resolution pattern)
             //
+
             // During the first pass of two-pass type resolution, types may be
             // represented as Placeholder types before their full definitions are
             // processed. At this stage, we conservatively assume not Sync because:
             //
+
             // 1. We cannot know the actual type's Sync status until resolved
             // 2. Returning false triggers a re-check after resolution completes
             // 3. This prevents incorrectly allowing unsafe shared references
             //
+
             // After pass 2 completes, all Placeholder types should be resolved.
             // If a Placeholder reaches Sync checking, it indicates either:
             // - Resolution is incomplete (will be caught by verify_no_placeholders)
@@ -493,6 +514,7 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Derive Send implementation for a type
     ///
+
     /// Returns a ProtocolImpl if the type can be Send, or None if it cannot.
     pub fn derive_send(&self, ty: &Type) -> Maybe<ProtocolImpl> {
         if !self.is_send(ty) {
@@ -516,6 +538,7 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Derive Sync implementation for a type
     ///
+
     /// Returns a ProtocolImpl if the type can be Sync, or None if it cannot.
     pub fn derive_sync(&self, ty: &Type) -> Maybe<ProtocolImpl> {
         if !self.is_sync(ty) {
@@ -539,6 +562,7 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Generate where clauses for Send implementation
     ///
+
     /// For generic types like List<T>, generate: where T: Send
     fn generate_send_where_clauses(&self, ty: &Type) -> List<crate::protocol::WhereClause> {
         let mut clauses = List::new();
@@ -565,6 +589,7 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Generate where clauses for Sync implementation
     ///
+
     /// For generic types like List<T>, generate: where T: Sync
     fn generate_sync_where_clauses(&self, ty: &Type) -> List<crate::protocol::WhereClause> {
         let mut clauses = List::new();
@@ -594,6 +619,7 @@ impl<'a> SendSyncDerivation<'a> {
 
 /// Register Send and Sync marker protocols
 ///
+
 /// This should be called during protocol checker initialization to register
 /// the standard Send and Sync protocols.
 pub fn register_send_sync_protocols(checker: &mut ProtocolChecker) {
@@ -630,6 +656,7 @@ pub fn register_send_sync_protocols(checker: &mut ProtocolChecker) {
 
 /// Register Send/Sync implementations for standard types
 ///
+
 /// This registers implementations for:
 /// - Primitive types (Int, Bool, Float, etc.)
 /// - Standard library types (List, Map, Set, etc.)

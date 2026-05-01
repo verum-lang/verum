@@ -1,42 +1,49 @@
 //! Verum AST → Coq/Lean Prop syntax translator.
 //!
+
 //! Task #140 / MSFS-L4.7 — the foundational piece that lifts the
 //! cross-format roundtrip's foreign-tool re-check from "this name
 //! exists in Prop" to "this proposition's TYPE STRUCTURE is
 //! well-formed in the target system."
 //!
+
 //! ## Architecture (protocol-driven)
 //!
+
 //! Single trait [`ExprRenderer`] with one implementation per foreign
-//! format.  `CoqExprRenderer` and `LeanExprRenderer` ship in this
-//! module.  Adding Isabelle / Agda / Dedukti is a single new
+//! format. `CoqExprRenderer` and `LeanExprRenderer` ship in this
+//! module. Adding Isabelle / Agda / Dedukti is a single new
 //! [`ExprRenderer`] instance — the corpus-export walker and the
 //! cross-format gate are unchanged.
 //!
+
 //! ## What gets translated
 //!
-//!   * Literals: `Int n` → `n` (Coq `nat`/`Z` infer; Lean `Nat`/`Int` infer);
-//!     `Bool b` → `True` / `False`; `Text s` → `"s"`.
-//!   * Path: identifier reference rendered verbatim (segments joined
-//!     by `_` per foreign-tool conventions; sanitisation matches
-//!     `corpus_export::sanitise_theorem_name`).
-//!   * Binary operators (the prop-level subset): `==` → `=`, `&&` →
-//!     `/\` (Coq) / `∧` (Lean), `||` → `\/` / `∨`, `->` → `->` / `→`,
-//!     `<->` → `<->` / `↔`, comparison operators map directly,
-//!     arithmetic likewise.
-//!   * Unary: `!x` → `~x` (Coq) / `¬x` (Lean); `-x` → `-x`.
-//!   * Quantifiers: `forall x, body` (Coq) / `∀ x, body` (Lean);
-//!     `exists` mirrors.
-//!   * Parens / parenthesised expressions: pass through.
-//!   * Application: `f a b` (curried) — works directly in both Coq
-//!     and Lean.
+
+//!  * Literals: `Int n` → `n` (Coq `nat`/`Z` infer; Lean `Nat`/`Int` infer);
+//!  `Bool b` → `True` / `False`; `Text s` → `"s"`.
+//!  * Path: identifier reference rendered verbatim (segments joined
+//!  by `_` per foreign-tool conventions; sanitisation matches
+//!  `corpus_export::sanitise_theorem_name`).
+//!  * Binary operators (the prop-level subset): `==` → `=`, `&&` →
+//!  `/\` (Coq) / `∧` (Lean), `||` → `\/` / `∨`, `->` → `->` / `→`,
+//!  `<->` → `<->` / `↔`, comparison operators map directly,
+//!  arithmetic likewise.
+//!  * Unary: `!x` → `~x` (Coq) / `¬x` (Lean); `-x` → `-x`.
+//!  * Quantifiers: `forall x, body` (Coq) / `∀ x, body` (Lean);
+//!  `exists` mirrors.
+//!  * Parens / parenthesised expressions: pass through.
+//!  * Application: `f a b` (curried) — works directly in both Coq
+//!  and Lean.
 //!
+
 //! ## What falls back to placeholder
 //!
+
 //! Match expressions, refinement types, tagged literals, complex
 //! pattern bindings — these don't map cleanly to a one-line Prop
 //! syntax, so the renderer returns `Prop` and emits the original
-//! Verum text in a comment.  The CI gate's invariant degrades from
+//! Verum text in a comment. The CI gate's invariant degrades from
 //! "TYPE structure verified" to "name binding verified" for these
 //! shapes — same level as the pre-translator placeholder.
 
@@ -46,25 +53,25 @@ use verum_ast::literal::{LiteralKind, StringLit};
 use verum_ast::ty::{Type, TypeKind};
 use verum_ast::{BinOp, UnOp};
 
-/// Output of translating one expression.  Carries either a successful
+/// Output of translating one expression. Carries either a successful
 /// rendering or a fall-back diagnostic so the caller can decide how
 /// to embed the result (full prop substitution vs. comment-only).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TranslatedExpr {
-    /// The expression translated cleanly.  `text` is ready to be
+    /// The expression translated cleanly. `text` is ready to be
     /// embedded after `Theorem foo : ` (Coq) / `theorem foo : ` (Lean).
     Translated {
         /// Foreign-tool source text — e.g. `n = 7` or `forall x, P x`.
         text: String,
     },
     /// The expression's shape couldn't be translated faithfully
-    /// (refinement types, complex pattern binders, etc.).  The
+    /// (refinement types, complex pattern binders, etc.). The
     /// caller falls back to `Prop` and embeds `original` in a
     /// comment so the foreign-tool reviewer can see what the
     /// statement was supposed to say.
     Fallback {
         /// Why the fallback fired (e.g., "match expression",
-        /// "refinement type").  Goes into the diagnostic comment.
+        /// "refinement type"). Goes into the diagnostic comment.
         reason: String,
         /// The Verum-side rendering (via `verum_ast::pretty::format_expr`)
         /// preserved verbatim for the comment.
@@ -87,14 +94,14 @@ impl TranslatedExpr {
     }
 }
 
-/// Per-format translator interface.  Adding a new foreign format is
+/// Per-format translator interface. Adding a new foreign format is
 /// one new instance.
 pub trait ExprRenderer {
     /// Stable identifier — `"coq"`, `"lean"`, etc.
     fn id(&self) -> &'static str;
 
     /// Translate a complete expression into the foreign-tool's
-    /// proposition syntax.  Returns [`TranslatedExpr::Fallback`] when
+    /// proposition syntax. Returns [`TranslatedExpr::Fallback`] when
     /// the shape can't be translated cleanly.
     fn render(&self, expr: &Expr) -> TranslatedExpr;
 }
@@ -221,7 +228,7 @@ fn render_expr_coq(expr: &Expr) -> Option<String> {
         }
         ExprKind::Block(block) => {
             // Trivial passthrough: a block with no statements and a
-            // final expression renders as that expression.  Blocks
+            // final expression renders as that expression. Blocks
             // with let-bindings or multiple statements fall back —
             // their lowering needs `let x := e in body` form which
             // requires statement-by-statement walking + variable-
@@ -239,12 +246,12 @@ fn render_expr_coq(expr: &Expr) -> Option<String> {
         ExprKind::If { condition, then_branch, else_branch } => {
             // `if cond { p } else q` → `(if cond then p else q)`.
             // Coq + Lean both accept the same surface syntax for the
-            // propositional if-then-else.  Restrictions:
-            //   * The condition must be a single Expr (no let-
-            //     chains — those need pattern rendering).
-            //   * Both branches must render cleanly.
-            //   * The `else_branch` must be present — without it the
-            //     statement isn't a propositional if-then-else.
+            // propositional if-then-else. Restrictions:
+            //  * The condition must be a single Expr (no let-
+            //  chains — those need pattern rendering).
+            //  * Both branches must render cleanly.
+            //  * The `else_branch` must be present — without it the
+            //  statement isn't a propositional if-then-else.
             let cond_kinds: Vec<&verum_ast::expr::ConditionKind> =
                 condition.conditions.iter().collect();
             if cond_kinds.len() != 1 {
@@ -414,19 +421,19 @@ fn render_expr_lean(expr: &Expr) -> Option<String> {
             ..
         } => {
             // Lean 4 dot-notation: `obj.method args...` (#147 /
-            // MSFS-L4.16).  Lean's namespace-resolution machinery uses
+            // MSFS-L4.16). Lean's namespace-resolution machinery uses
             // the receiver's type to find the method declaration
             // (e.g., `MetaClsTopWitness.max_1_full_classification` is
             // located via the `.max_1_full_classification` syntax),
             // which is more idiomatic than the applicative form
             // `(method obj args)` and matches what a Lean user writes
-            // by hand.  The receiver renders bare (no extra parens)
+            // by hand. The receiver renders bare (no extra parens)
             // when it is a Path or another MethodCall/Field — Lean's
             // dot is left-associative, so chains nest naturally as
-            // `a.b.c args`.  When the inner sub-expression returned
+            // `a.b.c args`. When the inner sub-expression returned
             // its result wrapped in `(...)` (every render_expr_lean
             // arm wraps), strip those parens for the dot-binder so
-            // the chain reads as one flat path.  Receivers that are
+            // the chain reads as one flat path. Receivers that are
             // not naturally bare (literals, binary expressions, etc.)
             // keep their parentheses so `<dot>` doesn't bind into a
             // sub-fragment.
@@ -548,7 +555,7 @@ fn render_literal_lean(kind: &LiteralKind) -> Option<String> {
 // Helpers
 // =============================================================================
 
-/// Project: extract the binder name from a `QuantifierBinding`.  Only
+/// Project: extract the binder name from a `QuantifierBinding`. Only
 /// Ident-pattern binders translate cleanly; any other shape returns
 /// `None`.
 fn quantifier_binding_name(qb: &verum_ast::expr::QuantifierBinding) -> Option<String> {
@@ -561,7 +568,7 @@ fn quantifier_binding_name(qb: &verum_ast::expr::QuantifierBinding) -> Option<St
 
 /// Wrap text in `(…)` when it isn't already parenthesised AND it
 /// looks complex enough to need disambiguation in op-precedence
-/// contexts.  Heuristic: any whitespace inside means there's a
+/// contexts. Heuristic: any whitespace inside means there's a
 /// substructure worth bracketing.
 fn parens_if_complex(text: &str) -> String {
     if text.starts_with('(') && text.ends_with(')') {
@@ -574,10 +581,10 @@ fn parens_if_complex(text: &str) -> String {
 }
 
 /// True when an expression's rendered form needs to be parenthesised
-/// before a Lean dot-token attaches to it.  Bare Path / MethodCall /
+/// before a Lean dot-token attaches to it. Bare Path / MethodCall /
 /// Field forms attach naturally (Lean's dot is left-associative);
 /// literals, binary expressions, and other shapes need `(…)` so
-/// `<dot>` doesn't bind to a sub-fragment.  Used by Lean
+/// `<dot>` doesn't bind to a sub-fragment. Used by Lean
 /// MethodCall / Field arms to produce idiomatic dot-notation.
 fn needs_parens_before_dot(expr: &Expr) -> bool {
     match &expr.kind {
@@ -590,7 +597,7 @@ fn needs_parens_before_dot(expr: &Expr) -> bool {
 /// Strip a balanced outer pair of parentheses from a rendered
 /// expression's text — used by Lean dot-notation chains where the
 /// inner sub-expression's outer wrap is redundant once the receiver
-/// is dot-attached to a method.  Only strips when the parens are
+/// is dot-attached to a method. Only strips when the parens are
 /// genuinely the outermost layer (matched by depth-tracked scan), so
 /// `(a + b)` strips to `a + b` but `(a) + (b)` is left untouched.
 fn strip_outer_parens(text: &str) -> String {
@@ -626,13 +633,14 @@ fn strip_outer_parens(text: &str) -> String {
 // TypeRenderer — verum_ast::Type → Coq/Lean type syntax (#141 / MSFS-L4.8)
 // =============================================================================
 //
+
 // Sibling to [`ExprRenderer`] — translates types into the foreign
 // tool's surface syntax so theorem parameters can be declared in the
-// emitted file.  Without this, every theorem's free variables are
+// emitted file. Without this, every theorem's free variables are
 // undeclared and `coqc`/`lean` reject before they get to type-
 // checking the proposition.
 
-/// Output of translating a type.  Same discriminated-union shape as
+/// Output of translating a type. Same discriminated-union shape as
 /// [`TranslatedExpr`] — successful render or a fallback diagnostic.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TranslatedType {
@@ -645,7 +653,7 @@ pub enum TranslatedType {
     },
     /// The type's shape couldn't be translated faithfully (refinement
     /// types with predicates, complex generics, function types with
-    /// effects, etc.).  Caller decides how to embed (typical: declare
+    /// effects, etc.). Caller decides how to embed (typical: declare
     /// the parameter as a fresh `Set` / `Type` variable).
     Fallback {
         /// Why the fallback fired.
@@ -670,7 +678,7 @@ impl TranslatedType {
     }
 }
 
-/// Per-format type translator.  Adding a new foreign format is a
+/// Per-format type translator. Adding a new foreign format is a
 /// single new instance.
 pub trait TypeRenderer {
     /// Stable id matching the corresponding [`ExprRenderer`].
@@ -787,12 +795,12 @@ fn render_type_coq(ty: &Type) -> Option<String> {
         TypeKind::Refined { base, predicate } => {
             // `T{predicate}` / `T where pred` → Coq subset type
             // `{ binder : T | predicate }`. Verum's surface forms:
-            //   * Inline `Int{> 0}` — implicit `it` binder.
-            //   * Lambda `Int where |x| x > 0` — explicit `x`.
-            //   * Sigma `x: Int where x > 0` — explicit `x`.
-            //   * Named `Text where is_email` — implicit `it`; the
-            //     predicate text is emitted verbatim (caller
-            //     resolves applicability).
+            //  * Inline `Int{> 0}` — implicit `it` binder.
+            //  * Lambda `Int where |x| x > 0` — explicit `x`.
+            //  * Sigma `x: Int where x > 0` — explicit `x`.
+            //  * Named `Text where is_email` — implicit `it`; the
+            //  predicate text is emitted verbatim (caller
+            //  resolves applicability).
             let base_text = render_type_coq(base)?;
             let pred_text = render_expr_coq(&predicate.expr)?;
             let binder = match &predicate.binding {
@@ -939,21 +947,23 @@ fn generic_arg_to_lean_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
 // AgdaExprRenderer (#156 — multi-kernel cross-validation, third backend)
 // -----------------------------------------------------------------------------
 
-/// Agda backend for proposition translation.  Agda is foundationally
+/// Agda backend for proposition translation. Agda is foundationally
 /// distinct from Coq + Lean: it lives in pure MLTT (no UIP, no
 /// classical extensions), so the cross-format gate gains a
 /// MLTT-side independent re-check the moment this backend lands.
 ///
+
 /// Surface conventions:
 ///
-///   * Universe: `Set` (Agda's term for `Type`/`Prop`).
-///   * Equality: `_≡_` (propositional equality from
-///     `Relation.Binary.PropositionalEquality`).
-///   * Logic: `_∧_` / `_∨_` / `→` / `_⇔_` (Agda stdlib).
-///   * Negation: `¬_`.
-///   * Numbers: literals dispatch via `BUILTIN NATURAL` for `Nat` /
-///     stdlib `Integer` for `Int`.
-///   * Booleans: `Bool` with `true`/`false` constructors (lowercase).
+
+///  * Universe: `Set` (Agda's term for `Type`/`Prop`).
+///  * Equality: `_≡_` (propositional equality from
+///  `Relation.Binary.PropositionalEquality`).
+///  * Logic: `_∧_` / `_∨_` / `→` / `_⇔_` (Agda stdlib).
+///  * Negation: `¬_`.
+///  * Numbers: literals dispatch via `BUILTIN NATURAL` for `Nat` /
+///  stdlib `Integer` for `Int`.
+///  * Booleans: `Bool` with `true`/`false` constructors (lowercase).
 pub struct AgdaExprRenderer;
 
 impl AgdaExprRenderer {
@@ -1022,7 +1032,7 @@ fn render_expr_agda(expr: &Expr) -> Option<String> {
                 BinOp::Div => Some("/"),
                 // Agda has no built-in `mod`; stdlib provides `_mod_`
                 // but the convention is `_%_` for primitive modulo
-                // and `_mod_` for proper modular arithmetic.  Use the
+                // and `_mod_` for proper modular arithmetic. Use the
                 // primitive form for closer Coq/Lean parity.
                 BinOp::Rem => Some("%"),
                 _ => None,
@@ -1126,7 +1136,7 @@ fn render_literal_agda(kind: &LiteralKind) -> Option<String> {
 // AgdaTypeRenderer
 // -----------------------------------------------------------------------------
 
-/// Agda type backend.  Mirrors Coq/Lean type renderers but emits
+/// Agda type backend. Mirrors Coq/Lean type renderers but emits
 /// MLTT-flavoured syntax: `Set` for the universe, `_≡_` for equality
 /// types, stdlib aliases (`ℕ` for naturals, `String`, `Bool`), and
 /// `Σ` for dependent products.
@@ -1163,7 +1173,7 @@ impl TypeRenderer for AgdaTypeRenderer {
 
 fn render_type_agda(ty: &Type) -> Option<String> {
     match &ty.kind {
-        // Agda stdlib: `Data.Unit.⊤`.  Use the unicode form so the
+        // Agda stdlib: `Data.Unit.⊤`. Use the unicode form so the
         // output matches mainstream Agda style.
         TypeKind::Unit => Some("⊤".to_string()),
         TypeKind::Bool => Some("Bool".to_string()),
@@ -1225,7 +1235,7 @@ fn render_type_agda(ty: &Type) -> Option<String> {
         | TypeKind::UnsafeReference { inner, .. } => render_type_agda(inner),
         TypeKind::Refined { base, predicate } => {
             // `T{predicate}` → Agda Σ-type
-            // `Σ[ binder ∈ T ] (predicate binder)`.  Standard
+            // `Σ[ binder ∈ T ] (predicate binder)`. Standard
             // dependent-pair form from `Data.Product`.
             let base_text = render_type_agda(base)?;
             let pred_text = render_expr_agda(&predicate.expr)?;
@@ -1251,19 +1261,21 @@ fn generic_arg_to_agda_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
 // IsabelleExprRenderer (#156 — fourth backend)
 // -----------------------------------------------------------------------------
 
-/// Isabelle/HOL backend.  Isabelle/HOL is a classical higher-order
+/// Isabelle/HOL backend. Isabelle/HOL is a classical higher-order
 /// logic system — distinct from Coq's CIC and Lean 4's CIC-derived
-/// hierarchy.  Adding it brings classical HOL into the foundation
+/// hierarchy. Adding it brings classical HOL into the foundation
 /// matrix alongside CIC (Coq + Lean) and MLTT (Agda).
 ///
+
 /// Surface conventions:
 ///
-///   * Equality: `=` (not `≡`).
-///   * Logic: `∧` / `∨` / `⟶` / `⟷` (Isabelle uses Unicode HOL
-///     symbols by default in modern Isabelle releases).
-///   * Negation: `¬`.
-///   * Function application: `f x y` (juxtaposition, like Lean).
-///   * Universal: `∀x. P x` / Existential: `∃x. P x`.
+
+///  * Equality: `=` (not `≡`).
+///  * Logic: `∧` / `∨` / `⟶` / `⟷` (Isabelle uses Unicode HOL
+///  symbols by default in modern Isabelle releases).
+///  * Negation: `¬`.
+///  * Function application: `f x y` (juxtaposition, like Lean).
+///  * Universal: `∀x. P x` / Existential: `∃x. P x`.
 pub struct IsabelleExprRenderer;
 
 impl IsabelleExprRenderer {
@@ -1428,7 +1440,7 @@ fn render_literal_isabelle(kind: &LiteralKind) -> Option<String> {
 // IsabelleTypeRenderer
 // -----------------------------------------------------------------------------
 
-/// Isabelle/HOL type backend.  Maps Verum stdlib types to their HOL
+/// Isabelle/HOL type backend. Maps Verum stdlib types to their HOL
 /// counterparts: `Int → int`, `Nat → nat`, `Bool → bool`, `Text →
 /// string`, `List<T> → 'T list`, `Maybe<T> → 'T option`.
 pub struct IsabelleTypeRenderer;
@@ -1501,7 +1513,7 @@ fn render_type_isabelle(ty: &Type) -> Option<String> {
         }
         TypeKind::Generic { base, args, .. } => {
             // Isabelle uses postfix syntax for type constructors:
-            // `'a list`, `'a option`.  For multi-arg: `(T1, T2) Map`.
+            // `'a list`, `'a option`. For multi-arg: `(T1, T2) Map`.
             let base_text = render_type_isabelle(base)?;
             let mapped_base = match base_text.as_str() {
                 "List" => "list",
@@ -1525,7 +1537,7 @@ fn render_type_isabelle(ty: &Type) -> Option<String> {
         | TypeKind::UnsafeReference { inner, .. } => render_type_isabelle(inner),
         TypeKind::Refined { base, predicate } => {
             // Isabelle refinement types use set-comprehension syntax:
-            // `{ x. P x }`.  The base type is implicit from context.
+            // `{ x. P x }`. The base type is implicit from context.
             let base_text = render_type_isabelle(base)?;
             let pred_text = render_expr_isabelle(&predicate.expr)?;
             let binder = match &predicate.binding {
@@ -1550,23 +1562,25 @@ fn generic_arg_to_isabelle_text(arg: &verum_ast::ty::GenericArg) -> Option<Strin
 // DeduktiExprRenderer (#156 — fifth backend)
 // -----------------------------------------------------------------------------
 
-/// Dedukti backend.  Dedukti is a logical framework based on the
+/// Dedukti backend. Dedukti is a logical framework based on the
 /// λΠ-calculus modulo rewriting (LF-style); it embeds many proof
 /// systems (Coq, Lean, Agda, Matita) into a uniform meta-language.
 /// Adding it is the architectural keystone of #156 — Dedukti can
 /// re-check artefacts emitted from any of the four upstream
 /// backends, providing a meta-validation pass.
 ///
+
 /// Surface conventions:
 ///
-///   * Equality: `eq T x y` (encoded; no infix operator).
-///   * Logic: `and` / `or` / `imp` / `iff` (named connectives in the
-///     stdlib; no operator notation by default).
-///   * Negation: `not`.
-///   * Universal: `! x : T, body` / Existential: `? x : T, body`
-///     (Lambdapi syntax; pure-Dedukti omits the quantifier symbols
-///     and uses encodings).
-///   * Function application: `f x y` (juxtaposition).
+
+///  * Equality: `eq T x y` (encoded; no infix operator).
+///  * Logic: `and` / `or` / `imp` / `iff` (named connectives in the
+///  stdlib; no operator notation by default).
+///  * Negation: `not`.
+///  * Universal: `! x : T, body` / Existential: `? x : T, body`
+///  (Lambdapi syntax; pure-Dedukti omits the quantifier symbols
+///  and uses encodings).
+///  * Function application: `f x y` (juxtaposition).
 pub struct DeduktiExprRenderer;
 
 impl DeduktiExprRenderer {
@@ -1738,9 +1752,9 @@ fn render_literal_dedukti(kind: &LiteralKind) -> Option<String> {
 // DeduktiTypeRenderer
 // -----------------------------------------------------------------------------
 
-/// Dedukti type backend.  Dedukti's type system is the λΠ-calculus
+/// Dedukti type backend. Dedukti's type system is the λΠ-calculus
 /// modulo rewriting — types are first-class terms and the syntactic
-/// surface is intentionally minimal.  Most Verum stdlib types map
+/// surface is intentionally minimal. Most Verum stdlib types map
 /// to bare-name constants (the consumer encoding-library is
 /// expected to provide concrete declarations).
 pub struct DeduktiTypeRenderer;
@@ -1878,8 +1892,8 @@ fn classify_unrenderable_type(ty: &Type) -> &'static str {
     }
 }
 
-/// Diagnostic classifier for unrenderable shapes.  Goes into the
-/// `Fallback.reason` field.  Only enumerates the common shapes the
+/// Diagnostic classifier for unrenderable shapes. Goes into the
+/// `Fallback.reason` field. Only enumerates the common shapes the
 /// MSFS corpus actually carries — everything else falls through to
 /// the generic catch-all.
 fn classify_unrenderable(expr: &Expr) -> &'static str {
@@ -2127,7 +2141,7 @@ mod tests {
     fn fallback_for_unsupported_shape_carries_reason() {
         // Tuple expressions don't translate cleanly to a one-line
         // Coq Prop syntax (would require Coq's pair / sigma encoding
-        // and we'd need type-context to disambiguate).  Renderer
+        // and we'd need type-context to disambiguate). Renderer
         // falls back with a non-empty reason and original text.
         let e = Expr::new(
             ExprKind::Tuple({
@@ -2287,7 +2301,7 @@ mod tests {
     #[test]
     fn coq_translates_chained_method_calls() {
         // cand.articulation_view().cond_F_S().has_phi_X()
-        //   → (has_phi_X (cond_F_S (articulation_view cand)))
+        //  → (has_phi_X (cond_F_S (articulation_view cand)))
         // This is the dominant MSFS proposition shape.
         let chain = method_call(
             method_call(
@@ -2312,10 +2326,10 @@ mod tests {
     #[test]
     fn lean_translates_chained_method_calls() {
         // cand.articulation_view().cond_F_S().has_phi_X()
-        //   → (cand.articulation_view.cond_F_S.has_phi_X)
+        //  → (cand.articulation_view.cond_F_S.has_phi_X)
         // Lean dot-notation chains naturally — left-associative,
         // each `.method` attaches to the preceding receiver-or-call,
-        // matching the Verum source structure exactly.  The Lean
+        // matching the Verum source structure exactly. The Lean
         // namespace resolver locates each method via the receiver's
         // type, so this form type-checks idiomatically.
         let chain = method_call(
@@ -2373,7 +2387,7 @@ mod tests {
     fn lean_translates_chained_field_then_method_dot_notation() {
         // obj.field.method(a) → (obj.field.method a) — common pattern
         // in record-based proofs (project a field, call a method on
-        // the projected value).  Lean's left-associative dot binds
+        // the projected value). Lean's left-associative dot binds
         // chains naturally without explicit parens around `obj.field`.
         let e = method_call(
             field(ident_expr("obj"), "field"),
@@ -2387,7 +2401,7 @@ mod tests {
     #[test]
     fn lean_dot_notation_parenthesises_complex_receiver() {
         // (a + b).method() — receiver is a Binary expression, NOT a
-        // bare path or method-chain.  The dot must not bind to `b`,
+        // bare path or method-chain. The dot must not bind to `b`,
         // so the receiver gets parenthesised: ((a + b).method).
         let plus = binop(BinOp::Add, ident_expr("a"), ident_expr("b"));
         let e = method_call(plus, "method", vec![]);
@@ -2398,7 +2412,7 @@ mod tests {
     #[test]
     fn method_call_falls_back_when_arg_unrenderable() {
         // obj.foo(<tuple>) → tuple is unrenderable, so the whole
-        // method-call expression must surface as a fallback.  Pre-#142
+        // method-call expression must surface as a fallback. Pre-#142
         // every MethodCall surfaced as fallback regardless of args;
         // post-#142 only sub-expression failures bubble up.
         let unrenderable_arg = Expr::new(
@@ -2476,7 +2490,7 @@ mod tests {
     #[test]
     fn block_with_statements_falls_back() {
         // Block with let-bindings or other statements — needs
-        // `let x := e in body` rendering.  Not supported in the V0
+        // `let x := e in body` rendering. Not supported in the V0
         // translator, so falls back.
         use verum_ast::stmt::Stmt;
         let mut stmts: verum_common::List<Stmt> = verum_common::List::new();
@@ -2550,7 +2564,7 @@ mod tests {
     #[test]
     fn if_inside_logical_and_translates_recursively() {
         // `(if c then p else q) && r` — pin recursive descent through
-        // Binary into If.  Common pattern in proposition translation
+        // Binary into If. Common pattern in proposition translation
         // when conditional definitions are inlined.
         let cond = ident_expr("c");
         let then_e = ident_expr("p");
@@ -2807,7 +2821,7 @@ mod tests {
     fn coq_translates_nested_refined_inside_generic() {
         // `List<Int{>= 0}>` → `(list { x : Z | x >= 0 })`. Pin that
         // recursive descent through `Generic` reaches the refined
-        // base.  This is the MSFS surface shape — `List<CategoricalLevel>`.
+        // base. This is the MSFS surface shape — `List<CategoricalLevel>`.
         let pred = binop(BinOp::Ge, ident_expr("x"), int_lit(0));
         let inner = refined(TypeKind::Int, pred, Some("x"));
         let mut args: verum_common::List<verum_ast::ty::GenericArg> =

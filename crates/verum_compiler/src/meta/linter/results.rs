@@ -1,7 +1,9 @@
 //! Lint Results for Meta Linter
 //!
+
 //! Contains LintResult, LintWarning, LintError, and UnsafePattern types.
 //!
+
 //! Meta linter: static analysis of meta code for unsafe patterns (unbounded
 //! recursion, infinite loops, unsafe interpolation without @safe attribute).
 

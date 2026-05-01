@@ -2,6 +2,7 @@
 //! the JSON certificate path. The flag was previously an inert config
 //! field — set in `Default::default` but never read by `to_json`.
 //!
+
 //! Spec: closes 13th instance of the inert-defense anti-pattern series.
 
 use verum_ast::expr::{Expr, ExprKind};

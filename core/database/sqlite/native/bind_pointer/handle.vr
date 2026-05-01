@@ -3,7 +3,8 @@
 // =============================================================================
 // Spec: SQLite C API
 //
-// A typed pointer is (tag, handle, deleter_installed).  `handle == 0`
+
+// A typed pointer is (tag, handle, deleter_installed). `handle == 0`
 // means "no pointer bound to this slot".
 // =============================================================================
 

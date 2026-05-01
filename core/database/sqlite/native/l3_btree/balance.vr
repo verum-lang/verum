@@ -6,25 +6,30 @@ module core.database.sqlite.native.l3_btree.balance;
 // Layer: 3
 // Spec: sqlite-native.md §10.5
 //
+
 // Balance is the hardest part of a B-tree. Every insert that overflows
 // a leaf, and every delete that under-fills a leaf, may ripple upward
 // through the tree; the balance code decides whether to:
 //
-//   * split       — one page → two, distribute cells, promote a
-//                    separator to the parent
-//   * redistribute — borrow cells from a sibling
-//   * merge       — two underfull pages → one
-//   * grow root   — the root itself is overfull
-//   * shrink root — the root has a single child and we can collapse
+
+//  * split — one page → two, distribute cells, promote a
+//  separator to the parent
+//  * redistribute — borrow cells from a sibling
+//  * merge — two underfull pages → one
+//  * grow root — the root itself is overfull
+//  * shrink root — the root has a single child and we can collapse
 //
+
 // Invariants (SMT-checkable in v2):
 //
-//   I1. Every internal cell's key is ≥ every key in its left subtree
-//       AND ≤ every key in its right subtree (sorted order preserved).
-//   I2. Every leaf has depth `root_depth` (balanced heights).
-//   I3. Every non-root page has cell_count ≥ min_cells_per_page.
-//   I4. Every page has cell_count ≤ max_cells_per_page(page_size).
+
+//  I1. Every internal cell's key is ≥ every key in its left subtree
+//  AND ≤ every key in its right subtree (sorted order preserved).
+//  I2. Every leaf has depth `root_depth` (balanced heights).
+//  I3. Every non-root page has cell_count ≥ min_cells_per_page.
+//  I4. Every page has cell_count ≤ max_cells_per_page(page_size).
 //
+
 // The concrete I/O (page reads, writes, allocations) is delegated to
 // the pager via the `BalanceContext` struct the caller passes in.
 // This module is pure — it plans the shape changes and returns the
@@ -135,13 +140,15 @@ public fn balance_context_new(page_size: Int, reserved: Int) -> BalanceContext {
 /// Decide how to handle overflow on `page` after an insert made it too
 /// full. Returns a `BalanceDecision` describing the topology change.
 ///
+
 /// Strategy (matches SQLite `balance_nonroot`):
 ///
-///   1. If there's a left or right sibling with headroom, rotate into
-///      it (cheapest: no allocation, no separator churn).
-///   2. Otherwise split — distribute cells across two pages, promote
-///      the median as a separator.
-///   3. If `page` is the root and no sibling exists, grow the tree.
+
+///  1. If there's a left or right sibling with headroom, rotate into
+///  it (cheapest: no allocation, no separator churn).
+///  2. Otherwise split — distribute cells across two pages, promote
+///  the median as a separator.
+///  3. If `page` is the root and no sibling exists, grow the tree.
 public fn plan_overflow(
     ctx: &BalanceContext,
     page: &PageStats,

@@ -52,6 +52,7 @@ fn test_cache_config() {
 // CacheConfig stats-driven gating wiring tests
 // =============================================================================
 //
+
 // Pin: `CacheConfig.{statistics_driven, min_decisions_to_cache,
 // min_conflicts_to_cache, min_solve_time_ms}` reach the public
 // `get_or_verify_with_stats` call-site. Pre-wire the four fields

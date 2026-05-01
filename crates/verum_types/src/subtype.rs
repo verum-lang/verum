@@ -1,5 +1,6 @@
 //! Subtyping with refinement types.
 //!
+
 //! This module implements subtyping rules including:
 //! - Structural subtyping for records and variants
 //! - Refinement subtyping (stronger predicates are subtypes)
@@ -7,6 +8,7 @@
 //! - Array/List subtyping (covariant in element type)
 //! - Reference variance rules (covariant for shared, invariant for mutable)
 //!
+
 //! Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 - Subtyping Algorithm
 
 use crate::ty::{Type, TypeVar};
@@ -22,6 +24,7 @@ thread_local! {
 
 /// Subtyping checker.
 ///
+
 /// Implements the complete subtyping algorithm per subtyping specification: structural subtyping for records, refinement subtyping, protocol-based nominal subtyping.
 /// The subtyping relation S <: T means "a value of type S can be used where T is expected".
 pub struct Subtyping {
@@ -105,8 +108,10 @@ impl Subtyping {
 
     /// Check if t1 is a subtype of t2: t1 <: t2
     ///
+
     /// This means a value of type t1 can be used where t2 is expected.
     ///
+
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 - Subtyping Algorithm
     pub fn is_subtype(&self, t1: &Type, t2: &Type) -> bool {
         // Depth guard to prevent stack overflow on deeply nested or cyclic types
@@ -152,9 +157,11 @@ impl Subtyping {
             // Generic types (stdlib types like List<T>, Map<K,V>, etc.)
             // Core semantics: value semantics by default, explicit reference/heap allocation, no implicit copying — Semantic types
             //
+
             // Generic types are covariant in their type arguments.
             // List<Int{> 0}> <: List<Int> because Int{> 0} <: Int
             //
+
             // CRITICAL FIX: Generic types need explicit handling for subtyping
             // This enables type inference to work when comparing synthesized types
             // (with type variables) against expected types (with concrete types).
@@ -236,6 +243,7 @@ impl Subtyping {
 
                 // Tier 2: SMT solver with timeout (10-100ms)
                 //
+
                 // Previously delegated to `crate::smt_backend::check_subsumption_smt`,
                 // which has been moved to `verum_smt::refinement_backend` to
                 // break the `verum_types ↔ verum_smt` cycle. `Subtyping` no
@@ -245,6 +253,7 @@ impl Subtyping {
                 // should go through `RefinementChecker` (which owns an
                 // injected `SmtBackend`).
                 //
+
                 // Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 line 439 requires conservative rejection
                 false
             }
@@ -468,20 +477,24 @@ impl Subtyping {
             // Pointer subtyping: *mut T <: *const T (mutable can be used where const expected)
             // Three-tier reference model: &T (managed, CBGR ~15ns), &checked T (statically verified, 0ns), &unsafe T (unchecked, 0ns). Memory layouts: ThinRef 16 bytes (ptr+generation+epoch), FatRef 24 bytes (+len) — Pointer Coercion Rules
             //
+
             // This is a standard and safe coercion found in C, C++, and Rust:
             // - *mut T → *const T is safe (reading is a subset of read/write)
             // - *const T → *mut T is UNSAFE (would allow writing to read-only)
             //
+
             // The inner type must match exactly (no covariance/contravariance)
             // because pointers can be written through and read from.
             //
+
             // Examples:
             // ```verum
             // let p: *mut Int = alloc(1);
-            // let q: *const Int = p;  // OK: *mut Int <: *const Int
+            // let q: *const Int = p; // OK: *mut Int <: *const Int
             //
+
             // let r: *const Int = ...;
-            // let s: *mut Int = r;    // ERROR: *const Int </: *mut Int
+            // let s: *mut Int = r; // ERROR: *const Int </: *mut Int
             // ```
             (
                 Pointer {
@@ -596,13 +609,15 @@ impl Subtyping {
             // Tensor subtyping
             // Tensor types: Tensor<T, Shape: meta [usize]> with compile-time shape tracking for N-dimensional arrays
             //
+
             // Tensors are subtypes if:
             // 1. Element types are covariant (T1 <: T2)
             // 2. Shapes are invariant (must match exactly)
             //
+
             // Example:
-            // Tensor<Int{> 0}, [2, 3]> <: Tensor<Int, [2, 3]>  // OK: covariant element
-            // Tensor<Int, [2, 3]> </: Tensor<Int, [3, 2]>      // ERROR: shapes differ
+            // Tensor<Int{> 0}, [2, 3]> <: Tensor<Int, [2, 3]> // OK: covariant element
+            // Tensor<Int, [2, 3]> </: Tensor<Int, [3, 2]> // ERROR: shapes differ
             (
                 Tensor {
                     element: e1,
@@ -627,9 +642,11 @@ impl Subtyping {
             // Universe subtyping (Cumulativity)
             // Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Universe Hierarchy
             //
+
             // Universe cumulativity: Type_n <: Type_{n+1}
             // This means any type at level n can be used where a type at level n+1 is expected.
             //
+
             // Examples:
             // - Type₀ <: Type₁ <: Type₂ ...
             // - Prop <: Type₁
@@ -638,6 +655,7 @@ impl Subtyping {
             // Prop is a subtype of Type₁
             // Inductive types: recursive type definitions with structural recursion, termination checking — .1 - Proof Irrelevance
             //
+
             // Prop : Type₁, so Prop <: Type₁
             // But Type₀ ≢ Prop (different universes for data vs proofs)
             (Prop, Universe { level }) => {
@@ -654,6 +672,7 @@ impl Subtyping {
             // Pi type subtyping
             // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi Types
             //
+
             // (x: A) -> B(x) <: (x: A') -> B'(x) if:
             // - A' <: A (contravariant in parameter type)
             // - B(x) <: B'(x) (covariant in return type, under x : A')
@@ -683,6 +702,7 @@ impl Subtyping {
             // Sigma type subtyping
             // Sigma types (dependent pairs): (x: A, B(x)) where second component type depends on first value, refinement types desugar to Sigma — Sigma Types
             //
+
             // (x: A, B(x)) <: (x: A', B'(x)) if:
             // - A <: A' (covariant in first component)
             // - B(x) <: B'(x) (covariant in second component)
@@ -709,6 +729,7 @@ impl Subtyping {
             // Equality type subtyping
             // Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — Equality Types
             //
+
             // Eq<A, x, y> <: Eq<A', x', y'> if:
             // - A <: A' (covariant in carrier type)
             // - x = x' and y = y' (terms must be identical)
@@ -735,6 +756,7 @@ impl Subtyping {
             // Inductive type subtyping
             // Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .1 - Inductive Types
             //
+
             // Inductive types with the same name are subtypes if their indices are subtypes.
             (
                 Inductive {
@@ -778,6 +800,7 @@ impl Subtyping {
             // This enables passing string literals directly to functions expecting references
             // Three-tier reference model: &T (managed, CBGR ~15ns), &checked T (statically verified, 0ns), &unsafe T (unchecked, 0ns). Memory layouts: ThinRef 16 bytes (ptr+generation+epoch), FatRef 24 bytes (+len) — Reference Coercion Rules
             //
+
             // An owned value can always be borrowed immutably:
             // - The lifetime is managed by the caller
             // - This is consistent with Rust's auto-ref behavior
@@ -802,6 +825,7 @@ impl Subtyping {
             // Existential type subtyping
             // Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — .4 - Existential Subtyping
             //
+
             // Two existentials: (some a. S) <: (some b. T) if S[a/witness] <: T[b/witness]
             // for a fresh witness type variable.
             (
@@ -852,6 +876,7 @@ impl Subtyping {
             // Universal type subtyping
             // Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — Universal Types
             //
+
             // (forall a. S) <: (forall b. T) if S[a/fresh] <: T[b/fresh]
             (
                 Forall {
@@ -914,22 +939,26 @@ impl Subtyping {
             // Capability-restricted type subtyping
             // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 12 - Capability Attenuation as Types
             //
+
             // T with [A, B, C] <: T with [A, B] when:
             // 1. Base types are subtypes: t1.base <: t2.base
             // 2. t1's capabilities are a SUPERSET of t2's capabilities
             //
+
             // "More capabilities" is a subtype of "fewer capabilities" because:
             // - A value with [Read, Write] can be used where [Read] is expected
             // - The extra capabilities (Write) are simply not used
             // - This enables automatic capability attenuation at call sites
             //
+
             // This is contravariant in capabilities (more caps -> subtype)
             //
+
             // Example:
             // ```verum
             // fn analyze(db: Database with [Read]) -> Stats { ... }
             // fn process(db: Database with [Read, Write]) {
-            //     analyze(db);  // OK: [Read, Write] ⊇ [Read]
+            //  analyze(db); // OK: [Read, Write] ⊇ [Read]
             // }
             // ```
             (
@@ -970,10 +999,12 @@ impl Subtyping {
             // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 13.2 - Unknown Type
             // =============================================================================
             //
+
             // Unknown is the TOP type (dual of Never):
             // - Any type T <: unknown (any value can be assigned to unknown)
             // - unknown <: T only if T == unknown (nothing can be done without narrowing)
             //
+
             // This enables safe FFI, deserialization, and rapid prototyping by
             // forcing explicit type narrowing (via `x is T` or pattern matching).
 
@@ -991,11 +1022,14 @@ impl Subtyping {
 
     /// Check record subtyping with width and depth subtyping.
     ///
+
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9607-9619
     ///
+
     /// Width subtyping: S can have MORE fields than T
     /// Depth subtyping: Matching fields must be subtypes
     ///
+
     /// Example:
     /// ```verum
     /// type Point2D is { x: Float, y: Float }
@@ -1030,10 +1064,12 @@ impl Subtyping {
 
     /// Check variant (sum type) subtyping.
     ///
+
     /// Variants are dual to records:
     /// - Contravariant in tags: fewer tags = subtype
     /// - Covariant in variant types
     ///
+
     /// Example:
     /// ```verum
     /// type Shape2D is Circle(Float) | Square(Float)
@@ -1042,6 +1078,7 @@ impl Subtyping {
     /// // For sum types: S <: T if S's tags ⊆ T's tags
     /// ```
     ///
+
     /// Actually, for safe variance:
     /// S <: T if for each tag in S, T also has that tag with a subtype
     fn check_variant_subtype(
@@ -1072,9 +1109,11 @@ impl Subtyping {
 
     /// Check array subtyping: covariant in element type, invariant in size.
     ///
+
     /// Arrays are fixed-size, so sizes must match exactly.
     /// Element types are covariant (read-only access).
     ///
+
     /// Example:
     /// ```verum
     /// type PositiveArray is [Int{> 0}; 10]
@@ -1100,19 +1139,23 @@ impl Subtyping {
 
     /// Check reference subtyping with variance rules.
     ///
+
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9593-9602
     ///
+
     /// Variance rules:
     /// - Shared references (&T): covariant in T
     /// - Mutable references (&mut T): invariant in T
     ///
+
     /// Example:
     /// ```verum
     /// let x: Int{> 0} = 10;
-    /// let r: &Int = &x;  // OK: &Int{> 0} <: &Int (shared refs covariant)
+    /// let r: &Int = &x; // OK: &Int{> 0} <: &Int (shared refs covariant)
     ///
+
     /// let mut y: Int = 5;
-    /// let r_mut: &mut Int{> 0} = &mut y;  // ERROR: &mut refs invariant
+    /// let r_mut: &mut Int{> 0} = &mut y; // ERROR: &mut refs invariant
     /// ```
     fn check_reference_subtype(&self, m1: bool, i1: &Type, m2: bool, i2: &Type) -> bool {
         if m1 && m2 {
@@ -1136,14 +1179,17 @@ impl Subtyping {
 
     /// Check function subtyping: contravariant in parameters, covariant in return.
     ///
+
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9621-9638
     /// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context requirement subtyping
     ///
+
     /// Function subtyping rules:
     /// - Parameters: contravariant (accept more inputs)
     /// - Return type: covariant (produce more specific outputs)
     /// - Contexts: S can have FEWER contexts than T
     ///
+
     /// Example:
     /// ```verum
     /// type IntToBool is Int -> Bool
@@ -1185,21 +1231,25 @@ impl Subtyping {
 
     /// Check context subtyping: S can have FEWER contexts than T.
     ///
+
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9663-9666
     /// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context requirement subtyping
     ///
+
     /// This allows passing pure functions where effectful functions are expected.
     ///
+
     /// Rules:
     /// - None (no contexts) is a subtype of any context requirement (pure functions can be used anywhere)
     /// - Some(Concrete(req1)) <: Some(Concrete(req2)) if req1.is_subset_of(req2)
     /// - Variable contexts are handled conservatively (assume compatible during inference)
     ///
+
     /// Example:
     /// ```verum
     /// fn pure_fn(x: Int) -> Int { x + 1 }
     /// fn takes_io_fn(f: Int -> Int using [IO]) { ... }
-    /// takes_io_fn(pure_fn)  // OK: None <: Some(IO)
+    /// takes_io_fn(pure_fn) // OK: None <: Some(IO)
     /// ```
     fn check_context_subtype(
         &self,
@@ -1226,21 +1276,25 @@ impl Subtyping {
 
     /// Check universe subtyping (cumulativity).
     ///
+
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Universe Hierarchy
     ///
+
     /// Universe cumulativity: Type_n <: Type_m if n <= m
     /// This allows types at lower levels to be used where higher levels are expected.
     ///
+
     /// # Rules:
     /// - Concrete(n) <: Concrete(m) if n <= m
     /// - Variable(i) <: Variable(j) is constraint-checked later
     /// - Succ(n) <: Succ(m) if n <= m
     /// - Max(a, b) <: Concrete(n) if max(a, b) <= n
     ///
+
     /// # Examples:
     /// ```verum
     /// // Type₀ <: Type₁ <: Type₂
-    /// let ty: Type₁ = Type₀;  // OK: cumulativity
+    /// let ty: Type₁ = Type₀; // OK: cumulativity
     /// ```
     fn check_universe_subtype(
         &self,
@@ -1303,14 +1357,17 @@ impl Default for Subtyping {
 
 /// Check syntactic subsumption for common refinement patterns.
 ///
+
 /// This provides a fast path that resolves >80% of refinement subsumption checks
 /// in <1ms without invoking the SMT solver.
 ///
+
 /// Returns:
 /// - Some(true): Predicates syntactically subsume
 /// - Some(false): Predicates syntactically don't subsume
 /// - None: Cannot determine syntactically, need SMT solver
 ///
+
 /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3.1 lines 9696-9707
 /// Syntactic subsumption: fast-path type checking via pattern matching before full unification
 fn check_syntactic_subsumption(phi1: &verum_ast::Expr, phi2: &verum_ast::Expr) -> Option<bool> {
@@ -1385,18 +1442,22 @@ fn check_syntactic_subsumption(phi1: &verum_ast::Expr, phi2: &verum_ast::Expr) -
 
     // Numeric comparison patterns for refinement type subsumption
     //
+
     // This uses syntactic pattern matching to decide common cases efficiently,
     // without invoking an SMT solver. The patterns cover:
     //
+
     // 1. x > N1 => x > N2 when N1 >= N2 (stronger lower bound implies weaker)
     // 2. x >= N1 => x >= N2 when N1 >= N2
     // 3. x < N1 => x < N2 when N1 <= N2 (stronger upper bound implies weaker)
     // 4. x <= N1 => x <= N2 when N1 <= N2
     // 5. x != N => x != N (equality preservation)
     //
+
     // For cases not covered by these patterns, return None to indicate
     // that SMT verification is needed (handled by caller).
     //
+
     // Type inference: Hindley-Milner algorithm W with extensions for refinement types, bidirectional type checking, and constraint-based inference — .3 - Refinement Type Subsumption
     match (&phi1.kind, &phi2.kind) {
         // Pattern: x > N1 => x > N2 if N1 >= N2

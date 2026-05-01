@@ -14,9 +14,11 @@
 )]
 //! Cross-module type resolution tests.
 //!
+
 //! Tests the integration of NameResolver with TypeChecker for resolving
 //! types across module boundaries.
 //!
+
 //! Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Cross-module name resolution
 
 use verum_ast::decl::{TypeDecl, TypeDeclBody, Visibility};

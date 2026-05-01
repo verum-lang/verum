@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §20.6
 //
+
 // A `Snapshot` is a WAL frame index recorded by a Read-mode
 // connection. Once issued, every subsequent read on the same
 // connection that is bound to that snapshot sees only frames at
@@ -10,6 +11,7 @@
 // further frames in the meantime. This is identical to SQLite's
 // `sqlite3_snapshot` API.
 //
+
 // The actual WAL read-path consults `Snapshot.frame_count` when
 // rebuilding the index map for a transaction.
 // =============================================================================
@@ -67,6 +69,7 @@ implement Snapshot {
 // Compatibility check
 // -----------------------------------------------------------------------------
 //
+
 // A schema-cookie change between snapshot creation and use means the
 // snapshot is no longer valid (table schemas differ). The caller
 // checks `is_compatible_with(current_cookie)` before each read.

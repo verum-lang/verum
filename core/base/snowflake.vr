@@ -5,38 +5,47 @@
 // Dependencies: core, core.time
 // =============================================================================
 //
+
 // Snowflake ID — 64-bit integer packing:
 //
-//   bit 63      : always 0 (positive int)
-//   bits 62..22 : milliseconds since `epoch_ms` (41 bits)
-//   bits 21..12 : worker / machine ID (10 bits, 0..=1023)
-//   bits 11..0  : sequence within the same millisecond (12 bits, 0..=4095)
+
+//  bit 63 : always 0 (positive int)
+//  bits 62..22 : milliseconds since `epoch_ms` (41 bits)
+//  bits 21..12 : worker / machine ID (10 bits, 0..=1023)
+//  bits 11..0 : sequence within the same millisecond (12 bits, 0..=4095)
 //
+
 // Guarantees:
 //
-//   * Monotonically increasing within one worker while the clock
-//     moves forward. Sequence wraps to 0 each millisecond.
-//   * Distributed: different workers produce different IDs in the
-//     same millisecond via the worker-ID bits.
-//   * Sortable: byte-lexicographic order of big-endian encoding
-//     matches chronological order — ideal for DB primary keys and
-//     Kafka partition keys.
+
+//  * Monotonically increasing within one worker while the clock
+//  moves forward. Sequence wraps to 0 each millisecond.
+//  * Distributed: different workers produce different IDs in the
+//  same millisecond via the worker-ID bits.
+//  * Sortable: byte-lexicographic order of big-endian encoding
+//  matches chronological order — ideal for DB primary keys and
+//  Kafka partition keys.
 //
+
 // # Why not UUID v7
 //
+
 // UUID v7 gives 128 bits of storage cost; Snowflake fits in 8 bytes
 // and leaves room in a typical 64-bit row-id column. For systems
 // that already have worker sharding, Snowflake is the tighter fit.
 // UUID v7 lives in `core.base.uuid` when 128-bit uniqueness is worth
 // paying for.
 //
+
 // # Clock drift
 //
+
 // If the wall clock goes backwards within a process, the generator
 // refuses to emit a new ID (`ClockRegressed(delta_ms)`) rather than
 // silently emit a non-monotone ID. Callers typically either sleep
 // until the clock recovers or shift to a backup ID source.
 //
+
 // =============================================================================
 
 module core.base.snowflake;
@@ -135,6 +144,7 @@ implement Snowflake {
     /// Emit the next ID. Busy-spins if the sequence saturates within
     /// a single millisecond (awaits the next ms tick).
     ///
+
     /// Pre-fix bug: `now_ms - self.epoch_ms` underflowed `UInt64`
     /// when the wall clock was before the configured epoch
     /// (embedded systems with unset RTC reading 1970 against the

@@ -3,10 +3,12 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.3
 //
+
 // `BBox` carries `[x_min, x_max, y_min, y_max, ...]` for the chosen
 // number of dimensions. SQLite caps R-tree at 5 dimensions; loom
 // matches that.
 //
+
 // All operations are pure: containment, overlap, union, area,
 // area-enlargement-after-insert (used by node-split heuristics).
 // =============================================================================

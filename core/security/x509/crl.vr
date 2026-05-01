@@ -4,36 +4,42 @@
 // Layer: 3 (X509Certificate)
 // =============================================================================
 //
+
 // RFC 5280 §5 CRL (X509Certificate Revocation List) structure:
 //
-//   CertificateList ::= SEQUENCE {
-//       tbsCertList          TBSCertList,
-//       signatureAlgorithm   AlgorithmIdentifier,
-//       signatureValue       BIT STRING
-//   }
+
+//  CertificateList ::= SEQUENCE {
+//  tbsCertList TBSCertList,
+//  signatureAlgorithm AlgorithmIdentifier,
+//  signatureValue BIT STRING
+//  }
 //
-//   TBSCertList ::= SEQUENCE {
-//       version                 Version OPTIONAL,   -- v2 (integer 1)
-//       signature               AlgorithmIdentifier,
-//       issuer                  Name,
-//       thisUpdate              Time,
-//       nextUpdate              Time OPTIONAL,
-//       revokedCertificates     SEQUENCE OF SEQUENCE {
-//           userCertificate     CertificateSerialNumber,   -- INTEGER
-//           revocationDate      Time,
-//           crlEntryExtensions  Extensions OPTIONAL
-//       } OPTIONAL,
-//       crlExtensions           [0] EXPLICIT Extensions OPTIONAL
-//   }
+
+//  TBSCertList ::= SEQUENCE {
+//  version Version OPTIONAL, -- v2 (integer 1)
+//  signature AlgorithmIdentifier,
+//  issuer Name,
+//  thisUpdate Time,
+//  nextUpdate Time OPTIONAL,
+//  revokedCertificates SEQUENCE OF SEQUENCE {
+//  userCertificate CertificateSerialNumber, -- INTEGER
+//  revocationDate Time,
+//  crlEntryExtensions Extensions OPTIONAL
+//  } OPTIONAL,
+//  crlExtensions [0] EXPLICIT Extensions OPTIONAL
+//  }
 //
+
 // This module implements the TBSCertList parser — enough to recognise
 // revoked serial numbers for chain validation. Full signature
 // verification is a v1.1 deliverable; the scaffold exposes the ADT +
 // per-entry iteration + lookup by-serial.
 //
+
 // OCSP is the primary revocation source for WebPKI; CRL is the
 // fallback for long-lived certs and private PKI deployments.
 //
+
 // =============================================================================
 
 module core.security.x509.crl;
@@ -130,6 +136,7 @@ implement Eq for CrlError {
 // Parser (TBSCertList DER → CertificateList)
 // =============================================================================
 //
+
 // The scaffold understands enough DER to walk TBSCertList and extract
 // the revoked-certificate serials. Full Name / Time / Extension
 // parsing is delegated to existing `x509.name.*` / `x509.time.*` /

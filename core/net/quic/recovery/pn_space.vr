@@ -5,19 +5,23 @@
 // Dependencies: core, collections, core.time.instant, quic.frame.AckRange
 // =============================================================================
 //
+
 // RFC 9000 §12.3 defines three independent packet-number spaces
 // (Initial, Handshake, Application Data). Each has its own:
 //
-//   * Monotonic next-PN-to-send counter.
-//   * Largest ACK-received tracking + time-of-arrival.
-//   * In-flight packet table for retransmission + loss detection.
-//   * Outgoing ACK range list.
+
+//  * Monotonic next-PN-to-send counter.
+//  * Largest ACK-received tracking + time-of-arrival.
+//  * In-flight packet table for retransmission + loss detection.
+//  * Outgoing ACK range list.
 //
+
 // The ACK ranges are stored in descending order with no overlaps and
 // gap > 1 between consecutive ranges (RFC 9000 §19.3.1 wire format
 // requires this). `insert_ack_range` merges adjacent ranges to
 // preserve the invariant.
 //
+
 // =============================================================================
 
 module core.net.quic.recovery.pn_space;
@@ -72,7 +76,7 @@ public type PnSpace is {
     // Inbound — received packets
     largest_acked_received: Maybe<UInt64>,     // largest PN we have ACKed from peer
     /// Outgoing ACK set — desc-sorted, non-overlapping, gap ≥ 2 per
-    /// RFC 9000 §19.3.1.  The `AckRanges` wrapper carries the V3
+    /// RFC 9000 §19.3.1. The `AckRanges` wrapper carries the V3
     /// invariant at type level (see core.net.quic.ack_ranges) — direct
     /// List<AckRange> mutation is no longer possible without going
     /// through insert_pn().
@@ -108,6 +112,7 @@ implement PnSpace {
     /// packet-number space MUST increase the packet number by at
     /// least one.").
     ///
+
     /// V4 obligation (spec §9): after this call, `self.next_pn` is
     /// strictly greater than the returned `pn`, and also strictly
     /// greater than `self.largest_acked_sent` (if any). `pn_monotonic_ok()`
@@ -160,7 +165,7 @@ implement PnSpace {
         };
         if should_update { self.largest_acked_received = Some(pn); }
 
-        // Invariant-preserving insert via AckRanges wrapper (V3).
+        // Invariant-preserving insert via AckRanges wrapper .
         let taken = self.ack_ranges.clone();
         self.ack_ranges = taken.insert_pn(pn);
     }

@@ -5,36 +5,46 @@
 // Dependencies: core, core.security.hash.sha256
 // =============================================================================
 //
+
 // Binary Merkle tree per RFC 6962 §2.1 (Certificate Transparency).
 // The same layout used by Sigstore, TUF-Conformance logs, Noms
 // content-addressed storage, and bitcoin-family chains.
 //
+
 // # Leaf / node hashing
 //
-//   leaf_hash(x) = SHA-256(0x00 || x)
-//   node_hash(l, r) = SHA-256(0x01 || l || r)
+
+//  leaf_hash(x) = SHA-256(0x00 || x)
+//  node_hash(l, r) = SHA-256(0x01 || l || r)
 //
+
 // The 0x00 / 0x01 domain separators prevent second-preimage
 // attacks across leaves and internal nodes (see Halevi-Krawczyk
 // 1997, formalised in RFC 6962 §2.1).
 //
+
 // # Odd-leaf handling
 //
+
 // When a level has an odd number of entries, the last entry is
 // promoted unchanged to the next level — matching RFC 6962's rule
 // and avoiding the Bitcoin-family CVE-2012-2459 duplication
 // collision.
 //
+
 // # API
 //
+
 // ```
 // let tree = MerkleTree.from_leaves(&vec_of_byte_lists);
 // let root: [Byte; 32] = tree.root();
 //
+
 // let proof = tree.inclusion_proof(index)?;
 // assert(verify_inclusion_proof(leaf_bytes, index, tree.len(), &proof, &root));
 // ```
 //
+
 // =============================================================================
 
 module core.security.merkle;
@@ -53,7 +63,7 @@ public type MerkleError is
     | BadProofLength(Int);
 
 // Display + Debug + Eq for MerkleError — the standard
-// stdlib protocol impls.  Pre-fix had no impls at all,
+// stdlib protocol impls. Pre-fix had no impls at all,
 // so callers wanting to log/format/compare these errors
 // had to roll their own match block.
 

@@ -1,44 +1,53 @@
 //! Unified audit-gate trait.
 //!
+
 //! Pre-#169, `crates/verum_cli/src/commands/audit.rs` carried 45
 //! ad-hoc `audit_X_with_format(format: AuditFormat) -> Result<()>`
-//! free functions.  Each gate had its own per-function entry point,
+//! free functions. Each gate had its own per-function entry point,
 //! its own dispatch in `main.rs`, and its own JSON-emission shape.
 //! Adding a new audit dimension meant editing audit.rs, main.rs,
 //! and the CLI argument parser — three coupled edit sites.
 //!
-//! Post-#169, every gate implements [`AuditGate`].  The CLI
+
+//! Post-#169, every gate implements [`AuditGate`]. The CLI
 //! dispatch becomes a registry lookup; the JSON-emission contract
 //! is enforced by the trait; new gates plug in by registering an
-//! instance.  The 45 free functions become trait implementations
+//! instance. The 45 free functions become trait implementations
 //! incrementally — the migration pattern is documented below.
 //!
+
 //! ## Migration pattern
 //!
+
 //! Each existing `audit_<name>_with_format(format)` function
 //! becomes a unit-struct implementing [`AuditGate`]:
 //!
+
 //! ```ignore
 //! pub struct FrameworkAxiomsGate;
 //!
+
 //! impl AuditGate for FrameworkAxiomsGate {
-//!     fn name(&self) -> &'static str { "framework-axioms" }
-//!     fn description(&self) -> &'static str {
-//!         "Enumerate every @framework(<corpus>, \"<citation>\") marker in the project."
-//!     }
-//!     fn run(&self, format: AuditFormat) -> crate::error::Result<()> {
-//!         super::audit::audit_framework_axioms_with_format(format)
-//!     }
+//!  fn name(&self) -> &'static str { "framework-axioms" }
+//!  fn description(&self) -> &'static str {
+//!  "Enumerate every @framework(<corpus>, \"<citation>\") marker in the project."
+//!  }
+//!  fn run(&self, format: AuditFormat) -> crate::error::Result<()> {
+//!  super::audit::audit_framework_axioms_with_format(format)
+//!  }
 //! }
 //! ```
 //!
+
 //! Wrapping the existing function preserves all current behaviour;
 //! a future pass can inline the body and delete the free function.
 //!
+
 //! ## Dispatch
 //!
+
 //! [`AuditRegistry::default()`] returns a registry pre-populated
-//! with every migrated gate.  `main.rs` resolves a `--gate <name>`
+//! with every migrated gate. `main.rs` resolves a `--gate <name>`
 //! argument via [`AuditRegistry::get`] and calls `run(format)`.
 //! Unknown gate names return [`AuditDispatchError::UnknownGate`].
 
@@ -46,7 +55,7 @@ use std::collections::BTreeMap;
 
 use crate::error::Result;
 
-/// Output format selector for audit gates.  Re-exported here so
+/// Output format selector for audit gates. Re-exported here so
 /// the trait surface is self-contained; mirrors
 /// [`super::audit::AuditFormat`].
 pub use super::audit::AuditFormat;
@@ -54,6 +63,7 @@ pub use super::audit::AuditFormat;
 /// **One audit gate** — checks a single L4-relevant invariant of
 /// the Verum corpus / kernel / project state and emits a report.
 ///
+
 /// Implementations are typically zero-sized unit structs; the
 /// gate's logic is deterministic from the project state on disk
 /// (no per-instance state).
@@ -65,8 +75,8 @@ pub trait AuditGate {
     /// One-line human-readable description for `verum audit --help`.
     fn description(&self) -> &'static str;
 
-    /// Run the gate.  Emits output in the requested format on
-    /// stdout (Plain) or as machine-parseable JSON (Json).  Returns
+    /// Run the gate. Emits output in the requested format on
+    /// stdout (Plain) or as machine-parseable JSON (Json). Returns
     /// `Ok(())` iff the audit invariant holds; non-zero exit on
     /// invariant violation.
     fn run(&self, format: AuditFormat) -> Result<()>;
@@ -91,14 +101,14 @@ impl std::fmt::Display for AuditDispatchError {
 
 impl std::error::Error for AuditDispatchError {}
 
-/// Registry of audit gates.  Lookup by stable name.
+/// Registry of audit gates. Lookup by stable name.
 pub struct AuditRegistry {
     gates: BTreeMap<&'static str, Box<dyn AuditGate>>,
 }
 
 impl AuditRegistry {
-    /// Construct an empty registry.  Callers register gates via
-    /// [`Self::register`].  Most consumers use [`Self::default`]
+    /// Construct an empty registry. Callers register gates via
+    /// [`Self::register`]. Most consumers use [`Self::default`]
     /// which returns a registry pre-populated with every migrated
     /// gate.
     pub fn new() -> Self {
@@ -107,7 +117,7 @@ impl AuditRegistry {
         }
     }
 
-    /// Register a gate.  Replaces any prior gate registered under
+    /// Register a gate. Replaces any prior gate registered under
     /// the same name (last-write-wins).
     pub fn register(&mut self, gate: Box<dyn AuditGate>) {
         self.gates.insert(gate.name(), gate);
@@ -136,7 +146,7 @@ impl AuditRegistry {
         self.gates.is_empty()
     }
 
-    /// Run a gate by name.  Returns
+    /// Run a gate by name. Returns
     /// [`AuditDispatchError::UnknownGate`] when the name doesn't
     /// resolve.
     pub fn run(
@@ -154,7 +164,7 @@ impl AuditRegistry {
 impl Default for AuditRegistry {
     fn default() -> Self {
         let mut r = Self::new();
-        // Full migration of all 27 audit gates.  Each gate is one
+        // Full migration of all 27 audit gates. Each gate is one
         // unit struct + one `impl AuditGate` block; the trait impl
         // routes through the existing `audit::audit_*_with_format`
         // function, so all current behaviour is preserved.
@@ -190,7 +200,7 @@ impl Default for AuditRegistry {
 }
 
 // =============================================================================
-// Audit gates — one struct + impl per gate.  Each impl wraps the
+// Audit gates — one struct + impl per gate. Each impl wraps the
 // existing `audit::audit_*_with_format` free function; future
 // inlining passes can move the body and delete the free function.
 // =============================================================================

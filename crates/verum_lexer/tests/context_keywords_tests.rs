@@ -14,9 +14,11 @@
 )]
 // Comprehensive tests for context keywords in verum_lexer.
 //
+
 // Verum keywords: 3 reserved (let, fn, is), plus ~38 contextual keywords across
 // categories (primary, control flow, async, modifier, FFI, module, additional).
 //
+
 // This test file verifies:
 // 1. All context keywords are recognized correctly
 // 2. Context keywords can be used as identifiers in non-keyword contexts

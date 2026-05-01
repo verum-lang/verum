@@ -5,30 +5,36 @@
 // Dependencies: core, base.cell, base.iterator
 // =============================================================================
 //
+
 // Composable, allocation-free stream operators built on rank-2 polymorphism.
 //
+
 // A *reducer* `R(acc, x) -> acc` is the universal stream-folding shape: any
 // pipeline endpoint (collecting to a List, summing, sending into a channel,
 // printing) can be expressed as a reducer.
 //
+
 // A *transducer* `T<A, B>` is a transformation of reducers — given a downstream
 // reducer over `B`, it produces an equivalent reducer over `A`. Crucially,
 // the quantification over the result type `R` lives *inside* the transducer
 // (rank-2): the transducer must work for ANY R the caller chooses.
 //
+
 // Why rank-2:
-//   * Composition is associative without allocation: `compose(t1, compose(t2, t3))`
-//     produces the same nested reducer as `compose(compose(t1, t2), t3)`. SMT
-//     proof of this identity lives in `vcs/specs/L3-extended/shell/`.
-//   * The accumulator never leaks into observable types — pipelines compose
-//     without committing to a particular sink shape.
-//   * One transducer flows through `List`, async `Stream`, channel `Receiver`,
-//     and any other reducible without rewriting.
+//  * Composition is associative without allocation: `compose(t1, compose(t2, t3))`
+//  produces the same nested reducer as `compose(compose(t1, t2), t3)`. SMT
+//  proof of this identity lives in `vcs/specs/L3-extended/shell/`.
+//  * The accumulator never leaks into observable types — pipelines compose
+//  without committing to a particular sink shape.
+//  * One transducer flows through `List`, async `Stream`, channel `Receiver`,
+//  and any other reducible without rewriting.
 //
+
 // Implementation note: in current Verum (v0.6) rank-2 fn types are accepted
 // in struct fields and as parameters; the implementation here closely follows
 // the pattern in `core/async/stream.vr` for explicit closures-over-state.
 //
+
 // =============================================================================
 
 module transducer;
@@ -41,6 +47,7 @@ mount core.base.protocols.{Clone};
 // Reducer<A, R> — fundamental fold step
 // =============================================================================
 //
+
 // `Reducer<A, R>` is `fn(R, A) -> R`. Verum's function types are first-class
 // so we just alias for documentation. Concrete reducers below.
 
@@ -50,6 +57,7 @@ public type Reducer<A, R> is fn(R, A) -> R;
 // Transducer<A, B> — reducer-to-reducer transformation
 // =============================================================================
 //
+
 // Note: rank-2 syntax `fn<R>(...)` is supported in struct field positions in
 // the grammar; the parser registers the universally-quantified `R` only
 // within the function-type expression.
@@ -205,7 +213,7 @@ public fn flat_mapping<A, B>(f: fn(A) -> List<B>) -> Transducer<A, B> {
 }
 
 /// `tap(f)` performs a side effect per element, passes the value through.
-/// Useful for logging.  Note: `tap` admits IO via `f`; the resulting
+/// Useful for logging. Note: `tap` admits IO via `f`; the resulting
 /// transducer is no longer Pure — caller must annotate accordingly.
 public fn tap<A>(f: fn(&A)) -> Transducer<A, A> {
     Transducer {
@@ -283,6 +291,7 @@ public fn transduce_into<A, B, R>(
 // StatefulTransducer — when the state must outlive the reducer's lifetime
 // =============================================================================
 //
+
 // Use this when the state is large enough that you don't want it captured
 // by the closure (e.g. windowing buffers, debounce trackers). The state is
 // supplied externally and threaded through.

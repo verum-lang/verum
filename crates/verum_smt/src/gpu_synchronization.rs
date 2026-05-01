@@ -1,32 +1,40 @@
 //! GPU Synchronization Verification using Z3
 //!
+
 //! This module implements verification of GPU synchronization primitives:
 //! - Barrier synchronization (`__syncthreads()` in CUDA)
 //! - Atomic operations
 //! - Memory fences
 //! - Lock-free algorithms
 //!
+
 //! ## Barrier Semantics
 //!
+
 //! A barrier ensures that:
 //! 1. All threads in the block reach the barrier
 //! 2. No thread proceeds past the barrier until all arrive
 //! 3. Memory operations before barrier are visible after barrier
 //!
+
 //! ## Atomic Operations
 //!
+
 //! Atomic operations provide:
 //! - Atomicity: Operation appears indivisible
 //! - Sequential consistency: Total order on atomic operations
 //! - Memory ordering: Synchronization between threads
 //!
+
 //! ## Verification Properties
 //!
+
 //! - **Barrier Reachability**: All threads must reach every barrier
 //! - **Deadlock Freedom**: No circular wait on synchronization
 //! - **Progress**: At least one thread makes progress
 //! - **Atomicity**: Atomic operations appear indivisible
 //!
+
 //! GPU synchronization verification for Verum's `@gpu` annotated kernels.
 //! Extends the type system's refinement verification to thread-level parallelism.
 //! Based on: GPUVerify, CUDA Programming Guide, PTX ISA
@@ -101,6 +109,7 @@ impl SyncVerifier {
 
     /// Encode barrier semantics
     ///
+
     /// Returns a Z3 formula that is SAT iff all threads reach the barrier
     pub fn encode_barrier(&self, barrier_id: u32, block_id: BlockId) -> Bool {
         // Find the barrier
@@ -152,6 +161,7 @@ impl SyncVerifier {
 
     /// Verify barrier correctness
     ///
+
     /// Checks that all threads in a block reach every barrier
     pub fn verify_barrier_reachability(&mut self) -> bool {
         let start = Instant::now();
@@ -191,6 +201,7 @@ impl SyncVerifier {
 
     /// Encode atomic operation
     ///
+
     /// Atomic operations are linearizable: they appear to execute atomically
     /// at some point between their invocation and response.
     pub fn encode_atomic_add(&self, addr: &Int, old_val: &Int, new_val: &Int) -> Bool {
@@ -239,16 +250,20 @@ impl SyncVerifier {
 
     /// Verify lock-free progress
     ///
+
     /// A lock-free algorithm guarantees that at least one thread makes progress
     /// in a finite number of steps, regardless of thread scheduling.
     ///
+
     /// ## Verification Strategy
     ///
+
     /// We encode liveness as a safety property by checking:
     /// 1. No deadlock: At least one atomic can complete without waiting on others
     /// 2. Fairness: Under fair scheduling, every enabled operation eventually executes
     /// 3. Progress: At least one thread advances the global state
     ///
+
     /// The encoding uses happens-before constraints to model dependencies:
     /// - If operation A waits for B, then B must happen-before A can complete
     /// - A cycle in the happens-before graph indicates deadlock
@@ -355,6 +370,7 @@ impl SyncVerifier {
 
     /// Build dependency graph for atomic operations
     ///
+
     /// An atomic operation A depends on B if:
     /// - A and B access the same address
     /// - A waits for B's result (e.g., CAS retry loop)
@@ -423,6 +439,7 @@ impl SyncVerifier {
 
     /// Detect cycles in the dependency graph (indicates deadlock)
     ///
+
     /// Uses DFS-based cycle detection with path tracking to provide deadlock witness
     fn detect_dependency_cycle(
         &self,
@@ -480,6 +497,7 @@ impl SyncVerifier {
 
     /// Encode that an atomic operation can complete (internal implementation)
     ///
+
     /// An atomic can complete if:
     /// 1. All its dependencies are satisfied (happens-before)
     /// 2. For CAS: the expected value matches (or will eventually match under fairness)
@@ -552,6 +570,7 @@ impl SyncVerifier {
 
     /// Verify deadlock freedom for all atomic operations
     ///
+
     /// Returns true if no deadlock is possible, false otherwise
     pub fn verify_deadlock_freedom(&mut self) -> bool {
         let dependency_graph = self.build_atomic_dependency_graph();
@@ -592,6 +611,7 @@ impl SyncVerifier {
 
     /// Verify memory fence semantics
     ///
+
     /// Memory fences ensure ordering of memory operations
     pub fn verify_fence(&self, fence: &MemoryFence) -> bool {
         let solver = Solver::new();
@@ -605,19 +625,22 @@ impl SyncVerifier {
 
     /// Encode fence semantics
     ///
+
     /// Memory fences establish ordering constraints between memory operations.
     /// This encoding follows the PTX ISA memory model and CUDA semantics.
     ///
+
     /// ## Fence Semantics
     ///
+
     /// - **Thread fence**: All prior memory operations by this thread are visible
-    ///   to subsequent operations by this thread (program order - always satisfied)
+    ///  to subsequent operations by this thread (program order - always satisfied)
     /// - **Block fence**: All prior memory operations by threads in this block are
-    ///   visible to subsequent operations by all threads in this block
+    ///  visible to subsequent operations by all threads in this block
     /// - **Device fence**: All prior memory operations by all threads are visible
-    ///   to subsequent operations by all threads on the device
+    ///  to subsequent operations by all threads on the device
     /// - **System fence**: All prior memory operations are visible to subsequent
-    ///   operations including host memory accesses
+    ///  operations including host memory accesses
     fn encode_fence(&self, fence: &MemoryFence) -> Bool {
         match fence.scope {
             FenceScope::Thread => {
@@ -647,9 +670,11 @@ impl SyncVerifier {
 
     /// Encode block-level fence semantics
     ///
+
     /// A block fence ensures that all memory operations by threads in the block
     /// before the fence are visible to all threads in the block after the fence.
     ///
+
     /// We encode this using happens-before constraints:
     /// - For each thread t1 with writes W before fence
     /// - For each thread t2 with reads R after fence
@@ -703,9 +728,11 @@ impl SyncVerifier {
 
     /// Encode device-level fence semantics
     ///
+
     /// A device fence ensures that all memory operations by any thread on the device
     /// before the fence are visible to all threads after the fence.
     ///
+
     /// This is stronger than block fence - it affects global memory visibility.
     fn encode_device_fence(&self, fence: &MemoryFence) -> Bool {
         let fence_time = fence.program_point;
@@ -734,9 +761,11 @@ impl SyncVerifier {
 
     /// Encode system-level fence semantics
     ///
+
     /// A system fence ensures that all memory operations (including host accesses)
     /// before the fence are visible to all operations after the fence.
     ///
+
     /// This is the strongest fence - it synchronizes with host memory.
     fn encode_system_fence(&self, fence: &MemoryFence) -> Bool {
         let fence_time = fence.program_point;

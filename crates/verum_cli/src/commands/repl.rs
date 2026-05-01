@@ -1,5 +1,6 @@
 //! REPL command - Interactive Read-Eval-Print Loop for Verum
 //!
+
 //! VBC-backed evaluation. Each input is parsed; top-level items
 //! (`fn`, `type`, `protocol`, `implement`, `static`, `mount`) are
 //! accumulated into a session source buffer. Bare expressions are
@@ -7,6 +8,7 @@
 //! the result, the session buffer is recompiled with the new
 //! function, and the function is executed via the VBC interpreter.
 //!
+
 //! Each `let`-style binding is desugared at the REPL surface into a
 //! `static` declaration so it persists across prompts. `:reset`
 //! clears the session.
@@ -242,7 +244,7 @@ fn process_input(input: &str, state: &mut ReplState) {
     state.add_to_history(input);
 
     // 1. `let NAME = EXPR` (with optional `: TYPE`) → desugar to
-    //    `static NAME: TYPE = EXPR;` so the binding persists across prompts.
+    //  `static NAME: TYPE = EXPR;` so the binding persists across prompts.
     if let Some((name, ty_opt, expr_src)) = parse_repl_let(input) {
         let stmt = match ty_opt {
             Some(ty) => format!("static {}: {} = {};\n", name, ty, expr_src),

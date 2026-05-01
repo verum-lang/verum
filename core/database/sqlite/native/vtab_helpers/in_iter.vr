@@ -3,8 +3,9 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // For vtabs that opt into SQLITE_VTAB_USES_ALL_SCHEMAS, a constraint
-// `col IN (v1, v2, v3)` can be served value-at-a-time.  The iterator
+// `col IN (v1, v2, v3)` can be served value-at-a-time. The iterator
 // exposes Start / More / Done states over a list of value rowids.
 // =============================================================================
 

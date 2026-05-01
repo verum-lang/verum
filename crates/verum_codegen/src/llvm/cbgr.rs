@@ -1,37 +1,45 @@
 //! CBGR (Capability-Based Generational References) lowering to LLVM IR.
 //!
+
 //! This module implements tier-aware reference operations for the CBGR
 //! memory safety system.
 //!
+
 //! # Reference Tiers
 //!
+
 //! - **Tier 0**: Full runtime checks (~15ns overhead)
-//!   - Generation validation on every dereference
-//!   - Capability checks for read/write/borrow
+//!  - Generation validation on every dereference
+//!  - Capability checks for read/write/borrow
 //!
+
 //! - **Tier 1**: Compiler-proven safe (zero overhead)
-//!   - Escape analysis proves reference validity
-//!   - Direct pointer access
+//!  - Escape analysis proves reference validity
+//!  - Direct pointer access
 //!
+
 //! - **Tier 2**: Manually marked unsafe (zero overhead)
-//!   - User asserts safety via `&unsafe T`
-//!   - Direct pointer access
+//!  - User asserts safety via `&unsafe T`
+//!  - Direct pointer access
 //!
+
 //! # Memory Layout
 //!
+
 //! ThinRef<T>: 16 bytes
 //! ```text
 //! +--------+------------+------------+
-//! |  ptr   | generation | epoch_caps |
-//! | 8 bytes|   4 bytes  |   4 bytes  |
+//! | ptr | generation | epoch_caps |
+//! | 8 bytes| 4 bytes | 4 bytes |
 //! +--------+------------+------------+
 //! ```
 //!
+
 //! FatRef<T>: 24 bytes (for slices/arrays)
 //! ```text
 //! +--------+------------+------------+--------+
-//! |  ptr   | generation | epoch_caps |  len   |
-//! | 8 bytes|   4 bytes  |   4 bytes  | 8 bytes|
+//! | ptr | generation | epoch_caps | len |
+//! | 8 bytes| 4 bytes | 4 bytes | 8 bytes|
 //! +--------+------------+------------+--------+
 //! ```
 
@@ -148,6 +156,7 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Create a ThinRef (Tier 0 - full checks).
     ///
+
     /// This generates the full reference with generation tracking.
     pub fn create_ref_tier0(
         &mut self,
@@ -179,6 +188,7 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Create a reference (Tier 1/2 - optimized path).
     ///
+
     /// For compiler-proven safe or manually unsafe references,
     /// we skip generation tracking.
     pub fn create_ref_checked(
@@ -225,10 +235,12 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Create a ThinRef from a raw user pointer.
     ///
+
     /// Reads the allocation header at `ptr - 32`:
-    ///   - offset 0: generation (i32)
-    ///   - offset 4: epoch (i16)
+    ///  - offset 0: generation (i32)
+    ///  - offset 4: epoch (i16)
     ///
+
     /// Packs into `{ ptr, generation, epoch_and_caps }` where epoch_and_caps
     /// stores epoch in the low 16 bits and zero capabilities in the high 16.
     pub fn create_thin_ref(
@@ -246,7 +258,7 @@ impl<'ctx> CbgrLowering<'ctx> {
         let ptr_type = self.context.ptr_type(Default::default());
 
         // 1. Compute header address: ptr - 32
-        //    GEP with i8 and index -32 to get byte-level offset.
+        //  GEP with i8 and index -32 to get byte-level offset.
         let neg_32 = i64_type.const_int((-32i64) as u64, true);
         // SAFETY: GEP with -32 byte offset to reach the CBGR allocation header preceding the user data pointer; all CBGR-managed allocations include a 32-byte header before the user region
         let header_ptr = unsafe {
@@ -299,6 +311,7 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Dereference a ThinRef (Tier 0 - with real validation).
     ///
+
     /// Extracts generation and epoch from the ThinRef, packs them into a
     /// single i64 (generation in low 32 bits, epoch in bits 32..47), then
     /// calls `verum_cbgr_validate_ref(user_ptr, packed_gen_epoch)`.
@@ -342,7 +355,7 @@ impl<'ctx> CbgrLowering<'ctx> {
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
         // 4. Pack: generation (low 32) | epoch (bits 32..47)
-        //    packed = zext(generation) | (zext(epoch_i32) << 32)
+        //  packed = zext(generation) | (zext(epoch_i32) << 32)
         let gen_i64 = builder
             .build_int_z_extend(generation, i64_type, "cbgr.gen_i64")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
@@ -437,6 +450,7 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Dereference a reference (Tier 1/2 - no checks).
     ///
+
     /// For compiler-proven or unsafe references, skip validation.
     pub fn deref_checked(
         &mut self,
@@ -483,6 +497,7 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Validate a reference (explicit ChkRef instruction).
     ///
+
     /// This performs a full Tier 0 validation regardless of the reference's tier.
     /// Used for explicit validation checks in the bytecode.
     pub fn validate_ref(

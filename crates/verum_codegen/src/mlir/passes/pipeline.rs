@@ -1,33 +1,40 @@
 //! Pass pipeline configuration and execution.
 //!
+
 //! Manages the sequence of optimization passes applied to MLIR modules.
 //!
+
 //! # Pipeline Architecture
 //!
+
 //! The pass pipeline is organized into phases:
 //!
+
 //! ```text
 //! Phase 1: Early Optimizations (MLIR Transform)
-//!   ├── Canonicalization
-//!   └── CSE (Common Subexpression Elimination)
+//!  ├── Canonicalization
+//!  └── CSE (Common Subexpression Elimination)
 //!
+
 //! Phase 2: Domain-Specific Passes (Verum)
-//!   ├── CBGR Elimination (escape analysis)
-//!   ├── Context Monomorphization (specialization)
-//!   └── Refinement Propagation (redundancy elimination)
+//!  ├── CBGR Elimination (escape analysis)
+//!  ├── Context Monomorphization (specialization)
+//!  └── Refinement Propagation (redundancy elimination)
 //!
+
 //! Phase 3: Late Optimizations (MLIR Transform)
-//!   ├── SCCP (Sparse Conditional Constant Propagation)
-//!   ├── LICM (Loop Invariant Code Motion)
-//!   ├── Mem2Reg
-//!   ├── Inlining
-//!   └── DCE (Dead Code Elimination)
+//!  ├── SCCP (Sparse Conditional Constant Propagation)
+//!  ├── LICM (Loop Invariant Code Motion)
+//!  ├── Mem2Reg
+//!  ├── Inlining
+//!  └── DCE (Dead Code Elimination)
 //!
+
 //! Phase 4: Lowering (MLIR Conversion)
-//!   ├── SCF → CF
-//!   ├── Arith/Func/Index/Math → LLVM
-//!   ├── MemRef → LLVM (finalized)
-//!   └── Cast Reconciliation
+//!  ├── SCF → CF
+//!  ├── Arith/Func/Index/Math → LLVM
+//!  ├── MemRef → LLVM (finalized)
+//!  └── Cast Reconciliation
 //! ```
 
 use crate::mlir::error::{MlirError, Result};
@@ -282,6 +289,7 @@ impl PipelineStats {
 
 /// Pass pipeline for Verum MLIR.
 ///
+
 /// Manages the sequence of optimization passes and provides
 /// a unified interface for running them.
 pub struct PassPipeline<'c> {
@@ -346,6 +354,7 @@ impl<'c> PassPipeline<'c> {
 
         // Create early optimization pass manager.
         //
+
         // Honour `enable_standard_opts` as a master umbrella over
         // both early AND late optimizations. Pre-fix the field
         // landed on PassConfig but no code path consulted it —
@@ -423,10 +432,12 @@ impl<'c> PassPipeline<'c> {
 
     /// Configure LLVM lowering passes.
     ///
+
     /// This configures the LLVM lowering pipeline using the comprehensive
     /// `create_to_llvm()` pass which handles all dialect conversions in
     /// the correct order with proper type converters.
     ///
+
     /// The comprehensive pass handles:
     /// - arith, cf, func, index, math → LLVM
     /// - memref → LLVM (with proper data layout)
@@ -461,6 +472,7 @@ impl<'c> PassPipeline<'c> {
         // - memref → LLVM (memory operations)
         // It also handles unrealized cast reconciliation internally.
         //
+
         // Using the comprehensive pass ensures all type converters are
         // properly configured and conversions happen in the correct order.
         pm.add_pass(conversion::create_to_llvm());

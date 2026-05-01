@@ -1,17 +1,18 @@
 //! K-HIT-Form / eliminator auto-generation integration tests
 //! (, + §17.2 Task C3).
 //!
+
 //! Higher inductive types extend ordinary inductives with **path
 //! constructors** — 1-cells whose endpoints are values of the type
 //! itself. The kernel auto-derives the eliminator's type from the
 //! registered declaration; this file covers:
-//!   • Ordinary inductive recursor shape (Bool, Nat).
-//!   • S¹ HIT (one nullary point + one closed-loop path constructor).
-//!   • Interval HIT (two nullary points + one path constructor).
-//!   • Path-constructor namespace check (collision with point ctor).
-//!   • Path-constructor uniqueness check (duplicate path names).
-//!   • Path-ctor declarations preserve back-compat with V8 inductive
-//!     registration when no path ctors are present.
+//!  • Ordinary inductive recursor shape (Bool, Nat).
+//!  • S¹ HIT (one nullary point + one closed-loop path constructor).
+//!  • Interval HIT (two nullary points + one path constructor).
+//!  • Path-constructor namespace check (collision with point ctor).
+//!  • Path-constructor uniqueness check (duplicate path names).
+//!  • Path-ctor declarations preserve back-compat with V8 inductive
+//!  registration when no path ctors are present.
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
@@ -41,7 +42,7 @@ fn bool_eliminator_type_has_motive_two_cases_and_scrutinee_pi() {
     let elim = eliminator_type(&bool_ind);
 
     // Π (motive : Bool → Type) . Π (case_True : motive(True)) .
-    //   Π (case_False : motive(False)) . Π (x : Bool) . motive(x)
+    //  Π (case_False : motive(False)) . Π (x : Bool) . motive(x)
     let CoreTerm::Pi {
         binder: motive_b,
         domain: motive_dom,
@@ -184,9 +185,9 @@ fn s1_eliminator_has_path_branch() {
     });
     let elim = eliminator_type(&s1);
     //  recursor-image resolution:
-    //   Π (motive). Π (case_Base : motive(Base)).
-    //     Π (case_Loop : PathTy(motive(Base), case_Base, case_Base)).
-    //     Π (x : S1). motive(x)
+    //  Π (motive). Π (case_Base : motive(Base)).
+    //  Π (case_Loop : PathTy(motive(Base), case_Base, case_Base)).
+    //  Π (x : S1). motive(x)
     let CoreTerm::Pi { codomain: after_motive, .. } = elim else {
         panic!()
     };
@@ -261,6 +262,7 @@ fn interval_eliminator_has_two_points_and_seg_branch() {
 // V3 () — App-chain endpoint resolution
 // =============================================================================
 //
+
 // V2 only resolved bare `Var(name)` endpoints to `case_<name>`. V3
 // extends to recursive App-chains: `Cons(x, Cons(y, Nil))` at a path
 // endpoint should resolve to `case_Cons(x, case_Cons(y, case_Nil))`.
@@ -271,8 +273,8 @@ fn interval_eliminator_has_two_points_and_seg_branch() {
 #[test]
 fn v3_app_chain_endpoint_resolves_at_inner_ctor() {
     // SuspensionList: Nil | Cons(Nat → SuspensionList)
-    //                 | Merid : Nil ↝ Cons(zero) ↝ ... (single-step
-    //                   App-chain endpoint to exercise V3 walk)
+    //  | Merid : Nil ↝ Cons(zero) ↝ ... (single-step
+    //  App-chain endpoint to exercise V3 walk)
     let susp = RegisteredInductive::new(
         Text::from("SuspList"),
         List::new(),

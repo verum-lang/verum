@@ -1,8 +1,10 @@
 //! Deep static analysis command using real compiler infrastructure
 //!
+
 //! Runs real escape analysis (verum_cbgr), context checking (verum_types),
 //! and refinement type coverage analysis on actual source files.
 //!
+
 //! Each analysis mode:
 //! - `--escape`: Parses + type checks + CBGR tier analysis on all .vr files
 //! - `--context`: Parses + walks AST for context declarations vs usage

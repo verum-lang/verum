@@ -4,23 +4,27 @@
 // Layer: 6
 // Spec: sqlite-native.md §16.4 (extended built-in vtabs)
 //
+
 // Provides a `csv` virtual table that exposes a CSV file as a
 // queryable table:
 //
-//   CREATE VIRTUAL TABLE t USING csv(
-//       file = '/path/to/data.csv',
-//       header = true,
-//       delim = ','
-//   );
-//   SELECT * FROM t WHERE col_5 > 100;
+
+//  CREATE VIRTUAL TABLE t USING csv(
+//  file = '/path/to/data.csv',
+//  header = true,
+//  delim = ','
+//  );
+//  SELECT * FROM t WHERE col_5 > 100;
 //
+
 // Key features:
-//   * RFC-4180-style parsing (quoted fields, embedded newlines,
-//     `""` escaping)
-//   * configurable delimiter / quote / line terminator
-//   * header-row inference for column names
-//   * fast row-skip for cursor reset
+//  * RFC-4180-style parsing (quoted fields, embedded newlines,
+//  `""` escaping)
+//  * configurable delimiter / quote / line terminator
+//  * header-row inference for column names
+//  * fast row-skip for cursor reset
 //
+
 // We expose the parser as a pure function on `Text` so users can
 // reuse it for one-off CSV processing without a vtab.
 // =============================================================================
@@ -274,7 +278,7 @@ fn append_int(dst: &mut Text, n: Int) {
     let mut digits: List<Byte> = List.new();
     // Two's-complement magnitude via UInt64 — the naïve negate
     // overflows for `Int.MIN` and silently produces "-" with no
-    // digits.  CSV export of a column holding `Int.MIN` should
+    // digits. CSV export of a column holding `Int.MIN` should
     // emit a parseable representation, not a stub. Same family
     // as panic.vr / Formatter.write_int / sqlite/string_fns.
     let mut mag: UInt64 = if n < 0 {

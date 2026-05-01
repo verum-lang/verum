@@ -5,10 +5,12 @@
 // Dependencies: layout/rect.vr
 // =============================================================================
 //
+
 // RenderViewport modes determine how the terminal renders content: fullscreen
 // (alternate buffer), inline (within normal terminal flow), or fixed
 // (a specific rectangular area).
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 7.3
 // =============================================================================
 
@@ -22,9 +24,10 @@ mount super.super.layout.rect.Rect;
 
 /// RenderViewport mode — how the terminal renders content.
 ///
+
 /// - Fullscreen: uses the alternate screen buffer for the entire terminal.
 /// - Inline: renders within the normal terminal flow, occupying a fixed
-///   number of rows from the current cursor position downward.
+///  number of rows from the current cursor position downward.
 /// - Fixed: renders into a specific rectangular area of the terminal.
 public type RenderViewport is
     | Fullscreen
@@ -53,6 +56,7 @@ implement RenderViewport {
 
     /// Get the effective rendering area for this viewport given terminal size.
     ///
+
     /// - Fullscreen: entire terminal (0, 0, cols, rows)
     /// - Inline: (0, 0, cols, min(height, rows)) — positioned by the backend
     /// - Fixed: the stored area, clipped to terminal bounds

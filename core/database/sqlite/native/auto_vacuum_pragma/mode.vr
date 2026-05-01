@@ -46,7 +46,7 @@ public fn supports_incremental_pragma(m: &AutoVacuumPragma) -> Bool {
     match m { AvIncremental => true, _ => false }
 }
 
-// Outcome of trying to change auto_vacuum.  In SQLite, the change is honoured
+// Outcome of trying to change auto_vacuum. In SQLite, the change is honoured
 // only on a freshly-created (empty) database; otherwise it's silently ignored.
 public type AutoVacuumSetOutcome is
     | SoApplied

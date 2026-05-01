@@ -15,6 +15,7 @@
 )]
 // Revolutionary Literal System v3.0 Tests
 //
+
 // Comprehensive test suite for Verum's Revolutionary Literal System including:
 // - Tagged literals (sql#, html#, regex#, etc.)
 // - Interpolated strings (f"", sql"", html"", etc.)
@@ -23,6 +24,7 @@
 // - Scientific notation (1.5e10, 3.14E-5)
 // - Unit suffixes (100_km, 90_deg, 20_C)
 //
+
 // Tests the complete Verum literal system as defined in the lexical grammar.
 
 use verum_ast::span::FileId;

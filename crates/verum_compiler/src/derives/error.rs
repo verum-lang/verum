@@ -1,33 +1,40 @@
 //! Error derive macro implementation
 //!
+
 //! Generates implementations for:
 //! - `implement Error for Type { fn description(&self) -> Text }`
 //! - `implement Display for Type { fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> }`
 //! - `From` implementations for wrapped error variants
 //!
+
 //! # Attribute Support
 //!
+
 //! - `@message("custom message")` - Custom display message for a variant
 //! - `@source` - Mark a field as the error source for chaining
 //!
+
 //! # Example
 //!
+
 //! ```verum
 //! @derive(Error)
 //! type MyError is
-//!     | @message("I/O operation failed")
-//!       IoError { @source inner: std.io.Error }
-//!     | @message("Parse failed: {reason}")
-//!       ParseError { reason: Text, line: Int }
-//!     | @message("Connection timeout")
-//!       Timeout;
+//!  | @message("I/O operation failed")
+//!  IoError { @source inner: std.io.Error }
+//!  | @message("Parse failed: {reason}")
+//!  ParseError { reason: Text, line: Int }
+//!  | @message("Connection timeout")
+//!  Timeout;
 //! ```
 //!
+
 //! Generates:
 //! - Error protocol implementation
 //! - Display protocol implementation
 //! - From<std.io.Error> for MyError
 //!
+
 //! The Error derive auto-generates Error protocol (description + source chaining),
 //! Display protocol (human-readable messages), and From conversions for @source-marked
 //! fields. This enables ergonomic error type hierarchies with ? operator support.
@@ -135,11 +142,12 @@ impl DeriveError {
 
     /// Generate the description method body
     ///
+
     /// Generates match expression:
     /// ```verum
     /// match self {
-    ///     Self::Variant1 => "Variant1 error",
-    ///     Self::Variant2 { reason, .. } => f"Parse failed: {reason}",
+    ///  Self::Variant1 => "Variant1 error",
+    ///  Self::Variant2 { reason, .. } => f"Parse failed: {reason}",
     /// }
     /// ```
     fn generate_description_method(&self, ctx: &DeriveContext, span: Span) -> DeriveResult<Block> {
@@ -277,11 +285,12 @@ impl DeriveError {
 
     /// Generate the source method body
     ///
+
     /// Generates match expression that returns the source error if @source is present:
     /// ```verum
     /// match self {
-    ///     Self::IoError { inner, .. } => Some(&inner),
-    ///     _ => None,
+    ///  Self::IoError { inner, .. } => Some(&inner),
+    ///  _ => None,
     /// }
     /// ```
     fn generate_source_method(&self, ctx: &DeriveContext, span: Span) -> DeriveResult<Block> {
@@ -510,6 +519,7 @@ impl DeriveError {
     /// Generate a format string expression for a `@derive(Error)` Display
     /// arm body.
     ///
+
     /// The template comes from the `@error("file: {path}")` attribute.
     /// Parses `{ident}` placeholders into the AST's
     /// `ExprKind::InterpolatedString { handler: "f", parts, exprs }`
@@ -518,6 +528,7 @@ impl DeriveError {
     /// the surrounding variant pattern binds each field by shorthand
     /// at the same name, so the bindings resolve naturally.
     ///
+
     /// Pre-fix this function returned the template as a plain string
     /// literal — `Display` for `MyError::FileNotFound { path }` rendered
     /// the literal `"file: {path}"` instead of substituting the actual
@@ -557,16 +568,18 @@ impl DeriveError {
 /// Parse an `@error("...")` template into the `(parts, exprs)` shape
 /// that `ExprKind::InterpolatedString` expects.
 ///
+
 /// Recognises:
-///   - `{ident}` → captures the ident as a `Path(ident)` Expr.
-///   - `{{` and `}}` → literal `{` / `}` (Rust-format-string escape).
-///   - Mismatched braces → preserved literally rather than aborting,
-///     which keeps generation resilient and lets the type-checker's
-///     subsequent passes flag the malformed template instead of the
-///     derive macro panicking. (Symmetric with how Rust's `format!`
-///     surface panics at compile time, but here we're inside a derive
-///     and want graceful degradation.)
+///  - `{ident}` → captures the ident as a `Path(ident)` Expr.
+///  - `{{` and `}}` → literal `{` / `}` (Rust-format-string escape).
+///  - Mismatched braces → preserved literally rather than aborting,
+///  which keeps generation resilient and lets the type-checker's
+///  subsequent passes flag the malformed template instead of the
+///  derive macro panicking. (Symmetric with how Rust's `format!`
+///  surface panics at compile time, but here we're inside a derive
+///  and want graceful degradation.)
 ///
+
 /// Invariant: when `exprs.len() == n`, `parts.len() == n + 1`.
 /// `exprs` is empty iff the template has no `{ident}` placeholders.
 fn parse_format_template(template: &str, span: Span) -> (List<Text>, List<Expr>) {
@@ -640,6 +653,7 @@ fn parse_format_template(template: &str, span: Span) -> (List<Text>, List<Expr>)
 
 /// Generate From implementations for wrapped error types
 ///
+
 /// For a variant like `IoError { @source inner: std.io.Error }`,
 /// generates: `implement From<std.io.Error> for MyError { ... }`
 pub fn generate_from_impls(ctx: &DeriveContext) -> DeriveResult<List<Item>> {

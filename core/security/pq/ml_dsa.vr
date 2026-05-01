@@ -5,13 +5,15 @@
 // stdlib exposes all three. ML-DSA-65 is the recommended default
 // (NIST category 3).
 //
+
 // Wire sizes (FIPS 204 §3.6):
 //
-// | Variant    | Public key | Secret key | Signature |
+
+// | Variant | Public key | Secret key | Signature |
 // |------------|-----------|-----------|-----------|
-// | ML-DSA-44  |      1312 |      2560 |      2420 |
-// | ML-DSA-65  |      1952 |      4032 |      3309 |
-// | ML-DSA-87  |      2592 |      4896 |      4627 |
+// | ML-DSA-44 | 1312 | 2560 | 2420 |
+// | ML-DSA-65 | 1952 | 4032 | 3309 |
+// | ML-DSA-87 | 2592 | 4896 | 4627 |
 // =============================================================================
 
 module core.security.pq.ml_dsa;

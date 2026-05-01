@@ -7,6 +7,7 @@
 //! falling back on genuine unknowns (where both solvers are
 //! likely to give up).
 //!
+
 //! Closes the inert-defense pattern that wired
 //! `FallbackConfig.on_timeout` (commit cee85686). These tests
 //! pin the configuration contract — every flag round-trips
@@ -102,6 +103,7 @@ fn max_attempts_one_short_circuits_fallback() {
     // backend was silently ignored. The wire-up adds
     // `max_attempts > 1` to the same gate as `enabled`.
     //
+
     // This pin asserts the canonical "primary only" shape:
     // every per-kind flag remains true so the fallback would
     // fire under normal config — but `max_attempts = 1`

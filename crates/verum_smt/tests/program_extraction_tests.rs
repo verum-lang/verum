@@ -1,8 +1,10 @@
 //! Comprehensive tests for program extraction module
 //!
+
 //! Tests for extracting executable programs from constructive proofs.
 //! Implements the Curry-Howard correspondence for Verum's type system.
 //!
+
 //! Program extraction via the Curry-Howard correspondence: constructive proofs of
 //! existence theorems yield executable programs. `@extract` turns `exists!(q,r). a = b*q+r`
 //! into `fn div_mod(a, b) -> (Nat, Nat)`. `@extract_witness` extracts just the witness.

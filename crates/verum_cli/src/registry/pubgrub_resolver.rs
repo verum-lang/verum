@@ -1,5 +1,6 @@
 //! PubGrub-based dependency resolver (P4.1).
 //!
+
 //! Wraps the [`pubgrub`](https://docs.rs/pubgrub) crate's
 //! conflict-driven clause-learning solver in an adapter that takes
 //! the existing Verum cog registry's data model (cog name +
@@ -7,35 +8,43 @@
 //! resolved dependency graph or a structured [`ResolverError`]
 //! (cf. `super::resolver_errors`, P4.3).
 //!
+
 //! # Why PubGrub
 //!
+
 //! PubGrub's strengths over the existing `sat_resolver` (DPLL-based,
 //! Verum's first-pass implementation):
 //!
+
 //! 1. **Linear-time best-case** — DPLL's worst case is exponential
-//!    in the number of variables; PubGrub's incompatibility-driven
-//!    backtracking with conflict-clause learning visits each
-//!    "interesting" set of versions at most once.
+//!  in the number of variables; PubGrub's incompatibility-driven
+//!  backtracking with conflict-clause learning visits each
+//!  "interesting" set of versions at most once.
 //! 2. **Better diagnostics** — when resolution fails, the algorithm
-//!    produces a *human-readable derivation* of the conflict ("A
-//!    requires B ≥ 2; C requires B < 2; therefore A and C are
-//!    incompatible") that maps cleanly onto our P4.3
-//!    [`ResolverError::VersionConflict`] requirement-chain shape.
+//!  produces a *human-readable derivation* of the conflict ("A
+//!  requires B ≥ 2; C requires B < 2; therefore A and C are
+//!  incompatible") that maps cleanly onto our P4.3
+//!  [`ResolverError::VersionConflict`] requirement-chain shape.
 //! 3. **Battle-tested** — the upstream crate underpins Cargo's
-//!    in-progress migration, uv (Astral's Python package manager),
-//!    and Dart's `pub` resolver. Vetted constraint semantics, bug
-//!    fixes upstreamed.
+//!  in-progress migration, uv (Astral's Python package manager),
+//!  and Dart's `pub` resolver. Vetted constraint semantics, bug
+//!  fixes upstreamed.
 //!
+
 //! # Surface
 //!
+
 //! Two entry points:
 //!
-//!   [`PubGrubBuilder`] — collect the dependency database in-memory,
-//!   then resolve.
+
+//!  [`PubGrubBuilder`] — collect the dependency database in-memory,
+//!  then resolve.
 //!
-//!   [`resolve`] — given a builder, run PubGrub and return the
-//!   selected versions or a [`ResolverError`].
+
+//!  [`resolve`] — given a builder, run PubGrub and return the
+//!  selected versions or a [`ResolverError`].
 //!
+
 //! The existing legacy `DependencyResolver` (graph-walking SAT) is
 //! preserved alongside; this module is a parallel, opt-in path.
 
@@ -75,6 +84,7 @@ impl<S: Into<String>> From<S> for CogName {
 /// `>=2, <3`) onto a `Ranges<Version>` requires evaluating the req
 /// against every concrete candidate version.
 ///
+
 /// The [`PubGrubBuilder`] collects every `(name, version)` pair the
 /// caller knows about, then materialises each `(name, req)` edge as
 /// a finite [`Ranges<Version>`] — the union of single-version
@@ -187,6 +197,7 @@ pub fn resolve(
 
 /// Internal adapter implementing PubGrub's [`DependencyProvider`].
 ///
+
 /// Reuses the [`pubgrub::OfflineDependencyProvider`] as the actual
 /// provider — it already implements every trait method correctly
 /// for the case where the dependency graph is fully known up front.
@@ -354,6 +365,7 @@ fn map_pubgrub_error(
 
 /// Map PubGrub's NoSolution derivation into a P4.3 VersionConflict.
 ///
+
 /// The full PubGrub derivation is a tree of incompatibilities; for
 /// the typed-error surface we summarise it to the (most recent)
 /// conflicted package and the requirement chain that touched it.
@@ -547,9 +559,9 @@ mod tests {
 
     fn build_basic() -> PubGrubBuilder {
         // Universe:
-        //   root @ 1.0.0  →  json ^1
-        //   json @ 1.0.0
-        //   json @ 1.4.0
+        //  root @ 1.0.0 → json ^1
+        //  json @ 1.0.0
+        //  json @ 1.4.0
         let mut b = PubGrubBuilder::new();
         b.add_package_version("root", ver("1.0.0"));
         b.add_package_version("json", ver("1.0.0"));

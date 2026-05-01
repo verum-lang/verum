@@ -6,26 +6,30 @@
 //! same way the K-rules were orphan kernel code before this commit
 //! series.
 //!
+
 //! This module ports R1+R2+R3 into Rust and exposes them as a
 //! first-class [`HygieneRecheckPass`] so the discipline applies on
 //! every `verum verify` invocation, catching stdlib-author and
 //! framework-author mistakes uniformly.
 //!
+
 //! # Severity contract (mirrors the Verum stdlib spec)
 //!
-//!   * **R1** (foundation-neutral names) — Warning. A brand-prefix
-//!     name (`diakrisis_*`, `actic_*`, `msfs_*`, `uhm_*`,
-//!     `noesis_*`) embedded in a public axiom name is a hygiene
-//!     concern, not a soundness one. The build can continue.
-//!   * **R2** (ε-coordinate canonicalisable) — Warning. The
-//!     AST-layer parser already rejects malformed `@enact(epsilon
-//!     = ...)` strings; R2 catches strings that slipped through
-//!     a refactor.
-//!   * **R3** (meta-classifier uniqueness) — Error. Per VVA
-//!     §10.4.1 only one framework may play the meta-classifier
-//!     role per module-tree; a violation is a coordinate-system
-//!     conflict that the build cannot recover from.
+
+//!  * **R1** (foundation-neutral names) — Warning. A brand-prefix
+//!  name (`diakrisis_*`, `actic_*`, `msfs_*`, `uhm_*`,
+//!  `noesis_*`) embedded in a public axiom name is a hygiene
+//!  concern, not a soundness one. The build can continue.
+//!  * **R2** (ε-coordinate canonicalisable) — Warning. The
+//!  AST-layer parser already rejects malformed `@enact(epsilon
+//!  = ...)` strings; R2 catches strings that slipped through
+//!  a refactor.
+//!  * **R3** (meta-classifier uniqueness) — Error. Per VVA
+//!  §10.4.1 only one framework may play the meta-classifier
+//!  role per module-tree; a violation is a coordinate-system
+//!  conflict that the build cannot recover from.
 //!
+
 //! `HygieneRecheckPass` returns `success == false` only when an
 //! Error-severity diagnostic fires. Warnings are recorded for the
 //! caller to surface but do not halt the pipeline.
@@ -444,6 +448,7 @@ impl VerificationPass for HygieneRecheckPass {
         // annotated declarations (default 5, configurable per
         // corpus ).
         //
+
         // the designated meta-classifier corpus
         // is exempt from this counting. names the
         // designated corpus as the legitimate occupant of the
@@ -462,7 +467,7 @@ impl VerificationPass for HygieneRecheckPass {
             meta_classifier_candidates.push(corpus.clone());
         }
 
-        // R4  — framework-compatibility audit. Walk every
+        // R4 — framework-compatibility audit. Walk every
         // (distinct) corpus appearing in @framework annotations
         // through the well-known incompatibility matrix. Each
         // match surfaces an Error-severity diagnostic; the

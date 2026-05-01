@@ -1,5 +1,6 @@
 //! Interactive REPL (Read-Eval-Print Loop)
 //!
+
 //! VBC-backed evaluation. Each input is parsed; top-level items
 //! (`fn`, `type`, `protocol`, `implement`, `static`, `mount`) are
 //! accumulated into a session source buffer. Bare expressions are
@@ -7,6 +8,7 @@
 //! the result; the session buffer is recompiled with the new function
 //! and that function is executed via the VBC interpreter.
 //!
+
 //! `let NAME [: TYPE] = EXPR` at the REPL surface is desugared to a
 //! `static NAME[: TYPE] = EXPR;` so bindings persist across prompts.
 //! `:reset` clears the session.
@@ -232,11 +234,11 @@ impl Repl {
         let parser = verum_fast_parser::VerumParser::new();
 
         // 1. `let NAME [: TYPE] = EXPR` → desugar to a session-level
-        //    declaration. With a type annotation, emit `static NAME:
-        //    TYPE = EXPR;` (mutation across prompts isn't supported,
-        //    but `static` accepts the broader value forms a user
-        //    typically wants in a REPL). Without a type, fall back
-        //    to `const` which permits inference.
+        //  declaration. With a type annotation, emit `static NAME:
+        //  TYPE = EXPR;` (mutation across prompts isn't supported,
+        //  but `static` accepts the broader value forms a user
+        //  typically wants in a REPL). Without a type, fall back
+        //  to `const` which permits inference.
         if let Some((name, ty_opt, expr_src)) = parse_repl_let(trimmed) {
             let stmt = match ty_opt {
                 Some(ty) => format!("static {}: {} = {};\n", name, ty, expr_src),
@@ -266,6 +268,7 @@ impl Repl {
         // the same `parse_module_script_str` that drives `verum
         // hello.vr`.
         //
+
         // Inline-let extraction (SCRIPT-12b): inputs of the shape
         // `let NAME = EXPR; <residual>` get the binding lifted into
         // a session-level `const` before the residual is wrapped
@@ -425,11 +428,13 @@ fn is_simple_ident(s: &str) -> bool {
 /// Returns `None` if the input doesn't START with `let` or doesn't
 /// have a top-level `;` terminating the binding.
 ///
+
 /// "Top-level `;`" means a semicolon outside any matched `()`,
 /// `[]`, `{}`, or string literal — so `let m = Map { a: 1, b: 2 };`
 /// (containing `;`-bearing nested blocks) splits at the OUTER
 /// terminator. Leading whitespace is allowed before `let`.
 ///
+
 /// Used by the REPL's script-mode wrapper to lift a leading
 /// binding into a session-level const before executing the
 /// residual, so subsequent prompts see the binding.

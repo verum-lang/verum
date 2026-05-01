@@ -1,46 +1,54 @@
 //! Verum lockfile v3 (P4.2).
 //!
+
 //! Successor to the legacy v1 [`super::lockfile::Lockfile`] (sha-256, no
 //! load-time verification). Three concrete improvements:
 //!
+
 //! 1. **Algorithm-tagged integrity strings.** Every entry's hash is
-//!    encoded as `"blake3:<64-hex>"` rather than a bare hex string.
-//!    A future migration to a stronger algorithm becomes a parser-side
-//!    discriminant rather than a silent re-interpretation.
+//!  encoded as `"blake3:<64-hex>"` rather than a bare hex string.
+//!  A future migration to a stronger algorithm becomes a parser-side
+//!  discriminant rather than a silent re-interpretation.
 //!
+
 //! 2. **Lockfile self-integrity.** A blake3 digest over the
-//!    canonicalised lockfile body (entries + workspace + manifest hash,
-//!    in fixed sort order) is embedded at the top. Tampering with any
-//!    entry's `integrity` field — the most attack-relevant part — flips
-//!    the self-digest, surfaced by [`LockfileV3::verify_self_integrity`].
+//!  canonicalised lockfile body (entries + workspace + manifest hash,
+//!  in fixed sort order) is embedded at the top. Tampering with any
+//!  entry's `integrity` field — the most attack-relevant part — flips
+//!  the self-digest, surfaced by [`LockfileV3::verify_self_integrity`].
 //!
+
 //! 3. **Verify-on-every-load.** [`LockfileV3::from_file`] always
-//!    re-runs self-integrity. Callers who hold a [`ContentStore`] can
-//!    additionally call [`LockfileV3::verify_against_store`] to
-//!    cross-check that every locked package's blob is present and
-//!    integrity-clean — the same guarantee P5.1 provides per-blob, but
-//!    extended to the whole lock.
+//!  re-runs self-integrity. Callers who hold a [`ContentStore`] can
+//!  additionally call [`LockfileV3::verify_against_store`] to
+//!  cross-check that every locked package's blob is present and
+//!  integrity-clean — the same guarantee P5.1 provides per-blob, but
+//!  extended to the whole lock.
 //!
+
 //! # Layout
 //!
+
 //! ```toml
-//! version             = 3
-//! root                = "myapp"
-//! self_integrity      = "blake3:9bdc..."
-//! manifest_integrity  = "blake3:c1aa..."   # optional: hash of verum.toml
-//! created_at          = 1714161000
-//! updated_at          = 1714161005
-//! cli_version         = "0.6.0"
+//! version = 3
+//! root = "myapp"
+//! self_integrity = "blake3:9bdc..."
+//! manifest_integrity = "blake3:c1aa..." # optional: hash of verum.toml
+//! created_at = 1714161000
+//! updated_at = 1714161005
+//! cli_version = "0.6.0"
 //!
+
 //! [[package]]
-//! name      = "json"
-//! version   = "1.4.0"
-//! source    = "registry+https://cogs.verum-lang.org"
+//! name = "json"
+//! version = "1.4.0"
+//! source = "registry+https://cogs.verum-lang.org"
 //! integrity = "blake3:7bde..."
 //! dependencies = [["http", "0.2.1"], ["text", "1.0.0"]]
-//! features  = ["std"]
+//! features = ["std"]
 //! ```
 //!
+
 //! Sort order is canonical: packages by `(name, version)`, dependency
 //! pairs and features are also sorted, so byte-equal inputs produce
 //! byte-equal lockfiles independent of resolver traversal order.
@@ -284,12 +292,13 @@ impl LockfileV3 {
     }
 
     /// Read a lockfile from disk. Fails if:
-    ///   - The file is missing or unreadable.
-    ///   - The TOML is malformed.
-    ///   - The `version` field doesn't match [`SCHEMA_VERSION`].
-    ///   - The `self_integrity` digest doesn't match the recomputed
-    ///     digest (tamper detection).
+    ///  - The file is missing or unreadable.
+    ///  - The TOML is malformed.
+    ///  - The `version` field doesn't match [`SCHEMA_VERSION`].
+    ///  - The `self_integrity` digest doesn't match the recomputed
+    ///  digest (tamper detection).
     ///
+
     /// Verify-on-every-load means the caller never has to remember to
     /// run a separate verify step for the lockfile itself. Cross-store
     /// verification is opt-in via [`verify_against_store`].
@@ -448,11 +457,13 @@ impl LockfileV3 {
 
     /// Cross-check every locked package against `store`:
     ///
-    ///   - Every package's blake3 integrity must resolve to a present
-    ///     blob in the store.
-    ///   - Every present blob must pass [`ContentStore::lookup_by_digest`]'s
-    ///     own re-hash check (catches local tampering).
+
+    ///  - Every package's blake3 integrity must resolve to a present
+    ///  blob in the store.
+    ///  - Every present blob must pass [`ContentStore::lookup_by_digest`]'s
+    ///  own re-hash check (catches local tampering).
     ///
+
     /// Non-blake3 integrity entries are skipped (nothing to compare
     /// against the blake3-keyed store). Returns `Ok(())` only if every
     /// blake3 entry is materialised and integrity-clean. A failure

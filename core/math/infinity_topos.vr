@@ -4,12 +4,14 @@
 // Layer: Foundations (Mathematical Structures)
 // Spec: Lurie "Higher Topos Theory" §6, Sheaves in Geometry and Logic
 //
+
 // The centerpiece of Phase C. Built on top of:
-//   * core/math/infinity_category.vr — InfinityCategory, InfinityFunctor
-//   * core/math/simplicial.vr         — KanComplex (∞-groupoid)
-//   * core/math/category.vr           — Topos, Presheaf, Sheaf (1-categorical)
-//   * core/math/hott.vr               — Equiv, IsContr, Path types
+//  * core/math/infinity_category.vr — InfinityCategory, InfinityFunctor
+//  * core/math/simplicial.vr — KanComplex (∞-groupoid)
+//  * core/math/category.vr — Topos, Presheaf, Sheaf (1-categorical)
+//  * core/math/hott.vr — Equiv, IsContr, Path types
 //
+
 // An ∞-topos is a presentable ∞-category equivalent to the ∞-category
 // of ∞-sheaves on some ∞-site. The elementary examples are spaces
 // (∞-groupoids), diagrams of spaces, and sheaves on a site. External
@@ -17,17 +19,18 @@
 // type theory, and formal epistemology (consumed by
 // `core.theory_interop`).
 //
+
 // This module provides:
-//   §1  Sieves and Grothendieck topologies
-//   §2  ∞-Sites
-//   §3  ∞-Presheaves and ∞-Sheaves (descent condition)
-//   §4  ∞-Topos (Giraud axioms)
-//   §5  Sheaf ∞-topos construction
-//   §6  Subobject classifier
-//   §7  Geometric morphisms
-//   §8  Čech descent checker (algorithmic)
-//   §9  Coherence violation types
-//   §10 Foundational theorems
+//  §1 Sieves and Grothendieck topologies
+//  §2 ∞-Sites
+//  §3 ∞-Presheaves and ∞-Sheaves (descent condition)
+//  §4 ∞-Topos (Giraud axioms)
+//  §5 Sheaf ∞-topos construction
+//  §6 Subobject classifier
+//  §7 Geometric morphisms
+//  §8 Čech descent checker (algorithmic)
+//  §9 Coherence violation types
+//  §10 Foundational theorems
 // =============================================================================
 
 module core.math.infinity_topos;
@@ -91,9 +94,10 @@ public type PullbackSieve<C: InfinityCategory, S: Sieve<C>> is {
 /// A **Grothendieck topology** on an ∞-category C assigns to every
 /// object c a collection of covering sieves satisfying three axioms:
 ///
-///   1. **Maximality**: the maximal sieve is always covering.
-///   2. **Stability** (base change): pullback of covering sieves is covering.
-///   3. **Transitivity**: a sieve covered by coverings is covering.
+
+///  1. **Maximality**: the maximal sieve is always covering.
+///  2. **Stability** (base change): pullback of covering sieves is covering.
+///  3. **Transitivity**: a sieve covered by coverings is covering.
 public type GrothendieckTopology<C: InfinityCategory> is protocol {
     /// Is the sieve `s` a covering sieve of object `c`?
     fn is_covering(&self, c: C.cells(0), s: &dyn Sieve<C>) -> Bool;
@@ -145,6 +149,7 @@ public type InfPresheaf<C: InfinityCategory> is protocol {
 
 /// An **∞-sheaf** on a site (C, J): a presheaf satisfying descent.
 ///
+
 /// The descent condition requires that for every covering sieve S of c,
 /// the canonical map F(c) → holim_{(f: d → c) ∈ S} F(d) is an equivalence.
 public type InfSheaf<C: InfinityCategory> is protocol extends InfPresheaf<C> {
@@ -161,11 +166,12 @@ public type InfSheaf<C: InfinityCategory> is protocol extends InfPresheaf<C> {
 /// An **∞-topos** is a presentable ∞-category satisfying the Giraud axioms
 /// (Lurie HTT Definition 6.1.0.4):
 ///
-///   1. Has small colimits
-///   2. Has finite limits
-///   3. Colimits are universal (stable under pullback)
-///   4. Coproducts are disjoint
-///   5. Every groupoid object is effective
+
+///  1. Has small colimits
+///  2. Has finite limits
+///  3. Colimits are universal (stable under pullback)
+///  4. Coproducts are disjoint
+///  5. Every groupoid object is effective
 public type InfinityTopos is protocol extends InfinityCategory {
     /// Giraud axiom G1: X has all small colimits.
     @verify(formal)
@@ -194,9 +200,9 @@ public type InfinityTopos is protocol extends InfinityCategory {
 
 /// The canonical ∞-topos: Sh_∞(C, J) — the ∞-category of ∞-sheaves
 /// on a site. Comes equipped with:
-///   - Sheafification functor: L : PSh(C) → Sh(C)
-///   - Yoneda embedding: y : C → Sh(C)
-///   - Left-exactness of sheafification
+///  - Sheafification functor: L : PSh(C) → Sh(C)
+///  - Yoneda embedding: y : C → Sh(C)
+///  - Left-exactness of sheafification
 public type SheafInfinityTopos<C: InfinityCategory> is protocol extends InfinityTopos {
     /// The site this ∞-topos is built from.
     fn underlying_site(&self) -> Site<C>;
@@ -314,10 +320,11 @@ public type CechNerve is {
 
 /// Compute the Čech nerve of a covering family up to a given level.
 ///
+
 /// For a covering {U_i → X}, the Čech nerve is the cosimplicial object:
-///   Level 0: ∐ U_i
-///   Level 1: ∐ U_i ×_X U_j       (double overlaps)
-///   Level 2: ∐ U_i ×_X U_j ×_X U_k  (triple overlaps)
+///  Level 0: ∐ U_i
+///  Level 1: ∐ U_i ×_X U_j (double overlaps)
+///  Level 2: ∐ U_i ×_X U_j ×_X U_k (triple overlaps)
 public fn compute_cech_nerve(
     covering: &List<Int>,
     target: Int,
@@ -406,14 +413,16 @@ public type DescentObstruction is {
 
 /// Check the descent condition for a presheaf on a finite covering.
 ///
+
 /// Given a presheaf F and a covering family {U_i → X}, descent requires:
-///   F(X) ≃ lim( ∏ F(U_i) ⇉ ∏ F(U_i ×_X U_j) ⇛ ∏ F(U_ij ×_X U_k) ... )
+///  F(X) ≃ lim( ∏ F(U_i) ⇉ ∏ F(U_i ×_X U_j) ⇛ ∏ F(U_ij ×_X U_k) ... )
 ///
+
 /// Algorithm:
-///   1. Compute the Čech nerve of the covering.
-///   2. Apply the presheaf to each level of the nerve.
-///   3. Compute the cosimplicial limit (totalization).
-///   4. Check whether the canonical map is an equivalence.
+///  1. Compute the Čech nerve of the covering.
+///  2. Apply the presheaf to each level of the nerve.
+///  3. Compute the cosimplicial limit (totalization).
+///  4. Check whether the canonical map is an equivalence.
 public fn check_descent<C: InfinityCategory>(
     presheaf_sections: &List<Int>,
     nerve: &CechNerve,
@@ -453,7 +462,7 @@ public fn check_descent<C: InfinityCategory>(
 
     // Step 2: Check higher cocycle conditions on triple overlaps (level 2).
     // For each triple (i, j, k), verify the cocycle identity:
-    //   d_0(s_{ij}) · d_2(s_{jk})^{-1} · d_1(s_{ik}) = id
+    //  d_0(s_{ij}) · d_2(s_{jk})^{-1} · d_1(s_{ik}) = id
     if nerve.levels.len() > 2 && max_deviation < 1e-10 {
         let triples = &nerve.levels[2];
         let num_triples = triples.components.len();

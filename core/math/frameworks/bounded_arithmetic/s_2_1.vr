@@ -7,6 +7,7 @@
 /// Polynomial induction (PIND) over Σ^b_1-formulas; bounded
 /// quantification with sharp bounds. ν^weak = 2.
 ///
+
 /// S^1_2 is *equivalent* in expressive power to Cook-Nguyen's V_1 but
 /// uses different syntax (smash function `#` for polynomial bounds,
 /// PIND instead of NIA). Verum exposes both as parallel packages so

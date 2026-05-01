@@ -4,64 +4,77 @@
 // Layer: 0 (no dependencies beyond core primitives + intrinsics)
 // =============================================================================
 //
-// Volatile-memset(0) over byte slices.  Used to wipe secret material
+
+// Volatile-memset(0) over byte slices. Used to wipe secret material
 // (key schedules, AEAD tags, PSK binders, password hashes,
 // session-resumption tickets) before the storage leaves scope.
 //
+
 // # Threat model
 //
+
 // LLVM's standard `memset` intrinsic is non-volatile: when the
 // optimiser proves the buffer is dead immediately after the memset
 // (which is the *exact* situation we use this for — wiping secrets
 // just before scope exit), `MemCpyOptPass` /
-// `DeadStoreEliminationPass` will silently elide the call.  The
+// `DeadStoreEliminationPass` will silently elide the call. The
 // secret stays in memory after the function returns, and a coredump,
 // swap-out, post-exit heap inspection, or use-after-free read will
 // expose the bytes.
 //
+
 // `secure_zero` routes through a dedicated VBC opcode
 // (`FfiSubOpcode::CSecureZero` = 0xA3) that lowers to
 // `llvm.memset.p0.i64(..., i1 true)` — the volatile flag tells the
 // optimiser the call is observable, and every pass preserves it.
 //
+
 // Audit: `internal/specs/tls-quic-security-audit.md` §2 (zeroise on
-// drop) Action #2.  The companion regression harness in
+// drop) Action #2. The companion regression harness in
 // `crates/verum_codegen/tests/secure_zero_preservation.rs`
 // (T1.5 follow-up) compiles a tiny program using `secure_zero` at
 // `-O3` and asserts the volatile memset survives in the optimised
 // IR.
 //
+
 // # API
 //
-//   secure_zero(slice)         -> ()        // zero a byte slice
-//   secure_zero_text(text)     -> ()        // zero a Text buffer
-//   secure_zero_bytes(ptr, n)  -> () unsafe // raw pointer + length
+
+//  secure_zero(slice) -> () // zero a byte slice
+//  secure_zero_text(text) -> () // zero a Text buffer
+//  secure_zero_bytes(ptr, n) -> () unsafe // raw pointer + length
 //
+
 // All three forms compile to the same `CSecureZero` opcode.
 //
+
 // # Correctness invariants
 //
+
 // 1. The buffer's bytes are 0x00 after the call returns.
 // 2. The compiler does NOT elide the writes, regardless of
-//    optimisation level (`-O0` through `-O3` + ThinLTO + FullLTO).
+//  optimisation level (`-O0` through `-O3` + ThinLTO + FullLTO).
 // 3. No data-dependent branches — every byte is overwritten in
-//    constant time (the size is not secret under any reasonable
-//    threat model).
+//  constant time (the size is not secret under any reasonable
+//  threat model).
 //
+
 // # Pitfalls
 //
-// * `secure_zero` does NOT release the underlying allocation.  It
-//   only wipes the bytes.  If you also want to release, call the
-//   appropriate `drop` / `dealloc` *after* `secure_zero`.
-// * The buffer must be writeable.  Calling on a read-only slice
-//   produces an LLVM-IR-level write to read-only memory and
-//   segfaults at runtime.
+
+// * `secure_zero` does NOT release the underlying allocation. It
+//  only wipes the bytes. If you also want to release, call the
+//  appropriate `drop` / `dealloc` *after* `secure_zero`.
+// * The buffer must be writeable. Calling on a read-only slice
+//  produces an LLVM-IR-level write to read-only memory and
+//  segfaults at runtime.
 // * Volatile semantics protect against compiler-pass elision, NOT
-//   against a hostile optimiser at higher levels (e.g. profile-
-//   guided memory rewriting).  If you need a stronger guarantee,
-//   add `#[inline(never)]` discipline upstream and run a third-
-//   party IR audit.
+//  against a hostile optimiser at higher levels (e.g. profile-
+//  guided memory rewriting). If you need a stronger guarantee,
+//  add `#[inline(never)]` discipline upstream and run a third-
+//  party IR audit.
 //
+
 
 module core.security.util.zeroize;
 
@@ -73,21 +86,23 @@ mount core.*;
 
 /// Zero `n` bytes at `ptr` via a volatile memset.
 ///
+
 /// Survives all LLVM optimisation passes — the standard
 /// `core.intrinsics.memory.memset` does NOT and MUST NOT be used
 /// for secret material.
 ///
+
 /// # Safety
 /// * `ptr` must be non-null and point to a writable region of at
-///   least `n` bytes.
+///  least `n` bytes.
 /// * Caller must not retain references / pointers into the region
-///   after this call returns — the contents are now 0x00 and any
-///   stale references would observe the zeroes.
+///  after this call returns — the contents are now 0x00 and any
+///  stale references would observe the zeroes.
 public unsafe fn secure_zero_bytes(ptr: &mut Byte, n: USize) {
     @intrinsic("secure_zero", ptr, n)
 }
 
-/// Zero a byte slice via volatile memset.  Length is taken from the
+/// Zero a byte slice via volatile memset. Length is taken from the
 /// slice header, so out-of-bounds is statically impossible.
 public fn secure_zero(slice: &mut [Byte]) {
     let ptr = slice.as_mut_ptr();
@@ -99,10 +114,12 @@ public fn secure_zero(slice: &mut [Byte]) {
 
 /// Zero the storage backing a `Text` value.
 ///
+
 /// The Text continues to logically refer to "the same string" but
-/// every byte of its storage is now 0x00.  Use just before
+/// every byte of its storage is now 0x00. Use just before
 /// dropping a Text that held a password / API key / session token.
 ///
+
 /// Note: if the Text is a "small string" (inline storage in the
 /// Value tagged-union), `as_mut_bytes` returns a slice into the
 /// inline buffer and zeroising clears the bytes there — exactly
@@ -116,11 +133,13 @@ public fn secure_zero_text(text: &mut Text) {
 // Tests
 // =============================================================================
 //
+
 // The end-to-end zero-survival assertion lives in
 // `crates/verum_codegen/tests/secure_zero_preservation.rs` —
 // it compiles a Verum program using `secure_zero`, optimises at
 // `-O3`, and grep's the resulting IR for `volatile` memset.
 //
+
 // In-language tests below verify the runtime semantics: bytes are
 // indeed 0x00 after the call, and the call is a no-op on
 // zero-length slices (no UB, no panic).

@@ -3,13 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §19.5
 //
+
 // `AuthAction` itself lives in `ext.hooks` so the protocol and the
 // action enum stay together. This module provides:
 //
-//   * `display(action)` — human-readable string (used in trace logs)
-//   * `is_dml(action)` / `is_ddl(action)` / `is_meta(action)` —
-//     classification helpers used by tests + per-class authorization
-//     policies (e.g. "deny all DDL in read-only mode")
+
+//  * `display(action)` — human-readable string (used in trace logs)
+//  * `is_dml(action)` / `is_ddl(action)` / `is_meta(action)` —
+//  classification helpers used by tests + per-class authorization
+//  policies (e.g. "deny all DDL in read-only mode")
 // =============================================================================
 
 module core.database.sqlite.native.auth.action;

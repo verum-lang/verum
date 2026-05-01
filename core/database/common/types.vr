@@ -5,10 +5,12 @@
 // Spec: internal/specs/database.md §4.1, §5.1
 // =============================================================================
 //
+
 // Vendor-neutral wire shapes. Every adapter sees rows / params through
 // these types; vendor-specific OID dictionaries live in adapter modules
 // and are folded back to / from these via `AdapterId`.
 //
+
 // Performance note. `WireRow` and `WireBuf` are designed for
 // allocation-free hot paths: row-bytes are borrowed from the connection
 // arena (CBGR), `WireBuf.write_*` methods append in place, and decoders
@@ -32,6 +34,7 @@ mount core.database.common.error.{DbError, DecodeFault, EncodeFault, AdapterId};
 /// shared space at the wire boundary so user code reasons about a
 /// single dictionary.
 ///
+
 /// We store the tag as an `Int` rather than a packed enum because new
 /// types appear (postgres extensions, custom domains) and the adapter
 /// keeps a richer per-vendor table. The constants below are the core
@@ -231,6 +234,7 @@ implement WireRow {
 /// Append-only byte buffer used by `Params.encode`. Lives in the
 /// connection arena — reset between requests, no per-query alloc.
 ///
+
 /// The integer writers always emit network byte order (big-endian).
 /// This matches Postgres v3 binary protocol and MySQL binary protocol;
 /// SQLite's adapter swaps on encode at the boundary to its native

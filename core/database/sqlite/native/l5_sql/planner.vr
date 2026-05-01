@@ -6,28 +6,33 @@ module core.database.sqlite.native.l5_sql.planner;
 // Layer: 5
 // Spec: sqlite-native.md §13
 //
+
 // The planner turns a parsed `Statement` into a `PlanNode` tree that
 // the codegen walks into VDBE opcodes. In the loom v1 this is a
 // minimal *structural* planner — no index selection, no join
 // reordering, no subquery flattening. It exists so the compile
 // pipeline can progress past "AST in hand" to "VDBE program on disk".
 //
+
 // Cost-based optimisation lands in follow-up patches; the shape of
 // `PlanNode` is already right for it (every transformation is a
 // node-level rewrite).
 //
+
 // Shape today:
 //
-//   PnValues          — rows of constant expressions, no source
-//   PnTableScan       — full scan of a single table
-//   PnFilter(child, predicate)   — attach WHERE
-//   PnProject(child, columns)    — attach SELECT list
-//   PnSort(child, terms)         — attach ORDER BY
-//   PnLimit(child, limit, offset)— attach LIMIT/OFFSET
-//   PnInsert(table, columns, source_plan, on_conflict)
-//   PnDelete(table, predicate)
-//   PnUpdate(table, assignments, predicate)
+
+//  PnValues — rows of constant expressions, no source
+//  PnTableScan — full scan of a single table
+//  PnFilter(child, predicate) — attach WHERE
+//  PnProject(child, columns) — attach SELECT list
+//  PnSort(child, terms) — attach ORDER BY
+//  PnLimit(child, limit, offset)— attach LIMIT/OFFSET
+//  PnInsert(table, columns, source_plan, on_conflict)
+//  PnDelete(table, predicate)
+//  PnUpdate(table, assignments, predicate)
 //
+
 // Every PlanNode carries enough information for codegen without
 // re-walking the AST.
 // =============================================================================
@@ -184,7 +189,7 @@ public fn plan_statement(stmt: &Statement) -> Result<PlanNode, PlanError> {
 
 fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
     // Compound SELECT — recursively plan both sides, then wrap in the
-    // corresponding compound node.  Outer ORDER BY / LIMIT (held on
+    // corresponding compound node. Outer ORDER BY / LIMIT (held on
     // `sel`) is applied AFTER the compound op, mirroring SQL semantics.
     let simple = match sel.kind {
         SkSimple(ref s) => s,
@@ -413,7 +418,7 @@ fn clone_assignments(xs: &List<UpdateAssignment>) -> List<UpdateAssignment> {
     out
 }
 
-// Recover the projection width of a planned subtree.  Used as a
+// Recover the projection width of a planned subtree. Used as a
 // fallback when the AST-side `compound_proj_count` returns -1 (i.e.
 // the lhs uses `SELECT *` / `t.*`); the post-projection plan node
 // structure exposes the resolved count.
@@ -436,10 +441,11 @@ fn plan_node_proj_count(node: &PlanNode) -> Int {
 }
 
 // Walk a SELECT statement to find the column count produced by the
-// leftmost simple SELECT.  Compound semantics (UNION, INTERSECT,
+// leftmost simple SELECT. Compound semantics (UNION, INTERSECT,
 // EXCEPT) require both sides to have the same column count; we use
 // the left side as the reference (mirrors SQLite's own behaviour).
 //
+
 // Returns -1 for `SELECT *` / `SELECT t.*` since the actual column
 // count needs schema; those cases fall through to the schema-aware
 // planner which has access to table metadata.
@@ -499,11 +505,11 @@ public fn clone_expr(e: &Expr) -> Expr {
         EIn(ref e, ref xs, neg) => EIn(Heap(clone_expr(e)), clone_expr_list(xs), neg),
         // Subquery expressions are rejected by the resolver
         // (`TooComplex("subquery in expression")`) before reaching
-        // clone_expr.  Pre-fix these arms silently coerced to
+        // clone_expr. Pre-fix these arms silently coerced to
         // `ELit(LNull)`, so any future code path that cloned a
         // pre-resolution expression would smuggle NULL into a subquery
         // position — `WHERE id IN (SELECT ...)` becomes `WHERE id IN
-        // NULL` ≡ unknown-for-every-row → empty result set.  Panic
+        // NULL` ≡ unknown-for-every-row → empty result set. Panic
         // loudly instead so the bug surfaces immediately rather than
         // returning a wrong-answer result set.
         EInSubquery(_, _, _) => panic("clone_expr: EInSubquery should be rejected by the resolver before clone"),
@@ -594,12 +600,14 @@ mount core.database.sqlite.native.l5_sql.resolver.{
 /// Plan a statement against a live SchemaCache. For SELECT over a
 /// single FROM table the planner:
 ///
-///   1. Looks up the table's metadata (root_page, column list).
-///   2. Builds a ColumnScope and resolves EColumn → EColumnRef in
-///      every result-column expression + WHERE predicate.
-///   3. Emits PnTableScan with the real root_page + n_cols, wraps
-///      with PnFilter / PnProject / PnLimit.
+
+///  1. Looks up the table's metadata (root_page, column list).
+///  2. Builds a ColumnScope and resolves EColumn → EColumnRef in
+///  every result-column expression + WHERE predicate.
+///  3. Emits PnTableScan with the real root_page + n_cols, wraps
+///  with PnFilter / PnProject / PnLimit.
 ///
+
 /// For non-SELECT statements the schema cache is consulted only for
 /// validation hooks; the rest falls through to plain `plan_statement`.
 public fn plan_statement_with_schema(
@@ -629,7 +637,7 @@ fn plan_insert_with_schema(
         IsSelect(ref sel) => {
             // INSERT ... SELECT delegates to the SELECT planner so the
             // sub-query gets full FROM/WHERE/JOIN/GROUP BY/ORDER BY
-            // resolution.  The PnInsert wrapper below treats the result
+            // resolution. The PnInsert wrapper below treats the result
             // as a row stream — column count is determined by the
             // SELECT's projection, validated against the INSERT column
             // list (or table schema if no explicit column list) downstream
@@ -741,6 +749,7 @@ fn plan_delete_with_schema(
 /// node + the column scopes + the "primary" meta for `SELECT *`
 /// expansion + the default cursor_id for qualified column lookup.
 ///
+
 /// v1 handles: FROM t, FROM t JOIN u ON … (INNER / CROSS only,
 /// single-level JOIN). Subqueries and RIGHT/FULL/LEFT OUTER joins
 /// defer to a later pass.
@@ -821,7 +830,7 @@ fn plan_from_for_select(
 
                 // Filter: emit only rows where A had no match — A.<col0> IS NULL
                 // (LEFT JOIN nullifies ALL right-side cols on no-match, so
-                // any one column suffices as the sentinel).  A is at cursor
+                // any one column suffices as the sentinel). A is at cursor
                 // 1 in the swapped scope.
                 if lmeta_full.columns.len() == 0 {
                     return Err(plan_error("FULL OUTER JOIN with empty-column left table".clone()));
@@ -917,7 +926,7 @@ fn plan_select_with_schema(
             // Determine projection width — when the lhs is a simple
             // SELECT with no `*`, we know it from result_columns; for
             // `*`/`t.*` or nested compounds we resort to the count
-            // produced by the lhs subplan structure.  The codegen
+            // produced by the lhs subplan structure. The codegen
             // never reads n_proj < 0; the schema resolver above has
             // already enforced agreement.
             let n_proj_left = compound_proj_count(lhs);

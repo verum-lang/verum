@@ -3,10 +3,13 @@
 // =============================================================================
 // Spec: SQLite C API
 //
+
 // The classical callback signature is:
 //
-//   int xCallback(void* pArg, int ncols, char** values, char** names);
+
+//  int xCallback(void* pArg, int ncols, char** values, char** names);
 //
+
 // Here we represent the pair of parallel arrays as a single typed
 // record to keep the API honest + avoid unchecked parallel indexing.
 // =============================================================================
@@ -20,7 +23,7 @@ mount collections.List;
 public type ExecColumn is {
     name: Text,
     /// The canonical sqlite3_exec surface hands NULLs back as an
-    /// empty Text — we keep that exactly.  Embedders that need
+    /// empty Text — we keep that exactly. Embedders that need
     /// typed values use the iterator/collect catalogue instead.
     text: Text,
 }

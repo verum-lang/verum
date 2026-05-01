@@ -1,21 +1,26 @@
 //! Conditional Compilation Configuration (`@cfg`) for Verum.
 //!
+
 //! This module provides the AST types and evaluation logic for conditional
 //! compilation based on target platform, features, and custom conditions.
 //!
+
 //! # Syntax
 //!
+
 //! ```verum
 //! // Simple predicate
 //! @cfg(unix)
 //! @cfg(windows)
 //! @cfg(debug_assertions)
 //!
+
 //! // Key-value predicates
 //! @cfg(target_os = "linux")
 //! @cfg(target_arch = "x86_64")
 //! @cfg(feature = "simd")
 //!
+
 //! // Combinators
 //! @cfg(all(unix, target_arch = "x86_64"))
 //! @cfg(any(target_os = "linux", target_os = "macos"))
@@ -23,10 +28,13 @@
 //! @cfg(all(unix, not(target_os = "ios")))
 //! ```
 //!
+
 //! # Target Configuration
 //!
+
 //! The following cfg options are predefined:
 //!
+
 //! | Option | Values | Description |
 //! |--------|--------|-------------|
 //! | `target_os` | linux, macos, windows, ios, android, freebsd, etc. | Operating system |
@@ -38,10 +46,13 @@
 //! | `target_vendor` | unknown, apple, pc, nvidia | Hardware vendor |
 //! | `feature` | user-defined | Cargo-style feature flags |
 //!
+
 //! # Simple Predicates
 //!
+
 //! These are shorthand for common conditions:
 //!
+
 //! | Predicate | Equivalent |
 //! |-----------|------------|
 //! | `unix` | `target_family = "unix"` |
@@ -49,8 +60,10 @@
 //! | `test` | Running in test mode |
 //! | `debug_assertions` | Debug build |
 //!
+
 //! # Conditional Compilation
 //!
+
 //! Verum supports only the C ABI for FFI (the only stable, universal ABI).
 //! Platform-specific code is selected via @cfg predicates that query target_os,
 //! target_arch, target_family, target_pointer_width, target_endian, target_env,
@@ -67,6 +80,7 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// A cfg predicate for conditional compilation.
 ///
+
 /// This represents the condition inside `@cfg(...)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CfgPredicate {
@@ -153,6 +167,7 @@ pub enum CfgPredicateKind {
 
 /// Target platform configuration for conditional compilation.
 ///
+
 /// This struct holds all the information about the compilation target
 /// that cfg predicates can query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -403,6 +418,7 @@ impl Default for TargetConfig {
 
 /// Parse a cfg predicate from an attribute expression.
 ///
+
 /// This function converts a generic Expr (from the parser) into a
 /// structured CfgPredicate.
 pub fn parse_cfg_predicate(expr: &crate::expr::Expr) -> Maybe<CfgPredicate> {
@@ -491,6 +507,7 @@ pub fn parse_cfg_predicate(expr: &crate::expr::Expr) -> Maybe<CfgPredicate> {
 
 /// Evaluator for @cfg attributes on declarations.
 ///
+
 /// This struct manages the target configuration and provides methods
 /// to filter declarations based on cfg predicates.
 #[derive(Debug, Clone)]
@@ -535,14 +552,16 @@ impl CfgEvaluator {
 
     /// Check if an item with the given attributes should be included.
     ///
+
     /// Returns `true` if all @cfg attributes on the item evaluate to true,
     /// or if the item has no @cfg attributes.
     ///
+
     /// **Fail-open on parse failure**: when an `@cfg(...)` predicate
     /// is structurally malformed (e.g. `@cfg(...)` with no args, or
     /// `@cfg(some_macro_invocation())` instead of an identifier /
     /// key-value / `all`/`any`/`not` form), the attribute is silently
-    /// ignored and the item is included.  This is intentional for
+    /// ignored and the item is included. This is intentional for
     /// forward-compatibility with future cfg dialect extensions, but
     /// callers that want to surface the failure should use
     /// [`Self::should_include_with_failures`] which returns the list
@@ -553,14 +572,15 @@ impl CfgEvaluator {
     }
 
     /// Same as [`should_include`] but additionally returns the list
-    /// of `@cfg` attributes whose predicate failed to parse.  An
+    /// of `@cfg` attributes whose predicate failed to parse. An
     /// empty `Vec` means every cfg attribute on the item parsed
-    /// cleanly.  Non-empty means at least one cfg was silently
+    /// cleanly. Non-empty means at least one cfg was silently
     /// ignored — callers (lints, diagnostics, strict-mode CI gates)
     /// can choose to surface this as a warn or error.
     ///
+
     /// Architectural note: the include decision still falls through
-    /// on parse failure (fail-open) for forward-compatibility.  This
+    /// on parse failure (fail-open) for forward-compatibility. This
     /// method just hands the failures back instead of swallowing
     /// them so observability isn't compromised.
     pub fn should_include_with_failures<'a>(
@@ -602,6 +622,7 @@ impl CfgEvaluator {
 
     /// Filter items from a module, keeping only those that pass cfg checks.
     ///
+
     /// This method is specifically designed for processing module items
     /// which are stored in a `List<Item>`.
     pub fn filter_items(&self, items: &List<crate::decl::Item>) -> List<crate::decl::Item> {
@@ -614,12 +635,13 @@ impl CfgEvaluator {
 
     /// Check if an individual Item should be included based on its @cfg attributes.
     ///
+
     /// Walks BOTH the outer `Item.attributes` list AND any inner-decl
     /// attribute list that the parser may have populated instead of
-    /// the outer one.  Per `verum_fast_parser/src/decl.rs`, type /
+    /// the outer one. Per `verum_fast_parser/src/decl.rs`, type /
     /// function declarations carry their `@cfg` attributes on the
     /// *inner* `TypeDecl.attributes` / `FunctionDecl.attributes`
-    /// field, leaving `Item.attributes` empty.  An outer-only check
+    /// field, leaving `Item.attributes` empty. An outer-only check
     /// silently bypasses every type-level / function-level @cfg gate
     /// in the stdlib — see #170 / #181 for the audit history.
     pub fn should_include_item(&self, item: &crate::decl::Item) -> bool {
@@ -852,6 +874,7 @@ impl TargetConfig {
 
     /// Generic bare-metal target (no OS) - for custom embedded platforms
     ///
+
     /// # Arguments
     /// * `arch` - CPU architecture name
     /// * `pointer_width` - Pointer width in bits (8, 16, 24, 32, 64)
@@ -1106,12 +1129,12 @@ mod tests {
     }
 
     /// `should_include_with_failures` must:
-    ///   1. Return `(true, [])` for items with no `@cfg` attributes.
-    ///   2. Return `(true, [&attr])` for a `@cfg(...)` whose
-    ///      predicate failed to parse — fail-OPEN include but the
-    ///      failed attribute is reported back to the caller.
-    ///   3. Return `(false, [])` when a parseable predicate evaluates
-    ///      to false.
+    ///  1. Return `(true, [])` for items with no `@cfg` attributes.
+    ///  2. Return `(true, [&attr])` for a `@cfg(...)` whose
+    ///  predicate failed to parse — fail-OPEN include but the
+    ///  failed attribute is reported back to the caller.
+    ///  3. Return `(false, [])` when a parseable predicate evaluates
+    ///  to false.
     /// Pins the contract that observability isn't compromised by
     /// the fail-open include semantic.
     #[test]
@@ -1127,7 +1150,7 @@ mod tests {
 
         // (2) `@cfg` with empty args is malformed — args.first() is
         // None so parse_cfg_predicate isn't even called; the cfg is
-        // treated as unparseable.  Item still includes, but the
+        // treated as unparseable. Item still includes, but the
         // failure is reported back.
         let bad_cfg = Attribute::simple(Text::from("cfg"), dummy_span());
         let attrs = vec![bad_cfg];
@@ -1146,7 +1169,7 @@ mod tests {
 
     /// Pin the contract that `should_include_item` walks BOTH the
     /// outer `Item.attributes` AND the inner-decl attributes for
-    /// type / function declarations.  Without this walk, the parser's
+    /// type / function declarations. Without this walk, the parser's
     /// inner-decl attribute placement (per `verum_fast_parser`) would
     /// silently bypass every type-level @cfg gate in the stdlib.
     /// See #170 / #181 audit history.

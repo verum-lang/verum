@@ -1,37 +1,44 @@
 //! VBC Code Generation Phase
 //!
+
 //! This phase compiles typed AST to VBC bytecode with tier-aware instructions.
 //! It runs CBGR tier analysis before codegen to determine optimal reference tiers.
 //!
+
 //! # Architecture
 //!
+
 //! ```text
 //! Typed AST (from Phase 4)
-//!       │
-//!       ▼
+//!  │
+//!  ▼
 //! ┌─────────────────────────────────────────┐
-//! │           VBC CODEGEN PHASE              │
-//! │                                          │
-//! │  1. Build CFG for tier analysis          │
-//! │  2. Run escape analysis (verum_cbgr)     │
-//! │  3. Convert TierDecision → TierContext   │
-//! │  4. Run VBC codegen with tier context    │
-//! │  5. Output VbcModule with tier stats     │
+//! │ VBC CODEGEN PHASE │
+//! │ │
+//! │ 1. Build CFG for tier analysis │
+//! │ 2. Run escape analysis (verum_cbgr) │
+//! │ 3. Convert TierDecision → TierContext │
+//! │ 4. Run VBC codegen with tier context │
+//! │ 5. Output VbcModule with tier stats │
 //! └─────────────────────────────────────────┘
-//!       │
-//!       ▼
+//!  │
+//!  ▼
 //! VbcModuleData (bytecode + tier stats)
 //! ```
 //!
+
 //! # Tier Analysis Integration
 //!
+
 //! The phase uses `verum_cbgr::tier_analysis` to determine which references
 //! can be promoted from Tier 0 (runtime checked) to Tier 1 (zero-overhead).
 //!
+
 //! - Tier 0: ~15ns overhead per dereference (CBGR validation)
 //! - Tier 1: 0ns overhead (compiler proven safe)
 //! - Tier 2: 0ns overhead (manual unsafe)
 //!
+
 //! VBC codegen with CBGR: TypedAST to VBC bytecode with CBGR safety checks.
 
 use std::time::{Duration, Instant};
@@ -48,6 +55,7 @@ use verum_vbc::codegen::{CodegenConfig, TierContext, VbcCodegen};
 
 /// VBC code generation phase.
 ///
+
 /// Compiles typed AST modules to VBC bytecode with tier-aware instructions.
 pub struct VbcCodegenPhase {
     /// Configuration for tier analysis.
@@ -166,11 +174,13 @@ impl VbcCodegenPhase {
 
     /// Runs tier analysis on a module and returns TierContext.
     ///
+
     /// This method:
     /// 1. Builds CFGs from all functions in the module using CfgConstructor
     /// 2. Runs TierAnalyzer on each CFG to determine reference tiers
     /// 3. Aggregates results into a TierContext for VBC codegen
     ///
+
     /// The tier decisions enable VBC codegen to emit tier-appropriate instructions:
     /// - Tier 0: ChkRef + Deref (runtime CBGR validation, ~15ns)
     /// - Tier 1: Deref directly (compiler-proven safe, 0ns)
@@ -184,10 +194,11 @@ impl VbcCodegenPhase {
 
         // Step 2: Run tier analysis on each function's CFG.
         //
+
         // ModuleCfg.functions is verum_common::Map (HashMap-backed), so
         // raw iteration order leaks Rust's per-process random hasher
         // seed into TierContext merge order — which in turn leaks into
-        // VBC bytecode emission.  Sort by FunctionId so the bytecode
+        // VBC bytecode emission. Sort by FunctionId so the bytecode
         // is byte-identical across runs.
         // See #143 / project_loom_quality_pivot_2026-04-25.md.
         let mut tier_context = TierContext::new();
@@ -213,6 +224,7 @@ impl VbcCodegenPhase {
 
             // Merge function-level decisions into module-level context.
             //
+
             // #118 — `func_tier_context.decisions` is keyed by
             // span-encoded ExprIds `(start<<32)|end`, NOT 0..N.
             // The pre-#118 `0..decision_count()` loop constructed

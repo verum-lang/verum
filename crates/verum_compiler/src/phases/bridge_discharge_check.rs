@@ -1,44 +1,52 @@
 //! Kernel-bridge discharge validation pre-pass.
 //!
+
 //! Task #135 / MSFS-L4.2 — the load-bearing piece that converts the
 //! bridge-discharge audit's *observation* (task #134's
 //! `verum audit --bridge-discharge`) into a *compile-time gate*.
 //!
+
 //! ## Architecture
 //!
+
 //! Every `apply kernel_<verb>_strict(literal_args...)` invocation in
 //! a proof body must be a legitimate discharge through Verum's
-//! kernel.  This pre-pass walks the proof body BEFORE the SMT proof
+//! kernel. This pre-pass walks the proof body BEFORE the SMT proof
 //! engine sees it, finds those invocations, and replays each through
-//! [`verum_kernel::dispatch_intrinsic`].  When the dispatcher returns
+//! [`verum_kernel::dispatch_intrinsic`]. When the dispatcher returns
 //! `Decision { holds: false }`, the discharge is rejected at compile
 //! time — the user's proof claim "this discharges through the kernel"
 //! is no longer trusted on faith.
 //!
+
 //! ## Architectural rationale (high-performance, no per-bridge hardcoding)
 //!
-//!   * **One code path, all bridges.**  The pre-pass is parameterised
-//!     over `verum_kernel::available_intrinsics()` + `dispatch_intrinsic`.
-//!     Adding a new `kernel_<verb>_strict` bridge requires only
-//!     registering its dispatcher entry; this validator picks it up
-//!     automatically with no edit here.
+
+//!  * **One code path, all bridges.** The pre-pass is parameterised
+//!  over `verum_kernel::available_intrinsics()` + `dispatch_intrinsic`.
+//!  Adding a new `kernel_<verb>_strict` bridge requires only
+//!  registering its dispatcher entry; this validator picks it up
+//!  automatically with no edit here.
 //!
-//!   * **Pre-Z3 cost.**  Pure AST walk + hashmap dispatch — no SMT
-//!     solver invocation, no kernel-recheck round-trip.  Microsecond-
-//!     scale per proof body.  The expensive part stays downstream.
+
+//!  * **Pre-Z3 cost.** Pure AST walk + hashmap dispatch — no SMT
+//!  solver invocation, no kernel-recheck round-trip. Microsecond-
+//!  scale per proof body. The expensive part stays downstream.
 //!
-//!   * **Conservative on non-literal args.**  Args that aren't
-//!     literally evaluable at parse time (parameter references,
-//!     arithmetic expressions, function calls) are passed through —
-//!     downstream layers (#136 / SMT engine) handle them.  We only
-//!     gate the literal-arg path because that's where the dispatcher
-//!     can run statically with full information.
+
+//!  * **Conservative on non-literal args.** Args that aren't
+//!  literally evaluable at parse time (parameter references,
+//!  arithmetic expressions, function calls) are passed through —
+//!  downstream layers (#136 / SMT engine) handle them. We only
+//!  gate the literal-arg path because that's where the dispatcher
+//!  can run statically with full information.
 //!
-//!   * **Error preservation.**  When the dispatcher rejects, the
-//!     compile error carries the dispatcher's `reason` text verbatim
-//!     so the user sees exactly *why* the kernel refused the args
-//!     (e.g., "grothendieck::build_grothendieck preconditions:
-//!     |fibres|=0 must be > 0").
+
+//!  * **Error preservation.** When the dispatcher rejects, the
+//!  compile error carries the dispatcher's `reason` text verbatim
+//!  so the user sees exactly *why* the kernel refused the args
+//!  (e.g., "grothendieck::build_grothendieck preconditions:
+//!  |fibres|=0 must be > 0").
 
 use std::path::PathBuf;
 
@@ -50,6 +58,7 @@ use verum_kernel::intrinsic_dispatch::{IntrinsicValue, dispatch_intrinsic};
 
 /// A single kernel-bridge discharge that the dispatcher rejected.
 ///
+
 /// Used to thread compile-time rejection diagnostics back to the
 /// caller, which folds them into the verification phase's error
 /// surface.
@@ -64,10 +73,10 @@ pub struct BridgeDischargeError {
     /// Args as written in the source (literal text rendering for the
     /// diagnostic message).
     pub args_rendered: Vec<String>,
-    /// Dispatcher's stated reason for the rejection.  Preserved
+    /// Dispatcher's stated reason for the rejection. Preserved
     /// verbatim from `verum_kernel`'s `Decision { holds: false, reason }`.
     pub reason: String,
-    /// Source path, surfaced to the diagnostic builder.  May be empty
+    /// Source path, surfaced to the diagnostic builder. May be empty
     /// when the verification phase didn't carry a path through.
     pub source_path: PathBuf,
 }
@@ -75,11 +84,13 @@ pub struct BridgeDischargeError {
 /// Walk a theorem's proof body and accumulate any kernel-bridge
 /// discharges that the dispatcher rejects.
 ///
+
 /// Returns an empty `Vec` when every bridge invocation either:
-///   * has all-literal args AND the dispatcher returned `holds: true`
-///   * has non-literal args (deferred to downstream layers)
-///   * does not target a `kernel_*_strict` bridge at all
+///  * has all-literal args AND the dispatcher returned `holds: true`
+///  * has non-literal args (deferred to downstream layers)
+///  * does not target a `kernel_*_strict` bridge at all
 ///
+
 /// Returns `Vec<BridgeDischargeError>` when one or more invocations
 /// failed the dispatcher's structural check.
 pub fn validate_proof_body_bridges(
@@ -96,7 +107,7 @@ pub fn validate_proof_body_bridges(
     errors
 }
 
-/// Walking-context bundle threaded through the recursion.  Avoids
+/// Walking-context bundle threaded through the recursion. Avoids
 /// passing the same `(item_name, source_path)` pair down every
 /// recursive call site.
 struct WalkContext {
@@ -160,7 +171,7 @@ fn walk_tactic(
 ) {
     match tactic {
         TacticExpr::Apply { lemma, args } => {
-            // Two parser shapes — match both.  The fast parser emits
+            // Two parser shapes — match both. The fast parser emits
             // Apply{lemma:Call{func, args}, args:[]} for `apply name(literal)`;
             // the structured form has Apply{lemma:Path, args:[...]}.
             let owned_args: Vec<Expr>;
@@ -195,7 +206,7 @@ fn walk_tactic(
     }
 }
 
-/// Process a single `apply lemma(args...)` callsite.  When it's a
+/// Process a single `apply lemma(args...)` callsite. When it's a
 /// `kernel_*_strict` bridge with all-literal args, dispatch through
 /// the kernel and record any rejection as a `BridgeDischargeError`.
 fn check_apply_callsite(
@@ -227,7 +238,7 @@ fn check_apply_callsite(
         match expr_to_intrinsic_value(a) {
             Some(v) => intrinsic_args.push(v),
             None => {
-                // Non-literal arg — defer to downstream layers.  We
+                // Non-literal arg — defer to downstream layers. We
                 // still render the arg-text for diagnostics in case the
                 // failure diagnostic later surfaces.
                 args_rendered.push(expr_to_text(a));
@@ -237,7 +248,7 @@ fn check_apply_callsite(
         args_rendered.push(expr_to_text(a));
     }
 
-    // Invoke dispatcher.  Bare-call (zero args) form is handled by
+    // Invoke dispatcher. Bare-call (zero args) form is handled by
     // some bridges via a separate name; for non-zero args, dispatch
     // with the resolved IntrinsicValues.
     let decision = dispatch_intrinsic(&bare_name, &intrinsic_args);

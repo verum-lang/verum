@@ -1,22 +1,30 @@
 //! Context requirement type checking for Verum's Two-Level Context System.
 //!
+
 //! This module implements compile-time validation of context requirements,
 //! ensuring that functions declare all contexts they use and that context
 //! providers are correctly installed.
 //!
+
 //! # Specification
 //!
+
 //! Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
 //!
+
 //! # Two-Level Model
 //!
+
 //! - **Level 1 (Static DI)**: @injectable/@inject - 0ns overhead, compile-time resolution
 //! - **Level 2 (Dynamic Contexts)**: provide/using - ~5ns overhead, runtime resolution
 //!
+
 //! This module focuses on **Level 2 type checking** - validating `using [Context]` clauses.
 //!
+
 //! # Context Requirement Rules
 //!
+
 //! 1. **Declaration**: Functions must declare contexts in `using` clause
 //! 2. **Propagation**: If function F calls G requiring contexts, F must also require them
 //! 3. **Scope Closure (β-reduction)**: Context availability is lexically scoped by `provide`
@@ -30,9 +38,11 @@ use verum_common::ToText;
 
 /// A context requirement in a function signature.
 ///
+
 /// Example: `fn foo() using [Database, Logger]`
 /// Creates two ContextRequirements: Database and Logger
 ///
+
 /// Extended with advanced context patterns (negative contexts, call graph verification, module aliases):
 /// Example: `fn pure_compute() using [!Database, !Network]`
 /// These are excluded contexts - the function cannot use them.
@@ -62,8 +72,10 @@ impl ContextRequirement {
 
     /// Create a negative context requirement (`!Database`)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     ///
+
     /// Negative contexts are excluded - the function and all its callees
     /// cannot use this context.
     pub fn negative(name: impl Into<Text>, span: Span) -> Self {
@@ -101,6 +113,7 @@ impl ContextRequirement {
 
 /// A set of context requirements.
 ///
+
 /// Similar to ContextSet from contexts module, but for Two-Level Context requirements.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextSet {
@@ -171,6 +184,7 @@ impl ContextSet {
 
     /// Check if a context is excluded (negative)
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     pub fn is_excluded(&self, name: &str) -> bool {
         self.contexts.iter().any(|c| c.name.as_str() == name && c.is_negative)
@@ -193,6 +207,7 @@ impl ContextSet {
 
     /// Check if using a context would violate any negative constraints
     ///
+
     /// Returns `Err(context_name)` if the context is excluded
     pub fn validate_usage(&self, context_name: &str) -> std::result::Result<(), Text> {
         if self.is_excluded(context_name) {
@@ -224,19 +239,22 @@ impl FromIterator<ContextRequirement> for ContextSet {
 
 /// Context environment (θ - theta) tracking available contexts.
 ///
+
 /// This tracks which contexts are currently available through `provide` statements.
 /// It's separate from TypeEnv (which tracks variable types).
 ///
+
 /// # Lexical Scoping
 ///
+
 /// ```verum
 /// provide Logger = console_logger();
 /// {
-///     // Logger available here
-///     Logger.log(...);  // ✅
+///  // Logger available here
+///  Logger.log(...); // ✅
 /// }
 /// // Logger out of scope here
-/// Logger.log(...);  // ❌ Error
+/// Logger.log(...); // ❌ Error
 /// ```
 #[derive(Debug, Clone)]
 pub struct ContextEnv {
@@ -379,8 +397,10 @@ impl CallSiteInfo {
 
 /// A call graph for analyzing transitive context requirements.
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
 ///
+
 /// The call graph enables efficient transitive analysis of negative context
 /// constraints by pre-computing which functions call which other functions.
 #[derive(Debug, Clone, Default)]
@@ -490,6 +510,7 @@ pub struct TransitiveViolationInfo {
 
 /// Context type checker.
 ///
+
 /// Validates that:
 /// 1. Functions declare all contexts they use
 /// 2. Context requirements propagate through call chains
@@ -549,8 +570,10 @@ impl ContextChecker {
 
     /// Install a context via `provide` statement
     ///
+
     /// Example: `provide Logger = console_logger();`
     ///
+
     /// Returns error E808 if the context is already provided in the current scope.
     pub fn provide_context(&mut self, name: impl Into<Text>, span: Span) -> Result<()> {
         let name = name.into();
@@ -578,6 +601,7 @@ impl ContextChecker {
 
     /// Set the required contexts for a function
     ///
+
     /// Called when entering a function with `using [Context1, Context2]`
     pub fn set_required(&mut self, contexts: ContextSet) {
         self.required = contexts;
@@ -593,6 +617,7 @@ impl ContextChecker {
 
     /// Validate a context method call
     ///
+
     /// Example: `Logger.log(Level::Info, "message")`
     pub fn check_context_call(
         &self,
@@ -639,31 +664,38 @@ impl ContextChecker {
 
     /// Check if a sub-context is valid
     ///
+
     /// Validates that a sub-context exists within a parent context.
     ///
+
     /// # Specification
     ///
+
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
     /// Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0.1 - Sub-Context Syntax
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// context FileSystem {
-    ///     context Read {
-    ///         fn read(path: Text) -> Result<List<u8>>
-    ///     }
-    ///     context Write {
-    ///         fn write(path: Text, data: List<u8>) -> Result<()>
-    ///     }
+    ///  context Read {
+    ///  fn read(path: Text) -> Result<List<u8>>
+    ///  }
+    ///  context Write {
+    ///  fn write(path: Text, data: List<u8>) -> Result<()>
+    ///  }
     /// }
     ///
+
     /// fn process_file() using [FileSystem.Read] {
-    ///     FileSystem.Read.read("file.txt")  // ✅ Valid
+    ///  FileSystem.Read.read("file.txt") // ✅ Valid
     /// }
     ///
-    /// fn invalid() using [FileSystem.Execute] {  // ❌ Error: Execute not found
-    ///     // ...
+
+    /// fn invalid() using [FileSystem.Execute] { // ❌ Error: Execute not found
+    ///  // ...
     /// }
     /// ```
     pub fn check_sub_context(&self, context: &str, sub: &str, span: Span) -> Result<()> {
@@ -703,6 +735,7 @@ impl ContextChecker {
 
     /// Validate context requirements propagation
     ///
+
     /// When function F calls function G, F must require all contexts that G requires
     /// (unless F provides them locally via `provide`).
     pub fn check_call_propagation(&self, callee_contexts: &ContextSet, span: Span) -> Result<()> {
@@ -730,37 +763,48 @@ impl ContextChecker {
 
     /// Check if a context is available at the current location
     ///
+
     /// Validates that required contexts are either:
     /// 1. Declared in the function's `using [Context]` clause
     /// 2. Provided via `provide` statement in the current scope
     ///
+
     /// # Specification
     ///
+
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
     ///
+
     /// # Arguments
     ///
+
     /// * `context_name` - The name of the context to check
     /// * `span` - Source location for error reporting
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if the context is available, or an appropriate error
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// fn process() using [Database] {
-    ///     Database.query(...)  // ✅ Available via function requirement
+    ///  Database.query(...) // ✅ Available via function requirement
     /// }
     ///
+
     /// fn main() {
-    ///     provide Database = postgres();
-    ///     Database.query(...)  // ✅ Available via provide statement
+    ///  provide Database = postgres();
+    ///  Database.query(...) // ✅ Available via provide statement
     /// }
     ///
+
     /// fn invalid() {
-    ///     Database.query(...)  // ❌ Error: context not available
+    ///  Database.query(...) // ❌ Error: context not available
     /// }
     /// ```
     pub fn check_context_availability(&self, context_name: &str, span: Span) -> Result<()> {
@@ -785,52 +829,66 @@ impl ContextChecker {
 
     /// Check if provided contexts satisfy function requirements
     ///
+
     /// Validates that all contexts required by a function are satisfied by:
     /// 1. The caller's own context requirements
     /// 2. Contexts provided via `provide` statements
     ///
+
     /// This is the core validation for context propagation at call sites.
     ///
+
     /// # Specification
     ///
+
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
     /// Context resolution: resolving context names to declarations, expanding groups, checking provision — .2 - Context Propagation Rules
     ///
+
     /// # Arguments
     ///
+
     /// * `required_contexts` - Contexts required by the callee function
     /// * `provided_contexts` - Contexts available in the caller (via `using` or `provide`)
     /// * `call_span` - Source location of the function call
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if all requirements are satisfied, or an error with details about
     /// missing contexts
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// fn callee() using [Database, Logger] {
-    ///     // Requires both Database and Logger
+    ///  // Requires both Database and Logger
     /// }
     ///
+
     /// fn caller1() using [Database, Logger] {
-    ///     callee();  // ✅ All requirements satisfied
+    ///  callee(); // ✅ All requirements satisfied
     /// }
     ///
+
     /// fn caller2() using [Database] {
-    ///     provide Logger = console_logger();
-    ///     callee();  // ✅ Database from requirement, Logger from provide
+    ///  provide Logger = console_logger();
+    ///  callee(); // ✅ Database from requirement, Logger from provide
     /// }
     ///
+
     /// fn caller3() using [Database] {
-    ///     callee();  // ❌ Error: Logger not available
+    ///  callee(); // ❌ Error: Logger not available
     /// }
     ///
+
     /// fn caller4() {
-    ///     provide Database = postgres();
-    ///     provide Logger = console_logger();
-    ///     callee();  // ✅ Both provided locally
+    ///  provide Database = postgres();
+    ///  provide Logger = console_logger();
+    ///  callee(); // ✅ Both provided locally
     /// }
     /// ```
     pub fn check_context_satisfaction(
@@ -877,16 +935,21 @@ impl ContextChecker {
 
     /// Check multiple contexts at once for bulk validation
     ///
+
     /// This is a convenience method that checks availability of multiple contexts
     /// and collects all missing contexts for comprehensive error reporting.
     ///
+
     /// # Arguments
     ///
+
     /// * `contexts` - Set of contexts to check
     /// * `span` - Source location for error reporting
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if all contexts are available, or an error listing all missing contexts
     pub fn check_contexts_availability(&self, contexts: &ContextSet, span: Span) -> Result<()> {
         let mut missing = List::new();
@@ -911,28 +974,37 @@ impl ContextChecker {
 
     /// Infer context requirements from an expression or function body
     ///
+
     /// This performs flow-sensitive analysis to determine what contexts are
     /// actually used within a function body, enabling automatic inference of
     /// context requirements.
     ///
+
     /// # Specification
     ///
+
     /// Context resolution: resolving context names to declarations, expanding groups, checking provision — .3 - Context Inference
     ///
+
     /// # Arguments
     ///
+
     /// * `used_contexts` - Set of context names referenced in the code
     ///
+
     /// # Returns
     ///
+
     /// A `ContextSet` containing all inferred requirements
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// fn process(data: Data) {
-    ///     Logger.info("Processing");  // Uses Logger
-    ///     Database.save(data);        // Uses Database
+    ///  Logger.info("Processing"); // Uses Logger
+    ///  Database.save(data); // Uses Database
     /// }
     /// // Compiler infers: using [Logger, Database]
     /// ```
@@ -950,24 +1022,33 @@ impl ContextChecker {
 
     /// Compute the transitive closure of context requirements
     ///
+
     /// Given a function that calls other functions, compute the complete set
     /// of contexts needed including transitive dependencies.
     ///
+
     /// # Specification
     ///
+
     /// Context resolution: resolving context names to declarations, expanding groups, checking provision — .2 - Context Propagation
     ///
+
     /// # Arguments
     ///
+
     /// * `direct_requirements` - Contexts directly required by the function
     /// * `callee_requirements` - List of context sets from called functions
     ///
+
     /// # Returns
     ///
+
     /// Complete set of contexts needed (union of all requirements)
     ///
+
     /// # Example
     ///
+
     /// ```verum
     /// fn leaf() using [Database] { ... }
     /// fn middle() using [Logger] { leaf(); }
@@ -991,26 +1072,35 @@ impl ContextChecker {
 
     /// Validate a full function definition with context requirements
     ///
+
     /// This is the main entry point for validating that a function properly
     /// declares and uses contexts.
     ///
+
     /// # Specification
     ///
+
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
     ///
+
     /// # Arguments
     ///
+
     /// * `declared_contexts` - Contexts in the function's `using` clause
     /// * `used_contexts` - Contexts actually referenced in the function body
     /// * `callee_contexts` - Context requirements from called functions
     /// * `span` - Source location for error reporting
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if the function is valid, or an error describing the issue
     ///
+
     /// # Validation Rules
     ///
+
     /// 1. All used contexts must be declared
     /// 2. All callee requirements must be satisfied
     /// 3. No undeclared contexts may be used
@@ -1046,8 +1136,10 @@ impl ContextChecker {
 
     /// Register a function's context information for transitive checking
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     ///
+
     /// This must be called for each function before transitive verification.
     pub fn register_function(&mut self, info: FunctionContextInfo) {
         self.function_registry.insert(info.name.clone(), info);
@@ -1055,6 +1147,7 @@ impl ContextChecker {
 
     /// Check if a context is available, considering negative constraints
     ///
+
     /// Returns an error if the context is excluded in the current requirements.
     pub fn check_context_not_excluded(&self, context_name: &str, span: Span) -> Result<()> {
         if self.required.is_excluded(context_name) {
@@ -1068,18 +1161,24 @@ impl ContextChecker {
 
     /// Validate a function call against negative context constraints
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     ///
+
     /// Ensures that calling `callee_name` doesn't violate any negative
     /// context constraints in the current function's requirements.
     ///
+
     /// # Arguments
     ///
+
     /// * `callee_name` - Name of the function being called
     /// * `call_span` - Source location of the call
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if the call is valid, or an error if it violates negative constraints
     pub fn check_call_negative_constraints(
         &self,
@@ -1109,17 +1208,23 @@ impl ContextChecker {
 
     /// Perform full transitive negative context verification for a function
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     ///
+
     /// This checks that if a function excludes a context (`!Database`),
     /// none of its callees (directly or transitively) use that context.
     ///
+
     /// # Arguments
     ///
+
     /// * `function_name` - The function to verify
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if all negative constraints are satisfied, or an error
     /// with the violation path
     pub fn verify_transitive_negative_contexts(
@@ -1223,29 +1328,37 @@ impl ContextChecker {
 
     /// Perform full transitive negative context verification using a CallGraph.
     ///
+
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     ///
+
     /// This is an enhanced version that uses a CallGraph structure for better
     /// error messages with detailed call chain information including line numbers.
     ///
+
     /// # Arguments
     ///
+
     /// * `function_name` - The function to verify
     /// * `excluded` - List of excluded context paths
     /// * `call_graph` - The call graph for the module/compilation unit
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if all negative constraints are satisfied, or an error
     /// with detailed call chain information
     ///
+
     /// # Error Format
     ///
+
     /// ```text
     /// error: Function 'pure_function' excludes 'Database' but transitively calls:
-    ///   -> helper_function() at line 15
-    ///      -> database_helper() at line 42
-    ///         uses Database
+    ///  -> helper_function() at line 15
+    ///  -> database_helper() at line 42
+    ///  uses Database
     /// ```
     pub fn verify_transitive_negative_contexts_with_graph(
         &self,
@@ -1354,6 +1467,7 @@ impl ContextChecker {
 
     /// Build a CallGraph from the function registry
     ///
+
     /// Converts the existing function registry into a CallGraph structure
     /// for enhanced transitive verification.
     pub fn build_call_graph_from_registry(&self) -> CallGraph {
@@ -1386,6 +1500,7 @@ impl ContextChecker {
 
     /// Verify all functions in the registry for transitive negative context violations
     ///
+
     /// This is a convenience method that checks all registered functions.
     pub fn verify_all_negative_contexts(&self) -> Result<()> {
         for (name, _info) in self.function_registry.iter() {
@@ -1407,6 +1522,7 @@ impl Default for ContextChecker {
 
 /// A context path for negative context exclusion
 ///
+
 /// Represents a path like "Database" or "FileSystem.Read"
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ContextPath {
@@ -1457,12 +1573,13 @@ fn path_to_text(path: &ContextPath) -> Text {
 impl TransitiveViolationInfo {
     /// Format the violation as a detailed error message
     ///
+
     /// Produces output matching the advanced context patterns specification (negative contexts, transitive verification):
     /// ```text
     /// error: Function 'pure_function' excludes 'Database' but transitively calls:
-    ///   -> helper_function() at line 15
-    ///      -> database_helper() at line 42
-    ///         uses Database
+    ///  -> helper_function() at line 15
+    ///  -> database_helper() at line 42
+    ///  uses Database
     /// ```
     pub fn format_error(&self) -> Text {
         let mut msg = format!(
@@ -1539,11 +1656,13 @@ pub struct ContextAccess {
 
 /// Collects all context accesses from an expression tree.
 ///
+
 /// Walks the expression AST and collects:
 /// - Direct context accesses: `Database.query(...)`
 /// - Context field accesses: `Logger.level`
 /// - Provide statements (which provide a context, not use it)
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
 pub fn collect_context_accesses(expr: &verum_ast::expr::Expr) -> List<ContextAccess> {
     let mut accesses = List::new();
@@ -1914,27 +2033,35 @@ fn collect_context_accesses_in_stmt(
 
 /// Verify that a function body does not directly use excluded contexts.
 ///
+
 /// This is the core direct usage check for negative contexts (E3050).
 ///
+
 /// # Arguments
 ///
+
 /// * `function_name` - Name of the function being checked
 /// * `body` - The function body expression
 /// * `negative_contexts` - Map of excluded context names to their declaration spans
 ///
+
 /// # Returns
 ///
+
 /// `Ok(())` if no violations found, `Err(TypeError)` with details if violated
 ///
+
 /// # Example
 ///
+
 /// ```verum
 /// fn calculate_total() using [!Database, !Network] {
-///     // This should be flagged as E3050:
-///     Database.query("SELECT...");
+///  // This should be flagged as E3050:
+///  Database.query("SELECT...");
 /// }
 /// ```
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
 pub fn verify_direct_negative_contexts(
     function_name: &str,
@@ -1962,6 +2089,7 @@ pub fn verify_direct_negative_contexts(
 
 /// Build a map of negative contexts from a context set.
 ///
+
 /// Helper function to extract negative contexts with their spans.
 pub fn build_negative_context_map(contexts: &ContextSet) -> Map<Text, Span> {
     let mut map = Map::new();
@@ -1999,9 +2127,11 @@ pub struct AliasConflict {
 
 /// Registry for tracking context aliases at the module level.
 ///
+
 /// Validates that aliases are unique within a module to prevent confusion
 /// and ensure consistent context resolution.
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
 #[derive(Debug, Clone, Default)]
 pub struct ModuleAliasRegistry {
@@ -2020,10 +2150,13 @@ impl ModuleAliasRegistry {
 
     /// Register an alias for a function.
     ///
+
     /// Records that `function_name` uses `alias` to refer to `context_path`.
     ///
+
     /// # Arguments
     ///
+
     /// * `function_name` - The function declaring the alias
     /// * `alias` - The alias name (e.g., "primary" in `Database as primary`)
     /// * `context_path` - The context being aliased (e.g., "Database")
@@ -2053,12 +2186,15 @@ impl ModuleAliasRegistry {
 
     /// Extract and register aliases from a function's context requirements.
     ///
+
     /// Parses the AST context requirements and extracts any aliases:
     /// - `Database as db` - explicit alias
     /// - `db: Database` - name binding (also an alias)
     ///
+
     /// # Arguments
     ///
+
     /// * `function_name` - Name of the function
     /// * `contexts` - List of AST context requirements
     pub fn register_function_aliases(
@@ -2109,11 +2245,14 @@ impl ModuleAliasRegistry {
 
     /// Validate that all aliases in the module are unique.
     ///
+
     /// Checks that no alias is used for different contexts within the module.
     /// Same context with same alias in different functions is OK.
     ///
+
     /// # Returns
     ///
+
     /// `Ok(())` if all aliases are consistent, `Err(conflicts)` with all violations
     pub fn validate_module(&self) -> std::result::Result<(), List<AliasConflict>> {
         let mut conflicts = List::new();
@@ -2146,6 +2285,7 @@ impl ModuleAliasRegistry {
 
     /// Convert alias conflicts to type errors.
     ///
+
     /// Transforms `AliasConflict` values into `TypeError::ContextAliasConflict`
     /// for proper error reporting.
     pub fn conflicts_to_type_errors(conflicts: &[AliasConflict]) -> List<TypeError> {
@@ -2177,16 +2317,22 @@ impl ModuleAliasRegistry {
 
 /// Validate all functions in a module for alias uniqueness.
 ///
+
 /// This is the entry point for module-level alias validation.
 ///
+
 /// # Arguments
 ///
+
 /// * `functions` - List of function declarations in the module
 ///
+
 /// # Returns
 ///
+
 /// `Ok(())` if all aliases are consistent, first `Err(TypeError)` if any conflict found
 ///
+
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
 pub fn validate_module_aliases(
     functions: &[verum_ast::decl::FunctionDecl],
@@ -2229,20 +2375,25 @@ pub fn validate_module_aliases(
 
 /// Full context checking for a function during type inference.
 ///
+
 /// Combines all Advanced context patterns (negative contexts, call graph verification, module aliases) checks:
 /// 1. Direct negative context verification
 /// 2. Alias uniqueness (single function - module level is separate)
 /// 3. Transitive negative context verification (when callees are known)
 ///
+
 /// # Arguments
 ///
+
 /// * `function_name` - Name of the function being checked
 /// * `contexts` - Function's context requirements
 /// * `body` - Function body expression
 /// * `checker` - The context checker with registered function info
 ///
+
 /// # Returns
 ///
+
 /// `Ok(())` if all checks pass, first `Err(TypeError)` if any check fails
 pub fn check_function_contexts(
     function_name: &str,

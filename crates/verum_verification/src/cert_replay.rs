@@ -1,48 +1,56 @@
 //! SMT certificate replay — backend-independent cert format +
 //! multi-backend cross-check.
 //!
+
 //! ## Goal
 //!
+
 //! Currently SMT certificates are replayed against a single
-//! kernel re-check.  Task #81 strengthens this to **multi-backend
+//! kernel re-check. Task #81 strengthens this to **multi-backend
 //! cross-validation**: a cert produced by Z3 should be replayable
 //! by CVC5 (and vice-versa), and the kernel re-check decomposes
 //! the cert into elementary kernel-rule applications so the SMT
 //! solver becomes truly external — not part of the trusted
 //! computing base.
 //!
+
 //! Verum joins the small group of systems (Coq's SMTCoq, Lean's
 //! lean-smt) with this guarantee, but with **multi-backend +
 //! multi-format coverage**: a cert can be cross-checked by every
 //! available solver as a sanity gate.
 //!
+
 //! ## Architectural pattern
 //!
+
 //! Same single-trait-boundary pattern as the rest of the
 //! integration arc:
 //!
-//!   * [`CertFormat`] enum — backend-independent canonical format
-//!     plus the per-backend native formats Verum can ingest.
-//!   * [`SmtCertificate`] — typed certificate (format + theory +
-//!     conclusion + raw body + content hash).
-//!   * [`ReplayBackend`] enum — Z3 / CVC5 / Verit / OpenSmt /
-//!     Mathsat / Kernel-only.
-//!   * [`CertReplayEngine`] trait — single dispatch interface;
-//!     `replay(cert) -> ReplayVerdict`.
-//!   * Reference impls: [`MockReplayEngine`] (deterministic, for
-//!     tests), [`KernelOnlyReplayEngine`] (V0 reference — verifies
-//!     the cert's own integrity hash + structural shape), per-
-//!     backend stub impls returning `ToolMissing` until production
-//!     wiring.
-//!   * [`CrossBackendVerdict`] — typed multi-backend agreement
-//!     report.  Used by `@verify(certified)`-style multi-solver
-//!     gates.
+
+//!  * [`CertFormat`] enum — backend-independent canonical format
+//!  plus the per-backend native formats Verum can ingest.
+//!  * [`SmtCertificate`] — typed certificate (format + theory +
+//!  conclusion + raw body + content hash).
+//!  * [`ReplayBackend`] enum — Z3 / CVC5 / Verit / OpenSmt /
+//!  Mathsat / Kernel-only.
+//!  * [`CertReplayEngine`] trait — single dispatch interface;
+//!  `replay(cert) -> ReplayVerdict`.
+//!  * Reference impls: [`MockReplayEngine`] (deterministic, for
+//!  tests), [`KernelOnlyReplayEngine`] (V0 reference — verifies
+//!  the cert's own integrity hash + structural shape), per-
+//!  backend stub impls returning `ToolMissing` until production
+//!  wiring.
+//!  * [`CrossBackendVerdict`] — typed multi-backend agreement
+//!  report. Used by `@verify(certified)`-style multi-solver
+//!  gates.
 //!
+
 //! ## Trust contract
 //!
+
 //! `KernelOnlyReplayEngine` is what makes SMT solvers external to
 //! the TCB: it checks the certificate's structural invariants
-//! using only the kernel rules + the on-disk hash.  If a solver
+//! using only the kernel rules + the on-disk hash. If a solver
 //! claims `unsat` but emits a cert whose hash doesn't match its
 //! payload, the kernel rejects without consulting the solver.
 
@@ -54,14 +62,14 @@ use verum_common::Text;
 // CertFormat
 // =============================================================================
 
-/// Certificate format.  `VerumCanonical` is the format every
+/// Certificate format. `VerumCanonical` is the format every
 /// backend lowers to; the others are native formats Verum ingests
 /// for backwards compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CertFormat {
-    /// Verum's canonical, backend-independent cert format.  Every
-    /// production backend produces this.  The kernel re-checker
+    /// Verum's canonical, backend-independent cert format. Every
+    /// production backend produces this. The kernel re-checker
     /// decomposes the cert into elementary kernel-rule applications.
     VerumCanonical,
     /// Z3's native `(proof ...)` format.
@@ -122,10 +130,10 @@ impl CertFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReplayBackend {
-    /// Verum's kernel-only re-check.  Validates the cert's
+    /// Verum's kernel-only re-check. Validates the cert's
     /// structural invariants (hash matches body, declared theory
     /// matches inferable shape, conclusion is consistent with
-    /// body).  Always available; this is what makes solvers
+    /// body). Always available; this is what makes solvers
     /// external to the TCB.
     KernelOnly,
     Z3,
@@ -192,7 +200,7 @@ pub struct SmtCertificate {
     pub conclusion: Text,
     /// Raw cert body — the format-specific payload.
     pub body: Text,
-    /// Blake3 content-hash of `body` (hex-encoded).  Used by
+    /// Blake3 content-hash of `body` (hex-encoded). Used by
     /// `KernelOnlyReplayEngine` to verify on-disk integrity.
     pub body_hash: Text,
     /// Optional originating-solver identifier (e.g. `"z3-4.13.0"`).
@@ -225,7 +233,7 @@ impl SmtCertificate {
         self
     }
 
-    /// True iff `body_hash` matches blake3 of `body`.  Pure
+    /// True iff `body_hash` matches blake3 of `body`. Pure
     /// integrity check — no semantic verification.
     pub fn body_hash_valid(&self) -> bool {
         let recomputed =
@@ -326,49 +334,56 @@ pub trait CertReplayEngine: std::fmt::Debug + Send + Sync {
 // KernelOnlyReplayEngine — the trust-boundary anchor
 // =============================================================================
 
-/// Verum's kernel-only re-check.  Validates the cert's structural
+/// Verum's kernel-only re-check. Validates the cert's structural
 /// invariants without trusting any external solver:
 ///
-///   1. `body_hash` matches blake3 of the body (integrity).
-///   2. `format` is recognised.
-///   3. `body` is non-empty.
-///   4. `conclusion` is non-empty.
-///   5. `theory` is one of the supported logical theories.
+
+///  1. `body_hash` matches blake3 of the body (integrity).
+///  2. `format` is recognised.
+///  3. `body` is non-empty.
+///  4. `conclusion` is non-empty.
+///  5. `theory` is one of the supported logical theories.
 ///
+
 /// Rejection ⇒ the cert is malformed; the solver that produced it
-/// gave us a corrupted artefact.  Acceptance ⇒ the cert is
+/// gave us a corrupted artefact. Acceptance ⇒ the cert is
 /// well-formed; further replay against an actual solver may still
 /// reject if the cert is unsound, but at the structural layer the
 /// kernel has done its part.
 ///
+
 /// This is what makes SMT solvers external to the TCB: even if Z3
 /// produces a fake cert, the kernel-only check catches it before
 /// the proof is committed.
 ///
-/// **Hardening note (#95).**  This engine no longer treats the
-/// cert body as opaque text.  It runs the format-appropriate
+
+/// **Hardening note (#95).** This engine no longer treats the
+/// cert body as opaque text. It runs the format-appropriate
 /// decomposer ([`decompose_cert`]) which parses the body into a
 /// list of [`InferenceStep`]s; every step's rule name is
 /// cross-checked against the canonical
-/// [`KernelRuleRegistry`].  Unknown rules + malformed bodies are
+/// [`KernelRuleRegistry`]. Unknown rules + malformed bodies are
 /// rejected before any solver is consulted.
 // =============================================================================
 // Cert decomposer (#95) — typed kernel-rule decomposition
 // =============================================================================
 //
+
 // Pre-this-module, `KernelOnlyReplayEngine` validated only structural
-// invariants (hash + theory + non-empty body / conclusion).  That
+// invariants (hash + theory + non-empty body / conclusion). That
 // passed any cert whose body was non-empty and whose hash matched —
 // a Z3 bug producing a syntactically-valid-but-meaningless trace
 // would slip through.
 //
+
 // Hardening: parse the cert body per-format into a typed sequence
 // of [`InferenceStep`]s (rule name + premises + conclusion), then
 // verify every rule name is in the canonical kernel-rule registry.
-// Unknown rule → Rejected.  This is the structural piece that
+// Unknown rule → Rejected. This is the structural piece that
 // genuinely takes solvers out of the TCB.
 //
-// What's NOT here yet (V2): the actual kernel `infer::check` call
+
+// What's NOT here yet : the actual kernel `infer::check` call
 // per step — that requires lifting the cert's textual conclusions
 // to typed `CoreTerm`s, which is a separate format-specific lift.
 // The decomposer's typed output is the prerequisite for that work.
@@ -380,12 +395,12 @@ pub struct InferenceStep {
     /// Local identifier (line label, e.g. `t1` / `h2` for ALETHE,
     /// `step_001` for verum_canonical).
     pub id: Text,
-    /// Rule name as it appears in the cert.  Cross-checked against
+    /// Rule name as it appears in the cert. Cross-checked against
     /// the kernel-rule registry.
     pub rule: Text,
     /// IDs of previous steps cited as premises.
     pub premises: Vec<Text>,
-    /// Conclusion (rendered text — typed lift is V2 work).
+    /// Conclusion (rendered text — typed lift is future work).
     pub conclusion: Text,
 }
 
@@ -418,15 +433,17 @@ impl std::error::Error for DecomposeError {}
 
 /// Canonical kernel-rule registry.
 ///
+
 /// **Each entry is a tuple `(cert_rule_name, kernel_rule_tag)`.**
 /// `cert_rule_name` is what the SMT solver writes in its proof
 /// trace; `kernel_rule_tag` is the canonical Verum-kernel rule it
 /// maps to (mirrors the `KernelRule` enum in
-/// `verum_kernel::proof_tree`).  Multiple cert names can map to the
+/// `verum_kernel::proof_tree`). Multiple cert names can map to the
 /// same kernel rule (e.g. Z3 `mp` and ALETHE `mp` both map to
 /// `modus_ponens`).
 ///
-/// Unknown rule names are rejected.  Adding a new rule is a one-
+
+/// Unknown rule names are rejected. Adding a new rule is a one-
 /// place edit here; downstream tooling automatically picks it up.
 pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     // ----- Resolution / propositional -----
@@ -589,11 +606,14 @@ pub fn decompose_cert(cert: &SmtCertificate) -> Result<Vec<InferenceStep>, Decom
 // Verum canonical — line-oriented format
 // -----------------------------------------------------------------------------
 //
+
 // One step per line:
 //
-//   `step <id> <rule> [<premise> ...] : <conclusion>`
+
+//  `step <id> <rule> [<premise> ...] : <conclusion>`
 //
-// Comment lines start with `;`.  Blank lines are ignored.
+
+// Comment lines start with `;`. Blank lines are ignored.
 
 fn decompose_verum_canonical(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
     let mut steps: Vec<InferenceStep> = Vec::new();
@@ -816,6 +836,7 @@ fn truncate_for_msg(s: &str, max_chars: usize) -> String {
 // Z3 proof — `((rule ...) ...)` — tree of nested rule applications
 // -----------------------------------------------------------------------------
 //
+
 // Z3's `(proof ...)` format is a deeply nested S-expression where
 // each rule application has shape `(rule_name <subproof>* <conclusion>)`.
 // We do a depth-first walk producing one step per encountered rule.
@@ -978,6 +999,7 @@ fn render_sexpr(s: &Sexpr) -> String {
 // LFSC pattern (CVC4 / CVC5 legacy)
 // -----------------------------------------------------------------------------
 //
+
 // LFSC traces are nested S-expressions whose head atoms are the
 // rule names ("resolution", "and-elim", "th-lemma", "trust", …).
 // We reuse the Z3 walker — same shape, different rule registry
@@ -1031,12 +1053,13 @@ fn walk_lfsc_sexpr(s: &Sexpr, steps: &mut Vec<InferenceStep>, next_id: &mut u32)
 }
 
 // -----------------------------------------------------------------------------
-// OpenSMT2 — line-oriented `<id> := <rule> [<premise>...]   : <conclusion>`
+// OpenSMT2 — line-oriented `<id> := <rule> [<premise>...] : <conclusion>`
 // -----------------------------------------------------------------------------
 //
+
 // OpenSMT2's proof trace is line-oriented similarly to verum_canonical
 // but uses `:=` as the rule-binding separator (one definition per
-// line) rather than the `step <id>` keyword.  Comments start with
+// line) rather than the `step <id>` keyword. Comments start with
 // `;` (SMT-LIB convention).
 
 fn decompose_open_smt(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
@@ -1102,9 +1125,10 @@ fn decompose_open_smt(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> 
 // MathSAT5 — line-oriented `<rule>(<id>; <premises>) -> <conclusion>`
 // -----------------------------------------------------------------------------
 //
+
 // MathSAT's native proof trace renders one step per line in the
-// shape `<rule>(<id>; <p1>, <p2>, ...) -> <conclusion>`.  Comments
-// start with `#`.  We extract the leading rule name (cross-checked
+// shape `<rule>(<id>; <p1>, <p2>, ...) -> <conclusion>`. Comments
+// start with `#`. We extract the leading rule name (cross-checked
 // against the kernel registry), the parenthesised id + premises,
 // and the conclusion after `->`.
 
@@ -1323,8 +1347,8 @@ impl CertReplayEngine for KernelOnlyReplayEngine {
 // MockReplayEngine — deterministic, test-friendly
 // =============================================================================
 
-/// Mock replay engine.  Configured with a backend tag + an "accept"
-/// flag.  Every replay returns a corresponding canned verdict.
+/// Mock replay engine. Configured with a backend tag + an "accept"
+/// flag. Every replay returns a corresponding canned verdict.
 /// Used by tests + the CLI's `--mock` mode.
 #[derive(Debug, Clone)]
 pub struct MockReplayEngine {
@@ -1422,7 +1446,7 @@ impl CrossBackendVerdict {
     }
 
     /// True iff every available (non-`ToolMissing`) backend
-    /// accepted the cert.  This is the @verify(certified)-style
+    /// accepted the cert. This is the @verify(certified)-style
     /// multi-solver gate: the proof is committed only when every
     /// available solver agrees.
     pub fn all_available_accept(&self) -> bool {
@@ -1458,7 +1482,7 @@ impl CrossBackendVerdict {
             .count()
     }
 
-    /// Backends grouped by verdict.  Used by the CLI's plain
+    /// Backends grouped by verdict. Used by the CLI's plain
     /// summary output.
     pub fn by_verdict(&self) -> BTreeMap<&'static str, Vec<ReplayBackend>> {
         let mut out: BTreeMap<&'static str, Vec<ReplayBackend>> = BTreeMap::new();
@@ -1475,7 +1499,7 @@ impl CrossBackendVerdict {
     }
 }
 
-/// Run a cert through every supplied engine and aggregate.  The
+/// Run a cert through every supplied engine and aggregate. The
 /// kernel-only engine is always invoked first (its acceptance is
 /// the structural-invariant baseline).
 pub fn cross_check(
@@ -1508,8 +1532,8 @@ pub fn cross_check(
 // engine_for — per-backend reference engines
 // =============================================================================
 
-/// Return a reference engine for a backend.  The kernel-only
-/// engine is always returned for `KernelOnly`.  For external
+/// Return a reference engine for a backend. The kernel-only
+/// engine is always returned for `KernelOnly`. For external
 /// backends the V0 reference is a `MockReplayEngine` that returns
 /// `ToolMissing` (V1+ swaps in production wiring that runs `coqc`
 /// / `cvc5` / `verit` etc).
@@ -1527,7 +1551,7 @@ mod tests {
     fn fixture_cert() -> SmtCertificate {
         // Minimal well-formed ALETHE body: an `assume` introducing a
         // hypothesis, plus a `step` whose `:rule` is in the canonical
-        // kernel-rule registry.  The kernel-only replay decomposes
+        // kernel-rule registry. The kernel-only replay decomposes
         // both lines into typed `InferenceStep`s and accepts.
         SmtCertificate::new(
             CertFormat::Cvc5Alethe,
@@ -1819,7 +1843,7 @@ mod tests {
             Box::new(MockReplayEngine::new(ReplayBackend::Verit)), // accepts
         ];
         let v = cross_check(&c, &engines);
-        // Every external engine accepts (mock default).  Kernel-only
+        // Every external engine accepts (mock default). Kernel-only
         // rejects → consensus broken.
         assert!(
             !v.all_available_accept(),
@@ -1830,7 +1854,7 @@ mod tests {
     #[test]
     fn task_81_multi_solver_certified_gate() {
         // §5: @verify(certified) accepts only when every solver
-        // agrees.  Pin the contract that one rejection breaks
+        // agrees. Pin the contract that one rejection breaks
         // consensus.
         let engines: Vec<Box<dyn CertReplayEngine>> = vec![
             Box::new(MockReplayEngine::new(ReplayBackend::Z3)),
@@ -1956,7 +1980,7 @@ mod tests {
     #[test]
     fn task_104_registry_covers_full_alias_class() {
         // Pin: every kernel-rule tag in the registry is reachable
-        // via at least one canonical cert-side name.  No "phantom"
+        // via at least one canonical cert-side name. No "phantom"
         // tag a tag-with-no-aliases would be a bug — it means the
         // simplifier can never match a real solver trace.
         use std::collections::BTreeSet;
@@ -2042,7 +2066,7 @@ mod tests {
 
     #[test]
     fn decompose_z3_proof_finds_rule_applications() {
-        // Z3-style nested rule application.  `mp` is in the registry.
+        // Z3-style nested rule application. `mp` is in the registry.
         let body = "(mp (asserted (>= x 0)) (rewrite (= a b)) (>= y 0))";
         let cert = SmtCertificate::new(CertFormat::Z3Proof, "QF_LIA", "(>= y 0)", body);
         let steps = decompose_cert(&cert).unwrap();
@@ -2196,7 +2220,7 @@ la_generic(s2; s1) -> (>= (+ x 1) 1)
     fn task_95_decomposer_is_the_tcb_gate() {
         // Pin: a hostile cert whose body is non-empty + hash-valid
         // but whose rule is unknown is REJECTED by the kernel-only
-        // engine BEFORE any solver replay runs.  This is the
+        // engine BEFORE any solver replay runs. This is the
         // structural guarantee that makes solvers external to the TCB.
         let body = "step s1 fake_solver_rule : (false_claim)";
         let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "false_claim", body);

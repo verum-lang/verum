@@ -1,29 +1,33 @@
 //! High-level Rust intercepts for `core.io.stdio` operations.
 //!
+
 //! Sibling to `shell_runtime.rs` (VBC-1), `file_runtime.rs`
 //! (VBC-FILE-1), and `env_runtime.rs` (VBC-ENV-1 + VBC-PROC-1).
 //! Bypasses the libSystem `write(2)`/`read(2)` FFI dispatch on
 //! stdin/stdout/stderr and uses `std::io::stdin/stdout/stderr`
 //! directly from the host process.
 //!
+
 //! # Functions intercepted
 //!
-//!   * `read_line() -> IoResult<Text>` — `std::io::stdin().read_line()`
-//!     with trailing `\n` (and `\r` for CRLF) stripped to match the
-//!     Verum stdlib's contract.
-//!   * `read_int() -> IoResult<Int>` — `read_line()` + parse to i64;
-//!     parse failure surfaces as `StreamError { kind: InvalidData, ... }`.
-//!   * `read_float() -> IoResult<Float>` — same shape, parse to f64.
-//!   * `read_to_end() -> IoResult<Text>` — drain stdin to EOF
-//!     (uses `read_to_string`).
-//!   * `print(s: &Text)` / `println(s: &Text)` — `std::io::stdout()`
-//!     write + flush; `println` appends `\n`.
-//!   * `eprint(s: &Text)` / `eprintln(s: &Text)` — `std::io::stderr()`
-//!     write + flush; `eprintln` appends `\n`.
-//!   * `println_empty()` — `std::io::stdout()` write `\n` + flush.
+
+//!  * `read_line() -> IoResult<Text>` — `std::io::stdin().read_line()`
+//!  with trailing `\n` (and `\r` for CRLF) stripped to match the
+//!  Verum stdlib's contract.
+//!  * `read_int() -> IoResult<Int>` — `read_line()` + parse to i64;
+//!  parse failure surfaces as `StreamError { kind: InvalidData, ... }`.
+//!  * `read_float() -> IoResult<Float>` — same shape, parse to f64.
+//!  * `read_to_end() -> IoResult<Text>` — drain stdin to EOF
+//!  (uses `read_to_string`).
+//!  * `print(s: &Text)` / `println(s: &Text)` — `std::io::stdout()`
+//!  write + flush; `println` appends `\n`.
+//!  * `eprint(s: &Text)` / `eprintln(s: &Text)` — `std::io::stderr()`
+//!  write + flush; `eprintln` appends `\n`.
+//!  * `println_empty()` — `std::io::stdout()` write `\n` + flush.
 //!
+
 //! No permission gate — stdin/stdout/stderr are the script's
-//! foreground I/O channels, always available.  (The Verum stdlib's
+//! foreground I/O channels, always available. (The Verum stdlib's
 //! surface-layer permission gates apply at the higher `using [...]`
 //! capability level, not at this intrinsic intercept.)
 
@@ -43,7 +47,7 @@ pub(in super::super) fn try_intercept_stdio_runtime(
     let bare = func_name.rsplit('.').next().unwrap_or(func_name);
     // Disambiguation: stdio's free-function form takes 0 args; the
     // method-on-Stdin form (`stdin.read_line(&mut buf)`) has different
-    // arg count and routes through CallM not Call.  Gating on
+    // arg count and routes through CallM not Call. Gating on
     // `arg_count == 0` is enough to disambiguate from the method form.
     match bare {
         "read_line" if arg_count == 0 => intercept_read_line(state),
@@ -56,10 +60,10 @@ pub(in super::super) fn try_intercept_stdio_runtime(
         // `DebugPrint` at codegen (with newline), so only mount-imported
         // stdlib forms (`core.io.stdio.{print,println}` /
         // `core.text.format.{print,println}`) reach here as a real
-        // Call.  Both stdlib definitions are stdout writers — the only
+        // Call. Both stdlib definitions are stdout writers — the only
         // ambiguity would be an unrelated user-defined `print` or
         // `println` falling through to the same name, which is
-        // vanishingly unlikely in scripts.  No qualifier check needed.
+        // vanishingly unlikely in scripts. No qualifier check needed.
         // `eprint`/`eprintln`/`println_empty` aren't builtins so every
         // call arrives here.
         "print" if arg_count == 1 => {
@@ -196,7 +200,7 @@ fn intercept_println_empty(_state: &mut InterpreterState) -> InterpreterResult<O
 
 
 /// Read one trimmed line from stdin (host-side; reused by read_int /
-/// read_float).  Returns `Ok(line_no_newline)` or `Err(io_error)`.
+/// read_float). Returns `Ok(line_no_newline)` or `Err(io_error)`.
 fn read_one_line() -> InterpreterResult<Result<String, std::io::Error>> {
     use std::io::BufRead;
     let stdin = std::io::stdin();

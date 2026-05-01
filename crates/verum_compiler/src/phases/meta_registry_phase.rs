@@ -1,16 +1,21 @@
 //! Phase 2: Meta Registry & AST Registration
 //!
+
 //! Registers all meta handlers BEFORE any macro expansion.
 //!
+
 //! ## Multi-Pass Architecture
 //!
+
 //! This phase implements **Pass 1** of the three-pass compilation:
 //! - **Pass 1: Parse + Register** (this phase)
 //! - Pass 2: Expand Macros (MacroExpansionPhase)
 //! - Pass 3: Semantic Analysis (type checking)
 //!
+
 //! ## Responsibilities
 //!
+
 //! 1. Register @tagged_literal handlers - e.g., `d#"2025-11-05"`
 //! 2. Register @derive macros - e.g., `@derive(Serialize)`
 //! 3. Register @differentiable functions - for autodiff
@@ -18,17 +23,22 @@
 //! 5. Register meta fn declarations
 //! 6. Build complete MetaRegistry (order-independent cross-file resolution)
 //!
+
 //! ## Output
 //!
+
 //! - Complete MetaRegistry with all handlers
 //! - Used by Phase 3 (Macro Expansion)
 //!
+
 //! ## Cross-File Resolution
 //!
+
 //! The MetaRegistry enables macros defined in one file to be used in any other
 //! file, regardless of parsing order. This eliminates the "chicken-and-egg"
 //! problem where a macro might be used before its definition is seen.
 //!
+
 //! Phase 2: Meta Registry and AST Registration. Registers @tagged_literal handlers,
 //! @derive macros, @differentiable functions, @verify annotations, and
 //! @interpolation_handler definitions. Order-independent (cross-file resolution).
@@ -49,12 +59,14 @@ use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 
 /// Meta registry phase - Pass 1 of multi-pass compilation
 ///
+
 /// This phase scans all source files and registers meta definitions:
 /// - @tagged_literal handlers → LiteralRegistry
 /// - @interpolation_handler handlers → InterpolationRegistry (within MetaRegistry)
 /// - @derive macros → MetaRegistry
 /// - meta fn declarations → MetaRegistry
 ///
+
 /// After this phase completes, the MetaRegistry has complete knowledge of all
 /// available macros and can be used by Pass 2 (MacroExpansionPhase) for expansion.
 pub struct MetaRegistryPhase {
@@ -190,15 +202,17 @@ impl MetaRegistryPhase {
 
     /// Register a meta function during Pass 1
     ///
+
     /// Meta functions are compile-time functions that can:
     /// - Compute constants
     /// - Generate code via quote!
     /// - Perform type-level computations
     ///
+
     /// # Example
     /// ```verum
     /// meta fn fibonacci(n: Int) -> Int {
-    ///     if n <= 1 { n } else { fibonacci(n-1) + fibonacci(n-2) }
+    ///  if n <= 1 { n } else { fibonacci(n-1) + fibonacci(n-2) }
     /// }
     /// ```
     fn register_meta_function(&mut self, func: &FunctionDecl) -> Result<(), Diagnostic> {
@@ -224,9 +238,11 @@ impl MetaRegistryPhase {
 
     /// Register an extern (FFI) function during Pass 1
     ///
+
     /// Extern functions are tracked so that meta function evaluation can
     /// detect and block attempts to call FFI functions at compile time.
     ///
+
     /// # Example
     /// ```verum
     /// extern "C" fn external_function() -> Int;
@@ -245,13 +261,15 @@ impl MetaRegistryPhase {
 
     /// Register a @derive macro during Pass 1
     ///
+
     /// Derive macros automatically generate protocol implementations for types.
     ///
+
     /// # Example
     /// ```verum
     /// @derive_macro("Builder")
     /// meta fn derive_builder(input: MacroInput) -> Result<TokenStream, MacroError> {
-    ///     // Generate builder pattern implementation
+    ///  // Generate builder pattern implementation
     /// }
     /// ```
     fn register_derive_macro(&mut self, func: &FunctionDecl) -> Result<(), Diagnostic> {
@@ -283,18 +301,22 @@ impl MetaRegistryPhase {
 
     /// Register a @tagged_literal handler during Pass 1
     ///
+
     /// Tagged literal handlers parse and validate domain-specific literals at compile-time.
     ///
+
     /// # Example
     /// ```verum
     /// @tagged_literal("d")
     /// meta fn date_literal(s: &str) -> Date {
-    ///     Date.parse(s).expect("Invalid date")
+    ///  Date.parse(s).expect("Invalid date")
     /// }
     ///
+
     /// // Usage: let birthday = d#"1990-01-01"
     /// ```
     ///
+
     /// # Spec
     /// Tagged literal desugaring: tag#"content" → const_eval of registered handler.
     fn register_tagged_literal_handler(&mut self, func: &FunctionDecl) -> Result<(), Diagnostic> {
@@ -345,13 +367,15 @@ impl MetaRegistryPhase {
 
     /// Register a @differentiable function during Pass 1
     ///
+
     /// Differentiable functions support automatic differentiation for tensor operations.
     ///
+
     /// # Example
     /// ```verum
     /// @differentiable(wrt = "x, y")
     /// fn loss(x: Tensor, y: Tensor) -> Tensor {
-    ///     (x - y).pow(2).mean()
+    ///  (x - y).pow(2).mean()
     /// }
     /// ```
     fn register_differentiable_function(&mut self, func: &FunctionDecl) -> Result<(), Diagnostic> {
@@ -367,21 +391,25 @@ impl MetaRegistryPhase {
 
     /// Register an @interpolation_handler during Pass 1
     ///
+
     /// Interpolation handlers process text interpolation syntax safely.
     ///
+
     /// # Example
     /// ```verum
     /// @interpolation_handler("sql")
-    /// @safe  // Verified to prevent SQL injection
+    /// @safe // Verified to prevent SQL injection
     /// meta fn sql_interpolate(template: &str, args: &[Expr]) -> TokenStream {
-    ///     quote! {
-    ///         SqlQuery.with_params(#template, list![#(#args.to_sql_param()),*])
-    ///     }
+    ///  quote! {
+    ///  SqlQuery.with_params(#template, list![#(#args.to_sql_param()),*])
+    ///  }
     /// }
     ///
+
     /// // Usage: let query = sql"SELECT * WHERE id = {user_id}"
     /// ```
     ///
+
     /// # Spec
     /// Interpolation handler: prefix"template {expr}" → safe parameterized output.
     fn register_interpolation_handler(&mut self, func: &FunctionDecl) -> Result<(), Diagnostic> {
@@ -432,6 +460,7 @@ impl MetaRegistryPhase {
 
     /// Extract a string argument from an attribute like @attr("value")
     ///
+
     /// Returns the string value or an error if the attribute doesn't have
     /// exactly one string argument.
     fn extract_string_arg_from_attr(
@@ -493,6 +522,7 @@ impl MetaRegistryPhase {
 
     /// Validate the signature of a @tagged_literal handler
     ///
+
     /// Must be: meta fn name(s: &str) -> ReturnType
     fn validate_tagged_literal_signature(
         &self,
@@ -536,6 +566,7 @@ impl MetaRegistryPhase {
 
     /// Validate the signature of an @interpolation_handler
     ///
+
     /// Must be: meta fn name(template: &str, args: &[Expr]) -> TokenStream
     fn validate_interpolation_handler_signature(
         &self,

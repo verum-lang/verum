@@ -14,6 +14,7 @@
 )]
 // Comprehensive parser tests for Verum v6.0-BALANCED specification compliance.
 //
+
 // Tests for Verum v6 syntax compliance
 
 use verum_ast::{FileId, ItemKind, TypeKind, decl::*};

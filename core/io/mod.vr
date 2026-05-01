@@ -5,14 +5,17 @@
 // Dependencies: core, text, collections
 // =============================================================================
 //
+
 // The I/O module provides input/output operations:
 //
+
 // - protocols.vr: Read, Write, Seek, BufRead protocols
 // - file.vr: File operations, BufReader, BufWriter
 // - stdio.vr: stdin, stdout, stderr
 // - path.vr: Path and PathBuf types, normalization, components
 // - fs.vr: Filesystem operations (metadata, directory listing, walk)
 //
+
 // =============================================================================
 
 module io;

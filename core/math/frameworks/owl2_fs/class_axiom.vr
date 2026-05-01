@@ -2,9 +2,11 @@
 // owl2_fs.class_axiom — Shkotin 2019 Table 5 (Class Expression Axioms)
 // =============================================================================
 //
+
 // §2.3.1 of OWL 2 Functional-Style Syntax (W3C Rec 2012); 4 axioms
 // asserting relationships between class expressions.
 //
+
 // V2 status (#134, 2026-04-25): all 4 class axioms now ship verbatim
 // W3C OWL 2 DS §5.1 / §5.2 / §5.3 / §5.4 bodies. Pattern mirrors
 // `assertion.vr`.
@@ -19,7 +21,7 @@ mount core.math.frameworks.owl2_fs.types.{
 
 /// `SubClassOf(CE₁, CE₂)` (W3C OWL 2 DS §5.1): every member of CE₁
 /// is also a member of CE₂ under I.
-/// ⟦SubClassOf(CE₁, CE₂)⟧^I  iff  ⟦CE₁⟧^I ⊆ ⟦CE₂⟧^I.
+/// ⟦SubClassOf(CE₁, CE₂)⟧^I iff ⟦CE₁⟧^I ⊆ ⟦CE₂⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.1 Table 5: SubClassOf")
 public axiom SubClassOf<I: Interpretation, C: ClassExpression>(
     interp: I,
@@ -31,9 +33,9 @@ public axiom SubClassOf<I: Interpretation, C: ClassExpression>(
 // ─── §5.2 EquivalentClasses ────────────────────────────────────────
 
 /// `EquivalentClasses(CE₁, …, CEₙ)` (W3C OWL 2 DS §5.2): every pair
-/// has equal class extensions under I. V2 ships the binary core;
+/// has equal class extensions under I. ships the binary core;
 /// the n-ary fold is a Verum-level helper.
-/// ⟦EquivalentClasses(CE₁, CE₂)⟧^I  iff  ⟦CE₁⟧^I = ⟦CE₂⟧^I.
+/// ⟦EquivalentClasses(CE₁, CE₂)⟧^I iff ⟦CE₁⟧^I = ⟦CE₂⟧^I.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.1 Table 5: EquivalentClasses")
 public axiom EquivalentClasses<I: Interpretation, C: ClassExpression>(
     interp: I,
@@ -47,7 +49,7 @@ public axiom EquivalentClasses<I: Interpretation, C: ClassExpression>(
 /// `DisjointClasses(CE₁, …, CEₙ)` (W3C OWL 2 DS §5.3): every pair
 /// has disjoint class extensions under I. Binary core; n-ary fold
 /// at the helper layer.
-/// ⟦DisjointClasses(CE₁, CE₂)⟧^I  iff  ⟦CE₁⟧^I ∩ ⟦CE₂⟧^I = ∅.
+/// ⟦DisjointClasses(CE₁, CE₂)⟧^I iff ⟦CE₁⟧^I ∩ ⟦CE₂⟧^I = ∅.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §2.3.1 Table 5: DisjointClasses")
 public axiom DisjointClasses<I: Interpretation, C: ClassExpression>(
     interp: I,
@@ -62,7 +64,8 @@ public axiom DisjointClasses<I: Interpretation, C: ClassExpression>(
 /// equivalent to the union of CE₁..CEₙ AND the CEᵢ are pairwise
 /// disjoint.
 ///
-/// V2 ships the binary core (n=2): C ≡ CE₁ ∪ CE₂ ∧ CE₁ ⊓ CE₂ = ∅.
+
+/// ships the binary core (n=2): C ≡ CE₁ ∪ CE₂ ∧ CE₁ ⊓ CE₂ = ∅.
 /// Equivalently: C ≡ CE₁ ⊔ CE₂ over the disjoint-union sense.
 /// Encoded as the conjunction of class_equal(C, union(CE₁, CE₂)) and
 /// class_disjoint(CE₁, CE₂); since the protocol doesn't yet expose a
@@ -71,8 +74,8 @@ public axiom DisjointClasses<I: Interpretation, C: ClassExpression>(
 /// formulation: `C` is a superset of EACH CEᵢ AND they're pairwise
 /// disjoint AND their cumulative coverage equals C. The third
 /// conjunct collapses for the binary case to:
-///   class_subset(CE₁, C) ∧ class_subset(CE₂, C) ∧
-///   class_disjoint(CE₁, CE₂) ∧ class_subset(C, /* CE₁ or CE₂ */).
+///  class_subset(CE₁, C) ∧ class_subset(CE₂, C) ∧
+///  class_disjoint(CE₁, CE₂) ∧ class_subset(C, /* CE₁ or CE₂ */).
 /// We approximate the cumulative-coverage clause using
 /// class_subset(C, a) ∨ class_subset(C, b) — sufficient when C has
 /// no other inhabitants. A full implementation lifts ObjectUnionOf

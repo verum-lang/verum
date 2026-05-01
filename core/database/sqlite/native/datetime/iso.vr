@@ -3,12 +3,15 @@
 // =============================================================================
 // Spec: sqlite-native.md §15.6
 //
+
 // Two grammars accepted:
 //
-//   `YYYY-MM-DD`                                   (date only)
-//   `YYYY-MM-DD HH:MM[:SS[.SSS]]`                  (date + time, sep=space|'T')
-//   `HH:MM:SS[.SSS]`                               (time only)
+
+//  `YYYY-MM-DD` (date only)
+//  `YYYY-MM-DD HH:MM[:SS[.SSS]]` (date + time, sep=space|'T')
+//  `HH:MM:SS[.SSS]` (time only)
 //
+
 // Renderer: emits canonical `YYYY-MM-DD HH:MM:SS.SSS` (always 23 chars
 // for date+time form).
 // =============================================================================

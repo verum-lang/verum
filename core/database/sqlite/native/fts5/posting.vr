@@ -3,6 +3,7 @@
 // =============================================================================
 // Spec: sqlite-native.md §16.2
 //
+
 // One `Posting` records that a term occurred in (rowid, column, position).
 // `PostingList` aggregates them in rowid-ascending order — the canonical
 // shape inside an inverted-index segment.

@@ -5,9 +5,11 @@
 // Dependencies: core.io, escape.vr
 // =============================================================================
 //
+
 // Read/write the system clipboard via OSC 52 escape sequences.
 // Supported by most modern terminals (kitty, iTerm2, foot, wezterm, etc.).
 //
+
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.2
 // =============================================================================
 

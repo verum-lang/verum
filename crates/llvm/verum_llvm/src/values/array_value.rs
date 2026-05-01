@@ -20,8 +20,10 @@ pub struct ArrayValue<'ctx> {
 impl<'ctx> ArrayValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
+
     /// # Safety
     ///
+
     /// The ref must be valid and of type array.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());
@@ -33,8 +35,10 @@ impl<'ctx> ArrayValue<'ctx> {
 
     /// Creates a new constant `ArrayValue` with the given type and values.
     ///
+
     /// # Safety
     ///
+
     /// `values` must be of the same type as `ty`.
     pub unsafe fn new_const_array<T: AsTypeRef, V: AsValueRef>(ty: &T, values: &[V]) -> Self {
         let values = values.iter().map(V::as_value_ref).collect::<Vec<_>>();
@@ -43,8 +47,10 @@ impl<'ctx> ArrayValue<'ctx> {
 
     /// Creates a new constant `ArrayValue` with the given type and values.
     ///
+
     /// # Safety
     ///
+
     /// `values` must be of the same type as `ty`.
     pub unsafe fn new_raw_const_array(ty: LLVMTypeRef, values: &[LLVMValueRef]) -> Self {
         unsafe { Self::new(LLVMConstArray(ty, values.as_ptr().cast_mut(), values.len() as _)) }
@@ -94,16 +100,20 @@ impl<'ctx> ArrayValue<'ctx> {
 
     /// Determines whether or not an `ArrayValue` is a constant.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let i64_type = context.i64_type();
     /// let i64_val = i64_type.const_int(23, false);
     /// let array_val = i64_type.const_array(&[i64_val]);
     ///
+
     /// assert!(array_val.is_const());
     /// ```
     pub fn is_const(self) -> bool {
@@ -112,14 +122,18 @@ impl<'ctx> ArrayValue<'ctx> {
 
     /// Determines whether or not an `ArrayValue` represents a constant array of `i8`s.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
+
     /// let context = Context::create();
     /// let string = context.const_string(b"my_string", false);
     ///
+
     /// assert!(string.is_const_string());
     /// ```
     // SubTypes: Impl only for ArrayValue<IntValue<i8>>
@@ -130,15 +144,19 @@ impl<'ctx> ArrayValue<'ctx> {
     /// Obtain the string from the ArrayValue
     /// if the value points to a constant string.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use std::ffi::CStr;
     ///
+
     /// let context = Context::create();
     /// let string = context.const_string(b"hello!", false);
     ///
+
     /// let result = b"hello!".as_slice();
     /// assert_eq!(string.as_const_string(), Some(result));
     /// ```
@@ -157,15 +175,19 @@ impl<'ctx> ArrayValue<'ctx> {
     /// Obtain the string from the ArrayValue
     /// if the value points to a constant string.
     ///
+
     /// # Example
     ///
+
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use std::ffi::CStr;
     ///
+
     /// let context = Context::create();
     /// let string = context.const_string(b"hello!", true);
     ///
+
     /// let result = CStr::from_bytes_with_nul(b"hello!\0").unwrap();
     /// assert_eq!(string.get_string_constant(), Some(result));
     /// ```

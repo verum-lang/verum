@@ -1,15 +1,16 @@
 //! Tests for the kernel-soundness cross-export pipeline.
 //!
+
 //! Pin coverage:
-//!   - The canonical rule list has exactly 35 entries.
-//!   - The 4 structurally-proved lemmas (K-Var, K-Univ, K-FwAx, K-Pos)
-//!     are marked `Proved`; everything else is `Admitted` with a
-//!     non-empty reason.
-//!   - Coq + Lean backends emit non-empty output for every section
-//!     and every rule; Admitted lemmas carry their reason in a
-//!     comment alongside the `Admitted.` / `sorry`.
-//!   - The drift check fires when the rule list differs from
-//!     `EXPECTED_KERNEL_RULE_COUNT`.
+//!  - The canonical rule list has exactly 35 entries.
+//!  - The 4 structurally-proved lemmas (K-Var, K-Univ, K-FwAx, K-Pos)
+//!  are marked `Proved`; everything else is `Admitted` with a
+//!  non-empty reason.
+//!  - Coq + Lean backends emit non-empty output for every section
+//!  and every rule; Admitted lemmas carry their reason in a
+//!  comment alongside the `Admitted.` / `sorry`.
+//!  - The drift check fires when the rule list differs from
+//!  `EXPECTED_KERNEL_RULE_COUNT`.
 
 use super::coq::CoqBackend;
 use super::lean::LeanBackend;
@@ -99,7 +100,7 @@ fn discharged_count_reflects_phase_1a() {
     let _ = rules.len();
     // Post-#155 Phase-1A: at least 7 rules discharged by framework
     // citation (K_Pi_Form, K_Lam_Intro, K_App_Elim, K_Sigma_Form,
-    // K_Pair_Intro, K_Fst_Elim, K_Snd_Elim).  This count is a floor;
+    // K_Pair_Intro, K_Fst_Elim, K_Snd_Elim). This count is a floor;
     // future Phase-1A advances will increase it.
     assert!(
         exporter.discharged_by_framework_count() >= 7,
@@ -183,7 +184,7 @@ fn coq_backend_renders_admitted_with_reason_comment() {
     let output = exporter.emit(&coq);
 
     // Pick a discharged lemma and confirm `Admitted.` plus the
-    // citation appear.  K_Pi_Form is now discharged-by-framework
+    // citation appear. K_Pi_Form is now discharged-by-framework
     // citing the substitution-lemma in mathlib4.
     assert!(output.contains("Admitted."));
     assert!(

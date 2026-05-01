@@ -5,25 +5,31 @@
 // Dependencies: core
 // =============================================================================
 //
+
 // RFC 4648 §6 — Base32 alphabet A-Z, 2-7. Case-insensitive on
 // decode; uppercase on encode. `=` padding to a multiple of 8
 // characters.
 //
+
 // # Uses
 //
-//   * TOTP / HOTP secret sharing (Google Authenticator QR codes).
-//   * DNSSEC NSEC3 hashed-owner names.
-//   * Onion service addresses (v3 — 32 bytes → 56-char domain).
+
+//  * TOTP / HOTP secret sharing (Google Authenticator QR codes).
+//  * DNSSEC NSEC3 hashed-owner names.
+//  * Onion service addresses (v3 — 32 bytes → 56-char domain).
 //
+
 // # Design notes
 //
-//   * Zero dependencies; all arithmetic in Int/UInt64.
-//   * Streaming API not exposed in v0.1 — Base32 payloads are
-//     short (typically 16-32 bytes) so one-shot encode/decode is
-//     the right surface.
-//   * Padding-optional decode via `decode_no_pad` for OTP QR
-//     codes that omit `=`.
+
+//  * Zero dependencies; all arithmetic in Int/UInt64.
+//  * Streaming API not exposed in v0.1 — Base32 payloads are
+//  short (typically 16-32 bytes) so one-shot encode/decode is
+//  the right surface.
+//  * Padding-optional decode via `decode_no_pad` for OTP QR
+//  codes that omit `=`.
 //
+
 // =============================================================================
 
 module core.encoding.base32;
@@ -172,10 +178,10 @@ public fn encode(src: &[Byte]) -> List<Byte> {
     }
 
     // Tail handling — RFC 4648 §6:
-    //   1 byte     → 2 chars + 6 `=`
-    //   2 bytes    → 4 chars + 4 `=`
-    //   3 bytes    → 5 chars + 3 `=`
-    //   4 bytes    → 7 chars + 1 `=`
+    //  1 byte → 2 chars + 6 `=`
+    //  2 bytes → 4 chars + 4 `=`
+    //  3 bytes → 5 chars + 3 `=`
+    //  4 bytes → 7 chars + 1 `=`
     let rem = n - i;
     if rem == 0 { return out; }
 
@@ -330,16 +336,19 @@ fn tail_check(out: List<Byte>, group: [Int; 8], pad: Int) -> Result<List<Byte>, 
 // =============================================================================
 // V8 (#252) — Extended Hex alphabet (RFC 4648 §7).
 //
+
 // The §7 alphabet (0-9, A-V) preserves lex-sort order with the
 // underlying bytes — encoded strings sort identically to their
 // pre-encode bytes. Used by:
 //
-//   • NSEC3 hashed-owner names (RFC 5155): the hash output is
-//     base32hex-encoded so authoritative resolvers can binary-search
-//     the sorted hash chain.
-//   • Protocols that route on the encoded form and want bytewise
-//     and encoded sort orders to agree.
+
+//  • NSEC3 hashed-owner names (RFC 5155): the hash output is
+//  base32hex-encoded so authoritative resolvers can binary-search
+//  the sorted hash chain.
+//  • Protocols that route on the encoded form and want bytewise
+//  and encoded sort orders to agree.
 //
+
 // The bit-shuffling layout is identical to standard Base32; only
 // the character mapping changes — the decoder accepts both alphabets
 // when called via the explicit `_hex` entry points.

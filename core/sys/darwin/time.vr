@@ -8,17 +8,20 @@ module sys.darwin.time;
 // Platform: macOS (x86_64, arm64)
 // =============================================================================
 //
+
 // This module provides high-resolution time operations on macOS:
 // - mach_absolute_time: Highest precision monotonic time
 // - clock_gettime: POSIX-compatible clock access
 // - nanosleep: High-precision sleep
 //
+
 // Key differences from Linux:
 // - mach_absolute_time is the preferred monotonic source (sub-nanosecond)
 // - Must convert Mach time units using mach_timebase_info
 // - No CLOCK_BOOTTIME equivalent (use CLOCK_MONOTONIC)
 // - No direct TSC access (use mach_absolute_time instead)
 //
+
 // Spec: docs/architecture/new-arch-spec.md Section 5.4
 // =============================================================================
 
@@ -185,6 +188,7 @@ public type DarwinInstant is (UInt64);  // Mach absolute time units
 implement DarwinInstant {
     /// Get the current instant (monotonic time).
     ///
+
     /// Uses mach_absolute_time for highest precision.
     public fn now() -> DarwinInstant {
         DarwinInstant(unsafe { mach_absolute_time() })
@@ -240,6 +244,7 @@ implement DarwinInstant {
 
 /// Get monotonic time in nanoseconds (using Mach time).
 ///
+
 /// This is the highest precision monotonic time source on macOS.
 /// Not affected by system time changes or NTP adjustments.
 public fn monotonic_nanos() -> UInt64 {
@@ -259,6 +264,7 @@ public fn monotonic_millis() -> UInt64 {
 
 /// Get monotonic raw time in nanoseconds.
 ///
+
 /// Uses CLOCK_MONOTONIC_RAW which is not adjusted by NTP.
 public fn monotonic_raw_nanos() -> UInt64 {
     let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
@@ -300,9 +306,11 @@ public fn process_cputime_nanos() -> UInt64 {
 
 /// Sleep for a duration (relative time).
 ///
+
 /// # Arguments
 /// * `duration` - Time to sleep
 ///
+
 /// # Returns
 /// Remaining time if interrupted, None if completed.
 public fn sleep(duration: DarwinDuration) -> Maybe<DarwinDuration> {
@@ -330,6 +338,7 @@ public fn sleep_us(us: UInt64) {
 
 /// Sleep until a specific Mach absolute time deadline.
 ///
+
 /// More precise than relative sleep for periodic wakeups.
 /// Uses mach_wait_until internally if available.
 public fn sleep_until_mach(deadline: UInt64) {
@@ -353,6 +362,7 @@ public fn sleep_until(deadline: DarwinInstant) {
 
 /// Measure elapsed time for a closure.
 ///
+
 /// Returns (result, duration).
 public fn time_it<T>(f: fn() -> T) -> (T, DarwinDuration) {
     let start = DarwinInstant.now();
@@ -435,6 +445,7 @@ implement DarwinStopwatch {
 
     /// Get a lap time (elapsed since last lap or start).
     ///
+
     /// Does not reset the stopwatch.
     public fn lap(&mut self) -> DarwinDuration {
         let elapsed = self.elapsed();
@@ -453,6 +464,7 @@ implement DarwinStopwatch {
 
 /// High-resolution performance counter.
 ///
+
 /// Uses Mach absolute time which is the fastest monotonic
 /// time source on macOS (typically just a register read).
 public type DarwinPerfCounter is (UInt64);
@@ -550,6 +562,7 @@ implement DarwinDeadlineTimer {
 
     /// Get remaining time until deadline.
     ///
+
     /// Returns DarwinDuration(0) if no deadline or deadline has passed.
     public fn remaining(&self) -> DarwinDuration {
         if !self.has_deadline {

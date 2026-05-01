@@ -1,6 +1,7 @@
 //! Supporting kernel operations — shape projection, substitution,
 //! structural equality, SMT-certificate replay. Split .
 //!
+
 //! These four operations are the kernel's "infrastructure layer":
 //! they don't implement a typing rule themselves, but every rule in
 //! `infer` / `check` calls one or more of them.
@@ -33,6 +34,7 @@ pub fn shape_of(term: &CoreTerm) -> CoreType {
 
 /// Capture-avoiding substitution: `term[name := value]`.
 ///
+
 /// Rename-on-clash (Barendregt-convention bringup): if a binder in
 /// `term` shadows `name`, that sub-tree is left untouched. Full
 /// alpha-renaming lands together with de Bruijn indices in the
@@ -41,18 +43,20 @@ pub fn shape_of(term: &CoreTerm) -> CoreType {
 /// produce capturing substitutions.
 pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
     // Fast-path (#100, task #44): if `name` doesn't occur free in
-    // `term`, the entire substitution reduces to a clone.  Walking
+    // `term`, the entire substitution reduces to a clone. Walking
     // the term once with an early-exit `var_occurs_free` is cheaper
     // than running the full reconstructing substitute, because:
     //
-    //   • `var_occurs_free` returns immediately as soon as it finds
-    //     a single free occurrence (linear-in-tree-depth at best,
-    //     linear-in-tree-size at worst — same as substitute itself).
-    //   • For terms WITHOUT a free occurrence, the second walk
-    //     (substitute proper) is replaced by a single shallow Heap
-    //     clone, which is O(N) of shared Arc bumps (no deep copy of
-    //     the underlying tree).
+
+    //  • `var_occurs_free` returns immediately as soon as it finds
+    //  a single free occurrence (linear-in-tree-depth at best,
+    //  linear-in-tree-size at worst — same as substitute itself).
+    //  • For terms WITHOUT a free occurrence, the second walk
+    //  (substitute proper) is replaced by a single shallow Heap
+    //  clone, which is O(N) of shared Arc bumps (no deep copy of
+    //  the underlying tree).
     //
+
     // In mount-core typechecking the dominant case is substitute
     // into refinement predicates / dependent types where the bound
     // variable name is used in only a few leaves, so this short-
@@ -228,11 +232,13 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
 
 /// Structural (syntactic) equality of two [`CoreTerm`] values.
 ///
+
 /// This is the kernel's conversion check at bring-up. Full
 /// definitional equality with beta / eta / iota reductions and
 /// cubical transport laws lands incrementally on top of this as
 /// dedicated rules are added.
 ///
+
 /// note: this remains the "exact-syntactic-equality"
 /// primitive callers can still use when they want byte-identity
 /// comparison. The new [`definitional_eq`] is the
@@ -259,27 +265,31 @@ pub const NORMALIZE_STEP_LIMIT: u32 = 10_000;
 /// the [`NORMALIZE_STEP_LIMIT`] step limit, whichever comes
 /// first.
 ///
+
 /// Reduction strategy: outermost-leftmost (call-by-name on the
 /// β-redex at the head, then recursive descent through all
 /// sub-terms). This is the *complete* β-normaliser for the SN
 /// fragment — every β-equivalent pair of terms reduces to the
 /// same unique normal form.
 ///
+
 /// What's normalised:
-///   • β-redexes: `App(Lam(x, _, body), arg) → body[x := arg]`,
-///     iterated to fixed point.
-///   • Recursive descent through every CoreTerm constructor —
-///     reducing inside Pi codomain / Lam body / Sigma snd_ty /
-///     PathTy carrier+endpoints / Refine predicate / etc.
+///  • β-redexes: `App(Lam(x, _, body), arg) → body[x := arg]`,
+///  iterated to fixed point.
+///  • Recursive descent through every CoreTerm constructor —
+///  reducing inside Pi codomain / Lam body / Sigma snd_ty /
+///  PathTy carrier+endpoints / Refine predicate / etc.
 ///
+
 /// What's *not* yet normalised (deferred):
-///   • δ-reduction (axiom unfolding) — needs an axiom/inductive
-///     registry parameter; current shape is registry-free for
-///     drop-in PathTy use.
-///   • η-reduction.
-///   • ι-reduction (Elim / pattern-match β).
-///   • Cubical reductions (HComp / Transp / Glue evaluation).
+///  • δ-reduction (axiom unfolding) — needs an axiom/inductive
+///  registry parameter; current shape is registry-free for
+///  drop-in PathTy use.
+///  • η-reduction.
+///  • ι-reduction (Elim / pattern-match β).
+///  • Cubical reductions (HComp / Transp / Glue evaluation).
 ///
+
 /// Used by [`definitional_eq`] (the main consumer) and by the
 /// PathTy formation rule per `verification-architecture.md`
 /// §4.4.
@@ -292,27 +302,30 @@ pub fn normalize(term: &CoreTerm) -> CoreTerm {
 // Cubical face / interval helpers (#98 hardening)
 // =============================================================================
 //
+
 // The cubical primitives (`HComp` / `Transp` / `Glue`) are
 // parameterised by a face formula `phi` and an interval endpoint
-// `regular`.  Pre-this-module those were just opaque `CoreTerm`s
+// `regular`. Pre-this-module those were just opaque `CoreTerm`s
 // — even when `phi = ⊥` (no face constrained) the kernel
-// preserved `HComp` instead of reducing to its base.  That broke
+// preserved `HComp` instead of reducing to its base. That broke
 // the Kan-fibrancy contract: cubical reductions documented in
 // `verum_verification::cubical::canonical_rules` were *named* but
 // not actually performed.
 //
+
 // Hardening: recognise the canonical face / interval marker terms
 // at the kernel level and wire each catalogue rule into
-// `normalize_with_budget` below.  The marker convention is the same
+// `normalize_with_budget` below. The marker convention is the same
 // the cubical surface uses (`⊤` / `⊥` / `i0` / `i1` plus their
 // ASCII aliases) — this is the *kernel-level* implementation of the
 // face-formula convention.
 //
+
 // Rule citations match `cubical::canonical_rules` names so the
 // catalogue ↔ kernel correspondence is explicit.
 
 /// True iff `term` is the canonical face-top marker (`⊤` / `1` /
-/// `top` / `true`).  Used by reductions that fire when `phi = ⊤`.
+/// `top` / `true`). Used by reductions that fire when `phi = ⊤`.
 pub fn is_face_top(term: &CoreTerm) -> bool {
     match term {
         CoreTerm::Var(name) => matches!(
@@ -324,7 +337,7 @@ pub fn is_face_top(term: &CoreTerm) -> bool {
 }
 
 /// True iff `term` is the canonical face-bot marker (`⊥` / `0` /
-/// `bot` / `false`).  Used by reductions that fire when `phi = ⊥`.
+/// `bot` / `false`). Used by reductions that fire when `phi = ⊥`.
 pub fn is_face_bot(term: &CoreTerm) -> bool {
     match term {
         CoreTerm::Var(name) => matches!(
@@ -336,7 +349,7 @@ pub fn is_face_bot(term: &CoreTerm) -> bool {
 }
 
 /// True iff `term` is the interval endpoint `i1` (the cubical
-/// "everything-known" point).  Equivalent to `is_face_top` for the
+/// "everything-known" point). Equivalent to `is_face_top` for the
 /// V0 marker convention but exposed separately so the
 /// `transp-fill` rule cites the precise cubical constant.
 pub fn is_interval_one(term: &CoreTerm) -> bool {
@@ -346,9 +359,9 @@ pub fn is_interval_one(term: &CoreTerm) -> bool {
     }
 }
 
-/// True iff `binder` occurs free in `body`.  Respects shadowing
+/// True iff `binder` occurs free in `body`. Respects shadowing
 /// introduced by inner binders (Pi / Lam / Sigma / Refine /
-/// PathOver-motive).  Used by the cubical `transp-const` rule:
+/// PathOver-motive). Used by the cubical `transp-const` rule:
 /// when the path-of-types is a constant lambda (binder unused in
 /// body) transport reduces to the identity.
 fn body_uses_binder(body: &CoreTerm, binder: &str) -> bool {
@@ -401,7 +414,7 @@ fn body_uses_binder(body: &CoreTerm, binder: &str) -> bool {
                 occurs(scrutinee, name) || occurs(motive, name) || occurs(case, name)
             }
             // Conservative fallback: assume usage for variants we
-            // don't enumerate.  False positives keep the rule from
+            // don't enumerate. False positives keep the rule from
             // firing (correct but less aggressive); they never
             // produce unsound reductions.
             _ => true,
@@ -509,15 +522,15 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
             let walls_n = normalize_with_budget(walls, budget);
             let base_n = normalize_with_budget(base, budget);
             // cubical::hcomp-id-when-empty-system —
-            // `hcomp {φ = ⊥} u a ↪ a`.  Empty face system carries no
+            // `hcomp {φ = ⊥} u a ↪ a`. Empty face system carries no
             // information; the composition collapses to the base.
             if is_face_bot(&phi_n) {
                 return base_n;
             }
             // cubical::hcomp-id-when-φ-equals-1 —
-            // `hcomp {φ = ⊤} u a ↪ u i1 1=1`.  When the entire face
+            // `hcomp {φ = ⊤} u a ↪ u i1 1=1`. When the entire face
             // is constrained the composition evaluates to the wall
-            // family at the top of the cube.  Best-effort: when
+            // family at the top of the cube. Best-effort: when
             // `walls_n` is a lambda we apply it to `i1`; otherwise
             // we leave the term residual (a downstream rewriter can
             // pick it up).
@@ -543,19 +556,19 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
             let path_n = normalize_with_budget(path, budget);
             let regular_n = normalize_with_budget(regular, budget);
             let value_n = normalize_with_budget(value, budget);
-            // cubical::transp-fill — `transp A 1 a ↪ a`.  When the
+            // cubical::transp-fill — `transp A 1 a ↪ a`. When the
             // regularity endpoint is `i1` (everything is known) the
             // transport returns the input unchanged.
             if is_interval_one(&regular_n) {
                 return value_n;
             }
             // cubical::transp-on-refl — `transp A 0 a ↪ a` when the
-            // path is reflexive.  Constant line of types ⇒ identity.
+            // path is reflexive. Constant line of types ⇒ identity.
             if let CoreTerm::Refl(_) = &path_n {
                 return value_n;
             }
             // cubical::transp-const — transport along a constant
-            // lambda is the identity.  We detect `λ _ → A` shape
+            // lambda is the identity. We detect `λ _ → A` shape
             // (binder unused in body).
             if let CoreTerm::Lam { binder, body, .. } = &path_n
                 && !body_uses_binder(body, binder.as_str()) {
@@ -573,13 +586,13 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
             let fiber_n = normalize_with_budget(fiber, budget);
             let equiv_n = normalize_with_budget(equiv, budget);
             // cubical::glue-on-false-face —
-            // `Glue A {⊥} T e ↪ A`.  No face constrained ⇒ glue is
+            // `Glue A {⊥} T e ↪ A`. No face constrained ⇒ glue is
             // the underlying carrier.
             if is_face_bot(&phi_n) {
                 return carrier_n;
             }
             // cubical::glue-on-true-face —
-            // `Glue A {⊤} T e ↪ T 1=1`.  Whole face constrained ⇒
+            // `Glue A {⊤} T e ↪ T 1=1`. Whole face constrained ⇒
             // glue evaluates to the partial fibre.
             if is_face_top(&phi_n) {
                 // Best-effort: when `fiber_n` is a lambda we apply it
@@ -699,6 +712,7 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
 /// `OrdinalDepth`. This enum is the bridge — a tagged union
 /// of the canonical ε-token shapes the Actic spec admits.
 ///
+
 /// Per defect 3: Actic ε-arithmetic is a
 /// different ordinal arithmetic from the kernel's
 /// Cantor-normal-form `OrdinalDepth`. This type captures the
@@ -729,6 +743,7 @@ pub enum EpsInvariant {
 /// convert an Actic ε-invariant to the kernel's
 /// Cantor-normal-form [`crate::OrdinalDepth`].
 ///
+
 /// Per item 5 + Diakrisis Actic
 /// 12-actic/03-epsilon-invariant.md: the Actic ε-coordinate
 /// and the kernel's modal-depth ordinal are *different*
@@ -739,16 +754,18 @@ pub enum EpsInvariant {
 /// order-preserving embedding exists. This function is that
 /// embedding.
 ///
+
 /// Properties (verified by tests):
-///   * `convert(Zero) == finite(0)` — identity.
-///   * `convert(Finite(n)) == finite(n)` — finite preservation.
-///   * `convert(Omega) == omega()` — first-transfinite preservation.
-///   * `convert(OmegaPlus(n)) == { omega_coeff: 1, finite_offset: n }`.
-///   * `convert(OmegaTimes { coeff, offset }) ==
-///     { omega_coeff: coeff, finite_offset: offset }`.
-///   * Monotonicity: `eps1 ≤ eps2` (Actic order) implies
-///     `convert(eps1).lt_or_eq(&convert(eps2))` (kernel lex).
+///  * `convert(Zero) == finite(0)` — identity.
+///  * `convert(Finite(n)) == finite(n)` — finite preservation.
+///  * `convert(Omega) == omega()` — first-transfinite preservation.
+///  * `convert(OmegaPlus(n)) == { omega_coeff: 1, finite_offset: n }`.
+///  * `convert(OmegaTimes { coeff, offset }) ==
+///  { omega_coeff: coeff, finite_offset: offset }`.
+///  * Monotonicity: `eps1 ≤ eps2` (Actic order) implies
+///  `convert(eps1).lt_or_eq(&convert(eps2))` (kernel lex).
 ///
+
 /// The bridge is **canonical** (independent of how the Actic
 /// ε-token was constructed) and **lossless** under the V0
 /// encoding — every Actic ε that fits Cantor-normal-form
@@ -771,10 +788,12 @@ pub fn convert_eps_to_md_omega(eps: &EpsInvariant) -> crate::OrdinalDepth {
 
 /// definitional (β-aware) equality on [`CoreTerm`] values.
 ///
+
 /// Normalises both sides via [`normalize`] and then performs
 /// structural comparison. Two terms compare equal under
 /// `definitional_eq` iff they have the same β-normal form.
 ///
+
 /// This is the right equality for typing-rule conversion
 /// checks: PathTy endpoint matching, App domain matching, etc.
 /// Replacing [`structural_eq`] with this is monotone (only
@@ -782,7 +801,7 @@ pub fn convert_eps_to_md_omega(eps: &EpsInvariant) -> crate::OrdinalDepth {
 /// is admitted by definitional_eq) and sound (the SN-fragment
 /// invariant guarantees normal forms are unique up to α).
 pub fn definitional_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
-    // Fast-path: same structural hash → trivially equal.  Same
+    // Fast-path: same structural hash → trivially equal. Same
     // optimization as `definitional_eq_with_axioms` (#43); skips
     // both normalize calls when terms are syntactically identical.
     // Dominant case during mount-core typechecking where the same
@@ -802,16 +821,18 @@ pub fn definitional_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
 /// [`crate::AxiomRegistry::register_definition`]) before
 /// β-normalising.
 ///
+
 /// Behaviour vs [`normalize`]:
-///   • Opaque postulates (`body = None`) are LEFT as-is —
-///     `Axiom { name: "..." }` references stay neutral. This is
-///     correct: a postulate is, by design, not reducible.
-///   • Transparent definitions (`body = Some(_)`) are UNFOLDED —
-///     `Axiom { name: "Id", ... }` where `Id := λx. x` becomes
-///     `λx. x` and continues normalising.
-///   • Every other CoreTerm constructor delegates to the same
-///     β-rules as [`normalize`].
+///  • Opaque postulates (`body = None`) are LEFT as-is —
+///  `Axiom { name: "..." }` references stay neutral. This is
+///  correct: a postulate is, by design, not reducible.
+///  • Transparent definitions (`body = Some(_)`) are UNFOLDED —
+///  `Axiom { name: "Id", ... }` where `Id := λx. x` becomes
+///  `λx. x` and continues normalising.
+///  • Every other CoreTerm constructor delegates to the same
+///  β-rules as [`normalize`].
 ///
+
 /// Step limit ([`NORMALIZE_STEP_LIMIT`]) shared with [`normalize`];
 /// δ-unfolds count against the same budget as β-reductions.
 pub fn normalize_with_axioms(
@@ -1044,6 +1065,7 @@ fn normalize_with_axioms_budget(
 /// and the **HIT eliminator β-rule** firing against a supplied
 /// inductive registry.
 ///
+
 /// The eliminator β-rule fires when an `Elim { scrutinee, motive,
 /// cases }` term is encountered with a scrutinee of the form
 /// `App-chain(Var(C), arg1, ..., argn)` where `C` matches the
@@ -1058,6 +1080,7 @@ fn normalize_with_axioms_budget(
 /// eliminator β-rule (Coq / Lean / Agda all generate this shape
 /// automatically).
 ///
+
 /// **Path constructors** are NOT handled here — their β-rule
 /// involves path substitution and is tracked under §7.4 V3.1.
 /// When the scrutinee normalises to anything other than a
@@ -1126,7 +1149,8 @@ fn normalize_with_inductives_budget(
                 // an additional argument right after the argument
                 // itself — matching Coq/Lean's dependent-elim shape:
                 //
-                //     case_C(a₁, rec(a₁) when a₁:T, a₂, rec(a₂) when a₂:T, …)
+
+                //  case_C(a₁, rec(a₁) when a₁:T, a₂, rec(a₂) when a₂:T, …)
                 let mut beta = case_body;
                 for (arg_idx, arg_ty) in ctor_sig.arg_types.iter().enumerate() {
                     let arg = ctor_args
@@ -1162,6 +1186,7 @@ fn normalize_with_inductives_budget(
             }
             // path-constructor β-rule.
             //
+
             // When the scrutinee normalises to a bare `Var(P)` whose
             // name matches a registered path constructor `P_j` of
             // inductive `T` (with `N` point ctors and `M` path ctors),
@@ -1171,6 +1196,7 @@ fn normalize_with_inductives_budget(
             // homogeneous `PathTy` for closed loops, per the
             // eliminator-emit convention in `inductive::eliminator_type`).
             //
+
             // The β-rewrite returns that case directly. Per Coq/Lean
             // dependent-elim convention path ctors are *0-arity*
             // here — their kernel `lhs` / `rhs` shape is endpoint
@@ -1372,6 +1398,7 @@ fn normalize_with_inductives_budget(
 
 /// δ-reduction-aware definitional equality.
 ///
+
 /// Normalises both sides via [`normalize_with_axioms`] (β + δ)
 /// and compares structurally. Two terms compare equal iff they
 /// have the same βδ-normal form against the supplied axiom
@@ -1384,19 +1411,21 @@ pub fn definitional_eq_with_axioms(
     // Fast-path: structural hash equality short-circuits the
     // double-normalize dance for trivially-equal terms (#100, task #43).
     //
+
     // In practice mount-core typechecking calls definitional_eq with
     // the SAME term on both sides constantly — `Int =? Int`,
     // `Bool =? Bool`, refinement-pred bodies that haven't been
-    // β-reduced yet but are structurally identical.  Skipping both
+    // β-reduced yet but are structurally identical. Skipping both
     // normalize calls saves O(N) tree walk + substitution per
     // skipped pair; when both inputs are the same Rust `&CoreTerm`
     // this is a near-zero op (the hash result is cached implicitly
     // because `format!` produces the same bytes).
     //
+
     // Axiom-registry independence: if structural_eq holds, normalize
     // would produce the same result regardless of axioms (δ-reduction
     // is a function of the term and the axiom set; identical terms
-    // always δ-reduce identically given the same registry).  So we
+    // always δ-reduce identically given the same registry). So we
     // don't need to fold the axiom fingerprint into the fast path.
     if crate::normalize_cache::StructuralHash::of(a)
         == crate::normalize_cache::StructuralHash::of(b)
@@ -1410,15 +1439,18 @@ pub fn definitional_eq_with_axioms(
 
 /// Early-exit free-variable test (#100, task #44).
 ///
-/// Returns `true` iff `name` occurs free in `term`.  Walks the
+
+/// Returns `true` iff `name` occurs free in `term`. Walks the
 /// term recursively but returns at the first occurrence — much
 /// faster than computing the full `free_vars` set when only one
 /// answer is needed.
 ///
+
 /// Used by [`substitute`] as a precondition check to short-circuit
 /// the no-op case (`name` doesn't appear → substitute returns a
 /// shallow clone instead of recursively reconstructing).
 ///
+
 /// Binder semantics: `name` is shadowed by `Pi`/`Lam`/`Sigma`
 /// binders that bind `name` exactly — sub-trees under those
 /// binders are skipped, matching `substitute`'s shadow-stop rule.
@@ -1466,17 +1498,20 @@ pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
 
 /// V8 — collect the **free variable set** of a [`CoreTerm`].
 ///
+
 /// A variable `Var(name)` is *free* in a term iff no enclosing
 /// binder (`Pi`, `Lam`, `Sigma`, `Refine`) introduces a binding
 /// for `name`. The walker descends through every sub-term while
 /// maintaining a binder-stack; on encountering a `Var`, it checks
 /// whether `name` is in the stack — if not, it's free.
 ///
+
 /// Returned set is a [`std::collections::BTreeSet`] for
 /// deterministic iteration (the caller often renders the set
 /// into a diagnostic message; sorted output keeps test golden
 /// values stable across hash-DOS-randomised builds).
 ///
+
 /// Used by [`crate::axiom::AxiomRegistry::register_subsingleton`]
 /// to enforce the `K-FwAx` closed-proposition route per
 /// `verification-architecture.md` §4.4.
@@ -1627,25 +1662,30 @@ fn free_vars_rec(
 
 /// Replay an [`SmtCertificate`] into a [`CoreTerm`] witness.
 ///
+
 /// This is the routine that puts Z3 / CVC5 / E / Vampire / Alt-Ergo
 /// **outside** the TCB: any SMT-produced proof must be independently
 /// reconstructed here before the kernel will admit it as a witness.
 ///
+
 /// # Supported certificate shapes
 ///
+
 /// The first phase of the replay ships support for **trust-tag
 /// certificates** — a minimal shape the SMT layer emits when a goal
 /// closes via the standard `Unsat`-means-valid protocol. The
 /// certificate's `trace` is a single-byte tag identifying which of
 /// three rule families the backend used:
 ///
+
 /// * `0x01` — **refl**: the obligation was discharged by
-///   syntactic reflexivity (`E == E`).
+///  syntactic reflexivity (`E == E`).
 /// * `0x02` — **asserted**: the obligation matched a hypothesis
-///   directly.
+///  directly.
 /// * `0x03` — **smt_unsat**: the backend reported `Unsat` on the
-///   negated obligation using a generic theory combination.
+///  negated obligation using a generic theory combination.
 ///
+
 /// For each recognised tag the replay constructs a `CoreTerm::Axiom`
 /// labelled with the backend's name and the rule family. This is
 /// weaker than a full LCF-style step-by-step proof reconstruction —
@@ -1653,6 +1693,7 @@ fn free_vars_rec(
 /// gives the kernel a well-defined *entry point* for more rigorous
 /// replay as the SMT layer starts emitting richer traces.
 ///
+
 /// **Obligation-hash semantics (V8, doc/code reconciliation).**
 /// This function checks that `cert.obligation_hash` is non-empty
 /// (rejecting with [`KernelError::MissingObligationHash`] on
@@ -1665,6 +1706,7 @@ fn free_vars_rec(
 /// threads the expected hash through and rejects on mismatch via
 /// [`KernelError::ObligationHashMismatch`].
 ///
+
 /// Future phases (one per backend): parse Z3's `(proof …)` tree
 /// format, CVC5's `ALETHE` format, reconstruct each rule's witness
 /// term compositionally.
@@ -1735,6 +1777,7 @@ pub fn replay_smt_cert(
 /// V8 — replay an SMT certificate **and** verify its
 /// `obligation_hash` matches the supplied `expected_hash`.
 ///
+
 /// This is the soundness-correct path for any caller that has a
 /// concrete goal in hand (e.g., the gradual-verification driver
 /// computing the expected obligation hash from the goal AST and
@@ -1742,13 +1785,14 @@ pub fn replay_smt_cert(
 /// non-comparison primitive [`replay_smt_cert`] with the explicit
 /// hash equality check the V0 doc *claimed* but didn't perform.
 ///
+
 /// Behaviour:
-///   1. Hash equality is checked **before** replay so a mismatched
-///      certificate doesn't waste backend-table dispatch work.
-///   2. On success, the witness term returned by
-///      [`replay_smt_cert`] is unchanged — the comparison adds no
-///      new failure mode beyond the new
-///      [`KernelError::ObligationHashMismatch`] variant.
+///  1. Hash equality is checked **before** replay so a mismatched
+///  certificate doesn't waste backend-table dispatch work.
+///  2. On success, the witness term returned by
+///  [`replay_smt_cert`] is unchanged — the comparison adds no
+///  new failure mode beyond the new
+///  [`KernelError::ObligationHashMismatch`] variant.
 pub fn replay_smt_cert_with_obligation(
     ctx: &Context,
     cert: &SmtCertificate,
@@ -1764,7 +1808,7 @@ pub fn replay_smt_cert_with_obligation(
 }
 
 // =============================================================================
-// K-Refine V3 — boolean conjunction helpers for refine-of-refine fold.
+// K-Refine — boolean conjunction helpers for refine-of-refine fold.
 // =============================================================================
 
 /// Canonical name of the boolean conjunction connective. Kept as a
@@ -1775,15 +1819,17 @@ pub const CONJUNCTION_NAME: &str = "∧";
 
 /// Build the canonical Bool conjunction `p1 ∧ p2` as a CoreTerm.
 ///
+
 /// Internally the conjunction is encoded as a curried application
 /// `App(App(Var("∧"), p1), p2)` rather than a dedicated AST variant,
 /// so existing kernel infrastructure (substitute, free_vars,
 /// normalize) treats it uniformly with other binary operators.
 ///
+
 /// **Idempotence**: `make_conjunction(p, p)` does NOT collapse to
 /// `p` — that would require knowing the predicate has Bool type,
 /// which the kernel re-checker enforces at refinement-formation
-/// time.  The K-Refine V3 fold relies on this: it calls
+/// time. The K-Refine Refine fold relies on this: it calls
 /// `make_conjunction` only after both predicates have already
 /// passed the V0 K-Refine-Form gate.
 pub fn make_conjunction(p1: &CoreTerm, p2: &CoreTerm) -> CoreTerm {
@@ -1796,7 +1842,7 @@ pub fn make_conjunction(p1: &CoreTerm, p2: &CoreTerm) -> CoreTerm {
 
 /// Recognise a canonical conjunction shape `p1 ∧ p2` produced by
 /// [`make_conjunction`]. Returns `Some((p1, p2))` on match, `None`
-/// otherwise. Used by the K-Refine V3 fold to keep iteration
+/// otherwise. Used by the K-Refine Refine fold to keep iteration
 /// idempotent (a fold that produced `Refine(B, p1 ∧ p2)` must NOT
 /// re-fold against any further predicate without first recognising
 /// the existing conjunction shape).
@@ -1810,22 +1856,26 @@ pub fn is_conjunction(t: &CoreTerm) -> Option<(&CoreTerm, &CoreTerm)> {
     None
 }
 
-/// K-Refine V3 fold:
+/// K-Refine Refine fold:
 ///
-///   `Refine(Refine(B, x: p₁), x: p₂)`  →  `Refine(B, x: p₁ ∧ p₂)`
+
+///  `Refine(Refine(B, x: p₁), x: p₂)` → `Refine(B, x: p₁ ∧ p₂)`
 ///
+
 /// When the outer and inner binders differ, the inner predicate is
 /// alpha-renamed to use the outer binder so the conjunction is
 /// well-scoped (substitute(p₁, inner_binder, Var(outer_binder))).
 ///
+
 /// Returns `Some(folded)` when the term has the canonical
 /// nested-Refine shape; `None` otherwise. Idempotent under
 /// composition: applying twice produces the same shape (the second
 /// application sees `Refine(B, p₁ ∧ p₂)` which is no longer
 /// `Refine(Refine, _)` — fold doesn't trigger).
 ///
+
 /// Soundness: the fold preserves the refinement semantics —
-/// `{ x : { y : B | p₁(y) } | p₂(x) }`  ≡  `{ x : B | p₁(x) ∧ p₂(x) }`
+/// `{ x : { y : B | p₁(y) } | p₂(x) }` ≡ `{ x : B | p₁(x) ∧ p₂(x) }`
 /// for every `x : B` in the underlying type theory (predicate-
 /// extensionality + BHK conjunction = pair-of-proofs).
 pub fn fold_refine_of_refine(term: &CoreTerm) -> Option<CoreTerm> {
@@ -1944,7 +1994,7 @@ mod conjunction_tests {
     #[test]
     fn fold_refine_alpha_renames_inner_binder() {
         // Refine(Refine(B, y: p(y)), x: q(x))
-        //   →  Refine(B, x: p(x) ∧ q(x))
+        //  → Refine(B, x: p(x) ∧ q(x))
         let b = var("Int");
         let inner = CoreTerm::Refine {
             base: Heap::new(b.clone()),
@@ -2031,7 +2081,7 @@ mod conjunction_tests {
     #[test]
     fn fold_refine_three_level_collapses_recursively_when_called_twice() {
         // Refine(Refine(Refine(B, x: p), x: q), x: r)
-        //   first fold: Refine(Refine(B, x: p ∧ q), x: r)  -- WAIT
+        //  first fold: Refine(Refine(B, x: p ∧ q), x: r) -- WAIT
         // Actually the fold is OUTERMOST-only: it folds the top two
         // levels. To fully collapse a 3-level stack the caller must
         // iterate. We pin the OUTERMOST-once contract here.
