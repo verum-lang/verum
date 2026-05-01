@@ -599,6 +599,15 @@ impl<'s> CompilationPipeline<'s> {
             linker_config.use_llvm_linker = true;
         }
 
+        // Wire CLI strip flags into linker config. Closes the
+        // inert-defense pattern: pre-fix the CLI's `--strip` and
+        // `--strip-debug` flags populated
+        // `CompilerOptions.strip_symbols` / `.strip_debug` but
+        // `link_with_config` only read from `LinkingConfig`, so
+        // CLI strip overrides were silently dropped when no
+        // `Verum.toml` was present.
+        apply_strip_options_to_linker_config(self.session.options(), &mut linker_config);
+
         // Wire Windows subsystem (console / GUI) into linker config.
         // The CLI (`--windows-subsystem`) and manifest
         // (`[build].windows_subsystem`) get resolved into
@@ -1004,5 +1013,85 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         Ok(())
+    }
+}
+
+/// Bridge `CompilerOptions.strip_symbols` / `.strip_debug` into the
+/// linker's `LinkingConfig`. Manifest-set keys are OR'd with CLI
+/// flags so a CLI override stacks on top of (rather than replaces)
+/// the manifest's setting — matches the documented "CLI augments
+/// manifest" semantic. `strip` is strictly stronger than
+/// `strip_debug_only` (drops function names too); when both are
+/// set, the linker honours `strip` and ignores `strip_debug_only`
+/// at the cmd-line emission level.
+fn apply_strip_options_to_linker_config(
+    options: &crate::options::CompilerOptions,
+    linker_config: &mut LinkingConfig,
+) {
+    linker_config.strip = linker_config.strip || options.strip_symbols;
+    linker_config.strip_debug_only =
+        linker_config.strip_debug_only || options.strip_debug;
+}
+
+#[cfg(test)]
+mod strip_wiring_tests {
+    use super::*;
+    use crate::options::CompilerOptions;
+
+    fn default_opts() -> CompilerOptions {
+        CompilerOptions::default()
+    }
+
+    /// Pin: CLI `strip_symbols` flag flows into `LinkingConfig.strip`
+    /// even when the manifest didn't set it. Closes the inert-defense
+    /// pattern around the field.
+    #[test]
+    fn cli_strip_symbols_sets_linker_strip() {
+        let mut linker = LinkingConfig::default();
+        assert!(!linker.strip);
+        let mut opts = default_opts();
+        opts.strip_symbols = true;
+        apply_strip_options_to_linker_config(&opts, &mut linker);
+        assert!(linker.strip, "CLI strip_symbols=true must set linker.strip");
+    }
+
+    /// Pin: CLI `strip_debug` flag flows into
+    /// `LinkingConfig.strip_debug_only`.
+    #[test]
+    fn cli_strip_debug_sets_linker_strip_debug_only() {
+        let mut linker = LinkingConfig::default();
+        assert!(!linker.strip_debug_only);
+        let mut opts = default_opts();
+        opts.strip_debug = true;
+        apply_strip_options_to_linker_config(&opts, &mut linker);
+        assert!(
+            linker.strip_debug_only,
+            "CLI strip_debug=true must set linker.strip_debug_only"
+        );
+    }
+
+    /// Pin: CLI flag OR's with manifest setting — neither overrides
+    /// the other. Mirrors the LTO wire-up's "CLI augments manifest"
+    /// semantic.
+    #[test]
+    fn cli_or_with_manifest_strip_settings() {
+        // Manifest already set strip; CLI doesn't override to false.
+        let mut linker = LinkingConfig::default();
+        linker.strip = true;
+        let opts = default_opts(); // strip_symbols defaults to false
+        apply_strip_options_to_linker_config(&opts, &mut linker);
+        assert!(
+            linker.strip,
+            "manifest strip=true must persist when CLI doesn't override"
+        );
+
+        // Manifest didn't set strip; CLI doesn't either — both stay false.
+        let mut linker = LinkingConfig::default();
+        let opts = default_opts();
+        apply_strip_options_to_linker_config(&opts, &mut linker);
+        assert!(
+            !linker.strip,
+            "neither CLI nor manifest set strip — must remain false"
+        );
     }
 }
