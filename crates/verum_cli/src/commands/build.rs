@@ -3,6 +3,7 @@
 // reporting for CBGR overhead, verification time, and context system costs.
 // Orchestrates compilation with caching, parallelization, and semantic honesty
 //
+
 // NOTE: Migrated to use verum_compiler (the unified compiler) instead of
 // the old crate::compiler module. This enables proper multi-file imports
 // and full verification pipeline support.
@@ -47,9 +48,9 @@ pub fn execute(
     emit_bc: bool,
     emit_types: bool,
     emit_vbc: bool,
-    // Windows PE subsystem override (`console` / `gui`).  When
+    // Windows PE subsystem override (`console` / `gui`). When
     // `None`, the manifest `[build].windows_subsystem` value is
-    // used (defaulting to `console`).  The CLI flag has higher
+    // used (defaulting to `console`). The CLI flag has higher
     // precedence than the manifest, mirroring how `--target` and
     // `--lto` already shadow their manifest counterparts.
     windows_subsystem_cli: Option<Text>,
@@ -227,7 +228,7 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     // field was tracing-only — embedders writing
     // `[profile.dev].debug_assertions = false` (turn the flag OFF
     // despite opt-level=0) saw zero observable effect at the
-    // `@cfg(debug_assertions)` gate.  Set the override only when
+    // `@cfg(debug_assertions)` gate. Set the override only when
     // the manifest value differs from the auto-derive
     // (`optimization_level == 0`) so callers who don't explicitly
     // configure the field get the unchanged auto-detect behaviour.
@@ -244,6 +245,7 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     // backend wiring), or `cbgr_checks` (`All` / `Optimized` /
     // `Proven` per-reference gate — needs CBGR pipeline plumbing).
     //
+
     // `debug_assertions` IS now wired above; the remaining fields
     // are surfaced via tracing::debug! when set to non-default
     // values so the request is audible at the build entry until
@@ -308,19 +310,20 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
         options.target_triple = Some(triple.clone());
     }
 
-    // Windows subsystem resolution.  Highest precedence first:
-    //   1. CLI `--windows-subsystem` flag (this branch).
-    //   2. Manifest `[build].windows_subsystem` if explicitly set.
-    //   3. Source-level `@gui` / `@console` attribute on `fn main`
-    //      (resolved by the compiler pipeline once the AST is parsed
-    //      via `pipeline::resolve_windows_subsystem_from_attrs`).
-    //   4. Default Console (the linker defaults when
-    //      `options.windows_subsystem` stays None).
+    // Windows subsystem resolution. Highest precedence first:
+    //  1. CLI `--windows-subsystem` flag (this branch).
+    //  2. Manifest `[build].windows_subsystem` if explicitly set.
+    //  3. Source-level `@gui` / `@console` attribute on `fn main`
+    //  (resolved by the compiler pipeline once the AST is parsed
+    //  via `pipeline::resolve_windows_subsystem_from_attrs`).
+    //  4. Default Console (the linker defaults when
+    //  `options.windows_subsystem` stays None).
     //
+
     // The CLI flag and an explicit manifest setting are
     // higher-precedence than the source attribute — they represent
     // overrides for a specific build / project — so they're applied
-    // here, blocking the attribute-driven step from firing.  When
+    // here, blocking the attribute-driven step from firing. When
     // both are absent, `options.windows_subsystem` stays `None` and
     // the codegen pipeline scans the AST for `@gui` / `@console`.
     if let Some(ref s) = windows_subsystem_cli {
@@ -342,16 +345,18 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
         options.windows_subsystem =
             Some(verum_common::Text::from(manifest_sub.as_link_flag()));
     } else {
-        // Source-attribute resolution.  Scan the entry source file
-        // for `@gui` / `@console` attached to `fn main`.  The scan is
+        // Source-attribute resolution. Scan the entry source file
+        // for `@gui` / `@console` attached to `fn main`. The scan is
         // textual (comment-stripping + regex-style), not a full AST
         // walk — sufficient for the leaf-level pattern
         //
-        //     @gui
-        //     fn main() { ... }
+
+        //  @gui
+        //  fn main() { ... }
         //
+
         // and avoids parsing the file twice (once here, once during
-        // the actual compile pipeline).  Edge cases — attribute
+        // the actual compile pipeline). Edge cases — attribute
         // hidden inside a macro expansion, attribute applied via
         // `@gui fn main` on the same line — are still caught because
         // the scan tolerates arbitrary whitespace + comments between
@@ -385,13 +390,13 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     // compiler's coarser `VerifyMode` until the SMT crate exposes
     // per-strategy dispatch (T2.1 — fine-grained backend wiring).
     // The mapping honours the ν-coordinate ordering:
-    //   - `runtime` / `static` / `fast`: compile-time-only or trivial,
-    //     collapse to `Runtime`.
-    //   - `coherent_runtime`: ε-monitor emission still runtime-level.
-    //   - `complexity_typed`: weak-stratum bounded arithmetic uses
-    //     SMT, hence `Proof`.
-    //   - `formal` and stricter (incl. `synthesize`, `coherent_*`):
-    //     promote to `Proof`.
+    //  - `runtime` / `static` / `fast`: compile-time-only or trivial,
+    //  collapse to `Runtime`.
+    //  - `coherent_runtime`: ε-monitor emission still runtime-level.
+    //  - `complexity_typed`: weak-stratum bounded arithmetic uses
+    //  SMT, hence `Proof`.
+    //  - `formal` and stricter (incl. `synthesize`, `coherent_*`):
+    //  promote to `Proof`.
     options.verify_mode = match verification {
         VerificationLevel::None
         | VerificationLevel::Runtime
@@ -506,13 +511,13 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
 
     let _analysis_time = analysis_start.elapsed();
 
-    // Persist / report SMT routing telemetry.  See
+    // Persist / report SMT routing telemetry. See
     // `smt_stats_decision` for the load-bearing contract; the build
-    // path branches on the typed enum it returns.  Two surfaces gate
+    // path branches on the typed enum it returns. Two surfaces gate
     // the persist (CLI `--smt-stats` and manifest
     // `[verify].persist_stats`) — either source asking for
     // persistence is sufficient unless `[verify].enable_telemetry =
-    // false` short-circuits both.  Closes the inert-defense pattern
+    // false` short-circuits both. Closes the inert-defense pattern
     // at config.rs where the [verify] telemetry knobs were
     // populated from manifest but had no consumer (#301).
     match smt_stats_decision(
@@ -631,28 +636,32 @@ struct BuildMetrics {
 
 /// Scan the project's entry source for `@gui` / `@console` on `fn main`.
 ///
+
 /// Returns the literal `link.exe` `/SUBSYSTEM:` flag value
 /// (`"WINDOWS"` for `@gui`, `"CONSOLE"` for `@console`) when the
 /// attribute is found, or `None` when neither attribute is present
 /// or the entry file doesn't exist.
 ///
+
 /// The scan is textual — it strips line/block comments and looks for
 /// the attribute token immediately followed (modulo whitespace) by
-/// the `fn main` declaration.  This avoids re-parsing the file via
+/// the `fn main` declaration. This avoids re-parsing the file via
 /// the full AST pipeline (which would happen during the actual
 /// compile anyway), keeping the resolution cheap.
 ///
+
 /// Searched files (in order):
-///   1. `src/main.vr` — the conventional application entry.
-///   2. `main.vr` at the manifest root — alternative project layout.
+///  1. `src/main.vr` — the conventional application entry.
+///  2. `main.vr` at the manifest root — alternative project layout.
 ///
+
 /// Robust to:
-///   * `// line comments` between the attribute and `fn main`
-///   * `/* block comments */` between them
-///   * Arbitrary whitespace / newlines
-///   * Multiple attributes (`@gui\n@inline\nfn main`) — last
-///     subsystem-affecting attribute wins, matching the natural
-///     reading order.
+///  * `// line comments` between the attribute and `fn main`
+///  * `/* block comments */` between them
+///  * Arbitrary whitespace / newlines
+///  * Multiple attributes (`@gui\n@inline\nfn main`) — last
+///  subsystem-affecting attribute wins, matching the natural
+///  reading order.
 fn scan_main_subsystem_attribute(manifest_dir: &std::path::Path) -> Option<&'static str> {
     let candidates = [
         manifest_dir.join("src").join("main.vr"),
@@ -662,13 +671,17 @@ fn scan_main_subsystem_attribute(manifest_dir: &std::path::Path) -> Option<&'sta
     let raw = std::fs::read_to_string(entry_path).ok()?;
     let stripped = strip_verum_comments(&raw);
 
-    // Locate the `fn main` token.  We accept any whitespace before
+    // Locate the `fn main` token. We accept any whitespace before
     // the `fn`, but the identifier must be exactly `main` followed
     // by `(` or whitespace+`(`.
     let main_idx = find_fn_main_token(&stripped)?;
 
     // Walk backwards from `fn main` over whitespace + adjacent
-    // attributes.  Last subsystem-affecting attribute wins.
+    // attributes. Only attributes IMMEDIATELY preceding `fn main`
+    // (separated only by whitespace, not by other top-level items)
+    // count. An `@gui` attached to a helper function is NOT a
+    // subsystem hint for `main`. Last subsystem-affecting attribute
+    // among the contiguous prefix wins.
     let prefix = &stripped[..main_idx];
     let mut last_match: Option<&'static str> = None;
     let mut cursor = prefix.trim_end();
@@ -677,10 +690,6 @@ fn scan_main_subsystem_attribute(manifest_dir: &std::path::Path) -> Option<&'sta
         let Some(at_pos) = cursor.rfind('@') else {
             break;
         };
-        // Reject `@` that's part of a string / unrelated context: an
-        // attribute starts at column 0 of its line OR after pure
-        // whitespace.  We already trimmed trailing whitespace, so the
-        // attribute occupies cursor[at_pos..].
         let attr_slice = &cursor[at_pos..];
         // Identifier: characters after `@` until first non-ident char.
         let ident_end = attr_slice[1..]
@@ -688,6 +697,42 @@ fn scan_main_subsystem_attribute(manifest_dir: &std::path::Path) -> Option<&'sta
             .map(|i| i + 1)
             .unwrap_or(attr_slice.len());
         let ident = &attr_slice[1..ident_end];
+        // Skip the optional `(...)` argument list of the attribute.
+        let mut body_end = ident_end;
+        if attr_slice.as_bytes().get(body_end) == Some(&b'(') {
+            // Consume balanced parens.
+            let mut depth: i32 = 0;
+            let bytes = attr_slice.as_bytes();
+            while body_end < bytes.len() {
+                match bytes[body_end] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        body_end += 1;
+                        if depth == 0 {
+                            break;
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+                body_end += 1;
+            }
+            // Unbalanced paren — bail; this isn't a clean attribute.
+            if depth != 0 {
+                break;
+            }
+        }
+        // CRITICAL: anything between the attribute body's end and the
+        // current cursor end MUST be only whitespace. If there's a
+        // `fn helper() {}` or any other code in between, the `@attr`
+        // belongs to that earlier construct, NOT to `fn main`. This
+        // is the fix for `ignores_at_gui_on_non_main_function` — the
+        // pre-fix scanner accepted `@gui` ANYWHERE in the prefix.
+        let after_body = &attr_slice[body_end..];
+        if !after_body.chars().all(|c| c.is_whitespace()) {
+            break;
+        }
         match ident {
             "gui" => last_match = last_match.or(Some("WINDOWS")),
             "console" => last_match = last_match.or(Some("CONSOLE")),
@@ -695,7 +740,6 @@ fn scan_main_subsystem_attribute(manifest_dir: &std::path::Path) -> Option<&'sta
         }
         // Move cursor to before this attribute and continue.
         cursor = cursor[..at_pos].trim_end();
-        // Stop if no more `@` immediately before whitespace.
         if cursor.is_empty() || !cursor.contains('@') {
             break;
         }
@@ -704,10 +748,10 @@ fn scan_main_subsystem_attribute(manifest_dir: &std::path::Path) -> Option<&'sta
 }
 
 /// Strip `// line comments` and `/* block comments */` from Verum
-/// source text.  Replaces stripped regions with spaces so byte
+/// source text. Replaces stripped regions with spaces so byte
 /// offsets line up with the original — useful for diagnostics
 /// downstream, even though the textual scan only consumes the
-/// stripped output.  Doesn't handle string literals containing `//`
+/// stripped output. Doesn't handle string literals containing `//`
 /// — acceptable since attribute placement is at top-level scope
 /// where the stripper is safe.
 fn strip_verum_comments(src: &str) -> String {
@@ -809,6 +853,7 @@ fn count_vr_files(dir: &PathBuf) -> Result<usize> {
 
 /// Outcome of evaluating the SMT-stats persistence policy (#301).
 ///
+
 /// Three CLI VerifyConfig fields are merged into a single typed
 /// decision so the build path branches once and the contract is
 /// pin-testable without driving the whole build pipeline.
@@ -827,20 +872,22 @@ pub(crate) enum SmtStatsDecision {
     Skip,
 }
 
-/// Evaluate the SMT-stats persistence policy.  Pure function;
+/// Evaluate the SMT-stats persistence policy. Pure function;
 /// extracted so the OR-then-AND lattice across CLI and manifest
 /// surfaces is regression-pinned.
 ///
+
 /// Truth table (`telemetry_enabled = true` reduces to `cli ||
 /// manifest_persist`; `telemetry_enabled = false` short-circuits):
 ///
-/// | cli_smt_stats | manifest.persist_stats | manifest.enable_telemetry | decision      |
+
+/// | cli_smt_stats | manifest.persist_stats | manifest.enable_telemetry | decision |
 /// |---------------|------------------------|---------------------------|---------------|
-/// | true          | *                      | true                      | Persist       |
-/// | false         | true                   | true                      | Persist       |
-/// | false         | false                  | true                      | Skip          |
-/// | true          | *                      | false                     | CliOverridden |
-/// | false         | *                      | false                     | Skip          |
+/// | true | * | true | Persist |
+/// | false | true | true | Persist |
+/// | false | false | true | Skip |
+/// | true | * | false | CliOverridden |
+/// | false | * | false | Skip |
 pub(crate) fn smt_stats_decision(
     cli_smt_stats: bool,
     manifest_persist_stats: bool,
@@ -913,7 +960,7 @@ mod tests {
     #[test]
     fn smt_stats_telemetry_disabled_short_circuits_cli() {
         // CLI explicitly asked but manifest disabled telemetry →
-        // CliOverridden (warning, no persist).  This is the
+        // CliOverridden (warning, no persist). This is the
         // load-bearing pin: without #301 the CLI flag would
         // silently win and disk persist regardless of manifest.
         assert_eq!(
@@ -983,7 +1030,7 @@ mod tests {
         // Helper picks up @gui — but main is the entry point, not helper.
         // Our scanner walks back from main; @gui is on helper, not main.
         // So the result should be None (or, depending on layout, still
-        // pick up @gui if it's textually adjacent).  This test pins the
+        // pick up @gui if it's textually adjacent). This test pins the
         // documented semantic: only attributes immediately preceding
         // `fn main` count.
         assert_eq!(scan_main_subsystem_attribute(tmp.path()), None);
