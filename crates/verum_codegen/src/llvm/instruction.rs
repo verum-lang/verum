@@ -351,21 +351,20 @@ fn get_or_declare_internal_puts<'ctx>(
     let func = module.add_function(wrapper_name, fn_type, None);
     func.set_linkage(verum_llvm::module::Linkage::Internal);
 
-    // Declare verum_internal_strlen (i64 strlen(ptr)).
-    let strlen_fn = module
-        .get_function("verum_internal_strlen")
-        .unwrap_or_else(|| {
-            let ft = i64_type.fn_type(&[ptr_type.into()], false);
-            module.add_function("verum_internal_strlen", ft, None)
-        });
-
-    // Declare verum_internal_write (i64 write(i64 fd, ptr buf, i64 count)).
-    let write_fn = module
-        .get_function("verum_internal_write")
-        .unwrap_or_else(|| {
-            let ft = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
-            module.add_function("verum_internal_write", ft, None)
-        });
+    // Route through `RuntimeLowering` so the bodies of
+    // `verum_internal_strlen` (open-coded byte-scan) and
+    // `verum_internal_write` (Linux: SYS_write syscall; macOS:
+    // __verum_libsys_write attribute → libSystem write) are emitted
+    // alongside the declaration.  Pre-fix this site only declared
+    // them bodyless and hoped some other emit path would fill them
+    // — which it doesn't for hello-world (the file-I/O emit chain
+    // doesn't run when no fs intrinsics are referenced).  The
+    // bodyless-decl fallback in `vbc_lowering.rs` then synthesised
+    // a `mov w0, #0; ret` stub, silently zero-returning every
+    // strlen/write call.  Closure of #78 (AOT hello-world).
+    let runtime = super::runtime::RuntimeLowering::new(llvm_ctx);
+    let strlen_fn = runtime.get_or_declare_strlen(module);
+    let write_fn = runtime.get_or_declare_write(module);
 
     let entry = llvm_ctx.append_basic_block(func, "entry");
     let builder = llvm_ctx.create_builder();

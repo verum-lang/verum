@@ -107,6 +107,41 @@ pub struct RuntimeLowering<'ctx> {
     context: &'ctx Context,
 }
 
+/// Get-or-declare a bare-named external function that the
+/// platform linker is expected to resolve to libSystem
+/// (macOS) / kernel32+ntdll (Windows) / nothing-on-Linux
+/// (the Linux paths use direct syscalls, so this helper
+/// is never invoked on Linux).
+///
+/// Returns the existing function if already declared with the
+/// expected signature, or adds a new declaration if not.
+///
+/// **Why a separate helper?** Per
+/// `docs/architecture/no-libc-architecture.md`, the macOS path
+/// is libSystem-only — calling `_write` / `_read` / `_close`
+/// directly is the canonical no-libc-on-glibc/musl path.
+/// Pre-fix the runtime emitted an internal-linkage indirection
+/// `__verum_libsys_<name>` tagged with a `verum.libsys`
+/// attribute, then assumed a downstream pass would resolve the
+/// indirection.  No such pass existed; the bodyless declaration
+/// fell through to `vbc_lowering.rs`'s safety-net stub
+/// synthesiser (`mov w0, #0; ret`), which silently zero-returned
+/// every libSystem call on macOS — most visibly turning AOT
+/// hello-world into a no-output program (#78).
+///
+/// This helper replaces the indirection with a direct extern.
+fn libsys_extern<'ctx>(
+    _ctx: &'ctx Context,
+    module: &Module<'ctx>,
+    name: &str,
+    fn_type: verum_llvm::types::FunctionType<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    if let Some(f) = module.get_function(name) {
+        return f;
+    }
+    module.add_function(name, fn_type, None)
+}
+
 impl<'ctx> RuntimeLowering<'ctx> {
     /// Create a new runtime lowering helper.
     pub fn new(context: &'ctx Context) -> Self {
@@ -9668,17 +9703,31 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// `i64` for fd (matching the historical caller convention in
     /// `runtime.rs`), but the kernel ABI takes i32; we truncate
     /// before issuing the syscall.
-    fn get_or_declare_write(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+    pub(crate) fn get_or_declare_write(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_write";
-        if let Some(f) = module.get_function(wrapper_name) {
-            return f;
-        }
+        // Adopt-and-emit pattern (parallels `get_or_declare_strlen`).
+        // `get_or_declare_internal_puts` (instruction.rs) forward-
+        // declares `verum_internal_write` so it can build calls before
+        // we run; we must *fill* that declaration, not skip past it.
+        // Pre-fix this short-circuit returned the bodyless decl,
+        // leaving the binary with a `mov x0, #0; ret` stub for every
+        // write call — the visible failure shape was AOT hello-world
+        // exiting 0 with no stdout output (#78).
+        let wrapper = match module.get_function(wrapper_name) {
+            Some(f) if f.count_basic_blocks() > 0 => return f,
+            Some(f) => f, // adopt the existing bodyless declaration
+            None => {
+                let ptr_type = self.context.ptr_type(AddressSpace::default());
+                let i64_type = self.context.i64_type();
+                let fn_type = i64_type
+                    .fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
+                let f = module.add_function(wrapper_name, fn_type, None);
+                f.set_linkage(verum_llvm::module::Linkage::Internal);
+                f
+            }
+        };
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
-
-        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
-        let wrapper = module.add_function(wrapper_name, fn_type, None);
-        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
 
         let entry = self.context.append_basic_block(wrapper, "entry");
         let builder = self.context.create_builder();
@@ -9700,24 +9749,34 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("write syscall");
             builder.build_return(Some(&ret)).expect("write return");
         } else {
-            let libsys_write = module
-                .get_function("__verum_libsys_write")
-                .unwrap_or_else(|| {
-                    let f = module.add_function(
-                        "__verum_libsys_write",
-                        i64_type
-                            .fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
-                        None,
-                    );
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        self.context
-                            .create_string_attribute("verum.libsys", "write"),
-                    );
-                    f
-                });
+            // macOS / other-Unix path: route through libSystem.B.dylib's
+            // `write` symbol.  Pre-fix this code declared an internal
+            // alias `__verum_libsys_write` tagged with a `verum.libsys`
+            // attribute and assumed a downstream pass would resolve it
+            // to libSystem — but no such pass exists, so the bodyless
+            // declaration fell through to the `vbc_lowering.rs`
+            // safety-net synthesiser which emitted `mov w0, #0; ret`.
+            // Visible failure: AOT hello-world exited 0 with no stdout
+            // (#78).  Fix: declare a bare `write` extern (with i32 fd
+            // matching the C ABI) and call it directly — clang's
+            // macOS auto-link pulls in libSystem, so the linker
+            // resolves `_write` to libSystem's symbol at link time.
+            let i32_type = self.context.i32_type();
+            let libsys_write = libsys_extern(
+                self.context,
+                module,
+                "write",
+                // ssize_t write(int fd, const void *buf, size_t count)
+                i64_type.fn_type(
+                    &[i32_type.into(), ptr_type.into(), i64_type.into()],
+                    false,
+                ),
+            );
+            let fd32 = builder
+                .build_int_truncate(fd, i32_type, "fd32")
+                .expect("write fd trunc");
             let ret = builder
-                .build_call(libsys_write, &[fd.into(), buf.into(), count.into()], "ret")
+                .build_call(libsys_write, &[fd32.into(), buf.into(), count.into()], "ret")
                 .expect("write libsys call")
                 .try_as_basic_value()
                 .basic()
@@ -9913,18 +9972,33 @@ impl<'ctx> RuntimeLowering<'ctx> {
     ///
 
     /// See `docs/architecture/no-libc-architecture.md`.
-    fn get_or_declare_strlen(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+    pub(crate) fn get_or_declare_strlen(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_strlen";
-        if let Some(f) = module.get_function(wrapper_name) {
-            return f;
-        }
+        // Adopt-and-emit if a prior site declared this wrapper without
+        // a body — `get_or_declare_internal_puts` (instruction.rs)
+        // forward-declares `verum_internal_strlen` purely to build
+        // calls into it, leaving the body for us to fill.  Returning
+        // the bodyless declaration here would leave the binary linked
+        // against an empty stub (LLVM's bodyless-decl synthesiser
+        // would emit `mov x0, #0; ret`) — silently zero-returning
+        // every call to strlen.  Distinguish via `count_basic_blocks`:
+        // > 0 means the body is already emitted (idempotent re-entry);
+        // == 0 means we still need to fill it.
+        let func = match module.get_function(wrapper_name) {
+            Some(f) if f.count_basic_blocks() > 0 => return f,
+            Some(f) => f, // adopt the existing bodyless declaration
+            None => {
+                let ptr_type = self.context.ptr_type(AddressSpace::default());
+                let i64_type = self.context.i64_type();
+                let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+                let f = module.add_function(wrapper_name, fn_type, None);
+                f.set_linkage(verum_llvm::module::Linkage::Internal);
+                f
+            }
+        };
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
-
-        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = module.add_function(wrapper_name, fn_type, None);
-        func.set_linkage(verum_llvm::module::Linkage::Internal);
 
         let entry = self.context.append_basic_block(func, "entry");
         let loop_check = self.context.append_basic_block(func, "loop_check");
