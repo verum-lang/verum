@@ -74,6 +74,26 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         method_name.clone()
     };
 
+    // **High-level Rust intercept** — TcpStream method calls
+    // (`read`, `write`, `flush`, `close`) bypass the libSystem
+    // `sys_send`/`sys_recv`/`sys_close` FFI chain.  See VBC-NET-2
+    // architecture notes and `net_runtime::try_intercept_tcp_method`.
+    {
+        let caller_base = state.reg_base();
+        if let Some(result) = super::net_runtime::try_intercept_tcp_method(
+            state,
+            &method_name,
+            &bare_method_name,
+            receiver,
+            args.start.0,
+            args.count,
+            caller_base,
+        )? {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     // Try generator methods (next, has_next, collect) first
     // These are dispatched to the corresponding GenNext/GenHasNext handlers
     if receiver.is_generator() {
