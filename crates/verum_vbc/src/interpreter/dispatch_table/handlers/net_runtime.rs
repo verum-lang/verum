@@ -287,6 +287,73 @@ pub fn tcp_local_port(fd: i64) -> i64 {
     }
 }
 
+/// Read the connected-peer address of a TCP fd via the registry's
+/// `peer_addr()` (synthetic-fd path) or `getpeername(2)` (real-fd
+/// path).  Returns the peer as a `(family, host_str, port)` tuple
+/// where family is 4 or 6.  None when the fd isn't tracked or the
+/// kernel call fails.  Used by VBC-NET-4 for peer_addr round-trip
+/// in `TcpStream` records.
+pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
+    // Fast path: registry → std::net::TcpStream::peer_addr.
+    let from_registry = REGISTRY.with(|r| {
+        let map = r.borrow();
+        match map.get(&fd) {
+            Some(NetResource::Stream(s)) => s.peer_addr().ok(),
+            _ => None,
+        }
+    });
+    if let Some(addr) = from_registry {
+        let port = addr.port() as i64;
+        return match addr {
+            std::net::SocketAddr::V4(v4) => Some((4, v4.ip().to_string(), port)),
+            std::net::SocketAddr::V6(v6) => Some((6, v6.ip().to_string(), port)),
+        };
+    }
+    // Real-fd path: `getpeername(2)` on the kernel fd.  Mirrors the
+    // shape used in `tcp_local_port`.
+    #[cfg(unix)]
+    unsafe {
+        let mut sa = [0u8; 28];
+        let mut sa_len: libc::socklen_t = 28;
+        let rc = libc::getpeername(
+            fd as libc::c_int,
+            sa.as_mut_ptr() as *mut libc::sockaddr,
+            &mut sa_len,
+        );
+        if rc < 0 {
+            return None;
+        }
+        // sa_family at offset 0.  AF_INET = 2, AF_INET6 = 30 (BSD)
+        // or 10 (Linux).  The cross-family detection here uses the
+        // libc constants directly.
+        let family = sa[0] as i32;
+        let port_be = u16::from_be_bytes([sa[2], sa[3]]);
+        let port = port_be as i64;
+        if family == libc::AF_INET {
+            // sockaddr_in: sin_addr at offset 4 (4 bytes).
+            let host = format!("{}.{}.{}.{}", sa[4], sa[5], sa[6], sa[7]);
+            return Some((4, host, port));
+        }
+        if family == libc::AF_INET6 {
+            // sockaddr_in6: sin6_addr at offset 8 (16 bytes).  Build
+            // the canonical hex representation; std::net::Ipv6Addr's
+            // Display gives RFC 5952 with `::` compression.
+            let octets: [u8; 16] = [
+                sa[8], sa[9], sa[10], sa[11], sa[12], sa[13], sa[14], sa[15],
+                sa[16], sa[17], sa[18], sa[19], sa[20], sa[21], sa[22], sa[23],
+            ];
+            let v6 = std::net::Ipv6Addr::from(octets);
+            return Some((6, v6.to_string(), port));
+        }
+        None
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = fd;
+        None
+    }
+}
+
 pub fn tcp_accept(listen_fd: i64) -> i64 {
     // Pull the listener out of the registry briefly so we don't hold
     // a RefCell borrow across the (potentially blocking) accept call.
@@ -302,18 +369,64 @@ pub fn tcp_accept(listen_fd: i64) -> i64 {
             }
         }
     });
-    let listener = match listener {
-        Some(l) => l,
-        None => return -1,
-    };
-    let result = listener.accept();
-    // Re-register the listener so a subsequent accept() call sees it.
-    REGISTRY.with(|r| {
-        r.borrow_mut().insert(listen_fd, NetResource::Listener(listener));
-    });
-    match result {
-        Ok((stream, _peer)) => register(NetResource::Stream(stream)),
-        Err(_) => -1,
+    if let Some(listener) = listener {
+        // Synthetic-fd path (legacy `__tcp_listen_raw`).
+        let result = listener.accept();
+        REGISTRY.with(|r| {
+            r.borrow_mut().insert(listen_fd, NetResource::Listener(listener));
+        });
+        return match result {
+            Ok((stream, _peer)) => register(NetResource::Stream(stream)),
+            Err(_) => -1,
+        };
+    }
+
+    // Real-kernel-fd path (`__tcp_listen_v2_raw` returns a real fd via
+    // `IntoRawFd::into_raw_fd()` — see commit c15df24b).  REGISTRY
+    // lookup misses, so we wrap the raw fd into a `TcpListener` long
+    // enough to call accept(2), then immediately surrender ownership
+    // back via `into_raw_fd()` to keep the listener alive (`TcpListener::Drop`
+    // would close the kernel fd otherwise).  The accepted connection's
+    // stream is registered in REGISTRY so subsequent recv/send/close
+    // continue through the existing synthetic-fd machinery without
+    // change.
+    //
+    // Cross-platform: Unix uses FromRawFd; Windows uses FromRawSocket.
+    // Other platforms have no real-fd accept path — fall through to -1.
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::{FromRawFd, IntoRawFd};
+        // SAFETY: `listen_fd` came from `__tcp_listen_v2_raw`'s
+        // `IntoRawFd::into_raw_fd()`.  The fd is valid and owned by
+        // the Verum runtime until `__tcp_close_raw` is called.
+        // `TcpListener::from_raw_fd` takes ownership; we hand it back
+        // via `into_raw_fd()` immediately after accept to keep the
+        // kernel fd alive across calls.
+        let listener = unsafe { TcpListener::from_raw_fd(listen_fd as i32) };
+        let result = listener.accept();
+        // Surrender ownership: kernel fd survives, TcpListener drops
+        // without closing.
+        let _surrendered_fd = listener.into_raw_fd();
+        match result {
+            Ok((stream, _peer)) => register(NetResource::Stream(stream)),
+            Err(_) => -1,
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+        let listener = unsafe { TcpListener::from_raw_socket(listen_fd as u64) };
+        let result = listener.accept();
+        let _surrendered = listener.into_raw_socket();
+        match result {
+            Ok((stream, _peer)) => register(NetResource::Stream(stream)),
+            Err(_) => -1,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = listen_fd;
+        -1
     }
 }
 
@@ -328,19 +441,55 @@ pub fn tcp_connect(host: &str, port: i64) -> i64 {
 }
 
 pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
-    // Write under the borrow because we just need a &mut TcpStream.
-    REGISTRY.with(|r| {
+    // First try the synthetic-fd registry path (legacy `__tcp_*_raw`).
+    let registry_result: Option<i64> = REGISTRY.with(|r| {
         let mut map = r.borrow_mut();
         match map.get_mut(&fd) {
             Some(NetResource::Stream(s)) => {
-                match s.write_all(data) {
+                Some(match s.write_all(data) {
                     Ok(()) => data.len() as i64,
                     Err(_) => -1,
-                }
+                })
             }
-            _ => -1,
+            _ => None,
         }
-    })
+    });
+    if let Some(rc) = registry_result {
+        return rc;
+    }
+
+    // Real-kernel-fd path: a v2-listener-accepted connection that
+    // somehow leaked into raw-fd form (or a future intrinsic that
+    // returns raw fds directly).  Wrap fd in a TcpStream long enough
+    // to call write_all, then surrender ownership.
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::{FromRawFd, IntoRawFd};
+        // SAFETY: caller-supplied fd is documented as a real kernel
+        // fd in this fallback branch; the synthetic-fd table missed.
+        let mut stream = unsafe { TcpStream::from_raw_fd(fd as i32) };
+        let result = stream.write_all(data);
+        let _surrendered = stream.into_raw_fd();
+        return match result {
+            Ok(()) => data.len() as i64,
+            Err(_) => -1,
+        };
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+        let mut stream = unsafe { TcpStream::from_raw_socket(fd as u64) };
+        let result = stream.write_all(data);
+        let _surrendered = stream.into_raw_socket();
+        return match result {
+            Ok(()) => data.len() as i64,
+            Err(_) => -1,
+        };
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        -1
+    }
 }
 
 pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
@@ -349,15 +498,45 @@ pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
     }
     let cap = max_len.min(1 << 20) as usize; // hard-cap 1 MiB / call.
     let mut buf = vec![0_u8; cap];
-    let n = REGISTRY.with(|r| {
+    // Synthetic-fd registry path first.
+    let registry_result: Option<Option<usize>> = REGISTRY.with(|r| {
         let mut map = r.borrow_mut();
         match map.get_mut(&fd) {
-            Some(NetResource::Stream(s)) => s.read(&mut buf).ok(),
+            Some(NetResource::Stream(s)) => Some(s.read(&mut buf).ok()),
             _ => None,
         }
-    })?;
-    buf.truncate(n);
-    Some(String::from_utf8_lossy(&buf).into_owned())
+    });
+    if let Some(read_result) = registry_result {
+        let n = read_result?;
+        buf.truncate(n);
+        return Some(String::from_utf8_lossy(&buf).into_owned());
+    }
+
+    // Real-kernel-fd fallback.
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::{FromRawFd, IntoRawFd};
+        let mut stream = unsafe { TcpStream::from_raw_fd(fd as i32) };
+        let result = stream.read(&mut buf).ok();
+        let _surrendered = stream.into_raw_fd();
+        let n = result?;
+        buf.truncate(n);
+        Some(String::from_utf8_lossy(&buf).into_owned())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+        let mut stream = unsafe { TcpStream::from_raw_socket(fd as u64) };
+        let result = stream.read(&mut buf).ok();
+        let _surrendered = stream.into_raw_socket();
+        let n = result?;
+        buf.truncate(n);
+        Some(String::from_utf8_lossy(&buf).into_owned())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
 }
 
 pub fn tcp_close(fd: i64) -> i64 {
@@ -594,6 +773,7 @@ pub(in super::super) fn try_intercept_net_runtime(
     }
     let bare = func_name.rsplit('.').next().unwrap_or(func_name);
     let is_udp = func_name.contains("UdpSocket.") || func_name.contains("net.udp");
+    let is_listener = func_name.contains("TcpListener.");
     match bare {
         // `TcpStream.connect<A: ToSocketAddrs>(addr: A) ->
         // Result<TcpStream, IoError>` — see `intercept_connect_text`.
@@ -605,6 +785,16 @@ pub(in super::super) fn try_intercept_net_runtime(
         // `socket(2)` + `bind(2)` via net_runtime::udp_bind.
         "bind" if arg_count == 1 && is_udp => {
             intercept_udp_bind_text(state, args_start_reg, caller_base)
+        }
+        // `TcpListener.bind<A: ToSocketAddrs>(addr: A) ->
+        // Result<TcpListener, IoError>` — bypass the iterator-bound
+        // path that crashes at `SocketAddr.ip` opcode 0x62 null-deref
+        // (the iteration's yielded SocketAddr value carries a stale
+        // pointer for some shape variants).  Routes through
+        // `net_runtime::tcp_listen_v2` and constructs a real
+        // TcpListener record.
+        "bind" if arg_count == 1 && is_listener => {
+            intercept_listener_bind_text(state, args_start_reg, caller_base)
         }
         _ => Ok(None),
     }
@@ -654,15 +844,76 @@ fn intercept_connect_text(
     // tracing `stream.write(self)` — the receiver's field 0 reads
     // back as `Value::is_int() == true`).  Store the fd directly.
     let fd_value = Value::from_i64(fd);
-    // peer_addr: best-effort SocketAddr.V4 reconstruction from
-    // the resolved (host, port).  When we can't parse the host as
-    // an IPv4 literal, omit the peer_addr field by storing Unit —
-    // the script's `Ok(_)` arm in the canonical test ignores the
-    // payload anyway.  V1 follow-up: round-trip via
-    // `getpeername(2)` on the live fd for the truly-resolved peer.
-    let peer_addr = build_peer_addr(state, &host, port).unwrap_or(Value::unit());
+    // peer_addr: round-trip via `getpeername(2)` on the live fd
+    // for the truly-resolved peer.  Handles IPv4, IPv6, and
+    // DNS-resolved hosts uniformly — the kernel reports the actual
+    // family + address it ended up connecting to.  Falls back to
+    // the input host:port literal when the peer query fails (e.g.,
+    // disconnected before we could query).
+    let peer_addr = match tcp_peer_addr(fd) {
+        Some((4, ip, p)) => build_peer_addr(state, &ip, p).unwrap_or(Value::unit()),
+        Some((6, ip, p)) => build_peer_addr_v6(state, &ip, p).unwrap_or(Value::unit()),
+        _ => build_peer_addr(state, &host, port).unwrap_or(Value::unit()),
+    };
     let stream = alloc_record_n_fields(state, "TcpStream", &[fd_value, peer_addr])?;
     Ok(Some(wrap_in_variant(state, "Result", 0, &[stream])?))
+}
+
+/// Intercept `TcpListener.bind(&Text)` — bind a kernel-side
+/// listener via `net_runtime::tcp_listen_v2` (which already registers
+/// the fd in the REGISTRY), then construct a `TcpListener { fd,
+/// local_addr }` record so subsequent `accept()` / `local_addr()`
+/// calls work via the standard method-dispatch hook.  Bypasses
+/// the iterator-bound bytecode path that crashes at SocketAddr.ip
+/// opcode 0x62 null-deref.
+fn intercept_listener_bind_text(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    if let Some(denied) = check_net_permission(state) {
+        return Ok(Some(denied));
+    }
+    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
+    if addr_text.is_empty() || !addr_text.contains(':') {
+        return Ok(None);
+    }
+    let (host, port) = match addr_text.rsplit_once(':') {
+        Some((h, p)) => match p.parse::<u16>() {
+            Ok(n) => (
+                h.trim_matches(|c| c == '[' || c == ']').to_string(),
+                n as i64,
+            ),
+            Err(_) => return Ok(None),
+        },
+        None => return Ok(None),
+    };
+    let fd = tcp_listen_v2(&host, port, 1024, 0);
+    if fd < 0 {
+        return Ok(Some(build_io_err(
+            state,
+            "AddrInUse",
+            6,
+            &format!("listener.bind: tcp_listen_v2({}:{}) failed errno={}", host, port, -fd),
+        )?));
+    }
+    // Resolve the actually-bound port (handles port=0 / kernel-
+    // assigned).  `tcp_local_port` walks the registry first then
+    // falls through to getsockname for real fds.
+    let bound_port = tcp_local_port(fd);
+    let bound_port = if bound_port > 0 { bound_port } else { port };
+    // FileDesc transparent-newtype Int.
+    let fd_value = Value::from_i64(fd);
+    // local_addr: try IPv6 first (covers "::", "::1") then IPv4.
+    let local_addr = if host.contains(':') {
+        build_peer_addr_v6(state, &host, bound_port).unwrap_or_else(|| {
+            build_peer_addr(state, &host, bound_port).unwrap_or(Value::unit())
+        })
+    } else {
+        build_peer_addr(state, &host, bound_port).unwrap_or(Value::unit())
+    };
+    let listener = alloc_record_n_fields(state, "TcpListener", &[fd_value, local_addr])?;
+    Ok(Some(wrap_in_variant(state, "Result", 0, &[listener])?))
 }
 
 /// Intercept `UdpSocket.bind(&Text)` — bind via std::net::UdpSocket
@@ -746,6 +997,49 @@ fn build_peer_addr(
     )
     .ok()?;
     wrap_in_variant(state, "SocketAddr", 0, &[v4]).ok()
+}
+
+/// IPv6 sibling to `build_peer_addr`.  Constructs
+/// `SocketAddr.V6(SocketAddrV6 { ip: Ipv6Addr { (s0..s7) }, port,
+/// flowinfo: 0, scope_id: 0 })` from an IPv6 literal in any
+/// canonical form (`::1`, `2001:db8::1`, `[::]`).  Returns None
+/// when the literal doesn't parse — caller falls back to Unit.
+/// Used by VBC-NET-4 for IPv6 peer_addr round-trip.
+fn build_peer_addr_v6(
+    state: &mut InterpreterState,
+    host: &str,
+    port: i64,
+) -> Option<Value> {
+    let host = host.trim_matches(|c| c == '[' || c == ']');
+    let ipv6: std::net::Ipv6Addr = host.parse().ok()?;
+    let segs = ipv6.segments();
+    let segments_record = alloc_record_n_fields(
+        state,
+        "Ipv6Addr",
+        &[
+            Value::from_i64(segs[0] as i64),
+            Value::from_i64(segs[1] as i64),
+            Value::from_i64(segs[2] as i64),
+            Value::from_i64(segs[3] as i64),
+            Value::from_i64(segs[4] as i64),
+            Value::from_i64(segs[5] as i64),
+            Value::from_i64(segs[6] as i64),
+            Value::from_i64(segs[7] as i64),
+        ],
+    )
+    .ok()?;
+    let v6 = alloc_record_n_fields(
+        state,
+        "SocketAddrV6",
+        &[
+            segments_record,
+            Value::from_i64(port),
+            Value::from_i64(0), // flowinfo
+            Value::from_i64(0), // scope_id
+        ],
+    )
+    .ok()?;
+    wrap_in_variant(state, "SocketAddr", 1, &[v6]).ok()
 }
 
 fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
@@ -886,13 +1180,15 @@ pub(in super::super) fn try_intercept_tcp_method(
     } else {
         receiver
     };
-    // UdpSocket method dispatch — the receiver shape is the same
-    // 3-field record `[fd, local_addr, peer_addr]`, so the fd lives
-    // at field 0 just like TcpStream.  Detect via method_name OR
-    // receiver TypeId.
+    // UdpSocket / TcpListener method dispatch — same shape as
+    // TcpStream (record with fd at field 0).  Detect via
+    // method_name OR receiver TypeId.
     let is_udp = method_name.contains("UdpSocket.")
         || is_record_typed_as(state, receiver, "UdpSocket");
+    let is_listener = method_name.contains("TcpListener.")
+        || is_record_typed_as(state, receiver, "TcpListener");
     if !is_udp
+        && !is_listener
         && !method_name.contains("TcpStream.")
         && !is_tcpstream_value(state, receiver)
     {
@@ -912,6 +1208,37 @@ pub(in super::super) fn try_intercept_tcp_method(
             }
             "close" if arg_count == 0 => {
                 let _ = udp_close(fd);
+                Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::unit()])?))
+            }
+            _ => Ok(None),
+        };
+    }
+    if is_listener {
+        return match bare_method {
+            // `listener.accept() -> Result<(TcpStream, SocketAddr), IoError>`
+            "accept" if arg_count == 0 => {
+                intercept_listener_accept(state, fd)
+            }
+            "local_port" if arg_count == 0 => {
+                let p = tcp_local_port(fd);
+                if p < 0 {
+                    Ok(Some(build_io_err(
+                        state,
+                        "Other",
+                        19,
+                        &format!("listener.local_port: getsockname({}) failed", fd),
+                    )?))
+                } else {
+                    Ok(Some(wrap_in_variant(
+                        state,
+                        "Result",
+                        0,
+                        &[Value::from_i64(p)],
+                    )?))
+                }
+            }
+            "close" if arg_count == 0 => {
+                let _ = tcp_close(fd);
                 Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::unit()])?))
             }
             _ => Ok(None),
@@ -949,6 +1276,40 @@ fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str) -> bool {
         .types
         .iter()
         .any(|td| td.id == header.type_id && state.module.strings.get(td.name) == Some(name))
+}
+
+/// `listener.accept() -> Result<(TcpStream, SocketAddr), IoError>` —
+/// blocks until a client connects.  Returns the connected stream
+/// (already registered in REGISTRY) plus the peer's resolved
+/// SocketAddr (V4 or V6 based on the kernel-reported family).
+fn intercept_listener_accept(
+    state: &mut InterpreterState,
+    listen_fd: i64,
+) -> InterpreterResult<Option<Value>> {
+    if let Some(denied) = check_net_permission(state) {
+        return Ok(Some(denied));
+    }
+    let client_fd = tcp_accept(listen_fd);
+    if client_fd < 0 {
+        return Ok(Some(build_io_err(
+            state,
+            "ConnectionAborted",
+            4,
+            &format!("listener.accept: tcp_accept({}) failed", listen_fd),
+        )?));
+    }
+    // Real-fd peer address via getpeername.
+    let peer_addr = match tcp_peer_addr(client_fd) {
+        Some((4, ip, p)) => build_peer_addr(state, &ip, p).unwrap_or(Value::unit()),
+        Some((6, ip, p)) => build_peer_addr_v6(state, &ip, p).unwrap_or(Value::unit()),
+        _ => Value::unit(),
+    };
+    let fd_value = Value::from_i64(client_fd);
+    let stream = alloc_record_n_fields(state, "TcpStream", &[fd_value, peer_addr])?;
+    // Result<(TcpStream, SocketAddr), IoError> — Tuple wrapped in
+    // Result.Ok.  Build the 2-field tuple record.
+    let pair = alloc_record_n_fields(state, "Tuple", &[stream, peer_addr])?;
+    Ok(Some(wrap_in_variant(state, "Result", 0, &[pair])?))
 }
 
 /// `socket.send_to(&[Byte], SocketAddr) -> Result<Int, IoError>` —
