@@ -21,6 +21,7 @@ mount core.net.http_parser.{
 mount core.async.cancellation.{CancellationToken};
 mount core.async.timer.{timeout_ms as future_timeout_ms, TimeoutError};
 mount core.async.panic_fence.{panic_safe};
+mount core.io.protocols.{IoError};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError, IntoResponse};
 mount core.net.weft.response_ext.{
@@ -81,7 +82,14 @@ implement Clone for ConnectionConfig {
 public type ConnError is
     | ClientClosed
     | Cancelled
-    | Io(Text)
+    /// Underlying I/O error from the transport.  #324: stores the
+    /// typed `IoError` directly instead of pre-formatted Text.
+    /// Pre-fix every Err path on the read/write hot path allocated
+    /// a fresh Text by formatting the IoError — exactly when the
+    /// system is already stressed by network errors.  Post-fix
+    /// the typed error propagates without allocation; Display
+    /// renders the message at presentation time only.
+    | Io(IoError)
     | Parse(ParseError)
     | TooLarge
     | UnsupportedTransferEncoding(Text)
@@ -97,7 +105,7 @@ implement Display for ConnError {
         match self {
             ClientClosed                       => f.write_str("connection: client closed"),
             Cancelled                          => f.write_str("connection: cancelled"),
-            Io(reason)                         => f.write_str(f"connection I/O error: {reason}".as_str()),
+            Io(e)                              => f.write_str(f"connection I/O error: {e}".as_str()),
             Parse(e)                           => f.write_str(f"connection: {e}".as_str()),
             TooLarge                           => f.write_str("connection: request too large"),
             UnsupportedTransferEncoding(t)     => f.write_str(f"connection: unsupported Transfer-Encoding ({t})".as_str()),
@@ -112,7 +120,7 @@ implement Debug for ConnError {
         match self {
             ClientClosed                       => f.write_str("ClientClosed"),
             Cancelled                          => f.write_str("Cancelled"),
-            Io(reason)                         => f.write_str(f"Io({reason})".as_str()),
+            Io(e)                              => f.write_str(f"Io({e:?})".as_str()),
             Parse(e)                           => f.write_str(f"Parse({e:?})".as_str()),
             TooLarge                           => f.write_str("TooLarge"),
             UnsupportedTransferEncoding(t)     => f.write_str(f"UnsupportedTransferEncoding({t})".as_str()),
@@ -232,7 +240,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
         };
         let n = match rr {
             Err(_) => return Err(ConnError.Cancelled),
-            Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
+            Ok(Err(e)) => return Err(ConnError.Io(e)),
             Ok(Ok(n)) => n,
         };
         if n == 0 {
@@ -344,7 +352,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
             };
             let n = match rr {
                 Err(_) => return Err(ConnError.Cancelled),
-                Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
+                Ok(Err(e)) => return Err(ConnError.Io(e)),
                 Ok(Ok(n)) => n,
             };
             if n == 0 { return Err(ConnError.ClientClosed); }
@@ -405,7 +413,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     };
 
     match write_response(stream, &response).await {
-        Err(e) => return Err(ConnError.Io(f"{e}")),
+        Err(e) => return Err(ConnError.Io(e)),
         Ok(()) => {}
     }
 
@@ -616,7 +624,7 @@ async fn read_chunked_body<T: WeftTransport>(
                 };
                 let n = match rr {
                     Err(_)     => return Err(ConnError.Cancelled),
-                    Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
+                    Ok(Err(e)) => return Err(ConnError.Io(e)),
                     Ok(Ok(n))  => n,
                 };
                 if n == 0 { return Err(ConnError.ClientClosed); }
