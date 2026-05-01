@@ -1,0 +1,12 @@
+{
+  "term": { "Pi": [{ "Universe": 0 }, { "Var": 5 }] },
+  "claimed_type": { "Universe": 1 },
+  "metadata": {
+    "name": "reject_unbound_var_in_pi_body",
+    "description": "Π(_:Universe(0)). Var(5) — Pi whose body references a deeper de Bruijn index than the binding depth allows. MUST REJECT — under the empty context extended with Universe(0), the only valid Var index is 0 (referring to the binder); Var(5) is out of bounds and T-Var rejects.",
+    "source": "core/verify/proof_term_examples/adversarial/",
+    "expected_outcome": "reject",
+    "adversarial_class": "free_var",
+    "kernel_rule_violated": "T-Var"
+  }
+}

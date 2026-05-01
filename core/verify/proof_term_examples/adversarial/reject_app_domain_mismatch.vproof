@@ -1,0 +1,17 @@
+{
+  "term": {
+    "App": [
+      { "Lam": [{ "Universe": 0 }, { "Var": 0 }] },
+      { "Universe": 1 }
+    ]
+  },
+  "claimed_type": { "Universe": 0 },
+  "metadata": {
+    "name": "reject_app_domain_mismatch",
+    "description": "App((λx:Universe(0). x), Universe(1)) — applying the identity-at-Universe(0) to a Universe(1) argument. MUST REJECT — the function expects Universe(0) inhabitants but Universe(1) is at type Universe(2), so T-App-Elim's domain check rejects (Universe(0) ≠ Universe(2)).",
+    "source": "core/verify/proof_term_examples/adversarial/",
+    "expected_outcome": "reject",
+    "adversarial_class": "domain_mismatch",
+    "kernel_rule_violated": "T-App-Elim"
+  }
+}

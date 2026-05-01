@@ -3854,7 +3854,11 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         }
     };
 
-    // Walk every .vproof file in the library directory.
+    // Walk every .vproof file in the library directory + the
+    // `adversarial/` subdirectory (#159 V3). Adversarial
+    // certificates are tagged via metadata.expected_outcome ==
+    // "reject" so the audit gate enforces the inverted contract:
+    // both kernels must REJECT, not ACCEPT.
     let mut entries: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&library_dir) {
         for e in rd.flatten() {
@@ -3864,11 +3868,24 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
             }
         }
     }
+    let adv_dir = library_dir.join("adversarial");
+    if adv_dir.is_dir() {
+        if let Ok(rd) = std::fs::read_dir(&adv_dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.extension().map_or(false, |ext| ext == "vproof") {
+                    entries.push(p);
+                }
+            }
+        }
+    }
     entries.sort();
 
     let mut verifications: Vec<serde_json::Value> = Vec::new();
     let mut verified = 0usize;
     let mut rejected = 0usize;
+    let mut adversarial_rejected = 0usize;
+    let mut adversarial_unsoundly_accepted = 0usize;
     let mut malformed = 0usize;
     // **#159 V2** — every certificate runs through BOTH kernels:
     // Algorithm A (`proof_checker`, trusted base, bidirectional +
@@ -3886,6 +3903,15 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                         .get("name")
                         .cloned()
                         .unwrap_or_else(|| "(anonymous)".to_string());
+                    // **#159 V3**: dispatch on metadata.expected_outcome.
+                    // Default ("accept") = canonical accept-path library;
+                    // "reject" = adversarial library (both kernels must
+                    // REJECT, not accept).
+                    let expected_reject = cert
+                        .metadata
+                        .get("expected_outcome")
+                        .map(|s| s.as_str() == "reject")
+                        .unwrap_or(false);
                     let trusted_outcome = cert.verify();
                     let nbe_outcome = proof_checker_nbe::verify_certificate(&cert);
                     // Differential agreement check: both kernels MUST
@@ -3900,27 +3926,57 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                             "disagreement"
                         }
                     };
-                    let (label, detail) = match (&trusted_outcome, agreement) {
-                        (Ok(()), "both_accept") => {
-                            verified += 1;
-                            ("verified", String::new())
+                    let (label, detail) = if expected_reject {
+                        // Adversarial path: both kernels MUST reject.
+                        match (&trusted_outcome, agreement) {
+                            (Err(_), "both_reject") => {
+                                adversarial_rejected += 1;
+                                (
+                                    "adversarial_rejected",
+                                    format!(
+                                        "lock-step rejection (trusted_base={:?}, nbe={:?})",
+                                        trusted_outcome, nbe_outcome,
+                                    ),
+                                )
+                            }
+                            (_, "both_accept") => {
+                                // SOUNDNESS BUG: an adversarial
+                                // certificate the kernel claims is valid.
+                                adversarial_unsoundly_accepted += 1;
+                                (
+                                    "adversarial_unsoundly_accepted",
+                                    "Both kernels ACCEPTED a certificate \
+                                     marked expected_outcome=reject — \
+                                     soundness violation."
+                                        .to_string(),
+                                )
+                            }
+                            _ => (
+                                "disagreement",
+                                format!(
+                                    "adversarial disagreement: trusted_base={:?}, nbe={:?}",
+                                    trusted_outcome, nbe_outcome,
+                                ),
+                            ),
                         }
-                        (Err(e), "both_reject") => {
-                            rejected += 1;
-                            ("rejected", format!("{:?}", e))
-                        }
-                        _ => {
-                            // Disagreement — a load-bearing
-                            // failure mode.  Capture both verdicts
-                            // in detail so the audit consumer can
-                            // diagnose the divergence.
-                            (
+                    } else {
+                        // Canonical-accept path: both kernels MUST accept.
+                        match (&trusted_outcome, agreement) {
+                            (Ok(()), "both_accept") => {
+                                verified += 1;
+                                ("verified", String::new())
+                            }
+                            (Err(e), "both_reject") => {
+                                rejected += 1;
+                                ("rejected", format!("{:?}", e))
+                            }
+                            _ => (
                                 "disagreement",
                                 format!(
                                     "trusted_base={:?}, nbe={:?}",
                                     trusted_outcome, nbe_outcome,
                                 ),
-                            )
+                            ),
                         }
                     };
                     (label, name, detail)
@@ -3956,7 +4012,7 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         let _ = std::fs::create_dir_all(parent);
     }
     let payload = serde_json::json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "command": "audit-proof-term-library",
         "library_path": library_dir.display().to_string(),
         "total": entries.len(),
@@ -3967,6 +4023,11 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         // the trusted base and the NbE kernel disagreed.  Any
         // non-zero value flips the audit gate to failure.
         "nbe_disagreements": nbe_disagreements,
+        // #159 V3 adversarial counts — every certificate marked
+        // expected_outcome=reject MUST be rejected by both kernels.
+        // adversarial_unsoundly_accepted > 0 → SOUNDNESS BUG.
+        "adversarial_rejected": adversarial_rejected,
+        "adversarial_unsoundly_accepted": adversarial_unsoundly_accepted,
         "verifications": verifications,
     });
     let _ = std::fs::write(
@@ -3977,21 +4038,34 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("Canonical proof-term certificate library (NbE-differential)");
-            println!("────────────────────────────────────────────────────────────");
+            println!("Canonical proof-term certificate library (NbE-differential + adversarial)");
+            println!("──────────────────────────────────────────────────────────────────────────");
             println!("  Library: {}", library_dir.display());
             println!(
-                "  ✓ {} verified · ✗ {} rejected · ⚠ {} malformed · ✗ {} NbE-disagreement (total {})",
+                "  ✓ {} verified · ✗ {} rejected · ✓ {} adversarial-rejected · {} {} adversarial-unsoundly-accepted",
                 verified,
                 rejected,
+                adversarial_rejected,
+                if adversarial_unsoundly_accepted == 0 { "✓" } else { "✗" },
+                adversarial_unsoundly_accepted,
+            );
+            println!(
+                "  ⚠ {} malformed · ✗ {} NbE-disagreement (total {})",
                 malformed,
                 nbe_disagreements,
                 entries.len(),
             );
-            if rejected > 0 || malformed > 0 || nbe_disagreements > 0 {
+            let any_failure = rejected > 0
+                || malformed > 0
+                || nbe_disagreements > 0
+                || adversarial_unsoundly_accepted > 0;
+            if any_failure {
                 println!();
                 for v in verifications.iter().filter(|v| {
-                    !matches!(v.get("outcome").and_then(|s| s.as_str()), Some("verified"))
+                    !matches!(
+                        v.get("outcome").and_then(|s| s.as_str()),
+                        Some("verified") | Some("adversarial_rejected"),
+                    )
                 }) {
                     println!(
                         "    {} :: {} :: {}",
@@ -4009,10 +4083,15 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    if rejected > 0 || malformed > 0 || nbe_disagreements > 0 {
+    if rejected > 0
+        || malformed > 0
+        || nbe_disagreements > 0
+        || adversarial_unsoundly_accepted > 0
+    {
         return Err(crate::error::CliError::VerificationFailed(format!(
-            "proof-term-library: {} rejected + {} malformed + {} NbE-disagreement(s)",
-            rejected, malformed, nbe_disagreements,
+            "proof-term-library: {} rejected + {} malformed + {} NbE-disagreement(s) + \
+             {} adversarial-unsoundly-accepted",
+            rejected, malformed, nbe_disagreements, adversarial_unsoundly_accepted,
         )));
     }
     Ok(())

@@ -1,0 +1,12 @@
+{
+  "term": { "Lam": [{ "Universe": 0 }, { "Var": 0 }] },
+  "claimed_type": { "Pi": [{ "Universe": 0 }, { "Universe": 1 }] },
+  "metadata": {
+    "name": "reject_lam_body_type_mismatch",
+    "description": "λ(x:Universe(0)). x claimed at type Π(_:Universe(0)). Universe(1). MUST REJECT — the body Var(0) under the binder has type Universe(0) (the bound variable's type), but the claimed Pi codomain is Universe(1). T-Lam-Intro + T-Conv would catch this mismatch.",
+    "source": "core/verify/proof_term_examples/adversarial/",
+    "expected_outcome": "reject",
+    "adversarial_class": "wrong_lam_codomain",
+    "kernel_rule_violated": "T-Lam-Intro / T-Conv"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "term": { "Universe": 1 },
+  "claimed_type": { "Universe": 0 },
+  "metadata": {
+    "name": "reject_universe_level_off_by_one",
+    "description": "Universe(1) claimed at type Universe(0). MUST REJECT — Universe(1)'s type is Universe(2), not Universe(0). The universe hierarchy is strict per T-Univ; off-by-one violations admit unsound type inhabitation chains.",
+    "source": "core/verify/proof_term_examples/adversarial/",
+    "expected_outcome": "reject",
+    "adversarial_class": "universe_mismatch",
+    "kernel_rule_violated": "T-Univ"
+  }
+}
