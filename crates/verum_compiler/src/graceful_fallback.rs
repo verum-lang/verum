@@ -91,18 +91,24 @@ impl GracefulFallback {
     pub fn llvm_available(&self) -> bool {
         #[cfg(feature = "llvm-codegen")]
         {
+            // #308: use AtomicBool + Once instead of `static mut +
+            // 3 unsafe blocks`.  Same once-init semantics, zero
+            // unsafe.  Relaxed ordering is sufficient because the
+            // Once already provides happens-before between the
+            // initialiser and every subsequent load.
             use std::sync::Once;
+            use std::sync::atomic::{AtomicBool, Ordering};
             static LLVM_INIT: Once = Once::new();
-            static mut LLVM_AVAILABLE: bool = false;
+            static LLVM_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
             LLVM_INIT.call_once(|| {
                 use inkwell::targets::{InitializationConfig, Target};
                 Target::initialize_native(&InitializationConfig::default())
-                    .map(|_| unsafe { LLVM_AVAILABLE = true })
+                    .map(|_| LLVM_AVAILABLE.store(true, Ordering::Relaxed))
                     .ok();
             });
 
-            unsafe { LLVM_AVAILABLE }
+            LLVM_AVAILABLE.load(Ordering::Relaxed)
         }
 
         #[cfg(not(feature = "llvm-codegen"))]
@@ -119,9 +125,12 @@ impl GracefulFallback {
 
         #[cfg(feature = "llvm-codegen")]
         {
+            // #308: same pattern as `llvm_available` — AtomicBool
+            // for once-init, no unsafe.
             use std::sync::Once;
+            use std::sync::atomic::{AtomicBool, Ordering};
             static JIT_CHECK: Once = Once::new();
-            static mut JIT_AVAILABLE: bool = false;
+            static JIT_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
             JIT_CHECK.call_once(|| {
                 use inkwell::OptimizationLevel;
@@ -131,14 +140,14 @@ impl GracefulFallback {
                 let module = context.create_module("jit_check");
 
                 match module.create_jit_execution_engine(OptimizationLevel::None) {
-                    Ok(_) => unsafe { JIT_AVAILABLE = true },
+                    Ok(_) => JIT_AVAILABLE.store(true, Ordering::Relaxed),
                     Err(e) => {
                         tracing::debug!("JIT not available: {}", e.to_string());
                     }
                 }
             });
 
-            unsafe { JIT_AVAILABLE }
+            JIT_AVAILABLE.load(Ordering::Relaxed)
         }
 
         #[cfg(not(feature = "llvm-codegen"))]
