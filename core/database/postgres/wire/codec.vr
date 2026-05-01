@@ -1,0 +1,655 @@
+// =============================================================================
+// core/database/postgres/wire/codec.vr — Postgres binary codec
+// =============================================================================
+// Layer: 3 (Database — postgres adapter, wire layer)
+// Spec: internal/specs/database.md §6.1.4 (binary codec register),
+//       §18.5 (canonical OID table), §18.10 (codec test vectors).
+// =============================================================================
+//
+// The single source of truth for Postgres binary wire-format type
+// codecs. Two responsibilities:
+//
+//   1. Canonical OID table (`PG_TYPE_*` constants) for every
+//      type Spindle understands, plus the inverse `Spindle TypeOid
+//      ↔ Postgres pg_type.oid` mapping used by the sql# meta-fn.
+//
+//   2. Per-type binary encoders / decoders. Phase-2 set (bool,
+//      int2/4/8, float4/8, text, bytea, uuid, date/time/timestamp[tz],
+//      interval) lives here. Phase-3 set added in this commit:
+//      jsonb (and the deprecated json alias), the four canonical
+//      range types (int4range, numrange, tsrange, tstzrange), and
+//      the generic array<T> wire-format framer.
+//
+// Numeric (Decimal) and composite types are deferred — both depend
+// on follow-up work (`core.text.numeric.decimal` doesn't exist yet;
+// composite needs the field-walker integrated with the row-type
+// resolver). Documented as TODO and explicitly listed in the
+// per-type "supported" predicate below so a sql# query that touches
+// them produces a clean compile-time "unsupported" error rather
+// than silent decode garbage.
+//
+// All codec functions take an `ArenaWireBuf` for encoding (so the
+// hot path is bump-allocated out of the connection arena, no heap)
+// and an `ArenaSlice` for decoding (the source bytes already live
+// in the arena, so decoders just navigate an offset).
+// =============================================================================
+
+module core.database.postgres.wire.codec;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount mem.raw_ops.{load_byte, store_byte};
+mount core.database.common.error.{DbError, DecodeFault, EncodeFault};
+mount core.database.common.arena.{SpindleArena};
+mount core.database.common.types.{
+    ArenaSlice, ArenaWireBuf, ArenaWireValue, ArenaWireRow,
+    AvNull, AvPresent, WireFormat, FmtBinary,
+};
+
+// -----------------------------------------------------------------------------
+// Canonical Postgres OID table (per src/include/catalog/pg_type.dat).
+// -----------------------------------------------------------------------------
+//
+// Phase-2 set — every adapter MUST support these (Spec §6.1.4 phase 2):
+
+public const PG_TYPE_BOOL:        Int = 16;
+public const PG_TYPE_BYTEA:       Int = 17;
+public const PG_TYPE_CHAR:        Int = 18;       // single-byte ASCII char
+public const PG_TYPE_NAME:        Int = 19;
+public const PG_TYPE_INT8:        Int = 20;
+public const PG_TYPE_INT2:        Int = 21;
+public const PG_TYPE_INT4:        Int = 23;
+public const PG_TYPE_TEXT:        Int = 25;
+public const PG_TYPE_OID:         Int = 26;
+public const PG_TYPE_JSON:        Int = 114;       // legacy text-json
+public const PG_TYPE_FLOAT4:      Int = 700;
+public const PG_TYPE_FLOAT8:      Int = 701;
+public const PG_TYPE_BPCHAR:      Int = 1042;     // CHAR(N)
+public const PG_TYPE_VARCHAR:     Int = 1043;
+public const PG_TYPE_DATE:        Int = 1082;
+public const PG_TYPE_TIME:        Int = 1083;
+public const PG_TYPE_TIMESTAMP:   Int = 1114;     // naive
+public const PG_TYPE_TIMESTAMPTZ: Int = 1184;     // UTC
+public const PG_TYPE_INTERVAL:    Int = 1186;
+public const PG_TYPE_NUMERIC:     Int = 1700;
+public const PG_TYPE_UUID:        Int = 2950;
+
+// Phase-3 set — added in this commit:
+public const PG_TYPE_JSONB:       Int = 3802;
+public const PG_TYPE_TSVECTOR:    Int = 3614;
+public const PG_TYPE_INET:        Int = 869;
+public const PG_TYPE_CIDR:        Int = 650;
+
+// Range types — element OIDs are the corresponding scalar types.
+public const PG_TYPE_INT4RANGE:   Int = 3904;
+public const PG_TYPE_NUMRANGE:    Int = 3906;
+public const PG_TYPE_TSRANGE:     Int = 3908;
+public const PG_TYPE_TSTZRANGE:   Int = 3910;
+public const PG_TYPE_INT8RANGE:   Int = 3926;
+public const PG_TYPE_DATERANGE:   Int = 3912;
+
+// Generic array sentinel — actual array OIDs are per-element-type
+// (e.g. int4[] is OID 1007, text[] is 1009). The dispatch table maps
+// each scalar OID to its array OID via `array_oid_for_element`.
+public const PG_TYPE_ANYARRAY:    Int = 2277;
+
+// Composite / record (anonymous row).
+public const PG_TYPE_RECORD:      Int = 2249;
+
+// pgvector — runtime-resolved per-database OID (not a fixed system
+// OID; the sql# meta-fn looks it up from `pg_type` once per schema
+// snapshot).
+public const PG_TYPE_VECTOR_DYNAMIC: Int = -1;
+
+// -----------------------------------------------------------------------------
+// Array-OID lookup — element OID → array OID for the supported set.
+// -----------------------------------------------------------------------------
+
+/// For every scalar OID Spindle supports, return the OID of the
+/// corresponding array type, or `-1` if Postgres does not register
+/// an array type for it (e.g. record[] is dynamic). The sql#
+/// meta-fn uses this to decide whether `${some_list}` parameter
+/// can fold to a single array bind or must be expanded to a tuple.
+public fn array_oid_for_element(oid: Int) -> Int {
+    if      oid == PG_TYPE_BOOL        { 1000 }
+    else if oid == PG_TYPE_BYTEA       { 1001 }
+    else if oid == PG_TYPE_CHAR        { 1002 }
+    else if oid == PG_TYPE_NAME        { 1003 }
+    else if oid == PG_TYPE_INT8        { 1016 }
+    else if oid == PG_TYPE_INT2        { 1005 }
+    else if oid == PG_TYPE_INT4        { 1007 }
+    else if oid == PG_TYPE_TEXT        { 1009 }
+    else if oid == PG_TYPE_OID         { 1028 }
+    else if oid == PG_TYPE_JSON        { 199 }
+    else if oid == PG_TYPE_FLOAT4      { 1021 }
+    else if oid == PG_TYPE_FLOAT8      { 1022 }
+    else if oid == PG_TYPE_BPCHAR      { 1014 }
+    else if oid == PG_TYPE_VARCHAR     { 1015 }
+    else if oid == PG_TYPE_DATE        { 1182 }
+    else if oid == PG_TYPE_TIME        { 1183 }
+    else if oid == PG_TYPE_TIMESTAMP   { 1115 }
+    else if oid == PG_TYPE_TIMESTAMPTZ { 1185 }
+    else if oid == PG_TYPE_INTERVAL    { 1187 }
+    else if oid == PG_TYPE_NUMERIC     { 1231 }
+    else if oid == PG_TYPE_UUID        { 2951 }
+    else if oid == PG_TYPE_JSONB       { 3807 }
+    else if oid == PG_TYPE_TSVECTOR    { 3643 }
+    else if oid == PG_TYPE_INET        { 1041 }
+    else if oid == PG_TYPE_CIDR        { 651 }
+    else if oid == PG_TYPE_INT4RANGE   { 3905 }
+    else if oid == PG_TYPE_NUMRANGE    { 3907 }
+    else if oid == PG_TYPE_TSRANGE     { 3909 }
+    else if oid == PG_TYPE_TSTZRANGE   { 3911 }
+    else if oid == PG_TYPE_INT8RANGE   { 3927 }
+    else if oid == PG_TYPE_DATERANGE   { 3913 }
+    else { -1 }
+}
+
+/// Returns true if the given OID has a binary codec implementation
+/// in this module. Used by sql# at compile time to reject unsupported
+/// types with a precise error instead of letting them through to a
+/// runtime decode failure.
+public fn supports_binary(oid: Int) -> Bool {
+    if      oid == PG_TYPE_BOOL        { true }
+    else if oid == PG_TYPE_BYTEA       { true }
+    else if oid == PG_TYPE_INT2        { true }
+    else if oid == PG_TYPE_INT4        { true }
+    else if oid == PG_TYPE_INT8        { true }
+    else if oid == PG_TYPE_FLOAT4      { true }
+    else if oid == PG_TYPE_FLOAT8      { true }
+    else if oid == PG_TYPE_TEXT        { true }
+    else if oid == PG_TYPE_VARCHAR     { true }
+    else if oid == PG_TYPE_BPCHAR      { true }
+    else if oid == PG_TYPE_NAME        { true }
+    else if oid == PG_TYPE_OID         { true }
+    else if oid == PG_TYPE_UUID        { true }
+    else if oid == PG_TYPE_JSON        { true }
+    else if oid == PG_TYPE_JSONB       { true }
+    else if oid == PG_TYPE_INT4RANGE   { true }
+    else if oid == PG_TYPE_INT8RANGE   { true }
+    else if oid == PG_TYPE_NUMRANGE    { true }
+    else if oid == PG_TYPE_TSRANGE     { true }
+    else if oid == PG_TYPE_TSTZRANGE   { true }
+    else if oid == PG_TYPE_DATERANGE   { true }
+    else if oid == PG_TYPE_DATE        { true }
+    else if oid == PG_TYPE_TIME        { true }
+    else if oid == PG_TYPE_TIMESTAMP   { true }
+    else if oid == PG_TYPE_TIMESTAMPTZ { true }
+    else if oid == PG_TYPE_INTERVAL    { true }
+    else if oid == PG_TYPE_INET        { true }
+    else if oid == PG_TYPE_CIDR        { true }
+    // Numeric, tsvector, composite remain on the deferred list.
+    else { false }
+}
+
+// -----------------------------------------------------------------------------
+// Decode error helpers.
+// -----------------------------------------------------------------------------
+
+fn decode_fault(reason: Text) -> DbError {
+    DbError.DecodeFailed {
+        fault: DecodeFault {
+            column_index: -1,
+            column_name: "".clone(),
+            expected_type: "".clone(),
+            found_oid: -1,
+            detail: reason,
+        },
+    }
+}
+
+fn encode_fault(reason: Text) -> DbError {
+    DbError.EncodeFailed {
+        fault: EncodeFault {
+            param_index: -1,
+            type_name: "".clone(),
+            reason: reason,
+        },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Slice helpers — read big-endian primitives directly out of an
+// ArenaSlice. The slice's `ptr` already lives in the connection
+// arena; reads are pure pointer math.
+// -----------------------------------------------------------------------------
+
+/// Extract one byte at `off`. Returns `None` if `off` is past the
+/// slice's end.
+fn slice_byte(s: &ArenaSlice, off: Int) -> Maybe<Int> {
+    if off < 0 || off >= s.len {
+        None
+    } else {
+        Some(load_byte(s.ptr + off) & 0xFF)
+    }
+}
+
+/// Read a 16-bit big-endian integer at `off`. Returns the value or
+/// a decode fault if the slice is too short.
+fn slice_u16_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
+    if off < 0 || off + 2 > s.len {
+        return Err(decode_fault("short read: u16 BE".clone()));
+    }
+    let hi = load_byte(s.ptr + off)     & 0xFF;
+    let lo = load_byte(s.ptr + off + 1) & 0xFF;
+    Ok((hi << 8) | lo)
+}
+
+/// Read a 32-bit big-endian integer (signed two's-complement).
+fn slice_i32_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
+    if off < 0 || off + 4 > s.len {
+        return Err(decode_fault("short read: i32 BE".clone()));
+    }
+    let b0 = (load_byte(s.ptr + off)     & 0xFF) << 24;
+    let b1 = (load_byte(s.ptr + off + 1) & 0xFF) << 16;
+    let b2 = (load_byte(s.ptr + off + 2) & 0xFF) << 8;
+    let b3 = (load_byte(s.ptr + off + 3) & 0xFF);
+    let u = b0 | b1 | b2 | b3;
+    if (u & 0x8000_0000) != 0 {
+        Ok(u | (-1 ^ 0xFFFF_FFFF))    // sign-extend
+    } else {
+        Ok(u)
+    }
+}
+
+/// Read a 64-bit big-endian integer.
+fn slice_i64_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
+    if off < 0 || off + 8 > s.len {
+        return Err(decode_fault("short read: i64 BE".clone()));
+    }
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < 8 {
+        v = (v << 8) | (load_byte(s.ptr + off + i) & 0xFF);
+        i = i + 1;
+    }
+    Ok(v)
+}
+
+/// Carve a sub-slice. Generation is inherited — invalidates with the
+/// parent.
+fn subslice(parent: &ArenaSlice, off: Int, len: Int) -> Result<ArenaSlice, DbError> {
+    if off < 0 || len < 0 || off + len > parent.len {
+        return Err(decode_fault("subslice out of range".clone()));
+    }
+    Ok(ArenaSlice {
+        ptr: parent.ptr + off,
+        len: len,
+        generation: parent.generation,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// JSONB — wire format = single version byte (0x01) || UTF-8 JSON text
+// -----------------------------------------------------------------------------
+//
+// This module treats Jsonb as opaque text plus the version prefix —
+// the application either re-parses through `core.encoding.json` or
+// (for indexed-paths) lets Postgres do the work via `->`/`->>`/`#>`
+// operators in the SQL itself.
+
+/// Internal representation of a decoded JSONB value — the JSON text
+/// after the version byte was stripped. Generation-bound to the
+/// arena it was decoded from.
+public type PgJsonb is {
+    /// Version byte from the wire — should always be 1 for current
+    /// Postgres releases. Carried so future-version JSONBs surface
+    /// at the API boundary instead of corrupting decoded text.
+    version: Int,
+    /// UTF-8 JSON text (unparsed). Sliced from the arena, no copy.
+    text: ArenaSlice,
+};
+
+/// Decode a JSONB column. Returns `None` if the wire bytes are
+/// shorter than one version byte. Fails with `DbError.DecodeError`
+/// on unsupported version.
+public fn decode_jsonb(slice: &ArenaSlice) -> Result<PgJsonb, DbError> {
+    let version = match slice_byte(slice, 0) {
+        Some(v) => v,
+        None    => return Err(decode_fault("jsonb: empty payload".clone())),
+    };
+    if version != 1 {
+        return Err(decode_fault(f"jsonb: unsupported version {version}"));
+    }
+    let body = subslice(slice, 1, slice.len - 1)?;
+    Ok(PgJsonb { version: version, text: body })
+}
+
+/// Encode a JSON text payload as JSONB binary. Writes the version
+/// byte (0x01) followed by the UTF-8 text. Returns false on arena
+/// exhaustion (caller must propagate as `EncodeError`).
+public fn encode_jsonb(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, json_text: &Text) -> Bool {
+    if !buf.put_u8(arena, 1) { return false; }
+    buf.put_bytes(arena, json_text.as_bytes())
+}
+
+/// JSON (legacy) decode — pure UTF-8 text, no version prefix. The
+/// caller treats it as a text-typed column for downstream use.
+public fn decode_json(slice: &ArenaSlice) -> Result<ArenaSlice, DbError> {
+    Ok(ArenaSlice { ptr: slice.ptr, len: slice.len, generation: slice.generation })
+}
+
+public fn encode_json(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, json_text: &Text) -> Bool {
+    buf.put_bytes(arena, json_text.as_bytes())
+}
+
+// -----------------------------------------------------------------------------
+// Range types — wire format = flags byte || (lower_len i32 || lower
+//                                            payload)? || (upper_len i32 ||
+//                                            upper payload)?
+// -----------------------------------------------------------------------------
+//
+// Reference: src/backend/utils/adt/rangetypes.c
+//
+// Flags byte (one of, OR'd):
+//   0x01  EMPTY
+//   0x02  LB_INC      (lower bound inclusive)
+//   0x04  UB_INC      (upper bound inclusive)
+//   0x08  LB_INF      (lower bound = -infinity, no payload follows)
+//   0x10  UB_INF      (upper bound = +infinity, no payload follows)
+//   0x20  LB_NULL     (legacy; not used by current Postgres)
+//   0x40  UB_NULL     (legacy)
+//   0x80  CONTAIN_EMPTY (hint for multirange; ignored at this layer)
+
+public const PG_RANGE_FLAG_EMPTY:  Int = 0x01;
+public const PG_RANGE_FLAG_LB_INC: Int = 0x02;
+public const PG_RANGE_FLAG_UB_INC: Int = 0x04;
+public const PG_RANGE_FLAG_LB_INF: Int = 0x08;
+public const PG_RANGE_FLAG_UB_INF: Int = 0x10;
+
+/// Decoded range as raw element slices. The element type is decoded
+/// further by the per-element codec (caller-chosen via the dispatch
+/// in `connection.vr` once the row resolver knows the column's
+/// element OID).
+public type PgRange is {
+    flags: Int,
+    /// `Some` if the lower bound exists (not -infinity, not empty).
+    lower: Maybe<ArenaSlice>,
+    /// `Some` if the upper bound exists.
+    upper: Maybe<ArenaSlice>,
+};
+
+implement PgRange {
+    public fn is_empty(&self)      -> Bool { (self.flags & PG_RANGE_FLAG_EMPTY) != 0 }
+    public fn lower_inclusive(&self) -> Bool { (self.flags & PG_RANGE_FLAG_LB_INC) != 0 }
+    public fn upper_inclusive(&self) -> Bool { (self.flags & PG_RANGE_FLAG_UB_INC) != 0 }
+    public fn lower_unbounded(&self) -> Bool { (self.flags & PG_RANGE_FLAG_LB_INF) != 0 }
+    public fn upper_unbounded(&self) -> Bool { (self.flags & PG_RANGE_FLAG_UB_INF) != 0 }
+}
+
+public fn decode_range(slice: &ArenaSlice) -> Result<PgRange, DbError> {
+    let flags = match slice_byte(slice, 0) {
+        Some(v) => v,
+        None    => return Err(decode_fault("range: empty payload".clone())),
+    };
+    if (flags & PG_RANGE_FLAG_EMPTY) != 0 {
+        return Ok(PgRange { flags: flags, lower: None, upper: None });
+    }
+    let mut off: Int = 1;
+    let lower = if (flags & PG_RANGE_FLAG_LB_INF) == 0 {
+        let len = slice_i32_be(slice, off)?;
+        off = off + 4;
+        let body = subslice(slice, off, len)?;
+        off = off + len;
+        Some(body)
+    } else {
+        None
+    };
+    let upper = if (flags & PG_RANGE_FLAG_UB_INF) == 0 {
+        let len = slice_i32_be(slice, off)?;
+        off = off + 4;
+        let body = subslice(slice, off, len)?;
+        off = off + len;
+        Some(body)
+    } else {
+        None
+    };
+    Ok(PgRange { flags: flags, lower: lower, upper: upper })
+}
+
+/// Encode a range value. `lower_payload` / `upper_payload` are the
+/// already-encoded element bytes (caller passes `None` to mean
+/// "infinity"). The empty range — `flags & PG_RANGE_FLAG_EMPTY` —
+/// is encoded as a single byte and ignores the payload arguments.
+public fn encode_range(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    flags: Int,
+    lower_payload: Maybe<&[Byte]>,
+    upper_payload: Maybe<&[Byte]>,
+) -> Bool {
+    if !buf.put_u8(arena, flags & 0xFF) { return false; }
+    if (flags & PG_RANGE_FLAG_EMPTY) != 0 {
+        return true;
+    }
+    if (flags & PG_RANGE_FLAG_LB_INF) == 0 {
+        match lower_payload {
+            None    => return false,    // contract violation — caller forgot
+            Some(b) => {
+                if !buf.put_i32_be(arena, b.len() as Int) { return false; }
+                if !buf.put_bytes(arena, b)               { return false; }
+            }
+        }
+    }
+    if (flags & PG_RANGE_FLAG_UB_INF) == 0 {
+        match upper_payload {
+            None    => return false,
+            Some(b) => {
+                if !buf.put_i32_be(arena, b.len() as Int) { return false; }
+                if !buf.put_bytes(arena, b)               { return false; }
+            }
+        }
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Array — multi-dimensional binary wire format.
+// -----------------------------------------------------------------------------
+//
+// Reference: src/backend/utils/adt/arrayfuncs.c, function
+// `array_send`. Wire layout:
+//
+//   i32  ndim                — number of dimensions (0..6)
+//   i32  flags               — currently only bit 0 = "has nulls"
+//   i32  element_oid         — repeated below; required even though
+//                              sender already knows it
+//   for each dim:
+//     i32  length            — count of elements in the dimension
+//     i32  lower_bound       — typically 1 (Postgres array indices
+//                              are 1-based)
+//   for each element (linearised in row-major order):
+//     i32  payload_len       — -1 for SQL NULL
+//     bytes payload[payload_len]
+//
+// Empty arrays (`{}`) are sent with `ndim = 0, flags = 0,
+// element_oid = T, no dim-headers, no element bytes`.
+
+public const PG_ARRAY_MAX_NDIM: Int = 6;
+
+public type PgArrayDim is { length: Int, lower_bound: Int };
+
+public type PgArrayHeader is {
+    ndim: Int,
+    has_nulls: Bool,
+    element_oid: Int,
+    dimensions: List<PgArrayDim>,
+};
+
+/// Decode the array header + element index. Returns the metadata
+/// plus a `List<Maybe<ArenaSlice>>` whose entries are the per-
+/// element payload slices in row-major order. A `None` entry means
+/// SQL NULL.
+public fn decode_array(slice: &ArenaSlice) -> Result<(PgArrayHeader, List<Maybe<ArenaSlice>>), DbError> {
+    let ndim = slice_i32_be(slice, 0)?;
+    if ndim < 0 || ndim > PG_ARRAY_MAX_NDIM {
+        return Err(decode_fault(f"array: ndim {ndim} out of range"));
+    }
+    let flags = slice_i32_be(slice, 4)?;
+    let element_oid = slice_i32_be(slice, 8)?;
+    let mut off: Int = 12;
+    let mut dims: List<PgArrayDim> = List.new();
+    let mut total: Int = if ndim == 0 { 0 } else { 1 };
+    let mut i: Int = 0;
+    while i < ndim {
+        let length = slice_i32_be(slice, off)?;
+        let lo     = slice_i32_be(slice, off + 4)?;
+        if length < 0 {
+            return Err(decode_fault(f"array: dim {i} negative length"));
+        }
+        dims.push(PgArrayDim { length: length, lower_bound: lo });
+        total = total * length;
+        off = off + 8;
+        i = i + 1;
+    }
+    let mut elements: List<Maybe<ArenaSlice>> = List.new();
+    let mut k: Int = 0;
+    while k < total {
+        let payload_len = slice_i32_be(slice, off)?;
+        off = off + 4;
+        if payload_len < 0 {
+            elements.push(None);
+        } else {
+            let body = subslice(slice, off, payload_len)?;
+            elements.push(Some(body));
+            off = off + payload_len;
+        }
+        k = k + 1;
+    }
+    let hdr = PgArrayHeader {
+        ndim: ndim,
+        has_nulls: (flags & 1) != 0,
+        element_oid: element_oid,
+        dimensions: dims,
+    };
+    Ok((hdr, elements))
+}
+
+/// Encode a one-dimensional array (the common case). `elements` is
+/// the per-element payload, with `None` for SQL NULL. Multi-
+/// dimensional encode is a follow-up — most application code only
+/// produces 1-D arrays anyway.
+public fn encode_array_1d(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    element_oid: Int,
+    elements: &List<Maybe<&[Byte]>>,
+) -> Bool {
+    let n = elements.len() as Int;
+    let mut has_nulls: Bool = false;
+    let mut i: Int = 0;
+    while i < n {
+        match &elements[i] {
+            None    => { has_nulls = true; }
+            Some(_) => {}
+        }
+        i = i + 1;
+    }
+    let flags = if has_nulls { 1 } else { 0 };
+    // Empty array shortcut — ndim = 0.
+    if n == 0 {
+        if !buf.put_i32_be(arena, 0)            { return false; }
+        if !buf.put_i32_be(arena, flags)        { return false; }
+        if !buf.put_i32_be(arena, element_oid)  { return false; }
+        return true;
+    }
+    if !buf.put_i32_be(arena, 1)            { return false; }   // ndim
+    if !buf.put_i32_be(arena, flags)        { return false; }
+    if !buf.put_i32_be(arena, element_oid)  { return false; }
+    if !buf.put_i32_be(arena, n)            { return false; }   // length
+    if !buf.put_i32_be(arena, 1)            { return false; }   // lower_bound = 1
+    let mut k: Int = 0;
+    while k < n {
+        match &elements[k] {
+            None => {
+                if !buf.put_i32_be(arena, -1) { return false; }
+            }
+            Some(b) => {
+                if !buf.put_i32_be(arena, b.len() as Int) { return false; }
+                if !buf.put_bytes(arena, b)               { return false; }
+            }
+        }
+        k = k + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// inet / cidr — RFC 7822 binary wire layout.
+// -----------------------------------------------------------------------------
+//
+// Reference: src/backend/utils/adt/network.c, `network_send`.
+// Wire layout for both inet and cidr (the OID distinguishes them):
+//
+//   u8 family          — 2 = AF_INET, 3 = AF_INET6 (PG-internal codes,
+//                        NOT the system AF_* macros)
+//   u8 prefix_bits     — 0..32 for v4, 0..128 for v6
+//   u8 is_cidr         — 1 = strict CIDR (host bits zeroed),
+//                        0 = inet (no requirement)
+//   u8 nb              — number of address bytes (4 or 16)
+//   u8 addr[nb]        — network byte order
+
+public const PG_INET_FAMILY_V4: Int = 2;
+public const PG_INET_FAMILY_V6: Int = 3;
+
+public type PgInet is {
+    family: Int,
+    prefix_bits: Int,
+    is_cidr: Bool,
+    addr: ArenaSlice,        // 4 or 16 bytes; preserves alignment via arena
+};
+
+public fn decode_inet(slice: &ArenaSlice) -> Result<PgInet, DbError> {
+    let family = match slice_byte(slice, 0) {
+        Some(v) => v,
+        None    => return Err(decode_fault("inet: short header".clone())),
+    };
+    let prefix = match slice_byte(slice, 1) {
+        Some(v) => v,
+        None    => return Err(decode_fault("inet: missing prefix".clone())),
+    };
+    let is_cidr = match slice_byte(slice, 2) {
+        Some(v) => v != 0,
+        None    => return Err(decode_fault("inet: missing is_cidr".clone())),
+    };
+    let nb = match slice_byte(slice, 3) {
+        Some(v) => v,
+        None    => return Err(decode_fault("inet: missing nb".clone())),
+    };
+    let expected_nb = if family == PG_INET_FAMILY_V4 { 4 }
+                      else if family == PG_INET_FAMILY_V6 { 16 }
+                      else { return Err(decode_fault(f"inet: unknown family {family}")); };
+    if nb != expected_nb {
+        return Err(decode_fault(f"inet: family/nb mismatch (family={family}, nb={nb})"));
+    }
+    let addr = subslice(slice, 4, nb)?;
+    Ok(PgInet {
+        family: family,
+        prefix_bits: prefix,
+        is_cidr: is_cidr,
+        addr: addr,
+    })
+}
+
+public fn encode_inet(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    family: Int,
+    prefix_bits: Int,
+    is_cidr: Bool,
+    addr: &[Byte],
+) -> Bool {
+    if family != PG_INET_FAMILY_V4 && family != PG_INET_FAMILY_V6 { return false; }
+    let nb = addr.len() as Int;
+    if family == PG_INET_FAMILY_V4 && nb != 4  { return false; }
+    if family == PG_INET_FAMILY_V6 && nb != 16 { return false; }
+    if prefix_bits < 0 { return false; }
+    if family == PG_INET_FAMILY_V4 && prefix_bits > 32  { return false; }
+    if family == PG_INET_FAMILY_V6 && prefix_bits > 128 { return false; }
+    if !buf.put_u8(arena, family)                     { return false; }
+    if !buf.put_u8(arena, prefix_bits)                { return false; }
+    if !buf.put_u8(arena, if is_cidr { 1 } else { 0 }){ return false; }
+    if !buf.put_u8(arena, nb)                         { return false; }
+    buf.put_bytes(arena, addr)
+}

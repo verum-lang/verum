@@ -1,0 +1,44 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: async, runtime, block_on, executable
+// @expected-stdout: block_on=42
+//
+// End-to-end pin (#334) — `rt.block_on(small_work())` and the
+// top-level `block_on(small_work())` both work in interpreter
+// mode.  This pin verifies the executable Tier 0 async path
+// that was historically blocked by:
+//
+//   * #325 / #326 / #327 / #328 / #329 / #330 / #332 / #333
+//     (each unblocked one architectural layer);
+//   * #334 specifically — under the interpreter's documented
+//     "async-as-sync" semantics
+//     (codegen/expressions.rs:12778 — async fns are NOT compiled
+//     to suspend/resume state machines), `block_on(future)`
+//     receives the already-computed value of the async fn body.
+//     The pure-Verum body of `block_on` calls `.poll()` on this
+//     value; in interpreter mode that dispatches to the wrong
+//     type's `poll` (first `*.poll` suffix-match win at
+//     method_dispatch.rs:1199) and crashes on a bogus
+//     self-pointer field access.  Fix: interpreter intercept at
+//     the call boundary returns the value directly under the
+//     async-as-sync invariant.
+
+mount core.async.executor.{AsyncRuntime, block_on as top_block_on};
+
+async fn small_work() -> Int {
+    42
+}
+
+fn main() {
+    // Method form: rt.block_on(future).
+    let rt = AsyncRuntime.new();
+    let r1 = rt.block_on(small_work());
+    assert_eq(r1, 42);
+
+    // Free-fn form: block_on(future).
+    let r2 = top_block_on(small_work());
+    assert_eq(r2, 42);
+
+    print(f"block_on={r1}");
+}
