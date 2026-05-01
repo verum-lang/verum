@@ -5282,6 +5282,25 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
+    // 11c. Reflection-tower — ordinal-indexed meta-soundness.
+    //  Walks every level in REF^0..REF^4 + REF^ω; each finite
+    //  level must discharge against the per-rule kernel-rule
+    //  footprint. Citations are Gödel 1931 + Feferman 1989,
+    //  Pohlers 2009, Beklemishev 2003, Schütte 1965, Feferman
+    //  1962 (one per level). The tower's stability is the
+    //  load-bearing meta-theory invariant of Verum's Gödel-2nd
+    //  escape.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "reflection_tower",
+        report_dir.join("reflection-tower.json"),
+        || audit_reflection_tower_with_format(AuditFormat::Json),
+    );
+    if summary.get("reflection_tower") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
     // 12. Proof-term-library — N-kernel + universe-stability +
     //  adversarial verification of the canonical certificate
     //  library at `core/verify/proof_term_examples/` (#157, #158
@@ -10029,6 +10048,186 @@ pub fn audit_self_recognition(format: AuditFormat) -> Result<()> {
             println!("{}", out);
         }
     }
+    Ok(())
+}
+
+// =============================================================================
+// Reflection-tower audit (#158) — Feferman 1989 / Pohlers / Beklemishev
+// =============================================================================
+
+/// `verum audit --reflection-tower` — walks every level in
+/// `verum_kernel::reflection_tower::reflection_tower()`, runs each
+/// level's algorithmic discharge, and surfaces the citation +
+/// verdict. Fails the gate if any finite level fails to discharge.
+///
+/// **Architectural role**: the base meta-soundness audit
+/// (`--self-recognition`) is rank-1 (kernel sound in
+/// Verum + κ_meta).  This gate exposes the full ordinal-indexed
+/// reflection tower (REF^0..REF^4 + REF^ω) with each level's
+/// published-proof citation. The tower's stability (every finite
+/// level discharges) is the load-bearing soundness contract.
+pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::reflection_tower::build_tower_report;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Reflection tower — MSFS-grounded meta-soundness");
+    }
+
+    let report = build_tower_report();
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("reflection-tower.json");
+
+    let stage_summaries: Vec<serde_json::Value> = report
+        .stage_verdicts
+        .iter()
+        .map(|v| {
+            serde_json::json!({
+                "stage_name": v.stage_name,
+                "stage_tag": v.stage_tag,
+                "msfs_citation": v.citation_tag,
+                "verum_corpus_path": v.corpus_path,
+                "discharges": v.discharges,
+            })
+        })
+        .collect();
+
+    let constructive_summaries: Vec<serde_json::Value> = report
+        .sampled_constructive_discharges
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "universe_index": d.universe_index,
+                "witness": {
+                    "a_m_cls_is_meta_cls": d.witness.a_m_cls_is_meta_cls_holds,
+                    "b_pi_inf_inf_plus_1_equivalent": d.witness.b_pi_inf_inf_plus_1_equivalent,
+                    "b_universe_ascent_with_theory_idempotence":
+                        d.witness.b_universe_ascent_with_theory_idempotence,
+                },
+                "kernel_truncate_to_level_holds": d.truncate_to_level_holds,
+                "kernel_straightening_equivalence_holds": d.straightening_equivalence_holds,
+                "holds": d.holds,
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "schema_version": 2,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "kernel_reflection_tower_msfs_grounded",
+        "msfs_paper": "Sereda 2026 — The Moduli Space of Formal Systems",
+        "load_bearing": report.is_load_bearing(),
+        "max_inaccessible_required": report.max_inaccessible_required,
+        "stages": stage_summaries,
+        "constructive_discharges_at_sampled_indices": constructive_summaries,
+        "discharged_stage_count": report.discharged_count(),
+        "constructive_discharged_count": report.constructive_discharged_count(),
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Reflection tower — MSFS-grounded meta-soundness");
+            println!("───────────────────────────────────────────────");
+            println!(
+                "  Four structural facts (MSFS Theorems 9.6 + 8.2 + 5.1; \
+                 three interior stages + AFN-T α boundary):",
+            );
+            println!();
+            println!(
+                "  {:<10}  {:<9}  {:<48}  Corpus path",
+                "Stage", "Discharge", "MSFS citation",
+            );
+            println!(
+                "  {}  {}  {}  {}",
+                "─".repeat(10), "─".repeat(9), "─".repeat(48), "─".repeat(60),
+            );
+            for v in &report.stage_verdicts {
+                let glyph = if v.discharges { "✓" } else { "✗" };
+                println!(
+                    "  {:<10}  {} {:<7}  {:<48}  {}",
+                    v.stage_name,
+                    glyph,
+                    if v.discharges { "yes" } else { "NO" },
+                    v.citation_tag,
+                    v.corpus_path,
+                );
+            }
+            println!();
+            println!(
+                "  Constructive per-index discharges (sampled at k = 0, 1, 2, 3, 7, 42):",
+            );
+            println!(
+                "  {:<6}  {:<7}  {:<14}  {:<14}  {:<14}  {}",
+                "k", "holds", "a_m_cls", "b_pi_∞,∞+1", "b_univ_ascent", "intrinsics",
+            );
+            println!("  {}", "─".repeat(80));
+            for d in &report.sampled_constructive_discharges {
+                let glyph = if d.holds { "✓" } else { "✗" };
+                println!(
+                    "  {:<6}  {} {:<5}  {:<14}  {:<14}  {:<14}  trunc={} straight={}",
+                    d.universe_index,
+                    glyph,
+                    if d.holds { "yes" } else { "NO" },
+                    d.witness.a_m_cls_is_meta_cls_holds,
+                    d.witness.b_pi_inf_inf_plus_1_equivalent,
+                    d.witness.b_universe_ascent_with_theory_idempotence,
+                    d.truncate_to_level_holds,
+                    d.straightening_equivalence_holds,
+                );
+            }
+            println!();
+            println!(
+                "  Max inaccessible-index required by current kernel: {}",
+                report.max_inaccessible_required,
+            );
+            println!(
+                "  Stages discharged: {}/{}; Constructive discharges held: {}/{}",
+                report.discharged_count(),
+                report.stage_verdicts.len(),
+                report.constructive_discharged_count(),
+                report.sampled_constructive_discharges.len(),
+            );
+            println!();
+            if report.is_load_bearing() {
+                println!(
+                    "{} MSFS-grounded reflection tower load-bearing: \
+                     every stage discharges + every sampled per-index constructive \
+                     witness fed through MSFS-machine-verified intrinsics agrees.",
+                    "✓".green(),
+                );
+            } else {
+                println!(
+                    "{} Reflection tower NOT load-bearing — at least one stage or \
+                     constructive discharge failed.",
+                    "✗".red(),
+                );
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    if !report.is_load_bearing() {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "reflection-tower audit: at least one finite level failed to \
+                 discharge — see {}",
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
     Ok(())
 }
 

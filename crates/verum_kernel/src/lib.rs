@@ -106,6 +106,7 @@ pub mod proof_checker_nbe; // NbE-based second algorithmic kernel
 pub mod proof_checker_meta; // universe-lift mechanism for meta-mode
 pub mod kernel_registry; // N-kernel registry for differential testing
 pub mod differential_fuzz; // mutation-based property fuzzing over the registry
+pub mod reflection_tower; // ordinal-indexed meta-soundness tower (Feferman 1989 / Pohlers / Beklemishev)
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type

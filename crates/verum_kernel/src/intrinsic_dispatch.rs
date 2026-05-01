@@ -772,6 +772,99 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
             })
         }
 
+        // Reflection-tower discharge routes (MSFS-grounded).
+        //
+        // Three structural facts (NOT five opaque ordinal levels):
+        //
+        //   * `kernel_reflection_tower_base` — REF^0 base footprint.
+        //   * `kernel_reflection_tower_stable` — REF^≥1 theory-level
+        //     idempotence (MSFS Theorem 9.6(b)).
+        //   * `kernel_reflection_tower_omega_bounded` — REF^ω
+        //     bounded by Con(S) + κ_inacc (MSFS Theorem 8.2).
+        //
+        // All three reuse the existing MSFS-machine-verified
+        // intrinsics (`kernel_truncate_to_level`,
+        // `kernel_straightening_equivalence`,
+        // `kernel_self_soundness_in_meta_universe`) under the hood.
+        "kernel_reflection_tower_base" => {
+            let d = crate::reflection_tower::discharge_at_universe_index(0);
+            Some(IntrinsicValue::Decision {
+                holds: d.holds,
+                reason: format!(
+                    "reflection-tower REF^0 (base footprint) — {}; \
+                     witness({}): a_m_cls={}, b_pi_inf_inf+1={}, \
+                     b_universe_ascent={}.  See \
+                     verum_kernel::zfc_self_recognition + \
+                     core/verify/kernel_self_soundness/predicative_reflection.vr.",
+                    if d.holds { "discharged" } else { "FAILED to discharge" },
+                    d.universe_index,
+                    d.witness.a_m_cls_is_meta_cls_holds,
+                    d.witness.b_pi_inf_inf_plus_1_equivalent,
+                    d.witness.b_universe_ascent_with_theory_idempotence,
+                ),
+            })
+        }
+        "kernel_reflection_tower_stable" => {
+            // REF^≥1 — theory-level idempotence (MSFS Theorem 9.6(b)).
+            // Constructively discharge at k=1; per Theorem 9.6, every
+            // k ≥ 1 yields the same theory.
+            let d = crate::reflection_tower::discharge_at_universe_index(1);
+            Some(IntrinsicValue::Decision {
+                holds: d.holds,
+                reason: format!(
+                    "reflection-tower REF^≥1 (MSFS Theorem 9.6(b) — theory-level \
+                     idempotence under universe-ascent) — {}; constructive \
+                     dispatch through kernel_truncate_to_level={} + \
+                     kernel_straightening_equivalence={}. Machine-verified at \
+                     MSFS corpus theorems/msfs/09_meta_classification/\
+                     theorems_9_3_9_4_9_6.vr.",
+                    if d.holds { "discharged" } else { "FAILED to discharge" },
+                    d.truncate_to_level_holds,
+                    d.straightening_equivalence_holds,
+                ),
+            })
+        }
+        "kernel_reflection_tower_omega_bounded" => {
+            let report = crate::reflection_tower::build_tower_report();
+            let omega = report
+                .stage_verdicts
+                .iter()
+                .find(|v| v.stage_tag == "ref_omega_bounded");
+            let holds = omega.map(|v| v.discharges).unwrap_or(false);
+            Some(IntrinsicValue::Decision {
+                holds,
+                reason: format!(
+                    "reflection-tower REF^ω (MSFS Theorem 8.2 — reflective \
+                     tower bounded by Con(S) + κ_inacc, exactly ONE extra \
+                     strongly-inaccessible) — {}; max_inaccessible_required={} \
+                     (bound is 3). Machine-verified at MSFS corpus \
+                     theorems/msfs/08_bypass_paths/theorems_8_1_to_8_8.vr.",
+                    if holds { "discharged" } else { "FAILED to discharge" },
+                    report.max_inaccessible_required,
+                ),
+            })
+        }
+        "kernel_reflection_tower_absolute_boundary" => {
+            // REF^Abs — MSFS Theorem 5.1 (AFN-T α): 𝓛_Abs = ∅.
+            // The boundary is uniformly empty across every Rich-
+            // metatheory + every categorical level (five-axis
+            // absoluteness). The kernel never instantiates an
+            // absolute-foundation candidate.
+            let holds = crate::reflection_tower::absolute_boundary_empty_discharges();
+            Some(IntrinsicValue::Decision {
+                holds,
+                reason: format!(
+                    "reflection-tower REF^Abs (MSFS Theorem 5.1 — AFN-T α \
+                     Boundary Lemma: 𝓛_Abs = ∅, the absolute foundation \
+                     stratum is empty) — {}; uniformly closed across all \
+                     Rich-metatheories + all categorical levels (five-axis \
+                     absoluteness, MSFS §11). Machine-verified at \
+                     MSFS corpus theorems/msfs/05_afnt_alpha/theorem_5_1.vr.",
+                    if holds { "discharged" } else { "FAILED to discharge" },
+                ),
+            })
+        }
+
         _ => None,
     }
 }
@@ -844,8 +937,19 @@ pub fn available_intrinsics() -> &'static [&'static str] {
         "kernel_soundness_v0",
         // Separation-logic surface alignment (#161 V0).
         "kernel_separation_logic_alignment_is_sound",
-        // Meta-soundness escape hatch (#158 V0).
+        // Meta-soundness escape hatch.
         "kernel_self_soundness_in_meta_universe",
+        // Reflection-tower discharges (MSFS-grounded).
+        // Three structural facts:
+        //   * base footprint (per-rule enumeration).
+        //   * REF^≥1 theory-level idempotence (MSFS Theorem 9.6(b)).
+        //   * REF^ω bounded by Con(S) + κ_inacc (MSFS Theorem 8.2).
+        // All three constructively dispatch through MSFS-machine-
+        // verified intrinsics already in this module.
+        "kernel_reflection_tower_base",
+        "kernel_reflection_tower_stable",
+        "kernel_reflection_tower_omega_bounded",
+        "kernel_reflection_tower_absolute_boundary",
     ]
 }
 
@@ -1172,13 +1276,15 @@ mod tests {
         // dispatchers from core/verify/codegen_soundness/ + 11
         // kernel_v0 rule soundness IOUs from core/verify/kernel_v0/ +
         // 1 separation-logic alignment dispatcher from
-        // core/verify/separation_soundness/ + 1 meta-soundness escape
-        // dispatcher from core/verify/kernel_self_soundness/. Adding
-        // a new bridge axiom must update both the bridge surface and
+        // core/verify/separation_soundness/ + 5 meta-soundness escape
+        // dispatchers from core/verify/kernel_self_soundness/
+        // (1 base meta-theorem + 4 MSFS-grounded reflection-tower
+        // facts: 3 interior stages + AFN-T α boundary). Adding a
+        // new bridge axiom must update both the bridge surface and
         // this count.
         assert_eq!(
             names.len(),
-            46,
+            50,
             "Every kernel_* axiom in core/proof/kernel_bridge.vr + \
              core/math/hott.vr + core/verify/codegen_soundness/ + \
              core/verify/kernel_v0/ + core/verify/separation_soundness/ + \

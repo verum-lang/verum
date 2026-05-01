@@ -1399,6 +1399,18 @@ enum Commands {
         #[clap(long = "differential-kernel-fuzz")]
         differential_kernel_fuzz: bool,
 
+        /// Run the reflection-tower audit. Walks every level in the
+        /// ordinal-indexed meta-soundness tower (REF^0 through REF^4
+        /// plus the REF^ω limit), reports per-level discharge verdict
+        /// and citation (Gödel 1931 + Feferman 1989, Pohlers 2009,
+        /// Beklemishev 2003, Schütte 1965, Feferman 1962). Auto-derives
+        /// the minimum reflection level required by the current
+        /// kernel-rule roster from per-rule footprint enumeration. Exits
+        /// non-zero if any finite level fails to discharge.
+        /// Output: `target/audit-reports/reflection-tower.json`.
+        #[clap(long = "reflection-tower")]
+        reflection_tower: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -2727,6 +2739,7 @@ fn run_command(cli: Cli) -> Result<()> {
                         30,
                         false,
                         emit_vbc,
+                        target.as_ref().map(|t| t.as_str()),
                     );
                 }
                 PathTarget::Project => {}
@@ -3860,6 +3873,7 @@ fn run_command(cli: Cli) -> Result<()> {
             codegen_attestation,
             differential_kernel,
             differential_kernel_fuzz,
+            reflection_tower,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -3923,6 +3937,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_differential_kernel_with_format(output_format)
             } else if differential_kernel_fuzz {
                 commands::audit::audit_differential_kernel_fuzz_with_format(output_format)
+            } else if reflection_tower {
+                commands::audit::audit_reflection_tower_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {
