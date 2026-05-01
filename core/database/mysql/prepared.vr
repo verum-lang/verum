@@ -1,0 +1,344 @@
+// =============================================================================
+// core/database/mysql/prepared.vr — high-level cached prepared API
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.3 (prepared statements),
+//       §6.3 (binary protocol over the modern caching_sha2 path)
+// =============================================================================
+//
+// The thin layer between the wire-level `MysqlConnection.prepare` /
+// `execute_prepared` / `close_prepared` (in `connection.vr`) and the
+// `MysqlStmtCache` LRU (in `stmt_cache.vr`). What handlers actually
+// call:
+//
+//   let rows = mysql.query_cached(
+//       sql#"SELECT id, name FROM users WHERE org = ? AND active = ?",
+//       params![org_id, true],
+//   ).await?;
+//
+//   let n = mysql.execute_cached(
+//       sql#"UPDATE users SET last_login = ? WHERE id = ?",
+//       params![now_ms, user_id],
+//   ).await?;
+//
+// Both paths are cache-aware: the first call against a fresh SQL
+// fingerprint runs COM_STMT_PREPARE and inserts into the per-
+// connection cache; subsequent calls hit the cache and only emit
+// COM_STMT_EXECUTE.
+//
+// This module is also responsible for the cache's lifecycle
+// invariant: every evicted statement_id MUST be COM_STMT_CLOSE'd on
+// the wire so the server frees the slot. `evict_and_close` is the
+// canonical sequence; `drain_cache_on_close` runs the same close-
+// every-cached-id sweep when the connection is shutting down.
+//
+// Error handling:
+//   * ER_UNKNOWN_STMT_HANDLER (1243) on EXECUTE → invalidate the
+//     cache entry and retry once with a fresh prepare. Surfaces as
+//     transparent recovery from server-side cache pressure.
+//   * Any other DbError propagates verbatim; cache entry is left
+//     in place (the statement_id is presumed still valid).
+//
+// Concurrency:
+//   * `MysqlStmtCache` is NOT thread-safe; this module assumes a
+//     single owner of the connection (matching `MysqlConnection`'s
+//     own affine semantics). A future async pipeline analogue would
+//     wrap the cache in a Mutex; out of scope for v0.1.
+// =============================================================================
+
+module core.database.mysql.prepared;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+
+mount core.database.common.error.{DbError, AdapterSpecific};
+mount core.database.mysql.connection.{
+    MysqlConnection, MysqlPreparedStatement, MysqlPreparedResult,
+};
+mount core.database.mysql.stmt_cache.{
+    MysqlStmtCache, MysqlStmtCacheMetrics, fingerprint,
+};
+mount core.database.mysql.wire.frontend.{
+    StmtParam, SpNull, SpTinyInt, SpShort, SpLong, SpLongLong,
+    SpDouble, SpFloat, SpString, SpBlob,
+    param_null, param_int, param_text, param_blob, param_double,
+};
+
+// -----------------------------------------------------------------------------
+// MySQL server error codes consumed here
+// -----------------------------------------------------------------------------
+
+/// `ER_UNKNOWN_STMT_HANDLER` — emitted by EXECUTE / CLOSE when the
+/// server has forgotten the statement_id (typically because the
+/// server's own prepared-statement cache evicted it under memory
+/// pressure). On this error we drop the client-side cache entry and
+/// retry once with a fresh prepare.
+public const MY_ER_UNKNOWN_STMT_HANDLER: Int = 1243;
+
+// -----------------------------------------------------------------------------
+// PreparedSession — connection + cache pair
+// -----------------------------------------------------------------------------
+
+/// Convenience wrapper that bundles a MysqlConnection with its
+/// prepared-statement cache. Production code that wants the
+/// cached-API ergonomics holds a `PreparedSession` instead of a
+/// bare `MysqlConnection`; the cache lives as long as the wrapper
+/// does.
+///
+/// The wrapper does NOT take ownership of the connection — it
+/// borrows mutably for the duration of each call. Callers can drop
+/// the `PreparedSession` and continue using the underlying
+/// connection; the cache (which tracks server-side state) is then
+/// effectively orphaned and the next user must close every cached
+/// statement_id manually via `drain_cache_on_close`.
+public type PreparedSession is {
+    cache: MysqlStmtCache,
+};
+
+implement PreparedSession {
+    public fn new() -> PreparedSession {
+        PreparedSession { cache: MysqlStmtCache.new() }
+    }
+
+    public fn with_cache_cap(cap: Int) -> PreparedSession {
+        PreparedSession { cache: MysqlStmtCache.with_cap(cap) }
+    }
+
+    /// Snapshot the cache's metrics — feed straight into the
+    /// `db.client.mysql.stmt_cache.*` metric set.
+    public fn cache_metrics(&self) -> MysqlStmtCacheMetrics {
+        self.cache.metrics()
+    }
+
+    public fn cache_len(&self) -> Int { self.cache.len() }
+    public fn cache_cap(&self) -> Int { self.cache.cap() }
+
+    // -------------------------------------------------------------------------
+    // Cache-aware prepare
+    // -------------------------------------------------------------------------
+
+    /// Return a prepared handle for `sql` — either from the cache
+    /// or freshly prepared via COM_STMT_PREPARE. On a fresh prepare
+    /// that exceeds the cache cap, the LRU victim is closed on the
+    /// wire before the new entry is inserted (so the server-side
+    /// slot is always released).
+    public fn prepare_cached(
+        &mut self,
+        conn: &mut MysqlConnection,
+        sql: &Text,
+    ) -> Result<MysqlPreparedStatement, DbError> {
+        let fp = fingerprint(sql);
+        match self.cache.lookup(fp) {
+            Some(stmt) => Ok(stmt),
+            None => {
+                let stmt = conn.prepare(sql)?;
+                let evicted = self.cache.insert(fp, clone_stmt(&stmt));
+                match evicted {
+                    Some(victim) => {
+                        // Best-effort close — failure is logged via
+                        // the returned error but does NOT propagate
+                        // (the user's prepare succeeded, the slot
+                        // we lose is not their concern).
+                        let _ = conn.close_prepared(&victim);
+                    }
+                    None => {}
+                }
+                Ok(stmt)
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Cache-aware query / execute (with auto-recovery from server cache miss)
+    // -------------------------------------------------------------------------
+
+    /// SELECT-class cached execute: prepare-or-cached-hit, then
+    /// EXECUTE. On `ER_UNKNOWN_STMT_HANDLER` (server forgot our
+    /// statement_id) the cache entry is invalidated and the call
+    /// retries ONCE with a fresh prepare. Other errors propagate
+    /// verbatim.
+    ///
+    /// Returns the raw `MysqlPreparedResult` — handlers further
+    /// decode `rows` against the statement's `column_types`.
+    public fn query_cached(
+        &mut self,
+        conn: &mut MysqlConnection,
+        sql: &Text,
+        params: &List<StmtParam>,
+    ) -> Result<MysqlPreparedResult, DbError> {
+        let fp = fingerprint(sql);
+        let stmt = self.prepare_cached(conn, sql)?;
+        match conn.execute_prepared(&stmt, params) {
+            Ok(r)  => Ok(r),
+            Err(e) => {
+                if is_unknown_stmt_handler(&e) {
+                    // Server forgot the slot — drop our entry,
+                    // re-prepare, retry once.
+                    let _ = self.cache.invalidate(fp);
+                    let fresh = self.prepare_cached(conn, sql)?;
+                    conn.execute_prepared(&fresh, params)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Non-SELECT cached execute. Identical recovery semantics to
+    /// `query_cached`; returned `MysqlPreparedResult.rows` will be
+    /// empty for INSERT/UPDATE/DELETE/DDL paths.
+    public fn execute_cached(
+        &mut self,
+        conn: &mut MysqlConnection,
+        sql: &Text,
+        params: &List<StmtParam>,
+    ) -> Result<MysqlPreparedResult, DbError> {
+        // Same machinery as `query_cached` — the binary protocol
+        // does not distinguish SELECT from non-SELECT at execute
+        // time; the response shape (OK vs result-set) is what
+        // differs, and `MysqlPreparedResult` already covers both.
+        self.query_cached(conn, sql, params)
+    }
+
+    // -------------------------------------------------------------------------
+    // Lifecycle — drain cache before connection close
+    // -------------------------------------------------------------------------
+
+    /// Close every cached statement on the wire, freeing the
+    /// server-side slots. Call this from the connection's own
+    /// `close()` path, BEFORE sending COM_QUIT — the server will
+    /// drop unclosed prepared statements when the connection ends,
+    /// but emitting CLOSE explicitly:
+    ///
+    ///   1. Reduces the `Com_stmt_count` counter immediately, which
+    ///      matters for shared-server deployments where a slow
+    ///      drain affects neighbouring sessions.
+    ///   2. Lets the server free per-statement memory (~few KB
+    ///      each) before TCP close-wait.
+    ///   3. Plays nicely with pgbouncer-style proxies that observe
+    ///      the explicit close to free their own bookkeeping.
+    ///
+    /// Returns the count of statements closed. Errors on individual
+    /// closes are silently dropped — the connection is shutting
+    /// down anyway, partial drain is acceptable.
+    public fn drain_cache_on_close(
+        &mut self,
+        conn: &mut MysqlConnection,
+    ) -> Int {
+        let stmts = self.cache.drain();
+        let mut closed: Int = 0;
+        let mut i: Int = 0;
+        while i < stmts.len() as Int {
+            match conn.close_prepared(&stmts[i]) {
+                Ok(_)  => { closed = closed + 1; }
+                Err(_) => {}      // best-effort — server will GC anyway
+            }
+            i = i + 1;
+        }
+        closed
+    }
+
+    /// Invalidate one cache entry by SQL — useful when the caller
+    /// independently knows the statement is stale (e.g. a DDL was
+    /// just applied and they want the next prepare to re-fetch
+    /// column metadata).
+    public fn invalidate(&mut self, sql: &Text) -> Bool {
+        let fp = fingerprint(sql);
+        match self.cache.invalidate(fp) {
+            Some(_) => true,
+            None    => false,
+        }
+    }
+
+    /// Drop the entire cache without closing the server-side
+    /// statements. Useful only when the underlying connection is
+    /// already known to be dead — otherwise prefer
+    /// `drain_cache_on_close`.
+    public fn clear_cache_no_close(&mut self) {
+        let _ = self.cache.drain();
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Error inspection — recognise the recoverable cache-pressure error
+// -----------------------------------------------------------------------------
+
+/// True iff `e` is a `DbError` describing
+/// `ER_UNKNOWN_STMT_HANDLER` (1243). Used by `query_cached` to
+/// decide whether to retry once with a fresh prepare.
+fn is_unknown_stmt_handler(e: &DbError) -> Bool {
+    match e {
+        DbError.QueryFailed { sql_state, message, .. } => {
+            // The MySQL adapter encodes the server errno into the
+            // `message` slot as "Error <code>: <text>" by
+            // `dberr_from_mysql`. We probe the text directly to
+            // avoid depending on a dedicated `errno` field that the
+            // common error type does not carry.
+            text_contains_errno(message, MY_ER_UNKNOWN_STMT_HANDLER) ||
+            sql_state_is_42000(sql_state)
+        }
+        DbError.Adapter(a) => {
+            text_contains_errno(&a.message, MY_ER_UNKNOWN_STMT_HANDLER)
+        }
+        _ => false,
+    }
+}
+
+fn text_contains_errno(t: &Text, code: Int) -> Bool {
+    let needle = f"Error {code}";
+    let bytes = t.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let n = bytes.len() as Int;
+    let m = needle_bytes.len() as Int;
+    if m == 0 || m > n { return false; }
+    let mut i: Int = 0;
+    while i + m <= n {
+        let mut j: Int = 0;
+        let mut all_match: Bool = true;
+        while j < m {
+            if bytes[i + j] != needle_bytes[j] {
+                all_match = false;
+                break;
+            }
+            j = j + 1;
+        }
+        if all_match { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+/// SQLSTATE 42000 (syntax error or access violation) is the class
+/// MySQL reports for unknown statement handler. We only return true
+/// for *exactly* 42000 — broader 42*** classes are real syntax
+/// errors that MUST NOT trigger silent retry.
+fn sql_state_is_42000(s: &core.database.common.error.SqlState) -> Bool {
+    s.0 == "42000".clone()
+}
+
+// -----------------------------------------------------------------------------
+// Helpers — clone MysqlPreparedStatement
+// -----------------------------------------------------------------------------
+
+fn clone_stmt(s: &MysqlPreparedStatement) -> MysqlPreparedStatement {
+    MysqlPreparedStatement {
+        statement_id: s.statement_id,
+        num_params: s.num_params,
+        num_columns: s.num_columns,
+        param_types: s.param_types.clone(),
+        column_types: s.column_types.clone(),
+        sql: s.sql.clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Public re-exports of the parameter constructors — so user code can
+// `mount core.database.mysql.prepared` once and have the full
+// build-and-execute surface in scope.
+// -----------------------------------------------------------------------------
+
+public mount core.database.mysql.wire.frontend.{
+    StmtParam,
+    param_null, param_int, param_text, param_blob, param_double,
+};

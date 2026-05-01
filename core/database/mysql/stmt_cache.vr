@@ -1,0 +1,375 @@
+// =============================================================================
+// core/database/mysql/stmt_cache.vr — per-connection prepared-statement cache
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.3 (COM_STMT_PREPARE / EXECUTE,
+//       session-local prepared statements)
+// =============================================================================
+//
+// MySQL prepared statements are session-local: every COM_STMT_PREPARE
+// allocates a `statement_id` server-side that is valid for the
+// lifetime of the connection. Re-preparing the same SQL on the same
+// connection wastes a round-trip and a server slot. Spindle keeps a
+// per-connection LRU cache of `(sql_fingerprint → MysqlPreparedStatement)`
+// so the high-level `query_cached` / `execute_cached` API returns the
+// already-prepared handle on a cache hit.
+//
+// # Cache key
+//
+// FNV-1a 64-bit hash of the canonicalised SQL text — leading /
+// trailing whitespace stripped, internal whitespace runs collapsed
+// to single spaces. Two queries that differ only in formatting
+// share one cache entry. The fingerprint is a Spindle-internal
+// detail; users never see it.
+//
+// # Eviction
+//
+// LRU at fixed cap (default 128, matching MySQL's `max_prepared_stmt_count`
+// default of 16384 divided across many connections — 128 per pool slot
+// keeps the server's per-session footprint bounded). Evicted entries
+// MUST be `COM_STMT_CLOSE`d on the wire so the server frees the slot
+// — see `evict_one_with_close` for the canonical sequence.
+//
+// # Invalidation
+//
+// MySQL emits ER_UNKNOWN_STMT_HANDLER (1243) when a statement_id was
+// closed under us (typically because the server-side cache was full
+// and our entry rotated out). Caller calls `invalidate(fingerprint)`
+// to drop the stale handle so the next request re-prepares.
+//
+// On schema mutation (DDL on a referenced table) MySQL silently
+// recompiles cached plans server-side; client-side cache stays valid.
+// Spindle does NOT clear on schema change — unlike Postgres, MySQL
+// does not invalidate the statement_id.
+//
+// # Mirrors core.database.postgres.stmt_cache
+//
+// Same data layout (List + linear LRU), same semantics, but stores
+// the full `MysqlPreparedStatement` (param/column type vectors) since
+// MySQL needs them at every EXECUTE — they're not redundant cached
+// state, they're load-bearing for the binary-protocol type vector.
+// =============================================================================
+
+module core.database.mysql.stmt_cache;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.mysql.connection.{MysqlPreparedStatement};
+
+// -----------------------------------------------------------------------------
+// SQL fingerprinting
+// -----------------------------------------------------------------------------
+
+/// Canonicalise SQL — strip leading/trailing whitespace, collapse
+/// internal whitespace runs to single spaces. The fingerprint is the
+/// FNV-1a hash of the canonical form, so two queries that differ
+/// only in formatting share one cache slot.
+fn canonicalise(sql: &Text) -> Text {
+    let bytes = sql.as_bytes();
+    let n = bytes.len() as Int;
+    let mut out: List<Byte> = List.with_capacity(n);
+    let mut i: Int = 0;
+    let mut prev_was_space: Bool = true;     // suppresses leading whitespace
+    while i < n {
+        let b = (bytes[i] as Int) & 0xFF;
+        let is_space = b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D;
+        if is_space {
+            if !prev_was_space {
+                out.push(0x20 as Byte);
+            }
+            prev_was_space = true;
+        } else {
+            out.push(bytes[i]);
+            prev_was_space = false;
+        }
+        i = i + 1;
+    }
+    // Trim trailing single space, if any.
+    if (out.len() as Int) > 0 && (out[(out.len() as Int) - 1] as Int) == 0x20 {
+        let trimmed_len = (out.len() as Int) - 1;
+        let mut trimmed: List<Byte> = List.with_capacity(trimmed_len);
+        let mut k: Int = 0;
+        while k < trimmed_len {
+            trimmed.push(out[k]);
+            k = k + 1;
+        }
+        out = trimmed;
+    }
+    match Text.from_utf8(out) {
+        Ok(t)  => t,
+        Err(_) => sql.clone(),       // adversarial input → fall back to verbatim
+    }
+}
+
+/// FNV-1a 64-bit hash. Stable, fast, well-spread for short strings.
+/// Adequate for our cache-key purpose — adversarial collision
+/// resistance is not required (one connection's cache, attacker
+/// has no useful action by colliding two of their own SQLs).
+fn fnv1a_64(s: &Text) -> Int {
+    let bytes = s.as_bytes();
+    let mut h: Int = -3750763034362895579;     // FNV offset basis (signed Int)
+    let prime: Int = 1099511628211;
+    let mut i: Int = 0;
+    let n = bytes.len() as Int;
+    while i < n {
+        h = h ^ ((bytes[i] as Int) & 0xFF);
+        h = h * prime;
+        i = i + 1;
+    }
+    h
+}
+
+/// Compute a stable cache fingerprint for `sql`. Two queries with
+/// the same canonical form share the same fingerprint.
+public fn fingerprint(sql: &Text) -> Int {
+    let canon = canonicalise(sql);
+    fnv1a_64(&canon)
+}
+
+// -----------------------------------------------------------------------------
+// Cache entry
+// -----------------------------------------------------------------------------
+
+public type MyCacheEntry is {
+    fingerprint: Int,
+    /// Owned copy of the prepared-statement handle; cloned on lookup
+    /// so callers can freely pass it to `execute_prepared` without
+    /// holding the cache lock.
+    stmt: MysqlPreparedStatement,
+    /// Logical clock at last touch — drives LRU eviction.
+    last_seen: Int,
+};
+
+// -----------------------------------------------------------------------------
+// MysqlStmtCache
+// -----------------------------------------------------------------------------
+
+/// Default per-connection cache cap. Sits below the MySQL server's
+/// `max_prepared_stmt_count` default (16384) by a comfortable margin
+/// when divided across pool slots — even at 128 connections × 128
+/// statements/conn = 16384, exactly at the server limit. Operators
+/// concerned about per-server pressure tune downward via
+/// `MysqlStmtCache.with_cap`.
+public const DEFAULT_MYSQL_STMT_CACHE_CAP: Int = 128;
+
+public type MysqlStmtCache is {
+    entries: List<MyCacheEntry>,
+    cap: Int,
+    /// Monotonic clock — incremented on every touch / insert. Used by
+    /// `evict_one` to find the LRU victim.
+    clock: Int,
+    /// Total successful lookups since construction. Drives the
+    /// `db.client.mysql.stmt_cache.hits` metric.
+    total_hits: Int,
+    /// Total inserts since construction (= cache misses that
+    /// produced a fresh prepare). Drives `..._misses`.
+    total_inserts: Int,
+    /// Total LRU evictions since construction. Drives
+    /// `..._evictions` — high values signal undersized cap or
+    /// SQL-shape churn.
+    total_evictions: Int,
+    /// Total invalidations (server reported the statement vanished).
+    /// High values correlate with server-side LRU pressure.
+    total_invalidations: Int,
+};
+
+implement MysqlStmtCache {
+    public fn new() -> MysqlStmtCache {
+        MysqlStmtCache.with_cap(DEFAULT_MYSQL_STMT_CACHE_CAP)
+    }
+
+    public fn with_cap(cap: Int) -> MysqlStmtCache {
+        let actual = if cap < 1 { 1 } else { cap };
+        MysqlStmtCache {
+            entries: List.new(),
+            cap: actual,
+            clock: 0,
+            total_hits: 0,
+            total_inserts: 0,
+            total_evictions: 0,
+            total_invalidations: 0,
+        }
+    }
+
+    public fn len(&self) -> Int { self.entries.len() as Int }
+    public fn cap(&self) -> Int { self.cap }
+
+    /// Look up by fingerprint. Updates LRU recency. Returns a clone
+    /// of the cached statement on hit; `None` on miss.
+    ///
+    /// `&mut` because we update `last_seen` and the hit counter.
+    public fn lookup(&mut self, fingerprint: Int) -> Maybe<MysqlPreparedStatement> {
+        self.clock = self.clock + 1;
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].fingerprint == fingerprint {
+                self.entries[i].last_seen = self.clock;
+                self.total_hits = self.total_hits + 1;
+                return Some(clone_stmt(&self.entries[i].stmt));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Insert a freshly-prepared statement under `fingerprint`. Returns
+    /// the evicted statement (if cap exceeded) so the caller can
+    /// emit COM_STMT_CLOSE for it. Returns `None` when no eviction
+    /// was necessary.
+    ///
+    /// Eviction MUST be visible to the caller — silently dropping a
+    /// `MysqlPreparedStatement` orphans the server-side slot until
+    /// session end, slowly leaking the server's
+    /// `max_prepared_stmt_count` pool.
+    public fn insert(
+        &mut self,
+        fingerprint: Int,
+        stmt: MysqlPreparedStatement,
+    ) -> Maybe<MysqlPreparedStatement> {
+        self.clock = self.clock + 1;
+        self.total_inserts = self.total_inserts + 1;
+        let mut evicted: Maybe<MysqlPreparedStatement> = None;
+        if self.entries.len() as Int >= self.cap {
+            evicted = self.evict_one_internal();
+        }
+        self.entries.push(MyCacheEntry {
+            fingerprint: fingerprint,
+            stmt: stmt,
+            last_seen: self.clock,
+        });
+        evicted
+    }
+
+    /// Drop the entry matching `fingerprint` if present. Returns the
+    /// evicted statement so the caller can decide whether to send
+    /// COM_STMT_CLOSE for it (typically NO — invalidation is called
+    /// in response to ER_UNKNOWN_STMT_HANDLER, where the server has
+    /// already forgotten the slot).
+    public fn invalidate(&mut self, fingerprint: Int) -> Maybe<MysqlPreparedStatement> {
+        let mut victim: Int = -1;
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].fingerprint == fingerprint {
+                victim = i;
+                break;
+            }
+            i = i + 1;
+        }
+        if victim < 0 {
+            return None;
+        }
+        self.total_invalidations = self.total_invalidations + 1;
+        self.remove_at(victim)
+    }
+
+    /// Drain every cached statement. Returns the list so the caller
+    /// can issue COM_STMT_CLOSE on each before closing the connection.
+    /// The cache is left empty after this call.
+    public fn drain(&mut self) -> List<MysqlPreparedStatement> {
+        let mut out: List<MysqlPreparedStatement> = List.new();
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            out.push(clone_stmt(&self.entries[i].stmt));
+            i = i + 1;
+        }
+        self.entries = List.new();
+        out
+    }
+
+    /// Snapshot of the cache's metric counters.
+    public fn metrics(&self) -> MysqlStmtCacheMetrics {
+        MysqlStmtCacheMetrics {
+            cap: self.cap,
+            len: self.entries.len() as Int,
+            total_hits: self.total_hits,
+            total_inserts: self.total_inserts,
+            total_evictions: self.total_evictions,
+            total_invalidations: self.total_invalidations,
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Internals
+    // -------------------------------------------------------------------------
+
+    fn evict_one_internal(&mut self) -> Maybe<MysqlPreparedStatement> {
+        if (self.entries.len() as Int) == 0 {
+            return None;
+        }
+        let mut victim: Int = 0;
+        let mut oldest: Int = self.entries[0].last_seen;
+        let mut i: Int = 1;
+        while i < self.entries.len() as Int {
+            if self.entries[i].last_seen < oldest {
+                oldest = self.entries[i].last_seen;
+                victim = i;
+            }
+            i = i + 1;
+        }
+        self.total_evictions = self.total_evictions + 1;
+        self.remove_at(victim)
+    }
+
+    fn remove_at(&mut self, idx: Int) -> Maybe<MysqlPreparedStatement> {
+        let n = self.entries.len() as Int;
+        if idx < 0 || idx >= n {
+            return None;
+        }
+        let evicted = clone_stmt(&self.entries[idx].stmt);
+        let mut new_entries: List<MyCacheEntry> = List.with_capacity(n - 1);
+        let mut k: Int = 0;
+        while k < n {
+            if k != idx {
+                new_entries.push(MyCacheEntry {
+                    fingerprint: self.entries[k].fingerprint,
+                    stmt: clone_stmt(&self.entries[k].stmt),
+                    last_seen: self.entries[k].last_seen,
+                });
+            }
+            k = k + 1;
+        }
+        self.entries = new_entries;
+        Some(evicted)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers — MysqlPreparedStatement clone
+// -----------------------------------------------------------------------------
+
+fn clone_stmt(s: &MysqlPreparedStatement) -> MysqlPreparedStatement {
+    MysqlPreparedStatement {
+        statement_id: s.statement_id,
+        num_params: s.num_params,
+        num_columns: s.num_columns,
+        param_types: s.param_types.clone(),
+        column_types: s.column_types.clone(),
+        sql: s.sql.clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Metrics snapshot
+// -----------------------------------------------------------------------------
+
+public type MysqlStmtCacheMetrics is {
+    cap: Int,
+    len: Int,
+    total_hits: Int,
+    total_inserts: Int,
+    total_evictions: Int,
+    total_invalidations: Int,
+};
+
+implement MysqlStmtCacheMetrics {
+    /// Hit ratio in the [0, 1000] integer-fixed-point range so callers
+    /// can render `f"{ratio_x1000 / 10}.{ratio_x1000 % 10}%"` without
+    /// pulling in floating-point arithmetic. Returns 0 when nothing
+    /// has been looked up yet.
+    public fn hit_ratio_per_mille(&self) -> Int {
+        let total = self.total_hits + self.total_inserts;
+        if total <= 0 { return 0; }
+        (self.total_hits * 1000) / total
+    }
+}
