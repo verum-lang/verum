@@ -52,15 +52,28 @@ public type BtreeError is
       InvalidRootPage(pn: Int)
     | InvalidPageSize(ps: Int)
     | IoError(msg: Text)
-    | Corrupt(msg: Text);
+    | Corrupt(msg: Text)
+    // Added by #140 — needed by cursor_seek + btree_ops:
+    | PageNotFound(pn: Int)
+    | CorruptPage(pn: Int)
+    | InvalidCursor(reason: Text)
+    | MaxDepthExceeded(depth: Int)
+    | BalancePlanFailed(reason: Text)
+    | BalanceApplyFailed(reason: Text);
 
 implement Display for BtreeError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            InvalidRootPage(pn) => f.write_str(f"sqlite btree: invalid root page {pn}".as_str()),
-            InvalidPageSize(ps) => f.write_str(f"sqlite btree: invalid page size {ps}".as_str()),
-            IoError(msg)        => f.write_str(f"sqlite btree I/O error: {msg}".as_str()),
-            Corrupt(msg)        => f.write_str(f"sqlite btree corruption: {msg}".as_str()),
+            InvalidRootPage(pn)     => f.write_str(f"sqlite btree: invalid root page {pn}".as_str()),
+            InvalidPageSize(ps)     => f.write_str(f"sqlite btree: invalid page size {ps}".as_str()),
+            IoError(msg)            => f.write_str(f"sqlite btree I/O error: {msg}".as_str()),
+            Corrupt(msg)            => f.write_str(f"sqlite btree corruption: {msg}".as_str()),
+            PageNotFound(pn)        => f.write_str(f"sqlite btree: page {pn} not found".as_str()),
+            CorruptPage(pn)         => f.write_str(f"sqlite btree: page {pn} corrupt".as_str()),
+            InvalidCursor(r)        => f.write_str(f"sqlite btree: cursor invalid ({r})".as_str()),
+            MaxDepthExceeded(d)     => f.write_str(f"sqlite btree: max depth {d} exceeded".as_str()),
+            BalancePlanFailed(r)    => f.write_str(f"sqlite btree: balance plan failed ({r})".as_str()),
+            BalanceApplyFailed(r)   => f.write_str(f"sqlite btree: balance apply failed ({r})".as_str()),
         }
     }
 }
@@ -68,10 +81,16 @@ implement Display for BtreeError {
 implement Debug for BtreeError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            InvalidRootPage(pn) => f.write_str(f"InvalidRootPage(pn: {pn})".as_str()),
-            InvalidPageSize(ps) => f.write_str(f"InvalidPageSize(ps: {ps})".as_str()),
-            IoError(msg)        => f.write_str(f"IoError(msg: {msg})".as_str()),
-            Corrupt(msg)        => f.write_str(f"Corrupt(msg: {msg})".as_str()),
+            InvalidRootPage(pn)     => f.write_str(f"InvalidRootPage(pn: {pn})".as_str()),
+            InvalidPageSize(ps)     => f.write_str(f"InvalidPageSize(ps: {ps})".as_str()),
+            IoError(msg)            => f.write_str(f"IoError(msg: {msg})".as_str()),
+            Corrupt(msg)            => f.write_str(f"Corrupt(msg: {msg})".as_str()),
+            PageNotFound(pn)        => f.write_str(f"PageNotFound(pn: {pn})".as_str()),
+            CorruptPage(pn)         => f.write_str(f"CorruptPage(pn: {pn})".as_str()),
+            InvalidCursor(r)        => f.write_str(f"InvalidCursor(reason: {r})".as_str()),
+            MaxDepthExceeded(d)     => f.write_str(f"MaxDepthExceeded(depth: {d})".as_str()),
+            BalancePlanFailed(r)    => f.write_str(f"BalancePlanFailed(reason: {r})".as_str()),
+            BalanceApplyFailed(r)   => f.write_str(f"BalanceApplyFailed(reason: {r})".as_str()),
         }
     }
 }
@@ -79,10 +98,16 @@ implement Debug for BtreeError {
 implement Eq for BtreeError {
     fn eq(&self, other: &BtreeError) -> Bool {
         match (self, other) {
-            (InvalidRootPage(a), InvalidRootPage(b)) => a == b,
-            (InvalidPageSize(a), InvalidPageSize(b)) => a == b,
-            (IoError(a),         IoError(b))         => a == b,
-            (Corrupt(a),         Corrupt(b))         => a == b,
+            (InvalidRootPage(a),    InvalidRootPage(b))    => a == b,
+            (InvalidPageSize(a),    InvalidPageSize(b))    => a == b,
+            (IoError(a),            IoError(b))            => a == b,
+            (Corrupt(a),            Corrupt(b))            => a == b,
+            (PageNotFound(a),       PageNotFound(b))       => a == b,
+            (CorruptPage(a),        CorruptPage(b))        => a == b,
+            (InvalidCursor(a),      InvalidCursor(b))      => a == b,
+            (MaxDepthExceeded(a),   MaxDepthExceeded(b))   => a == b,
+            (BalancePlanFailed(a),  BalancePlanFailed(b))  => a == b,
+            (BalanceApplyFailed(a), BalanceApplyFailed(b)) => a == b,
             _ => false,
         }
     }

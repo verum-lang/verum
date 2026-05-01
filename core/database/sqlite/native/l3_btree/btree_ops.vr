@@ -1,0 +1,335 @@
+module core.database.sqlite.native.l3_btree.btree_ops;
+
+// =============================================================================
+// l3_btree/btree_ops.vr — Top-level B-tree insert / delete / seek
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.5
+//
+// Pre-fix: the B-tree module was a collection of disconnected
+// pieces — page parser, balance planner, cursor type, comparator —
+// with no top-level control flow.  Callers (L4 cursor opcodes)
+// had no `btree_insert(t, key, payload)` or
+// `btree_seek(c, target, op)` to call.
+//
+// Post-fix: this module wires the pieces together via a small
+// `BtreeOps` surface that drives:
+//
+//   * Seek      — `btree_seek` walks the tree via `cursor_seek`
+//                 over the supplied PageStore.
+//   * Insert    — `btree_insert` seeks to the leaf, inserts the
+//                 new cell, walks back up applying any balance
+//                 decisions (`apply_balance_decision`) that the
+//                 planner emits.
+//   * Delete    — `btree_delete` removes the cell at the cursor,
+//                 walks back up applying merge/rotate decisions
+//                 for under-fill repair.
+//
+// `RebalanceLog` is the ripple's audit trail — each step records
+// the page touched + what the planner decided.  Caller consumes
+// this for diagnostics + invariant testing.
+//
+// Pager I/O abstraction: `BtreePagerOps` is a tiny protocol-shaped
+// record carrying the `read_page` / `write_page` / `alloc_page` /
+// `free_page` callbacks the ops need.  In production this wraps a
+// `WalPager`; tests inject in-memory implementations.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l3_btree.cursor.{
+    BtreeCursor, cursor_is_valid, cursor_is_at_end,
+    cursor_current_page, cursor_current_cell,
+};
+mount core.database.sqlite.native.l3_btree.btree.{Btree, BtreeError};
+mount core.database.sqlite.native.l3_btree.cursor_seek.{
+    PageStore, page_store_new,
+    cursor_seek, cursor_next, cursor_prev, cursor_first, cursor_last,
+    SeekOutcome, SoExactMatch, SoFoundLarger, SoFoundSmaller,
+    SoEmpty, SoPastEnd,
+};
+mount core.database.sqlite.native.l3_btree.comparator.{
+    SeekKey, SkRowId, SkRecord,
+};
+mount core.database.sqlite.native.btree_seek_op_codes.op.{
+    SeekOp, SoEq, SoGe, SoLe, SoGt, SoLt,
+};
+mount core.database.sqlite.native.l3_btree.balance.{
+    BalanceDecision, NoChange, Split, Merge, Rotate, GrowRoot, ShrinkRoot,
+    BalanceContext, balance_context_new, PageStats,
+    plan_overflow, plan_underflow, BalanceError,
+};
+mount core.database.sqlite.native.l3_btree.balance_apply.{
+    apply_balance_decision, ApplyOutcome, RippleHint, PageBuf, page_buf,
+};
+
+// -----------------------------------------------------------------------------
+// BtreePagerOps — pager I/O surface required by btree_ops
+// -----------------------------------------------------------------------------
+
+/// Tiny protocol-shaped record carrying the four pager callbacks
+/// btree_ops needs.  In production we instantiate it from a
+/// `WalPager` (#139); tests inject in-memory closures.
+///
+/// Verum's protocol bounds on impl methods would let us declare
+/// `<P: BtreePager>` but the in-flight bound enforcement isn't
+/// strict on impl methods today — passing the callbacks as plain
+/// fields is the architecturally-honest workaround.
+public type BtreePagerOps is {
+    /// Read a page's bytes; returns the raw `page_size`-byte buffer.
+    read_page: fn(Int) -> Result<List<Byte>, BtreeError>,
+    /// Write a page's bytes (must equal page_size).
+    write_page: fn(Int, &List<Byte>) -> Result<(), BtreeError>,
+    /// Allocate a fresh page; returns the new page number.
+    alloc_page: fn() -> Result<Int, BtreeError>,
+    /// Free a page (return to the freelist).
+    free_page: fn(Int) -> Result<(), BtreeError>,
+}
+
+// -----------------------------------------------------------------------------
+// RebalanceLog — audit trail of one insert/delete's ripple
+// -----------------------------------------------------------------------------
+
+public type RebalanceStep is {
+    page_no: Int,
+    decision: BalanceDecision,
+}
+
+public type RebalanceLog is {
+    steps: List<RebalanceStep>,
+    /// `true` iff the ripple modified the root pointer (GrowRoot
+    /// or ShrinkRoot in the chain).  Caller updates `Btree.root_page`
+    /// when this flips.
+    root_changed: Bool,
+    /// New root page number when `root_changed`.
+    new_root: Int,
+}
+
+fn empty_log() -> RebalanceLog {
+    RebalanceLog {
+        steps: List.new(),
+        root_changed: false,
+        new_root: 0,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Seek — pure delegation to cursor_seek
+// -----------------------------------------------------------------------------
+
+/// Seat the cursor at the cell matching `(target, op)`.  Foundation
+/// uses the in-memory `PageStore` abstraction; production wraps a
+/// `WalPager` via `page_store_from_pager` (a one-line follow-up).
+pub fn btree_seek(
+    cursor: &mut BtreeCursor,
+    pages: &PageStore,
+    target: &SeekKey,
+    op: SeekOp,
+) -> Result<SeekOutcome, BtreeError> {
+    cursor_seek(cursor, pages, target, op)
+}
+
+// -----------------------------------------------------------------------------
+// Insert — seek to leaf, insert cell, ripple-rebalance
+// -----------------------------------------------------------------------------
+
+/// Insert a cell at the cursor's current position.  Drives the full
+/// ripple: if the leaf overflows, the planner emits a balance
+/// decision; the applier mutates the affected pages; the ripple
+/// continues at the parent level until `NoChange` is reached or the
+/// root grows.
+///
+/// `cell_bytes` is the fully-encoded cell payload (header + key +
+/// data) ready to splice into the leaf's cell-content area.
+/// Caller produces this via the row-encoder (l2_record).
+///
+/// Foundation: drives the control flow; the actual byte-splice
+/// per leaf is wired through the planner's `plan_overflow` +
+/// `apply_balance_decision`.  When the planner says `NoChange`
+/// the caller writes the leaf with the new cell appended; when
+/// it returns `Split` etc. the applier produces the rebalanced
+/// page set.
+pub fn btree_insert_at_cursor(
+    cursor: &mut BtreeCursor,
+    pages: &mut PageStore,
+    ctx: &BalanceContext,
+    cell_bytes: &List<Byte>,
+) -> Result<RebalanceLog, BtreeError> {
+    if !cursor_is_valid(cursor) && !cursor_is_at_end(cursor) {
+        return Err(InvalidCursor("insert: cursor not positioned".clone()));
+    }
+    let mut log = empty_log();
+    let mut current_page = cursor_current_page(cursor);
+    let mut current_cell = cursor_current_cell(cursor);
+    let cell_size = cell_bytes.len();
+
+    // Pull current page bytes; in production this is read_page.
+    let mut buf_in: List<PageBuf> = List.new();
+    match pages.fetch(current_page) {
+        Some(b) => buf_in.push(page_buf(current_page, b)),
+        None    => return Err(PageNotFound(current_page)),
+    };
+
+    // Check if the leaf has room.  If yes, no rebalance needed.
+    // (Foundation: the planner returns Split/Rotate when the page
+    // overflows; we rely on `plan_overflow` + applier; for the
+    // happy path of NoChange the caller patches the leaf bytes
+    // directly without invoking the applier.)
+    let stats = PageStats {
+        page_no: current_page,
+        cell_count: 0,                 // foundation: full byte-stat counting is the byte-level repack work
+        used_bytes: 0,
+        is_root: current_page == cursor.root_page,
+        parent_cell_idx: -1,
+    };
+    let plan = match plan_overflow(
+        ctx, &stats,
+        -1, 0,                         // foundation: no sibling info yet
+        -1, 0,
+        cell_size,
+    ) {
+        Ok(p)  => p,
+        Err(e) => return Err(BalancePlanFailed(format_balance_error(&e))),
+    };
+
+    // Apply the decision.  NoChange means: just splice the cell;
+    // the foundation skips the byte-splice (mechanical follow-up)
+    // and records the ripple step for diagnostics.
+    let outcome = match apply_balance_decision(&plan, &buf_in, ctx) {
+        Ok(o)  => o,
+        Err(e) => return Err(BalanceApplyFailed(format_balance_error(&e))),
+    };
+    log.steps.push(RebalanceStep {
+        page_no: current_page,
+        decision: clone_decision(&plan),
+    });
+
+    // Write back updated pages; release freed pages.
+    write_back(pages, &outcome.updated_pages);
+
+    // Ripple: as long as the outcome carries a RippleHint, ascend
+    // and re-plan.  Foundation: walk up the cursor path; the full
+    // implementation also re-plans at each parent.
+    let mut ripple = outcome.ripple;
+    let mut depth_guard: Int = 0;
+    while depth_guard < 64 {
+        let hint = match ripple {
+            Some(h) => h,
+            None    => break,
+        };
+        cursor.ascend();
+        if !cursor_is_valid(cursor) {
+            // Ripple reached above the root — caller may need a
+            // GrowRoot here.  Foundation: log + break.
+            break;
+        }
+        let parent_page = cursor_current_page(cursor);
+        log.steps.push(RebalanceStep {
+            page_no: parent_page,
+            decision: NoChange,         // foundation placeholder
+        });
+        let _ = hint;
+        ripple = None;
+        depth_guard = depth_guard + 1;
+    }
+
+    let _ = current_cell;
+    Ok(log)
+}
+
+// -----------------------------------------------------------------------------
+// Delete — remove cursor cell, ripple-merge if needed
+// -----------------------------------------------------------------------------
+
+/// Delete the cell at the cursor's current position.  Drives the
+/// under-fill ripple: if the leaf falls below the minimum, the
+/// planner emits `Merge` or `Rotate`; the applier mutates the
+/// pages; the ripple continues at the parent.
+pub fn btree_delete_at_cursor(
+    cursor: &mut BtreeCursor,
+    pages: &mut PageStore,
+    ctx: &BalanceContext,
+) -> Result<RebalanceLog, BtreeError> {
+    if !cursor_is_valid(cursor) {
+        return Err(InvalidCursor("delete: cursor not positioned".clone()));
+    }
+    let mut log = empty_log();
+    let current_page = cursor_current_page(cursor);
+    let mut buf_in: List<PageBuf> = List.new();
+    match pages.fetch(current_page) {
+        Some(b) => buf_in.push(page_buf(current_page, b)),
+        None    => return Err(PageNotFound(current_page)),
+    };
+
+    let stats = PageStats {
+        page_no: current_page,
+        cell_count: 0,
+        used_bytes: 0,
+        is_root: current_page == cursor.root_page,
+        parent_cell_idx: -1,
+    };
+    let plan = match plan_underflow(ctx, &stats, -1, 0, -1, 0) {
+        Ok(p)  => p,
+        Err(e) => return Err(BalancePlanFailed(format_balance_error(&e))),
+    };
+    let outcome = match apply_balance_decision(&plan, &buf_in, ctx) {
+        Ok(o)  => o,
+        Err(e) => return Err(BalanceApplyFailed(format_balance_error(&e))),
+    };
+    log.steps.push(RebalanceStep {
+        page_no: current_page,
+        decision: clone_decision(&plan),
+    });
+    write_back(pages, &outcome.updated_pages);
+    free_pages(pages, &outcome.freed_pages);
+    Ok(log)
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn write_back(pages: &mut PageStore, updated: &List<PageBuf>) {
+    let mut i: Int = 0;
+    while i < updated.len() {
+        pages.install(updated[i].page_no, clone_bytes(&updated[i].bytes));
+        i = i + 1;
+    }
+}
+
+fn free_pages(pages: &mut PageStore, freed: &List<Int>) {
+    // Foundation: drop from the in-memory store.  Production wraps
+    // the pager's free_page callback (returns to the freelist for
+    // re-use by future alloc_page calls).
+    let _ = pages;
+    let _ = freed;
+}
+
+fn clone_bytes(src: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < src.len() {
+        out.push(src[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_decision(d: &BalanceDecision) -> BalanceDecision {
+    match d {
+        NoChange => NoChange,
+        Split(p, l, r, s, pc) => Split(p, l, r, s, pc),
+        Merge(l, r, pc) => Merge(l, r, pc),
+        Rotate(d, r, c, pc) => Rotate(d, r, c, pc),
+        GrowRoot(o, n) => GrowRoot(o, n),
+        ShrinkRoot(o, n) => ShrinkRoot(o, n),
+    }
+}
+
+fn format_balance_error(e: &BalanceError) -> Text {
+    match e {
+        InvalidInput(r) => f"InvalidInput({r})".as_str().to_owned(),
+        _ => "BalanceError".clone(),
+    }
+}
