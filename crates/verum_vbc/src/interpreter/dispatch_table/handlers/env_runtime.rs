@@ -70,6 +70,55 @@ pub(in super::super) fn try_intercept_env_runtime(
             }
             intercept_remove_var(state, args_start_reg, caller_base)
         }
+        // Process-state intercepts (VBC-PROC-1).  current_dir uses
+        // sys_getcwd FFI + iterator chains that fail in interpreter;
+        // args/args_count/arg() rely on the C-runtime argv pointer
+        // table that's not populated for `verum run` invocations.
+        "current_dir" => {
+            if arg_count != 0 {
+                return Ok(None);
+            }
+            intercept_current_dir(state)
+        }
+        "set_current_dir" => {
+            if arg_count != 1 {
+                return Ok(None);
+            }
+            intercept_set_current_dir(state, args_start_reg, caller_base)
+        }
+        "args" => {
+            // `args()` is a 0-arg constructor — collisions with
+            // method receivers (Command.args(...)) take ≥1 arg, so
+            // gating on arg_count alone disambiguates without
+            // needing a qualifier check (which fails for unqualified
+            // call sites where the codegen registers the function
+            // under just `args`).
+            if arg_count != 0 {
+                return Ok(None);
+            }
+            intercept_args(state)
+        }
+        "args_count" => {
+            if arg_count != 0 {
+                return Ok(None);
+            }
+            Ok(Some(Value::from_i64(std::env::args().count() as i64)))
+        }
+        "arg" => {
+            // Same reasoning as `args` — 1-arg variant.  Collisions
+            // (Command.arg(text)) also take 1 arg but the receiver
+            // would be passed as arg 0 making the actual user arg
+            // index different; the env-namespace `arg(idx)` takes
+            // exactly 1 arg (the index), so we accept this and
+            // fall back to None on type mismatch (caller's bytecode
+            // path then takes over).  In practice this isn't
+            // ambiguous because Command.arg goes through method
+            // dispatch (CallM), not plain Call.
+            if arg_count != 1 {
+                return Ok(None);
+            }
+            intercept_arg(state, args_start_reg, caller_base)
+        }
         _ => Ok(None),
     }
 }
@@ -159,6 +208,132 @@ fn intercept_remove_var(
         std::env::remove_var(&key);
     }
     Ok(Some(Value::unit()))
+}
+
+// ----------------------------------------------------------------------------
+// Process-state intercepts (current_dir, set_current_dir, args, arg)
+// ----------------------------------------------------------------------------
+
+fn intercept_current_dir(state: &mut InterpreterState) -> InterpreterResult<Option<Value>> {
+    match std::env::current_dir() {
+        Ok(p) => {
+            let s = p.to_string_lossy().to_string();
+            let text = alloc_string_value(state, &s)?;
+            // PathBuf has shape `{ inner: Text }` — single-field record.
+            let pathbuf = alloc_record_n_fields(state, "PathBuf", &[text])?;
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[pathbuf])?))
+        }
+        Err(_e) => {
+            // Build Err(StreamError { kind: Other, message: None })
+            let kind = wrap_in_variant(state, "IoErrorKind", 19, &[])?;
+            let none = wrap_in_variant(state, "Maybe", 0, &[])?;
+            let err = alloc_record_n_fields(state, "StreamError", &[kind, none])?;
+            Ok(Some(wrap_in_variant(state, "Result", 1, &[err])?))
+        }
+    }
+}
+
+fn intercept_set_current_dir(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    if state.check_permission(PermissionScope::Process, 0) == PermissionDecision::Deny {
+        let kind = wrap_in_variant(state, "IoErrorKind", 1, &[])?; // PermissionDenied
+        let none = wrap_in_variant(state, "Maybe", 0, &[])?;
+        let err = alloc_record_n_fields(state, "StreamError", &[kind, none])?;
+        return Ok(Some(wrap_in_variant(state, "Result", 1, &[err])?));
+    }
+    let path = extract_text_arg(state, args_start_reg, caller_base);
+    match std::env::set_current_dir(&path) {
+        Ok(()) => Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::unit()])?)),
+        Err(_e) => {
+            let kind = wrap_in_variant(state, "IoErrorKind", 19, &[])?;
+            let none = wrap_in_variant(state, "Maybe", 0, &[])?;
+            let err = alloc_record_n_fields(state, "StreamError", &[kind, none])?;
+            Ok(Some(wrap_in_variant(state, "Result", 1, &[err])?))
+        }
+    }
+}
+
+fn intercept_args(state: &mut InterpreterState) -> InterpreterResult<Option<Value>> {
+    let argv: Vec<String> = std::env::args().collect();
+    let mut text_values: Vec<Value> = Vec::with_capacity(argv.len());
+    for s in &argv {
+        text_values.push(alloc_string_value(state, s)?);
+    }
+    Ok(Some(alloc_text_list(state, &text_values)?))
+}
+
+fn intercept_arg(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let idx_val = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(args_start_reg));
+    let idx = if super::cbgr_helpers::is_cbgr_ref(&idx_val) {
+        let (abs, _) = super::cbgr_helpers::decode_cbgr_ref(idx_val.as_i64());
+        state.registers.get_absolute(abs).as_i64()
+    } else {
+        idx_val.as_i64()
+    };
+    let argv: Vec<String> = std::env::args().collect();
+    if idx < 0 || (idx as usize) >= argv.len() {
+        return Ok(Some(alloc_string_value(state, "")?));
+    }
+    Ok(Some(alloc_string_value(state, &argv[idx as usize])?))
+}
+
+/// Allocate a `List<Text>` Verum value with the given Value entries
+/// (each entry must already be a Text Value — i.e. small-string or
+/// heap-string pointer).  Layout matches the codegen's List
+/// representation: `[len:Value(i64)] [cap:Value(i64)] [backing_ptr:Value]`
+/// where backing is an array of Values.
+fn alloc_text_list(
+    state: &mut InterpreterState,
+    items: &[Value],
+) -> InterpreterResult<Value> {
+    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
+    let len = items.len();
+    let cap = if len < 16 { 16 } else { len };
+
+    let backing = state
+        .heap
+        .alloc(TypeId::LIST, cap * std::mem::size_of::<Value>())?;
+    state.record_allocation();
+    let backing_data = unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
+    for (i, v) in items.iter().enumerate() {
+        unsafe { *backing_data.add(i) = *v; }
+    }
+
+    let list = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
+    state.record_allocation();
+    let data_ptr = unsafe { (list.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
+    unsafe {
+        *data_ptr = Value::from_i64(len as i64);
+        *data_ptr.add(1) = Value::from_i64(cap as i64);
+        *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);
+    }
+    Ok(Value::from_ptr(list.as_ptr() as *mut u8))
+}
+
+fn alloc_record_n_fields(
+    state: &mut InterpreterState,
+    type_name: &str,
+    fields: &[Value],
+) -> InterpreterResult<Value> {
+    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
+    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x9000));
+    let payload_size = fields.len() * std::mem::size_of::<Value>();
+    let obj = state.heap.alloc(type_id, payload_size)?;
+    state.record_allocation();
+    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
+    for (i, v) in fields.iter().enumerate() {
+        unsafe { *data_ptr.add(i) = *v; }
+    }
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
 // ============================================================================
