@@ -11,6 +11,9 @@ public module schema_cache;
 public module connection;
 public module statement;
 public module bridge;
+public module statement_cache;
+public module sqlite_schema_parser;
+public module statement_lifecycle;
 
 public mount .schema_cache.{
     ColumnMeta, TableKind, TableMeta, IndexMeta,
@@ -33,4 +36,27 @@ public mount .statement.{
 
 public mount .bridge.{
     seed_cursors_from_connection, writeback_cursors_to_connection,
+};
+
+public mount .statement_cache.{
+    StatementCache, CachedSlot,
+    statement_cache_new, statement_cache_default,
+};
+
+public mount .sqlite_schema_parser.{
+    SchemaRow, SchemaRowKind, SchemaRowError, LoadReport,
+    SrkTable, SrkIndex, SrkView, SrkTrigger, SrkUnknown,
+    classify_row_type, decode_schema_row,
+    schema_row_to_table_meta, schema_row_to_index_meta,
+    load_schema_from_rows,
+};
+
+public mount .statement_lifecycle.{
+    LifecycleError, StepOutcome, ExecOutcome,
+    SoRowReady, SoDone, SoErrored,
+    bind_positional, bind_named, clear_bindings,
+    step_one, reset, finalize,
+    column_count, column_name, column_declared_type,
+    column_value, column_kind,
+    execute_collect,
 };
