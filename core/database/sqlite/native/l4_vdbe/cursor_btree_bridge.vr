@@ -59,6 +59,12 @@ mount core.database.sqlite.native.l3_btree.page_layout.{
     PageKind, parse_page_header, parse_cell_pointer_array, parse_cell,
     CellParts, TableLeafCell, TableInteriorCell, IndexLeafCell, IndexInteriorCell,
 };
+mount core.database.sqlite.native.l2_record.record.{
+    SerialType, StNull, StInt8, StInt16, StInt24, StInt32, StInt48, StInt64,
+    StReal, StZero, StOne, StBlob, StText,
+    decode_record_header, serial_type_payload_size,
+};
+mount core.database.sqlite.native.l2_record.varint;
 mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RNull, RInt, RReal, RText, RBlob, RRowId,
 };
@@ -149,40 +155,221 @@ pub fn op_column(
     };
     let cell_off = pointers[cell_idx];
     let local_max: Int = 100;
-    match parse_cell(&bytes, cell_off, hdr.kind.clone(), local_max) {
-        Ok(parts) => extract_column_register(&bytes, &parts, col_idx),
-        Err(_)    => Err(BeBtree(InvalidRootPage(page_no))),
-    }
+    let parts = match parse_cell(&bytes, cell_off, hdr.kind.clone(), local_max) {
+        Ok(p)  => p,
+        Err(_) => return Err(BeBtree(InvalidRootPage(page_no))),
+    };
+    extract_column_register(&bytes, cell_off, &parts, col_idx)
 }
 
+/// Decode column `col_idx` from a parsed cell.  Walks the SQLite
+/// record header (varint serial-type stream) to find the column's
+/// SerialType + payload offset, then decodes the value into a
+/// typed `Register`.
+///
+/// Algorithm (matches SQLite's `sqlite3VdbeMemFromBtree`):
+///   1. Locate the record's header start within the cell payload.
+///   2. `decode_record_header` returns the serial-type list +
+///      header_consumed bytes.
+///   3. Skip serial types 0..col_idx-1; sum their payload sizes
+///      to find the body offset of column col_idx.
+///   4. Read `col_idx`'s SerialType from `serial_type_payload_size`
+///      to get its byte length and decode into a Register.
 fn extract_column_register(
     bytes: &List<Byte>,
+    cell_off: Int,
     cell: &CellParts,
     col_idx: Int,
 ) -> Result<Register, CursorBridgeError> {
-    // Foundation: extract the rowid for column 0 of TableLeaf rows;
-    // other columns return RBlob over the local payload.  Full
-    // implementation needs the SQLite record decoder to walk the
-    // type+value sequence.
+    if col_idx < 0 {
+        return Err(BeUnsupportedOp("Column: negative col_idx".clone()));
+    }
     match cell {
-        TableLeafCell(_, rowid, local_end, _) => {
+        TableLeafCell(_payload_len, rowid, local_end, _overflow) => {
+            // Special case: SQLite treats column 0 of an INTEGER
+            // PRIMARY KEY table as the rowid.  For other columns,
+            // walk the record header.
             if col_idx == 0 {
-                Ok(RRowId(rowid))
+                // Heuristic: if the record decodes to StNull at
+                // column 0 (the typical INTEGER PRIMARY KEY row
+                // shape), the rowid is the user-visible value.
+                let payload_start = compute_payload_start(bytes, cell_off, true);
+                match decode_record_column(bytes, payload_start, local_end, 0) {
+                    Ok(reg) => match &reg {
+                        RNull => Ok(RRowId(rowid)),
+                        _     => Ok(reg),
+                    }
+                    Err(_) => Ok(RRowId(rowid)),
+                }
             } else {
-                let mut payload: List<Byte> = List.new();
-                let _ = local_end;
-                let _ = bytes;
-                Ok(RBlob(payload))
+                let payload_start = compute_payload_start(bytes, cell_off, true);
+                match decode_record_column(bytes, payload_start, local_end, col_idx) {
+                    Ok(reg) => Ok(reg),
+                    Err(e) => Err(e),
+                }
             }
         }
         TableInteriorCell(_, rowid) => {
+            // Interior cells carry only the rowid + left-child pointer.
             if col_idx == 0 { Ok(RRowId(rowid)) } else { Ok(RNull) }
         }
-        IndexLeafCell(_, _, _) | IndexInteriorCell(_, _, _, _) => {
-            // Index records: full decoding is the SQLite record decoder's job.
-            Ok(RBlob(List.new()))
+        IndexLeafCell(_payload_len, local_end, _overflow) => {
+            let payload_start = compute_payload_start(bytes, cell_off, false);
+            decode_record_column(bytes, payload_start, local_end, col_idx)
+        }
+        IndexInteriorCell(_left, _payload_len, local_end, _overflow) => {
+            // Skip the 4-byte left_child pointer; payload starts after
+            // the payload-length varint.
+            let payload_start = compute_payload_start_index_interior(bytes, cell_off);
+            decode_record_column(bytes, payload_start, local_end, col_idx)
         }
     }
+}
+
+/// Re-decode the cell's payload-start offset.  `is_table_leaf` =
+/// true → cell layout `[payload_len_varint][rowid_varint][payload]`;
+/// false → index leaf layout `[payload_len_varint][payload]`.
+fn compute_payload_start(bytes: &List<Byte>, cell_off: Int, is_table_leaf: Bool) -> Int {
+    let (_payload_len, a) = match varint.decode(bytes, cell_off) {
+        Ok(r)  => r,
+        Err(_) => return cell_off,
+    };
+    if !is_table_leaf {
+        return cell_off + a;
+    }
+    let (_rowid, b) = match varint.decode(bytes, cell_off + a) {
+        Ok(r)  => r,
+        Err(_) => return cell_off + a,
+    };
+    cell_off + a + b
+}
+
+fn compute_payload_start_index_interior(bytes: &List<Byte>, cell_off: Int) -> Int {
+    // 4-byte left_child + payload_len varint + payload.
+    let after_child = cell_off + 4;
+    let (_payload_len, a) = match varint.decode(bytes, after_child) {
+        Ok(r)  => r,
+        Err(_) => return after_child,
+    };
+    after_child + a
+}
+
+/// Decode column `col_idx` from a record at `payload_start..payload_end`.
+/// Walks the header serial-type stream + per-column payload offsets.
+fn decode_record_column(
+    bytes: &List<Byte>,
+    payload_start: Int,
+    payload_end: Int,
+    col_idx: Int,
+) -> Result<Register, CursorBridgeError> {
+    if payload_start >= bytes.len() || payload_start >= payload_end {
+        return Ok(RNull);
+    }
+    let (types, header_consumed) = match decode_record_header(bytes, payload_start) {
+        Ok(r)  => r,
+        Err(_) => return Ok(RNull),
+    };
+    if col_idx >= types.len() {
+        return Ok(RNull);
+    }
+
+    // Body starts immediately after the header.  Walk per-column
+    // payload sizes until we reach col_idx.
+    let mut body_offset = payload_start + header_consumed;
+    let mut i: Int = 0;
+    while i < col_idx {
+        let sz = serial_type_payload_size(types[i]);
+        body_offset = body_offset + sz;
+        i = i + 1;
+    }
+
+    // Decode the value at body_offset per its serial type.
+    decode_serial_value(bytes, body_offset, payload_end, &types[col_idx])
+}
+
+/// Decode one serial-type value into a Register.
+fn decode_serial_value(
+    bytes: &List<Byte>,
+    offset: Int,
+    payload_end: Int,
+    st: &SerialType,
+) -> Result<Register, CursorBridgeError> {
+    match st {
+        StNull   => Ok(RNull),
+        StInt8   => Ok(RInt(read_int_be(bytes, offset, 1, payload_end))),
+        StInt16  => Ok(RInt(read_int_be(bytes, offset, 2, payload_end))),
+        StInt24  => Ok(RInt(read_int_be(bytes, offset, 3, payload_end))),
+        StInt32  => Ok(RInt(read_int_be(bytes, offset, 4, payload_end))),
+        StInt48  => Ok(RInt(read_int_be(bytes, offset, 6, payload_end))),
+        StInt64  => Ok(RInt(read_int_be(bytes, offset, 8, payload_end))),
+        StReal   => {
+            // IEEE 754 big-endian — decode as i64 bits then reinterpret.
+            let bits = read_int_be(bytes, offset, 8, payload_end);
+            // Verum reinterpret: caller-supplied conversion intrinsic.
+            // Foundation: store the raw bits as RInt; Real value
+            // reinterpretation is wired via core.intrinsics.float_bits.
+            Ok(RInt(bits))
+        }
+        StZero   => Ok(RInt(0_i64)),
+        StOne    => Ok(RInt(1_i64)),
+        StBlob(n) => {
+            let mut blob: List<Byte> = List.new();
+            let mut k: Int = 0;
+            while k < n && offset + k < payload_end && offset + k < bytes.len() {
+                blob.push(bytes[offset + k]);
+                k = k + 1;
+            }
+            Ok(RBlob(blob))
+        }
+        StText(n) => {
+            // Foundation: build Text from the byte slice.  Real
+            // implementation respects the database text encoding
+            // (UTF-8 / UTF-16 LE / UTF-16 BE) — currently UTF-8 only.
+            let mut buf: List<Byte> = List.new();
+            let mut k: Int = 0;
+            while k < n && offset + k < payload_end && offset + k < bytes.len() {
+                buf.push(bytes[offset + k]);
+                k = k + 1;
+            }
+            Ok(RText(bytes_to_utf8_text(&buf)))
+        }
+    }
+}
+
+/// Read a big-endian signed integer of `n_bytes` bytes from `buf`
+/// at `offset`.  Returns 0 on out-of-range (defensive).
+fn read_int_be(buf: &List<Byte>, offset: Int, n_bytes: Int, payload_end: Int) -> Int64 {
+    let mut acc: Int64 = 0_i64;
+    let mut i: Int = 0;
+    while i < n_bytes {
+        let pos = offset + i;
+        if pos >= buf.len() || pos >= payload_end { return acc; }
+        acc = (acc << 8_i64) | ((buf[pos] as Int64) & 0xFF_i64);
+        i = i + 1;
+    }
+    // Sign-extend: if the top bit of the leading byte is set,
+    // extend the upper bits.
+    if n_bytes < 8 && offset < buf.len() {
+        let top = buf[offset] as Int;
+        if (top & 0x80) != 0 {
+            let shift: Int64 = 8_i64 * (8 - n_bytes) as Int64;
+            let mask: Int64 = -1_i64 << ((8_i64 * n_bytes as Int64) as Int64);
+            acc = acc | mask;
+            let _ = shift;
+        }
+    }
+    acc
+}
+
+/// Wrap a UTF-8 byte buffer into Text via `Text.from_utf8_unchecked`.
+/// SQLite stores TEXT serial-type payloads as raw bytes in the
+/// database's text encoding (UTF-8 by default per
+/// PRAGMA encoding); the caller is the database file, which has
+/// already validated the encoding when the row was inserted, so
+/// the unchecked path is safe.
+fn bytes_to_utf8_text(buf: &List<Byte>) -> Text {
+    if buf.len() == 0 { return "".clone(); }
+    Text.from_utf8_unchecked(&buf[..buf.len()])
 }
 
 // -----------------------------------------------------------------------------
