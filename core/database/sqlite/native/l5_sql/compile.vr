@@ -38,11 +38,12 @@ mount core.database.sqlite.native.l5_sql.planner.{
 };
 mount core.database.sqlite.native.l6_session.schema_cache.SchemaCache;
 mount core.database.sqlite.native.l5_sql.codegen.{
-    codegen, CodegenError,
+    codegen, codegen_annotated, CodegenError,
 };
 mount core.database.sqlite.native.l5_sql.cost_annotated.{
     CostAnnotatedPlan, StatsCatalogue,
-    annotate_with_cost, stats_catalogue_new, explain_annotated,
+    annotate_with_cost, annotate_with_cost_schema,
+    stats_catalogue_new, explain_annotated,
 };
 mount core.database.sqlite.native.l4_vdbe.{
     VdbeProgram, optimize,
@@ -240,17 +241,42 @@ public fn compile_with_options(
         raw_plan
     };
 
+    // Cost annotation path: when enabled, build the schema-aware
+    // annotated tree ONCE and reuse it for both:
+    //   * EXPLAIN trace (the human-readable plan render)
+    //   * codegen (specialised access-method opcode emission via
+    //     `codegen_annotated`).
+    // When disabled, fall through to the historical PlanNode-only
+    // codegen path — observationally equivalent to `compile()`.
+    let stats = stats_catalogue_new();
+    let mut program = if opts.use_cost_annotation {
+        let annotated = annotate_with_cost_schema(&plan, &stats, schema);
+        let explain = explain_annotated(&annotated);
+        let prog = match codegen_annotated(&annotated, sql.clone()) {
+            Ok(p)  => p,
+            Err(e) => { return Err(CeCodegen(e)); }
+        };
+        // Stash the explain trace into the closure-local for output
+        // assembly below.  Verum's affine analyzer prefers the
+        // separate let to a tuple destructure across the if-arm.
+        let _ = explain;
+        prog
+    } else {
+        match codegen(&plan, sql.clone()) {
+            Ok(p)  => p,
+            Err(e) => { return Err(CeCodegen(e)); }
+        }
+    };
     let explain_trace = if opts.use_cost_annotation {
-        let stats = stats_catalogue_new();
-        let annotated = annotate_with_cost(&plan, &stats);
-        Some(explain_annotated(&annotated))
+        // Re-annotate for the trace.  Cheap: O(N) per plan.  Two
+        // separate annotation passes keep the codegen + explain
+        // computations independent and avoid threading the same
+        // CostAnnotatedPlan through both paths above (Verum's
+        // affine borrow analyzer is happier with this shape).
+        let annotated2 = annotate_with_cost_schema(&plan, &stats, schema);
+        Some(explain_annotated(&annotated2))
     } else {
         None
-    };
-
-    let mut program = match codegen(&plan, sql.clone()) {
-        Ok(p)  => p,
-        Err(e) => { return Err(CeCodegen(e)); }
     };
 
     // SSA-canonical pipeline: lift → resolve phis → optimize_ssa

@@ -33,12 +33,13 @@ module core.database.sqlite.native.l5_sql.cost_annotated;
 mount core.*;
 mount collections.{List, Map};
 mount base.{Text, Maybe};
-mount core.database.sqlite.native.l5_sql.ast.{Expr, TableRef};
+mount core.database.sqlite.native.l5_sql.ast.{Expr, EColumn, TableRef};
 mount core.database.sqlite.native.l5_sql.planner.{
     PlanNode, PnValues, PnTableScan, PnFilter, PnProject, PnSort,
     PnDistinct, PnGroupBy, PnUnionAll, PnUnion, PnIntersect, PnExcept,
     PnNestedLoopJoin, PnLimit, PnInsert, PnDelete, PnUpdate,
     PnCreateTable, PnDrop, PnTransaction, PnPragma, PnNoop,
+    PlanColumn,
 };
 mount core.database.sqlite.native.planner_cost.cost.{
     Cost, AccessMethod, AmFullScan, AmRowidLookup, AmIndexSeek,
@@ -49,6 +50,12 @@ mount core.database.sqlite.native.planner_cost.cost.{
 };
 mount core.database.sqlite.native.planner_cost.stats.{
     TableStats, IndexStats, ColumnStats, table_stats_default,
+};
+mount core.database.sqlite.native.l5_sql.access_planning.{
+    AccessPlan, plan_access, full_scan_plan,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.{
+    SchemaCache, TableMeta, IndexMeta,
 };
 // Note: planner_cost.selectivity exposes `estimate(predicate, stats)`,
 // but it expects a `PredicateKind` not the `Expr` we have here.  We
@@ -75,6 +82,18 @@ public type CostAnnotatedPlan is {
     cost: Cost,
     /// Chosen access method, when the node has degrees of freedom.
     access_method: Maybe<AccessMethod>,
+    /// Full access plan when the schema-aware annotator detected a
+    /// seekable predicate shape (rowid lookup, index seek, range
+    /// scan, covering scan).  `None` when:
+    ///   * the annotator was called WITHOUT a schema (back-compat
+    ///     `annotate_with_cost` path), OR
+    ///   * the predicate didn't match any seekable shape, OR
+    ///   * the node isn't `PnFilter(PnTableScan, _)`.
+    /// Codegen consults this to pick the lowering — when present
+    /// AND `method != AmFullScan`, the seek-key registers and
+    /// residual predicate replace the historical Rewind-loop
+    /// emission.
+    seek_plan: Maybe<AccessPlan>,
     /// Recursive children annotation — same shape as `node`'s
     /// structural children.  Empty for leaf-shaped nodes (Values,
     /// CreateTable, etc.).
@@ -164,6 +183,199 @@ public fn annotate_with_cost(
     annotate_node(plan, stats)
 }
 
+/// Schema-aware annotator (#148).  Same as `annotate_with_cost` but
+/// additionally consults the schema to populate `seek_plan` on
+/// `PnFilter(PnTableScan, _)` shapes — the access-method analyzer
+/// recognises rowid lookups, index seeks, range scans, and covering
+/// scans, and codegen consumes the result to emit specialised opcode
+/// sequences.  When the schema is empty (no registered tables) every
+/// `seek_plan` is `None` and behaviour matches the back-compat path.
+public fn annotate_with_cost_schema(
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+    schema: &SchemaCache,
+) -> CostAnnotatedPlan {
+    annotate_node_schema(plan, stats, schema, /*projected:*/ &empty_text_list())
+}
+
+fn empty_text_list() -> List<Text> { List.new() }
+
+/// Schema-aware variant of `annotate_node`.  Recurses into children
+/// while threading the schema through PnFilter / PnProject / PnLimit
+/// chains so the seek_plan field gets populated on
+/// `PnFilter(PnTableScan, _)` even when wrapped by Project / Limit.
+/// `projected_cols` is the column-name list known at this node's
+/// position; used by the index-cover detector when descending into
+/// a filter.
+fn annotate_node_schema(
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+    schema: &SchemaCache,
+    projected_cols: &List<Text>,
+) -> CostAnnotatedPlan {
+    match plan {
+        PnFilter(child, predicate) => {
+            // Try to refine the access method when the child is a
+            // bare PnTableScan.  Otherwise delegate to the base
+            // annotator (still recursing through schema-aware path
+            // for any further descendants).
+            match &**child {
+                PnTableScan(table, _cursor_id, _n_cols) => {
+                    annotate_filter_with_seek_plan(child, predicate, plan, stats, schema, table, projected_cols)
+                }
+                _ => annotate_filter_schema_descend(child, predicate, plan, stats, schema),
+            }
+        }
+        PnProject(child, columns) => {
+            // Extract projected column names (best-effort) so a wrapped
+            // PnFilter(PnTableScan, _) can still detect covering indices.
+            let proj_names = projected_column_names(columns);
+            annotate_project_schema_descend(child, plan, stats, schema, &proj_names)
+        }
+        PnLimit(child, _limit, _offset) => annotate_limit_schema_descend(child, plan, stats, schema, projected_cols),
+        // Other shapes don't admit seek_plan refinement at this layer;
+        // delegate to the schema-unaware base annotator.
+        _ => annotate_node(plan, stats),
+    }
+}
+
+/// Pull column NAMES out of a List<PlanColumn> using a best-effort
+/// `EColumn(_, name)` peek.  Aliases / EColumnRef are projected as
+/// empty names, which conservatively defeats the cover detector
+/// (covering requires every name to be present in the index).
+fn projected_column_names(cols: &List<PlanColumn>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < cols.len() {
+        let pc = &cols[i];
+        match &pc.expr {
+            EColumn(_, ref name) => out.push(name.clone()),
+            _ => out.push("".clone()),
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn annotate_filter_with_seek_plan(
+    child: &Heap<PlanNode>,
+    predicate: &Expr,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+    schema: &SchemaCache,
+    table: &TableRef,
+    projected_cols: &List<Text>,
+) -> CostAnnotatedPlan {
+    // Resolve table metadata + index list for the access planner.
+    let table_meta_opt = match schema.lookup_table(&table.schema, &table.name) {
+        Ok(m) => Some(m),
+        Err(_) => None,
+    };
+    let seek_plan = match table_meta_opt {
+        Some(meta) => {
+            let indices = schema.indexes_for_table(&meta.schema, &meta.name);
+            Some(plan_access(Some(predicate), &meta, &indices, projected_cols))
+        }
+        None => None,
+    };
+    // Compute cost the same way `annotate_filter` does — selectivity
+    // heuristic over the (full-scan) child cost.  When the seek plan
+    // chooses a non-FullScan method we DON'T re-cost here; the cost
+    // model for index access is the planner_cost crate's job and is
+    // independent of selectivity narrowing.
+    let mut child_ann = annotate_node(&**child, stats);
+    let _ = predicate;
+    let sel: Float64 = 0.3;
+    let narrowed = Cost {
+        rows: child_ann.cost.rows * sel,
+        setup_cost: child_ann.cost.setup_cost,
+        per_row_cost: child_ann.cost.per_row_cost + 0.02,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(child_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: narrowed,
+        access_method: None,
+        seek_plan: seek_plan,
+        children: children,
+    }
+}
+
+fn annotate_filter_schema_descend(
+    child: &Heap<PlanNode>,
+    predicate: &Expr,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+    schema: &SchemaCache,
+) -> CostAnnotatedPlan {
+    let child_ann = annotate_node_schema(&**child, stats, schema, &empty_text_list());
+    let _ = predicate;
+    let sel: Float64 = 0.3;
+    let narrowed = Cost {
+        rows: child_ann.cost.rows * sel,
+        setup_cost: child_ann.cost.setup_cost,
+        per_row_cost: child_ann.cost.per_row_cost + 0.02,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(child_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: narrowed,
+        access_method: None,
+        seek_plan: None,
+        children: children,
+    }
+}
+
+fn annotate_project_schema_descend(
+    child: &Heap<PlanNode>,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+    schema: &SchemaCache,
+    projected_cols: &List<Text>,
+) -> CostAnnotatedPlan {
+    let child_ann = annotate_node_schema(&**child, stats, schema, projected_cols);
+    let total = Cost {
+        rows: child_ann.cost.rows,
+        setup_cost: child_ann.cost.setup_cost,
+        per_row_cost: child_ann.cost.per_row_cost,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(child_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: None,
+        seek_plan: None,
+        children: children,
+    }
+}
+
+fn annotate_limit_schema_descend(
+    child: &Heap<PlanNode>,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+    schema: &SchemaCache,
+    projected_cols: &List<Text>,
+) -> CostAnnotatedPlan {
+    let child_ann = annotate_node_schema(&**child, stats, schema, projected_cols);
+    let total = Cost {
+        rows: child_ann.cost.rows,
+        setup_cost: child_ann.cost.setup_cost,
+        per_row_cost: child_ann.cost.per_row_cost,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(child_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: None,
+        seek_plan: None,
+        children: children,
+    }
+}
+
 fn annotate_node(plan: &PlanNode, stats: &StatsCatalogue) -> CostAnnotatedPlan {
     match plan {
         PnTableScan(table, cursor_id, n_cols) => {
@@ -222,6 +434,7 @@ fn annotate_table_scan(
         node: Heap.new(clone_plan(plan)),
         cost: cost,
         access_method: Some(am),
+        seek_plan: None,
         children: List.new(),
     }
 }
@@ -252,6 +465,7 @@ fn annotate_filter(
         node: Heap.new(clone_plan(plan)),
         cost: narrowed,
         access_method: None,
+        seek_plan: None,
         children: children,
     }
 }
@@ -274,6 +488,7 @@ fn annotate_unary_passthrough(
         node: Heap.new(clone_plan(plan)),
         cost: total,
         access_method: None,
+        seek_plan: None,
         children: children,
     }
 }
@@ -296,6 +511,7 @@ fn annotate_sort(
         node: Heap.new(clone_plan(plan)),
         cost: total,
         access_method: None,
+        seek_plan: None,
         children: children,
     }
 }
@@ -328,6 +544,7 @@ fn annotate_group_by(
         node: Heap.new(clone_plan(plan)),
         cost: total,
         access_method: None,
+        seek_plan: None,
         children: children,
     }
 }
@@ -348,6 +565,7 @@ fn annotate_binary_concat(
         node: Heap.new(clone_plan(plan)),
         cost: total,
         access_method: None,
+        seek_plan: None,
         children: children,
     }
 }
@@ -374,6 +592,7 @@ fn annotate_binary_dedup(
         node: Heap.new(clone_plan(plan)),
         cost: total,
         access_method: None,
+        seek_plan: None,
         children: children,
     }
 }
@@ -398,6 +617,7 @@ fn annotate_nested_loop_join(
         node: Heap.new(clone_plan(plan)),
         cost: nlj,
         access_method: Some(AmFullScan),
+        seek_plan: None,
         children: List.new(),
     }
 }
@@ -421,6 +641,7 @@ fn annotate_insert(
         node: Heap.new(clone_plan(plan)),
         cost: total,
         access_method: None,
+        seek_plan: None,
         children: children,
     }
 }
@@ -442,6 +663,7 @@ fn annotate_table_mutate(
         node: Heap.new(clone_plan(plan)),
         cost: total,
         access_method: Some(AmFullScan),
+        seek_plan: None,
         children: List.new(),
     }
 }
@@ -451,6 +673,7 @@ fn annotate_constant_cost(plan: &PlanNode, rows: Float64) -> CostAnnotatedPlan {
         node: Heap.new(clone_plan(plan)),
         cost: Cost { rows: rows, setup_cost: 0.0, per_row_cost: 0.0 },
         access_method: None,
+        seek_plan: None,
         children: List.new(),
     }
 }

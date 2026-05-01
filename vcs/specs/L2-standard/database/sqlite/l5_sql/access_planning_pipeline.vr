@@ -1,0 +1,309 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l5_sql, access_planning, cost_annotated, codegen, pipeline
+// @timeout: 15000
+// @description: Schema-aware access-method analyzer + annotation-driven
+//               codegen — exercises plan_access, full_scan_plan,
+//               annotate_with_cost_schema, codegen_annotated +
+//               compile_with_options(cost-aware) end-to-end (#148).
+//
+// Spec: internal/specs/sqlite-native.md §13.3
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.{
+    AccessPlan, RangeBound, RangeOp, RoLt, RoLe, RoGt, RoGe,
+    plan_access, full_scan_plan,
+    CostAnnotatedPlan, StatsCatalogue,
+    annotate_with_cost, annotate_with_cost_schema,
+    stats_catalogue_new, explain_annotated,
+    CompileOptions, CompileOutput,
+    compile_options_default, compile_options_cost_aware,
+    compile_options_ssa_canonical,
+    compile_with_options,
+};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Expr, ELit, EColumn, EBinary, BEq, BLt, BGt, SqlLiteral, LInt, TableRef,
+};
+mount core.database.sqlite.native.l5_sql.planner.{
+    PlanNode, PnTableScan, PnFilter, PnNoop,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.{
+    SchemaCache, schema_cache_new,
+    TableMeta, ColumnMeta, IndexMeta, TableKind, TkTable,
+};
+mount core.database.sqlite.native.l2_record.affinity.{Affinity, infer_affinity};
+mount core.database.sqlite.native.planner_cost.cost.{
+    AccessMethod, AmFullScan, AmRowidLookup, AmIndexSeek,
+};
+
+// -----------------------------------------------------------------------------
+// Helpers — fabricate schema entries inline
+// -----------------------------------------------------------------------------
+
+fn mk_table_with_pkey() -> TableMeta {
+    let mut cols: List<ColumnMeta> = List.new();
+    cols.push(ColumnMeta {
+        name: "id".clone(),
+        declared_type: "INTEGER".clone(),
+        affinity: infer_affinity(&"INTEGER".clone()),
+        not_null: true,
+        primary_key: true,
+        collation: "".clone(),
+    });
+    cols.push(ColumnMeta {
+        name: "name".clone(),
+        declared_type: "TEXT".clone(),
+        affinity: infer_affinity(&"TEXT".clone()),
+        not_null: false,
+        primary_key: false,
+        collation: "".clone(),
+    });
+    let mut pk: List<Text> = List.new();
+    pk.push("id".clone());
+    TableMeta {
+        schema: "main".clone(),
+        name: "users".clone(),
+        kind: TkTable,
+        root_page: 5,
+        columns: cols,
+        primary_key_cols: pk,
+        strict: false,
+        without_rowid: false,
+        created_sql: "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)".clone(),
+    }
+}
+
+fn mk_table_no_pkey() -> TableMeta {
+    let mut cols: List<ColumnMeta> = List.new();
+    cols.push(ColumnMeta {
+        name: "first".clone(),
+        declared_type: "TEXT".clone(),
+        affinity: infer_affinity(&"TEXT".clone()),
+        not_null: false,
+        primary_key: false,
+        collation: "".clone(),
+    });
+    cols.push(ColumnMeta {
+        name: "last".clone(),
+        declared_type: "TEXT".clone(),
+        affinity: infer_affinity(&"TEXT".clone()),
+        not_null: false,
+        primary_key: false,
+        collation: "".clone(),
+    });
+    TableMeta {
+        schema: "main".clone(),
+        name: "people".clone(),
+        kind: TkTable,
+        root_page: 7,
+        columns: cols,
+        primary_key_cols: List.new(),
+        strict: false,
+        without_rowid: false,
+        created_sql: "CREATE TABLE people (first TEXT, last TEXT)".clone(),
+    }
+}
+
+fn mk_index_on(table: Text, col: Text, root: Int) -> IndexMeta {
+    let mut cols: List<Text> = List.new();
+    cols.push(col);
+    IndexMeta {
+        schema: "main".clone(),
+        name: f"idx_{table}_{cols[0]}".as_str().to_owned(),
+        table_name: table,
+        root_page: root,
+        columns: cols,
+        unique: false,
+    }
+}
+
+fn mk_eq_predicate(col_name: Text, k: Int64) -> Expr {
+    EBinary(
+        BEq,
+        Heap.new(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, col_name)),
+        Heap.new(ELit(LInt(k))),
+    )
+}
+
+// -----------------------------------------------------------------------------
+// 1. No predicate → full scan, no residual
+// -----------------------------------------------------------------------------
+
+fn no_predicate_yields_full_scan() {
+    let table = mk_table_with_pkey();
+    let indices: List<IndexMeta> = List.new();
+    let projected: List<Text> = List.new();
+    let plan = plan_access(None, &table, &indices, &projected);
+    match plan.method {
+        AmFullScan => {},
+        _ => panic("expected AmFullScan for empty predicate"),
+    }
+    assert_eq(plan.seek_keys.len(), 0);
+    match plan.residual_predicate {
+        None => {},
+        _ => panic("expected None residual for empty predicate"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2. WHERE rowid = K → AmRowidLookup
+// -----------------------------------------------------------------------------
+
+fn rowid_equality_yields_rowid_lookup() {
+    let table = mk_table_with_pkey();
+    let indices: List<IndexMeta> = List.new();
+    let projected: List<Text> = List.new();
+    let pred = mk_eq_predicate("rowid".clone(), 42_i64);
+    let plan = plan_access(Some(&pred), &table, &indices, &projected);
+    match plan.method {
+        AmRowidLookup => {},
+        _ => panic("expected AmRowidLookup for WHERE rowid = K"),
+    }
+    assert_eq(plan.seek_keys.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// 3. WHERE id = K (where id is INTEGER PRIMARY KEY) → AmRowidLookup
+// -----------------------------------------------------------------------------
+
+fn integer_pkey_yields_rowid_lookup() {
+    let table = mk_table_with_pkey();
+    let indices: List<IndexMeta> = List.new();
+    let projected: List<Text> = List.new();
+    let pred = mk_eq_predicate("id".clone(), 100_i64);
+    let plan = plan_access(Some(&pred), &table, &indices, &projected);
+    match plan.method {
+        AmRowidLookup => {},
+        _ => panic("expected AmRowidLookup for WHERE int_pkey = K"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4. WHERE first = "X" with no index → full scan with residual
+// -----------------------------------------------------------------------------
+
+fn unindexed_equality_yields_full_scan_with_residual() {
+    let table = mk_table_no_pkey();
+    let indices: List<IndexMeta> = List.new();
+    let projected: List<Text> = List.new();
+    let pred = mk_eq_predicate("first".clone(), 0_i64);
+    let plan = plan_access(Some(&pred), &table, &indices, &projected);
+    match plan.method {
+        AmFullScan => {},
+        _ => panic("expected AmFullScan when no index covers the column"),
+    }
+    match plan.residual_predicate {
+        Some(_) => {},
+        None => panic("expected residual predicate to carry the unconsumed conjunct"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 5. WHERE last = "X" with index on last → AmIndexSeek(1)
+// -----------------------------------------------------------------------------
+
+fn indexed_equality_yields_index_seek() {
+    let table = mk_table_no_pkey();
+    let mut indices: List<IndexMeta> = List.new();
+    indices.push(mk_index_on("people".clone(), "last".clone(), 9));
+    let projected: List<Text> = List.new();
+    let pred = mk_eq_predicate("last".clone(), 0_i64);
+    let plan = plan_access(Some(&pred), &table, &indices, &projected);
+    match plan.method {
+        AmIndexSeek(n) => assert_eq(n, 1),
+        _ => panic("expected AmIndexSeek(1) for WHERE indexed_col = K"),
+    }
+    assert_eq(plan.index_root_page, 9);
+}
+
+// -----------------------------------------------------------------------------
+// 6. full_scan_plan helper round-trips
+// -----------------------------------------------------------------------------
+
+fn full_scan_helper_round_trip() {
+    let plan = full_scan_plan(None);
+    match plan.method {
+        AmFullScan => {},
+        _ => panic("full_scan_plan(None) should produce AmFullScan"),
+    }
+    assert_eq(plan.seek_keys.len(), 0);
+    match plan.residual_predicate {
+        None => {},
+        _ => panic("full_scan_plan(None) should produce empty residual"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 7. annotate_with_cost_schema attaches seek_plan on PnFilter(PnTableScan)
+// -----------------------------------------------------------------------------
+
+fn schema_aware_annotator_attaches_seek_plan() {
+    let mut schema = schema_cache_new();
+    let _ = schema.register_table(mk_table_with_pkey());
+    let stats = stats_catalogue_new();
+    // Build a minimal plan: PnFilter(PnTableScan, WHERE rowid = 1).
+    let table_ref = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
+    let scan = PnTableScan(table_ref, 0, 2);
+    let pred = mk_eq_predicate("rowid".clone(), 1_i64);
+    let filter = PnFilter(Heap.new(scan), pred);
+    let ann = annotate_with_cost_schema(&filter, &stats, &schema);
+    match ann.seek_plan {
+        Some(p) => match p.method {
+            AmRowidLookup => {},
+            _ => panic("expected seek_plan.method = AmRowidLookup"),
+        },
+        None => panic("expected seek_plan = Some on PnFilter(PnTableScan, WHERE rowid = 1)"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 8. annotate_with_cost (back-compat) does NOT attach seek_plan
+// -----------------------------------------------------------------------------
+
+fn back_compat_annotator_skips_seek_plan() {
+    let stats = stats_catalogue_new();
+    let table_ref = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
+    let scan = PnTableScan(table_ref, 0, 2);
+    let pred = mk_eq_predicate("rowid".clone(), 1_i64);
+    let filter = PnFilter(Heap.new(scan), pred);
+    let ann = annotate_with_cost(&filter, &stats);
+    match ann.seek_plan {
+        None => {},
+        _ => panic("annotate_with_cost (no schema) should leave seek_plan = None"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 9. compile_with_options(cost_aware) runs codegen_annotated end-to-end
+// -----------------------------------------------------------------------------
+
+fn cost_aware_pipeline_compiles() {
+    let mut schema = schema_cache_new();
+    let _ = schema.register_table(mk_table_with_pkey());
+    let opts = compile_options_cost_aware();
+    match compile_with_options(&"SELECT name FROM users WHERE id = 5".clone(), &schema, &opts) {
+        Ok(out) => {
+            assert(out.program.instruction_count() >= 1);
+            match &out.explain_trace {
+                Some(_) => {},
+                None => panic("cost-aware compile should populate explain_trace"),
+            }
+        }
+        Err(_) => panic("cost-aware compile failed"),
+    }
+}
+
+fn main() {
+    no_predicate_yields_full_scan();
+    rowid_equality_yields_rowid_lookup();
+    integer_pkey_yields_rowid_lookup();
+    unindexed_equality_yields_full_scan_with_residual();
+    indexed_equality_yields_index_seek();
+    full_scan_helper_round_trip();
+    schema_aware_annotator_attaches_seek_plan();
+    back_compat_annotator_skips_seek_plan();
+    cost_aware_pipeline_compiles();
+}

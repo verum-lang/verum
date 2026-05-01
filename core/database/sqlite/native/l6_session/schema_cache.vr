@@ -210,6 +210,28 @@ implement SchemaCache {
         None
     }
 
+    /// Enumerate every index whose `table_name` matches the given
+    /// (schema, name) pair.  Used by the L5 access planner to walk
+    /// candidate indices for a `WHERE col = ?`-style seek.  Linear
+    /// scan over the index map; index counts per table are typically
+    /// O(10) — well below the cost of running the planner once.
+    public fn indexes_for_table(&self, schema: &Text, name: &Text) -> List<IndexMeta> {
+        let mut out: List<IndexMeta> = List.new();
+        let want_schema = if schema.len() == 0 { "main".clone() } else { schema.clone() };
+        let keys = self.indexes.keys();
+        let mut i: Int = 0;
+        while i < keys.len() {
+            let k = keys[i].clone();
+            let idx = &self.indexes.get(k);
+            let idx_schema_norm = if idx.schema.len() == 0 { "main".clone() } else { idx.schema.clone() };
+            if idx_schema_norm == want_schema && &idx.table_name == name {
+                out.push(clone_index_meta(idx));
+            }
+            i = i + 1;
+        }
+        out
+    }
+
     // -------------------------------------------------------------------------
     // DDL hooks
     // -------------------------------------------------------------------------

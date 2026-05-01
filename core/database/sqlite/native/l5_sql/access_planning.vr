@@ -1,0 +1,688 @@
+module core.database.sqlite.native.l5_sql.access_planning;
+
+// =============================================================================
+// l5_sql/access_planning.vr — Predicate → AccessPlan analyzer (#148)
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §13.3 (access-method selection)
+//
+// Pure analyzer that turns `(predicate, table_meta, indices, projected_cols)`
+// into an `AccessPlan` — the full instruction the codegen needs to lower a
+// table-scan-shaped subtree into the right opcode sequence.  Owns NO state;
+// every input is consumed by reference, every output is a fresh value.
+//
+// The planner recognises four kinds of seekable predicate shapes; in
+// preference order (cheapest first):
+//
+//   1. **Rowid lookup**  — `WHERE rowid = K` or `WHERE pkey = K` where
+//      pkey is the table's INTEGER PRIMARY KEY (rowid alias).  O(log N)
+//      single-row read; the canonical "primary-key-by-id" case.
+//   2. **Index seek**    — `WHERE c0 = K0 AND c1 = K1 ...` with a
+//      matching multi-column index whose leading columns are bound by
+//      equality.  O(log N) seek + bounded scan per matched index entry.
+//   3. **Index range scan** — `WHERE c0 = K0 AND ... AND ck OP V`
+//      where OP is `<` / `<=` / `>` / `>=`.  Equality prefix locates
+//      the start; the trailing range conjunct bounds the scan.
+//   4. **Covering index scan** — same as #2 / #3 but every projected
+//      column is also stored in the index, so the base table is never
+//      touched (a strict speed win when the index is narrower).
+//
+// When NO seekable conjunct is found the planner returns `AmFullScan`
+// with the entire predicate as `residual_predicate`.  The codegen still
+// needs to evaluate the residual predicate row-by-row inside the loop
+// body — exactly the historical `OpenRead + Rewind + IfNot + Next`
+// shape.
+//
+// Pipeline:
+//   1. `decompose_conjuncts(predicate)` flattens AND-chains into
+//      independent atomic predicates;
+//   2. each atomic conjunct is classified as
+//      Eq{col, value} / Range{col, op, value} / Opaque(expr) via
+//      `classify_atom`;
+//   3. `try_rowid_lookup` checks the equality set for a binding on
+//      rowid/_rowid_/oid OR the table's INTEGER-PRIMARY-KEY column;
+//   4. `try_index_match` walks the candidate index list (longest
+//      prefix wins; ties broken by covering > narrower);
+//   5. residual conjuncts are recombined into a single
+//      `Some(EBinary(BAnd, ...))` chain (or `None` when empty).
+//
+// All passes are O(N) in conjunct + index counts; per-conjunct work
+// is O(1) modulo Heap-clone of small expressions.  No allocations
+// beyond the output AccessPlan and the residual predicate Heap nodes.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Expr, ELit, EColumn, EColumnRef, EVar, EPositional, EUnary, EBinary,
+    EFunc, ECase, EIn, EBetween, ELike, ECast, ECollate, EExists, ESubquery,
+    ENullIf, ECoalesce, BinOp, BAnd, BOr, BEq, BLt, BLe, BGt, BGe, BIs,
+    UnOp, UNeg, UPlus, UBitNot,
+    SqlLiteral, LInt, LReal, LText, LNull, LBlob, LTrue, LFalse,
+    TableRef,
+};
+mount core.database.sqlite.native.planner_cost.cost.{
+    AccessMethod, AmFullScan, AmRowidLookup, AmIndexSeek,
+    AmIndexRangeScan, AmCoveringIndexScan,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.{
+    TableMeta, IndexMeta, ColumnMeta,
+};
+
+// -----------------------------------------------------------------------------
+// AccessPlan — the analyzer's output
+// -----------------------------------------------------------------------------
+
+/// Direction tag for a range-scan endpoint.
+public type RangeOp is RoLt | RoLe | RoGt | RoGe;
+
+/// Decoded range bound — the "OP value" half of the index-range
+/// conjunct.  Codegen turns this into `SeekGE/SeekGT/SeekLE/SeekLT`
+/// + an `Idx*` end-of-range check.
+public type RangeBound is {
+    op: RangeOp,
+    value: Heap<Expr>,
+};
+
+/// Full access plan for a table-scan-shaped subtree.
+///
+/// Field semantics:
+///
+///   * `method` — top-level dispatch tag.  Codegen branches on this
+///     to choose the opcode shape.
+///   * `seek_keys` — equality-bound key expressions, in index column
+///     order (or single rowid expr for `AmRowidLookup`).  Empty for
+///     `AmFullScan`.
+///   * `range_upper` — `Some` only for `AmIndexRangeScan` with a
+///     trailing range conjunct beyond the equality prefix; carries
+///     the end-of-range expression + comparison op.  `None` for the
+///     "open above" form.
+///   * `index_name` / `index_root_page` — populated only for the
+///     index-using methods.  `index_root_page` is the L3 root page
+///     of the index B-tree.
+///   * `covers_projection` — `True` iff every projected column is
+///     also stored in the chosen index.  Tells codegen it can skip
+///     the rowid → base-table lookup entirely.
+///   * `residual_predicate` — conjuncts NOT consumed by the seek;
+///     codegen must still evaluate this inside the loop body via
+///     the existing `IfNot` skip pattern.
+public type AccessPlan is {
+    method: AccessMethod,
+    seek_keys: List<Expr>,
+    range_upper: Maybe<RangeBound>,
+    index_name: Maybe<Text>,
+    index_root_page: Int,
+    covers_projection: Bool,
+    residual_predicate: Maybe<Expr>,
+};
+
+/// Default plan: full scan with the entire predicate residual.
+pub fn full_scan_plan(residual: Maybe<Expr>) -> AccessPlan {
+    AccessPlan {
+        method: AmFullScan,
+        seek_keys: List.new(),
+        range_upper: None,
+        index_name: None,
+        index_root_page: 0,
+        covers_projection: false,
+        residual_predicate: residual,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Atomic conjunct classification
+// -----------------------------------------------------------------------------
+
+/// Atomic-conjunct shape after classification.
+type AtomKind is
+      AkEq(Text, Heap<Expr>)              // col = value
+    | AkRange(Text, RangeOp, Heap<Expr>)  // col OP value (Lt/Le/Gt/Ge)
+    | AkOpaque(Expr);                     // unrecognised — residual
+
+/// Decompose a predicate into a flat list of AND-conjuncts.  The
+/// canonical form `(a AND b) AND c` flattens to `[a, b, c]`; any
+/// non-AND root becomes a single-element list.  NULL predicate →
+/// empty list.
+fn decompose_conjuncts(pred: Maybe<&Expr>) -> List<Expr> {
+    let mut out: List<Expr> = List.new();
+    match pred {
+        Some(e) => collect_conjuncts(e, &mut out),
+        None => {},
+    }
+    out
+}
+
+fn collect_conjuncts(e: &Expr, out: &mut List<Expr>) {
+    match e {
+        EBinary(op, ref a, ref b) => match op {
+            BAnd => {
+                collect_conjuncts(&**a, out);
+                collect_conjuncts(&**b, out);
+            }
+            _ => out.push(clone_expr(e)),
+        },
+        _ => out.push(clone_expr(e)),
+    }
+}
+
+/// Classify an atomic predicate.  Recognises the equality and range
+/// shapes against either `EColumn(_, name)` or `EColumnRef(_, _)`
+/// (the latter is post-resolver form — we treat it as opaque since
+/// we lack name-recovery at this layer; columns must be looked up
+/// pre-resolution OR via an `EColumn` in the predicate AST).
+///
+/// NB: only the `column OP literal` shape is recognised.  The
+/// commuted `literal OP column` shape (e.g. `WHERE 5 = id`) is also
+/// accepted by canonicalising at this site.  More exotic shapes
+/// (`a + 1 = ?`, `f(col) = K`) fall through to AkOpaque.
+fn classify_atom(e: &Expr) -> AtomKind {
+    match e {
+        EBinary(op, ref a, ref b) => {
+            // Try `column OP value` first.
+            match column_name_of(&**a) {
+                Some(name) => match op {
+                    BEq => return AkEq(name, b.clone()),
+                    BIs => return AkEq(name, b.clone()),     // `IS` on non-NULL ≡ `=`
+                    BLt => return AkRange(name, RoLt, b.clone()),
+                    BLe => return AkRange(name, RoLe, b.clone()),
+                    BGt => return AkRange(name, RoGt, b.clone()),
+                    BGe => return AkRange(name, RoGe, b.clone()),
+                    _ => {},
+                },
+                None => {},
+            }
+            // Try the commuted `value OP column` shape — flip the op.
+            match column_name_of(&**b) {
+                Some(name) => match op {
+                    BEq => return AkEq(name, a.clone()),
+                    BIs => return AkEq(name, a.clone()),
+                    BLt => return AkRange(name, RoGt, a.clone()),
+                    BLe => return AkRange(name, RoGe, a.clone()),
+                    BGt => return AkRange(name, RoLt, a.clone()),
+                    BGe => return AkRange(name, RoLe, a.clone()),
+                    _ => {},
+                },
+                None => {},
+            }
+            AkOpaque(clone_expr(e))
+        }
+        _ => AkOpaque(clone_expr(e)),
+    }
+}
+
+/// Return the bare column name when `e` is `EColumn(_, name)`.
+/// Resolved `EColumnRef(cursor_id, col_idx)` is intentionally NOT
+/// recognised — we expect the analyzer to run BEFORE the resolver
+/// has rewritten column references.  Callers that pass a resolved
+/// AST will get only AkOpaque atoms (and therefore AmFullScan); this
+/// is sound — the only loss is missed optimization.
+fn column_name_of(e: &Expr) -> Maybe<Text> {
+    match e {
+        EColumn(_, ref name) => Some(name.clone()),
+        _ => None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Predicate-driven access selection
+// -----------------------------------------------------------------------------
+
+/// Produce an AccessPlan for a `(predicate, table_meta, indices,
+/// projected_cols)` tuple.  Pure — input is borrowed.  Output is a
+/// fresh value owned by the caller.
+///
+/// `projected_cols` is the list of column NAMES the caller will read
+/// from each row.  Used by the covering-index check.  Pass an empty
+/// list when the caller is happy with `covers_projection = false` for
+/// every plan (common for "I just want the right access method, I'll
+/// always go to the base table").
+pub fn plan_access(
+    predicate: Maybe<&Expr>,
+    table: &TableMeta,
+    indices: &List<IndexMeta>,
+    projected_cols: &List<Text>,
+) -> AccessPlan {
+    let conjuncts = decompose_conjuncts(predicate);
+    if conjuncts.len() == 0 {
+        // No predicate → full scan, no residual.
+        return full_scan_plan(None);
+    }
+
+    // Classify every conjunct once; we'll consume them across the
+    // attempts below.
+    let mut atoms: List<AtomKind> = List.new();
+    let mut i: Int = 0;
+    while i < conjuncts.len() {
+        atoms.push(classify_atom(&conjuncts[i]));
+        i = i + 1;
+    }
+
+    // Attempt 1: rowid lookup.
+    match try_rowid_lookup(&atoms, table) {
+        Some(plan) => return plan,
+        None => {},
+    }
+
+    // Attempt 2: index match (best-prefix across all candidate
+    // indices, with covering preferred when the projection is
+    // contained in the index columns).
+    match try_index_match(&atoms, indices, projected_cols) {
+        Some(plan) => return plan,
+        None => {},
+    }
+
+    // Fallback: full scan with every conjunct as residual.
+    let residual = recombine_residual(&atoms, /*consumed_set:*/ &empty_consumed_set(atoms.len()));
+    full_scan_plan(residual)
+}
+
+// -----------------------------------------------------------------------------
+// Rowid lookup
+// -----------------------------------------------------------------------------
+
+/// Try to recognise a `WHERE rowid = K` (or `WHERE pkey = K` where
+/// pkey is INTEGER PRIMARY KEY → rowid alias) shape among the atoms.
+/// Returns Some(plan) when found; the plan's residual carries every
+/// non-consumed conjunct.
+fn try_rowid_lookup(atoms: &List<AtomKind>, table: &TableMeta) -> Maybe<AccessPlan> {
+    // INTEGER PRIMARY KEY column name (when present) is the rowid alias.
+    let pkey_alias_name = integer_primary_key_alias(table);
+
+    let mut i: Int = 0;
+    while i < atoms.len() {
+        match &atoms[i] {
+            AkEq(name, ref value) => {
+                if is_rowid_alias_name(name, &pkey_alias_name) {
+                    // Found rowid equality.  Build the plan.
+                    let mut consumed: List<Bool> = empty_consumed_set(atoms.len());
+                    consumed[i] = true;
+                    let mut keys: List<Expr> = List.new();
+                    keys.push((**value).clone());
+                    return Some(AccessPlan {
+                        method: AmRowidLookup,
+                        seek_keys: keys,
+                        range_upper: None,
+                        index_name: None,
+                        index_root_page: 0,
+                        covers_projection: true,  // rowid lookup hits the base table directly
+                        residual_predicate: recombine_residual(atoms, &consumed),
+                    });
+                }
+            }
+            _ => {},
+        }
+        i = i + 1;
+    }
+    None
+}
+
+/// `True` iff the identifier `name` is one of SQLite's three rowid
+/// aliases OR matches the table's INTEGER PRIMARY KEY column.
+fn is_rowid_alias_name(name: &Text, pkey_alias: &Maybe<Text>) -> Bool {
+    if name == "rowid" || name == "_rowid_" || name == "oid" { return true; }
+    match pkey_alias {
+        Some(p) => name == p,
+        None => false,
+    }
+}
+
+/// Return `Some(col_name)` when the table has a single INTEGER
+/// PRIMARY KEY column (rowid alias), else `None`.  WITHOUT ROWID
+/// tables intentionally return `None` — rowid lookup doesn't apply.
+fn integer_primary_key_alias(table: &TableMeta) -> Maybe<Text> {
+    if table.without_rowid { return None; }
+    if table.primary_key_cols.len() != 1 { return None; }
+    let pk_name = &table.primary_key_cols[0];
+    let mut i: Int = 0;
+    while i < table.columns.len() {
+        let c = &table.columns[i];
+        if &c.name == pk_name && c.primary_key {
+            // Check declared type contains "INT" (case-insensitive).
+            // SQLite's rowid-alias rule: declared type "INTEGER" exact
+            // (case-insensitive).  We accept any "INT*" prefix to match
+            // common rowid-alias dialect (SQLite's own rule).
+            if declared_type_is_integer(&c.declared_type) {
+                return Some(c.name.clone());
+            }
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn declared_type_is_integer(declared: &Text) -> Bool {
+    if declared.len() == 0 { return false; }
+    // Exact-match "INTEGER" per SQLite rowid-alias rule.
+    let upper = declared.to_uppercase();
+    upper == "INTEGER".clone()
+}
+
+// -----------------------------------------------------------------------------
+// Index match
+// -----------------------------------------------------------------------------
+
+/// Try to match a candidate index against the equality conjuncts.
+/// Picks the longest leading-equality prefix; ties broken by
+/// covering-projection-yes.  Returns `None` when no index has even
+/// a single leading equality conjunct.
+fn try_index_match(
+    atoms: &List<AtomKind>,
+    indices: &List<IndexMeta>,
+    projected_cols: &List<Text>,
+) -> Maybe<AccessPlan> {
+    let mut best: Maybe<(Int, Int, AccessPlan)> = None;  // (n_eq_prefix, covering_score, plan)
+
+    let mut idx_i: Int = 0;
+    while idx_i < indices.len() {
+        let idx = &indices[idx_i];
+        let candidate = match_one_index(atoms, idx, projected_cols);
+        match candidate {
+            Some((n_keys, covering, plan)) => {
+                let prefer = match &best {
+                    None => true,
+                    Some((cur_n, cur_cov, _)) => {
+                        if n_keys > cur_n { true }
+                        else if n_keys == cur_n && covering > cur_cov { true }
+                        else { false }
+                    }
+                };
+                if prefer {
+                    best = Some((n_keys, covering, plan));
+                }
+            }
+            None => {},
+        }
+        idx_i = idx_i + 1;
+    }
+
+    match best {
+        Some((_, _, plan)) => Some(plan),
+        None => None,
+    }
+}
+
+/// Try to seek the longest equality prefix on `idx`.  Optionally
+/// extend with one trailing range conjunct.  Returns
+/// `Some((n_keys, covering_score, plan))` where `covering_score` is
+/// 1 when every projected column lives in the index (covering
+/// scan), 0 otherwise.
+fn match_one_index(
+    atoms: &List<AtomKind>,
+    idx: &IndexMeta,
+    projected_cols: &List<Text>,
+) -> Maybe<(Int, Int, AccessPlan)> {
+    let mut consumed: List<Bool> = empty_consumed_set(atoms.len());
+    let mut keys: List<Expr> = List.new();
+    let mut n_eq: Int = 0;
+    let mut col_i: Int = 0;
+    while col_i < idx.columns.len() {
+        let icol = &idx.columns[col_i];
+        // Find an unconsumed AkEq conjunct on this index column.
+        let mut atom_i: Int = 0;
+        let mut hit: Bool = false;
+        while atom_i < atoms.len() {
+            if !consumed[atom_i] {
+                match &atoms[atom_i] {
+                    AkEq(name, ref value) => {
+                        if name == icol {
+                            consumed[atom_i] = true;
+                            keys.push((**value).clone());
+                            n_eq = n_eq + 1;
+                            hit = true;
+                            atom_i = atoms.len();  // break inner loop
+                        }
+                    }
+                    _ => {},
+                }
+            }
+            atom_i = atom_i + 1;
+        }
+        if !hit { col_i = idx.columns.len(); }  // break outer loop — prefix ends
+        else { col_i = col_i + 1; }
+    }
+
+    if n_eq == 0 {
+        // Try a leading-range-only seek: WHERE indexed_col >/>= K
+        // becomes a one-sided range scan starting at K.
+        let mut atom_i: Int = 0;
+        while atom_i < atoms.len() {
+            if !consumed[atom_i] {
+                match &atoms[atom_i] {
+                    AkRange(name, op, ref value) => {
+                        if &idx.columns[0] == name {
+                            consumed[atom_i] = true;
+                            let plan = AccessPlan {
+                                method: AmIndexRangeScan(0),
+                                seek_keys: List.new(),
+                                range_upper: Some(RangeBound { op: *op, value: value.clone() }),
+                                index_name: Some(idx.name.clone()),
+                                index_root_page: idx.root_page,
+                                covers_projection: index_covers_projection(idx, projected_cols),
+                                residual_predicate: recombine_residual(atoms, &consumed),
+                            };
+                            let cov = if plan.covers_projection { 1 } else { 0 };
+                            return Some((1, cov, plan));
+                        }
+                    }
+                    _ => {},
+                }
+            }
+            atom_i = atom_i + 1;
+        }
+        return None;
+    }
+
+    // Look for a trailing range conjunct on the next index column
+    // (n_eq < idx.columns.len()).  At most one — additional range
+    // conjuncts on the same column would form `BETWEEN` semantics
+    // that we don't yet support past the seek key.
+    let mut range_upper: Maybe<RangeBound> = None;
+    if n_eq < idx.columns.len() {
+        let next_col = &idx.columns[n_eq];
+        let mut atom_i: Int = 0;
+        while atom_i < atoms.len() {
+            if !consumed[atom_i] {
+                match &atoms[atom_i] {
+                    AkRange(name, op, ref value) => {
+                        if name == next_col {
+                            consumed[atom_i] = true;
+                            range_upper = Some(RangeBound { op: *op, value: value.clone() });
+                            atom_i = atoms.len();
+                        }
+                    }
+                    _ => {},
+                }
+            }
+            atom_i = atom_i + 1;
+        }
+    }
+
+    let covering = index_covers_projection(idx, projected_cols);
+    let cov_score = if covering { 1 } else { 0 };
+    let am: AccessMethod = match &range_upper {
+        Some(_) => AmIndexRangeScan(n_eq),
+        None => if covering { AmCoveringIndexScan(n_eq) } else { AmIndexSeek(n_eq) },
+    };
+    let plan = AccessPlan {
+        method: am,
+        seek_keys: keys,
+        range_upper: range_upper,
+        index_name: Some(idx.name.clone()),
+        index_root_page: idx.root_page,
+        covers_projection: covering,
+        residual_predicate: recombine_residual(atoms, &consumed),
+    };
+    Some((n_eq, cov_score, plan))
+}
+
+/// `True` iff every name in `projected_cols` appears in the index's
+/// column list.  Empty projection is treated as "non-covering" — the
+/// caller is signalling "I don't care about cover detection".
+fn index_covers_projection(idx: &IndexMeta, projected_cols: &List<Text>) -> Bool {
+    if projected_cols.len() == 0 { return false; }
+    let mut i: Int = 0;
+    while i < projected_cols.len() {
+        let want = &projected_cols[i];
+        let mut hit: Bool = false;
+        let mut j: Int = 0;
+        while j < idx.columns.len() {
+            if &idx.columns[j] == want { hit = true; j = idx.columns.len(); }
+            else { j = j + 1; }
+        }
+        if !hit { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Residual recombination
+// -----------------------------------------------------------------------------
+
+/// Initialise a "consumed" bit-vector matching atom count.
+fn empty_consumed_set(n: Int) -> List<Bool> {
+    let mut out: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push(false); i = i + 1; }
+    out
+}
+
+/// Recombine non-consumed atoms back into a single residual
+/// predicate.  Returns `None` when all atoms were consumed; otherwise
+/// returns `Some(EBinary(BAnd, ...))` chain (left-leaning).
+fn recombine_residual(atoms: &List<AtomKind>, consumed: &List<Bool>) -> Maybe<Expr> {
+    let mut acc: Maybe<Expr> = None;
+    let mut i: Int = 0;
+    while i < atoms.len() {
+        if !consumed[i] {
+            let e = atom_to_expr(&atoms[i]);
+            acc = match acc {
+                None => Some(e),
+                Some(prev) => Some(EBinary(BAnd, Heap.new(prev), Heap.new(e))),
+            };
+        }
+        i = i + 1;
+    }
+    acc
+}
+
+/// Reverse of `classify_atom`: rebuild the original predicate
+/// expression from a classified atom.  AkOpaque carries its original
+/// expression directly; AkEq / AkRange reconstruct via `EBinary`.
+fn atom_to_expr(a: &AtomKind) -> Expr {
+    match a {
+        AkEq(name, ref value) => EBinary(
+            BEq,
+            Heap.new(EColumn(empty_table_ref(), name.clone())),
+            Heap.new((**value).clone()),
+        ),
+        AkRange(name, op, ref value) => EBinary(
+            range_op_to_binop(op),
+            Heap.new(EColumn(empty_table_ref(), name.clone())),
+            Heap.new((**value).clone()),
+        ),
+        AkOpaque(ref e) => clone_expr(e),
+    }
+}
+
+fn range_op_to_binop(op: &RangeOp) -> BinOp {
+    match op {
+        RoLt => BLt,
+        RoLe => BLe,
+        RoGt => BGt,
+        RoGe => BGe,
+    }
+}
+
+fn empty_table_ref() -> TableRef {
+    TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }
+}
+
+// -----------------------------------------------------------------------------
+// Expr clone (heap-friendly deep clone for reassembly into residual)
+// -----------------------------------------------------------------------------
+
+fn clone_expr(e: &Expr) -> Expr {
+    match e {
+        ELit(ref l) => ELit(clone_literal(l)),
+        EColumn(ref t, ref n) => EColumn(clone_table_ref(t), n.clone()),
+        EColumnRef(c, k) => EColumnRef(c, k),
+        EVar(ref n) => EVar(n.clone()),
+        EPositional(i) => EPositional(i),
+        EUnary(op, ref inner) => EUnary(*op, Heap.new(clone_expr(&**inner))),
+        EBinary(op, ref a, ref b) =>
+            EBinary(*op, Heap.new(clone_expr(&**a)), Heap.new(clone_expr(&**b))),
+        EFunc(ref n, ref args, distinct) => EFunc(n.clone(), clone_expr_list(args), distinct),
+        ECase(ref scrut, ref arms, ref else_) => ECase(
+            clone_maybe_heap_expr(scrut),
+            clone_arm_list(arms),
+            clone_maybe_heap_expr(else_),
+        ),
+        EIn(ref subj, ref opts, neg) => EIn(Heap.new(clone_expr(&**subj)), clone_expr_list(opts), neg),
+        EBetween(ref subj, ref lo, ref hi, neg) => EBetween(
+            Heap.new(clone_expr(&**subj)),
+            Heap.new(clone_expr(&**lo)),
+            Heap.new(clone_expr(&**hi)),
+            neg,
+        ),
+        ELike(ref subj, ref pat, ref esc, neg) => ELike(
+            Heap.new(clone_expr(&**subj)),
+            Heap.new(clone_expr(&**pat)),
+            clone_maybe_heap_expr(esc),
+            neg,
+        ),
+        ECast(ref inner, ref t) => ECast(Heap.new(clone_expr(&**inner)), t.clone()),
+        ECollate(ref inner, ref c) => ECollate(Heap.new(clone_expr(&**inner)), c.clone()),
+        // Subquery-bearing variants are opaque to the analyzer; deep
+        // clone just enough for the residual rebuild.  We don't run
+        // any optimization through them.
+        EExists(ref s, neg) => EExists(s.clone(), neg),
+        ESubquery(ref s) => ESubquery(s.clone()),
+        EInSubquery(ref subj, ref s, neg) => EInSubquery(Heap.new(clone_expr(&**subj)), s.clone(), neg),
+        ENullIf(ref a, ref b) => ENullIf(Heap.new(clone_expr(&**a)), Heap.new(clone_expr(&**b))),
+        ECoalesce(ref args) => ECoalesce(clone_expr_list(args)),
+    }
+}
+
+fn clone_literal(l: &SqlLiteral) -> SqlLiteral {
+    match l {
+        LNull => LNull,
+        LInt(v) => LInt(v),
+        LReal(v) => LReal(v),
+        LText(ref t) => LText(t.clone()),
+        LBlob(ref b) => LBlob(b.clone()),
+        LTrue => LTrue,
+        LFalse => LFalse,
+        _ => l.clone(),
+    }
+}
+
+fn clone_expr_list(src: &List<Expr>) -> List<Expr> {
+    let mut out: List<Expr> = List.new();
+    let mut i: Int = 0;
+    while i < src.len() { out.push(clone_expr(&src[i])); i = i + 1; }
+    out
+}
+
+fn clone_arm_list(src: &List<(Expr, Expr)>) -> List<(Expr, Expr)> {
+    let mut out: List<(Expr, Expr)> = List.new();
+    let mut i: Int = 0;
+    while i < src.len() {
+        let arm = &src[i];
+        out.push((clone_expr(&arm.0), clone_expr(&arm.1)));
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_maybe_heap_expr(src: &Maybe<Heap<Expr>>) -> Maybe<Heap<Expr>> {
+    match src {
+        None => None,
+        Some(h) => Some(Heap.new(clone_expr(&**h))),
+    }
+}
+
+fn clone_table_ref(t: &TableRef) -> TableRef {
+    TableRef { schema: t.schema.clone(), name: t.name.clone(), alias: t.alias.clone() }
+}
