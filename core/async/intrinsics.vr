@@ -136,18 +136,20 @@ public fn future_poll_sync<F: Future>(future: &mut F) -> Maybe<F.Output> {
 // =============================================================================
 // Sleep Intrinsics
 // =============================================================================
-
-/// Low-level async sleep in milliseconds.
-///
-
-/// The intrinsic version uses the C runtime's sleep mechanism.
-/// For Verum-native sleep, use `async.timer.sleep_ms()`.
-@intrinsic("async_sleep_ms")
-public fn async_sleep_ms(ms: Int);
-
-/// Low-level async sleep in nanoseconds.
-@intrinsic("async_sleep_ns")
-public fn async_sleep_ns(ns: Int);
+//
+// **Re-exported from `core/intrinsics/runtime/async_ops.vr`** (#83).
+//
+// Pre-fix this file declared `async_sleep_ms`/`ns` with `Int` ABI
+// while `core/intrinsics/runtime/async_ops.vr` had `UInt64 + async`
+// — same `@intrinsic("async_sleep_ms")` name, different surfaces.
+// Per CLAUDE.md "all intrinsics in core/intrinsics", the canonical
+// home is `core/intrinsics/runtime/async_ops.vr`; this file just
+// re-exports them so legacy `mount core.async.intrinsics.{...}`
+// users keep working.
+public mount core.intrinsics.runtime.async_ops.{
+    async_sleep_ms,
+    async_sleep_ns,
+};
 
 // =============================================================================
 // Waker Utilities

@@ -73,5 +73,16 @@ public fn rdtsc() -> UInt64 { @intrinsic("rdtsc") }
 /// Returns (timestamp, processor_id)
 public fn rdtscp() -> (UInt64, UInt32) { @intrinsic("rdtscp") }
 
-/// CPU spin hint for busy-wait loops (PAUSE on x86, YIELD on ARM)
-public fn spin_hint() { @intrinsic("spin_hint") }
+// **`spin_hint` re-exported from runtime/sync.vr**
+// (architectural cleanup: single source of truth per intrinsic).
+//
+// Pre-fix this file declared `spin_hint` as an inline-invocation
+// wrapper `@intrinsic("spin_hint")`, duplicating the canonical
+// extern declaration in `runtime/sync.vr:102`.  Both produced the
+// same VBC opcode at codegen time, but the dual-declaration
+// pattern violates the "single canonical home per intrinsic"
+// architectural invariant established under #83.  Many call
+// sites in `core/{mem,async,sync,sys}` mount this exact path:
+// `mount core.intrinsics.platform.{spin_hint}` — keeping the
+// path stable so they don't break.
+public mount super.runtime.sync.spin_hint;
