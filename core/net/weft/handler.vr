@@ -163,8 +163,23 @@ fn hex_nibble(b: Byte) -> Maybe<Int> {
 // Handler protocol
 // -----------------------------------------------------------------------------
 
+mount core.net.weft.error.{IntoResponse};
+
+/// Request-handling protocol.  The `Error` associated type lets
+/// middleware type-route on handler-specific failure modes
+/// (red-team §8): a `RetryLayer<H> where H::Error: RetryClassify`
+/// statically reaches only handlers whose error converts to a
+/// retry classification.
+///
+/// `Error` defaults to `WeftError` — every existing implementer
+/// inherits the framework's closed sum without modification.
+/// Domain handlers that want richer per-handler typing can override
+/// (`type Error = MyDomainError;`); the `IntoResponse` bound
+/// guarantees the framework can always render a reply, so the
+/// override is sound by construction.
 public type Handler is protocol {
-    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError>;
+    type Error: IntoResponse = WeftError;
+    async fn handle(&self, req: WeftRequest) -> Result<Response, Self.Error>;
 };
 
 // -----------------------------------------------------------------------------

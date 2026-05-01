@@ -14,14 +14,13 @@
 // without touching tcp.vr, and gives us a single binding point for
 // TLS / UDS / vsock adaptors.
 //
-// Buffer type — `List<Byte>` (post-#316 migration follow-up).
-// Pre-migration the stdlib socket layer marshalled bytes through
-// `List<Int>`, forcing every parse-layer consumer to mask + cast
-// back to Byte at 8× the memory footprint.  The transport API now
-// hands bytes out as bytes, eliminating the conversion permanently.
-// `core/net/tcp.vr` bridges this byte-typed surface to the AsyncRead
-// / AsyncWrite protocols (still `List<Int>` for now) at a single
-// per-await conversion point.
+// Buffer type — `List<Byte>` end-to-end.  Pre-§4 the stdlib socket
+// layer marshalled bytes through `List<Int>` (8 bytes per element
+// in the NaN-boxed Value representation), forcing every parse-layer
+// consumer to mask + cast back to Byte at 8× the memory footprint.
+// Post-§4 the AsyncRead / AsyncWrite protocols themselves speak
+// `List<Byte>`, so this transport surface is a direct passthrough
+// with zero per-await conversion.
 //
 // =============================================================================
 
@@ -47,8 +46,7 @@ public type WeftTransport is protocol {
     fn peer_addr(&self) -> Result<SocketAddr, IoError>;
 
     /// Cancellable read. Outer Result is the cancellation channel;
-    /// inner Result the normal read outcome.  `buf` is `&mut
-    /// List<Byte>` (semantic-honesty migration #316 follow-up).
+    /// inner Result the normal read outcome.  `buf` is `&mut List<Byte>`.
     async fn read_cancellable(
         &mut self,
         buf: &mut List<Byte>,
@@ -57,7 +55,7 @@ public type WeftTransport is protocol {
 
     /// Write — may be partial; the connection pipeline is responsible
     /// for retrying until `buf` is fully drained (see `write_response`
-    /// in connection.vr).  `buf` is `&List<Byte>` post-#316.
+    /// in connection.vr).  `buf` is `&List<Byte>`.
     async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError>;
 
     /// Half-close write direction (HTTP/1.1 `Connection: close` path

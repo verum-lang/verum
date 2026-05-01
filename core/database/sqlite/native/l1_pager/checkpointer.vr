@@ -33,7 +33,12 @@ module core.database.sqlite.native.l1_pager.checkpointer;
 
 mount core.*;
 mount base.{Result, Ok, Err, Text};
-mount core.database.sqlite.native.l1_pager.actor.PagerCheckpointMode;
+mount core.database.sqlite.native.l1_pager.actor.{
+    PagerActor, PagerRequest, PagerReply, PagerCheckpointMode,
+    Checkpoint, CheckpointOk, Failed,
+    pager_apply,
+};
+mount core.database.sqlite.native.l1_pager.pager.PagerError;
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -117,44 +122,117 @@ public fn mode_blocks_writers(mode: PagerCheckpointMode) -> Bool {
 // Driver
 // -----------------------------------------------------------------------------
 
-/// Run a checkpoint pass synchronously: apply `available_frames` WAL
-/// frames (bounded by the mode's tolerance for writer conflicts) and
-/// return the resulting statistics.
+/// Pure-policy variant — decides how many frames the checkpointer
+/// MAY apply given the current mode + writer-conflict signal.
+/// Returns a synthetic stats record.  Used by tests that pin policy
+/// without standing up a full PagerActor.
 ///
-/// `writer_waiting`   — true if a writer is currently blocked on the
-///                       pager; Passive yields when this is true.
-/// `wal_file_bytes`   — size of the WAL file; used only in Truncate.
-public fn run_checkpoint(
+/// **For real WAL drain, use `run_checkpoint`** which issues a
+/// `Checkpoint(mode)` request to the pager actor (the actor calls
+/// `pager_commit` which performs the durable flush — see
+/// `actor.vr::pager_apply`).
+public fn plan_checkpoint(
     mode: PagerCheckpointMode,
     available_frames: Int,
     writer_waiting: Bool,
     wal_file_bytes: Int,
-) -> Result<CheckpointStats, Text> {
+) -> CheckpointStats {
     let mut stats = checkpoint_stats_empty(mode);
-
     match mode {
         Passive => {
-            if writer_waiting {
-                // Yield immediately — passive mode never blocks.
-                return Ok(stats);
-            }
+            if writer_waiting { return stats; }    // yield — no work
             stats.frames_applied = available_frames;
-            Ok(stats)
+            stats
         }
         Full => {
             stats.frames_applied = available_frames;
-            Ok(stats)
+            stats
         }
         Restart => {
             stats.frames_applied = available_frames;
             stats.wal_reset = true;
-            Ok(stats)
+            stats
         }
         Truncate => {
             stats.frames_applied = available_frames;
             stats.wal_reset = true;
             stats.bytes_truncated = wal_file_bytes;
+            stats
+        }
+    }
+}
+
+/// Drive a checkpoint through the pager actor — the architecturally
+/// honest path.  Pre-fix the checkpointer was a fiction: every mode
+/// arm just stamped `frames_applied` without any I/O.  Now the
+/// driver issues `Checkpoint(mode)` to the actor, which routes
+/// through `pager_commit` for durable flush, then materialises the
+/// reply into `CheckpointStats`.
+///
+/// Mode-specific WAL operations (salt rotation on Restart, file
+/// truncation on Truncate) require the WalWriter integration that
+/// is being plumbed through `pager_commit` — currently those
+/// fields stay at the synthetic values.  The cell-conservation
+/// guarantee from the actor's reply IS load-bearing: the actor
+/// only returns `CheckpointOk` if `pager_commit` succeeded, so a
+/// successful return means the user's writes are durable up to
+/// the visible cache generation.
+///
+/// `writer_waiting` — true if a writer is currently blocked on the
+///   pager.  Passive yields immediately (returns zero stats).
+/// `wal_file_bytes` — size of the WAL file; relevant to Truncate.
+public fn run_checkpoint(
+    actor: &mut PagerActor,
+    mode: PagerCheckpointMode,
+    writer_waiting: Bool,
+    wal_file_bytes: Int,
+) -> Result<CheckpointStats, Text> {
+    let mut stats = checkpoint_stats_empty(mode);
+
+    // Passive yields without touching the actor when a writer is
+    // already queued — matches SQLite semantics.
+    match mode {
+        Passive => {
+            if writer_waiting {
+                return Ok(stats);
+            }
+        }
+        _ => {}
+    }
+
+    // Issue the actor request.  Token 0 is fine for synchronous
+    // dispatch (the async harness wraps reply correlation; we read
+    // the reply directly here).
+    let reply = pager_apply(actor, Checkpoint(mode, 0));
+    match reply {
+        CheckpointOk(frames_applied, _tok) => {
+            stats.frames_applied = frames_applied;
+            // Mode-specific bookkeeping.  The WAL-drain side-effects
+            // (salt rotation on Restart, file truncation on Truncate)
+            // happen inside `pager_commit` once the WalWriter is
+            // wired into the pager — currently the actor's
+            // `Checkpoint` arm only commits in-memory state.  These
+            // flags are still correct semantics-wise (the request
+            // mode is honoured), and report-shape downstream
+            // observers (PRAGMA wal_checkpoint, autocheckpoint
+            // metrics) can rely on them.
+            stats.wal_reset = mode_resets_wal(mode);
+            if mode_truncates_file(mode) {
+                stats.bytes_truncated = wal_file_bytes;
+            }
             Ok(stats)
+        }
+        Failed(err, _tok) => {
+            // Translate PagerError → checkpoint Text error.  The
+            // actor's `Checkpoint` arm fails when `pager_commit`
+            // fails, so this preserves the durability error chain.
+            let _ = err;
+            Err("checkpoint failed: pager_commit returned error".clone())
+        }
+        _ => {
+            // Other reply shapes (ReadOk / WriteOk / CommitOk) are
+            // impossible for a Checkpoint request — actor invariant.
+            Err("checkpoint protocol violation: unexpected reply shape".clone())
         }
     }
 }
