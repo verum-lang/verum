@@ -1,0 +1,294 @@
+// =============================================================================
+// security/encrypt/rsa_oaep.vr — RSA-OAEP encryption (RFC 8017 §7.1)
+// =============================================================================
+// Layer: 2 (Security)
+// Dependencies: core.math.big_uint, core.security.hash.sha1,
+//               core.security.sig.rsa, core.security.util.rng
+// =============================================================================
+//
+// RSA-OAEP encryption per RFC 8017 §7.1.1 (RSAES-OAEP-ENCRYPT).
+// Uses SHA-1 by default for compatibility with MySQL
+// caching_sha2_password's full_auth path (spec §6.3.2): MySQL
+// hard-codes OAEP-SHA1, even on modern 8.x servers, because the
+// public-key flow originates from MySQL 5.7. SHA-256 variant ships
+// once a non-MySQL caller needs it.
+//
+// # Algorithm summary (RFC 8017 §7.1.1, hash = SHA-1, h_len = 20)
+//
+// Inputs: public key (n, e), message M (≤ k - 2*h_len - 2 bytes,
+// where k = byte length of n), label L (default empty).
+//
+// 1.  l_hash = SHA-1(L)
+// 2.  PS = (k - mLen - 2*h_len - 2) zero bytes  (padding)
+// 3.  DB = l_hash || PS || 0x01 || M            (h_len + (k - h_len - 1)
+//                                                 = k - h_len - 1 bytes)
+// 4.  seed = h_len random bytes
+// 5.  db_mask = MGF1-SHA1(seed, k - h_len - 1)
+// 6.  masked_db = DB XOR db_mask
+// 7.  seed_mask = MGF1-SHA1(masked_db, h_len)
+// 8.  masked_seed = seed XOR seed_mask
+// 9.  EM = 0x00 || masked_seed || masked_db          (k bytes total)
+// 10. m  = OS2IP(EM)        (big-int integer in [0, n-1])
+// 11. c  = m^e mod n
+// 12. C  = I2OSP(c, k)      (big-endian, k bytes)
+//
+// Output: C (k bytes — same length as the modulus).
+//
+// # Security notes
+//
+//   * Uses fresh `seed` per encryption (RFC 8017 mandates random
+//     seed for each call). Drawn from `core.security.util.rng` —
+//     OS-level CSPRNG, not a deterministic PRNG.
+//
+//   * The seed and intermediate values aren't currently zeroized
+//     after use. Plain-Text RSA encryption operands are public-
+//     key-side only (the encrypted message AND the public key
+//     are public); the only secret is `M`, which the caller
+//     handles. A `@constant_time` annotation lands when the
+//     decryption variant ships.
+//
+//   * RFC 8017 forbids `mLen > k - 2*h_len - 2` — we surface
+//     `OaepError.MessageTooLong` cleanly. With SHA-1 (h_len = 20)
+//     and k = 256 (RSA-2048), max message = 214 bytes — plenty
+//     for password / session-key transport.
+//
+//   * Length-leak — variable-time arithmetic in `core.math.big_uint`
+//     means the encryption time scales with message length /
+//     modulus length. Acceptable for public-key encryption (the
+//     message length is implicitly bounded by `k - 2*h_len - 2`
+//     and known to the attacker via the ciphertext length).
+//     Decryption / signing variants MUST be constant-time and
+//     ship later under `core.security.sig.rsa.{sign_pss,
+//     decrypt_oaep}` with Montgomery / Barrett reduction.
+//
+// =============================================================================
+
+module core.security.encrypt.rsa_oaep;
+
+mount core.*;
+mount core.collections.List;
+mount core.math.big_uint.{BigUint, modexp};
+mount core.security.hash.sha1.{Sha1, SHA1_DIGEST_SIZE};
+mount core.security.sig.rsa.RsaPublicKey;
+mount core.security.util.rng.{fill_secure};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// SHA-1 digest size in bytes (h_len in RFC 8017 notation).
+public const OAEP_SHA1_HLEN: Int = 20;
+
+/// Maximum modulus byte-length OAEP supports — purely defensive,
+/// caps at 8192-bit RSA. Larger values are pathological in
+/// practice (more cost, no security gain) and would slow the
+/// schoolbook-arithmetic path unreasonably.
+public const OAEP_MAX_MODULUS_BYTES: Int = 1024;
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type OaepError is
+      /// Message too long — `mLen > k - 2*h_len - 2` per RFC 8017.
+      OeMessageTooLong { msg_len: Int, max_len: Int }
+      /// RNG failed to produce the seed bytes.
+    | OeRngFailure
+      /// Modulus too small to fit any message at all (k <= 2*h_len + 2).
+    | OeModulusTooSmall(Int)
+      /// Modulus exceeds `OAEP_MAX_MODULUS_BYTES`.
+    | OeModulusTooLarge(Int)
+      /// Public key's modulus length and exponent length are zero
+      /// or otherwise nonsensical.
+    | OeMalformedKey
+      /// Internal arithmetic overflow producing a ciphertext
+      /// that cannot fit in `k` bytes — should not happen for
+      /// valid keys; surface for diagnostic completeness.
+    | OeArithmeticOverflow;
+
+implement Display for OaepError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OeMessageTooLong { msg_len, max_len } =>
+                f.write_str(f"OAEP: message {msg_len} bytes exceeds maximum {max_len}".as_str()),
+            OeRngFailure                          => f.write_str("OAEP: RNG failure"),
+            OeModulusTooSmall(k)                  => f.write_str(f"OAEP: modulus {k} bytes too small for SHA-1".as_str()),
+            OeModulusTooLarge(k)                  => f.write_str(f"OAEP: modulus {k} bytes exceeds limit".as_str()),
+            OeMalformedKey                        => f.write_str("OAEP: malformed public key"),
+            OeArithmeticOverflow                  => f.write_str("OAEP: arithmetic overflow"),
+        }
+    }
+}
+
+implement Debug for OaepError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OeMessageTooLong { msg_len, max_len } =>
+                f.write_str(f"OeMessageTooLong {{ msg_len: {msg_len}, max_len: {max_len} }}".as_str()),
+            OeRngFailure                          => f.write_str("OeRngFailure"),
+            OeModulusTooSmall(k)                  => f.write_str(f"OeModulusTooSmall({k})".as_str()),
+            OeModulusTooLarge(k)                  => f.write_str(f"OeModulusTooLarge({k})".as_str()),
+            OeMalformedKey                        => f.write_str("OeMalformedKey"),
+            OeArithmeticOverflow                  => f.write_str("OeArithmeticOverflow"),
+        }
+    }
+}
+
+// =============================================================================
+// MGF1-SHA1 — Mask Generation Function (RFC 8017 §B.2.1)
+// =============================================================================
+
+/// MGF1 with SHA-1 — produces `mask_len` mask bytes from `seed`.
+/// Concatenates SHA-1(seed || counter) for counter = 0, 1, 2, …
+/// until the output is at least `mask_len` bytes; truncates.
+///
+/// The OAEP encryption flow invokes this twice: once with a fresh
+/// random seed to mask DB, once with the masked DB to mask the
+/// seed itself.
+public fn mgf1_sha1(seed: &[Byte], mask_len: Int) -> List<Byte> {
+    if mask_len <= 0 { return List.new(); }
+    let mut out: List<Byte> = List.with_capacity(mask_len);
+    let mut counter: UInt32 = 0_u32;
+    while (out.len() as Int) < mask_len {
+        // counter as 4-byte big-endian.
+        let c0 = ((counter >> 24_u32) & 0xFF_u32) as Byte;
+        let c1 = ((counter >> 16_u32) & 0xFF_u32) as Byte;
+        let c2 = ((counter >> 8_u32)  & 0xFF_u32) as Byte;
+        let c3 = ( counter            & 0xFF_u32) as Byte;
+        let mut hasher = Sha1.new();
+        hasher.update(seed);
+        let counter_bytes: [Byte; 4] = [c0, c1, c2, c3];
+        hasher.update(&counter_bytes);
+        let digest: [Byte; 20] = hasher.finalize();
+        let mut i: Int = 0;
+        while i < SHA1_DIGEST_SIZE && (out.len() as Int) < mask_len {
+            out.push(digest[i]);
+            i = i + 1;
+        }
+        counter = counter + 1_u32;
+    }
+    out
+}
+
+// =============================================================================
+// RSAES-OAEP-ENCRYPT (RFC 8017 §7.1.1, hash = SHA-1, label = "")
+// =============================================================================
+
+/// Encrypt `message` under `pubkey` using RSA-OAEP-SHA1 with an
+/// empty label. Returns a ciphertext of exactly `pubkey.modulus_bytes()`
+/// bytes (big-endian, zero-padded as needed). Suitable for the
+/// MySQL caching_sha2_password full_auth flow.
+///
+/// `label` argument is reserved for callers that want a non-empty
+/// associated context. The MySQL caller passes `&[]` — empty
+/// label is the protocol default everywhere outside niche
+/// applications.
+public fn encrypt_oaep_sha1(
+    pubkey: &RsaPublicKey,
+    message: &[Byte],
+    label: &[Byte],
+) -> Result<List<Byte>, OaepError> {
+    let k = pubkey.modulus_bytes();
+    if k <= 2 * OAEP_SHA1_HLEN + 2 {
+        return Err(OeModulusTooSmall(k));
+    }
+    if k > OAEP_MAX_MODULUS_BYTES {
+        return Err(OeModulusTooLarge(k));
+    }
+    if pubkey.n.len() == 0 || pubkey.e.len() == 0 {
+        return Err(OeMalformedKey);
+    }
+    let m_len = message.len() as Int;
+    let max_len = k - 2 * OAEP_SHA1_HLEN - 2;
+    if m_len > max_len {
+        return Err(OeMessageTooLong { msg_len: m_len, max_len: max_len });
+    }
+
+    // Step 1: l_hash = SHA-1(label).
+    let l_hash_arr: [Byte; 20] = Sha1.digest(label);
+
+    // Step 2-3: build DB = l_hash || PS || 0x01 || M, total k - h_len - 1 bytes.
+    let db_len = k - OAEP_SHA1_HLEN - 1;
+    let mut db: List<Byte> = List.with_capacity(db_len);
+    let mut i: Int = 0;
+    while i < OAEP_SHA1_HLEN {
+        db.push(l_hash_arr[i]);
+        i = i + 1;
+    }
+    let ps_len = db_len - OAEP_SHA1_HLEN - 1 - m_len;
+    let mut p: Int = 0;
+    while p < ps_len {
+        db.push(0x00_u8);
+        p = p + 1;
+    }
+    db.push(0x01_u8);
+    let mut q: Int = 0;
+    while q < m_len {
+        db.push(message[q]);
+        q = q + 1;
+    }
+    // Sanity — db length should equal db_len exactly.
+    if (db.len() as Int) != db_len {
+        return Err(OeArithmeticOverflow);
+    }
+
+    // Step 4: random seed — h_len bytes from CSPRNG. `fill_secure`
+    // overwrites a pre-sized List with bytes drawn from the
+    // runtime's secure DRBG (NIST SP 800-90A; spec §5.6).
+    let mut seed: List<Byte> = List.with_capacity(OAEP_SHA1_HLEN);
+    let mut s: Int = 0;
+    while s < OAEP_SHA1_HLEN { seed.push(0_u8); s = s + 1; }
+    fill_secure(&mut seed);
+
+    // Step 5-6: db_mask = MGF1-SHA1(seed, db_len);  masked_db = DB XOR db_mask.
+    let db_mask = mgf1_sha1(seed.as_slice(), db_len);
+    let masked_db = xor_buf(&db, &db_mask);
+
+    // Step 7-8: seed_mask = MGF1-SHA1(masked_db, h_len);
+    //           masked_seed = seed XOR seed_mask.
+    let seed_mask = mgf1_sha1(masked_db.as_slice(), OAEP_SHA1_HLEN);
+    let masked_seed = xor_buf(&seed, &seed_mask);
+
+    // Step 9: EM = 0x00 || masked_seed || masked_db, k bytes.
+    let mut em: List<Byte> = List.with_capacity(k);
+    em.push(0x00_u8);
+    let mut a: Int = 0;
+    while a < masked_seed.len() as Int {
+        em.push(masked_seed[a]);
+        a = a + 1;
+    }
+    let mut b: Int = 0;
+    while b < masked_db.len() as Int {
+        em.push(masked_db[b]);
+        b = b + 1;
+    }
+
+    // Step 10-11: m = OS2IP(EM); c = m^e mod n.
+    let m = BigUint.from_bytes_be(em.as_slice());
+    let n = BigUint.from_bytes_be(pubkey.n.as_slice());
+    let e = BigUint.from_bytes_be(pubkey.e.as_slice());
+    let c = modexp(&m, &e, &n);
+
+    // Step 12: C = I2OSP(c, k).
+    match c.to_bytes_be(k) {
+        Some(out) => Ok(out),
+        None      => Err(OeArithmeticOverflow),
+    }
+}
+
+// =============================================================================
+// XOR helpers
+// =============================================================================
+
+fn xor_buf(a: &List<Byte>, b: &List<Byte>) -> List<Byte> {
+    let n = a.len() as Int;
+    let mut out: List<Byte> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let av = (a[i] as Int) & 0xFF;
+        let bv = (b[i] as Int) & 0xFF;
+        out.push(((av ^ bv) & 0xFF) as Byte);
+        i = i + 1;
+    }
+    out
+}

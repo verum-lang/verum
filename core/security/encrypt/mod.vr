@@ -1,0 +1,28 @@
+// =============================================================================
+// security/encrypt/mod.vr — public-key encryption schemes
+// =============================================================================
+// Layer: 2 (Security)
+// =============================================================================
+//
+// Encryption — distinct from signature (which lives in
+// `core.security.sig.*`) — and from AEAD symmetric encryption
+// (`core.security.aead.*`). This namespace holds public-key
+// encryption schemes, primarily used as transport for short
+// secrets (session keys, password-equivalents, key-encapsulation
+// outputs).
+//
+// Currently shipped:
+//   * `rsa_oaep` — RSA encryption with OAEP-SHA1 padding
+//                  (RFC 8017 §7.1). Used by MySQL
+//                  caching_sha2_password's full_auth fallback
+//                  path (spec §6.3.2) and by legacy TLS
+//                  cipher-suites that haven't migrated to ECDHE.
+//
+// Future:
+//   * RSA-OAEP-SHA256 — same module, hash parameter switch.
+//   * KEM — `core.security.pq.ml_kem` already lives in security/pq.
+// =============================================================================
+
+module core.security.encrypt;
+
+public module rsa_oaep;

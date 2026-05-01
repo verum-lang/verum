@@ -198,6 +198,9 @@ public module examples;
 // GCD/LCM, Euler/Fermat/FTA theorem statements
 public module number_theory;
 
+// Multi-precision unsigned integers — RSA / DH / EC scalar arithmetic
+public module big_uint;
+
 // =============================================================================
 // ∞-Topos + Category Theory Foundation
 // =============================================================================
