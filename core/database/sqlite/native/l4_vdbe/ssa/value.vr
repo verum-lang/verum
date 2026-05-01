@@ -1,0 +1,152 @@
+module core.database.sqlite.native.l4_vdbe.ssa.value;
+
+// =============================================================================
+// l4_vdbe/ssa/value.vr — Typed SSA value
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4 ("VDBE как SSA IR (не register-VM)")
+//
+// Monomorphized SSA value: each value has a STATIC kind known at compile
+// time, replacing the runtime-tagged `Register` of the legacy register VM.
+//
+// The kind is determined when the value is materialised:
+//   * `IConst(SkInt, ...)`        → SkInt
+//   * `IAdd(a: SkInt, b: SkInt)`  → SkInt
+//   * `IColumn(cur, idx)`         → kind from cursor schema
+//
+// `SsaValue` carries no runtime tag — kind information lives in the
+// instruction that produced it (and is cached in the per-block
+// `value_kinds` table for O(1) lookup).
+//
+// Spec §4.4 advantages this enables:
+//   1. monomorphic dispatch (no runtime tag-switch per opcode)
+//   2. branch-table opcode dispatch lowering to a jump table at -O2+
+//   3. constant-folding / DCE / peephole at the SSA layer pre-emission
+// =============================================================================
+
+mount core.*;
+mount base.{Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// SValueKind — the static type of every SSA value
+// -----------------------------------------------------------------------------
+
+/// Statically-known kind of an SSA value.  Inferred at codegen from the
+/// instruction that produces the value; never re-checked at runtime in
+/// the SSA fast path (the register-VM back-translation re-tags as
+/// `Register` for legacy interpreter compatibility).
+///
+/// Aligns with `Register` variants of the legacy VM:
+///   `SkInt    ↔ RInt(Int64)`
+///   `SkReal   ↔ RReal(Float64)`
+///   `SkText   ↔ RText(Text)`
+///   `SkBlob   ↔ RBlob(List<Byte>)`
+///   `SkRowId  ↔ RRowId(Int64)`
+///   `SkBool   ↔ RInt(0|1)`         — distinct kind for type-safe If/IfNot
+///   `SkNull   ↔ RNull`             — singleton, no payload
+///   `SkAny    ↔ Register`          — escape hatch for column reads where
+///                                    the cursor schema is dynamic (PRAGMA,
+///                                    EXPLAIN); back-translates to a
+///                                    runtime-tagged Register
+public type SValueKind is
+      SkNull
+    | SkInt
+    | SkReal
+    | SkText
+    | SkBlob
+    | SkBool
+    | SkRowId
+    | SkAny;
+
+/// Pretty-printer for diagnostics + EXPLAIN output.
+public fn kind_name(k: &SValueKind) -> Text {
+    match k {
+        SkNull  => "Null",
+        SkInt   => "Int",
+        SkReal  => "Real",
+        SkText  => "Text",
+        SkBlob  => "Blob",
+        SkBool  => "Bool",
+        SkRowId => "RowId",
+        SkAny   => "Any",
+    }
+}
+
+/// Two kinds are compatible iff identical OR one side is `SkAny`.
+/// Used by the type-checker pass to validate `IAdd(a, b)` etc.
+public fn kinds_compatible(a: &SValueKind, b: &SValueKind) -> Bool {
+    if kind_eq(a, &SkAny) { return true; }
+    if kind_eq(b, &SkAny) { return true; }
+    kind_eq(a, b)
+}
+
+/// Discriminator equality (no payload to compare).
+public fn kind_eq(a: &SValueKind, b: &SValueKind) -> Bool {
+    match a {
+        SkNull  => matches_null(b),
+        SkInt   => matches_int(b),
+        SkReal  => matches_real(b),
+        SkText  => matches_text(b),
+        SkBlob  => matches_blob(b),
+        SkBool  => matches_bool(b),
+        SkRowId => matches_rowid(b),
+        SkAny   => matches_any(b),
+    }
+}
+
+fn matches_null(k: &SValueKind)  -> Bool { match k { SkNull  => true, _ => false } }
+fn matches_int(k: &SValueKind)   -> Bool { match k { SkInt   => true, _ => false } }
+fn matches_real(k: &SValueKind)  -> Bool { match k { SkReal  => true, _ => false } }
+fn matches_text(k: &SValueKind)  -> Bool { match k { SkText  => true, _ => false } }
+fn matches_blob(k: &SValueKind)  -> Bool { match k { SkBlob  => true, _ => false } }
+fn matches_bool(k: &SValueKind)  -> Bool { match k { SkBool  => true, _ => false } }
+fn matches_rowid(k: &SValueKind) -> Bool { match k { SkRowId => true, _ => false } }
+fn matches_any(k: &SValueKind)   -> Bool { match k { SkAny   => true, _ => false } }
+
+// -----------------------------------------------------------------------------
+// ValueId — monotonically-increasing SSA value identifier
+// -----------------------------------------------------------------------------
+
+/// Globally-unique within an `SsaProgram`.  Allocator is the
+/// `SsaBuilder` (see `builder.vr`) which hands out fresh ids on every
+/// instruction emission.
+///
+/// Convention: `ValueId(0)` is the synthetic null literal (always
+/// emitted as the first instruction of the entry block).  Backends
+/// MAY rely on this; the back-translation pass guarantees it.
+public type ValueId is (Int);
+
+public fn value_id(n: Int) -> ValueId { ValueId(n) }
+public fn value_id_raw(v: &ValueId) -> Int {
+    match v { ValueId(n) => n }
+}
+
+public fn value_id_eq(a: &ValueId, b: &ValueId) -> Bool {
+    value_id_raw(a) == value_id_raw(b)
+}
+
+// -----------------------------------------------------------------------------
+// SsaValue — id + statically-known kind
+// -----------------------------------------------------------------------------
+
+/// An SSA value reference.  `id` uniquely identifies the producing
+/// instruction; `kind` is the static type used by the type-checker
+/// and back-translator.
+///
+/// Cloning is intentionally cheap (copy of a small record).  The
+/// kind is a small variant tag, NOT the actual payload.
+public type SsaValue is {
+    id: ValueId,
+    kind: SValueKind,
+};
+
+public fn ssa_value(id: ValueId, kind: SValueKind) -> SsaValue {
+    SsaValue { id: id, kind: kind }
+}
+
+/// Equality: only on `id`.  Two SSA values with same id but different
+/// declared kinds are pathological — the builder MUST never produce
+/// such pairs.
+public fn ssa_value_eq(a: &SsaValue, b: &SsaValue) -> Bool {
+    value_id_eq(&a.id, &b.id)
+}

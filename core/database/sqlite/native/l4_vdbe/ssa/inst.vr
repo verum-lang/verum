@@ -1,0 +1,350 @@
+module core.database.sqlite.native.l4_vdbe.ssa.inst;
+
+// =============================================================================
+// l4_vdbe/ssa/inst.vr — Typed SSA instruction
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4 (SSA IR with monomorphized register types)
+//
+// Each `SsaInst` variant maps to one or more legacy `Opcode` cases, but
+// carries `SsaValue` operands instead of integer register indices.
+// Values flow by id+kind, NOT by register-file slot.
+//
+// Coverage: this enum is the FULL pre-emission IR; the back-translator
+// in `to_register_vm.vr` lowers it to legacy `Opcode` for execution.
+// New SSA-only optimisations (constant-folding, DCE, peephole) operate
+// on this IR before lowering.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{SsaValue, ValueId};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{BlockId, block_id_eq};
+
+// -----------------------------------------------------------------------------
+// Comparison kind (factored out of the 6 IIcmp variants)
+// -----------------------------------------------------------------------------
+
+public type CmpKind is CkEq | CkNe | CkLt | CkLe | CkGt | CkGe;
+
+public fn cmp_kind_name(k: &CmpKind) -> Text {
+    match k {
+        CkEq => "Eq",
+        CkNe => "Ne",
+        CkLt => "Lt",
+        CkLe => "Le",
+        CkGt => "Gt",
+        CkGe => "Ge",
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Cursor operation kinds (factored out of OpenRead/OpenWrite/Close/...)
+// -----------------------------------------------------------------------------
+
+public type CursorOpKind is
+      CoOpenRead
+    | CoOpenWrite
+    | CoOpenEphemeral
+    | CoOpenAutoindex
+    | CoSorterOpen
+    | CoClose;
+
+// -----------------------------------------------------------------------------
+// SsaInst — the typed SSA instruction
+// -----------------------------------------------------------------------------
+
+/// Typed SSA instruction.  Variants are grouped by category; each
+/// destination operand is the SSA value PRODUCED by the instruction.
+public type SsaInst is
+    // ---- Constants ----------------------------------------------------------
+    /// Materialise a typed constant from the program's constant pool.
+    /// `dst.kind` is determined by the constant entry kind.
+    | IConst(SsaValue, Int)                              // dst, const_pool_idx
+
+    /// Synthetic null literal.  Always at the entry of the program;
+    /// used by code-generators that need to produce an SkNull value
+    /// without going through the constant pool.
+    | INull(SsaValue)                                    // dst (kind = SkNull)
+
+    /// Inline integer literal (for immediates that don't deserve a
+    /// constant-pool slot — e.g. small comparison thresholds).
+    | IIntImm(SsaValue, Int64)                           // dst (kind = SkInt), value
+
+    // ---- Arithmetic ---------------------------------------------------------
+    /// All arithmetic instructions require both operands to share kind
+    /// (SkInt or SkReal).  Mixed-kind arithmetic uses ICast first.
+    | IAdd(SsaValue, SsaValue, SsaValue)                 // dst, a, b
+    | ISub(SsaValue, SsaValue, SsaValue)
+    | IMul(SsaValue, SsaValue, SsaValue)
+    | IDiv(SsaValue, SsaValue, SsaValue)
+    | IRem(SsaValue, SsaValue, SsaValue)
+
+    // ---- Bitwise (SkInt only) ----------------------------------------------
+    | IBitAnd(SsaValue, SsaValue, SsaValue)
+    | IBitOr(SsaValue, SsaValue, SsaValue)
+    | IShiftLeft(SsaValue, SsaValue, SsaValue)
+    | IShiftRight(SsaValue, SsaValue, SsaValue)
+    | IBitNot(SsaValue, SsaValue)                        // dst, src
+
+    // ---- Comparison: dst is always SkBool ----------------------------------
+    | ICmp(SsaValue, CmpKind, SsaValue, SsaValue)        // dst (Bool), kind, a, b
+
+    // ---- Type cast (the ONLY operation that legitimately changes kind) ----
+    | ICast(SsaValue, SsaValue)                          // dst (target kind), src
+
+    // ---- Cursor / table access ---------------------------------------------
+    /// Open a cursor.  No SSA value produced — cursor handle is a
+    /// CursorId (already statically known at codegen).
+    | ICursorOpen(Int, CursorOpKind, Int, Int)           // cursor_id, op, root_page, n_cols
+
+    /// Close cursor.
+    | ICursorClose(Int)                                  // cursor_id
+
+    /// Position cursor at first row.  Branches to `eof_block` if
+    /// table is empty.
+    | ICursorRewind(Int, BlockId)                        // cursor, eof_block
+
+    /// Advance cursor.  Branches to `eof_block` if past last row.
+    | ICursorNext(Int, BlockId)                          // cursor, eof_block
+
+    | ICursorPrev(Int, BlockId)
+    | ICursorLast(Int, BlockId)
+
+    /// Read column `idx` from current row of cursor.  `dst.kind` is
+    /// inferred from the cursor's column schema (SkAny for cursors
+    /// without static schema, e.g. PRAGMA / EXPLAIN).
+    | IColumn(SsaValue, Int, Int)                        // dst, cursor, col_idx
+
+    /// Read current rowid from cursor.  `dst.kind = SkRowId`.
+    | IRowId(SsaValue, Int)                              // dst, cursor
+
+    /// Build a SQLite record from `n` consecutive SSA values.  Used
+    /// to populate INSERT/UPDATE buffers.  `dst.kind = SkBlob`.
+    | IMakeRecord(SsaValue, List<SsaValue>, Text)        // dst, values, affinity_str
+
+    /// Write record `record` with rowid `rowid` to cursor.
+    | ICursorInsert(Int, SsaValue, SsaValue, Int)        // cursor, record, rowid, flags
+
+    /// Delete current row from cursor.
+    | ICursorDelete(Int)                                 // cursor
+
+    /// Allocate a new rowid for cursor.  `dst.kind = SkRowId`.
+    | INewRowId(SsaValue, Int)                           // dst, cursor
+
+    // ---- Function call (SQL functions) -------------------------------------
+    | ICallFn(SsaValue, Text, List<SsaValue>)            // dst, fn_name, args
+
+    /// Aggregate step (no SSA value produced; mutates aggregator state).
+    | IAggStep(Text, List<SsaValue>, Int)                // fn_name, args, accumulator_id
+
+    /// Aggregate finalize.  Reads accumulator, produces final value.
+    | IAggFinal(SsaValue, Int)                           // dst, accumulator_id
+
+    // ---- Phi node (SSA-essential — placed at block entry) ------------------
+    /// `dst` receives one of `incoming` based on which `predecessor`
+    /// flowed into the block.  `incoming.len() == predecessors.len()`.
+    | IPhi(SsaValue, List<PhiOperand>)                   // dst, incoming
+
+    // ---- Result row emission (yields one row to the caller) ---------------
+    | IResultRow(List<SsaValue>)                         // values to emit
+
+    // ---- Transaction control -----------------------------------------------
+    | ITransactionBegin(Int)                             // mode (write-flag)
+    | ITransactionCommit
+    | ITransactionRollback(Int)                          // savepoint_id (-1 for full)
+
+    // ---- Control flow (terminators) ---------------------------------------
+    /// Conditional branch.  `cond.kind` MUST be `SkBool`.
+    | IBranch(SsaValue, BlockId, BlockId)                // cond, then_blk, else_blk
+
+    /// Unconditional jump.
+    | IJump(BlockId)
+
+    /// Halt program.  `code` is exit status (0 = SQLITE_OK), `msg`
+    /// optional error message.
+    | IHalt(Int, Text)
+
+    /// Return from sub-program (trigger body).
+    | IReturn(ValueId)                                   // return-address register
+
+    /// Yield to caller (used in step-by-step execution).
+    | IYield(BlockId);                                   // resume_block
+
+/// One incoming edge into a phi node.
+public type PhiOperand is {
+    pred: BlockId,
+    value: SsaValue,
+};
+
+// -----------------------------------------------------------------------------
+// Inst classification helpers
+// -----------------------------------------------------------------------------
+
+/// Returns `true` iff `inst` is a terminator (Branch / Jump / Halt /
+/// Return / Yield).  Used by block builder to validate insertions.
+public fn inst_is_terminator(inst: &SsaInst) -> Bool {
+    match inst {
+        IBranch(_, _, _) => true,
+        IJump(_)         => true,
+        IHalt(_, _)      => true,
+        IReturn(_)       => true,
+        IYield(_)        => true,
+        _                => false,
+    }
+}
+
+/// Successors of a terminator.  Empty for IHalt/IReturn (program
+/// exit).  Single for IJump/IYield.  Pair for IBranch.  Used by
+/// CFG builder.
+public fn inst_terminator_targets(inst: &SsaInst) -> List<BlockId> {
+    let mut out: List<BlockId> = List.new();
+    match inst {
+        IBranch(_, then_blk, else_blk) => {
+            out.push(then_blk);
+            // Avoid duplicate if both arms target the same block
+            // (canonical form after peephole opt).
+            if !block_id_eq(&then_blk, &else_blk) {
+                out.push(else_blk);
+            }
+        }
+        IJump(target)  => { out.push(target); }
+        IYield(target) => { out.push(target); }
+        IHalt(_, _)    => {}                // no successors
+        IReturn(_)     => {}
+        _              => {}                // non-terminators have no targets
+    }
+    out
+}
+
+/// Returns the destination SSA value of an instruction, or `None` if
+/// the instruction has no result (terminators, cursor ops, agg step).
+public fn inst_dst(inst: &SsaInst) -> Maybe<SsaValue> {
+    match inst {
+        IConst(d, _)            => Some(d.clone()),
+        INull(d)                => Some(d.clone()),
+        IIntImm(d, _)           => Some(d.clone()),
+        IAdd(d, _, _)           => Some(d.clone()),
+        ISub(d, _, _)           => Some(d.clone()),
+        IMul(d, _, _)           => Some(d.clone()),
+        IDiv(d, _, _)           => Some(d.clone()),
+        IRem(d, _, _)           => Some(d.clone()),
+        IBitAnd(d, _, _)        => Some(d.clone()),
+        IBitOr(d, _, _)         => Some(d.clone()),
+        IShiftLeft(d, _, _)     => Some(d.clone()),
+        IShiftRight(d, _, _)    => Some(d.clone()),
+        IBitNot(d, _)           => Some(d.clone()),
+        ICmp(d, _, _, _)        => Some(d.clone()),
+        ICast(d, _)             => Some(d.clone()),
+        IColumn(d, _, _)        => Some(d.clone()),
+        IRowId(d, _)            => Some(d.clone()),
+        IMakeRecord(d, _, _)    => Some(d.clone()),
+        INewRowId(d, _)         => Some(d.clone()),
+        ICallFn(d, _, _)        => Some(d.clone()),
+        IAggFinal(d, _)         => Some(d.clone()),
+        IPhi(d, _)              => Some(d.clone()),
+        // ---- no-result ----
+        ICursorOpen(_, _, _, _) => None,
+        ICursorClose(_)         => None,
+        ICursorRewind(_, _)     => None,
+        ICursorNext(_, _)       => None,
+        ICursorPrev(_, _)       => None,
+        ICursorLast(_, _)       => None,
+        ICursorInsert(_, _, _, _) => None,
+        ICursorDelete(_)        => None,
+        IAggStep(_, _, _)       => None,
+        IResultRow(_)           => None,
+        ITransactionBegin(_)    => None,
+        ITransactionCommit      => None,
+        ITransactionRollback(_) => None,
+        IBranch(_, _, _)        => None,
+        IJump(_)                => None,
+        IHalt(_, _)             => None,
+        IReturn(_)              => None,
+        IYield(_)               => None,
+    }
+}
+
+/// Operand SSA values read by an instruction.  Used by DCE +
+/// liveness analysis.  Phi operands are returned as-is.
+public fn inst_operands(inst: &SsaInst) -> List<SsaValue> {
+    let mut out: List<SsaValue> = List.new();
+    match inst {
+        IConst(_, _)             => {}
+        INull(_)                 => {}
+        IIntImm(_, _)            => {}
+        IAdd(_, a, b)            => { out.push(a.clone()); out.push(b.clone()); }
+        ISub(_, a, b)            => { out.push(a.clone()); out.push(b.clone()); }
+        IMul(_, a, b)            => { out.push(a.clone()); out.push(b.clone()); }
+        IDiv(_, a, b)            => { out.push(a.clone()); out.push(b.clone()); }
+        IRem(_, a, b)            => { out.push(a.clone()); out.push(b.clone()); }
+        IBitAnd(_, a, b)         => { out.push(a.clone()); out.push(b.clone()); }
+        IBitOr(_, a, b)          => { out.push(a.clone()); out.push(b.clone()); }
+        IShiftLeft(_, a, b)      => { out.push(a.clone()); out.push(b.clone()); }
+        IShiftRight(_, a, b)     => { out.push(a.clone()); out.push(b.clone()); }
+        IBitNot(_, s)            => { out.push(s.clone()); }
+        ICmp(_, _, a, b)         => { out.push(a.clone()); out.push(b.clone()); }
+        ICast(_, s)              => { out.push(s.clone()); }
+        IColumn(_, _, _)         => {}                     // operand is cursor (Int)
+        IRowId(_, _)             => {}
+        IMakeRecord(_, vs, _)    => {
+            let mut i: Int = 0;
+            while i < vs.len() {
+                out.push(vs[i].clone());
+                i = i + 1;
+            }
+        }
+        INewRowId(_, _)          => {}
+        ICallFn(_, _, args)      => {
+            let mut i: Int = 0;
+            while i < args.len() {
+                out.push(args[i].clone());
+                i = i + 1;
+            }
+        }
+        IAggFinal(_, _)          => {}
+        IPhi(_, ops)             => {
+            let mut i: Int = 0;
+            while i < ops.len() {
+                out.push(ops[i].value.clone());
+                i = i + 1;
+            }
+        }
+        ICursorInsert(_, rec, rowid, _) => {
+            out.push(rec.clone());
+            out.push(rowid.clone());
+        }
+        IAggStep(_, args, _)     => {
+            let mut i: Int = 0;
+            while i < args.len() {
+                out.push(args[i].clone());
+                i = i + 1;
+            }
+        }
+        IResultRow(vs)           => {
+            let mut i: Int = 0;
+            while i < vs.len() {
+                out.push(vs[i].clone());
+                i = i + 1;
+            }
+        }
+        IBranch(c, _, _)         => { out.push(c.clone()); }
+        // ---- no SSA operands ----
+        ICursorOpen(_, _, _, _)  => {}
+        ICursorClose(_)          => {}
+        ICursorRewind(_, _)      => {}
+        ICursorNext(_, _)        => {}
+        ICursorPrev(_, _)        => {}
+        ICursorLast(_, _)        => {}
+        ICursorDelete(_)         => {}
+        ITransactionBegin(_)     => {}
+        ITransactionCommit       => {}
+        ITransactionRollback(_)  => {}
+        IJump(_)                 => {}
+        IHalt(_, _)              => {}
+        IReturn(_)               => {}
+        IYield(_)                => {}
+    }
+    out
+}

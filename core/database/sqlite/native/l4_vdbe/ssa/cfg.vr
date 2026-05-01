@@ -1,0 +1,97 @@
+module core.database.sqlite.native.l4_vdbe.ssa.cfg;
+
+// =============================================================================
+// l4_vdbe/ssa/cfg.vr — Control-flow graph
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4
+//
+// Owns the basic-block array + entry-block id.  Predecessor lists on
+// blocks are populated by `compute_preds()` once construction is
+// complete.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{
+    BasicBlock, BlockId, block_id, block_id_raw, block_id_eq, block_new
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, inst_terminator_targets};
+
+// -----------------------------------------------------------------------------
+// Cfg
+// -----------------------------------------------------------------------------
+
+public type Cfg is {
+    blocks: List<BasicBlock>,
+    entry: BlockId,
+};
+
+/// Empty CFG with a single entry block.  The entry block has the
+/// placeholder terminator and no instructions.
+public fn cfg_new() -> Cfg {
+    let mut bs: List<BasicBlock> = List.new();
+    bs.push(block_new(block_id(0)));
+    Cfg { blocks: bs, entry: block_id(0) }
+}
+
+implement Cfg {
+    public fn block_count(&self) -> Int { self.blocks.len() }
+
+    /// Allocate a fresh block.  Returns its id.  The new block has
+    /// the placeholder terminator and must be patched before
+    /// `compute_preds()` is called.
+    public fn new_block(&mut self) -> BlockId {
+        let id = block_id(self.blocks.len());
+        self.blocks.push(block_new(id));
+        id
+    }
+
+    /// Borrow block by id.  Returns the placeholder/empty block on
+    /// out-of-bounds (matches the defensive convention used by the
+    /// register VM).
+    public fn get(&self, id: &BlockId) -> &BasicBlock {
+        let raw = block_id_raw(id);
+        if raw < 0 || raw >= self.blocks.len() {
+            &self.blocks[0]
+        } else {
+            &self.blocks[raw]
+        }
+    }
+
+    /// Mutable borrow for in-place block edits during construction.
+    public fn get_mut(&mut self, id: &BlockId) -> &mut BasicBlock {
+        let raw = block_id_raw(id);
+        // Defensive: caller must guarantee in-bounds; use 0 as fallback
+        // to avoid panic in malformed CFGs.
+        let idx = if raw < 0 || raw >= self.blocks.len() { 0 } else { raw };
+        &mut self.blocks[idx]
+    }
+
+    /// Compute and cache `predecessors` lists on every block.  Idempotent;
+    /// safe to re-run after CFG mutation (clears existing entries).
+    public fn compute_preds(&mut self) {
+        // Phase 1: clear existing pred lists
+        let mut i: Int = 0;
+        while i < self.blocks.len() {
+            self.blocks[i].predecessors = List.new();
+            i = i + 1;
+        }
+
+        // Phase 2: scan terminators and append pred edges
+        let mut from: Int = 0;
+        while from < self.blocks.len() {
+            let term_targets = inst_terminator_targets(&self.blocks[from].terminator);
+            let mut t: Int = 0;
+            while t < term_targets.len() {
+                let target_raw = block_id_raw(&term_targets[t]);
+                if target_raw >= 0 && target_raw < self.blocks.len() {
+                    self.blocks[target_raw].predecessors.push(block_id(from));
+                }
+                t = t + 1;
+            }
+            from = from + 1;
+        }
+    }
+}
