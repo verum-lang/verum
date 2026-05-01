@@ -138,11 +138,17 @@ public fn strcmp(a: Int, b: Int) -> Int {
 
 /// Load a single byte from memory address.
 @intrinsic("load_byte")
-fn __load_byte(addr: Int) -> Int { 0 }
+public fn load_byte(addr: Int) -> Int { 0 }
 
 /// Store a single byte to memory address.
 @intrinsic("store_byte")
-fn __store_byte(addr: Int, value: Int) -> Int { 0 }
+public fn store_byte(addr: Int, value: Int) -> Int { 0 }
+
+/// Backwards-compatible private aliases — internal call sites in this
+/// module (memcpy/memset/memcmp/strlen/strcmp fallbacks) keep using
+/// the underscore-prefixed name.
+fn __load_byte(addr: Int) -> Int { load_byte(addr) }
+fn __store_byte(addr: Int, value: Int) -> Int { store_byte(addr, value) }
 
 /// Load an i64 from memory address.
 @intrinsic("load_i64")
