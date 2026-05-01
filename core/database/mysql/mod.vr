@@ -20,6 +20,7 @@
 
 module core.database.mysql;
 
+public module mysql_stream;
 public module wire;
 public module auth;
 public module error;
@@ -34,8 +35,10 @@ public module introspect;
 public module transaction;
 
 public mount .config.{
-    MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
+    MysqlConfig, MysqlTlsMode,
+    MtmDisable, MtmPreferred, MtmRequired, MtmVerifyCa, MtmVerifyIdentity,
 };
+public mount .mysql_stream.{MysqlStream, MsPlain, MsTls};
 public mount .connection.{
     MysqlConnection, MysqlConnState, MySimpleQueryResult,
     MysqlTextValue, MtvNull, MtvBytes,

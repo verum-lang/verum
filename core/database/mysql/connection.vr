@@ -38,14 +38,19 @@ mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.net.tcp.TcpStream;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
-mount core.database.mysql.config.{MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired};
+mount core.database.mysql.config.{
+    MysqlConfig, MysqlTlsMode,
+    MtmDisable, MtmPreferred, MtmRequired, MtmVerifyCa, MtmVerifyIdentity,
+};
+mount core.database.mysql.mysql_stream.{MysqlStream, MsPlain, MsTls, upgrade_to_tls};
+mount core.net.tls.TlsConfig;
 mount core.database.mysql.error.dberr_from_mysql;
 mount core.database.mysql.wire.frame.{
     MysqlPacket, FrameParseOutcome, frame_packet, try_parse_packet,
     decode_lei, read_lenenc_string, read_bytes,
 };
 mount core.database.mysql.wire.frontend.{
-    handshake_response, com_query, com_ping, com_quit,
+    handshake_response, ssl_request, com_query, com_ping, com_quit,
     default_plugin_name,
     com_stmt_prepare, com_stmt_execute, com_stmt_close, com_stmt_reset,
     StmtParam, SpNull, SpTinyInt, SpShort, SpLong, SpLongLong,
@@ -62,6 +67,7 @@ mount core.database.mysql.wire.backend.{
 };
 mount core.database.mysql.wire.types.{
     PKT_OK, PKT_EOF, PKT_ERROR, CAP_PROTOCOL_41, CAP_DEPRECATE_EOF,
+    CAP_SSL, SPINDLE_CLIENT_FLAGS,
     plugin_caching_sha2_password,
 };
 mount core.database.mysql.auth.caching_sha2.{
@@ -146,7 +152,12 @@ public type MysqlPreparedResult is {
 // -----------------------------------------------------------------------------
 
 public type MysqlConnection is {
-    stream: TcpStream,
+    /// Unified TCP / TLS transport. `MsPlain(TcpStream)` for
+    /// plaintext sessions; `MsTls(TlsStream)` after a successful
+    /// CLIENT_SSL handshake. All wire I/O routes through
+    /// `stream.read` / `stream.write` so the encryption layer
+    /// stays transparent to the protocol code. Spec §6.3.
+    stream: MysqlStream,
     state: MysqlConnState,
     sequence: Int,
     recv: List<Byte>,
@@ -160,20 +171,8 @@ public type MysqlConnection is {
 // -----------------------------------------------------------------------------
 
 public fn connect(config: &MysqlConfig) -> Result<MysqlConnection, DbError> {
-    match config.tls_mode {
-        MtmDisable => {}
-        MtmRequired => {
-            return Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "TLS_PENDING".clone(),
-                message: "MtmRequired pending core.net.tls integration".clone(),
-                retryable: false,
-            }));
-        }
-    }
-
     let target = format_host_port(&config.host, config.port);
-    let stream = match TcpStream.connect(target.as_str()) {
+    let tcp = match TcpStream.connect(target.as_str()) {
         Ok(s)  => s,
         Err(_) => {
             return Err(DbError.ConnectionFailed {
@@ -183,8 +182,13 @@ public fn connect(config: &MysqlConfig) -> Result<MysqlConnection, DbError> {
         }
     };
 
+    // MySQL TLS upgrade is mid-handshake (after Initial Handshake,
+    // before HandshakeResponse41), unlike PG's pre-startup
+    // SSLRequest. The plaintext stream wrap is provisional — the
+    // handshake driver may upgrade in-place via
+    // `upgrade_stream_tls`.
     let mut conn = MysqlConnection {
-        stream: stream,
+        stream: MsPlain(tcp),
         state: McsConnecting,
         sequence: 0,
         recv: List.new(),
@@ -718,6 +722,18 @@ fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(
         });
     }
 
+    // Step 2.5 — TLS upgrade (spec §6.3, §8.13.1). MySQL TLS is
+    // mid-handshake, after Initial Handshake but BEFORE
+    // HandshakeResponse41.
+    //
+    //   1. Client sends SSL-only mini HandshakeResponse (32 bytes,
+    //      capabilities including CAP_SSL bit set, no
+    //      user/password/db).
+    //   2. Both sides drive TLS handshake on the same TCP socket.
+    //   3. Client sends FULL HandshakeResponse41 over the now-
+    //      encrypted channel.
+    drive_tls_upgrade(conn, config, hs.capabilities)?;
+
     // Step 3 — build HandshakeResponse41.
     let scramble = scramble_caching_sha2(
         config.password.as_bytes(),
@@ -840,20 +856,18 @@ fn drive_full_auth(
     config: &MysqlConfig,
     nonce: &[Byte],
 ) -> Result<(), DbError> {
-    // TLS-active fast path — cleartext over the protected
-    // channel. MtmRequired returns TLS_PENDING in `connect`
-    // today, so this branch fires only when the TLS integration
-    // lands; the structure is wired ahead of time so the
-    // follow-up is a config-only change.
-    match config.tls_mode {
-        MtmRequired => {
-            let payload = make_cleartext_password(config.password.as_bytes());
-            // The auth packet sits in the same sequence stream as
-            // the AuthMoreData we just consumed.
-            send_packet(conn, payload.as_slice())?;
-            return Ok(());
-        }
-        MtmDisable => {}
+    // TLS-active fast path — cleartext password over the
+    // protected channel. We dispatch on actual stream state
+    // (`is_tls()`) rather than config.tls_mode because
+    // MtmPreferred can fall back to plaintext when the server
+    // lacks CAP_SSL — in that case we MUST take the RSA-OAEP
+    // path even though the user asked for "preferred".
+    if conn.stream.is_tls() {
+        let payload = make_cleartext_password(config.password.as_bytes());
+        // The auth packet sits in the same sequence stream as
+        // the AuthMoreData we just consumed.
+        send_packet(conn, payload.as_slice())?;
+        return Ok(());
     }
 
     // Plain-TCP path — RSA-OAEP exchange.
@@ -1020,7 +1034,7 @@ fn recv_packet(conn: &mut MysqlConnection) -> Result<MysqlPacket, DbError> {
     }
 }
 
-fn write_all(stream: &mut TcpStream, buf: &[Byte]) -> Result<(), DbError> {
+fn write_all(stream: &mut MysqlStream, buf: &[Byte]) -> Result<(), DbError> {
     let mut written: Int = 0;
     while written < buf.len() as Int {
         let chunk = sub_slice(buf, written, buf.len() as Int);
@@ -1101,4 +1115,163 @@ fn bad_decode(label: &str) -> DbError {
         message: f"protocol decode failed: {label}",
         retryable: false,
     })
+}
+
+// =============================================================================
+// TLS upgrade — CLIENT_SSL mid-handshake flow (spec §6.3, §8.13.1)
+// =============================================================================
+
+/// Drive the CLIENT_SSL handshake:
+///   1. If `tls_mode == MtmDisable` → no-op.
+///   2. Server lacks CAP_SSL → fall back per
+///      `permits_plaintext_fallback`.
+///   3. Send the SSL-only mini HandshakeResponse (32 bytes,
+///      capabilities including CAP_SSL bit).
+///   4. Replace `conn.stream` with `MsTls(...)` via
+///      `upgrade_to_tls(tcp, server_name, &tls_config)`.
+///   5. Subsequent reads/writes go through TLS encrypt/decrypt;
+///      the full HandshakeResponse41 (sent by the caller) rides
+///      the encrypted channel.
+fn drive_tls_upgrade(
+    conn: &mut MysqlConnection,
+    config: &MysqlConfig,
+    server_caps: Int,
+) -> Result<(), DbError> {
+    match config.tls_mode {
+        MtmDisable => return Ok(()),
+        _ => {}
+    }
+    let server_supports_ssl = (server_caps & CAP_SSL) != 0;
+    if !server_supports_ssl {
+        if config.tls_mode.permits_plaintext_fallback() {
+            return Ok(());
+        }
+        return Err(DbError.Adapter(AdapterSpecific {
+            adapter: AdMysql,
+            code: "TLS_REJECTED_BY_SERVER".clone(),
+            message: f"server lacks CAP_SSL (mode {config.tls_mode.name()} requires encryption)",
+            retryable: false,
+        }));
+    }
+
+    // Step 3 — send SSL-only HandshakeResponse (sequence number
+    // continues from server's seq=0 Initial Handshake; ours is 1).
+    let cap_with_ssl = SPINDLE_CLIENT_FLAGS | CAP_SSL;
+    let payload = ssl_request(cap_with_ssl, config.character_set, 16_777_216);
+    conn.sequence = 1;
+    send_packet(conn, payload.as_slice())?;
+
+    // Step 4 — extract the underlying TCP, drive TLS, swap back in.
+    // We do this via a take-replace dance because Verum doesn't
+    // let us move out of `&mut self`'s field directly. The
+    // `swap-with-dummy` pattern is safe because the dummy is
+    // immediately overwritten before any wire op.
+    //
+    // The semantics: `conn.stream` is currently `MsPlain(tcp)`.
+    // We extract the `tcp`, drive TLS over it, get back
+    // `MsTls(tls)`, and put that into `conn.stream`.
+    let tls_config = build_tls_config(config);
+    let upgraded = match &mut conn.stream {
+        MsPlain(_) => {
+            // Move the TcpStream out via std::mem::replace-style
+            // pattern. We synthesise a placeholder TcpStream from
+            // a sentinel fd so the type-checker is happy; that
+            // placeholder is dropped immediately after the swap.
+            // For correctness we use the take-and-replace via a
+            // helper that swaps the variant.
+            swap_to_tls(conn, &config.host, &tls_config)?
+        }
+        MsTls(_) => {
+            // Already TLS — protocol violation if `drive_tls_upgrade`
+            // was somehow called twice on the same connection.
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "TLS_DOUBLE_UPGRADE".clone(),
+                message: "drive_tls_upgrade called on an already-TLS connection".clone(),
+                retryable: false,
+            }));
+        }
+    };
+    let _ = upgraded;
+    Ok(())
+}
+
+/// Take the `MsPlain(tcp)` stream out of `conn`, drive TLS, and
+/// place the resulting `MsTls(tls)` back. Helper isolates the
+/// take-replace dance from `drive_tls_upgrade` so the borrow
+/// pattern stays clear.
+fn swap_to_tls(
+    conn: &mut MysqlConnection,
+    server_name: &Text,
+    tls_config: &TlsConfig,
+) -> Result<(), DbError> {
+    // Use mem::replace via a synthetic placeholder. We rely on
+    // `MsPlain(...)` carrying ONLY the TcpStream (no extra fields
+    // to preserve), so the take-and-replace is the natural
+    // shape.
+    //
+    // Verum doesn't expose mem::replace as such; we approximate
+    // by pattern-matching, cloning the TCP fd via try_clone, and
+    // letting the original drop on the swap. For TLS this is
+    // semantically clean because the underlying TCP socket lives
+    // inside the resulting TlsStream.inner anyway.
+    let tcp_clone = match &conn.stream {
+        MsPlain(t) => match t.try_clone() {
+            Ok(c)  => c,
+            Err(_) => {
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdMysql,
+                    code: "TLS_HANDSHAKE_FAILED".clone(),
+                    message: "TcpStream.try_clone failed before TLS handshake".clone(),
+                    retryable: false,
+                }));
+            }
+        },
+        MsTls(_) => {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "TLS_DOUBLE_UPGRADE".clone(),
+                message: "swap_to_tls on TLS already".clone(),
+                retryable: false,
+            }));
+        }
+    };
+    match upgrade_to_tls(tcp_clone, server_name, tls_config) {
+        Ok(s)  => {
+            conn.stream = s;
+            Ok(())
+        }
+        Err(e) => Err(DbError.Adapter(AdapterSpecific {
+            adapter: AdMysql,
+            code: "TLS_HANDSHAKE_FAILED".clone(),
+            message: f"TLS handshake failed: {e}",
+            retryable: false,
+        })),
+    }
+}
+
+/// Convert MysqlConfig.tls_mode to TlsConfig per spec §8.13.1:
+///   MtmRequired      → CertVerifyMode.None
+///   MtmVerifyCa      → CertVerifyMode.Full + system certs
+///   MtmVerifyIdentity→ CertVerifyMode.Full + system certs +
+///                       hostname match (handled by intrinsic).
+fn build_tls_config(config: &MysqlConfig) -> TlsConfig {
+    let base = TlsConfig.client();
+    match config.tls_mode {
+        MtmPreferred | MtmRequired => {
+            TlsConfig {
+                verify_mode: core.net.tls.CertVerifyMode.None,
+                use_system_certs: false,
+                .. base
+            }
+        }
+        MtmVerifyCa | MtmVerifyIdentity => {
+            TlsConfig {
+                verify_mode: core.net.tls.CertVerifyMode.Full,
+                use_system_certs: true,
+                .. base
+            }
+        }
+        _ => base,
+    }
 }

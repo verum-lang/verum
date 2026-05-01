@@ -61,6 +61,37 @@ public fn handshake_response(
     out
 }
 
+/// SSL-only mini HandshakeResponse — sent BEFORE the full
+/// HandshakeResponse41 to negotiate TLS upgrade. Layout per MySQL
+/// docs:
+///
+///   u32 capability_flags (with CAP_SSL bit set)
+///   u32 max_packet
+///   u8  character_set
+///   bytes[23]  reserved (zero)
+///
+/// Total: 32 bytes. After the server reads this and sees CAP_SSL,
+/// it expects the next bytes on the same TCP socket to be the
+/// TLS ClientHello. The client drives the TLS handshake; once
+/// established, the FULL HandshakeResponse41 is sent over TLS.
+///
+/// Sequence number on the wire: same packet sequence as the
+/// initial handshake reply (typically seq=1, immediately after
+/// the server's seq=0 Initial Handshake).
+public fn ssl_request(
+    capability_flags: Int,
+    character_set: Int,
+    max_packet: Int,
+) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(32);
+    put_u32_le(&mut out, capability_flags);
+    put_u32_le(&mut out, max_packet);
+    put_u8(&mut out, character_set);
+    let mut i = 0;
+    while i < 23 { out.push(0 as Byte); i = i + 1; }
+    out
+}
+
 // -----------------------------------------------------------------------------
 // COM_QUERY — single SQL string, text-mode result-set.
 // -----------------------------------------------------------------------------
