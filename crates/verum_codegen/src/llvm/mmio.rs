@@ -329,8 +329,10 @@ impl<'ctx> MmioLowering<'ctx> {
     /// memory_barrier();
     /// ```
     pub fn memory_barrier(&mut self, ordering: VolatileOrdering) -> Result<()> {
+        // Name MUST be empty: fence returns void; LLVM rejects named
+        // void-result instructions.
         self.builder
-            .build_fence(ordering.to_llvm(), false, "fence")
+            .build_fence(ordering.to_llvm(), false, "")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
         // Track statistics

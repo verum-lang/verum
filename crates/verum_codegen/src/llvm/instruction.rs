@@ -3270,11 +3270,15 @@ pub fn lower_instruction<'ctx>(
 
             for (i, reg) in futures.iter().enumerate() {
                 let val = ctx.get_register(reg.0)?;
-                // SAFETY: GEP into the stack-allocated channel array at index i; the array was sized for exactly futures.len() elements
+                // GEP into a `[N x i64]` array: element type must be the
+                // ARRAY type (not the i64 element type) when using two
+                // indices.  Pre-fix used `i64_type` + `[0, i]` which is
+                // malformed — the second index has no aggregate to walk.
+                // SAFETY: array sized for exactly futures.len() elements.
                 let elem_ptr = unsafe {
                     ctx.builder()
                         .build_in_bounds_gep(
-                            i64_type,
+                            arr_type,
                             arr_alloca,
                             &[
                                 i64_type.const_int(0, false),
@@ -24846,7 +24850,7 @@ fn lower_atomic_fence<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ordering: u8) -
                 let _ = ctx.builder().build_fence(
                     AtomicOrdering::Monotonic,
                     true, // single_thread = true (thread-local hint, not a real fence)
-                    "spin_hint",
+                    "",   // fence is void — must be unnamed
                 );
                 let _ = ctx.builder().build_return(None);
                 if let Some(block) = saved_block {
@@ -24867,9 +24871,12 @@ fn lower_atomic_fence<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ordering: u8) -
 
     let llvm_ordering = vbc_to_llvm_ordering(ordering);
 
-    // Build fence instruction (is_single_thread = false for cross-thread synchronization)
+    // Build fence instruction (is_single_thread = false for cross-thread
+    // synchronization).  Name MUST be empty: fence returns void and
+    // LLVM rejects named void-result instructions ("instructions
+    // returning void cannot have a name").
     ctx.builder()
-        .build_fence(llvm_ordering, false, "fence")
+        .build_fence(llvm_ordering, false, "")
         .map_err(|e| LlvmLoweringError::internal(format!("Failed to build fence: {}", e)))?;
 
     Ok(())
