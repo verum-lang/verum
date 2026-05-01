@@ -284,6 +284,84 @@ implement<F: Future> TaskState<F> {
 }
 
 // =============================================================================
+// WorkerPool — Phase 1 of #271 (multi-threaded async scheduler)
+// =============================================================================
+//
+// Foundation data structure for the multi-threaded async scheduler.
+// Phase 1A (THIS commit): type definition + AsyncRuntime field +
+//                         `worker_pool_size()` accessor.  No threads
+//                         are actually spawned yet; `num_workers`
+//                         remains 0 even when the manifest configures
+//                         a non-zero `async_worker_threads`.
+// Phase 1B (followup):    `start_worker_pool()` actually spawns N
+//                         workers via `core.runtime.thread.Thread.spawn`,
+//                         workers loop on `process_ready_tasks` +
+//                         park via Condvar.
+// Phase 2:                Per-worker local deques + work-stealing
+//                         (see #278).
+//
+// Architecture: docs/architecture/multi-threaded-async-scheduler.md
+//
+// Zero-overhead default contract: when `async_worker_threads = 0`
+// (the manifest default) `worker_pool_size()` returns 0 and no
+// concurrent state is touched.  Programs see bit-identical
+// behaviour to today's single-threaded loop.
+
+/// Multi-threaded worker-pool data structure.  Phase 1A foundation —
+/// holds the configured worker count + lifecycle flag without yet
+/// spawning real threads.
+public type WorkerPool is {
+    /// Number of workers configured for this pool (resolved from
+    /// manifest `async_worker_threads`, or `num_cpus()-1` when the
+    /// manifest sets 0 with explicit auto-detect intent).  Phase 1A:
+    /// always 0 because no threads are spawned yet.
+    num_workers: Int,
+    /// True once `start_worker_pool` has actually spawned the
+    /// `num_workers` worker threads and they're polling the
+    /// `task_queue` / `ready_queue`.  Phase 1A: always false.
+    is_running: AtomicBool,
+    /// Shutdown signal — set by `AsyncRuntime.shutdown()` to
+    /// terminate workers.  Phase 1A: present but unused (no
+    /// workers exist to observe it).
+    shutdown_flag: AtomicBool,
+    /// Diagnostic counter — number of times a worker called
+    /// `park_worker()` because its queue was empty.  Phase 1A: 0.
+    parked_count: AtomicInt,
+};
+
+implement WorkerPool {
+    /// Construct an empty pool with the given configured worker
+    /// count.  Phase 1A: stores the count but does not spawn
+    /// anything; future Phase 1B will spawn `num` workers when
+    /// `start()` is called.
+    public fn empty(num: Int) -> WorkerPool {
+        WorkerPool {
+            num_workers: num,
+            is_running: AtomicBool.new(false),
+            shutdown_flag: AtomicBool.new(false),
+            parked_count: AtomicInt.new(0),
+        }
+    }
+
+    /// Read the configured worker count.
+    public fn size(&self) -> Int {
+        self.num_workers
+    }
+
+    /// Read the shutdown flag (workers' poll-loop exit gate).
+    public fn shutdown_requested(&self) -> Bool {
+        self.shutdown_flag.load(MemoryOrdering.Acquire)
+    }
+
+    /// Signal workers to terminate.  Phase 1A: no workers exist;
+    /// the call is a no-op (idempotent).  Phase 1B will pair this
+    /// with `park_cv.notify_all()` to wake parked workers.
+    public fn request_shutdown(&self) {
+        self.shutdown_flag.store(true, MemoryOrdering.Release);
+    }
+}
+
+// =============================================================================
 // AsyncRuntime
 // =============================================================================
 
@@ -344,6 +422,15 @@ public type AsyncRuntime is {
     total_polls: AtomicInt,
     /// Total number of tasks that completed
     total_completions: AtomicInt,
+    /// Multi-threaded worker pool foundation (#271 Phase 1A).
+    /// `Maybe.None` when `async_worker_threads = 0` (the default —
+    /// zero-overhead single-threaded behaviour).  `Maybe.Some(...)`
+    /// when the manifest configures a non-zero count; the pool is
+    /// constructed but no threads are spawned yet (Phase 1B will
+    /// add `start_worker_pool` that actually spawns the workers).
+    /// Held behind `Mutex` because `start_worker_pool` and
+    /// `shutdown` need exclusive access during transition.
+    worker_pool: Mutex<Maybe<WorkerPool>>,
 };
 
 /// A pending timer registration.
@@ -396,6 +483,25 @@ implement AsyncRuntime {
             tick_count: AtomicInt.new(0),
             total_polls: AtomicInt.new(0),
             total_completions: AtomicInt.new(0),
+            // Phase 1A foundation (#271): worker pool is `Maybe.None`
+            // until `start_worker_pool` is called.  Default
+            // `async_worker_threads = 0` keeps it None forever —
+            // zero-overhead single-threaded path is bit-identical
+            // to pre-#271 behaviour.
+            worker_pool: Mutex.new(Maybe.None),
+        }
+    }
+
+    /// Read the current worker-pool size — 0 when no pool is
+    /// configured (the default), else the configured worker count.
+    /// Phase 1A: always 0 because `start_worker_pool` is not yet
+    /// implemented.  Surfacing the accessor now lets diagnostic
+    /// callers verify the manifest setting reaches the runtime
+    /// without depending on Phase 1B's actual spawn logic.
+    public fn worker_pool_size(&self) -> Int {
+        match *self.worker_pool.lock() {
+            Maybe.Some(ref pool) => pool.size(),
+            Maybe.None => 0,
         }
     }
 
