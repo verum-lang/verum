@@ -1,0 +1,12 @@
+{
+  "term": { "Universe": 0 },
+  "claimed_type": { "Universe": 0 },
+  "metadata": {
+    "name": "reject_universe_self_type",
+    "description": "Universe(0) claimed at type Universe(0). MUST REJECT — Universe(n) : Universe(n+1) by T-Univ. Self-reference would collapse the universe hierarchy (Type-in-Type) and admit Russell's paradox.",
+    "source": "core/verify/proof_term_examples/adversarial/",
+    "expected_outcome": "reject",
+    "adversarial_class": "universe_mismatch",
+    "kernel_rule_violated": "T-Univ"
+  }
+}

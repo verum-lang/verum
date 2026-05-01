@@ -1,0 +1,12 @@
+{
+  "term": { "App": [{ "Universe": 0 }, { "Universe": 0 }] },
+  "claimed_type": { "Universe": 0 },
+  "metadata": {
+    "name": "reject_application_of_universe",
+    "description": "App(Universe(0), Universe(0)) — applying a type to a type. MUST REJECT — T-App-Elim requires the applicand to be a Π-type, not a universe. Universes are not functions; this is the canonical 'NotAFunction' rejection path.",
+    "source": "core/verify/proof_term_examples/adversarial/",
+    "expected_outcome": "reject",
+    "adversarial_class": "non_fn_app",
+    "kernel_rule_violated": "T-App-Elim"
+  }
+}

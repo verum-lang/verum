@@ -1,0 +1,12 @@
+{
+  "term": { "Lam": [{ "Universe": 0 }, { "Var": 0 }] },
+  "claimed_type": { "Universe": 0 },
+  "metadata": {
+    "name": "reject_claimed_type_universe_mismatch",
+    "description": "λ(x:Universe(0)). x claimed at type Universe(0). MUST REJECT — λ-bodies are NOT universes; the claimed type must be a Π. Confusing 'a type whose value is a function' with 'a function value' is a foundational confusion T-Lam-Intro catches.",
+    "source": "core/verify/proof_term_examples/adversarial/",
+    "expected_outcome": "reject",
+    "adversarial_class": "wrong_claimed_type",
+    "kernel_rule_violated": "T-Lam-Intro / T-Conv"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "term": { "Pi": [{ "Var": 0 }, { "Universe": 0 }] },
+  "claimed_type": { "Universe": 1 },
+  "metadata": {
+    "name": "reject_pi_domain_not_a_type",
+    "description": "Π(Var(0), Universe(0)) — Pi whose domain is a free variable (not a well-typed type expression). MUST REJECT — T-Pi-Form requires both domain and body to be types (i.e., have type Universe(n) for some n). A free variable as the domain is malformed at the empty context.",
+    "source": "core/verify/proof_term_examples/adversarial/",
+    "expected_outcome": "reject",
+    "adversarial_class": "pi_domain_not_type",
+    "kernel_rule_violated": "T-Pi-Form"
+  }
+}
