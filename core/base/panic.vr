@@ -72,9 +72,9 @@ fn panic_impl(msg: Text, file: Text, line: Int, column: Int) -> ! {
     exit_process(101)
 }
 
-/// Write a string to stderr using platform-specific syscalls.
-@intrinsic("verum.io.write_stderr")
-fn write_stderr(s: &Text);
+/// Write a string to stderr — centralised in
+/// `core/intrinsics/runtime/os.vr` (#65 Phase 1.5).
+mount core.intrinsics.runtime.os.{write_stderr};
 
 /// Write an integer to stderr.
 ///
@@ -119,9 +119,9 @@ fn write_int_stderr(n: Int) {
     write_stderr(&digit_str);
 }
 
-/// Exit the process with a status code.
-@intrinsic("verum.process.exit")
-fn exit_process(code: Int) -> !;
+/// Exit the process — centralised in
+/// `core/intrinsics/runtime/os.vr` (#65 Phase 1.5).
+mount core.intrinsics.runtime.os.{exit_process};
 
 /// Panic with a formatted message.
 public fn panic_fmt(args: FormatArgs) -> ! {

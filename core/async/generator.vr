@@ -510,14 +510,12 @@ implement<T: Clone, F: fn(&T) -> T> Iterator for SuccessorGenerator<T, F> {
 // verum_gen_* functions in verum_runtime.c. They operate on opaque
 // generator handles (i64 pointers).
 
-@intrinsic("gen_next")
-fn __gen_next_raw(handle: Int) -> Int;
-
-@intrinsic("gen_has_next")
-fn __gen_has_next_raw(handle: Int) -> Int;
-
-@intrinsic("gen_close")
-fn __gen_close_raw(handle: Int) -> ();
+// Generator intrinsics — centralised in core/intrinsics/runtime/
+// (#65 Phase 1.5).  `gen_next` and `gen_has_next` live in `async_ops.vr`
+// (async-runtime concern); `gen_close` in `os.vr` (kernel coroutine
+// teardown).
+mount core.intrinsics.runtime.async_ops.{__gen_next_raw, __gen_has_next_raw};
+mount core.intrinsics.runtime.os.{__gen_close_raw};
 
 // =============================================================================
 // Tests

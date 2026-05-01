@@ -55,3 +55,18 @@ public mount text.*;
 
 /// VBC tier management
 public mount tier.*;
+
+/// OS kernel-boundary intrinsics — file I/O, networking, time, raw
+/// allocation, process spawn, context system, defer, args, concurrency
+/// primitives.  Migrated from `core/sys/raw.vr` (#61 Phase 1.1).
+public mount os.*;
+
+/// I/O engine + socket-option + async I/O intrinsics — kqueue/epoll/IOCP
+/// readiness multiplexer, setsockopt helpers, async_accept/read/write.
+/// Migrated from `core/io/engine.vr` (#63 Phase 1.3).
+public mount io.*;
+
+/// Raw memory operations — `Int`-pointer API for memcpy/memmove/memset/
+/// memcmp/strlen/strcmp + scalar load/store (i32/i64/byte).  Migrated
+/// from `core/mem/raw_ops.vr` (#64 Phase 1.4).
+public mount mem_raw.*;

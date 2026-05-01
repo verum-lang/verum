@@ -3730,16 +3730,21 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing param 1")?
             .into_int_value();
 
-        // O_RDONLY=0, O_WRONLY=1, O_CREAT=0x200(mac)/0x40(linux), O_TRUNC=0x400(mac)/0x200(linux), O_APPEND=0x8(mac)/0x400(linux)
-        #[cfg(target_os = "macos")]
+        // O_RDONLY=0, O_WRONLY=1, O_CREAT=0x200(mac)/0x40(linux),
+        // O_TRUNC=0x400(mac)/0x200(linux), O_APPEND=0x8(mac)/0x400(linux).
+        //
+        // **Target-aware** (#70): bake flags per the LLVM module's
+        // target triple, NOT the host `#[cfg(target_os)]`.  Cross-
+        // compile from x86_64-darwin to arm64-linux MUST emit
+        // Linux flag values into the IR.
         let (o_rdonly, o_wronly_creat_trunc, o_wronly_creat_append) =
-            (0i64, 0x0001 | 0x0200 | 0x0400, 0x0001 | 0x0200 | 0x0008);
-        #[cfg(target_os = "linux")]
-        let (o_rdonly, o_wronly_creat_trunc, o_wronly_creat_append) =
-            (0i64, 0x0001 | 0x0040 | 0x0200, 0x0001 | 0x0040 | 0x0400);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let (o_rdonly, o_wronly_creat_trunc, o_wronly_creat_append) =
-            (0i64, 0x0001 | 0x0200 | 0x0400, 0x0001 | 0x0200 | 0x0008);
+            if super::target_triple::target_is_linux(module) {
+                (0i64, 0x0001 | 0x0040 | 0x0200, 0x0001 | 0x0040 | 0x0400)
+            } else {
+                // macOS / BSD-derived (default for unknown — closer
+                // to historical behaviour for the unspecified case)
+                (0i64, 0x0001 | 0x0200 | 0x0400, 0x0001 | 0x0200 | 0x0008)
+            };
 
         // Allocate flags alloca for phi-like pattern
         let flags_alloca = builder.build_alloca(i32_type, "flags").or_llvm_err()?;
@@ -4519,13 +4524,13 @@ impl<'ctx> PlatformIR<'ctx> {
         let write_fn = module.get_function("write").or_missing_fn("write")?;
         let close_fn = module.get_function("close").or_missing_fn("close")?;
 
-        // O_WRONLY|O_CREAT|O_TRUNC
-        #[cfg(target_os = "macos")]
-        let open_flags: u64 = 0x0001 | 0x0200 | 0x0400;
-        #[cfg(target_os = "linux")]
-        let open_flags: u64 = 0x0001 | 0x0040 | 0x0200;
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let open_flags: u64 = 0x0001 | 0x0200 | 0x0400;
+        // O_WRONLY|O_CREAT|O_TRUNC — target-aware per #70.
+        let open_flags: u64 = if super::target_triple::target_is_linux(module) {
+            0x0001 | 0x0040 | 0x0200
+        } else {
+            // macOS / BSD-derived defaults
+            0x0001 | 0x0200 | 0x0400
+        };
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
@@ -4637,13 +4642,13 @@ impl<'ctx> PlatformIR<'ctx> {
         let write_fn = module.get_function("write").or_missing_fn("write")?;
         let close_fn = module.get_function("close").or_missing_fn("close")?;
 
-        // O_WRONLY|O_CREAT|O_APPEND
-        #[cfg(target_os = "macos")]
-        let open_flags: u64 = 0x0001 | 0x0200 | 0x0008;
-        #[cfg(target_os = "linux")]
-        let open_flags: u64 = 0x0001 | 0x0040 | 0x0400;
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let open_flags: u64 = 0x0001 | 0x0200 | 0x0008;
+        // O_WRONLY|O_CREAT|O_APPEND — target-aware per #70.
+        let open_flags: u64 = if super::target_triple::target_is_linux(module) {
+            0x0001 | 0x0040 | 0x0400
+        } else {
+            // macOS / BSD-derived defaults
+            0x0001 | 0x0200 | 0x0008
+        };
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
@@ -5069,8 +5074,11 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Helper: build sockaddr_in struct on stack.
     /// Layout: { i16 sin_family, u16 sin_port, u32 sin_addr, [8 x i8] padding } = 16 bytes
+    /// `module` parameter required for target-aware Darwin-vs-Linux
+    /// sockaddr_in layout dispatch (#70).
     fn build_sockaddr_in(
         &self,
+        module: &Module<'ctx>,
         builder: &verum_llvm::builder::Builder<'ctx>,
         family: verum_llvm::values::IntValue<'ctx>,
         port_be: verum_llvm::values::IntValue<'ctx>,
@@ -5091,9 +5099,11 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_store(buf, buf_type.const_zero())
             .or_llvm_err()?;
 
-        #[cfg(target_os = "macos")]
-        {
-            // macOS: byte 0 = sizeof(sockaddr_in) = 16, byte 1 = AF_INET = 2
+        // Target-aware sockaddr_in layout (#70): macOS/BSD lay out
+        // `sin_len: u8` at byte 0 and `sin_family: u8` at byte 1 (BSD
+        // heritage); Linux/Windows use `sin_family: u16` at bytes 0-1.
+        if super::target_triple::target_is_darwin(module) {
+            // macOS: byte 0 = sizeof(sockaddr_in) = 16, byte 1 = AF_INET
             // SAFETY: GEP into the stack-allocated 16-byte sockaddr_in buffer at byte 0 (sin_len field)
             let len_ptr = unsafe {
                 builder
@@ -5113,9 +5123,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 .build_int_truncate(family, i8_type, "fam8")
                 .or_llvm_err()?;
             builder.build_store(fam_ptr, fam8).or_llvm_err()?;
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
+        } else {
             // Linux: bytes 0-1 = sin_family (u16 LE)
             // SAFETY: GEP into the stack-allocated 16-byte sockaddr_in buffer at byte 0 (sin_family as u16)
             let fam_ptr = unsafe {
@@ -5255,6 +5263,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let port_be = self.build_htons(&builder, port)?;
         let localhost_addr = i32_type.const_int(0x0100007f, false); // 127.0.0.1 in network byte order
         let saddr = self.build_sockaddr_in(
+            module,
             &builder,
             i32_type.const_int(2, false),
             port_be,
@@ -5376,13 +5385,14 @@ impl<'ctx> PlatformIR<'ctx> {
         let setsockopt_fn = module
             .get_function("setsockopt")
             .or_missing_fn("setsockopt")?;
-        // SOL_SOCKET=0xFFFF(macOS)/1(Linux), SO_REUSEADDR=0x0004(macOS)/2(Linux)
-        #[cfg(target_os = "macos")]
-        let (sol_socket, so_reuseaddr) = (0xFFFFu64, 0x0004u64);
-        #[cfg(target_os = "linux")]
-        let (sol_socket, so_reuseaddr) = (1u64, 2u64);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let (sol_socket, so_reuseaddr) = (0xFFFFu64, 0x0004u64);
+        // SOL_SOCKET=0xFFFF(macOS)/1(Linux), SO_REUSEADDR=0x0004(macOS)/2(Linux).
+        // Target-aware per #70.
+        let (sol_socket, so_reuseaddr): (u64, u64) =
+            if super::target_triple::target_is_linux(module) {
+                (1, 2)
+            } else {
+                (0xFFFF, 0x0004)
+            };
         builder
             .build_call(
                 setsockopt_fn,
@@ -5400,6 +5410,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // Build sockaddr_in with INADDR_ANY
         let port_be = self.build_htons(&builder, port)?;
         let saddr = self.build_sockaddr_in(
+            module,
             &builder,
             i32_type.const_int(2, false),
             port_be,
@@ -5816,6 +5827,7 @@ impl<'ctx> PlatformIR<'ctx> {
         builder.position_at_end(sock_ok);
         let port_be = self.build_htons(&builder, port)?;
         let saddr = self.build_sockaddr_in(
+            module,
             &builder,
             i32_type.const_int(2, false),
             port_be,
@@ -5938,7 +5950,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let port_be = self.build_htons(&builder, port)?;
         let dest_addr = i32_type.const_int(0x0100007f, false); // 127.0.0.1
         let saddr =
-            self.build_sockaddr_in(&builder, i32_type.const_int(2, false), port_be, dest_addr)?;
+            self.build_sockaddr_in(module, &builder, i32_type.const_int(2, false), port_be, dest_addr)?;
 
         let n = builder
             .build_call(
@@ -8402,13 +8414,12 @@ impl<'ctx> PlatformIR<'ctx> {
         let ts_alloca = builder
             .build_alloca(i64_type.array_type(2), "ts")
             .or_llvm_err()?;
-        // CLOCK_MONOTONIC: macOS=6, Linux=1
-        #[cfg(target_os = "macos")]
-        let clock_id = i64_type.const_int(6, false);
-        #[cfg(target_os = "linux")]
-        let clock_id = i64_type.const_int(1, false);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let clock_id = i64_type.const_int(6, false);
+        // CLOCK_MONOTONIC: macOS=6, Linux=1.  Target-aware per #70.
+        let clock_id = if super::target_triple::target_is_linux(module) {
+            i64_type.const_int(1, false)
+        } else {
+            i64_type.const_int(6, false)
+        };
         builder
             .build_call(clock_gettime_fn, &[clock_id.into(), ts_alloca.into()], "")
             .or_llvm_err()?;
@@ -11477,13 +11488,12 @@ impl<'ctx> PlatformIR<'ctx> {
                 "sysconf",
                 i64_type.fn_type(&[i64_type.into()], false),
             );
-            // _SC_NPROCESSORS_ONLN: macOS=58, Linux=84
-            #[cfg(target_os = "macos")]
-            let sc_nproc = i64_type.const_int(58, false);
-            #[cfg(target_os = "linux")]
-            let sc_nproc = i64_type.const_int(84, false);
-            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-            let sc_nproc = i64_type.const_int(58, false);
+            // _SC_NPROCESSORS_ONLN: macOS=58, Linux=84.  Target-aware per #70.
+            let sc_nproc = if super::target_triple::target_is_linux(module) {
+                i64_type.const_int(84, false)
+            } else {
+                i64_type.const_int(58, false)
+            };
             let ncpu = builder
                 .build_call(sysconf_fn, &[sc_nproc.into()], "ncpu")
                 .or_llvm_err()?
@@ -14943,11 +14953,12 @@ impl<'ctx> PlatformIR<'ctx> {
                 .build_store(ts, ts_type.const_zero())
                 .or_llvm_err()?;
 
-            // CLOCK_MONOTONIC = 6 on macOS, 1 on Linux
-            #[cfg(target_os = "macos")]
-            let clock_id = i64_type.const_int(6, false);
-            #[cfg(not(target_os = "macos"))]
-            let clock_id = i64_type.const_int(1, false);
+            // CLOCK_MONOTONIC = 6 on macOS, 1 on Linux. Target-aware per #70.
+            let clock_id = if super::target_triple::target_is_darwin(module) {
+                i64_type.const_int(6, false)
+            } else {
+                i64_type.const_int(1, false)
+            };
 
             builder
                 .build_call(clock_fn, &[clock_id.into(), ts.into()], "")
@@ -18450,8 +18461,11 @@ impl<'ctx> PlatformIR<'ctx> {
     // ========================================================================
     // macOS — libSystem FFI declarations
     // ========================================================================
+    //
+    // **No host gate** (#70): emit-side function must be available on
+    // every host so cross-compile from Linux/Windows to macOS produces
+    // the right declarations.  Caller dispatches via `target_is_darwin(module)`.
 
-    #[cfg(target_os = "macos")]
     fn emit_macos_declarations(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let i64_type = self.context.i64_type();
         let i32_type = self.context.i32_type();

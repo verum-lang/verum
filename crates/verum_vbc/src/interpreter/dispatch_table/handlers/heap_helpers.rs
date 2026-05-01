@@ -167,6 +167,54 @@ pub(super) fn alloc_byte_list(
     Ok(Value::from_ptr(list.as_ptr() as *mut u8))
 }
 
+/// Allocate a `List<Byte>` heap value with **packed-byte backing** —
+/// 1 byte per element instead of one NaN-boxed Value (8 bytes) per
+/// element.  Closes red-team §4: at 10K connections × 16-KiB read
+/// buffer, this drops the steady-state heap from 1.28 GiB to 160 MiB.
+///
+/// **Layout** — three-Value header `[len, cap, backing_ptr]` tagged
+/// with `TypeId::BYTE_LIST`; `backing` is a contiguous `[u8; cap]`
+/// region in heap-managed memory.  The list-shaped read primitives
+/// (`extract_byte_slice`, `read_buffer_capacity`, `write_into_byte_slice`)
+/// dispatch on the header's `TypeId` to walk either the canonical
+/// Value-per-element backing (`LIST`) or this packed backing
+/// (`BYTE_LIST`).
+///
+/// **Mutation discipline** — this allocator is appropriate when the
+/// caller knows the result is consumed read-only (intrinsic results:
+/// stdout, stderr, file contents).  Script-side `.push()` /
+/// `.pop()` / `.set()` against a `BYTE_LIST` requires the
+/// matching writer-handler migration (tracked separately) — until
+/// that lands, prefer [`alloc_byte_list`] for mutable byte lists.
+#[allow(dead_code)]
+pub(super) fn alloc_byte_list_packed(
+    state: &mut InterpreterState,
+    bytes: &[u8],
+) -> InterpreterResult<Value> {
+    use heap::OBJECT_HEADER_SIZE;
+    let len = bytes.len();
+    let cap = if len < 16 { 16 } else { len };
+    let backing = state.heap.alloc(TypeId::BYTE_LIST, cap)?;
+    state.record_allocation();
+    let backing_data = unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) };
+    if !bytes.is_empty() {
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), backing_data, len);
+        }
+    }
+    let list = state
+        .heap
+        .alloc(TypeId::BYTE_LIST, 3 * std::mem::size_of::<Value>())?;
+    state.record_allocation();
+    let data_ptr = unsafe { (list.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
+    unsafe {
+        *data_ptr = Value::from_i64(len as i64);
+        *data_ptr.add(1) = Value::from_i64(cap as i64);
+        *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);
+    }
+    Ok(Value::from_ptr(list.as_ptr() as *mut u8))
+}
+
 /// Decode a `&[Byte]` argument into an owned `Vec<u8>`. Walks
 /// either a FatRef-shaped slice (elem_size 0 = NaN-boxed Values, 1
 /// = packed bytes) or a `List<Byte>` Value-per-element backing.
@@ -222,6 +270,21 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
                 }
             }
         }
+        if header.type_id == TypeId::BYTE_LIST {
+            // Packed-byte backing — `[u8; cap]` after the backing
+            // ObjectHeader.  One byte per element; no Value boxing.
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+            let len = unsafe { (*data_ptr).as_i64() } as usize;
+            let backing_v = unsafe { *data_ptr.add(2) };
+            if backing_v.is_ptr() && !backing_v.is_nil() {
+                let backing = backing_v.as_ptr::<u8>();
+                if !backing.is_null() && len > 0 {
+                    let backing_data = unsafe { backing.add(heap::OBJECT_HEADER_SIZE) };
+                    return unsafe { std::slice::from_raw_parts(backing_data, len) }.to_vec();
+                }
+                return Vec::new();
+            }
+        }
     }
     _ = state; // suppress unused warning when no extract paths fire.
     Vec::new()
@@ -229,7 +292,8 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
 
 /// Capacity of a byte buffer for sizing `recv()` — the slice's
 /// declared length when it's a FatRef, the list's len when it's
-/// `List<Byte>`. Returns None when the shape isn't recognised.
+/// `List<Byte>` (canonical or packed-byte layout). Returns None
+/// when the shape isn't recognised.
 pub(super) fn read_buffer_capacity(v: Value) -> Option<usize> {
     if v.is_fat_ref() {
         return Some(v.as_fat_ref().len() as usize);
@@ -240,7 +304,11 @@ pub(super) fn read_buffer_capacity(v: Value) -> Option<usize> {
             return None;
         }
         let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-        if header.type_id == TypeId::LIST {
+        if header.type_id.is_list_like() {
+            // Both `LIST` and `BYTE_LIST` share the 3-Value header
+            // shape `[len, cap, backing_ptr]`; the layout difference
+            // is in the backing only.  `len` (slot 0) is the same
+            // across both.
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             return Some(unsafe { (*data_ptr).as_i64() } as usize);
         }
@@ -298,6 +366,24 @@ pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
                         }
                     }
                     unsafe {
+                        *data_ptr = Value::from_i64(n as i64);
+                    }
+                }
+            }
+            return;
+        }
+        if header.type_id == TypeId::BYTE_LIST {
+            // Packed-byte backing: write bytes directly via memcpy.
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
+            let n = bytes.len().min(cap);
+            let backing_v = unsafe { *data_ptr.add(2) };
+            if backing_v.is_ptr() && !backing_v.is_nil() {
+                let backing = backing_v.as_ptr::<u8>();
+                if !backing.is_null() && n > 0 {
+                    let backing_data = unsafe { backing.add(heap::OBJECT_HEADER_SIZE) };
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), backing_data, n);
                         *data_ptr = Value::from_i64(n as i64);
                     }
                 }

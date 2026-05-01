@@ -138,6 +138,11 @@ pub(in super::super) fn handle_log_extended(
 /// - 0x03: Realloc - reallocate heap memory
 /// - 0x04: Swap - swap two values in place
 /// - 0x05: Replace - replace value and return old
+/// - 0x06: NewByteList - allocate a `List<Byte>` with packed-byte
+///   backing (1 byte/element, vs 8 for canonical `NewList`).
+///   Closes red-team §4 runtime memory amplification: 10K connections
+///   × 16-KiB read buffer drops from 1.28 GiB to 160 MiB.
+///   Format: `[dst:reg, cap:reg]`.
 pub(in super::super) fn handle_mem_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -296,6 +301,44 @@ pub(in super::super) fn handle_mem_extended(
             unsafe { *dest_ptr = new_val };
 
             state.set_reg(dst, Value::from_i64(old_val as i64));
+            Ok(DispatchResult::Continue)
+        }
+
+        // NewByteList: [dst, cap] — allocate `List<Byte>` with packed
+        // 1-byte-per-element backing (TypeId::BYTE_LIST).  Mirrors
+        // `handle_new_list`'s 3-Value-header layout but tags both the
+        // list and its backing with `BYTE_LIST` and sizes the backing
+        // as `cap` raw bytes rather than `cap * sizeof(Value)`.
+        // Closes red-team §4 runtime memory half.
+        0x06 => {
+            use crate::interpreter::heap::OBJECT_HEADER_SIZE;
+            use crate::types::TypeId;
+
+            let dst = read_reg(state)?;
+            let cap_reg = read_reg(state)?;
+
+            let cap_raw = state.get_reg(cap_reg).as_i64();
+            let cap: usize = if cap_raw < 16 { 16 } else { cap_raw as usize };
+
+            let backing = state.heap.alloc(TypeId::BYTE_LIST, cap)?;
+            state.record_allocation();
+            // Backing data is `cap` raw bytes — no per-element
+            // initialisation needed (heap.alloc returns zeroed memory
+            // for managed allocations; len = 0 means no slot is read).
+
+            let list = state
+                .heap
+                .alloc(TypeId::BYTE_LIST, 3 * std::mem::size_of::<Value>())?;
+            state.record_allocation();
+            let data_ptr = unsafe {
+                (list.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value
+            };
+            unsafe {
+                *data_ptr = Value::from_i64(0);
+                *data_ptr.add(1) = Value::from_i64(cap as i64);
+                *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);
+            }
+            state.set_reg(dst, Value::from_ptr(list.as_ptr() as *mut u8));
             Ok(DispatchResult::Continue)
         }
 

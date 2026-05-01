@@ -30,24 +30,15 @@ module waitgroup;
 
 mount core.*;
 
-// Raw intrinsics
-@intrinsic("waitgroup_new")
-fn __waitgroup_new_raw() -> Int;
-
-@intrinsic("waitgroup_add")
-fn __waitgroup_add_raw(wg: Int, delta: Int) -> Int;
-
-@intrinsic("waitgroup_done")
-fn __waitgroup_done_raw(wg: Int) -> Int;
-
-@intrinsic("waitgroup_wait")
-fn __waitgroup_wait_raw(wg: Int) -> Int;
-
-@intrinsic("waitgroup_try_wait")
-fn __waitgroup_try_wait_raw(wg: Int) -> Int;
-
-@intrinsic("waitgroup_destroy")
-fn __waitgroup_destroy_raw(wg: Int) -> Int;
+// Raw intrinsics — centralised in core/intrinsics/runtime/sync.vr (#65).
+mount core.intrinsics.runtime.sync.{
+    __waitgroup_new_raw,
+    __waitgroup_add_raw,
+    __waitgroup_done_raw,
+    __waitgroup_wait_raw,
+    __waitgroup_try_wait_raw,
+    __waitgroup_destroy_raw,
+};
 
 /// A synchronization barrier that waits for a group of tasks.
 ///

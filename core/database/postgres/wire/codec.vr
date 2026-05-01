@@ -39,7 +39,7 @@ module core.database.postgres.wire.codec;
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
-mount mem.raw_ops.{load_byte, store_byte};
+mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
 mount core.database.common.error.{DbError, DecodeFault, EncodeFault};
 mount core.database.common.arena.{SpindleArena};
 mount core.database.common.types.{

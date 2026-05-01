@@ -1,0 +1,110 @@
+// =============================================================================
+// core/intrinsics/runtime/io.vr — I/O Engine + Socket Option Intrinsics
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: Operating system (kqueue/epoll/IOCP)
+//
+// Centralised home for I/O engine + socket-option + async I/O intrinsics.
+// Migrated from `core/io/engine.vr` (#63 Phase 1.3) to satisfy the
+// architectural invariant that ALL `@intrinsic` declarations live under
+// `core/intrinsics/`.
+//
+// # Two-tier dispatch
+//
+// Tier 0 (interpreter): handlers in
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/io_engine.rs`
+// dispatch by intrinsic name.
+//
+// Tier 1 (AOT): LLVM IR emitter in `crates/verum_codegen/src/llvm/`
+// emits target-specific syscall sequences:
+//   * Linux: epoll_create1/epoll_ctl/epoll_wait + setsockopt syscalls
+//   * macOS: kqueue/kevent + setsockopt via libSystem
+//   * Windows: CreateIoCompletionPort/GetQueuedCompletionStatusEx +
+//     setsockopt via WinSock
+// =============================================================================
+
+module core.intrinsics.runtime.io;
+
+// =============================================================================
+// I/O Engine — readiness multiplexer
+// =============================================================================
+
+/// Create a new I/O engine with given queue capacity.
+@intrinsic("io_engine_new")
+public fn __io_engine_new_raw(capacity: Int) -> Int;
+
+/// Destroy an I/O engine, releasing kernel resources.
+@intrinsic("io_engine_destroy")
+public fn __io_engine_destroy_raw(engine: Int) -> Int;
+
+/// Submit interest in `events` for `fd` to the engine.
+@intrinsic("io_submit")
+public fn __io_submit_raw(engine: Int, fd: Int, events: Int) -> Int;
+
+/// Poll the engine for readiness, blocking up to `timeout_ns` ns.
+/// Returns the number of ready events, 0 on timeout, -1 on error.
+@intrinsic("io_poll")
+public fn __io_poll_raw(engine: Int, max: Int, timeout_ns: Int) -> Int;
+
+/// Remove an fd's registration from the engine.
+@intrinsic("io_remove")
+public fn __io_remove_raw(engine: Int, fd: Int) -> Int;
+
+/// Modify the events mask for an already-registered fd.
+@intrinsic("io_modify")
+public fn __io_modify_raw(engine: Int, fd: Int, events: Int) -> Int;
+
+/// Check if `fd` is ready for `events`.  Returns 1 (ready), 0 (not ready).
+@intrinsic("io_is_ready")
+public fn __io_is_ready_raw(engine: Int, fd: Int, events: Int) -> Int;
+
+/// Take ready notification for `fd` and `events`, clearing the
+/// ready bit so subsequent polls don't re-emit.
+@intrinsic("io_take_ready")
+public fn __io_take_ready_raw(engine: Int, fd: Int, events: Int) -> Int;
+
+// =============================================================================
+// Socket option intrinsics
+// =============================================================================
+
+/// Set fd to non-blocking mode.
+@intrinsic("socket_set_nonblocking")
+public fn __socket_set_nonblocking_raw(fd: Int) -> Int;
+
+/// Set fd to blocking mode.
+@intrinsic("socket_set_blocking")
+public fn __socket_set_blocking_raw(fd: Int) -> Int;
+
+/// Set SO_REUSEADDR on socket.
+@intrinsic("socket_set_reuseaddr")
+public fn __socket_set_reuseaddr_raw(fd: Int) -> Int;
+
+/// Set TCP_NODELAY (disable Nagle's algorithm).
+@intrinsic("socket_set_nodelay")
+public fn __socket_set_nodelay_raw(fd: Int) -> Int;
+
+/// Set SO_KEEPALIVE.
+@intrinsic("socket_set_keepalive")
+public fn __socket_set_keepalive_raw(fd: Int) -> Int;
+
+/// Get pending socket error (SO_ERROR via getsockopt).
+@intrinsic("socket_get_error")
+public fn __socket_get_error_raw(fd: Int) -> Int;
+
+// =============================================================================
+// Async I/O — engine-mediated, timeout-bounded
+// =============================================================================
+
+/// Async accept on `listen_fd` via `engine`.  Blocks until a connection
+/// arrives or `timeout_ns` elapses.  Returns the new fd or a negative
+/// status code (see `core/intrinsics/runtime/os.vr` reactor convention).
+@intrinsic("async_accept")
+public fn __async_accept_raw(engine: Int, listen_fd: Int, timeout_ns: Int) -> Int;
+
+/// Async read from `fd` via `engine`.  Returns bytes read or negative status.
+@intrinsic("async_read")
+public fn __async_read_raw(engine: Int, fd: Int, buf: Int, len: Int, timeout_ns: Int) -> Int;
+
+/// Async write to `fd` via `engine`.  Returns bytes written or negative status.
+@intrinsic("async_write")
+public fn __async_write_raw(engine: Int, fd: Int, buf: Int, len: Int, timeout_ns: Int) -> Int;

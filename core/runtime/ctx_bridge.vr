@@ -24,7 +24,7 @@
 
 module core.runtime.ctx_bridge;
 mount sys.common.{ctx_get, ctx_set, ctx_clear, CONTEXT_SLOT_COUNT};
-mount mem.raw_ops.{load_i64};
+mount core.intrinsics.runtime.mem_raw.{load_i64};
 
 // =============================================================================
 // Context Get/Set Bridge

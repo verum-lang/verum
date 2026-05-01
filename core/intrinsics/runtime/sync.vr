@@ -115,3 +115,33 @@ public fn memory_fence(order: Int = 5);
 @intrinsic("compiler_fence")
 @inline(always)
 public fn compiler_fence(order: Int = 5);
+
+// =============================================================================
+// SECTION 4: WaitGroup primitives — migrated from `core/sync/waitgroup.vr`
+// (#65 Phase 1.5).  Counter-based join: spawn N tasks, each calls done(),
+// the parent calls wait() to block until count reaches zero.
+// =============================================================================
+
+/// Create a new waitgroup. Returns opaque handle.
+@intrinsic("waitgroup_new")
+public fn __waitgroup_new_raw() -> Int;
+
+/// Increment the counter by `delta` (typically called before spawn).
+@intrinsic("waitgroup_add")
+public fn __waitgroup_add_raw(wg: Int, delta: Int) -> Int;
+
+/// Decrement the counter (called by spawned task on completion).
+@intrinsic("waitgroup_done")
+public fn __waitgroup_done_raw(wg: Int) -> Int;
+
+/// Block until the counter reaches zero.
+@intrinsic("waitgroup_wait")
+public fn __waitgroup_wait_raw(wg: Int) -> Int;
+
+/// Non-blocking check; returns 1 if counter is zero.
+@intrinsic("waitgroup_try_wait")
+public fn __waitgroup_try_wait_raw(wg: Int) -> Int;
+
+/// Destroy a waitgroup; reclaims the handle.
+@intrinsic("waitgroup_destroy")
+public fn __waitgroup_destroy_raw(wg: Int) -> Int;

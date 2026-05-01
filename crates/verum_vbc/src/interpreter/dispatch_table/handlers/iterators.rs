@@ -17,6 +17,10 @@ const ITER_TYPE_MAP: i64 = 1;
 const ITER_TYPE_ARRAY: i64 = 2;
 const ITER_TYPE_RANGE: i64 = 3;
 const ITER_TYPE_GENERATOR: i64 = 4;
+/// `List<Byte>` packed-byte iteration (red-team §4 fix).
+/// Element stride is 1 byte instead of `sizeof(Value)`; reads
+/// zero-extend the byte into a NaN-boxed Value.
+const ITER_TYPE_BYTE_LIST: i64 = 5;
 
 // ============================================================================
 // Iterator + Range Operations
@@ -95,7 +99,7 @@ pub(in super::super) fn handle_iter_new(
             {
                 let data = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let tag = unsafe { (*data.add(3)).as_i64() };
-                if (ITER_TYPE_LIST..=ITER_TYPE_RANGE).contains(&tag) {
+                if (ITER_TYPE_LIST..=ITER_TYPE_BYTE_LIST).contains(&tag) {
                     let inner_source = unsafe { *data };
                     (inner_source, Some(tag))
                 } else {
@@ -125,6 +129,7 @@ pub(in super::super) fn handle_iter_new(
                 TypeId::MAP | TypeId::SET => ITER_TYPE_MAP,
                 TypeId::ARRAY => ITER_TYPE_ARRAY,
                 TypeId::RANGE => ITER_TYPE_RANGE,
+                TypeId::BYTE_LIST => ITER_TYPE_BYTE_LIST,
                 // LIST and all other types default to list iteration
                 _ => ITER_TYPE_LIST,
             }
@@ -334,6 +339,31 @@ pub(in super::super) fn handle_iter_next(
             }
 
             state.set_reg(dst, element);
+            state.set_reg(has_next_dst, Value::from_bool(true));
+        }
+        ITER_TYPE_BYTE_LIST => {
+            // Packed-byte list iteration: same 3-Value header shape as
+            // LIST but the backing is `[u8; cap]`.  Read 1 byte and
+            // zero-extend into a NaN-boxed Value (red-team §4 fix).
+            let list_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+            let len = unsafe { (*list_header).as_i64() } as usize;
+
+            if current_idx >= len {
+                state.set_reg(dst, Value::unit());
+                state.set_reg(has_next_dst, Value::from_bool(false));
+                return Ok(DispatchResult::Continue);
+            }
+
+            let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+            let elem_ptr =
+                unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE + current_idx) };
+            let byte_value = unsafe { *elem_ptr };
+
+            unsafe {
+                *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
+            }
+
+            state.set_reg(dst, Value::from_i64(byte_value as i64));
             state.set_reg(has_next_dst, Value::from_bool(true));
         }
         ITER_TYPE_MAP => {

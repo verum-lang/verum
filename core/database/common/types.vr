@@ -23,7 +23,7 @@ module core.database.common.types;
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
-mount mem.raw_ops.{memcpy, store_byte, load_byte};
+mount core.intrinsics.runtime.mem_raw.{memcpy, store_byte, load_byte};
 mount core.database.common.error.{DbError, DecodeFault, EncodeFault, AdapterId};
 mount core.database.common.arena.{SpindleArena};
 

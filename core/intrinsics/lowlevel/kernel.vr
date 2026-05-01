@@ -153,3 +153,44 @@ public fn aarch64_exception_prologue();
 @llvm_only(reason = "inline assembly")
 @vbc_direct_lowering
 public fn aarch64_exception_epilogue();
+
+// =============================================================================
+// SECTION: Interrupt Enable/Disable Primitives
+// =============================================================================
+// Migrated from `core/sys/interrupt.vr` (#66 Phase 1.6).
+// Bare-metal / kernel-mode primitives — disable/enable IRQ flag.
+// Linux x86_64: `cli` / `sti`; aarch64: `msr daifset, #2` / `daifclr`.
+// =============================================================================
+
+/// Disable interrupts and return previous state.
+///
+/// Returns the previous interrupt enable state, which should be passed
+/// to `restore_interrupts` to restore the previous state.
+@inline(always)
+@intrinsic("disable_interrupts")
+public fn disable_interrupts() -> USize;
+
+/// Restore interrupts to a previous state.
+///
+/// Pass the value returned by `disable_interrupts` to restore
+/// the previous interrupt state (enabled or disabled).
+@inline(always)
+@intrinsic("restore_interrupts")
+public fn restore_interrupts(previous: USize);
+
+/// Enable interrupts unconditionally.
+@inline(always)
+@intrinsic("enable_interrupts")
+public fn enable_interrupts();
+
+/// Check if interrupts are currently enabled.
+@inline(always)
+@intrinsic("interrupts_enabled")
+public fn interrupts_enabled() -> Bool;
+
+/// Save interrupt state and disable (combined operation).
+///
+/// More efficient than separate read + disable on some platforms.
+@inline(always)
+@intrinsic("save_and_disable_interrupts")
+public fn save_and_disable_interrupts() -> USize;

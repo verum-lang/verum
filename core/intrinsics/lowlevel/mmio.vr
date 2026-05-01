@@ -1,0 +1,92 @@
+// =============================================================================
+// core/intrinsics/lowlevel/mmio.vr — MMIO + Memory Barrier Primitives
+// =============================================================================
+// Layer: Stdlib (1)
+// Dependencies: None
+//
+// Migrated from `core/sys/mmio.vr` (#66 Phase 1.6).  Volatile memory
+// access primitives + memory barriers — used by MmioRegister<T, MODE>
+// in `core/sys/mmio.vr` for memory-mapped I/O on bare-metal / kernel
+// drivers and by sync primitives that need explicit ordering control.
+//
+// **All declarations are `@llvm_only`** in spirit — they map directly
+// to LLVM `load volatile` / `store volatile` / `fence` intrinsics with
+// no interpreter fallback.  The interpreter doesn't have meaningful
+// MMIO semantics; usage of these intrinsics from interpreter-mode
+// code traps via the standard "no body for intrinsic" path.
+// =============================================================================
+
+module core.intrinsics.lowlevel.mmio;
+
+mount core.*;
+
+// =============================================================================
+// VOLATILE LOAD / STORE
+// =============================================================================
+
+/// Read from volatile memory location.
+///
+/// This is the primitive operation for MMIO reads. It:
+/// - Prevents load elimination
+/// - Emits a single memory read instruction
+/// - Does NOT provide memory ordering (use with barriers if needed)
+@inline(always)
+@intrinsic("volatile_load")
+public fn volatile_load<T: Copy>(ptr: *volatile T) -> T;
+
+/// Write to volatile memory location.
+///
+/// This is the primitive operation for MMIO writes. It:
+/// - Prevents store elimination
+/// - Emits a single memory write instruction
+/// - Does NOT provide memory ordering (use with barriers if needed)
+@inline(always)
+@intrinsic("volatile_store")
+public fn volatile_store<T: Copy>(ptr: *volatile mut T, value: T);
+
+/// Read with acquire semantics.
+///
+/// Ensures all subsequent reads and writes happen after this read.
+/// Use for acquiring locks or reading synchronization flags.
+@inline(always)
+@intrinsic("volatile_load_acquire")
+public fn volatile_load_acquire<T: Copy>(ptr: *volatile T) -> T;
+
+/// Write with release semantics.
+///
+/// Ensures all previous reads and writes happen before this write.
+/// Use for releasing locks or signaling completion.
+@inline(always)
+@intrinsic("volatile_store_release")
+public fn volatile_store_release<T: Copy>(ptr: *volatile mut T, value: T);
+
+// =============================================================================
+// MEMORY BARRIERS
+// =============================================================================
+
+/// Memory barrier types for explicit ordering control.
+/// **Stays in `core/sys/mmio.vr`** as user-facing type; this file
+/// references it via mount.
+mount core.sys.mmio.{BarrierKind};
+
+/// Insert a memory barrier.
+///
+/// Use barriers to enforce ordering between memory operations:
+/// - Compiler: Prevents compiler reordering, no CPU fence
+/// - Acquire: Ensures loads before are visible before loads/stores after
+/// - Release: Ensures stores after are visible after loads/stores before
+/// - AcqRel: Both acquire and release semantics
+/// - SeqCst: Full sequential consistency (most expensive)
+@inline(always)
+@intrinsic("memory_barrier")
+public fn barrier(kind: BarrierKind);
+
+/// Data synchronization barrier (ARM terminology).
+@inline(always)
+@intrinsic("dsb")
+public fn dsb();
+
+/// Instruction synchronization barrier (ARM terminology).
+@inline(always)
+@intrinsic("isb")
+public fn isb();

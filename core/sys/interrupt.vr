@@ -139,38 +139,15 @@ implement ExceptionFrame {
 /// Disable interrupts and return previous state.
 ///
 
-/// Returns the previous interrupt enable state, which should be passed
-/// to `restore_interrupts` to restore the previous state.
-@inline(always)
-@intrinsic("disable_interrupts")
-public fn disable_interrupts() -> USize;
-
-/// Restore interrupts to a previous state.
-///
-
-/// Pass the value returned by `disable_interrupts` to restore
-/// the previous interrupt state (enabled or disabled).
-@inline(always)
-@intrinsic("restore_interrupts")
-public fn restore_interrupts(previous: USize);
-
-/// Enable interrupts unconditionally.
-@inline(always)
-@intrinsic("enable_interrupts")
-public fn enable_interrupts();
-
-/// Check if interrupts are currently enabled.
-@inline(always)
-@intrinsic("interrupts_enabled")
-public fn interrupts_enabled() -> Bool;
-
-/// Save interrupt state and disable (combined operation).
-///
-
-/// More efficient than separate read + disable on some platforms.
-@inline(always)
-@intrinsic("save_and_disable_interrupts")
-public fn save_and_disable_interrupts() -> USize;
+/// Interrupt enable/disable primitives — centralised in
+/// `core/intrinsics/lowlevel/kernel.vr` (#66 Phase 1.6).
+public mount core.intrinsics.lowlevel.kernel.{
+    disable_interrupts,
+    restore_interrupts,
+    enable_interrupts,
+    interrupts_enabled,
+    save_and_disable_interrupts,
+};
 
 // =============================================================================
 // CRITICAL SECTION
