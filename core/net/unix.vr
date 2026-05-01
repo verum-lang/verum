@@ -510,19 +510,24 @@ implement AsyncWrite for UnixStream {
 // Ergonomic async wrappers + cancellable variants (mirror TcpStream).
 
 implement UnixStream {
-    pub async fn read_async(&mut self, buf: &mut List<Int>) -> Result<Int, IoError> {
+    /// Async read — `buf` is `&mut List<Byte>` (semantic-honesty
+    /// migration #316 follow-up: AF_UNIX stream payloads are bytes,
+    /// not 8-byte Ints).
+    pub async fn read_async(&mut self, buf: &mut List<Byte>) -> Result<Int, IoError> {
         let mut fut = UnixReadFut { stream: self, buf: buf };
         fut.await
     }
 
-    pub async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError> {
+    /// Async write — `buf` is `&List<Byte>` post-#316.
+    pub async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
         let mut fut = UnixWriteFut { stream: self, buf: buf };
         fut.await
     }
 
+    /// Cancellable async read — `buf` is `&mut List<Byte>` post-#316.
     pub async fn read_cancellable(
         &mut self,
-        buf: &mut List<Int>,
+        buf: &mut List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
@@ -531,9 +536,10 @@ implement UnixStream {
         }
     }
 
+    /// Cancellable async write — `buf` is `&List<Byte>` post-#316.
     pub async fn write_cancellable(
         &mut self,
-        buf: &List<Int>,
+        buf: &List<Byte>,
         token: &CancellationToken,
     ) -> Result<Result<Int, IoError>, CancellationError> {
         select {
@@ -543,27 +549,47 @@ implement UnixStream {
     }
 }
 
+// Bridge between the byte-typed user-facing API and the AsyncRead /
+// AsyncWrite protocols (still `List<Int>` for protocol compatibility).
+// One conversion per await, never per byte at the consumer.
+
 public type UnixReadFut<'a> is {
     stream: &'a mut UnixStream,
-    buf: &'a mut List<Int>,
+    buf: &'a mut List<Byte>,
 };
 
 implement<'a> Future for UnixReadFut<'a> {
     type Output = Result<Int, IoError>;
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
-        self.stream.poll_read(cx, self.buf)
+        let mut int_buf: List<Int> = List.with_capacity(self.buf.capacity());
+        match self.stream.poll_read(cx, &mut int_buf) {
+            Poll.Pending => Poll.Pending,
+            Poll.Ready(r) => match r {
+                Err(e) => Poll.Ready(Err(e)),
+                Ok(n) => {
+                    for i in 0..n {
+                        self.buf.push((int_buf[i] & 0xFF) as Byte);
+                    }
+                    Poll.Ready(Ok(n))
+                }
+            },
+        }
     }
 }
 
 public type UnixWriteFut<'a> is {
     stream: &'a mut UnixStream,
-    buf: &'a List<Int>,
+    buf: &'a List<Byte>,
 };
 
 implement<'a> Future for UnixWriteFut<'a> {
     type Output = Result<Int, IoError>;
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
-        self.stream.poll_write(cx, self.buf)
+        let mut int_buf: List<Int> = List.with_capacity(self.buf.len());
+        for i in 0..self.buf.len() {
+            int_buf.push(self.buf[i] as Int);
+        }
+        self.stream.poll_write(cx, &int_buf)
     }
 }
 

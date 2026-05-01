@@ -212,7 +212,10 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     let mut hdr_frame: Maybe<HeaderFrame> = None;
 
     loop {
-        let mut chunk: List<Int> = List.with_capacity(4096);
+        // Read directly into a byte-typed scratch buffer; the
+        // transport API hands out `List<Byte>` post-#316 so the
+        // accumulator gets bytes the parser already understands.
+        let mut chunk: List<Byte> = List.with_capacity(4096);
         // Header-deadline wrap (redteam §2): the `header_deadline_ms`
         // budget bounds total time-on-wire from the FIRST read of
         // this request frame to the parser's `Done` verdict.
@@ -260,13 +263,11 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
             let _ = write_response(stream, &mk_413()).await;
             return Err(ConnError.TooLarge);
         }
-        // Convert the just-arrived chunk once, in place, and extend
-        // accum in O(n).  Pre-fix this loop also did a per-byte push
-        // into a List<Int> that was then re-converted whole-buffer on
-        // every iteration; post-fix accum is List<Byte> directly so
-        // the parser feeds against it without any conversion.
+        // Append the freshly-arrived bytes to the accumulator.
+        // Post-#316 follow-up: `chunk` is `List<Byte>` straight from
+        // the transport — no mask, no cast, just an O(n) copy.
         for i in 0..n {
-            accum.push((chunk[i] & 0xFF) as Byte);
+            accum.push(chunk[i]);
         }
         match parser.feed(&accum) {
             ParseProgress.NeedMore => continue,
@@ -328,7 +329,7 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
             return Err(ConnError.TooLarge);
         }
         while accum.len() - hdr.body_start < body_len {
-            let mut chunk: List<Int> = List.with_capacity(4096);
+            let mut chunk: List<Byte> = List.with_capacity(4096);
             // Body-deadline wrap (redteam §2): bounds total
             // time-on-wire for the body half of the request.
             // Same slowloris defence as the header-read above
@@ -356,10 +357,9 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
                 Ok(Ok(n)) => n,
             };
             if n == 0 { return Err(ConnError.ClientClosed); }
-            // Red-team #316: chunk is List<Int> (transport API) but
-            // accum is List<Byte> after the request-buffer fix —
-            // mask + cast in a single tight loop.
-            for i in 0..n { accum.push((chunk[i] & 0xFF) as Byte); }
+            // Post-#316 follow-up: chunk is `List<Byte>` — no mask,
+            // no cast, just append.
+            for i in 0..n { accum.push(chunk[i]); }
         }
         // Body extraction: accum is already byte-typed, so this is
         // a straight subrange copy with no per-element conversion.
@@ -482,7 +482,10 @@ async fn write_response<T: WeftTransport>(
     stream: &mut T,
     resp: &Response,
 ) -> Result<(), core.io.protocols.IoError> {
-    let mut out: List<Int> = List.with_capacity(512 + resp.body.len());
+    // Post-#316 follow-up: assemble the wire response directly as
+    // `List<Byte>` — the transport accepts bytes natively, so no
+    // back-conversion at the body-copy step.
+    let mut out: List<Byte> = List.with_capacity(512 + resp.body.len());
     push_str(&mut out, &resp.version.as_str());
     push_byte(&mut out, 0x20);
     push_str(&mut out, &f"{resp.status.code()}");
@@ -498,23 +501,23 @@ async fn write_response<T: WeftTransport>(
     }
     push_crlf(&mut out);
     for i in 0..resp.body.len() {
-        out.push(resp.body[i] as Int);
+        out.push(resp.body[i]);
     }
     stream.write_async(&out).await.map(|_| ())
 }
 
-fn push_str(out: &mut List<Int>, s: &Text) {
+fn push_str(out: &mut List<Byte>, s: &Text) {
     let b = s.as_bytes();
     for i in 0..b.len() {
-        out.push(b[i] as Int);
+        out.push(b[i]);
     }
 }
 
-fn push_byte(out: &mut List<Int>, b: Byte) {
-    out.push(b as Int);
+fn push_byte(out: &mut List<Byte>, b: Byte) {
+    out.push(b);
 }
 
-fn push_crlf(out: &mut List<Int>) {
+fn push_crlf(out: &mut List<Byte>) {
     out.push(0x0D);
     out.push(0x0A);
 }
@@ -606,8 +609,9 @@ async fn read_chunked_body<T: WeftTransport>(
                 return Ok(out);
             }
             ChunkProgress.ChunkNeedMore => {
-                // Read more bytes and re-feed.
-                let mut chunk: List<Int> = List.with_capacity(4096);
+                // Read more bytes and re-feed.  Post-#316 the
+                // transport hands out `List<Byte>` directly.
+                let mut chunk: List<Byte> = List.with_capacity(4096);
                 // Body-deadline wrap (redteam §2): chunked
                 // body's per-chunk read budget mirrors the
                 // Content-Length path's body deadline.
@@ -628,9 +632,9 @@ async fn read_chunked_body<T: WeftTransport>(
                     Ok(Ok(n))  => n,
                 };
                 if n == 0 { return Err(ConnError.ClientClosed); }
-                // Mask + cast to Byte once per arrival (no full-buffer
-                // reconversion on subsequent iterations).
-                for i in 0..n { accum.push((chunk[i] & 0xFF) as Byte); }
+                // Post-#316 follow-up: chunk is `List<Byte>` — append
+                // once per arrival, no per-byte mask + cast.
+                for i in 0..n { accum.push(chunk[i]); }
             }
             ChunkProgress.ChunkErr(e) => return Err(ConnError.Parse(e)),
         }

@@ -69,11 +69,12 @@ fn typecheck_incoming_poll_next(inc: &mut UnixIncoming, cx: &mut Context)
     inc.poll_next(cx)
 }
 
-// Cancellable async I/O
+// Cancellable async I/O — `read_cancellable` takes `&mut List<Byte>`
+// post-#316 (semantic-honesty migration: stream payloads are bytes).
 async fn typecheck_cancellable_read(stream: &mut UnixStream, token: &CancellationToken)
     -> Result<Result<Int, IoError>, CancellationError>
 {
-    let mut buf: List<Int> = [];
+    let mut buf: List<Byte> = [];
     stream.read_cancellable(&mut buf, token).await
 }
 
