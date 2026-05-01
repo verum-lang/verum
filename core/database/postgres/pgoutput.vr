@@ -1,0 +1,451 @@
+// =============================================================================
+// core/database/postgres/pgoutput.vr — pgoutput payload decoder (V0)
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (logical replication
+//       payload format, ProtoVersion 1 from PG 10+).
+//       Reference: PG src/backend/replication/logical/proto.c.
+// =============================================================================
+//
+// Each XLogData payload carries one pgoutput message. Format
+// (ProtoVersion 1):
+//
+//   'B' Begin       final_lsn:i64 commit_ts:i64 xid:i32
+//   'C' Commit      flags:i8 commit_lsn:i64 end_lsn:i64 commit_ts:i64
+//   'R' Relation    relid:i32 ns:cstr name:cstr replica_id:i8
+//                   num_cols:i16
+//                   foreach col: flags:i8 name:cstr type_oid:i32
+//                                type_mod:i32
+//   'I' Insert      relid:i32 'N' tuple
+//   'U' Update      relid:i32
+//                   ['K' old-key | 'O' old-tuple]?
+//                   'N' new-tuple
+//   'D' Delete      relid:i32 ['K'|'O'] tuple
+//
+//   Tuple-data:     num_cols:i16
+//                   foreach col one of:
+//                     'n'                       (NULL)
+//                     'u'                       (unchanged toast)
+//                     't' len:i32 bytes:[len]   (text format)
+//                     'b' len:i32 bytes:[len]   (binary format)
+//
+// V0 SCOPE: B / C / R / I / U / D + tuple-data decoder. Enough for
+// every CDC consumer pattern — relation cache + DML stream.
+//
+// OUT of scope V0:
+//   * 'O' Origin (replication-origin tracking).
+//   * 'Y' Type (custom-type metadata).
+//   * 'T' Truncate (multi-relation operation).
+//   * 'M' Logical decoding message.
+//   * Streaming-tx variants 'S' / 'E' / 'c' / 'A' (proto v2+).
+//   * Two-phase commit prepare / commit-prepared.
+//
+// Each unhandled tag surfaces as `PgoUnknown { tag, payload }` so
+// callers can dispatch new variants without rev-locking.
+// =============================================================================
+
+module core.database.postgres.pgoutput;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.common.types.{WireReader};
+mount core.database.postgres.replication.Lsn;
+
+// =============================================================================
+// Public ADT
+// =============================================================================
+
+public type PgoMessage is
+      PgoBegin(BeginMessage)
+    | PgoCommit(CommitMessage)
+    | PgoRelation(RelationMessage)
+    | PgoInsert(InsertMessage)
+    | PgoUpdate(UpdateMessage)
+    | PgoDelete(DeleteMessage)
+    | PgoUnknown { tag: Byte, payload: List<Byte> };
+
+public type BeginMessage is {
+    /// LSN of the next-to-be-committed transaction; meaningful for
+    /// the consumer's flush/apply position bookkeeping.
+    final_lsn: Lsn,
+    /// Microseconds since 2000-01-01 UTC, server timezone-aware
+    /// commit timestamp. Subtract PG_EPOCH_OFFSET_US to convert
+    /// to UNIX microseconds.
+    commit_timestamp_us: Int,
+    /// Source transaction ID.
+    xid: Int,
+};
+
+public type CommitMessage is {
+    /// Reserved bit field — always 0 in proto v1, defined for
+    /// future flag bits. Kept verbatim so downstream code can
+    /// gate on new flags without re-decoding.
+    flags: Int,
+    /// LSN of the COMMIT record itself.
+    commit_lsn: Lsn,
+    /// LSN immediately after the transaction's last WAL record;
+    /// the consumer's flush_lsn moves to this on apply.
+    end_lsn: Lsn,
+    commit_timestamp_us: Int,
+};
+
+public type RelationMessage is {
+    relid: Int,
+    namespace: Text,
+    name: Text,
+    /// Replica identity setting: 'd' default (PK), 'n' nothing,
+    /// 'f' full, 'i' index. Stored as the raw byte value.
+    replica_identity: Byte,
+    columns: List<RelationColumn>,
+};
+
+public type RelationColumn is {
+    /// Bit 1 (0x01) = column is part of the key.
+    flags: Int,
+    name: Text,
+    type_oid: Int,
+    type_modifier: Int,
+};
+
+public type InsertMessage is {
+    relid: Int,
+    new_tuple: TupleData,
+};
+
+public type UpdateMessage is {
+    relid: Int,
+    /// Set when the relation has REPLICA IDENTITY DEFAULT and the
+    /// updated row touched a key column ('K'), or REPLICA IDENTITY
+    /// FULL ('O'). None when the relation's replica identity was
+    /// sufficient (the new tuple alone identifies the row).
+    old_tuple: Maybe<OldTupleVariant>,
+    new_tuple: TupleData,
+};
+
+public type DeleteMessage is {
+    relid: Int,
+    /// 'K' (key columns only) or 'O' (full old tuple).
+    old_tuple_kind: OldTupleKind,
+    old_tuple: TupleData,
+};
+
+public type OldTupleVariant is OtvKey(TupleData) | OtvOld(TupleData);
+public type OldTupleKind    is OtkKey | OtkOld;
+
+public type TupleData is {
+    columns: List<TupleColumn>,
+};
+
+public type TupleColumn is
+      TcNull
+    /// TOAST optimisation: the column was unchanged so PG omits it.
+    /// Consumers must look up the previous value from their own
+    /// state — pgoutput intentionally avoids re-shipping it.
+    | TcUnchangedToast
+    | TcText(List<Byte>)
+    | TcBinary(List<Byte>);
+
+// =============================================================================
+// Public entry — decode one XLogData payload.
+// =============================================================================
+
+/// Microseconds between 1970-01-01 (UNIX epoch) and 2000-01-01
+/// (PG epoch) — `(30 years × 365.25 days × 86400 seconds × 10^6)
+/// = 946684800_000_000`. Add this to a pgoutput timestamp to
+/// convert into UNIX microseconds.
+public const PG_EPOCH_OFFSET_US: Int = 946684800_000_000;
+
+public fn decode_pgoutput(payload: List<Byte>) -> Result<PgoMessage, DbError> {
+    if payload.len() == 0 {
+        return Err(decode_err("empty pgoutput payload"));
+    }
+    let tag = payload[0];
+    let mut r = WireReader.new(payload);
+    let _ = match r.read_u8() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("pgoutput tag read failed")); }
+    };
+
+    let t = (tag as Int) & 0xFF;
+    if t == ('B' as Int) { return decode_begin(&mut r); }
+    if t == ('C' as Int) { return decode_commit(&mut r); }
+    if t == ('R' as Int) { return decode_relation(&mut r); }
+    if t == ('I' as Int) { return decode_insert(&mut r); }
+    if t == ('U' as Int) { return decode_update(&mut r); }
+    if t == ('D' as Int) { return decode_delete(&mut r); }
+
+    // Drain rest as opaque bytes for downstream dispatch.
+    let rest = r.remaining_bytes();
+    Ok(PgoUnknown { tag: tag, payload: rest })
+}
+
+// =============================================================================
+// Begin / Commit
+// =============================================================================
+
+fn decode_begin(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let final_lsn = read_lsn(r, "Begin.final_lsn")?;
+    let ts = read_i64(r, "Begin.commit_timestamp")?;
+    let xid_u32 = match r.read_u32_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("Begin.xid truncated")); }
+    };
+    Ok(PgoBegin(BeginMessage {
+        final_lsn: final_lsn,
+        commit_timestamp_us: ts,
+        xid: xid_u32,
+    }))
+}
+
+fn decode_commit(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let flags = read_u8(r, "Commit.flags")?;
+    let commit_lsn = read_lsn(r, "Commit.commit_lsn")?;
+    let end_lsn = read_lsn(r, "Commit.end_lsn")?;
+    let ts = read_i64(r, "Commit.commit_timestamp")?;
+    Ok(PgoCommit(CommitMessage {
+        flags: flags,
+        commit_lsn: commit_lsn,
+        end_lsn: end_lsn,
+        commit_timestamp_us: ts,
+    }))
+}
+
+// =============================================================================
+// Relation schema descriptor
+// =============================================================================
+
+fn decode_relation(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let relid = read_i32(r, "Relation.relid")?;
+    let ns = read_cstr(r, "Relation.namespace")?;
+    let name = read_cstr(r, "Relation.name")?;
+    let replica_identity_b = match r.read_u8() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("Relation.replica_identity truncated")); }
+    };
+    let num_cols = match r.read_u16_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("Relation.num_columns truncated")); }
+    };
+    let mut cols: List<RelationColumn> = List.with_capacity(num_cols);
+    let mut i: Int = 0;
+    while i < num_cols {
+        let flags = read_u8(r, "Relation.col.flags")?;
+        let cname = read_cstr(r, "Relation.col.name")?;
+        let oid = read_i32(r, "Relation.col.type_oid")?;
+        let typmod = read_i32(r, "Relation.col.type_modifier")?;
+        cols.push(RelationColumn {
+            flags: flags,
+            name: cname,
+            type_oid: oid,
+            type_modifier: typmod,
+        });
+        i = i + 1;
+    }
+    Ok(PgoRelation(RelationMessage {
+        relid: relid,
+        namespace: ns,
+        name: name,
+        replica_identity: replica_identity_b as Byte,
+        columns: cols,
+    }))
+}
+
+// =============================================================================
+// DML — Insert / Update / Delete
+// =============================================================================
+
+fn decode_insert(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let relid = read_i32(r, "Insert.relid")?;
+    let kind = read_u8(r, "Insert.tuple_kind")?;
+    if kind != ('N' as Int) {
+        return Err(decode_err("Insert: expected 'N' tuple kind"));
+    }
+    let tup = decode_tuple_data(r)?;
+    Ok(PgoInsert(InsertMessage {
+        relid: relid,
+        new_tuple: tup,
+    }))
+}
+
+fn decode_update(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let relid = read_i32(r, "Update.relid")?;
+    let kind1 = read_u8(r, "Update.first_tuple_kind")?;
+
+    // The first byte after relid may be:
+    //   'K' — key tuple (replica identity DEFAULT, key changed)
+    //   'O' — old tuple (replica identity FULL)
+    //   'N' — new tuple (no old data, replica identity sufficient)
+    let mut old_variant: Maybe<OldTupleVariant> = None;
+    let new_kind: Int = if kind1 == ('K' as Int) {
+        let key_tup = decode_tuple_data(r)?;
+        old_variant = Some(OtvKey(key_tup));
+        read_u8(r, "Update.new_tuple_kind_after_K")?
+    } else if kind1 == ('O' as Int) {
+        let old_tup = decode_tuple_data(r)?;
+        old_variant = Some(OtvOld(old_tup));
+        read_u8(r, "Update.new_tuple_kind_after_O")?
+    } else {
+        kind1
+    };
+    if new_kind != ('N' as Int) {
+        return Err(decode_err("Update: expected 'N' new-tuple kind"));
+    }
+    let new_tup = decode_tuple_data(r)?;
+    Ok(PgoUpdate(UpdateMessage {
+        relid: relid,
+        old_tuple: old_variant,
+        new_tuple: new_tup,
+    }))
+}
+
+fn decode_delete(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let relid = read_i32(r, "Delete.relid")?;
+    let kind = read_u8(r, "Delete.tuple_kind")?;
+    let otk = if kind == ('K' as Int) {
+        OtkKey
+    } else if kind == ('O' as Int) {
+        OtkOld
+    } else {
+        return Err(decode_err("Delete: expected 'K' or 'O' tuple kind"));
+    };
+    let tup = decode_tuple_data(r)?;
+    Ok(PgoDelete(DeleteMessage {
+        relid: relid,
+        old_tuple_kind: otk,
+        old_tuple: tup,
+    }))
+}
+
+// =============================================================================
+// Tuple data — common building block
+// =============================================================================
+
+fn decode_tuple_data(r: &mut WireReader) -> Result<TupleData, DbError> {
+    let num_cols = match r.read_u16_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("Tuple.num_columns truncated")); }
+    };
+    let mut cols: List<TupleColumn> = List.with_capacity(num_cols);
+    let mut i: Int = 0;
+    while i < num_cols {
+        let kind = read_u8(r, "Tuple.col.kind")?;
+        if kind == ('n' as Int) {
+            cols.push(TcNull);
+        } else if kind == ('u' as Int) {
+            cols.push(TcUnchangedToast);
+        } else if kind == ('t' as Int) {
+            let len = read_i32(r, "Tuple.text.len")?;
+            let bytes = match r.read_bytes(len) {
+                Ok(b)  => b,
+                Err(_) => { return Err(decode_err("Tuple.text.bytes truncated")); }
+            };
+            cols.push(TcText(bytes));
+        } else if kind == ('b' as Int) {
+            let len = read_i32(r, "Tuple.binary.len")?;
+            let bytes = match r.read_bytes(len) {
+                Ok(b)  => b,
+                Err(_) => { return Err(decode_err("Tuple.binary.bytes truncated")); }
+            };
+            cols.push(TcBinary(bytes));
+        } else {
+            return Err(decode_err("Tuple: unknown column kind"));
+        }
+        i = i + 1;
+    }
+    Ok(TupleData { columns: cols })
+}
+
+// =============================================================================
+// Read primitives — sugar over WireReader with typed error context
+// =============================================================================
+
+fn read_u8(r: &mut WireReader, what: &str) -> Result<Int, DbError> {
+    match r.read_u8() {
+        Ok(v)  => Ok(v),
+        Err(_) => Err(decode_err(&f"{what} truncated")),
+    }
+}
+
+fn read_i32(r: &mut WireReader, what: &str) -> Result<Int, DbError> {
+    match r.read_i32_be() {
+        Ok(v)  => Ok(v),
+        Err(_) => Err(decode_err(&f"{what} truncated")),
+    }
+}
+
+fn read_i64(r: &mut WireReader, what: &str) -> Result<Int, DbError> {
+    match r.read_i64_be() {
+        Ok(v)  => Ok(v),
+        Err(_) => Err(decode_err(&f"{what} truncated")),
+    }
+}
+
+fn read_lsn(r: &mut WireReader, what: &str) -> Result<Lsn, DbError> {
+    let raw = read_i64(r, what)?;
+    Ok(Lsn.from_int(raw))
+}
+
+fn read_cstr(r: &mut WireReader, what: &str) -> Result<Text, DbError> {
+    match r.read_cstr() {
+        Ok(s)  => Ok(s),
+        Err(_) => Err(decode_err(&f"{what} (NUL-terminated string) truncated or non-UTF8")),
+    }
+}
+
+fn decode_err(what: &Text) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "PGOUTPUT_DECODE".clone(),
+        message: f"pgoutput decode error: {what}",
+        retryable: false,
+    })
+}
+
+// =============================================================================
+// Relation cache — convenience helper for CDC consumers
+// =============================================================================
+//
+// pgoutput emits a Relation message exactly once per (relid,
+// schema-version) pair within a stream. Subsequent
+// Insert/Update/Delete frames carry only relid; the consumer must
+// remember the column metadata. PgoRelationCache is the minimal
+// keyed cache that does this lookup.
+
+public type PgoRelationCache is {
+    entries: List<(Int, RelationMessage)>,
+};
+
+implement PgoRelationCache {
+    public fn new() -> PgoRelationCache {
+        PgoRelationCache { entries: List.new() }
+    }
+
+    public fn record(&mut self, msg: RelationMessage) {
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            let (rid, _) = &self.entries[i];
+            if *rid == msg.relid {
+                self.entries[i] = (msg.relid, msg);
+                return;
+            }
+            i = i + 1;
+        }
+        self.entries.push((msg.relid, msg));
+    }
+
+    public fn lookup(&self, relid: Int) -> Maybe<&RelationMessage> {
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            let (rid, m) = &self.entries[i];
+            if *rid == relid { return Some(m); }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn len(&self) -> Int { self.entries.len() as Int }
+}

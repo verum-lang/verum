@@ -44,6 +44,7 @@ public module introspect;
 public module transaction;
 public module copy;
 public module replication;
+public module pgoutput;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -77,6 +78,18 @@ public mount .replication.{
     Lsn, ReplicationMessage, RmXLogData, RmKeepalive, RmOther,
     XLogData, PrimaryKeepalive, IdentifySystemRow,
     connect_replication,
+};
+public mount .pgoutput.{
+    PgoMessage, PgoBegin, PgoCommit, PgoRelation, PgoInsert,
+    PgoUpdate, PgoDelete, PgoUnknown,
+    BeginMessage, CommitMessage, RelationMessage, RelationColumn,
+    InsertMessage, UpdateMessage, DeleteMessage,
+    OldTupleVariant, OtvKey, OtvOld,
+    OldTupleKind, OtkKey, OtkOld,
+    TupleData, TupleColumn, TcNull, TcUnchangedToast, TcText, TcBinary,
+    PgoRelationCache,
+    decode_pgoutput,
+    PG_EPOCH_OFFSET_US,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
