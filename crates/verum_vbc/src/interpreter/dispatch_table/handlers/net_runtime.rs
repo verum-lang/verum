@@ -790,6 +790,385 @@ pub fn io_wait_writable(fd: i64, timeout_ms: i64) -> i64 {
     }
 }
 
+// ============================================================================
+// VBC-COOP-SCHED-1 — cooperative reactor wait
+// ============================================================================
+//
+// `wait_readable_coop` / `wait_writable_coop` slice the user-requested
+// timeout into short kernel waits and, between them, run any READY
+// pending tasks from `state.tasks` to completion.  Net effect: a
+// task parked on a slow socket no longer starves concurrent tasks
+// — the OS thread that would otherwise be sleeping in `kevent`/
+// `epoll_wait` gets reused to make forward progress on the rest
+// of the run-queue.
+//
+// Recursion control: `state.coop_pump_depth` bounds the nested
+// pumping (a pumped task may itself call `tcp_recv_timeout_coop`,
+// which would recurse).  Beyond `MAX_COOP_PUMP_DEPTH` the call
+// degrades to a plain reactor wait — correctness preserved,
+// just no further cooperative interleaving.
+
+/// Maximum nested cooperative-pump depth before degrading to a
+/// plain (OS-thread-blocking) reactor wait.  16 is generous —
+/// real Verum task graphs rarely nest beyond 3-4 levels of await.
+const MAX_COOP_PUMP_DEPTH: u32 = 16;
+
+/// One slice of the cooperative wait — the per-iteration kernel
+/// wait latency.  Short enough that a freshly-arrived ready task
+/// is picked up within ~5 ms; long enough that we don't burn CPU
+/// in a tight poll loop when nothing is happening.
+const COOP_PUMP_SLICE_MS: i64 = 5;
+
+/// Cooperative variant of `io_wait_readable` — same return
+/// convention, but pumps ready tasks between kernel waits.
+/// `state` is read-write because pumping a task mutates the
+/// interpreter's full state.
+pub fn io_wait_readable_coop(
+    state: &mut crate::interpreter::state::InterpreterState,
+    fd: i64,
+    timeout_ms: i64,
+) -> i64 {
+    coop_wait(state, fd, true, timeout_ms)
+}
+
+/// Cooperative variant of `io_wait_writable`.
+pub fn io_wait_writable_coop(
+    state: &mut crate::interpreter::state::InterpreterState,
+    fd: i64,
+    timeout_ms: i64,
+) -> i64 {
+    coop_wait(state, fd, false, timeout_ms)
+}
+
+fn coop_wait(
+    state: &mut crate::interpreter::state::InterpreterState,
+    fd: i64,
+    readable: bool,
+    timeout_ms: i64,
+) -> i64 {
+    // Beyond max depth, fall back to plain blocking — preserves
+    // correctness while preventing unbounded recursion in
+    // pathological many-task scenarios.
+    if state.coop_pump_depth >= MAX_COOP_PUMP_DEPTH {
+        return if readable {
+            io_wait_readable(fd, timeout_ms)
+        } else {
+            io_wait_writable(fd, timeout_ms)
+        };
+    }
+
+    let deadline = std::time::Instant::now()
+        + Duration::from_millis(timeout_ms.max(0) as u64);
+
+    loop {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return 0; // timeout
+        }
+        let remaining = deadline - now;
+        // Per-slice wait — short enough to interleave task pumps
+        // responsively, never longer than the user-requested
+        // remainder of the deadline.
+        let slice_ms = remaining
+            .as_millis()
+            .min(COOP_PUMP_SLICE_MS as u128)
+            .max(1) as i64;
+        let r = if readable {
+            io_wait_readable(fd, slice_ms)
+        } else {
+            io_wait_writable(fd, slice_ms)
+        };
+        match r {
+            1 => return 1, // ready
+            0 => {
+                // Slice timed out — try to drain ONE pending task.
+                // Bound by depth counter to prevent stack overflow.
+                state.coop_pump_depth += 1;
+                let _pumped = pump_one_ready_task(state);
+                state.coop_pump_depth -= 1;
+                // Loop continues; deadline check at the top exits
+                // when the user-requested total timeout elapses.
+            }
+            other => return other, // -1 reactor error
+        }
+    }
+}
+
+/// Run ONE ready pending task to completion.  Returns true if a
+/// task was actually pumped, false if the queue is empty.
+///
+/// **Why one-at-a-time:** we want to MAXIMIZE responsiveness back
+/// to the original waiter — running the entire queue would delay
+/// the original tcp_recv_timeout's next reactor poll by the
+/// arbitrarily-long execution time of the queued tasks.  One per
+/// slice gives a fair-share interleave.
+///
+/// **FIFO over LIFO:** uses `steal_ready()` (front-of-deque) rather
+/// than `next_ready()` (back).  The original task that's parked in
+/// the reactor wait was THE most-recently-spawned (by the spawner
+/// that immediately called await on it); pulling it back via the
+/// LIFO end would just re-park it.  Pumping from the FIFO end
+/// drains older sibling tasks that have been waiting longer —
+/// fair-share + minimum-latency interleave.
+fn pump_one_ready_task(state: &mut crate::interpreter::state::InterpreterState) -> bool {
+    let next_ready_id = state.tasks.steal_ready();
+    if let Some(tid) = next_ready_id {
+        // Errors from the pumped task should NOT propagate up to
+        // the original tcp_recv caller — they belong to the pumped
+        // task's own error handling.  The task's status is set to
+        // Failed by execute_pending_task on error; the original
+        // waiter doesn't care.
+        let _ = crate::interpreter::dispatch_table::execute_pending_task(state, tid);
+        true
+    } else {
+        false
+    }
+}
+
+/// Cooperative variant of `tcp_recv_timeout`.  Same shape, takes
+/// state for cooperative task pumping.
+pub fn tcp_recv_timeout_coop(
+    state: &mut crate::interpreter::state::InterpreterState,
+    fd: i64,
+    max_len: i64,
+    timeout_ms: i64,
+) -> (i64, String) {
+    if max_len <= 0 {
+        return (0, String::new());
+    }
+    let cap = max_len.min(1 << 20) as usize;
+    let mut buf = vec![0_u8; cap];
+    let raw_fd: i64 = {
+        let map = REGISTRY.lock().unwrap();
+        match map.get(&fd) {
+            Some(NetResource::Stream(s)) => stream_raw_fd(s),
+            _ => return (NET_STATUS_IO_ERROR, String::new()),
+        }
+    };
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+    loop {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return (NET_STATUS_TIMEOUT, String::new());
+        }
+        let remaining_ms = (deadline - now).as_millis() as i64;
+        match io_wait_readable_coop(state, raw_fd, remaining_ms.max(1)) {
+            0 => return (NET_STATUS_TIMEOUT, String::new()),
+            1 => {}
+            _ => return (NET_STATUS_REACTOR_ERROR, String::new()),
+        }
+        let n = unsafe {
+            libc::recv(
+                raw_fd as libc::c_int,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+                libc::MSG_DONTWAIT,
+            )
+        };
+        if n > 0 {
+            let n = n as usize;
+            buf.truncate(n);
+            return (n as i64, String::from_utf8_lossy(&buf).into_owned());
+        } else if n == 0 {
+            if !verify_real_eof(raw_fd) {
+                continue;
+            }
+            return (NET_STATUS_EOF, String::new());
+        } else {
+            let err = std::io::Error::last_os_error();
+            match err.kind() {
+                std::io::ErrorKind::WouldBlock => continue,
+                std::io::ErrorKind::Interrupted => continue,
+                _ => return (NET_STATUS_IO_ERROR, String::new()),
+            }
+        }
+    }
+}
+
+/// Cooperative variant of `tcp_accept_timeout`.
+pub fn tcp_accept_timeout_coop(
+    state: &mut crate::interpreter::state::InterpreterState,
+    listen_fd: i64,
+    timeout_ms: i64,
+) -> i64 {
+    let raw_fd: i64 = {
+        let map = REGISTRY.lock().unwrap();
+        match map.get(&listen_fd) {
+            Some(NetResource::Listener(l)) => listener_raw_fd(l),
+            _ => -1,
+        }
+    };
+    let effective_fd = if raw_fd >= 0 { raw_fd } else { listen_fd };
+    if effective_fd < 0 {
+        return NET_STATUS_IO_ERROR;
+    }
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+    loop {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return NET_STATUS_TIMEOUT;
+        }
+        let remaining_ms = (deadline - now).as_millis() as i64;
+        match io_wait_readable_coop(state, effective_fd, remaining_ms.max(1)) {
+            0 => return NET_STATUS_TIMEOUT,
+            1 => {}
+            _ => return NET_STATUS_REACTOR_ERROR,
+        }
+        let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+        let mut peer_len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+        #[cfg(target_os = "linux")]
+        let conn_fd = unsafe {
+            libc::accept4(
+                effective_fd as libc::c_int,
+                &mut peer as *mut _ as *mut libc::sockaddr,
+                &mut peer_len,
+                libc::SOCK_CLOEXEC,
+            )
+        };
+        #[cfg(not(target_os = "linux"))]
+        let conn_fd = unsafe {
+            libc::accept(
+                effective_fd as libc::c_int,
+                &mut peer as *mut _ as *mut libc::sockaddr,
+                &mut peer_len,
+            )
+        };
+        if conn_fd >= 0 {
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::FromRawFd;
+                let stream = unsafe { TcpStream::from_raw_fd(conn_fd) };
+                return register(NetResource::Stream(stream));
+            }
+            #[cfg(not(unix))]
+            return NET_STATUS_IO_ERROR;
+        }
+        let err = std::io::Error::last_os_error();
+        match err.kind() {
+            std::io::ErrorKind::WouldBlock => continue,
+            std::io::ErrorKind::Interrupted => continue,
+            _ => return NET_STATUS_IO_ERROR,
+        }
+    }
+}
+
+/// Cooperative variant of `udp_recv_from_timeout`.
+pub fn udp_recv_from_timeout_coop(
+    state: &mut crate::interpreter::state::InterpreterState,
+    fd: i64,
+    max_len: i64,
+    timeout_ms: i64,
+) -> (i64, String, Option<(u8, String, i64)>) {
+    if max_len <= 0 {
+        return (0, String::new(), None);
+    }
+    let cap = max_len.min(1 << 20) as usize;
+    let mut buf = vec![0_u8; cap];
+    let raw_fd: i64 = {
+        let map = REGISTRY.lock().unwrap();
+        match map.get(&fd) {
+            Some(NetResource::Udp(s)) => udp_raw_fd(s),
+            _ => return (NET_STATUS_IO_ERROR, String::new(), None),
+        }
+    };
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+    loop {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return (NET_STATUS_TIMEOUT, String::new(), None);
+        }
+        let remaining_ms = (deadline - now).as_millis() as i64;
+        match io_wait_readable_coop(state, raw_fd, remaining_ms.max(1)) {
+            0 => return (NET_STATUS_TIMEOUT, String::new(), None),
+            1 => {}
+            _ => return (NET_STATUS_REACTOR_ERROR, String::new(), None),
+        }
+        let mut peer_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+        let mut peer_len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+        let n = unsafe {
+            libc::recvfrom(
+                raw_fd as libc::c_int,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+                libc::MSG_DONTWAIT,
+                &mut peer_storage as *mut _ as *mut libc::sockaddr,
+                &mut peer_len,
+            )
+        };
+        if n > 0 {
+            let n = n as usize;
+            buf.truncate(n);
+            let peer_tuple = decode_sockaddr_storage(&peer_storage, peer_len);
+            return (n as i64, String::from_utf8_lossy(&buf).into_owned(), peer_tuple);
+        } else if n == 0 {
+            let peer_tuple = decode_sockaddr_storage(&peer_storage, peer_len);
+            return (0, String::new(), peer_tuple);
+        } else {
+            let err = std::io::Error::last_os_error();
+            match err.kind() {
+                std::io::ErrorKind::WouldBlock => continue,
+                std::io::ErrorKind::Interrupted => continue,
+                _ => return (NET_STATUS_IO_ERROR, String::new(), None),
+            }
+        }
+    }
+}
+
+/// Cooperative variant of `tcp_send_timeout`.
+pub fn tcp_send_timeout_coop(
+    state: &mut crate::interpreter::state::InterpreterState,
+    fd: i64,
+    data: &[u8],
+    timeout_ms: i64,
+) -> i64 {
+    if data.is_empty() {
+        return 0;
+    }
+    let raw_fd: i64 = {
+        let map = REGISTRY.lock().unwrap();
+        match map.get(&fd) {
+            Some(NetResource::Stream(s)) => stream_raw_fd(s),
+            _ => return NET_STATUS_IO_ERROR,
+        }
+    };
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+    let mut written = 0_usize;
+    while written < data.len() {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return if written > 0 { written as i64 } else { NET_STATUS_TIMEOUT };
+        }
+        let remaining_ms = (deadline - now).as_millis() as i64;
+        match io_wait_writable_coop(state, raw_fd, remaining_ms.max(1)) {
+            0 => return if written > 0 { written as i64 } else { NET_STATUS_TIMEOUT },
+            1 => {}
+            _ => return NET_STATUS_REACTOR_ERROR,
+        }
+        let flags = libc::MSG_DONTWAIT | platform_msg_nosignal();
+        let n = unsafe {
+            libc::send(
+                raw_fd as libc::c_int,
+                data[written..].as_ptr() as *const libc::c_void,
+                data.len() - written,
+                flags,
+            )
+        };
+        if n > 0 {
+            written += n as usize;
+        } else if n == 0 {
+            return NET_STATUS_EOF;
+        } else {
+            let err = std::io::Error::last_os_error();
+            match err.kind() {
+                std::io::ErrorKind::WouldBlock => continue,
+                std::io::ErrorKind::Interrupted => continue,
+                _ => return if written > 0 { written as i64 } else { NET_STATUS_IO_ERROR },
+            }
+        }
+    }
+    written as i64
+}
+
 pub fn tcp_accept_timeout(listen_fd: i64, timeout_ms: i64) -> i64 {
     // Read the listener's raw_fd briefly under the lock — the
     // registry holds the listener alive throughout this call (we
@@ -1659,6 +2038,105 @@ mod tests {
         l.set_nonblocking(true).unwrap();
         let fd = l.as_raw_fd() as i64;
         assert_eq!(io_wait_readable(fd, 80), 0);
+    }
+
+    // VBC-COOP-SCHED-1 -------------------------------------------------------
+
+    /// Cooperative wait pumps pending tasks during the kernel
+    /// wait.  Pin the contract: when `io_wait_readable_coop` is
+    /// called on a silent fd with a timeout AND the InterpreterState
+    /// has pending tasks queued, those tasks GET RUN before the
+    /// wait deadline expires.
+    ///
+    /// This is the central architectural property of VBC-COOP-SCHED-1
+    /// — without it, a Verum task parked in `tcp_recv_timeout` would
+    /// stall every other task in the run-queue.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn coop_wait_pumps_pending_tasks_before_timeout() {
+        let _guard = REACTOR_TEST_MUTEX.lock().unwrap();
+        use crate::interpreter::state::InterpreterState;
+        use crate::module::{FunctionId, VbcModule};
+        use std::os::fd::AsRawFd;
+        use std::sync::Arc;
+
+        // Build a minimal interpreter state with the singleton
+        // synthetic module (no functions needed — we only check
+        // that pump_one_ready_task short-circuits when there are
+        // no real functions to dispatch).
+        let module = Arc::new(VbcModule::new("coop_test".to_string()));
+        let mut state = InterpreterState::new(module);
+
+        // Bind a silent listener so the wait must time out.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.set_nonblocking(true).unwrap();
+        let fd = l.as_raw_fd() as i64;
+
+        // Pre-condition: zero pump depth, zero tasks.
+        assert_eq!(state.coop_pump_depth, 0);
+        assert!(state.tasks.is_empty());
+
+        // Wait for a tiny window — the cooperative version must
+        // still time out, but it should NOT stack-overflow or
+        // misbehave with an empty task queue.
+        let start = std::time::Instant::now();
+        let r = io_wait_readable_coop(&mut state, fd, 80);
+        let elapsed = start.elapsed();
+        assert_eq!(r, 0, "expected timeout, got {r}");
+        assert!(elapsed >= Duration::from_millis(60));
+        assert!(elapsed < Duration::from_secs(2));
+        // Pump depth must return to 0 after the call.
+        assert_eq!(state.coop_pump_depth, 0);
+
+        // Now add a synthetic task that fails immediately
+        // (FunctionId(0) doesn't exist in the empty module — the
+        // pump's `execute_pending_task` will error out, and we
+        // intentionally swallow the error).  The wait should still
+        // time out, NOT crash, and the task should be processed
+        // (status flipped to Failed).
+        let task_id = state.tasks.spawn(FunctionId(0));
+        assert!(state.tasks.has_pending());
+        let r2 = io_wait_readable_coop(&mut state, fd, 80);
+        assert_eq!(r2, 0, "expected timeout, got {r2}");
+        // Task was pumped — its status is now Failed (no func 0).
+        let task_status = state.tasks.get(task_id).map(|t| t.status);
+        assert!(
+            !matches!(task_status, Some(crate::interpreter::state::TaskStatus::Pending)),
+            "task should have been pumped (got status {task_status:?})"
+        );
+        // Pump depth back to 0.
+        assert_eq!(state.coop_pump_depth, 0);
+    }
+
+    /// Recursion guard: `io_wait_readable_coop` at MAX_COOP_PUMP_DEPTH
+    /// degrades to plain blocking — preserves correctness, prevents
+    /// unbounded stack growth in pathological many-task graphs.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn coop_wait_at_max_depth_falls_back_to_plain_block() {
+        let _guard = REACTOR_TEST_MUTEX.lock().unwrap();
+        use crate::interpreter::state::InterpreterState;
+        use crate::module::VbcModule;
+        use std::os::fd::AsRawFd;
+        use std::sync::Arc;
+
+        let module = Arc::new(VbcModule::new("coop_max_depth".to_string()));
+        let mut state = InterpreterState::new(module);
+        // Force the depth to the cap.
+        state.coop_pump_depth = MAX_COOP_PUMP_DEPTH;
+
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.set_nonblocking(true).unwrap();
+        let fd = l.as_raw_fd() as i64;
+
+        let start = std::time::Instant::now();
+        let r = io_wait_readable_coop(&mut state, fd, 60);
+        let elapsed = start.elapsed();
+        assert_eq!(r, 0);
+        assert!(elapsed >= Duration::from_millis(40));
+        assert!(elapsed < Duration::from_secs(2));
+        // Depth unchanged (we degraded to plain wait).
+        assert_eq!(state.coop_pump_depth, MAX_COOP_PUMP_DEPTH);
     }
 }
 

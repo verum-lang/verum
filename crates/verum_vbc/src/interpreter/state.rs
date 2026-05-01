@@ -605,6 +605,17 @@ pub struct InterpreterState {
     /// loops that span nested dispatch calls from bypassing the instruction limit.
     pub global_instruction_count: u64,
 
+    /// VBC-COOP-SCHED-1 — current depth of nested cooperative
+    /// task pumping.  Incremented when a reactor-blocking
+    /// intrinsic (`tcp_recv_timeout` etc.) decides to pump a
+    /// pending ready task instead of OS-thread-blocking; decremented
+    /// when the pumped task returns.  Bounded by
+    /// `MAX_COOP_PUMP_DEPTH` (16) — beyond that, cooperative pumping
+    /// degrades to plain blocking to prevent stack overflow under
+    /// pathological many-task pressure.  Zero by default — single-
+    /// task scripts are unaffected.
+    pub coop_pump_depth: u32,
+
     /// Permission router for intrinsic gating (#12 / P3.2).
     ///
 
@@ -2384,6 +2395,7 @@ impl InterpreterState {
             ffi_array_buffers: Vec::new(),
             pending_drops: Vec::new(),
             global_instruction_count: 0,
+            coop_pump_depth: 0,
             permission_router: Box::new(
                 crate::interpreter::permission::PermissionRouter::allow_all(),
             ),

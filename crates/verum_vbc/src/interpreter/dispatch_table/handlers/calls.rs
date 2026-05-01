@@ -1528,24 +1528,25 @@ fn try_dispatch_intrinsic_by_name(
             Ok(Some(Value::from_i64(super::net_runtime::udp_close(fd))))
         }
 
-        // --- VBC-NET-RT-2: reactor-backed timeout-bound I/O ---
-        // Generic readiness primitives — these are the Tier-0
-        // host-side surface of `core/sys/io_engine` semantics.
-        // See `crate::interpreter::reactor` for the kqueue/epoll
-        // backend.
+        // --- VBC-NET-RT-2 + VBC-COOP-SCHED-1: reactor-backed,
+        //     cooperatively-scheduled timeout-bound I/O ---
+        // Generic readiness primitives.  At the intrinsic boundary
+        // we use the COOPERATIVE variants — they pump pending
+        // ready tasks during the wait, so a Verum task parked on
+        // I/O doesn't starve concurrent tasks.  Direct Rust callers
+        // that want plain blocking behaviour reach for the non-
+        // _coop variants in net_runtime directly.
         "__io_wait_readable_raw" | "io_wait_readable" => {
             let fd = get_i64_arg(state, 0);
             let timeout_ms = get_i64_arg(state, 1);
-            Ok(Some(Value::from_i64(
-                super::net_runtime::io_wait_readable(fd, timeout_ms),
-            )))
+            let r = super::net_runtime::io_wait_readable_coop(state, fd, timeout_ms);
+            Ok(Some(Value::from_i64(r)))
         }
         "__io_wait_writable_raw" | "io_wait_writable" => {
             let fd = get_i64_arg(state, 0);
             let timeout_ms = get_i64_arg(state, 1);
-            Ok(Some(Value::from_i64(
-                super::net_runtime::io_wait_writable(fd, timeout_ms),
-            )))
+            let r = super::net_runtime::io_wait_writable_coop(state, fd, timeout_ms);
+            Ok(Some(Value::from_i64(r)))
         }
         // Timeout-bound TCP/UDP variants.  Status codes:
         //   >0 = bytes transferred / new fd
@@ -1557,17 +1558,15 @@ fn try_dispatch_intrinsic_by_name(
         "__tcp_accept_timeout_raw" | "tcp_accept_timeout" => {
             let listen_fd = get_i64_arg(state, 0);
             let timeout_ms = get_i64_arg(state, 1);
-            Ok(Some(Value::from_i64(
-                super::net_runtime::tcp_accept_timeout(listen_fd, timeout_ms),
-            )))
+            let r = super::net_runtime::tcp_accept_timeout_coop(state, listen_fd, timeout_ms);
+            Ok(Some(Value::from_i64(r)))
         }
         "__tcp_send_timeout_raw" | "tcp_send_timeout" => {
             let fd = get_i64_arg(state, 0);
             let data = super::string_helpers::resolve_string_value(&get_arg(state, 1), state);
             let timeout_ms = get_i64_arg(state, 2);
-            Ok(Some(Value::from_i64(
-                super::net_runtime::tcp_send_timeout(fd, data.as_bytes(), timeout_ms),
-            )))
+            let r = super::net_runtime::tcp_send_timeout_coop(state, fd, data.as_bytes(), timeout_ms);
+            Ok(Some(Value::from_i64(r)))
         }
         "__tcp_recv_timeout_raw" | "tcp_recv_timeout" => {
             // Returns Text body; status code is observable via
@@ -1577,7 +1576,7 @@ fn try_dispatch_intrinsic_by_name(
             let max_len = get_i64_arg(state, 1);
             let timeout_ms = get_i64_arg(state, 2);
             let (_status, body) =
-                super::net_runtime::tcp_recv_timeout(fd, max_len, timeout_ms);
+                super::net_runtime::tcp_recv_timeout_coop(state, fd, max_len, timeout_ms);
             let v = super::string_helpers::alloc_string_value(state, &body)?;
             Ok(Some(v))
         }
@@ -1585,6 +1584,10 @@ fn try_dispatch_intrinsic_by_name(
             let host = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
             let port = get_i64_arg(state, 1);
             let timeout_ms = get_i64_arg(state, 2);
+            // tcp_connect_timeout doesn't reactor-wait — it uses
+            // std's connect_timeout directly.  No cooperative
+            // variant needed (DNS resolution + connect handshake
+            // is a single bounded blocking call).
             Ok(Some(Value::from_i64(
                 super::net_runtime::tcp_connect_timeout(&host, port, timeout_ms),
             )))
@@ -1594,7 +1597,7 @@ fn try_dispatch_intrinsic_by_name(
             let max_len = get_i64_arg(state, 1);
             let timeout_ms = get_i64_arg(state, 2);
             let (_status, body, _peer) =
-                super::net_runtime::udp_recv_from_timeout(fd, max_len, timeout_ms);
+                super::net_runtime::udp_recv_from_timeout_coop(state, fd, max_len, timeout_ms);
             let v = super::string_helpers::alloc_string_value(state, &body)?;
             Ok(Some(v))
         }
