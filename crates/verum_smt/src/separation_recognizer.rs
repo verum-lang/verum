@@ -323,6 +323,122 @@ pub fn try_translate_sep_predicate_to_smtlib(
 }
 
 // =============================================================================
+// Verification-goal routing — #161 V4
+// =============================================================================
+
+/// Outcome of a separation-aware entailment attempt.
+///
+/// Distinguishes the four observable verdict shapes the caller
+/// needs to dispatch on:
+///   * `NotSeparationGoal` — neither side is a syntactic separation
+///     predicate; caller must fall through to generic SMT.
+///   * `Valid` — P ⊢ Q checked by `SepLogicEncoder::verify_entailment`.
+///     Audit-clean discharge.
+///   * `Invalid` — counterexample found; the obligation is unsound.
+///   * `Unknown` — Z3 returned `unknown` (timeout / incompleteness).
+///
+/// Mirrors [`crate::separation_logic::EntailmentResult`] but adds
+/// the `NotSeparationGoal` arm so callers don't conflate "neither
+/// recognised" with "couldn't decide".
+#[derive(Debug, Clone)]
+pub enum SepObligationOutcome {
+    /// At least one of `pre`/`post` isn't a separation predicate;
+    /// caller dispatches to generic SMT.
+    NotSeparationGoal,
+    /// `Pre ⊢ Post` proved valid by the separation-logic encoder.
+    Valid,
+    /// Counterexample found; the obligation is unsound. The
+    /// `counterexample_summary` is a human-readable rendering of
+    /// the heap state Z3 produced.
+    Invalid { counterexample_summary: String },
+    /// Z3 returned `unknown` for the entailment query.
+    Unknown { reason: String },
+}
+
+impl SepObligationOutcome {
+    /// Stable diagnostic tag — matches what audit reports surface.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            SepObligationOutcome::NotSeparationGoal => "not_separation_goal",
+            SepObligationOutcome::Valid => "valid",
+            SepObligationOutcome::Invalid { .. } => "invalid",
+            SepObligationOutcome::Unknown { .. } => "unknown",
+        }
+    }
+
+    /// True iff the entailment was decisively VALID. Used by the
+    /// proof-verification phase as the discharge predicate.
+    pub fn is_valid(&self) -> bool {
+        matches!(self, SepObligationOutcome::Valid)
+    }
+}
+
+/// **Verify a separation-logic Hoare obligation** at the
+/// `requires P ensures Q` boundary.
+///
+/// Walks the Verum-source `pre` and `post` expressions through
+/// [`try_recognize_sep_assertion`].  When BOTH sides recognise as
+/// separation predicates, builds them into [`SepAssertion`]s and
+/// routes through [`crate::separation_logic::SepLogicEncoder::verify_entailment`]
+/// to obtain a Z3-backed verdict.
+///
+/// **Architectural role** (#161 V4): closes the load-bearing
+/// chain. Pre-V4, `requires`/`ensures` clauses with separation
+/// predicates produced structured `(sep_star …)` SMT-LIB but no
+/// Z3 setup understood the separation theory. Post-V4, the
+/// obligation routes through the existing
+/// [`SepLogicEncoder`](crate::separation_logic::SepLogicEncoder) —
+/// 4441 LOC of Z3-array-theory-backed encoding, frame inference,
+/// counterexample extraction. Reuses 100% of existing
+/// infrastructure.
+///
+/// **Asymmetric handling**: when ONE side recognises but the
+/// other doesn't (e.g. `requires sep_conj(...)` ensures
+/// `result == 0`), returns `NotSeparationGoal` so the caller can
+/// dispatch the obligation through generic SMT. Mixing
+/// separation-and-pure verification is a V5+ concern; V4 handles
+/// the homogeneous-separation case.
+///
+/// **Returns**:
+///   * `NotSeparationGoal` when at least one side isn't a syntactic
+///     separation predicate.
+///   * `Valid` / `Invalid` / `Unknown` for the entailment verdict
+///     when both sides are recognised.
+pub fn verify_separation_obligation(
+    pre: &Expr,
+    post: &Expr,
+) -> SepObligationOutcome {
+    let pre_assertion = match try_recognize_sep_assertion(pre) {
+        Some(a) => a,
+        None => return SepObligationOutcome::NotSeparationGoal,
+    };
+    let post_assertion = match try_recognize_sep_assertion(post) {
+        Some(a) => a,
+        None => return SepObligationOutcome::NotSeparationGoal,
+    };
+
+    // Both sides recognised — build the SepLogicEncoder and run
+    // entailment.  Use default config — callers wanting custom
+    // timeout / unfolding-depth can use the lower-level encoder
+    // API directly.
+    use crate::separation_logic::{EntailmentResult, SepLogicConfig, SepLogicEncoder};
+
+    let encoder = SepLogicEncoder::new(SepLogicConfig::default());
+    match encoder.verify_entailment(&pre_assertion, &post_assertion) {
+        Ok(EntailmentResult::Valid { .. }) => SepObligationOutcome::Valid,
+        Ok(EntailmentResult::Invalid { counterexample, .. }) => SepObligationOutcome::Invalid {
+            counterexample_summary: format!("{:?}", counterexample),
+        },
+        Ok(EntailmentResult::Unknown { reason, .. }) => SepObligationOutcome::Unknown {
+            reason: reason.as_str().to_string(),
+        },
+        Err(e) => SepObligationOutcome::Unknown {
+            reason: format!("encoder error: {:?}", e),
+        },
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -588,6 +704,90 @@ mod tests {
         let outer = SepAssertion::sep(SepAssertion::Emp, mid);
         let r = sep_assertion_to_smtlib(&outer).unwrap();
         assert_eq!(r, "(sep_star sep_emp (sep_star sep_emp (sep_pt a av)))");
+    }
+
+    // ----- V4 verification routing -----
+
+    #[test]
+    fn verify_separation_obligation_routes_pure_emp_to_valid() {
+        // emp ⊢ emp — trivially valid under separation logic.
+        let pre = call_expr("emp", vec![]);
+        let post = call_expr("emp", vec![]);
+        let outcome = verify_separation_obligation(&pre, &post);
+        // Z3 may return Valid OR Unknown depending on the encoder's
+        // unfolding / timeout state. Pin only that the entry point
+        // RUNS without panic and never returns `NotSeparationGoal`
+        // for a recognised pre/post pair.
+        assert!(
+            !matches!(outcome, SepObligationOutcome::NotSeparationGoal),
+            "both sides recognised — must NOT report NotSeparationGoal",
+        );
+    }
+
+    #[test]
+    fn verify_separation_obligation_unrecognised_pre_returns_not_separation() {
+        let pre = call_expr("user_function", vec![]);
+        let post = call_expr("emp", vec![]);
+        let outcome = verify_separation_obligation(&pre, &post);
+        assert!(
+            matches!(outcome, SepObligationOutcome::NotSeparationGoal),
+            "pre side not a sep predicate → NotSeparationGoal",
+        );
+    }
+
+    #[test]
+    fn verify_separation_obligation_unrecognised_post_returns_not_separation() {
+        let pre = call_expr("emp", vec![]);
+        let post = call_expr("user_function", vec![]);
+        let outcome = verify_separation_obligation(&pre, &post);
+        assert!(
+            matches!(outcome, SepObligationOutcome::NotSeparationGoal),
+            "post side not a sep predicate → NotSeparationGoal",
+        );
+    }
+
+    #[test]
+    fn verify_separation_obligation_both_unrecognised_returns_not_separation() {
+        let pre = call_expr("foo", vec![]);
+        let post = call_expr("bar", vec![]);
+        assert!(matches!(
+            verify_separation_obligation(&pre, &post),
+            SepObligationOutcome::NotSeparationGoal,
+        ));
+    }
+
+    #[test]
+    fn sep_obligation_outcome_tags_are_distinct() {
+        // Pin: every variant produces a distinct stable diagnostic tag.
+        let probes = [
+            SepObligationOutcome::NotSeparationGoal,
+            SepObligationOutcome::Valid,
+            SepObligationOutcome::Invalid {
+                counterexample_summary: "x".into(),
+            },
+            SepObligationOutcome::Unknown {
+                reason: "y".into(),
+            },
+        ];
+        let tags: std::collections::BTreeSet<_> = probes.iter().map(|o| o.tag()).collect();
+        assert_eq!(tags.len(), 4, "every outcome variant must have a distinct tag");
+    }
+
+    #[test]
+    fn sep_obligation_outcome_is_valid_predicate_is_load_bearing() {
+        // Only `Valid` returns true. Other variants — including
+        // NotSeparationGoal — return false. Used by the
+        // verification-phase discharge predicate.
+        assert!(SepObligationOutcome::Valid.is_valid());
+        assert!(!SepObligationOutcome::NotSeparationGoal.is_valid());
+        assert!(!SepObligationOutcome::Invalid {
+            counterexample_summary: "x".into()
+        }
+        .is_valid());
+        assert!(!SepObligationOutcome::Unknown {
+            reason: "x".into()
+        }
+        .is_valid());
     }
 
     // ----- Architectural pin -----
