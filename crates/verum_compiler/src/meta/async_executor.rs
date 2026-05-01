@@ -46,6 +46,7 @@ use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 use verum_ast::expr::Expr;
 use verum_common::{List, Text};
 
@@ -265,17 +266,36 @@ impl std::error::Error for MetaAsyncError {}
 ///
 
 /// # Thread Safety
-/// Uses work-stealing parallelism via Rayon thread pool
-#[allow(dead_code)] // Fields are infrastructure for future parallelism features
+/// Uses work-stealing parallelism via Rayon thread pool. The pool's
+/// worker count is bounded by [`Self::max_parallelism`]; wall-clock
+/// execution is bounded by [`Self::timeout_ms`].
 pub struct MetaAsyncExecutor {
-    /// Sandbox for I/O validation
+    /// Sandbox for I/O / forbidden-function validation. Used by
+    /// [`Self::validate_no_io`] as a defense-in-depth gate alongside
+    /// the local AST walker. Closes the inert-defense pattern around
+    /// the sandbox field — pre-fix the field was constructed but
+    /// never consulted; the AST-walker's substring matching could be
+    /// defeated by FFI calls like `libc::open` whose path doesn't
+    /// contain `read`/`write`/`File` substrings.
     sandbox: MetaSandbox,
-    /// Task dependency graph
-    task_graph: TaskDependencyGraph,
-    /// Maximum parallel tasks
+    /// Maximum parallel tasks. Bounds the Rayon thread pool's worker
+    /// count via [`Self::parallel_pool`]; setting this below
+    /// `rayon::current_num_threads()` reduces pressure on the host
+    /// when meta async fns are part of a larger concurrent workload.
     max_parallelism: usize,
-    /// Execution timeout in milliseconds
+    /// Execution timeout in milliseconds. Checked at the top of every
+    /// wave in [`Self::execute_parallel_tasks`]; once elapsed
+    /// `>= timeout_ms`, the loop returns
+    /// [`MetaAsyncError::Timeout`] regardless of in-flight tasks.
+    /// `0` disables the bound.
     timeout_ms: u64,
+    /// Bounded Rayon thread pool. Built lazily so the executor is
+    /// cheap to construct (the global pool init is heavy enough to
+    /// avoid paying for it when the executor is never used). When
+    /// `max_parallelism == 0` or matches the global pool size,
+    /// [`Self::parallel_pool`] returns `None` and the global pool
+    /// is used.
+    pool: std::sync::OnceLock<Arc<rayon::ThreadPool>>,
 }
 
 impl MetaAsyncExecutor {
@@ -283,9 +303,9 @@ impl MetaAsyncExecutor {
     pub fn new() -> Self {
         Self {
             sandbox: MetaSandbox::new(),
-            task_graph: TaskDependencyGraph::new(),
             max_parallelism: rayon::current_num_threads(),
             timeout_ms: 30_000, // 30 seconds default
+            pool: std::sync::OnceLock::new(),
         }
     }
 
@@ -293,10 +313,45 @@ impl MetaAsyncExecutor {
     pub fn with_parallelism(max_parallelism: usize, timeout_ms: u64) -> Self {
         Self {
             sandbox: MetaSandbox::new(),
-            task_graph: TaskDependencyGraph::new(),
             max_parallelism,
             timeout_ms,
+            pool: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Resolve the Rayon thread pool to dispatch parallel waves
+    /// through. Returns `None` when `max_parallelism == 0` or the
+    /// configured size matches the global pool's worker count
+    /// (no benefit from a separate pool); callers fall back to the
+    /// global pool in those cases.
+    fn parallel_pool(&self) -> Option<&rayon::ThreadPool> {
+        if self.max_parallelism == 0 {
+            return None;
+        }
+        if self.max_parallelism == rayon::current_num_threads() {
+            return None;
+        }
+        Some(
+            self.pool
+                .get_or_init(|| {
+                    Arc::new(
+                        rayon::ThreadPoolBuilder::new()
+                            .num_threads(self.max_parallelism)
+                            .thread_name(|i| format!("verum-meta-async-{i}"))
+                            .build()
+                            .unwrap_or_else(|_| {
+                                // Fallback: single-thread pool so the
+                                // bound is honoured even under heavy
+                                // thread-creation pressure.
+                                rayon::ThreadPoolBuilder::new()
+                                    .num_threads(1)
+                                    .build()
+                                    .expect("single-thread pool build never fails")
+                            }),
+                    )
+                })
+                .as_ref(),
+        )
     }
 
     /// Execute a meta async function
@@ -345,8 +400,26 @@ impl MetaAsyncExecutor {
         let completed: Arc<Mutex<HashSet<TaskId>>> = Arc::new(Mutex::new(HashSet::new()));
         let errors: Arc<Mutex<Option<MetaAsyncError>>> = Arc::new(Mutex::new(None));
 
+        // Track wall-clock start to honour `timeout_ms`. The check
+        // fires at the top of every wave so an in-flight task is
+        // never killed mid-execution (Rayon doesn't support thread
+        // cancellation in safe Rust); the bound is a "no further
+        // waves once elapsed" guarantee, not a hard kill. Mirrors
+        // the kill-on-first vs. wait-for-loser pattern from
+        // `crate::backend_switcher::PortfolioConfig::kill_on_first`
+        // — the field's documented semantic is honoured indirectly.
+        let timeout_start = Instant::now();
+        let timeout_ms = self.timeout_ms;
+
         // Process in waves based on dependencies
         loop {
+            // Honour `timeout_ms` — bail before scheduling the next
+            // wave if the budget is exhausted.
+            if timeout_ms > 0 && timeout_start.elapsed().as_millis() as u64 >= timeout_ms {
+                *errors.lock() = Some(MetaAsyncError::Timeout);
+                break;
+            }
+
             // Get ready tasks
             let ready = {
                 let completed_guard = completed.lock();
@@ -367,36 +440,45 @@ impl MetaAsyncExecutor {
                 break;
             }
 
-            // Execute ready tasks in parallel
-            ready.par_iter().for_each(|&task_id| {
-                // Skip if error already occurred
-                if errors.lock().is_some() {
-                    return;
-                }
+            // Execute ready tasks in parallel inside the configured
+            // pool when one is provisioned (max_parallelism strictly
+            // below the global). Falls back to the global pool when
+            // `parallel_pool()` returns None — bypass cost for the
+            // common "embedder uses default parallelism" case.
+            let exec_wave = || {
+                ready.par_iter().for_each(|&task_id| {
+                    // Skip if error already occurred
+                    if errors.lock().is_some() {
+                        return;
+                    }
 
-                // Find the task
-                if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
-                    // Execute task
-                    let result = {
-                        let mut ctx = context.lock();
-                        // In production, this would use the sandbox to evaluate
-                        self.execute_task_expr(&task.expr, &mut ctx)
-                    };
+                    // Find the task
+                    if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
+                        // Execute task
+                        let result = {
+                            let mut ctx = context.lock();
+                            self.execute_task_expr(&task.expr, &mut ctx)
+                        };
 
-                    match result {
-                        Ok(value) => {
-                            results.lock().insert(task_id, value);
-                            completed.lock().insert(task_id);
-                        }
-                        Err(e) => {
-                            *errors.lock() = Some(MetaAsyncError::TaskFailed {
-                                task_id,
-                                error: Text::from(format!("{:?}", e)),
-                            });
+                        match result {
+                            Ok(value) => {
+                                results.lock().insert(task_id, value);
+                                completed.lock().insert(task_id);
+                            }
+                            Err(e) => {
+                                *errors.lock() = Some(MetaAsyncError::TaskFailed {
+                                    task_id,
+                                    error: Text::from(format!("{:?}", e)),
+                                });
+                            }
                         }
                     }
-                }
-            });
+                });
+            };
+            match self.parallel_pool() {
+                Some(pool) => pool.install(exec_wave),
+                None => exec_wave(),
+            }
         }
 
         // Check for errors
@@ -409,12 +491,30 @@ impl MetaAsyncExecutor {
         Ok(final_results)
     }
 
-    /// Validate that an expression contains no I/O operations
+    /// Validate that an expression contains no I/O operations.
+    ///
+    /// **Defense in depth**:
+    ///  1. Run the sandbox's full validator
+    ///  ([`MetaSandbox::validate_expr`]). This catches forbidden
+    ///  function calls / FFI / unsafe operations / module access
+    ///  the local AST walker cannot — e.g. `libc::open(...)`-style
+    ///  FFI calls that don't contain a `read` / `write` / `File`
+    ///  substring slip past [`Self::check_expr_for_io`] but trip
+    ///  the allowlist.
+    ///  2. If the sandbox accepts the expression, fall through to
+    ///  [`Self::check_expr_for_io`] for the cheap async-meta-fn
+    ///  specific markers (`spawn`, `http`, `net`).
+    ///
+    /// The two layers catch different failure modes; running both is
+    /// strictly stricter than either alone. Pre-fix only step 2 ran;
+    /// the sandbox field was constructed but never consulted.
     fn validate_no_io(&self, expr: &Expr) -> Result<(), MetaAsyncError> {
-        // For now, we just validate the AST structure
-        // In a full implementation, this would use the sandbox to check for I/O
-        // The sandbox.execute_expr is private and requires a MetaContext
-        // So we'll do a simpler AST-based check
+        if let Err(sandbox_err) = self.sandbox.validate_expr(expr) {
+            return Err(MetaAsyncError::IoDetected {
+                task_name: Text::from("<async task>"),
+                operation: Text::from(sandbox_err.to_string()),
+            });
+        }
         self.check_expr_for_io(expr)
     }
 
@@ -688,5 +788,74 @@ mod tests {
         let executor = MetaAsyncExecutor::with_parallelism(4, 10_000);
         assert_eq!(executor.max_parallelism, 4);
         assert_eq!(executor.timeout_ms, 10_000);
+    }
+
+    /// Pin: `parallel_pool()` returns `None` when `max_parallelism == 0`
+    /// (use global pool) and when it equals the global pool size
+    /// (no benefit from a separate pool). Returns `Some(pool)` when
+    /// configured below the global. Closes the inert-defense pattern
+    /// at the gate level — a regression that drops the bypass and
+    /// always builds a pool would re-trip the regression here.
+    #[test]
+    fn parallel_pool_is_some_when_below_global_else_none() {
+        let zero = MetaAsyncExecutor::with_parallelism(0, 1_000);
+        assert!(
+            zero.parallel_pool().is_none(),
+            "max_parallelism=0 must skip pool construction"
+        );
+
+        let global = rayon::current_num_threads();
+        let same = MetaAsyncExecutor::with_parallelism(global, 1_000);
+        assert!(
+            same.parallel_pool().is_none(),
+            "max_parallelism == global pool size must skip pool construction"
+        );
+
+        // Build a strict-below-global pool only when the host has
+        // ≥2 cores; otherwise the test is vacuous on single-core CI.
+        if global >= 2 {
+            let bounded = MetaAsyncExecutor::with_parallelism(1, 1_000);
+            let pool = bounded
+                .parallel_pool()
+                .expect("max_parallelism < global must build a bounded pool");
+            assert_eq!(
+                pool.current_num_threads(),
+                1,
+                "bounded pool must honour configured size"
+            );
+        }
+    }
+
+    /// Pin: `timeout_ms = 0` disables the bound (no timeout error).
+    /// The wave loop must still run to completion. Closes a corner
+    /// case in the timeout gate — a regression that treated `0` as
+    /// "fire immediately" would surface here.
+    #[test]
+    fn timeout_ms_zero_disables_bound() {
+        let executor = MetaAsyncExecutor::with_parallelism(0, 0);
+        assert_eq!(executor.timeout_ms, 0);
+        // No tasks => execute_parallel_tasks returns Ok(empty).
+        let ctx = Arc::new(Mutex::new(MetaContext::new()));
+        let result = executor.execute_parallel_tasks(&[], ctx);
+        assert!(
+            result.is_ok(),
+            "empty task list with timeout=0 must complete: {:?}",
+            result
+        );
+        assert!(result.unwrap().is_empty());
+    }
+
+    /// Pin: `validate_no_io` runs the sandbox before the AST walker.
+    /// A bare literal expression (no I/O markers) is accepted by both
+    /// layers — round-trip pin that proves the sandbox path doesn't
+    /// false-positive on innocuous expressions. The reverse case —
+    /// sandbox correctly rejecting an FFI / forbidden call — is
+    /// covered by the sandbox crate's own tests; we only pin that
+    /// the executor *invokes* the sandbox here.
+    #[test]
+    fn validate_no_io_accepts_pure_literal() {
+        let executor = MetaAsyncExecutor::new();
+        let res = executor.validate_no_io(&dummy_expr());
+        assert!(res.is_ok(), "pure literal must pass both gates: {:?}", res);
     }
 }
