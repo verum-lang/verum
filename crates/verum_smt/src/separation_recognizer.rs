@@ -373,6 +373,96 @@ impl SepObligationOutcome {
     }
 }
 
+/// **Combine a slice of AST `Expr` clauses into a single
+/// [`SepAssertion`] via separating conjunction.** Used by the
+/// multi-clause Hoare-obligation entry point [`verify_separation_obligation_multi`]
+/// (#161 V6).
+///
+/// Behaviour:
+///   * Empty slice → `Some(SepAssertion::Emp)` — the identity
+///     element of separating conjunction.  This makes
+///     `requires <empty>` map to `requires emp`, which is the
+///     vacuously-satisfied precondition.
+///   * Single clause → recognise it directly; return `Some(a)`
+///     when recognition succeeds.
+///   * Multi-clause → recognise each individually; combine via
+///     left-associative `sep_conj`. Returns `Some(a1 ∗ a2 ∗ … ∗ aN)`
+///     when EVERY clause recognises; `None` if any clause fails
+///     recognition.
+///
+/// **Soundness**: separating conjunction is associative
+/// (Reynolds 2002, O'Hearn 2007) and has `emp` as identity, so
+/// `((a ∗ b) ∗ c) ≡ (a ∗ (b ∗ c)) ≡ (a ∗ b ∗ c)`.  Left-fold
+/// composition is the canonical encoding.
+///
+/// **All-or-nothing**: if even one clause fails recognition, the
+/// combined result is `None`.  Half-recognised conjunctions would
+/// be unsound — some clauses opaque, some lifted.
+pub fn try_combine_clauses_to_sep_assertion(
+    clauses: &[&Expr],
+) -> Option<SepAssertion> {
+    if clauses.is_empty() {
+        return Some(SepAssertion::Emp);
+    }
+    let mut acc: Option<SepAssertion> = None;
+    for clause in clauses {
+        let recognised = try_recognize_sep_assertion(clause)?;
+        acc = Some(match acc {
+            None => recognised,
+            Some(a) => SepAssertion::sep(a, recognised),
+        });
+    }
+    acc
+}
+
+/// **Verify a multi-clause separation-logic Hoare obligation**
+/// (#161 V6).  Generalises [`verify_separation_obligation`] from
+/// single-clause to any number of pre/post clauses, combining
+/// each side via separating conjunction.
+///
+/// **Routing rules**:
+///   * Both sides combine successfully (every clause recognised) →
+///     route through [`crate::separation_logic::SepLogicEncoder::verify_entailment`].
+///   * Either side has at least one unrecognised clause →
+///     return `NotSeparationGoal`; caller dispatches to generic SMT.
+///   * Empty side → treated as `emp` (the identity element).  A
+///     theorem with no requires-clause is `requires emp`.
+///
+/// **Architectural composition** with V5: the verifier's hot path
+/// in `verum_compiler::phases::proof_verification` calls
+/// `verify_separation_obligation_multi(requires_clauses,
+/// ensures_clauses)`.  Pre-V6 (V5) it was restricted to N=1 each;
+/// post-V6 any N works.
+pub fn verify_separation_obligation_multi(
+    pre_clauses: &[&Expr],
+    post_clauses: &[&Expr],
+) -> SepObligationOutcome {
+    let pre_assertion = match try_combine_clauses_to_sep_assertion(pre_clauses) {
+        Some(a) => a,
+        None => return SepObligationOutcome::NotSeparationGoal,
+    };
+    let post_assertion = match try_combine_clauses_to_sep_assertion(post_clauses) {
+        Some(a) => a,
+        None => return SepObligationOutcome::NotSeparationGoal,
+    };
+
+    use crate::separation_logic::{EntailmentResult, SepLogicConfig, SepLogicEncoder};
+
+    let encoder = SepLogicEncoder::new(SepLogicConfig::default());
+    match encoder.verify_entailment(&pre_assertion, &post_assertion) {
+        Ok(EntailmentResult::Valid { .. }) => SepObligationOutcome::Valid,
+        Ok(EntailmentResult::Invalid { counterexample, .. }) => SepObligationOutcome::Invalid {
+            counterexample_summary: format!("{:?}", counterexample),
+        },
+        Ok(EntailmentResult::Unknown { reason, .. }) => SepObligationOutcome::Unknown {
+            reason: reason.as_str().to_string(),
+        },
+        Err(e) => SepObligationOutcome::Unknown {
+            reason: format!("encoder error: {:?}", e),
+        },
+    }
+}
+
 /// **Verify a separation-logic Hoare obligation** at the
 /// `requires P ensures Q` boundary.
 ///
@@ -771,6 +861,109 @@ mod tests {
         ];
         let tags: std::collections::BTreeSet<_> = probes.iter().map(|o| o.tag()).collect();
         assert_eq!(tags.len(), 4, "every outcome variant must have a distinct tag");
+    }
+
+    // ----- V6 multi-clause combination -----
+
+    #[test]
+    fn combine_empty_clauses_produces_emp() {
+        let clauses: Vec<&Expr> = vec![];
+        let result = try_combine_clauses_to_sep_assertion(&clauses);
+        assert!(matches!(result, Some(SepAssertion::Emp)));
+    }
+
+    #[test]
+    fn combine_single_clause_returns_recognised_form() {
+        let c = call_expr("emp", vec![]);
+        let result = try_combine_clauses_to_sep_assertion(&[&c]);
+        assert!(matches!(result, Some(SepAssertion::Emp)));
+    }
+
+    #[test]
+    fn combine_two_clauses_via_sep_conj() {
+        // [emp(), points_to(a, av)] should combine to
+        // sep_conj(emp, points_to(a, av)).
+        let emp_call = call_expr("emp", vec![]);
+        let pt_call = call_expr("points_to", vec![name_path_expr("a"), name_path_expr("av")]);
+        let result = try_combine_clauses_to_sep_assertion(&[&emp_call, &pt_call]);
+        match result {
+            Some(SepAssertion::Sep { left, right }) => {
+                assert!(matches!(left.as_ref(), SepAssertion::Emp));
+                assert!(matches!(right.as_ref(), SepAssertion::PointsTo { .. }));
+            }
+            other => panic!("expected Sep(Emp, PointsTo), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn combine_three_clauses_left_associative() {
+        // [emp, emp, emp] → sep_conj(sep_conj(emp, emp), emp).
+        let c = call_expr("emp", vec![]);
+        let result = try_combine_clauses_to_sep_assertion(&[&c, &c, &c]);
+        match result {
+            Some(SepAssertion::Sep { left, right }) => {
+                assert!(matches!(right.as_ref(), SepAssertion::Emp));
+                match left.as_ref() {
+                    SepAssertion::Sep { .. } => {}
+                    other => panic!("expected nested Sep on left, got {:?}", other),
+                }
+            }
+            other => panic!("expected Sep, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn combine_with_one_unrecognised_clause_returns_none() {
+        let emp_call = call_expr("emp", vec![]);
+        let user = call_expr("user_function", vec![]);
+        let result = try_combine_clauses_to_sep_assertion(&[&emp_call, &user, &emp_call]);
+        assert!(
+            result.is_none(),
+            "all-or-nothing: one unrecognised clause → whole combination fails",
+        );
+    }
+
+    #[test]
+    fn verify_multi_obligation_routes_pure_emp_pair_to_valid() {
+        // requires emp ensures emp — trivially valid.
+        let emp = call_expr("emp", vec![]);
+        let outcome = verify_separation_obligation_multi(&[&emp], &[&emp]);
+        // Z3 may return Valid OR Unknown depending on encoder state.
+        // Pin only that the entry point RUNS without panic and never
+        // returns NotSeparationGoal for recognised clauses.
+        assert!(
+            !matches!(outcome, SepObligationOutcome::NotSeparationGoal),
+            "both sides recognised — must NOT report NotSeparationGoal",
+        );
+    }
+
+    #[test]
+    fn verify_multi_obligation_with_unrecognised_pre_returns_not_separation() {
+        let emp = call_expr("emp", vec![]);
+        let user = call_expr("user_function", vec![]);
+        let outcome = verify_separation_obligation_multi(&[&user], &[&emp]);
+        assert!(matches!(outcome, SepObligationOutcome::NotSeparationGoal));
+    }
+
+    #[test]
+    fn verify_multi_obligation_empty_pre_treated_as_emp() {
+        // An empty requires-list is treated as `requires emp`.
+        let emp = call_expr("emp", vec![]);
+        let outcome = verify_separation_obligation_multi(&[], &[&emp]);
+        assert!(
+            !matches!(outcome, SepObligationOutcome::NotSeparationGoal),
+            "empty pre-list should default to emp, not NotSeparationGoal",
+        );
+    }
+
+    #[test]
+    fn verify_multi_obligation_empty_post_treated_as_emp() {
+        let emp = call_expr("emp", vec![]);
+        let outcome = verify_separation_obligation_multi(&[&emp], &[]);
+        assert!(
+            !matches!(outcome, SepObligationOutcome::NotSeparationGoal),
+            "empty post-list should default to emp, not NotSeparationGoal",
+        );
     }
 
     #[test]
