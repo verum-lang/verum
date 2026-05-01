@@ -3939,9 +3939,57 @@ impl VbcCodegen {
             // Regular function call
             // Use actual_arg_count (includes defaults) instead of args.len()
             let call_arg_count = func_info.param_count.max(args.len());
+            // **#332 dispatch-gap fix**: when `func_info.id == u32::MAX`
+            // (the FFI/intrinsic sentinel) and the FFI symbol map
+            // doesn't have a matching entry, emitting a `Call(u32::MAX)`
+            // here will fail downstream lowering with "function id
+            // 4294967295 not found in VBC module" and skip the entire
+            // enclosing function — which is what made os_mmap /
+            // os_alloc_segment / similar bodyless-declared FFI shims
+            // disappear from the AOT binary.
+            //
+            // Two roots can land here:
+            //   1. Cross-module alias: `mount sys.darwin.{safe_mmap as
+            //      mmap}` re-exports an intrinsic-attributed shim under
+            //      the alias `mmap`. The aliased FunctionInfo carries
+            //      the FFI sentinel because the underlying decl is
+            //      body-less, but the alias name is NOT in
+            //      `ffi_function_map`.
+            //   2. Stale registration: a register-once-per-module path
+            //      added FunctionInfo with id=u32::MAX into
+            //      `ctx.functions` for a name whose FFI symbol entry
+            //      lives in a different compilation unit's symbol
+            //      table.
+            //
+            // Fix: redirect to `UNRESOLVED_FN_ID` (`0x7FFFFFFF`,
+            // i32::MAX) which the LLVM lowering (instruction.rs:7826)
+            // handles as a graceful runtime-trap (const-zero return).
+            // Same architectural pattern as the existing #106 Path B
+            // bodyless-decl safety net for inner-closure resolution
+            // failures. The enclosing function compiles successfully
+            // and the call manifests at runtime as a zero return —
+            // observable in tests, far better than silently
+            // disappearing the entire calling function from the
+            // emitted binary.
+            const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
+            let final_func_id = if func_info.id.0 == u32::MAX {
+                if std::env::var_os("VERUM_AOT_TRACE_BAD_CALL").is_some() {
+                    eprintln!(
+                        "[bad-call->trap] resolved_name={} func_name={} ffi_lookup={} param_count={} arg_count={}",
+                        resolved_name,
+                        func_name,
+                        self.get_ffi_symbol_id(&func_name).is_some(),
+                        func_info.param_count,
+                        args.len(),
+                    );
+                }
+                UNRESOLVED_FN_ID
+            } else {
+                func_info.id.0
+            };
             self.ctx.emit(Instruction::Call {
                 dst: result,
-                func_id: func_info.id.0,
+                func_id: final_func_id,
                 args: crate::instruction::RegRange {
                     start: args_start,
                     count: call_arg_count as u8,
@@ -5254,6 +5302,16 @@ impl VbcCodegen {
             _ => None,
         };
 
+        // Receiver-type-arg awareness for `List<Byte>` ergonomic
+        // auto-routing (red-team §4): when the receiver expression is
+        // a `TypeExpr` carrying generic args, peek the first arg.
+        // `List<Byte>::with_capacity(N)` → `@byte_list_with_capacity(N)`;
+        // `List<Byte>::new()` → `@byte_list_with_capacity(16)`.
+        let static_receiver_first_arg_is_byte: bool = match &receiver.kind {
+            ExprKind::TypeExpr(ty) => self.is_generic_first_arg(ty, "Byte"),
+            _ => false,
+        };
+
         // Intercept `Q.of(x)` for quotient types (and any other type the
         // codegen has registered in `newtype_names` as a pass-through
         // carrier) — the quotient layer is compile-time only, so the
@@ -5451,7 +5509,27 @@ impl VbcCodegen {
         {
             if tn == type_names::LIST {
                 let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::NewList { dst: dest });
+                if static_receiver_first_arg_is_byte {
+                    // `List<Byte>::new()` → packed-byte list with
+                    // default capacity 16 (red-team §4 ergonomic
+                    // auto-routing).  Mirrors the runtime
+                    // `MemSubOpcode::NewByteList = 0x06` path.
+                    let cap_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: cap_reg,
+                        value: 16,
+                    });
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, cap_reg.0);
+                    self.ctx.emit(Instruction::MemExtended {
+                        sub_op: 0x06,
+                        operands,
+                    });
+                    self.ctx.free_temp(cap_reg);
+                } else {
+                    self.ctx.emit(Instruction::NewList { dst: dest });
+                }
                 return Ok(Some(dest));
             }
             if tn == type_names::MAP {
@@ -5484,6 +5562,28 @@ impl VbcCodegen {
             && args.len() == 1
             && let Some(ref tn) = static_receiver_type
         {
+            // `List<Byte>::with_capacity(N)` → packed-byte list with
+            // honoured capacity (red-team §4 ergonomic auto-routing).
+            // Routes to `MemSubOpcode::NewByteList = 0x06` rather than
+            // `NewList`, so the heap actually allocates a
+            // `[u8; cap]` backing instead of a Value-per-element one.
+            if tn == type_names::LIST && static_receiver_first_arg_is_byte {
+                let cap_reg = self.compile_expr(&args[0])?.ok_or_else(|| {
+                    CodegenError::internal(
+                        "List<Byte>::with_capacity arg has no value",
+                    )
+                })?;
+                let dest = self.ctx.alloc_temp();
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                Self::write_reg(&mut operands, cap_reg.0);
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x06,
+                    operands,
+                });
+                self.ctx.free_temp(cap_reg);
+                return Ok(Some(dest));
+            }
             let opcode = if tn == type_names::LIST {
                 Some(Instruction::NewList { dst: Reg(0) })
             } else if tn == type_names::MAP {
@@ -17221,6 +17321,41 @@ impl VbcCodegen {
                 // @list_with_capacity(N) — create an empty list (capacity hint ignored at Tier 0)
                 self.ctx.emit(Instruction::NewList { dst: dest });
             }
+            "byte_list_with_capacity" => {
+                // @byte_list_with_capacity(N) — create an empty
+                // `List<Byte>` with packed-byte backing (1 byte per
+                // element).  Closes red-team §4 runtime memory half:
+                // 10K connections × 16-KiB read buffer drops from
+                // 1.28 GiB to 160 MiB.  Uses the `MemExtended sub_op
+                // 0x06 NewByteList` opcode; the runtime tags both
+                // list header and backing with `TypeId::BYTE_LIST`.
+                let cap_reg = if args.is_empty() {
+                    let r = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: r,
+                        value: 16,
+                    });
+                    r
+                } else {
+                    self.compile_expr(&args[0])?.ok_or_else(|| {
+                        CodegenError::internal(
+                            "@byte_list_with_capacity arg has no value",
+                        )
+                    })?
+                };
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                Self::write_reg(&mut operands, cap_reg.0);
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x06,
+                    operands,
+                });
+                if args.is_empty() {
+                    self.ctx.free_temp(cap_reg);
+                } else {
+                    self.ctx.free_temp(cap_reg);
+                }
+            }
             "unwrap" => {
                 // @unwrap(expr) — unwrap a Maybe value, panic on None
                 if let Some(arg) = args.first() {
@@ -23082,6 +23217,28 @@ impl VbcCodegen {
                 // @list_with_capacity(N) → create empty list (capacity is optimization hint)
                 let dest = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::NewList { dst: dest });
+                Ok(Some(dest))
+            }
+            "byte_list_with_capacity" => {
+                // @byte_list_with_capacity(N) → packed-byte
+                // `List<Byte>` (red-team §4 fix: 1 byte/element vs 8).
+                // The capacity hint is honoured here — emitting
+                // `MemExtended sub_op=0x06 NewByteList` with a default
+                // capacity load when no argument is supplied.
+                let dest = self.ctx.alloc_temp();
+                let cap_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: cap_reg,
+                    value: 16,
+                });
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                Self::write_reg(&mut operands, cap_reg.0);
+                self.ctx.emit(Instruction::MemExtended {
+                    sub_op: 0x06,
+                    operands,
+                });
+                self.ctx.free_temp(cap_reg);
                 Ok(Some(dest))
             }
             "unwrap" => {
