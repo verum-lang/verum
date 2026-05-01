@@ -4150,6 +4150,22 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_mls_coverage(AuditFormat::Json),
     );
 
+    // 8. kernel_v0 roster — bootstrap-meta-theory drift gate (#154).
+    //    Confirms the canonical 10-rule manifest matches the
+    //    on-disk verify/kernel_v0/rules/ tree.  Drift is an L4
+    //    failure: if proof_checker.rs gains a rule that kernel_v0
+    //    doesn't mirror, the bootstrap chain is broken.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "kernel_v0_roster",
+        report_dir.join("kernel-v0-roster.json"),
+        || audit_kernel_v0_roster_with_format(AuditFormat::Json),
+    );
+    if summary.get("kernel_v0_roster") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
     let bundle_path = report_dir.join("bundle.json");
     let payload = serde_json::json!({
         "schema_version": 1,
