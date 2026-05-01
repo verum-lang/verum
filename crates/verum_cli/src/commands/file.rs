@@ -846,32 +846,38 @@ fn execute_cached_vbc(
 /// Resolve a script's frontmatter dependencies into a populated
 /// `CogResolver` ready to be installed on the run-time `Session`.
 ///
-/// **Path-form dependencies are fully supported.** Declaration:
+/// Three resolution kinds, all uniform from the resolver's POV
+/// (`register_cog(name, version, root_path)`):
 ///
-/// ```toml
-/// dependencies = [
-///     { name = "foo", path = "./local-cogs/foo" },
-///     { name = "bar", path = "../shared/bar" },
-/// ]
-/// ```
+///   1. **Path-form** (`{ name = "foo", path = "./local-cogs/foo" }`):
+///      resolved relative to the script's directory, canonicalised
+///      so the script remains runnable from any cwd.  No I/O beyond
+///      `canonicalize`.
+///   2. **Registry-form** (short `"json@1"` or long `{ name = "json",
+///      version = "^1.0" }`): version constraint resolved via the
+///      registry HTTP client (`get_metadata` for exact versions,
+///      `get_latest_version` for bare names / range constraints
+///      since the registry doesn't yet expose `list_versions`),
+///      tarball downloaded into the cog cache (`<cache>/verum/cogs/
+///      <name>/<version>/<name>-<version>.tar.gz`), extracted into
+///      a sibling directory, registered with the resolver.  Cache
+///      hits (extracted dir already present) skip both download and
+///      extract.
+///   3. **Git-form** (`{ name = "x", git = "https://...", rev = "..." }`):
+///      cloned into `<cache>/verum/git/<name>-<rev>/`, checked out
+///      to the requested rev/branch/tag, registered with the
+///      resolver.  Cache hits skip the clone.
 ///
-/// Each path is resolved relative to the script file's directory
-/// (not the current working directory) so a script remains
-/// runnable regardless of where the shell happens to be when the
-/// user invokes it. Once registered, the cog's mounts (`mount
-/// foo.client.Response`) resolve through the same `ModuleLoader`
-/// path that workspace dependencies use; downstream code can't
-/// tell whether a cog came from `verum.toml` or from a script's
-/// frontmatter.
+/// All three kinds emit a `LockedDep` for the script's lockfile
+/// (`path+<dir>` / `registry+<url>` / `git+<url>#<sha>`) so a
+/// `verum lockfile verify` can fail-closed on supply-chain drift.
 ///
-/// **Registry / git form is not yet wired.** The frontmatter
-/// supports short-form (`"foo@1.2"`) and long-form with `version`
-/// / `git` / `branch`, but resolution requires the registry HTTP
-/// client and the verum-cache layout, neither of which is in
-/// scope for the script-mode work. We surface a clear warning and
-/// continue without registering those entries — the script may
-/// still work if it doesn't actually `mount` the unresolved cog.
-/// Outcome of resolving a script's `dependencies = [...]` frontmatter.
+/// Network errors during registry/git resolution surface as
+/// `CliError` (the script run aborts) rather than warn-and-continue —
+/// silently dropping a declared dependency would let
+/// `mount foo.client.Response` "succeed" with an empty cog and the
+/// resulting `unbound symbol` errors at use site would mislead the
+/// user.
 struct ResolvedDeps {
     resolver: verum_modules::cog_resolver::CogResolver,
     locked: Vec<crate::script::lockfile::LockedDep>,
@@ -891,7 +897,8 @@ fn resolve_script_dependencies(
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     let mut path_count = 0usize;
-    let mut deferred_count = 0usize;
+    let mut registry_count = 0usize;
+    let mut git_count = 0usize;
     for dep in &fm.dependencies {
         match dep {
             DepSpec::Long(long) if long.path.is_some() => {
@@ -919,31 +926,247 @@ fn resolve_script_dependencies(
                 });
                 path_count += 1;
             }
-            // Long-form with no path → registry / git resolution
-            // territory. Surface but defer.
-            DepSpec::Long(_) => {
-                deferred_count += 1;
+            DepSpec::Long(long) if long.git.is_some() => {
+                let entry = resolve_git_dep(long)?;
+                resolver.register_cog(
+                    long.name.as_str(),
+                    entry.version.as_str(),
+                    entry.root.clone(),
+                );
+                locked.push(entry.locked);
+                git_count += 1;
             }
-            // Short-form (`"json@1"`) is registry-only.
-            DepSpec::Short(_) => {
-                deferred_count += 1;
+            DepSpec::Long(long) => {
+                let entry = resolve_registry_dep(
+                    long.name.as_str(),
+                    long.version.as_deref(),
+                )?;
+                resolver.register_cog(
+                    long.name.as_str(),
+                    entry.version.as_str(),
+                    entry.root.clone(),
+                );
+                locked.push(entry.locked);
+                registry_count += 1;
+            }
+            DepSpec::Short(spec) => {
+                let (name, version_req) = parse_short_dep(spec).ok_or_else(|| {
+                    CliError::Custom(format!(
+                        "script dependency `{spec}`: malformed short-form (expected `name` or `name@version`)"
+                    ))
+                })?;
+                let entry = resolve_registry_dep(name.as_str(), version_req.as_deref())?;
+                resolver.register_cog(name.as_str(), entry.version.as_str(), entry.root.clone());
+                locked.push(entry.locked);
+                registry_count += 1;
             }
         }
     }
 
     if path_count > 0 {
-        ui::detail(
-            "Dependencies",
-            &format!("{path_count} path-cog(s) registered"),
-        );
+        ui::detail("Dependencies", &format!("{path_count} path-cog(s) registered"));
     }
-    if deferred_count > 0 {
-        ui::warn(&format!(
-            "{deferred_count} script dependency declaration(s) require registry \
-             resolution (not yet wired) — they will be ignored at runtime"
-        ));
+    if registry_count > 0 {
+        ui::detail("Dependencies", &format!("{registry_count} registry-cog(s) registered"));
+    }
+    if git_count > 0 {
+        ui::detail("Dependencies", &format!("{git_count} git-cog(s) registered"));
     }
     Ok(ResolvedDeps { resolver, locked })
+}
+
+/// Resolved registry/git dependency: extracted root + lockfile entry.
+struct ResolvedDepEntry {
+    root: std::path::PathBuf,
+    version: String,
+    locked: crate::script::lockfile::LockedDep,
+}
+
+/// Parse a short-form dep spec `"name@version"` or `"name"` into
+/// `(name, Option<version_req>)`.  Returns `None` on malformed input.
+fn parse_short_dep(spec: &str) -> Option<(String, Option<String>)> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match trimmed.split_once('@') {
+        Some((name, ver)) => {
+            let n = name.trim();
+            let v = ver.trim();
+            if n.is_empty() || v.is_empty() {
+                None
+            } else {
+                Some((n.to_string(), Some(v.to_string())))
+            }
+        }
+        None => Some((trimmed.to_string(), None)),
+    }
+}
+
+/// Resolve a registry-form dependency: pick the concrete version,
+/// download into the cog cache (skip if already cached + extracted),
+/// extract the tarball, return the extracted-source root + lockfile
+/// entry.
+fn resolve_registry_dep(
+    name: &str,
+    version_req: Option<&str>,
+) -> Result<ResolvedDepEntry, CliError> {
+    use crate::registry::{cache_manager::CacheManager, client::RegistryClient};
+
+    let client = RegistryClient::from_manifest()?;
+    let cache_dir = crate::registry::cache_dir()?;
+    let cache_manager = CacheManager::new(cache_dir.clone())?;
+
+    // Version resolution.  The registry doesn't expose a
+    // `list_versions` endpoint yet, so:
+    //   - No constraint → `get_latest_version`.
+    //   - Pure-numeric `"1.4.0"` (parses as `semver::Version`) → as-is.
+    //   - Range `"^1.0"`, `">=2.0"` → fall back to `get_latest_version`
+    //     and pin the resolved version in the lockfile (subsequent
+    //     runs hit a stable target regardless of registry drift).
+    let version: String = match version_req {
+        None => client.get_latest_version(name)?.as_str().to_string(),
+        Some(req) => {
+            if is_exact_version(req) {
+                req.to_string()
+            } else {
+                client.get_latest_version(name)?.as_str().to_string()
+            }
+        }
+    };
+
+    let extracted_root = cache_dir.join(name).join(&version);
+    let archive_path = extracted_root.join(format!("{}-{}.tar.gz", name, version));
+    let needs_install = !looks_extracted(&extracted_root);
+
+    if needs_install {
+        let metadata = client.get_metadata(name, &version)?;
+        let url = format!(
+            "{}/cogs/{}/{}/download",
+            crate::registry::DEFAULT_REGISTRY,
+            name,
+            version,
+        );
+        let _archive = cache_manager.download_cog(
+            name,
+            &version,
+            url.as_str(),
+            metadata.checksum.as_str(),
+        )?;
+        cache_manager.extract(&archive_path, &extracted_root)?;
+    }
+
+    let root = extracted_root.clone();
+    let integrity = compute_path_cog_integrity(&root);
+    let locked = crate::script::lockfile::LockedDep {
+        name: name.to_string(),
+        version: version.clone(),
+        source: format!("registry+{}", crate::registry::DEFAULT_REGISTRY),
+        integrity,
+    };
+    Ok(ResolvedDepEntry { root, version, locked })
+}
+
+/// Resolve a git-form dependency: clone into the git cache (skip if
+/// already cloned), checkout to the requested rev/branch/tag, return
+/// the source root + lockfile entry.
+fn resolve_git_dep(
+    long: &crate::script::frontmatter::DepLong,
+) -> Result<ResolvedDepEntry, CliError> {
+    let url = long.git.as_deref().ok_or_else(|| {
+        CliError::Custom(format!("git dependency `{}` missing `git = ...` URL", long.name))
+    })?;
+    let pin = long
+        .rev
+        .as_deref()
+        .or(long.tag.as_deref())
+        .or(long.branch.as_deref())
+        .unwrap_or("HEAD");
+    let safe_pin = sanitize_git_pin(pin);
+    let dest = crate::registry::git_dir()?.join(format!("{}-{}", long.name, safe_pin));
+
+    if !dest.join(".git").exists() {
+        std::fs::create_dir_all(&dest)?;
+        let status = std::process::Command::new("git")
+            .arg("clone").arg("--quiet").arg(url).arg(&dest)
+            .status()
+            .map_err(|e| CliError::Custom(format!(
+                "git dep `{}`: spawn `git clone` failed: {e}", long.name
+            )))?;
+        if !status.success() {
+            return Err(CliError::Custom(format!(
+                "git dep `{}`: `git clone {}` failed (exit {})",
+                long.name, url, status.code().unwrap_or(-1),
+            )));
+        }
+    }
+
+    let status = std::process::Command::new("git")
+        .arg("-C").arg(&dest)
+        .arg("checkout").arg("--quiet").arg(pin)
+        .status()
+        .map_err(|e| CliError::Custom(format!(
+            "git dep `{}`: spawn `git checkout` failed: {e}", long.name
+        )))?;
+    if !status.success() {
+        return Err(CliError::Custom(format!(
+            "git dep `{}`: `git checkout {}` failed (exit {})",
+            long.name, pin, status.code().unwrap_or(-1),
+        )));
+    }
+
+    let sha_out = std::process::Command::new("git")
+        .arg("-C").arg(&dest)
+        .arg("rev-parse").arg("HEAD")
+        .output()
+        .map_err(|e| CliError::Custom(format!(
+            "git dep `{}`: spawn `git rev-parse` failed: {e}", long.name
+        )))?;
+    let sha = String::from_utf8_lossy(&sha_out.stdout).trim().to_string();
+    let version = long.version.clone().unwrap_or_else(|| sha.clone());
+
+    let integrity = compute_path_cog_integrity(&dest);
+    let locked = crate::script::lockfile::LockedDep {
+        name: long.name.clone(),
+        version: version.clone(),
+        source: format!("git+{}#{}", url, sha),
+        integrity,
+    };
+    Ok(ResolvedDepEntry { root: dest, version, locked })
+}
+
+/// Check if the extracted directory looks like a populated cog
+/// (contains either a `verum.toml` manifest or a `src/` directory).
+/// Used to short-circuit the download+extract path on cache hits.
+fn looks_extracted(dir: &std::path::Path) -> bool {
+    dir.join("verum.toml").is_file() || dir.join("src").is_dir()
+}
+
+/// Heuristic: a version string is "exact" when it parses as a bare
+/// `semver::Version` (no operator prefix like `^`, `~`, `>=`).  Used
+/// to decide whether `get_metadata` (exact) vs `get_latest_version`
+/// (range) is the right registry call.
+fn is_exact_version(req: &str) -> bool {
+    semver::Version::parse(req).is_ok()
+}
+
+/// Sanitize a git rev/branch/tag identifier into a filesystem-safe
+/// directory-name fragment.  Rev SHAs are already safe; branch / tag
+/// names with `/` or other non-portable chars get replaced with `_`.
+/// Truncated to 64 chars to keep cache-dir names manageable.
+fn sanitize_git_pin(pin: &str) -> String {
+    let cleaned: String = pin
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '.' | '_' => c,
+            _ => '_',
+        })
+        .collect();
+    if cleaned.len() > 64 {
+        cleaned[..64].to_string()
+    } else {
+        cleaned
+    }
 }
 
 /// Persist (or verify+refresh) a script's resolved dependencies as
@@ -1558,4 +1781,83 @@ pub fn info(features: bool, llvm: bool, all: bool) -> Result<(), CliError> {
     println!("  For help: verum --help");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod script_dep_tests {
+    use super::{is_exact_version, parse_short_dep, sanitize_git_pin};
+
+    #[test]
+    fn parse_short_dep_bare_name() {
+        let (n, v) = parse_short_dep("json").unwrap();
+        assert_eq!(n, "json");
+        assert!(v.is_none());
+    }
+
+    #[test]
+    fn parse_short_dep_name_at_version() {
+        let (n, v) = parse_short_dep("json@1.4.0").unwrap();
+        assert_eq!(n, "json");
+        assert_eq!(v.as_deref(), Some("1.4.0"));
+    }
+
+    #[test]
+    fn parse_short_dep_name_at_range() {
+        let (n, v) = parse_short_dep("http@^0.2").unwrap();
+        assert_eq!(n, "http");
+        assert_eq!(v.as_deref(), Some("^0.2"));
+    }
+
+    #[test]
+    fn parse_short_dep_trims_whitespace() {
+        let (n, v) = parse_short_dep("  json  @  1  ").unwrap();
+        assert_eq!(n, "json");
+        assert_eq!(v.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn parse_short_dep_rejects_empty() {
+        assert!(parse_short_dep("").is_none());
+        assert!(parse_short_dep("   ").is_none());
+        assert!(parse_short_dep("@1.0").is_none());
+        assert!(parse_short_dep("name@").is_none());
+    }
+
+    #[test]
+    fn is_exact_version_recognises_full_semver() {
+        assert!(is_exact_version("1.0.0"));
+        assert!(is_exact_version("0.2.5"));
+        assert!(is_exact_version("2.10.3-alpha.1"));
+    }
+
+    #[test]
+    fn is_exact_version_rejects_ranges_and_partials() {
+        assert!(!is_exact_version("^1.0"));
+        assert!(!is_exact_version("~0.2"));
+        assert!(!is_exact_version(">=2.0"));
+        assert!(!is_exact_version("1"));
+        assert!(!is_exact_version("1.2"));
+    }
+
+    #[test]
+    fn sanitize_git_pin_passes_safe_chars() {
+        assert_eq!(sanitize_git_pin("a1b2c3d4"), "a1b2c3d4");
+        assert_eq!(sanitize_git_pin("v1.2.3"), "v1.2.3");
+        assert_eq!(sanitize_git_pin("feature_branch-1"), "feature_branch-1");
+    }
+
+    #[test]
+    fn sanitize_git_pin_replaces_unsafe_chars() {
+        assert_eq!(sanitize_git_pin("feature/foo"), "feature_foo");
+        assert_eq!(sanitize_git_pin("refs/tags/v1"), "refs_tags_v1");
+        assert_eq!(sanitize_git_pin("user@host:path"), "user_host_path");
+    }
+
+    #[test]
+    fn sanitize_git_pin_truncates_long_input() {
+        let long = "a".repeat(200);
+        let s = sanitize_git_pin(&long);
+        assert_eq!(s.len(), 64);
+        assert!(s.chars().all(|c| c == 'a'));
+    }
 }

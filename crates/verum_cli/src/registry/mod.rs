@@ -58,3 +58,16 @@ pub fn mirror_dir() -> Result<std::path::PathBuf> {
         .ok_or_else(|| crate::error::CliError::Custom("Cannot determine data directory".into()))?;
     Ok(data.join("verum").join("mirror"))
 }
+
+/// Get local git-clone cache directory.
+///
+/// Layout: `<cache>/verum/git/<name>-<rev>/` — the cog's source tree
+/// after `git clone` + checkout.  Mirrors the registry-cogs cache
+/// layout (one directory per `(name, version)`-equivalent key) so the
+/// same `CogResolver.register_cog(name, version, root_path)` API
+/// serves both source kinds uniformly.
+pub fn git_dir() -> Result<std::path::PathBuf> {
+    let cache = dirs::cache_dir()
+        .ok_or_else(|| crate::error::CliError::Custom("Cannot determine cache directory".into()))?;
+    Ok(cache.join("verum").join("git"))
+}
