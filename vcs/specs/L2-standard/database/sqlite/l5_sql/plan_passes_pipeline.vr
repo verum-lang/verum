@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l5_sql, plan_passes, optimizer, pipeline
+// @timeout: 15000
+// @description: PlanNode-canonical optimizer pipeline — exercises
+//               flatten_project_chains, merge_filter_chains,
+//               limit_pushdown_unsorted, unwrap_distinct_unique
+//               + the run_plan_passes runner (#159 closure).
+//
+// Spec: internal/specs/sqlite-native.md §13.5
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.{
+    PlanNode, PnValues, PnTableScan, PnFilter, PnProject, PnSort,
+    PnDistinct, PnGroupBy, PnLimit, PnNoop,
+    PlanColumn, plan_statement,
+    PlanPassFn, PlanPassReport,
+    run_plan_passes, standard_pipeline,
+    flatten_project_chains, merge_filter_chains,
+    limit_pushdown_unsorted, unwrap_distinct_unique,
+    CompileOptions, CompileOutput,
+    compile_options_default, compile_options_cost_aware,
+    compile_options_ssa_canonical,
+    compile_with_options,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.{
+    SchemaCache, schema_cache_new,
+};
+
+// -----------------------------------------------------------------------------
+// 1. Default options DON'T run plan passes
+// -----------------------------------------------------------------------------
+
+fn defaults_skip_plan_passes() {
+    let d = compile_options_default();
+    assert(!d.run_plan_passes);
+}
+
+// -----------------------------------------------------------------------------
+// 2. Cost-aware preset enables plan passes
+// -----------------------------------------------------------------------------
+
+fn cost_aware_enables_plan_passes() {
+    let c = compile_options_cost_aware();
+    assert(c.run_plan_passes);
+}
+
+// -----------------------------------------------------------------------------
+// 3. SSA-canonical preset enables ALL optimization layers
+// -----------------------------------------------------------------------------
+
+fn ssa_canonical_enables_all() {
+    let s = compile_options_ssa_canonical();
+    assert(s.use_cost_annotation);
+    assert(s.run_optimizer);
+    assert(s.use_ssa_pipeline);
+    assert(s.run_plan_passes);
+}
+
+// -----------------------------------------------------------------------------
+// 4. Empty pipeline runs without error
+// -----------------------------------------------------------------------------
+
+fn empty_pipeline_no_op() {
+    let plan = PnNoop;
+    let passes: List<PlanPassFn> = List.new();
+    let (out, report) = run_plan_passes(plan, passes, 4);
+    match out {
+        PnNoop => {},
+        _ => panic("expected PnNoop unchanged"),
+    }
+    assert_eq(report.iterations, 1);
+    assert_eq(report.total_edits, 0);
+}
+
+// -----------------------------------------------------------------------------
+// 5. standard_pipeline returns 4 passes
+// -----------------------------------------------------------------------------
+
+fn standard_pipeline_size() {
+    let p = standard_pipeline();
+    assert_eq(p.len(), 4);
+}
+
+// -----------------------------------------------------------------------------
+// 6. compile_with_options(cost_aware) round-trips a SELECT through
+//    the plan-pass pipeline
+// -----------------------------------------------------------------------------
+
+fn cost_aware_round_trip() {
+    let schema = schema_cache_new();
+    let opts = compile_options_cost_aware();
+    match compile_with_options(&"SELECT 1".clone(), &schema, &opts) {
+        Ok(out) => {
+            assert(out.program.instruction_count() >= 1);
+            // Cost annotation is on → explain trace populated.
+            match &out.explain_trace {
+                Some(_) => {},
+                None => panic("cost-aware should populate explain_trace"),
+            }
+        }
+        Err(_) => panic("cost-aware compile failed for SELECT 1"),
+    }
+}
+
+fn main() {
+    defaults_skip_plan_passes();
+    cost_aware_enables_plan_passes();
+    ssa_canonical_enables_all();
+    empty_pipeline_no_op();
+    standard_pipeline_size();
+    cost_aware_round_trip();
+}

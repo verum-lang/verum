@@ -33,6 +33,7 @@ public module planner;
 public module resolver;
 public module codegen;
 public module cost_annotated;
+public module plan_passes;
 public module compile;
 
 public mount .lexer.{
@@ -95,4 +96,11 @@ public mount .compile.{
 public mount .cost_annotated.{
     CostAnnotatedPlan, StatsCatalogue,
     annotate_with_cost, stats_catalogue_new, explain_annotated,
+};
+
+public mount .plan_passes.{
+    PlanPassFn, PlanPassReport,
+    run_plan_passes, standard_pipeline,
+    flatten_project_chains, merge_filter_chains,
+    limit_pushdown_unsorted, unwrap_distinct_unique,
 };
