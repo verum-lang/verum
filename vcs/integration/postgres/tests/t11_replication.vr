@@ -31,6 +31,10 @@ mount core.database.postgres.{
     LogicalReplicationOptions,
     Lsn, ReplicationMessage, RmXLogData, RmKeepalive, RmOther,
     connect_replication,
+    PgoMessage, PgoBegin, PgoCommit, PgoRelation, PgoInsert,
+    PgoUpdate, PgoDelete, PgoUnknown,
+    PgoRelationCache,
+    decode_pgoutput,
 };
 mount core.time.SystemClock;
 
@@ -151,9 +155,13 @@ fn main() {
     // 5. Drain up to N messages, expecting at least one XLogData.
     // -------------------------------------------------------------------------
     let mut saw_xlog = false;
+    let mut saw_relation = false;
+    let mut saw_insert = false;
     let mut saw_keepalive_or_other = false;
+    let mut rel_cache = PgoRelationCache.new();
+    let mut last_relid: Int = 0;
     let mut i: Int = 0;
-    while i < 20 {
+    while i < 40 {
         let msg = expect_ok(
             repl.next_message(),
             &f"next_message #{i} failed",
@@ -165,12 +173,46 @@ fn main() {
                     x.payload.len() > 0,
                     &"XLogData payload empty".clone(),
                 );
-                // Acknowledge progress so the server doesn't drop us.
-                let now_us = SystemClock.now().as_microseconds();
-                let _ = repl.send_standby_status(
-                    x.wal_end, x.wal_end, x.wal_end, now_us, false,
+                // Decode the pgoutput layer.
+                let pgm = expect_ok(
+                    decode_pgoutput(x.payload.clone()),
+                    &"pgoutput decode failed".clone(),
                 );
-                if saw_xlog { break; }
+                match pgm {
+                    PgoBegin(_)  => {}
+                    PgoCommit(_) => {
+                        // Acknowledge end-of-tx LSN.
+                        let now_us = SystemClock.now().as_microseconds();
+                        let _ = repl.send_standby_status(
+                            x.wal_end, x.wal_end, x.wal_end, now_us, false,
+                        );
+                    }
+                    PgoRelation(rel) => {
+                        last_relid = rel.relid;
+                        saw_relation = true;
+                        rel_cache.record(rel);
+                    }
+                    PgoInsert(ins) => {
+                        saw_insert = true;
+                        // Verify the relation cache resolves.
+                        match rel_cache.lookup(ins.relid) {
+                            Some(r) => {
+                                expect(
+                                    r.columns.len() == ins.new_tuple.columns.len(),
+                                    &"insert column count must match relation schema".clone(),
+                                );
+                            }
+                            None => {
+                                expect(false,
+                                    &f"insert for unknown relid {ins.relid}");
+                            }
+                        }
+                    }
+                    PgoUpdate(_)  => {}
+                    PgoDelete(_)  => {}
+                    PgoUnknown { .. } => {}
+                }
+                if saw_xlog && saw_relation && saw_insert { break; }
             }
             RmKeepalive(k) => {
                 saw_keepalive_or_other = true;
@@ -189,6 +231,14 @@ fn main() {
     expect(
         saw_xlog || saw_keepalive_or_other,
         &"replication stream produced no messages at all".clone(),
+    );
+    expect(
+        saw_relation,
+        &"never saw a Relation message — pgoutput decode broken?".clone(),
+    );
+    expect(
+        saw_insert,
+        &"never saw an Insert — side-channel INSERT did not propagate".clone(),
     );
 
     // Cleanup is best-effort — closing the connection drops the
