@@ -106,6 +106,13 @@ impl ModulePath {
         &self.segments
     }
 
+    /// Consume the path and return its segments as a `Vec<Text>`.
+    /// Used by relative-import resolvers that need to manipulate the
+    /// segment list (e.g., strip a trailing leaf-name).
+    pub fn into_segments(self) -> Vec<Text> {
+        self.segments.into_iter().collect()
+    }
+
     /// Get the last segment (the name).
     pub fn name(&self) -> Maybe<&Text> {
         match self.segments.last() {
@@ -273,36 +280,85 @@ impl ModulePath {
                 }
                 Ok(result)
             }
-        } else if import_path.starts_with("super.") {
-            // super.foo.bar means:
-            // - From handlers.search: super.contexts -> contexts (sibling of handlers, i.e., src/contexts)
+        } else if import_path.starts_with("super.") || import_path == "super" {
+            // **`super` semantics — fundamental fix (#187 follow-up).**
             //
+            // `super.X` means "X resolved relative to the parent module
+            // of the current one". Previously the resolver popped TWO
+            // segments off `current` (parent.parent()) — this assumed
+            // every module's path's leaf was a regular `.vr` file
+            // skippable by `parent()`, and broke for nested directories
+            // where the user expected one-level-up navigation.
+            //
+            // Correct semantics:
+            //   * From regular file `core.verify.kernel_v0.soundness`,
+            //     `super.X` resolves to `core.verify.kernel_v0.X`
+            //     (sibling within the same directory).
+            //   * From `mod.vr` module `core.verify.kernel_v0`,
+            //     `super.X` resolves to `core.verify.X` (sibling of
+            //     the directory itself).
+            //
+            // Both cases are uniformly modelled by `current.parent()`:
+            // the parent of `core.verify.kernel_v0.soundness` is
+            // `core.verify.kernel_v0` (the directory `soundness.vr`
+            // lives in); the parent of `core.verify.kernel_v0` is
+            // `core.verify` (the directory `kernel_v0/` lives in).
+            //
+            // The previous `parent.parent()` form double-stripped, so
+            // `super.X` from `kernel_v0.soundness` resolved to
+            // `core.verify.X` (skipping `kernel_v0`!) — which silently
+            // failed every nested-multi-segment mount in the
+            // `kernel_v0/soundness.vr` aggregator.
+            //
+            // Each leading `super.` peels one parent level (so
+            // `super.super.X` works from a deeply-nested file).
 
-            // super goes up one level from the current module's parent.
-            let rest = import_path.strip_prefix("super.").unwrap_or("");
-            if let Some(parent) = current.parent() {
-                // From handlers.search: parent is handlers
-                if let Some(grandparent) = parent.parent() {
-                    // grandparent.rest
-                    let mut result = grandparent;
-                    for segment in rest.split('.') {
-                        if !segment.is_empty() {
-                            result.push(segment);
+            let mut remaining = import_path;
+            let mut base = current.clone();
+
+            // Peel each leading `super` segment, walking up one parent
+            // per peel.
+            loop {
+                if remaining == "super" {
+                    base = match base.parent() {
+                        Some(p) => p,
+                        None => {
+                            return Err(ModuleError::InvalidPath {
+                                path: Text::from(import_path),
+                                reason: Text::from(
+                                    "cannot use 'super' from root module",
+                                ),
+                                span: None,
+                            });
                         }
-                    }
-                    Ok(result)
+                    };
+                    remaining = "";
+                    break;
+                } else if let Some(rest) = remaining.strip_prefix("super.") {
+                    base = match base.parent() {
+                        Some(p) => p,
+                        None => {
+                            return Err(ModuleError::InvalidPath {
+                                path: Text::from(import_path),
+                                reason: Text::from(
+                                    "cannot use 'super' from root module",
+                                ),
+                                span: None,
+                            });
+                        }
+                    };
+                    remaining = rest;
                 } else {
-                    // parent is top-level, so super.X is just X at root level
-                    Ok(ModulePath::from_str(rest))
+                    break;
                 }
-            } else {
-                // Current is already top-level, super is invalid
-                Err(ModuleError::InvalidPath {
-                    path: Text::from(import_path),
-                    reason: Text::from("cannot use 'super' from root module"),
-                    span: None,
-                })
             }
+
+            for segment in remaining.split('.') {
+                if !segment.is_empty() {
+                    base.push(segment);
+                }
+            }
+            Ok(base)
         } else {
             // Absolute path, return as-is
             Ok(ModulePath::from_str(import_path))
@@ -448,4 +504,115 @@ pub fn resolve_import(
     }
 
     Ok(ModulePath::new(result_segments))
+}
+
+#[cfg(test)]
+mod super_resolution_tests {
+    //! Test coverage for the `super.` path-resolution fix landed in
+    //! the #187 root-cause investigation.  The old resolver popped
+    //! TWO levels (`current.parent().parent()`) which silently
+    //! mis-resolved every nested `mount super.X.{Y};` form in
+    //! kernel_v0/soundness.vr.  These tests pin the corrected
+    //! one-parent-per-`super.` semantics.
+    use super::ModulePath;
+
+    #[test]
+    fn super_from_regular_file_resolves_to_parent_directory() {
+        // `core.verify.kernel_v0.soundness` is a regular file inside
+        // the `kernel_v0/` directory.  `super.X` from it should land
+        // in `core.verify.kernel_v0.X` (sibling within same dir).
+        let cur = ModulePath::from_str("core.verify.kernel_v0.soundness");
+        let resolved =
+            ModulePath::resolve_import("super.rules.k_var", &cur).unwrap();
+        assert_eq!(
+            resolved,
+            ModulePath::from_str("core.verify.kernel_v0.rules.k_var"),
+        );
+    }
+
+    #[test]
+    fn super_super_from_nested_file_pops_two_levels() {
+        // `core.verify.kernel_v0.rules.k_var` is two levels deep
+        // (k_var.vr lives in rules/, which lives in kernel_v0/).
+        // `super.super.X` should land in `core.verify.kernel_v0.X`
+        // (out of rules/, then add X).
+        let cur = ModulePath::from_str("core.verify.kernel_v0.rules.k_var");
+        let resolved =
+            ModulePath::resolve_import("super.super.context", &cur).unwrap();
+        assert_eq!(
+            resolved,
+            ModulePath::from_str("core.verify.kernel_v0.context"),
+        );
+    }
+
+    #[test]
+    fn super_from_mod_vr_pops_one_directory_level() {
+        // mod.vr files represent the directory itself, so
+        // `core.verify.kernel_v0` (mod.vr) → `super.X` = `core.verify.X`.
+        let cur = ModulePath::from_str("core.verify.kernel_v0");
+        let resolved = ModulePath::resolve_import("super.foundation", &cur)
+            .unwrap();
+        assert_eq!(resolved, ModulePath::from_str("core.verify.foundation"));
+    }
+
+    #[test]
+    fn super_super_super_pops_three_levels() {
+        let cur = ModulePath::from_str("a.b.c.d.e");
+        let resolved = ModulePath::resolve_import("super.super.super.x", &cur)
+            .unwrap();
+        assert_eq!(resolved, ModulePath::from_str("a.b.x"));
+    }
+
+    #[test]
+    fn super_into_nested_subpath_preserves_dotted_tail() {
+        let cur = ModulePath::from_str("a.b.c");
+        let resolved =
+            ModulePath::resolve_import("super.rules.k_var", &cur).unwrap();
+        assert_eq!(resolved, ModulePath::from_str("a.b.rules.k_var"));
+    }
+
+    #[test]
+    fn super_from_root_returns_invalid_path_error() {
+        let cur = ModulePath::from_str("");
+        let res = ModulePath::resolve_import("super.x", &cur);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn super_super_too_deep_returns_invalid_path_error() {
+        // current = "a" (depth 1).  super pops to root.
+        // super.super tries to pop again → error.
+        let cur = ModulePath::from_str("a");
+        let res = ModulePath::resolve_import("super.super.x", &cur);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn bare_super_without_dotted_tail_resolves() {
+        // `mount super;` is unusual but accepted by the parser; the
+        // resolver should produce the parent path without crashing.
+        let cur = ModulePath::from_str("a.b.c");
+        let resolved = ModulePath::resolve_import("super", &cur).unwrap();
+        assert_eq!(resolved, ModulePath::from_str("a.b"));
+    }
+
+    #[test]
+    fn absolute_paths_pass_through_unchanged() {
+        let cur = ModulePath::from_str("a.b.c");
+        let resolved =
+            ModulePath::resolve_import("core.verify.kernel_v0.context", &cur)
+                .unwrap();
+        assert_eq!(
+            resolved,
+            ModulePath::from_str("core.verify.kernel_v0.context"),
+        );
+    }
+
+    #[test]
+    fn self_dot_x_resolves_to_sibling_for_regular_file() {
+        // self.X from a regular file is the parent + X (sibling).
+        let cur = ModulePath::from_str("a.b.c");
+        let resolved = ModulePath::resolve_import("self.d", &cur).unwrap();
+        assert_eq!(resolved, ModulePath::from_str("a.b.d"));
+    }
 }

@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, runtime, worker-pool, phase-1b
+// @timeout: 10000
+// @expect: pass
+//
+// Phase 1B (#325) — surface contract pin. Type-checks that the
+// public WorkerPool / AsyncRuntime methods Phase 1B introduces
+// exist with the documented signatures.  A regression that
+// removes a method or changes its return type lights up here
+// without needing a full runtime spin-up (the interpreter cannot
+// construct AsyncRuntime without a pre-existing stack-overflow
+// fix; AOT trunk has separate breakage).  Once both modes
+// unblock, this typecheck pin is complemented by an executable
+// Tier 0 + Tier 1 pin asserting `worker_pool_size() == 0` under
+// the default config and graceful fallback when start_worker_pool
+// fails.
+
+mount core.async.executor.{AsyncRuntime, AsyncRuntimeConfig, WorkerPool};
+mount core.runtime.thread.{ThreadJoinHandle};
+
+fn surface_check(rt: &AsyncRuntime) {
+    // Phase 1B accessors exist with the documented return types.
+    let _: Int = rt.worker_pool_size();
+
+    // Phase 1B method: idempotent worker-pool spawner. Returns
+    // the actual number of workers spawned.
+    let _: Int = rt.start_worker_pool();
+
+    // shutdown is unchanged in surface — still `&self`-only.
+    rt.shutdown();
+}
+
+fn worker_pool_surface_check(pool: &WorkerPool) {
+    // Phase 1A foundation accessors (must continue to compile).
+    let _: Int = pool.size();
+    let _: Bool = pool.shutdown_requested();
+    pool.request_shutdown();
+
+    // Phase 1B additions: notify + parked-count diagnostic.
+    pool.notify_one();
+    pool.notify_all();
+    let _: Int = pool.parked();
+}
+
+fn main() {
+    let rt = AsyncRuntime.new();
+    surface_check(&rt);
+
+    let pool = WorkerPool.empty(2);
+    worker_pool_surface_check(&pool);
+}

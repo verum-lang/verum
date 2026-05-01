@@ -45,6 +45,13 @@ mount .task.*;
 mount .diagnostics.{TaskInfo, TaskLifecycleState};
 mount core.intrinsics.atomic.{compiler_fence};
 mount core.intrinsics.platform.{spin_hint};
+// Phase 1B (#325): worker-pool thread spawning. Pulls in
+// `Thread.spawn` + `ThreadBuilder` + `ThreadJoinHandle` so
+// `start_worker_pool` can fan out the configured worker count.
+// `ThreadError::SpawnFailed` is the runtime-observable signal
+// that triggers the graceful single-threaded fallback (Hazard 4
+// — Tier 0 interpreter mode + any platform / resource failure).
+mount core.runtime.thread.{Thread, ThreadBuilder, ThreadJoinHandle, ThreadError};
 
 // =============================================================================
 // Native System Layer Imports (V-LLSI)
@@ -320,39 +327,69 @@ implement<F: Future> TaskState<F> {
 // concurrent state is touched. Programs see bit-identical
 // behaviour to today's single-threaded loop.
 
-/// Multi-threaded worker-pool data structure. Phase 1A foundation —
-/// holds the configured worker count + lifecycle flag without yet
-/// spawning real threads.
+/// Multi-threaded worker-pool data structure. Phase 1B
+/// (#325) — holds the configured worker count, lifecycle flag,
+/// the spawned join handles, and the park_mu / park_cv pair
+/// workers wait on when their queues empty.
 public type WorkerPool is {
     /// Number of workers configured for this pool (resolved from
     /// manifest `async_worker_threads`, or `num_cpus()-1` when the
-    /// manifest sets 0 with explicit auto-detect intent). Phase 1A:
-    /// always 0 because no threads are spawned yet.
+    /// manifest sets 0 with explicit auto-detect intent).
     num_workers: Int,
     /// True once `start_worker_pool` has actually spawned the
     /// `num_workers` worker threads and they're polling the
-    /// `task_queue` / `ready_queue`. Phase 1A: always false.
+    /// `task_queue` / `ready_queue`. False during Phase 1A
+    /// foundation runs and during the brief window between
+    /// `WorkerPool.empty(...)` construction and the spawn loop
+    /// finishing in `start_worker_pool`.
     is_running: AtomicBool,
     /// Shutdown signal — set by `AsyncRuntime.shutdown()` to
-    /// terminate workers. Phase 1A: present but unused (no
-    /// workers exist to observe it).
+    /// terminate workers. Workers re-check this flag at the top
+    /// of every poll iteration and after every park-wake.
     shutdown_flag: AtomicBool,
-    /// Diagnostic counter — number of times a worker called
-    /// `park_worker()` because its queue was empty. Phase 1A: 0.
+    /// Diagnostic counter — number of workers currently parked
+    /// on `park_cv`. Incremented immediately before each
+    /// `park_cv.wait`, decremented immediately after.
     parked_count: AtomicInt,
+    /// Phase 1B (#325): join handles for the spawned worker
+    /// threads. Empty when start_worker_pool fell back to
+    /// single-threaded mode (interpreter mode / spawn failure).
+    /// `shutdown` extracts the entire WorkerPool via
+    /// `Maybe::take` and joins handles AFTER releasing the
+    /// `worker_pool` Mutex — Hazard 6 mitigation, prevents
+    /// Drop-time deadlock when a worker tries to access
+    /// `worker_pool` while shutdown holds the lock.
+    handles: List<ThreadJoinHandle<()>>,
+    /// Phase 1B (#325): mutex paired with `park_cv` for the
+    /// classic monitor pattern. Workers acquire `park_mu`,
+    /// re-check the queue emptiness predicate UNDER the lock
+    /// (Hazard 2 — lost-wakeup race mitigation), then call
+    /// `park_cv.wait(guard)` which atomically releases the lock
+    /// and blocks. Producers (currently a periodic timeout
+    /// rather than spawn-side notify; spawn-side notify is
+    /// follow-up work) wake parked workers via `park_cv`.
+    /// `Heap` because Mutex has no `Copy` and the WorkerPool
+    /// must be moveable into / out of `Maybe<WorkerPool>`.
+    park_mu: Heap<Mutex<()>>,
+    /// Phase 1B (#325): condition variable workers wait on. See
+    /// `park_mu` for the protocol.
+    park_cv: Heap<Condvar>,
 };
 
 implement WorkerPool {
-    /// Construct an empty pool with the given configured worker
-    /// count. Phase 1A: stores the count but does not spawn
-    /// anything; future Phase 1B will spawn `num` workers when
-    /// `start()` is called.
+    /// Construct a fresh pool with the given configured worker
+    /// count. The pool is empty (no threads spawned, no handles)
+    /// — `AsyncRuntime.start_worker_pool` populates `handles`
+    /// after spawning.
     public fn empty(num: Int) -> WorkerPool {
         WorkerPool {
             num_workers: num,
             is_running: AtomicBool.new(false),
             shutdown_flag: AtomicBool.new(false),
             parked_count: AtomicInt.new(0),
+            handles: List.new(),
+            park_mu: Heap.new(Mutex.new(())),
+            park_cv: Heap.new(Condvar.new()),
         }
     }
 
@@ -366,13 +403,49 @@ implement WorkerPool {
         self.shutdown_flag.load(MemoryOrdering.Acquire)
     }
 
-    /// Signal workers to terminate. Phase 1A: no workers exist;
-    /// the call is a no-op (idempotent). Phase 1B will pair this
-    /// with `park_cv.notify_all()` to wake parked workers.
+    /// Signal workers to terminate. Idempotent. Pair with
+    /// `notify_all()` to wake parked workers so they observe
+    /// the flag and exit.
     public fn request_shutdown(&self) {
         self.shutdown_flag.store(true, MemoryOrdering.Release);
     }
+
+    /// Wake one parked worker. Called by producers after pushing
+    /// work onto `ready_queue` / `task_queue` so a parked worker
+    /// can re-check the predicate and pick up the new task.
+    public fn notify_one(&self) {
+        self.park_cv.notify_one();
+    }
+
+    /// Wake all parked workers. Called by `shutdown` after
+    /// setting `shutdown_flag` so every worker observes the
+    /// flag promptly and exits.
+    public fn notify_all(&self) {
+        self.park_cv.notify_all();
+    }
+
+    /// Diagnostic — current parked-worker count. Useful for
+    /// observability tests that want to assert the pool went
+    /// idle after a workload.
+    public fn parked(&self) -> Int {
+        self.parked_count.load(MemoryOrdering.Relaxed)
+    }
 }
+
+/// Phase 1B (#325): action a worker takes after returning from
+/// `AsyncRuntime.try_park`. `Stop` exits the poll loop
+/// (shutdown observed); `Continue` re-iterates (work arrived or
+/// the park timed out).
+type ParkAction is | Stop | Continue;
+
+/// Phase 1B (#325): default park timeout when no producer-side
+/// notify integration is in place. Workers wake every
+/// `WORKER_PARK_TIMEOUT_MS` to re-check the queues and shutdown
+/// flag, providing a safety net against any lost-wakeup edge
+/// case AND giving graceful shutdown an upper bound on
+/// worker-exit latency. 50 ms is a balance between idle-wake
+/// overhead (~20 wakes/sec/worker) and shutdown responsiveness.
+const WORKER_PARK_TIMEOUT_MS: Int = 50;
 
 // =============================================================================
 // AsyncRuntime
@@ -511,15 +584,211 @@ implement AsyncRuntime {
     }
 
     /// Read the current worker-pool size — 0 when no pool is
-    /// configured (the default), else the configured worker count.
-    /// Phase 1A: always 0 because `start_worker_pool` is not yet
-    /// implemented. Surfacing the accessor now lets diagnostic
-    /// callers verify the manifest setting reaches the runtime
-    /// without depending on Phase 1B's actual spawn logic.
+    /// configured (the default) or when start_worker_pool has not
+    /// yet been called for this `block_on` cycle, else the
+    /// configured worker count.
     public fn worker_pool_size(&self) -> Int {
         match *self.worker_pool.lock() {
             Maybe.Some(ref pool) => pool.size(),
             Maybe.None => 0,
+        }
+    }
+
+    /// Phase 1B (#325): spawn worker threads and start the pool.
+    ///
+    /// **Contract**:
+    ///  * Idempotent — second call with an active pool returns
+    ///  the existing worker count without re-spawning.
+    ///  * Returns the actual number of workers spawned, which
+    ///  may be 0 if the manifest sets `async_worker_threads`
+    ///  to 0, or if `Thread.spawn` returned `Err` for the very
+    ///  first worker (interpreter mode / OS resource pressure).
+    ///  * **Graceful single-threaded fallback**: when any
+    ///  spawn fails mid-loop, every already-spawned handle is
+    ///  joined cleanly (shutdown_flag + notify_all + join) and
+    ///  the function returns 0 with no `worker_pool` populated.
+    ///  The runtime continues running on the existing
+    ///  cooperative single-threaded loop in `block_on`.
+    ///
+    /// **Hazard 4 (Tier 0 / interpreter mode)**: this graceful-
+    /// fallback path is what makes Phase 1B safe in interpreter
+    /// mode — `Thread.spawn` may return `Err::SpawnFailed`
+    /// (libffi pthread limitations under interpretation) and the
+    /// runtime degrades silently to single-threaded behaviour.
+    public fn start_worker_pool(&self) -> Int {
+        let configured = self.config.async_worker_threads;
+        if configured <= 0 {
+            return 0;
+        }
+
+        // Idempotency check — if a pool is already running, no-op.
+        {
+            let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+            if let Maybe.Some(ref existing) = *guard {
+                if existing.is_running.load(MemoryOrdering.Acquire) {
+                    return existing.num_workers;
+                }
+            }
+        }
+
+        let mut pool = WorkerPool.empty(configured);
+        // SAFETY: `runtime_addr` is the runtime's `&self` pointer.
+        // Workers cast back to `&AsyncRuntime` in `worker_main`.
+        // The pointer remains valid for the entire worker
+        // lifetime because `shutdown` (called by `Drop`) joins
+        // every handle BEFORE the runtime can be dropped — see
+        // Hazard 5 SAFETY block in worker_main.
+        let runtime_addr: &unsafe Byte = self as &unsafe Byte;
+
+        let mut spawned = 0;
+        let mut spawn_failed = false;
+        let mut i = 0;
+        while i < configured {
+            let result = ThreadBuilder.new()
+                .name(f"verum-worker-{i}")
+                .stack_size(self.config.task_stack_size)
+                .spawn(fn() {
+                    worker_main(runtime_addr);
+                });
+            match result {
+                Ok(handle) => {
+                    pool.handles.push(handle);
+                    spawned = spawned + 1;
+                }
+                Err(_) => {
+                    spawn_failed = true;
+                    break;
+                }
+            };
+            i = i + 1;
+        }
+
+        if spawn_failed {
+            // Hazard 4 graceful fallback: drain partial spawns
+            // cleanly. Set shutdown_flag + notify so any
+            // already-spawned worker exits, then join.
+            pool.shutdown_flag.store(true, MemoryOrdering.Release);
+            pool.notify_all();
+            for h in pool.handles.into_iter() {
+                let _ = h.join();
+            }
+            // Don't store the pool — runtime stays single-threaded.
+            return 0;
+        }
+
+        pool.is_running.store(true, MemoryOrdering.Release);
+        {
+            let mut guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+            *guard = Maybe.Some(pool);
+        }
+        spawned
+    }
+
+    /// Phase 1B (#325): park the calling worker until either a
+    /// queue becomes non-empty (re-checked after wake), shutdown
+    /// is signalled, or `WORKER_PARK_TIMEOUT_MS` elapses.
+    ///
+    /// **Hazard 1 (lock ordering)**: this method acquires
+    /// `worker_pool` briefly to read `park_cv` / `park_mu`
+    /// pointers, then RELEASES the worker_pool lock BEFORE
+    /// touching park_mu. Workers must NEVER hold worker_pool
+    /// while waiting on park_cv (that would deadlock with
+    /// `shutdown` which holds worker_pool while calling
+    /// notify_all).
+    ///
+    /// **Hazard 2 (lost-wakeup race)**: the predicate (queues
+    /// empty + not shut down) is re-checked UNDER park_mu before
+    /// `park_cv.wait`. Combined with the timeout-based fallback
+    /// (50 ms re-check), no producer-side notify is required for
+    /// correctness in Phase 1B-1 — the production-grade
+    /// `notify_one`-after-`spawn` integration is Phase 1B-2.
+    fn try_park(&self) -> ParkAction {
+        // Snapshot the cv / mu raw pointers under a brief
+        // worker_pool lock — Hazard 1 lock ordering.
+        let mut park_cv_ptr: &unsafe Byte = 0 as &unsafe Byte;
+        let mut park_mu_ptr: &unsafe Byte = 0 as &unsafe Byte;
+        let mut have_pool = false;
+        {
+            let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+            match *guard {
+                Maybe.Some(ref pool) => {
+                    park_cv_ptr = (&*pool.park_cv) as &unsafe Byte;
+                    park_mu_ptr = (&*pool.park_mu) as &unsafe Byte;
+                    pool.parked_count.fetch_add(1, MemoryOrdering.Relaxed);
+                    have_pool = true;
+                }
+                Maybe.None => {},
+            }
+        }
+        if !have_pool {
+            // Pool was extracted by shutdown — exit promptly.
+            return ParkAction.Stop;
+        }
+
+        // SAFETY: park_cv / park_mu live inside the WorkerPool
+        // owned by `self.worker_pool`. The pool is NOT dropped
+        // until `shutdown` joins all workers; therefore the
+        // pointers remain valid for the entire lifetime of the
+        // calling worker. See Hazard 6 mitigation in `shutdown`.
+        let park_cv = unsafe { &*(park_cv_ptr as &Condvar) };
+        let park_mu = unsafe { &*(park_mu_ptr as &Mutex<()>) };
+
+        let mu_guard = park_mu.lock().unwrap_or_else(|p| p.into_inner());
+
+        // Hazard 2: re-check the predicate UNDER park_mu before
+        // waiting. If work arrived between the worker's last
+        // poll and the lock-acquire here, observe it now and
+        // skip the wait.
+        let queues_have_work = self.queues_nonempty();
+        if queues_have_work {
+            self.decrement_parked_count();
+            return ParkAction.Continue;
+        }
+        if self.shutdown.load(MemoryOrdering.Acquire) {
+            self.decrement_parked_count();
+            return ParkAction.Stop;
+        }
+
+        // Park with timeout — bounded shutdown latency.
+        let timeout = SysDuration.from_millis(WORKER_PARK_TIMEOUT_MS);
+        let _woken_guard = park_cv
+            .wait_timeout(mu_guard, timeout)
+            .map(|(g, _)| g)
+            .unwrap_or_else(|p| p.into_inner());
+
+        self.decrement_parked_count();
+        if self.shutdown.load(MemoryOrdering.Acquire) {
+            ParkAction.Stop
+        } else {
+            ParkAction.Continue
+        }
+    }
+
+    /// Cheap predicate — true iff either queue has at least one
+    /// task. Acquires both locks briefly; never held across any
+    /// other lock.
+    fn queues_nonempty(&self) -> Bool {
+        let r_empty = {
+            let r = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
+            r.is_empty()
+        };
+        if !r_empty {
+            return true;
+        }
+        let p_empty = {
+            let p = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
+            p.is_empty()
+        };
+        !p_empty
+    }
+
+    /// Decrement parked_count under a brief worker_pool lock.
+    /// Idempotent — silently no-ops if the pool was extracted
+    /// by shutdown between the increment and this call.
+    fn decrement_parked_count(&self) {
+        let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+        if let Maybe.Some(ref pool) = *guard {
+            pool.parked_count.fetch_sub(1, MemoryOrdering.Relaxed);
         }
     }
 
@@ -636,8 +905,47 @@ implement AsyncRuntime {
     }
 
     /// Request shutdown.
+    ///
+    /// Phase 1B (#325): when a worker pool is active, this also
+    /// drains workers cleanly:
+    ///  1. Set the runtime-level `shutdown` flag (visible to
+    ///  workers via Acquire load).
+    ///  2. Extract the WorkerPool from `worker_pool` Mutex via
+    ///  `Maybe::take` while holding the lock briefly. Set the
+    ///  pool-level `shutdown_flag` and call `notify_all` to
+    ///  wake every parked worker.
+    ///  3. Release the worker_pool lock.
+    ///  4. `into_iter` the extracted handles and `join()` each —
+    ///  blocks until every worker has exited its poll loop.
+    ///
+    /// **Hazard 3 + 6**: steps 1-3 hold the worker_pool lock; the
+    /// joins in step 4 are lock-free. This prevents:
+    ///  * Hazard 3 — workers calling `worker_pool.lock()` (e.g.
+    ///  in `try_park` / `decrement_parked_count`) deadlocking
+    ///  with the join.
+    ///  * Hazard 6 — `Drop for AsyncRuntime` calling shutdown
+    ///  while a worker is mid-`worker_pool.lock()` blocking
+    ///  the join indefinitely.
     public fn shutdown(&self) {
         self.shutdown.store(true, MemoryOrdering.Release);
+
+        // Hazard 3 + 6: extract the pool atomically, notify, then
+        // RELEASE the lock before joining.
+        let pool_taken: Maybe<WorkerPool> = {
+            let mut g = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+            let extracted = g.take();
+            if let Maybe.Some(ref p) = extracted {
+                p.shutdown_flag.store(true, MemoryOrdering.Release);
+                p.notify_all();
+            }
+            extracted
+        };
+        // Lock released; safe to join lock-free.
+        if let Maybe.Some(pool) = pool_taken {
+            for h in pool.handles.into_iter() {
+                let _ = h.join();
+            }
+        }
     }
 
     /// Spawn a future on the runtime.
@@ -764,6 +1072,16 @@ implement AsyncRuntime {
 
         // Set runtime context
         ctx_set(SLOT_RUNTIME, self as &unsafe Byte);
+
+        // Phase 1B (#325): start the worker pool if the manifest
+        // configured `async_worker_threads > 0`. The call is
+        // idempotent and gracefully falls back to single-threaded
+        // mode under interpreter execution / spawn failure (returns
+        // 0, leaves `worker_pool` empty). Either way the existing
+        // single-threaded poll loop below remains the SAFETY net —
+        // workers are parallel POLLERS of the same shared queues,
+        // not a replacement for the main-thread loop.
+        let _spawned = self.start_worker_pool();
 
         // Create IOEngine for this event loop if I/O is enabled
         if self.config.enable_io {
@@ -1582,6 +1900,66 @@ public type ExecutorTimeout<F: Future> is {
 @inline
 fn time_now_ns() -> UInt64 {
     monotonic_nanos()
+}
+
+// =============================================================================
+// Phase 1B (#325) — Worker main loop
+// =============================================================================
+//
+// Each spawned worker thread runs `worker_main(runtime_ptr)`.
+// The function casts the `&unsafe Byte` back to `&AsyncRuntime`
+// and runs a poll-and-park loop until shutdown.
+//
+// SAFETY contract for the cast:
+//
+//   * `runtime_ptr` is a `&unsafe Byte` derived from
+//     `(&AsyncRuntime) as &unsafe Byte` in `start_worker_pool`.
+//   * The runtime outlives all spawned workers because:
+//      1. `block_on` claims the `running` flag before calling
+//         `start_worker_pool`, owning the runtime's stack frame
+//         for the entire poll loop.
+//      2. `shutdown` (called by `Drop for AsyncRuntime` at the
+//         bottom of `block_on` AND by the runtime's user-facing
+//         drop) extracts the WorkerPool and joins every handle
+//         BEFORE the runtime can be dropped — Hazard 5 + 6.
+//      3. The `pool_taken` local in `shutdown` keeps the
+//         WorkerPool (and its `park_cv` / `park_mu`) alive
+//         through the `into_iter().join()` loop, so workers
+//         waking from a wait have valid park primitives until
+//         the moment they exit `worker_main`.
+//
+// Therefore the unsafe deref is sound for the entire
+// `worker_main` body.
+fn worker_main(runtime_ptr: &unsafe Byte) {
+    let runtime = unsafe { &*(runtime_ptr as &AsyncRuntime) };
+
+    loop {
+        // Promptly check the shutdown flag at every iteration —
+        // covers wake from `notify_all`, timeout expiry, and the
+        // initial loop entry alike.
+        if runtime.shutdown.load(MemoryOrdering.Acquire) {
+            break;
+        }
+
+        // Drain any ready / pending tasks. `process_ready_tasks`
+        // is thread-safe via per-queue Mutex + atomic counters —
+        // workers compete for queue popping under the lock, then
+        // poll their owned task without holding any lock.
+        let _completed = runtime.process_ready_tasks();
+
+        if runtime.shutdown.load(MemoryOrdering.Acquire) {
+            break;
+        }
+
+        // No tasks to poll → park. `try_park` re-checks the
+        // queues UNDER park_mu (Hazard 2 lost-wakeup mitigation)
+        // and waits with a 50 ms timeout (Phase 1B-1 safety net
+        // — Phase 1B-2 will replace with notify-after-spawn).
+        match runtime.try_park() {
+            ParkAction.Stop => break,
+            ParkAction.Continue => {},
+        };
+    }
 }
 
 // =============================================================================

@@ -232,7 +232,20 @@ Mitigation:
 - Phase 1A foundation (LANDED, commit 0ab9cdcb): WorkerPool data
   structure + AsyncRuntime.worker_pool field + worker_pool_size()
   accessor. Zero-overhead default contract preserved.
-- Phase 1B thread-spawning: follow-up task #325 (split off from #277).
+- **Phase 1B-1 (LANDED, this commit)**: thread spawning via
+  `Thread.spawn` + worker-main poll loop + park/notify protocol +
+  shutdown extract-and-join + 50 ms park timeout safety net.
+  Graceful single-threaded fallback covers Tier 0 / spawn failures
+  (Hazard 4). All 6 documented hazards (1-6) mitigated. Test
+  surface: `test_compile_stdlib_async_executor` (codegen feature)
+  green; `worker_pool_phase1b_typecheck.vr` (L2 spec) typechecks
+  the Phase 1B method surface. Executable Tier 0 + Tier 1 pin
+  tests gated on (a) the pre-existing AsyncRuntime-construction
+  stack-overflow in interpreter mode and (b) AOT trunk being
+  unblocked from `dealloc missing param 1` lowering bug.
+- Phase 1B-2 follow-up: replace 50 ms park timeout with explicit
+  `worker_pool.notify_one()` calls in `spawn()` + waker-dispatch
+  paths for production-grade wakeup latency.
 - Phase 2 work-stealing: follow-up task #278.
 - Phase 3 Send/Sync pins: follow-up task #279.
 - Phase 4 lock-free + cache padding: follow-up task #280.
