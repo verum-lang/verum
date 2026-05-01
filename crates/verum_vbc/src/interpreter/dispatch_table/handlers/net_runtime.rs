@@ -39,10 +39,11 @@
 //! stalling on read/accept. The async-aware path (kqueue/io_uring
 //! through `core/io/engine.vr`) remains an AOT-only feature.
 
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
 /// The kinds of network resources we track per fd.
 enum NetResource {
@@ -51,22 +52,31 @@ enum NetResource {
     Udp(UdpSocket),
 }
 
-thread_local! {
-    static REGISTRY: RefCell<HashMap<i64, NetResource>> = RefCell::new(HashMap::new());
-    static NEXT_FD: Cell<i64> = const { Cell::new(1) };
-}
+// VBC-NET-RT-1: process-wide async-safe REGISTRY (was per-thread
+// `thread_local!` + `RefCell` — single-threaded only).  Async script
+// work multiplexes across worker threads (the io_uring/kqueue
+// executor in `core/io/engine`); a `thread_local!` REGISTRY would
+// return DISTINCT instances per worker, so a `tcp_send(fd)` issued
+// on a different thread than the original `tcp_connect` would NOT
+// find the fd.  Production server systems MUST share the registry
+// across all workers.  `LazyLock<Mutex<HashMap>>` is the chosen
+// primitive: process-wide, predictable latency under contention,
+// zero external deps.  The fd allocator uses an `AtomicI64` +
+// `fetch_add(1, Relaxed)` — fully lock-free.  Where a registry
+// operation is blocking (`tcp_accept`, `tcp_recv`), the lock is
+// explicitly DROPPED before the blocking call so concurrent
+// intrinsics can proceed on OTHER fds.
+static REGISTRY: LazyLock<Mutex<HashMap<i64, NetResource>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEXT_FD: AtomicI64 = AtomicI64::new(1);
 
 fn alloc_fd() -> i64 {
-    NEXT_FD.with(|c| {
-        let v = c.get();
-        c.set(v.wrapping_add(1));
-        v
-    })
+    NEXT_FD.fetch_add(1, Ordering::Relaxed)
 }
 
 fn register(res: NetResource) -> i64 {
     let fd = alloc_fd();
-    REGISTRY.with(|r| r.borrow_mut().insert(fd, res));
+    REGISTRY.lock().unwrap().insert(fd, res);
     fd
 }
 
@@ -258,8 +268,8 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 /// the fd isn't tracked — single API surface, two backing mechanisms.
 pub fn tcp_local_port(fd: i64) -> i64 {
     // Fast path: registry lookup for legacy synthetic-fd flows.
-    let from_registry = REGISTRY.with(|r| {
-        let map = r.borrow();
+    let from_registry = {
+        let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
             Some(NetResource::Listener(l)) => {
                 Some(l.local_addr().map(|a| a.port() as i64).unwrap_or(-1))
@@ -272,7 +282,7 @@ pub fn tcp_local_port(fd: i64) -> i64 {
             }
             None => None,
         }
-    });
+    };
     if let Some(p) = from_registry {
         return p;
     }
@@ -313,13 +323,13 @@ pub fn tcp_local_port(fd: i64) -> i64 {
 /// in `TcpStream` records.
 pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
     // Fast path: registry → std::net::TcpStream::peer_addr.
-    let from_registry = REGISTRY.with(|r| {
-        let map = r.borrow();
+    let from_registry = {
+        let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
             Some(NetResource::Stream(s)) => s.peer_addr().ok(),
             _ => None,
         }
-    });
+    };
     if let Some(addr) = from_registry {
         let port = addr.port() as i64;
         return match addr {
@@ -375,8 +385,8 @@ pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
 pub fn tcp_accept(listen_fd: i64) -> i64 {
     // Pull the listener out of the registry briefly so we don't hold
     // a RefCell borrow across the (potentially blocking) accept call.
-    let listener: Option<TcpListener> = REGISTRY.with(|r| {
-        let mut map = r.borrow_mut();
+    let listener: Option<TcpListener> = {
+        let mut map = REGISTRY.lock().unwrap();
         match map.remove(&listen_fd) {
             Some(NetResource::Listener(l)) => Some(l),
             other => {
@@ -386,14 +396,14 @@ pub fn tcp_accept(listen_fd: i64) -> i64 {
                 None
             }
         }
-    });
+    };
     if let Some(listener) = listener {
         // Synthetic-fd path (legacy `__tcp_listen_raw`).
         let result = listener.accept();
-        REGISTRY.with(|r| {
-            r.borrow_mut()
+        {
+            REGISTRY.lock().unwrap()
                 .insert(listen_fd, NetResource::Listener(listener));
-        });
+        };
         return match result {
             Ok((stream, _peer)) => register(NetResource::Stream(stream)),
             Err(_) => -1,
@@ -462,8 +472,8 @@ pub fn tcp_connect(host: &str, port: i64) -> i64 {
 
 pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
     // First try the synthetic-fd registry path (legacy `__tcp_*_raw`).
-    let registry_result: Option<i64> = REGISTRY.with(|r| {
-        let mut map = r.borrow_mut();
+    let registry_result: Option<i64> = {
+        let mut map = REGISTRY.lock().unwrap();
         match map.get_mut(&fd) {
             Some(NetResource::Stream(s)) => Some(match s.write_all(data) {
                 Ok(()) => data.len() as i64,
@@ -471,7 +481,7 @@ pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
             }),
             _ => None,
         }
-    });
+    };
     if let Some(rc) = registry_result {
         return rc;
     }
@@ -517,13 +527,13 @@ pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
     let cap = max_len.min(1 << 20) as usize; // hard-cap 1 MiB / call.
     let mut buf = vec![0_u8; cap];
     // Synthetic-fd registry path first.
-    let registry_result: Option<Option<usize>> = REGISTRY.with(|r| {
-        let mut map = r.borrow_mut();
+    let registry_result: Option<Option<usize>> = {
+        let mut map = REGISTRY.lock().unwrap();
         match map.get_mut(&fd) {
             Some(NetResource::Stream(s)) => Some(s.read(&mut buf).ok()),
             _ => None,
         }
-    });
+    };
     if let Some(read_result) = registry_result {
         let n = read_result?;
         buf.truncate(n);
@@ -559,10 +569,10 @@ pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
 
 pub fn tcp_close(fd: i64) -> i64 {
     // Legacy synthetic-fd path: drop from registry, std::net Drop runs.
-    let registry_hit = REGISTRY.with(|r| {
-        let mut map = r.borrow_mut();
+    let registry_hit = {
+        let mut map = REGISTRY.lock().unwrap();
         map.remove(&fd).is_some()
-    });
+    };
     if registry_hit {
         return 0;
     }
@@ -600,16 +610,14 @@ pub fn udp_send(fd: i64, data: &[u8], host: &str, port: i64) -> i64 {
     if !(0..=65535).contains(&port) {
         return -1;
     }
-    REGISTRY.with(|r| {
-        let map = r.borrow();
-        match map.get(&fd) {
-            Some(NetResource::Udp(s)) => match s.send_to(data, (host, port as u16)) {
-                Ok(n) => n as i64,
-                Err(_) => -1,
-            },
-            _ => -1,
-        }
-    })
+    let map = REGISTRY.lock().unwrap();
+    match map.get(&fd) {
+        Some(NetResource::Udp(s)) => match s.send_to(data, (host, port as u16)) {
+            Ok(n) => n as i64,
+            Err(_) => -1,
+        },
+        _ => -1,
+    }
 }
 
 pub fn udp_recv(fd: i64, max_len: i64) -> Option<String> {
@@ -618,13 +626,13 @@ pub fn udp_recv(fd: i64, max_len: i64) -> Option<String> {
     }
     let cap = max_len.min(1 << 20) as usize;
     let mut buf = vec![0_u8; cap];
-    let n = REGISTRY.with(|r| {
-        let map = r.borrow();
+    let n = {
+        let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
             Some(NetResource::Udp(s)) => s.recv(&mut buf).ok(),
             _ => None,
         }
-    })?;
+    }?;
     buf.truncate(n);
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
@@ -645,13 +653,13 @@ mod tests {
         let listen_fd = tcp_listen(0);
         assert!(listen_fd > 0);
         // Need the actual port to connect — read off the registered listener.
-        let port = REGISTRY.with(|r| {
-            let map = r.borrow();
+        let port = {
+            let map = REGISTRY.lock().unwrap();
             match map.get(&listen_fd) {
                 Some(NetResource::Listener(l)) => l.local_addr().unwrap().port(),
                 _ => panic!("listener missing"),
             }
-        });
+        };
         // Spawn a client
         let client = thread::spawn(move || {
             // Tiny sleep so accept() is reached first deterministically.
@@ -836,10 +844,12 @@ fn intercept_connect_text(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    if let Some(denied) = check_net_permission(state) {
+    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
+    // Granular permission check uses the host:port endpoint as the
+    // target_id; falls through to WILDCARD for `permissions = ["net"]`.
+    if let Some(denied) = check_net_permission_for(state, Some(&addr_text)) {
         return Ok(Some(denied));
     }
-    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
     // Only handle the Text-arg shape — if the extracted string is
     // empty or doesn't contain `:port`, fall through to the bytecode
     // body (which can handle SocketAddr / tuple shapes).
@@ -901,10 +911,12 @@ fn intercept_listener_bind_text(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    if let Some(denied) = check_net_permission(state) {
+    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
+    // Granular permission: hash the bind endpoint so
+    // `permissions = ["net=127.0.0.1:8080"]` grants only that bind.
+    if let Some(denied) = check_net_permission_for(state, Some(&addr_text)) {
         return Ok(Some(denied));
     }
-    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
     if addr_text.is_empty() || !addr_text.contains(':') {
         return Ok(None);
     }
@@ -957,10 +969,10 @@ fn intercept_udp_bind_text(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    if let Some(denied) = check_net_permission(state) {
+    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
+    if let Some(denied) = check_net_permission_for(state, Some(&addr_text)) {
         return Ok(Some(denied));
     }
-    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
     if addr_text.is_empty() || !addr_text.contains(':') {
         return Ok(None);
     }
@@ -1063,17 +1075,39 @@ fn build_peer_addr_v6(state: &mut InterpreterState, host: &str, port: i64) -> Op
     wrap_in_variant(state, "SocketAddr", 1, &[v6]).ok()
 }
 
-fn check_net_permission(state: &mut InterpreterState) -> Option<Value> {
-    if state.check_permission(PermissionScope::Network, 0) == PermissionDecision::Deny {
-        return build_io_err(
-            state,
-            "PermissionDenied",
-            1,
-            "permission denied: network access requires `net`",
-        )
-        .ok();
+/// VBC-PERM-1 — granular target_id: hash the host:port endpoint
+/// so a script frontmatter `permissions = ["net=api.example.com:443"]`
+/// grants only that endpoint.  Falls through to WILDCARD for
+/// scripts that grant `"net"` without a target.  Callers pass
+/// `None` for endpoint when the operation isn't endpoint-specific
+/// (e.g. wildcard fallbacks during early bind/listen probes).
+fn check_net_permission_for(
+    state: &mut InterpreterState,
+    endpoint: Option<&str>,
+) -> Option<Value> {
+    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+    if let Some(ep) = endpoint {
+        let tid = target_id_for(ep);
+        if state.check_permission(PermissionScope::Network, tid) == PermissionDecision::Allow {
+            return None;
+        }
     }
-    None
+    if state.check_permission(PermissionScope::Network, WILDCARD_TARGET_ID)
+        != PermissionDecision::Deny
+    {
+        return None;
+    }
+    let msg = match endpoint {
+        Some(ep) => format!("permission denied: network access to {} requires `net` grant", ep),
+        None => "permission denied: network access requires `net`".to_string(),
+    };
+    build_io_err(state, "PermissionDenied", 1, &msg).ok()
+}
+
+/// Backward-compat wrapper for call sites that don't have an
+/// endpoint (e.g. simple TCP-listen-on-any-port operations).
+fn check_net_permission(state: &mut InterpreterState) -> Option<Value> {
+    check_net_permission_for(state, None)
 }
 
 fn build_io_err(
