@@ -415,6 +415,183 @@ pub fn try_combine_clauses_to_sep_assertion(
     acc
 }
 
+// =============================================================================
+// Clause partitioning — #161 V7 (mixed separation + pure)
+// =============================================================================
+
+/// Per-clause classification used by the V7 splitter.
+///
+/// Separates clauses into two cohorts:
+///   * `Separation` — recognises as a syntactic separation
+///     predicate via [`try_recognize_sep_assertion`]; route through
+///     the SepLogicEncoder.
+///   * `Pure` — does NOT recognise as a separation predicate;
+///     route through generic SMT.
+///
+/// The discrimination is the load-bearing soundness boundary: a
+/// clause is treated as separation-bearing IFF the recogniser says
+/// so. Pure clauses don't see the heap; their verdict is independent
+/// of the separation portion.
+#[derive(Debug, Clone)]
+pub enum ClauseKind<'a> {
+    /// Clause recognises as a separation predicate.
+    Separation(SepAssertion),
+    /// Clause is heap-independent (treated as pure proposition).
+    /// The original AST `Expr` is preserved for downstream SMT
+    /// translation.
+    Pure(&'a Expr),
+}
+
+/// Outcome of partitioning a list of clauses into separation +
+/// pure cohorts (#161 V7).
+#[derive(Debug, Clone)]
+pub struct ClausePartition<'a> {
+    /// Clauses that recognised as separation predicates,
+    /// pre-translated to `SepAssertion`.
+    pub separation: Vec<SepAssertion>,
+    /// Clauses that DID NOT recognise — heap-irrelevant pure
+    /// propositions. The original `Expr` references are preserved
+    /// so the caller can dispatch them through generic SMT.
+    pub pure: Vec<&'a Expr>,
+}
+
+impl<'a> ClausePartition<'a> {
+    /// Combine the separation cohort into a single `SepAssertion`
+    /// via left-associative `sep_conj`. Empty cohort → `Emp`
+    /// (identity).
+    pub fn combined_separation(&self) -> SepAssertion {
+        if self.separation.is_empty() {
+            return SepAssertion::Emp;
+        }
+        let mut iter = self.separation.iter().cloned();
+        let first = iter.next().expect("non-empty");
+        iter.fold(first, |acc, next| SepAssertion::sep(acc, next))
+    }
+
+    /// True iff the partition has at least one separation clause —
+    /// the predicate the V7 hot-path uses to decide whether to
+    /// invoke the SepLogicEncoder at all.
+    pub fn has_separation(&self) -> bool {
+        !self.separation.is_empty()
+    }
+}
+
+/// Partition a slice of clauses into separation + pure cohorts.
+///
+/// **Soundness**: a clause is classified as `Separation` IFF the
+/// recogniser produces a `SepAssertion`. Otherwise it's `Pure` —
+/// no syntactic mixing within a single clause.  This rule keeps
+/// the split semantically clean: separation clauses describe heap
+/// shape; pure clauses describe heap-irrelevant logical
+/// constraints.
+///
+/// **Use site** (#161 V7): the verifier's hot path partitions
+/// requires + ensures clauses via this function, dispatches the
+/// separation cohort through the SepLogicEncoder, dispatches the
+/// pure cohort through generic SMT, and ANDs the verdicts.
+pub fn partition_clauses<'a>(clauses: &[&'a Expr]) -> ClausePartition<'a> {
+    let mut separation: Vec<SepAssertion> = Vec::new();
+    let mut pure: Vec<&'a Expr> = Vec::new();
+    for clause in clauses {
+        match try_recognize_sep_assertion(clause) {
+            Some(a) => separation.push(a),
+            None => pure.push(clause),
+        }
+    }
+    ClausePartition { separation, pure }
+}
+
+/// **Verify a mixed separation+pure Hoare obligation** (#161 V7).
+///
+/// The architectural extension on top of V6: splits `pre` and
+/// `post` clause lists into separation + pure cohorts, dispatches
+/// each cohort through the appropriate verifier:
+///   * Separation cohort → `SepLogicEncoder::verify_entailment`
+///     (heap-shape entailment with array-theory backing).
+///   * Pure cohort → generic SMT (the caller is expected to
+///     dispatch the returned `Expr`s through existing
+///     verification infrastructure).
+///
+/// **Soundness**: the conjunction `(P_sep ∗ P_pure) ⊢ (Q_sep ∗
+/// Q_pure)` proves separately as `P_sep ⊢ Q_sep` AND
+/// `P_pure ⊢ Q_pure` — both must hold. The pure portion is
+/// heap-irrelevant, so its verdict doesn't depend on the heap
+/// state; the separation portion describes heap shape, so its
+/// verdict doesn't depend on pure logic.
+///
+/// Returns the V4-style outcome for the SEPARATION portion plus
+/// the list of pure clauses the caller must verify through
+/// generic SMT. The caller's job is to (a) confirm the separation
+/// outcome is `Valid`, (b) hand the pure clauses to the generic
+/// verification path, (c) AND the two verdicts.
+///
+/// **No automatic AND**: this function doesn't try to verify the
+/// pure portion itself — that requires the full generic-SMT setup
+/// (engine, hypothesis context, refinement aliases) which lives
+/// in the verifier hot path. Returning the pure clauses lets the
+/// caller compose verification cleanly.
+pub fn split_separation_obligation<'a>(
+    pre_clauses: &[&'a Expr],
+    post_clauses: &[&'a Expr],
+) -> SeparationSplitOutcome<'a> {
+    let pre_partition = partition_clauses(pre_clauses);
+    let post_partition = partition_clauses(post_clauses);
+
+    // If neither side has a separation clause, V7 has nothing to
+    // contribute — punt to generic SMT for the whole obligation.
+    if !pre_partition.has_separation() && !post_partition.has_separation() {
+        return SeparationSplitOutcome::NotSeparationGoal;
+    }
+
+    // Verify the separation portion via the existing V4 path.
+    let pre_sep = pre_partition.combined_separation();
+    let post_sep = post_partition.combined_separation();
+    use crate::separation_logic::{EntailmentResult, SepLogicConfig, SepLogicEncoder};
+    let encoder = SepLogicEncoder::new(SepLogicConfig::default());
+    let separation_outcome = match encoder.verify_entailment(&pre_sep, &post_sep) {
+        Ok(EntailmentResult::Valid { .. }) => SepObligationOutcome::Valid,
+        Ok(EntailmentResult::Invalid { counterexample, .. }) => SepObligationOutcome::Invalid {
+            counterexample_summary: format!("{:?}", counterexample),
+        },
+        Ok(EntailmentResult::Unknown { reason, .. }) => SepObligationOutcome::Unknown {
+            reason: reason.as_str().to_string(),
+        },
+        Err(e) => SepObligationOutcome::Unknown {
+            reason: format!("encoder error: {:?}", e),
+        },
+    };
+
+    SeparationSplitOutcome::Split {
+        separation_outcome,
+        pure_pre: pre_partition.pure,
+        pure_post: post_partition.pure,
+    }
+}
+
+/// Outcome of [`split_separation_obligation`] (#161 V7).
+#[derive(Debug, Clone)]
+pub enum SeparationSplitOutcome<'a> {
+    /// Neither pre nor post has a separation clause — caller
+    /// dispatches through generic SMT, no V7 routing.
+    NotSeparationGoal,
+    /// At least one side had a separation clause; the separation
+    /// portion was verified through the SepLogicEncoder; the pure
+    /// portion is returned to the caller for dispatch through
+    /// generic SMT.
+    Split {
+        /// Verdict on the separation portion (Valid / Invalid /
+        /// Unknown).  The caller AND-s this with the pure-portion
+        /// verdict.
+        separation_outcome: SepObligationOutcome,
+        /// Pure pre-clauses — to be dispatched as hypotheses
+        /// through generic SMT.
+        pure_pre: Vec<&'a Expr>,
+        /// Pure post-clauses — to be dispatched as goals through
+        /// generic SMT.
+        pure_post: Vec<&'a Expr>,
+    },
+}
+
 /// **Verify a multi-clause separation-logic Hoare obligation**
 /// (#161 V6).  Generalises [`verify_separation_obligation`] from
 /// single-clause to any number of pre/post clauses, combining
@@ -964,6 +1141,136 @@ mod tests {
             !matches!(outcome, SepObligationOutcome::NotSeparationGoal),
             "empty post-list should default to emp, not NotSeparationGoal",
         );
+    }
+
+    // ----- V7 mixed separation+pure splitting -----
+
+    #[test]
+    fn partition_classifies_separation_and_pure_correctly() {
+        // [emp(), x > 0] should split into 1 separation + 1 pure.
+        let emp = call_expr("emp", vec![]);
+        let pure_pred = name_path_expr("x_gt_zero"); // surrogate for `x > 0`
+        let clauses = [&emp, &pure_pred];
+        let partition = partition_clauses(&clauses);
+        assert_eq!(partition.separation.len(), 1);
+        assert_eq!(partition.pure.len(), 1);
+        assert!(matches!(partition.separation[0], SepAssertion::Emp));
+    }
+
+    #[test]
+    fn partition_all_pure_returns_empty_separation() {
+        let p1 = name_path_expr("x_gt_zero");
+        let p2 = name_path_expr("y_lt_max");
+        let clauses = [&p1, &p2];
+        let partition = partition_clauses(&clauses);
+        assert!(partition.separation.is_empty());
+        assert_eq!(partition.pure.len(), 2);
+        assert!(!partition.has_separation());
+    }
+
+    #[test]
+    fn partition_all_separation_returns_empty_pure() {
+        let emp = call_expr("emp", vec![]);
+        let pt = call_expr("points_to", vec![name_path_expr("a"), name_path_expr("av")]);
+        let clauses = [&emp, &pt];
+        let partition = partition_clauses(&clauses);
+        assert_eq!(partition.separation.len(), 2);
+        assert!(partition.pure.is_empty());
+        assert!(partition.has_separation());
+    }
+
+    #[test]
+    fn combined_separation_emp_when_no_separation_clauses() {
+        let p = name_path_expr("x");
+        let clauses = [&p];
+        let partition = partition_clauses(&clauses);
+        let combined = partition.combined_separation();
+        assert!(matches!(combined, SepAssertion::Emp));
+    }
+
+    #[test]
+    fn combined_separation_left_associative_fold() {
+        let emp = call_expr("emp", vec![]);
+        let pt = call_expr("points_to", vec![name_path_expr("a"), name_path_expr("av")]);
+        let clauses = [&emp, &pt, &emp];
+        let partition = partition_clauses(&clauses);
+        let combined = partition.combined_separation();
+        // Expected: sep(sep(emp, points_to), emp).
+        match combined {
+            SepAssertion::Sep { left, right } => {
+                assert!(matches!(right.as_ref(), SepAssertion::Emp));
+                match left.as_ref() {
+                    SepAssertion::Sep { .. } => {}
+                    other => panic!("expected nested Sep on left, got {:?}", other),
+                }
+            }
+            other => panic!("expected outer Sep, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn split_separation_obligation_no_separation_returns_not_separation_goal() {
+        // All clauses pure → V7 has nothing to contribute.
+        let p1 = name_path_expr("x_gt_zero");
+        let p2 = name_path_expr("y_lt_max");
+        let pre = [&p1];
+        let post = [&p2];
+        let outcome = split_separation_obligation(&pre, &post);
+        assert!(matches!(outcome, SeparationSplitOutcome::NotSeparationGoal));
+    }
+
+    #[test]
+    fn split_separation_obligation_mixed_returns_split_with_pure_clauses() {
+        // pre = [emp(), x_gt_zero], post = [emp(), y_lt_max].
+        // The separation portion: emp ⊢ emp (trivially valid).
+        // The pure portion: [x_gt_zero] ⊢ [y_lt_max] — passed
+        // through to the caller for generic SMT dispatch.
+        let emp = call_expr("emp", vec![]);
+        let pre_pure = name_path_expr("x_gt_zero");
+        let post_pure = name_path_expr("y_lt_max");
+        let pre = [&emp, &pre_pure];
+        let post = [&emp, &post_pure];
+        let outcome = split_separation_obligation(&pre, &post);
+        match outcome {
+            SeparationSplitOutcome::Split {
+                separation_outcome: _,
+                pure_pre,
+                pure_post,
+            } => {
+                assert_eq!(pure_pre.len(), 1);
+                assert_eq!(pure_post.len(), 1);
+                // Pre's pure clause is `x_gt_zero`; post's is `y_lt_max`.
+                let pre_text = pure_pre[0]
+                    .kind
+                    .clone();
+                let post_text = pure_post[0]
+                    .kind
+                    .clone();
+                let _ = (pre_text, post_text); // shape pin only
+            }
+            other => panic!("expected Split, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn split_separation_obligation_only_separation_clauses_routes_normally() {
+        // No pure clauses — V7 still routes through (just like V6
+        // would have done), pure_pre/pure_post are empty.
+        let emp = call_expr("emp", vec![]);
+        let pre = [&emp];
+        let post = [&emp];
+        let outcome = split_separation_obligation(&pre, &post);
+        match outcome {
+            SeparationSplitOutcome::Split {
+                pure_pre,
+                pure_post,
+                ..
+            } => {
+                assert!(pure_pre.is_empty());
+                assert!(pure_post.is_empty());
+            }
+            other => panic!("expected Split with empty pure cohorts, got {:?}", other),
+        }
     }
 
     #[test]
