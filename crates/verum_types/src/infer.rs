@@ -6701,6 +6701,55 @@ impl TypeChecker {
         std::mem::take(&mut self.classification_map)
     }
 
+    /// Compute the MLS classification of an expression (#292
+    /// propagation foundation).
+    ///
+    /// Walks common expression kinds applying the lattice's join:
+    ///   - `Path(name)` → `binding_classification(name)`
+    ///   - `Binary { left, right }` → `expr_classification(left).
+    ///     join(right)` — both operands taint the result
+    ///   - `Call { args }` → max of `expr_classification(arg)`
+    ///     for each arg — function arguments propagate
+    ///   - `Unary { expr }` → `expr_classification(expr)`
+    ///   - `Paren(inner)` → `expr_classification(inner)`
+    ///   - other kinds → `MlsLevel::Public` (no propagation in
+    ///     Phase 2b foundation; `@declassify` blocks and explicit
+    ///     classification escape hatches are #292-Followup)
+    ///
+    /// This is the load-bearing read site for the let-binding
+    /// propagation pin: `let x = secret_param;` flows the param's
+    /// classification onto `x`'s sidecar entry.
+    pub fn expr_classification(
+        &self,
+        expr: &verum_ast::expr::Expr,
+    ) -> verum_common::mls::MlsLevel {
+        use verum_ast::expr::ExprKind;
+        use verum_common::mls::MlsLevel;
+        match &expr.kind {
+            ExprKind::Path(path) => {
+                if let Some(ident) = path.as_ident() {
+                    return self.binding_classification(&ident.name);
+                }
+                MlsLevel::Public
+            }
+            ExprKind::Binary { left, right, .. } => self
+                .expr_classification(left)
+                .join(self.expr_classification(right)),
+            ExprKind::Unary { expr, .. } => self.expr_classification(expr),
+            ExprKind::Paren(inner) => self.expr_classification(inner),
+            ExprKind::Call { func, args, .. } => {
+                let mut acc = self.expr_classification(func);
+                for a in args.iter() {
+                    acc = acc.join(self.expr_classification(a));
+                }
+                acc
+            }
+            // Other kinds default to Public; the lattice's identity
+            // means this is a no-op at downstream join sites.
+            _ => MlsLevel::Public,
+        }
+    }
+
     pub fn set_universe_poly_enabled(&mut self, enabled: bool) {
         self.universe_poly_enabled = enabled;
     }
@@ -18346,6 +18395,27 @@ impl TypeChecker {
 
                     // Bind pattern
                     self.bind_pattern_scheme(pattern, scheme.clone())?;
+
+                    // MLS Phase 2b-Followup propagation (#292):
+                    // when binding `let x = expr;`, compute the
+                    // expression's classification and seed the
+                    // sidecar so `x`'s classification reflects its
+                    // source. Only fires for Ident patterns at the
+                    // top level — destructuring patterns are
+                    // #292-Patterns scope (each sub-binding tracks
+                    // independently).
+                    //
+                    // The lattice's `Public` identity means
+                    // unclassified expressions don't pollute the
+                    // sparse map: `let y = 42;` doesn't create a
+                    // sidecar entry, only `let secret = secret_arg;`
+                    // does.
+                    if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
+                        let level = self.expr_classification(val);
+                        if level != verum_common::mls::MlsLevel::Public {
+                            self.classification_map.insert(name.name.clone(), level);
+                        }
+                    }
 
                     // =====================================================================
                     // NLL: Link reference holders to their borrows
@@ -57730,6 +57800,159 @@ mod mount_cycle_tests {
         assert_eq!(
             checker.binding_classification(&Text::from("high")),
             verum_common::mls::MlsLevel::TopSecret
+        );
+    }
+
+    // ============================================================
+    // MLS Phase 2b-Followup pin tests (#292) — expression
+    // classification + let-binding propagation.
+    // ============================================================
+
+    fn mk_path_expr(name: &str) -> verum_ast::expr::Expr {
+        use verum_ast::expr::{Expr, ExprKind};
+        let path = verum_ast::ty::Path::single(
+            verum_ast::ty::Ident::new(name, Span::default()),
+        );
+        Expr::new(ExprKind::Path(path), Span::default())
+    }
+
+    fn mk_int_lit(n: i64) -> verum_ast::expr::Expr {
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::literal::{Literal, LiteralKind, IntLit};
+        Expr::new(
+            ExprKind::Literal(Literal::new(
+                LiteralKind::Int(IntLit { value: n as i128, suffix: Maybe::None }),
+                Span::default(),
+            )),
+            Span::default(),
+        )
+    }
+
+    #[test]
+    fn expr_classification_path_resolves_classified_binding() {
+        // Pin: a Path expression referring to a classified binding
+        // returns that binding's classification — the load-bearing
+        // read site for let-binding propagation.
+        let mut checker = TypeChecker::new();
+        checker.set_binding_classification(
+            Text::from("secret_data"),
+            verum_common::mls::MlsLevel::Secret,
+        );
+        let expr = mk_path_expr("secret_data");
+        assert_eq!(
+            checker.expr_classification(&expr),
+            verum_common::mls::MlsLevel::Secret
+        );
+    }
+
+    #[test]
+    fn expr_classification_path_unknown_returns_public() {
+        // Pin: unknown Path expressions return Public (sparse-by-
+        // design). No false positives from typos.
+        let checker = TypeChecker::new();
+        let expr = mk_path_expr("nonexistent");
+        assert_eq!(
+            checker.expr_classification(&expr),
+            verum_common::mls::MlsLevel::Public
+        );
+    }
+
+    #[test]
+    fn expr_classification_literal_returns_public() {
+        // Pin: literal expressions are unclassified. Constants are
+        // not derived from any classified source.
+        let checker = TypeChecker::new();
+        let expr = mk_int_lit(42);
+        assert_eq!(
+            checker.expr_classification(&expr),
+            verum_common::mls::MlsLevel::Public
+        );
+    }
+
+    #[test]
+    fn expr_classification_binary_joins_operand_classifications() {
+        // Pin: `a + b` where a is Secret and b is Public produces
+        // Secret. Lattice JOIN semantics — both operands taint the
+        // result.
+        use verum_ast::expr::{Expr, ExprKind, BinOp};
+        let mut checker = TypeChecker::new();
+        checker.set_binding_classification(
+            Text::from("a"),
+            verum_common::mls::MlsLevel::Secret,
+        );
+        let left = mk_path_expr("a");
+        let right = mk_int_lit(5);
+        let binop = Expr::new(
+            ExprKind::Binary {
+                op: BinOp::Add,
+                left: verum_common::Heap::new(left),
+                right: verum_common::Heap::new(right),
+            },
+            Span::default(),
+        );
+        assert_eq!(
+            checker.expr_classification(&binop),
+            verum_common::mls::MlsLevel::Secret
+        );
+    }
+
+    #[test]
+    fn expr_classification_binary_max_when_both_classified() {
+        // Pin: when both operands are classified at different
+        // levels, the lattice JOIN produces the maximum.
+        use verum_ast::expr::{Expr, ExprKind, BinOp};
+        let mut checker = TypeChecker::new();
+        checker.set_binding_classification(
+            Text::from("secret_v"),
+            verum_common::mls::MlsLevel::Secret,
+        );
+        checker.set_binding_classification(
+            Text::from("ts_v"),
+            verum_common::mls::MlsLevel::TopSecret,
+        );
+        let left = mk_path_expr("secret_v");
+        let right = mk_path_expr("ts_v");
+        let binop = Expr::new(
+            ExprKind::Binary {
+                op: BinOp::Mul,
+                left: verum_common::Heap::new(left),
+                right: verum_common::Heap::new(right),
+            },
+            Span::default(),
+        );
+        assert_eq!(
+            checker.expr_classification(&binop),
+            verum_common::mls::MlsLevel::TopSecret
+        );
+    }
+
+    #[test]
+    fn expr_classification_call_propagates_through_args() {
+        // Pin: function calls propagate classification from
+        // arguments to result. `foo(secret_arg)` taints the result
+        // at Secret. The function's own classification is the
+        // join with arg classifications — Phase 2b-Final will
+        // refine this with parameter-classification matching.
+        use verum_ast::expr::{Expr, ExprKind};
+        let mut checker = TypeChecker::new();
+        checker.set_binding_classification(
+            Text::from("secret_arg"),
+            verum_common::mls::MlsLevel::Secret,
+        );
+        let func = mk_path_expr("foo");
+        let mut args = List::new();
+        args.push(mk_path_expr("secret_arg"));
+        let call = Expr::new(
+            ExprKind::Call {
+                func: verum_common::Heap::new(func),
+                args,
+                type_args: List::new(),
+            },
+            Span::default(),
+        );
+        assert_eq!(
+            checker.expr_classification(&call),
+            verum_common::mls::MlsLevel::Secret
         );
     }
 }
