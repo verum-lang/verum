@@ -1,0 +1,454 @@
+// =============================================================================
+// math/big_uint.vr — minimal multi-precision unsigned integer
+// =============================================================================
+// Layer: 1 (Math)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// Multi-precision unsigned-integer arithmetic. Built specifically
+// for the cryptographic routines that need RSA-class moduli
+// (2048+ bits) — RSA-OAEP encryption, RSA-PSS verification, and
+// other public-key paths under `core.security.{sig,encrypt}.*`.
+//
+// # Surface (intentionally minimal)
+//
+//   * `BigUint` — little-endian limbs as `List<UInt32>` (a 2048-bit
+//     value is 64 limbs).
+//   * `from_bytes_be(&[Byte]) -> BigUint` — RSA wire / PEM input.
+//   * `to_bytes_be(target_len: Int) -> List<Byte>` — RSA wire output;
+//     left-pads with zero bytes to `target_len` (e.g. the modulus
+//     byte-length so the encrypted ciphertext occupies exactly k
+//     bytes per RFC 8017 §7.1).
+//   * `cmp` / `is_zero` / `bit_len` — comparison and metadata.
+//   * `add` / `sub_checked` / `mul` — basic arithmetic. `sub_checked`
+//     returns `None` on underflow (we are unsigned).
+//   * `rem` — modular reduction via long division. The hot path
+//     for RSA encryption only invokes this once after each
+//     `mul`, so the schoolbook O(n²) algorithm is sufficient at
+//     the 64-limb scale (sub-millisecond per encrypt on modern
+//     hardware).
+//   * `modexp(base, exp, modulus) -> BigUint` — binary
+//     square-and-multiply with reduction after every step. Public
+//     RSA exponents are typically 2^16+1 (16 bit + leading 1), so
+//     ~17 multiplies per encryption — fast.
+//
+// # NOT included (deliberately)
+//
+//   * Signed integers — any caller that needs signs wraps a sign
+//     flag externally. RSA / DH / EC scalar multiply work with
+//     unsigned-only values inside the modulus.
+//
+//   * Montgomery multiplication / Barrett reduction — premature
+//     optimisation for the RSA encryption use case (small e).
+//     The decryption path (large d ≈ modulus_bits) would benefit;
+//     when that path lands, this module gains a Montgomery
+//     variant alongside, the `modexp` API stays.
+//
+//   * Constant-time guarantees — RSA encryption is OK with
+//     variable-time arithmetic because the secrets (public-key
+//     operations) involve only the public-key material. RSA
+//     decryption / signing MUST be constant-time; that work
+//     ships with the Montgomery variant and is gated on a
+//     `@constant_time` annotation.
+//
+//   * Karatsuba / Toom-Cook / FFT multiplication — schoolbook
+//     O(n²) is fine at n ≤ 64 limbs; would matter at 4096+ bits.
+//
+// # Limb size choice
+//
+// 32-bit limbs avoid carry-bit issues with the platform's native
+// 64-bit Int — a (UInt32 * UInt32) product fits in 64 bits with
+// room for a carry-in, lets the multiplier loop stay branch-free.
+// Caller-visible byte order is big-endian (RSA wire format) so
+// the limb layout is purely internal.
+// =============================================================================
+
+module core.math.big_uint;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// BigUint
+// =============================================================================
+
+/// Multi-precision unsigned integer. Limbs are 32-bit, stored
+/// little-endian (`limbs[0]` is the least significant 32 bits).
+/// Trailing zero limbs are NEVER kept — `BigUint.zero()` has
+/// `limbs.len() == 0`. Helpers normalise after every arithmetic
+/// op.
+public type BigUint is {
+    limbs: List<UInt32>,
+};
+
+implement BigUint {
+    /// The unique zero value.
+    public fn zero() -> BigUint {
+        BigUint { limbs: List.new() }
+    }
+
+    /// One — useful as a starting value for `modexp`.
+    public fn one() -> BigUint {
+        let mut limbs: List<UInt32> = List.with_capacity(1);
+        limbs.push(1_u32);
+        BigUint { limbs: limbs }
+    }
+
+    /// Construct from a small native unsigned integer.
+    public fn from_u64(n: UInt64) -> BigUint {
+        if n == 0_u64 {
+            return BigUint.zero();
+        }
+        let mut limbs: List<UInt32> = List.new();
+        limbs.push((n & 0xFFFFFFFF_u64) as UInt32);
+        let hi = (n >> 32_u64) as UInt32;
+        if hi != 0_u32 {
+            limbs.push(hi);
+        }
+        BigUint { limbs: limbs }
+    }
+
+    /// Decode from a big-endian byte slice (RSA / wire format
+    /// canonical). Leading zero bytes are tolerated and stripped.
+    public fn from_bytes_be(bytes: &[Byte]) -> BigUint {
+        let n = bytes.len() as Int;
+        if n == 0 { return BigUint.zero(); }
+        // Walk from the LSB end, packing 4 bytes per limb.
+        let mut limbs: List<UInt32> = List.new();
+        let mut i: Int = n - 1;
+        let mut shift: Int = 0;
+        let mut current: UInt32 = 0_u32;
+        while i >= 0 {
+            let b = (bytes[i] as Int) & 0xFF;
+            current = current | ((b as UInt32) << (shift as UInt32));
+            shift = shift + 8;
+            if shift == 32 {
+                limbs.push(current);
+                current = 0_u32;
+                shift = 0;
+            }
+            i = i - 1;
+        }
+        if shift > 0 {
+            limbs.push(current);
+        }
+        BigUint { limbs: limbs }.normalise()
+    }
+
+    /// Encode to a big-endian byte slice of EXACTLY `target_len`
+    /// bytes. Left-pads with zero bytes when the value is shorter
+    /// than `target_len`. Returns `None` if the value's magnitude
+    /// exceeds `target_len * 8` bits.
+    public fn to_bytes_be(&self, target_len: Int) -> Maybe<List<Byte>> {
+        if target_len < 0 { return None; }
+        // Compute byte-length needed and reject if it's larger
+        // than `target_len`.
+        let bits = self.bit_len();
+        let needed = (bits + 7) / 8;
+        if needed > target_len {
+            return None;
+        }
+        let mut out: List<Byte> = List.with_capacity(target_len);
+        let mut i: Int = 0;
+        while i < target_len {
+            out.push(0_u8);
+            i = i + 1;
+        }
+        // Walk from MSB end; place limbs at the correct offset.
+        let n_limbs = self.limbs.len() as Int;
+        let mut limb_idx: Int = 0;
+        while limb_idx < n_limbs {
+            let limb = self.limbs[limb_idx];
+            // Limb sits at byte offset (target_len - 1 - limb_idx*4 .. -3).
+            let mut k: Int = 0;
+            while k < 4 {
+                let byte_off = target_len - 1 - (limb_idx * 4 + k);
+                if byte_off >= 0 && byte_off < target_len {
+                    out[byte_off] = ((limb >> ((k * 8) as UInt32)) & 0xFF_u32) as Byte;
+                }
+                k = k + 1;
+            }
+            limb_idx = limb_idx + 1;
+        }
+        Some(out)
+    }
+
+    /// True iff the value is zero.
+    public fn is_zero(&self) -> Bool {
+        self.limbs.len() == 0
+    }
+
+    /// Number of significant bits — `0` for zero, otherwise
+    /// `(limb_count - 1) * 32 + bit_len(top_limb)`.
+    public fn bit_len(&self) -> Int {
+        let n = self.limbs.len() as Int;
+        if n == 0 { return 0; }
+        let top = self.limbs[n - 1];
+        let mut hi: Int = 0;
+        let mut t = top;
+        while t != 0_u32 {
+            hi = hi + 1;
+            t = t >> 1_u32;
+        }
+        (n - 1) * 32 + hi
+    }
+
+    /// Three-way compare: returns -1 / 0 / +1.
+    public fn cmp(&self, other: &BigUint) -> Int {
+        let na = self.limbs.len() as Int;
+        let nb = other.limbs.len() as Int;
+        if na < nb { return -1; }
+        if na > nb { return  1; }
+        let mut i: Int = na - 1;
+        while i >= 0 {
+            let a = self.limbs[i];
+            let b = other.limbs[i];
+            if a < b { return -1; }
+            if a > b { return  1; }
+            i = i - 1;
+        }
+        0
+    }
+
+    public fn equals(&self, other: &BigUint) -> Bool {
+        self.cmp(other) == 0
+    }
+
+    /// Drop trailing zero limbs.
+    fn normalise(mut self) -> BigUint {
+        while (self.limbs.len() as Int) > 0
+            && self.limbs[(self.limbs.len() as Int) - 1] == 0_u32
+        {
+            // Shrink by one — pop the trailing zero. List.pop
+            // removes the last element and returns it; we
+            // discard.
+            let _ = self.limbs.pop();
+        }
+        self
+    }
+}
+
+// =============================================================================
+// Arithmetic primitives — schoolbook implementations.
+// =============================================================================
+
+/// `a + b`. Always succeeds — `BigUint` has no upper bound.
+public fn add(a: &BigUint, b: &BigUint) -> BigUint {
+    let na = a.limbs.len() as Int;
+    let nb = b.limbs.len() as Int;
+    let m = if na > nb { na } else { nb };
+    let mut out: List<UInt32> = List.with_capacity(m + 1);
+    let mut carry: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < m {
+        let av: UInt64 = if i < na { a.limbs[i] as UInt64 } else { 0_u64 };
+        let bv: UInt64 = if i < nb { b.limbs[i] as UInt64 } else { 0_u64 };
+        let sum = av + bv + carry;
+        out.push((sum & 0xFFFFFFFF_u64) as UInt32);
+        carry = sum >> 32_u64;
+        i = i + 1;
+    }
+    if carry != 0_u64 {
+        out.push(carry as UInt32);
+    }
+    BigUint { limbs: out }.normalise()
+}
+
+/// `a - b`. Returns `None` on underflow (`a < b`).
+public fn sub_checked(a: &BigUint, b: &BigUint) -> Maybe<BigUint> {
+    if a.cmp(b) < 0 { return None; }
+    let na = a.limbs.len() as Int;
+    let nb = b.limbs.len() as Int;
+    let mut out: List<UInt32> = List.with_capacity(na);
+    let mut borrow: Int = 0;
+    let mut i: Int = 0;
+    while i < na {
+        let av = a.limbs[i] as Int;
+        let bv: Int = if i < nb { b.limbs[i] as Int } else { 0 };
+        let diff = av - bv - borrow;
+        if diff < 0 {
+            out.push((diff + 0x1_0000_0000) as UInt32);
+            borrow = 1;
+        } else {
+            out.push(diff as UInt32);
+            borrow = 0;
+        }
+        i = i + 1;
+    }
+    Some(BigUint { limbs: out }.normalise())
+}
+
+/// `a * b` — schoolbook O(n*m) multiplication.
+public fn mul(a: &BigUint, b: &BigUint) -> BigUint {
+    let na = a.limbs.len() as Int;
+    let nb = b.limbs.len() as Int;
+    if na == 0 || nb == 0 { return BigUint.zero(); }
+    let mut out_limbs: List<UInt32> = List.with_capacity(na + nb);
+    let mut k: Int = 0;
+    while k < na + nb {
+        out_limbs.push(0_u32);
+        k = k + 1;
+    }
+    let mut i: Int = 0;
+    while i < na {
+        let av = a.limbs[i] as UInt64;
+        let mut carry: UInt64 = 0_u64;
+        let mut j: Int = 0;
+        while j < nb {
+            let bv = b.limbs[j] as UInt64;
+            let prev = out_limbs[i + j] as UInt64;
+            let prod = av * bv + prev + carry;
+            out_limbs[i + j] = (prod & 0xFFFFFFFF_u64) as UInt32;
+            carry = prod >> 32_u64;
+            j = j + 1;
+        }
+        if carry != 0_u64 {
+            // Propagate carry into the higher limb.
+            let prev = out_limbs[i + nb] as UInt64;
+            out_limbs[i + nb] = ((prev + carry) & 0xFFFFFFFF_u64) as UInt32;
+            // Higher carry beyond i+nb is impossible at the
+            // schoolbook bound: prev + carry < 2 * 2^32, so the
+            // single-limb update is sufficient.
+        }
+        i = i + 1;
+    }
+    BigUint { limbs: out_limbs }.normalise()
+}
+
+/// `a mod m` via repeated subtract-shift. Slow at the 2048-bit
+/// scale (~2048 shifts per call) but correct and obvious.
+/// Production callers that need throughput swap in Montgomery /
+/// Barrett reduction; for RSA-OAEP encryption this is fired once
+/// per ~17-bit `e` modexp iteration, so total is ~17×~2048 =
+/// ~35k ops per encryption — under a millisecond.
+public fn rem(a: &BigUint, m: &BigUint) -> BigUint {
+    if m.is_zero() {
+        // Mathematically undefined; surface as zero rather than
+        // panicking in a context where the operation might be
+        // attacker-driven.
+        return BigUint.zero();
+    }
+    if a.cmp(m) < 0 {
+        return clone_biguint(a);
+    }
+    // Find the highest bit of `a`; align `m` to that bit and
+    // conditionally subtract while shifting down.
+    let a_bits = a.bit_len();
+    let m_bits = m.bit_len();
+    if a_bits < m_bits {
+        return clone_biguint(a);
+    }
+    let mut r = clone_biguint(a);
+    let mut shifted = shl(m, a_bits - m_bits);
+    let mut bit: Int = a_bits - m_bits;
+    loop {
+        if r.cmp(&shifted) >= 0 {
+            r = match sub_checked(&r, &shifted) {
+                Some(v) => v,
+                None    => return BigUint.zero(),    // unreachable
+            };
+        }
+        if bit == 0 { break; }
+        bit = bit - 1;
+        shifted = shr1(&shifted);
+    }
+    r
+}
+
+/// Left shift by `n` bits — used by `rem` to align the divisor.
+public fn shl(a: &BigUint, n: Int) -> BigUint {
+    if n <= 0 || a.is_zero() {
+        return clone_biguint(a);
+    }
+    let limb_shift = n / 32;
+    let bit_shift = n % 32;
+    let na = a.limbs.len() as Int;
+    let total = na + limb_shift + 1;
+    let mut out: List<UInt32> = List.with_capacity(total);
+    let mut k: Int = 0;
+    while k < total {
+        out.push(0_u32);
+        k = k + 1;
+    }
+    let mut carry: UInt32 = 0_u32;
+    let mut i: Int = 0;
+    while i < na {
+        let v: UInt64 = (a.limbs[i] as UInt64) << (bit_shift as UInt64);
+        let lo = (v & 0xFFFFFFFF_u64) as UInt32;
+        let hi = (v >> 32_u64) as UInt32;
+        out[i + limb_shift] = lo | carry;
+        carry = hi;
+        i = i + 1;
+    }
+    if carry != 0_u32 {
+        out[na + limb_shift] = carry;
+    }
+    BigUint { limbs: out }.normalise()
+}
+
+/// Right shift by 1 — used by `rem`'s subtract-shift loop.
+fn shr1(a: &BigUint) -> BigUint {
+    if a.is_zero() { return BigUint.zero(); }
+    let na = a.limbs.len() as Int;
+    let mut out: List<UInt32> = List.with_capacity(na);
+    let mut k: Int = 0;
+    while k < na {
+        out.push(0_u32);
+        k = k + 1;
+    }
+    let mut carry: UInt32 = 0_u32;
+    let mut i: Int = na - 1;
+    while i >= 0 {
+        let v = a.limbs[i];
+        let new_carry = (v & 1_u32) << 31_u32;
+        out[i] = (v >> 1_u32) | carry;
+        carry = new_carry;
+        i = i - 1;
+    }
+    BigUint { limbs: out }.normalise()
+}
+
+/// Modular exponentiation: `base^exp mod modulus`. Right-to-left
+/// binary square-and-multiply with reduction after each multiply
+/// so the working values never exceed `modulus^2`. Public-key
+/// RSA encryption uses small `exp` (typically 65537), so this is
+/// ~17 squarings + ~2 multiplies — under a millisecond.
+public fn modexp(base: &BigUint, exp: &BigUint, modulus: &BigUint) -> BigUint {
+    if modulus.is_zero() || modulus.equals(&BigUint.one()) {
+        return BigUint.zero();
+    }
+    let mut result = BigUint.one();
+    let mut b = rem(base, modulus);
+    let exp_bits = exp.bit_len();
+    let mut bit_idx: Int = 0;
+    while bit_idx < exp_bits {
+        if bit_at(exp, bit_idx) {
+            let prod = mul(&result, &b);
+            result = rem(&prod, modulus);
+        }
+        let sq = mul(&b, &b);
+        b = rem(&sq, modulus);
+        bit_idx = bit_idx + 1;
+    }
+    result
+}
+
+/// Bit accessor — returns true iff bit `i` is set.
+fn bit_at(a: &BigUint, i: Int) -> Bool {
+    let limb = i / 32;
+    let off = i % 32;
+    let n = a.limbs.len() as Int;
+    if limb >= n { return false; }
+    ((a.limbs[limb] >> (off as UInt32)) & 1_u32) != 0_u32
+}
+
+/// Deep-clone a `BigUint`. Used internally by `rem` / `modexp`.
+fn clone_biguint(a: &BigUint) -> BigUint {
+    let mut out: List<UInt32> = List.with_capacity(a.limbs.len() as Int);
+    let mut i: Int = 0;
+    while i < a.limbs.len() as Int {
+        out.push(a.limbs[i]);
+        i = i + 1;
+    }
+    BigUint { limbs: out }
+}

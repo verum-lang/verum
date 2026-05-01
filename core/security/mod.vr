@@ -125,6 +125,10 @@ public module ecc;
 // Legacy / interop only — prefer Ed25519 for new applications.
 public module sig;
 
+// Public-key encryption (RSA-OAEP and friends). Distinct from
+// `sig` (signing) and `aead` (symmetric encryption).
+public module encrypt;
+
 // Cryptographic random token generator (URL-safe / hex / numeric).
 public module token;
 
