@@ -33,6 +33,14 @@ pub struct Unifier {
     pub unify_count: usize,
     /// Current recursion depth for unify_inner (prevents stack overflow)
     unify_depth: u32,
+    /// Maximum permitted unify_inner recursion depth (#304).
+    /// Pre-fix this was a hardcoded `MAX_UNIFY_DEPTH = 50`
+    /// constant; embedders running heavy generic-type inference
+    /// could not raise the cap.  Default 50 stays for backward
+    /// compatibility (50 frames × ~2500 lines of match arms ≈
+    /// the safe stack-frame budget on 64MB-stack threads); use
+    /// `with_max_unify_depth` to override.
+    max_unify_depth: u32,
     /// Accumulated substitution from all unifications
     /// This is composed with each new unification result
     substitution: Substitution,
@@ -108,6 +116,12 @@ pub struct Unifier {
     cubical_enabled: bool,
 }
 
+/// Default `unify_inner` recursion budget (#304).  50 frames ×
+/// ~2500-line match arms ≈ the safe stack-frame budget on
+/// 64 MiB-stack threads.  Embedders with deeper generic-type
+/// inference can raise via `Unifier::with_max_unify_depth`.
+pub const DEFAULT_MAX_UNIFY_DEPTH: u32 = 50;
+
 impl Unifier {
     pub fn new() -> Self {
         let mut array_coercible_types = std::collections::HashSet::new();
@@ -159,6 +173,7 @@ impl Unifier {
         Self {
             unify_count: 0,
             unify_depth: 0,
+            max_unify_depth: DEFAULT_MAX_UNIFY_DEPTH,
             substitution: Substitution::new(),
             variant_type_names: Map::new(),
             original_variant_types: Map::new(),
@@ -1153,10 +1168,13 @@ impl Unifier {
 
         // Recursion depth guard to prevent stack overflow (RAII for safety on early returns)
         // Each recursive unify_inner_impl frame is ~2500 lines of match arms,
-        // consuming significant stack. With 64MB thread stacks, limit to 50.
-        const MAX_UNIFY_DEPTH: u32 = 50;
+        // consuming significant stack.  Default cap is
+        // DEFAULT_MAX_UNIFY_DEPTH = 50 (calibrated for 64 MiB
+        // thread stacks); #304 makes it overridable via
+        // `with_max_unify_depth` so embedders running heavier
+        // inference can raise the budget.
         self.unify_depth += 1;
-        if self.unify_depth > MAX_UNIFY_DEPTH {
+        if self.unify_depth > self.max_unify_depth {
             self.unify_depth -= 1;
             return Err(TypeError::Other(
                 verum_common::Text::from("type inference recursion limit exceeded"),
@@ -1165,6 +1183,25 @@ impl Unifier {
         let result = self.unify_inner_impl(t1, t2, span);
         self.unify_depth = self.unify_depth.saturating_sub(1);
         result
+    }
+
+    /// Override the unify_inner recursion budget (#304).  Useful
+    /// when embedders running heavy generic-type inference need
+    /// to raise the default 50-frame cap, or when fuzzing /
+    /// security-sensitive contexts want to lower it.  Setting `0`
+    /// rejects every unification (the gate fires on the first
+    /// frame).  Returns `self` for fluent construction.
+    pub fn with_max_unify_depth(mut self, max_depth: u32) -> Self {
+        self.max_unify_depth = max_depth;
+        self
+    }
+
+    /// Read mirror of the configured maximum unify recursion
+    /// depth.  Surfaced as a getter so embedders can confirm
+    /// the value the manifest set without exercising the full
+    /// unify path.
+    pub fn configured_max_unify_depth(&self) -> u32 {
+        self.max_unify_depth
     }
 
     fn unify_inner_impl(&mut self, t1: &Type, t2: &Type, span: Span) -> Result<Substitution> {

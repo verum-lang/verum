@@ -470,3 +470,70 @@ fn test_type_of_universe_hierarchy() {
         "Bool should have type Type₀"
     );
 }
+
+// =========================================================================
+// #304: Unifier MAX_UNIFY_DEPTH configurable pins
+// =========================================================================
+
+#[test]
+fn unifier_default_max_unify_depth_matches_constant() {
+    // Pin (#304): the default still uses the documented
+    // DEFAULT_MAX_UNIFY_DEPTH = 50 cap — backward-compatible
+    // behaviour for callers that don't override.
+    let unifier = Unifier::new();
+    assert_eq!(
+        unifier.configured_max_unify_depth(),
+        verum_types::unify::DEFAULT_MAX_UNIFY_DEPTH
+    );
+    assert_eq!(unifier.configured_max_unify_depth(), 50);
+}
+
+#[test]
+fn unifier_with_max_unify_depth_overrides_default() {
+    // Pin (#304): builder propagates the configured cap.
+    let unifier = Unifier::new().with_max_unify_depth(200);
+    assert_eq!(unifier.configured_max_unify_depth(), 200);
+
+    let tightened = Unifier::new().with_max_unify_depth(5);
+    assert_eq!(tightened.configured_max_unify_depth(), 5);
+}
+
+#[test]
+fn unifier_max_unify_depth_zero_rejects_first_call() {
+    // Pin (#304): pathological max_unify_depth = 0 rejects every
+    // unification (the first frame already exceeds depth 0).
+    // Sanity check that the gate fires unconditionally — without
+    // this pin a misconfigured embedder might silently bypass
+    // the guard.
+    let mut unifier = Unifier::new().with_max_unify_depth(0);
+    let span = Span::dummy();
+    let result = unifier.unify(&Type::int(), &Type::int(), span);
+    match result {
+        Err(TypeError::Other(msg)) => {
+            assert!(
+                msg.as_str().contains("recursion limit exceeded"),
+                "expected recursion-limit error, got: {}",
+                msg.as_str()
+            );
+        }
+        other => panic!(
+            "expected recursion-limit error, got: {:?}",
+            other.is_ok()
+        ),
+    }
+}
+
+#[test]
+fn unifier_max_unify_depth_above_zero_admits_simple_unification() {
+    // Pin (#304): a non-zero limit (even if small) admits a single
+    // primitive unification — the gate fires on EXCEEDING the
+    // configured cap, not on hitting it.
+    let mut unifier = Unifier::new().with_max_unify_depth(5);
+    let span = Span::dummy();
+    let result = unifier.unify(&Type::int(), &Type::int(), span);
+    assert!(
+        result.is_ok(),
+        "primitive unification must succeed within budget: {:?}",
+        result
+    );
+}
