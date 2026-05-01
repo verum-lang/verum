@@ -289,15 +289,23 @@ fn render_term_coq(body: &ProofBody) -> TranslatedProofBody {
 /// yet (Coq apply unification usually figures out the implicit
 /// arguments from the goal).  Covers both `ProofBody::Tactic(Apply)`
 /// and the equivalent `ProofBody::Structured` shapes produced for
-/// `proof { apply <name>(args); }` blocks.
+/// `proof { apply <name>(args); }` blocks.  Also covers the simple
+/// primitive tactics (Auto / Trivial / Reflexivity / Assumption /
+/// Ring / Field / Omega) — each translates to a single Coq tactic
+/// of the same name.
 fn render_single_apply_coq(body: &ProofBody) -> TranslatedProofBody {
     if let Some((name, _args)) = classify_single_apply(body) {
         return TranslatedProofBody::Translated {
             text: format!("apply {}.", name),
         };
     }
+    if let Some(tactic) = primitive_tactic(body) {
+        if let Some(text) = primitive_tactic_to_coq(tactic) {
+            return TranslatedProofBody::Translated { text };
+        }
+    }
     TranslatedProofBody::Fallback {
-        reason: "Coq: only single-apply (`apply <name>(args);`) is covered in V0".to_string(),
+        reason: "Coq: V0 covers single-apply + primitive tactics (auto/trivial/refl/assumption/ring/field/omega)".to_string(),
     }
 }
 
@@ -360,16 +368,99 @@ fn render_term_lean(body: &ProofBody) -> TranslatedProofBody {
 }
 
 /// Lean single-apply proof: `by apply <name>`.  Covers both bare
-/// tactic-mode and structured-with-single-apply shapes.
+/// tactic-mode and structured-with-single-apply shapes.  Also covers
+/// the simple primitive tactics — each gets a `by <lean_name>`
+/// translation.
 fn render_single_apply_lean(body: &ProofBody) -> TranslatedProofBody {
     if let Some((name, _args)) = classify_single_apply(body) {
         return TranslatedProofBody::Translated {
             text: format!("by apply {}", name),
         };
     }
-    TranslatedProofBody::Fallback {
-        reason: "Lean: only single-apply (`apply <name>(args);`) is covered in V0".to_string(),
+    if let Some(tactic) = primitive_tactic(body) {
+        if let Some(text) = primitive_tactic_to_lean(tactic) {
+            return TranslatedProofBody::Translated { text };
+        }
     }
+    TranslatedProofBody::Fallback {
+        reason: "Lean: V0 covers single-apply + primitive tactics (auto/trivial/refl/assumption/ring/field/omega)".to_string(),
+    }
+}
+
+// =============================================================================
+// Primitive-tactic recognition + per-backend translation
+// =============================================================================
+
+/// Extract the inner tactic from a body that's either
+/// `ProofBody::Tactic(t)` or `ProofBody::Structured` with exactly one
+/// `Tactic(t)` step (and no conclusion) or `Structured` with empty
+/// steps and `conclusion: Some(t)`.  Mirrors [`classify_single_apply`]
+/// but returns the raw tactic instead of the apply payload — the
+/// caller decides how to translate it.
+fn primitive_tactic(body: &ProofBody) -> Option<&TacticExpr> {
+    match body {
+        ProofBody::Tactic(t) => Some(t),
+        ProofBody::Structured(s) => {
+            let steps_count = s.steps.iter().count();
+            match (steps_count, &s.conclusion) {
+                (1, Maybe::None) => {
+                    let step = s.steps.iter().next()?;
+                    if let ProofStepKind::Tactic(t) = &step.kind {
+                        Some(t)
+                    } else {
+                        None
+                    }
+                }
+                (0, Maybe::Some(t)) => Some(t),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Translate a primitive tactic to its Coq equivalent.  Returns `None`
+/// for non-primitive tactics (the caller falls back to admitted).
+///
+/// **Why these tactics**: each is decidable enough that the foreign
+/// tool can re-discharge it with a single tactic invocation.  The
+/// translation is direct: the Verum tactic name matches the Coq
+/// tactic name (Coq has all of these in its built-in tactic library).
+fn primitive_tactic_to_coq(tactic: &TacticExpr) -> Option<String> {
+    Some(match tactic {
+        TacticExpr::Trivial => "trivial.".to_string(),
+        TacticExpr::Assumption => "assumption.".to_string(),
+        TacticExpr::Reflexivity => "reflexivity.".to_string(),
+        TacticExpr::Auto { with_hints } if with_hints.iter().count() == 0 => {
+            "auto.".to_string()
+        }
+        TacticExpr::Ring => "ring.".to_string(),
+        TacticExpr::Field => "field.".to_string(),
+        TacticExpr::Omega => "lia.".to_string(), // modern Coq uses lia for omega
+        _ => return None,
+    })
+}
+
+/// Translate a primitive tactic to its Lean 4 equivalent.  Returns
+/// `None` for non-primitive tactics.  Lean tactic names diverge
+/// slightly from Coq:
+///
+///   * `reflexivity` → `rfl`
+///   * `omega` → `omega` (Mathlib provides this)
+///   * `field` → `field_simp` (Mathlib)
+fn primitive_tactic_to_lean(tactic: &TacticExpr) -> Option<String> {
+    Some(match tactic {
+        TacticExpr::Trivial => "by trivial".to_string(),
+        TacticExpr::Assumption => "by assumption".to_string(),
+        TacticExpr::Reflexivity => "by rfl".to_string(),
+        TacticExpr::Auto { with_hints } if with_hints.iter().count() == 0 => {
+            "by simp_all".to_string()
+        }
+        TacticExpr::Ring => "by ring".to_string(),
+        TacticExpr::Field => "by field_simp".to_string(),
+        TacticExpr::Omega => "by omega".to_string(),
+        _ => return None,
+    })
 }
 
 // =============================================================================
@@ -535,7 +626,9 @@ mod tests {
 
     #[test]
     fn coq_falls_back_on_unsupported_tactic() {
-        let body = ProofBody::Tactic(TacticExpr::Trivial);
+        // Use a tactic outside the V0 primitive set — `Split` (∧-intro)
+        // isn't translated yet, so the renderer must fall back.
+        let body = ProofBody::Tactic(TacticExpr::Split);
         let r = CoqProofBodyRenderer::new().render(&body);
         assert!(matches!(r, TranslatedProofBody::Fallback { .. }));
     }
@@ -573,7 +666,7 @@ mod tests {
 
     #[test]
     fn lean_falls_back_on_unsupported_tactic() {
-        let body = ProofBody::Tactic(TacticExpr::Reflexivity);
+        let body = ProofBody::Tactic(TacticExpr::Split);
         let r = LeanProofBodyRenderer::new().render(&body);
         assert!(matches!(r, TranslatedProofBody::Fallback { .. }));
     }
@@ -728,6 +821,141 @@ mod tests {
         assert_eq!(f.text(), None);
         assert!(t.is_translated());
         assert!(!f.is_translated());
+    }
+
+    // -------------------------------------------------------------
+    // Primitive tactic translation (Auto, Trivial, Refl, Ring, ...)
+    // -------------------------------------------------------------
+
+    fn primitive_body(t: TacticExpr) -> ProofBody {
+        ProofBody::Tactic(t)
+    }
+
+    #[test]
+    fn coq_renders_primitive_tactics() {
+        assert_eq!(
+            CoqProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Trivial))
+                .text(),
+            Some("trivial."),
+        );
+        assert_eq!(
+            CoqProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Assumption))
+                .text(),
+            Some("assumption."),
+        );
+        assert_eq!(
+            CoqProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Reflexivity))
+                .text(),
+            Some("reflexivity."),
+        );
+        assert_eq!(
+            CoqProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Auto {
+                    with_hints: List::new(),
+                }))
+                .text(),
+            Some("auto."),
+        );
+        assert_eq!(
+            CoqProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Ring))
+                .text(),
+            Some("ring."),
+        );
+        assert_eq!(
+            CoqProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Field))
+                .text(),
+            Some("field."),
+        );
+        assert_eq!(
+            CoqProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Omega))
+                .text(),
+            Some("lia."),
+            "modern Coq uses `lia` for linear-integer-arithmetic decisions",
+        );
+    }
+
+    #[test]
+    fn lean_renders_primitive_tactics() {
+        assert_eq!(
+            LeanProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Trivial))
+                .text(),
+            Some("by trivial"),
+        );
+        assert_eq!(
+            LeanProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Reflexivity))
+                .text(),
+            Some("by rfl"),
+            "Lean uses `rfl` for reflexivity, not `reflexivity`",
+        );
+        assert_eq!(
+            LeanProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Auto {
+                    with_hints: List::new(),
+                }))
+                .text(),
+            Some("by simp_all"),
+        );
+        assert_eq!(
+            LeanProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Field))
+                .text(),
+            Some("by field_simp"),
+            "Lean Mathlib uses `field_simp`, not `field`",
+        );
+        assert_eq!(
+            LeanProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Omega))
+                .text(),
+            Some("by omega"),
+        );
+    }
+
+    #[test]
+    fn auto_with_hints_falls_back_in_v0() {
+        // Hint sets aren't translated yet — fall back to admitted.
+        let body = primitive_body(TacticExpr::Auto {
+            with_hints: List::from(vec![ident("hint_lemma")]),
+        });
+        assert!(matches!(
+            CoqProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+        assert!(matches!(
+            LeanProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+    }
+
+    #[test]
+    fn primitive_tactic_via_structured_body_translates() {
+        // `proof { trivial; }` parses as Structured with one Tactic(Trivial)
+        // step.  Should translate just like the bare Tactic form.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let step = ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Trivial),
+            span: span(),
+        };
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![step]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        assert_eq!(
+            CoqProofBodyRenderer::new().render(&body).text(),
+            Some("trivial."),
+        );
+        assert_eq!(
+            LeanProofBodyRenderer::new().render(&body).text(),
+            Some("by trivial"),
+        );
     }
 
     #[test]
