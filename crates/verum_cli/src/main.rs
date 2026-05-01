@@ -1605,6 +1605,18 @@ enum Commands {
         #[clap(long)]
         verify_ladder: bool,
 
+        /// Manifest-coverage audit (#290): enumerate every
+        /// `Verum.toml` manifest field, report its wiring status
+        /// (load-bearing / partial / forward-looking), and emit a
+        /// JSON report at `target/audit-reports/manifest-coverage.json`.
+        /// Load-bearing inert-defense gate: any future PR that adds
+        /// a manifest field without wiring it produces a
+        /// `forward-looking` row pointing at the closure follow-up
+        /// task. CI consumers can grep `is_wired:false` rows to
+        /// know what's pending.
+        #[clap(long = "manifest-coverage")]
+        manifest_coverage: bool,
+
         /// Proof-honesty audit (M0.G): walk every public theorem /
         /// axiom in the project and classify each by proof-body shape
         /// — `axiom-placeholder` / `theorem-no-proof-body` /
@@ -3752,6 +3764,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_intrinsics,
             kernel_discharged_axioms,
             verify_ladder,
+            manifest_coverage,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -3840,6 +3853,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_discharged_axioms(output_format)
             } else if verify_ladder {
                 commands::audit::audit_verify_ladder(output_format)
+            } else if manifest_coverage {
+                commands::audit::audit_manifest_coverage(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,

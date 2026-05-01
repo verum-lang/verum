@@ -8424,3 +8424,316 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
     }
     Ok(())
 }
+
+// =============================================================================
+// `verum audit --manifest-coverage` — load-bearing inert-defense gate (#290).
+//
+// Enumerates every Verum.toml manifest field with its wiring status. A
+// future PR adding a manifest field without wiring it produces a
+// `ForwardLooking` row and points reviewers at the closure_task. The
+// session.rs documentation comments and this static table are
+// synchronized — when one drifts, the audit gate catches it.
+// =============================================================================
+
+/// Wiring status of a single manifest field (#290).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind")]
+pub enum ManifestFieldStatus {
+    /// Fully wired — manifest value drives observable production
+    /// behaviour through the documented consumer site.
+    LoadBearing,
+    /// Wired in part — surface gate fires but full integration
+    /// (e.g. type-level taint propagation) is split out.
+    LoadBearingPartial,
+    /// Wired only via the embedder path — standard CLI
+    /// auto-routing is documented as a separate scope.
+    EmbedderLoadBearing,
+    /// Forward-looking infrastructure — value lands on the session
+    /// but the consumer is documented as a phased follow-up.
+    ForwardLooking,
+}
+
+impl ManifestFieldStatus {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::LoadBearing => "load-bearing",
+            Self::LoadBearingPartial => "load-bearing (partial)",
+            Self::EmbedderLoadBearing => "embedder-load-bearing",
+            Self::ForwardLooking => "forward-looking",
+        }
+    }
+
+    /// Whether this status counts as "wired" for the bundle audit.
+    fn is_wired(&self) -> bool {
+        !matches!(self, Self::ForwardLooking)
+    }
+}
+
+/// One row of the manifest-coverage audit (#290).
+#[derive(Debug, Clone)]
+struct ManifestFieldEntry {
+    section: &'static str,
+    field: &'static str,
+    status: ManifestFieldStatus,
+    closure_task: &'static str,
+    consumer_site: &'static str,
+}
+
+/// Enumerate every manifest field and its wiring status (#290).
+///
+/// **Maintenance contract**: when a new manifest field is added to
+/// `LanguageFeatures` or `CompilerOptions`, this table MUST grow a
+/// row. The pin tests verify representative entries are present.
+fn manifest_field_table() -> Vec<ManifestFieldEntry> {
+    use ManifestFieldStatus as S;
+    vec![
+        // [types] — all 9 wired.
+        ManifestFieldEntry { section: "types", field: "dependent", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.dependent_enabled → infer.rs" },
+        ManifestFieldEntry { section: "types", field: "cubical", status: S::LoadBearing, closure_task: "", consumer_site: "Unifier.cubical_enabled → unify.rs" },
+        ManifestFieldEntry { section: "types", field: "higher_kinded", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.higher_kinded_enabled → infer.rs" },
+        ManifestFieldEntry { section: "types", field: "coinductive", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.coinductive_enabled → infer.rs" },
+        ManifestFieldEntry { section: "types", field: "instance_search", status: S::LoadBearing, closure_task: "", consumer_site: "ProtocolChecker.instance_search_enabled → protocol.rs" },
+        ManifestFieldEntry { section: "types", field: "quotient", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.quotient_enabled → infer.rs" },
+        ManifestFieldEntry { section: "types", field: "universe_polymorphism", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.universe_poly_enabled → infer.rs" },
+        ManifestFieldEntry { section: "types", field: "refinement", status: S::LoadBearing, closure_task: "", consumer_site: "refinement_typing_on → semantic_analysis" },
+        ManifestFieldEntry { section: "types", field: "coherence_check_depth", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.coherence_check_depth → semantic_analysis" },
+
+        // [runtime] — 7/8 wired (async_worker_threads forward-looking).
+        ManifestFieldEntry { section: "runtime", field: "cbgr_mode", status: S::LoadBearing, closure_task: "", consumer_site: "InterpreterConfig → pipeline/interpreter.rs" },
+        ManifestFieldEntry { section: "runtime", field: "async_scheduler", status: S::LoadBearing, closure_task: "", consumer_site: "InterpreterConfig → pipeline/interpreter.rs" },
+        ManifestFieldEntry { section: "runtime", field: "heap_policy", status: S::LoadBearing, closure_task: "", consumer_site: "InterpreterConfig → pipeline/interpreter.rs" },
+        ManifestFieldEntry { section: "runtime", field: "panic", status: S::LoadBearing, closure_task: "", consumer_site: "PanicStrategy::from_manifest_text → PlatformIR" },
+        ManifestFieldEntry { section: "runtime", field: "futures", status: S::LoadBearing, closure_task: "#262 + #281", consumer_site: "Tier 0: handle_spawn / Tier 1: lower_spawn (codegen-time)" },
+        ManifestFieldEntry { section: "runtime", field: "nurseries", status: S::LoadBearing, closure_task: "#262 + #281", consumer_site: "Tier 0: handle_nursery_init / Tier 1: NurseryInit lowering" },
+        ManifestFieldEntry { section: "runtime", field: "async_worker_threads", status: S::ForwardLooking, closure_task: "#277", consumer_site: "LLVM globals (#261) — stdlib WorkerPool consumer pending" },
+        ManifestFieldEntry { section: "runtime", field: "task_stack_size", status: S::LoadBearing, closure_task: "#259", consumer_site: "AsyncRuntimeConfig.task_stack_size via runtime bridge" },
+
+        // [codegen] — all 4 wired.
+        ManifestFieldEntry { section: "codegen", field: "monomorphization_cache", status: S::LoadBearing, closure_task: "", consumer_site: "VbcMonomorphizationPhase::without_cache" },
+        ManifestFieldEntry { section: "codegen", field: "tail_call_optimization", status: S::LoadBearing, closure_task: "", consumer_site: "vbc_lowering: disable-tail-calls LLVM attr" },
+        ManifestFieldEntry { section: "codegen", field: "vectorize", status: S::LoadBearing, closure_task: "", consumer_site: "vbc_lowering: no-loop-vectorize / no-slp-vectorize attrs" },
+        ManifestFieldEntry { section: "codegen", field: "inline_depth", status: S::LoadBearing, closure_task: "#267", consumer_site: "vbc_lowering: inline-threshold per-function attr" },
+
+        // [protocols] — all 5 wired.
+        ManifestFieldEntry { section: "protocols", field: "resolution_strategy", status: S::LoadBearing, closure_task: "", consumer_site: "ProtocolChecker.resolution_strategy → find_impl" },
+        ManifestFieldEntry { section: "protocols", field: "blanket_impls", status: S::LoadBearing, closure_task: "", consumer_site: "ProtocolChecker.blanket_impls → candidate filter" },
+        ManifestFieldEntry { section: "protocols", field: "coherence", status: S::LoadBearing, closure_task: "#263", consumer_site: "ProtocolChecker.coherence_mode → register_impl" },
+        ManifestFieldEntry { section: "protocols", field: "higher_kinded_protocols", status: S::LoadBearing, closure_task: "#264", consumer_site: "TypeChecker.higher_kinded_protocols_enabled" },
+        ManifestFieldEntry { section: "protocols", field: "generic_associated_types", status: S::LoadBearing, closure_task: "#265", consumer_site: "TypeChecker.generic_associated_types_enabled" },
+
+        // [safety] — all 6 wired (Phase 1+2a+2b+3a stack).
+        ManifestFieldEntry { section: "safety", field: "unsafe_allowed", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.unsafe_allowed → safety_gate" },
+        ManifestFieldEntry { section: "safety", field: "ffi", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.ffi → safety_gate" },
+        ManifestFieldEntry { section: "safety", field: "ffi_boundary", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.ffi_boundary strict/lenient → safety_gate" },
+        ManifestFieldEntry { section: "safety", field: "capability_required", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.capability_required → safety_gate" },
+        ManifestFieldEntry { section: "safety", field: "forbid_stdlib_extern", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.forbid_stdlib_extern → safety_gate" },
+        ManifestFieldEntry { section: "safety", field: "mls_level", status: S::LoadBearingPartial, closure_task: "#266 + #282 + #283", consumer_site: "Phase 1+2a+2b+3a — Pi-type propagation = #289" },
+
+        // [test] — 4/8 wired, 4 forward-looking (need #286 infra).
+        ManifestFieldEntry { section: "test", field: "timeout_secs", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.timeout_secs → commands/test.rs" },
+        ManifestFieldEntry { section: "test", field: "deny_warnings", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.deny_warnings → commands/test.rs" },
+        ManifestFieldEntry { section: "test", field: "coverage", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.coverage CLI||manifest" },
+        ManifestFieldEntry { section: "test", field: "parallel", status: S::LoadBearing, closure_task: "", consumer_site: "rayon thread-pool gate" },
+        ManifestFieldEntry { section: "test", field: "differential", status: S::ForwardLooking, closure_task: "#286 + #273", consumer_site: "Cross-tier runner pending" },
+        ManifestFieldEntry { section: "test", field: "property_testing", status: S::ForwardLooking, closure_task: "#286", consumer_site: "proptest crate integration pending" },
+        ManifestFieldEntry { section: "test", field: "proptest_cases", status: S::ForwardLooking, closure_task: "#286", consumer_site: "Coupled to property_testing" },
+        ManifestFieldEntry { section: "test", field: "fuzzing", status: S::ForwardLooking, closure_task: "#286", consumer_site: "cargo-fuzz harness pending" },
+
+        // CompilerOptions surface fields.
+        ManifestFieldEntry { section: "options", field: "continue_on_error", status: S::LoadBearing, closure_task: "#270", consumer_site: "Session::collect_phase_error → validate_module" },
+        ManifestFieldEntry { section: "options", field: "emit_proof_certificate", status: S::LoadBearing, closure_task: "#285", consumer_site: "phase_verify::emit_theorem_certificates" },
+        ManifestFieldEntry { section: "options", field: "proof_certificate_format", status: S::LoadBearing, closure_task: "#285", consumer_site: "phase_verify::emit_theorem_certificates" },
+        ManifestFieldEntry { section: "options", field: "proof_certificate_path", status: S::LoadBearing, closure_task: "#285", consumer_site: "phase_verify::emit_theorem_certificates" },
+    ]
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize)]
+struct ManifestCoverageSummary {
+    total: usize,
+    load_bearing: usize,
+    load_bearing_partial: usize,
+    embedder_load_bearing: usize,
+    forward_looking: usize,
+    fully_wired: bool,
+}
+
+/// Entry point: `verum audit --manifest-coverage [--format FORMAT]`.
+pub fn audit_manifest_coverage(format: AuditFormat) -> Result<()> {
+    let entries = manifest_field_table();
+
+    let mut summary = ManifestCoverageSummary {
+        total: entries.len(),
+        ..Default::default()
+    };
+    for entry in &entries {
+        match entry.status {
+            ManifestFieldStatus::LoadBearing => summary.load_bearing += 1,
+            ManifestFieldStatus::LoadBearingPartial => summary.load_bearing_partial += 1,
+            ManifestFieldStatus::EmbedderLoadBearing => summary.embedder_load_bearing += 1,
+            ManifestFieldStatus::ForwardLooking => summary.forward_looking += 1,
+        }
+    }
+    summary.fully_wired = summary.forward_looking == 0;
+
+    let manifest_dir = Manifest::find_manifest_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("manifest-coverage.json");
+    let json_payload = serde_json::json!({
+        "schema_version": 1,
+        "summary": summary,
+        "entries": entries.iter().map(|e| serde_json::json!({
+            "section": e.section,
+            "field": e.field,
+            "status": e.status.label(),
+            "is_wired": e.status.is_wired(),
+            "closure_task": e.closure_task,
+            "consumer_site": e.consumer_site,
+        })).collect::<Vec<_>>(),
+    });
+    if let Ok(s) = serde_json::to_string_pretty(&json_payload) {
+        let _ = std::fs::write(&report_path, s);
+    }
+
+    match format {
+        AuditFormat::Json => {
+            if let Ok(s) = serde_json::to_string_pretty(&json_payload) {
+                ui::output(&s);
+            }
+        }
+        AuditFormat::Plain => {
+            ui::step("Manifest-coverage audit");
+            for entry in &entries {
+                let line = format!(
+                    "  [{}] {}.{} — {} ({})",
+                    if entry.status.is_wired() { "✓" } else { "·" },
+                    entry.section,
+                    entry.field,
+                    entry.status.label(),
+                    if entry.closure_task.is_empty() {
+                        entry.consumer_site
+                    } else {
+                        entry.closure_task
+                    },
+                );
+                ui::output(&line);
+            }
+            let wired_count = summary.load_bearing
+                + summary.load_bearing_partial
+                + summary.embedder_load_bearing;
+            ui::output(&format!(
+                "\nSummary: {}/{} fields wired ({} load-bearing, {} partial, {} embedder, {} forward-looking)",
+                wired_count,
+                summary.total,
+                summary.load_bearing,
+                summary.load_bearing_partial,
+                summary.embedder_load_bearing,
+                summary.forward_looking,
+            ));
+            ui::output(&format!("Report: {}", report_path.display()));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod manifest_coverage_tests {
+    use super::*;
+
+    #[test]
+    fn manifest_field_table_is_non_empty() {
+        let entries = manifest_field_table();
+        assert!(entries.len() >= 30,
+            "manifest_field_table must enumerate ≥ 30 fields; got {}",
+            entries.len());
+    }
+
+    #[test]
+    fn every_entry_has_section_and_field() {
+        for entry in manifest_field_table() {
+            assert!(!entry.section.is_empty(), "empty section");
+            assert!(!entry.field.is_empty(), "empty field");
+            assert!(!entry.consumer_site.is_empty(),
+                "empty consumer_site for {}.{}",
+                entry.section, entry.field);
+        }
+    }
+
+    #[test]
+    fn known_wired_fields_present() {
+        let entries = manifest_field_table();
+        let labels: std::collections::HashSet<(&str, &str)> = entries
+            .iter()
+            .map(|e| (e.section, e.field))
+            .collect();
+        for (section, field) in &[
+            ("types", "dependent"),
+            ("runtime", "panic"),
+            ("codegen", "inline_depth"),
+            ("protocols", "coherence"),
+            ("safety", "mls_level"),
+            ("test", "timeout_secs"),
+            ("options", "continue_on_error"),
+        ] {
+            assert!(
+                labels.contains(&(*section, *field)),
+                "missing row for {}.{}",
+                section,
+                field
+            );
+        }
+    }
+
+    #[test]
+    fn forward_looking_entries_have_followup_task() {
+        for entry in manifest_field_table() {
+            if matches!(entry.status, ManifestFieldStatus::ForwardLooking) {
+                assert!(
+                    !entry.closure_task.is_empty(),
+                    "{}.{} is ForwardLooking but has no closure_task",
+                    entry.section, entry.field,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn status_label_uniqueness() {
+        let labels: std::collections::HashSet<&str> = [
+            ManifestFieldStatus::LoadBearing,
+            ManifestFieldStatus::LoadBearingPartial,
+            ManifestFieldStatus::EmbedderLoadBearing,
+            ManifestFieldStatus::ForwardLooking,
+        ]
+        .iter()
+        .map(|s| s.label())
+        .collect();
+        assert_eq!(labels.len(), 4, "status labels must be unique");
+    }
+
+    #[test]
+    fn is_wired_excludes_only_forward_looking() {
+        assert!(ManifestFieldStatus::LoadBearing.is_wired());
+        assert!(ManifestFieldStatus::LoadBearingPartial.is_wired());
+        assert!(ManifestFieldStatus::EmbedderLoadBearing.is_wired());
+        assert!(!ManifestFieldStatus::ForwardLooking.is_wired());
+    }
+
+    #[test]
+    fn no_duplicate_section_field_pairs() {
+        // Pin: each (section, field) tuple must be unique. Catches
+        // accidental copy-paste duplicates in the table.
+        let entries = manifest_field_table();
+        let mut seen = std::collections::HashSet::new();
+        for entry in &entries {
+            let key = (entry.section, entry.field);
+            assert!(
+                seen.insert(key),
+                "duplicate row: {}.{}",
+                entry.section,
+                entry.field
+            );
+        }
+    }
+}

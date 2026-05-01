@@ -484,11 +484,10 @@ impl Session {
         // No runtime warn! needed — every value the user can set
         // produces observable codegen behaviour.
 
-        // Phase-not-realised tracing for inert type-system
-        // knobs. The `[types]` manifest section parses 7 bool
-        // fields beyond `refinement` (wired via
-        // `refinement_typing_on`) and `coherence_check_depth`
-        // (wired in semantic_analysis).  Five are wired:
+        // The `[types]` manifest section parses 7 bool fields
+        // beyond `refinement` (wired via `refinement_typing_on`)
+        // and `coherence_check_depth` (wired in semantic_analysis).
+        // ALL 7 are wired (see below):
         //   - `dependent` flows to `TypeChecker.dependent_enabled`
         //     and is consulted at `infer.rs:13439` (gates
         //     dependent pattern matching on inductive types with
