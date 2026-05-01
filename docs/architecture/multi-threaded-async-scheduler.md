@@ -242,8 +242,16 @@ Mitigation:
   the 50 ms timeout to pick up newly-spawned work. The timeout
   remains as a defense-in-depth safety net; latency is now
   bounded by `Condvar` wake (~µs).
-- **Phase 2 (LANDED, this commit)**: per-worker local deques +
-  work-stealing.  `WorkerSlot` type holds
+- **Phase 3 (LANDED, this commit)**: Send/Sync correctness pins.
+  `AsyncRuntime.spawn<F: Future + Send>` (was missing `F: Send`
+  bound — only `F.Output: Send` was required, allowing UB via
+  `!Send` captures like `Rc<T>`); `LocalExecutor.spawn_local<F>`
+  retains the `!Send` path. SAFETY contract added to
+  `TaskEntry.future_ptr` documenting the cross-thread move
+  invariant. `wait_for_events` panics if called from a worker
+  thread (`current_worker_id()` returns `Maybe.Some(...)`) —
+  IOEngine is main-thread-only.
+- **Phase 2 (LANDED)**: per-worker local deques + work-stealing.  `WorkerSlot` type holds
   `local_deque: Heap<Mutex<Deque<Heap<TaskEntry>>>>` +
   `steal_hint: AtomicInt`. `WorkerPool.slots: List<WorkerSlot>`
   allocated by `WorkerPool.empty(num)`.
