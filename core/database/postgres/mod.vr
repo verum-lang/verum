@@ -27,6 +27,7 @@
 
 module core.database.postgres;
 
+public module pg_stream;
 public module wire;
 public module auth;
 public module error;

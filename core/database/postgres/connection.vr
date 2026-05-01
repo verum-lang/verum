@@ -65,7 +65,7 @@ mount core.database.postgres.wire.backend.{
     TxStatus, TxIdle, TxInTransaction, TxFailedTransaction,
 };
 mount core.database.postgres.auth.scram.{
-    ScramClient, ChannelBinding, CbNone,
+    ScramClient, ChannelBinding, CbNone, CbTlsServerEndPoint,
     scram_client_new,
 };
 mount core.database.common.types.{WireValue, WvNull, WvPresent};
@@ -73,6 +73,10 @@ mount core.database.postgres.notify.NotifyDispatcher;
 mount core.database.postgres.pipeline.{
     PgPipeline, PipelineHandle,
 };
+mount core.database.postgres.pg_stream.{PgStream, PsPlain, PsTls, upgrade_to_tls};
+mount core.net.tls.TlsConfig;
+// CertVerifyMode is referenced fully-qualified to avoid name
+// collision with `Maybe.None`.
 
 // -----------------------------------------------------------------------------
 // Connection state — observable from outside.
@@ -91,7 +95,14 @@ public type PgConnState is
 // -----------------------------------------------------------------------------
 
 public type PgConnection is {
-    stream: TcpStream,
+    /// Unified TCP / TLS transport. `PsPlain(TcpStream)` for
+    /// plaintext connections; `PsTls(TlsStream)` after a successful
+    /// TLS handshake (PtmAllow / Require / VerifyCa / VerifyFull
+    /// when server returned 'S' to SSLRequest). All wire reads /
+    /// writes go through `stream.read` / `stream.write` so the
+    /// encryption layer stays transparent to the protocol code.
+    /// Spec §6.1.2.
+    stream: PgStream,
     state: PgConnState,
     /// Recv buffer — accumulates partial frames between reads.
     recv: List<Byte>,
@@ -157,7 +168,7 @@ public type PgConnection is {
 /// supported.
 public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
     let target = format_host_port(&config.host, config.port);
-    let mut stream = match TcpStream.connect(target.as_str()) {
+    let mut tcp = match TcpStream.connect(target.as_str()) {
         Ok(s)  => s,
         Err(_) => {
             return Err(DbError.ConnectionFailed {
@@ -169,15 +180,16 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
 
     // SSLRequest negotiation — spec §6.1.2. Skip entirely for
     // PtmDisable; for every other mode, send the 8-byte magic
-    // packet and read the single-byte server verdict.
-    let mut tls_active: Bool = false;
-    match config.tls_mode {
+    // packet on raw TCP, read the single-byte server verdict, then
+    // (on 'S') drive TLS handshake and wrap the result.
+    let stream: PgStream = match config.tls_mode {
         PtmDisable => {
             // Plaintext only — no SSLRequest sent.
+            PsPlain(tcp)
         }
         _ => {
             let req = ssl_request();
-            if write_all(&mut stream, req.as_slice()).is_err() {
+            if write_all_tcp(&mut tcp, req.as_slice()).is_err() {
                 return Err(DbError.ConnectionFailed {
                     source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
                     adapter: AdPostgres,
@@ -187,7 +199,7 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
             // 'N' = decline TLS. Anything else = protocol violation.
             let mut one_byte: List<Byte> = List.new();
             one_byte.push(0 as Byte);
-            let verdict = match stream.read(one_byte.as_mut_slice()) {
+            let verdict = match tcp.read(one_byte.as_mut_slice()) {
                 Ok(n) if n == 1 => one_byte[0],
                 _ => {
                     return Err(DbError.ConnectionFailed {
@@ -198,18 +210,25 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
             };
             let v = (verdict as Int) & 0xFF;
             if v == 0x53 {
-                // 'S' — server agreed to TLS. Per spec §6.1.2 the
-                // TLS handshake follows immediately. The actual
-                // TlsClient<Handshaking> driver lands in the next
-                // commit; until then we surface an honest error
-                // describing what's missing so callers can pin to
-                // PtmDisable for now.
-                return Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdPostgres,
-                    code: "TLS_HANDSHAKE_PENDING".clone(),
-                    message: f"server accepted SSLRequest (mode {config.tls_mode.name()}) — TLS 1.3 handshake driver pending tls13.session.client integration; pin tls_mode = PtmDisable until that lands",
-                    retryable: false,
-                }));
+                // 'S' — server agreed to TLS. Drive the handshake
+                // through `upgrade_to_tls` (which routes through
+                // `core.net.tls.TlsStream.connect` via
+                // `block_on`). Build the TLS config from the PG
+                // tls_mode posture: VerifyFull → CertVerifyMode.Full;
+                // VerifyCa / Require → custom CA-only / no-verify
+                // variants.
+                let tls_config = build_tls_config(config);
+                match upgrade_to_tls(tcp, &config.host, &tls_config) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return Err(DbError.Adapter(AdapterSpecific {
+                            adapter: AdPostgres,
+                            code: "TLS_HANDSHAKE_FAILED".clone(),
+                            message: f"TLS handshake failed: {e}",
+                            retryable: false,
+                        }));
+                    }
+                }
             } else if v == 0x4E {
                 // 'N' — server declined TLS. Per the mode:
                 if !config.tls_mode.permits_plaintext_fallback() {
@@ -220,7 +239,9 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
                         retryable: false,
                     }));
                 }
-                // PtmAllow tolerates plaintext fallback — continue.
+                // PtmAllow tolerates plaintext fallback — continue
+                // with the same TCP socket.
+                PsPlain(tcp)
             } else {
                 return Err(DbError.Adapter(AdapterSpecific {
                     adapter: AdPostgres,
@@ -229,11 +250,8 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
                     retryable: false,
                 }));
             }
-            // tls_active stays false until the handshake driver
-            // lands — currently we never reach here with TLS up.
-            let _ = tls_active;
         }
-    }
+    };
 
     let mut conn = PgConnection {
         stream: stream,
@@ -1075,12 +1093,52 @@ fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), D
                         });
                     }
                     AuthSasl { mechanisms } => {
-                        let chose = pick_scram_mechanism(&mechanisms)?;
+                        // Pick SCRAM-SHA-256-PLUS when TLS is
+                        // active AND server offered it; fall back
+                        // to SCRAM-SHA-256 otherwise. The cbind
+                        // payload for -PLUS is the SHA-256 of the
+                        // server's leaf certificate (RFC 5929
+                        // tls-server-end-point) — captured from
+                        // the established TLS session.
+                        let tls_active = conn.stream.is_tls();
+                        let chose = pick_scram_mechanism(&mechanisms, tls_active)?;
+                        let cbind: ChannelBinding = if chose == "SCRAM-SHA-256-PLUS".clone() {
+                            // Server expects -PLUS; we already
+                            // verified TLS is active inside
+                            // `pick_scram_mechanism`. Pull the
+                            // peer cert hash from the TLS session.
+                            match conn.stream.peer_cert_hash_sha256() {
+                                Some(arr) => {
+                                    let mut v: List<Byte> = List.with_capacity(32);
+                                    let mut i: Int = 0;
+                                    while i < 32 {
+                                        v.push(arr[i]);
+                                        i = i + 1;
+                                    }
+                                    CbTlsServerEndPoint(v)
+                                }
+                                None => {
+                                    // TLS active but cert hash
+                                    // unavailable — fail closed
+                                    // rather than silently
+                                    // demoting to CbNone (which
+                                    // would let an active MITM
+                                    // pass).
+                                    return Err(DbError.AuthFailed {
+                                        kind: core.database.common.error.AuthErrorKind.AekScramFailed(
+                                            "SCRAM-SHA-256-PLUS chosen but TLS layer did not expose peer_cert_hash_sha256()".clone(),
+                                        ),
+                                    });
+                                }
+                            }
+                        } else {
+                            CbNone
+                        };
                         let nonce = make_client_nonce();
                         let mut client = scram_client_new(
                             config.user.clone(),
                             config.password.clone(),
-                            CbNone,
+                            cbind,
                             nonce,
                         );
                         let initial = client.client_first_message();
@@ -1149,20 +1207,36 @@ fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), D
     }
 }
 
-fn pick_scram_mechanism(mechs: &List<Text>) -> Result<Text, DbError> {
-    // Prefer SCRAM-SHA-256-PLUS when channel-binding is wired; for now
-    // we accept SCRAM-SHA-256 only. A server that offers ONLY -PLUS is
-    // rejected so the user opts in explicitly later.
+/// Pick a SCRAM mechanism per spec §6.1.2:
+///
+///   * `tls_active = true`  — prefer SCRAM-SHA-256-PLUS when the
+///     server offers it (defends against MITM on TLS-terminating
+///     proxies via tls-server-end-point channel binding). Fall
+///     back to SCRAM-SHA-256 when -PLUS not offered.
+///   * `tls_active = false` — accept only SCRAM-SHA-256. Servers
+///     that offer ONLY -PLUS over plaintext are rejected (cbind
+///     data is meaningless without a TLS layer).
+fn pick_scram_mechanism(mechs: &List<Text>, tls_active: Bool) -> Result<Text, DbError> {
+    let mut has_plain: Bool = false;
+    let mut has_plus:  Bool = false;
     let mut i = 0;
     while i < mechs.len() as Int {
         if mechs[i] == "SCRAM-SHA-256" {
-            return Ok("SCRAM-SHA-256".clone());
+            has_plain = true;
+        } else if mechs[i] == "SCRAM-SHA-256-PLUS" {
+            has_plus = true;
         }
         i = i + 1;
     }
+    if tls_active && has_plus {
+        return Ok("SCRAM-SHA-256-PLUS".clone());
+    }
+    if has_plain {
+        return Ok("SCRAM-SHA-256".clone());
+    }
     Err(DbError.AuthFailed {
         kind: core.database.common.error.AuthErrorKind.AekScramFailed(
-            "server did not offer SCRAM-SHA-256".clone(),
+            f"server offered no acceptable SCRAM mechanism (tls_active={tls_active})",
         ),
     })
 }
@@ -1262,7 +1336,11 @@ fn decode_one(frame: PgFrame, formats: &List<Int>) -> Result<BackendMessage, DbE
     }
 }
 
-fn write_all(stream: &mut TcpStream, buf: &[Byte]) -> Result<(), DbError> {
+/// Pre-handshake TCP write — used only for the SSLRequest packet
+/// before `PgStream` wraps the socket. Mirrors `write_all` but
+/// against the raw `TcpStream` because PgStream doesn't yet exist
+/// at that call site.
+fn write_all_tcp(stream: &mut TcpStream, buf: &[Byte]) -> Result<(), DbError> {
     let mut written: Int = 0;
     while written < buf.len() as Int {
         let chunk = sub_slice(buf, written, buf.len() as Int);
@@ -1285,6 +1363,69 @@ fn write_all(stream: &mut TcpStream, buf: &[Byte]) -> Result<(), DbError> {
         }
     }
     Ok(())
+}
+
+fn write_all(stream: &mut PgStream, buf: &[Byte]) -> Result<(), DbError> {
+    let mut written: Int = 0;
+    while written < buf.len() as Int {
+        let chunk = sub_slice(buf, written, buf.len() as Int);
+        match stream.write(chunk.as_slice()) {
+            Ok(n) => {
+                if n <= 0 {
+                    return Err(DbError.ConnectionFailed {
+                        source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                        adapter: AdPostgres,
+                    });
+                }
+                written = written + n;
+            }
+            Err(_) => {
+                return Err(DbError.ConnectionFailed {
+                    source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                    adapter: AdPostgres,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Convert `PgConfig.tls_mode` to a `TlsConfig` for the underlying
+/// `core.net.tls` handshake driver. Posture mapping per spec
+/// §8.13.1:
+///
+///   * `PtmAllow`     — `CertVerifyMode.None` (no validation).
+///   * `PtmRequire`   — `CertVerifyMode.None` (encryption only).
+///   * `PtmVerifyCa`  — `CertVerifyMode.Full` minus hostname check.
+///                      `core.net.tls` doesn't yet expose the
+///                      "ca-only" mode independently, so this
+///                      currently uses Full and documents the gap.
+///   * `PtmVerifyFull`— `CertVerifyMode.Full`. System certs.
+fn build_tls_config(config: &PgConfig) -> TlsConfig {
+    let base = TlsConfig.client();
+    match config.tls_mode {
+        PtmAllow | PtmRequire => {
+            // No certificate verification.
+            TlsConfig {
+                verify_mode: core.net.tls.CertVerifyMode.None,
+                use_system_certs: false,
+                .. base
+            }
+        }
+        PtmVerifyCa | PtmVerifyFull => {
+            // CA validation + (for Full) hostname match. The
+            // hostname-match toggle is implicit in the underlying
+            // intrinsic for now; PtmVerifyCa accepts the slight
+            // over-validation as a documented trade-off until
+            // core.net.tls exposes the granularity.
+            TlsConfig {
+                verify_mode: core.net.tls.CertVerifyMode.Full,
+                use_system_certs: true,
+                .. base
+            }
+        }
+        _ => base,
+    }
 }
 
 /// Build a "connection-gone" error to fail every parked pipeline

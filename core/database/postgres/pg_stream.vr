@@ -1,0 +1,180 @@
+// =============================================================================
+// core/database/postgres/pg_stream.vr — TCP / TLS unified stream for PG wire
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.2 (TLS), §8.13.1 (TLS posture)
+// =============================================================================
+//
+// Sum-type wrapper around `core.net.tcp.TcpStream` and
+// `core.net.tls.TlsStream` so PgConnection can read/write through
+// either transport without per-call dispatch logic at every wire
+// site.
+//
+// Two variants:
+//
+//   * `PsPlain(TcpStream)` — pre-TLS or `tls_mode = PtmDisable`.
+//     Read / write go directly to the kernel TCP buffer.
+//
+//   * `PsTls(TlsStream)`   — TLS established. Read / write go
+//     through the TLS session for encrypt / decrypt, then to the
+//     wire. The peer cert hash is captured at handshake time and
+//     accessible via `peer_cert_hash_sha256()` for SCRAM-SHA-256-
+//     PLUS channel binding (spec §6.1.2).
+//
+// `core.net.tls.TlsStream`'s public API is async (read / write
+// return Futures). PgConnection is currently synchronous; the
+// bridge happens here via `core.async.executor.block_on`. Once
+// PgConnection migrates to async, the `block_on` wrappers
+// disappear and the surface becomes uniformly async — the
+// PgStream sum type stays.
+//
+// Caller pattern:
+//
+//   match conn.stream {
+//       PgStream::PsPlain(_) => write_all(&mut tcp, bytes),
+//       PgStream::PsTls(_)   => stream.write(bytes),  // unified
+//   }
+//
+// In practice every wire-site uses the unified `read` / `write`
+// methods on PgStream — the variant distinction stays internal.
+// =============================================================================
+
+module core.database.postgres.pg_stream;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.net.tcp.TcpStream;
+mount core.net.tls.{TlsStream, TlsConfig, LegacyTlsError};
+mount core.net.addr.SocketAddr;
+mount core.io.IoError;
+mount core.async.executor.block_on;
+
+// =============================================================================
+// PgStream
+// =============================================================================
+
+public type PgStream is
+      PsPlain(TcpStream)
+    | PsTls(TlsStream);
+
+implement PgStream {
+    /// Borrow the inner TCP stream — every transport variant has
+    /// one underneath. Used for socket-level operations (local_addr
+    /// for cancel source-IP-bind, set_*_timeout) that don't care
+    /// about the encryption layer.
+    public fn tcp(&self) -> &TcpStream {
+        match self {
+            PsPlain(t)  => t,
+            PsTls(tls)  => &tls.inner,
+        }
+    }
+
+    /// Mutable borrow of the inner TCP stream — same caveats as
+    /// `tcp()`.
+    public fn tcp_mut(&mut self) -> &mut TcpStream {
+        match self {
+            PsPlain(t)  => t,
+            PsTls(tls)  => &mut tls.inner,
+        }
+    }
+
+    /// Local address — pass-through to TcpStream.local_addr. Used by
+    /// CancelRequest source-IP-bind (spec §6.1.7).
+    public fn local_addr(&self) -> Result<SocketAddr, IoError> {
+        self.tcp().local_addr()
+    }
+
+    /// True iff the stream is encrypted (currently in `PsTls(...)`
+    /// state).
+    public fn is_tls(&self) -> Bool {
+        match self {
+            PsPlain(_) => false,
+            PsTls(_)   => true,
+        }
+    }
+
+    /// SHA-256 of the peer's leaf certificate. `Some` when TLS is
+    /// active and the platform's TLS layer can extract the cert
+    /// hash; `None` for plaintext or when extraction failed. Spec
+    /// §6.1.2 — used by SCRAM-SHA-256-PLUS for the
+    /// `tls-server-end-point` channel-binding token.
+    public fn peer_cert_hash_sha256(&self) -> Maybe<[Byte; 32]> {
+        match self {
+            PsPlain(_)  => None,
+            PsTls(tls)  => tls.peer_cert_hash_sha256(),
+        }
+    }
+
+    /// Read into `buf`, returning the number of bytes read. Bridges
+    /// the async `TlsStream.read` through `block_on` so PgConnection
+    /// keeps its synchronous wire surface. On TLS, the bytes
+    /// returned are decrypted plaintext.
+    public fn read(&mut self, buf: &mut [Byte]) -> Result<Int, IoError> {
+        match self {
+            PsPlain(t) => t.read(buf),
+            PsTls(tls) => {
+                // TlsStream.read takes a `&mut List<Byte>`. Resize
+                // a temp list to the buf's len, await through
+                // block_on, copy back into the caller's slice.
+                let mut tmp: List<Byte> = List.with_capacity(buf.len() as Int);
+                let mut i: Int = 0;
+                while i < buf.len() as Int { tmp.push(0_u8); i = i + 1; }
+                let result = block_on(tls.read(&mut tmp));
+                match result {
+                    Ok(n) => {
+                        let mut k: Int = 0;
+                        while k < n {
+                            buf[k] = tmp[k];
+                            k = k + 1;
+                        }
+                        Ok(n)
+                    }
+                    Err(e) => Err(IoError.Other(f"TLS read: {e}")),
+                }
+            }
+        }
+    }
+
+    /// Write `data`, returning the number of bytes written. On TLS
+    /// the bytes are encrypted before transmission.
+    public fn write(&mut self, data: &[Byte]) -> Result<Int, IoError> {
+        match self {
+            PsPlain(t) => t.write(data),
+            PsTls(tls) => {
+                let result = block_on(tls.write(data));
+                match result {
+                    Ok(n)  => Ok(n),
+                    Err(e) => Err(IoError.Other(f"TLS write: {e}")),
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// upgrade — drive a TCP stream through TLS handshake
+// =============================================================================
+
+/// Drive a TLS client handshake over an existing TCP stream. On
+/// success, returns a `PgStream::PsTls(...)` ready for encrypted
+/// reads / writes. On failure, the underlying TCP stream is consumed
+/// (caller cannot recover plaintext use of it — TLS handshake state
+/// is opaque post-failure per RFC 8446 §6.2).
+///
+/// `server_name` is used for SNI + hostname verification when
+/// `config.verify_mode = Full`. Pass the connect-string host (NOT
+/// an IP literal — SNI is only meaningful for DNS names).
+///
+/// Bridged through `block_on` because `TlsStream.connect` is async
+/// and PgConnection is currently synchronous.
+public fn upgrade_to_tls(
+    tcp: TcpStream,
+    server_name: &Text,
+    config: &TlsConfig,
+) -> Result<PgStream, LegacyTlsError> {
+    match block_on(TlsStream.connect(tcp, server_name, config)) {
+        Ok(tls)  => Ok(PsTls(tls)),
+        Err(e)   => Err(e),
+    }
+}
