@@ -16,6 +16,7 @@
 //   * `fault`     — fault-injection taxonomy (PowerLoss / DiskFull / SlowFsync)
 //   * `oracle`    — durability + atomicity invariant checks
 //   * `harness`   — DstHarness state machine driving generator + faults + oracles
+//   * `bridge`    — DstHarness ↔ live Database adapter; emits DstReport
 // =============================================================================
 
 module core.database.sqlite.native.dst;
@@ -26,3 +27,4 @@ public module generator;
 public module fault;
 public module oracle;
 public module harness;
+public module bridge;
