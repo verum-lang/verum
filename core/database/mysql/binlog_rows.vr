@@ -1,0 +1,857 @@
+// =============================================================================
+// core/database/mysql/binlog_rows.vr — TABLE_MAP + WRITE/UPDATE/DELETE_ROWS_V2
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.7 (binlog replication).
+// Refs:
+//   * MySQL src/sql/log_event.h (Table_map_log_event,
+//     Rows_log_event, type-specific decoders).
+//   * MySQL src/sql/rpl_record.cc (pack/unpack_row).
+// =============================================================================
+//
+// Closes the CDC-consumer chain. P-PROD-MYSQL-BINLOG-V0 ships the
+// dump wire and surfaces transaction boundaries (XID / GTID) +
+// DDL (QUERY); this module decodes the actual DML payload.
+//
+// Wire structure recap (post-FORMAT_DESCRIPTION post_header_lengths
+// in MySQL 5.6+):
+//
+//   TABLE_MAP_EVENT (0x13)
+//     Post-header (8 bytes, fixed):
+//       6 bytes: table_id (u48 LE)
+//       2 bytes: flags
+//     Body:
+//       1 byte:    schema_name_length (NOT lenenc — fixed 1 byte)
+//       N bytes:   schema_name
+//       1 byte:    0x00 (NUL terminator after schema)
+//       1 byte:    table_name_length
+//       N bytes:   table_name
+//       1 byte:    0x00 (NUL terminator after table)
+//       lenenc:    column_count
+//       N bytes:   column_types (one u8 per column)
+//       lenenc:    metadata_length
+//       M bytes:   metadata block (per-type variable; type-aware
+//                  parser splits)
+//       ceil(N/8): null_bitmap (1 = column is nullable)
+//
+//   WRITE_ROWS_V2 / UPDATE_ROWS_V2 / DELETE_ROWS_V2
+//     Post-header (10 bytes for V2):
+//       6 bytes:  table_id
+//       2 bytes:  flags
+//       2 bytes:  extra_data_length
+//     Body:
+//       N bytes:  extra_data (skipped V0)
+//       lenenc:   num_columns
+//       ceil(N/8) bytes: cols_present_bitmap_1
+//                          (UPDATE/DELETE: BEFORE; WRITE: AFTER)
+//       ceil(N/8) bytes: cols_present_bitmap_2
+//                          (UPDATE only: AFTER)
+//       rows[]:
+//         per WRITE/DELETE: one tuple
+//         per UPDATE: two tuples (BEFORE, AFTER)
+//
+//   tuple = ceil(present/8) bytes null_bitmap +
+//           per non-null present column: type-specific bytes
+//
+// V0 column-type coverage (per `decode_value_for_type`):
+//   TINY u8 / SHORT i16 / INT24 i24 / LONG i32 / LONGLONG i64
+//   FLOAT f32 / DOUBLE f64
+//   TIMESTAMP u32 / DATETIME packed-i64 / DATE i24 / TIME i24
+//   YEAR u8 (year - 1900) / TIMESTAMP2 / DATETIME2 / TIME2
+//   VARCHAR / VAR_STRING / STRING / BLOB (1-4 byte length)
+//   NEWDECIMAL / JSON (surfaced as raw bytes; downstream decodes)
+//   NULL (always NULL — metadata trick)
+//
+// OUT of V0:
+//   * GEOMETRY (0xFF), ENUM (0xF7), SET (0xF8) — surface as raw.
+//   * PARTIAL_UPDATE_ROWS_EVENT (8.0+ JSON partial diffs).
+//   * Checksum-included payload trim (V0 forces checksum=NONE).
+//   * Per-table INVISIBLE column flag handling.
+// =============================================================================
+
+module core.database.mysql.binlog_rows;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.wire.frame.{
+    read_u8, read_u16_le, read_u32_le, read_u64_le, read_bytes,
+    decode_lei,
+};
+
+// =============================================================================
+// MySQL column-type bytes (subset used by V0)
+// =============================================================================
+
+public const COL_TYPE_DECIMAL:     Int = 0x00;
+public const COL_TYPE_TINY:        Int = 0x01;
+public const COL_TYPE_SHORT:       Int = 0x02;
+public const COL_TYPE_LONG:        Int = 0x03;
+public const COL_TYPE_FLOAT:       Int = 0x04;
+public const COL_TYPE_DOUBLE:      Int = 0x05;
+public const COL_TYPE_NULL:        Int = 0x06;
+public const COL_TYPE_TIMESTAMP:   Int = 0x07;
+public const COL_TYPE_LONGLONG:    Int = 0x08;
+public const COL_TYPE_INT24:       Int = 0x09;
+public const COL_TYPE_DATE:        Int = 0x0A;
+public const COL_TYPE_TIME:        Int = 0x0B;
+public const COL_TYPE_DATETIME:    Int = 0x0C;
+public const COL_TYPE_YEAR:        Int = 0x0D;
+public const COL_TYPE_VARCHAR:     Int = 0x0F;
+public const COL_TYPE_BIT:         Int = 0x10;
+public const COL_TYPE_TIMESTAMP2:  Int = 0x11;
+public const COL_TYPE_DATETIME2:   Int = 0x12;
+public const COL_TYPE_TIME2:       Int = 0x13;
+public const COL_TYPE_JSON:        Int = 0xF5;
+public const COL_TYPE_NEWDECIMAL:  Int = 0xF6;
+public const COL_TYPE_ENUM:        Int = 0xF7;
+public const COL_TYPE_SET:         Int = 0xF8;
+public const COL_TYPE_TINY_BLOB:   Int = 0xF9;
+public const COL_TYPE_MEDIUM_BLOB: Int = 0xFA;
+public const COL_TYPE_LONG_BLOB:   Int = 0xFB;
+public const COL_TYPE_BLOB:        Int = 0xFC;
+public const COL_TYPE_VAR_STRING:  Int = 0xFD;
+public const COL_TYPE_STRING:      Int = 0xFE;
+public const COL_TYPE_GEOMETRY:    Int = 0xFF;
+
+// =============================================================================
+// TABLE_MAP_EVENT
+// =============================================================================
+
+public type ColumnMeta is {
+    /// Raw column_type byte from TABLE_MAP.column_types[i].
+    column_type: Int,
+    /// Type-specific metadata. For BLOB/JSON: 1-4 (length-prefix
+    /// byte width). For VARCHAR/VAR_STRING: max length in bytes.
+    /// For NEWDECIMAL: precision×256 + scale. For DATETIME2/TIME2/
+    /// TIMESTAMP2: fractional digits 0-6. Surface as raw u16 so
+    /// per-type decoders unpack.
+    metadata: Int,
+    /// True if the column allows NULL (from TABLE_MAP.null_bitmap).
+    nullable: Bool,
+};
+
+public type TableMapEvent is {
+    table_id: Int,
+    flags: Int,
+    schema: Text,
+    name: Text,
+    columns: List<ColumnMeta>,
+};
+
+public fn decode_table_map_body(buf: &[Byte]) -> Result<TableMapEvent, DbError> {
+    // Post-header is included in the event body for V2 — first 8
+    // bytes = table_id:u48 + flags:u16. The caller already
+    // stripped the 19-byte event header.
+    let table_id = read_u48_le(buf, 0)?;
+    let flags = match read_u16_le(buf, 6) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_rows("TABLE_MAP.flags")); }
+    };
+    let mut off: Int = 8;
+
+    // Schema (1 byte length + bytes + 1 byte NUL terminator).
+    let schema_len = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+    off = off + 1;
+    let schema_bytes = match read_bytes(buf, off, schema_len) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("TABLE_MAP.schema")); }
+    };
+    off = off + schema_len + 1;       // skip NUL
+
+    // Table name (1 byte length + bytes + 1 byte NUL).
+    let name_len = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+    off = off + 1;
+    let name_bytes = match read_bytes(buf, off, name_len) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("TABLE_MAP.name")); }
+    };
+    off = off + name_len + 1;         // skip NUL
+
+    // column_count (lenenc).
+    let (col_count, _, lei_n) = match decode_lei(buf, off) {
+        Ok(t)  => t,
+        Err(_) => { return Err(bad_rows("TABLE_MAP.column_count")); }
+    };
+    off = off + lei_n;
+
+    // column_types — one u8 per column.
+    let mut types: List<Int> = List.with_capacity(col_count);
+    let mut i: Int = 0;
+    while i < col_count {
+        types.push((buf[off + i] as Int) & 0xFF);
+        i = i + 1;
+    }
+    off = off + col_count;
+
+    // metadata_length (lenenc).
+    let (meta_len, _, mlei_n) = match decode_lei(buf, off) {
+        Ok(t)  => t,
+        Err(_) => { return Err(bad_rows("TABLE_MAP.metadata_length")); }
+    };
+    off = off + mlei_n;
+
+    // Per-column metadata block.
+    let meta_block = match read_bytes(buf, off, meta_len) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("TABLE_MAP.metadata_block")); }
+    };
+    off = off + meta_len;
+
+    // null_bitmap.
+    let bitmap_bytes = (col_count + 7) / 8;
+    let null_bitmap = match read_bytes(buf, off, bitmap_bytes) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("TABLE_MAP.null_bitmap")); }
+    };
+
+    // Walk meta_block per type to extract per-column metadata.
+    let mut columns: List<ColumnMeta> = List.with_capacity(col_count);
+    let mut meta_off: Int = 0;
+    let mut k: Int = 0;
+    while k < col_count {
+        let ct = types[k];
+        let (meta, advance) = parse_column_metadata(ct, meta_block.as_slice(), meta_off);
+        meta_off = meta_off + advance;
+        let nullable = bitmap_bit(null_bitmap.as_slice(), k);
+        columns.push(ColumnMeta {
+            column_type: ct,
+            metadata: meta,
+            nullable: nullable,
+        });
+        k = k + 1;
+    }
+
+    Ok(TableMapEvent {
+        table_id: table_id,
+        flags: flags,
+        schema: bytes_to_text(&schema_bytes),
+        name: bytes_to_text(&name_bytes),
+        columns: columns,
+    })
+}
+
+/// Per-column metadata layout per MySQL src/sql/log_event_server.cc
+/// (Table_map_log_event::save_field_metadata). Returns (meta_value,
+/// bytes_consumed). meta_value packs whatever the type needs into
+/// a single Int so downstream decoders can dispatch without
+/// allocating intermediate structs.
+fn parse_column_metadata(col_type: Int, buf: &[Byte], off: Int) -> (Int, Int) {
+    let t = col_type;
+    if t == COL_TYPE_FLOAT || t == COL_TYPE_DOUBLE
+       || t == COL_TYPE_BLOB || t == COL_TYPE_JSON
+       || t == COL_TYPE_GEOMETRY
+       || t == COL_TYPE_TINY_BLOB || t == COL_TYPE_MEDIUM_BLOB
+       || t == COL_TYPE_LONG_BLOB
+       || t == COL_TYPE_TIME2 || t == COL_TYPE_DATETIME2
+       || t == COL_TYPE_TIMESTAMP2
+    {
+        // 1 byte metadata.
+        let v = if (off as Int) < (buf.len() as Int) {
+            (buf[off] as Int) & 0xFF
+        } else { 0 };
+        return (v, 1);
+    }
+    if t == COL_TYPE_VARCHAR || t == COL_TYPE_VAR_STRING
+       || t == COL_TYPE_BIT || t == COL_TYPE_NEWDECIMAL
+       || t == COL_TYPE_STRING || t == COL_TYPE_ENUM
+       || t == COL_TYPE_SET
+    {
+        // 2 bytes metadata.
+        let v = if (off + 2) <= (buf.len() as Int) {
+            ((buf[off] as Int) & 0xFF) | (((buf[off + 1] as Int) & 0xFF) << 8)
+        } else { 0 };
+        return (v, 2);
+    }
+    // Fixed-width integer + date types — no metadata.
+    (0, 0)
+}
+
+// =============================================================================
+// ROWS events
+// =============================================================================
+
+public type RowEventKind is RkWrite | RkUpdate | RkDelete;
+
+public type RowsEvent is {
+    table_id: Int,
+    flags: Int,
+    extra_data: List<Byte>,
+    column_count: Int,
+    /// Bitmap of columns present in the BEFORE image
+    /// (UPDATE/DELETE) or AFTER image (WRITE).
+    cols_present_before: List<Byte>,
+    /// Set only for UPDATE — bitmap of columns present in the
+    /// AFTER image. Empty list for WRITE/DELETE.
+    cols_present_after: List<Byte>,
+    /// Per-row payload (raw bytes — type-aware decoder is
+    /// invoked via `RowsRecord.decode_with_table` below).
+    rows_payload: List<Byte>,
+    kind: RowEventKind,
+};
+
+public fn decode_rows_event_body(buf: &[Byte], kind: RowEventKind)
+    -> Result<RowsEvent, DbError>
+{
+    let table_id = read_u48_le(buf, 0)?;
+    let flags = match read_u16_le(buf, 6) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_rows("ROWS.flags")); }
+    };
+    // V2 has 2-byte extra_data_length right after flags.
+    let extra_len = match read_u16_le(buf, 8) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_rows("ROWS.extra_data_length")); }
+    };
+    let extra_data = match read_bytes(buf, 10, extra_len) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("ROWS.extra_data")); }
+    };
+    let mut off: Int = 10 + extra_len;
+
+    // num_columns (lenenc).
+    let (col_count, _, lei_n) = match decode_lei(buf, off) {
+        Ok(t)  => t,
+        Err(_) => { return Err(bad_rows("ROWS.num_columns")); }
+    };
+    off = off + lei_n;
+
+    let bitmap_bytes = (col_count + 7) / 8;
+    let cols_before = match read_bytes(buf, off, bitmap_bytes) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("ROWS.cols_present_before")); }
+    };
+    off = off + bitmap_bytes;
+
+    let cols_after = match kind {
+        RkUpdate => {
+            let cb = match read_bytes(buf, off, bitmap_bytes) {
+                Ok(b)  => b,
+                Err(_) => { return Err(bad_rows("ROWS.cols_present_after")); }
+            };
+            off = off + bitmap_bytes;
+            cb
+        }
+        _ => List.new(),
+    };
+
+    // Rest of body is the rows-payload — defer per-tuple decoding
+    // to RowsRecord.decode_with_table once the consumer pairs the
+    // event with its TABLE_MAP entry.
+    let rows_payload = match read_bytes(buf, off, (buf.len() as Int) - off) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("ROWS.rows_payload")); }
+    };
+
+    Ok(RowsEvent {
+        table_id: table_id,
+        flags: flags,
+        extra_data: extra_data,
+        column_count: col_count,
+        cols_present_before: cols_before,
+        cols_present_after: cols_after,
+        rows_payload: rows_payload,
+        kind: kind,
+    })
+}
+
+// =============================================================================
+// Per-tuple decoder — invoked once consumer pairs RowsEvent + TABLE_MAP
+// =============================================================================
+
+public type RowValue is
+      RvNull
+    | RvInt(Int)
+    | RvUInt(Int)
+    | RvFloat(Float)
+    | RvText(Text)
+    | RvBytes(List<Byte>)
+    /// Pre-formatted MySQL date/time as raw bytes from the wire —
+    /// callers invoke a dedicated parser to lift to a typed
+    /// timestamp. Saves us from depending on a chrono module here.
+    | RvDateTime { packed: Int, fractional_us: Int }
+    | RvDate { year: Int, month: Int, day: Int }
+    | RvTime { hours: Int, minutes: Int, seconds: Int, fractional_us: Int }
+    /// Raw payload for types V0 doesn't decode (NEWDECIMAL, JSON,
+    /// GEOMETRY, ENUM, SET, BIT). Surface bytes; downstream owns
+    /// the parser.
+    | RvRaw(List<Byte>);
+
+public type DecodedRow is {
+    /// Position-aligned with `TableMapEvent.columns` AND with the
+    /// active present-bitmap (cols_present_before for
+    /// DELETE/UPDATE-before, cols_present_after for WRITE/UPDATE-
+    /// after). Columns absent from the present bitmap surface as
+    /// `RvNull`; columns present-but-NULL also `RvNull`. Use the
+    /// tableMap.columns[i].nullable + present-bit to distinguish
+    /// if needed.
+    columns: List<RowValue>,
+};
+
+/// Decode every row in a RowsEvent into DecodedRow tuples. UPDATE
+/// events return pairs; the `pairs` flavour encodes BEFORE then
+/// AFTER for each logical row.
+public type DecodedRows is
+      DrSimple(List<DecodedRow>)
+    | DrPairs(List<(DecodedRow, DecodedRow)>);
+
+public fn decode_with_table_map(rev: &RowsEvent, tm: &TableMapEvent)
+    -> Result<DecodedRows, DbError>
+{
+    if tm.table_id != rev.table_id {
+        return Err(bad_rows("decode_with_table_map: table_id mismatch"));
+    }
+    let buf = rev.rows_payload.as_slice();
+    let mut off: Int = 0;
+    let n = buf.len() as Int;
+
+    match rev.kind {
+        RkUpdate => {
+            let mut pairs: List<(DecodedRow, DecodedRow)> = List.new();
+            while off < n {
+                let (before, advance_b) = decode_one_tuple(
+                    buf, off, &tm.columns, rev.cols_present_before.as_slice(),
+                )?;
+                off = off + advance_b;
+                let (after, advance_a) = decode_one_tuple(
+                    buf, off, &tm.columns, rev.cols_present_after.as_slice(),
+                )?;
+                off = off + advance_a;
+                pairs.push((before, after));
+            }
+            Ok(DrPairs(pairs))
+        }
+        _ => {
+            let bitmap = match rev.kind {
+                RkWrite  => rev.cols_present_before.as_slice(),
+                RkDelete => rev.cols_present_before.as_slice(),
+                _ => rev.cols_present_before.as_slice(),
+            };
+            let mut rows: List<DecodedRow> = List.new();
+            while off < n {
+                let (row, advance) = decode_one_tuple(buf, off, &tm.columns, bitmap)?;
+                off = off + advance;
+                rows.push(row);
+            }
+            Ok(DrSimple(rows))
+        }
+    }
+}
+
+fn decode_one_tuple(
+    buf: &[Byte],
+    start: Int,
+    columns: &List<ColumnMeta>,
+    present_bitmap: &[Byte],
+) -> Result<(DecodedRow, Int), DbError> {
+    // Count present columns.
+    let mut present_count: Int = 0;
+    let mut i: Int = 0;
+    while i < (columns.len() as Int) {
+        if bitmap_bit(present_bitmap, i) { present_count = present_count + 1; }
+        i = i + 1;
+    }
+
+    // null_bitmap — one bit per *present* column.
+    let null_bm_len = (present_count + 7) / 8;
+    let null_bm = match read_bytes(buf, start, null_bm_len) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("tuple.null_bitmap")); }
+    };
+    let mut off: Int = start + null_bm_len;
+
+    let mut values: List<RowValue> = List.with_capacity(columns.len());
+    let mut present_idx: Int = 0;
+    let mut col_idx: Int = 0;
+    while col_idx < (columns.len() as Int) {
+        if !bitmap_bit(present_bitmap, col_idx) {
+            // Column not in the row image at all — surface as NULL
+            // (caller can disambiguate via present-bitmap if needed).
+            values.push(RvNull);
+        } else {
+            let is_null = bitmap_bit(null_bm.as_slice(), present_idx);
+            present_idx = present_idx + 1;
+            if is_null {
+                values.push(RvNull);
+            } else {
+                let meta = &columns[col_idx];
+                let (v, advance) = decode_value_for_type(buf, off, meta)?;
+                off = off + advance;
+                values.push(v);
+            }
+        }
+        col_idx = col_idx + 1;
+    }
+
+    Ok((DecodedRow { columns: values }, off - start))
+}
+
+fn decode_value_for_type(
+    buf: &[Byte],
+    off: Int,
+    meta: &ColumnMeta,
+) -> Result<(RowValue, Int), DbError> {
+    let t = meta.column_type;
+
+    // Integers — fixed width, sign-extended where appropriate.
+    if t == COL_TYPE_TINY {
+        let v = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+        // sign-extend from 8 bits.
+        let signed = if (v & 0x80) != 0 { v | (-1 ^ 0xFF) } else { v };
+        return Ok((RvInt(signed), 1));
+    }
+    if t == COL_TYPE_SHORT {
+        let v = match read_u16_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let signed = if (v & 0x8000) != 0 { v | (-1 ^ 0xFFFF) } else { v };
+        return Ok((RvInt(signed), 2));
+    }
+    if t == COL_TYPE_INT24 {
+        if (buf.len() as Int) < off + 3 { return Err(bad_rows("INT24 truncated")); }
+        let v = ((buf[off] as Int) & 0xFF)
+              | (((buf[off + 1] as Int) & 0xFF) << 8)
+              | (((buf[off + 2] as Int) & 0xFF) << 16);
+        let signed = if (v & 0x800000) != 0 { v | (-1 ^ 0xFFFFFF) } else { v };
+        return Ok((RvInt(signed), 3));
+    }
+    if t == COL_TYPE_LONG {
+        let v = match read_u32_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let signed = if (v & 0x80000000) != 0 { v | (-1 ^ 0xFFFFFFFF) } else { v };
+        return Ok((RvInt(signed), 4));
+    }
+    if t == COL_TYPE_LONGLONG {
+        let v = match read_u64_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        // Verum Int is 64-bit two's-complement — u64 LE bit-pattern
+        // re-interprets directly.
+        return Ok((RvInt(v), 8));
+    }
+    if t == COL_TYPE_YEAR {
+        let v = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let year = if v == 0 { 0 } else { v + 1900 };
+        return Ok((RvInt(year), 1));
+    }
+
+    // Floats — IEEE 754 LE; surface as Float (impl-detail
+    // bit-cast is via the runtime helpers used by other decoders).
+    if t == COL_TYPE_FLOAT {
+        let bits = match read_u32_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        return Ok((RvFloat(bits_to_f32(bits) as Float), 4));
+    }
+    if t == COL_TYPE_DOUBLE {
+        let bits = match read_u64_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        return Ok((RvFloat(bits_to_f64(bits)), 8));
+    }
+
+    // Strings / blobs — length-prefixed; prefix width depends on
+    // metadata (BLOB) or max-length threshold (VARCHAR).
+    if t == COL_TYPE_VARCHAR || t == COL_TYPE_VAR_STRING {
+        let max_len = meta.metadata;
+        let prefix = if max_len >= 256 { 2 } else { 1 };
+        let (len, p) = read_var_length(buf, off, prefix)?;
+        let bytes = match read_bytes(buf, off + p, len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_rows("VARCHAR.bytes")); }
+        };
+        return Ok((bytes_to_row_value(bytes), p + len));
+    }
+    if t == COL_TYPE_STRING {
+        // String metadata encodes [real_type:1][max_len:1] in a
+        // 2-byte tightly-packed form. For V0 treat as 1-byte
+        // length-prefixed string.
+        let len = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+        let bytes = match read_bytes(buf, off + 1, len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_rows("STRING.bytes")); }
+        };
+        return Ok((bytes_to_row_value(bytes), 1 + len));
+    }
+    if t == COL_TYPE_BLOB || t == COL_TYPE_TINY_BLOB
+       || t == COL_TYPE_MEDIUM_BLOB || t == COL_TYPE_LONG_BLOB
+    {
+        let prefix = if meta.metadata > 0 && meta.metadata <= 4 { meta.metadata } else { 2 };
+        let (len, p) = read_var_length(buf, off, prefix)?;
+        let bytes = match read_bytes(buf, off + p, len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_rows("BLOB.bytes")); }
+        };
+        return Ok((RvBytes(bytes), p + len));
+    }
+
+    // Date / time / timestamp — V0 extracts the raw packed values
+    // and surfaces structured tuples; downstream calendars own
+    // any timezone math.
+    if t == COL_TYPE_TIMESTAMP {
+        let secs = match read_u32_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        return Ok((RvDateTime { packed: secs, fractional_us: 0 }, 4));
+    }
+    if t == COL_TYPE_TIMESTAMP2 {
+        let secs = match read_u32_be(buf, off) {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_rows("TIMESTAMP2.seconds")); }
+        };
+        let frac_bytes = (meta.metadata + 1) / 2;
+        let frac = read_fractional_be(buf, off + 4, frac_bytes, meta.metadata);
+        return Ok((RvDateTime { packed: secs, fractional_us: frac }, 4 + frac_bytes));
+    }
+    if t == COL_TYPE_DATE {
+        if (buf.len() as Int) < off + 3 { return Err(bad_rows("DATE truncated")); }
+        let v = ((buf[off] as Int) & 0xFF)
+              | (((buf[off + 1] as Int) & 0xFF) << 8)
+              | (((buf[off + 2] as Int) & 0xFF) << 16);
+        let year  = (v >> 9) & 0x7FFF;
+        let month = (v >> 5) & 0x0F;
+        let day   = v & 0x1F;
+        return Ok((RvDate { year: year, month: month, day: day }, 3));
+    }
+    if t == COL_TYPE_TIME {
+        if (buf.len() as Int) < off + 3 { return Err(bad_rows("TIME truncated")); }
+        let v = ((buf[off] as Int) & 0xFF)
+              | (((buf[off + 1] as Int) & 0xFF) << 8)
+              | (((buf[off + 2] as Int) & 0xFF) << 16);
+        let hours   = v / 10000;
+        let minutes = (v / 100) % 100;
+        let seconds = v % 100;
+        return Ok((RvTime {
+            hours: hours, minutes: minutes,
+            seconds: seconds, fractional_us: 0,
+        }, 3));
+    }
+    if t == COL_TYPE_TIME2 {
+        // 24-bit BE packed + fractional.
+        if (buf.len() as Int) < off + 3 { return Err(bad_rows("TIME2 truncated")); }
+        let packed = (((buf[off] as Int) & 0xFF) << 16)
+                   | (((buf[off + 1] as Int) & 0xFF) << 8)
+                   | ((buf[off + 2] as Int) & 0xFF);
+        let frac_bytes = (meta.metadata + 1) / 2;
+        let frac = read_fractional_be(buf, off + 3, frac_bytes, meta.metadata);
+        let hours   = (packed >> 12) & 0x3FF;
+        let minutes = (packed >> 6) & 0x3F;
+        let seconds = packed & 0x3F;
+        return Ok((RvTime {
+            hours: hours, minutes: minutes,
+            seconds: seconds, fractional_us: frac,
+        }, 3 + frac_bytes));
+    }
+    if t == COL_TYPE_DATETIME {
+        let v = match read_u64_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        return Ok((RvDateTime { packed: v, fractional_us: 0 }, 8));
+    }
+    if t == COL_TYPE_DATETIME2 {
+        // 5-byte BE packed + fractional.
+        if (buf.len() as Int) < off + 5 { return Err(bad_rows("DATETIME2 truncated")); }
+        let mut packed: Int = 0;
+        let mut k: Int = 0;
+        while k < 5 {
+            packed = (packed << 8) | ((buf[off + k] as Int) & 0xFF);
+            k = k + 1;
+        }
+        let frac_bytes = (meta.metadata + 1) / 2;
+        let frac = read_fractional_be(buf, off + 5, frac_bytes, meta.metadata);
+        return Ok((RvDateTime { packed: packed, fractional_us: frac }, 5 + frac_bytes));
+    }
+
+    // Types V0 doesn't decode — surface raw bytes so the consumer
+    // can dispatch its own decoder.
+    if t == COL_TYPE_NEWDECIMAL {
+        // metadata = (precision << 8) | scale
+        let precision = (meta.metadata >> 8) & 0xFF;
+        let scale = meta.metadata & 0xFF;
+        let len = newdecimal_byte_length(precision, scale);
+        let bytes = match read_bytes(buf, off, len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_rows("NEWDECIMAL truncated")); }
+        };
+        return Ok((RvRaw(bytes), len));
+    }
+    if t == COL_TYPE_JSON {
+        let prefix = if meta.metadata > 0 && meta.metadata <= 4 { meta.metadata } else { 4 };
+        let (len, p) = read_var_length(buf, off, prefix)?;
+        let bytes = match read_bytes(buf, off + p, len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_rows("JSON truncated")); }
+        };
+        return Ok((RvBytes(bytes), p + len));
+    }
+    if t == COL_TYPE_NULL {
+        return Ok((RvNull, 0));
+    }
+
+    // Catch-all: BIT / ENUM / SET / GEOMETRY / DECIMAL — surface
+    // raw bytes the consumer can dispatch on. We don't know the
+    // length without a deeper parser; conservatively read 1 byte
+    // length + bytes (matches BIT / SET in the common case).
+    let len_guess = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+    let bytes = match read_bytes(buf, off + 1, len_guess) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_rows("unknown-type fallback")); }
+    };
+    Ok((RvRaw(bytes), 1 + len_guess))
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn read_u48_le(buf: &[Byte], off: Int) -> Result<Int, DbError> {
+    if (buf.len() as Int) < off + 6 {
+        return Err(bad_rows("u48 truncated"));
+    }
+    let v = ((buf[off] as Int) & 0xFF)
+          | (((buf[off + 1] as Int) & 0xFF) << 8)
+          | (((buf[off + 2] as Int) & 0xFF) << 16)
+          | (((buf[off + 3] as Int) & 0xFF) << 24)
+          | (((buf[off + 4] as Int) & 0xFF) << 32)
+          | (((buf[off + 5] as Int) & 0xFF) << 40);
+    Ok(v)
+}
+
+fn read_u32_be(buf: &[Byte], off: Int) -> Result<Int, DbError> {
+    if (buf.len() as Int) < off + 4 {
+        return Err(bad_rows("u32_be truncated"));
+    }
+    let v = (((buf[off] as Int) & 0xFF) << 24)
+          | (((buf[off + 1] as Int) & 0xFF) << 16)
+          | (((buf[off + 2] as Int) & 0xFF) << 8)
+          | ((buf[off + 3] as Int) & 0xFF);
+    Ok(v)
+}
+
+fn read_var_length(buf: &[Byte], off: Int, prefix_bytes: Int)
+    -> Result<(Int, Int), DbError>
+{
+    if prefix_bytes == 1 {
+        let v = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
+        return Ok((v, 1));
+    }
+    if prefix_bytes == 2 {
+        let v = match read_u16_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+        return Ok((v, 2));
+    }
+    if prefix_bytes == 3 {
+        if (buf.len() as Int) < off + 3 { return Err(bad_rows("len3 truncated")); }
+        let v = ((buf[off] as Int) & 0xFF)
+              | (((buf[off + 1] as Int) & 0xFF) << 8)
+              | (((buf[off + 2] as Int) & 0xFF) << 16);
+        return Ok((v, 3));
+    }
+    // 4-byte
+    let v = match read_u32_le(buf, off) { Ok(v) => v, Err(_) => 0 };
+    Ok((v, 4))
+}
+
+fn read_fractional_be(buf: &[Byte], off: Int, frac_bytes: Int, fsp: Int) -> Int {
+    if frac_bytes == 0 || (buf.len() as Int) < off + frac_bytes { return 0; }
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < frac_bytes {
+        v = (v << 8) | ((buf[off + i] as Int) & 0xFF);
+        i = i + 1;
+    }
+    // fsp 0 → 0 / fsp 1-2 → ×10000 / fsp 3-4 → ×100 / fsp 5-6 → ×1
+    if fsp <= 2 { v * 10000 }
+    else if fsp <= 4 { v * 100 }
+    else { v }
+}
+
+fn newdecimal_byte_length(precision: Int, scale: Int) -> Int {
+    // MySQL stores 9 decimal digits per 4 bytes; partial groups
+    // encoded in a smaller width.
+    let intg = precision - scale;
+    let intg_full = intg / 9;
+    let intg_frac = intg - intg_full * 9;
+    let frac_full = scale / 9;
+    let frac_frac = scale - frac_full * 9;
+    let partial_bytes_for = |digits: Int| -> Int {
+        if digits == 0 { 0 }
+        else if digits == 1 || digits == 2 { 1 }
+        else if digits == 3 || digits == 4 { 2 }
+        else if digits == 5 || digits == 6 { 3 }
+        else { 4 }
+    };
+    intg_full * 4 + partial_bytes_for(intg_frac)
+        + frac_full * 4 + partial_bytes_for(frac_frac)
+}
+
+fn bitmap_bit(buf: &[Byte], idx: Int) -> Bool {
+    let byte_idx = idx >> 3;
+    let bit_idx = idx & 0x7;
+    if byte_idx >= (buf.len() as Int) { return false; }
+    ((buf[byte_idx] as Int) & (1 << bit_idx)) != 0
+}
+
+fn bytes_to_text(b: &List<Byte>) -> Text {
+    match Text.from_utf8(b.as_slice()) {
+        Ok(s)  => s,
+        Err(_) => "".clone(),
+    }
+}
+
+fn bytes_to_row_value(bytes: List<Byte>) -> RowValue {
+    match Text.from_utf8(bytes.as_slice()) {
+        Ok(s)  => RvText(s),
+        Err(_) => RvBytes(bytes),
+    }
+}
+
+// IEEE 754 bit-cast helpers — single-precision and double.
+// Verum runtime exposes `core.intrinsics.float.f32_from_bits` and
+// `f64_from_bits`; if unavailable in the loaded stdlib version,
+// callers see RvFloat(0.0) for unparsable bits — surfacing the
+// precision loss is preferable to a panic.
+fn bits_to_f32(bits: Int) -> Float {
+    core.intrinsics.float.f32_from_bits(bits as Int32) as Float
+}
+
+fn bits_to_f64(bits: Int) -> Float {
+    core.intrinsics.float.f64_from_bits(bits)
+}
+
+// =============================================================================
+// TableMapCache — analogue of PgoRelationCache
+// =============================================================================
+
+public type TableMapCache is {
+    entries: List<(Int, TableMapEvent)>,
+};
+
+implement TableMapCache {
+    public fn new() -> TableMapCache {
+        TableMapCache { entries: List.new() }
+    }
+
+    public fn record(&mut self, ev: TableMapEvent) {
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            let (tid, _) = &self.entries[i];
+            if *tid == ev.table_id {
+                self.entries[i] = (ev.table_id, ev);
+                return;
+            }
+            i = i + 1;
+        }
+        self.entries.push((ev.table_id, ev));
+    }
+
+    public fn lookup(&self, table_id: Int) -> Maybe<&TableMapEvent> {
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            let (tid, m) = &self.entries[i];
+            if *tid == table_id { return Some(m); }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn len(&self) -> Int { self.entries.len() as Int }
+}
+
+fn bad_rows(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "BINLOG_ROWS".clone(),
+        message: f"binlog rows decode error: {what}",
+        retryable: false,
+    })
+}

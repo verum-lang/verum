@@ -218,6 +218,14 @@ public type BinlogEvent is
     | BeFormatDescription { header: BinlogEventHeader, body: FormatDescriptionBody }
     | BeGtid { header: BinlogEventHeader, body: GtidEventBody }
     | BeHeartbeat { header: BinlogEventHeader }
+    | BeTableMap { header: BinlogEventHeader,
+                   body: core.database.mysql.binlog_rows.TableMapEvent }
+    | BeWriteRows { header: BinlogEventHeader,
+                    body: core.database.mysql.binlog_rows.RowsEvent }
+    | BeUpdateRows { header: BinlogEventHeader,
+                     body: core.database.mysql.binlog_rows.RowsEvent }
+    | BeDeleteRows { header: BinlogEventHeader,
+                     body: core.database.mysql.binlog_rows.RowsEvent }
     | BeOther { header: BinlogEventHeader, payload: List<Byte> };
 
 public type QueryEventBody is {
@@ -499,6 +507,31 @@ fn decode_event_body(header: &BinlogEventHeader, body: List<Byte>) -> Result<Bin
     if t == ET_GTID || t == ET_ANONYMOUS_GTID {
         let g = decode_gtid_body(body.as_slice())?;
         return Ok(BeGtid { header: header.clone(), body: g });
+    }
+    if t == ET_TABLE_MAP {
+        let tm = core.database.mysql.binlog_rows.decode_table_map_body(body.as_slice())?;
+        return Ok(BeTableMap { header: header.clone(), body: tm });
+    }
+    if t == ET_WRITE_ROWS_V2 {
+        let rs = core.database.mysql.binlog_rows.decode_rows_event_body(
+            body.as_slice(),
+            core.database.mysql.binlog_rows.RkWrite,
+        )?;
+        return Ok(BeWriteRows { header: header.clone(), body: rs });
+    }
+    if t == ET_UPDATE_ROWS_V2 {
+        let rs = core.database.mysql.binlog_rows.decode_rows_event_body(
+            body.as_slice(),
+            core.database.mysql.binlog_rows.RkUpdate,
+        )?;
+        return Ok(BeUpdateRows { header: header.clone(), body: rs });
+    }
+    if t == ET_DELETE_ROWS_V2 {
+        let rs = core.database.mysql.binlog_rows.decode_rows_event_body(
+            body.as_slice(),
+            core.database.mysql.binlog_rows.RkDelete,
+        )?;
+        return Ok(BeDeleteRows { header: header.clone(), body: rs });
     }
     Ok(BeOther { header: header.clone(), payload: body })
 }

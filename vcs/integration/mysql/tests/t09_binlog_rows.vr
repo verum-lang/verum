@@ -1,0 +1,169 @@
+// =============================================================================
+// t09_binlog_rows.vr — TABLE_MAP + WRITE/UPDATE/DELETE_ROWS_V2 decoder
+// =============================================================================
+// Spec: internal/specs/database.md §6.3.7 (binlog replication, ROW events).
+// =============================================================================
+//
+// V0 row-event chain:
+//   1. INSERT a row on a side connection.
+//   2. Open binlog stream (empty GTID set → start from earliest).
+//   3. Drain events; record TABLE_MAP for the affected table;
+//      pair WRITE_ROWS_V2 with cached TABLE_MAP and decode the
+//      tuple via `decode_with_table_map`.
+//   4. Assert the decoded values match what we inserted.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    connect_app,
+};
+mount core.database.mysql.{
+    MysqlConfig, MtmDisable,
+    BinlogConfig, BinlogStream,
+    BinlogEvent, BeFormatDescription, BeQuery, BeXid, BeRotate,
+    BeGtid, BeHeartbeat, BeOther,
+    BeTableMap, BeWriteRows, BeUpdateRows, BeDeleteRows,
+    TableMapEvent, TableMapCache, RowsEvent,
+    RowValue, RvInt, RvText, RvBytes, RvNull,
+    DecodedRows, DrSimple, DrPairs,
+    decode_with_table_map,
+    connect_binlog,
+};
+
+const SERVER_ID: Int = 16777217;
+
+fn admin_mysql_cfg() -> MysqlConfig {
+    MysqlConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        character_set: 255,
+        tls_mode: MtmDisable,
+        connect_timeout_ms: 10_000,
+    }
+}
+
+fn write_rows_on_side_channel() {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS binlog_rows_smoke ( \
+            id INT PRIMARY KEY, \
+            payload VARCHAR(255) NOT NULL \
+          ) ENGINE=InnoDB".clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM binlog_rows_smoke".clone());
+    let _ = expect_ok(
+        side.simple_query(&
+            "INSERT INTO binlog_rows_smoke (id, payload) VALUES (1, 'first')".clone()
+        ),
+        &"side-channel INSERT failed".clone(),
+    );
+    let _ = expect_ok(
+        side.simple_query(&
+            "INSERT INTO binlog_rows_smoke (id, payload) VALUES (2, 'second')".clone()
+        ),
+        &"side-channel INSERT 2 failed".clone(),
+    );
+}
+
+fn main() {
+    write_rows_on_side_channel();
+
+    let bcfg = BinlogConfig.from_gtid(SERVER_ID, "".clone());
+    let mut stream = expect_ok(
+        connect_binlog(&admin_mysql_cfg(), bcfg),
+        &"connect_binlog failed".clone(),
+    );
+
+    let mut cache = TableMapCache.new();
+    let mut decoded_inserts: Int = 0;
+    let mut saw_int_value: Bool = false;
+    let mut saw_text_value: Bool = false;
+    let mut i: Int = 0;
+    while i < 100 {
+        let r = expect_ok(
+            stream.next_event(),
+            &f"next_event #{i} failed",
+        );
+        match r {
+            Some(ev) => {
+                match ev {
+                    BeTableMap { body: tm, .. } => {
+                        // Record schema for downstream row decoding.
+                        if &tm.name == &"binlog_rows_smoke".clone() {
+                            cache.record(tm);
+                        } else {
+                            cache.record(tm);
+                        }
+                    }
+                    BeWriteRows { body: rev, .. } => {
+                        match cache.lookup(rev.table_id) {
+                            Some(tm) => {
+                                if &tm.name == &"binlog_rows_smoke".clone() {
+                                    let dr = expect_ok(
+                                        decode_with_table_map(&rev, tm),
+                                        &"decode_with_table_map failed".clone(),
+                                    );
+                                    match dr {
+                                        DrSimple(rows) => {
+                                            decoded_inserts = decoded_inserts + (rows.len() as Int);
+                                            // Spot-check the first row.
+                                            if rows.len() > 0 {
+                                                let row = &rows[0];
+                                                if row.columns.len() >= 2 {
+                                                    match &row.columns[0] {
+                                                        RvInt(_) => { saw_int_value = true; }
+                                                        _ => {}
+                                                    }
+                                                    match &row.columns[1] {
+                                                        RvText(_) => { saw_text_value = true; }
+                                                        RvBytes(_) => { saw_text_value = true; }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        DrPairs(_) => {}
+                                    }
+                                }
+                            }
+                            None => {}
+                        }
+                    }
+                    BeUpdateRows { .. } | BeDeleteRows { .. } => {}
+                    BeFormatDescription { .. } | BeQuery { .. } | BeXid { .. }
+                    | BeGtid { .. } | BeRotate { .. } | BeHeartbeat { .. }
+                    | BeOther { .. } => {}
+                }
+                if decoded_inserts >= 2 && saw_int_value && saw_text_value {
+                    break;
+                }
+            }
+            None => { break; }
+        }
+        i = i + 1;
+    }
+
+    expect(
+        decoded_inserts >= 2,
+        &f"expected ≥2 decoded INSERT rows, got {decoded_inserts}".clone(),
+    );
+    expect(
+        saw_int_value,
+        &"never saw an integer column value in decoded row".clone(),
+    );
+    expect(
+        saw_text_value,
+        &"never saw a text/bytes column value in decoded row".clone(),
+    );
+
+    let _ = stream.close();
+
+    pass(&"t09_binlog_rows".clone());
+}
