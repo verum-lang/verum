@@ -1219,11 +1219,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
             builder.build_store(field3, len).or_llvm_err()?;
         } else {
             // string_register: text_val is i64 pointer to null-terminated C string
-            // Use strlen to get length
-            let strlen_fn = module.get_function("strlen").unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-                module.add_function("strlen", fn_type, None)
-            });
+            // Use libc-free verum_internal_strlen (inline byte-scan loop)
+            let strlen_fn = self.get_or_declare_strlen(module);
             let str_ptr = builder
                 .build_int_to_ptr(text_val, ptr_type, "str_ptr")
                 .or_llvm_err()?;
@@ -12971,10 +12968,12 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .get_nth_param(0)
             .or_internal("missing param 0")?
             .into_pointer_value();
-        let strlen_fn = module.get_function("strlen").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-            module.add_function("strlen", fn_type, None)
-        });
+        // Libc-free: verum_internal_strlen is an inline byte-scan loop
+        // pre-declared at the top of define_text_ir_helpers (or by
+        // get_or_declare_strlen on the codegen impl).
+        let strlen_fn = module
+            .get_function("verum_internal_strlen")
+            .or_missing_fn("verum_internal_strlen")?;
         let len = builder
             .build_call(strlen_fn, &[s.into()], "len")
             .or_llvm_err()?
@@ -13161,10 +13160,12 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         builder.build_return(Some(&null_result)).or_llvm_err()?;
 
         builder.position_at_end(valid_bb);
-        let strlen_fn = module.get_function("strlen").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-            module.add_function("strlen", fn_type, None)
-        });
+        // Libc-free: verum_internal_strlen is an inline byte-scan loop
+        // pre-declared at the top of define_text_ir_helpers (or by
+        // get_or_declare_strlen on the codegen impl).
+        let strlen_fn = module
+            .get_function("verum_internal_strlen")
+            .or_missing_fn("verum_internal_strlen")?;
         let len = builder
             .build_call(strlen_fn, &[s.into()], "len")
             .or_llvm_err()?
@@ -13296,10 +13297,12 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .into_pointer_value();
 
         // Get lengths via strlen
-        let strlen_fn = module.get_function("strlen").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-            module.add_function("strlen", fn_type, None)
-        });
+        // Libc-free: verum_internal_strlen is an inline byte-scan loop
+        // pre-declared at the top of define_text_ir_helpers (or by
+        // get_or_declare_strlen on the codegen impl).
+        let strlen_fn = module
+            .get_function("verum_internal_strlen")
+            .or_missing_fn("verum_internal_strlen")?;
         let a_len = builder
             .build_call(strlen_fn, &[a_ptr.into()], "a_len")
             .or_llvm_err()?
