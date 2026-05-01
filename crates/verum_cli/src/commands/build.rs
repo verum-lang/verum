@@ -506,20 +506,40 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
 
     let _analysis_time = analysis_start.elapsed();
 
-    // Persist / report SMT routing telemetry when --smt-stats is on.
-    // The session's RoutingStats is populated by any verification phase
-    // that dispatches through SmtBackendSwitcher (see Task #42 for the
-    // phase-side wiring). Even when no SMT work ran, we still write a
-    // zero-filled report so `verum smt-stats` has something to show.
-    if smt_stats {
-        let json = session.routing_stats().as_json();
-        if let Err(e) = crate::commands::smt_stats::persist_stats(&json) {
-            ui::warn(&format!("Failed to persist SMT stats: {}", e));
-        } else {
-            ui::detail(
-                "SMT stats",
-                "written — run `verum smt-stats` to view",
+    // Persist / report SMT routing telemetry.  See
+    // `smt_stats_decision` for the load-bearing contract; the build
+    // path branches on the typed enum it returns.  Two surfaces gate
+    // the persist (CLI `--smt-stats` and manifest
+    // `[verify].persist_stats`) — either source asking for
+    // persistence is sufficient unless `[verify].enable_telemetry =
+    // false` short-circuits both.  Closes the inert-defense pattern
+    // at config.rs where the [verify] telemetry knobs were
+    // populated from manifest but had no consumer (#301).
+    match smt_stats_decision(
+        smt_stats,
+        manifest.verify.persist_stats,
+        manifest.verify.enable_telemetry,
+    ) {
+        SmtStatsDecision::Persist => {
+            let json = session.routing_stats().as_json();
+            if let Err(e) = crate::commands::smt_stats::persist_stats(&json) {
+                ui::warn(&format!("Failed to persist SMT stats: {}", e));
+            } else {
+                ui::detail(
+                    "SMT stats",
+                    "written — run `verum smt-stats` to view",
+                );
+            }
+        }
+        SmtStatsDecision::CliOverridden => {
+            ui::warn(
+                "--smt-stats requested but [verify].enable_telemetry = false in \
+                 manifest; skipping disk persist (set enable_telemetry = true \
+                 or remove the manifest override)",
             );
+        }
+        SmtStatsDecision::Skip => {
+            // No source asked for persistence — silent skip.
         }
     }
 
@@ -787,6 +807,59 @@ fn count_vr_files(dir: &PathBuf) -> Result<usize> {
     Ok(count)
 }
 
+/// Outcome of evaluating the SMT-stats persistence policy (#301).
+///
+/// Three CLI VerifyConfig fields are merged into a single typed
+/// decision so the build path branches once and the contract is
+/// pin-testable without driving the whole build pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SmtStatsDecision {
+    /// Persist routing stats to disk + emit the success line.
+    /// Reached when telemetry is enabled AND either source (CLI
+    /// `--smt-stats` or manifest `[verify].persist_stats`) asked
+    /// for persistence.
+    Persist,
+    /// CLI explicitly asked for persistence but the manifest
+    /// disabled telemetry — skip the persist + emit a warning so
+    /// the user sees their `--smt-stats` request was dropped.
+    CliOverridden,
+    /// No source asked for persistence — silent skip.
+    Skip,
+}
+
+/// Evaluate the SMT-stats persistence policy.  Pure function;
+/// extracted so the OR-then-AND lattice across CLI and manifest
+/// surfaces is regression-pinned.
+///
+/// Truth table (`telemetry_enabled = true` reduces to `cli ||
+/// manifest_persist`; `telemetry_enabled = false` short-circuits):
+///
+/// | cli_smt_stats | manifest.persist_stats | manifest.enable_telemetry | decision      |
+/// |---------------|------------------------|---------------------------|---------------|
+/// | true          | *                      | true                      | Persist       |
+/// | false         | true                   | true                      | Persist       |
+/// | false         | false                  | true                      | Skip          |
+/// | true          | *                      | false                     | CliOverridden |
+/// | false         | *                      | false                     | Skip          |
+pub(crate) fn smt_stats_decision(
+    cli_smt_stats: bool,
+    manifest_persist_stats: bool,
+    manifest_enable_telemetry: bool,
+) -> SmtStatsDecision {
+    if !manifest_enable_telemetry {
+        return if cli_smt_stats {
+            SmtStatsDecision::CliOverridden
+        } else {
+            SmtStatsDecision::Skip
+        };
+    }
+    if cli_smt_stats || manifest_persist_stats {
+        SmtStatsDecision::Persist
+    } else {
+        SmtStatsDecision::Skip
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -798,6 +871,73 @@ mod tests {
         std::fs::create_dir_all(&src_dir).expect("mkdir src");
         std::fs::write(src_dir.join("main.vr"), src).expect("write main.vr");
         tmp
+    }
+
+    // ----- #301: smt_stats_decision pin tests --------------------------
+
+    #[test]
+    fn smt_stats_cli_only_persists_when_telemetry_enabled() {
+        // `--smt-stats` alone with telemetry enabled (default) → Persist.
+        assert_eq!(
+            smt_stats_decision(true, false, true),
+            SmtStatsDecision::Persist
+        );
+    }
+
+    #[test]
+    fn smt_stats_manifest_only_persists_when_telemetry_enabled() {
+        // Manifest `persist_stats = true` alone → Persist (no CLI flag).
+        assert_eq!(
+            smt_stats_decision(false, true, true),
+            SmtStatsDecision::Persist
+        );
+    }
+
+    #[test]
+    fn smt_stats_or_combines_cli_and_manifest() {
+        // OR-combination: either source asking for persistence → Persist.
+        assert_eq!(
+            smt_stats_decision(true, true, true),
+            SmtStatsDecision::Persist
+        );
+    }
+
+    #[test]
+    fn smt_stats_neither_source_yields_skip() {
+        assert_eq!(
+            smt_stats_decision(false, false, true),
+            SmtStatsDecision::Skip
+        );
+    }
+
+    #[test]
+    fn smt_stats_telemetry_disabled_short_circuits_cli() {
+        // CLI explicitly asked but manifest disabled telemetry →
+        // CliOverridden (warning, no persist).  This is the
+        // load-bearing pin: without #301 the CLI flag would
+        // silently win and disk persist regardless of manifest.
+        assert_eq!(
+            smt_stats_decision(true, false, false),
+            SmtStatsDecision::CliOverridden
+        );
+        assert_eq!(
+            smt_stats_decision(true, true, false),
+            SmtStatsDecision::CliOverridden
+        );
+    }
+
+    #[test]
+    fn smt_stats_telemetry_disabled_silent_skip_when_no_cli() {
+        // Telemetry disabled + no CLI request → silent Skip
+        // (no warning since the user didn't ask for anything).
+        assert_eq!(
+            smt_stats_decision(false, false, false),
+            SmtStatsDecision::Skip
+        );
+        assert_eq!(
+            smt_stats_decision(false, true, false),
+            SmtStatsDecision::Skip
+        );
     }
 
     #[test]
