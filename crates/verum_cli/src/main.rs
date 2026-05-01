@@ -1385,6 +1385,20 @@ enum Commands {
         #[clap(long = "differential-kernel")]
         differential_kernel: bool,
 
+        /// Run the differential-kernel fuzz audit. Mutation-based
+        /// property fuzzing: takes the canonical-certificate roster,
+        /// applies structural mutations (universe lifts, subterm
+        /// swaps, binder rewrites, application injections), runs every
+        /// mutant through every registered kernel. The property
+        /// invariant is that every mutant produces a unanimous
+        /// agreement; any disagreement is a kernel-implementation
+        /// bug and exits non-zero. Bounded deterministic campaign
+        /// (default 500 iterations, fixed seed) — disagreements are
+        /// reproducible across runs.
+        /// Output: `target/audit-reports/differential-kernel-fuzz.json`.
+        #[clap(long = "differential-kernel-fuzz")]
+        differential_kernel_fuzz: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -3845,6 +3859,7 @@ fn run_command(cli: Cli) -> Result<()> {
             dependent_theorems,
             codegen_attestation,
             differential_kernel,
+            differential_kernel_fuzz,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -3906,6 +3921,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_codegen_attestation_with_format(output_format)
             } else if differential_kernel {
                 commands::audit::audit_differential_kernel_with_format(output_format)
+            } else if differential_kernel_fuzz {
+                commands::audit::audit_differential_kernel_fuzz_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {

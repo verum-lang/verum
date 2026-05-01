@@ -102,9 +102,10 @@
 pub const VVA_VERSION: &str = "2.6.0";
 
 pub mod proof_checker;
-pub mod proof_checker_nbe; // #159 V1 — NbE-based second algorithmic kernel
-pub mod proof_checker_meta; // #158 V1 — universe-lift mechanism for meta-mode
-pub mod kernel_registry; // #159 V4 — N-kernel registry for differential testing
+pub mod proof_checker_nbe; // NbE-based second algorithmic kernel
+pub mod proof_checker_meta; // universe-lift mechanism for meta-mode
+pub mod kernel_registry; // N-kernel registry for differential testing
+pub mod differential_fuzz; // mutation-based property fuzzing over the registry
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type
