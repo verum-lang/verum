@@ -6898,6 +6898,20 @@ impl ProtocolChecker {
     fn apply_type_substitution_impl(&self, ty: &Type, subst: &Map<TypeVar, Type>, depth: usize) -> Type {
         const MAX_SUBST_DEPTH: usize = 128;
         if depth > MAX_SUBST_DEPTH {
+            // #306: surface the silent depth-limit fallback so a
+            // chain of self-referential generic substitution
+            // hitting the cap is observable in telemetry rather
+            // than producing a mysteriously-unsubstituted Type::
+            // Generic.  Conservative fallback is correct (the
+            // type is returned unchanged) but the event needs
+            // to be visible.
+            tracing::warn!(
+                "apply_type_substitution_impl depth limit ({}) \
+                 exceeded — returning type unchanged.  This \
+                 typically means a self-referential generic \
+                 substitution chain.",
+                MAX_SUBST_DEPTH
+            );
             return ty.clone(); // Conservative: return unchanged at depth limit
         }
         let d = depth + 1;
@@ -10043,6 +10057,16 @@ impl ProtocolChecker {
         let _guard = SubstDepthGuard;
 
         if depth > 20 {
+            // #306: surface the silent depth-limit fallback so a
+            // type-parameter substitution cycle (e.g., F<F<F<...>>>)
+            // hitting the cap is observable in telemetry rather
+            // than producing a mysteriously-unsubstituted type.
+            tracing::warn!(
+                "subst_type_params depth limit (20) exceeded — \
+                 returning type unchanged to break a substitution \
+                 cycle.  This typically means a type alias or \
+                 generic parameter forms a self-reference."
+            );
             return ty.clone(); // Return unchanged to break the cycle
         }
 

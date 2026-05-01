@@ -552,6 +552,20 @@ impl Unifier {
     fn apply_alias_subst_impl(&self, ty: &Type, subst: &Map<Text, Type>, depth: usize) -> Type {
         const MAX_DEPTH: usize = 100;
         if depth > MAX_DEPTH {
+            // #306: surface the silent depth-limit fallback so a
+            // chain of self-referential type aliases hitting the
+            // cap is observable in telemetry rather than producing
+            // a mysteriously-unsubstituted type.  Conservative fall
+            // back is correct (returns the type unmodified) but
+            // hiding the event from the user makes downstream
+            // type-error messages baffling.
+            tracing::warn!(
+                "apply_alias_subst depth limit ({}) exceeded — \
+                 returning type unchanged.  This typically means \
+                 a self-referential type alias chain; consider \
+                 simplifying the alias graph.",
+                MAX_DEPTH
+            );
             return ty.clone();
         }
         let d = depth + 1;
