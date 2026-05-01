@@ -172,3 +172,49 @@ jobs:
       - name: clippy (-D warnings, advisory)
         continue-on-error: true
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # Job 5: Architectural invariants (#80) — codify the no-libc and
+  # target-triple discipline established under #91 perf roadmap so future
+  # commits can't silently regress.
+  # ---------------------------------------------------------------------------
+  arch-guards:
+    name: Architectural invariants (no-libc, no-host-cfg)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: arch-guards-${{ matrix.os }}
+
+      - name: Build verum CLI for smoke binary
+        run: cargo build --bin verum --locked
+
+      # **No-host-#[cfg(target_os)] in codegen** (#80).
+      # Codegen MUST read module.get_triple() — never host-cfg.
+      # The script enforces this; new violations block merge.
+      - name: Check no host-#[cfg(target_os)] in codegen
+        run: python3 scripts/ci/check_no_host_cfg.py --strict
+
+      # **No-libc dynamic linkage** (#80).
+      # Builds a smoke .vr program and verifies the produced binary
+      # only links the platform's permitted system boundary
+      # (libSystem.B.dylib on macOS; ld-linux on Linux; nothing else).
+      - name: Check AOT binary doesn't link libc
+        run: ./scripts/ci/check_no_libc_link.sh target/debug/verum

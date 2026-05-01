@@ -22972,27 +22972,37 @@ fn lower_ffi_extended<'ctx>(
         // Other operations
         // ================================================================
         Some(FfiSubOpcode::GetLastError) => {
-            // Windows-specific: GetLastError()
-            #[cfg(target_os = "windows")]
-            {
-                // Would need to declare and call GetLastError
-                Err(LlvmLoweringError::internal(
-                    "GetLastError not yet implemented",
-                ))
+            // Windows-specific: GetLastError().  Target-triple-dispatched
+            // (NOT host `#[cfg]`) so cross-compiles emit the right code.
+            // Pre-fix this used `#[cfg(target_os = "windows")]` which
+            // checks the BUILD HOST — a verum binary compiled on Linux
+            // for a Windows target would silently emit the non-Windows
+            // fallback (return 0), miscompiling user error-handling.
+            //
+            // Per `docs/architecture/no-libc-architecture.md`: every
+            // per-platform decision in codegen reads
+            // `module.get_triple()`.
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "GetLastError: insufficient operands",
+                ));
             }
-            #[cfg(not(target_os = "windows"))]
-            {
-                // On non-Windows, return 0
-                if operands.is_empty() {
-                    return Err(LlvmLoweringError::internal(
-                        "GetLastError: insufficient operands",
-                    ));
-                }
-                let dst_reg = op_reg(operands, 0);
-                let zero = ctx.types().i64_type().const_zero();
-                ctx.set_register(dst_reg, zero.into());
-                Ok(())
+            let dst_reg = op_reg(operands, 0);
+            let module = ctx.get_module();
+            if super::target_triple::target_is_windows(&module) {
+                // TODO: declare and call kernel32.dll::GetLastError().
+                // Until then, emit a const-zero with a tracing warning.
+                tracing::warn!(
+                    "GetLastError on Windows target — placeholder const-zero \
+                     until kernel32.GetLastError is wired in (#80 follow-up)"
+                );
             }
+            // Non-Windows OR not-yet-implemented Windows path: return 0.
+            // Per POSIX programs don't use GetLastError; this is the
+            // safe sentinel.
+            let zero = ctx.types().i64_type().const_zero();
+            ctx.set_register(dst_reg, zero.into());
+            Ok(())
         }
 
         Some(FfiSubOpcode::RandomU64) => {
