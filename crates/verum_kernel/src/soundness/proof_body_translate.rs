@@ -461,16 +461,45 @@ fn render_term_agda(body: &ProofBody) -> TranslatedProofBody {
 /// and no tactic mode in vanilla form, so the translation is just
 /// the bare lemma name as a term.  The args are dropped — Agda's
 /// unification fills in implicit arguments when the proof is
-/// type-checked against the goal.
+/// type-checked against the goal.  Also covers the small set of
+/// primitive tactics that have direct term-mode equivalents in
+/// Agda's stdlib.
 fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
     if let Some((name, _args)) = classify_single_apply(body) {
         return TranslatedProofBody::Translated {
             text: name.to_string(),
         };
     }
-    TranslatedProofBody::Fallback {
-        reason: "Agda: no tactic system; only Term and single-apply translate in V0".to_string(),
+    if let Some(tactic) = primitive_tactic(body) {
+        if let Some(text) = primitive_tactic_to_agda(tactic) {
+            return TranslatedProofBody::Translated { text };
+        }
     }
+    TranslatedProofBody::Fallback {
+        reason: "Agda: V0 covers Term + single-apply + reflexivity/trivial primitives only".to_string(),
+    }
+}
+
+/// Translate a primitive tactic to its Agda term-mode equivalent.
+/// Agda has no tactic system, so only tactics with direct term-mode
+/// proof terms in Agda's stdlib translate; everything else falls
+/// back to postulate.
+///
+/// Coverage:
+///   * `Reflexivity` → `refl` — the propositional-equality
+///     constructor from `Relation.Binary.PropositionalEquality`.
+///   * `Trivial` → `tt` — the unit constructor for `⊤`
+///     (the trivial proposition).
+///
+/// `Auto` / `Omega` / `Ring` etc. have no term-mode equivalents —
+/// they're decision procedures that only exist as tactics in
+/// Coq/Lean/Isabelle.
+fn primitive_tactic_to_agda(tactic: &TacticExpr) -> Option<String> {
+    Some(match tactic {
+        TacticExpr::Reflexivity => "refl".to_string(),
+        TacticExpr::Trivial => "tt".to_string(),
+        _ => return None,
+    })
 }
 
 // =============================================================================
@@ -544,9 +573,33 @@ fn render_single_apply_dedukti(body: &ProofBody) -> TranslatedProofBody {
             text: name.to_string(),
         };
     }
-    TranslatedProofBody::Fallback {
-        reason: "Dedukti: no tactic system; only Term and single-apply translate in V0".to_string(),
+    if let Some(tactic) = primitive_tactic(body) {
+        if let Some(text) = primitive_tactic_to_dedukti(tactic) {
+            return TranslatedProofBody::Translated { text };
+        }
     }
+    TranslatedProofBody::Fallback {
+        reason: "Dedukti: V0 covers Term + single-apply + reflexivity/trivial primitives only".to_string(),
+    }
+}
+
+/// Translate a primitive tactic to its Dedukti term-mode
+/// equivalent.  Dedukti has no tactic system; only tactics with
+/// direct term-form encodings in standard Dedukti libraries
+/// translate.
+///
+/// Coverage:
+///   * `Reflexivity` → `refl` — the propositional-equality
+///     constructor (assumed to be present in the consumer's
+///     theory; encodings vary by library).
+///   * `Trivial` → `I` — the canonical inhabitant of `True`
+///     in Coq-flavoured Dedukti encodings (LF-style).
+fn primitive_tactic_to_dedukti(tactic: &TacticExpr) -> Option<String> {
+    Some(match tactic {
+        TacticExpr::Reflexivity => "refl".to_string(),
+        TacticExpr::Trivial => "I".to_string(),
+        _ => return None,
+    })
 }
 
 // =============================================================================
@@ -1259,23 +1312,39 @@ mod tests {
     }
 
     #[test]
-    fn agda_falls_back_on_primitive_tactic() {
-        // Agda has no built-in `auto` / `omega` / `ring`.  The
-        // primitive tactics fall back; the corpus-emission layer
-        // then uses `postulate` for these theorems.
+    fn agda_translates_term_mode_primitives() {
+        // Reflexivity + Trivial have direct term-mode equivalents in
+        // Agda's stdlib (`refl` / `tt`).  Everything else still
+        // falls back since Agda has no tactic system.
+        assert_eq!(
+            AgdaProofBodyRenderer::new()
+                .render(&ProofBody::Tactic(TacticExpr::Reflexivity))
+                .text(),
+            Some("refl"),
+        );
+        assert_eq!(
+            AgdaProofBodyRenderer::new()
+                .render(&ProofBody::Tactic(TacticExpr::Trivial))
+                .text(),
+            Some("tt"),
+        );
+    }
+
+    #[test]
+    fn agda_falls_back_on_decision_tactics() {
+        // Auto / Omega / Ring have no term-mode equivalents in Agda.
         for tactic in [
-            TacticExpr::Trivial,
-            TacticExpr::Reflexivity,
             TacticExpr::Auto {
                 with_hints: List::new(),
             },
             TacticExpr::Omega,
+            TacticExpr::Ring,
         ] {
             let body = ProofBody::Tactic(tactic);
             let r = AgdaProofBodyRenderer::new().render(&body);
             assert!(
                 matches!(r, TranslatedProofBody::Fallback { .. }),
-                "Agda must fall back on primitive tactics — no built-in equivalents",
+                "Agda decision tactics fall back — no term-mode equivalents",
             );
         }
     }
@@ -1358,14 +1427,32 @@ mod tests {
     }
 
     #[test]
-    fn dedukti_falls_back_on_primitive_tactic() {
+    fn dedukti_translates_term_mode_primitives() {
+        // Reflexivity + Trivial have direct term encodings in
+        // standard Dedukti libraries.
+        assert_eq!(
+            DeduktiProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Reflexivity))
+                .text(),
+            Some("refl"),
+        );
+        assert_eq!(
+            DeduktiProofBodyRenderer::new()
+                .render(&primitive_body(TacticExpr::Trivial))
+                .text(),
+            Some("I"),
+        );
+    }
+
+    #[test]
+    fn dedukti_falls_back_on_decision_tactics() {
         let body = primitive_body(TacticExpr::Auto {
             with_hints: List::new(),
         });
         let r = DeduktiProofBodyRenderer::new().render(&body);
         assert!(
             matches!(r, TranslatedProofBody::Fallback { .. }),
-            "Dedukti has no tactic system — primitive tactics fall back",
+            "Dedukti decision tactics (auto/omega/ring) fall back",
         );
     }
 
