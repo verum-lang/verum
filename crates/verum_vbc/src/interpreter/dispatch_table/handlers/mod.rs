@@ -48,6 +48,12 @@ pub(super) mod env_runtime;
 // libSystem `read(2)` on stdin via `std::io::stdin()`.
 pub(super) mod stdio_runtime;
 
+// High-level Rust intercepts for process spawning
+// (spawn_child_with_output for `Command.output()` / `.status()`).
+// Sibling to shell_runtime; bypasses libSystem fork/execve/pipe via
+// `std::process::Command`.  See VBC-PROC-2 architecture notes.
+pub(super) mod process_runtime;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 
