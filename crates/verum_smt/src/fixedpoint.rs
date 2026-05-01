@@ -627,7 +627,14 @@ impl FixedPointEngine {
                 self.extract_numeral_value(ctx, ast)
             }
             _ => {
-                // Check if it's still a numeral (some numerals are represented as apps)
+                // Check if it's still a numeral (some numerals are represented as apps).
+                // SAFETY: FFI call to Z3.  Both `ctx` and `ast` are
+                // live pointers passed in from the caller — `ctx`
+                // is the borrowed Z3_context the caller owns, and
+                // `ast` was just extracted from the parent AST
+                // walk in the surrounding match.  `Z3_is_numeral_ast`
+                // takes `(Z3_context, Z3_ast)` and returns a bool;
+                // does not mutate state.
                 let is_numeral = unsafe { Z3_is_numeral_ast(ctx, ast) };
                 if is_numeral {
                     self.extract_numeral_value(ctx, ast)
@@ -709,6 +716,12 @@ impl FixedPointEngine {
     /// More efficient than multiple single queries when you want to check
     /// multiple predicates at once.
     pub fn query_relations(&mut self, relations: &[&FuncDecl]) -> Result<SatResult, Text> {
+        // SAFETY: `get_z3_func_decl` is a thin extractor that
+        // unwraps the `Z3_func_decl` pointer from the high-level
+        // `FuncDecl` wrapper.  The wrapper is borrow-checked, so
+        // every `decl` here is alive for the duration of this
+        // function — the resulting pointers are valid until
+        // `query_relations` returns.
         let decl_ptrs: List<Z3_func_decl> = relations
             .iter()
             .map(|decl| unsafe { get_z3_func_decl(decl) })
@@ -826,6 +839,11 @@ impl FixedPointEngine {
 
     /// Convert fixedpoint state to SMT-LIB string
     pub fn to_string(&self, queries: &[&Bool]) -> Text {
+        // SAFETY: `get_z3_ast` is a thin extractor that unwraps the
+        // raw `Z3_ast` from the high-level `Bool` wrapper.  Each
+        // `b` is a borrow that's live for the duration of this
+        // function; the extracted pointer remains valid until
+        // `to_string` returns.
         let query_asts: List<Z3_ast> = queries.iter().map(|b| unsafe { get_z3_ast(b) }).collect();
 
         // SAFETY: All pointers are valid

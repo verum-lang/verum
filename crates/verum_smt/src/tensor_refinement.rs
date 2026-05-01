@@ -278,7 +278,27 @@ impl TensorRefinementVerifier {
         element: &Type,
         shape: &[Expr],
     ) -> Result<TensorSort, TensorRefinementError> {
-        // Create a temporary translator
+        // SAFETY: The cast `&*(&*self.context as *const Context)` is
+        // lifetime laundering — it converts `&'self Context` (borrow
+        // tied to self) into `&'context Context` where 'context is
+        // any lifetime up to 'static.  This is sound here because:
+        //   1. `self.context` is a `Heap<Context>` (owned heap
+        //      allocation) — its address is stable for the lifetime
+        //      of `self`.
+        //   2. The resulting `context_ref` is consumed entirely
+        //      within this function: `Translator::new(context_ref)`
+        //      then `translate_tensor_type` are called and the
+        //      function returns.  No path stores `context_ref`
+        //      outside this stack frame.
+        //   3. `self` is borrowed for the entire function call, so
+        //      `self.context` cannot be dropped during the body.
+        //
+        // The Translator constructor takes `&'a Context` for some
+        // lifetime parameter that we can't easily express through
+        // self's borrow — hence the explicit cast.  A future
+        // refactor that eliminates the lifetime mismatch (e.g.,
+        // by giving Translator an owning Heap<Context> handle)
+        // would let us drop the unsafe entirely.
         let context_ref = unsafe { &*(&*self.context as *const Context) };
         let translator = Translator::new(context_ref);
 

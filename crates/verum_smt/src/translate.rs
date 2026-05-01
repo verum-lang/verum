@@ -1459,7 +1459,19 @@ impl<'ctx> Translator<'ctx> {
                 let expr_str = if let Some(str_val) = expr_z3.as_string() {
                     str_val
                 } else if let Some(int_val) = expr_z3.as_int() {
-                    // Use Z3 C API for int-to-string conversion
+                    // Use Z3 C API for int-to-string conversion.
+                    // SAFETY: FFI call to Z3's C API.
+                    //   - `ctx.get_z3_context()` returns the live
+                    //     Z3_context pointer the high-level z3
+                    //     binding owns; it is non-null and
+                    //     borrow-checked through `ctx`.
+                    //   - `int_val.get_z3_ast()` returns the live
+                    //     Z3_ast for the Int.
+                    //   - `Z3_mk_int_to_str` wraps the int in a
+                    //     fresh AST node owned by the context;
+                    //     we hand it to `Z3String::wrap(ctx, ast)`
+                    //     which takes ownership and reference-
+                    //     counts via `Z3_inc_ref` internally.
                     let ctx = int_val.get_ctx();
                     unsafe {
                         let str_ast =
@@ -1539,6 +1551,17 @@ impl<'ctx> Translator<'ctx> {
             // Get the context from the base AST node
             let ctx = base_z3.get_ctx();
 
+            // SAFETY: FFI call to Z3's C API for the select
+            // operation on a Dynamic-sorted base.
+            //   - `ctx.get_z3_context()` is the live Z3_context
+            //     pointer the binding owns.
+            //   - `base_z3.get_z3_ast()` and `index_int.get_z3_ast()`
+            //     are live AST pointers for the array operand and
+            //     index respectively, both produced by translation
+            //     within the same context.
+            //   - `Z3_mk_select` produces a fresh AST owned by the
+            //     context; `Dynamic::wrap(ctx, ast)` takes ownership
+            //     and reference-counts via `Z3_inc_ref` internally.
             unsafe {
                 // Use Z3 C API directly for select operation on Dynamic
                 let select_ast = z3_sys::Z3_mk_select(
