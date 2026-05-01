@@ -253,13 +253,210 @@ fn resolve_goto(target: Int, ops: &List<Opcode>, budget: Int) -> Int {
 }
 
 // -----------------------------------------------------------------------------
+// Pass: Dead-code elimination
+// -----------------------------------------------------------------------------
+
+/// Drop instructions unreachable from PC 0 via fall-through + jump
+/// edges.  Worklist algorithm: mark PC 0 reachable; for every reachable
+/// instruction, mark its fall-through successor (if non-terminator)
+/// AND its jump target (if any) reachable; iterate until fixed point;
+/// drop instructions marked unreachable from the back.
+///
+/// Returns the number of instructions removed.  After this pass, jump
+/// targets in the surviving program need re-mapping (call
+/// `eliminate_noops` after — the index gaps left by removed
+/// instructions are picked up via the same renumbering machinery).
+///
+/// Ported from the now-deleted `optimizer/dead_code.vr` parallel tree
+/// (#133 — single-canonical-tree consolidation).
+public fn eliminate_dead_code(program: &mut VdbeProgram) -> Int {
+    let n = program.instructions.len();
+    if n == 0 { return 0; }
+
+    // Reachability mark.
+    let mut reachable: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < n { reachable.push(false); i = i + 1; }
+
+    // Worklist seeded with PC 0 (entry).
+    let mut worklist: List<Int> = List.new();
+    worklist.push(0);
+    reachable[0] = true;
+
+    while worklist.len() > 0 {
+        let last = worklist.len() - 1;
+        let pc = worklist[last];
+        // Pop the last element by truncation.
+        let mut new_wl: List<Int> = List.new();
+        let mut k: Int = 0;
+        while k < last { new_wl.push(worklist[k]); k = k + 1; }
+        worklist = new_wl;
+
+        let op = &program.instructions[pc];
+
+        // Fall-through successor (pc + 1) unless this is a terminator
+        // or unconditional branch.
+        if opcode_falls_through(op) {
+            let nxt = pc + 1;
+            if nxt < n && !reachable[nxt] {
+                reachable[nxt] = true;
+                worklist.push(nxt);
+            }
+        }
+
+        // Jump targets.
+        let targets = opcode_jump_targets(op);
+        let mut t: Int = 0;
+        while t < targets.len() {
+            let tgt = targets[t];
+            if tgt >= 0 && tgt < n && !reachable[tgt] {
+                reachable[tgt] = true;
+                worklist.push(tgt);
+            }
+            t = t + 1;
+        }
+    }
+
+    // Replace dead instructions with Noop in place; the subsequent
+    // `eliminate_noops` call handles index repacking + jump retarget.
+    let mut edits: Int = 0;
+    let mut j: Int = 0;
+    while j < n {
+        if !reachable[j] {
+            program.instructions[j] = Noop;
+            edits = edits + 1;
+        }
+        j = j + 1;
+    }
+    edits
+}
+
+/// `true` iff control falls through to PC+1 after `op` executes.
+/// Terminators (Halt, Return) and unconditional branches (Goto, Init,
+/// Once) do NOT fall through.
+fn opcode_falls_through(op: &Opcode) -> Bool {
+    match op {
+        Halt(_, _)        => false,
+        Return(_)         => false,
+        Goto(_)           => false,
+        Init(_)           => false,
+        Once(_)           => false,
+        _                 => true,
+    }
+}
+
+/// All jump-target instruction indices reachable from `op`.  Empty
+/// for non-branching instructions.
+fn opcode_jump_targets(op: &Opcode) -> List<Int> {
+    let mut out: List<Int> = List.new();
+    match op {
+        Init(t)              => { out.push(t); }
+        Goto(t)              => { out.push(t); }
+        Gosub(_, t)          => { out.push(t); }
+        Once(t)              => { out.push(t); }
+        Eq(_, _, t)          => { out.push(t); }
+        Ne(_, _, t)          => { out.push(t); }
+        Lt(_, _, t)          => { out.push(t); }
+        Le(_, _, t)          => { out.push(t); }
+        Gt(_, _, t)          => { out.push(t); }
+        Ge(_, _, t)          => { out.push(t); }
+        If(_, t)             => { out.push(t); }
+        IfNot(_, t)          => { out.push(t); }
+        IfNull(_, t)         => { out.push(t); }
+        NotNull(_, t)        => { out.push(t); }
+        Rewind(_, t)         => { out.push(t); }
+        Last(_, t)           => { out.push(t); }
+        Next(_, t)           => { out.push(t); }
+        Prev(_, t)           => { out.push(t); }
+        SeekGE(_, _, _, t)   => { out.push(t); }
+        SeekGT(_, _, _, t)   => { out.push(t); }
+        SeekLE(_, _, _, t)   => { out.push(t); }
+        SeekLT(_, _, _, t)   => { out.push(t); }
+        Found(_, t, _, _)    => { out.push(t); }
+        NotFound(_, t, _, _) => { out.push(t); }
+        SorterNext(_, t)     => { out.push(t); }
+        _ => {}
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Pass: Move-chain collapse
+// -----------------------------------------------------------------------------
+
+/// Collapse adjacent `Move r1→r2 (count=1); Move r2→r3 (count=1)`
+/// into a single `Move r1→r3`.  Only handles count=1 chains and only
+/// when r2 has no other consumers in between.  Conservative — when
+/// in doubt, leaves the chain alone.
+///
+/// Ported from the now-deleted `optimizer/move_chain.vr` parallel tree
+/// (#133 — single-canonical-tree consolidation).
+public fn collapse_move_chains(program: &mut VdbeProgram) -> Int {
+    let n = program.instructions.len();
+    if n < 2 { return 0; }
+    let mut edits: Int = 0;
+    let mut i: Int = 0;
+    while i + 1 < n {
+        let lhs_src;
+        let lhs_dst;
+        match &program.instructions[i] {
+            Move(s, d, c) => {
+                if c != 1 { i = i + 1; continue; }
+                lhs_src = s;
+                lhs_dst = d;
+            }
+            _ => { i = i + 1; continue; }
+        }
+        // Look at i+1.
+        let rhs_dst;
+        let rhs_count;
+        match &program.instructions[i + 1] {
+            Move(s2, d2, c2) => {
+                if s2 != lhs_dst { i = i + 1; continue; }
+                if c2 != 1 { i = i + 1; continue; }
+                rhs_dst = d2;
+                rhs_count = c2;
+            }
+            _ => { i = i + 1; continue; }
+        }
+        // Replace [i] with the collapsed move; [i+1] becomes Noop.
+        program.instructions[i] = Move(lhs_src, rhs_dst, rhs_count);
+        program.instructions[i + 1] = Noop;
+        edits = edits + 1;
+        i = i + 2;
+    }
+    edits
+}
+
+// -----------------------------------------------------------------------------
 // Driver
 // -----------------------------------------------------------------------------
 
-/// Run every pass to fixed-point (actually just once for each — the
-/// passes are designed to converge in a single scan).
+/// Run every pass to fixed-point.  The passes are designed to converge
+/// in O(1) iterations on well-formed programs but we run a small
+/// fixed-point loop so passes that expose new opportunities for each
+/// other (DCE → noop_elim → jump_threading) all benefit.
+///
+/// Order matters:
+///   1. `thread_jumps`        — collapse Goto chains so DCE sees real targets
+///   2. `collapse_move_chains` — expose dead Move targets
+///   3. `eliminate_dead_code`  — mark unreachable Noops
+///   4. `eliminate_noops`     — drop Noops + retarget jumps
+///
+/// Returns the total number of edits across every pass + iteration.
 public fn optimize(program: &mut VdbeProgram) -> Int {
-    let threaded = thread_jumps(program);
-    let dropped = eliminate_noops(program);
-    threaded + dropped
+    let max_iters: Int = 4;
+    let mut total: Int = 0;
+    let mut iter: Int = 0;
+    while iter < max_iters {
+        let threaded = thread_jumps(program);
+        let collapsed = collapse_move_chains(program);
+        let dead = eliminate_dead_code(program);
+        let dropped = eliminate_noops(program);
+        let iter_edits = threaded + collapsed + dead + dropped;
+        total = total + iter_edits;
+        if iter_edits == 0 { break; }
+        iter = iter + 1;
+    }
+    total
 }
