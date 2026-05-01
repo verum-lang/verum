@@ -7341,12 +7341,305 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module.add_function("freeaddrinfo", fn_type, None)
     }
 
+    /// Get or declare a libc-free `inet_pton(af, src, dst) -> i32` wrapper.
+    ///
+    /// **Libc-free**: emits an open-coded IPv4 dotted-decimal parser
+    /// in LLVM IR.  IPv6 path returns -1 (unsupported in this
+    /// minimal implementation; callers fall back to libSystem on
+    /// macOS or use the v2 TCP intrinsic family which carries the
+    /// IPv4 address directly).
+    ///
+    /// Algorithm for AF_INET (af == 2):
+    ///   1. Walk `src` byte-by-byte, accumulating each octet's
+    ///      digits into an i32 (rejecting non-digit, non-dot
+    ///      characters via early-exit-with-0).
+    ///   2. On '.' or NUL, store accumulated octet to dst[i].
+    ///   3. Validate exactly 4 octets and each in range [0,255].
+    ///   4. Return 1 on success, 0 on parse error, -1 on bad af.
+    ///
+    /// Returns the wrapper as a FunctionValue with libc-compatible
+    /// signature `(i32, ptr, ptr) -> i32` so existing call sites
+    /// don't need updating.
+    ///
+    /// See `docs/architecture/no-libc-architecture.md`.
     fn get_or_declare_inet_pton(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("inet_pton") { return f; }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[i32_type.into(), ptr_type.into(), ptr_type.into()], false);
-        module.add_function("inet_pton", fn_type, None)
+        let wrapper_name = "verum_internal_inet_pton";
+        if let Some(f) = module.get_function(wrapper_name) {
+            return f;
+        }
+
+        let ctx = self.context;
+        let i8_type = ctx.i8_type();
+        let i32_type = ctx.i32_type();
+        let i64_type = ctx.i64_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+
+        let fn_type = i32_type.fn_type(
+            &[i32_type.into(), ptr_type.into(), ptr_type.into()],
+            false,
+        );
+        let func = module.add_function(wrapper_name, fn_type, None);
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = ctx.append_basic_block(func, "entry");
+        let af_inet = ctx.append_basic_block(func, "af_inet");
+        let af_other = ctx.append_basic_block(func, "af_other");
+        let parse_loop = ctx.append_basic_block(func, "parse_loop");
+        let on_digit = ctx.append_basic_block(func, "on_digit");
+        let on_dot_or_nul = ctx.append_basic_block(func, "on_dot_or_nul");
+        let store_octet = ctx.append_basic_block(func, "store_octet");
+        let on_invalid = ctx.append_basic_block(func, "on_invalid");
+        let return_ok = ctx.append_basic_block(func, "return_ok");
+        let return_fail = ctx.append_basic_block(func, "return_fail");
+
+        let builder = ctx.create_builder();
+
+        // entry: check af == AF_INET (2).
+        builder.position_at_end(entry);
+        let af = func.get_nth_param(0).expect("af").into_int_value();
+        let src = func.get_nth_param(1).expect("src").into_pointer_value();
+        let dst = func.get_nth_param(2).expect("dst").into_pointer_value();
+        let af_inet_const = i32_type.const_int(2, false);
+        let is_af_inet = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, af, af_inet_const, "is_af_inet")
+            .expect("af cmp");
+        builder
+            .build_conditional_branch(is_af_inet, af_inet, af_other)
+            .expect("af branch");
+
+        // af_other: return -1 (unsupported family).
+        builder.position_at_end(af_other);
+        let _ = src;
+        let _ = dst;
+        let neg_one = i32_type.const_int(u32::MAX as u64, true);
+        builder.build_return(Some(&neg_one)).expect("af_other ret");
+
+        // af_inet: enter parse loop.  State: i (byte index in src),
+        // octet_idx (0..4), digit_count (digits in current octet),
+        // current_octet (accumulator).
+        builder.position_at_end(af_inet);
+        builder
+            .build_unconditional_branch(parse_loop)
+            .expect("parse loop entry");
+
+        // parse_loop: load src[i], dispatch on digit / dot / nul.
+        builder.position_at_end(parse_loop);
+        let i_phi = builder
+            .build_phi(i64_type, "i")
+            .expect("i phi");
+        let octet_phi = builder
+            .build_phi(i32_type, "octet")
+            .expect("octet phi");
+        let digit_count_phi = builder
+            .build_phi(i32_type, "digit_count")
+            .expect("digit_count phi");
+        let octet_idx_phi = builder
+            .build_phi(i32_type, "octet_idx")
+            .expect("octet_idx phi");
+        i_phi.add_incoming(&[(&i64_type.const_zero(), af_inet)]);
+        octet_phi.add_incoming(&[(&i32_type.const_zero(), af_inet)]);
+        digit_count_phi.add_incoming(&[(&i32_type.const_zero(), af_inet)]);
+        octet_idx_phi.add_incoming(&[(&i32_type.const_zero(), af_inet)]);
+
+        let i_val = i_phi.as_basic_value().into_int_value();
+        let p = unsafe {
+            builder
+                .build_gep(i8_type, src, &[i_val], "p")
+                .expect("gep src")
+        };
+        let c = builder
+            .build_load(i8_type, p, "c")
+            .expect("load src")
+            .into_int_value();
+
+        // Classify: '0'..'9' (0x30..0x39), '.' (0x2E), 0 (NUL).
+        let zero_ch = i8_type.const_int(b'0' as u64, false);
+        let nine_ch = i8_type.const_int(b'9' as u64, false);
+        let dot_ch = i8_type.const_int(b'.' as u64, false);
+        let nul_ch = i8_type.const_zero();
+
+        let is_dig_lo = builder
+            .build_int_compare(verum_llvm::IntPredicate::UGE, c, zero_ch, "ge0")
+            .expect("ge0");
+        let is_dig_hi = builder
+            .build_int_compare(verum_llvm::IntPredicate::ULE, c, nine_ch, "le9")
+            .expect("le9");
+        let is_digit = builder
+            .build_and(is_dig_lo, is_dig_hi, "is_digit")
+            .expect("and");
+        let is_dot = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, c, dot_ch, "is_dot")
+            .expect("dot");
+        let is_nul = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, c, nul_ch, "is_nul")
+            .expect("nul");
+        let is_dot_or_nul = builder
+            .build_or(is_dot, is_nul, "dot_or_nul")
+            .expect("or1");
+
+        builder
+            .build_conditional_branch(is_digit, on_digit, on_dot_or_nul)
+            .expect("digit branch");
+
+        // on_digit: octet = octet*10 + (c - '0'); digit_count++;
+        // if digit_count > 3 || octet > 255: invalid.
+        builder.position_at_end(on_digit);
+        let c_i32 = builder
+            .build_int_z_extend(c, i32_type, "c_i32")
+            .expect("c ext");
+        let zero_i32 = i32_type.const_int(b'0' as u64, false);
+        let digit = builder
+            .build_int_sub(c_i32, zero_i32, "digit")
+            .expect("digit sub");
+        let octet_val = octet_phi.as_basic_value().into_int_value();
+        let ten = i32_type.const_int(10, false);
+        let octet_x10 = builder
+            .build_int_mul(octet_val, ten, "x10")
+            .expect("mul");
+        let new_octet = builder
+            .build_int_add(octet_x10, digit, "new_octet")
+            .expect("add");
+        let digit_count_val = digit_count_phi.as_basic_value().into_int_value();
+        let new_digit_count = builder
+            .build_int_add(digit_count_val, i32_type.const_int(1, false), "dc_inc")
+            .expect("dc add");
+        let three = i32_type.const_int(3, false);
+        let two_fifty_five = i32_type.const_int(255, false);
+        let too_many_digits = builder
+            .build_int_compare(verum_llvm::IntPredicate::UGT, new_digit_count, three, "tmd")
+            .expect("tmd");
+        let too_big = builder
+            .build_int_compare(verum_llvm::IntPredicate::UGT, new_octet, two_fifty_five, "tb")
+            .expect("tb");
+        let bad = builder
+            .build_or(too_many_digits, too_big, "bad")
+            .expect("or2");
+
+        let advance = ctx.append_basic_block(func, "advance");
+        builder
+            .build_conditional_branch(bad, on_invalid, advance)
+            .expect("bad br");
+
+        builder.position_at_end(advance);
+        let i_next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "i_next")
+            .expect("i++");
+        builder
+            .build_unconditional_branch(parse_loop)
+            .expect("loop");
+        i_phi.add_incoming(&[(&i_next, advance)]);
+        octet_phi.add_incoming(&[(&new_octet, advance)]);
+        digit_count_phi.add_incoming(&[(&new_digit_count, advance)]);
+        octet_idx_phi.add_incoming(&[(&octet_idx_phi.as_basic_value().into_int_value(), advance)]);
+
+        // on_dot_or_nul: digit_count > 0 (at least one digit) → store octet.
+        builder.position_at_end(on_dot_or_nul);
+        let digit_count_for_check = digit_count_phi.as_basic_value().into_int_value();
+        let no_digits = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::EQ,
+                digit_count_for_check,
+                i32_type.const_zero(),
+                "no_digits",
+            )
+            .expect("no digits");
+        builder
+            .build_conditional_branch(no_digits, on_invalid, store_octet)
+            .expect("store br");
+
+        // store_octet: dst[octet_idx] = octet & 0xFF.
+        builder.position_at_end(store_octet);
+        let octet_idx = octet_idx_phi.as_basic_value().into_int_value();
+        let octet_idx_i64 = builder
+            .build_int_z_extend(octet_idx, i64_type, "oi_i64")
+            .expect("oi ext");
+        let dst_p = unsafe {
+            builder
+                .build_gep(i8_type, dst, &[octet_idx_i64], "dst_p")
+                .expect("dst gep")
+        };
+        let octet_low = builder
+            .build_int_truncate(
+                octet_phi.as_basic_value().into_int_value(),
+                i8_type,
+                "octet_low",
+            )
+            .expect("octet trunc");
+        builder
+            .build_store(dst_p, octet_low)
+            .expect("store octet");
+
+        let new_octet_idx = builder
+            .build_int_add(octet_idx, i32_type.const_int(1, false), "oi_inc")
+            .expect("oi add");
+
+        // Was this octet terminated by NUL?  If so, check octet_idx==4 → ok else fail.
+        let ipv4_done = ctx.append_basic_block(func, "ipv4_done");
+        let continue_parse = ctx.append_basic_block(func, "continue_parse");
+        builder
+            .build_conditional_branch(is_nul, ipv4_done, continue_parse)
+            .expect("done br");
+
+        builder.position_at_end(ipv4_done);
+        let four = i32_type.const_int(4, false);
+        let exact_4 = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::EQ,
+                new_octet_idx,
+                four,
+                "exact_4",
+            )
+            .expect("exact_4");
+        builder
+            .build_conditional_branch(exact_4, return_ok, return_fail)
+            .expect("ipv4 final");
+
+        // continue_parse: increment idx, reset octet/digit_count, advance i.
+        builder.position_at_end(continue_parse);
+        let too_many_dots = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::UGE,
+                new_octet_idx,
+                four,
+                "tmd_dots",
+            )
+            .expect("dot count check");
+        let next_i = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "i_next2")
+            .expect("i++ 2");
+        let next_loop = ctx.append_basic_block(func, "next_loop");
+        builder
+            .build_conditional_branch(too_many_dots, on_invalid, next_loop)
+            .expect("loop continue");
+
+        builder.position_at_end(next_loop);
+        builder
+            .build_unconditional_branch(parse_loop)
+            .expect("loop back");
+        i_phi.add_incoming(&[(&next_i, next_loop)]);
+        octet_phi.add_incoming(&[(&i32_type.const_zero(), next_loop)]);
+        digit_count_phi.add_incoming(&[(&i32_type.const_zero(), next_loop)]);
+        octet_idx_phi.add_incoming(&[(&new_octet_idx, next_loop)]);
+
+        // on_invalid → return 0.
+        builder.position_at_end(on_invalid);
+        builder
+            .build_return(Some(&i32_type.const_zero()))
+            .expect("ret invalid");
+
+        // return_ok → 1.
+        builder.position_at_end(return_ok);
+        builder
+            .build_return(Some(&i32_type.const_int(1, false)))
+            .expect("ret ok");
+
+        // return_fail → 0.
+        builder.position_at_end(return_fail);
+        builder
+            .build_return(Some(&i32_type.const_zero()))
+            .expect("ret fail");
+
+        func
     }
 
     fn get_or_declare_getsockname(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
