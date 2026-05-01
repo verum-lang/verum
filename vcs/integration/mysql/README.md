@@ -54,6 +54,7 @@ plugin Spindle accepts in the safe path).
 | `t04_transactions.vr` | begin / commit / rollback / savepoint |
 | `t05_capability.vr` | `Database<MysqlPool, DbReadWriteTx>.into_readonly()` |
 | `t06_pool.vr` | acquire/release accounting; total_arena_resets |
+| `t07_async_transaction.vr` | async typed Database<AsyncMysqlPool, _> + AsyncMysqlTxScope rollback / commit (spec §6.3.6 async surface) |
 
 ## Adding tests
 

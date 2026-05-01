@@ -1,0 +1,181 @@
+// =============================================================================
+// core/database/mysql/async_pool.vr — async MySQL pool
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.6 (async surface), §4.3 (pool).
+// =============================================================================
+//
+// Mirror of `core/database/postgres/async_pool.vr` for MySQL.
+// Channel-mediated bounded pool over `AsyncMysqlConnection`.
+// =============================================================================
+
+module core.database.mysql.async_pool;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.config.MysqlConfig;
+mount core.database.mysql.async_connection.{
+    AsyncMysqlConnection, connect as async_connect,
+};
+mount core.async.channel.{
+    Sender, Receiver, bounded_channel,
+};
+
+public type AsyncMysqlPoolConfig is {
+    min_size: Int,
+    max_size: Int,
+    mailbox_capacity: Int,
+};
+
+implement AsyncMysqlPoolConfig {
+    public fn default() -> AsyncMysqlPoolConfig {
+        AsyncMysqlPoolConfig {
+            min_size: 2,
+            max_size: 16,
+            mailbox_capacity: 64,
+        }
+    }
+
+    public fn with_size(mut self, min: Int, max: Int) -> AsyncMysqlPoolConfig {
+        self.min_size = min;
+        self.max_size = max;
+        self
+    }
+
+    public fn with_mailbox_capacity(mut self, c: Int) -> AsyncMysqlPoolConfig {
+        self.mailbox_capacity = c;
+        self
+    }
+}
+
+public type AsyncMysqlPool is {
+    config: MysqlConfig,
+    pool_cfg: AsyncMysqlPoolConfig,
+    available_tx: Sender<AsyncMysqlConnection>,
+    available_rx: Shared<sync.mutex.Mutex<Receiver<AsyncMysqlConnection>>>,
+    current: Shared<AtomicInt>,
+};
+
+implement AsyncMysqlPool {
+    public async fn launch(
+        config: MysqlConfig,
+        pool_cfg: AsyncMysqlPoolConfig,
+    ) -> Result<AsyncMysqlPool, DbError> {
+        let max = if pool_cfg.max_size < 1 { 1 } else { pool_cfg.max_size };
+        let (tx, rx) = bounded_channel::<AsyncMysqlConnection>(max);
+
+        let mut opened: Int = 0;
+        let mut i: Int = 0;
+        while i < pool_cfg.min_size {
+            let h = async_connect(&config, pool_cfg.mailbox_capacity).await?;
+            match tx.send_async(h).await {
+                Ok(())  => { opened = opened + 1; }
+                Err(_)  => { return Err(pool_err("seat fresh connection failed")); }
+            }
+            i = i + 1;
+        }
+
+        Ok(AsyncMysqlPool {
+            config: config,
+            pool_cfg: pool_cfg,
+            available_tx: tx,
+            available_rx: Shared.new(sync.mutex.Mutex.new(rx)),
+            current: Shared.new(AtomicInt.new(opened)),
+        })
+    }
+
+    public async fn acquire(&self) -> Result<AsyncMysqlPoolGuard, DbError> {
+        let mut guard = self.available_rx.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.try_recv() {
+            Ok(h) => {
+                drop(guard);
+                return Ok(AsyncMysqlPoolGuard {
+                    handle: Some(h),
+                    available_tx: self.available_tx.clone(),
+                });
+            }
+            Err(_) => {}
+        }
+        drop(guard);
+
+        let cur = self.current.fetch_add(1, MemoryOrdering.AcqRel);
+        if cur < self.pool_cfg.max_size {
+            match async_connect(&self.config, self.pool_cfg.mailbox_capacity).await {
+                Ok(h) => Ok(AsyncMysqlPoolGuard {
+                    handle: Some(h),
+                    available_tx: self.available_tx.clone(),
+                }),
+                Err(e) => {
+                    let _ = self.current.fetch_sub(1, MemoryOrdering.AcqRel);
+                    Err(e)
+                }
+            }
+        } else {
+            let _ = self.current.fetch_sub(1, MemoryOrdering.AcqRel);
+            let mut g2 = self.available_rx.lock().unwrap_or_else(|p| p.into_inner());
+            let fut = g2.recv_fut();
+            drop(g2);
+            match fut.await {
+                Some(h) => Ok(AsyncMysqlPoolGuard {
+                    handle: Some(h),
+                    available_tx: self.available_tx.clone(),
+                }),
+                None => Err(pool_err("available channel closed")),
+            }
+        }
+    }
+
+    public fn tracked(&self) -> Int {
+        self.current.load(MemoryOrdering.Acquire)
+    }
+}
+
+public type affine AsyncMysqlPoolGuard is {
+    handle: Maybe<AsyncMysqlConnection>,
+    available_tx: Sender<AsyncMysqlConnection>,
+};
+
+implement AsyncMysqlPoolGuard {
+    public fn conn_ref(&self) -> &AsyncMysqlConnection {
+        match &self.handle {
+            Some(h) => h,
+            None    => panic("AsyncMysqlPoolGuard: handle taken"),
+        }
+    }
+
+    public fn conn(&self) -> AsyncMysqlConnection {
+        match &self.handle {
+            Some(h) => h.clone(),
+            None    => panic("AsyncMysqlPoolGuard: handle taken"),
+        }
+    }
+
+    public async fn release(mut self) {
+        match self.handle.take() {
+            Some(h) => { let _ = self.available_tx.send_async(h).await; }
+            None    => {}
+        }
+    }
+}
+
+implement Drop for AsyncMysqlPoolGuard {
+    fn drop(&mut self) {
+        match self.handle.take() {
+            Some(h) => { let _ = self.available_tx.try_send(h); }
+            None    => {}
+        }
+    }
+}
+
+fn pool_err(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "ASYNC_POOL".clone(),
+        message: f"async MySQL pool error: {what}",
+        retryable: false,
+    })
+}

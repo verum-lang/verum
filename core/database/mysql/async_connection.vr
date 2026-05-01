@@ -1,0 +1,285 @@
+// =============================================================================
+// core/database/mysql/async_connection.vr — async wrapper over sync MySQL wire
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.6 (async surface).
+// =============================================================================
+//
+// Mirror of `core/database/postgres/async_connection.vr` against
+// the MySQL wire. Same actor-per-connection pattern: each
+// `MysqlConnection` runs on a dedicated `spawn_blocking` task; the
+// caller-side `AsyncMysqlConnection` is an mpsc Sender + actor
+// JoinHandle.
+//
+// Sync MysqlConnection canonical / unchanged. All blocking I/O
+// stays on the dedicated blocking-pool thread; the async executor
+// is never blocked.
+//
+// V0 surface — covers the canonical operations used by every
+// AsyncMysqlDatabase consumer:
+//   * `simple_query(sql)` → Future<Result<MySimpleQueryResult, …>>
+//   * `execute(sql)`      → Future<Result<Int, …>>  (affected_rows)
+//   * `ping()`            → Future<Result<(), …>>
+//   * `close()`           → Future<Result<(), …>>
+//
+// Out of V0 (each follow-up):
+//   * Prepared statements (PreparedSession lives caller-side; an
+//     async wrapper needs a per-actor cache).
+//   * MySQL X protocol (separate sub-protocol, separate actor).
+//   * Multi-statement results.
+// =============================================================================
+
+module core.database.mysql.async_connection;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.connection.{
+    MysqlConnection, MySimpleQueryResult, connect as sync_connect,
+};
+mount core.database.mysql.config.MysqlConfig;
+mount core.async.channel.{
+    Sender, Receiver, OneshotSender,
+    bounded_channel, oneshot,
+};
+mount core.async.task.{spawn_blocking, JoinHandle};
+
+// =============================================================================
+// Request enum
+// =============================================================================
+
+public type MysqlRequest is
+      MyReqSimpleQuery {
+        sql: Text,
+        reply: OneshotSender<Result<MySimpleQueryResult, DbError>>,
+    }
+    | MyReqExecute {
+        sql: Text,
+        reply: OneshotSender<Result<Int, DbError>>,
+    }
+    | MyReqPing {
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | MyReqBeginTx {
+        begin_sql: Text,
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | MyReqCommitTx {
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | MyReqRollbackTx {
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | MyReqSavepoint {
+        name: Text,
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | MyReqReleaseSavepoint {
+        name: Text,
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | MyReqRollbackToSavepoint {
+        name: Text,
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | MyReqShutdown {
+        reply: OneshotSender<Result<(), DbError>>,
+    };
+
+// =============================================================================
+// Public handle
+// =============================================================================
+
+public type AsyncMysqlConnection is {
+    tx: Sender<MysqlRequest>,
+    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+};
+
+implement AsyncMysqlConnection {
+    public fn clone(&self) -> AsyncMysqlConnection {
+        AsyncMysqlConnection {
+            tx: self.tx.clone(),
+            join: self.join.clone(),
+        }
+    }
+
+    public fn tx_ref(&self) -> &Sender<MysqlRequest> { &self.tx }
+
+    public async fn simple_query(&self, sql: &Text)
+        -> Result<MySimpleQueryResult, DbError>
+    {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(MyReqSimpleQuery {
+            sql: sql.clone(),
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("simple_query")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("simple_query reply")),
+        }
+    }
+
+    public async fn execute(&self, sql: &Text) -> Result<Int, DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(MyReqExecute {
+            sql: sql.clone(),
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("execute")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("execute reply")),
+        }
+    }
+
+    public async fn ping(&self) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(MyReqPing { reply: rs }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("ping")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("ping reply")),
+        }
+    }
+
+    public async fn close(&self) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(MyReqShutdown { reply: rs }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("close")); }
+        }
+        let _ = rr.await;
+        let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.take() {
+            Some(jh) => { let _ = jh.join().await; }
+            None     => {}
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+public async fn connect(
+    cfg: &MysqlConfig,
+    mailbox_capacity: Int,
+) -> Result<AsyncMysqlConnection, DbError> {
+    let cfg_owned = cfg.clone();
+    let conn_jh = spawn_blocking(move || -> Result<MysqlConnection, DbError> {
+        sync_connect(&cfg_owned)
+    });
+    let conn = match conn_jh.join().await {
+        Ok(r)  => r?,
+        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+    };
+
+    let cap = if mailbox_capacity < 1 { 1 } else { mailbox_capacity };
+    let (tx, rx) = bounded_channel::<MysqlRequest>(cap);
+
+    let join = spawn_blocking(move || -> () {
+        run_actor(conn, rx);
+    });
+
+    Ok(AsyncMysqlConnection {
+        tx: tx,
+        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+    })
+}
+
+// =============================================================================
+// Actor body
+// =============================================================================
+
+fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
+    loop {
+        let req = match rx.recv() {
+            Some(r) => r,
+            None    => { break; }
+        };
+        match req {
+            MyReqSimpleQuery { sql, reply } => {
+                let r = conn.simple_query(&sql);
+                let _ = reply.send(r);
+            }
+            MyReqExecute { sql, reply } => {
+                let r = conn.execute(&sql);
+                let _ = reply.send(r);
+            }
+            MyReqPing { reply } => {
+                let r = conn.ping();
+                let _ = reply.send(r);
+            }
+            MyReqBeginTx { begin_sql, reply } => {
+                let r = match conn.execute(&begin_sql) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            MyReqCommitTx { reply } => {
+                let r = match conn.execute(&"COMMIT".clone()) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            MyReqRollbackTx { reply } => {
+                let r = match conn.execute(&"ROLLBACK".clone()) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            MyReqSavepoint { name, reply } => {
+                let sql = f"SAVEPOINT {name}";
+                let r = match conn.execute(&sql) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            MyReqReleaseSavepoint { name, reply } => {
+                let sql = f"RELEASE SAVEPOINT {name}";
+                let r = match conn.execute(&sql) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            MyReqRollbackToSavepoint { name, reply } => {
+                let sql = f"ROLLBACK TO SAVEPOINT {name}";
+                let r = match conn.execute(&sql) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            MyReqShutdown { reply } => {
+                let r = conn.close();
+                let _ = reply.send(r);
+                break;
+            }
+        }
+    }
+}
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "ACTOR_CLOSED".clone(),
+        message: f"async MySQL actor unavailable during {what}",
+        retryable: false,
+    })
+}
