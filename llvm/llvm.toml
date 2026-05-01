@@ -18,10 +18,31 @@ repo = "https://github.com/llvm/llvm-project.git"
 # Optional: clang (C/C++ frontend, useful for debugging)
 projects = ["clang", "lld", "mlir"]
 
-# CPU targets to build
-# Fewer targets = faster build, smaller binaries
-# Common: X86, AArch64, WebAssembly, RISCV, ARM
-targets = ["X86", "AArch64", "WebAssembly"]
+# CPU targets to build (#82 cross-compile matrix support).
+#
+# All major architectures Verum supports + cross-compile-validates:
+#   * X86       — x86_64-{linux,darwin,windows,freebsd,openbsd,netbsd}
+#   * AArch64   — arm64-{linux,darwin,windows} + aarch64-* embedded
+#   * ARM       — 32-bit ARMv6/v7 (embedded, Raspberry Pi 3-)
+#   * RISCV     — RV64GC server-class RISC-V SoCs + embedded
+#   * PowerPC   — POWER8/9/10 IBM systems, big-endian server-class
+#   * SystemZ   — s390x IBM z/Architecture
+#   * BPF       — Linux kernel BPF, eBPF (tracing / networking)
+#   * WebAssembly — wasm32-{unknown,wasi}
+#
+# Each target adds ~5-15 MB compressed to the prebuilt LLVM tarball;
+# the win is verum binaries can cross-compile to any of these
+# without per-machine LLVM rebuilds.
+#
+# Per `docs/architecture/no-libc-architecture.md` the codegen path
+# is target-agnostic — all per-platform decisions read
+# `module.get_triple()` (see `target_triple.rs`), so this list
+# enables the full cross-compile matrix without extra work.
+#
+# **Format note**: build.sh parses this with `grep '^targets'` then
+# `cut -d'[' -f2 | cut -d']' -f1`, so the value MUST stay on one
+# line (no array wrapping).
+targets = ["X86", "AArch64", "ARM", "RISCV", "PowerPC", "SystemZ", "BPF", "WebAssembly"]
 
 # Build type: MinSizeRel, Release, RelWithDebInfo, Debug
 # MinSizeRel is recommended for production (smallest binary size)

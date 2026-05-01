@@ -75,6 +75,44 @@ pub fn target_is_freebsd(module: &Module<'_>) -> bool {
 }
 
 /// Returns `true` when the LLVM module's target triple denotes
+/// **any BSD-derived OS** — FreeBSD, OpenBSD, NetBSD, DragonFlyBSD.
+///
+/// All BSDs share a common ABI heritage distinct from Linux:
+/// - sockaddr layout includes `sin_len` byte (like Darwin)
+/// - errno is `__error()` / `__errno_location()`-style not bare global
+/// - syscall numbers diverge from Linux's
+///
+/// Use this when behaviour is identical across all BSD variants;
+/// use the OS-specific helpers (`target_is_freebsd`, etc.) when
+/// behaviour diverges between them.
+pub fn target_is_bsd(module: &Module<'_>) -> bool {
+    let triple = module.get_triple();
+    let t = triple.as_str().to_string_lossy();
+    t.contains("freebsd")
+        || t.contains("openbsd")
+        || t.contains("netbsd")
+        || t.contains("dragonfly")
+}
+
+/// Returns `true` when the LLVM module's target triple denotes OpenBSD.
+pub fn target_is_openbsd(module: &Module<'_>) -> bool {
+    let triple = module.get_triple();
+    triple.as_str().to_string_lossy().contains("openbsd")
+}
+
+/// Returns `true` when the LLVM module's target triple denotes NetBSD.
+pub fn target_is_netbsd(module: &Module<'_>) -> bool {
+    let triple = module.get_triple();
+    triple.as_str().to_string_lossy().contains("netbsd")
+}
+
+/// Returns `true` when the LLVM module's target triple denotes DragonFlyBSD.
+pub fn target_is_dragonfly(module: &Module<'_>) -> bool {
+    let triple = module.get_triple();
+    triple.as_str().to_string_lossy().contains("dragonfly")
+}
+
+/// Returns `true` when the LLVM module's target triple denotes
 /// aarch64 / arm64.
 ///
 
@@ -125,6 +163,47 @@ pub fn triple_str_is_windows(triple: &str) -> bool {
         || triple.contains("win32")
         || triple.contains("msvc")
         || triple.contains("mingw")
+}
+
+/// `target_is_bsd` for callers holding a raw triple string.
+/// True for FreeBSD, OpenBSD, NetBSD, DragonFlyBSD.
+pub fn triple_str_is_bsd(triple: &str) -> bool {
+    triple.contains("freebsd")
+        || triple.contains("openbsd")
+        || triple.contains("netbsd")
+        || triple.contains("dragonfly")
+}
+
+/// `target_is_freebsd` for callers holding a raw triple string.
+pub fn triple_str_is_freebsd(triple: &str) -> bool {
+    triple.contains("freebsd")
+}
+
+/// Coarse OS family from a target triple — useful for host-vs-target
+/// equality checks without enumerating every variant.
+///
+/// Returns one of: "darwin", "linux", "windows", "freebsd", "openbsd",
+/// "netbsd", "dragonfly", "wasi", "unknown".
+pub fn triple_str_os_family(triple: &str) -> &'static str {
+    if triple_str_is_darwin(triple) {
+        "darwin"
+    } else if triple_str_is_linux(triple) {
+        "linux"
+    } else if triple_str_is_windows(triple) {
+        "windows"
+    } else if triple.contains("freebsd") {
+        "freebsd"
+    } else if triple.contains("openbsd") {
+        "openbsd"
+    } else if triple.contains("netbsd") {
+        "netbsd"
+    } else if triple.contains("dragonfly") {
+        "dragonfly"
+    } else if triple.contains("wasi") {
+        "wasi"
+    } else {
+        "unknown"
+    }
 }
 
 #[cfg(test)]
