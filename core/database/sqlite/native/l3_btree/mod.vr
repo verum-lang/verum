@@ -39,6 +39,7 @@ public module overflow;
 public module integrity;
 public module comparator;
 public module cursor_seek;
+public module page_writer;
 public module balance_apply;
 public module btree_ops;
 
@@ -97,6 +98,12 @@ public mount .cursor_seek.{
     SoEmpty, SoPastEnd,
     cursor_seek, cursor_next, cursor_prev, cursor_first, cursor_last,
     outcome_name,
+};
+
+public mount .page_writer.{
+    MaterializedCell, MaterializedPage,
+    materialized_cell, materialized_page,
+    materialize_page, serialize_page,
 };
 
 public mount .balance_apply.{
