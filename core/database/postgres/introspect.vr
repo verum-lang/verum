@@ -161,6 +161,7 @@ fn read_columns(
                         autoincrement: autoincrement,
                         default_expr: default_expr,
                         refinement: None,
+                        refinement_pred: None,
                         check_constraint: None,
                     });
                 }
