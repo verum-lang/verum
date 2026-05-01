@@ -147,7 +147,7 @@ byte).  16 KiB read buffer occupies 128 KiB.
 
 ---
 
-## §4. High: 8× memory amplification in read buffers
+## §4. High: 8× memory amplification in read buffers — **PARTIALLY FIXED**
 
 ### Attack
 Server sized for 10 000 connections × 16 KiB read buffer = 160
@@ -157,13 +157,29 @@ spec's footprint target** (< 8 KiB per idle connection).
 
 ### Evidence
 Same site as §3.  `let mut accum: List<Int> = List.with_capacity(...)`.
-NaN-boxed Value = 8 bytes per element vs 1 byte for
-`List<Byte>`.
+NaN-boxed Value = 8 bytes per element vs 1 byte for `List<Byte>`
+*if* the runtime uses a packed-byte backing.
 
-### Fundamental fix
-Globally replace `List<Int>` byte-buffer instances with
-`List<Byte>` (or arena-bound slices).  This is mechanical —
-roughly 50 sites in connection.vr and adjacent.
+### Status
+Type-system migration **complete**: `core/io/async_protocols.vr`'s
+`AsyncRead` / `AsyncWrite` / `AsyncBufRead` protocols speak
+`List<Byte>` end-to-end; every implementer (TcpStream, UnixStream,
+TlsStream) drops the int↔byte marshalling code (~30 LOC saved per
+impl); the `WeftTransport` adapter is now a direct passthrough.
+The semantic gain (bytes are bytes) is realised; the per-byte
+cast on read+write is eliminated.
+
+The **runtime memory reduction remains pending** a separate
+VBC-level optimisation: today both `List<Byte>` and `List<Int>`
+use the canonical 3-slot list layout with one NaN-boxed Value per
+element (`alloc_byte_list` in
+`crates/verum_vbc/src/interpreter/dispatch_table/handlers/heap_helpers.rs:124`),
+so byte-typing alone does not change the heap footprint.  The
+heap helpers already support a packed-byte FatRef path
+(`extract_byte_slice` arm `1 => unsafe { slice::from_raw_parts(...) }`
+at line 173) — the optimisation is to make codegen lower
+`List<Byte>` to that packed path for read-buffer-shaped allocations.
+Tracked separately so the type-system migration can land cleanly.
 
 ---
 
@@ -221,7 +237,7 @@ write into a side-task so it doesn't gate the accept loop.
 
 ---
 
-## §7. Architectural: backpressure decision is not type-enforced
+## §7. Architectural: backpressure decision is not type-enforced — **FIXED**
 
 ### Attack
 The spec promises (§1.3) "Each `Service` обязан декларировать
@@ -233,16 +249,44 @@ that **every** `Layer`-wrapped service uses the inner's
 own `poll_ready`.  Hidden queues then grow unbounded; the system
 collapses under load with no diagnostic trail.
 
-### Fundamental fix
-This requires Verum's refinement-type machinery on the `Service`
-protocol — `poll_ready` returns `Poll<Result<(), E>>` with a
-refinement `where ready_implies_capacity_for_one_call`.  The
-type-checker rejects implementations that lie.  Without this,
-weft inherits Tower's foot-gun.
+### Fundamental fix — affine Permit pattern (LANDED)
+The fix uses Verum's affine semantics rather than a new
+refinement DSL.  `core/net/weft/service.vr` ships a move-only
+`Permit<S, Req, Resp>` token:
+```verum
+public type Permit<S: Service<Req, Resp>, Req, Resp> is {
+    service: &mut S,
+}
+implement<S: Service<Req, Resp>, Req, Resp> Permit<S, Req, Resp> {
+    public async fn dispatch(self, req: Req) -> Result<Resp, S.Error> {
+        self.service.call(req).await
+    }
+}
+public fn ready<S: Service<Req, Resp>, Req, Resp>(svc: &mut S)
+    -> PollReadyFuture<S, Req, Resp>;
+```
+Move-only / no Clone makes `Permit` affine — consumed by exactly
+one `dispatch`.  The `&mut self` borrow held by the Permit
+excludes concurrent mutation of the inner service.  `ready()`
+is the only constructor; it internally awaits `poll_ready` via
+`PollReadyFuture`.  **The compiler enforces ready-before-call as
+a borrow-checker invariant; a middleware that lies cannot ladder
+the lie because forwarding to its inner Service requires acquiring
+its inner Permit, which requires polling its inner `poll_ready`.**
+
+### Verification
+`verum check core/net/weft/service.vr` — 0 errors.  Forward
+type-parameter references inside generic bounds (`Permit<S:
+Service<Req, Resp>, Req, Resp>` where the bound on `S` references
+`Req`/`Resp` declared later in the same parameter list) parse and
+resolve cleanly; the earlier "blocked on parser" status was a
+mis-diagnosis caused by transient stdlib parse errors in
+`core/async/executor.vr` (parallel-agent WIP) that masqueraded as
+a forward-ref failure.  The language already supports the pattern.
 
 ---
 
-## §8. Architectural: handler signature doesn't track failure modes
+## §8. Architectural: handler signature doesn't track failure modes — **DESIGNED, DEFERRED**
 
 ### Attack
 A handler returns `Result<Response, WeftError>`.  But the
@@ -252,12 +296,31 @@ know whether a 500 is "the handler claimed Internal" or "Verum's
 runtime panicked through the future".  Observability suffers;
 incident triage takes longer.
 
-### Fundamental fix
-Use Verum's effect typing (`Async | IO | Fallible | Mutates |
-Spawns`) — the framework can statically discover that a handler
-declares `Fallible<DatabaseError>` and route those errors to a
-DB-recovery middleware that handlers without `Fallible<DatabaseError>`
-don't reach.
+### Fundamental fix — associated `Error` type on `Handler`
+```verum
+public type Handler is protocol {
+    type Error: IntoResponse;
+    async fn handle(&self, req: WeftRequest) -> Result<Response, Self.Error>;
+}
+```
+Currently every `implement Handler for X` returns the closed
+`WeftError` sum.  Promoting `Error` to an associated type lets
+middleware type-route: e.g.
+`RetryLayer<H> where H::Error: RetryClassify` only wraps handlers
+whose error converts to a retry classification.  Verum's
+existing computational properties (`Async | IO | Fallible<E> |
+Mutates`) are inferred from the body and become observable
+through this signature surface — a handler that declares
+`Fallible<DatabaseError>` is statically routable to a
+DB-recovery middleware.
+
+### Status — DEFERRED
+This is a multi-file refactor: every `implement Handler for X`
+site in `core/net/weft/**` (router, rpc, adaptive, timeout,
+spiffe, health, wasm_filter, zero_rtt_gate, metrics, tracing,
+backpressure × 5, handler.vr default impls) gains an explicit
+`type Error = WeftError;` clause.  Mechanical, but ~20 sites
+plus migration of every test/example.  Scoped as follow-up.
 
 ---
 

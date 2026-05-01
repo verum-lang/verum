@@ -7,9 +7,9 @@
 //
 // Plugs `core.net.tls.TlsStream` into Weft through two small pieces:
 //
-//   * `TlsTransport` — `WeftTransport` adapter.  Post-#316 follow-up
-//     both TlsStream and the transport ABI speak `List<Byte>`, so
-//     this adaptor is now a thin pass-through (no Int↔Byte
+//   * `TlsTransport` — `WeftTransport` adapter.  Both TlsStream and
+//     the transport ABI speak `List<Byte>` end-to-end (red-team §4
+//     fix), so this adaptor is a thin pass-through (no Int↔Byte
 //     conversion in either direction).
 //
 //   * `TlsHttp1Runner<H>` — `ConnectionRunner` implementor; runs the
@@ -69,8 +69,8 @@ implement TlsTransport {
     }
 
     /// Read one TLS chunk into the transport-supplied byte buffer.
-    /// Post-#316 the WeftTransport ABI speaks `List<Byte>` directly,
-    /// so this is a straight forward to `TlsStream.read`.
+    /// The WeftTransport ABI speaks `List<Byte>` directly, so this is
+    /// a straight forward to `TlsStream.read`.
     async fn tls_read(&mut self, buf: &mut List<Byte>) -> Result<Int, IoError> {
         match self.inner.read(buf).await {
             Err(e) => Err(IoError.Other { reason: f"tls read: {e}" }),
@@ -96,8 +96,8 @@ implement WeftTransport for TlsTransport {
     }
 
     async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
-        // Post-#316: transport hands us bytes directly — pass through
-        // to the byte-typed TlsStream API with no marshalling.
+        // Transport hands us bytes directly — pass through to the
+        // byte-typed TlsStream API with no marshalling.
         match self.inner.write(buf).await {
             Ok(n)  => Ok(n),
             Err(e) => Err(IoError.Other { reason: f"tls write: {e}" }),

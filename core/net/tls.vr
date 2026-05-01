@@ -704,13 +704,13 @@ implement TlsStream {
 // notes in internal/website/docs/stdlib/net.md.
 
 implement AsyncRead for TlsStream {
-    fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Int>) -> Poll<Result<Int, IoError>> {
+    fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<Result<Int, IoError>> {
         @intrinsic("verum.tls.poll_read", &self.session, cx, buf)
     }
 }
 
 implement AsyncWrite for TlsStream {
-    fn poll_write(&mut self, cx: &mut Context, buf: &List<Int>) -> Poll<Result<Int, IoError>> {
+    fn poll_write(&mut self, cx: &mut Context, buf: &List<Byte>) -> Poll<Result<Int, IoError>> {
         @intrinsic("verum.tls.poll_write", &self.session, cx, buf)
     }
 
@@ -726,9 +726,8 @@ implement AsyncWrite for TlsStream {
 implement TlsStream {
     /// Cancellable async read.
     ///
-    /// `buf` is `&mut List<Byte>` (semantic-honesty migration #316
-    /// follow-up): plaintext bytes emerging from the TLS record
-    /// layer are bytes, not 8-byte Ints.
+    /// `buf` is `&mut List<Byte>` (red-team §4 fix): plaintext bytes
+    /// emerging from the TLS record layer are bytes, not 8-byte Ints.
     pub async fn read_cancellable(
         &mut self,
         buf: &mut List<Byte>,
@@ -742,7 +741,7 @@ implement TlsStream {
 
     /// Cancellable async write.
     ///
-    /// `buf` is `&List<Byte>` post-#316.
+    /// `buf` is `&List<Byte>`.
     pub async fn write_cancellable(
         &mut self,
         buf: &List<Byte>,
@@ -756,9 +755,8 @@ implement TlsStream {
 
     /// Ergonomic async read — returns `Result<Int, IoError>`.
     ///
-    /// `buf` is `&mut List<Byte>` post-#316.  Internally bridges to
-    /// the AsyncRead protocol's `poll_read` (still `List<Int>`)
-    /// using a scratch list — one conversion per await.
+    /// `buf` is `&mut List<Byte>`.  Forwards directly to the AsyncRead
+    /// protocol's `poll_read` — both speak `List<Byte>` end-to-end.
     pub async fn read_async(&mut self, buf: &mut List<Byte>) -> Result<Int, IoError> {
         let mut fut = TlsReadFut { stream: self, buf: buf };
         fut.await
@@ -766,19 +764,17 @@ implement TlsStream {
 
     /// Ergonomic async write.
     ///
-    /// `buf` is `&List<Byte>` post-#316.  Internally marshals to a
-    /// scratch `List<Int>` for the AsyncWrite protocol's `poll_write`.
+    /// `buf` is `&List<Byte>`.  Forwards directly to the AsyncWrite
+    /// protocol's `poll_write`.
     pub async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
         let mut fut = TlsWriteFut { stream: self, buf: buf };
         fut.await
     }
 }
 
-// Helper Future types for read_async / write_async.
-//
-// Bridge between the byte-typed user-facing API and the AsyncRead /
-// AsyncWrite protocols (still `List<Int>` for protocol compatibility).
-// One conversion per await, never per byte at the consumer.
+// Helper Future types for read_async / write_async — direct
+// passthrough to the AsyncRead / AsyncWrite protocols, both of
+// which speak `List<Byte>` end-to-end post-§4.
 
 public type TlsReadFut<'a> is {
     stream: &'a mut TlsStream,
@@ -788,19 +784,7 @@ public type TlsReadFut<'a> is {
 implement<'a> Future for TlsReadFut<'a> {
     type Output = Result<Int, IoError>;
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
-        let mut int_buf: List<Int> = List.with_capacity(self.buf.capacity());
-        match self.stream.poll_read(cx, &mut int_buf) {
-            Poll.Pending => Poll.Pending,
-            Poll.Ready(r) => match r {
-                Err(e) => Poll.Ready(Err(e)),
-                Ok(n) => {
-                    for i in 0..n {
-                        self.buf.push((int_buf[i] & 0xFF) as Byte);
-                    }
-                    Poll.Ready(Ok(n))
-                }
-            },
-        }
+        self.stream.poll_read(cx, self.buf)
     }
 }
 
@@ -812,11 +796,7 @@ public type TlsWriteFut<'a> is {
 implement<'a> Future for TlsWriteFut<'a> {
     type Output = Result<Int, IoError>;
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
-        let mut int_buf: List<Int> = List.with_capacity(self.buf.len());
-        for i in 0..self.buf.len() {
-            int_buf.push(self.buf[i] as Int);
-        }
-        self.stream.poll_write(cx, &int_buf)
+        self.stream.poll_write(cx, self.buf)
     }
 }
 
