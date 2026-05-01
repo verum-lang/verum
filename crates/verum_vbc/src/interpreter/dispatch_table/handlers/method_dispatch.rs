@@ -1215,12 +1215,49 @@ pub(in super::super) fn handle_call_method(
                 }
             }
 
-            // Second pass: original suffix-match (no receiver-type constraint)
-            // — kept for the many call sites where we either have no heap
-            // receiver (small-string type names, primitives) or the type
-            // doesn't itself declare the method (protocol-default body,
-            // inherited impl, …). Preserves all existing passing tests.
+            // Second pass: type-bounds-aware suffix-match fallback (#335).
+            //
+            // Pre-fix this fallback picked the FIRST `*.method_name` in
+            // the function table with matching arity, regardless of whose
+            // method it was. Concrete failures:
+            //   * `Int(42).poll(cx)` silently dispatched to `Receiver.poll`
+            //     (#334 root cause) → null-deref on bogus self field-access.
+            //   * Same for any non-pointer receiver call site whose method
+            //     name had multiple `*.poll` / `*.swap` / `*.next` etc.
+            //     candidates.
+            //
+            // The fundamental fix: REJECT methods whose `parent_type` is
+            // structurally incompatible with the receiver. Three cases:
+            //
+            //   1. **Receiver is a non-pointer primitive** (Int / Bool /
+            //      Float / Byte / Char / nil): only accept methods whose
+            //      `parent_type` is None (free fn-shape) OR whose parent
+            //      type's name is in the documented primitive type set
+            //      ("Int", "Bool", "Float", "Byte", "Char"). Reject
+            //      methods whose parent is a heap-allocated struct
+            //      (Receiver, BTreeMap, …) — those CAN'T have a primitive
+            //      receiver.
+            //
+            //   2. **Receiver is a pointer with a recovered type name**:
+            //      already handled by the first pass above. Second pass
+            //      just provides protocol-default / inherited fallback.
+            //
+            //   3. **Receiver is a pointer but TypeId not registered**
+            //      (rare — synthetic types from runtime intercepts):
+            //      preserve the historical behaviour (accept any match).
+            //
+            // This eliminates the dispatch collision pattern by
+            // construction without needing per-method protocol-bound
+            // checks (which would require a much larger refactor).
             if found_func_id.is_none() {
+                // Stable list of primitive type names whose methods are
+                // legal targets for a non-pointer receiver. Methods are
+                // registered with these names via codegen's primitive-
+                // method-registration path (see `register_primitive_methods`
+                // in mod.rs).
+                let receiver_is_primitive =
+                    !dispatch_receiver.is_ptr() || dispatch_receiver.is_nil();
+
                 for func in &state.module.functions {
                     let func_name = state.module.strings.get(func.name).unwrap_or("");
                     let matches = if is_already_qualified {
@@ -1232,6 +1269,51 @@ pub(in super::super) fn handle_call_method(
                         func_name.ends_with(&method_suffix) && func_name.contains('.')
                     };
                     if matches {
+                        // Type-bounds gate (#335): reject methods whose
+                        // parent type is structurally incompatible with
+                        // the receiver.
+                        let parent_compatible = if receiver_is_primitive {
+                            // Non-pointer receiver: the method must
+                            // either be free-fn-shaped (parent_type ==
+                            // None) or registered on a primitive type.
+                            match func.parent_type {
+                                None => true,
+                                Some(tid) => match state.module.get_type(tid) {
+                                    Some(td) => {
+                                        let tname = state
+                                            .module
+                                            .strings
+                                            .get(td.name)
+                                            .unwrap_or("");
+                                        matches!(
+                                            tname,
+                                            "Int" | "Bool" | "Float"
+                                                | "Float32" | "Float64"
+                                                | "Byte" | "Char" | "UInt8"
+                                                | "UInt16" | "UInt32"
+                                                | "UInt64" | "Int8" | "Int16"
+                                                | "Int32" | "Int64" | "Text"
+                                                | "Unit"
+                                        )
+                                    }
+                                    None => true, // unregistered TypeId — preserve historic behaviour
+                                },
+                            }
+                        } else {
+                            // Heap receiver: the first-pass receiver-type
+                            // dispatch above already tried the exact-match.
+                            // Here we accept any match — covers protocol-
+                            // default / inherited-impl call sites where
+                            // the receiver's own type doesn't declare the
+                            // method. (Future tightening: walk the
+                            // receiver's protocol implementations and
+                            // accept only methods whose parent_type is in
+                            // that set.)
+                            true
+                        };
+                        if !parent_compatible {
+                            continue;
+                        }
                         // Prefer exact parameter count match
                         if func.params.len() == expected_param_count || func.register_count > 0 {
                             found_func_id = Some(func.id);

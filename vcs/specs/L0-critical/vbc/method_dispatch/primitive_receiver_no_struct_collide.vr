@@ -1,0 +1,65 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: vbc, method-dispatch, dispatch-collision
+// @expected-stdout: dispatch ok
+//
+// Pin (#335) — type-bounds-aware second-pass dispatch fallback.
+//
+// Pre-fix the VBC method dispatcher's "second pass" suffix-match
+// fallback (method_dispatch.rs:1218) picked the FIRST `*.method`
+// in the function table with matching arity, regardless of whose
+// method it was.  Concrete failure: `Int(42).method_name(...)` —
+// when the receiver is a non-pointer primitive, the first-pass
+// receiver-type-aware lookup CAN'T recover a heap-object TypeId,
+// so the fallback fires unconstrained and silently dispatches to
+// some heap-allocated struct's same-named method.  That struct's
+// body then field-accesses `self` (which is the primitive Int
+// reinterpreted as a pointer) and crashes on a null/invalid
+// dereference.
+//
+// This was the root cause of #334's `Int(42).poll() →
+// Receiver.poll → null-deref` chain — and a CLASS of similar bugs
+// (any primitive receiver calling a method name shared with a
+// struct method).
+//
+// Post-fix: the second-pass fallback is now type-bounds-aware.
+// When the receiver is a non-pointer primitive, methods whose
+// `parent_type` is a heap-allocated struct are REJECTED.  Only
+// methods on primitive types (Int, Bool, Float, Byte, Char,
+// UInt8/16/32/64, Int8/16/32/64, Text, Unit) OR free-fn-shaped
+// methods (`parent_type == None`) are eligible targets.
+
+// Define a struct method that shares the name `clone` with
+// primitive `Int.clone` (Verum auto-generates `.clone` for Copy
+// types). Pre-fix calling `42.clone()` could spuriously match
+// `Container.clone` (or any other `*.clone` ahead in the function
+// table); post-fix the dispatcher rejects struct methods when
+// the receiver is a primitive.
+type Container is { inner: Int };
+
+implement Container {
+    fn clone(&self) -> Container {
+        Container { inner: self.inner }
+    }
+}
+
+fn main() {
+    // The primitive receiver case — pre-fix could collide with
+    // Container.clone (or any heap-struct *.clone in the table);
+    // post-fix the type-bounds gate rejects Container.clone
+    // because Container is a heap-allocated struct, not a
+    // primitive type.
+    let n: Int = 42;
+    let n_clone = n.clone();
+    assert_eq(n_clone, 42);
+
+    // Sanity — Container.clone DOES dispatch correctly when the
+    // receiver IS a Container (first-pass receiver-type-aware
+    // lookup wins).
+    let c = Container { inner: 7 };
+    let c2 = c.clone();
+    assert_eq(c2.inner, 7);
+
+    print("dispatch ok");
+}
