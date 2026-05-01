@@ -230,8 +230,28 @@ public fn acquire_pending(manager: &mut SqliteLockManager) -> Result<(), VfsErro
     }
 }
 
-/// Reserved/Pending → Exclusive. Drops the SHARED-byte then takes an
-/// exclusive lock over the entire SHARED-range.
+/// Reserved/Pending → Exclusive.  Drops the SHARED-byte then takes
+/// an exclusive lock over the entire SHARED-range.
+///
+/// **Atomicity contract** (post-fix):
+///
+///   On success     → manager.state == Exclusive (kernel matches).
+///   On EXCLUSIVE   → SHARED is restored AND manager.state stays
+///   acquire fail     at the original Reserved/Pending value; kernel
+///                    matches.  Caller may retry.
+///   On SHARED      → manager.state is forced to Unlocked AND a
+///   restore-fail     fatal IoError is returned.  Caller MUST close
+///                    the file: continuing with state-divergence
+///                    risks SQLite-protocol invariants.
+///
+/// Pre-fix the rollback path on EXCLUSIVE failure used `try_lock_region`
+/// without checking the result — if SHARED re-acquisition itself
+/// failed (rare but possible: another connection raced into the
+/// SHARED range between our drop and re-take), `manager.state`
+/// stayed at Reserved/Pending while the kernel held NO byte at
+/// `manager.shared_byte` — silent state divergence that downstream
+/// `release_all` and reader-vs-writer accounting both walked over,
+/// risking double-write corruption.
 public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsError> {
     match manager.state {
         Exclusive => Ok(()),
@@ -240,6 +260,7 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
             message: "Exclusive requires at least Reserved or Pending",
         }),
         Reserved | Pending => {
+            let original_state = manager.state;
             // Drop our shared byte first so the exclusive range request
             // can succeed.
             let _ = unlock_region(manager.fd, manager.shared_byte, 1);
@@ -251,13 +272,38 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
                     Ok(())
                 }
                 Err(e) => {
-                    // Re-acquire our shared byte to roll back to the
-                    // previous state on failure — callers expect
-                    // best-effort atomicity.
-                    let _ = try_lock_region(
+                    // Roll back to the original state.  The SHARED byte
+                    // re-acquisition MUST succeed; if it doesn't, the
+                    // kernel state has diverged from `manager.state`
+                    // and continuing risks double-write corruption.
+                    match try_lock_region(
                         manager.fd, Shared, manager.shared_byte, 1,
-                    );
-                    Err(to_vfs_error(e))
+                    ) {
+                        Ok(_) => {
+                            // Kernel state matches our advertised state
+                            // (still Reserved/Pending with SHARED held).
+                            manager.state = original_state;
+                            Err(to_vfs_error(e))
+                        }
+                        Err(_) => {
+                            // CRITICAL: state divergence.  We dropped
+                            // SHARED, EXCLUSIVE failed, AND SHARED
+                            // restore failed.  The kernel now holds
+                            // NEITHER our SHARED byte NOR the EXCLUSIVE
+                            // range, but `manager.state` was last
+                            // Reserved/Pending which the SQLite
+                            // protocol assumes still holds SHARED.
+                            // Force `manager.state` to `Unlocked` so
+                            // future operations don't reason from a
+                            // false premise; surface a fatal IoError so
+                            // the caller closes the file.
+                            manager.state = Unlocked;
+                            Err(VfsError {
+                                kind: IoError,
+                                message: "acquire_exclusive: SHARED rollback failed; lock state diverged — close file",
+                            })
+                        }
+                    }
                 }
             }
         }
