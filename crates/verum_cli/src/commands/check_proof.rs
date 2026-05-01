@@ -50,6 +50,14 @@ use verum_kernel::proof_checker::Certificate;
 
 /// Entry point for `verum check-proof <file>`.
 pub fn execute(path: &str) -> Result<()> {
+    execute_with_universe_lift(path, 0)
+}
+
+/// Entry point for `verum check-proof <file> [--meta-mode | --meta-lift N]`
+/// (#158 V2). When `lift > 0`, runs the kernel with every
+/// `Universe(n)` interpreted as `Universe(n + lift)` — the
+/// meta-mode interpretation.
+pub fn execute_with_universe_lift(path: &str, lift: u32) -> Result<()> {
     let file_path = std::path::PathBuf::from(path);
     if !file_path.exists() {
         return Err(CliError::InvalidArgument(format!(
@@ -58,10 +66,15 @@ pub fn execute(path: &str) -> Result<()> {
         )));
     }
 
-    ui::step(&format!(
-        "Re-verifying {} against minimal proof-term checker",
-        path,
-    ));
+    let mode_label = if lift == 0 {
+        "minimal proof-term checker".to_string()
+    } else {
+        format!(
+            "minimal proof-term checker (META-MODE, universe-lift={})",
+            lift,
+        )
+    };
+    ui::step(&format!("Re-verifying {} against {}", path, mode_label));
 
     // Read + parse the certificate. The .vproof format is JSON for
     // v0 (structured s-expression is a future refinement; the JSON
@@ -79,19 +92,45 @@ pub fn execute(path: &str) -> Result<()> {
             .unwrap_or_else(|| "(anonymous)".to_string())
     });
 
-    // Verify.
-    match cert.verify() {
+    // Verify.  When lift > 0, route through the meta-mode wrapper.
+    let result = if lift == 0 {
+        cert.verify()
+    } else {
+        verum_kernel::proof_checker_meta::verify_certificate_with_lift(&cert, lift)
+    };
+
+    match result {
         Ok(()) => {
-            ui::success(&format!("{}: certificate verified", name,));
-            println!(
-                "    ({} LOC trusted base; CIC fragment with 6 inference rules)",
-                approx_trusted_base_loc(),
-            );
+            if lift == 0 {
+                ui::success(&format!("{}: certificate verified", name));
+                println!(
+                    "    ({} LOC trusted base; CIC fragment with 6 inference rules)",
+                    approx_trusted_base_loc(),
+                );
+            } else {
+                ui::success(&format!(
+                    "{}: certificate verified at META universe-lift={}",
+                    name, lift,
+                ));
+                println!(
+                    "    ({} LOC trusted base; CIC fragment with 6 inference rules; \
+                     every Universe(n) interpreted as Universe(n+{}) for meta-mode \
+                     re-checking — Gödel-2nd workaround foundation)",
+                    approx_trusted_base_loc(),
+                    lift,
+                );
+            }
             Ok(())
         }
         Err(e) => Err(CliError::VerificationFailed(format!(
-            "{}: certificate REJECTED by minimal kernel — {:?}",
-            name, e,
+            "{}: certificate REJECTED by minimal kernel{} — {:?}",
+            name,
+            if lift == 0 {
+                "".to_string()
+            } else {
+                format!(" at universe-lift={}", lift)
+            },
+            e,
         ))),
     }
 }
