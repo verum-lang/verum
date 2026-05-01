@@ -1,0 +1,483 @@
+// =============================================================================
+// core/database/common/arena.vr — Spindle four-level arena hierarchy
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §4.2
+// =============================================================================
+//
+// The hot-path memory model for Spindle. Every hand-allocated database
+// byte travels through one of four arenas, each tied to a well-defined
+// lifetime. The hierarchy lines up with the cooperation between pool,
+// connection, transaction, and individual query:
+//
+//   ┌────────────────────────────────────────────────────────────┐
+//   │ PoolArena       — schema snapshots, prepared-statement     │
+//   │                   cache entries, vendor metadata.          │
+//   │                   Lifetime = pool process lifetime.        │
+//   │                                                            │
+//   │   owns ▼                                                   │
+//   │ ConnectionArena — wire read / write buffers, codec scratch.│
+//   │                   Lifetime = one pooled checkout. RESET    │
+//   │                   on `release_healthy` so the next         │
+//   │                   acquirer starts at offset 0 with a fresh │
+//   │                   generation.                              │
+//   │                                                            │
+//   │   snapshot ▼                                               │
+//   │ TxScope        — bound parameter encoding, decoded rows    │
+//   │                   that should outlive a single query but   │
+//   │                   die at commit/rollback. Implemented as   │
+//   │                   an `ArenaSnapshot` over the connection   │
+//   │                   arena (no fresh allocation, no fresh     │
+//   │                   generation bump — that only happens on   │
+//   │                   release).                                │
+//   │                                                            │
+//   │   snapshot ▼                                               │
+//   │ QueryScope     — per-`.execute()`/`.query()` temporaries   │
+//   │                   (decoded values, temporary strings).     │
+//   │                   Restored to its parent scope's bump      │
+//   │                   pointer at the end of the call.          │
+//   └────────────────────────────────────────────────────────────┘
+//
+// Key invariants (all enforced at runtime via CBGR + snapshots):
+//
+//   * **One generation bump per checkout** — connection arena's
+//     generation only increments when the connection is recycled
+//     back to the pool. Sub-scopes (Tx, Query) use snapshots so
+//     references created inside one scope can safely flow up into
+//     the parent.
+//
+//   * **No allocation across release** — a `ThinRef` carved from
+//     a connection arena and stashed somewhere outside the
+//     checkout dies the moment that connection returns to the
+//     pool. CBGR rejects the use-after-release with the regular
+//     ~15 ns generation check, no special policing required.
+//
+//   * **No `List<Byte>` on the hot path** — `ArenaWireBuf` and
+//     `ArenaSlice` (in `types.vr`) bump-allocate from the right
+//     scope. Heap-backed `WireBuf` is preserved only for
+//     diagnostics / one-off paths.
+//
+//   * **Reset is O(1)** — a pool checkout that produced 100 k
+//     allocations costs exactly the same to recycle as one that
+//     produced none. Memory stays mapped; only the bump pointer
+//     and generation counter move.
+//
+// We delegate raw allocation, growth, reset, snapshot/restore, and
+// the generation invariant to `core.mem.arena.GenerationalArena`. This
+// module adds:
+//
+//   * a phase tag (`ArenaPhase`) for diagnostics so a leak shows up
+//     as "TxScope leaked X bytes" instead of "anonymous arena";
+//   * recommended sizing constants per phase;
+//   * `ArenaScope` — the snapshot RAII helper that powers Tx /
+//     Query scopes;
+//   * `with_query_scope` / `with_tx_scope` combinators that take a
+//     closure and guarantee restoration on every exit path.
+//
+// Spec ties: §4.2, §4.3 (pool ↔ supervision interaction).
+// =============================================================================
+
+module core.database.common.arena;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount mem.arena.{GenerationalArena, ArenaConfig, ArenaSnapshot, ARENA_ALIGNMENT};
+
+// -----------------------------------------------------------------------------
+// Sizing — empirically tuned for OLTP workloads.
+// -----------------------------------------------------------------------------
+//
+// `INITIAL_*` is the buffer the arena reserves up front; the
+// `GenerationalArena.alloc` path doubles capacity on overflow up to
+// `MAX_*`. Keeping a generous initial capacity makes the steady-state
+// `release_healthy` path a pure pointer + counter reset, so the
+// service never pays a re-mmap for "the next request happened to
+// produce one extra row".
+
+/// Pool arena initial size — fits ~32 schema snapshots + cached
+/// prepared statements without growth in a typical service.
+public const INITIAL_POOL_ARENA_BYTES: Int = 65536;        // 64 KiB
+
+/// Pool arena hard ceiling. 32 MiB is enough to hold a multi-tenant
+/// schema cache for hundreds of distinct query shapes; past that, the
+/// service is doing something pathological and should be flagged.
+public const MAX_POOL_ARENA_BYTES: Int = 33_554_432;       // 32 MiB
+
+/// Connection arena — sized for one pooled checkout's worth of wire
+/// traffic. 256 KiB clears the largest typical row payload (Postgres
+/// jsonb / bytea) without forcing growth on every request.
+public const INITIAL_CONNECTION_ARENA_BYTES: Int = 262_144;  // 256 KiB
+
+/// Connection arena ceiling. 16 MiB lets COPY / replication payloads
+/// stay in-arena; bigger than that they should stream.
+public const MAX_CONNECTION_ARENA_BYTES: Int = 16_777_216;   // 16 MiB
+
+/// Pool arena growth factor (percent). 200 = double on overflow.
+public const POOL_ARENA_GROWTH: Int = 200;
+
+/// Connection arena growth factor (percent). 200 = double on overflow.
+public const CONNECTION_ARENA_GROWTH: Int = 200;
+
+// -----------------------------------------------------------------------------
+// ArenaPhase — diagnostic tag.
+// -----------------------------------------------------------------------------
+
+/// Logical role of an arena. Stamped on every `SpindleArena` so
+/// metrics / panics name the offender ("TxScope leaked 2 KiB on
+/// connection #847") without dragging extra fields through the
+/// hot-path allocation code.
+public type ArenaPhase is
+      ApPool
+    | ApConnection
+    | ApTx
+    | ApQuery;
+
+implement ArenaPhase {
+    public fn label(&self) -> Text {
+        match self {
+            ApPool       => "Pool".clone(),
+            ApConnection => "Connection".clone(),
+            ApTx         => "Tx".clone(),
+            ApQuery      => "Query".clone(),
+        }
+    }
+
+    public fn equals(&self, other: &ArenaPhase) -> Bool {
+        match (self, other) {
+            (ApPool,       ApPool)       => true,
+            (ApConnection, ApConnection) => true,
+            (ApTx,         ApTx)         => true,
+            (ApQuery,      ApQuery)      => true,
+            _                            => false,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SpindleArena — the wire-up between Spindle and core.mem.arena.
+// -----------------------------------------------------------------------------
+
+/// Phase-tagged arena. The pool / connection / tx / query layers each
+/// hold one (transitively, via snapshots for Tx and Query) so the
+/// hot-path allocator stays a bump pointer.
+///
+/// `inner` is the underlying generational arena. `phase` exists for
+/// diagnostics only — it never gates allocation behaviour. Callers
+/// MUST go through `alloc_bytes` / `snapshot` / `restore` rather than
+/// poking `inner` directly so future instrumentation hooks (metrics,
+/// audit log) attach in one place.
+public type SpindleArena is {
+    inner: GenerationalArena,
+    phase: ArenaPhase,
+    /// Connection / pool identifier the arena was created for. 0 if
+    /// the arena is unattached (e.g. a free-floating pool arena).
+    /// Embedded into diagnostic payloads.
+    owner_id: Int,
+};
+
+implement SpindleArena {
+    /// Construct a pool-scoped arena. Lifetime matches the pool
+    /// itself — this arena is never reset while the pool runs.
+    public fn new_pool() -> SpindleArena {
+        let cfg = ArenaConfig.custom(
+            INITIAL_POOL_ARENA_BYTES,
+            MAX_POOL_ARENA_BYTES,
+            POOL_ARENA_GROWTH,
+        );
+        SpindleArena {
+            inner: GenerationalArena.with_config(cfg),
+            phase: ApPool,
+            owner_id: 0,
+        }
+    }
+
+    /// Construct a connection-scoped arena. Stamped with the
+    /// pool-assigned `owner_id` for diagnostics.
+    public fn new_connection(owner_id: Int) -> SpindleArena {
+        let cfg = ArenaConfig.custom(
+            INITIAL_CONNECTION_ARENA_BYTES,
+            MAX_CONNECTION_ARENA_BYTES,
+            CONNECTION_ARENA_GROWTH,
+        );
+        SpindleArena {
+            inner: GenerationalArena.with_config(cfg),
+            phase: ApConnection,
+            owner_id: owner_id,
+        }
+    }
+
+    /// Construct an arena with explicit configuration. Useful in
+    /// tests and for vendor-specific tuning (Postgres COPY ingest
+    /// wants a much larger initial buffer than the OLTP default).
+    public fn with_config(phase: ArenaPhase, owner_id: Int, cfg: ArenaConfig) -> SpindleArena {
+        SpindleArena {
+            inner: GenerationalArena.with_config(cfg),
+            phase: phase,
+            owner_id: owner_id,
+        }
+    }
+
+    /// Bump-allocate `size` bytes from the arena. Returns 0 on
+    /// exhaustion (arena cannot grow further) — callers MUST check.
+    ///
+    /// O(1) — single pointer bump + alignment fix.
+    public fn alloc_bytes(&mut self, size: Int) -> Int {
+        self.inner.alloc(size)
+    }
+
+    /// Aligned variant — same growth caveat as
+    /// `GenerationalArena.alloc_aligned`: the aligned path does NOT
+    /// auto-grow. Callers needing both alignment guarantees and
+    /// growth should pre-size via `with_config`.
+    public fn alloc_aligned(&mut self, size: Int, alignment: Int) -> Int {
+        self.inner.alloc_aligned(size, alignment)
+    }
+
+    /// Current generation — `ThinRef` constructors stamp this so the
+    /// CBGR check rejects use-after-reset references.
+    public fn generation(&self) -> Int {
+        self.inner.generation()
+    }
+
+    /// Bytes currently allocated (bump pointer offset).
+    public fn used(&self) -> Int {
+        self.inner.used()
+    }
+
+    /// Total addressable bytes.
+    public fn capacity(&self) -> Int {
+        self.inner.capacity()
+    }
+
+    /// Number of allocations since the last reset — diagnostic /
+    /// metric input.
+    public fn alloc_count(&self) -> Int {
+        self.inner.alloc_count()
+    }
+
+    /// Total resets since construction. The connection arena is
+    /// reset once per checkout-release; this counter feeds the pool
+    /// metric `db.pool.connection.recycled_count`.
+    public fn reset_count(&self) -> Int {
+        self.inner.reset_count()
+    }
+
+    /// Phase tag — diagnostic surface only.
+    public fn phase(&self) -> ArenaPhase {
+        self.phase.clone()
+    }
+
+    public fn owner_id(&self) -> Int {
+        self.owner_id
+    }
+
+    /// O(1) mass invalidation — every `ThinRef` carved out of the
+    /// arena since the last reset becomes stale. Connection arenas
+    /// call this on `release_healthy`; the pool arena MUST NOT call
+    /// this while live (its references outlive the call).
+    public fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    /// Snapshot the bump pointer + alloc counter without touching
+    /// the generation. Used by Tx and Query scopes — references
+    /// carved between snapshot and restore are still
+    /// generation-valid (the connection arena hasn't been reset),
+    /// but their *physical* address space is rewound on restore.
+    ///
+    /// Callers MUST NOT keep references that escape past their
+    /// snapshot's restore boundary; `ArenaScope` enforces this by
+    /// owning the snapshot and restoring exactly once on completion.
+    public fn snapshot(&self) -> ArenaSnapshot {
+        self.inner.snapshot()
+    }
+
+    /// Restore the arena to a previous snapshot. Returns false if
+    /// the snapshot is stale (the arena was reset between snapshot
+    /// and restore) — callers should treat this as a logic error.
+    public fn restore(&mut self, snap: ArenaSnapshot) -> Bool {
+        self.inner.restore(snap)
+    }
+
+    /// Tear down the arena. Used by pool shutdown / test teardown.
+    public fn destroy(&mut self) {
+        self.inner.destroy();
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ArenaScope — RAII guard for Tx and Query sub-scopes.
+// -----------------------------------------------------------------------------
+
+/// Affine snapshot guard. Hand it the parent arena and a phase tag;
+/// the guard captures a snapshot up front and restores it on
+/// `commit` / `discard`. Using `affine` flushes out the
+/// "forgot to restore" class of bug at compile time — the value is
+/// always consumed exactly once.
+///
+/// Typical lifecycle:
+///
+///   let scope = ArenaScope.begin(&conn_arena, ApQuery);
+///   // ... bump-allocate row buffers, value temporaries ...
+///   scope.discard(&mut conn_arena);
+///   // arena bump pointer is back where it started; references
+///   // carved during the scope are now address-invalid (CBGR will
+///   // catch any escapee on its next deref).
+///
+/// Tx scopes use the same machinery but choose `commit` /
+/// `discard` based on the transaction outcome. `commit` does NOT
+/// reset the snapshot — it leaves whatever the body allocated in
+/// place so result rows can be returned to the caller; lifetime
+/// then binds to the *next* enclosing scope (typically the
+/// connection arena, which resets at checkout-release).
+///
+/// Hand-rolling these everywhere is error-prone, so prefer the
+/// `with_query_scope` / `with_tx_scope` combinators below.
+public type affine ArenaScope is {
+    snap: ArenaSnapshot,
+    phase: ArenaPhase,
+    /// Generation observed at scope start — sanity-check on
+    /// restore. If the arena was reset under us we cannot safely
+    /// rewind the bump pointer, so we silently no-op (CBGR catches
+    /// the underlying use-after-reset).
+    start_generation: Int,
+};
+
+implement ArenaScope {
+    /// Capture the parent arena's current state. The arena reference
+    /// is borrowed for snapshotting only — the scope does NOT retain
+    /// it across calls.
+    public fn begin(parent: &SpindleArena, phase: ArenaPhase) -> ArenaScope {
+        ArenaScope {
+            snap: parent.snapshot(),
+            phase: phase,
+            start_generation: parent.generation(),
+        }
+    }
+
+    /// Restore the parent arena's bump pointer. Anything the body
+    /// allocated since `begin` becomes address-invalid (the bytes
+    /// remain mapped but will be overwritten by the next allocation).
+    /// Generation is NOT bumped — sibling scopes downstream can still
+    /// rely on the arena's identity.
+    public fn discard(self, parent: &mut SpindleArena) {
+        let _ = parent.restore(self.snap);
+        // self consumed by `affine` discipline — no further use.
+    }
+
+    /// Keep whatever the body allocated. Used when a successful
+    /// transaction needs its return rows to outlive the scope; the
+    /// rows then live until the next enclosing scope rewinds (or
+    /// the connection arena is reset on release).
+    public fn commit(self) {
+        // Drop the snapshot without restoring; affine consumption
+        // satisfied. The bump pointer stays where the body left it.
+        let _ = self.snap;
+    }
+
+    /// Diagnostic accessors.
+    public fn phase(&self) -> ArenaPhase { self.phase.clone() }
+    public fn start_generation(&self) -> Int { self.start_generation }
+}
+
+// -----------------------------------------------------------------------------
+// Combinators — the recommended call shape.
+// -----------------------------------------------------------------------------
+
+/// Run `body` against a fresh query sub-scope of `arena`. The body's
+/// return value is propagated verbatim; the arena bump pointer is
+/// restored on every exit path (success, error, or — once the
+/// runtime supports it — panic-unwind via affine destructor).
+///
+/// `body` receives a mutable reference to the parent arena so it can
+/// allocate freely; the framework owns the snapshot/restore and
+/// guarantees it exactly once.
+///
+/// Use this in adapter `query` / `execute` implementations after the
+/// per-tx scope has been established.
+public fn with_query_scope<R>(
+    arena: &mut SpindleArena,
+    body: fn(&mut SpindleArena) -> R,
+) -> R {
+    let scope = ArenaScope.begin(arena, ApQuery);
+    let result = body(arena);
+    scope.discard(arena);
+    result
+}
+
+/// Run `body` against a fresh transaction sub-scope of `arena`.
+/// Behaves like `with_query_scope` except the caller chooses whether
+/// the scope's allocations should outlive the body via the returned
+/// `TxArenaOutcome`:
+///
+///   * `TxoCommit(value)` — keep the body's allocations; useful when
+///     the caller wants to return decoded rows produced inside the
+///     transaction without copying them.
+///   * `TxoRollback(value)` — restore the bump pointer; the body's
+///     allocations become address-invalid.
+///
+/// In either case `value` flows through unchanged. The body is
+/// expected to map application-level commit/rollback to the
+/// corresponding `TxArenaOutcome` variant.
+public fn with_tx_scope<R>(
+    arena: &mut SpindleArena,
+    body: fn(&mut SpindleArena) -> TxArenaOutcome<R>,
+) -> R {
+    let scope = ArenaScope.begin(arena, ApTx);
+    match body(arena) {
+        TxoCommit(v) => {
+            scope.commit();
+            v
+        }
+        TxoRollback(v) => {
+            scope.discard(arena);
+            v
+        }
+    }
+}
+
+/// Two-armed outcome consumed by `with_tx_scope`. Distinguishes
+/// commit (keep allocations) from rollback (rewind allocations) at
+/// the type level so neither can be silently mis-routed.
+public type TxArenaOutcome<R> is
+      TxoCommit(R)
+    | TxoRollback(R);
+
+// -----------------------------------------------------------------------------
+// Diagnostics — payload helpers.
+// -----------------------------------------------------------------------------
+
+/// Snapshot of arena state for metrics emission.
+///
+/// Adapters / pool wrappers populate this once per release-healthy
+/// cycle and feed it to `core.metrics`. The fields line up with the
+/// spec's `db.pool.arena.*` metric set.
+public type ArenaStats is {
+    phase: ArenaPhase,
+    owner_id: Int,
+    generation: Int,
+    capacity_bytes: Int,
+    used_bytes: Int,
+    alloc_count: Int,
+    reset_count: Int,
+};
+
+implement ArenaStats {
+    public fn from_arena(arena: &SpindleArena) -> ArenaStats {
+        ArenaStats {
+            phase: arena.phase(),
+            owner_id: arena.owner_id(),
+            generation: arena.generation(),
+            capacity_bytes: arena.capacity(),
+            used_bytes: arena.used(),
+            alloc_count: arena.alloc_count(),
+            reset_count: arena.reset_count(),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Public re-exports for convenience.
+// -----------------------------------------------------------------------------
+
+public mount mem.arena.{GenerationalArena, ArenaConfig, ArenaSnapshot};

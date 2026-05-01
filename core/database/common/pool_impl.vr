@@ -42,6 +42,7 @@ mount collections.List;
 mount sync.mutex.Mutex;
 mount async.timer.sleep_ms;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific, PoolErrorKind};
+mount core.database.common.arena.{SpindleArena, ArenaPhase, ArenaStats, ApConnection};
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -103,6 +104,13 @@ public type ReleaseKind is
 
 type PoolInner<C> is {
     idle: List<C>,
+    /// Per-slot connection arenas pinned to currently-idle connections.
+    /// Reused across checkouts — `acquire` grabs the arena alongside
+    /// the connection so the new owner inherits a primed bump pointer
+    /// without paying the mmap on first use. `release_healthy` bumps
+    /// the generation (O(1)) before pushing the slot back here, so
+    /// every reference carved by the previous owner is invalidated.
+    idle_arenas: List<SpindleArena>,
     outstanding: Int,
     /// Monotonic counter for assigning checkouts a unique ID — useful
     /// for tracing and for the `PoolHandle.checked_out_at_ms` slot
@@ -114,6 +122,9 @@ type PoolInner<C> is {
     total_timeouts: Int,
     /// Total errors during connect / checkout.
     total_errors: Int,
+    /// Cumulative arena resets — one per `release_healthy`. Feeds the
+    /// `db.pool.connection.recycled_count` metric.
+    total_arena_resets: Int,
 }
 
 // -----------------------------------------------------------------------------
@@ -127,6 +138,13 @@ public type ConnectionPool<C> is {
     /// connection. Errors propagate verbatim.
     factory: fn() -> Result<C, DbError>,
     inner: Mutex<PoolInner<C>>,
+    /// Pool-scoped arena. Lives the entire pool lifetime; holds
+    /// schema snapshots, prepared-statement cache entries, vendor
+    /// metadata. NEVER reset while the pool is live (its references
+    /// outlive every checkout). Wrapped in a `Mutex` so concurrent
+    /// acquires can register cached prepared statements without
+    /// stepping on each other.
+    pool_arena: Mutex<SpindleArena>,
 }
 
 implement<C> ConnectionPool<C> {
@@ -148,26 +166,38 @@ implement<C> ConnectionPool<C> {
             });
         }
         let mut idle: List<C> = List.new();
+        let mut idle_arenas: List<SpindleArena> = List.new();
         let mut i: Int = 0;
         while i < config.min_connections {
             match factory() {
-                Ok(c)  => idle.push(c),
+                Ok(c)  => {
+                    idle.push(c);
+                    // Pre-warm a connection arena per eagerly-opened
+                    // slot so the first acquirer never pays the
+                    // initial mmap.
+                    idle_arenas.push(SpindleArena.new_connection(i + 1));
+                }
                 Err(e) => { return Err(e); }
             }
             i = i + 1;
         }
         let inner = PoolInner {
             idle: idle,
+            idle_arenas: idle_arenas,
             outstanding: 0,
-            next_id: 1,
+            // `next_id` starts past the warmed slots' owner_ids so
+            // their diagnostics stay distinguishable.
+            next_id: config.min_connections + 1,
             total_acquired: 0,
             total_timeouts: 0,
             total_errors: 0,
+            total_arena_resets: 0,
         };
         Ok(ConnectionPool {
             config: config,
             factory: factory,
             inner: Mutex.new(inner),
+            pool_arena: Mutex.new(SpindleArena.new_pool()),
         })
     }
 
@@ -208,14 +238,35 @@ implement<C> ConnectionPool<C> {
     /// closed + slot count decremented. Returning a connection always
     /// succeeds (the connection itself may already be closed; we just
     /// drop it).
-    public fn release(&self, conn: C, kind: ReleaseKind) {
+    ///
+    /// Healthy-path arena handling: the freshly-released arena is
+    /// *reset* (generation++) before being parked in `idle_arenas`.
+    /// This is the load-bearing CBGR step — every `ThinRef` /
+    /// `ArenaSlice` carved out during the previous checkout becomes
+    /// generation-stale on the next dereference, so leaked
+    /// references caught by application code surface as a clean
+    /// `DecodeError` rather than corrupting the next checkout's
+    /// state. Cost: a single integer add and a bump-pointer rewind,
+    /// O(1) regardless of how many bytes were allocated during the
+    /// session.
+    ///
+    /// Discard-path: the arena is destroyed alongside the
+    /// connection. The next acquire builds a fresh arena via the
+    /// factory + `new_connection`.
+    public fn release(&self, conn: C, mut arena: SpindleArena, kind: ReleaseKind) {
         let mut guard = match self.inner.lock() {
             Ok(g)  => g,
             Err(_) => { return; }   // poisoned — silently drop the conn
         };
         match kind {
-            Healthy => { guard.idle.push(conn); }
+            Healthy => {
+                arena.reset();
+                guard.total_arena_resets = guard.total_arena_resets + 1;
+                guard.idle.push(conn);
+                guard.idle_arenas.push(arena);
+            }
             Discard(_reason) => {
+                arena.destroy();
                 let _ = conn;     // dropped, factory rebuilds on next acquire
             }
         }
@@ -224,10 +275,20 @@ implement<C> ConnectionPool<C> {
         }
     }
 
+    /// Read-only handle to the pool arena. The `Mutex` guards
+    /// concurrent `alloc_bytes` / `snapshot` calls (callers register
+    /// schema-snap entries, prepared statement metadata, etc).
+    /// Long-lived references obtained through this lock MUST honour
+    /// the pool's own lifetime — they outlive every checkout but die
+    /// with the pool itself.
+    public fn pool_arena(&self) -> &Mutex<SpindleArena> {
+        &self.pool_arena
+    }
+
     /// Drain — refuse new acquires (caller policed at handler scope),
     /// wait for in-flight checkouts to release, then close every idle
-    /// connection. The connection drop is the responsibility of `C`'s
-    /// destructor.
+    /// connection AND destroy its parked arena. The connection drop
+    /// is the responsibility of `C`'s destructor.
     public fn drain(&self, deadline_ms: Int) -> Result<(), DbError> {
         let mut waited: Int = 0;
         loop {
@@ -236,7 +297,17 @@ implement<C> ConnectionPool<C> {
                 Err(_) => { return Err(self.poisoned_err()); }
             };
             if guard.outstanding == 0 {
+                // Tear down every parked arena before dropping the
+                // List — `SpindleArena.destroy` releases the
+                // underlying mmap'd buffer back to the OS.
+                let mut i: Int = 0;
+                let n = guard.idle_arenas.len() as Int;
+                while i < n {
+                    guard.idle_arenas[i].destroy();
+                    i = i + 1;
+                }
                 guard.idle = List.new();
+                guard.idle_arenas = List.new();
                 return Ok(());
             }
             // Drop the lock before sleeping so releases can land.
@@ -253,7 +324,8 @@ implement<C> ConnectionPool<C> {
     }
 
     /// Snapshot — total / idle / in_use / waiting / total_acquired /
-    /// total_timeouts / total_errors. Useful for metrics emit.
+    /// total_timeouts / total_errors / total_arena_resets.
+    /// Useful for metrics emit (`db.pool.*`).
     public fn stats(&self) -> PoolStatsSnapshot {
         let guard = match self.inner.lock() {
             Ok(g)  => g,
@@ -261,6 +333,7 @@ implement<C> ConnectionPool<C> {
                 return PoolStatsSnapshot {
                     total: 0, idle: 0, in_use: 0,
                     total_acquired: 0, total_timeouts: 0, total_errors: 0,
+                    total_arena_resets: 0,
                 };
             }
         };
@@ -273,6 +346,7 @@ implement<C> ConnectionPool<C> {
             total_acquired: guard.total_acquired,
             total_timeouts: guard.total_timeouts,
             total_errors: guard.total_errors,
+            total_arena_resets: guard.total_arena_resets,
         }
     }
 
@@ -295,12 +369,22 @@ implement<C> ConnectionPool<C> {
                         return Ok(None);
                     }
                 };
+                // Pair the connection with its parked arena. The
+                // two queues are always pushed together by
+                // `release_healthy`, so a length mismatch indicates
+                // pool corruption — fall back to a fresh arena
+                // instead of indexing past the end.
+                let arena = match guard.idle_arenas.pop() {
+                    Some(a) => a,
+                    None    => SpindleArena.new_connection(guard.next_id),
+                };
                 guard.outstanding = guard.outstanding + 1;
                 guard.total_acquired = guard.total_acquired + 1;
                 let id = guard.next_id;
                 guard.next_id = guard.next_id + 1;
                 return Ok(Some(PooledConnection {
                     conn: Some(conn),
+                    arena: Some(arena),
                     pool: self,
                     id: id,
                 }));
@@ -326,6 +410,7 @@ implement<C> ConnectionPool<C> {
                 guard.next_id = guard.next_id + 1;
                 Ok(Some(PooledConnection {
                     conn: Some(conn),
+                    arena: Some(SpindleArena.new_connection(id)),
                     pool: self,
                     id: id,
                 }))
@@ -362,8 +447,17 @@ implement<C> ConnectionPool<C> {
 /// `release_discard`; the destructor's behaviour for an unconsumed
 /// handle is to release as healthy (defensive — we'd rather leak a
 /// possibly-bad connection back into the pool than leak the slot).
+///
+/// Carries a `SpindleArena` alongside the connection so adapter
+/// code (`Connection.execute`, `Connection.query`, ...) can carve
+/// per-query scopes without re-discovering "which arena does this
+/// connection live in". Arena lifetime: born at first acquire (or
+/// reused from the parked idle slot), reset on every healthy
+/// release (generation-bump invalidates stale references), destroyed
+/// on discard.
 public type PooledConnection<C> is {
     conn: Maybe<C>,
+    arena: Maybe<SpindleArena>,
     pool: &ConnectionPool<C>,
     id: Int,
 }
@@ -387,24 +481,68 @@ implement<C> PooledConnection<C> {
         }
     }
 
-    /// Return the connection to the pool as healthy.
+    /// Borrow the connection-scoped arena mutably. Adapter code
+    /// passes this into `with_query_scope` / `with_tx_scope` so the
+    /// per-query bump pointer rewinds at the right boundary.
+    ///
+    /// Lifetime: the arena lives as long as the `PooledConnection`
+    /// itself; on `release_healthy` it is reset (generation++) and
+    /// parked back in the pool's idle queue.
+    public fn arena_mut(&mut self) -> &mut SpindleArena {
+        match &mut self.arena {
+            Some(a) => a,
+            None    => panic("PooledConnection: arena already released"),
+        }
+    }
+
+    public fn arena_ref(&self) -> &SpindleArena {
+        match &self.arena {
+            Some(a) => a,
+            None    => panic("PooledConnection: arena already released"),
+        }
+    }
+
+    /// Snapshot for metrics emission. Stable to call on a live or
+    /// in-flight handle.
+    public fn arena_stats(&self) -> Maybe<ArenaStats> {
+        match &self.arena {
+            Some(a) => Some(ArenaStats.from_arena(a)),
+            None    => None,
+        }
+    }
+
+    /// Return the connection to the pool as healthy. Resets the
+    /// arena's generation in O(1) so any reference that escaped the
+    /// previous handler scope becomes stale before the next
+    /// acquirer sees the slot.
     public fn release_healthy(mut self) {
         let c = match self.conn {
             Some(c) => c,
             None    => { return; }
         };
+        let a = match self.arena {
+            Some(a) => a,
+            None    => SpindleArena.new_connection(self.id),
+        };
         self.conn = None;
-        self.pool.release(c, Healthy);
+        self.arena = None;
+        self.pool.release(c, a, Healthy);
     }
 
     /// Discard the connection (will be reopened on next acquire).
+    /// The arena is destroyed alongside.
     public fn release_discard(mut self, reason: Text) {
         let c = match self.conn {
             Some(c) => c,
             None    => { return; }
         };
+        let a = match self.arena {
+            Some(a) => a,
+            None    => SpindleArena.new_connection(self.id),
+        };
         self.conn = None;
-        self.pool.release(c, Discard(reason));
+        self.arena = None;
+        self.pool.release(c, a, Discard(reason));
     }
 }
 
@@ -419,4 +557,8 @@ public type PoolStatsSnapshot is {
     total_acquired: Int,
     total_timeouts: Int,
     total_errors: Int,
+    /// Cumulative arena generation-bumps (one per healthy release).
+    /// Equals total successful checkout cycles in steady state. Feeds
+    /// `db.pool.arena.reset_total` per spec §7.6.
+    total_arena_resets: Int,
 }

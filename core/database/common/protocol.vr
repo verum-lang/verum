@@ -28,6 +28,7 @@ mount core.*;
 mount base.{Result, Text};
 mount collections.List;
 mount async.stream.Stream;
+mount core.database.common.arena.{SpindleArena};
 mount core.database.common.error.{DbError, AdapterId};
 mount core.database.common.query.{PreparedQuery};
 mount core.database.common.types.{WireRow, WireBuf, RowSchema, TypeOid};
@@ -96,6 +97,17 @@ public type Connection is protocol {
 
     /// Round-trip; cheap on Postgres (Sync), free on SQLite (no-op).
     async fn ping(&mut self) -> Result<(), DbError>;
+
+    /// Connection-scoped arena. Adapter implementations route every
+    /// hot-path byte through this arena, then snapshot/restore for
+    /// per-tx and per-query scopes via
+    /// `core.database.common.arena.with_query_scope`.
+    ///
+    /// Lifetime contract: the arena lives as long as the
+    /// `Connection`; the pool resets it (generation++) on
+    /// `release_healthy`. References escaping the connection's
+    /// lifetime are caught by the regular CBGR check.
+    fn arena(&mut self) -> &mut SpindleArena;
 
     async fn begin(&mut self) -> Result<Self.Tx, DbError>;
 

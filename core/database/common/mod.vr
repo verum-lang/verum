@@ -40,6 +40,7 @@
 module core.database.common;
 
 public module error;
+public module arena;
 public module types;
 public module query;
 public module protocol;
