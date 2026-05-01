@@ -108,6 +108,62 @@ implement SqlState {
         let cls = self.class();
         cls == "23" || cls == "22"
     }
+
+    /// More specific subclass detection — every SQLSTATE 23* code that
+    /// Spindle can map to a typed `ConstraintKind`. Returns
+    /// `CkOther` for unrecognised 23* codes (forward-compat with new
+    /// SQLSTATE codes Postgres / MySQL may add).
+    public fn integrity_kind(&self) -> Maybe<ConstraintKind> {
+        if !self.is_integrity() { return None; }
+        let c = self.code.as_str();
+        // SQLSTATE 23xxx subclasses — see PostgreSQL Appendix A.
+        if      c == "23502" { Some(CkNotNull) }
+        else if c == "23503" { Some(CkForeignKey) }
+        else if c == "23505" { Some(CkUnique) }
+        else if c == "23514" { Some(CkCheck) }
+        else if c == "23001" { Some(CkRestrictViolation) }
+        else if c == "23000" { Some(CkOther) }
+        else if self.class() == "22" { Some(CkDataException) }
+        else                 { Some(CkOther) }
+    }
+}
+
+/// Specific shape of an integrity / constraint violation. Drives
+/// HTTP status mapping (409 vs 422) and observability labels.
+public type ConstraintKind is
+      CkNotNull              // 23502 — missing NOT NULL value
+    | CkForeignKey           // 23503 — FK violation
+    | CkUnique               // 23505 — UNIQUE / PRIMARY KEY collision
+    | CkCheck                // 23514 — CHECK constraint failure
+    | CkRestrictViolation    // 23001 — RESTRICT-class FK
+    | CkDataException        // 22xxx — value outside type domain
+    | CkOther;               // 23000 / 23xxx unrecognised
+
+implement ConstraintKind {
+    public fn label(&self) -> Text {
+        match self {
+            CkNotNull           => "not_null".clone(),
+            CkForeignKey        => "foreign_key".clone(),
+            CkUnique            => "unique".clone(),
+            CkCheck             => "check".clone(),
+            CkRestrictViolation => "restrict".clone(),
+            CkDataException     => "data_exception".clone(),
+            CkOther             => "integrity_other".clone(),
+        }
+    }
+
+    public fn equals(&self, other: &ConstraintKind) -> Bool {
+        match (self, other) {
+            (CkNotNull,           CkNotNull)           => true,
+            (CkForeignKey,        CkForeignKey)        => true,
+            (CkUnique,            CkUnique)            => true,
+            (CkCheck,             CkCheck)             => true,
+            (CkRestrictViolation, CkRestrictViolation) => true,
+            (CkDataException,     CkDataException)     => true,
+            (CkOther,             CkOther)             => true,
+            _                                          => false,
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -253,6 +309,49 @@ implement DbError {
             QueryFailed { sql_state, .. } => sql_state.is_integrity(),
             RefinementViolated { .. }     => true,
             _                             => false,
+        }
+    }
+
+    /// Unified accessor: returns a structured `ConstraintViolation`
+    /// regardless of whether the failure was caught client-side
+    /// (`RefinementViolated` — SMT/Z3 caught the parameter before
+    /// the wire trip) or server-side (`QueryFailed` with a SQLSTATE
+    /// 22xxx / 23xxx code). Handler code that just wants the column
+    /// + kind for a 409 / 422 response uses this; the variant
+    /// distinction stays available for callers that care about the
+    /// detection boundary.
+    public fn as_constraint_violation(&self) -> Maybe<ConstraintViolation> {
+        match self {
+            RefinementViolated { column, predicate } =>
+                Some(ConstraintViolation {
+                    column: Some(column.clone()),
+                    predicate: Some(predicate.clone()),
+                    kind: CkCheck,                           // refinements
+                                                              // emit CHECK
+                                                              // semantics on
+                                                              // both sides
+                    detected_at: VdClientPreflight,
+                }),
+            QueryFailed { sql_state, message, .. } => {
+                if !sql_state.is_integrity() { return None; }
+                Some(ConstraintViolation {
+                    // PG / MySQL rarely echo the column name in the
+                    // protocol-level message; extracting it requires
+                    // the `c=...` ErrorResponse field that the wire
+                    // layer captures separately. v1 surfaces None;
+                    // adapter-specific paths can populate via
+                    // `set_constraint_column` once the wire-layer
+                    // captures the field.
+                    column: None,
+                    predicate: extract_constraint_name(message),
+                    kind: match sql_state.integrity_kind() {
+                        Some(k) => k,
+                        None    => CkOther,
+                    },
+                    detected_at: VdServerReject,
+                })
+            }
+            _ => None,
         }
     }
 
@@ -659,5 +758,123 @@ implement Eq for DbError {
             (Adapter(a),                    Adapter(b))                => a == b,
             _ => false,
         }
+    }
+}
+
+// =============================================================================
+// ConstraintViolation — unified detail for client-preflight + server-reject
+// =============================================================================
+//
+// Both `RefinementViolated` (SMT/Z3 caught a parameter before it
+// went on the wire) and `QueryFailed { sql_state: 23xxx }` (the
+// database's CHECK / UNIQUE / FK constraint rejected the row)
+// represent "your data violates an invariant". This type is the
+// shape they collapse to for handler code that wants one accessor
+// for both paths.
+//
+// Variants stay distinct in `DbError` because they carry different
+// observability signal — a client-preflight catch never hit the
+// pool, never burned a connection, and signals that the application
+// has end-to-end refinement coverage. A server-reject catch means
+// the wire trip happened (and burned the round-trip latency); over
+// time, an increase in server-reject share is a code-quality
+// signal that refinement annotations are missing.
+
+/// Where the constraint failure was detected.
+public type ViolationDetection is
+      VdClientPreflight       // SMT/Z3 caught it client-side; never hit wire
+    | VdServerReject;         // database CHECK / UNIQUE / FK rejected the row
+
+implement ViolationDetection {
+    public fn label(&self) -> Text {
+        match self {
+            VdClientPreflight => "client_preflight".clone(),
+            VdServerReject    => "server_reject".clone(),
+        }
+    }
+
+    public fn equals(&self, other: &ViolationDetection) -> Bool {
+        match (self, other) {
+            (VdClientPreflight, VdClientPreflight) => true,
+            (VdServerReject,    VdServerReject)    => true,
+            _                                      => false,
+        }
+    }
+}
+
+/// Unified shape returned by `DbError.as_constraint_violation()`.
+/// Drives `IntoResponse`'s 409-vs-422 status mapping and the
+/// `db.client.constraint.*` metric set.
+public type ConstraintViolation is {
+    /// Column responsible for the violation, when the wire
+    /// protocol surfaces it. Currently `None` from the server-side
+    /// path — extracting it requires the `c=` ErrorResponse field
+    /// that the wire layer captures into a separate slot; v1 leaves
+    /// it `None` and adapters can populate via a follow-up. The
+    /// client-side path always populates it from the
+    /// `RefinementViolated.column` field.
+    column: Maybe<Text>,
+    /// The constraint expression text (best-effort). For
+    /// client-preflight this is the refinement predicate source;
+    /// for server-reject it's the constraint NAME extracted from
+    /// the diagnostic message (PG / MySQL surface
+    /// "violates check constraint \"<name>\"" — we lift the name
+    /// out for stable metric labels).
+    predicate: Maybe<Text>,
+    /// Specific kind of constraint that fired.
+    kind: ConstraintKind,
+    /// Detection boundary.
+    detected_at: ViolationDetection,
+};
+
+implement ConstraintViolation {
+    /// Stable label combining kind + detection — useful as a
+    /// metric-cardinality-bounded tag.
+    public fn metric_tag(&self) -> Text {
+        let mut t: Text = self.detected_at.label();
+        t.push_str(&"/".clone());
+        t.push_str(&self.kind.label());
+        t
+    }
+}
+
+/// Lift the constraint name out of a vendor diagnostic message.
+/// Looks for the canonical pattern `"\"<name>\""` Postgres / MySQL
+/// emit ("violates check constraint \"<name>\"" / "Duplicate entry
+/// '...' for key '<name>'"). Returns `None` when no such substring
+/// is present — the caller treats the predicate as anonymous.
+fn extract_constraint_name(message: &Text) -> Maybe<Text> {
+    let bytes = message.as_bytes();
+    let n = bytes.len() as Int;
+    // Find the first `"`; capture until the next `"`.
+    let mut start: Int = -1;
+    let mut i: Int = 0;
+    while i < n {
+        if (bytes[i] as Int) == 0x22 {        // ASCII `"`
+            start = i + 1;
+            break;
+        }
+        i = i + 1;
+    }
+    if start < 0 { return None; }
+    let mut end: Int = -1;
+    let mut j: Int = start;
+    while j < n {
+        if (bytes[j] as Int) == 0x22 {
+            end = j;
+            break;
+        }
+        j = j + 1;
+    }
+    if end < 0 || end <= start { return None; }
+    let mut buf: List<Byte> = List.with_capacity(end - start);
+    let mut k: Int = start;
+    while k < end {
+        buf.push(bytes[k]);
+        k = k + 1;
+    }
+    match Text.from_utf8(buf) {
+        Ok(t)  => Some(t),
+        Err(_) => None,
     }
 }

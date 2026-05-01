@@ -5,12 +5,10 @@
 // Spec: internal/specs/database.md §5.6, internal/specs/net-framework.md §5.6
 // =============================================================================
 //
-
 // Wires `core.database.common.error.DbError` into the Weft framework's
 // `IntoResponse` protocol so handlers that use `[Database]` get
 // `?`-propagation to a typed HTTP response with no extra ceremony.
 //
-
 // The mapping is conservative: server-internal detail (SQL text,
 // vendor error codes, position offsets, internal message bodies)
 // is NEVER echoed to clients — instead we emit a stable shape per
@@ -18,36 +16,87 @@
 // via the framework's tracing layer; the response carries only the
 // public-safe summary.
 //
-
-//  ErrorCategory Status Body Reason
+// Constraint violations get more specific HTTP status than the
+// generic `EcClient → 400` mapping. The unified
+// `DbError.as_constraint_violation` accessor lets us route both
+// client-preflight catches (RefinementViolated) AND server-rejects
+// (QueryFailed { sql_state: 23xxx }) through the same logic, so
+// downstream consumers don't need to pattern-match the variant.
+//
+//  Constraint kind                          Status  Reason
 //  -----------------------------------------------------------------------------
-//  EcTransient → 503 Service Unavailable "service temporarily unavailable"
-//  EcPermanent → 500 Internal Server Error "internal error"
-//  EcSecurity → 403 Forbidden "access denied"
-//  EcClient → 400 Bad Request "<DbError.message>" (safe — already de-detailed)
-//  EcUpstream → 502 Bad Gateway "upstream error"
+//  CkUnique / CkForeignKey / CkRestrict  → 409 Conflict
+//  CkCheck / CkNotNull / CkDataException → 422 Unprocessable Entity
+//
+//  Other categories ─────────────────────────────────────────────────────────
+//  EcTransient                            → 503 Service Unavailable
+//  EcPermanent                            → 500 Internal Server Error
+//  EcSecurity                             → 403 Forbidden
+//  EcClient (non-constraint)              → 400 Bad Request "<msg>"
+//  EcUpstream                             → 502 Bad Gateway
 // =============================================================================
 
 module core.database.common.into_response;
 
 mount core.*;
-mount base.{Text};
+mount base.{Text, Maybe, None, Some};
 mount core.net.http.{Response, StatusCode};
 mount core.net.weft.error.IntoResponse;
 mount core.net.weft.response_ext.{
     resp_status, resp_with_body_text,
 };
 mount core.database.common.error.{
-    DbError, ErrorCategory,
+    DbError, ErrorCategory, ConstraintViolation, ConstraintKind,
     EcTransient, EcPermanent, EcSecurity, EcClient, EcUpstream,
+    CkNotNull, CkForeignKey, CkUnique, CkCheck, CkRestrictViolation,
+    CkDataException, CkOther,
 };
 
 implement IntoResponse for DbError {
     fn into_response(self) -> Response {
+        // Constraint violations short-circuit the category lookup
+        // — they have a dedicated HTTP status mapping that's more
+        // useful to clients than the generic 400. The accessor
+        // collapses RefinementViolated (client-preflight) and
+        // QueryFailed { sql_state: 23xxx } (server-reject) into
+        // the same `ConstraintViolation` shape so we don't repeat
+        // the mapping for both code paths.
+        match self.as_constraint_violation() {
+            Some(cv) => {
+                let (status, body) = render_for_constraint(&cv, &self);
+                let resp = resp_status(status);
+                return resp_with_body_text(resp, body);
+            }
+            None => {}
+        }
         let category = self.category();
         let (status, body) = render_for_category(&category, &self);
         let resp = resp_status(status);
         resp_with_body_text(resp, body)
+    }
+}
+
+fn render_for_constraint(cv: &ConstraintViolation, err: &DbError) -> (StatusCode, Text) {
+    match cv.kind {
+        // Conflict-class constraints: the row's data is internally
+        // consistent but conflicts with existing rows. 409 Conflict
+        // is the canonical HTTP semantic — clients typically retry
+        // with a different key (UPSERT, alternative ID).
+        CkUnique             => (StatusCode.new(409), "conflict".clone()),
+        CkForeignKey         => (StatusCode.new(409), "foreign key violation".clone()),
+        CkRestrictViolation  => (StatusCode.new(409), "restrict violation".clone()),
+
+        // Validation-class: the row's data itself is wrong (out of
+        // range, missing required field, regex mismatch). 422
+        // Unprocessable Entity per RFC 4918 — the request was
+        // syntactically valid but the content failed validation.
+        CkCheck              => (StatusCode.new(422), "validation failed".clone()),
+        CkNotNull            => (StatusCode.new(422), "missing required field".clone()),
+        CkDataException      => (StatusCode.new(422), "value out of range".clone()),
+
+        // Forward-compat — unrecognised 23xxx codes fall back to
+        // the safe, shape-preserving 400.
+        CkOther              => (StatusCode.new(400), err.message()),
     }
 }
 
