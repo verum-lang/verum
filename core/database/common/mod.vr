@@ -50,6 +50,7 @@ public module retry;
 public module retry_run;
 public module pool;
 public module pool_impl;
+public module pool_supervisor;
 public module into_response;
 public module schema;
 public module check_codegen;
