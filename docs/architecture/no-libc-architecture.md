@@ -121,6 +121,8 @@ shipping):
 | ✅ `ffi.rs::get_or_declare_malloc/free/realloc` | `malloc`/`free`/`realloc` | malloc → `verum_os_alloc`; free → `verum_internal_free` (no-op stub; CBGR epoch model handles bulk invalidation); realloc → `verum_internal_realloc` (allocate-new wrapper). **Closed.** |
 | ✅ `instruction.rs::checked_malloc_instr`     | `malloc` + `_exit`    | Both routed through `verum_os_alloc` and `verum_os_exit`. **Closed.** |
 | ✅ `instruction.rs` strcmp call sites (×3)    | `strcmp`              | Single shared `verum_internal_strcmp` helper — inline byte-by-byte comparison loop with null-termination check.  Internal-linkage so the symbol doesn't escape. **Closed.** |
+| ✅ `instruction.rs` puts call sites (×9)      | `puts`                | Single shared `verum_internal_puts` helper that calls `verum_internal_strlen` + `verum_internal_write` (both libc-free) plus a trailing newline.  Internal-linkage. **Closed.** |
+| ✅ All `_exit` call sites (×13 across instruction.rs / ffi.rs / platform_ir.rs / runtime.rs) | `_exit` | Bulk-renamed to `verum_internal_exit_i64` — internal-linkage wrapper that truncates i64→i32 and calls `verum_os_exit` (which itself uses ExitProcess on Windows, `_exit` syscall on Linux, libSystem `_exit` on macOS). **Closed.** |
 | ✅ `runtime.rs::get_or_declare_unlink`        | `unlink`              | Linux x86_64 `SYS_unlink` (87) / aarch64 `SYS_unlinkat` (35) ; libSystem on macOS. **Closed.** |
 | ✅ `runtime.rs::get_or_declare_lseek`         | `lseek`               | Linux `SYS_lseek` (8) direct syscall ; libSystem on macOS. **Closed.** |
 | ✅ `runtime.rs::get_or_declare_access`        | `access`              | Linux x86_64 `SYS_access` (21) / aarch64 `SYS_faccessat` (48) ; libSystem on macOS. **Closed.** |

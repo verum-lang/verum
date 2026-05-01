@@ -947,9 +947,9 @@ impl<'ctx> PlatformIR<'ctx> {
             let code_u32 = builder.build_int_cast(code, i32_type, "code32").or_llvm_err()?;
             builder.build_call(exit_process, &[code_u32.into()], "").or_llvm_err()?;
         } else {
-            let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+            let exit_fn = module.get_function("verum_internal_exit_i64").unwrap_or_else(|| {
                 let exit_type = void_type.fn_type(&[i64_type.into()], false);
-                let f = module.add_function("_exit", exit_type, None);
+                let f = module.add_function("verum_internal_exit_i64", exit_type, None);
                 f.add_attribute(AttributeLoc::Function, ctx.create_string_attribute("noreturn", ""));
                 f
             });
@@ -2169,8 +2169,8 @@ impl<'ctx> PlatformIR<'ctx> {
                 ).or_llvm_err()?;
 
                 let exit_fn_type = void_type.fn_type(&[i64_type.into()], false);
-                let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
-                    let f = module.add_function("_exit", exit_fn_type, None);
+                let exit_fn = module.get_function("verum_internal_exit_i64").unwrap_or_else(|| {
+                    let f = module.add_function("verum_internal_exit_i64", exit_fn_type, None);
                     f.add_attribute(AttributeLoc::Function, ctx.create_string_attribute("noreturn", ""));
                     f
                 });
@@ -2314,9 +2314,9 @@ impl<'ctx> PlatformIR<'ctx> {
                 builder.position_at_end(entry);
 
                 // Declare _exit(i64) -> void (matches existing convention)
-                let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+                let exit_fn = module.get_function("verum_internal_exit_i64").unwrap_or_else(|| {
                     let exit_type = void_type.fn_type(&[i64_type.into()], false);
-                    let f = module.add_function("_exit", exit_type, None);
+                    let f = module.add_function("verum_internal_exit_i64", exit_type, None);
                     f.add_attribute(AttributeLoc::Function, ctx.create_string_attribute("noreturn", ""));
                     f
                 });
@@ -7320,9 +7320,9 @@ impl<'ctx> PlatformIR<'ctx> {
         }
 
         // _exit is noreturn
-        if module.get_function("_exit").is_none() {
+        if module.get_function("verum_internal_exit_i64").is_none() {
             let ft = void_type.fn_type(&[i64_type.into()], false);
-            let f = module.add_function("_exit", ft, None);
+            let f = module.add_function("verum_internal_exit_i64", ft, None);
             f.add_attribute(
                 AttributeLoc::Function,
                 ctx.create_string_attribute("noreturn", ""),
@@ -7378,7 +7378,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let dup2_fn = module.get_function("dup2").or_missing_fn("dup2")?;
         let execvp_fn = module.get_function("execvp").or_missing_fn("execvp")?;
         let close_fn = module.get_function("close").or_missing_fn("close")?;
-        let exit_fn = module.get_function("_exit").or_missing_fn("_exit")?;
+        let exit_fn = module.get_function("verum_internal_exit_i64").or_missing_fn("_exit")?;
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");

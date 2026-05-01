@@ -309,12 +309,12 @@ impl<'ctx> FfiLowering<'ctx> {
             .build_conditional_branch(is_null, oom_bb, ok_bb)
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
         builder.position_at_end(oom_bb);
-        let exit_fn = if let Some(f) = module.get_function("_exit") {
+        let exit_fn = if let Some(f) = module.get_function("verum_internal_exit_i64") {
             f
         } else {
             let i64_type = self.context.i64_type();
             let fn_type = self.context.void_type().fn_type(&[i64_type.into()], false);
-            let f = module.add_function("_exit", fn_type, None);
+            let f = module.add_function("verum_internal_exit_i64", fn_type, None);
             f.add_attribute(
                 verum_llvm::attributes::AttributeLoc::Function,
                 self.context.create_string_attribute("noreturn", ""),
