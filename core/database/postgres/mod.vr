@@ -36,6 +36,7 @@ public module adapter;
 public module stmt_cache;
 public module extended;
 public module pipeline;
+public module notify;
 public module pool;
 public module introspect;
 public module transaction;
@@ -69,6 +70,13 @@ public mount .pipeline.{
     PsActive, PsAborting, PsClosed,
     MAX_INFLIGHT, INITIAL_BATCH_SIZE, MAX_BATCH_SIZE, MIN_BATCH_SIZE,
     RTT_LOW_NS, RTT_HIGH_NS, RTT_SAMPLE_WINDOW,
+};
+public mount .notify.{
+    Notification, NotificationStream, NotificationOutcome,
+    Got, Drained,
+    NotifyDispatcher, ChannelSink,
+    StreamMetrics, DispatcherMetrics,
+    NOTIFY_CHANNEL_DEFAULT_CAP, NOTIFY_RATE_WARNING_THRESHOLD, NOTIFY_RATE_WINDOW_NS,
 };
 public mount .pool.PgPool;
 public mount .introspect.introspect as introspect_postgres;
