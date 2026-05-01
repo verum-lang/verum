@@ -477,3 +477,50 @@ refcount bump.
   zero-overhead default contract preserved (bit-identical
   observable behaviour to the pre-fix path with the
   iteration-allocation hoisting as net win).
+
+---
+
+## §12. Structural: `ArenaPool` defined but not wired into `connection.vr` — **FIXED**
+
+### Attack
+Same architectural pattern as §11 (BufferPool) but for the
+**per-request arena pool** — the Phase-5 killer feature for the
+Weft hot path per spec §4.3.  `core/net/weft/arena_pool.vr`
+shipped a fully-architected `ArenaPool` (`ArenaLease` RAII
+discipline, `GenerationalArena.reset()` for O(1) mass invalidation,
+bounded-OOM contract via `ArenaPoolConfig.max_total`, hierarchy /
+epoch-dual-protection design notes per §4.3.1-§4.3.4) — yet **no
+weft module consumed it**.
+
+The structural consequence: every per-request handler allocation
+went to the standard CBGR-managed heap with the standard
+free-on-drop discipline.  Tokio/Hyper's `bytes::Bytes` pool, axum's
+`RequestExt::extensions()`, .NET's `MemoryPool<T>.Shared` all ship
+the per-request arena pattern as the production-grade default —
+Verum's spec called for it; the implementation was orphaned.
+
+### Fundamental fix (LANDED)
+`ConnectionConfig.arena_pool: Maybe<Shared<ArenaPool>>` field +
+`with_arena_pool()` builder.  When set, `serve_one_message`
+acquires a fresh `ArenaLease` for the request's lifetime; the
+lease is released on Drop with O(1) reset() (generation bump
+invalidating all in-arena allocations) and the arena returns to
+the warm pool.  `Shared<ArenaPool>` clone semantics give every
+per-connection task a refcounted view of the SAME pool state.
+
+The lease binding is `let _arena_lease` — handlers don't see the
+lease directly per spec §4.3 ("Handlers see `&mut Arena`, never
+the lease itself").  This is the pre-`@lifetime(request)`
+foundation pin: the future annotation will let CBGR escape
+analysis statically prove handlers cannot leak arena-allocated
+references out of the request scope.
+
+### Verification
+* `vcs/specs/L2-standard/net/weft/connection_arena_pool_wired.vr`
+  (typecheck-pass) pins the `with_arena_pool` builder API and
+  the `Clone for ConnectionConfig` propagation.
+* `cargo test -p verum_vbc --features codegen
+   test_compile_stdlib_net_*` — all 5 net stdlib compile
+  tests green.
+* Default `ConnectionConfig.default()` keeps `arena_pool: None`
+  — zero-overhead default contract preserved.
