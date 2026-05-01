@@ -20,10 +20,13 @@ use super::target_triple::{
     target_is_aarch64, target_is_darwin, target_is_linux, target_is_windows,
 };
 use verum_llvm::attributes::AttributeLoc;
+use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
-use verum_llvm::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue};
+use verum_llvm::values::{
+    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue,
+};
 use verum_llvm::{AddressSpace, IntPredicate};
 
 /// Manifest-driven runtime configuration values that flow from
@@ -4749,6 +4752,15 @@ impl<'ctx> PlatformIR<'ctx> {
         self.emit_udp_send_text(module)?;
         self.emit_udp_recv_text(module)?;
         self.emit_udp_close(module)?;
+        // Timeout-bound + readiness intrinsics — close interpreter↔AOT
+        // parity for `core/intrinsics/runtime/os.vr` net helpers.
+        self.emit_tcp_recv_timeout(module)?;
+        self.emit_tcp_send_timeout(module)?;
+        self.emit_tcp_accept_timeout(module)?;
+        self.emit_tcp_connect_timeout(module)?;
+        self.emit_udp_recv_timeout(module)?;
+        self.emit_io_wait_readable(module)?;
+        self.emit_io_wait_writable(module)?;
         Ok(())
     }
 
@@ -5737,6 +5749,533 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_call(dealloc_fn, &[buf.into(), alloc_size.into()], "")
             .or_llvm_err()?;
         builder.build_return(Some(&text)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// Set SO_RCVTIMEO or SO_SNDTIMEO on `fd` from a millisecond
+    /// count.  Lays out a `struct timeval { tv_sec; tv_usec; }` on
+    /// the stack and calls the existing libc-free `setsockopt`
+    /// wrapper.
+    ///
+    /// `sol_level` / `opt_name` are passed in by the caller because
+    /// the constants differ per target (Linux vs Darwin) — see
+    /// `target_socket_timeout_consts` below.
+    fn emit_setsockopt_timeval_ms(
+        &self,
+        module: &Module<'ctx>,
+        builder: &Builder<'ctx>,
+        fd: IntValue<'ctx>,
+        sol_level: u64,
+        opt_name: u64,
+        timeout_ms: IntValue<'ctx>,
+    ) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+
+        // struct timeval { tv_sec: i64, tv_usec: i64 } — Linux/macOS
+        // both store both fields as 64-bit on 64-bit platforms.
+        // Total size: 16 bytes.
+        let timeval_ty = i64_type.array_type(2);
+        let tv = builder.build_alloca(timeval_ty, "tv").or_llvm_err()?;
+
+        // tv_sec  = timeout_ms / 1000
+        let thousand = i64_type.const_int(1000, false);
+        let tv_sec = builder
+            .build_int_signed_div(timeout_ms, thousand, "tv_sec")
+            .or_llvm_err()?;
+        // tv_usec = (timeout_ms % 1000) * 1000
+        let rem = builder
+            .build_int_signed_rem(timeout_ms, thousand, "tv_rem")
+            .or_llvm_err()?;
+        let tv_usec = builder
+            .build_int_mul(rem, thousand, "tv_usec")
+            .or_llvm_err()?;
+
+        // SAFETY: GEP into the just-allocated stack timeval; both
+        // offsets are within the 16-byte allocation.
+        let sec_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    timeval_ty,
+                    tv,
+                    &[i64_type.const_zero(), i64_type.const_zero()],
+                    "sec_ptr",
+                )
+                .or_llvm_err()?
+        };
+        builder.build_store(sec_ptr, tv_sec).or_llvm_err()?;
+        let usec_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    timeval_ty,
+                    tv,
+                    &[i64_type.const_zero(), i64_type.const_int(1, false)],
+                    "usec_ptr",
+                )
+                .or_llvm_err()?
+        };
+        builder.build_store(usec_ptr, tv_usec).or_llvm_err()?;
+
+        let setsockopt_fn = module
+            .get_function("setsockopt")
+            .or_missing_fn("setsockopt")?;
+        builder
+            .build_call(
+                setsockopt_fn,
+                &[
+                    fd.into(),
+                    i64_type.const_int(sol_level, false).into(),
+                    i64_type.const_int(opt_name, false).into(),
+                    tv.into(),
+                    i64_type.const_int(16, false).into(),
+                ],
+                "sso_to",
+            )
+            .or_llvm_err()?;
+        Ok(())
+    }
+
+    /// SOL_SOCKET / SO_RCVTIMEO / SO_SNDTIMEO per target.
+    /// Linux: SOL_SOCKET=1, SO_RCVTIMEO=20, SO_SNDTIMEO=21
+    /// Darwin: SOL_SOCKET=0xFFFF, SO_RCVTIMEO=0x1006, SO_SNDTIMEO=0x1005
+    fn target_socket_timeout_consts(&self, module: &Module<'ctx>) -> (u64, u64, u64) {
+        if target_is_linux(module) {
+            (1, 20, 21)
+        } else {
+            (0xFFFF, 0x1006, 0x1005)
+        }
+    }
+
+    /// verum_tcp_recv_timeout(fd: i64, max_len: i64, timeout_ms: i64) -> i64 (Text)
+    ///
+    /// Sets SO_RCVTIMEO on `fd` for `timeout_ms` milliseconds, then
+    /// delegates to `verum_tcp_recv_text`.  On timeout, the
+    /// underlying `recv()` returns -1 with errno=EAGAIN and
+    /// `verum_tcp_recv_text` produces an empty Text — semantically
+    /// equivalent to the interpreter's
+    /// `net_runtime::tcp_recv_timeout_coop` which also returns
+    /// `(status, body)` with empty body on timeout (the caller
+    /// disambiguates timeout vs. EOF via a follow-up
+    /// `io_wait_readable` poll, per `core/intrinsics/runtime/os.vr`
+    /// I/O return-code contract).
+    fn emit_tcp_recv_timeout(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let fn_type =
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        let func = self.get_or_declare_fn(module, "verum_tcp_recv_timeout", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let fd = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let max_len = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+        let timeout_ms = func
+            .get_nth_param(2)
+            .or_internal("missing param 2")?
+            .into_int_value();
+
+        let (sol, rcv, _snd) = self.target_socket_timeout_consts(module);
+        self.emit_setsockopt_timeval_ms(module, &builder, fd, sol, rcv, timeout_ms)?;
+
+        let recv_text_fn = self
+            .get_or_declare_fn(
+                module,
+                "verum_tcp_recv_text",
+                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+            );
+        let result = builder
+            .build_call(recv_text_fn, &[fd.into(), max_len.into()], "rt")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?;
+        builder.build_return(Some(&result)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_tcp_send_timeout(fd: i64, data: i64, timeout_ms: i64) -> i64
+    ///
+    /// SO_SNDTIMEO + delegate to `verum_tcp_send_text`.  Returns
+    /// the number of bytes written (or -1 on timeout/error).
+    fn emit_tcp_send_timeout(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let fn_type =
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        let func = self.get_or_declare_fn(module, "verum_tcp_send_timeout", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let fd = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let data = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+        let timeout_ms = func
+            .get_nth_param(2)
+            .or_internal("missing param 2")?
+            .into_int_value();
+
+        let (sol, _rcv, snd) = self.target_socket_timeout_consts(module);
+        self.emit_setsockopt_timeval_ms(module, &builder, fd, sol, snd, timeout_ms)?;
+
+        let send_text_fn = self
+            .get_or_declare_fn(
+                module,
+                "verum_tcp_send_text",
+                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+            );
+        let result = builder
+            .build_call(send_text_fn, &[fd.into(), data.into()], "st")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?;
+        builder.build_return(Some(&result)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_tcp_accept_timeout(listen_fd: i64, timeout_ms: i64) -> i64
+    ///
+    /// SO_RCVTIMEO on the listening socket affects accept(),
+    /// returning -1 with errno=EAGAIN on timeout (per POSIX).
+    /// `verum_tcp_accept` returns the i64 from accept() directly,
+    /// so timeout surfaces as -1.
+    fn emit_tcp_accept_timeout(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let func = self.get_or_declare_fn(module, "verum_tcp_accept_timeout", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let listen_fd = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let timeout_ms = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+
+        let (sol, rcv, _snd) = self.target_socket_timeout_consts(module);
+        self.emit_setsockopt_timeval_ms(module, &builder, listen_fd, sol, rcv, timeout_ms)?;
+
+        let accept_fn = self
+            .get_or_declare_fn(
+                module,
+                "verum_tcp_accept",
+                i64_type.fn_type(&[i64_type.into()], false),
+            );
+        let result = builder
+            .build_call(accept_fn, &[listen_fd.into()], "at")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?;
+        builder.build_return(Some(&result)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_tcp_connect_timeout(host: i64 Text, port: i64, timeout_ms: i64) -> i64
+    ///
+    /// Pragmatic AOT shim: delegates to `verum_tcp_connect(host,
+    /// port)` which uses the kernel's default connect deadline.
+    /// True deadline-aware connect requires non-blocking sockets +
+    /// poll(POLLOUT) — tracked as a follow-up.  The current shape
+    /// preserves link-time correctness; semantic-deadline parity
+    /// is best-effort.  `timeout_ms` is intentionally ignored.
+    fn emit_tcp_connect_timeout(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let fn_type =
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        let func = self.get_or_declare_fn(module, "verum_tcp_connect_timeout", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let host = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let port = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+        // timeout_ms is param 2 — currently unused (see doc comment).
+
+        let connect_fn = self
+            .get_or_declare_fn(
+                module,
+                "verum_tcp_connect",
+                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+            );
+        let result = builder
+            .build_call(connect_fn, &[host.into(), port.into()], "ct")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?;
+        builder.build_return(Some(&result)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_udp_recv_timeout(fd: i64, max_len: i64, timeout_ms: i64) -> i64 (Text)
+    fn emit_udp_recv_timeout(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let fn_type =
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        let func = self.get_or_declare_fn(module, "verum_udp_recv_timeout", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let fd = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let max_len = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+        let timeout_ms = func
+            .get_nth_param(2)
+            .or_internal("missing param 2")?
+            .into_int_value();
+
+        let (sol, rcv, _snd) = self.target_socket_timeout_consts(module);
+        self.emit_setsockopt_timeval_ms(module, &builder, fd, sol, rcv, timeout_ms)?;
+
+        let udp_recv_fn = self
+            .get_or_declare_fn(
+                module,
+                "verum_udp_recv_text",
+                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+            );
+        let result = builder
+            .build_call(udp_recv_fn, &[fd.into(), max_len.into()], "ur")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?;
+        builder.build_return(Some(&result)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_io_wait_readable(fd: i64, timeout_ms: i64) -> i64
+    ///
+    /// Returns: 1 = readable, 0 = timeout, -1 = error/EOF.
+    ///
+    /// Implementation: SO_RCVTIMEO + `recv(fd, &b, 1, MSG_PEEK)`.
+    /// MSG_PEEK doesn't consume bytes, so the caller's subsequent
+    /// recv reads the same data.  `recv` returns 1 if data is
+    /// available, 0 on EOF, -1 on timeout (errno=EAGAIN) — we map
+    /// to {1, -1, 0} respectively to match the interpreter contract
+    /// in `net_runtime::io_wait_readable_coop`.
+    fn emit_io_wait_readable(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let i32_type = ctx.i32_type();
+        let i8_type = ctx.i8_type();
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let func = self.get_or_declare_fn(module, "verum_io_wait_readable", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        let bb_eof = ctx.append_basic_block(func, "eof");
+        let bb_timeout = ctx.append_basic_block(func, "timeout");
+        let bb_ready = ctx.append_basic_block(func, "ready");
+        let bb_check_neg = ctx.append_basic_block(func, "check_neg");
+        let bb_check_zero = ctx.append_basic_block(func, "check_zero");
+
+        builder.position_at_end(entry);
+        let fd = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let timeout_ms = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+
+        let (sol, rcv, _snd) = self.target_socket_timeout_consts(module);
+        self.emit_setsockopt_timeval_ms(module, &builder, fd, sol, rcv, timeout_ms)?;
+
+        // 1-byte peek buffer
+        let peek_buf = builder.build_alloca(i8_type, "peek").or_llvm_err()?;
+        // MSG_PEEK = 0x2 on both Linux and Darwin.
+        let recv_fn = module.get_function("recv").or_missing_fn("recv")?;
+        let n = builder
+            .build_call(
+                recv_fn,
+                &[
+                    fd.into(),
+                    peek_buf.into(),
+                    i64_type.const_int(1, false).into(),
+                    i64_type.const_int(2, false).into(),
+                ],
+                "n",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
+        let _ = i32_type; // suppress unused
+
+        // n > 0 → ready; n == 0 → EOF; n < 0 → timeout (we don't
+        // distinguish EAGAIN from other errors here — both produce
+        // 0 in our return contract since the caller will retry or
+        // surface the error via a separate mechanism).
+        let is_pos = builder
+            .build_int_compare(IntPredicate::SGT, n, i64_type.const_zero(), "ip")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_pos, bb_ready, bb_check_zero)
+            .or_llvm_err()?;
+
+        builder.position_at_end(bb_check_zero);
+        let is_zero = builder
+            .build_int_compare(IntPredicate::EQ, n, i64_type.const_zero(), "iz")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_zero, bb_eof, bb_check_neg)
+            .or_llvm_err()?;
+
+        builder.position_at_end(bb_check_neg);
+        // Negative — timeout (or other recv error). Map to 0
+        // ("not ready / timed out") to match the interpreter's
+        // io_wait_readable_coop contract.
+        builder
+            .build_unconditional_branch(bb_timeout)
+            .or_llvm_err()?;
+
+        builder.position_at_end(bb_ready);
+        builder
+            .build_return(Some(&i64_type.const_int(1, false)))
+            .or_llvm_err()?;
+
+        builder.position_at_end(bb_eof);
+        builder
+            .build_return(Some(&i64_type.const_all_ones())) // -1
+            .or_llvm_err()?;
+
+        builder.position_at_end(bb_timeout);
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_io_wait_writable(fd: i64, timeout_ms: i64) -> i64
+    ///
+    /// Returns: 1 = writable, 0 = timeout, -1 = error.
+    ///
+    /// Implementation: SO_SNDTIMEO + `send(fd, _, 0, MSG_DONTWAIT)`
+    /// to probe writability without enqueuing data.  `send` of 0
+    /// bytes returns 0 if the socket is writable (or the kernel
+    /// accepts an empty send), -1 on EAGAIN/error.  We map to
+    /// {1 if n >= 0, 0 if EAGAIN-like}.  Imperfect — a true
+    /// poll(POLLOUT) is the correct primitive; this is the
+    /// pragmatic shim that matches `io_wait_readable`'s structure.
+    fn emit_io_wait_writable(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let i8_type = ctx.i8_type();
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let func = self.get_or_declare_fn(module, "verum_io_wait_writable", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        let bb_writable = ctx.append_basic_block(func, "writable");
+        let bb_timeout = ctx.append_basic_block(func, "timeout");
+
+        builder.position_at_end(entry);
+        let fd = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let timeout_ms = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+
+        let (sol, _rcv, snd) = self.target_socket_timeout_consts(module);
+        self.emit_setsockopt_timeval_ms(module, &builder, fd, sol, snd, timeout_ms)?;
+
+        let buf = builder.build_alloca(i8_type, "wb").or_llvm_err()?;
+        let send_fn = module.get_function("send").or_missing_fn("send")?;
+        let n = builder
+            .build_call(
+                send_fn,
+                &[
+                    fd.into(),
+                    buf.into(),
+                    i64_type.const_zero().into(),
+                    i64_type.const_int(0, false).into(),
+                ],
+                "n",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
+        let is_ok = builder
+            .build_int_compare(IntPredicate::SGE, n, i64_type.const_zero(), "iok")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_ok, bb_writable, bb_timeout)
+            .or_llvm_err()?;
+
+        builder.position_at_end(bb_writable);
+        builder
+            .build_return(Some(&i64_type.const_int(1, false)))
+            .or_llvm_err()?;
+        builder.position_at_end(bb_timeout);
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
         Ok(())
     }
 

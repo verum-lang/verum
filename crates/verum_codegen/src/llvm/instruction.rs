@@ -10109,31 +10109,64 @@ fn lower_call<'ctx>(
     // Intercept file I/O and networking intrinsics.
     // These let user code call file_read_all(), tcp_connect(), etc.
     // directly, routing to C runtime functions.
-    if func_name == "file_open"
-        || func_name == "file_read"
-        || func_name == "file_write"
-        || func_name == "file_close"
-        || func_name == "file_read_all"
-        || func_name == "file_write_all"
-        || func_name == "file_append"
-        || func_name == "file_exists"
-        || func_name == "file_delete"
-        || func_name == "sleep"
-        || func_name == "sleep_ms"
-        || func_name == "time_now"
-        || func_name == "time_now_ms"
-        || func_name == "tcp_connect"
-        || func_name == "tcp_listen"
-        || func_name == "tcp_listen_v2"
-        || func_name == "tcp_local_port"
-        || func_name == "tcp_accept"
-        || func_name == "tcp_send"
-        || func_name == "tcp_recv"
-        || func_name == "tcp_close"
-        || func_name == "udp_bind"
-        || func_name == "udp_send"
-        || func_name == "udp_recv"
-        || func_name == "udp_close"
+    // Normalise the callee name to the bare intrinsic key.  The
+    // `.vr` declarations come in two flavours:
+    //
+    //   1. Bare:        `@intrinsic("file_open") fn file_open(...)`
+    //                  (the Verum-side function is named `file_open`).
+    //   2. `__xxx_raw`: `@intrinsic("file_open") fn __file_open_raw(...)`
+    //                  (the Verum-side function is named
+    //                  `__file_open_raw` — the `core/intrinsics/runtime/os.vr`
+    //                  convention).
+    //
+    // The intercept logic below dispatches on the *intrinsic* key
+    // (`file_open`, `tcp_connect`, …), so we accept either flavour
+    // by stripping a leading `__` and trailing `_raw` if both are
+    // present.  This means callers from `core/intrinsics/runtime/os.vr`
+    // (which use `__file_open_raw` etc.) reach the same AOT helper
+    // as callers that import the bare intrinsic directly.
+    let intrinsic_key: &str = if func_name.starts_with("__") && func_name.ends_with("_raw") {
+        &func_name[2..func_name.len() - 4]
+    } else {
+        func_name
+    };
+
+    if intrinsic_key == "file_open"
+        || intrinsic_key == "file_read"
+        || intrinsic_key == "file_write"
+        || intrinsic_key == "file_close"
+        || intrinsic_key == "file_read_all"
+        || intrinsic_key == "file_write_all"
+        || intrinsic_key == "file_append"
+        || intrinsic_key == "file_exists"
+        || intrinsic_key == "file_delete"
+        || intrinsic_key == "sleep"
+        || intrinsic_key == "sleep_ms"
+        || intrinsic_key == "time_now"
+        || intrinsic_key == "time_now_ms"
+        || intrinsic_key == "tcp_connect"
+        || intrinsic_key == "tcp_listen"
+        || intrinsic_key == "tcp_listen_v2"
+        || intrinsic_key == "tcp_local_port"
+        || intrinsic_key == "tcp_accept"
+        || intrinsic_key == "tcp_send"
+        || intrinsic_key == "tcp_recv"
+        || intrinsic_key == "tcp_close"
+        || intrinsic_key == "udp_bind"
+        || intrinsic_key == "udp_send"
+        || intrinsic_key == "udp_recv"
+        || intrinsic_key == "udp_close"
+        // Timeout-bound + readiness intrinsics (interpreter↔AOT parity).
+        // The runtime helpers (`verum_tcp_recv_timeout`, …) are
+        // emitted unconditionally in `emit_networking`; here we just
+        // wire call sites to invoke them.
+        || intrinsic_key == "tcp_recv_timeout"
+        || intrinsic_key == "tcp_send_timeout"
+        || intrinsic_key == "tcp_accept_timeout"
+        || intrinsic_key == "tcp_connect_timeout"
+        || intrinsic_key == "udp_recv_timeout"
+        || intrinsic_key == "io_wait_readable"
+        || intrinsic_key == "io_wait_writable"
     {
         let i64_type = ctx.types().i64_type();
         let ptr_type = ctx.types().ptr_type();
@@ -10154,7 +10187,7 @@ fn lower_call<'ctx>(
                 module.add_function("verum_text_from_cstr", fn_type, None)
             });
 
-        match func_name {
+        match intrinsic_key {
             // ============================================================
             // File I/O intrinsics
             // ============================================================
@@ -10826,6 +10859,187 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "ucl_r")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                return Ok(());
+            }
+
+            // ====================================================
+            // Timeout-bound net intrinsics
+            // ====================================================
+            "tcp_recv_timeout" => {
+                let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "trt_fd")?;
+                let max_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "trt_max")?;
+                let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "trt_to")?;
+                let helper = module
+                    .get_function("verum_tcp_recv_timeout")
+                    .unwrap_or_else(|| {
+                        let fn_type = i64_type.fn_type(
+                            &[i64_type.into(), i64_type.into(), i64_type.into()],
+                            false,
+                        );
+                        module.add_function("verum_tcp_recv_timeout", fn_type, None)
+                    });
+                let result = ctx
+                    .builder()
+                    .build_call(
+                        helper,
+                        &[fd_val.into(), max_val.into(), to_val.into()],
+                        "trt_r",
+                    )
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                ctx.mark_text_register(dst.0);
+                return Ok(());
+            }
+
+            "tcp_send_timeout" => {
+                let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tst_fd")?;
+                let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tst_data")?;
+                let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "tst_to")?;
+                let helper = module
+                    .get_function("verum_tcp_send_timeout")
+                    .unwrap_or_else(|| {
+                        let fn_type = i64_type.fn_type(
+                            &[i64_type.into(), i64_type.into(), i64_type.into()],
+                            false,
+                        );
+                        module.add_function("verum_tcp_send_timeout", fn_type, None)
+                    });
+                let result = ctx
+                    .builder()
+                    .build_call(
+                        helper,
+                        &[fd_val.into(), data_val.into(), to_val.into()],
+                        "tst_r",
+                    )
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                return Ok(());
+            }
+
+            "tcp_accept_timeout" => {
+                let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tat_fd")?;
+                let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tat_to")?;
+                let helper = module
+                    .get_function("verum_tcp_accept_timeout")
+                    .unwrap_or_else(|| {
+                        let fn_type =
+                            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+                        module.add_function("verum_tcp_accept_timeout", fn_type, None)
+                    });
+                let result = ctx
+                    .builder()
+                    .build_call(helper, &[fd_val.into(), to_val.into()], "tat_r")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                return Ok(());
+            }
+
+            "tcp_connect_timeout" => {
+                // host: Text, port: Int, timeout_ms: Int → Int (fd or -1)
+                let host_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tct_host")?;
+                let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tct_port")?;
+                let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "tct_to")?;
+                let helper = module
+                    .get_function("verum_tcp_connect_timeout")
+                    .unwrap_or_else(|| {
+                        let fn_type = i64_type.fn_type(
+                            &[i64_type.into(), i64_type.into(), i64_type.into()],
+                            false,
+                        );
+                        module.add_function("verum_tcp_connect_timeout", fn_type, None)
+                    });
+                let result = ctx
+                    .builder()
+                    .build_call(
+                        helper,
+                        &[host_val.into(), port_val.into(), to_val.into()],
+                        "tct_r",
+                    )
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                return Ok(());
+            }
+
+            "udp_recv_timeout" => {
+                let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "urt_fd")?;
+                let max_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "urt_max")?;
+                let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "urt_to")?;
+                let helper = module
+                    .get_function("verum_udp_recv_timeout")
+                    .unwrap_or_else(|| {
+                        let fn_type = i64_type.fn_type(
+                            &[i64_type.into(), i64_type.into(), i64_type.into()],
+                            false,
+                        );
+                        module.add_function("verum_udp_recv_timeout", fn_type, None)
+                    });
+                let result = ctx
+                    .builder()
+                    .build_call(
+                        helper,
+                        &[fd_val.into(), max_val.into(), to_val.into()],
+                        "urt_r",
+                    )
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                ctx.mark_text_register(dst.0);
+                return Ok(());
+            }
+
+            "io_wait_readable" => {
+                let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "iwr_fd")?;
+                let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "iwr_to")?;
+                let helper = module
+                    .get_function("verum_io_wait_readable")
+                    .unwrap_or_else(|| {
+                        let fn_type =
+                            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+                        module.add_function("verum_io_wait_readable", fn_type, None)
+                    });
+                let result = ctx
+                    .builder()
+                    .build_call(helper, &[fd_val.into(), to_val.into()], "iwr_r")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                return Ok(());
+            }
+
+            "io_wait_writable" => {
+                let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "iww_fd")?;
+                let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "iww_to")?;
+                let helper = module
+                    .get_function("verum_io_wait_writable")
+                    .unwrap_or_else(|| {
+                        let fn_type =
+                            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+                        module.add_function("verum_io_wait_writable", fn_type, None)
+                    });
+                let result = ctx
+                    .builder()
+                    .build_call(helper, &[fd_val.into(), to_val.into()], "iww_r")
                     .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
                     .try_as_basic_value()
                     .basic()
