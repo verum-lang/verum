@@ -662,15 +662,12 @@ public fn NtRemoveIoCompletionEx(
     alertable: Bool,
 ) -> NtStatus;
 
-/// Associate file handle with completion port
-@extern("ntdll.dll")
-public fn NtSetInformationFile(
-    file_handle: Handle,
-    io_status_block: &mut IoStatusBlock,
-    file_information: &unsafe Byte,
-    length: UInt32,
-    file_information_class: UInt32,
-) -> NtStatus;
+// `NtSetInformationFile` is declared earlier in this file (around
+// line 336) — keep a single canonical extern declaration.  The
+// second declaration here was a copy with an "Associate file handle
+// with completion port" comment; the canonical declaration covers
+// both use cases (the IOCP-association call passes a
+// `FileCompletionInformation` class to the same Nt entrypoint).
 
 // File information class for IOCP association
 public const FileCompletionInformation: UInt32 = 30;

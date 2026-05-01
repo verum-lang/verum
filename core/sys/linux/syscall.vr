@@ -1598,18 +1598,11 @@ public fn getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32
     }
 }
 
-/// File control operations.
-public fn fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
-    let result = unsafe {
-        syscall_raw(SYS_FCNTL, fd.as_raw(), cmd, arg, 0, 0, 0)
-    };
-
-    if result < 0 {
-        Err(OSError.from_code(-result as Int))
-    } else {
-        Ok(result)
-    }
-}
+// `fcntl` is declared earlier in this file (around line 407) — keep
+// a single canonical declaration.  A duplicate here previously
+// emitted two codegen-time function bodies with the same descriptor
+// id, requiring the dedup pass at `crates/verum_vbc/src/codegen/
+// mod.rs` to collapse on every script run.
 
 /// Set file descriptor to non-blocking mode.
 public fn set_nonblocking(fd: FileDesc, nonblocking: Bool) -> Result<(), OSError> {
@@ -1777,37 +1770,11 @@ public const TIOCGWINSZ: Int = 0x5413;
 /// Set terminal window size
 public const TIOCSWINSZ: Int = 0x5414;
 
-// =============================================================================
-// Terminal ioctl wrappers
-// =============================================================================
-
-/// Perform ioctl on a file descriptor.
-///
-/// # Arguments
-/// * `fd` - File descriptor to operate on
-/// * `request` - Ioctl request code (TCGETS, TIOCGWINSZ, etc.)
-/// * `arg` - Pointer argument (cast to Int)
-///
-/// # Returns
-/// Ok with ioctl return value on success, Err with OSError on failure.
-public fn ioctl(fd: FileDesc, request: Int, arg: Int) -> Result<Int, OSError> {
-    let result = unsafe {
-        syscall_raw(SYS_IOCTL, fd.as_raw(), request, arg, 0, 0, 0)
-    };
-    if result < 0 {
-        Err(OSError.from_code(-result as Int))
-    } else {
-        Ok(result)
-    }
-}
-
-/// Check whether a file descriptor refers to a terminal.
-///
-/// Attempts TIOCGWINSZ ioctl; success means it is a tty.
-public fn isatty(fd: FileDesc) -> Bool {
-    let mut ws: [Byte; 8] = [0; 8];
-    let result = unsafe {
-        syscall_raw(SYS_IOCTL, fd.as_raw(), TIOCGWINSZ, &ws as Int, 0, 0, 0)
-    };
-    result == 0
-}
+// `ioctl` and `isatty` are declared earlier in this file (around
+// lines 547 / 559) — keep a single canonical declaration.
+// Duplicates here previously emitted two codegen-time function
+// bodies with the same descriptor id, requiring the dedup pass at
+// `crates/verum_vbc/src/codegen/mod.rs` to collapse on every script
+// run.  The earlier `ioctl` uses the POSIX-correct `request: UInt64`
+// signature; this trailing `request: Int` form was the legacy
+// shape and is removed to avoid the silent shadow.
