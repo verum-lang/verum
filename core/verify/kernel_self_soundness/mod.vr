@@ -1,0 +1,46 @@
+// =============================================================================
+// core.verify.kernel_self_soundness — Meta-soundness escape hatch (#158)
+// =============================================================================
+//
+
+// **The meta-theory layer for Verum's kernel.**
+//
+
+// Distinct from `core.verify.kernel_soundness/` (which contains the
+// kernel's soundness theorem + 35 per-rule lemmas), THIS module
+// records the META-theorem:
+//
+//   "Verum's kernel + its soundness corpus is sound under
+//    Verum + κ_meta + ZFC + 2-inacc."
+//
+// The meta-theorem is the structured admission of Verum's
+// Gödel-2nd-incompleteness escape: instead of pretending the kernel
+// proves its own consistency, Verum is honest that the soundness
+// claim relies on a stronger meta-theory.
+//
+
+// **Module roster** (V0 — single entry; future entries extend the
+// reflection layer):
+//
+//   1. `meta_theorem.vr` — the meta-soundness axiom
+//      `kernel_self_soundness_in_meta_universe`. Cited via
+//      `@framework(verum_internal_meta, …)` to the Gödel /
+//      Tarski / Feferman literature on structured reflection.
+//
+// **Future entries** (#158 V1+):
+//   * `meta_meta_soundness.vr` — the meta-meta-theorem (Verum+κ_meta
+//     is sound in Verum+2·κ_meta).  Recursive descent.
+//   * `predicative_reflection.vr` — Feferman 1989-style predicative
+//     reflection schemata.
+//   * `audit_chain.vr` — the formal trust-delegation chain as data.
+//
+// **Architectural alignment**: mirrors `codegen_soundness/` (#162)
+// and `separation_soundness/` (#161 V0). All three follow the same
+// kernel-discharge pattern — declarations citing
+// `@kernel_discharge(<intrinsic>)` + matching dispatcher arms +
+// audit-gate visibility.
+// =============================================================================
+
+module core.verify.kernel_self_soundness.mod;
+
+mount super.meta_theorem.{kernel_self_soundness_in_meta_universe};

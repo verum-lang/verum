@@ -427,6 +427,59 @@ impl SelfRecognitionAudit {
     }
 }
 
+// =============================================================================
+// Meta-soundness footprint — the #158 V0 algorithmic discharge witness
+// =============================================================================
+
+/// Compute the **full meta-theoretic footprint** of every kernel rule
+/// — the union of ZFC axioms + inaccessibles needed to model the
+/// kernel's seven rules.  The result is the algorithmic witness for
+/// the meta-soundness claim
+/// `kernel_self_soundness_in_meta_universe`: if the footprint is
+/// bounded by ZFC + 2-inaccessibles, the claim that the kernel is
+/// sound under Verum + κ_meta (one inaccessible above the working
+/// universe) holds by direct enumeration.
+///
+/// **Architectural role** (#158): the meta-soundness axiom in
+/// `core/verify/kernel_self_soundness/meta_theorem.vr` cites this
+/// function as its discharge route.  The dispatcher arm
+/// `kernel_self_soundness_in_meta_universe` can call
+/// [`kernel_meta_soundness_holds`] to compute the verdict
+/// algorithmically rather than simply cite the framework citation.
+///
+/// **Trade-off**: per-rule recognition data lives in
+/// [`required_meta_theory`].  Adding a new kernel rule requires
+/// extending [`KernelRuleId::full_list`] AND
+/// [`required_meta_theory`]; the footprint then automatically
+/// updates without per-call hardcoding.
+pub fn kernel_meta_soundness_footprint() -> SelfRecognitionAudit {
+    let mut audit = SelfRecognitionAudit::new();
+    for rule in KernelRuleId::full_list() {
+        audit.cite(rule);
+    }
+    audit
+}
+
+/// **The algorithmic witness for the meta-soundness theorem.**
+///
+/// Returns `true` iff every kernel rule is individually provable in
+/// ZFC + 2 strongly-inaccessible cardinals.  When `true`, the
+/// meta-soundness claim
+/// `kernel_self_soundness_in_meta_universe` holds *constructively*
+/// — the proof reduces to per-rule footprint enumeration, no
+/// further trust delegation needed beyond the standard ZFC + 2-inacc
+/// meta-theory.
+///
+/// **Soundness of this witness**: relies on [`is_zfc_plus_2_inacc_provable`]
+/// being correct for each rule.  The audit gate
+/// `verum audit --self-recognition` walks the same data and
+/// surfaces the verdict with full per-rule decomposition, so any
+/// disagreement between the algorithm and the per-rule citation
+/// metadata is loud.
+pub fn kernel_meta_soundness_holds() -> bool {
+    kernel_meta_soundness_footprint().is_provable_in_zfc_plus_2_inacc()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,5 +626,62 @@ mod tests {
         assert!(report.contains("κ_1"));
         assert!(report.contains("κ_2"));
         assert!(report.contains("Replacement"));
+    }
+
+    // -------------------------------------------------------------
+    // #158 V0 — meta-soundness algorithmic-discharge witness
+    // -------------------------------------------------------------
+
+    #[test]
+    fn meta_soundness_footprint_cites_every_kernel_rule() {
+        // The footprint must enumerate all 7 kernel rules — adding
+        // a new rule to KernelRuleId::full_list() AUTOMATICALLY
+        // updates the footprint, no per-call hardcoding.
+        let audit = kernel_meta_soundness_footprint();
+        assert_eq!(
+            audit.citations.len(),
+            KernelRuleId::full_list().len(),
+            "meta-soundness footprint must cite every kernel rule"
+        );
+    }
+
+    #[test]
+    fn meta_soundness_footprint_holds_under_zfc_plus_2_inacc() {
+        // The full kernel must be provable in ZFC + 2-inaccessibles
+        // (the meta-theory Verum + κ_meta lifts to). When this fails,
+        // the meta-soundness claim breaks and the audit gate must
+        // refuse to discharge `kernel_self_soundness_in_meta_universe`.
+        assert!(
+            kernel_meta_soundness_holds(),
+            "meta-soundness algorithmic discharge: full kernel footprint \
+             must be bounded by ZFC + 2-inaccessibles. If this fails the \
+             #158 escape hatch is broken — investigate which rule's \
+             required_meta_theory exceeds the bound."
+        );
+    }
+
+    #[test]
+    fn meta_soundness_footprint_requires_both_inaccessibles() {
+        // Verum's working universe is hosted at κ_2 (per universe_ascent /
+        // infinity_topos). The full kernel footprint must require at
+        // least κ_1 and κ_2 — the meta-theory adds κ_meta on top.
+        let audit = kernel_meta_soundness_footprint();
+        let inacc = audit.required_inaccessibles();
+        assert!(inacc.contains(&InaccessibleLevel::Kappa1));
+        assert!(inacc.contains(&InaccessibleLevel::Kappa2));
+    }
+
+    #[test]
+    fn meta_soundness_report_describes_full_footprint() {
+        // Audit-gate consumers read the textual report; pin that the
+        // report enumerates the citation count + ZFC axioms + inaccessibles.
+        let audit = kernel_meta_soundness_footprint();
+        let report = audit.report();
+        assert!(
+            report.contains(&format!("{} citations", audit.citations.len())),
+            "report must surface citation count; got: {}",
+            report,
+        );
+        assert!(report.contains("κ_2"), "report must mention κ_2 (working universe)");
     }
 }

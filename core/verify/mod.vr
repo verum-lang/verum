@@ -48,6 +48,7 @@ public module attempt;
 public module certificate;
 public module coherence;
 public module kernel_soundness;
+public module kernel_self_soundness;
 public module codegen_soundness;
 public module separation_soundness;
 
