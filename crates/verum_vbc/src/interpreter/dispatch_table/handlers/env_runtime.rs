@@ -186,11 +186,20 @@ fn intercept_set_var(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    if state.check_permission(PermissionScope::Process, 0) == PermissionDecision::Deny {
-        return Ok(Some(Value::unit()));
-    }
     let key = extract_text_arg(state, args_start_reg, caller_base);
     let value = extract_text_arg(state, args_start_reg + 1, caller_base);
+    // VBC-PERM-1 — granular target_id: hash the env-var key so a
+    // script frontmatter `permissions = ["env=PATH"]` grants only
+    // the named variable.  Falls through to the WILDCARD check
+    // for scripts that grant `"env"` without a target.
+    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+    let tid = target_id_for(&key);
+    if state.check_permission(PermissionScope::Process, tid) != PermissionDecision::Allow
+        && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+            == PermissionDecision::Deny
+    {
+        return Ok(Some(Value::unit()));
+    }
     // SAFETY: `set_var` is unsafe in newer Rust due to threading
     // concerns, but the interpreter is single-threaded at this point.
     // The safety contract is met by the surrounding interpreter
@@ -206,10 +215,16 @@ fn intercept_remove_var(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    if state.check_permission(PermissionScope::Process, 0) == PermissionDecision::Deny {
+    let key = extract_text_arg(state, args_start_reg, caller_base);
+    // VBC-PERM-1 — same granular env-key pattern as set_var.
+    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+    let tid = target_id_for(&key);
+    if state.check_permission(PermissionScope::Process, tid) != PermissionDecision::Allow
+        && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+            == PermissionDecision::Deny
+    {
         return Ok(Some(Value::unit()));
     }
-    let key = extract_text_arg(state, args_start_reg, caller_base);
     // SAFETY: see set_var above.
     unsafe {
         std::env::remove_var(&key);
@@ -245,13 +260,22 @@ fn intercept_set_current_dir(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    if state.check_permission(PermissionScope::Process, 0) == PermissionDecision::Deny {
+    let path = extract_text_arg(state, args_start_reg, caller_base);
+    // VBC-PERM-1 — granular target_id: hash the directory path so a
+    // script frontmatter `permissions = ["run=/var/jobs"]` grants
+    // chdir only into that directory.  Falls through to WILDCARD
+    // for scripts that grant `"run"` without a target.
+    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+    let tid = target_id_for(&path);
+    if state.check_permission(PermissionScope::Process, tid) != PermissionDecision::Allow
+        && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+            == PermissionDecision::Deny
+    {
         let kind = wrap_in_variant(state, "IoErrorKind", 1, &[])?; // PermissionDenied
         let none = wrap_in_variant(state, "Maybe", 0, &[])?;
         let err = alloc_record_n_fields(state, "StreamError", &[kind, none])?;
         return Ok(Some(wrap_in_variant(state, "Result", 1, &[err])?));
     }
-    let path = extract_text_arg(state, args_start_reg, caller_base);
     match std::env::set_current_dir(&path) {
         Ok(()) => Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::unit()])?)),
         Err(_e) => {
