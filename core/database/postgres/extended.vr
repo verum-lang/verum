@@ -25,7 +25,11 @@ mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
-mount core.database.common.types.WireValue;
+mount core.database.common.types.{WireValue, WvNull, WvPresent};
+mount core.database.common.arena.SpindleArena;
+mount core.database.postgres.wire.typed.{
+    TypedValue, encode_params_for_bind, decode_typed_from_bytes,
+};
 
 mount core.database.postgres.wire.frontend.{
     parse, bind, describe_statement, execute, sync as send_sync, close_statement,
@@ -235,4 +239,124 @@ fn append_all(dst: &mut List<Byte>, src: &[Byte]) {
         dst.push(src[i]);
         i = i + 1;
     }
+}
+
+// =============================================================================
+// Typed parameter / row helpers
+// =============================================================================
+//
+// Front-door for callers that have a `List<Maybe<TypedValue>>` of
+// params + the corresponding param-OID list (typically resolved
+// from `Parse`'s `param_oids` or a `PreparedQuery<R, P>`'s
+// declared shape). Wraps the bind-frame builder so the caller
+// only sees typed values, never raw byte buffers.
+
+/// Build the bind-frame bytes for a typed call. Encodes every
+/// non-NULL param via the OID-dispatched binary encoder
+/// (`encode_typed`), then composes the `Bind` packet with `binary`
+/// param formats and `binary` result formats.
+///
+/// `arena` is borrowed for the duration of the encoding hot path —
+/// each param is bump-allocated, copied out into a heap
+/// `List<Byte>` the wire frame consumes, and the arena is rewound
+/// before returning. Net per-call arena residency: zero past the
+/// returned bytes.
+public fn build_bind_typed(
+    portal: &Text,
+    stmt_name: &Text,
+    param_oids: &[Int],
+    params: &List<Maybe<TypedValue>>,
+    arena: &mut SpindleArena,
+) -> Result<List<Byte>, DbError> {
+    let encoded_params = encode_params_for_bind(param_oids, params, arena)?;
+    // Binary format for both params and results.
+    let param_formats: List<Int> = {
+        let mut v: List<Int> = List.with_capacity(1);
+        v.push(1);             // 1 = binary, 0 = text
+        v
+    };
+    let result_formats: List<Int> = {
+        let mut v: List<Int> = List.with_capacity(1);
+        v.push(1);
+        v
+    };
+    Ok(core.database.postgres.wire.frontend.bind(
+        portal,
+        stmt_name,
+        param_formats.as_slice(),
+        &encoded_params,
+        result_formats.as_slice(),
+    ))
+}
+
+/// Decode a single `DataRow` payload (List<WireValue>) into typed
+/// values using the column OIDs from the most-recent RowDescription.
+/// Each non-NULL column flows through `decode_typed_from_bytes`;
+/// NULL columns produce `None`.
+///
+/// `column_oids[i]` MUST correspond positionally to `row[i]`. The
+/// arena is borrowed for staging — decoders that allocate (text /
+/// bytea / uuid / jsonb materialisation) write through it.
+public fn decode_typed_row(
+    row: &List<WireValue>,
+    column_oids: &[Int],
+    arena: &mut SpindleArena,
+) -> Result<List<Maybe<TypedValue>>, DbError> {
+    let n_cols = column_oids.len() as Int;
+    let n_vals = row.len() as Int;
+    if n_cols != n_vals {
+        return Err(DbError.DecodeFailed {
+            fault: core.database.common.error.DecodeFault {
+                column_index: -1,
+                column_name: "".clone(),
+                expected_type: "".clone(),
+                found_oid: -1,
+                detail: f"decode_typed_row: column_oids.len() = {n_cols}, row.len() = {n_vals}",
+            },
+        });
+    }
+    let mut out: List<Maybe<TypedValue>> = List.with_capacity(n_cols);
+    let mut i: Int = 0;
+    while i < n_cols {
+        match &row[i] {
+            WvNull => out.push(None),
+            WvPresent { bytes, .. } => {
+                let value = decode_typed_from_bytes(column_oids[i], bytes.as_slice(), arena)?;
+                out.push(Some(value));
+            }
+        }
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+/// Convenience — decode every row in an `ExtendedQueryResult`'s
+/// `rows` against the column OIDs from its `row_description`.
+/// Returns a parallel `List<List<Maybe<TypedValue>>>`. Caller
+/// supplies the arena (typically the connection's per-checkout
+/// arena from `PooledConnection.arena_mut()`).
+public fn decode_typed_result(
+    result: &ExtendedQueryResult,
+    arena: &mut SpindleArena,
+) -> Result<List<List<Maybe<TypedValue>>>, DbError> {
+    let oids: List<Int> = match &result.row_description {
+        None => List.new(),
+        Some(rd) => {
+            let mut v: List<Int> = List.with_capacity(rd.fields.len() as Int);
+            let mut i: Int = 0;
+            while i < rd.fields.len() as Int {
+                v.push(rd.fields[i].type_oid);
+                i = i + 1;
+            }
+            v
+        }
+    };
+    let mut out: List<List<Maybe<TypedValue>>> = List.with_capacity(result.rows.len() as Int);
+    let mut k: Int = 0;
+    while k < result.rows.len() as Int {
+        let typed_row = decode_typed_row(&result.rows[k], oids.as_slice(), arena)?;
+        out.push(typed_row);
+        k = k + 1;
+    }
+    Ok(out)
 }

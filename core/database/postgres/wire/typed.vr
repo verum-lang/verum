@@ -570,6 +570,130 @@ public fn decode_typed(
 }
 
 // =============================================================================
+// Heap-byte bridge — connection-side `WireValue.bytes: List<Byte>`
+// adapter
+// =============================================================================
+//
+// `decode_typed` operates on `ArenaSlice` for the zero-copy hot path.
+// connection.vr's existing `WireValue` wraps `List<Byte>` (heap),
+// because the simple-query / extended-query reply parser
+// materialises each column's bytes into an owned list before
+// passing them up. To bridge: copy the bytes into the connection
+// arena, get back an ArenaSlice, dispatch normally. Per-column
+// arena cost is the column's wire bytes; for typical scalar
+// columns (4–16 bytes) this is a noise-level allocation.
+//
+// Once connection.vr is itself migrated to arena-borrowed
+// `ArenaWireValue` / `ArenaSlice` (a follow-up cross-cutting refactor
+// per spec §4.2), `decode_typed_from_bytes` becomes redundant — every
+// caller can use `decode_typed` directly. Until then this bridge
+// is the single point where the heap → arena hand-off happens.
+
+/// Decode a column's heap-owned `List<Byte>` bytes through the typed
+/// dispatch. Same OID lookup as `decode_typed`; the only difference
+/// is the input shape.
+public fn decode_typed_from_bytes(
+    oid: Int,
+    bytes: &[Byte],
+    arena: &mut SpindleArena,
+) -> Result<TypedValue, DbError> {
+    let n = bytes.len() as Int;
+    if n == 0 {
+        // Empty payload — only `text` / `bytea` interpret this as
+        // legitimately-empty; everything else expects at least one
+        // length-defined byte. Defer to the per-OID decoder via an
+        // empty arena slice so it can decide.
+        let empty_slice = ArenaSlice {
+            ptr: 0,
+            len: 0,
+            generation: arena.generation(),
+        };
+        return decode_typed(oid, &empty_slice, arena);
+    }
+    // Allocate into the arena — pure raw_alloc, no zero-init
+    // needed (we overwrite every byte).
+    let dst = arena.alloc_bytes(n);
+    if dst == 0 {
+        return Err(decode_fault("decode_typed_from_bytes: arena exhausted".clone()));
+    }
+    let mut i: Int = 0;
+    while i < n {
+        let _ = store_byte(dst + i, (bytes[i] as Int) & 0xFF);
+        i = i + 1;
+    }
+    let slice = ArenaSlice {
+        ptr: dst,
+        len: n,
+        generation: arena.generation(),
+    };
+    decode_typed(oid, &slice, arena)
+}
+
+/// Encode a list of typed parameters into wire-ready
+/// `List<Maybe<List<Byte>>>` for direct consumption by
+/// `core.database.postgres.wire.frontend.bind`.
+///
+/// `param_oids[i]` is the OID for `params[i]`; `params[i] = None`
+/// represents SQL NULL (preserved as `None` in the output so the
+/// bind builder's length-prefix-of-(-1) path fires).
+///
+/// Ownership: a fresh `List<Byte>` per param so the result outlives
+/// any temporary arena. The internal encoding uses an
+/// `ArenaWireBuf` for the bump-allocated hot path; the final bytes
+/// are copied out before the function returns.
+public fn encode_params_for_bind(
+    param_oids: &[Int],
+    params: &List<Maybe<TypedValue>>,
+    arena: &mut SpindleArena,
+) -> Result<List<Maybe<List<Byte>>>, DbError> {
+    let n_oids = param_oids.len() as Int;
+    let n_params = params.len() as Int;
+    if n_oids != n_params {
+        return Err(encode_fault(
+            f"encode_params_for_bind: oids.len() = {n_oids}, params.len() = {n_params}"
+        ));
+    }
+    let mut out: List<Maybe<List<Byte>>> = List.with_capacity(n_params);
+    let mut i: Int = 0;
+    while i < n_params {
+        match &params[i] {
+            None => out.push(None),
+            Some(value) => {
+                // Snapshot the arena before encoding — if encoding
+                // succeeds we copy the bytes out and rewind so the
+                // arena bump pointer doesn't grow per-call.
+                let scope = core.database.common.arena.ArenaScope.begin(
+                    arena,
+                    core.database.common.arena.ApQuery,
+                );
+                let mut buf = ArenaWireBuf.with_arena(arena, 32);
+                match encode_typed(param_oids[i], value, &mut buf, arena) {
+                    Ok(_) => {
+                        // Copy bytes out of the arena into a heap-
+                        // owned List<Byte>.
+                        let slice = buf.as_slice();
+                        let mut owned: List<Byte> = List.with_capacity(slice.len);
+                        let mut k: Int = 0;
+                        while k < slice.len {
+                            owned.push(load_byte(slice.ptr + k) as Byte);
+                            k = k + 1;
+                        }
+                        scope.discard(arena);    // rewind arena
+                        out.push(Some(owned));
+                    }
+                    Err(e) => {
+                        scope.discard(arena);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+// =============================================================================
 // Error helpers — same shape as codec.vr's local `decode_fault` /
 // `encode_fault` so the surface is consistent.
 // =============================================================================
