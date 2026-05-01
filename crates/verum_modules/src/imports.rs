@@ -53,6 +53,60 @@ pub fn path_to_module_path(path: &Path) -> ModulePath {
     ModulePath::new(segments)
 }
 
+/// Convert an AST `Path` to a `ModulePath` that has had `super.` /
+/// `self.` resolved against the importing module's actual location.
+/// This is the canonical entry point for relative-path resolution
+/// during import processing — internally it delegates to
+/// [`ModulePath::resolve_import`] which does the depth-aware peeling.
+///
+/// **Why this exists**: pre-this-helper, `path_to_module_path` was
+/// the only conversion site, but it kept `super` as a literal
+/// segment in the returned `ModulePath`, leaking the unresolved
+/// keyword into the symbol-table lookup pipeline.  The lookup then
+/// failed silently (the leaf-symbol clauses dropped with no
+/// diagnostic), surfacing as the #187 symptom: kernel_v0/soundness.vr
+/// imports `mount super.rules.k_var.{k_var_sound}` and the loader
+/// reported "module exports: introduce_var" with k_var_sound dropped.
+///
+/// Returns `None` if the path resolution fails (e.g., super from
+/// root); callers should fall back to the unresolved
+/// `path_to_module_path` form so the existing diagnostic path
+/// (ModuleNotFound / ItemNotFound) fires correctly.
+pub fn path_to_module_path_resolved(
+    path: &Path,
+    importing_module_path: &ModulePath,
+) -> ModulePath {
+    // Build the dotted-string form of the AST path so we can route
+    // it through `ModulePath::resolve_import` (which is string-based).
+    let mut parts: Vec<String> = Vec::with_capacity(path.segments.len());
+    for segment in &path.segments {
+        match segment {
+            PathSegment::Name(ident) => parts.push(ident.name.as_str().to_string()),
+            PathSegment::SelfValue => parts.push("self".to_string()),
+            PathSegment::Super => parts.push("super".to_string()),
+            PathSegment::Cog => parts.push("cog".to_string()),
+            PathSegment::Relative => {}
+        }
+    }
+    let dotted = parts.join(".");
+
+    // Only the relative-path forms need resolver invocation; absolute
+    // paths pass through `resolve_import`'s else-arm unchanged but
+    // it's cheaper to skip the call.
+    if dotted.starts_with("self.")
+        || dotted == "self"
+        || dotted.starts_with("super.")
+        || dotted == "super"
+    {
+        match ModulePath::resolve_import(&dotted, importing_module_path) {
+            Ok(resolved) => resolved,
+            Err(_) => path_to_module_path(path),
+        }
+    } else {
+        path_to_module_path(path)
+    }
+}
+
 /// Extract the last segment name from a Path.
 ///
 
@@ -420,9 +474,40 @@ impl ImportResolver {
         module_paths: &Map<ModuleId, ModulePath>,
         span: Span,
     ) -> ModuleResult<ResolvedImport> {
-        // Convert Path to ModulePath using proper segment extraction
-        // The module path is the parent of the full path (without the item name)
-        let module_path = path_parent(path).unwrap_or_else(|| path_to_module_path(path));
+        // Convert Path to ModulePath using proper segment extraction.
+        // The module path is the parent of the full path (without the
+        // item name).  Resolve `super.`/`self.` against the importing
+        // module's actual location — the unresolved-form kept `super`
+        // as a literal segment which broke the symbol-table lookup
+        // (the symptom that surfaced as kernel_v0/soundness.vr's
+        // 10-symbol-drop bug — see #187).
+        let module_path = path_parent(path)
+            .map(|p| {
+                // Re-resolve the parent through the relative-path
+                // resolver when the source AST path starts with
+                // `super` / `self`.
+                if let Some(importing_path) = module_paths.get(&importing_module) {
+                    let resolved =
+                        path_to_module_path_resolved(path, importing_path);
+                    // The resolved form is the FULL path (including
+                    // the leaf symbol name); strip the last segment
+                    // to get the parent module.
+                    let mut segs = resolved.into_segments();
+                    if !segs.is_empty() {
+                        segs.pop();
+                    }
+                    ModulePath::new(segs.into_iter().collect())
+                } else {
+                    p
+                }
+            })
+            .unwrap_or_else(|| {
+                if let Some(importing_path) = module_paths.get(&importing_module) {
+                    path_to_module_path_resolved(path, importing_path)
+                } else {
+                    path_to_module_path(path)
+                }
+            });
 
         // Find the target module
         let target_module = self.find_module_by_path(&module_path, module_paths)?;
@@ -521,8 +606,15 @@ impl ImportResolver {
         module_paths: &Map<ModuleId, ModulePath>,
         span: Span,
     ) -> ModuleResult<ResolvedImport> {
-        // Convert Path to ModulePath using proper segment extraction
-        let module_path = path_to_module_path(path);
+        // Resolve `super.`/`self.` against the importing module's
+        // actual location (#187 follow-up).
+        let module_path = if let Some(importing_path) =
+            module_paths.get(&importing_module)
+        {
+            path_to_module_path_resolved(path, importing_path)
+        } else {
+            path_to_module_path(path)
+        };
         let target_module = self.find_module_by_path(&module_path, module_paths)?;
 
         let exports = match module_exports.get(&target_module) {
@@ -577,7 +669,15 @@ impl ImportResolver {
         span: Span,
         filter: &GlobFilter,
     ) -> ModuleResult<ResolvedImport> {
-        let module_path = path_to_module_path(path);
+        // Resolve `super.`/`self.` against the importing module's
+        // actual location (#187 follow-up).
+        let module_path = if let Some(importing_path) =
+            module_paths.get(&importing_module)
+        {
+            path_to_module_path_resolved(path, importing_path)
+        } else {
+            path_to_module_path(path)
+        };
         let target_module = self.find_module_by_path(&module_path, module_paths)?;
 
         let exports = match module_exports.get(&target_module) {
@@ -640,6 +740,129 @@ impl ImportResolver {
         ))
     }
 
+    /// Resolve an import tree against an EXTERNAL prefix already
+    /// computed by `resolve_nested_import`.  The leaf trees within
+    /// a nested form (`{Foo, Bar}`) are bare symbol names, not
+    /// absolute paths — this helper joins them to the resolved
+    /// prefix before delegating to symbol-table lookup.
+    fn resolve_import_tree_with_prefix(
+        &self,
+        tree: &MountTree,
+        prefix: &ModulePath,
+        importing_module: ModuleId,
+        module_exports: &Map<ModuleId, ExportTable>,
+        module_paths: &Map<ModuleId, ModulePath>,
+        span: Span,
+    ) -> ModuleResult<ResolvedImport> {
+        match &tree.kind {
+            MountTreeKind::Path(leaf) => {
+                // Leaf path: append its segments to the prefix +
+                // resolve as a simple import.
+                let target_module = self.find_module_by_path(prefix, module_paths)?;
+                let item_name_text = match leaf.segments.last() {
+                    Some(PathSegment::Name(ident)) => ident.name.clone(),
+                    _ => {
+                        return Err(ModuleError::InvalidPath {
+                            path: Text::from(format!("{:?}", leaf)),
+                            reason: Text::from("leaf path must be a name"),
+                            span: Some(span),
+                        });
+                    }
+                };
+                let exports =
+                    module_exports
+                        .get(&target_module)
+                        .ok_or_else(|| ModuleError::ModuleNotFound {
+                            path: prefix.clone(),
+                            searched_paths: List::new(),
+                            suggestions: List::new(),
+                            span: Some(span),
+                        })?;
+                let exported_item = match exports.get(&item_name_text) {
+                    Maybe::Some(item) => item,
+                    Maybe::None => {
+                        let available_items: List<Text> = exports
+                            .all_exports()
+                            .map(|(name, _)| name.clone())
+                            .collect::<List<_>>();
+                        let suggestions = crate::suggestions::find_similar_items(
+                            item_name_text.as_str(),
+                            &available_items,
+                        );
+                        return Err(ModuleError::ItemNotFound {
+                            item_name: item_name_text.clone(),
+                            module_path: prefix.clone(),
+                            available_items,
+                            suggestions,
+                            span: Some(span),
+                        });
+                    }
+                };
+                let importing_path = module_paths
+                    .get(&importing_module)
+                    .cloned()
+                    .unwrap_or_else(|| ModulePath::from_str("unknown"));
+                if !exports.is_visible_from_path(&item_name_text, &importing_path) {
+                    return Err(ModuleError::PrivateAccess {
+                        item_name: item_name_text.clone(),
+                        item_module: prefix.clone(),
+                        accessing_module: importing_path,
+                        span: Some(span),
+                    });
+                }
+                // Honour the per-tree alias when present.
+                let final_name = match &tree.alias {
+                    Maybe::Some(alias) => alias.name.clone(),
+                    Maybe::None => item_name_text.clone(),
+                };
+                let imported_item = ImportedItem::new(
+                    final_name,
+                    item_name_text,
+                    target_module,
+                    exported_item.kind,
+                    span,
+                );
+                Ok(ResolvedImport::single(
+                    prefix.clone(),
+                    imported_item,
+                    importing_module,
+                    span,
+                ))
+            }
+            MountTreeKind::Glob(_) => {
+                // Glob inside a nested form: resolve directly via the
+                // existing glob path; the prefix is already part of
+                // the leaf's path representation.
+                self.resolve_import_tree(
+                    tree,
+                    importing_module,
+                    module_exports,
+                    module_paths,
+                    span,
+                )
+            }
+            MountTreeKind::Nested { .. } => {
+                // Nested-within-nested: recurse via the standard tree
+                // resolver, which will call back into us for the
+                // inner nesting.
+                self.resolve_import_tree(
+                    tree,
+                    importing_module,
+                    module_exports,
+                    module_paths,
+                    span,
+                )
+            }
+            MountTreeKind::File { .. } => self.resolve_import_tree(
+                tree,
+                importing_module,
+                module_exports,
+                module_paths,
+                span,
+            ),
+        }
+    }
+
     /// Resolve nested imports: `import std.io.{File, Read, Write}`
     fn resolve_nested_import(
         &self,
@@ -650,18 +873,43 @@ impl ImportResolver {
         module_paths: &Map<ModuleId, ModulePath>,
         span: Span,
     ) -> ModuleResult<ResolvedImport> {
-        // Convert Path to ModulePath using proper segment extraction
-        let prefix_path = path_to_module_path(prefix);
+        // Resolve the prefix relative to the importing module's
+        // location (#187 root-cause fix).  Pre-fix the prefix kept
+        // `super` as a literal segment, and the inner trees were
+        // resolved AS IF ABSOLUTE — so a nested form like
+        // `mount super.rules.k_var.{k_var_sound}` had its trees
+        // looked up at the bare path `k_var_sound` (root scope) and
+        // failed silently.
+        //
+        // Post-fix:
+        //   1. Resolve the prefix to the absolute parent module.
+        //   2. For each leaf tree, prepend the resolved prefix to
+        //      the tree's path so the inner resolver sees the full
+        //      `<absolute-prefix>.<leaf>` form.
+        let prefix_path = if let Some(importing_path) =
+            module_paths.get(&importing_module)
+        {
+            path_to_module_path_resolved(prefix, importing_path)
+        } else {
+            path_to_module_path(prefix)
+        };
         let mut all_items = List::new();
 
         for tree in trees {
-            let resolved = self.resolve_import_tree(
-                tree,
-                importing_module,
-                module_exports,
-                module_paths,
-                span,
-            )?;
+            // Build a synthetic absolute path for each leaf by
+            // joining the resolved prefix + the leaf's last segment.
+            // This is the load-bearing piece — the leaf's symbol
+            // name (e.g., `k_var_sound`) gets attached to the
+            // resolved-prefix module path.
+            let resolved =
+                self.resolve_import_tree_with_prefix(
+                    tree,
+                    &prefix_path,
+                    importing_module,
+                    module_exports,
+                    module_paths,
+                    span,
+                )?;
             all_items.extend(resolved.items);
         }
 
