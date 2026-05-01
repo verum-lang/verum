@@ -356,11 +356,14 @@ public fn modf(x: Float) -> (Float, Float) {
     (integral, fractional)
 }
 
-// Truncate toward zero (integer part)
-@intrinsic("llvm.trunc.f64")
-public fn trunc(x: Float) -> Float;
+// Truncate toward zero (integer part).  **Re-exported from
+// `core/math/elementary.vr`** which is the canonical home for
+// floating-point primitives (#83 architectural cleanup —
+// single source of truth per `@intrinsic`).
+public mount super.elementary.trunc;
 
-// Truncate Float32 toward zero
+// Truncate Float32 toward zero.  Float32 variant has no peer
+// in elementary.vr — declared here as the canonical home.
 @intrinsic("llvm.trunc.f32")
 public fn trunc_f32(x: Float32) -> Float32;
 

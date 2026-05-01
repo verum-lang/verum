@@ -101,11 +101,17 @@ public fn get_stdout_size() -> IoResult<TerminalSize> {
 // Cursor position query (via DSR)
 // =============================================================================
 
-/// Low-level poll+read with millisecond timeout. Wired against the
-/// same intrinsic `core.term.raw.capabilities` uses so a single
-/// runtime entry-point services every blocking-with-deadline read.
-@intrinsic("verum.io.poll_read")
-fn poll_read_raw(fd: Int, buf: &mut [Byte], timeout_ms: Int) -> Int;
+// **`poll_read_raw` re-exported from `capabilities.vr`** (#83
+// architectural cleanup: single canonical home per intrinsic).
+//
+// Pre-fix this file declared its own `@intrinsic("verum.io.poll_read")`
+// extern stub — duplicating `capabilities.vr:224`'s identical
+// declaration.  Both routed to the same VBC opcode at codegen
+// time, so the duplication was harmless at runtime, but violated
+// the "single canonical home per intrinsic" architectural invariant
+// established under #83.  Comment on the original line even
+// flagged the desired single-source-of-truth structure.
+mount super.capabilities.poll_read_raw;
 
 /// Per-byte deadline for the DSR response. Local TTYs typically reply
 /// within a few milliseconds; 100ms is conservative for SSH'd sessions.

@@ -506,28 +506,25 @@ fn align_pointer(ptr: &unsafe Byte, alignment: Int) -> &unsafe Byte {
     aligned as &unsafe Byte
 }
 
-/// Internal: Direct mmap intrinsic wrapper for macOS.
-/// This is defined in common.vr to ensure the intrinsic is recognized.
+// **mmap/munmap/gettid intrinsics — single canonical home** (#83).
+//
+// Pre-fix this file declared `mmap_intrinsic`/`munmap_intrinsic`/
+// `gettid_intrinsic` as `@intrinsic("sys_mmap")`/`("sys_munmap")`/
+// `("sys_gettid")` extern stubs that DUPLICATED the canonical
+// declarations in `darwin/libsystem.vr::safe_mmap`/`safe_munmap`/
+// `safe_gettid`.  Both routed to the same VBC opcode, so the
+// duplication was harmless at runtime, but violated the "single
+// canonical home per intrinsic" architectural invariant.
+//
+// Post-fix: re-export from the canonical home.  Callers in this
+// file that use `mmap_intrinsic` / `gettid_intrinsic` continue to
+// work; the intrinsic-name is declared exactly once.
 @cfg(target_os = "macos")
-@intrinsic("sys_mmap")
-fn mmap_intrinsic(
-    addr: Int,
-    len: Int,
-    prot: MemProt,
-    flags: MapFlags,
-    fd: FileDesc,
-    offset: Int,
-) -> Result<&unsafe Byte, OSError>;
-
-/// Internal: Direct munmap intrinsic wrapper for macOS.
-@cfg(target_os = "macos")
-@intrinsic("sys_munmap")
-fn munmap_intrinsic(addr: Int, len: Int) -> Result<(), OSError>;
-
-/// Internal: Direct gettid intrinsic wrapper for macOS.
-@cfg(target_os = "macos")
-@intrinsic("sys_gettid")
-fn gettid_intrinsic() -> UInt64;
+mount super.darwin.libsystem.{
+    safe_mmap as mmap_intrinsic,
+    safe_munmap as munmap_intrinsic,
+    safe_gettid as gettid_intrinsic,
+};
 
 /// Get current thread ID (platform-independent).
 public fn get_thread_id() -> UInt64 {
