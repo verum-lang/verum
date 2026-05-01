@@ -16,251 +16,140 @@ profile = "application"
 # ============================================================================
 # LLVM Backend Configuration
 # ============================================================================
+#
+# Three load-bearing fields (LlvmConfig in
+# crates/verum_cli/src/config.rs).  All others (`reloc_mode` /
+# `code_model` / `pic` / `pie`) are not parsed and would silently
+# no-op.  PIC / PIE selection is currently driven by `[linker]`
+# section + LLVM defaults for the chosen target.
 
 [llvm]
-# Target triple for compilation
+# Target triple for compilation.  Load-bearing.
 # Examples:
 #   - "x86_64-unknown-linux-gnu" (Linux x86_64)
 #   - "aarch64-apple-darwin" (macOS ARM64)
 #   - "x86_64-pc-windows-msvc" (Windows)
-# Default: host triple (auto-detected)
+# Default: host triple (auto-detected).
 target_triple = "x86_64-unknown-linux-gnu"
 
-# CPU model for optimization
+# CPU model for optimization.  Load-bearing.
 # Options:
 #   - "native" - detect host CPU (best for local builds)
 #   - "generic" - portable across CPUs
 #   - Specific: "skylake", "apple-m1", "cortex-a72", etc.
-# Default: "generic"
-cpu = "native"
+# Default: unset (LLVM picks based on target_triple).
+target_cpu = "native"
 
-# CPU features (enable with '+', disable with '-')
+# CPU features (enable with '+', disable with '-').  Load-bearing.
 # Examples:
 #   - "+avx2,+fma" - Enable AVX2 and FMA instructions
 #   - "+neon" - Enable ARM NEON SIMD
 #   - "-sse4.2" - Disable SSE4.2
-# Default: "" (auto-detect from CPU)
-features = "+avx2,+fma"
-
-# Relocation mode
-# Options: static, pic, dynamic-no-pic, ropi, rwpi, ropi-rwpi
-# Default: pic (required for shared libraries)
-reloc_mode = "pic"
-
-# Code model (memory layout)
-# Options: default, small, kernel, medium, large
-# Default: default
-code_model = "default"
-
-# Enable position-independent code (PIC)
-# Default: true
-pic = true
-
-# Enable position-independent executable (PIE)
-# Default: true
-pie = true
+# Default: unset (auto-detect from target_cpu).
+target_features = "+avx2,+fma"
 
 # ============================================================================
 # Optimization Pass Configuration
 # ============================================================================
+#
+# NOTE — forward-looking section.  The parser (OptimizationConfig in
+# crates/verum_cli/src/config.rs) recognises only `level` / `size_opt`
+# / `inline` today.  The active codegen optimization knob is
+# `[profile.<dev|release>].optimization` (per-profile `opt_level`)
+# which IS load-bearing.  Setting fields below logs a debug-trace
+# observation but does NOT change LLVM pass selection.
+#
+# Vectorize / loop-unroll / SLP / LICM / merge-functions / function-
+# inlining are all driven implicitly by `opt_level` through LLVM's
+# `default<O0..O3>` pass pipeline.
 
 [optimization]
-# Custom pass pipeline string (overrides opt_level from profile)
-# Examples:
-#   - "default<O0>" - No optimization
-#   - "default<O1>" - Basic optimization
-#   - "default<O2>" - Standard optimization
-#   - "default<O3>" - Aggressive optimization
-#   - "default<Os>" - Size optimization
-#   - "default<Oz>" - Aggressive size optimization
-#   - "module(inline,function(sroa,early-cse))" - Custom pipeline
-# Default: None (use profile.opt_level)
-# passes = "default<O3>"
+# Optimization level (0-3).  Forward-looking — see note above.
+# Default: 0 (use profile.opt_level instead).
+# level = 2
 
-# Inlining threshold (0-65535)
-# Higher = more aggressive inlining
-# Default: 225
-inline_threshold = 275
+# Enable size optimization (analogous to LLVM `-Os`).  Forward-looking.
+# Default: false.
+# size_opt = false
 
-# Loop unrolling threshold (0-65535)
-# Higher = more aggressive unrolling
-# Default: 100
-unroll_threshold = 150
-
-# Enable loop vectorization (SIMD)
-# Default: true
-vectorize = true
-
-# Enable SLP (superword-level parallelism) vectorization
-# Default: true
-slp_vectorize = true
-
-# Enable loop unrolling
-# Default: true
-loop_unroll = true
-
-# Enable loop interleaving (O3 only)
-# Default: false
-loop_interleaving = true
-
-# Enable function merging (identical code elimination)
-# Default: true
-merge_functions = true
-
-# Enable call graph profiling
-# Default: true
-call_graph_profile = true
-
-# Enable LICM (loop-invariant code motion) with MemorySSA
-# Default: true
-licm_mssa = true
-
-# LICM optimization cap (0-10)
-# Default: 1
-licm_mssa_opt_cap = 1
-
-# Enable verification of each pass (debug builds only)
-# Default: false (expensive)
-verify_each = false
-
-# Enable debug logging (requires LLVM built with debug)
-# Default: false
-debug_logging = false
-
-# Vectorization strategy
-# Options: none, basic, aggressive, full
-# Default: aggressive
-vectorization_strategy = "full"
-
-# Enable CBGR-specific optimizations (check elimination)
-# Default: true
-cbgr_optimizations = true
+# Enable function-inlining hint.  Forward-looking — current inlining
+# is driven by `[codegen].inline_depth` (load-bearing) which maps to
+# LLVM's per-function `inline-threshold` string attribute.
+# Default: false.
+# inline = false
 
 # ============================================================================
 # Link-Time Optimization (LTO) Configuration
 # ============================================================================
+#
+# NOTE — forward-looking section.  The parser (LtoConfig) recognises
+# only `enabled` / `mode` today.  The ACTIVE LTO control is
+# `[linker].lto = "thin" | "full"` (handled by
+# verum_compiler::linker_config::LinkerSection — load-bearing).
+#
+# Setting `[lto]` fields below logs a debug-trace observation but
+# does NOT change linker behaviour.  `incremental` / `import_instr_limit`
+# / `aggressive_inlining` / `enable_devirtualization` /
+# `enable_global_dce` / `max_threads` / `cache_dir` are not parsed.
 
 [lto]
-# LTO mode
-# Options:
-#   - none - No LTO (fastest compilation)
-#   - thin - Thin LTO (5-15% perf gain, parallel, 2-3x faster than fat)
-#   - fat - Fat LTO (whole program optimization, maximum performance)
-# Default: thin
-mode = "thin"
+# Enable LTO.  Forward-looking — use `[linker].lto` instead.
+# Default: false.
+# enabled = false
 
-# Enable incremental LTO (with caching)
-# Only applies to Thin LTO
-# Default: true
-incremental = true
-
-# Maximum threads for parallel compilation (Thin LTO only)
-# Default: None (use all CPU cores)
-# max_threads = 8
-
-# Import instruction limit
-# Functions larger than this won't be imported across modules
-# Default: 100
-import_instr_limit = 100
-
-# Cache directory for incremental builds
-# Default: None (no caching)
-cache_dir = "target/lto-cache"
-
-# Enable aggressive cross-module inlining
-# Default: true
-aggressive_inlining = true
-
-# Enable devirtualization (virtual call elimination)
-# Default: true
-enable_devirtualization = true
-
-# Enable global dead code elimination
-# Default: true
-enable_global_dce = true
+# LTO mode: "thin" or "full".  Forward-looking.
+# Default: unset.
+# mode = "thin"
 
 # ============================================================================
 # Profile-Guided Optimization (PGO) Configuration
 # ============================================================================
+#
+# NOTE — forward-looking section.  The parser (PgoConfig) recognises
+# only `enabled` / `profile_path` today.  PGO integration is not yet
+# wired into the LLVM/MLIR backend.  Setting fields below logs a
+# debug-trace observation but does NOT instrument the produced
+# binary.  `mode` / `profile_dir` / `hot_threshold` /
+# `enable_bb_reordering` / `hot_inline_multiplier` / `use_sampling`
+# are not parsed.
 
 [pgo]
-# Enable PGO workflow
-# Default: false
-enabled = false
+# Enable PGO workflow.  Forward-looking.
+# Default: false.
+# enabled = false
 
-# PGO mode
-# Options:
-#   - none - No PGO
-#   - generate - Generate instrumented binary (Phase 1)
-#   - use - Use collected profile data (Phase 3)
-# Default: none
-mode = "none"
-
-# Profile data directory
-# Default: "pgo-data"
-profile_dir = "pgo-data"
-
-# Hot function threshold (execution count)
-# Default: None (auto-detect at 90th percentile)
-# hot_threshold = 1000
-
-# Enable basic block reordering based on profile
-# Default: true
-enable_bb_reordering = true
-
-# Inline threshold multiplier for hot functions
-# Default: 1.5 (50% more aggressive for hot code)
-hot_inline_multiplier = 1.5
-
-# Use sampling-based profiling (lower overhead)
-# Default: false (use instrumentation-based)
-use_sampling = false
+# Path to profile data file (the .profraw or .profdata produced by
+# a previous instrumented run).  Forward-looking.
+# Default: unset.
+# profile_path = "target/pgo/release.profdata"
 
 # ============================================================================
 # Cross-Compilation Configuration
 # ============================================================================
+#
+# NOTE — forward-looking section.  The parser (CrossCompileConfig)
+# recognises only `target` / `sysroot` / `linker` today.  The ACTIVE
+# cross-compile path goes through `[llvm].target_triple` (consumed
+# by the LLVM backend at codegen) and the `--target` CLI flag.
+# Setting `[cross_compile]` fields below logs a tracing::warn!
+# observation but does NOT change toolchain invocation.
+# `enabled` / `link_args` / `linking_strategy` / `strip_symbols` /
+# `universal_binary` / `minimal_runtime` are not parsed.
 
 [cross_compile]
-# Enable cross-compilation
-# Default: false
-enabled = false
+# Target triple for cross-compilation.  Forward-looking — use
+# `[llvm].target_triple` instead.
+# Default: unset.
+# target = "aarch64-unknown-linux-gnu"
 
-# Target triple for cross-compilation
-# Required if enabled=true
-# Examples:
-#   - "aarch64-unknown-linux-gnu" - ARM64 Linux
-#   - "x86_64-pc-windows-gnu" - Windows x64
-#   - "armv7-unknown-linux-gnueabihf" - ARM32 Linux
-# target_triple = "aarch64-unknown-linux-gnu"
-
-# Sysroot path for cross-compilation
-# Default: None (auto-detect)
+# Sysroot path for cross-compilation.  Forward-looking — not yet
+# wired into the toolchain invocation.
+# Default: unset.
 # sysroot = "/usr/aarch64-linux-gnu"
 
-# Custom linker path
-# Default: None (auto-detect)
+# Custom linker path.  Forward-looking.
+# Default: unset.
 # linker = "/usr/bin/aarch64-linux-gnu-gcc"
-
-# Additional linker arguments
-# Default: []
-# link_args = ["-static", "-L/custom/lib"]
-
-# Linking strategy
-# Options: static, dynamic, hybrid
-# Default: dynamic
-linking_strategy = "dynamic"
-
-# Strip symbols from output
-# Default: false
-strip_symbols = false
-
-# Enable universal binary for macOS (x86_64 + aarch64)
-# Default: false
-universal_binary = false
-
-# Minimum runtime dependencies (static builds)
-# Default: false
-minimal_runtime = false
 
 # ============================================================================
 # Build Profiles
