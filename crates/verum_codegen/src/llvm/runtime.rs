@@ -1863,19 +1863,13 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 $expr?;
             }};
         }
-        step!(
-            "emit_verum_text_get_ptr",
-            self.emit_verum_text_get_ptr(module)
-        );
-        step!("emit_verum_text_alloc", self.emit_verum_text_alloc(module));
-        step!(
-            "emit_verum_text_from_cstr",
-            self.emit_verum_text_from_cstr(module)
-        );
-        step!(
-            "emit_verum_text_concat",
-            self.emit_verum_text_concat(module)
-        );
+        // **Note**: 6 text helpers (`verum_text_get_ptr`, `_alloc`,
+        // `_from_cstr`, `_concat`, `_from_static`, `_char_len`) are
+        // emitted by the canonical `define_text_ir_helpers`
+        // (Phase 0.5) — duplicate `emit_verum_text_*` methods were
+        // removed (#91 perf cleanup).  Below: only helpers UNIQUE
+        // to RuntimeLowering that aren't covered by the canonical
+        // emitters.
         step!("emit_verum_text_free", self.emit_verum_text_free(module));
         step!(
             "emit_verum_generic_len",
@@ -1884,10 +1878,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         step!(
             "emit_verum_strlen_export",
             self.emit_verum_strlen_export(module)
-        );
-        step!(
-            "emit_verum_text_from_static",
-            self.emit_verum_text_from_static(module)
         );
         step!("emit_verum_generic_eq", self.emit_verum_generic_eq(module));
         step!(
@@ -1909,10 +1899,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         step!(
             "emit_verum_string_parse_float",
             self.emit_verum_string_parse_float(module)
-        );
-        step!(
-            "emit_verum_text_char_len",
-            self.emit_verum_text_char_len(module)
         );
         step!("fixup_text_len", self.fixup_text_len(module));
         step!("fixup_map_get", self.fixup_map_get(module));
@@ -3966,492 +3952,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_text_get_ptr(text_obj: i64) -> ptr
-    /// Returns the char* from a Text object, or "" if null.
-    fn emit_verum_text_get_ptr(&self, module: &Module<'ctx>) -> Result<()> {
-        let ctx = self.context;
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let i64_type = ctx.i64_type();
-
-        // Reuse existing declaration or create new function.
-        // NEVER delete — that invalidates existing call sites.
-        let func = if let Some(f) = module.get_function("verum_text_get_ptr") {
-            f
-        } else {
-            let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-            module.add_function("verum_text_get_ptr", fn_type, None)
-        };
-
-        // **Hot inline gate** (#91 perf roadmap).
-        //
-        // Body is 4 basic blocks of trivial integer + load ops; for
-        // static `__rodata` Text constants the optimiser can fold
-        // through every branch (non-null + non-null → return field0,
-        // and field0 is `ptrtoint @verum_text_data_<id>` which is a
-        // link-time constant).  Without `alwaysinline`, LLVM's call-
-        // site cost model often keeps the call alive — e.g.
-        // `verum_main` post-#92 still emitted `bl _verum_text_get_ptr`
-        // even though the entire chain was constant-foldable.  With
-        // `alwaysinline` the optimiser inlines unconditionally, then
-        // SROA / GVN / instcombine collapse the result to a single
-        // `adrp + add` pair (matching what C/Rust would do for a
-        // static string).
-        //
-        // **Idempotent** — must be applied even when the body is
-        // already emitted (multiple emit-chains may have created
-        // the function; the attribute attaches once per call but
-        // LLVM dedupes attribute additions internally).
-        func.add_attribute(
-            verum_llvm::attributes::AttributeLoc::Function,
-            ctx.create_enum_attribute(
-                verum_llvm::attributes::Attribute::get_named_enum_kind_id("alwaysinline"),
-                0,
-            ),
-        );
-
-        if func.count_basic_blocks() > 0 {
-            return Ok(()); // Body already emitted; only the attribute matters
-        }
-
-        let entry = ctx.append_basic_block(func, "entry");
-        let load_ptr = ctx.append_basic_block(func, "load_ptr");
-        let check_ptr = ctx.append_basic_block(func, "check_ptr");
-        let ret_empty = ctx.append_basic_block(func, "ret_empty");
-
-        let builder = ctx.create_builder();
-
-        // Entry: check if text_obj is null (0)
-        builder.position_at_end(entry);
-        let text_obj = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_int_value();
-        let is_null = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                text_obj,
-                i64_type.const_zero(),
-                "is_null",
-            )
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(is_null, ret_empty, load_ptr)
-            .or_llvm_err()?;
-
-        // load_ptr: cast to ptr, load first field (char* ptr)
-        builder.position_at_end(load_ptr);
-        let text_ptr = builder
-            .build_int_to_ptr(text_obj, ptr_type, "text_ptr")
-            .or_llvm_err()?;
-        let field0 = builder
-            .build_load(i64_type, text_ptr, "field0")
-            .or_llvm_err()?
-            .into_int_value();
-        let field0_ptr = builder
-            .build_int_to_ptr(field0, ptr_type, "field0_ptr")
-            .or_llvm_err()?;
-        let ptr_is_null = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                field0,
-                i64_type.const_zero(),
-                "ptr_null",
-            )
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(ptr_is_null, ret_empty, check_ptr)
-            .or_llvm_err()?;
-
-        // check_ptr: return the actual pointer
-        builder.position_at_end(check_ptr);
-        builder.build_return(Some(&field0_ptr)).or_llvm_err()?;
-
-        // ret_empty: return pointer to empty string constant
-        builder.position_at_end(ret_empty);
-        let empty_str = builder
-            .build_global_string_ptr("", "empty_str")
-            .or_llvm_err()?;
-        builder
-            .build_return(Some(&empty_str.as_pointer_value()))
-            .or_llvm_err()?;
-        Ok(())
-    }
-
-    /// verum_text_alloc(ptr: ptr, len: i64, cap: i64) -> i64
-    /// Allocates a Text object {ptr, len, cap} on the heap.
-    fn emit_verum_text_alloc(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_text_alloc") {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
-        }
-
-        let ctx = self.context;
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let i64_type = ctx.i64_type();
-
-        // text_alloc(ptr: ptr, len: i64, cap: i64) -> i64
-        let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_alloc")
-            .unwrap_or_else(|| module.add_function("verum_text_alloc", fn_type, None));
-
-        let entry = ctx.append_basic_block(func, "entry");
-        let builder = ctx.create_builder();
-        builder.position_at_end(entry);
-
-        // malloc(24) for 3 x i64
-        let size = i64_type.const_int(24, false);
-        let raw = self.emit_checked_malloc(&builder, module, size, "raw")?;
-
-        // Store ptr as i64
-        let ptr_param = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_pointer_value();
-        let ptr_as_i64 = builder
-            .build_ptr_to_int(ptr_param, i64_type, "ptr_i64")
-            .or_llvm_err()?;
-        builder.build_store(raw, ptr_as_i64).or_llvm_err()?;
-
-        // Store len at offset 8
-        let len_param = func
-            .get_nth_param(1)
-            .or_internal("missing param 1")?
-            .into_int_value();
-        // SAFETY: GEP at a computed offset within the allocated entries array; index is bounded by capacity
-        let slot1 = unsafe {
-            builder
-                .build_in_bounds_gep(i64_type, raw, &[i64_type.const_int(1, false)], "slot1")
-                .or_llvm_err()?
-        };
-        builder.build_store(slot1, len_param).or_llvm_err()?;
-
-        // Store cap at offset 16
-        let cap_param = func
-            .get_nth_param(2)
-            .or_internal("missing param 2")?
-            .into_int_value();
-        // SAFETY: GEP at a computed offset within the allocated entries array; index is bounded by capacity
-        let slot2 = unsafe {
-            builder
-                .build_in_bounds_gep(i64_type, raw, &[i64_type.const_int(2, false)], "slot2")
-                .or_llvm_err()?
-        };
-        builder.build_store(slot2, cap_param).or_llvm_err()?;
-
-        // Return ptr-to-int of the Text object
-        let result = builder
-            .build_ptr_to_int(raw, i64_type, "result")
-            .or_llvm_err()?;
-        builder.build_return(Some(&result)).or_llvm_err()?;
-        Ok(())
-    }
-
-    /// verum_text_from_cstr(s: ptr) -> i64
-    /// Wraps a null-terminated C string in a Text object.
-    fn emit_verum_text_from_cstr(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_text_from_cstr") {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
-        }
-
-        let ctx = self.context;
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let i64_type = ctx.i64_type();
-
-        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_text_from_cstr")
-            .unwrap_or_else(|| module.add_function("verum_text_from_cstr", fn_type, None));
-
-        let entry = ctx.append_basic_block(func, "entry");
-        let null_bb = ctx.append_basic_block(func, "null_str");
-        let valid_bb = ctx.append_basic_block(func, "valid_str");
-
-        let builder = ctx.create_builder();
-        builder.position_at_end(entry);
-
-        let s = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_pointer_value();
-        let s_i64 = builder
-            .build_ptr_to_int(s, i64_type, "s_i64")
-            .or_llvm_err()?;
-        let is_null = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                s_i64,
-                i64_type.const_zero(),
-                "is_null",
-            )
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(is_null, null_bb, valid_bb)
-            .or_llvm_err()?;
-
-        // null case: text_alloc(NULL, 0, 0)
-        builder.position_at_end(null_bb);
-        let text_alloc = module
-            .get_function("verum_text_alloc")
-            .or_missing_fn("verum_text_alloc")?;
-        let null_ptr = ptr_type.const_null();
-        let zero = i64_type.const_zero();
-        let empty = builder
-            .build_call(
-                text_alloc,
-                &[null_ptr.into(), zero.into(), zero.into()],
-                "empty",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
-            .into_int_value();
-        builder.build_return(Some(&empty)).or_llvm_err()?;
-
-        // valid case: strlen(s), then text_alloc(s, len, len)
-        builder.position_at_end(valid_bb);
-        let strlen_fn = self.get_or_declare_strlen(module);
-        let len = builder
-            .build_call(strlen_fn, &[s.into()], "len")
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
-            .into_int_value();
-        let result = builder
-            .build_call(text_alloc, &[s.into(), len.into(), len.into()], "result")
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
-            .into_int_value();
-        builder.build_return(Some(&result)).or_llvm_err()?;
-        Ok(())
-    }
-
-    /// verum_text_concat(text_a: i64, text_b: i64) -> i64
-    /// Concatenates two Text objects, returns new Text.
-    fn emit_verum_text_concat(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_text_concat") {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
-        }
-
-        let ctx = self.context;
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let i64_type = ctx.i64_type();
-
-        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_concat")
-            .unwrap_or_else(|| module.add_function("verum_text_concat", fn_type, None));
-
-        let entry = ctx.append_basic_block(func, "entry");
-        let load_a_bb = ctx.append_basic_block(func, "load_a");
-        let check_b_bb = ctx.append_basic_block(func, "check_b");
-        let load_b_bb = ctx.append_basic_block(func, "load_b");
-        let do_concat_bb = ctx.append_basic_block(func, "do_concat");
-
-        let builder = ctx.create_builder();
-        builder.position_at_end(entry);
-
-        let a = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_int_value();
-        let b = func
-            .get_nth_param(1)
-            .or_internal("missing param 1")?
-            .into_int_value();
-        let zero = i64_type.const_zero();
-
-        // Check a == null, branch to load_a or check_b with defaults
-        let a_is_null = builder
-            .build_int_compare(verum_llvm::IntPredicate::EQ, a, zero, "a_null")
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(a_is_null, check_b_bb, load_a_bb)
-            .or_llvm_err()?;
-
-        // load_a: read a.ptr and a.len
-        builder.position_at_end(load_a_bb);
-        let a_obj = builder
-            .build_int_to_ptr(a, ptr_type, "a_obj")
-            .or_llvm_err()?;
-        let a_ptr_loaded = builder
-            .build_load(i64_type, a_obj, "a_ptr_raw")
-            .or_llvm_err()?
-            .into_int_value();
-        // SAFETY: GEP into the 2-field text struct at index 1 to access the string length
-        let a_len_gep = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    a_obj,
-                    &[i64_type.const_int(1, false)],
-                    "a_len_gep",
-                )
-                .or_llvm_err()?
-        };
-        let a_len_loaded = builder
-            .build_load(i64_type, a_len_gep, "a_len_raw")
-            .or_llvm_err()?
-            .into_int_value();
-        builder
-            .build_unconditional_branch(check_b_bb)
-            .or_llvm_err()?;
-
-        // check_b: phi for a values, then check b
-        builder.position_at_end(check_b_bb);
-        let a_ptr_phi = builder.build_phi(i64_type, "a_ptr").or_llvm_err()?;
-        a_ptr_phi.add_incoming(&[(&zero, entry), (&a_ptr_loaded, load_a_bb)]);
-        let a_len_phi = builder.build_phi(i64_type, "a_len").or_llvm_err()?;
-        a_len_phi.add_incoming(&[(&zero, entry), (&a_len_loaded, load_a_bb)]);
-
-        let b_is_null = builder
-            .build_int_compare(verum_llvm::IntPredicate::EQ, b, zero, "b_null")
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(b_is_null, do_concat_bb, load_b_bb)
-            .or_llvm_err()?;
-
-        // load_b: read b.ptr and b.len
-        builder.position_at_end(load_b_bb);
-        let b_obj = builder
-            .build_int_to_ptr(b, ptr_type, "b_obj")
-            .or_llvm_err()?;
-        let b_ptr_loaded = builder
-            .build_load(i64_type, b_obj, "b_ptr_raw")
-            .or_llvm_err()?
-            .into_int_value();
-        // SAFETY: GEP into object header to access the length field; the object uses the standard NewG layout (24-byte header)
-        let b_len_gep = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    b_obj,
-                    &[i64_type.const_int(1, false)],
-                    "b_len_gep",
-                )
-                .or_llvm_err()?
-        };
-        let b_len_loaded = builder
-            .build_load(i64_type, b_len_gep, "b_len_raw")
-            .or_llvm_err()?
-            .into_int_value();
-        builder
-            .build_unconditional_branch(do_concat_bb)
-            .or_llvm_err()?;
-
-        // do_concat: phi for b values, then allocate and copy
-        builder.position_at_end(do_concat_bb);
-        let b_ptr_phi = builder.build_phi(i64_type, "b_ptr").or_llvm_err()?;
-        b_ptr_phi.add_incoming(&[(&zero, check_b_bb), (&b_ptr_loaded, load_b_bb)]);
-        let b_len_phi = builder.build_phi(i64_type, "b_len").or_llvm_err()?;
-        b_len_phi.add_incoming(&[(&zero, check_b_bb), (&b_len_loaded, load_b_bb)]);
-
-        let a_ptr_val = a_ptr_phi.as_basic_value().into_int_value();
-        let a_len = a_len_phi.as_basic_value().into_int_value();
-        let b_ptr_val = b_ptr_phi.as_basic_value().into_int_value();
-        let b_len = b_len_phi.as_basic_value().into_int_value();
-
-        // total = a_len + b_len
-        let total = builder.build_int_add(a_len, b_len, "total").or_llvm_err()?;
-        // buf = malloc(total + 1)
-        let total_plus_1 = builder
-            .build_int_add(total, i64_type.const_int(1, false), "total_p1")
-            .or_llvm_err()?;
-        let buf = self.emit_checked_malloc(&builder, module, total_plus_1, "buf")?;
-
-        // memcpy a_ptr to buf (a_len bytes) — only if a_len > 0
-        let memcpy_fn = self.get_or_declare_memcpy(module);
-        let a_ptr = builder
-            .build_int_to_ptr(a_ptr_val, ptr_type, "a_ptr")
-            .or_llvm_err()?;
-        let a_len_gt0 = builder
-            .build_int_compare(verum_llvm::IntPredicate::SGT, a_len, zero, "a_gt0")
-            .or_llvm_err()?;
-        let copy_a_bb = ctx.append_basic_block(func, "copy_a");
-        let after_a_bb = ctx.append_basic_block(func, "after_a");
-        builder
-            .build_conditional_branch(a_len_gt0, copy_a_bb, after_a_bb)
-            .or_llvm_err()?;
-
-        builder.position_at_end(copy_a_bb);
-        builder
-            .build_call(memcpy_fn, &[buf.into(), a_ptr.into(), a_len.into()], "")
-            .or_llvm_err()?;
-        builder
-            .build_unconditional_branch(after_a_bb)
-            .or_llvm_err()?;
-
-        // memcpy b_ptr to buf+a_len (b_len bytes) — only if b_len > 0
-        builder.position_at_end(after_a_bb);
-        let b_ptr = builder
-            .build_int_to_ptr(b_ptr_val, ptr_type, "b_ptr")
-            .or_llvm_err()?;
-        // SAFETY: GEP to compute the end-of-buffer position; the offset is the sum of validated lengths that fit within the allocation
-        let buf_offset = unsafe {
-            builder
-                .build_in_bounds_gep(ctx.i8_type(), buf, &[a_len], "buf_off")
-                .or_llvm_err()?
-        };
-        let b_len_gt0 = builder
-            .build_int_compare(verum_llvm::IntPredicate::SGT, b_len, zero, "b_gt0")
-            .or_llvm_err()?;
-        let copy_b_bb = ctx.append_basic_block(func, "copy_b");
-        let after_b_bb = ctx.append_basic_block(func, "after_b");
-        builder
-            .build_conditional_branch(b_len_gt0, copy_b_bb, after_b_bb)
-            .or_llvm_err()?;
-
-        builder.position_at_end(copy_b_bb);
-        builder
-            .build_call(
-                memcpy_fn,
-                &[buf_offset.into(), b_ptr.into(), b_len.into()],
-                "",
-            )
-            .or_llvm_err()?;
-        builder
-            .build_unconditional_branch(after_b_bb)
-            .or_llvm_err()?;
-
-        // null-terminate: buf[total] = 0
-        builder.position_at_end(after_b_bb);
-        // SAFETY: GEP to access the 'end' field at a fixed offset within a struct of known layout
-        let end = unsafe {
-            builder
-                .build_in_bounds_gep(ctx.i8_type(), buf, &[total], "end")
-                .or_llvm_err()?
-        };
-        builder
-            .build_store(end, ctx.i8_type().const_zero())
-            .or_llvm_err()?;
-
-        // text_alloc(buf, total, total)
-        let text_alloc = module
-            .get_function("verum_text_alloc")
-            .or_missing_fn("verum_text_alloc")?;
-        let result = builder
-            .build_call(
-                text_alloc,
-                &[buf.into(), total.into(), total.into()],
-                "result",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
-            .into_int_value();
-        builder.build_return(Some(&result)).or_llvm_err()?;
-        Ok(())
-    }
+    // **Removed `emit_verum_text_get_ptr`** — was a 108-line dead
+    // duplicate of `define_text_ir_helpers`'s canonical emitter at
+    // line 13270.  The canonical site runs at Phase 0.5 of
+    // `lower_module` (vbc_lowering.rs:856) and creates the function
+    // body before any Phase 6+ `emit_text_ir_functions` invocation;
+    // every previous re-entry into `emit_verum_text_get_ptr` saw
+    // `count_basic_blocks() > 0` and silently no-op'd.  The
+    // `alwaysinline` attribute now lives on the canonical emitter
+    // where it actually attaches.  See #91 perf roadmap.
+    // **Removed `emit_verum_text_alloc`** — dead duplicate of canonical `define_text_ir_helpers` emitter; see comment above (#91 perf cleanup).
+    // **Removed `emit_verum_text_from_cstr`** — dead duplicate of canonical `define_text_ir_helpers` emitter; see comment above (#91 perf cleanup).
+    // **Removed `emit_verum_text_concat`** — dead duplicate of canonical `define_text_ir_helpers` emitter; see comment above (#91 perf cleanup).
 
     /// verum_text_free(text_obj: i64) -> void
     /// Frees an owned Text object: null-check, free backing buffer, free header.
@@ -4694,98 +4206,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.build_return(Some(&len)).or_llvm_err()?;
         Ok(())
     }
-
-    /// verum_text_from_static(ptr: ptr, len: i64) -> ptr
-    /// Creates a null-terminated copy of a static string.
-    fn emit_verum_text_from_static(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_text_from_static") {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
-        }
-
-        let ctx = self.context;
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let i64_type = ctx.i64_type();
-
-        // from_static(ptr: ptr, len: i64) -> ptr (char*)
-        let fn_type = ptr_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_from_static")
-            .unwrap_or_else(|| module.add_function("verum_text_from_static", fn_type, None));
-
-        let entry = ctx.append_basic_block(func, "entry");
-        let valid_bb = ctx.append_basic_block(func, "valid");
-        let empty_bb = ctx.append_basic_block(func, "empty");
-
-        let builder = ctx.create_builder();
-        builder.position_at_end(entry);
-
-        let src = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_pointer_value();
-        let len = func
-            .get_nth_param(1)
-            .or_internal("missing param 1")?
-            .into_int_value();
-
-        // Check if ptr is null or len <= 0
-        let src_i64 = builder
-            .build_ptr_to_int(src, i64_type, "src_i64")
-            .or_llvm_err()?;
-        let src_null = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                src_i64,
-                i64_type.const_zero(),
-                "src_null",
-            )
-            .or_llvm_err()?;
-        let len_le0 = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::SLE,
-                len,
-                i64_type.const_zero(),
-                "len_le0",
-            )
-            .or_llvm_err()?;
-        let invalid = builder
-            .build_or(src_null, len_le0, "invalid")
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(invalid, empty_bb, valid_bb)
-            .or_llvm_err()?;
-
-        // empty: malloc(1), set to '\0', return
-        builder.position_at_end(empty_bb);
-        let one = i64_type.const_int(1, false);
-        let empty_buf = self.emit_checked_malloc(&builder, module, one, "empty_buf")?;
-        builder
-            .build_store(empty_buf, ctx.i8_type().const_zero())
-            .or_llvm_err()?;
-        builder.build_return(Some(&empty_buf)).or_llvm_err()?;
-
-        // valid: malloc(len+1), memcpy, null-terminate
-        builder.position_at_end(valid_bb);
-        let len_plus_1 = builder.build_int_add(len, one, "len_p1").or_llvm_err()?;
-        let buf = self.emit_checked_malloc(&builder, module, len_plus_1, "buf")?;
-        let memcpy_fn = self.get_or_declare_memcpy(module);
-        builder
-            .build_call(memcpy_fn, &[buf.into(), src.into(), len.into()], "")
-            .or_llvm_err()?;
-        // SAFETY: GEP to access the 'end' field at a fixed offset within a struct of known layout
-        let end = unsafe {
-            builder
-                .build_in_bounds_gep(ctx.i8_type(), buf, &[len], "end")
-                .or_llvm_err()?
-        };
-        builder
-            .build_store(end, ctx.i8_type().const_zero())
-            .or_llvm_err()?;
-        builder.build_return(Some(&buf)).or_llvm_err()?;
-        Ok(())
-    }
+    // **Removed `emit_verum_text_from_static`** — dead duplicate of canonical `define_text_ir_helpers` emitter; see comment above (#91 perf cleanup).
 
     /// Emit verum_is_text_object(val: i64) -> i1 as inline LLVM IR helper.
     /// Heuristic: checks if val looks like a valid heap-allocated Text object.
@@ -5603,165 +5024,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
         Ok(())
     }
-
-    /// verum_text_char_len(text_obj: i64) -> i64
-    ///
-
-    /// Returns the number of UTF-8 codepoints in a Text object.
-    /// Counts bytes that are NOT continuation bytes (0x80..0xBF).
-    fn emit_verum_text_char_len(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_text_char_len") {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
-        }
-
-        let ctx = self.context;
-        let i8_type = ctx.i8_type();
-        let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-
-        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_char_len")
-            .unwrap_or_else(|| module.add_function("verum_text_char_len", fn_type, None));
-
-        let entry = ctx.append_basic_block(func, "entry");
-        let get_fields = ctx.append_basic_block(func, "get_fields");
-        let loop_head = ctx.append_basic_block(func, "loop_head");
-        let loop_body = ctx.append_basic_block(func, "loop_body");
-        let loop_end = ctx.append_basic_block(func, "loop_end");
-        let ret_zero = ctx.append_basic_block(func, "ret_zero");
-        let builder = ctx.create_builder();
-
-        // Entry: null check
-        builder.position_at_end(entry);
-        let text_obj = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_int_value();
-        let is_null = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                text_obj,
-                i64_type.const_zero(),
-                "null",
-            )
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(is_null, ret_zero, get_fields)
-            .or_llvm_err()?;
-
-        // get_fields: extract ptr and len from Text object
-        builder.position_at_end(get_fields);
-        let text_ptr = builder
-            .build_int_to_ptr(text_obj, ptr_type, "tptr")
-            .or_llvm_err()?;
-        let data_ptr_raw = builder
-            .build_load(i64_type, text_ptr, "data_raw")
-            .or_llvm_err()?
-            .into_int_value();
-        let data_ptr = builder
-            .build_int_to_ptr(data_ptr_raw, ptr_type, "data")
-            .or_llvm_err()?;
-        // SAFETY: in-bounds GEP on a pointer to an object with known layout; the offset is within the allocated size
-        let len_gep = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    text_ptr,
-                    &[i64_type.const_int(1, false)],
-                    "len_gep",
-                )
-                .or_llvm_err()?
-        };
-        let byte_len = builder
-            .build_load(i64_type, len_gep, "byte_len")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // Check if len == 0
-        let len_zero = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                byte_len,
-                i64_type.const_zero(),
-                "lz",
-            )
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(len_zero, ret_zero, loop_head)
-            .or_llvm_err()?;
-
-        // loop_head: phi for index and count
-        builder.position_at_end(loop_head);
-        let idx_phi = builder.build_phi(i64_type, "idx").or_llvm_err()?;
-        let cnt_phi = builder.build_phi(i64_type, "cnt").or_llvm_err()?;
-        idx_phi.add_incoming(&[(&i64_type.const_zero(), get_fields)]);
-        cnt_phi.add_incoming(&[(&i64_type.const_zero(), get_fields)]);
-        let idx = idx_phi.as_basic_value().into_int_value();
-        let cnt = cnt_phi.as_basic_value().into_int_value();
-
-        let done = builder
-            .build_int_compare(verum_llvm::IntPredicate::UGE, idx, byte_len, "done")
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(done, loop_end, loop_body)
-            .or_llvm_err()?;
-
-        // loop_body: load byte, check if NOT continuation byte (0b10xxxxxx)
-        builder.position_at_end(loop_body);
-        // SAFETY: GEP at a fixed offset within a known struct layout; the pointer is valid from prior allocation
-        let byte_gep = unsafe {
-            builder
-                .build_in_bounds_gep(i8_type, data_ptr, &[idx], "bgep")
-                .or_llvm_err()?
-        };
-        let byte = builder
-            .build_load(i8_type, byte_gep, "byte")
-            .or_llvm_err()?
-            .into_int_value();
-        // Continuation bytes have pattern 10xxxxxx → (byte & 0xC0) == 0x80
-        let masked = builder
-            .build_and(byte, i8_type.const_int(0xC0, false), "masked")
-            .or_llvm_err()?;
-        let is_cont = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                masked,
-                i8_type.const_int(0x80, false),
-                "is_cont",
-            )
-            .or_llvm_err()?;
-        // If NOT continuation byte, increment count
-        let not_cont = builder.build_not(is_cont, "not_cont").or_llvm_err()?;
-        let not_cont_ext = builder
-            .build_int_z_extend(not_cont, i64_type, "ext")
-            .or_llvm_err()?;
-        let new_cnt = builder
-            .build_int_add(cnt, not_cont_ext, "ncnt")
-            .or_llvm_err()?;
-        let new_idx = builder
-            .build_int_add(idx, i64_type.const_int(1, false), "nidx")
-            .or_llvm_err()?;
-
-        idx_phi.add_incoming(&[(&new_idx, loop_body)]);
-        cnt_phi.add_incoming(&[(&new_cnt, loop_body)]);
-        builder
-            .build_unconditional_branch(loop_head)
-            .or_llvm_err()?;
-
-        // loop_end: return count
-        builder.position_at_end(loop_end);
-        builder.build_return(Some(&cnt)).or_llvm_err()?;
-
-        // ret_zero
-        builder.position_at_end(ret_zero);
-        builder
-            .build_return(Some(&i64_type.const_zero()))
-            .or_llvm_err()?;
-        Ok(())
-    }
+    // **Removed `emit_verum_text_char_len`** — dead duplicate of canonical `define_text_ir_helpers` emitter; see comment above (#91 perf cleanup).
 
     // =========================================================================
     // Misc LLVM IR Functions — time, random, range
@@ -13267,12 +12530,30 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
 
     // --- verum_text_get_ptr(text_obj: i64) -> ptr ---
     // Extracts char* from Text object. Returns "" for null.
+    //
+    // **Hot inline gate** (#91 perf roadmap, parallels
+    // `RuntimeLowering::emit_verum_text_get_ptr`).  Body is 6 basic
+    // blocks of trivial integer + load ops; for `__rodata` Text
+    // constants (#92) the optimiser folds through every branch.
+    // Without `alwaysinline`, LLVM's `default<O2>` inliner cost
+    // model often keeps the call alive when there are many
+    // callers (96+ in stdlib build) — defeating the constant-
+    // folding chain.  Mark `alwaysinline` so the inliner fires
+    // unconditionally; SROA + GVN + instcombine then collapse the
+    // result to a single `adrp + add` pair on aarch64.
     if module.get_function("verum_text_get_ptr").is_none() {
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
         let func = module
             .get_function("verum_text_get_ptr")
             .unwrap_or_else(|| module.add_function("verum_text_get_ptr", fn_type, None));
         func.set_linkage(verum_llvm::module::Linkage::Internal);
+        func.add_attribute(
+            verum_llvm::attributes::AttributeLoc::Function,
+            context.create_enum_attribute(
+                verum_llvm::attributes::Attribute::get_named_enum_kind_id("alwaysinline"),
+                0,
+            ),
+        );
         let entry = context.append_basic_block(func, "entry");
         let null_bb = context.append_basic_block(func, "null_obj");
         let load_bb = context.append_basic_block(func, "load_ptr");

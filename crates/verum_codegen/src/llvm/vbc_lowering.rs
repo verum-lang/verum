@@ -2340,12 +2340,40 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             );
         }
 
-        // Enable alloca-based registers for multi-block functions.
-        // This ensures values persist across basic block boundaries.
-        // LLVM's mem2reg pass will optimize these to SSA form.
-        if block_starts.len() > 1 {
-            ctx.enable_alloca_mode();
-        }
+        // Enable alloca-based registers UNCONDITIONALLY (#94 follow-up).
+        //
+        // Pre-fix: alloca mode was gated on `block_starts.len() > 1`.
+        // Single-block functions (like generic `swap<T>`) used SSA
+        // mode, which makes `get_register(reg)` ERROR on registers
+        // that haven't been explicitly populated — even if the VBC
+        // codegen briefly allocated a transient register that the
+        // body never wrote (Unit return placeholders, intrinsic-call
+        // arg-marshalling temps, etc.).
+        //
+        // The VBC codegen for a body like `@intrinsic("swap", a, b)`
+        // sometimes emits an implicit transient register-2 access
+        // for the Unit return slot — perfectly valid in interpreter
+        // (which reads zero from un-populated regs) but tripping
+        // SSA-mode's `InvalidRegister(reg)` Err in AOT.  The
+        // historical workaround was the `skip_body_func_ids` path
+        // (vbc_lowering.rs:3957) which strips the entire body and
+        // emits `ret <zero>` — defeating ALL of the function's perf
+        // (it never runs, callers see zero).  Worse, having ANY
+        // skip-body function in the module forced the LLVM pipeline
+        // to drop from `default<O2>` to `always-inline,globaldce`
+        // (#94 tiered fallback).
+        //
+        // Fix: always enable alloca mode.  Alloca-mode `get_register`
+        // returns zero for un-populated registers (graceful), the
+        // single block lowers correctly, mem2reg + SROA promote
+        // every alloca back to SSA form during the LLVM pipeline —
+        // so there's ZERO runtime cost vs the SSA-mode emission.
+        // Net win: `swap` and friends no longer trigger skip-body,
+        // `skip_body_count` drops to 0 for clean stdlib builds, and
+        // the full `default<O2>` pipeline reactivates — unblocking
+        // SROA, GVN, instcombine, loop opts, vectorization for
+        // every user binary.
+        ctx.enable_alloca_mode();
 
         // Set up entry block — always position at the very first block (block_0)
         if let Some(entry) = ctx.entry_block() {
