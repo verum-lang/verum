@@ -43,6 +43,7 @@ mount core.async.timer.{timeout_ms as future_timeout_ms};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.net.weft.handler.{Handler};
 mount core.net.weft.connection.{serve_http1, ConnectionConfig};
+mount core.net.weft.io_uring_accept.{IoUringAcceptConfig};
 
 // =============================================================================
 // Config
@@ -69,6 +70,14 @@ public type ListenerConfig is {
     /// 0 disables the per-IP throttle (NOT recommended in
     /// internet-exposed deployments).  Default 100.
     per_ip_max: Int,
+    /// Optional io_uring multi-shot accept config (§6.17).  `None`
+    /// keeps the existing `TcpListener::accept` path; `Some(cfg)`
+    /// opts the listener into the strategy selected by
+    /// `io_uring_accept.select_accept_strategy(target_triple, cfg)`.
+    /// V0 (#316.3) accepts the field but the selector falls through
+    /// to the blocking strategy on every platform; V1 (#316.4) wires
+    /// in the liburing FFI and Linux callers transparently upgrade.
+    io_uring_accept: Maybe<IoUringAcceptConfig>,
 };
 
 implement ListenerConfig {
@@ -79,6 +88,7 @@ implement ListenerConfig {
             drain_grace_ms: 30_000,
             reuseport: false,
             per_ip_max: 100,
+            io_uring_accept: None,
         }
     }
 
@@ -92,6 +102,17 @@ implement ListenerConfig {
 
     public fn with_per_ip_max(self, max: Int) -> ListenerConfig {
         ListenerConfig { per_ip_max: max, ..self }
+    }
+
+    /// Opt the listener into io_uring multi-shot accept (Linux ≥ 6.11)
+    /// per spec §6.17.  The supplied `IoUringAcceptConfig` is handed
+    /// to `select_accept_strategy()` at startup; on non-Linux targets
+    /// or when V1 isn't yet wired the listener silently falls through
+    /// to today's `TcpListener::accept` path — caller-side behaviour
+    /// is unchanged either way.  Default for new `ListenerConfig`s
+    /// remains `None` (no behavioural change to existing call sites).
+    public fn with_io_uring_strategy(self, cfg: IoUringAcceptConfig) -> ListenerConfig {
+        ListenerConfig { io_uring_accept: Some(cfg), ..self }
     }
 }
 
