@@ -517,7 +517,13 @@ impl<'s> CompilationPipeline<'s> {
             // get inlined into call sites, cutting hello-world's
             // `verum_main` from `bl _verum_text_get_ptr; bl _verum_internal_puts`
             // to inline `_verum_internal_puts(adrp+add)`.
-            let passes = if !has_ir_issues {
+            // VERUM_FORCE_FULL_O2=1 — diagnostic override; force the
+            // full O2/O3 pipeline regardless of IR-issue status.  Used
+            // to investigate codegen-level type-conflict bugs (arity-
+            // collided functions with multi-typed register slots that
+            // crash SROA / SimplifyCFG / GVN).  See #91 follow-up.
+            let force_full = std::env::var("VERUM_FORCE_FULL_O2").is_ok();
+            let passes = if !has_ir_issues || force_full {
                 match opt_level {
                     0 => "globaldce".to_string(),
                     1 => "default<O1>".to_string(),
@@ -545,10 +551,28 @@ impl<'s> CompilationPipeline<'s> {
             }
 
             info!("  Running LLVM passes: {}", passes);
+            if std::env::var("VERUM_TRACE_PASSES").is_ok() {
+                eprintln!(
+                    "[verum-passes] running: {} (arity_collisions={}, skip_body={})",
+                    passes,
+                    lowering.has_arity_collisions(),
+                    lowering.skip_body_count(),
+                );
+            }
+            // **Pre-pass IR dump** — capture IR before LLVM passes run.
+            // Used for diagnosing crashes inside SimplifyCFG/SROA/GVN.
+            if std::env::var("VERUM_DUMP_PRE_PASS").is_ok() {
+                let pre_path = build_dir.join(format!("{}.pre-pass.ll", module_name));
+                let _ = lowering.write_ir_to_file(&pre_path);
+                eprintln!("[verum-passes] pre-pass IR -> {}", pre_path.display());
+            }
             if let Err(e) = lowering
                 .module()
                 .run_passes(&passes, &target_machine, pass_options)
             {
+                if std::env::var("VERUM_TRACE_PASSES").is_ok() {
+                    eprintln!("[verum-passes] FAILED: {} — falling back to globaldce", e);
+                }
                 // Fall back to just globaldce if full pipeline fails
                 tracing::warn!(
                     "Full LLVM pass pipeline failed: {} — falling back to globaldce",

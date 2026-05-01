@@ -1686,8 +1686,33 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let llvm_fn = if let Some(existing) = self.module.get_function(&func_name) {
                 if existing.count_params() as usize != effective_params.len() {
                     // Collision! Create with a unique suffix so both functions coexist.
+                    //
+                    // **Method overloading support**: Verum allows multiple
+                    // methods with the same name but different signatures
+                    // (e.g. `Map.get_or_default(&K) -> V` vs
+                    // `Map.get_or_default(&K, V) -> V`).  At LLVM IR level
+                    // each function needs a unique linkage name; we mangle
+                    // by arity suffix.  Call-site resolution at
+                    // `instruction.rs::resolve_llvm_function` tries the
+                    // bare name first, then `__arity{N}`.
+                    //
+                    // **Known limitation** (#96): the full `default<O2>`
+                    // pipeline crashes (SIGBUS in `SimplifyCFG`) on
+                    // modules with arity collisions, so the pipeline
+                    // gates fallback to `always-inline,globaldce` for
+                    // affected modules.  Fixing this requires emitting
+                    // the body IR in a way SimplifyCFG can traverse,
+                    // tracked separately.
                     let unique_name = format!("{}__arity{}", func_name, effective_params.len());
                     self.has_arity_collisions = true;
+                    if std::env::var("VERUM_TRACE_PASSES").is_ok() {
+                        eprintln!(
+                            "[arity-collision] {}: existing arity {}, new arity {}",
+                            func_name,
+                            existing.count_params(),
+                            effective_params.len(),
+                        );
+                    }
                     // The ORIGINAL function (existing) keeps its name. If the current
                     // func_desc has a body and the existing function has different arity,
                     // lowering this body into the existing function would produce invalid
