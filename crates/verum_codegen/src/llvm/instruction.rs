@@ -37,9 +37,12 @@ fn checked_malloc_instr<'ctx>(
     let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
     let i64_type = llvm_ctx.i64_type();
 
-    let malloc_fn = module.get_function("malloc").unwrap_or_else(|| {
+    // Libc-free: route through `verum_os_alloc` (mmap on Linux/macOS,
+    // VirtualAlloc on Windows) instead of libc malloc.
+    // See `docs/architecture/no-libc-architecture.md`.
+    let malloc_fn = module.get_function("verum_os_alloc").unwrap_or_else(|| {
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        module.add_function("malloc", fn_type, None)
+        module.add_function("verum_os_alloc", fn_type, None)
     });
 
     let raw_ptr = builder
@@ -68,11 +71,15 @@ fn checked_malloc_instr<'ctx>(
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
     builder.position_at_end(oom_bb);
-    let exit_fn = if let Some(f) = module.get_function("_exit") {
+    // Libc-free OOM abort: route through `verum_os_exit` (defined in
+    // `platform_ir.rs::emit_verum_os_exit`) which uses ExitProcess on
+    // Windows, _exit syscall on Linux, libSystem _exit on macOS.
+    let i32_type = llvm_ctx.i32_type();
+    let exit_fn = if let Some(f) = module.get_function("verum_os_exit") {
         f
     } else {
-        let fn_type = llvm_ctx.void_type().fn_type(&[i64_type.into()], false);
-        let f = module.add_function("_exit", fn_type, None);
+        let fn_type = llvm_ctx.void_type().fn_type(&[i32_type.into()], false);
+        let f = module.add_function("verum_os_exit", fn_type, None);
         f.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
             llvm_ctx.create_string_attribute("noreturn", ""),
@@ -80,7 +87,7 @@ fn checked_malloc_instr<'ctx>(
         f
     };
     builder
-        .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
+        .build_call(exit_fn, &[i32_type.const_int(1, false).into()], "")
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
     builder
         .build_unreachable()
@@ -88,6 +95,112 @@ fn checked_malloc_instr<'ctx>(
 
     builder.position_at_end(ok_bb);
     Ok(raw_ptr)
+}
+
+/// Get or declare a libc-free `strcmp(a, b) -> i32` wrapper.
+///
+/// **Libc-free**: emits an internal-linkage byte-by-byte
+/// comparison loop instead of declaring `extern "C" fn strcmp`.
+/// LLVM's optimiser inlines the body at -O2+ so the wrapper has
+/// zero runtime cost.  See `docs/architecture/no-libc-architecture.md`.
+fn get_or_declare_internal_strcmp<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_strcmp";
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
+    let i8_type = llvm_ctx.i8_type();
+    let i32_type = llvm_ctx.i32_type();
+    let i64_type = llvm_ctx.i64_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let fn_type = i32_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let loop_check = llvm_ctx.append_basic_block(func, "loop_check");
+    let cmp_bytes = llvm_ctx.append_basic_block(func, "cmp_bytes");
+    let advance = llvm_ctx.append_basic_block(func, "advance");
+    let return_diff = llvm_ctx.append_basic_block(func, "return_diff");
+
+    let builder = llvm_ctx.create_builder();
+
+    // entry → loop_check (i = 0)
+    builder.position_at_end(entry);
+    builder.build_unconditional_branch(loop_check).expect("strcmp entry br");
+
+    builder.position_at_end(loop_check);
+    let i_phi = builder.build_phi(i64_type, "i").expect("strcmp i phi");
+    i_phi.add_incoming(&[(&i64_type.const_zero(), entry)]);
+
+    let a = func.get_first_param().expect("strcmp p0").into_pointer_value();
+    let b = func.get_nth_param(1).expect("strcmp p1").into_pointer_value();
+    let i_val = i_phi.as_basic_value().into_int_value();
+
+    // Load a[i], b[i]
+    let pa = unsafe { builder.build_gep(i8_type, a, &[i_val], "pa").expect("strcmp gep a") };
+    let pb = unsafe { builder.build_gep(i8_type, b, &[i_val], "pb").expect("strcmp gep b") };
+    let ca = builder
+        .build_load(i8_type, pa, "ca")
+        .expect("strcmp load a")
+        .into_int_value();
+    let cb = builder
+        .build_load(i8_type, pb, "cb")
+        .expect("strcmp load b")
+        .into_int_value();
+
+    // If ca != cb → return cb - ca (or rather a-b for sign convention).
+    // libc strcmp returns *positive* if a > b, *negative* if a < b, 0 if equal.
+    let neq = builder
+        .build_int_compare(verum_llvm::IntPredicate::NE, ca, cb, "neq")
+        .expect("strcmp neq");
+    builder
+        .build_conditional_branch(neq, return_diff, cmp_bytes)
+        .expect("strcmp neq br");
+
+    // Equal: if ca == 0, both strings ended at the same point — return 0.
+    builder.position_at_end(cmp_bytes);
+    let is_term = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, ca, i8_type.const_zero(), "is_term")
+        .expect("strcmp is_term");
+    let return_zero = llvm_ctx.append_basic_block(func, "return_zero");
+    builder
+        .build_conditional_branch(is_term, return_zero, advance)
+        .expect("strcmp term br");
+
+    builder.position_at_end(return_zero);
+    builder
+        .build_return(Some(&i32_type.const_zero()))
+        .expect("strcmp ret 0");
+
+    // Advance: i = i + 1, jump back to loop_check.
+    builder.position_at_end(advance);
+    let one = i64_type.const_int(1, false);
+    let i_next = builder.build_int_add(i_val, one, "i_next").expect("strcmp i_next");
+    builder
+        .build_unconditional_branch(loop_check)
+        .expect("strcmp back-edge");
+    i_phi.add_incoming(&[(&i_next, advance)]);
+
+    // return_diff: extend ca/cb to i32 and return ca - cb.
+    builder.position_at_end(return_diff);
+    let ca_i32 = builder
+        .build_int_z_extend(ca, i32_type, "ca_i32")
+        .expect("strcmp ca ext");
+    let cb_i32 = builder
+        .build_int_z_extend(cb, i32_type, "cb_i32")
+        .expect("strcmp cb ext");
+    let diff = builder
+        .build_int_sub(ca_i32, cb_i32, "diff")
+        .expect("strcmp sub");
+    builder
+        .build_return(Some(&diff))
+        .expect("strcmp ret diff");
+
+    func
 }
 
 /// Safely extract a pointer value from a register, converting int-to-ptr if needed.
@@ -698,11 +811,10 @@ pub fn lower_instruction<'ctx>(
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: expected return value"))?
                     .into_pointer_value();
 
-                let fn_type = i32_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+                let _ = i32_type; // unused after libc-free migration
                 let module = ctx.get_module();
-                let strcmp = module.get_function("strcmp").unwrap_or_else(|| {
-                    module.add_function("strcmp", fn_type, None)
-                });
+                // Libc-free: route through inline strcmp wrapper.
+                let strcmp = get_or_declare_internal_strcmp(ctx.llvm_context(), &module);
 
                 let cmp_result = ctx.builder()
                     .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
@@ -22212,11 +22324,10 @@ fn lower_cmp_generic<'ctx>(
             .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: expected return value"))?
             .into_pointer_value();
         let i32_type = ctx.llvm_context().i32_type();
-        let fn_type = i32_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+        let _ = (i32_type, ptr_type); // sig + ptr params unused after libc-free migration
         let module = ctx.get_module();
-        let strcmp = module.get_function("strcmp").unwrap_or_else(|| {
-            module.add_function("strcmp", fn_type, None)
-        });
+        // Libc-free: inline strcmp wrapper.
+        let strcmp = get_or_declare_internal_strcmp(ctx.llvm_context(), &module);
         let cmp_result = ctx.builder()
             .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
@@ -22368,11 +22479,10 @@ fn lower_cmp_generic<'ctx>(
             .into_pointer_value();
 
         let i32_type = ctx.llvm_context().i32_type();
-        let fn_type = i32_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+        let _ = (i32_type, ptr_type); // unused after libc-free migration
         let module = ctx.get_module();
-        let strcmp = module.get_function("strcmp").unwrap_or_else(|| {
-            module.add_function("strcmp", fn_type, None)
-        });
+        // Libc-free: inline strcmp wrapper.
+        let strcmp = get_or_declare_internal_strcmp(ctx.llvm_context(), &module);
         let cmp_result = ctx.builder()
             .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
