@@ -143,6 +143,16 @@ public type Opcode is
     | AggStepAvg(n_args: Int, reg_first_arg: Int, reg_sum: Int, reg_count: Int)
     | AggFinalAvg(reg_sum: Int, reg_count: Int, reg_dst: Int)
 
+    // Parameter binding ------------------------------------------------------
+    //
+    // `Variable(reg_dst, param_idx)` — copy positional parameter `?N`
+    // (1-based) from the active `ParamBindings` into `reg_dst`.
+    // `VariableNamed(reg_dst, name_const_idx)` — copy named parameter
+    // `:foo` (or `@foo` / `$foo`) into `reg_dst`.  Unbound slots
+    // evaluate to NULL (matching SQLite semantics).
+    | Variable(reg_dst: Int, param_idx: Int)
+    | VariableNamed(reg_dst: Int, name_const_idx: Int)
+
     // Result emission ---------------------------------------------------------
     | ResultRow(reg_start: Int, n_cols: Int);
 
@@ -234,6 +244,8 @@ public fn opcode_name(op: &Opcode) -> Text {
         AggFinal(_, _)       => "AggFinal".clone(),
         AggStepAvg(_, _, _, _) => "AggStepAvg".clone(),
         AggFinalAvg(_, _, _)   => "AggFinalAvg".clone(),
+        Variable(_, _)         => "Variable".clone(),
+        VariableNamed(_, _)    => "VariableNamed".clone(),
         ResultRow(_, _) => "ResultRow".clone(),
     }
 }

@@ -34,6 +34,9 @@ mount core.database.sqlite.native.l4_vdbe.program.{
 mount core.database.sqlite.native.l4_vdbe.cursor_table.{
     CursorTable, cursor_table_new,
 };
+mount core.database.sqlite.native.l4_vdbe.bindings.{
+    ParamBindings, param_bindings_new,
+};
 mount core.database.sqlite.native.l3_btree.BtreeKind;
 
 // -----------------------------------------------------------------------------
@@ -74,6 +77,10 @@ public type affine VdbeState is {
     /// drained by the L6 writeback bridge to fire update_hook
     /// callbacks.  Empty for read-only programs.
     mutations: List<RowMutation>,
+    /// Active parameter bindings — written exclusively at the L6
+    /// `PreparedStatement.step()` boundary; read by `Variable` /
+    /// `VariableNamed` opcode handlers.
+    bindings: ParamBindings,
 };
 
 public fn vdbe_state_new(program: &VdbeProgram) -> VdbeState {
@@ -85,6 +92,7 @@ public fn vdbe_state_new(program: &VdbeProgram) -> VdbeState {
         halted: false,
         cursors: cursor_table_new(program.cursor_count(), 4096, 0),
         mutations: List.new(),
+        bindings: param_bindings_new(),
     }
 }
 
@@ -106,6 +114,14 @@ implement VdbeState {
         self.mutations = List.new();
         out
     }
+
+    /// Snapshot the caller's bindings into the interpreter state.
+    public fn install_bindings(&mut self, b: ParamBindings) {
+        self.bindings = b;
+    }
+
+    /// Borrow the active bindings.
+    public fn bindings_ref(&self) -> &ParamBindings { &self.bindings }
 }
 
 // -----------------------------------------------------------------------------
@@ -541,6 +557,27 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             // next call moves past it.
             state.pc = state.pc + 1;
             Row(start, n)
+        }
+
+        // -------------------------------------------------------------
+        // Parameter binding
+        // -------------------------------------------------------------
+
+        Variable(reg_dst, param_idx) => {
+            let v = state.bindings.get_positional(param_idx);
+            state.regs.set(reg_dst, register_clone(&v));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        VariableNamed(reg_dst, name_const_idx) => {
+            let v = match program.constants.get(name_const_idx) {
+                KText(ref nm) => state.bindings.get_named(nm),
+                _ => RNull,
+            };
+            state.regs.set(reg_dst, register_clone(&v));
+            state.pc = state.pc + 1;
+            Yield
         }
 
         // -------------------------------------------------------------

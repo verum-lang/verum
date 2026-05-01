@@ -210,6 +210,9 @@ implement PreparedStatement {
     /// the caller pattern-matches to decide whether to read a row.
     public fn step(&mut self) -> StepResult {
         if self.done { return Done; }
+        // Snapshot bindings into VdbeState before each step so Variable/
+        // VariableNamed opcodes see the current binding table.
+        self.state.install_bindings(self.bindings.clone());
         let result = run_until_row(&mut self.state, &self.program, -1);
         match result {
             Row(start, cols) => {

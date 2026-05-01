@@ -1,0 +1,107 @@
+module core.database.sqlite.native.l4_vdbe.bindings;
+
+// =============================================================================
+// l4_vdbe/bindings.vr — VDBE parameter bindings (positional + named)
+// =============================================================================
+// Layer: 4 (runtime VM state)
+// Spec: sqlite-native.md §16.3
+//
+// Parameter bindings are runtime-VM state, not session-layer state — they
+// must be readable from the L4 interpreter's `Variable` / `VariableNamed`
+// opcodes without a layering violation upward.  The L6 `PreparedStatement`
+// is responsible for marshalling user-side `bind_*` calls into this
+// module's API and copying the populated table into `VdbeState.bindings`
+// before each step boundary.
+//
+// SQLite parameter syntax:
+//
+//   `?`      — implicit positional (auto-numbered left-to-right)
+//   `?N`     — explicit positional (1-based; N may exceed implicit count)
+//   `:name`  — named (prefix `:`)
+//   `@name`  — named (prefix `@`; same name space as `:name`)
+//   `$name`  — named (prefix `$`; same name space)
+//
+// All four forms share the same binding table — `:foo`, `@foo`, `$foo`
+// resolve to the same slot.  Positional and named bindings live in
+// disjoint namespaces (positional indexed by Int, named by Text).
+//
+// **Architectural invariant**: bindings are READ-ONLY from the
+// interpreter's perspective.  Mutations happen exclusively at the
+// session boundary (`PreparedStatement.bind_*`).  The interpreter
+// can therefore borrow `&ParamBindings` immutably and never needs
+// to coordinate concurrent writers — single-writer semantics are
+// enforced by the affine `PreparedStatement` handle.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull};
+
+// -----------------------------------------------------------------------------
+// Binding table
+// -----------------------------------------------------------------------------
+
+public type ParamBindings is {
+    /// Indexed positional params (`?N`).  Slot 0 holds `?1`; padding
+    /// with `RNull` keeps the access pattern O(1) without a sparse
+    /// representation.
+    positional: List<Register>,
+    /// Named params (`:name` / `@name` / `$name`).  All three sigils
+    /// share the same key — the SQL parser strips the sigil before
+    /// reaching this layer.
+    named: Map<Text, Register>,
+};
+
+public fn param_bindings_new() -> ParamBindings {
+    ParamBindings {
+        positional: List.new(),
+        named: Map.new(),
+    }
+}
+
+implement ParamBindings {
+    public fn clear(&mut self) {
+        self.positional = List.new();
+        self.named = Map.new();
+    }
+
+    /// Set the positional slot `idx` (1-based per SQLite convention).
+    /// Pads with `RNull` if the slot was previously absent.
+    /// Out-of-range `idx <= 0` is silently ignored — the SQL parser
+    /// guarantees positional indices are positive.
+    public fn set_positional(&mut self, idx: Int, value: Register) {
+        if idx < 1 { return; }
+        while self.positional.len() < idx {
+            self.positional.push(RNull);
+        }
+        self.positional[idx - 1] = value;
+    }
+
+    /// Set the named slot `name`.  Overwrites a prior binding.
+    public fn set_named(&mut self, name: Text, value: Register) {
+        let _ = self.named.insert(name, value);
+    }
+
+    /// Read positional slot `idx` (1-based).  Returns `RNull` when the
+    /// slot is unbound or out of range — matching SQLite's semantics
+    /// that an unbound `?N` evaluates to NULL.
+    public fn get_positional(&self, idx: Int) -> Register {
+        if idx < 1 || idx > self.positional.len() { return RNull; }
+        self.positional[idx - 1]
+    }
+
+    /// Read named slot `name`.  Returns `RNull` when absent.
+    public fn get_named(&self, name: &Text) -> Register {
+        if !self.named.contains_key(name.clone()) { return RNull; }
+        self.named.get(name.clone())
+    }
+
+    /// Number of positional slots currently populated (highest 1-based
+    /// index that received a `set_positional` call).  Used by
+    /// `parameter_count` introspection on the prepared statement.
+    public fn positional_count(&self) -> Int { self.positional.len() }
+
+    /// Snapshot of the named-binding key set for introspection.
+    public fn named_count(&self) -> Int { self.named.len() }
+}
