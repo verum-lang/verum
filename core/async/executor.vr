@@ -38,6 +38,7 @@ module core.async.executor;
 mount core.*;
 mount collections.*;
 mount sync.*;
+mount core.intrinsics.atomic.{atomic_fence, MemoryOrder};
 mount .poll.*;
 mount .waker.*;
 mount .future.*;
@@ -327,39 +328,257 @@ implement<F: Future> TaskState<F> {
 // concurrent state is touched. Programs see bit-identical
 // behaviour to today's single-threaded loop.
 
-/// Multi-threaded worker-pool data structure. Phase 1B
-/// (#325) — holds the configured worker count, lifecycle flag,
-/// the spawned join handles, and the park_mu / park_cv pair
+// =============================================================================
+// Phase 4 (#280) — Chase-Lev lock-free work-stealing deque
+// =============================================================================
+//
+// Single-producer / multi-consumer deque after Chase & Lev (2005)
+// refined for the C11 memory model by Lê, Pop, Cohen & Nardelli
+// (2013). Replaces the Phase 2 `Mutex<Deque<...>>` backend with a
+// lock-free implementation: owner-side push/pop are pure atomic
+// operations (no Mutex acquire), stealer-side uses a single CAS
+// per attempt.
+//
+// The contract on the WorkerSlot surface is unchanged from Phase 2
+// (`push_local`, `pop_local`, `try_steal`) — Phase 2→Phase 4 is a
+// transparent backend swap from the caller's perspective.
+//
+// Reference: D. Chase, Y. Lev. "Dynamic Circular Work-Stealing
+// Deque" SPAA'05.  N. M. Lê et al. "Correct and Efficient
+// Work-Stealing for Weak Memory Models" PPoPP'13.
+//
+// Same algorithm Tokio's tokio-runtime, Rayon, .NET TPL,
+// Go scheduler ship in production.
+
+/// Phase 4 (#280): Chase-Lev local-deque capacity. Power-of-2
+/// (`CAPACITY & MASK == 0`) so `idx & MASK == idx % CAPACITY`
+/// — single-instruction modulo. 256 covers >99% of real
+/// async-task bursts; overflow returns false from push_local
+/// and the caller (spawn) falls through to the global injector.
+const CHASE_LEV_CAPACITY: Int = 256;
+const CHASE_LEV_MASK: Int = 255;
+
+/// Phase 4 (#280): Chase-Lev work-stealing deque. Lock-free
+/// single-producer / multi-consumer ring buffer.
+///
+/// **Operations**:
+///   * `push_local(task) -> Bool` — owner only. Pure atomic
+///     write; no CAS. Returns false on overflow.
+///   * `pop_local() -> Maybe<task>` — owner only. Single CAS
+///     only when the deque has exactly one element (the
+///     boundary race with stealers).
+///   * `try_steal() -> Maybe<task>` — any thread. Always one
+///     CAS; returns None on empty OR race-lost.
+///
+/// **Memory ordering** (load-bearing fences from Lê et al §3.1):
+///   * `push_local`: Release fence between slot-store and
+///     bottom-update — stealers see a fully-published task
+///     before the bottom advance becomes visible.
+///   * `pop_local`: SeqCst fence between bottom-decrement and
+///     top-load — without this, the owner can read a stale
+///     top value after a stealer already advanced it, and
+///     pop a task the stealer had already taken.
+///   * `try_steal`: SeqCst fence between top-load and
+///     bottom-load — mirrors pop_local's ordering so the
+///     stealer observes any concurrent owner-side decrement.
+///
+/// **Slot storage**: each slot is an `AtomicInt` holding the
+/// raw pointer of a `Heap<TaskEntry>` (`Heap::into_raw(...)` as
+/// Int). Per-slot atomicity prevents torn reads under the C11
+/// model when stealer-load races with owner-store.
+public type ChaseLevDeque is {
+    /// Owner-side bottom index. Owner reads/writes Relaxed;
+    /// the SeqCst fence in `pop_local` orders the
+    /// bottom-decrement relative to the top-load.
+    bottom: AtomicInt,
+    /// Stealer-side top index. Stealers load Acquire / CAS
+    /// SeqCst-on-success / Relaxed-on-failure.
+    top: AtomicInt,
+    /// Per-slot atomic storage. Each entry holds a raw
+    /// `Heap<TaskEntry>` pointer cast to Int.  AtomicInt
+    /// because the stealer's slot-load races with the owner's
+    /// slot-store; non-atomic access would tear under the C11
+    /// memory model.
+    slots: Heap<List<AtomicInt>>,
+};
+
+implement ChaseLevDeque {
+    /// Construct a fresh empty deque with `CHASE_LEV_CAPACITY`
+    /// pre-allocated slots.
+    public fn new() -> ChaseLevDeque {
+        let mut s: List<AtomicInt> = List.with_capacity(CHASE_LEV_CAPACITY);
+        let mut i = 0;
+        while i < CHASE_LEV_CAPACITY {
+            s.push(AtomicInt.new(0));
+            i = i + 1;
+        }
+        ChaseLevDeque {
+            bottom: AtomicInt.new(0),
+            top: AtomicInt.new(0),
+            slots: Heap.new(s),
+        }
+    }
+
+    /// Owner-only push. Returns `Ok(())` on success and
+    /// `Err(task)` on capacity overflow — the caller
+    /// (`AsyncRuntime.spawn`) re-routes the returned task to the
+    /// global injector path so no task is lost.
+    ///
+    /// Returning the task on failure keeps the move-discipline
+    /// sound: a Bool return would force the caller to drop
+    /// `task` at the failure site, leaking the inner
+    /// `future_ptr`'s heap-allocated TaskState (`Heap<TaskState>`
+    /// has no Drop hook for the type-erased state).  The Result
+    /// shape is the same pattern Tokio's `LocalQueue::push_back`
+    /// uses for the identical failure mode.
+    public fn push_local(
+        &self,
+        task: Heap<TaskEntry>,
+    ) -> Result<(), Heap<TaskEntry>> {
+        let b = self.bottom.load(MemoryOrdering.Relaxed);
+        let t = self.top.load(MemoryOrdering.Acquire);
+        // Reserve one extra slot so the empty/full disambiguation
+        // (b == t means empty by convention) stays unambiguous.
+        if b - t >= CHASE_LEV_CAPACITY - 1 {
+            return Err(task);
+        }
+        let raw = Heap.into_raw(task) as Int;
+        self.slots.index(b & CHASE_LEV_MASK).store(raw, MemoryOrdering.Relaxed);
+        atomic_fence(MemoryOrder.Release);
+        self.bottom.store(b + 1, MemoryOrdering.Relaxed);
+        Ok(())
+    }
+
+    /// Owner-only pop (LIFO). Pops the most-recently pushed
+    /// task. The single-element boundary races with stealers
+    /// via CAS on `top`.
+    public fn pop_local(&self) -> Maybe<Heap<TaskEntry>> {
+        // Tentatively claim the bottom slot.
+        let b = self.bottom.load(MemoryOrdering.Relaxed) - 1;
+        self.bottom.store(b, MemoryOrdering.Relaxed);
+        atomic_fence(MemoryOrder.SeqCst);
+        let t = self.top.load(MemoryOrdering.Relaxed);
+
+        if t > b {
+            // Empty — restore the original bottom.
+            self.bottom.store(b + 1, MemoryOrdering.Relaxed);
+            return Maybe.None;
+        }
+
+        let raw_int = self.slots
+            .index(b & CHASE_LEV_MASK)
+            .load(MemoryOrdering.Relaxed);
+
+        if t < b {
+            // Multi-element — owner wins unconditionally.
+            let raw_ptr = raw_int as &unsafe Byte;
+            return Maybe.Some(unsafe { Heap.from_raw(raw_ptr as &mut TaskEntry) });
+        }
+
+        // t == b: last element — race with stealers via CAS.
+        match self.top.compare_exchange(
+            t, t + 1,
+            MemoryOrdering.SeqCst,
+            MemoryOrdering.Relaxed,
+        ) {
+            Ok(_) => {
+                // Owner won.
+                self.bottom.store(b + 1, MemoryOrdering.Relaxed);
+                let raw_ptr = raw_int as &unsafe Byte;
+                Maybe.Some(unsafe { Heap.from_raw(raw_ptr as &mut TaskEntry) })
+            }
+            Err(_) => {
+                // Stealer won — empty deque, restore bottom.
+                self.bottom.store(b + 1, MemoryOrdering.Relaxed);
+                Maybe.None
+            }
+        }
+    }
+
+    /// Stealer-side pop (FIFO). Non-blocking — returns None
+    /// on empty OR race-lost. Concurrent stealers race via the
+    /// CAS; one wins per stolen task.
+    public fn try_steal(&self) -> Maybe<Heap<TaskEntry>> {
+        let t = self.top.load(MemoryOrdering.Acquire);
+        atomic_fence(MemoryOrder.SeqCst);
+        let b = self.bottom.load(MemoryOrdering.Acquire);
+        if t >= b {
+            return Maybe.None; // empty
+        }
+        let raw_int = self.slots
+            .index(t & CHASE_LEV_MASK)
+            .load(MemoryOrdering.Relaxed);
+        match self.top.compare_exchange(
+            t, t + 1,
+            MemoryOrdering.SeqCst,
+            MemoryOrdering.Relaxed,
+        ) {
+            Ok(_) => {
+                let raw_ptr = raw_int as &unsafe Byte;
+                Maybe.Some(unsafe { Heap.from_raw(raw_ptr as &mut TaskEntry) })
+            }
+            Err(_) => Maybe.None, // race lost
+        }
+    }
+
+    /// Diagnostic — approximate count of in-flight tasks.
+    /// May read stale values from concurrent operations; never
+    /// used as a correctness gate, only for observability.
+    public fn approx_len(&self) -> Int {
+        let b = self.bottom.load(MemoryOrdering.Relaxed);
+        let t = self.top.load(MemoryOrdering.Relaxed);
+        let diff = b - t;
+        if diff < 0 { 0 } else { diff }
+    }
+}
+
+/// Phase 1B (#325) — holds the configured worker count, lifecycle
+/// flag, the spawned join handles, and the park_mu / park_cv pair
 /// workers wait on when their queues empty.
 /// Phase 2 (#278): per-worker scheduling slot. Owns a local
-/// `Deque<Heap<TaskEntry>>` that the slot's worker pushes to
-/// (LIFO, cache-hot for recursive spawn) and pops from (LIFO).
-/// Foreign workers (work-stealers) pop from the FRONT (FIFO) so
-/// they pick up older tasks that the owner is least likely to
-/// re-touch — minimises cache-line ping-pong vs. stealing
-/// LIFO-end where the owner is currently working.
+/// deque that the slot's worker pushes to (LIFO, cache-hot for
+/// recursive spawn) and pops from (LIFO). Foreign workers
+/// (work-stealers) pop from the FRONT (FIFO) so they pick up
+/// older tasks that the owner is least likely to re-touch —
+/// minimises cache-line ping-pong vs. stealing LIFO-end where
+/// the owner is currently working.
 ///
-/// **Concurrency model — v2 (Mutex-protected)**:
-///   * Owner: `local_deque.lock().push_back(task)` /
-///     `local_deque.lock().pop_back()`.
-///   * Stealer: `local_deque.try_lock()` (non-blocking) →
-///     `pop_front()`. `try_lock` failure aborts the steal
-///     attempt; the stealer rotates to the next victim.
+/// **Concurrency model — v3 (Phase 4 #280, Chase-Lev lock-free)**:
+///   * Owner: `local_deque.push_local(task)` /
+///     `local_deque.pop_local()` — pure atomic ops, no Mutex.
+///   * Stealer: `local_deque.try_steal()` — single CAS, no
+///     Mutex contention. Multiple thieves race via the CAS.
 ///
-/// **v3 forward-compatibility**: the API surface (push_back /
-/// pop_back / pop_front) maps 1-to-1 onto the Chase-Lev
-/// lock-free deque planned for #280 Phase 4. v2 → v3 is a
-/// transparent backend swap; no caller-side change.
+/// **API stability**: same surface as Phase 2's Mutex-backed
+/// implementation; the v2→v3 backend swap is invisible to
+/// `worker_main` / `AsyncRuntime.spawn` / `try_steal_for`.
+///
+/// **Phase 4 (#280) cache-line padding**: `@repr(align = 64)`
+/// aligns each WorkerSlot to a 64-byte cache line boundary —
+/// the typical L1d line size on x86_64 / aarch64 targets.
+/// Without this, two adjacent WorkerSlots in `WorkerPool.slots`
+/// could share a cache line; the owner of slot[0] writing
+/// `bottom` and the owner of slot[1] writing its own `bottom`
+/// would constantly invalidate each other's cache line —
+/// "false sharing" — costing ~30 ns per write on modern CPUs.
+/// Aligning to 64 bytes places each slot on its own cache line,
+/// eliminating the false-sharing tax. Same trick Tokio's
+/// `worker::Core` uses (`#[repr(align(128))]` on AMD Zen which
+/// has 128-byte effective lines for some operations; 64 is the
+/// safe industry default).
+@repr(align = 64)
 public type WorkerSlot is {
     /// Worker's id (index into `WorkerPool.slots`). Stable for
     /// the lifetime of the pool — assigned by `start_worker_pool`
     /// and observed via the `CURRENT_WORKER_ID` thread-local.
     worker_id: Int,
-    /// LIFO local deque. Owner pushes/pops back; foreign workers
-    /// steal from the front. `Heap` because Mutex has no `Copy`
-    /// and the slot lives inside a `List` that may need to be
-    /// moved during initialisation.
-    local_deque: Heap<Mutex<Deque<Heap<TaskEntry>>>>,
+    /// LIFO local deque (Phase 4 lock-free Chase-Lev backend).
+    /// Owner pushes/pops via `push_local` / `pop_local` — pure
+    /// atomic ops. Foreign workers steal via `try_steal` —
+    /// single CAS. `Heap` because the deque holds an inner
+    /// `Heap<List<AtomicInt>>` and the WorkerSlot must be
+    /// moveable into / out of the `WorkerPool.slots` list.
+    local_deque: Heap<ChaseLevDeque>,
     /// Last-victim hint for the steal-rotation strategy. Workers
     /// keep this hint to retry the same victim that previously
     /// fed them (locality), and rotate only on steal failure.
@@ -373,42 +592,43 @@ implement WorkerSlot {
     public fn empty(id: Int) -> WorkerSlot {
         WorkerSlot {
             worker_id: id,
-            local_deque: Heap.new(Mutex.new(Deque.new())),
+            local_deque: Heap.new(ChaseLevDeque.new()),
             steal_hint: AtomicInt.new(0),
         }
     }
 
-    /// Owner-side push (LIFO, cache-hot). Brief lock; no
-    /// blocking on contention since only the owner pushes.
-    public fn push_local(&self, task: Heap<TaskEntry>) {
-        let mut dq = self.local_deque.lock().unwrap_or_else(|p| p.into_inner());
-        dq.push_back(task);
+    /// Owner-side push (LIFO, cache-hot). Pure atomic op via
+    /// the Chase-Lev backend — no Mutex acquire.  Forwards the
+    /// `Result<(), Heap<TaskEntry>>` so the caller
+    /// (`AsyncRuntime.spawn`) re-routes the task to the global
+    /// injector on capacity overflow without leaking the inner
+    /// future state.
+    public fn push_local(
+        &self,
+        task: Heap<TaskEntry>,
+    ) -> Result<(), Heap<TaskEntry>> {
+        self.local_deque.push_local(task)
     }
 
     /// Owner-side pop (LIFO, cache-hot). Returns None when the
     /// local deque is empty; caller falls through to the global
     /// injector or steal path.
     public fn pop_local(&self) -> Maybe<Heap<TaskEntry>> {
-        let mut dq = self.local_deque.lock().unwrap_or_else(|p| p.into_inner());
-        dq.pop_back()
+        self.local_deque.pop_local()
     }
 
     /// Stealer-side pop (FIFO). Non-blocking — returns None on
-    /// lock contention so the caller rotates to the next victim
-    /// rather than blocking the steal attempt. FIFO end is
-    /// preferred to minimise cache-line ping-pong with the
-    /// owner's LIFO-end activity.
+    /// empty OR race-lost (concurrent stealer won the CAS).
+    /// FIFO end is preferred to minimise cache-line ping-pong
+    /// with the owner's LIFO-end activity.
     public fn try_steal(&self) -> Maybe<Heap<TaskEntry>> {
-        match self.local_deque.try_lock() {
-            Ok(mut dq) => dq.pop_front(),
-            Err(_) => Maybe.None,
-        }
+        self.local_deque.try_steal()
     }
 
-    /// Diagnostic — current local-deque length.
+    /// Diagnostic — approximate local-deque length. May read
+    /// stale values from concurrent operations.
     public fn local_len(&self) -> Int {
-        let dq = self.local_deque.lock().unwrap_or_else(|p| p.into_inner());
-        dq.len()
+        self.local_deque.approx_len()
     }
 }
 
@@ -1360,8 +1580,21 @@ implement AsyncRuntime {
                 let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
                 if let Maybe.Some(ref pool) = *guard {
                     if let Maybe.Some(slot) = pool.slot(wid) {
+                        // Phase 4 (#280): `push_local` returns
+                        // `Result<(), Heap<TaskEntry>>`. On capacity
+                        // overflow it returns `Err(task)` — re-store
+                        // the task in `entry_slot` so the fall-through
+                        // pushes it to the global injector. No task
+                        // lost; no future-state leaked.
                         if let Maybe.Some(e) = entry_slot.take() {
-                            slot.push_local(e);
+                            match slot.push_local(e) {
+                                Ok(()) => {},
+                                Err(returned_task) => {
+                                    // Capacity overflow — graceful
+                                    // re-route to global injector.
+                                    entry_slot = Maybe.Some(returned_task);
+                                }
+                            };
                         }
                     }
                 }

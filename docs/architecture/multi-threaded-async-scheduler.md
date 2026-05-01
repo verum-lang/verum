@@ -242,7 +242,22 @@ Mitigation:
   the 50 ms timeout to pick up newly-spawned work. The timeout
   remains as a defense-in-depth safety net; latency is now
   bounded by `Condvar` wake (~µs).
-- **Phase 3 (LANDED, this commit)**: Send/Sync correctness pins.
+- **Phase 4 (LANDED, this commit)**: Chase-Lev lock-free deque
+  + cache-line padding.  `WorkerSlot.local_deque` migrated from
+  `Heap<Mutex<Deque<...>>>` to `Heap<ChaseLevDeque>`. Pure
+  atomic owner-side push/pop; single-CAS try_steal. Following
+  Lê et al PPoPP'13 with SeqCst fence between bottom-decrement
+  and top-load (and mirror in try_steal). Bounded capacity
+  (`CHASE_LEV_CAPACITY = 256`); push_local returns
+  `Result<(), Heap<TaskEntry>>` so `AsyncRuntime.spawn`
+  re-routes overflow to the global injector without leaking
+  the inner future state. `@repr(align = 64)` on WorkerSlot
+  eliminates false sharing between adjacent slots' hot fields
+  (`bottom` writes by slot[0]'s owner would otherwise invalidate
+  slot[1]'s cache line). Test surface:
+  `worker_pool_phase4_typecheck.vr` typechecks the
+  `ChaseLevDeque` + Result-returning push_local surface.
+- **Phase 3 (LANDED)**: Send/Sync correctness pins.
   `AsyncRuntime.spawn<F: Future + Send>` (was missing `F: Send`
   bound — only `F.Output: Send` was required, allowing UB via
   `!Send` captures like `Rc<T>`); `LocalExecutor.spawn_local<F>`
