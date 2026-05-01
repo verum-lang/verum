@@ -29,6 +29,10 @@ pub(super) mod control_flow;
 // Call operations (0x5B-0x5F, 0x80-0x82, 0x8A)
 pub(super) mod calls;
 
+// High-level Rust intercepts for shell-runtime calls (sh_check, sh).
+// Bypasses the libSystem FFI chain — see VBC-1 architecture notes.
+pub(super) mod shell_runtime;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 

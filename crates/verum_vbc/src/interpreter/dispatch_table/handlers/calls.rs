@@ -33,6 +33,48 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
     let func_name_id = func.name;
     let reg_count = func.register_count;
 
+    if std::env::var("VERUM_TRACE_CALLS").is_ok() {
+        let func_name: String = state
+            .module
+            .strings
+            .get(func_name_id)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        eprintln!("[trace-call] handler=Call func_id={} name='{}' descriptor.id={} args.count={} bytecode_length={}",
+            func_id.0, func_name, func.id.0, args.count, bytecode_length);
+    }
+
+    // **High-level Rust intercept** — fires regardless of bytecode_length.
+    // Specific Verum function names (currently: `sh_check`, `sh`) are
+    // intercepted at the call boundary and dispatched to a Rust-native
+    // implementation that uses `std::process::Command` directly,
+    // bypassing the libSystem FFI chain.  This is the canonical Tier-0
+    // architecture for "complex syscall sequence" surfaces — interpret
+    // high-level intrinsics in Rust; reserve FFI dispatch for genuinely-
+    // foreign cases.  See `shell_runtime.rs` for the full rationale and
+    // the marshaling contract.
+    {
+        let caller_base = state.reg_base();
+        let func_name: String = state
+            .module
+            .strings
+            .get(func_name_id)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        if !func_name.is_empty() {
+            if let Some(result) = super::shell_runtime::try_intercept_shell_runtime(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
+        }
+    }
+
     // Check for external/intrinsic functions with no bytecode body.
     // These are functions declared with @intrinsic("llvm.xxx") that have no
     // Verum implementation body. When the codegen can't resolve the intrinsic
