@@ -1,0 +1,128 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7_api, capability, phantom-types
+// @timeout: 15000
+// @description: TypedConnection<C> capability surface — every cap implements
+//               the protocols required by its tier of the lattice.
+//
+// Spec: internal/specs/sqlite-native.md §4.8 (Connection<Read|Write|Admin>
+//        — capability at the type level, not runtime checks)
+//
+// This test asserts the typed surface composes:
+//
+//   * `Capability` is implemented by all three caps (read access to
+//     name / path / schema_generation).
+//   * `CanRead` is implemented by all three caps.
+//   * `CanWrite` is implemented by WriteCap + AdminCap.
+//   * `CanDdl` is implemented by AdminCap only.
+//
+// The test does NOT yet exercise actual SQL execution (the typed
+// surface ships stubs for the foundation pass; real wiring is a
+// #134 follow-up).  What it asserts is the COMPILE-TIME shape:
+// the protocol bounds work, methods land on the right cap, and
+// narrowing from admin → write → read produces the right type.
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l7_api.{
+    TypedConnection,
+    open_memory_readonly, open_memory_readwrite, open_memory_admin,
+    ReadCap, WriteCap, AdminCap,
+    Capability, CanRead, CanWrite, CanDdl,
+};
+
+// -----------------------------------------------------------------------------
+// 1. Read-only connection: capability_name + path access
+// -----------------------------------------------------------------------------
+
+fn read_only_capability_name() {
+    match open_memory_readonly() {
+        Ok(c) => {
+            // Universal accessor (Capability bound)
+            let n = c.capability_name();
+            assert(n == "read");
+            // Universal: path
+            let p = c.path_text();
+            assert(p == ":memory:");
+        }
+        Err(_) => panic("open_memory_readonly failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2. Write connection: read + write surface
+// -----------------------------------------------------------------------------
+
+fn write_connection_capability_name() {
+    match open_memory_readwrite() {
+        Ok(c) => {
+            let n = c.capability_name();
+            assert(n == "write");
+        }
+        Err(_) => panic("open_memory_readwrite failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. Admin connection: full surface
+// -----------------------------------------------------------------------------
+
+fn admin_connection_capability_name() {
+    match open_memory_admin() {
+        Ok(c) => {
+            let n = c.capability_name();
+            assert(n == "admin");
+        }
+        Err(_) => panic("open_memory_admin failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4. Capability narrowing: admin → write → read
+// -----------------------------------------------------------------------------
+
+fn admin_demote_to_write() {
+    match open_memory_admin() {
+        Ok(c) => {
+            let w = c.demote_to_write();
+            // After narrowing, `w` is now `TypedConnection<WriteCap>`.
+            // The type-checker would reject `w.execute_ddl_stub(...)`
+            // because `WriteCap` does not implement `CanDdl`.
+            let n = w.capability_name();
+            assert(n == "write");
+        }
+        Err(_) => panic("open_memory_admin failed"),
+    }
+}
+
+fn admin_demote_to_read() {
+    match open_memory_admin() {
+        Ok(c) => {
+            let r = c.demote_to_read();
+            let n = r.capability_name();
+            assert(n == "read");
+        }
+        Err(_) => panic("open_memory_admin failed"),
+    }
+}
+
+fn write_demote_to_read() {
+    match open_memory_readwrite() {
+        Ok(c) => {
+            let r = c.demote_to_read();
+            let n = r.capability_name();
+            assert(n == "read");
+        }
+        Err(_) => panic("open_memory_readwrite failed"),
+    }
+}
+
+fn main() {
+    read_only_capability_name();
+    write_connection_capability_name();
+    admin_connection_capability_name();
+    admin_demote_to_write();
+    admin_demote_to_read();
+    write_demote_to_read();
+}

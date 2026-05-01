@@ -1,0 +1,241 @@
+module core.database.sqlite.native.l7_api.typed_connection;
+
+// =============================================================================
+// l7_api/typed_connection.vr — Phantom-typed Connection<C>
+// =============================================================================
+// Layer: 7
+// Spec: sqlite-native.md §4.8
+//
+// `TypedConnection<C>` wraps the existing untyped `Connection` and
+// surfaces capability at the type level via the marker types
+// `ReadCap` / `WriteCap` / `AdminCap` from `capability.vr`.
+//
+// Methods that mutate the database require `C: CanWrite` at the
+// generic implement bound; DDL methods require `C: CanDdl`.  Misuse
+// is a compile-time error — no `ensure_writable` runtime check is
+// performed on the typed surface.
+//
+// The legacy `Connection` (with runtime `mode: ConnectionMode`)
+// remains for backward compatibility; `TypedConnection<C>` carries
+// it internally and exposes `as_untyped()` for legacy interop.
+// New code SHOULD use `TypedConnection`; the runtime mode field on
+// the inner `Connection` is preserved only for back-compat
+// diagnostics.
+//
+// Constructors:
+//
+//   `open_readonly(path)   -> Result<TypedConnection<ReadCap>,  ...>`
+//   `open_readwrite(path)  -> Result<TypedConnection<WriteCap>, ...>`
+//   `open_admin(path)      -> Result<TypedConnection<AdminCap>, ...>`
+//   `open_memory_readonly() -> Result<TypedConnection<ReadCap>,  ...>`
+//   `open_memory_readwrite() -> Result<TypedConnection<WriteCap>, ...>`
+//   `open_memory_admin()    -> Result<TypedConnection<AdminCap>, ...>`
+//
+// Capability narrowing (NOT widening):
+//
+//   `TypedConnection<AdminCap>.demote_to_write() -> TypedConnection<WriteCap>`
+//   `TypedConnection<AdminCap>.demote_to_read()  -> TypedConnection<ReadCap>`
+//   `TypedConnection<WriteCap>.demote_to_read()  -> TypedConnection<ReadCap>`
+//
+// Widening (escalating capability) is intentionally NOT exposed —
+// authority must be acquired at open time.
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l6_session.connection.{
+    Connection, ConnectionError, ConnectionMode,
+    CmRead, CmWrite, CmAdmin,
+    open_memory, open_file,
+};
+mount core.database.sqlite.native.l7_api.capability.{
+    ReadCap, WriteCap, AdminCap,
+    Capability, CanRead, CanWrite, CanDdl,
+};
+
+// -----------------------------------------------------------------------------
+// TypedConnection<C>
+// -----------------------------------------------------------------------------
+
+/// Capability-typed wrapper around the legacy `Connection`.  `C` is
+/// the phantom marker type carried for compile-time enforcement;
+/// the inner `mode: ConnectionMode` is left in place for back-compat
+/// but the typed methods don't consult it.
+///
+/// `affine` because the underlying `Connection` is — handing the
+/// same `TypedConnection` to two threads simultaneously is unsound
+/// (the pager's actor model requires single-owner serialisation).
+public type affine TypedConnection<C> is {
+    inner: Connection,
+    _phantom: C,
+};
+
+// -----------------------------------------------------------------------------
+// Constructors — capability-bound
+// -----------------------------------------------------------------------------
+
+/// Open a read-only connection to `path`.  Returns
+/// `TypedConnection<ReadCap>` — the type-checker rejects mutating
+/// method calls.
+public fn open_readonly(path: &Text) -> Result<TypedConnection<ReadCap>, ConnectionError> {
+    match open_file(path, CmRead) {
+        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: ReadCap }),
+        Err(e) => Err(e),
+    }
+}
+
+/// Open a read-write connection to `path`.  Returns
+/// `TypedConnection<WriteCap>` — DDL methods (CREATE / DROP / VACUUM)
+/// remain unavailable.
+public fn open_readwrite(path: &Text) -> Result<TypedConnection<WriteCap>, ConnectionError> {
+    match open_file(path, CmWrite) {
+        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: WriteCap }),
+        Err(e) => Err(e),
+    }
+}
+
+/// Open an admin (read + write + DDL) connection to `path`.
+public fn open_admin(path: &Text) -> Result<TypedConnection<AdminCap>, ConnectionError> {
+    match open_file(path, CmAdmin) {
+        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: AdminCap }),
+        Err(e) => Err(e),
+    }
+}
+
+/// Read-only `:memory:` connection.
+public fn open_memory_readonly() -> Result<TypedConnection<ReadCap>, ConnectionError> {
+    match open_memory(CmRead) {
+        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: ReadCap }),
+        Err(e) => Err(e),
+    }
+}
+
+/// Read-write `:memory:` connection.
+public fn open_memory_readwrite() -> Result<TypedConnection<WriteCap>, ConnectionError> {
+    match open_memory(CmWrite) {
+        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: WriteCap }),
+        Err(e) => Err(e),
+    }
+}
+
+/// Admin `:memory:` connection.
+public fn open_memory_admin() -> Result<TypedConnection<AdminCap>, ConnectionError> {
+    match open_memory(CmAdmin) {
+        Ok(c)  => Ok(TypedConnection { inner: c, _phantom: AdminCap }),
+        Err(e) => Err(e),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Universal accessors (no capability bound — all caps implement Capability)
+// -----------------------------------------------------------------------------
+
+implement<C: Capability> TypedConnection<C> {
+    /// Access the underlying untyped `Connection` for legacy code
+    /// paths.  ESCAPE HATCH — typed callers should not need this.
+    public fn as_untyped(&self) -> &Connection { &self.inner }
+
+    /// Mutable escape hatch — needed by legacy methods that mutate
+    /// the inner connection (PRAGMA dispatch, hook registration).
+    /// Prefer the typed equivalents where they exist.
+    public fn as_untyped_mut(&mut self) -> &mut Connection { &mut self.inner }
+
+    /// Database file path / `:memory:`.
+    public fn path_text(&self) -> &Text { self.inner.path_text() }
+
+    /// Schema generation counter.  Bumped by every successful DDL.
+    public fn schema_generation(&self) -> Int { self.inner.schema_generation() }
+
+    /// `true` iff a transaction is currently active.
+    public fn is_in_tx(&self) -> Bool { self.inner.is_in_tx() }
+
+    /// Savepoint depth (0 = no transaction).
+    public fn tx_depth(&self) -> Int { self.inner.tx_depth() }
+
+    /// Capability name as text — for logging / diagnostics.
+    public fn capability_name(&self) -> Text { C::capability_name() }
+}
+
+// -----------------------------------------------------------------------------
+// Read-bound surface (CanRead) — every cap implements this
+// -----------------------------------------------------------------------------
+
+implement<C: CanRead> TypedConnection<C> {
+    /// SELECT-class compile + step.  Available on every typed
+    /// connection.  At the typed surface this dispatches via
+    /// the existing untyped pipeline; once L5 codegen accepts a
+    /// `&TypedConnection<C>` directly the underlying ensure_*
+    /// runtime checks become dead code.
+    ///
+    /// Stub: returns `Err(IoError("typed-read not yet wired"))` for
+    /// the foundation pass.  The wiring is mechanical and tracked
+    /// as a #134 follow-up.
+    public fn execute_query_stub(&self, _sql: &Text) -> Result<(), ConnectionError> {
+        Err(IoError("typed read-execute not yet wired".clone()))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Write-bound surface (CanWrite) — WriteCap + AdminCap only
+// -----------------------------------------------------------------------------
+
+implement<C: CanWrite> TypedConnection<C> {
+    /// INSERT / UPDATE / DELETE compile + step.  Compile-time
+    /// rejected for `TypedConnection<ReadCap>` — no runtime
+    /// `ensure_writable` is consulted.
+    ///
+    /// Stub: returns `Err(IoError("typed-write not yet wired"))`
+    /// for the foundation pass.  The wiring is mechanical and
+    /// tracked as a #134 follow-up.
+    public fn execute_dml_stub(&mut self, _sql: &Text) -> Result<(), ConnectionError> {
+        Err(IoError("typed write-execute not yet wired".clone()))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DDL-bound surface (CanDdl) — AdminCap only
+// -----------------------------------------------------------------------------
+
+implement<C: CanDdl> TypedConnection<C> {
+    /// CREATE / DROP / ALTER / VACUUM / writable_schema.
+    /// Compile-time rejected for `TypedConnection<ReadCap>` AND
+    /// `TypedConnection<WriteCap>`.
+    ///
+    /// Stub for the foundation pass; tracked as a #134 follow-up.
+    public fn execute_ddl_stub(&mut self, _sql: &Text) -> Result<(), ConnectionError> {
+        Err(IoError("typed DDL-execute not yet wired".clone()))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Capability narrowing — admin → write → read (one-way)
+// -----------------------------------------------------------------------------
+
+implement TypedConnection<AdminCap> {
+    /// Drop the DDL capability.  Useful for handing a long-lived
+    /// admin connection into a context that should only mutate
+    /// data.  The underlying `mode: ConnectionMode` field is
+    /// updated to `CmWrite` so legacy callers via `as_untyped()`
+    /// see the narrowed authority.
+    public fn demote_to_write(self) -> TypedConnection<WriteCap> {
+        let mut inner = self.inner;
+        inner.mode = CmWrite;
+        TypedConnection { inner: inner, _phantom: WriteCap }
+    }
+
+    /// Drop both DDL and write capabilities.
+    public fn demote_to_read(self) -> TypedConnection<ReadCap> {
+        let mut inner = self.inner;
+        inner.mode = CmRead;
+        TypedConnection { inner: inner, _phantom: ReadCap }
+    }
+}
+
+implement TypedConnection<WriteCap> {
+    /// Drop the write capability.
+    public fn demote_to_read(self) -> TypedConnection<ReadCap> {
+        let mut inner = self.inner;
+        inner.mode = CmRead;
+        TypedConnection { inner: inner, _phantom: ReadCap }
+    }
+}

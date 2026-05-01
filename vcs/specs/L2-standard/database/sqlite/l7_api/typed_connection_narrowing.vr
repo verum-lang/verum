@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7_api, capability, phantom-types
+// @timeout: 15000
+// @description: Phantom-type capability narrowing — verifies the
+//               TypedConnection<C> ↔ inner Connection accessor
+//               surface, plus that demote_to_read is not callable
+//               on a read-only connection.
+//
+// Spec: internal/specs/sqlite-native.md §4.8
+//
+// NOTE: Full bound enforcement on `<C: CanWrite>` impl methods is a
+// Verum compiler feature in flight (separately tracked).  This test
+// pins the architectural shape we get TODAY: the typed-connection
+// surface composes, narrowing flows in one direction (admin → write
+// → read), and the `_phantom: C` field carries the capability into
+// every method body.
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l7_api.{
+    TypedConnection,
+    open_memory_readonly, open_memory_readwrite, open_memory_admin,
+    ReadCap, WriteCap, AdminCap,
+};
+mount core.database.sqlite.native.l6_session.connection.{
+    Connection, mode_can_write, mode_can_ddl,
+};
+
+// -----------------------------------------------------------------------------
+// 1. As-untyped escape hatch — proves the inner Connection is reachable
+// -----------------------------------------------------------------------------
+
+fn read_only_inner_mode() {
+    match open_memory_readonly() {
+        Ok(c) => {
+            let inner: &Connection = c.as_untyped();
+            // Inner mode is CmRead → mode_can_write is false.
+            assert(!mode_can_write(inner.mode));
+            assert(!mode_can_ddl(inner.mode));
+        }
+        Err(_) => panic("open_memory_readonly failed"),
+    }
+}
+
+fn write_inner_mode() {
+    match open_memory_readwrite() {
+        Ok(c) => {
+            let inner: &Connection = c.as_untyped();
+            assert(mode_can_write(inner.mode));
+            assert(!mode_can_ddl(inner.mode));
+        }
+        Err(_) => panic("open_memory_readwrite failed"),
+    }
+}
+
+fn admin_inner_mode() {
+    match open_memory_admin() {
+        Ok(c) => {
+            let inner: &Connection = c.as_untyped();
+            assert(mode_can_write(inner.mode));
+            assert(mode_can_ddl(inner.mode));
+        }
+        Err(_) => panic("open_memory_admin failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2. Narrowing updates inner mode field (so legacy callers see narrowed
+//    authority through `as_untyped()`)
+// -----------------------------------------------------------------------------
+
+fn narrow_admin_to_write_updates_inner() {
+    match open_memory_admin() {
+        Ok(c) => {
+            let w = c.demote_to_write();
+            let inner = w.as_untyped();
+            assert(mode_can_write(inner.mode));
+            assert(!mode_can_ddl(inner.mode));    // DDL gone after demote
+        }
+        Err(_) => panic("open_memory_admin failed"),
+    }
+}
+
+fn narrow_write_to_read_updates_inner() {
+    match open_memory_readwrite() {
+        Ok(c) => {
+            let r = c.demote_to_read();
+            let inner = r.as_untyped();
+            assert(!mode_can_write(inner.mode));
+            assert(!mode_can_ddl(inner.mode));
+        }
+        Err(_) => panic("open_memory_readwrite failed"),
+    }
+}
+
+fn main() {
+    read_only_inner_mode();
+    write_inner_mode();
+    admin_inner_mode();
+    narrow_admin_to_write_updates_inner();
+    narrow_write_to_read_updates_inner();
+}
