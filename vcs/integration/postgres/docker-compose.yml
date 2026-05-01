@@ -41,6 +41,9 @@ services:
         -c log_min_messages=notice
         -c max_connections=64
         -c shared_buffers=64MB
+        -c wal_level=logical
+        -c max_wal_senders=8
+        -c max_replication_slots=8
     tmpfs:
       - /var/lib/postgresql/data:rw,size=256m
     healthcheck:

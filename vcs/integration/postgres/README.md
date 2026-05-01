@@ -94,3 +94,6 @@ Test list per `internal/specs/database.md` follow-up:
 - `t10_arena_simple_query.vr` — `simple_query_arena` returns rows whose
   bytes live in the connection arena; `reset_arena()` invalidates them
   via generation bump (spec §4.2 load-bearing)
+- `t11_replication.vr` — logical replication V0: IDENTIFY_SYSTEM →
+  CREATE_REPLICATION_SLOT → START_REPLICATION → drain XLogData /
+  Keepalive → Standby Status Update (spec §6.1.7)

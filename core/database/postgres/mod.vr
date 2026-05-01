@@ -43,6 +43,7 @@ public module typed_database;
 public module introspect;
 public module transaction;
 public module copy;
+public module replication;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -68,6 +69,14 @@ public mount .wire.typed.{
 public mount .copy.{
     CopyInBuilder, CopyOutBuilder,
     copy_in, copy_out,
+};
+public mount .replication.{
+    PgReplicationConfig, PgReplicationConnection,
+    ReplicationMode, RmLogical, RmPhysical,
+    LogicalReplicationOptions,
+    Lsn, ReplicationMessage, RmXLogData, RmKeepalive, RmOther,
+    XLogData, PrimaryKeepalive, IdentifySystemRow,
+    connect_replication,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
