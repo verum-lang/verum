@@ -176,6 +176,7 @@ impl Default for AuditRegistry {
         r.register(Box::new(HygieneStrictGate));
         r.register(Box::new(KernelRechecksGate));
         r.register(Box::new(KernelSoundnessGate));
+        r.register(Box::new(KernelV0RosterGate));
         r.register(Box::new(LadderMonotonicityGate));
         r.register(Box::new(Owl2ClassifyGate));
         r.register(Box::new(ProofHonestyGate));
@@ -397,6 +398,18 @@ impl AuditGate for KernelRechecksGate {
     }
 }
 
+/// `verum audit --kernel-v0-roster` — bootstrap-meta-theory roster (#154).
+pub struct KernelV0RosterGate;
+impl AuditGate for KernelV0RosterGate {
+    fn name(&self) -> &'static str { "kernel-v0-roster" }
+    fn description(&self) -> &'static str {
+        "Walk the 10-rule kernel_v0 bootstrap manifest; verify file existence + report Proved/Admitted split + IOU citations."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_kernel_v0_roster_with_format(format)
+    }
+}
+
 /// `verum audit --kernel-soundness` — per-rule soundness-lemma status.
 pub struct KernelSoundnessGate;
 impl AuditGate for KernelSoundnessGate {
@@ -519,6 +532,7 @@ mod tests {
             "hygiene-strict",
             "kernel-recheck",
             "kernel-soundness",
+            "kernel-v0-roster",
             "ladder-monotonicity",
             "owl2-classify",
             "proof-honesty",
@@ -533,7 +547,7 @@ mod tests {
                 name,
             );
         }
-        assert_eq!(r.len(), 25, "expected 25 gates in the default registry");
+        assert_eq!(r.len(), 26, "expected 26 gates in the default registry");
     }
 
     #[test]
@@ -551,7 +565,7 @@ mod tests {
     fn registry_list_returns_name_description_pairs() {
         let r = AuditRegistry::default();
         let entries = r.list();
-        assert_eq!(entries.len(), 25);
+        assert_eq!(entries.len(), 26);
         for (name, desc) in &entries {
             assert!(!name.is_empty());
             assert!(!desc.is_empty());
