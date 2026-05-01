@@ -612,31 +612,35 @@ impl Session {
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.
 
-        // Proof-certificate emission knobs:
-        // `CompilerOptions.emit_proof_certificate` (default false),
-        // `proof_certificate_format` (Option<Text>), and
-        // `proof_certificate_path` (Option<PathBuf>) land on the
-        // session via the `with_proof_certificate*` builders
-        // (options.rs:655-672).
+        // Proof-certificate emission knobs (#269 + #285): all three
+        // fields are now load-bearing across both paths.
         //
-        // Status: PARTIALLY WIRED.
-        //   - Embedder path (load-bearing): `verum_smt::certificates::
-        //     CertificateGenerator::new(format)` accepts the format
-        //     directly; embedders calling `run_common_pipeline` and
-        //     reading `session.options()` can route the manifest
-        //     fields into the generator.  The verify_cmd path emits
-        //     proofs via its own export logic (verify_cmd.rs reads
-        //     `verification_json_path`).
-        //   - Standard CLI auto-routing (#269-CLI): `verum verify
-        //     --emit-proof-certificate=lean` does not yet trigger
-        //     CertificateGenerator at the end of phase_verify.
-        //     Tracked as #269-CLI for the auto-routing scope; the
-        //     fields are NOT inert (embedders consume them
-        //     directly), so no runtime warn! is needed.
+        //   - `emit_proof_certificate: bool` — the entry switch.
+        //     When true, `pipeline/phases_orchestration.rs::
+        //     emit_theorem_certificates` runs at the end of
+        //     phase_verify and writes one stub certificate file per
+        //     theorem/lemma/corollary in the manifest-selected
+        //     format.
+        //   - `proof_certificate_format: Option<Text>` — selects the
+        //     target format ("lean" | "coq" | "dedukti" |
+        //     "metamath" | "opentheory" | "json"). Default "lean".
+        //     Unknown values fall back to Lean with a tracing::warn.
+        //   - `proof_certificate_path: Option<PathBuf>` — output
+        //     directory.  Default
+        //     `<input_parent>/target/audit-reports/proof-certificates/`.
         //
-        // No diagnostic emitted — the previous false-positive
-        // warning fired even when embedders correctly consumed the
-        // fields, polluting their logs.
+        // Stub-certificate body: `Admitted.` (Coq) / `sorry` (Lean)
+        // / axiom-form (Dedukti / Metamath / OpenTheory) /
+        // `proof_status="admitted"` (JSON).  Full proof-term
+        // reconstruction (where the SMT verifier surfaces the
+        // proof term it constructed) is tracked as #285-Followup.
+        //
+        // Embedder path (still load-bearing): `verum_smt::
+        // certificates::CertificateGenerator::generate(&proof,
+        // theorem)` for callers that have a real ProofTerm in hand.
+        // The new `generate_stub(theorem)` helper is the standard
+        // CLI entry point and is what the auto-routing pipeline
+        // consumes.
 
         // `CompilerOptions.continue_on_error` is now load-bearing via
         // `Session::collect_phase_error` (session.rs:1043) which the
