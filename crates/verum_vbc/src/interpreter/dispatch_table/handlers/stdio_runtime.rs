@@ -28,10 +28,10 @@
 //! capability level, not at this intrinsic intercept.)
 
 use crate::interpreter::state::InterpreterState;
-use crate::types::TypeId;
 use crate::value::Value;
 use super::super::super::error::InterpreterResult;
-use super::string_helpers::{alloc_string_value, extract_string};
+use super::heap_helpers::{alloc_record_n_fields, extract_text_arg, wrap_in_variant};
+use super::string_helpers::alloc_string_value;
 
 pub(in super::super) fn try_intercept_stdio_runtime(
     state: &mut InterpreterState,
@@ -194,19 +194,6 @@ fn intercept_println_empty(_state: &mut InterpreterState) -> InterpreterResult<O
     Ok(Some(Value::unit()))
 }
 
-/// Extract a Text argument from a register, transparently handling
-/// CBGR-style register references (`&text` → negative-int encoding).
-/// Mirrors `file_runtime::extract_text_arg`.
-fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
-    let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
-    };
-    extract_string(&unwrapped, state)
-}
 
 /// Read one trimmed line from stdin (host-side; reused by read_int /
 /// read_float).  Returns `Ok(line_no_newline)` or `Err(io_error)`.
@@ -268,59 +255,3 @@ fn build_io_err_kind(state: &mut InterpreterState, kind_tag: u32) -> Interpreter
 }
 
 // ============================================================================
-// Heap helpers (mirror file_runtime.rs)
-// ============================================================================
-
-fn alloc_record_n_fields(
-    state: &mut InterpreterState,
-    type_name: &str,
-    fields: &[Value],
-) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x9000));
-    let payload_size = fields.len() * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc(type_id, payload_size)?;
-    state.record_allocation();
-    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
-    for (i, v) in fields.iter().enumerate() {
-        unsafe { *data_ptr.add(i) = *v; }
-    }
-    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-}
-
-fn wrap_in_variant(
-    state: &mut InterpreterState,
-    type_name: &str,
-    tag: u32,
-    fields: &[Value],
-) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x8000 + tag));
-    let field_count = fields.len() as u32;
-    let data_size = 8 + (fields.len() * std::mem::size_of::<Value>());
-    let obj = state.heap.alloc(type_id, data_size)?;
-    state.record_allocation();
-    let base = obj.as_ptr() as *mut u8;
-    unsafe {
-        let tag_ptr = base.add(OBJECT_HEADER_SIZE) as *mut u32;
-        *tag_ptr = tag;
-        *tag_ptr.add(1) = field_count;
-        let payload_ptr = base.add(OBJECT_HEADER_SIZE + 8) as *mut Value;
-        for (i, v) in fields.iter().enumerate() {
-            *payload_ptr.add(i) = *v;
-        }
-    }
-    Ok(Value::from_ptr(base))
-}
-
-fn lookup_type_id_by_name(state: &InterpreterState, name: &str) -> Option<TypeId> {
-    state
-        .module
-        .types
-        .iter()
-        .find(|td| {
-            state.module.strings.get(td.name) == Some(name)
-                && !matches!(td.kind, crate::types::TypeKind::Protocol)
-        })
-        .map(|td| td.id)
-}

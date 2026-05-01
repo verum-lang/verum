@@ -51,9 +51,10 @@
 
 use crate::interpreter::permission::{PermissionDecision, PermissionScope};
 use crate::interpreter::state::InterpreterState;
-use crate::types::{TypeId, VariantKind};
+use crate::types::VariantKind;
 use crate::value::Value;
 use super::super::super::error::InterpreterResult;
+use super::heap_helpers::{alloc_byte_list, alloc_record_n_fields, wrap_in_variant};
 use super::string_helpers::{alloc_string_value, extract_string};
 
 /// Try to intercept a high-level shell-runtime call.  Returns `Some(value)`
@@ -214,43 +215,6 @@ fn build_err_spawn_failed(
 // ============================================================================
 
 /// Allocate a `List<Byte>` Verum value with the given content.
-///
-/// Layout matches the codegen's List representation:
-///   [ObjectHeader] [len:Value(i64)] [cap:Value(i64)] [backing_ptr:Value]
-/// Backing array layout: [ObjectHeader] [Value;cap] — one Value per
-/// element (each byte boxed as `Value::from_i64(b as i64)`).  This
-/// matches the canonical List<T> shape (see `method_dispatch::
-/// handle_call_method` empty-List path) so script-side `bytes[i]`
-/// reads the byte rather than header bits.
-fn alloc_byte_list(state: &mut InterpreterState, bytes: &[u8]) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let len = bytes.len();
-    let cap = if len < 16 { 16 } else { len };
-
-    let backing = state.heap.alloc_array(TypeId::LIST, cap)?;
-    state.record_allocation();
-    let backing_data =
-        unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
-    for (i, b) in bytes.iter().enumerate() {
-        unsafe {
-            *backing_data.add(i) = Value::from_i64(*b as i64);
-        }
-    }
-
-    // Allocate the List header [len, cap, backing_ptr].
-    let list = state
-        .heap
-        .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
-    state.record_allocation();
-    let data_ptr = unsafe { (list.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
-    unsafe {
-        *data_ptr = Value::from_i64(len as i64);
-        *data_ptr.add(1) = Value::from_i64(cap as i64);
-        *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);
-    }
-
-    Ok(Value::from_ptr(list.as_ptr() as *mut u8))
-}
 
 /// Allocate a record type with exactly one field.
 fn alloc_record_one_field(
@@ -259,78 +223,6 @@ fn alloc_record_one_field(
     field_value: Value,
 ) -> InterpreterResult<Value> {
     alloc_record_n_fields(state, type_name, &[field_value])
-}
-
-/// Allocate a record type with N fields.  Looks up the TypeId by name
-/// from the module's type table; falls back to a synthetic id when the
-/// type isn't registered (still produces a usable heap object — the
-/// formatter will render it via the generic record fallback).
-fn alloc_record_n_fields(
-    state: &mut InterpreterState,
-    type_name: &str,
-    fields: &[Value],
-) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x9000));
-    let payload_size = fields.len() * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc(type_id, payload_size)?;
-    state.record_allocation();
-    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
-    for (i, v) in fields.iter().enumerate() {
-        unsafe {
-            *data_ptr.add(i) = *v;
-        }
-    }
-    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-}
-
-/// Build a variant value of the given (type_name, tag) with the given
-/// payload fields.  Identical layout to `MakeVariantTyped` /
-/// `alloc_variant_into_with_type_id` so the runtime variant-name
-/// lookup at `format_variant_for_print_depth` resolves correctly.
-fn wrap_in_variant(
-    state: &mut InterpreterState,
-    type_name: &str,
-    tag: u32,
-    fields: &[Value],
-) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name)
-        .unwrap_or(TypeId(0x8000 + tag));
-    let field_count = fields.len() as u32;
-    let data_size = 8 + (fields.len() * std::mem::size_of::<Value>());
-    let obj = state.heap.alloc(type_id, data_size)?;
-    state.record_allocation();
-    let base = obj.as_ptr() as *mut u8;
-    unsafe {
-        let tag_ptr = base.add(OBJECT_HEADER_SIZE) as *mut u32;
-        *tag_ptr = tag;
-        *tag_ptr.add(1) = field_count;
-        let payload_ptr = base.add(OBJECT_HEADER_SIZE + 8) as *mut Value;
-        for (i, v) in fields.iter().enumerate() {
-            *payload_ptr.add(i) = *v;
-        }
-    }
-    Ok(Value::from_ptr(base))
-}
-
-/// Look up a TypeId by registered type name in the module's type table.
-fn lookup_type_id_by_name(state: &InterpreterState, name: &str) -> Option<TypeId> {
-    state
-        .module
-        .types
-        .iter()
-        .find(|td| {
-            // Look up the TypeDescriptor's name from the string table
-            // and compare against `name`.
-            state.module.strings.get(td.name) == Some(name)
-                // Sum types (Result, ShellError) live under any kind;
-                // record types (ShellResult, ExitStatus, Duration)
-                // live under `Record`.  We accept either — the
-                // dispatch is name-based, not kind-based.
-                && !matches!(td.kind, crate::types::TypeKind::Protocol)
-        })
-        .map(|td| td.id)
 }
 
 // Suppress unused-import warning when feature combos drop the variant kind.
