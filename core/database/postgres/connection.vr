@@ -50,7 +50,9 @@ mount core.database.postgres.wire.frontend.{
     StartupParams, startup, simple_query, terminate, sasl_initial_response, sasl_response,
     cancel_request, ssl_request,
     copy_data, copy_done, copy_fail,
+    parse, describe_statement, sync, close_statement,
 };
+mount core.database.postgres.extended.{build_bind_execute};
 mount core.database.postgres.wire.backend.{
     BackendMessage,
     BmAuth, BmParameterStatus, BmBackendKeyData, BmReadyForQuery,
@@ -62,6 +64,7 @@ mount core.database.postgres.wire.backend.{
     AuthRequest, AuthOk, AuthCleartextPassword, AuthMd5Password,
     AuthSasl, AuthSaslContinue, AuthSaslFinal,
     parse_backend, Diagnostic, ColumnDesc, RowDescription, DataRow,
+    BmParameterDescription, ParameterDescription,
     TxStatus, TxIdle, TxInTransaction, TxFailedTransaction,
     BackendMessageArena,
     BmaAuth, BmaParameterStatus, BmaBackendKeyData, BmaReadyForQuery,
@@ -159,6 +162,10 @@ public type PgConnection is {
     /// CopyData while waiting for CopyOutResponse). `None` on
     /// every non-replication connection.
     replication_stash: Maybe<BackendMessage>,
+    /// Monotonic counter for prepared-statement name generation
+    /// (`s0`, `s1`, …). Resets on connection close — server
+    /// drops every prepared statement when the session ends.
+    prepared_counter: Int,
 };
 
 // -----------------------------------------------------------------------------
@@ -307,6 +314,7 @@ fn connect_with_optional_replication(
         pipeline: None,
         arena: SpindleArena.new_connection(0),
         replication_stash: None,
+        prepared_counter: 0,
     };
 
     // Send Startup. Replication mode (when set) feeds into the
@@ -938,6 +946,207 @@ implement PgConnection {
     }
 
     // -------------------------------------------------------------------------
+    // Prepared statements (extended-query) — spec §6.1.4
+    // -------------------------------------------------------------------------
+    //
+    // Sync surface for the extended-query protocol. Wraps the
+    // existing `extended.vr` byte-builders with state-driving
+    // helpers that handle the Parse / Describe / Bind / Execute /
+    // Sync round-trips and surface a typed handle.
+    //
+    // Statement names are auto-generated as `s0`, `s1`, … via the
+    // `prepared_counter` field; callers who want named statements
+    // can manage their own names via the raw extended.vr API.
+
+    /// Send Parse + Describe + Sync; collect ParameterDescription
+    /// + RowDescription. Returns a `PgPreparedStatement` carrying
+    /// the server-allocated name + param OIDs + result columns.
+    public fn prepare(&mut self, sql: &Text) -> Result<PgPreparedStatement, DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "prepare requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        let name = f"s{self.prepared_counter}";
+        self.prepared_counter = self.prepared_counter + 1;
+
+        let empty_oids: List<Int> = List.new();
+        let p = parse(&name, sql, empty_oids.as_slice());
+        let d = describe_statement(&name);
+        let s = sync();
+        let mut payload: List<Byte> = List.new();
+        append_all(&mut payload, p.as_slice());
+        append_all(&mut payload, d.as_slice());
+        append_all(&mut payload, s.as_slice());
+
+        self.state = PcsBusy;
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        let mut param_oids: List<Int> = List.new();
+        let mut row_desc: Maybe<RowDescription> = None;
+        let mut diagnostic: Maybe<Diagnostic> = None;
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmParseComplete => {}
+                BmParameterDescription(pd) => { param_oids = pd.type_oids; }
+                BmRowDescription(rd) => { row_desc = Some(rd); }
+                BmNoData => { row_desc = None; }
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None => Ok(PgPreparedStatement {
+                name: name,
+                sql: sql.clone(),
+                param_oids: param_oids,
+                row_description: row_desc,
+            }),
+        }
+    }
+
+    /// Bind + Execute + Sync the named prepared statement. `params`
+    /// is one entry per `$N` placeholder — `None` for SQL NULL,
+    /// `Some(bytes)` for the wire-formatted value matching the
+    /// param's OID + format. V0 forces text format for both
+    /// params and results; binary format is reserved for V1
+    /// (callers wanting binary today drop down to extended.vr).
+    public fn execute_prepared(
+        &mut self,
+        stmt: &PgPreparedStatement,
+        params: &List<Maybe<List<Byte>>>,
+    ) -> Result<PgSimpleQueryResult, DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "execute_prepared requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        let portal = "".clone();          // unnamed portal
+        let text_formats: List<Int> = List.new();    // empty → text for all
+        let result_formats: List<Int> = List.new();
+        let payload = build_bind_execute(
+            &stmt.name,
+            text_formats.as_slice(),
+            params,
+            result_formats.as_slice(),
+            &portal,
+            0,                            // unlimited rows
+        );
+
+        self.state = PcsBusy;
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        // Update last_formats from the prepared row description so
+        // BmDataRow decoders pick the right per-column format.
+        match &stmt.row_description {
+            Some(rd) => { self.last_formats = collect_formats(rd); }
+            None    => {}
+        }
+
+        let mut rows: List<List<WireValue>> = List.new();
+        let mut command_tag: Text = "".clone();
+        let mut diagnostic: Maybe<Diagnostic> = None;
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmBindComplete => {}
+                BmRowDescription(rd) => {
+                    self.last_formats = collect_formats(&rd);
+                }
+                BmDataRow(dr) => { rows.push(dr.values); }
+                BmCommandComplete(cc) => { command_tag = cc.tag; }
+                BmEmptyQueryResponse => {
+                    if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
+                }
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None => Ok(PgSimpleQueryResult {
+                command_tag: command_tag,
+                row_description: stmt.row_description.clone(),
+                rows: rows,
+            }),
+        }
+    }
+
+    /// Send Close(S, name) + Sync — frees the server-side
+    /// statement slot. Caller must NOT use the statement after.
+    public fn close_prepared(&mut self, stmt: &PgPreparedStatement)
+        -> Result<(), DbError>
+    {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "close_prepared requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        let c = close_statement(&stmt.name);
+        let s = sync();
+        let mut payload: List<Byte> = List.new();
+        append_all(&mut payload, c.as_slice());
+        append_all(&mut payload, s.as_slice());
+        self.state = PcsBusy;
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        let mut diagnostic: Maybe<Diagnostic> = None;
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCloseComplete => {}
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None    => Ok(()),
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // LISTEN / NOTIFY — async event surface (spec §6.1.7)
     // -------------------------------------------------------------------------
     //
@@ -1482,6 +1691,39 @@ public type PgSimpleQueryResult is {
     row_description: Maybe<RowDescription>,
     rows: List<List<WireValue>>,
 };
+
+/// Server-side prepared statement — handle returned by
+/// `PgConnection.prepare`. The `name` is allocated by Spindle
+/// (auto-generated `s0`, `s1`, …); `param_oids` come from the
+/// server's `ParameterDescription`; `row_description` is `None`
+/// for non-SELECT statements.
+///
+/// V0 — handle is plain (not affine). Caller is responsible for
+/// `close_prepared` when done; otherwise the slot survives until
+/// connection close. V1 candidates: affine handle that runs
+/// close_prepared on Drop; PgPreparedSession LRU like MySQL's
+/// PreparedSession.
+public type PgPreparedStatement is {
+    name: Text,
+    sql: Text,
+    param_oids: List<Int>,
+    row_description: Maybe<RowDescription>,
+};
+
+implement PgPreparedStatement {
+    public fn name(&self) -> &Text { &self.name }
+    public fn sql(&self) -> &Text { &self.sql }
+    public fn param_oids(&self) -> &List<Int> { &self.param_oids }
+    public fn row_description(&self) -> &Maybe<RowDescription> { &self.row_description }
+}
+
+fn append_all(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < (src.len() as Int) {
+        dst.push(src[i]);
+        i = i + 1;
+    }
+}
 
 /// Arena-backed counterpart of `PgSimpleQueryResult` — every
 /// `ArenaWireRow.values[*]` slice points into the connection's
