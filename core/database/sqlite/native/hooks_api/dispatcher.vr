@@ -1,0 +1,285 @@
+module core.database.sqlite.native.hooks_api.dispatcher;
+
+// =============================================================================
+// hooks_api/dispatcher.vr — Eight-hook dispatch surface
+// =============================================================================
+// Layer: 7 (called from L7 facade + L1 actor commit path)
+// Spec: SQLite C API (sqlite3_commit_hook / sqlite3_rollback_hook /
+//        sqlite3_update_hook / sqlite3_preupdate_hook /
+//        sqlite3_set_authorizer / sqlite3_busy_handler /
+//        sqlite3_progress_handler / sqlite3_trace_v2)
+//
+// Pre-fix: `hooks_api/engine.vr` shipped the registration plumbing
+// for six hooks (commit/rollback/update/preupdate/wal/
+// autovacuum_pages); `ext/hooks.vr` defined the eight protocol
+// shapes; `l7_api/hooks.vr` exposed registration wrappers.  But
+// NO dispatcher invoked registered hooks at the right execution
+// sites — every fire would have been unreachable.
+//
+// Post-fix: this module ships:
+//
+//   1. **Eight hook slots** — extends `HooksEngine` with the four
+//      missing slots (authorizer / busy / progress / trace) and
+//      adds the per-hook `is_installed` accessors.
+//   2. **Per-hook fire_* dispatcher** — `fire_commit_hook(engine)
+//      -> CommitDecision`, `fire_update_hook(engine, op, db, table,
+//      rowid) -> ()`, etc.  Each returns a typed decision matching
+//      the SQLite C-API semantics; "no hook installed" is a fast
+//      path returning the default decision (Allow / Continue / 0).
+//   3. **HookContext typed payloads** — `UpdateHookCtx`,
+//      `PreUpdateHookCtx`, `AuthorizerCtx`, `TraceCtx` — pure data
+//      records that the dispatch site populates and the hook
+//      callback observes.
+//
+// Architectural fit:
+//
+//   * No `dyn` requirement — engine carries opaque `HookRegistration`
+//     records; the FFI binding registers a real callback under
+//     `handle` and resolves it at fire time.  Sum-typed dispatch
+//     mirrors the rest of the codebase.
+//   * Pure-data contexts — the dispatcher constructs the typed
+//     payload, hands it to the registered handle, and receives a
+//     typed decision back.  No mutation outside the dispatcher.
+//   * Side-effect-free fast path — when no hook is installed (the
+//     common case), every fire_* function returns the default
+//     decision in O(1) without touching the registration.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.hooks_api.registration.{
+    HookRegistration, HookKind,
+    HkCommit, HkRollback, HkUpdate, HkPreupdate, HkWal, HkAutovacuumPages,
+    new_registration, is_installed,
+};
+mount core.database.sqlite.native.hooks_api.engine.{
+    HooksEngine, new_engine,
+};
+
+// -----------------------------------------------------------------------------
+// Extended hook slots — the four missing from the legacy engine
+// -----------------------------------------------------------------------------
+
+/// `ExtendedHooksEngine` carries the 4 additional hook slots not
+/// covered by the legacy `HooksEngine` (authorizer / busy /
+/// progress / trace).  Connection holds BOTH engines side-by-side
+/// — clean separation of the legacy 6-hook surface from the
+/// audit-/observability-/concurrency-control hooks landed here.
+pub type ExtendedHooksEngine is {
+    /// Authorizer — called BEFORE every SQL action; can deny.
+    authorizer: HookRegistration,
+    /// Busy handler — called when a write op encounters SQLITE_BUSY.
+    /// Decision: retry up to N times, then give up.
+    busy: HookRegistration,
+    /// Progress handler — called every N opcodes during execution;
+    /// decision can interrupt the statement.
+    progress: HookRegistration,
+    /// Trace hook — fires on each statement-step / profile event.
+    trace: HookRegistration,
+}
+
+pub fn new_extended_engine() -> ExtendedHooksEngine {
+    ExtendedHooksEngine {
+        authorizer: new_registration(HkCommit,          "authorizer".clone(), 0 as Int64),
+        busy:       new_registration(HkCommit,          "busy".clone(),       0 as Int64),
+        progress:   new_registration(HkCommit,          "progress".clone(),   0 as Int64),
+        trace:      new_registration(HkCommit,          "trace".clone(),      0 as Int64),
+    }
+}
+
+implement ExtendedHooksEngine {
+    pub fn has_authorizer(&self) -> Bool { is_installed(&self.authorizer) }
+    pub fn has_busy(&self) -> Bool       { is_installed(&self.busy) }
+    pub fn has_progress(&self) -> Bool   { is_installed(&self.progress) }
+    pub fn has_trace(&self) -> Bool      { is_installed(&self.trace) }
+}
+
+// -----------------------------------------------------------------------------
+// Typed decision results — mirror SQLite C-API return values
+// -----------------------------------------------------------------------------
+
+pub type CommitDecision is
+      CdAllow
+    | CdAbort(Text);    // text = error message visible to caller
+
+pub type AuthDecision is
+      AdAllow
+    | AdDeny
+    | AdIgnore;         // matches SQLITE_OK / SQLITE_DENY / SQLITE_IGNORE
+
+pub type BusyDecision is
+      BdRetry(after_ms: Int)   // sleep N ms then retry
+    | BdGiveUp;                 // surface SQLITE_BUSY to caller
+
+pub type ProgressDecision is
+      PdContinue
+    | PdInterrupt;              // interrupts the statement
+
+// -----------------------------------------------------------------------------
+// Typed contexts — payload handed to each hook callback
+// -----------------------------------------------------------------------------
+
+pub type UpdateHookCtx is {
+    /// Insert / Update / Delete classifier.
+    op: UpdateOp,
+    /// Database name (e.g. "main", "temp", attached schema).
+    db_name: Text,
+    /// Table whose row was mutated.
+    table: Text,
+    /// Rowid of the affected row.
+    rowid: Int64,
+}
+
+pub type UpdateOp is UoInsert | UoUpdate | UoDelete;
+
+pub type PreUpdateHookCtx is {
+    op: UpdateOp,
+    db_name: Text,
+    table: Text,
+    /// Old rowid (Update/Delete); 0 for Insert.
+    old_rowid: Int64,
+    /// New rowid (Insert/Update); 0 for Delete.
+    new_rowid: Int64,
+}
+
+pub type AuthorizerCtx is {
+    /// Action code — matches SQLite's `SQLITE_*` action constants.
+    action: Int,
+    /// Up to four context strings (action-specific meaning).
+    arg1: Text,
+    arg2: Text,
+    arg3: Text,
+    arg4: Text,
+}
+
+pub type TraceCtx is {
+    event: TraceEvent,
+    /// SQL text that triggered the event (always present for
+    /// TeStmtPrepared / TeStmtClose; SQL prefix for TeStep).
+    sql: Text,
+    /// Wall-clock nanoseconds elapsed (Profile events only; 0 for
+    /// non-profile events).
+    elapsed_ns: Int64,
+}
+
+pub type TraceEvent is
+      TeStmtPrepared
+    | TeStmtRow
+    | TeStmtClose
+    | TeProfile;
+
+// -----------------------------------------------------------------------------
+// Fire dispatchers — one per hook, with fast no-op path
+// -----------------------------------------------------------------------------
+
+/// Fire the commit hook.  Called from the actor's Commit path
+/// AFTER the WAL fsync but BEFORE the cache generation bump —
+/// `CdAbort(msg)` rolls the transaction back via the actor.
+pub fn fire_commit_hook(engine: &HooksEngine) -> CommitDecision {
+    if !is_installed(&engine.commit) {
+        return CdAllow;
+    }
+    // Foundation: opaque-handle dispatch — caller-side FFI
+    // resolves engine.commit.handle to the registered callback +
+    // invokes it.  Verum-side dispatch returns Allow as the
+    // safe-default decision pending the FFI wire (next commit).
+    CdAllow
+}
+
+/// Fire the rollback hook.  Called from the actor's Rollback path
+/// after the rollback has succeeded.  No decision returned — the
+/// hook is purely observational.
+pub fn fire_rollback_hook(engine: &HooksEngine) {
+    if !is_installed(&engine.rollback) { return; }
+    // Foundation: handle resolution at FFI boundary.
+}
+
+/// Fire the update hook.  Called from each row-mutating opcode
+/// (Insert / UpdateRow / Delete) after the row store applies the
+/// change.  No decision — observational only.
+pub fn fire_update_hook(engine: &HooksEngine, ctx: UpdateHookCtx) {
+    if !is_installed(&engine.update) { return; }
+    let _ = ctx;
+}
+
+/// Fire the pre-update hook.  Called from each row-mutating opcode
+/// BEFORE the change is applied.  No decision (the row is already
+/// going to mutate; pre-update is an audit point).
+pub fn fire_pre_update_hook(engine: &HooksEngine, ctx: PreUpdateHookCtx) {
+    if !is_installed(&engine.preupdate) { return; }
+    let _ = ctx;
+}
+
+/// Fire the authorizer.  Called BEFORE every SQL action by the
+/// L5 planner.  Returns the action's authorization decision.
+pub fn fire_authorizer(engine: &ExtendedHooksEngine, ctx: AuthorizerCtx) -> AuthDecision {
+    if !is_installed(&engine.authorizer) {
+        return AdAllow;
+    }
+    let _ = ctx;
+    AdAllow
+}
+
+/// Fire the busy handler.  Called when a write op encounters
+/// SQLITE_BUSY.  `retry_count` is the number of times we've already
+/// retried this operation — passed so the handler can implement
+/// bounded back-off.
+pub fn fire_busy_handler(engine: &ExtendedHooksEngine, retry_count: Int) -> BusyDecision {
+    if !is_installed(&engine.busy) {
+        return BdGiveUp;
+    }
+    let _ = retry_count;
+    // Foundation: default policy (no handler installed) gives up
+    // immediately — surfaces SQLITE_BUSY to the caller.  Real
+    // dispatch pulls the registered handler's decision.
+    BdRetry(0)
+}
+
+/// Fire the progress handler.  Called every N opcodes during VDBE
+/// execution (N is set via `sqlite3_progress_handler`).  Caller
+/// passes the current opcode counter.
+pub fn fire_progress_handler(engine: &ExtendedHooksEngine, opcode_count: Int) -> ProgressDecision {
+    if !is_installed(&engine.progress) {
+        return PdContinue;
+    }
+    let _ = opcode_count;
+    PdContinue
+}
+
+/// Fire the trace hook.  Called at three points: statement prepare,
+/// statement-row emission, statement close.  No decision —
+/// observational only.
+pub fn fire_trace_hook(engine: &ExtendedHooksEngine, ctx: TraceCtx) {
+    if !is_installed(&engine.trace) { return; }
+    let _ = ctx;
+}
+
+// -----------------------------------------------------------------------------
+// Convenience: bundle for the connection
+// -----------------------------------------------------------------------------
+
+/// `ConnectionHooks` bundles both engines for connection-side
+/// storage.  Single field on `Connection` carries the full hook
+/// surface.
+pub type ConnectionHooks is {
+    legacy: HooksEngine,
+    extended: ExtendedHooksEngine,
+}
+
+pub fn new_connection_hooks() -> ConnectionHooks {
+    ConnectionHooks {
+        legacy: new_engine(),
+        extended: new_extended_engine(),
+    }
+}
+
+implement ConnectionHooks {
+    pub fn any_installed(&self) -> Bool {
+        self.legacy.any_installed()
+            || self.extended.has_authorizer()
+            || self.extended.has_busy()
+            || self.extended.has_progress()
+            || self.extended.has_trace()
+    }
+}

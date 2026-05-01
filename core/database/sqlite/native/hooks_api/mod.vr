@@ -28,3 +28,29 @@ module core.database.sqlite.native.hooks_api;
 public module registration;
 public module op;
 public module engine;
+public module dispatcher;
+
+public mount .registration.{
+    HookRegistration, HookKind,
+    HkCommit, HkRollback, HkUpdate, HkPreupdate, HkWal, HkAutovacuumPages,
+    new_registration, is_installed, kind_name,
+};
+
+public mount .engine.{
+    HooksEngine, new_engine,
+};
+
+public mount .dispatcher.{
+    ExtendedHooksEngine, ConnectionHooks,
+    new_extended_engine, new_connection_hooks,
+    CommitDecision, CdAllow, CdAbort,
+    AuthDecision, AdAllow, AdDeny, AdIgnore,
+    BusyDecision, BdRetry, BdGiveUp,
+    ProgressDecision, PdContinue, PdInterrupt,
+    UpdateOp, UoInsert, UoUpdate, UoDelete,
+    UpdateHookCtx, PreUpdateHookCtx, AuthorizerCtx, TraceCtx,
+    TraceEvent, TeStmtPrepared, TeStmtRow, TeStmtClose, TeProfile,
+    fire_commit_hook, fire_rollback_hook,
+    fire_update_hook, fire_pre_update_hook,
+    fire_authorizer, fire_busy_handler, fire_progress_handler, fire_trace_hook,
+};
