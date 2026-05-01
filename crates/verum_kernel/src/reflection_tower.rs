@@ -66,9 +66,7 @@
 //! kernel-discharge audit gate.
 
 use crate::intrinsic_dispatch::{IntrinsicValue, dispatch_intrinsic};
-use crate::zfc_self_recognition::{
-    KernelRuleId, kernel_meta_soundness_footprint, required_meta_theory,
-};
+use crate::zfc_self_recognition::{KernelRuleId, kernel_meta_soundness_holds, required_meta_theory};
 
 // =============================================================================
 // MSFS citation — bound to the corpus
@@ -237,10 +235,14 @@ impl ReflectionStage {
 // =============================================================================
 
 /// Algorithmic discharge for `REF^0`: the per-rule footprint must
-/// be bounded by ZFC + 2 strongly-inaccessibles. Reuses the
-/// existing `kernel_meta_soundness_footprint` machinery.
+/// be bounded by ZFC + 2 strongly-inaccessibles.  Thin delegation
+/// to the canonical [`kernel_meta_soundness_holds`] in
+/// `zfc_self_recognition` — single source of truth for the
+/// base-stage verdict.  Pre-consolidation, the predicate was
+/// duplicated here as a one-liner; post-consolidation it is the
+/// same function under a tower-aware name.
 pub fn base_discharges() -> bool {
-    kernel_meta_soundness_footprint().is_provable_in_zfc_plus_2_inacc()
+    kernel_meta_soundness_holds()
 }
 
 /// Algorithmic discharge for `REF^≥1`: per MSFS Theorem 9.6(b),

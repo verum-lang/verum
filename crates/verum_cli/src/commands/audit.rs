@@ -9925,131 +9925,12 @@ pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
     Ok(())
 }
 
-// =============================================================================
-// Kernel self-recognition audit (ZFC + 2-inacc)
-// =============================================================================
-
-/// `verum audit --self-recognition` — emits per-rule decomposition
-/// of the seven kernel rules into ZFC axioms + Grothendieck universes.
-pub fn audit_self_recognition(format: AuditFormat) -> Result<()> {
-    use verum_kernel::zfc_self_recognition::{
-        KernelRuleId, SelfRecognitionAudit, is_zfc_plus_2_inacc_provable, required_meta_theory,
-    };
-
-    let mut audit = SelfRecognitionAudit::new();
-    for rule in KernelRuleId::full_list() {
-        audit.cite(rule);
-    }
-    let zfc_required = audit.required_zfc_axioms();
-    let inacc_required = audit.required_inaccessibles();
-    let provable = audit.is_provable_in_zfc_plus_2_inacc();
-
-    match format {
-        AuditFormat::Plain => {
-            ui::step("Kernel self-recognition vs. ZFC + 2 inaccessibles");
-            println!();
-            println!(
-                "  {:<13}  {:<8}  {:<6}  Citation",
-                "Rule", "ZFC ax", "Inacc"
-            );
-            println!(
-                "  {}  {}  {}  {}",
-                "─".repeat(13),
-                "─".repeat(8),
-                "─".repeat(6),
-                "─".repeat(40)
-            );
-            for rule in KernelRuleId::full_list() {
-                let req = required_meta_theory(rule);
-                println!(
-                    "  {:<13}  {:<8}  {:<6}  {}",
-                    rule.name(),
-                    req.zfc_axioms.len(),
-                    req.inaccessibles.len(),
-                    req.citation.as_str()
-                );
-            }
-            println!();
-            println!("  Trusted-base report:");
-            println!(
-                "    ZFC axioms required: [{}]",
-                zfc_required
-                    .iter()
-                    .map(|a| a.name())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            println!(
-                "    Inaccessibles required: [{}]",
-                inacc_required
-                    .iter()
-                    .map(|k| k.name())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            println!(
-                "    Provable in ZFC + 2-inacc: {}",
-                if provable { "YES" } else { "NO" }
-            );
-            for rule in KernelRuleId::full_list() {
-                if !is_zfc_plus_2_inacc_provable(rule) {
-                    eprintln!(
-                        "  E_SELF_RECOGNITION: rule {} not provable in ZFC + 2-inacc",
-                        rule.name()
-                    );
-                }
-            }
-        }
-        AuditFormat::Json => {
-            let mut out = String::from("{\n");
-            out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!(
-                "  \"provable_in_zfc_plus_2_inacc\": {},\n",
-                provable
-            ));
-            out.push_str("  \"zfc_axioms_required\": [");
-            for (i, ax) in zfc_required.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                out.push_str(&format!("\"{}\"", ax.name()));
-            }
-            out.push_str("],\n");
-            out.push_str("  \"inaccessibles_required\": [");
-            for (i, k) in inacc_required.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                out.push_str(&format!("\"{}\"", k.name()));
-            }
-            out.push_str("],\n");
-            out.push_str("  \"rules\": [\n");
-            let rules: Vec<_> = KernelRuleId::full_list().to_vec();
-            for (i, rule) in rules.iter().enumerate() {
-                let req = required_meta_theory(*rule);
-                out.push_str(&format!(
-                    "    {{ \"rule\": \"{}\", \"zfc_axioms\": [{}], \"inaccessibles\": [{}], \"citation\": \"{}\" }}{}\n",
-                    rule.name(),
-                    req.zfc_axioms
-                        .iter()
-                        .map(|a| format!("\"{}\"", a.name()))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    req.inaccessibles
-                        .iter()
-                        .map(|k| format!("\"{}\"", k.name()))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    json_escape(req.citation.as_str()),
-                    if i + 1 < rules.len() { "," } else { "" }
-                ));
-            }
-            out.push_str("  ]\n}");
-            println!("{}", out);
-        }
-    }
-    Ok(())
-}
+// Kernel self-recognition audit was subsumed into the
+// reflection-tower gate (`audit_reflection_tower_with_format`):
+// per-rule footprint table is the `base_footprint` sub-block of
+// `reflection-tower.json`. The standalone `--self-recognition`
+// command was removed as part of the verification consolidation
+// audit; consumers should call `--reflection-tower` instead.
 
 // =============================================================================
 // Reflection-tower audit (#158) — Feferman 1989 / Pohlers / Beklemishev
@@ -10113,8 +9994,36 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
         })
         .collect();
 
+    // Per-rule meta-theoretic footprint — the data formerly served
+    // by `audit --self-recognition`.  Now embedded as a sub-block
+    // of the reflection-tower report so the two gates share a
+    // single canonical source.
+    use verum_kernel::zfc_self_recognition::{
+        KernelRuleId, SelfRecognitionAudit, is_zfc_plus_2_inacc_provable, required_meta_theory,
+    };
+    let mut self_rec_audit = SelfRecognitionAudit::new();
+    for rule in KernelRuleId::full_list() {
+        self_rec_audit.cite(rule);
+    }
+    let zfc_required = self_rec_audit.required_zfc_axioms();
+    let inacc_required = self_rec_audit.required_inaccessibles();
+    let provable_in_zfc_plus_2_inacc = self_rec_audit.is_provable_in_zfc_plus_2_inacc();
+    let per_rule_footprint: Vec<serde_json::Value> = KernelRuleId::full_list()
+        .iter()
+        .map(|rule| {
+            let req = required_meta_theory(*rule);
+            serde_json::json!({
+                "rule": rule.name(),
+                "zfc_axioms": req.zfc_axioms.iter().map(|a| a.name()).collect::<Vec<_>>(),
+                "inaccessibles": req.inaccessibles.iter().map(|k| k.name()).collect::<Vec<_>>(),
+                "citation": req.citation.as_str(),
+                "provable_in_zfc_plus_2_inacc": is_zfc_plus_2_inacc_provable(*rule),
+            })
+        })
+        .collect();
+
     let payload = serde_json::json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "kernel_version": env!("CARGO_PKG_VERSION"),
         "discipline": "kernel_reflection_tower_msfs_grounded",
         "msfs_paper": "Sereda 2026 — The Moduli Space of Formal Systems",
@@ -10124,6 +10033,14 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
         "constructive_discharges_at_sampled_indices": constructive_summaries,
         "discharged_stage_count": report.discharged_count(),
         "constructive_discharged_count": report.constructive_discharged_count(),
+        // Per-rule meta-theoretic footprint (subsumes the legacy
+        // `audit --self-recognition` payload as a sub-view).
+        "base_footprint": {
+            "provable_in_zfc_plus_2_inacc": provable_in_zfc_plus_2_inacc,
+            "zfc_axioms_required": zfc_required.iter().map(|a| a.name()).collect::<Vec<_>>(),
+            "inaccessibles_required": inacc_required.iter().map(|k| k.name()).collect::<Vec<_>>(),
+            "rules": per_rule_footprint,
+        },
     });
     let _ = std::fs::write(
         &report_path,

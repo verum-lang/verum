@@ -21,18 +21,14 @@
 
 // **Module roster**:
 //
-//   1. `meta_theorem.vr` — the meta-soundness axiom
-//      `kernel_self_soundness_in_meta_universe` (rank-1 — kernel
-//      sound in Verum + κ_meta). Cited via
-//      `@framework(verum_internal_meta, …)` to the Gödel /
-//      Tarski / Feferman literature on structured reflection.
-//
-//   2. `predicative_reflection.vr` — MSFS-grounded reflection
-//      tower. Four structural facts: REF^0 base footprint, REF^≥1
-//      theory-level idempotence (MSFS Theorem 9.6(b)), REF^ω
-//      boundedness (MSFS Theorem 8.2), REF^Abs absolute-boundary
-//      emptiness (MSFS Theorem 5.1, AFN-T α). Each substantive
-//      theorem is machine-verified in the MSFS corpus.
+//   1. `predicative_reflection.vr` — MSFS-grounded reflection
+//      tower. Four structural facts: REF^0 base footprint
+//      (subsumes the rank-1 meta-soundness claim — kernel sound in
+//      Verum + κ_meta), REF^≥1 theory-level idempotence (MSFS
+//      Theorem 9.6(b)), REF^ω boundedness (MSFS Theorem 8.2),
+//      REF^Abs absolute-boundary emptiness (MSFS Theorem 5.1,
+//      AFN-T α). Each substantive theorem is machine-verified in
+//      the MSFS corpus.
 //
 // **Architectural alignment**: mirrors `codegen_soundness/` (#162)
 // and `separation_soundness/` (#161 V0). All three follow the same
@@ -43,7 +39,6 @@
 
 module core.verify.kernel_self_soundness.mod;
 
-mount super.meta_theorem.{kernel_self_soundness_in_meta_universe};
 mount super.predicative_reflection.{
     kernel_reflection_tower_base,
     kernel_reflection_tower_stable,
