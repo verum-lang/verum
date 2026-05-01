@@ -112,9 +112,34 @@ public type PgRequest is
         name: Text,
         reply: OneshotSender<Result<(), DbError>>,
     }
+    /// Open a streaming COPY FROM session. Actor takes over the
+    /// wire, acks via `ack`, then drives a sub-loop reading from
+    /// `chunk_rx` until Done/Cancel.
+    | ReqCopyInOpen {
+        sql: Text,
+        chunk_rx: Receiver<CopyInChunk>,
+        ack: OneshotSender<Result<(), DbError>>,
+    }
+    /// Open a streaming COPY TO session. Actor acks via `ack`,
+    /// then pushes every CopyData payload to `chunk_tx` until
+    /// CopyDone, then drains to RFQ and sends a final
+    /// `CoeDone(Result<row_count, …>)` event.
+    | ReqCopyOutOpen {
+        sql: Text,
+        chunk_tx: Sender<core.database.postgres.async_copy.CopyOutEvent>,
+        ack: OneshotSender<Result<(), DbError>>,
+    }
     | ReqShutdown {
         reply: OneshotSender<Result<(), DbError>>,
     };
+
+/// Per-chunk write event the COPY-IN sub-loop pulls from its
+/// dedicated channel. `CicDone` carries the completion oneshot so
+/// the writer's `finish()` future is awoken with the row count.
+public type CopyInChunk is
+      CicBytes(List<Byte>)
+    | CicDone(OneshotSender<Result<Int, DbError>>)
+    | CicCancel { reason: Text, reply: OneshotSender<Result<(), DbError>> };
 
 // =============================================================================
 // Public handle
@@ -337,11 +362,113 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
                 };
                 let _ = reply.send(r);
             }
+            ReqCopyInOpen { sql, chunk_rx, ack } => {
+                run_copy_in_subloop(&mut conn, &sql, chunk_rx, ack);
+            }
+            ReqCopyOutOpen { sql, chunk_tx, ack } => {
+                run_copy_out_subloop(&mut conn, &sql, chunk_tx, ack);
+            }
             ReqShutdown { reply } => {
                 // Clean wire shutdown — best-effort.
                 let r = conn.close();
                 let _ = reply.send(r);
                 break;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// COPY IN sub-loop
+// =============================================================================
+
+fn run_copy_in_subloop(
+    conn: &mut PgConnection,
+    sql: &Text,
+    mut chunk_rx: Receiver<CopyInChunk>,
+    ack: OneshotSender<Result<(), DbError>>,
+) {
+    match conn.start_copy_in_session(sql) {
+        Ok(())  => { let _ = ack.send(Ok(())); }
+        Err(e)  => {
+            let _ = ack.send(Err(e));
+            return;
+        }
+    }
+
+    loop {
+        let chunk = match chunk_rx.recv() {
+            Some(c) => c,
+            None    => {
+                // Channel closed without an explicit Done/Cancel —
+                // writer dropped. Best-effort cancel on the wire.
+                let _ = conn.cancel_copy_in_session(&"writer dropped".clone());
+                return;
+            }
+        };
+        match chunk {
+            CicBytes(b) => {
+                match conn.write_copy_in_chunk(b.as_slice()) {
+                    Ok(())  => {}
+                    Err(_)  => {
+                        // Wire failed mid-write — try to drain.
+                        let _ = conn.cancel_copy_in_session(&"write failed".clone());
+                        return;
+                    }
+                }
+            }
+            CicDone(reply) => {
+                let r = conn.finish_copy_in_session();
+                let _ = reply.send(r);
+                return;
+            }
+            CicCancel { reason, reply } => {
+                let r = conn.cancel_copy_in_session(&reason);
+                let _ = reply.send(r);
+                return;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// COPY OUT sub-loop
+// =============================================================================
+
+fn run_copy_out_subloop(
+    conn: &mut PgConnection,
+    sql: &Text,
+    chunk_tx: Sender<core.database.postgres.async_copy.CopyOutEvent>,
+    ack: OneshotSender<Result<(), DbError>>,
+) {
+    match conn.start_copy_out_session(sql) {
+        Ok(())  => { let _ = ack.send(Ok(())); }
+        Err(e)  => {
+            let _ = ack.send(Err(e));
+            return;
+        }
+    }
+
+    loop {
+        match conn.read_copy_out_chunk() {
+            Ok(Some(bytes)) => {
+                let _ = chunk_tx.send(
+                    core.database.postgres.async_copy.CoeBytes(bytes),
+                );
+            }
+            Ok(None) => {
+                // CopyDone observed — drain to RFQ for the row count.
+                let r = conn.finish_copy_out_session();
+                let _ = chunk_tx.send(
+                    core.database.postgres.async_copy.CoeDone(r),
+                );
+                return;
+            }
+            Err(e) => {
+                let _ = chunk_tx.send(
+                    core.database.postgres.async_copy.CoeDone(Err(e)),
+                );
+                return;
             }
         }
     }
