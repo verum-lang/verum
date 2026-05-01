@@ -3825,6 +3825,23 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
+    // 6. Manifest-coverage — every Verum.toml manifest field's
+    //    wiring status is enumerated in a static table; this gate
+    //    emits the report and verifies no field is silently inert
+    //    (#290). Doesn't flip overall_l4 (forward-looking entries
+    //    are observability, not L4 failures), but the bundle
+    //    records the wired/forward-looking counts so CI tracks
+    //    inert-defense audit progress over time.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "manifest_coverage",
+        report_dir.join("manifest-coverage.json"),
+        || audit_manifest_coverage(AuditFormat::Json),
+    );
+    // Always passes (observability gate — forward-looking rows
+    // are accountability surface, not failures).
+
     let bundle_path = report_dir.join("bundle.json");
     let payload = serde_json::json!({
         "schema_version": 1,
