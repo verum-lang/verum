@@ -1328,12 +1328,60 @@ fn try_dispatch_intrinsic_by_name(
         | "__waitgroup_destroy_raw" => Ok(Some(Value::from_i64(0))),
         "__gen_close_raw" => Ok(Some(Value::from_i64(0))),
 
-        // --- IO Engine (interpreter: no-op, returns fake handles) ---
-        "__io_engine_new_raw" => Ok(Some(Value::from_i64(1))),
-        "__io_engine_destroy_raw" | "__io_submit_raw" | "__io_remove_raw" | "__io_modify_raw" => {
-            Ok(Some(Value::from_i64(0)))
+        // --- IO Engine (VBC-IO-ENGINE-1: backed by per-session
+        //     kqueue/epoll fd, see crate::interpreter::io_engine).
+        //     Mirrors the Tier-1 KqueueDriver in
+        //     core/sys/darwin/io.vr — same API shape, same kernel
+        //     primitives, executed on the host side at Tier-0. ---
+        "__io_engine_new_raw" => {
+            let cap = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::engine_new(cap))))
         }
-        "__io_poll_raw" => Ok(Some(Value::from_i64(0))), // no events
+        "__io_engine_destroy_raw" => {
+            let h = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::engine_destroy(h))))
+        }
+        "__io_submit_raw" => {
+            let h = get_i64_arg(state, 0);
+            let fd = get_i64_arg(state, 1);
+            let flags = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::submit(h, fd, flags))))
+        }
+        "__io_remove_raw" => {
+            let h = get_i64_arg(state, 0);
+            let fd = get_i64_arg(state, 1);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::remove(h, fd))))
+        }
+        "__io_modify_raw" => {
+            let h = get_i64_arg(state, 0);
+            let fd = get_i64_arg(state, 1);
+            let flags = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::modify(h, fd, flags))))
+        }
+        "__io_poll_raw" => {
+            let h = get_i64_arg(state, 0);
+            let max = get_i64_arg(state, 1);
+            let timeout_ns = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::poll(h, max, timeout_ns))))
+        }
+        // VBC-IO-ENGINE-1: companions queried by the Verum-side
+        // `AsyncIoReady.poll` Future driver — non-consuming
+        // `is_ready` and consuming `take_ready` against the
+        // session's ready queue.  Pre-VBC-IO-ENGINE-1 the
+        // Verum-side surface called these but they didn't exist
+        // (compile-time link error / runtime missing-intrinsic).
+        "__io_is_ready_raw" => {
+            let h = get_i64_arg(state, 0);
+            let fd = get_i64_arg(state, 1);
+            let flags = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::is_ready(h, fd, flags))))
+        }
+        "__io_take_ready_raw" => {
+            let h = get_i64_arg(state, 0);
+            let fd = get_i64_arg(state, 1);
+            let flags = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::take_ready(h, fd, flags))))
+        }
 
         // --- Thread Pool (interpreter: single-threaded execution) ---
         "__pool_create_raw" => Ok(Some(Value::from_i64(1))),
@@ -1342,15 +1390,55 @@ fn try_dispatch_intrinsic_by_name(
         | "__pool_destroy_raw"
         | "__pool_global_submit_raw" => Ok(Some(Value::from_i64(0))),
 
-        // --- Socket Options ---
-        "__socket_set_nonblocking_raw"
-        | "__socket_set_blocking_raw"
-        | "__socket_set_reuseaddr_raw"
-        | "__socket_set_nodelay_raw"
-        | "__socket_set_keepalive_raw"
-        | "__socket_get_error_raw" => Ok(Some(Value::from_i64(0))),
-        "__async_accept_raw" | "__async_read_raw" | "__async_write_raw" => {
-            Ok(Some(Value::from_i64(-1))) // not available in interpreter
+        // --- Socket Options (VBC-IO-ENGINE-1: real syscalls,
+        //     not no-op) ---
+        "__socket_set_nonblocking_raw" => {
+            let fd = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::socket_set_nonblocking(fd, true))))
+        }
+        "__socket_set_blocking_raw" => {
+            let fd = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::socket_set_nonblocking(fd, false))))
+        }
+        "__socket_set_reuseaddr_raw" => {
+            let fd = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::socket_set_reuseaddr(fd))))
+        }
+        "__socket_set_nodelay_raw" => {
+            let fd = get_i64_arg(state, 0);
+            let on = get_i64_arg(state, 1) != 0;
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::socket_set_nodelay(fd, on))))
+        }
+        "__socket_set_keepalive_raw" => {
+            let fd = get_i64_arg(state, 0);
+            let on = get_i64_arg(state, 1) != 0;
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::socket_set_keepalive(fd, on))))
+        }
+        "__socket_get_error_raw" => {
+            let fd = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(crate::interpreter::io_engine::socket_get_error(fd))))
+        }
+        // VBC-IO-ENGINE-1: async_accept submits listen_fd to the
+        // session's IoEngine, polls until ready, accepts, and
+        // returns the synthetic fd of the registered TcpStream.
+        // Net status codes from net_runtime apply (NET_STATUS_*).
+        "__async_accept_raw" => {
+            let engine = get_i64_arg(state, 0);
+            let listen_fd = get_i64_arg(state, 1);
+            let timeout_ns = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(
+                crate::interpreter::io_engine::async_accept(engine, listen_fd, timeout_ns),
+            )))
+        }
+        "__async_read_raw" | "__async_write_raw" => {
+            // Buffer-marshaling intrinsics — deferred to a
+            // follow-up task (VBC-IO-ENGINE-2).  The high-level
+            // Verum surface reaches read/write via the
+            // SocketAddr-aware tcp_recv_timeout / tcp_send_timeout
+            // path (already wired through reactor in VBC-NET-RT-2);
+            // these intrinsics target the lower-level
+            // buffer-pointer surface used by zero-copy paths.
+            Ok(Some(Value::from_i64(-1)))
         }
 
         // --- TCP Networking (Tier-0 std-net backed; see handlers/net_runtime.rs) ---

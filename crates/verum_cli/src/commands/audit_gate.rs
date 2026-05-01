@@ -174,6 +174,7 @@ impl Default for AuditRegistry {
         r.register(Box::new(BridgeDischargeGate));
         r.register(Box::new(BundleGate));
         r.register(Box::new(CodegenAttestationGate));
+        r.register(Box::new(DifferentialKernelGate));
         r.register(Box::new(CoherentGate));
         r.register(Box::new(CoordGate));
         r.register(Box::new(CoordConsistencyGate));
@@ -272,6 +273,20 @@ impl AuditGate for BundleGate {
     }
     fn run(&self, format: AuditFormat) -> Result<()> {
         super::audit::audit_bundle_with_format(format)
+    }
+}
+
+/// `verum audit --differential-kernel` — Rust↔Verum kernel agreement (#159).
+pub struct DifferentialKernelGate;
+impl AuditGate for DifferentialKernelGate {
+    fn name(&self) -> &'static str {
+        "differential-kernel"
+    }
+    fn description(&self) -> &'static str {
+        "Differential-kernel cross-implementation audit (#159): Rust trusted base vs Verum self-hosted kernel agreement on canonical certificates."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_differential_kernel_with_format(format)
     }
 }
 

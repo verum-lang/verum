@@ -1346,6 +1346,19 @@ enum Commands {
         #[clap(long = "codegen-attestation")]
         codegen_attestation: bool,
 
+        /// Differential-kernel cross-implementation audit
+        /// (task #159 / Rust↔Verum self-hosted kernel agreement).
+        /// Runs every kernel_v0 rule's canonical certificate through
+        /// the Rust trusted base (`verum_kernel::proof_checker`) AND
+        /// the Verum-self-hosted kernel (`core/verify/kernel_v0/`).
+        /// Reports per-rule agreement (`both_accept` / `both_reject` /
+        /// `disagreement` / `not_yet_self_hosting`). Exits non-zero
+        /// on any disagreement; `not_yet_self_hosting` is observability
+        /// (current state — Verum side awaits parser-blocker fix).
+        /// Output: `target/audit-reports/differential-kernel.json`.
+        #[clap(long = "differential-kernel")]
+        differential_kernel: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -3796,6 +3809,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_v0_roster,
             dependent_theorems,
             codegen_attestation,
+            differential_kernel,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -3855,6 +3869,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 )
             } else if codegen_attestation {
                 commands::audit::audit_codegen_attestation_with_format(output_format)
+            } else if differential_kernel {
+                commands::audit::audit_differential_kernel_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {

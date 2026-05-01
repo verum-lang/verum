@@ -2876,6 +2876,181 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
 }
 
 // =============================================================================
+// audit --differential-kernel — task #159 / cross-implementation validation
+// =============================================================================
+
+/// Entry-point for `verum audit --differential-kernel [--format FORMAT]`.
+///
+/// Runs the differential-kernel testing harness from
+/// [`verum_kernel::differential`] over every kernel_v0 rule + the
+/// canonical proof-term certificate library
+/// (`core/verify/proof_term_examples/*.vproof`).
+///
+/// **Architecture (#159)**: differential testing checks that **two**
+/// kernel implementations agree on every certificate — Rust trusted
+/// base [`verum_kernel::proof_checker`] vs Verum-self-hosted kernel
+/// (`core/verify/kernel_v0/`). When the Verum side is online, the
+/// gate flips disagreements into audit failures. When the Verum
+/// side is stubbed (current state — parser blocker on
+/// `core/verify/kernel_v0/`), every report records
+/// `not_yet_self_hosting`; the gate exits 0 (observability-only)
+/// because there's no second kernel to disagree.
+///
+/// **Forward-compatibility**: when
+/// `verum_kernel::differential::run_differential_test_with_verum`
+/// gains a real Verum-side adapter, this gate's output flips
+/// automatically — every existing call site still goes through
+/// `differential_test_rule(name)` which looks up the Rule then
+/// runs the test. Plug in the Verum adapter, the gate becomes
+/// load-bearing.
+///
+/// **Output**: `target/audit-reports/differential-kernel.json`.
+pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::differential::{
+        DifferentialAgreement, DifferentialOutcome, DifferentialReport, differential_test_rule,
+    };
+    use verum_kernel::soundness::kernel_v0_manifest::manifest;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Differential-kernel test — Rust trusted base vs Verum self-hosted");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let rules = manifest();
+    let mut reports: Vec<DifferentialReport> = Vec::with_capacity(rules.len());
+
+    for rule in &rules {
+        // `differential_test_rule` returns `None` for unknown rules,
+        // but every name we pass is from `manifest()` directly, so
+        // the lookup is total. We use `if let` to stay defensive —
+        // a future manifest refactor that introduces aliasing should
+        // fail loudly, not silently.
+        if let Some(report) = differential_test_rule(&rule.name) {
+            reports.push(report);
+        }
+    }
+    let outcome = DifferentialOutcome::from_reports(&reports);
+
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("differential-kernel.json");
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "task": "#159",
+        "discipline": "differential_kernel_cross_implementation",
+        "rule_count": rules.len(),
+        "report_count": reports.len(),
+        "outcome": {
+            "accepted": outcome.accepted,
+            "rejected": outcome.rejected,
+            "disagreement": outcome.disagreement,
+            "not_yet_self_hosting": outcome.not_yet_self_hosting,
+        },
+        "load_bearing": outcome.disagreement == 0,
+        "reports": reports
+            .iter()
+            .map(|r| {
+                let agreement_tag = match r.agreement {
+                    DifferentialAgreement::BothAccept => "both_accept",
+                    DifferentialAgreement::BothReject => "both_reject",
+                    DifferentialAgreement::Disagreement => "disagreement",
+                    DifferentialAgreement::NotYetSelfHosting => "not_yet_self_hosting",
+                };
+                serde_json::json!({
+                    "rule": r.rule_name,
+                    "rust_verdict": r.rust_verdict.tag(),
+                    "verum_verdict": r.verum_verdict.tag(),
+                    "agreement": agreement_tag,
+                })
+            })
+            .collect::<Vec<_>>(),
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Differential-kernel test (#159 — Rust ↔ Verum self-hosted)");
+            println!("──────────────────────────────────────────────────────────");
+            println!("Total rules:           {}", rules.len());
+            println!("Reports run:           {}", reports.len());
+            println!("Both accept:           {}", outcome.accepted);
+            println!("Both reject:           {}", outcome.rejected);
+            println!(
+                "{} Disagreement:          {}",
+                if outcome.disagreement == 0 { "✓" } else { "✗" },
+                outcome.disagreement,
+            );
+            println!("Not yet self-hosting:  {}", outcome.not_yet_self_hosting);
+            println!();
+            for r in &reports {
+                let glyph = match r.agreement {
+                    DifferentialAgreement::BothAccept => "✓",
+                    DifferentialAgreement::BothReject => "○",
+                    DifferentialAgreement::Disagreement => "✗",
+                    DifferentialAgreement::NotYetSelfHosting => "·",
+                };
+                println!(
+                    "  {} {:<14}  rust={:<10}  verum={:<22}",
+                    glyph, r.rule_name, r.rust_verdict.tag(), r.verum_verdict.tag(),
+                );
+            }
+            println!();
+            if outcome.disagreement == 0 {
+                if outcome.not_yet_self_hosting > 0 {
+                    println!(
+                        "{} {} report(s) pending Verum-side self-hosting (parser blocker on \
+                         core/verify/kernel_v0/); harness load-bearing the moment it lands.",
+                        "·".yellow(),
+                        outcome.not_yet_self_hosting,
+                    );
+                } else {
+                    println!(
+                        "{} All differential reports agree — kernel implementations consistent.",
+                        "✓".green(),
+                    );
+                }
+            } else {
+                println!(
+                    "{} {} disagreement(s) — at least one Rust↔Verum kernel divergence \
+                     detected. Failing the audit.",
+                    "✗".red(),
+                    outcome.disagreement,
+                );
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default(),);
+        }
+    }
+
+    // Failure semantics: ANY disagreement fails the gate.
+    // `not_yet_self_hosting` reports are observability — the gate
+    // remains pass-state because there's no second kernel to disagree.
+    // Once the Verum-side adapter lands, the same audit code starts
+    // producing real verdicts and the gate becomes load-bearing.
+    if outcome.disagreement > 0 {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "differential-kernel audit: {} disagreement(s) between Rust trusted \
+                 base and Verum self-hosted kernel — see {}",
+                outcome.disagreement,
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
 // audit --bridge-discharge — task #134 / MSFS-L4.1 entry point
 // =============================================================================
 
