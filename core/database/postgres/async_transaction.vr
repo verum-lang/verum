@@ -1,0 +1,225 @@
+// =============================================================================
+// core/database/postgres/async_transaction.vr — affine async transaction
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §5.5 (affine Tx), §6.1.8 (async).
+// =============================================================================
+//
+// Mirror of `core/database/postgres/transaction.vr` over the
+// async actor surface. Reuses `PgTxOpts.render_sql()` so isolation
+// / access-mode / deferrable rendering is single-source-of-truth
+// shared with sync.
+//
+// Same affine guarantee: `AsyncPgTransaction` cannot be cloned;
+// every begin must end in exactly one of `commit_tx_async` /
+// `rollback_tx_async`. Drop without commit/rollback leaves the
+// server-side tx open until the connection actor sees its next
+// statement — V1 layer in a Drop guard that auto-rollbacks.
+// =============================================================================
+
+module core.database.postgres.async_transaction;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.async_connection.{
+    AsyncPgConnection, PgRequest,
+    ReqBeginTx, ReqCommitTx, ReqRollbackTx,
+    ReqSavepoint, ReqReleaseSavepoint, ReqRollbackToSavepoint,
+};
+mount core.database.postgres.transaction.{
+    PgTxOpts, PgTxKind, PgAccessMode, PgDeferrable,
+    PgTkReadCommitted, PgTkRepeatableRead, PgTkSerializable,
+    PgAmReadWrite, PgAmReadOnly,
+    PgDfNone, PgDfDeferrable, PgDfNotDeferrable,
+    pg_tx_opts_default,
+};
+mount core.async.channel.oneshot;
+
+// =============================================================================
+// Affine handle
+// =============================================================================
+
+/// Affine — exactly one consumer; cannot be cloned. Drops without
+/// explicit commit/rollback leave the wire's tx state open;
+/// `commit_tx_async` / `rollback_tx_async` consume the handle so
+/// the lifecycle is type-checked.
+public type affine AsyncPgTransaction is {
+    opts: PgTxOpts,
+};
+
+implement AsyncPgTransaction {
+    public fn opts_view(&self) -> &PgTxOpts { &self.opts }
+}
+
+fn make_tx(opts: PgTxOpts) -> AsyncPgTransaction {
+    AsyncPgTransaction { opts: opts }
+}
+
+// =============================================================================
+// Begin
+// =============================================================================
+
+/// Begin a transaction with default opts (READ COMMITTED, READ WRITE).
+public async fn begin_tx_async(conn: &AsyncPgConnection)
+    -> Result<AsyncPgTransaction, DbError>
+{
+    begin_tx_with_async(conn, pg_tx_opts_default()).await
+}
+
+/// Begin a transaction with explicit opts.
+public async fn begin_tx_with_async(
+    conn: &AsyncPgConnection,
+    opts: PgTxOpts,
+) -> Result<AsyncPgTransaction, DbError> {
+    let mut sql: Text = "BEGIN".clone();
+    sql.push_str(&opts.render_sql());
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(ReqBeginTx {
+        begin_sql: sql,
+        reply: rs,
+    }).await;
+    match rr.await {
+        Ok(Ok(()))  => Ok(make_tx(opts)),
+        Ok(Err(e))  => Err(e),
+        Err(_)      => Err(actor_dropped("begin_tx")),
+    }
+}
+
+public async fn begin_tx_serializable_async(conn: &AsyncPgConnection)
+    -> Result<AsyncPgTransaction, DbError>
+{
+    begin_tx_with_async(
+        conn,
+        pg_tx_opts_default().with_isolation(PgTkSerializable),
+    ).await
+}
+
+public async fn begin_tx_read_only_async(conn: &AsyncPgConnection)
+    -> Result<AsyncPgTransaction, DbError>
+{
+    begin_tx_with_async(
+        conn,
+        pg_tx_opts_default().with_mode(PgAmReadOnly),
+    ).await
+}
+
+// =============================================================================
+// Commit / Rollback — consume the affine handle
+// =============================================================================
+
+public async fn commit_tx_async(
+    conn: &AsyncPgConnection,
+    tx: AsyncPgTransaction,
+) -> Result<(), DbError> {
+    let _ = tx;
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(ReqCommitTx { reply: rs }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("commit_tx")),
+    }
+}
+
+public async fn rollback_tx_async(
+    conn: &AsyncPgConnection,
+    tx: AsyncPgTransaction,
+) -> Result<(), DbError> {
+    let _ = tx;
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(ReqRollbackTx { reply: rs }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("rollback_tx")),
+    }
+}
+
+// =============================================================================
+// Savepoints
+// =============================================================================
+
+public async fn savepoint_async(
+    conn: &AsyncPgConnection,
+    name: &Text,
+) -> Result<(), DbError> {
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(ReqSavepoint {
+        name: name.clone(),
+        reply: rs,
+    }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("savepoint")),
+    }
+}
+
+public async fn release_savepoint_async(
+    conn: &AsyncPgConnection,
+    name: &Text,
+) -> Result<(), DbError> {
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(ReqReleaseSavepoint {
+        name: name.clone(),
+        reply: rs,
+    }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("release_savepoint")),
+    }
+}
+
+public async fn rollback_to_savepoint_async(
+    conn: &AsyncPgConnection,
+    name: &Text,
+) -> Result<(), DbError> {
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(ReqRollbackToSavepoint {
+        name: name.clone(),
+        reply: rs,
+    }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("rollback_to_savepoint")),
+    }
+}
+
+// =============================================================================
+// with_transaction — RAII-style scope helper
+// =============================================================================
+
+/// Run `body` inside a transaction; commits on Ok, rolls back on
+/// Err. Mirrors `core.database.postgres.transaction.with_transaction`.
+public async fn with_transaction_async<R>(
+    conn: &AsyncPgConnection,
+    opts: PgTxOpts,
+    body: fn(&AsyncPgConnection) -> R,
+) -> Result<R, DbError>
+where R: Future<Output = Result<R::Output, DbError>>
+{
+    let tx = begin_tx_with_async(conn, opts).await?;
+    match body(conn).await {
+        Ok(v) => {
+            commit_tx_async(conn, tx).await?;
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = rollback_tx_async(conn, tx).await;
+            Err(e)
+        }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "ACTOR_CLOSED".clone(),
+        message: f"async PG actor unavailable during {what}",
+        retryable: false,
+    })
+}
