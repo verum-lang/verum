@@ -9252,12 +9252,21 @@ fn lower_call<'ctx>(
                 let ptr_val = ctx.get_register(args.start.0)?;
                 let size_val = ctx.get_register(args.start.0 + 1)?;
                 let void_type = ctx.types().void_type();
+                let ptr_ty = ctx.types().ptr_type();
+                // Canonical signature: verum_dealloc(ptr, size: i64) -> void.
+                // Matches platform_ir.rs::emit_allocator and the size-class
+                // freelist contract.
                 let dealloc_fn = module.get_function("verum_dealloc").unwrap_or_else(|| {
-                    let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+                    let fn_type = void_type.fn_type(&[ptr_ty.into(), i64_type.into()], false);
                     module.add_function("verum_dealloc", fn_type, None)
                 });
+                // ptr_val arrives as i64 in the register file; reify to ptr type.
+                let ptr_arg = ctx
+                    .builder()
+                    .build_int_to_ptr(ptr_val.into_int_value(), ptr_ty, "dealloc_ptr")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
                 ctx.builder()
-                    .build_call(dealloc_fn, &[ptr_val.into(), size_val.into()], "")
+                    .build_call(dealloc_fn, &[ptr_arg.into(), size_val.into()], "")
                     .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
@@ -19083,7 +19092,8 @@ fn lower_mem_extended<'ctx>(
     operands: &[u8],
 ) -> Result<()> {
     // Sub-op numbering MUST match VBC codegen (expressions.rs) and interpreter:
-    // 0x00=Alloc, 0x01=AllocZeroed, 0x02=Dealloc, 0x03=Realloc, 0x04=Swap, 0x05=Replace
+    // 0x00=Alloc, 0x01=AllocZeroed, 0x02=Dealloc, 0x03=Realloc, 0x04=Swap,
+    // 0x05=Replace, 0x06=NewByteList (red-team §4 packed-byte list allocator)
     match sub_op {
         0x00 => {
             // Alloc: operands = [dst, size, align]
@@ -19272,6 +19282,49 @@ fn lower_mem_extended<'ctx>(
                 .build_store(ptr_val, new_val)
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             ctx.set_register(dst, old_val);
+            Ok(())
+        }
+        0x06 => {
+            // NewByteList: operands = [dst, cap_reg]
+            //
+            // Allocates a `List<Byte>` with packed-byte backing — 1 byte
+            // per element instead of 8 bytes (NaN-boxed Value).  Closes
+            // red-team §4 runtime memory amplification.  Calls the
+            // runtime helper `verum_alloc_byte_list_packed(cap: i64)
+            // -> *mut u8` which mirrors interpreter's
+            // `alloc_byte_list_packed`: builds a 3-Value header tagged
+            // `TypeId::BYTE_LIST` + a `[u8; cap]` packed backing.
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = operands[0] as u16;
+            let cap_raw = ctx.get_register(operands[1] as u16)?;
+            let cap_i64 = as_i64(ctx, cap_raw, "byte_list_cap")?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
+            let alloc_fn = module
+                .get_function("verum_alloc_byte_list_packed")
+                .unwrap_or_else(|| {
+                    module.add_function(
+                        "verum_alloc_byte_list_packed",
+                        fn_type,
+                        None,
+                    )
+                });
+            let result = ctx
+                .builder()
+                .build_call(alloc_fn, &[cap_i64.into()], "byte_list_packed")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| {
+                    LlvmLoweringError::internal(
+                        "NewByteList: expected return value",
+                    )
+                })?;
+            ctx.set_register(dst, result);
             Ok(())
         }
         _ => {

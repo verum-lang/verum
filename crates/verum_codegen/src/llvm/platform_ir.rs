@@ -511,7 +511,13 @@ impl<'ctx> PlatformIR<'ctx> {
     /// Emit the full allocator as LLVM IR — no C code needed.
     ///
 
-    /// Algorithm: Thread-safe bump allocator with mmap-backed arenas.
+    /// Algorithm: size-class freelist allocator with mmap-backed arena
+    /// fallback. 9 power-of-two size classes (16, 32, 64, 128, 256,
+    /// 512, 1024, 2048, 4096). Each class has a Treiber-stack
+    /// freelist; deallocations push to the matching class, allocations
+    /// pop. On freelist miss, the request is bump-allocated from a
+    /// 2 MB mmap arena. Allocations larger than 4 KB skip freelist
+    /// entirely and go straight to the bump path.
     ///
 
     /// Global state (LLVM global variables):
@@ -519,15 +525,26 @@ impl<'ctx> PlatformIR<'ctx> {
     ///  @__verum_arena_ptr : ptr — next free byte in arena
     ///  @__verum_arena_end : ptr — end of current arena block
     ///  @__verum_alloc_lock : i32 — spinlock (0=free, 1=locked)
+    ///  @__verum_freelist_heads : [9 x ptr] — per-class freelist heads
     ///
 
-    /// verum_alloc(size):
-    ///  1. Align size to 16 bytes
-    ///  2. Acquire spinlock (cmpxchg loop)
-    ///  3. Try bump: new_ptr = arena_ptr + size
-    ///  4. If new_ptr <= arena_end: store new_ptr, release lock, return old arena_ptr
-    ///  5. Else: call verum_os_alloc(2MB), update arena, retry
-    ///  6. Release spinlock
+    /// Size class formula: class = max(0, 64 - ctlz(size-1) - 4)
+    ///   size <= 16  → class 0 (alloc 16)
+    ///   size 17–32  → class 1 (alloc 32)
+    ///   ...
+    ///   size 2049–4096 → class 8 (alloc 4096)
+    ///   size > 4096 → bump-only, no freelist
+    ///
+
+    /// All paths preserve the "verum_alloc returns zeroed memory"
+    /// invariant — bump path memsets fresh bytes; freelist hits
+    /// memset recycled blocks.
+    ///
+
+    /// Concurrency: the existing `__verum_alloc_lock` spinlock
+    /// serialises bump-arena AND freelist push/pop. Per-class
+    /// lock-free Treiber-stack would scale better but introduces
+    /// ABA hazards; for now correctness over throughput.
     fn emit_allocator(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -535,6 +552,10 @@ impl<'ctx> PlatformIR<'ctx> {
         let i1_type = ctx.bool_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
         let void_type = ctx.void_type();
+        let i8_type = ctx.i8_type();
+
+        const NUM_SIZE_CLASSES: u32 = 9; // 16, 32, 64, ..., 4096
+        const LARGE_THRESHOLD: u64 = 4096;
 
         // ---- Global variables ----
         let arena_base = module.add_global(ptr_type, None, "__verum_arena_base");
@@ -553,12 +574,23 @@ impl<'ctx> PlatformIR<'ctx> {
         alloc_lock.set_initializer(&i32_type.const_zero());
         alloc_lock.set_linkage(verum_llvm::module::Linkage::Internal);
 
+        let freelist_array_type = ptr_type.array_type(NUM_SIZE_CLASSES);
+        let freelist_heads = module.add_global(freelist_array_type, None, "__verum_freelist_heads");
+        freelist_heads.set_initializer(&freelist_array_type.const_zero());
+        freelist_heads.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        // ---- ctlz intrinsic declaration ----
+        let ctlz_fn = module.get_function("llvm.ctlz.i64").unwrap_or_else(|| {
+            let fn_type = i64_type.fn_type(&[i64_type.into(), i1_type.into()], false);
+            module.add_function("llvm.ctlz.i64", fn_type, None)
+        });
+
         // ---- verum_alloc(size: i64) -> ptr ----
         let alloc_fn_type = ptr_type.fn_type(&[i64_type.into()], false);
         let alloc_fn = if let Some(f) = module.get_function("verum_alloc") {
             if f.count_basic_blocks() > 0 {
                 return Ok(());
-            } // Already has body
+            }
             f
         } else {
             module.add_function("verum_alloc", alloc_fn_type, None)
@@ -566,8 +598,12 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(alloc_fn, "entry");
+        let large_path = ctx.append_basic_block(alloc_fn, "large_path");
+        let small_path = ctx.append_basic_block(alloc_fn, "small_path");
         let acquire_lock = ctx.append_basic_block(alloc_fn, "acquire_lock");
         let lock_acquired = ctx.append_basic_block(alloc_fn, "lock_acquired");
+        let try_freelist = ctx.append_basic_block(alloc_fn, "try_freelist");
+        let freelist_hit = ctx.append_basic_block(alloc_fn, "freelist_hit");
         let try_bump = ctx.append_basic_block(alloc_fn, "try_bump");
         let bump_ok = ctx.append_basic_block(alloc_fn, "bump_ok");
         let need_new_arena = ctx.append_basic_block(alloc_fn, "need_new_arena");
@@ -578,34 +614,93 @@ impl<'ctx> PlatformIR<'ctx> {
             .get_first_param()
             .or_internal("missing first param")?
             .into_int_value();
-        let arena_size_const = i64_type.const_int(2 * 1024 * 1024, false); // 2MB arena
+        let arena_size_const = i64_type.const_int(2 * 1024 * 1024, false);
 
-        // ---- entry: align size to 16 ----
+        // ---- entry: classify large vs small ----
         builder.position_at_end(entry);
-        // aligned = (size + 15) & ~15
+        let large_threshold = i64_type.const_int(LARGE_THRESHOLD, false);
+        let is_large = builder
+            .build_int_compare(IntPredicate::UGT, size_param, large_threshold, "is_large")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_large, large_path, small_path)
+            .or_llvm_err()?;
+
+        // ---- large_path: align original size to 16, no freelist ----
+        builder.position_at_end(large_path);
         let fifteen = i64_type.const_int(15, false);
         let neg_sixteen = i64_type.const_int(!15u64, false);
-        let size_plus = builder
-            .build_int_add(size_param, fifteen, "size_plus")
+        let large_plus = builder
+            .build_int_add(size_param, fifteen, "large_plus")
             .or_llvm_err()?;
-        let aligned_size = builder
-            .build_and(size_plus, neg_sixteen, "aligned")
+        let large_aligned = builder
+            .build_and(large_plus, neg_sixteen, "large_aligned")
             .or_llvm_err()?;
-        // Ensure minimum 16 bytes
-        let min_size = i64_type.const_int(16, false);
-        let is_small = builder
-            .build_int_compare(IntPredicate::ULT, aligned_size, min_size, "is_small")
-            .or_llvm_err()?;
-        let final_size = builder
-            .build_select(is_small, min_size, aligned_size, "final_size")
-            .or_llvm_err()?
-            .into_int_value();
         builder
             .build_unconditional_branch(acquire_lock)
             .or_llvm_err()?;
 
-        // ---- acquire_lock: CAS spinlock ----
+        // ---- small_path: compute size class ----
+        builder.position_at_end(small_path);
+        // size_minus_one = size - 1; ctlz(0) = 64 (is_zero_undef=false)
+        let one_i64 = i64_type.const_int(1, false);
+        let size_minus_one = builder
+            .build_int_sub(size_param, one_i64, "size_minus_one")
+            .or_llvm_err()?;
+        let ctlz_call = builder
+            .build_call(
+                ctlz_fn,
+                &[size_minus_one.into(), i1_type.const_zero().into()],
+                "ctlz",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
+        // shift = 64 - ctlz
+        let shift = builder
+            .build_int_sub(i64_type.const_int(64, false), ctlz_call, "shift")
+            .or_llvm_err()?;
+        // class_signed = shift - 4
+        let four = i64_type.const_int(4, false);
+        let class_signed = builder
+            .build_int_sub(shift, four, "class_signed")
+            .or_llvm_err()?;
+        // class = max(0, class_signed) — for size <= 16, class_signed underflows
+        let is_neg = builder
+            .build_int_compare(IntPredicate::SLT, class_signed, i64_type.const_zero(), "is_neg")
+            .or_llvm_err()?;
+        let class = builder
+            .build_select(is_neg, i64_type.const_zero(), class_signed, "class")
+            .or_llvm_err()?
+            .into_int_value();
+        // alloc_size = 16 << class
+        let small_alloc_size = builder
+            .build_left_shift(i64_type.const_int(16, false), class, "small_alloc_size")
+            .or_llvm_err()?;
+        builder
+            .build_unconditional_branch(acquire_lock)
+            .or_llvm_err()?;
+
+        // ---- acquire_lock: PHI(large/small) for size + class info, then CAS spinlock ----
         builder.position_at_end(acquire_lock);
+        // PHI: final_size from each path
+        let final_size_phi = builder.build_phi(i64_type, "final_size").or_llvm_err()?;
+        final_size_phi.add_incoming(&[(&large_aligned, large_path), (&small_alloc_size, small_path)]);
+        let final_size = final_size_phi.as_basic_value().into_int_value();
+        // PHI: is_large_flag (1 for large, 0 for small) — used to skip freelist
+        let is_large_phi = builder.build_phi(i64_type, "is_large_flag").or_llvm_err()?;
+        is_large_phi.add_incoming(&[
+            (&i64_type.const_int(1, false), large_path),
+            (&i64_type.const_zero(), small_path),
+        ]);
+        let is_large_flag = is_large_phi.as_basic_value().into_int_value();
+        // PHI: class index (0 for large, computed for small) — only meaningful when is_large=0
+        let class_phi = builder.build_phi(i64_type, "class_idx").or_llvm_err()?;
+        class_phi.add_incoming(&[(&i64_type.const_zero(), large_path), (&class, small_path)]);
+        let class_idx = class_phi.as_basic_value().into_int_value();
+
         let lock_ptr = alloc_lock.as_pointer_value();
         let zero_i32 = i32_type.const_zero();
         let one_i32 = i32_type.const_int(1, false);
@@ -626,11 +721,57 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(cas_success, lock_acquired, acquire_lock)
             .or_llvm_err()?;
 
-        // ---- lock_acquired: load arena state ----
+        // ---- lock_acquired: branch on is_large ----
         builder.position_at_end(lock_acquired);
-        builder.build_unconditional_branch(try_bump).or_llvm_err()?;
+        let skip_freelist = builder
+            .build_int_compare(IntPredicate::NE, is_large_flag, i64_type.const_zero(), "skip_fl")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(skip_freelist, try_bump, try_freelist)
+            .or_llvm_err()?;
 
-        // ---- try_bump: check if arena has room ----
+        // ---- try_freelist: load head; if non-null, pop and return ----
+        builder.position_at_end(try_freelist);
+        // head_slot = &__verum_freelist_heads[class_idx]
+        // SAFETY: GEP into freelist array; class_idx is bounded to [0, NUM_SIZE_CLASSES) by ctlz formula clamped at small path
+        let head_slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    freelist_array_type,
+                    freelist_heads.as_pointer_value(),
+                    &[i64_type.const_zero(), class_idx],
+                    "head_slot",
+                )
+                .or_llvm_err()?
+        };
+        let head_node = builder
+            .build_load(ptr_type, head_slot, "head_node")
+            .or_llvm_err()?
+            .into_pointer_value();
+        let head_i64 = builder
+            .build_ptr_to_int(head_node, i64_type, "head_i64")
+            .or_llvm_err()?;
+        let head_is_null = builder
+            .build_int_compare(IntPredicate::EQ, head_i64, i64_type.const_zero(), "head_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(head_is_null, try_bump, freelist_hit)
+            .or_llvm_err()?;
+
+        // ---- freelist_hit: head_slot ← *head_node; release lock; memset; return head_node ----
+        builder.position_at_end(freelist_hit);
+        let next_node = builder
+            .build_load(ptr_type, head_node, "next_node")
+            .or_llvm_err()?
+            .into_pointer_value();
+        builder.build_store(head_slot, next_node).or_llvm_err()?;
+        builder.build_store(lock_ptr, zero_i32).or_llvm_err()?;
+        builder
+            .build_memset(head_node, 1, i8_type.const_zero(), final_size)
+            .or_llvm_err()?;
+        builder.build_return(Some(&head_node)).or_llvm_err()?;
+
+        // ---- try_bump: bump-arena fast path ----
         builder.position_at_end(try_bump);
         let cur_ptr = builder
             .build_load(ptr_type, arena_ptr_global.as_pointer_value(), "cur_ptr")
@@ -641,16 +782,13 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?
             .into_pointer_value();
 
-        // new_ptr = cur_ptr + final_size (via GEP on i8)
-        let i8_type = ctx.i8_type();
-        // SAFETY: in-bounds GEP to advance the arena bump pointer by final_size bytes; cur_ptr is within the arena block and new_ptr is bounds-checked against cur_end below
+        // SAFETY: in-bounds GEP to advance bump pointer by final_size; cur_ptr is within arena, new_ptr bounds-checked below
         let new_ptr = unsafe {
             builder
                 .build_in_bounds_gep(i8_type, cur_ptr, &[final_size], "new_ptr")
                 .or_llvm_err()?
         };
 
-        // Check cur_ptr != null AND new_ptr <= cur_end
         let ptr_not_null = builder
             .build_int_compare(
                 IntPredicate::NE,
@@ -677,14 +815,12 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(can_bump, bump_ok, need_new_arena)
             .or_llvm_err()?;
 
-        // ---- bump_ok: update arena_ptr, release lock, return ----
+        // ---- bump_ok: update arena_ptr, release lock, memset, return ----
         builder.position_at_end(bump_ok);
         builder
             .build_store(arena_ptr_global.as_pointer_value(), new_ptr)
             .or_llvm_err()?;
-        // Release lock
         builder.build_store(lock_ptr, zero_i32).or_llvm_err()?;
-        // memset to zero
         builder
             .build_memset(cur_ptr, 1, i8_type.const_zero(), final_size)
             .or_llvm_err()?;
@@ -728,7 +864,7 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(arena_ptr_global.as_pointer_value(), new_block)
             .or_llvm_err()?;
-        // SAFETY: GEP to compute the end address of a newly allocated arena block; offset equals the arena size, within the mmap'd region
+        // SAFETY: GEP to compute end of newly mmap'd arena block; offset = arena size
         let new_end = unsafe {
             builder
                 .build_in_bounds_gep(i8_type, new_block, &[arena_size_const], "new_end")
@@ -746,7 +882,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_return(Some(&ptr_type.const_null()))
             .or_llvm_err()?;
 
-        // ---- verum_alloc_zeroed: calls verum_alloc (already zeroed by memset) ----
+        // ---- verum_alloc_zeroed: thin wrapper (alloc already zeroes) ----
         let alloc_zeroed_fn_type = ptr_type.fn_type(&[i64_type.into()], false);
         let alloc_zeroed_fn = if let Some(f) = module.get_function("verum_alloc_zeroed") {
             if f.count_basic_blocks() > 0 {
@@ -769,7 +905,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("expected basic value")?;
         builder.build_return(Some(&az_result)).or_llvm_err()?;
 
-        // ---- verum_dealloc: no-op for bump allocator (arena freed at exit) ----
+        // ---- verum_dealloc(ptr, size): push to size-class freelist ----
         let dealloc_fn_type = void_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
         let dealloc_fn = if let Some(f) = module.get_function("verum_dealloc") {
             if f.count_basic_blocks() > 0 {
@@ -779,9 +915,133 @@ impl<'ctx> PlatformIR<'ctx> {
         } else {
             module.add_function("verum_dealloc", dealloc_fn_type, None)
         };
+
         let d_entry = ctx.append_basic_block(dealloc_fn, "entry");
+        let d_large = ctx.append_basic_block(dealloc_fn, "d_large");
+        let d_small = ctx.append_basic_block(dealloc_fn, "d_small");
+        let d_acquire = ctx.append_basic_block(dealloc_fn, "d_acquire");
+        let d_locked = ctx.append_basic_block(dealloc_fn, "d_locked");
+        let d_done = ctx.append_basic_block(dealloc_fn, "d_done");
+
+        let dealloc_ptr_param = dealloc_fn
+            .get_first_param()
+            .or_internal("dealloc missing param 0")?
+            .into_pointer_value();
+        let dealloc_size_param = dealloc_fn
+            .get_nth_param(1)
+            .or_internal("dealloc missing param 1")?
+            .into_int_value();
+
+        // ---- d_entry: null-ptr guard + size classification ----
         builder.position_at_end(d_entry);
+        let dptr_i64 = builder
+            .build_ptr_to_int(dealloc_ptr_param, i64_type, "dptr_i64")
+            .or_llvm_err()?;
+        let dptr_null = builder
+            .build_int_compare(IntPredicate::EQ, dptr_i64, i64_type.const_zero(), "dptr_null")
+            .or_llvm_err()?;
+        // null ptr → return immediately
+        let d_check_size = ctx.append_basic_block(dealloc_fn, "d_check_size");
+        builder
+            .build_conditional_branch(dptr_null, d_done, d_check_size)
+            .or_llvm_err()?;
+
+        builder.position_at_end(d_check_size);
+        let d_is_large = builder
+            .build_int_compare(IntPredicate::UGT, dealloc_size_param, large_threshold, "d_large_q")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(d_is_large, d_large, d_small)
+            .or_llvm_err()?;
+
+        // ---- d_large: leak (TODO: track per-large-alloc mmap and munmap) ----
+        builder.position_at_end(d_large);
+        builder.build_unconditional_branch(d_done).or_llvm_err()?;
+
+        // ---- d_small: compute class index ----
+        builder.position_at_end(d_small);
+        let d_size_minus_one = builder
+            .build_int_sub(dealloc_size_param, one_i64, "d_size_m1")
+            .or_llvm_err()?;
+        let d_ctlz = builder
+            .build_call(
+                ctlz_fn,
+                &[d_size_minus_one.into(), i1_type.const_zero().into()],
+                "d_ctlz",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
+        let d_shift = builder
+            .build_int_sub(i64_type.const_int(64, false), d_ctlz, "d_shift")
+            .or_llvm_err()?;
+        let d_class_signed = builder
+            .build_int_sub(d_shift, four, "d_class_signed")
+            .or_llvm_err()?;
+        let d_is_neg = builder
+            .build_int_compare(IntPredicate::SLT, d_class_signed, i64_type.const_zero(), "d_neg")
+            .or_llvm_err()?;
+        let d_class = builder
+            .build_select(d_is_neg, i64_type.const_zero(), d_class_signed, "d_class")
+            .or_llvm_err()?
+            .into_int_value();
+        builder.build_unconditional_branch(d_acquire).or_llvm_err()?;
+
+        // ---- d_acquire: CAS spinlock ----
+        builder.position_at_end(d_acquire);
+        let d_cas = builder
+            .build_cmpxchg(
+                lock_ptr,
+                zero_i32,
+                one_i32,
+                verum_llvm::AtomicOrdering::Acquire,
+                verum_llvm::AtomicOrdering::Monotonic,
+            )
+            .or_llvm_err()?;
+        let d_cas_ok = builder
+            .build_extract_value(d_cas, 1, "d_cas_ok")
+            .or_llvm_err()?
+            .into_int_value();
+        builder
+            .build_conditional_branch(d_cas_ok, d_locked, d_acquire)
+            .or_llvm_err()?;
+
+        // ---- d_locked: push ptr onto freelist[class] ----
+        builder.position_at_end(d_locked);
+        // d_head_slot = &__verum_freelist_heads[d_class]
+        // SAFETY: GEP into freelist array; d_class clamped to [0, NUM_SIZE_CLASSES)
+        let d_head_slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    freelist_array_type,
+                    freelist_heads.as_pointer_value(),
+                    &[i64_type.const_zero(), d_class],
+                    "d_head_slot",
+                )
+                .or_llvm_err()?
+        };
+        let old_head = builder
+            .build_load(ptr_type, d_head_slot, "old_head")
+            .or_llvm_err()?
+            .into_pointer_value();
+        // *ptr = old_head — store the previous head into the freed block's first 8 bytes
+        builder
+            .build_store(dealloc_ptr_param, old_head)
+            .or_llvm_err()?;
+        // freelist_heads[class] = ptr
+        builder
+            .build_store(d_head_slot, dealloc_ptr_param)
+            .or_llvm_err()?;
+        // Release lock
+        builder.build_store(lock_ptr, zero_i32).or_llvm_err()?;
+        builder.build_unconditional_branch(d_done).or_llvm_err()?;
+
+        // ---- d_done: return ----
+        builder.position_at_end(d_done);
         builder.build_return(None).or_llvm_err()?;
+
         Ok(())
     }
 

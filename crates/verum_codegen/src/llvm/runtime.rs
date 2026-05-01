@@ -16292,22 +16292,21 @@ impl<'ctx> RuntimeLowering<'ctx> {
             )
             .or_llvm_err()?;
 
-        // verum_dealloc(header)
+        // verum_dealloc(header, total_size)
         //
         // **Architectural rule (CLAUDE.md no-libc invariant)**: emit IR
         // routes ALL heap deallocations through `verum_dealloc` (the
         // CBGR-aware companion to `verum_alloc` emitted in
-        // `platform_ir.rs::emit_allocator`).  The legacy comment
-        // claiming "verum_dealloc is static in verum_platform.c and
-        // cannot be called from LLVM IR" is obsolete — `emit_allocator`
-        // now emits `verum_dealloc` directly with external linkage,
-        // callable from any other site.  Pairs with the `verum_alloc`
-        // call in this same emit_cbgr_allocate function.
+        // `platform_ir.rs::emit_allocator`).  Signature is
+        // `(ptr, size) -> void` — the size lets the size-class
+        // freelist allocator return the block to the matching pool.
         let free_fn = self.get_or_declare_fn(
-            module, "verum_dealloc", void_type.fn_type(&[ptr_type.into()], false),
+            module,
+            "verum_dealloc",
+            void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         );
         builder
-            .build_call(free_fn, &[header.into()], "")
+            .build_call(free_fn, &[header.into(), total.into()], "")
             .or_llvm_err()?;
         builder.build_return(None).or_llvm_err()?;
         Ok(())
