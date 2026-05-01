@@ -11762,15 +11762,40 @@ if !skip_compiled_lookup && let Some(func_desc) = vbc_mod.get_function(FunctionI
                             | "Default" | "Clone" | "Copy");
                         if is_protocol_fn && receiver_type_name.is_none() {
                             false
+                        } else if let Some(t) = receiver_type_name.as_deref() {
+                            // Receiver type IS tracked: strict equality
+                            // (cross-module: also accept the trailing
+                            // segment of a fully-qualified module path).
+                            //
+                            // Pre-fix the catch-all `map_or(true, ...)`
+                            // returned true when the receiver type was
+                            // None, allowing wrong-type matches under
+                            // protocol-method dispatch (#27).
+                            vbc_resolved
+                                || t == func_type_prefix
+                                || t.rsplit('.').next().map_or(false, |s| s == func_type_prefix)
+                                || func_type_prefix.rsplit('.').next().map_or(false, |s| s == t)
+                        } else if vbc_resolved {
+                            true
                         } else {
-                            // Cross-module method dispatch: match type prefix with
-                            // suffix-aware comparison for module-qualified names.
-                            // E.g., receiver "module.Point" matches prefix "Point"
-                            vbc_resolved || receiver_type_name.as_deref().map_or(true, |t| {
-                                t == func_type_prefix
-                                    || t.rsplit('.').next().map_or(false, |s| s == func_type_prefix)
-                                    || func_type_prefix.rsplit('.').next().map_or(false, |s| s == t)
-                            })
+                            // Receiver type unknown AND VBC didn't pre-
+                            // resolve.  Allow ONLY when no other
+                            // type-prefixed function shares the same
+                            // suffix — i.e., dispatch is unambiguous.
+                            // Multiple candidates → reject and fall
+                            // through to Strategy 2 / 3 / runtime.
+                            let suffix_local = format!(".{}", method_name_str);
+                            let collisions = if let Some(idx) = ctx.func_name_index() {
+                                idx.find_by_suffix(&suffix_local).len()
+                            } else {
+                                let mut c = 0;
+                                for fd in &vbc_mod.functions {
+                                    let n = vbc_mod.get_string(fd.name).unwrap_or("");
+                                    if n.ends_with(&suffix_local) { c += 1; if c > 1 { break; } }
+                                }
+                                c
+                            };
+                            collisions <= 1
                         }
                     }
                 }
@@ -11888,8 +11913,63 @@ if !skip_compiled_lookup && resolved_func_name.is_none() && !method_name_str.is_
                         || ctx.is_binaryheap_register(receiver.0)
                     {
                         false
+                    } else if let Some(t) = receiver_type_name.as_deref() {
+                        // Receiver type IS tracked: only allow exact match
+                        // against the function's type prefix.  Pre-fix the
+                        // catch-all `map_or(true, ...)` returned true when
+                        // `receiver_type_name` was None, which silently
+                        // allowed `Text.to_socket_addrs` to match a
+                        // `SocketAddr` receiver — see #27.  With the
+                        // explicit Some(t) branch the receiver type drives
+                        // a strict equality check.
+                        vbc_resolved || t == func_type_prefix
+                    } else if vbc_resolved {
+                        // VBC's static resolution already picked this
+                        // function — trust it (covers the common case
+                        // where the codegen emitted a fully-qualified
+                        // call name and we just need to find the LLVM
+                        // function with that exact name).
+                        true
+                    } else if has_no_tracking {
+                        // Receiver type fully unknown AND VBC didn't
+                        // pre-resolve.  Pre-fix this allowed any
+                        // suffix match through, which is wrong when
+                        // multiple types implement the same method
+                        // (e.g., the `Text.to_socket_addrs` /
+                        // `SocketAddr.to_socket_addrs` /
+                        // `(&Text,Int).to_socket_addrs` triplet for
+                        // the `ToSocketAddrs` protocol).  See #27.
+                        //
+                        // Allow ONLY when the function is unique for
+                        // its bare method name in the VBC module —
+                        // i.e., no other type-prefixed function has
+                        // the same suffix.  When multiple candidates
+                        // exist, reject and fall through to Strategy
+                        // 3 / runtime dispatch (which can read the
+                        // receiver's heap-header type_id at runtime).
+                        let has_no_collisions = {
+                            let mut count = 0_usize;
+                            if let Some(idx) = ctx.func_name_index() {
+                                count = idx.find_by_suffix(&suffix).len();
+                            } else {
+                                for fd in &vbc_mod.functions {
+                                    let fname = vbc_mod.get_string(fd.name).unwrap_or("");
+                                    if fname.ends_with(&suffix) {
+                                        count += 1;
+                                        if count > 1 { break; }
+                                    }
+                                }
+                            }
+                            count <= 1
+                        };
+                        has_no_collisions
                     } else {
-                        vbc_resolved || receiver_type_name.as_deref().map_or(true, |t| t == func_type_prefix)
+                        // Receiver tracking exists but doesn't match
+                        // any of the well-known cases above (e.g., a
+                        // Channel-marked receiver hitting a
+                        // SomeUserType.method candidate).  Reject —
+                        // the caller has type info that doesn't match.
+                        false
                     }
                 }
             };
