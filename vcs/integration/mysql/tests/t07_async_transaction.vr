@@ -1,0 +1,113 @@
+// =============================================================================
+// t07_async_transaction.vr — async typed database + affine transaction
+// =============================================================================
+// Spec: internal/specs/database.md §5.4 (capability lattice),
+//       §5.5 (affine Tx), §6.3.6 (async surface).
+// =============================================================================
+//
+// MySQL counterpart of vcs/integration/postgres/tests/t13_async_transaction.vr.
+// Same shape — proves the actor pattern generalises to the second
+// adapter and the typed Database<P, C> works structurally for any P.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.mysql.{
+    MysqlConfig, MtmDisable,
+    AsyncMysqlPool, AsyncMysqlPoolConfig,
+    AsyncMysqlTxScope,
+    async_mysql_database_from_pool,
+};
+mount core.async.executor.block_on;
+
+fn pool_config() -> AsyncMysqlPoolConfig {
+    AsyncMysqlPoolConfig.default().with_size(2, 4).with_mailbox_capacity(8)
+}
+
+fn main() {
+    block_on(async move {
+        let cfg = MysqlConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            character_set: 255,
+            tls_mode: MtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let pool = expect_ok(
+            AsyncMysqlPool.launch(cfg, pool_config()).await,
+            &"AsyncMysqlPool.launch failed".clone(),
+        );
+
+        let db = async_mysql_database_from_pool(pool);
+
+        let r1 = expect_ok(
+            db.query_simple(&"SELECT 1".clone()).await,
+            &"db.query_simple SELECT 1 failed".clone(),
+        );
+        expect_eq_int(r1.rows.len() as Int, 1, &"SELECT 1 row count".clone());
+
+        let db_ro = db.clone().into_readonly();
+        let r2 = expect_ok(
+            db_ro.query_simple(&"SELECT 2".clone()).await,
+            &"db_ro.query_simple SELECT 2 failed".clone(),
+        );
+        expect_eq_int(r2.rows.len() as Int, 1, &"SELECT 2 row count".clone());
+
+        let _ = db.execute_simple(&"DELETE FROM accounts".clone()).await;
+
+        // Rollback path.
+        let mut tx1 = expect_ok(
+            db.begin().await,
+            &"db.begin (rollback case) failed".clone(),
+        );
+        expect_ok(
+            tx1.conn_ref().execute(&
+                "INSERT INTO accounts (email, age) VALUES ('atx-rb@x.co', 25)".clone()
+            ).await,
+            &"INSERT inside tx1 failed".clone(),
+        );
+        expect_ok(
+            tx1.rollback().await,
+            &"AsyncMysqlTxScope.rollback failed".clone(),
+        );
+        let after_rb = expect_ok(
+            db.query_simple(&
+                "SELECT count(*) FROM accounts WHERE email = 'atx-rb@x.co'".clone()
+            ).await,
+            &"count after rollback failed".clone(),
+        );
+        expect_eq_int(after_rb.rows.len() as Int, 1, &"count rows".clone());
+
+        // Commit path.
+        let mut tx2 = expect_ok(
+            db.begin().await,
+            &"db.begin (commit case) failed".clone(),
+        );
+        expect_ok(
+            tx2.conn_ref().execute(&
+                "INSERT INTO accounts (email, age) VALUES ('atx-cm@x.co', 30)".clone()
+            ).await,
+            &"INSERT inside tx2 failed".clone(),
+        );
+        expect_ok(
+            tx2.commit().await,
+            &"AsyncMysqlTxScope.commit failed".clone(),
+        );
+        let after_cm = expect_ok(
+            db.query_simple(&
+                "SELECT email FROM accounts WHERE email = 'atx-cm@x.co'".clone()
+            ).await,
+            &"post-commit SELECT failed".clone(),
+        );
+        expect_eq_int(after_cm.rows.len() as Int, 1, &"row visible after commit".clone());
+
+        let _ = db.execute_simple(&"DELETE FROM accounts".clone()).await;
+
+        pass(&"t07_async_transaction".clone());
+    });
+}

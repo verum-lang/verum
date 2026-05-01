@@ -33,6 +33,10 @@ public module pool;
 public module typed_database;
 public module introspect;
 public module transaction;
+public module async_connection;
+public module async_pool;
+public module async_transaction;
+public module async_typed_database;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -77,4 +81,29 @@ public mount .transaction.{
     commit_tx, rollback_tx,
     savepoint, release_savepoint, rollback_to_savepoint,
     with_transaction, with_transaction_serializable,
+};
+public mount .async_connection.{
+    AsyncMysqlConnection,
+    connect as async_mysql_connect,
+};
+public mount .async_pool.{
+    AsyncMysqlPool, AsyncMysqlPoolConfig, AsyncMysqlPoolGuard,
+};
+public mount .async_transaction.{
+    AsyncMysqlTransaction,
+    begin_tx_async as mysql_begin_tx_async,
+    begin_tx_with_async as mysql_begin_tx_with_async,
+    begin_tx_serializable_async as mysql_begin_tx_serializable_async,
+    begin_tx_read_only_async as mysql_begin_tx_read_only_async,
+    commit_tx_async as mysql_commit_tx_async,
+    rollback_tx_async as mysql_rollback_tx_async,
+    savepoint_async as mysql_savepoint_async,
+    release_savepoint_async as mysql_release_savepoint_async,
+    rollback_to_savepoint_async as mysql_rollback_to_savepoint_async,
+};
+public mount .async_typed_database.{
+    AsyncMysqlTxScope,
+    async_mysql_database_from_pool,
+    async_mysql_admin_database_from_pool,
+    async_mysql_readonly_database_from_pool,
 };

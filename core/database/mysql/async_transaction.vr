@@ -1,0 +1,172 @@
+// =============================================================================
+// core/database/mysql/async_transaction.vr — affine async MySQL transaction
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §5.5 (affine Tx), §6.3.6 (async).
+// =============================================================================
+//
+// Mirror of `core/database/mysql/transaction.vr` over the async
+// actor surface. Reuses `MyTxOpts.render_sql()` so isolation /
+// access-mode rendering stays single-source-of-truth shared with
+// sync.
+// =============================================================================
+
+module core.database.mysql.async_transaction;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.async_connection.{
+    AsyncMysqlConnection, MysqlRequest,
+    MyReqBeginTx, MyReqCommitTx, MyReqRollbackTx,
+    MyReqSavepoint, MyReqReleaseSavepoint, MyReqRollbackToSavepoint,
+};
+mount core.database.mysql.transaction.{
+    MyTxOpts, MyTxKind, MyAccessMode,
+    MyTkRepeatableRead, MyTkReadCommitted, MyTkReadUncommitted, MyTkSerializable,
+    MyAmReadWrite, MyAmReadOnly,
+    my_tx_opts_default,
+};
+mount core.async.channel.oneshot;
+
+public type affine AsyncMysqlTransaction is {
+    opts: MyTxOpts,
+};
+
+implement AsyncMysqlTransaction {
+    public fn opts_view(&self) -> &MyTxOpts { &self.opts }
+}
+
+fn make_tx(opts: MyTxOpts) -> AsyncMysqlTransaction {
+    AsyncMysqlTransaction { opts: opts }
+}
+
+public async fn begin_tx_async(conn: &AsyncMysqlConnection)
+    -> Result<AsyncMysqlTransaction, DbError>
+{
+    begin_tx_with_async(conn, my_tx_opts_default()).await
+}
+
+public async fn begin_tx_with_async(
+    conn: &AsyncMysqlConnection,
+    opts: MyTxOpts,
+) -> Result<AsyncMysqlTransaction, DbError> {
+    // MySQL's BEGIN cannot carry isolation/access-mode in the same
+    // statement (PG style); it requires a preceding `SET SESSION
+    // TRANSACTION ISOLATION LEVEL …` plus optional `SET SESSION
+    // TRANSACTION READ ONLY/WRITE`. The sync transaction module
+    // already encodes this in `render_sql()` — we replay verbatim.
+    let mut sql: Text = opts.render_sql();
+    if sql.len() > 0 { sql.push_str("; "); }
+    sql.push_str("START TRANSACTION");
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(MyReqBeginTx {
+        begin_sql: sql,
+        reply: rs,
+    }).await;
+    match rr.await {
+        Ok(Ok(()))  => Ok(make_tx(opts)),
+        Ok(Err(e))  => Err(e),
+        Err(_)      => Err(actor_dropped("begin_tx")),
+    }
+}
+
+public async fn begin_tx_serializable_async(conn: &AsyncMysqlConnection)
+    -> Result<AsyncMysqlTransaction, DbError>
+{
+    begin_tx_with_async(
+        conn,
+        my_tx_opts_default().with_isolation(MyTkSerializable),
+    ).await
+}
+
+public async fn begin_tx_read_only_async(conn: &AsyncMysqlConnection)
+    -> Result<AsyncMysqlTransaction, DbError>
+{
+    begin_tx_with_async(
+        conn,
+        my_tx_opts_default().with_mode(MyAmReadOnly),
+    ).await
+}
+
+public async fn commit_tx_async(
+    conn: &AsyncMysqlConnection,
+    tx: AsyncMysqlTransaction,
+) -> Result<(), DbError> {
+    let _ = tx;
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(MyReqCommitTx { reply: rs }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("commit_tx")),
+    }
+}
+
+public async fn rollback_tx_async(
+    conn: &AsyncMysqlConnection,
+    tx: AsyncMysqlTransaction,
+) -> Result<(), DbError> {
+    let _ = tx;
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(MyReqRollbackTx { reply: rs }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("rollback_tx")),
+    }
+}
+
+public async fn savepoint_async(
+    conn: &AsyncMysqlConnection,
+    name: &Text,
+) -> Result<(), DbError> {
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(MyReqSavepoint {
+        name: name.clone(),
+        reply: rs,
+    }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("savepoint")),
+    }
+}
+
+public async fn release_savepoint_async(
+    conn: &AsyncMysqlConnection,
+    name: &Text,
+) -> Result<(), DbError> {
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(MyReqReleaseSavepoint {
+        name: name.clone(),
+        reply: rs,
+    }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("release_savepoint")),
+    }
+}
+
+public async fn rollback_to_savepoint_async(
+    conn: &AsyncMysqlConnection,
+    name: &Text,
+) -> Result<(), DbError> {
+    let (rs, rr) = oneshot();
+    let _ = conn.tx_ref().send_async(MyReqRollbackToSavepoint {
+        name: name.clone(),
+        reply: rs,
+    }).await;
+    match rr.await {
+        Ok(r)  => r,
+        Err(_) => Err(actor_dropped("rollback_to_savepoint")),
+    }
+}
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "ACTOR_CLOSED".clone(),
+        message: f"async MySQL actor unavailable during {what}",
+        retryable: false,
+    })
+}

@@ -1,0 +1,144 @@
+// =============================================================================
+// core/database/mysql/async_typed_database.vr — async Database<P,C> for MySQL
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §5.4 (capability lattice),
+//       §6.3.6 (async surface).
+// =============================================================================
+//
+// Mirror of `core/database/postgres/async_typed_database.vr` for
+// `AsyncMysqlPool`. Database<P, C> capability narrowing is generic
+// in P, so all the lattice navigation (`into_readonly` / etc.)
+// works out of the box.
+// =============================================================================
+
+module core.database.mysql.async_typed_database;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId, AdMysql};
+mount core.database.common.db_handle.Database;
+mount core.database.common.capability.{
+    Capability, CanRead, CanWrite, CanTx, CanDdl,
+    DbRead, DbReadWriteTx, DbAdmin,
+};
+
+mount core.database.mysql.async_pool.AsyncMysqlPool;
+mount core.database.mysql.async_connection.AsyncMysqlConnection;
+mount core.database.mysql.connection.MySimpleQueryResult;
+mount core.database.mysql.async_transaction.{
+    AsyncMysqlTransaction, begin_tx_async, begin_tx_with_async,
+    commit_tx_async, rollback_tx_async,
+};
+mount core.database.mysql.transaction.{MyTxOpts, my_tx_opts_default};
+
+implement<C: CanRead> Database<AsyncMysqlPool, C> {
+    public async fn query_simple(&self, sql: &Text)
+        -> Result<MySimpleQueryResult, DbError>
+    {
+        let guard = self.pool.acquire().await?;
+        guard.conn_ref().simple_query(sql).await
+    }
+}
+
+implement<C: CanWrite> Database<AsyncMysqlPool, C> {
+    /// Returns affected rows.
+    public async fn execute_simple(&self, sql: &Text)
+        -> Result<Int, DbError>
+    {
+        let guard = self.pool.acquire().await?;
+        guard.conn_ref().execute(sql).await
+    }
+}
+
+implement<C: CanTx> Database<AsyncMysqlPool, C> {
+    public async fn begin(&self)
+        -> Result<AsyncMysqlTxScope, DbError>
+    {
+        self.begin_with_opts(&my_tx_opts_default()).await
+    }
+
+    public async fn begin_with_opts(&self, opts: &MyTxOpts)
+        -> Result<AsyncMysqlTxScope, DbError>
+    {
+        let guard = self.pool.acquire().await?;
+        let conn = guard.conn();
+        let tx = begin_tx_with_async(&conn, opts.clone()).await?;
+        Ok(AsyncMysqlTxScope {
+            guard: Some(guard),
+            conn: Some(conn),
+            tx: Some(tx),
+        })
+    }
+}
+
+public type affine AsyncMysqlTxScope is {
+    guard: Maybe<core.database.mysql.async_pool.AsyncMysqlPoolGuard>,
+    conn: Maybe<AsyncMysqlConnection>,
+    tx: Maybe<AsyncMysqlTransaction>,
+};
+
+implement AsyncMysqlTxScope {
+    public fn conn_ref(&self) -> &AsyncMysqlConnection {
+        match &self.conn {
+            Some(c) => c,
+            None    => panic("AsyncMysqlTxScope: connection already taken"),
+        }
+    }
+
+    public async fn commit(mut self) -> Result<(), DbError> {
+        let conn = match self.conn.take() {
+            Some(c) => c,
+            None    => { return Err(scope_used("commit")); }
+        };
+        let tx = match self.tx.take() {
+            Some(t) => t,
+            None    => { return Err(scope_used("commit-no-tx")); }
+        };
+        let r = commit_tx_async(&conn, tx).await;
+        let _ = self.guard.take();
+        r
+    }
+
+    public async fn rollback(mut self) -> Result<(), DbError> {
+        let conn = match self.conn.take() {
+            Some(c) => c,
+            None    => { return Err(scope_used("rollback")); }
+        };
+        let tx = match self.tx.take() {
+            Some(t) => t,
+            None    => { return Err(scope_used("rollback-no-tx")); }
+        };
+        let r = rollback_tx_async(&conn, tx).await;
+        let _ = self.guard.take();
+        r
+    }
+}
+
+public fn async_mysql_database_from_pool(pool: AsyncMysqlPool)
+    -> Database<AsyncMysqlPool, DbReadWriteTx>
+{
+    Database.from_pool(Shared.new(pool))
+}
+
+public fn async_mysql_admin_database_from_pool(pool: AsyncMysqlPool)
+    -> Database<AsyncMysqlPool, DbAdmin>
+{
+    Database.from_admin_pool(Shared.new(pool))
+}
+
+public fn async_mysql_readonly_database_from_pool(pool: AsyncMysqlPool)
+    -> Database<AsyncMysqlPool, DbRead>
+{
+    Database.from_readonly_pool(Shared.new(pool))
+}
+
+fn scope_used(what: &str) -> DbError {
+    DbError.Adapter(core.database.common.error.AdapterSpecific {
+        adapter: AdMysql,
+        code: "TX_SCOPE_USED".clone(),
+        message: f"AsyncMysqlTxScope already consumed at {what}",
+        retryable: false,
+    })
+}
