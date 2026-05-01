@@ -18682,17 +18682,28 @@ impl VbcCodegen {
                 self.emit_arith_extended_binary(ArithSubOpcode::RotateRight, args, dest);
             }
 
-            // Spinlock and futex - library calls
+            // Spinlock and futex — synchronization primitives.
+            // Route through `FfiExtended` sub-ops 0xB0–0xB2 so the
+            // interpreter has a typed dispatch path; AOT lowers the
+            // same sub-ops to `verum_futex_wait` / `verum_futex_wake`
+            // / `verum_spinlock_lock` runtime helpers.
             InlineSequenceId::SpinlockLock
             | InlineSequenceId::FutexWait
             | InlineSequenceId::FutexWake => {
-                let func_name = match seq_id {
-                    InlineSequenceId::SpinlockLock => "verum_spinlock_lock",
-                    InlineSequenceId::FutexWait => "verum_futex_wait",
-                    InlineSequenceId::FutexWake => "verum_futex_wake",
-                    _ => "verum_spinlock_lock",
+                use crate::instruction::FfiSubOpcode;
+                let sub_op = match seq_id {
+                    InlineSequenceId::SpinlockLock => FfiSubOpcode::SpinlockLock as u8,
+                    InlineSequenceId::FutexWait => FfiSubOpcode::FutexWait as u8,
+                    InlineSequenceId::FutexWake => FfiSubOpcode::FutexWake as u8,
+                    _ => unreachable!(),
                 };
-                self.emit_intrinsic_library_call(func_name, args, dest)?;
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for arg in args {
+                    Self::write_reg(&mut operands, arg.0);
+                }
+                self.ctx
+                    .emit(Instruction::FfiExtended { sub_op, operands });
             }
 
             // Sqrt - native VBC instruction

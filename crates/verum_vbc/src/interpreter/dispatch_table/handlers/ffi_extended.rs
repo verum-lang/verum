@@ -358,6 +358,79 @@ pub(in super::super) fn handle_ffi_extended(
         }
 
         // ================================================================
+        // Synchronization Primitives (0xB0-0xBF)
+        // ================================================================
+        Some(FfiSubOpcode::FutexWait) => {
+            // Format: dst:reg, addr:reg, expected:reg, timeout_ns:reg
+            // ABI: `(addr, expected, timeout_ns) -> i64` —
+            //   0      → woken
+            //   -EAGAIN (-11) → `*addr != expected`
+            //   -ETIMEDOUT (-110 Linux / -60 macOS; we use -110 universally)
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let expected_reg = read_reg(state)?;
+            let timeout_reg = read_reg(state)?;
+
+            let addr = state.get_reg(addr_reg).as_i64() as u64 as *const i32;
+            let expected = state.get_reg(expected_reg).as_i64() as i32;
+            let timeout_ns = state.get_reg(timeout_reg).as_i64();
+
+            let result = futex_park::wait(addr, expected, timeout_ns);
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(FfiSubOpcode::FutexWake) => {
+            // Format: dst:reg, addr:reg, count:reg
+            // ABI: `(addr, count) -> i64` returns # waiters woken.
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let count_reg = read_reg(state)?;
+
+            let addr = state.get_reg(addr_reg).as_i64() as u64 as *const i32;
+            let count = state.get_reg(count_reg).as_i64();
+
+            let woken = futex_park::wake(addr, count);
+            state.set_reg(dst, Value::from_i64(woken));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(FfiSubOpcode::SpinlockLock) => {
+            // Format: dst:reg, lock_addr:reg
+            // ABI: `(lock_addr: i64) -> i64` (always returns 0)
+            // Atomic CAS loop: 0 → 1 means lock acquired.
+            let dst = read_reg(state)?;
+            let lock_reg = read_reg(state)?;
+
+            let lock_addr = state.get_reg(lock_reg).as_i64() as u64 as *mut u8;
+            if !lock_addr.is_null() {
+                // SAFETY: caller is responsible for `lock_addr` pointing
+                // at a live u8 lock cell. Use atomic CAS to flip 0→1.
+                let atomic = unsafe { &*(lock_addr as *const std::sync::atomic::AtomicU8) };
+                let mut spin = 0u32;
+                while atomic
+                    .compare_exchange_weak(
+                        0,
+                        1,
+                        std::sync::atomic::Ordering::Acquire,
+                        std::sync::atomic::Ordering::Relaxed,
+                    )
+                    .is_err()
+                {
+                    spin = spin.saturating_add(1);
+                    if spin < 64 {
+                        std::hint::spin_loop();
+                    } else {
+                        std::thread::yield_now();
+                        spin = 0;
+                    }
+                }
+            }
+            state.set_reg(dst, Value::from_i64(0));
+            Ok(DispatchResult::Continue)
+        }
+
+        // ================================================================
         // Byte Array Allocation
         // ================================================================
         Some(FfiSubOpcode::NewByteArray) => {
@@ -3451,5 +3524,150 @@ fn memprot_to_win_protect(prot_flags: i32) -> u32 {
         (_, true, _) => 0x04,          // PAGE_READWRITE
         (true, _, _) => 0x02,          // PAGE_READONLY
         _ => 0x01,                     // PAGE_NOACCESS
+    }
+}
+
+/// Address-keyed park/unpark primitive backing the `FutexWait` /
+/// `FutexWake` interpreter sub-ops.
+///
+/// The interpreter is single-threaded for ordinary script execution
+/// but supports cooperative green-thread spawning. This module
+/// provides the cross-thread wake semantics that real OS futexes
+/// would carry: parked threads block on a `Condvar` keyed by the
+/// 32-bit memory address; wake-up signals are delivered with FIFO
+/// fairness on the same key. The implementation deliberately does
+/// not call into the kernel — it stays pure-Rust so cross-build /
+/// no-libc invariants are preserved.
+mod futex_park {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+    use std::sync::{Arc, Condvar, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    /// Per-address waiter state. `park_mu` is the condvar's
+    /// associated mutex shared across all waiters on the same key —
+    /// this is the contract `Condvar::wait` requires (every waiter
+    /// uses the *same* mutex). `wake_pending` is an atomic token
+    /// counter consumed lock-free via CAS so the mutex stays cheap.
+    struct Slot {
+        cv: Condvar,
+        park_mu: Mutex<()>,
+        wake_pending: AtomicU64,
+    }
+
+    fn slots() -> &'static Mutex<HashMap<usize, Arc<Slot>>> {
+        static SLOTS: OnceLock<Mutex<HashMap<usize, Arc<Slot>>>> = OnceLock::new();
+        SLOTS.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    fn slot_for(addr: usize) -> Arc<Slot> {
+        let mut table = slots().lock().expect("futex_park slots poisoned");
+        table
+            .entry(addr)
+            .or_insert_with(|| {
+                Arc::new(Slot {
+                    cv: Condvar::new(),
+                    park_mu: Mutex::new(()),
+                    wake_pending: AtomicU64::new(0),
+                })
+            })
+            .clone()
+    }
+
+    /// Try to consume one wake token. Returns true if a token was
+    /// available and consumed.
+    fn consume_token(slot: &Slot) -> bool {
+        let mut cur = slot.wake_pending.load(Ordering::Acquire);
+        while cur > 0 {
+            match slot.wake_pending.compare_exchange_weak(
+                cur,
+                cur - 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => cur = actual,
+            }
+        }
+        false
+    }
+
+    /// Park the current thread until either:
+    ///   * `*addr != expected` at entry         → return -EAGAIN (-11)
+    ///   * a `wake()` call delivers a token     → return 0
+    ///   * the timeout elapses (timeout_ns > 0) → return -ETIMEDOUT (-110)
+    ///
+    /// `timeout_ns <= 0` means "no timeout" (block indefinitely).
+    pub fn wait(addr: *const i32, expected: i32, timeout_ns: i64) -> i64 {
+        if addr.is_null() {
+            return -22; // -EINVAL
+        }
+        // SAFETY: caller is responsible for `addr` pointing at a live
+        // 32-bit aligned cell. Atomic load to compare against `expected`.
+        let cell = unsafe { &*(addr as *const AtomicI32) };
+        if cell.load(Ordering::Acquire) != expected {
+            return -11; // -EAGAIN
+        }
+        let slot = slot_for(addr as usize);
+        let mut guard = slot.park_mu.lock().expect("park_mu poisoned");
+
+        // Re-check after acquiring the park mutex to defend against
+        // wakes delivered between the cell load above and parking.
+        if cell.load(Ordering::Acquire) != expected {
+            return -11;
+        }
+        if consume_token(&slot) {
+            return 0;
+        }
+
+        if timeout_ns > 0 {
+            let deadline = Instant::now() + Duration::from_nanos(timeout_ns as u64);
+            loop {
+                let remaining = match deadline.checked_duration_since(Instant::now()) {
+                    None => return -110,
+                    Some(rem) => rem,
+                };
+                let (g, res) = slot
+                    .cv
+                    .wait_timeout(guard, remaining)
+                    .expect("futex_park condvar poisoned");
+                guard = g;
+                if consume_token(&slot) {
+                    return 0;
+                }
+                if res.timed_out() {
+                    return -110;
+                }
+            }
+        } else {
+            loop {
+                guard = slot.cv.wait(guard).expect("futex_park condvar poisoned");
+                if consume_token(&slot) {
+                    return 0;
+                }
+            }
+        }
+    }
+
+    /// Wake up to `count` waiters parked on `addr`. Returns the number
+    /// of tokens deposited.
+    pub fn wake(addr: *const i32, count: i64) -> i64 {
+        if addr.is_null() || count <= 0 {
+            return 0;
+        }
+        let key = addr as usize;
+        let slot = {
+            let table = slots().lock().expect("futex_park slots poisoned");
+            match table.get(&key) {
+                Some(s) => s.clone(),
+                None => return 0,
+            }
+        };
+        let to_wake = count.min(i64::MAX) as u64;
+        slot.wake_pending.fetch_add(to_wake, Ordering::AcqRel);
+        // Wake all parked waiters; spurious wakes re-check the token
+        // counter under the park mutex and re-park if nothing's left.
+        slot.cv.notify_all();
+        to_wake as i64
     }
 }

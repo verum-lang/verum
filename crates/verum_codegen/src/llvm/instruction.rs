@@ -16137,6 +16137,66 @@ fn read_reg_varlen(operands: &[u8], pos: &mut usize) -> Result<u16> {
     }
 }
 
+/// Decode the operand stream into a flat `Vec<u16>` of register
+/// indexes.  Used by extended-op LLVM lowering handlers that
+/// previously indexed `operands[i] as u16` positionally — after
+/// this call, `regs[i]` is the i-th register, regardless of
+/// whether registers are 1-byte or 2-byte encoded.
+///
+/// **Lenient on truncation**: stops decoding at the first byte
+/// that would require a non-existent successor (truncated 2-byte
+/// register).  The caller may receive fewer regs than the operand
+/// stream's byte count — that's correct because (a) some sub-ops
+/// mix raw-byte payloads (counts, offsets) after the register
+/// list, and (b) early-returning Err here would propagate failure
+/// out of the entire match before any arm runs, breaking arms
+/// that rely on the raw-byte tail.  Each match arm reads the
+/// regs it needs from the head of the returned vec; raw bytes
+/// are still indexed via `operands[i]` directly at the known
+/// position.
+#[inline]
+fn decode_reg_operands(operands: &[u8]) -> Vec<u16> {
+    let mut regs = Vec::with_capacity(operands.len());
+    let mut pos = 0usize;
+    while pos < operands.len() {
+        match read_reg_varlen(operands, &mut pos) {
+            Ok(r) => regs.push(r),
+            Err(_) => break,
+        }
+    }
+    regs
+}
+
+/// Read the i-th register-encoded operand from a varint-encoded
+/// stream.  Returns `0` on out-of-range, matching the historical
+/// graceful-degradation behaviour of the pre-fix
+/// `if operands.len() < N { return Ok(()); }` early returns
+/// (which silently dropped malformed instructions; turning every
+/// such drop into a hard `Err` would surface latent codegen bugs
+/// where the operand count was wrong but the result happened to
+/// be right because the malformed sub-op ran an empty body).
+///
+/// **Production correctness fix** (red-team): replaces direct
+/// `operands[i] as u16` indexing which read only the first byte
+/// of varint-encoded register numbers ≥128 — silently miscompiling
+/// any function with 128+ live registers.
+#[inline]
+fn op_reg(operands: &[u8], idx: usize) -> u16 {
+    let mut pos = 0usize;
+    let mut current = 0usize;
+    while pos < operands.len() {
+        let r = match read_reg_varlen(operands, &mut pos) {
+            Ok(r) => r,
+            Err(_) => return 0,
+        };
+        if current == idx {
+            return r;
+        }
+        current += 1;
+    }
+    0
+}
+
 fn lower_arith_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
@@ -16152,9 +16212,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             // Use LLVM sadd.with.overflow intrinsic
             let intrinsic_name = if matches!(sub, Some(ArithSubOpcode::CheckedAddU)) {
                 "llvm.uadd.with.overflow.i64"
@@ -16169,9 +16229,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let intrinsic_name = if matches!(sub, Some(ArithSubOpcode::CheckedSubU)) {
                 "llvm.usub.with.overflow.i64"
             } else {
@@ -16185,9 +16245,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let intrinsic_name = if matches!(sub, Some(ArithSubOpcode::CheckedMulU)) {
                 "llvm.umul.with.overflow.i64"
             } else {
@@ -16201,9 +16261,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let i64_type = ctx.types().i64_type();
             let zero = i64_type.const_int(0, false);
             let is_zero = ctx
@@ -16249,9 +16309,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = ctx
                 .builder()
                 .build_int_add(a, b, "wrap_add")
@@ -16263,9 +16323,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = ctx
                 .builder()
                 .build_int_sub(a, b, "wrap_sub")
@@ -16277,9 +16337,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = ctx
                 .builder()
                 .build_int_mul(a, b, "wrap_mul")
@@ -16291,8 +16351,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = ctx
                 .builder()
                 .build_int_neg(a, "wrap_neg")
@@ -16304,9 +16364,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = ctx
                 .builder()
                 .build_left_shift(a, b, "wrap_shl")
@@ -16318,9 +16378,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = ctx
                 .builder()
                 .build_right_shift(a, b, true, "wrap_shr")
@@ -16334,9 +16394,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = build_binary_intrinsic(ctx, "llvm.sadd.sat.i64", a, b, "sat_add")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16345,9 +16405,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = build_binary_intrinsic(ctx, "llvm.ssub.sat.i64", a, b, "sat_sub")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16357,9 +16417,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let i64_type = ctx.types().i64_type();
             // Use smul.with.overflow to detect overflow
             let ovf_result = build_overflow_intrinsic(
@@ -16429,8 +16489,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = build_unary_intrinsic_with_poison(ctx, "llvm.ctlz.i64", a, "clz")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16439,8 +16499,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = build_unary_intrinsic_with_poison(ctx, "llvm.cttz.i64", a, "ctz")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16449,8 +16509,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = build_unary_intrinsic(ctx, "llvm.ctpop.i64", a, "popcnt")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16459,8 +16519,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = build_unary_intrinsic(ctx, "llvm.bswap.i64", a, "bswap")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16469,8 +16529,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = build_unary_intrinsic(ctx, "llvm.bitreverse.i64", a, "bitrev")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16479,9 +16539,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = build_binary_intrinsic(ctx, "llvm.fshl.i64", a, b, "rotl")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16490,9 +16550,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result = build_binary_intrinsic(ctx, "llvm.fshr.i64", a, b, "rotr")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16503,8 +16563,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = ctx
                 .builder()
                 .build_int_s_extend(a, i64_ty, "sext")
@@ -16516,8 +16576,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let result = ctx
                 .builder()
                 .build_int_z_extend(a, i64_ty, "zext")
@@ -16529,8 +16589,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "fptrunc_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fptrunc_src")?;
             let f32_ty = ctx.llvm_context().f32_type();
             let result = ctx
                 .builder()
@@ -16548,8 +16608,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let val = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let val = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst, val);
             Ok(())
         }
@@ -16557,8 +16617,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "f64bits_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "f64bits_src")?;
             let result = ctx
                 .builder()
                 .build_bit_cast(a, i64_ty, "f64_to_bits")
@@ -16572,8 +16632,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let f64_ty = ctx.types().f64_type();
             let result = ctx
                 .builder()
@@ -16591,9 +16651,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result =
                 build_overflowing_tuple(ctx, "llvm.sadd.with.overflow.i64", a, b, "ovf_add")?;
             ctx.set_register(dst, result);
@@ -16603,9 +16663,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result =
                 build_overflowing_tuple(ctx, "llvm.ssub.with.overflow.i64", a, b, "ovf_sub")?;
             ctx.set_register(dst, result);
@@ -16615,9 +16675,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let result =
                 build_overflowing_tuple(ctx, "llvm.smul.with.overflow.i64", a, b, "ovf_mul")?;
             ctx.set_register(dst, result);
@@ -16633,9 +16693,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "poly_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
             let result = ctx
                 .builder()
                 .build_int_add(a, b, "poly_add")
@@ -16647,9 +16707,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "poly_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
             let result = ctx
                 .builder()
                 .build_int_sub(a, b, "poly_sub")
@@ -16661,9 +16721,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "poly_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
             let result = ctx
                 .builder()
                 .build_int_mul(a, b, "poly_mul")
@@ -16675,9 +16735,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "poly_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
             let result = safe_int_div(ctx, a, b, "poly_div")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16686,8 +16746,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
             let zero = ctx.types().i64_type().const_zero();
             let result = ctx
                 .builder()
@@ -16700,8 +16760,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
             let i64_type = ctx.types().i64_type();
             let zero = i64_type.const_zero();
             // abs(x) = x >= 0 ? x : -x
@@ -16727,9 +16787,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "poly_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
             let result = safe_int_rem(ctx, a, b, "poly_rem")?;
             ctx.set_register(dst, result.into());
             Ok(())
@@ -16738,8 +16798,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
             let i64_type = ctx.types().i64_type();
             let zero = i64_type.const_zero();
             let one = i64_type.const_int(1, false);
@@ -16772,9 +16832,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "poly_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
             let cmp = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, a, b, "min_cmp")
@@ -16792,9 +16852,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "poly_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
             let cmp = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGT, a, b, "max_cmp")
@@ -16813,10 +16873,10 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let val = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "clamp_val")?;
-            let lo = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "clamp_lo")?;
-            let hi = as_i64(ctx, ctx.get_register(operands[3] as u16)?, "clamp_hi")?;
+            let dst = op_reg(operands, 0);
+            let val = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "clamp_val")?;
+            let lo = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "clamp_lo")?;
+            let hi = as_i64(ctx, ctx.get_register(op_reg(operands, 3))?, "clamp_hi")?;
             // min(val, hi)
             let cmp_hi = ctx
                 .builder()
@@ -16850,9 +16910,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "atan2_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "atan2_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "atan2_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "atan2_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
@@ -16874,9 +16934,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "hypot_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "hypot_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "hypot_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "hypot_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
@@ -16898,9 +16958,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "copysign_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "copysign_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "copysign_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "copysign_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
@@ -16922,9 +16982,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "pow_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "pow_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "pow_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "pow_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
@@ -16946,9 +17006,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "logbase_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "logbase_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "logbase_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "logbase_b")?;
             let f64_ty = ctx.types().f64_type();
             let log_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
             let module = ctx.get_module();
@@ -16987,9 +17047,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "fmod_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "fmod_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fmod_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fmod_b")?;
             let result = ctx
                 .builder()
                 .build_float_rem(a, b, "fmod")
@@ -17002,9 +17062,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "remainder_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "remainder_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "remainder_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "remainder_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
@@ -17026,9 +17086,9 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "fdim_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "fdim_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fdim_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fdim_b")?;
             let diff = ctx
                 .builder()
                 .build_float_sub(a, b, "fdim_diff")
@@ -17054,8 +17114,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "f32bits_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "f32bits_src")?;
             let f32_ty = ctx.types().f32_type();
             let i32_ty = ctx.types().i32_type();
             // Truncate f64 to f32
@@ -17084,10 +17144,10 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             let a = as_i64(
                 ctx,
-                ctx.get_register(operands[1] as u16)?,
+                ctx.get_register(op_reg(operands, 1))?,
                 "f32frombits_src",
             )?;
             let i32_ty = ctx.types().i32_type();
@@ -17121,8 +17181,8 @@ fn lower_arith_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let val = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "trunc_val")?;
+            let dst = op_reg(operands, 0);
+            let val = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "trunc_val")?;
             let target_width = if operands.len() >= 3 {
                 operands[2] as u32
             } else {
@@ -17239,10 +17299,10 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "fma_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "fma_b")?;
-            let c = as_f64(ctx, ctx.get_register(operands[3] as u16)?, "fma_c")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fma_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fma_b")?;
+            let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fma_c")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
@@ -17264,9 +17324,9 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "fmod_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "fmod_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fmod_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fmod_b")?;
             let result = ctx
                 .builder()
                 .build_float_rem(a, b, "fmod")
@@ -17290,8 +17350,8 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "isnan_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isnan_src")?;
             // NaN != NaN is true
             let is_nan = ctx
                 .builder()
@@ -17308,8 +17368,8 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "isinf_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isinf_src")?;
             let f64_ty = ctx.types().f64_type();
             let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
             let module = ctx.get_module();
@@ -17340,8 +17400,8 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "isfinite_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isfinite_src")?;
             // finite = ordered comparison with itself (not NaN) AND not infinite
             let f64_ty = ctx.types().f64_type();
             let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
@@ -17446,10 +17506,10 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "fmaf_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "fmaf_b")?;
-            let c = as_f64(ctx, ctx.get_register(operands[3] as u16)?, "fmaf_c")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fmaf_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fmaf_b")?;
+            let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fmaf_c")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
@@ -17471,9 +17531,9 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "fmodf_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "fmodf_b")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fmodf_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fmodf_b")?;
             let result = ctx
                 .builder()
                 .build_float_rem(a, b, "fmodf")
@@ -17497,8 +17557,8 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "isnanf_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isnanf_src")?;
             let is_nan = ctx
                 .builder()
                 .build_float_compare(FloatPredicate::UNO, a, a, "is_nanf")
@@ -17514,8 +17574,8 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "isinff_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isinff_src")?;
             let f64_ty = ctx.types().f64_type();
             let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
             let module = ctx.get_module();
@@ -17546,8 +17606,8 @@ fn lower_math_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "isfinitef_src")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isfinitef_src")?;
             let f64_ty = ctx.types().f64_type();
             let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
             let module = ctx.get_module();
@@ -17605,9 +17665,9 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
-            let len_reg = operands[2] as u16;
+            let dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let len_reg = op_reg(operands, 2);
             let ptr = ctx.get_register(ptr_reg)?;
             let len = ctx.get_register(len_reg)?;
             let module = ctx.get_module();
@@ -17639,9 +17699,9 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
-            let len_reg = operands[2] as u16;
+            let dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let len_reg = op_reg(operands, 2);
             let ptr = ctx.get_register(ptr_reg)?;
             let len = ctx.get_register(len_reg)?;
             let module = ctx.get_module();
@@ -17669,16 +17729,16 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             // Support both 3-operand (dst, ptr, len) and 2-operand (dst, text_ref) forms
             let (ptr, len) = if operands.len() >= 3 {
                 (
-                    ctx.get_register(operands[1] as u16)?,
-                    ctx.get_register(operands[2] as u16)?,
+                    ctx.get_register(op_reg(operands, 1))?,
+                    ctx.get_register(op_reg(operands, 2))?,
                 )
             } else {
                 // 2-operand form: operand 1 is a Text struct ref, extract ptr and len
-                let text_val = ctx.get_register(operands[1] as u16)?;
+                let text_val = ctx.get_register(op_reg(operands, 1))?;
                 let text_ptr = as_ptr(ctx, text_val, "from_static_text_ptr")?;
                 let i64_ty = ctx.types().i64_type();
                 let i8_ty = ctx.types().i8_type();
@@ -17730,8 +17790,8 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let val = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let val = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -17776,8 +17836,8 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let val = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let val = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -17824,8 +17884,8 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[ctx.types().ptr_type().into()], false);
@@ -17847,8 +17907,8 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             // Prefer compiled Text.char_count from text.vr
@@ -17875,8 +17935,8 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[ctx.types().ptr_type().into()], false);
@@ -17911,7 +17971,7 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             let i64_ty = ctx.types().i64_type();
             ctx.set_register(dst, i64_ty.const_int(1, false).into());
             Ok(())
@@ -17927,8 +17987,8 @@ fn lower_text_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let text_reg = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let text_reg = op_reg(operands, 1);
             let text_val = ctx.get_register(text_reg)?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
@@ -18012,9 +18072,9 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let list_reg = operands[1] as u16;
-            let index_reg = operands[2] as u16;
+            let dst = op_reg(operands, 0);
+            let list_reg = op_reg(operands, 1);
+            let index_reg = op_reg(operands, 2);
 
             let list_ptr = as_ptr(ctx, ctx.get_register(list_reg)?, "rle_list_ptr")?;
             let index = as_i64(ctx, ctx.get_register(index_reg)?, "rle_idx")?;
@@ -18079,9 +18139,9 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
-            let len_reg = operands[2] as u16;
+            let dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let len_reg = op_reg(operands, 2);
             let ptr_val = as_i64(ctx, ctx.get_register(ptr_reg)?, "ref_slice_raw_ptr")?;
             let len_val = as_i64(ctx, ctx.get_register(len_reg)?, "ref_slice_raw_len")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
@@ -18096,8 +18156,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let ptr = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let ptr = ctx.get_register(op_reg(operands, 1))?;
             // Read generation from allocation header (32 bytes before user pointer).
             // Register may hold a raw i64 NaN-boxed pointer encoding in addition
             // to an LLVM PointerValue, so route via `as_ptr` (see commit 04de418).
@@ -18135,7 +18195,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 1 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             let module = ctx.get_module();
 
             // Try compiled .vr: current_epoch() -> i64 (free function in epoch.vr)
@@ -18191,8 +18251,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let ptr_val = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let ptr_val = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
 
@@ -18245,10 +18305,10 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
-            let start = ctx.get_register(operands[2] as u16)?;
-            let len = ctx.get_register(operands[3] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let start = ctx.get_register(op_reg(operands, 2))?;
+            let len = ctx.get_register(op_reg(operands, 3))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             // Compute offset: base_ptr + start * 8 (i64 elements)
@@ -18308,8 +18368,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let base = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let base = ctx.get_register(op_reg(operands, 1))?;
             let field_offset = operands[2] as u64;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
@@ -18338,9 +18398,9 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let base = ctx.get_register(operands[1] as u16)?;
-            let index = ctx.get_register(operands[2] as u16)?;
+            let dst = op_reg(operands, 0);
+            let base = ctx.get_register(op_reg(operands, 1))?;
+            let index = ctx.get_register(op_reg(operands, 2))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             let offset = ctx
@@ -18372,8 +18432,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             // In AOT, trait objects are simply pointers (vtable dispatch is resolved at compile time)
             ctx.set_register(dst, src);
             Ok(())
@@ -18383,8 +18443,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src_reg = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let src_reg = op_reg(operands, 1);
             let fat_ref = ctx.get_register(src_reg)?;
             let i64_ty = ctx.types().i64_type();
             let i8_ty = ctx.types().i8_type();
@@ -18431,8 +18491,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src_reg = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let src_reg = op_reg(operands, 1);
             let fat_ref = ctx.get_register(src_reg)?;
             let i64_ty = ctx.types().i64_type();
             let i8_ty = ctx.types().i8_type();
@@ -18468,9 +18528,9 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let fat_ref = ctx.get_register(operands[1] as u16)?;
-            let index_raw = ctx.get_register(operands[2] as u16)?;
+            let dst = op_reg(operands, 0);
+            let fat_ref = ctx.get_register(op_reg(operands, 1))?;
+            let index_raw = ctx.get_register(op_reg(operands, 2))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             // Load base pointer from fat ref. Registers can store either a
@@ -18511,10 +18571,10 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
-            let start_raw = ctx.get_register(operands[2] as u16)?;
-            let end_raw = ctx.get_register(operands[3] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let start_raw = ctx.get_register(op_reg(operands, 2))?;
+            let end_raw = ctx.get_register(op_reg(operands, 3))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             // Load base from fat ref. Same variance as SliceGet.
@@ -18573,10 +18633,10 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst1 = operands[0] as u16;
-            let dst2 = operands[1] as u16;
-            let src = ctx.get_register(operands[2] as u16)?;
-            let mid = ctx.get_register(operands[3] as u16)?;
+            let dst1 = op_reg(operands, 0);
+            let dst2 = op_reg(operands, 1);
+            let src = ctx.get_register(op_reg(operands, 2))?;
+            let mid = ctx.get_register(op_reg(operands, 3))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             // Load base and len from source fat ref. Registers can hold
@@ -18666,8 +18726,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             // In AOT mode, capabilities are not enforced at runtime (compile-time only)
             // Pass through the reference unchanged
             ctx.set_register(dst, src);
@@ -18678,8 +18738,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst, src);
             Ok(())
         }
@@ -18688,7 +18748,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             // In AOT, all capabilities are assumed present (checked at compile time)
             ctx.set_register(dst, ctx.types().i64_type().const_int(1, false).into());
             Ok(())
@@ -18698,7 +18758,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             // Return full capabilities mask: READ|WRITE|ADD|REMOVE|EXCLUSIVE|DELEGATE|ALIAS|DROP = 0xFF
             ctx.set_register(dst, ctx.types().i64_type().const_int(0xFF, false).into());
             Ok(())
@@ -18708,8 +18768,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst, src);
             Ok(())
         }
@@ -18722,7 +18782,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             ctx.set_register(dst, ctx.types().i64_type().const_int(1, false).into());
             Ok(())
         }
@@ -18731,8 +18791,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst, src);
             Ok(())
         }
@@ -18745,9 +18805,9 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
-            let metadata = ctx.get_register(operands[2] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let metadata = ctx.get_register(op_reg(operands, 2))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             let module = ctx.get_module();
@@ -18783,8 +18843,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let fat = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let fat = ctx.get_register(op_reg(operands, 1))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             let fat_pv = as_ptr(ctx, fat, "fat_to_thin_fat")?;
@@ -18804,8 +18864,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst, src);
             Ok(())
         }
@@ -18814,8 +18874,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst, src);
             Ok(())
         }
@@ -18832,7 +18892,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             ctx.set_register(dst, ctx.types().i64_type().const_zero().into());
             Ok(())
         }
@@ -18841,8 +18901,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             let module = ctx.get_module();
@@ -18866,8 +18926,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             let i64_ty = ctx.types().i64_type();
             let module = ctx.get_module();
 
@@ -18927,8 +18987,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             let i64_ty = ctx.types().i64_type();
             let module = ctx.get_module();
 
@@ -18997,7 +19057,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 1 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             let i64_ty = ctx.types().i64_type();
             let module = ctx.get_module();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -19021,7 +19081,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 1 {
                 return Ok(());
             }
-            let src = ctx.get_register(operands[0] as u16)?;
+            let src = ctx.get_register(op_reg(operands, 0))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let fn_type = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
@@ -19038,8 +19098,8 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = ctx.get_register(operands[1] as u16)?;
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
             let i64_ty = ctx.types().i64_type();
             let module = ctx.get_module();
 
@@ -19098,7 +19158,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 1 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             ctx.set_register(dst, ctx.types().i64_type().const_zero().into());
             Ok(())
         }
@@ -19107,7 +19167,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.is_empty() {
                 return Ok(());
             }
-            let src = ctx.get_register(operands[0] as u16)?;
+            let src = ctx.get_register(op_reg(operands, 0))?;
             let module = ctx.get_module();
 
             // Try compiled .vr: ThinRef.revoke(i64 ref_ptr) -> i64 (Result)
@@ -19144,7 +19204,7 @@ fn lower_cbgr_extended<'ctx>(
             if operands.is_empty() {
                 return Ok(());
             }
-            let src = ctx.get_register(operands[0] as u16)?;
+            let src = ctx.get_register(op_reg(operands, 0))?;
             let ptr_ty = ctx.types().ptr_type();
             let module = ctx.get_module();
             // verum_cbgr_register_root(void* ptr) -> void
@@ -19430,8 +19490,8 @@ fn lower_char_extended<'ctx>(
     if operands.len() < 2 {
         return Ok(());
     }
-    let dst = operands[0] as u16;
-    let ch = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "ch")?;
+    let dst = op_reg(operands, 0);
+    let ch = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "ch")?;
     let i64_ty = ctx.types().i64_type();
 
     // Build inline classification for common cases
@@ -19967,8 +20027,8 @@ fn lower_char_extended<'ctx>(
             // DecodeUtf8 (0x51): decode UTF-8 char from bytes at index
             // Operands: [dst, bytes_ptr, index]
             if operands.len() >= 3 {
-                let bytes_reg = operands[1] as u16;
-                let idx_reg = operands[2] as u16;
+                let bytes_reg = op_reg(operands, 1);
+                let idx_reg = op_reg(operands, 2);
                 let bytes_val = as_i64(ctx, ctx.get_register(bytes_reg)?, "bytes")?;
                 let idx_val = as_i64(ctx, ctx.get_register(idx_reg)?, "idx")?;
                 let ptr_type = ctx.types().ptr_type();
@@ -20054,8 +20114,8 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let src = op_reg(operands, 1);
             let val = ctx.get_register(src)?;
             ctx.set_register(dst, val);
             Ok(())
@@ -20065,9 +20125,9 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             // operands[1] = vec_reg, operands[2] = lane
-            let val_reg = operands[3] as u16;
+            let val_reg = op_reg(operands, 3);
             let val = ctx.get_register(val_reg)?;
             ctx.set_register(dst, val);
             Ok(())
@@ -20077,8 +20137,8 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let first = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let first = op_reg(operands, 1);
             let val = ctx.get_register(first)?;
             ctx.set_register(dst, val);
             Ok(())
@@ -20123,8 +20183,8 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let src = op_reg(operands, 1);
             let val = as_f64(ctx, ctx.get_register(src)?, "simd_src")?;
             let f64_ty = ctx.types().f64_type();
             let result = match sub.or_internal("missing SIMD sub-opcode")? {
@@ -20197,10 +20257,10 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "fma_a")?;
-            let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "fma_b")?;
-            let c = as_f64(ctx, ctx.get_register(operands[3] as u16)?, "fma_c")?;
+            let dst = op_reg(operands, 0);
+            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fma_a")?;
+            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fma_b")?;
+            let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fma_c")?;
             let f64_ty = ctx.types().f64_type();
             let fn_ty = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
             let func = ctx
@@ -20248,8 +20308,8 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let src = op_reg(operands, 1);
             let val = ctx.get_register(src)?;
             ctx.set_register(dst, val);
             Ok(())
@@ -20282,10 +20342,10 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let mask = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "mask")?;
-            let a = ctx.get_register(operands[2] as u16)?;
-            let b = ctx.get_register(operands[3] as u16)?;
+            let dst = op_reg(operands, 0);
+            let mask = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "mask")?;
+            let a = ctx.get_register(op_reg(operands, 2))?;
+            let b = ctx.get_register(op_reg(operands, 3))?;
             let zero = ctx.types().i64_type().const_zero();
             let cond = ctx
                 .builder()
@@ -20318,8 +20378,8 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "not_src")?;
+            let dst = op_reg(operands, 0);
+            let src = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "not_src")?;
             let result = ctx
                 .builder()
                 .build_not(src, "simd_not")
@@ -20350,8 +20410,8 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let src = op_reg(operands, 1);
             let val = ctx.get_register(src)?;
             ctx.set_register(dst, val);
             Ok(())
@@ -20370,7 +20430,7 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 1 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             ctx.set_register(dst, ctx.types().i64_type().const_int(1, false).into());
             Ok(())
         }
@@ -20378,7 +20438,7 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 1 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             ctx.set_register(dst, ctx.types().i64_type().const_zero().into());
             Ok(())
         }
@@ -20387,8 +20447,8 @@ fn lower_simd_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let src = operands[1] as u16;
+            let dst = op_reg(operands, 0);
+            let src = op_reg(operands, 1);
             let val = ctx.get_register(src)?;
             ctx.set_register(dst, val);
             Ok(())
@@ -20418,9 +20478,9 @@ where
     if operands.len() < 3 {
         return Ok(());
     }
-    let dst = operands[0] as u16;
-    let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "simd_a")?;
-    let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "simd_b")?;
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "simd_a")?;
+    let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "simd_b")?;
     let result = op(ctx.builder(), a, b)?;
     ctx.set_register(dst, result.into());
     Ok(())
@@ -20441,8 +20501,8 @@ where
     if operands.len() < 2 {
         return Ok(());
     }
-    let dst = operands[0] as u16;
-    let v = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "simd_v")?;
+    let dst = op_reg(operands, 0);
+    let v = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "simd_v")?;
     let result = op(ctx.builder(), v)?;
     ctx.set_register(dst, result.into());
     Ok(())
@@ -20464,9 +20524,9 @@ where
     if operands.len() < 3 {
         return Ok(());
     }
-    let dst = operands[0] as u16;
-    let a = as_i64(ctx, ctx.get_register(operands[1] as u16)?, "simd_a")?;
-    let b = as_i64(ctx, ctx.get_register(operands[2] as u16)?, "simd_b")?;
+    let dst = op_reg(operands, 0);
+    let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "simd_a")?;
+    let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "simd_b")?;
     let result = op(ctx.builder(), a, b)?;
     ctx.set_register(dst, result.into());
     Ok(())
@@ -20481,9 +20541,9 @@ fn lower_simd_cmp_f64<'ctx>(
     if operands.len() < 3 {
         return Ok(());
     }
-    let dst = operands[0] as u16;
-    let a = as_f64(ctx, ctx.get_register(operands[1] as u16)?, "cmp_a")?;
-    let b = as_f64(ctx, ctx.get_register(operands[2] as u16)?, "cmp_b")?;
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "cmp_a")?;
+    let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "cmp_b")?;
     let cmp = ctx
         .builder()
         .build_float_compare(pred, a, b, "simd_cmp")
@@ -20508,7 +20568,7 @@ fn lower_log_extended<'ctx>(
             if operands.is_empty() {
                 return Ok(());
             }
-            let val = ctx.get_register(operands[0] as u16)?;
+            let val = ctx.get_register(op_reg(operands, 0))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -20531,7 +20591,7 @@ fn lower_log_extended<'ctx>(
             if operands.is_empty() {
                 return Ok(());
             }
-            let val = ctx.get_register(operands[0] as u16)?;
+            let val = ctx.get_register(op_reg(operands, 0))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -20565,7 +20625,7 @@ fn lower_log_extended<'ctx>(
             if operands.is_empty() {
                 return Ok(());
             }
-            let val = ctx.get_register(operands[0] as u16)?;
+            let val = ctx.get_register(op_reg(operands, 0))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
@@ -20582,7 +20642,7 @@ fn lower_log_extended<'ctx>(
             if operands.is_empty() {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
+            let dst = op_reg(operands, 0);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -20644,14 +20704,14 @@ fn lower_extended<'ctx>(
             // reg (one byte) when its top bit is clear; otherwise it's
             // the high-7 of a two-byte encoding.
             let reg_idx: u16 = if operands[0] & 0x80 == 0 {
-                operands[0] as u16
+                op_reg(operands, 0)
             } else {
                 if operands.len() < 2 {
                     return Err(LlvmLoweringError::internal(
                         "ProcessExit: truncated long-form register encoding",
                     ));
                 }
-                (((operands[0] & 0x7F) as u16) << 8) | operands[1] as u16
+                (((operands[0] & 0x7F) as u16) << 8) | op_reg(operands, 1)
             };
 
             // Load the exit code from the register; it's stored as i64
@@ -21517,10 +21577,10 @@ fn lower_math_unary_f64<'ctx>(
     if operands.len() < 2 {
         return Ok(());
     }
-    let dst = operands[0] as u16;
+    let dst = op_reg(operands, 0);
     let a = as_f64(
         ctx,
-        ctx.get_register(operands[1] as u16)?,
+        ctx.get_register(op_reg(operands, 1))?,
         &format!("{}_a", name),
     )?;
     let f64_ty = ctx.types().f64_type();
@@ -21552,15 +21612,15 @@ fn lower_math_binary_f64<'ctx>(
     if operands.len() < 3 {
         return Ok(());
     }
-    let dst = operands[0] as u16;
+    let dst = op_reg(operands, 0);
     let a = as_f64(
         ctx,
-        ctx.get_register(operands[1] as u16)?,
+        ctx.get_register(op_reg(operands, 1))?,
         &format!("{}_a", name),
     )?;
     let b = as_f64(
         ctx,
-        ctx.get_register(operands[2] as u16)?,
+        ctx.get_register(op_reg(operands, 2))?,
         &format!("{}_b", name),
     )?;
     let f64_ty = ctx.types().f64_type();
@@ -21606,9 +21666,9 @@ fn lower_ffi_extended<'ctx>(
                     "CMemcpy: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let src_reg = operands[1] as u16;
-            let size_reg = operands[2] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let src_reg = op_reg(operands, 1);
+            let size_reg = op_reg(operands, 2);
 
             let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
             let src_ptr = as_ptr(ctx, ctx.get_register(src_reg)?, "src_ptr")?;
@@ -21626,9 +21686,9 @@ fn lower_ffi_extended<'ctx>(
                     "CMemset: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let value_reg = operands[1] as u16;
-            let size_reg = operands[2] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let value_reg = op_reg(operands, 1);
+            let size_reg = op_reg(operands, 2);
 
             let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
             let value = as_i64(ctx, ctx.get_register(value_reg)?, "value")?;
@@ -21661,8 +21721,8 @@ fn lower_ffi_extended<'ctx>(
                     "CSecureZero: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let size_reg = operands[1] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let size_reg = op_reg(operands, 1);
 
             let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
             let size = as_i64(ctx, ctx.get_register(size_reg)?, "size")?;
@@ -21679,9 +21739,9 @@ fn lower_ffi_extended<'ctx>(
                     "CMemmove: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let src_reg = operands[1] as u16;
-            let size_reg = operands[2] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let src_reg = op_reg(operands, 1);
+            let size_reg = op_reg(operands, 2);
 
             let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
             let src_ptr = as_ptr(ctx, ctx.get_register(src_reg)?, "src_ptr")?;
@@ -21699,10 +21759,10 @@ fn lower_ffi_extended<'ctx>(
                     "CMemcmp: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let ptr1_reg = operands[1] as u16;
-            let ptr2_reg = operands[2] as u16;
-            let size_reg = operands[3] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let ptr1_reg = op_reg(operands, 1);
+            let ptr2_reg = op_reg(operands, 2);
+            let size_reg = op_reg(operands, 3);
 
             let ptr1 = as_ptr(ctx, ctx.get_register(ptr1_reg)?, "ptr1")?;
             let ptr2 = as_ptr(ctx, ctx.get_register(ptr2_reg)?, "ptr2")?;
@@ -21727,8 +21787,8 @@ fn lower_ffi_extended<'ctx>(
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal("CAlloc: insufficient operands"));
             }
-            let dst_reg = operands[0] as u16;
-            let size_reg = operands[1] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let size_reg = op_reg(operands, 1);
 
             let size = as_i64(ctx, ctx.get_register(size_reg)?, "size")?;
 
@@ -21744,7 +21804,7 @@ fn lower_ffi_extended<'ctx>(
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal("CFree: insufficient operands"));
             }
-            let ptr_reg = operands[0] as u16;
+            let ptr_reg = op_reg(operands, 0);
 
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
 
@@ -21760,9 +21820,9 @@ fn lower_ffi_extended<'ctx>(
                     "CRealloc: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
-            let size_reg = operands[2] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let size_reg = op_reg(operands, 2);
 
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
             let size = as_i64(ctx, ctx.get_register(size_reg)?, "size")?;
@@ -21784,7 +21844,7 @@ fn lower_ffi_extended<'ctx>(
                     "GetErrno: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
 
             let module = ctx.get_module();
             let errno_val = ffi.lower_get_errno(ctx.builder(), &module)?;
@@ -21807,7 +21867,7 @@ fn lower_ffi_extended<'ctx>(
                     "SetErrno: insufficient operands",
                 ));
             }
-            let value_reg = operands[0] as u16;
+            let value_reg = op_reg(operands, 0);
 
             let value = as_i64(ctx, ctx.get_register(value_reg)?, "value")?;
 
@@ -21846,8 +21906,8 @@ fn lower_ffi_extended<'ctx>(
                     "DerefRaw: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
             let size_bytes = operands[2];
 
             // Pass-through ref: Heap<T> is transparent in AOT — no actual allocation.
@@ -21942,8 +22002,8 @@ fn lower_ffi_extended<'ctx>(
                     "DerefMutRaw: insufficient operands",
                 ));
             }
-            let ptr_reg = operands[0] as u16;
-            let value_reg = operands[1] as u16;
+            let ptr_reg = op_reg(operands, 0);
+            let value_reg = op_reg(operands, 1);
             let size_bytes = operands[2];
 
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
@@ -21960,8 +22020,8 @@ fn lower_ffi_extended<'ctx>(
                     "DerefRawPtr: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
 
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
             let result = ffi.lower_deref_raw_ptr(ctx.builder(), ptr)?;
@@ -21975,9 +22035,9 @@ fn lower_ffi_extended<'ctx>(
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal("PtrAdd: insufficient operands"));
             }
-            let dst_reg = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
-            let offset_reg = operands[2] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let offset_reg = op_reg(operands, 2);
 
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
             let offset = as_i64(ctx, ctx.get_register(offset_reg)?, "offset")?;
@@ -21993,9 +22053,9 @@ fn lower_ffi_extended<'ctx>(
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal("PtrSub: insufficient operands"));
             }
-            let dst_reg = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
-            let offset_reg = operands[2] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let offset_reg = op_reg(operands, 2);
 
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
             let offset = as_i64(ctx, ctx.get_register(offset_reg)?, "offset")?;
@@ -22013,9 +22073,9 @@ fn lower_ffi_extended<'ctx>(
                     "PtrDiff: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let ptr1_reg = operands[1] as u16;
-            let ptr2_reg = operands[2] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let ptr1_reg = op_reg(operands, 1);
+            let ptr2_reg = op_reg(operands, 2);
 
             let ptr1 = as_ptr(ctx, ctx.get_register(ptr1_reg)?, "ptr1")?;
             let ptr2 = as_ptr(ctx, ctx.get_register(ptr2_reg)?, "ptr2")?;
@@ -22033,8 +22093,8 @@ fn lower_ffi_extended<'ctx>(
                     "PtrIsNull: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
 
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
             let is_null = ffi.lower_ptr_is_null(ctx.builder(), ptr)?;
@@ -22069,7 +22129,7 @@ fn lower_ffi_extended<'ctx>(
             let symbol_idx =
                 u32::from_le_bytes([operands[0], operands[1], operands[2], operands[3]]);
             let arg_count = operands[4] as usize;
-            let ret_reg = operands[5] as u16;
+            let ret_reg = op_reg(operands, 5);
 
             if operands.len() < 6 + arg_count {
                 return Err(LlvmLoweringError::internal(
@@ -22246,7 +22306,7 @@ fn lower_ffi_extended<'ctx>(
                 u32::from_le_bytes([operands[0], operands[1], operands[2], operands[3]]);
             let fixed_count = operands[4] as usize;
             let variadic_count = operands[5] as usize;
-            let ret_reg = operands[6] as u16;
+            let ret_reg = op_reg(operands, 6);
             let total_args = fixed_count + variadic_count;
 
             if operands.len() < 7 + total_args {
@@ -22378,11 +22438,11 @@ fn lower_ffi_extended<'ctx>(
                 ));
             }
 
-            let ptr_reg = operands[0] as u16;
+            let ptr_reg = op_reg(operands, 0);
             let signature_idx =
                 u32::from_le_bytes([operands[1], operands[2], operands[3], operands[4]]);
             let arg_count = operands[5] as usize;
-            let ret_reg = operands[6] as u16;
+            let ret_reg = op_reg(operands, 6);
 
             if operands.len() < 7 + arg_count {
                 return Err(LlvmLoweringError::internal(
@@ -22512,7 +22572,7 @@ fn lower_ffi_extended<'ctx>(
                 ));
             }
 
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let symbol_idx =
                 u32::from_le_bytes([operands[1], operands[2], operands[3], operands[4]]);
 
@@ -22566,7 +22626,7 @@ fn lower_ffi_extended<'ctx>(
                     "GetLibrary: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
 
             let null_ptr = ctx.types().ptr_type().const_null();
             ctx.set_register(dst_reg, null_ptr.into());
@@ -22580,7 +22640,7 @@ fn lower_ffi_extended<'ctx>(
                     "IsSymbolResolved: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
 
             let true_val = ctx.types().bool_type().const_int(1, false);
             ctx.set_register(dst_reg, true_val.into());
@@ -22598,8 +22658,8 @@ fn lower_ffi_extended<'ctx>(
                     "Marshal: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let src_val = ctx.get_register(operands[1] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let src_val = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst_reg, src_val);
             Ok(())
         }
@@ -22611,8 +22671,8 @@ fn lower_ffi_extended<'ctx>(
                     "StringToC: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let src_val = ctx.get_register(operands[1] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let src_val = ctx.get_register(op_reg(operands, 1))?;
             // Text ptr is already a char*, pass through
             ctx.set_register(dst_reg, src_val);
             Ok(())
@@ -22625,8 +22685,8 @@ fn lower_ffi_extended<'ctx>(
                     "StringFromC: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let c_str = ctx.get_register(operands[1] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let c_str = ctx.get_register(op_reg(operands, 1))?;
             // For now, pass through the pointer (Text is already a char* internally)
             ctx.set_register(dst_reg, c_str);
             Ok(())
@@ -22639,8 +22699,8 @@ fn lower_ffi_extended<'ctx>(
                     "ArrayMarshal: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let src_val = ctx.get_register(operands[1] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let src_val = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst_reg, src_val);
             Ok(())
         }
@@ -22652,8 +22712,8 @@ fn lower_ffi_extended<'ctx>(
                     "StructMarshal: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let src_val = ctx.get_register(operands[1] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let src_val = ctx.get_register(op_reg(operands, 1))?;
             ctx.set_register(dst_reg, src_val);
             Ok(())
         }
@@ -22678,7 +22738,7 @@ fn lower_ffi_extended<'ctx>(
                         "GetLastError: insufficient operands",
                     ));
                 }
-                let dst_reg = operands[0] as u16;
+                let dst_reg = op_reg(operands, 0);
                 let zero = ctx.types().i64_type().const_zero();
                 ctx.set_register(dst_reg, zero.into());
                 Ok(())
@@ -22692,7 +22752,7 @@ fn lower_ffi_extended<'ctx>(
                     "RandomU64: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -22717,7 +22777,7 @@ fn lower_ffi_extended<'ctx>(
                     "RandomFloat: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[], false);
@@ -22742,8 +22802,8 @@ fn lower_ffi_extended<'ctx>(
                     "NewByteArray: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let size = ctx.get_register(operands[1] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let size = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -22771,9 +22831,9 @@ fn lower_ffi_extended<'ctx>(
                     "ByteArrayElementAddr: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let base_ptr = as_ptr(ctx, ctx.get_register(operands[1] as u16)?, "ba_base")?;
-            let index = ctx.get_register(operands[2] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ba_base")?;
+            let index = ctx.get_register(op_reg(operands, 2))?;
             let i8_ty = ctx.llvm_context().i8_type();
             // SAFETY: GEP into a byte array at the given index to get the element address; bounds checking is caller's responsibility
             let elem_ptr = unsafe {
@@ -22792,9 +22852,9 @@ fn lower_ffi_extended<'ctx>(
                     "ByteArrayLoad: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let base_ptr = as_ptr(ctx, ctx.get_register(operands[1] as u16)?, "ba_base")?;
-            let index = ctx.get_register(operands[2] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ba_base")?;
+            let index = ctx.get_register(op_reg(operands, 2))?;
             let i8_ty = ctx.llvm_context().i8_type();
             // SAFETY: GEP into a byte array at the given index to load a single byte; bounds checking is caller's responsibility
             let elem_ptr = unsafe {
@@ -22822,9 +22882,9 @@ fn lower_ffi_extended<'ctx>(
                     "ByteArrayStore: insufficient operands",
                 ));
             }
-            let base_ptr = as_ptr(ctx, ctx.get_register(operands[0] as u16)?, "ba_base")?;
-            let index = ctx.get_register(operands[1] as u16)?;
-            let value = ctx.get_register(operands[2] as u16)?;
+            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "ba_base")?;
+            let index = ctx.get_register(op_reg(operands, 1))?;
+            let value = ctx.get_register(op_reg(operands, 2))?;
             let i8_ty = ctx.llvm_context().i8_type();
             // SAFETY: GEP into a byte array at the given index to store a single byte; bounds checking is caller's responsibility
             let elem_ptr = unsafe {
@@ -22849,11 +22909,11 @@ fn lower_ffi_extended<'ctx>(
                     "TypedArray: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             if sub_op == FfiSubOpcode::NewTypedArray as u8 {
                 // Allocate: same as NewByteArray but size = count * element_size
                 let size = if operands.len() >= 2 {
-                    ctx.get_register(operands[1] as u16)?
+                    ctx.get_register(op_reg(operands, 1))?
                 } else {
                     ctx.types().i64_type().const_int(0, false).into()
                 };
@@ -22876,8 +22936,8 @@ fn lower_ffi_extended<'ctx>(
                 ctx.set_register(dst_reg, result);
             } else {
                 // Element addr: base + index * 8 (assuming 8-byte elements)
-                let base_ptr = as_ptr(ctx, ctx.get_register(operands[1] as u16)?, "ta_base")?;
-                let index = ctx.get_register(operands[2] as u16)?;
+                let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ta_base")?;
+                let index = ctx.get_register(op_reg(operands, 2))?;
                 let i64_ty = ctx.types().i64_type();
                 // SAFETY: GEP into a typed array at the given index to compute the element address; bounds checking is caller's responsibility
                 let elem_ptr = unsafe {
@@ -22905,8 +22965,8 @@ fn lower_ffi_extended<'ctx>(
                     "StructFieldAddr: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let obj_ptr = as_ptr(ctx, ctx.get_register(operands[1] as u16)?, "sf_obj")?;
+            let dst_reg = op_reg(operands, 0);
+            let obj_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "sf_obj")?;
             let offset_lo = operands[2] as u64;
             let offset_hi = operands[3] as u64;
             let field_offset = (offset_hi << 8) | offset_lo;
@@ -22938,9 +22998,9 @@ fn lower_ffi_extended<'ctx>(
                     "Callback: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             if operands.len() >= 2 {
-                let val = ctx.get_register(operands[1] as u16)?;
+                let val = ctx.get_register(op_reg(operands, 1))?;
                 ctx.set_register(dst_reg, val);
             } else {
                 let null = ctx.types().ptr_type().const_null();
@@ -22956,7 +23016,7 @@ fn lower_ffi_extended<'ctx>(
                     "TimeMonotonicNanos: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -22984,7 +23044,7 @@ fn lower_ffi_extended<'ctx>(
                     "TimeRealtimeNanos: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -23011,7 +23071,7 @@ fn lower_ffi_extended<'ctx>(
                     "TimeMonotonicRawNanos: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -23037,7 +23097,7 @@ fn lower_ffi_extended<'ctx>(
             if operands.is_empty() {
                 return Ok(());
             }
-            let nanos = ctx.get_register(operands[0] as u16)?;
+            let nanos = ctx.get_register(op_reg(operands, 0))?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into()], false);
@@ -23057,7 +23117,7 @@ fn lower_ffi_extended<'ctx>(
                     "TimeCpuNanos: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -23086,7 +23146,7 @@ fn lower_ffi_extended<'ctx>(
                     "SysGetpid: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -23110,7 +23170,7 @@ fn lower_ffi_extended<'ctx>(
                     "SysGettid: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(&[], false);
@@ -23135,7 +23195,7 @@ fn lower_ffi_extended<'ctx>(
                     "SysMmap: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -23176,8 +23236,8 @@ fn lower_ffi_extended<'ctx>(
             if operands.len() < 2 {
                 return Ok(());
             }
-            let addr = ctx.get_register(operands[0] as u16)?;
-            let length = ctx.get_register(operands[1] as u16)?;
+            let addr = ctx.get_register(op_reg(operands, 0))?;
+            let length = ctx.get_register(op_reg(operands, 1))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -23199,9 +23259,9 @@ fn lower_ffi_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let addr = ctx.get_register(operands[0] as u16)?;
-            let length = ctx.get_register(operands[1] as u16)?;
-            let advice = ctx.get_register(operands[2] as u16)?;
+            let addr = ctx.get_register(op_reg(operands, 0))?;
+            let length = ctx.get_register(op_reg(operands, 1))?;
+            let advice = ctx.get_register(op_reg(operands, 2))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -23222,7 +23282,7 @@ fn lower_ffi_extended<'ctx>(
                 .ok_or_else(|| LlvmLoweringError::internal("SysMadvise: expected return value"))?;
             // Store result if there's a destination
             if operands.len() >= 4 {
-                ctx.set_register(operands[3] as u16, result);
+                ctx.set_register(op_reg(operands, 3), result);
             }
             Ok(())
         }
@@ -23234,9 +23294,9 @@ fn lower_ffi_extended<'ctx>(
                     "SysGetentropy: insufficient operands",
                 ));
             }
-            let dst_reg = operands[0] as u16;
-            let buf = ctx.get_register(operands[1] as u16)?;
-            let length = ctx.get_register(operands[2] as u16)?;
+            let dst_reg = op_reg(operands, 0);
+            let buf = ctx.get_register(op_reg(operands, 1))?;
+            let length = ctx.get_register(op_reg(operands, 2))?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -23271,7 +23331,7 @@ fn lower_ffi_extended<'ctx>(
             if operands.is_empty() {
                 return Ok(());
             }
-            let dst_reg = operands[0] as u16;
+            let dst_reg = op_reg(operands, 0);
             let zero = ctx.types().i64_type().const_zero();
             ctx.set_register(dst_reg, zero.into());
             Ok(())
@@ -23286,9 +23346,9 @@ fn lower_ffi_extended<'ctx>(
             if operands.len() < 3 {
                 return Ok(());
             }
-            let dst = operands[0] as u16;
-            let size_reg = operands[1] as u16;
-            let _align_reg = operands[2] as u16;
+            let dst = op_reg(operands, 0);
+            let size_reg = op_reg(operands, 1);
+            let _align_reg = op_reg(operands, 2);
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             let module = ctx.get_module();
@@ -23321,8 +23381,8 @@ fn lower_ffi_extended<'ctx>(
             if operands.len() < 4 {
                 return Ok(());
             }
-            let _dst = operands[0] as u16;
-            let ptr_reg = operands[1] as u16;
+            let _dst = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
@@ -23338,6 +23398,108 @@ fn lower_ffi_extended<'ctx>(
                 .build_call(dealloc_fn, &[ptr_val.into()], "")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             let _ = i64_ty;
+            Ok(())
+        }
+
+        // ================================================================
+        // Synchronization Primitives (0xB0-0xB2)
+        // ================================================================
+        // Route through the existing `verum_futex_wait` /
+        // `verum_futex_wake` / `verum_spinlock_lock` runtime helpers
+        // (declared and bodied later in this file at lines ~10034+).
+        // The interpreter implements these directly via park/unpark
+        // on a shared address keyed by the lock cell.
+        Some(FfiSubOpcode::FutexWait) => {
+            if operands.len() < 4 {
+                return Err(LlvmLoweringError::internal(
+                    "FutexWait: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let addr_reg = op_reg(operands, 1);
+            let expected_reg = op_reg(operands, 2);
+            let timeout_reg = op_reg(operands, 3);
+
+            let i64_type = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let fn_type =
+                i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+            let wait_fn = module
+                .get_function("verum_futex_wait")
+                .unwrap_or_else(|| module.add_function("verum_futex_wait", fn_type, None));
+
+            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "futex_addr")?;
+            let expected_val = as_i64(ctx, ctx.get_register(expected_reg)?, "futex_expected")?;
+            let timeout_val = as_i64(ctx, ctx.get_register(timeout_reg)?, "futex_timeout")?;
+
+            let result = ctx
+                .builder()
+                .build_call(
+                    wait_fn,
+                    &[addr_val.into(), expected_val.into(), timeout_val.into()],
+                    "futex_wait",
+                )
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .unwrap_or_else(|| i64_type.const_int(0, false).into());
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(FfiSubOpcode::FutexWake) => {
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "FutexWake: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let addr_reg = op_reg(operands, 1);
+            let count_reg = op_reg(operands, 2);
+
+            let i64_type = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+            let wake_fn = module
+                .get_function("verum_futex_wake")
+                .unwrap_or_else(|| module.add_function("verum_futex_wake", fn_type, None));
+
+            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "futex_addr")?;
+            let count_val = as_i64(ctx, ctx.get_register(count_reg)?, "futex_count")?;
+
+            let result = ctx
+                .builder()
+                .build_call(wake_fn, &[addr_val.into(), count_val.into()], "futex_wake")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .unwrap_or_else(|| i64_type.const_int(0, false).into());
+            ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        Some(FfiSubOpcode::SpinlockLock) => {
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "SpinlockLock: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let addr_reg = op_reg(operands, 1);
+
+            let i64_type = ctx.types().i64_type();
+            let module = ctx.get_module();
+            let void_type = ctx.types().void_type();
+            let fn_type = void_type.fn_type(&[i64_type.into()], false);
+            let lock_fn = module
+                .get_function("verum_spinlock_lock")
+                .unwrap_or_else(|| module.add_function("verum_spinlock_lock", fn_type, None));
+
+            let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "spinlock_addr")?;
+            ctx.builder()
+                .build_call(lock_fn, &[addr_val.into()], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst_reg, i64_type.const_int(0, false).into());
             Ok(())
         }
 
@@ -25816,7 +25978,7 @@ fn lower_tensor_extended<'ctx>(
     if operands.is_empty() {
         return Ok(());
     }
-    let dst_reg = operands[0] as u16;
+    let dst_reg = op_reg(operands, 0);
     let i64_ty = ctx.types().i64_type();
 
     let get_arg = |ctx: &FunctionContext<'_, 'ctx>,
@@ -27063,7 +27225,7 @@ fn lower_gpu_extended<'ctx>(
     if operands.is_empty() {
         return Ok(());
     }
-    let dst_reg = operands[0] as u16;
+    let dst_reg = op_reg(operands, 0);
     let i64_ty = ctx.types().i64_type();
 
     let get_arg = |ctx: &FunctionContext<'_, 'ctx>,
