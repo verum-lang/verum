@@ -480,6 +480,156 @@ pub fn run_fuzz_campaign_against(
 }
 
 // =============================================================================
+// Generative fuzz — random arbitrary CIC terms (vs. mutation)
+// =============================================================================
+//
+// Mutation-based fuzzing (above) keeps mutants close to canonical
+// well-typed seeds; generative fuzzing samples the structurally-
+// arbitrary CIC term space directly.  The two regimes are
+// complementary: mutation explores the well-typed neighbourhood;
+// generation explores everywhere else.
+//
+// For both, the property invariant is identical:
+//
+//   `registry.verify_all(&cert).agreement` must NOT be
+//   `Disagreement` — every registered kernel reaches the same
+//   verdict on the same certificate.
+//
+// Whether the random certificate types or not is irrelevant.
+// Generative fuzzing exposes implementation drift in the
+// rejection paths — kernels can share fast-accept paths but
+// disagree on which structurally-malformed shapes get rejected
+// vs. trigger an internal panic.
+
+/// Sample a structurally-arbitrary closed `Term` of bounded depth.
+///
+/// **Construction**: recursive descent producing any of the five
+/// `Term` variants with uniform probability.  Bounded by `depth`:
+/// at depth=0 we ALWAYS generate a leaf (`Var(0)` or `Universe(n)`)
+/// to terminate.  Variable indices are drawn from `[0, depth+2)`
+/// so the term has a chance of being well-scoped under shallow
+/// contexts; the kernel rejects free variables uniformly, so this
+/// is the soundness-clean way to keep both kernels in lockstep.
+///
+/// **Soundness contract**: the generated `Term` is structurally
+/// valid by construction (every `Pi`/`Lam`/`App` has the right
+/// boxed children).  Whether it type-checks under any context is
+/// not guaranteed — the test harness uses it as a fuzz input.
+pub fn gen_arbitrary_term(rng: &mut FuzzRng, depth: u32) -> crate::proof_checker::Term {
+    use crate::proof_checker::Term;
+    if depth == 0 {
+        // Leaf: Var or Universe with low-bias toward Universe(0)
+        // (the most common well-typed leaf).
+        return match rng.gen_below(3) {
+            0 => Term::Universe(rng.gen_below(4) as u32),
+            1 => Term::Var(rng.gen_below(3) as usize),
+            _ => Term::Universe(0),
+        };
+    }
+    match rng.gen_below(5) {
+        0 => Term::Universe(rng.gen_below(4) as u32),
+        1 => Term::Var(rng.gen_below((depth + 2) as u64) as usize),
+        2 => Term::Pi(
+            Box::new(gen_arbitrary_term(rng, depth - 1)),
+            Box::new(gen_arbitrary_term(rng, depth - 1)),
+        ),
+        3 => Term::Lam(
+            Box::new(gen_arbitrary_term(rng, depth - 1)),
+            Box::new(gen_arbitrary_term(rng, depth - 1)),
+        ),
+        4 => Term::App(
+            Box::new(gen_arbitrary_term(rng, depth - 1)),
+            Box::new(gen_arbitrary_term(rng, depth - 1)),
+        ),
+        _ => unreachable!("gen_below(5)"),
+    }
+}
+
+/// Generate a structurally-arbitrary `Certificate` by sampling
+/// independent random terms for `term` and `claimed_type`.
+/// Both terms have bounded depth.
+///
+/// **Yield rate**: most generated certificates will be ill-typed
+/// (the random `term` rarely inhabits the random `claimed_type`).
+/// That's the point — we exercise the rejection paths of both
+/// kernels and confirm lock-step rejection.  The few accept-path
+/// hits exercise normalisation/conversion lock-step.
+pub fn gen_arbitrary_certificate(
+    rng: &mut FuzzRng,
+    term_depth: u32,
+    type_depth: u32,
+) -> crate::proof_checker::Certificate {
+    crate::proof_checker::Certificate {
+        term: gen_arbitrary_term(rng, term_depth),
+        claimed_type: gen_arbitrary_term(rng, type_depth),
+        metadata: std::collections::BTreeMap::new(),
+    }
+}
+
+/// Run a single generative-fuzz iteration: sample a random
+/// certificate, run it through every registered kernel, return
+/// the result with the canonical `MultiVerdict`.
+pub fn run_generative_iteration(
+    iteration: usize,
+    rng: &mut FuzzRng,
+    registry: &KernelRegistry,
+) -> FuzzResult {
+    // Use shallow depths to keep the certificate space dense at
+    // realistic shapes; deeper depths rarely produce well-typed
+    // candidates and inflate Z3 / kernel evaluation cost.
+    let cert = gen_arbitrary_certificate(rng, 4, 4);
+    let verdict = registry.verify_all(&cert);
+    FuzzResult {
+        iteration,
+        // seed_index = 0 sentinel — generative fuzz has no seed
+        // index since certificates are sampled fresh.
+        seed_index: 0,
+        // Stable diagnostic tag for generative iterations.
+        mutation_tag: "generative",
+        verdict,
+    }
+}
+
+/// Run a generative-fuzz campaign over the default registry.
+///
+/// Same audit-failure contract as the mutation campaign: any
+/// disagreement is a kernel-implementation bug.
+pub fn run_generative_campaign(n_iterations: usize, base_seed: u64) -> FuzzCampaignReport {
+    let registry = KernelRegistry::default();
+    run_generative_campaign_against(&registry, n_iterations, base_seed)
+}
+
+pub fn run_generative_campaign_against(
+    registry: &KernelRegistry,
+    n_iterations: usize,
+    base_seed: u64,
+) -> FuzzCampaignReport {
+    let mut rng = FuzzRng::new(base_seed);
+    let mut unanimous_accept = 0usize;
+    let mut unanimous_reject = 0usize;
+    let mut disagreements: Vec<FuzzResult> = Vec::new();
+
+    for iter in 0..n_iterations {
+        let result = run_generative_iteration(iter, &mut rng, registry);
+        match &result.verdict.agreement {
+            crate::kernel_registry::AgreementVerdict::Unanimous => unanimous_accept += 1,
+            crate::kernel_registry::AgreementVerdict::UnanimousReject => unanimous_reject += 1,
+            crate::kernel_registry::AgreementVerdict::Disagreement { .. } => {
+                disagreements.push(result)
+            }
+        }
+    }
+
+    FuzzCampaignReport {
+        total_iterations: n_iterations,
+        unanimous_accept,
+        unanimous_reject,
+        disagreements,
+        registered_kernels: registry.names(),
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -672,6 +822,105 @@ mod tests {
         assert!(report.registered_kernels.contains(&"proof_checker_nbe"));
         // Sanity: campaign exercised both verdict directions.
         assert!(report.unanimous_accept + report.unanimous_reject == 200);
+    }
+
+    // ----- Generative fuzz tests -----
+
+    #[test]
+    fn gen_arbitrary_term_at_depth_zero_is_leaf() {
+        // Pin: depth=0 produces ONLY leaf terms (Var or Universe).
+        // Pi/Lam/App at depth=0 would unbalance the recursion.
+        use crate::proof_checker::Term;
+        let mut rng = FuzzRng::new(1234);
+        for _ in 0..50 {
+            let t = gen_arbitrary_term(&mut rng, 0);
+            assert!(
+                matches!(t, Term::Var(_) | Term::Universe(_)),
+                "depth=0 must yield leaf terms, got {:?}",
+                t,
+            );
+        }
+    }
+
+    #[test]
+    fn gen_arbitrary_term_bounded_depth_does_not_panic() {
+        // Pin: bounded depth never overflows the stack.
+        let mut rng = FuzzRng::new(0xCAFE);
+        for _ in 0..20 {
+            let _ = gen_arbitrary_term(&mut rng, 8);
+        }
+    }
+
+    #[test]
+    fn gen_arbitrary_certificate_independent_term_and_type() {
+        // Pin: term and claimed_type are independent samples.  The
+        // certificate is structurally valid; whether it type-checks
+        // is a separate matter (mostly: no).
+        let mut rng = FuzzRng::new(42);
+        let cert = gen_arbitrary_certificate(&mut rng, 3, 3);
+        assert!(cert.metadata.is_empty());
+        // Both fields are real Term values (smoke check).
+        let _ = format!("{:?}", cert.term);
+        let _ = format!("{:?}", cert.claimed_type);
+    }
+
+    #[test]
+    fn small_generative_campaign_zero_disagreements() {
+        // Headline soundness pin: 100-iteration generative campaign
+        // over default registry produces ZERO disagreements.  This
+        // is the key generative-vs-mutation result: even on
+        // structurally-arbitrary CIC terms, the trusted base and
+        // NbE kernel agree on every verdict.
+        let report = run_generative_campaign(100, 0xDEAD_F00D);
+        assert!(
+            report.is_sound(),
+            "generative fuzz found {} disagreement(s); first: {:?}",
+            report.disagreements.len(),
+            report.disagreements.first(),
+        );
+        assert_eq!(report.total_iterations, 100);
+        // Sanity: 100 random certificates land in some mix of
+        // accept/reject (almost all rejected, by construction —
+        // random certificates rarely type-check).
+        assert!(report.unanimous_accept + report.unanimous_reject == 100);
+    }
+
+    #[test]
+    fn generative_campaign_reproducible() {
+        // Determinism pin (mirror of mutation campaign).
+        let r1 = run_generative_campaign(50, 0xABCDEF);
+        let r2 = run_generative_campaign(50, 0xABCDEF);
+        assert_eq!(r1.unanimous_accept, r2.unanimous_accept);
+        assert_eq!(r1.unanimous_reject, r2.unanimous_reject);
+        assert_eq!(r1.disagreements.len(), r2.disagreements.len());
+    }
+
+    #[test]
+    fn generative_surfaces_disagreements_against_synthetic_kernel() {
+        // Liveness pin: when a synthetic always-accept kernel is
+        // registered alongside the trusted base, generative fuzz
+        // MUST surface disagreements (random terms rarely type, so
+        // the trusted base rejects almost all; AlwaysAcceptKernel
+        // accepts all → disagreement).  Confirms the gate isn't
+        // vacuous.
+        struct AlwaysAccept;
+        impl KernelChecker for AlwaysAccept {
+            fn name(&self) -> &'static str {
+                "always_accept_synthetic"
+            }
+            fn description(&self) -> &'static str {
+                "synthetic — always accepts (test-only)"
+            }
+            fn verify(&self, _: &crate::proof_checker::Certificate) -> Result<(), CheckError> {
+                Ok(())
+            }
+        }
+        use crate::kernel_registry::ProofCheckerKernel;
+        let mut registry = KernelRegistry::new();
+        registry.register(ProofCheckerKernel);
+        registry.register(AlwaysAccept);
+        let report = run_generative_campaign_against(&registry, 50, 0xCAFE);
+        assert!(!report.is_sound(), "synthetic always-accept must surface disagreements");
     }
 
     #[test]

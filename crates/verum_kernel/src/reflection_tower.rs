@@ -473,6 +473,90 @@ pub fn discharge_at_universe_index(k: u32) -> ConstructiveDischarge {
 }
 
 // =============================================================================
+// Multi-level stability walk — recursive descent meta-meta-soundness
+// =============================================================================
+
+/// Aggregate verdict from walking `discharge_at_universe_index`
+/// across `[0, max_lift]`.  Surfaces:
+///   * `max_walked` — highest level walked (== max_lift on success).
+///   * `all_stable` — true iff witness pattern is invariant for
+///     every k ≥ 1 (MSFS Theorem 9.6(b) idempotence).
+///   * `divergence_at` — first k where invariance broke (None when
+///     all_stable holds).
+#[derive(Debug, Clone)]
+pub struct StabilityVerdict {
+    pub max_walked: u32,
+    pub all_stable: bool,
+    pub divergence_at: Option<u32>,
+    /// Sampled witness pattern from k=1 (the canonical reference);
+    /// every subsequent k is compared against this.
+    pub canonical_witness_summary: String,
+}
+
+impl StabilityVerdict {
+    /// True iff the walk completed and every level was stable.
+    pub fn is_load_bearing(&self) -> bool {
+        self.all_stable && self.divergence_at.is_none()
+    }
+}
+
+/// **Walk multi-level stability up to `max_lift`.**
+///
+/// The recursive-descent meta-meta-soundness check.  For every
+/// `k ∈ [0, max_lift]`, computes [`discharge_at_universe_index`]
+/// and verifies the witness pattern is invariant for `k ≥ 1`
+/// (MSFS Theorem 9.6(b) idempotence — every meta-iteration of
+/// the classifier produces the same `(∞,∞)`-theory; only the
+/// universe ascends).
+///
+/// `max_lift = 0` walks only the base level; `max_lift = N` walks
+/// `0..=N`.  Default for the audit gate is `max_lift = 10` —
+/// sufficient to verify deep stability without inflating audit
+/// time.
+pub fn walk_stability_up_to(max_lift: u32) -> StabilityVerdict {
+    let canonical = discharge_at_universe_index(1);
+    let canonical_summary = format!(
+        "a_m_cls={}, b_pi={}, b_universe_ascent={}, holds={}",
+        canonical.witness.a_m_cls_is_meta_cls_holds,
+        canonical.witness.b_pi_inf_inf_plus_1_equivalent,
+        canonical.witness.b_universe_ascent_with_theory_idempotence,
+        canonical.holds,
+    );
+
+    for k in 0..=max_lift {
+        let d = discharge_at_universe_index(k);
+        // For k = 0 the witness's b_* fields are false by
+        // construction (REF^0 base; idempotence kicks in at k≥1).
+        // For k ≥ 1 the witness pattern MUST equal the canonical
+        // (Theorem 9.6(b)).
+        if k >= 1 {
+            let stable = d.witness.a_m_cls_is_meta_cls_holds
+                == canonical.witness.a_m_cls_is_meta_cls_holds
+                && d.witness.b_pi_inf_inf_plus_1_equivalent
+                    == canonical.witness.b_pi_inf_inf_plus_1_equivalent
+                && d.witness.b_universe_ascent_with_theory_idempotence
+                    == canonical.witness.b_universe_ascent_with_theory_idempotence
+                && d.holds == canonical.holds;
+            if !stable {
+                return StabilityVerdict {
+                    max_walked: k,
+                    all_stable: false,
+                    divergence_at: Some(k),
+                    canonical_witness_summary: canonical_summary,
+                };
+            }
+        }
+    }
+
+    StabilityVerdict {
+        max_walked: max_lift,
+        all_stable: true,
+        divergence_at: None,
+        canonical_witness_summary: canonical_summary,
+    }
+}
+
+// =============================================================================
 // TowerReport — audit-gate carrier
 // =============================================================================
 
@@ -501,11 +585,17 @@ pub struct ReflectionTowerReport {
     /// theory, so spot-checking at non-trivial indices exposes any
     /// regression in the constructive witness synthesis.
     pub sampled_constructive_discharges: Vec<ConstructiveDischarge>,
+    /// **Multi-level stability verdict** (default `max_lift = 10`).
+    /// Algorithmically walks `[0, max_lift]` confirming idempotence
+    /// — recursive-descent meta-meta-soundness.  Surfaces the first
+    /// divergence index when stability breaks.
+    pub stability_verdict: StabilityVerdict,
 }
 
 impl ReflectionTowerReport {
-    /// True iff every stage discharges AND every sampled
-    /// constructive per-index discharge holds.  Audit-gate
+    /// True iff every stage discharges, every sampled constructive
+    /// per-index discharge holds, AND multi-level stability
+    /// (recursive-descent meta-meta-soundness) holds.  Audit-gate
     /// failure predicate.
     pub fn is_load_bearing(&self) -> bool {
         self.stage_verdicts.iter().all(|v| v.discharges)
@@ -513,6 +603,7 @@ impl ReflectionTowerReport {
                 .sampled_constructive_discharges
                 .iter()
                 .all(|d| d.holds)
+            && self.stability_verdict.is_load_bearing()
     }
 
     /// Number of stages that discharged.
@@ -562,10 +653,14 @@ pub fn build_tower_report() -> ReflectionTowerReport {
         .iter()
         .map(|&k| discharge_at_universe_index(k))
         .collect();
+    // Multi-level stability walk — default max_lift = 10 walks
+    // [0, 10] verifying idempotence per MSFS Theorem 9.6(b).
+    let stability_verdict = walk_stability_up_to(10);
     ReflectionTowerReport {
         stage_verdicts,
         max_inaccessible_required: max_inaccessible_required(),
         sampled_constructive_discharges,
+        stability_verdict,
     }
 }
 
@@ -824,6 +919,44 @@ mod tests {
         // Every sampled discharge must hold.
         assert!(r.is_load_bearing());
         assert_eq!(r.constructive_discharged_count(), 6);
+    }
+
+    // ----- Multi-level stability walk -----
+
+    #[test]
+    fn walk_stability_holds_for_max_lift_zero() {
+        // Pin: max_lift=0 walks only the base level — there are no
+        // k≥1 to compare, so the verdict is trivially stable.
+        let v = walk_stability_up_to(0);
+        assert!(v.all_stable);
+        assert!(v.divergence_at.is_none());
+        assert_eq!(v.max_walked, 0);
+    }
+
+    #[test]
+    fn walk_stability_holds_for_default_max_lift_10() {
+        // Headline soundness pin: walking [0, 10] under the current
+        // kernel rule roster verifies idempotence at every k≥1.
+        // MSFS Theorem 9.6(b) holds constructively.
+        let v = walk_stability_up_to(10);
+        assert!(v.is_load_bearing(), "stability walk must hold; got {:?}", v);
+        assert_eq!(v.max_walked, 10);
+        assert!(v.divergence_at.is_none());
+    }
+
+    #[test]
+    fn walk_stability_at_arbitrary_high_lift() {
+        // Pin: walking up to 100 still holds — Theorem 9.6(b) is
+        // unbounded in finite k.  No divergence at any depth.
+        let v = walk_stability_up_to(100);
+        assert!(v.is_load_bearing());
+    }
+
+    #[test]
+    fn build_tower_report_includes_stability_verdict() {
+        let r = build_tower_report();
+        assert!(r.stability_verdict.is_load_bearing());
+        assert_eq!(r.stability_verdict.max_walked, 10);
     }
 
     #[test]
