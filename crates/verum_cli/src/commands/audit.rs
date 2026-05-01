@@ -2823,6 +2823,7 @@ fn audit_cross_format_roundtrip_inner(
                     params: Vec::new(),
                     generics: Vec::new(),
                     has_proof_body: has_proof,
+                    per_backend_proof_tactic: std::collections::BTreeMap::new(),
                     declared_strategy,
                 }
                 .with_translated_params(&walker_params)
@@ -3226,6 +3227,7 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
                 params: Vec::new(),
                 generics: Vec::new(),
                 has_proof_body: has_proof,
+                per_backend_proof_tactic: std::collections::BTreeMap::new(),
                 declared_strategy,
             });
         }

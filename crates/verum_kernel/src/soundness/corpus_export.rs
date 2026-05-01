@@ -146,8 +146,29 @@ pub struct TheoremSpec {
     /// Whether the theorem has a proof body.  Statements without a
     /// proof body are treated as axioms (postulates) in the foreign
     /// tool; ones with a proof body get `sorry` / `Admitted.` as a
-    /// placeholder until per-theorem proof-term export lands.
+    /// placeholder unless `per_backend_proof_tactic` carries a real
+    /// translation (#153 — proof-term emission).
     pub has_proof_body: bool,
+    /// **Per-backend translated proof body (#153 / Phase 2 of
+    /// proof-term emission)**.  When a backend's entry is present,
+    /// the corresponding [`CorpusBackend`] uses that text in place
+    /// of the `admit` / `sorry` placeholder — `Proof. <text> Qed.`
+    /// (Coq) / `theorem ... := <text>` (Lean).  Keys are backend
+    /// ids (`"coq"` / `"lean"`); values are the renderer's output.
+    /// Absent entries trigger the placeholder fallback so partial
+    /// translation coverage is safe — backends that haven't been
+    /// taught a particular proof-body shape silently degrade to
+    /// admitted-with-comment instead of producing malformed output.
+    ///
+    /// **Why a per-backend map (rather than a single proof_text)**:
+    /// Coq and Lean tactic syntax diverges enough that a single
+    /// canonical form would over-constrain the translator
+    /// (e.g. Coq `apply X.` vs. Lean `exact X` for term-mode-leaning
+    /// dispatch).  The map keeps each backend independent and lets
+    /// translators land iteratively without touching the wire
+    /// format.
+    #[serde(default)]
+    pub per_backend_proof_tactic: std::collections::BTreeMap<String, String>,
     /// `@verify(<strategy>)` annotation if present (records the
     /// declared verification level for the audit report).
     pub declared_strategy: Option<String>,
@@ -332,13 +353,37 @@ impl CorpusBackend for CoqCorpusBackend {
         let coq_generics = render_generics_for_backend(spec, "coq");
         let coq_params = render_params_for_backend(spec, "coq");
         if spec.has_proof_body {
-            content.push_str(&format!(
-                "Theorem {}{}{} : {}.\n\
-                 Proof.\n  \
-                   admit.\n\
-                 Admitted.\n",
-                spec.name, coq_generics, coq_params, coq_type,
-            ));
+            // #153 / Phase 2: when a translated proof tactic is
+            // available for this backend, emit it in place of
+            // `admit.` + `Admitted.`  Closes the proof normally
+            // with `Qed.` (constructive) instead of `Admitted.`
+            // (un-checked).  Coq accepts multi-line tactic bodies;
+            // we wrap the translation in a `Proof.`/`Qed.` block
+            // and prefix each line with two-space indent so the
+            // output stays readable.
+            match spec.per_backend_proof_tactic.get("coq") {
+                Some(tactic) if !tactic.trim().is_empty() => {
+                    content.push_str(&format!(
+                        "Theorem {}{}{} : {}.\nProof.\n",
+                        spec.name, coq_generics, coq_params, coq_type,
+                    ));
+                    for line in tactic.lines() {
+                        content.push_str("  ");
+                        content.push_str(line);
+                        content.push('\n');
+                    }
+                    content.push_str("Qed.\n");
+                }
+                _ => {
+                    content.push_str(&format!(
+                        "Theorem {}{}{} : {}.\n\
+                         Proof.\n  \
+                           admit.\n\
+                         Admitted.\n",
+                        spec.name, coq_generics, coq_params, coq_type,
+                    ));
+                }
+            }
         } else {
             content.push_str(&format!(
                 "Axiom {}{}{} : {}.\n",
@@ -388,6 +433,15 @@ pub fn compute_provenance_signature(
     hasher.update(spec.proposition_text.as_bytes());
     hasher.update(b"\x00");
     hasher.update(if spec.has_proof_body { b"T" } else { b"F" });
+    hasher.update(b"\x00");
+    // #153: include this backend's translated proof tactic in the
+    // signature.  When the tactic changes (translator improvement,
+    // refactor, soundness fix), the signature flips — third-party
+    // reviewers see a hash mismatch and know the proof body has
+    // shifted, not just the proposition.
+    if let Some(tactic) = spec.per_backend_proof_tactic.get(backend_id) {
+        hasher.update(tactic.as_bytes());
+    }
     hasher.update(b"\x00");
     if let Some(s) = &spec.declared_strategy {
         hasher.update(s.as_bytes());
@@ -464,10 +518,29 @@ impl CorpusBackend for LeanCorpusBackend {
         let lean_generics = render_generics_for_backend(spec, "lean");
         let lean_params = render_params_for_backend(spec, "lean");
         if spec.has_proof_body {
-            content.push_str(&format!(
-                "theorem {}{}{} : {} := by sorry\n",
-                spec.name, lean_generics, lean_params, lean_type,
-            ));
+            // #153 / Phase 2: when a translated proof tactic is
+            // available for this backend, emit it in place of
+            // `:= by sorry`.  Lean 4 accepts both term-mode
+            // (`:= <expr>`) and tactic-mode (`:= by <tactics>`)
+            // proofs; the translator decides which form to emit
+            // by prefixing the text with `by ` or not.  We pass
+            // the translation through verbatim — translators are
+            // responsible for emitting the leading `by ` themselves
+            // when their output is a tactic block.
+            match spec.per_backend_proof_tactic.get("lean") {
+                Some(tactic) if !tactic.trim().is_empty() => {
+                    content.push_str(&format!(
+                        "theorem {}{}{} : {} := {}\n",
+                        spec.name, lean_generics, lean_params, lean_type, tactic,
+                    ));
+                }
+                _ => {
+                    content.push_str(&format!(
+                        "theorem {}{}{} : {} := by sorry\n",
+                        spec.name, lean_generics, lean_params, lean_type,
+                    ));
+                }
+            }
         } else {
             content.push_str(&format!(
                 "axiom {}{}{} : {}\n",
@@ -573,6 +646,7 @@ mod tests {
             params: Vec::new(),
             generics: Vec::new(),
             has_proof_body: true,
+            per_backend_proof_tactic: std::collections::BTreeMap::new(),
             declared_strategy: None,
         }
     }
@@ -586,6 +660,7 @@ mod tests {
             params: Vec::new(),
             generics: Vec::new(),
             has_proof_body: false,
+            per_backend_proof_tactic: std::collections::BTreeMap::new(),
             declared_strategy: None,
         }
     }
@@ -626,6 +701,140 @@ mod tests {
         assert!(rendered.content.contains("axiom my_axiom : Prop"));
         assert!(!rendered.content.contains("theorem"));
         assert!(!rendered.content.contains("sorry"));
+    }
+
+    // -------------------------------------------------------------
+    // #153 — per_backend_proof_tactic: real proof-body emission
+    // -------------------------------------------------------------
+
+    #[test]
+    fn coq_emits_proof_tactic_when_present() {
+        let backend = CoqCorpusBackend::new();
+        let mut spec = spec_proven("delegated_thm", "P");
+        spec.per_backend_proof_tactic
+            .insert("coq".to_string(), "apply other_thm.".to_string());
+        let rendered = backend.render_theorem(&spec);
+        assert!(
+            rendered.content.contains("Proof.\n  apply other_thm.\nQed."),
+            "tactic must replace `admit. Admitted.`; got:\n{}",
+            rendered.content,
+        );
+        assert!(
+            !rendered.content.contains("Admitted."),
+            "Admitted must not appear when a proof tactic is present",
+        );
+    }
+
+    #[test]
+    fn lean_emits_proof_tactic_when_present() {
+        let backend = LeanCorpusBackend::new();
+        let mut spec = spec_proven("delegated_thm", "P");
+        spec.per_backend_proof_tactic
+            .insert("lean".to_string(), "by apply other_thm".to_string());
+        let rendered = backend.render_theorem(&spec);
+        assert!(
+            rendered
+                .content
+                .contains("theorem delegated_thm : Prop := by apply other_thm"),
+            "tactic must replace `:= by sorry`; got:\n{}",
+            rendered.content,
+        );
+        assert!(
+            !rendered.content.contains("sorry"),
+            "sorry must not appear when a proof tactic is present",
+        );
+    }
+
+    #[test]
+    fn coq_falls_back_to_admitted_when_tactic_missing() {
+        // Per-backend independence: even if Lean has a translation,
+        // Coq without one falls back to Admitted.
+        let backend = CoqCorpusBackend::new();
+        let mut spec = spec_proven("partial_thm", "P");
+        spec.per_backend_proof_tactic
+            .insert("lean".to_string(), "by exact x".to_string());
+        let rendered = backend.render_theorem(&spec);
+        assert!(rendered.content.contains("Admitted."));
+    }
+
+    #[test]
+    fn lean_falls_back_to_sorry_when_tactic_missing() {
+        let backend = LeanCorpusBackend::new();
+        let mut spec = spec_proven("partial_thm", "P");
+        spec.per_backend_proof_tactic
+            .insert("coq".to_string(), "apply x.".to_string());
+        let rendered = backend.render_theorem(&spec);
+        assert!(rendered.content.contains(":= by sorry"));
+    }
+
+    #[test]
+    fn empty_proof_tactic_is_treated_as_missing() {
+        // A whitespace-only tactic shouldn't be emitted as a proof.
+        // Whitespace-only is the same as absent: fall back to admitted.
+        let backend = CoqCorpusBackend::new();
+        let mut spec = spec_proven("whitespace_thm", "P");
+        spec.per_backend_proof_tactic
+            .insert("coq".to_string(), "   \n  \t".to_string());
+        let rendered = backend.render_theorem(&spec);
+        assert!(rendered.content.contains("Admitted."));
+    }
+
+    #[test]
+    fn coq_proof_tactic_supports_multiline_body() {
+        let backend = CoqCorpusBackend::new();
+        let mut spec = spec_proven("multistep_thm", "P");
+        spec.per_backend_proof_tactic.insert(
+            "coq".to_string(),
+            "intros n.\napply lemma_1.\nexact H.".to_string(),
+        );
+        let rendered = backend.render_theorem(&spec);
+        assert!(rendered.content.contains("  intros n."));
+        assert!(rendered.content.contains("  apply lemma_1."));
+        assert!(rendered.content.contains("  exact H."));
+        assert!(rendered.content.ends_with("Qed.\n"));
+    }
+
+    #[test]
+    fn provenance_signature_changes_when_proof_tactic_changes() {
+        // The signature (#174) must change when the proof body
+        // changes — otherwise reviewers can't detect proof-body
+        // drift between releases.
+        let mut spec_a = spec_proven("thm", "P");
+        spec_a
+            .per_backend_proof_tactic
+            .insert("coq".to_string(), "apply v1.".to_string());
+        let mut spec_b = spec_proven("thm", "P");
+        spec_b
+            .per_backend_proof_tactic
+            .insert("coq".to_string(), "apply v2.".to_string());
+        let sig_a = compute_provenance_signature(&spec_a, "coq");
+        let sig_b = compute_provenance_signature(&spec_b, "coq");
+        assert_ne!(
+            sig_a, sig_b,
+            "different proof tactics must produce different signatures",
+        );
+    }
+
+    #[test]
+    fn provenance_signature_independent_per_backend() {
+        // The signature for backend X depends on backend X's tactic
+        // only — not the union of all tactics.  Otherwise editing
+        // Lean's translation would break the Coq signature.
+        let mut spec = spec_proven("thm", "P");
+        spec.per_backend_proof_tactic
+            .insert("coq".to_string(), "apply x.".to_string());
+        spec.per_backend_proof_tactic
+            .insert("lean".to_string(), "by apply x".to_string());
+        let coq_sig_with_lean = compute_provenance_signature(&spec, "coq");
+
+        spec.per_backend_proof_tactic
+            .insert("lean".to_string(), "by apply different_x".to_string());
+        let coq_sig_after_lean_change = compute_provenance_signature(&spec, "coq");
+
+        assert_eq!(
+            coq_sig_with_lean, coq_sig_after_lean_change,
+            "Coq signature must not depend on Lean's tactic",
+        );
     }
 
     #[test]
