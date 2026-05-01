@@ -39274,16 +39274,7 @@ impl TypeChecker {
         fallback: &Type,
     ) -> Type {
         let type_name = verum_common::Text::from(name);
-        // #[cfg(debug_assertions)]
-        // if name == "Maybe" {
-        //     eprintln!("[DEBUG try_build_variant] Checking constructors for: {}", name);
-        //     eprintln!("[DEBUG try_build_variant] args = {:?}", args);
-        // }
         if let Some(constructors) = self.ctx.get_constructors(&type_name) {
-            // #[cfg(debug_assertions)]
-            // if name == "Maybe" {
-            //     eprintln!("[DEBUG try_build_variant] Found {} constructors", constructors.len());
-            // }
             if !constructors.is_empty() {
                 // Build variant map from inductive constructors
                 let mut variants: indexmap::IndexMap<verum_common::Text, Type> = indexmap::IndexMap::new();
@@ -39317,24 +39308,11 @@ impl TypeChecker {
                             let subst_ty = self.substitute_type_params(payload_ty, &subst);
                             substituted_variants.insert(tag.clone(), subst_ty);
                         }
-                        // #[cfg(debug_assertions)]
-                        // if name == "Maybe" {
-                        //     eprintln!("[DEBUG try_build_variant] Returning substituted Variant with {} entries", substituted_variants.len());
-                        // }
                         return Type::Variant(substituted_variants);
                     }
                 }
-                // #[cfg(debug_assertions)]
-                // if name == "Maybe" {
-                //     eprintln!("[DEBUG try_build_variant] Returning unsubstituted Variant with {} entries", variants.len());
-                // }
                 return Type::Variant(variants);
             }
-        } else {
-            // #[cfg(debug_assertions)]
-            // if name == "Maybe" {
-            //     eprintln!("[DEBUG try_build_variant] No constructors found for: {}", name);
-            // }
         }
         fallback.clone()
     }
