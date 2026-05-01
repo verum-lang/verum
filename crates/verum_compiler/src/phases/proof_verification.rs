@@ -1502,6 +1502,84 @@ pub fn verify_proof_body_with_aliases_and_graph(
         };
     }
 
+    // ----------------------------------------------------------------
+    // Separation-logic fast path (#161 V5)
+    // ----------------------------------------------------------------
+    //
+    // Before falling into the generic SMT engine, attempt to route
+    // the obligation through the separation-logic encoder when the
+    // theorem's `requires`/`ensures` clauses are syntactic
+    // separation predicates (calls to `core/logic/separation.vr`
+    // smart constructors).
+    //
+    // Routing rules:
+    //   * Exactly one `requires` clause AND exactly one `ensures`
+    //     clause (i.e. a clean Hoare triple).
+    //   * Both clauses recognise as separation predicates via
+    //     `verum_smt::separation_recognizer::try_recognize_sep_assertion`.
+    //   * The dispatcher returns `Valid` → verification succeeds.
+    //   * The dispatcher returns `Invalid` → verification fails with
+    //     a counterexample-bearing diagnostic.
+    //   * The dispatcher returns `Unknown` or `NotSeparationGoal` →
+    //     fall through to the generic SMT path. Soundness: nothing
+    //     unsound is admitted; the generic path takes over with full
+    //     hypothesis context and the original goal.
+    //
+    // **Architectural rationale**: separation-logic obligations are
+    // a NATURAL FIT for the encoder's array-theory-backed Z3 setup
+    // (`SepLogicEncoder::verify_entailment`). Routing through the
+    // generic SMT path treats `sep_conj`/`points_to` as opaque UF,
+    // which Z3's CEGAR loop almost always falsifies. The fast path
+    // gives the encoder its native input.
+    //
+    // **Performance**: the recogniser is O(n) AST walk; on
+    // non-separation theorems it returns `NotSeparationGoal`
+    // immediately and the cost is bounded by the requires/ensures
+    // size (typically <30 nodes; <1µs).
+    if theorem.requires.iter().count() == 1 && theorem.ensures.iter().count() == 1 {
+        let req_expr = theorem.requires.iter().next().expect("len==1");
+        let ens_expr = theorem.ensures.iter().next().expect("len==1");
+        match verum_smt::separation_recognizer::verify_separation_obligation(req_expr, ens_expr) {
+            verum_smt::separation_recognizer::SepObligationOutcome::Valid => {
+                return ProofVerificationResult::Verified(ProofCertificate {
+                    theorem_name,
+                    steps: List::new(),
+                    total_duration: proof_start.elapsed(),
+                    has_incomplete_steps: false,
+                });
+            }
+            verum_smt::separation_recognizer::SepObligationOutcome::Invalid {
+                counterexample_summary,
+            } => {
+                let mut suggestions = List::new();
+                suggestions.push(Text::from(format!(
+                    "separation-logic counterexample: {}",
+                    counterexample_summary,
+                )));
+                let mut unproved = List::new();
+                unproved.push(UnprovedSubgoal {
+                    goal: Text::from(format!(
+                        "separation-logic Hoare obligation {{P}} c {{Q}} \
+                         REJECTED by SepLogicEncoder",
+                    )),
+                    hypotheses: List::new(),
+                    suggestions,
+                });
+                return ProofVerificationResult::Failed {
+                    verified_steps: List::new(),
+                    unproved,
+                };
+            }
+            // Unknown / NotSeparationGoal → fall through to the
+            // generic SMT path. NotSeparationGoal is the dominant
+            // case (most theorems aren't pure-separation goals);
+            // Unknown means the encoder couldn't decide and the
+            // generic SMT may have better luck via Z3's general
+            // tactics.
+            _ => {}
+        }
+    }
+
     // Build the primary goal from the theorem's proposition and requires clauses.
     //
 
