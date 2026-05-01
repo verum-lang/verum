@@ -746,32 +746,6 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         // Verum + κ_2 + ZFC.  Adding κ_meta on top (one strongly
         // inaccessible above κ_2) puts the soundness proof inside
         // the meta-universe.
-        "kernel_self_soundness_in_meta_universe" => {
-            // **Algorithmic discharge** (not just framework-cited):
-            // delegate to `kernel_meta_soundness_holds` which walks
-            // every kernel rule's per-rule footprint and verifies the
-            // union is bounded by ZFC + 2-inaccessibles.  When the
-            // bound holds, the meta-soundness claim
-            // (kernel sound in Verum + κ_meta + ZFC + 2-inacc)
-            // reduces to direct enumeration — no further trust
-            // delegation beyond the standard meta-theory.
-            let audit = crate::zfc_self_recognition::kernel_meta_soundness_footprint();
-            let holds = audit.is_provable_in_zfc_plus_2_inacc();
-            Some(IntrinsicValue::Decision {
-                holds,
-                reason: format!(
-                    "Gödel 2nd workaround (algorithmic discharge): \
-                     {} — kernel meta-soundness reduces to per-rule \
-                     enumeration via verum_kernel::zfc_self_recognition::\
-                     required_meta_theory.  Adding κ_meta (one strongly \
-                     inaccessible above the working universe) closes the \
-                     meta-soundness claim.  See \
-                     core/verify/kernel_self_soundness/meta_theorem.vr.",
-                    audit.report(),
-                ),
-            })
-        }
-
         // Reflection-tower discharge routes (MSFS-grounded).
         //
         // Three structural facts (NOT five opaque ordinal levels):
@@ -937,15 +911,14 @@ pub fn available_intrinsics() -> &'static [&'static str] {
         "kernel_soundness_v0",
         // Separation-logic surface alignment (#161 V0).
         "kernel_separation_logic_alignment_is_sound",
-        // Meta-soundness escape hatch.
-        "kernel_self_soundness_in_meta_universe",
         // Reflection-tower discharges (MSFS-grounded).
-        // Three structural facts:
-        //   * base footprint (per-rule enumeration).
+        // Four structural facts; the base stage subsumes the
+        // rank-1 meta-soundness claim previously declared as a
+        // separate axiom.
+        //   * base footprint (per-rule enumeration; rank-1 meta-soundness).
         //   * REF^≥1 theory-level idempotence (MSFS Theorem 9.6(b)).
         //   * REF^ω bounded by Con(S) + κ_inacc (MSFS Theorem 8.2).
-        // All three constructively dispatch through MSFS-machine-
-        // verified intrinsics already in this module.
+        //   * REF^Abs (AFN-T α — boundary).
         "kernel_reflection_tower_base",
         "kernel_reflection_tower_stable",
         "kernel_reflection_tower_omega_bounded",
@@ -1276,15 +1249,15 @@ mod tests {
         // dispatchers from core/verify/codegen_soundness/ + 11
         // kernel_v0 rule soundness IOUs from core/verify/kernel_v0/ +
         // 1 separation-logic alignment dispatcher from
-        // core/verify/separation_soundness/ + 5 meta-soundness escape
+        // core/verify/separation_soundness/ + 4 reflection-tower
         // dispatchers from core/verify/kernel_self_soundness/
-        // (1 base meta-theorem + 4 MSFS-grounded reflection-tower
-        // facts: 3 interior stages + AFN-T α boundary). Adding a
-        // new bridge axiom must update both the bridge surface and
-        // this count.
+        // (REF^0 base subsumes the former rank-1 meta-soundness
+        // axiom; REF^≥1 / REF^ω / REF^Abs complete the tower).
+        // Adding a new bridge axiom must update both the bridge
+        // surface and this count.
         assert_eq!(
             names.len(),
-            50,
+            49,
             "Every kernel_* axiom in core/proof/kernel_bridge.vr + \
              core/math/hott.vr + core/verify/codegen_soundness/ + \
              core/verify/kernel_v0/ + core/verify/separation_soundness/ + \

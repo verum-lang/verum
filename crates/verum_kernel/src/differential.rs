@@ -263,21 +263,39 @@ impl DifferentialReport {
 /// classification will become live without touching this function's
 /// callers.
 pub fn run_differential_test(rule: &KernelV0Rule, certificate: &Certificate) -> DifferentialReport {
-    let rust_verdict: KernelVerdict = certificate.verify().into();
-    // **#159 V1 — second algorithmic kernel**.  Pre-V1 the second
-    // slot was stubbed as `NotYetSelfHosting` because no second
-    // implementation existed.  Post-V1 the NbE-based
-    // [`crate::proof_checker_nbe`] runs as the second kernel.
-    // Differential-test catches implementation bugs in EITHER
-    // implementation as Disagreement verdicts.
-    //
-    // The Verum-self-hosted kernel (`core/verify/kernel_v0/`) is
-    // a separate, longer-running project tracked under #154; when
-    // it lands it will become a THIRD slot via a separate
-    // `run_differential_test_with_verum` invocation.
-    let nbe_verdict: KernelVerdict =
-        crate::proof_checker_nbe::verify_certificate(certificate).into();
+    // Canonical N-kernel discharge via the registry — single source
+    // of truth for differential testing.  Outcomes are extracted in
+    // registration order (proof_checker, proof_checker_nbe) and
+    // mapped into the differential-report verdict shape.
+    use crate::kernel_registry::KernelRegistry;
+    let registry = KernelRegistry::default();
+    let multi = registry.verify_all(certificate);
+    let rust_verdict = multi
+        .outcomes
+        .iter()
+        .find(|o| o.kernel_name == "proof_checker")
+        .map(outcome_to_kernel_verdict)
+        .unwrap_or(KernelVerdict::NotYetSelfHosting);
+    let nbe_verdict = multi
+        .outcomes
+        .iter()
+        .find(|o| o.kernel_name == "proof_checker_nbe")
+        .map(outcome_to_kernel_verdict)
+        .unwrap_or(KernelVerdict::NotYetSelfHosting);
     DifferentialReport::new(rule.name.clone(), rust_verdict, nbe_verdict)
+}
+
+fn outcome_to_kernel_verdict(outcome: &crate::kernel_registry::KernelOutcome) -> KernelVerdict {
+    if outcome.accepted {
+        KernelVerdict::Accepted
+    } else {
+        KernelVerdict::Rejected {
+            reason: outcome
+                .error_summary
+                .clone()
+                .unwrap_or_else(|| "rejected".to_string()),
+        }
+    }
 }
 
 /// Variant of [`run_differential_test`] that accepts a Verum-side

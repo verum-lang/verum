@@ -1692,17 +1692,6 @@ enum Commands {
         #[clap(long)]
         ar_roadmap: bool,
 
-        /// Kernel self-recognition audit. Decomposes each of the
-        /// seven kernel rules (K-Refine, K-Univ, K-Pos, K-Norm,
-        /// K-FwAx, K-Adj-Unit, K-Adj-Counit) into its required ZFC
-        /// axioms + Grothendieck universes per
-        /// `verum_kernel::zfc_self_recognition::required_meta_theory`.
-        /// Reports the trusted-base ZFC + κ_n union and exits
-        /// non-zero if any rule fails the ZFC + 2-inacc provability
-        /// invariant.
-        #[clap(long)]
-        self_recognition: bool,
-
         /// Cross-format CI hard gate audit. Lists the four
         /// required export formats (Coq, Lean4, Isabelle, Dedukti)
         /// with their replay commands per
@@ -3900,7 +3889,6 @@ fn run_command(cli: Cli) -> Result<()> {
             coord_consistency,
             htt_roadmap,
             ar_roadmap,
-            self_recognition,
             cross_format,
             kernel_intrinsics,
             kernel_discharged_axioms,
@@ -3996,8 +3984,6 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_htt_roadmap(output_format)
             } else if ar_roadmap {
                 commands::audit::audit_ar_roadmap(output_format)
-            } else if self_recognition {
-                commands::audit::audit_self_recognition(output_format)
             } else if cross_format {
                 commands::audit::audit_cross_format(output_format)
             } else if kernel_intrinsics {
