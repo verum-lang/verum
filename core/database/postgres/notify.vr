@@ -1,0 +1,718 @@
+// =============================================================================
+// core/database/postgres/notify.vr — high-level LISTEN/NOTIFY pub/sub API
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1 (LISTEN/NOTIFY scaling), §6.1.7
+//       (NOTIFY semantics)
+// =============================================================================
+//
+// Postgres LISTEN/NOTIFY is the cheapest in-server pub/sub channel
+// in any modern relational database. The wire-level
+// `NotificationResponse` arrives at any time the server pushes —
+// `connection.vr` already demuxes them into a `List<NotificationResponse>`
+// buffer (poll-based API). This module adds the stream-based
+// surface that production code wants:
+//
+//   let stream = dispatcher.subscribe("chat:room42");
+//   loop {
+//       let notif = stream.block_until_next()?;
+//       handle_message(&notif.payload);
+//   }
+//
+// Why a separate module:
+//
+//   * `connection.vr` owns the wire-frame demux (one buffer per
+//     connection, populated by `read_message`). This module owns
+//     the *fan-out* — channel-keyed routing across many
+//     subscribers, broadcast semantics, capability gating.
+//
+//   * Multi-subscriber-per-channel is a real production pattern
+//     (different parts of the app react to the same notify). The
+//     dispatcher's `Map<Text, List<Shared<ChannelSink>>>` cleanly
+//     handles fan-out without complicating the connection's hot
+//     path.
+//
+//   * The capability lattice (`core.database.common.capability`)
+//     gates `Database<P, DbNotify>` to LISTEN/NOTIFY only — every
+//     entry point here is callable through that bound, so misuse
+//     compiles into "method not in scope" errors.
+//
+//   * The rate-limit warning (§6.1: NOTIFY does not scale past
+//     ~1000 subscribers because of the global commit lock) lives
+//     here — application code shouldn't have to pattern-match the
+//     wire layer to see it.
+//
+// # Architecture
+//
+//   ┌─────────────────────┐ ──┐
+//   │ PgConnection.read_  │   │ on every NotificationResponse
+//   │ message (existing)  │ ──┼─ dispatcher.dispatch(notif)
+//   └─────────────────────┘   │
+//                             ▼
+//                  ┌─────────────────────────┐
+//                  │ NotifyDispatcher        │
+//                  │   channels: Mutex<      │
+//                  │     Map<Text,           │
+//                  │       List<Shared<      │
+//                  │         ChannelSink>>>  │
+//                  │   warnings: rate-limit  │
+//                  │   metrics: counters     │
+//                  └────┬────────────────────┘
+//                       │ fan-out to every subscriber
+//                       ▼
+//                ┌──────────────────┐
+//                │ NotificationStream│ (one per subscribe call)
+//                │   sink: Shared<…>│
+//                │   block_until_next│
+//                │   try_next        │
+//                │   close           │
+//                └──────────────────┘
+//
+// # Concurrency
+//
+// `Shared<ChannelSink>` is reference-counted; cloning gives another
+// handle to the same inner state. The sink's queue is guarded by a
+// `Mutex` and a wakeup `Condvar` so the dispatcher can fill it from
+// the read loop while consumers block on `block_until_next`.
+// `core.sync.condvar.wait_timeout` is the wakeup primitive.
+// =============================================================================
+
+module core.database.postgres.notify;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.memory.Shared;
+mount collections.List;
+mount sync.mutex.Mutex;
+mount sync.condvar.Condvar;
+mount time.instant.Instant;
+mount core.database.common.error.{DbError, AdapterSpecific, AdPostgres};
+mount core.database.postgres.wire.backend.NotificationResponse;
+
+// -----------------------------------------------------------------------------
+// Notification — typed wrapper carried by the stream
+// -----------------------------------------------------------------------------
+
+/// One server-side NOTIFY event seen on a subscribed channel.
+/// Self-describing — the consumer needs no out-of-band context to
+/// route the event further (a single dispatcher can serve many
+/// channels through different streams, but each notification still
+/// carries its channel name for diagnostics / metrics labels).
+public type Notification is {
+    /// Channel name, exactly as the producer passed it to `NOTIFY`.
+    channel: Text,
+    /// Payload string. Empty when the producer omitted it.
+    payload: Text,
+    /// Postgres backend pid that emitted the notification — useful
+    /// for filtering self-emitted events ("don't react to my own
+    /// NOTIFY") and for distributed-trace correlation.
+    sender_pid: Int,
+    /// Wall-clock at the moment the dispatcher received the
+    /// frame. Monotonic; useful for staleness checks when the
+    /// dispatcher backpressures.
+    received_at: Instant,
+};
+
+implement Notification {
+    /// Build a `Notification` from the wire frame plus a fresh
+    /// timestamp. Used by `NotifyDispatcher.dispatch`; rarely
+    /// constructed by user code.
+    public fn from_wire(resp: &NotificationResponse) -> Notification {
+        Notification {
+            channel: resp.channel.clone(),
+            payload: resp.payload.clone(),
+            sender_pid: resp.process_id,
+            received_at: Instant.now(),
+        }
+    }
+
+    /// True iff the notification was emitted by the same backend
+    /// pid the consumer is connected through. A common pattern:
+    /// skip self-emitted events to avoid loops.
+    public fn is_self_emitted(&self, my_pid: Int) -> Bool {
+        self.sender_pid == my_pid
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ChannelSink — per-subscriber queue
+// -----------------------------------------------------------------------------
+//
+// A bounded queue (default 1024 entries) feeding one `NotificationStream`.
+// When the queue overflows, the oldest entries are dropped — a
+// notification system that blocks the dispatcher on a stuck consumer
+// would let one slow handler stall every other channel. Drops are
+// counted; metrics surface them as a clear signal.
+
+/// Maximum buffered notifications per subscriber before back-pressure
+/// kicks in. 1024 fits the common case of a UI consumer reading at
+/// human speed (≪ 1000 events/s); database-driven pubsub-storm
+/// scenarios should reach for logical replication instead (spec §6.1).
+public const NOTIFY_CHANNEL_DEFAULT_CAP: Int = 1024;
+
+type SinkInner is {
+    queue: List<Notification>,
+    /// Hard cap before the oldest entry is dropped to make room.
+    cap: Int,
+    /// Total received by this sink since construction.
+    total_received: Int,
+    /// Total dropped because the queue was full.
+    total_dropped: Int,
+    /// True when the dispatcher has unsubscribed this sink. Future
+    /// calls to `block_until_next` return `Drained`.
+    closed: Bool,
+};
+
+/// One subscriber's incoming queue. Reference-counted so the
+/// dispatcher and the consumer hold parallel handles.
+public type ChannelSink is {
+    inner: Mutex<SinkInner>,
+    notify: Condvar,
+    /// Channel this sink is subscribed to — preserved for
+    /// diagnostics / metric labels.
+    channel: Text,
+};
+
+implement ChannelSink {
+    public fn new(channel: Text, cap: Int) -> ChannelSink {
+        let actual_cap = if cap < 1 { 1 } else { cap };
+        ChannelSink {
+            inner: Mutex.new(SinkInner {
+                queue: List.new(),
+                cap: actual_cap,
+                total_received: 0,
+                total_dropped: 0,
+                closed: false,
+            }),
+            notify: Condvar.new(),
+            channel: channel,
+        }
+    }
+
+    /// Push one notification — invoked by the dispatcher's fan-out.
+    /// Drops the oldest entry on overflow rather than blocking
+    /// the dispatcher.
+    fn push(&self, notif: Notification) {
+        {
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => return,
+            };
+            guard.total_received = guard.total_received + 1;
+            if (guard.queue.len() as Int) >= guard.cap {
+                // Drop the head (oldest). O(N) — fine at default
+                // cap = 1024, called only on overflow.
+                guard.total_dropped = guard.total_dropped + 1;
+                let mut new_q: List<Notification> = List.with_capacity(guard.cap);
+                let mut i: Int = 1;
+                while i < guard.queue.len() as Int {
+                    new_q.push(clone_notif(&guard.queue[i]));
+                    i = i + 1;
+                }
+                guard.queue = new_q;
+            }
+            guard.queue.push(notif);
+        }
+        self.notify.notify_one();
+    }
+
+    /// Mark closed — wakes any blocked consumer with `Drained`.
+    fn close(&self) {
+        {
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => return,
+            };
+            guard.closed = true;
+        }
+        self.notify.notify_all();
+    }
+
+    pub fn channel(&self) -> Text { self.channel.clone() }
+}
+
+// -----------------------------------------------------------------------------
+// NotificationStream — consumer-side handle
+// -----------------------------------------------------------------------------
+
+/// Outcome of `block_until_next`. `Got(notif)` is the happy path;
+/// `Drained` means the dispatcher closed the subscription (typically
+/// because the connection went away or `unsubscribe` was called).
+/// Streams that observe `Drained` MUST NOT call `block_until_next`
+/// again — the dispatcher will not feed the sink any further.
+public type NotificationOutcome is
+      Got(Notification)
+    | Drained;
+
+/// Subscriber-side handle. One per `subscribe` call; multiple
+/// streams on the same channel each get an independent fan-out.
+public type NotificationStream is {
+    sink: Shared<ChannelSink>,
+};
+
+implement NotificationStream {
+    /// Channel this stream is subscribed to.
+    public fn channel(&self) -> Text {
+        self.sink.channel()
+    }
+
+    /// Non-blocking pop. Returns `None` when the queue is empty —
+    /// caller spins on its own schedule (typically a select! /
+    /// nursery wait).
+    public fn try_next(&self) -> Maybe<Notification> {
+        let mut guard = match self.sink.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return None,
+        };
+        if (guard.queue.len() as Int) == 0 {
+            return None;
+        }
+        let head = clone_notif(&guard.queue[0]);
+        let mut new_q: List<Notification> = List.with_capacity(guard.queue.len() as Int);
+        let mut i: Int = 1;
+        while i < guard.queue.len() as Int {
+            new_q.push(clone_notif(&guard.queue[i]));
+            i = i + 1;
+        }
+        guard.queue = new_q;
+        Some(head)
+    }
+
+    /// Block until a notification arrives or the dispatcher closes
+    /// this subscription. The blocking primitive is the sink's own
+    /// `Condvar` — same wakeup pattern as `core.sync.condvar.wait`.
+    public fn block_until_next(&self) -> Result<NotificationOutcome, DbError> {
+        let mut guard = match self.sink.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return Err(notify_poisoned("sink mutex poisoned".clone())),
+        };
+        loop {
+            if guard.closed && (guard.queue.len() as Int) == 0 {
+                return Ok(Drained);
+            }
+            if (guard.queue.len() as Int) > 0 {
+                let head = clone_notif(&guard.queue[0]);
+                let mut new_q: List<Notification> = List.with_capacity(guard.queue.len() as Int);
+                let mut i: Int = 1;
+                while i < guard.queue.len() as Int {
+                    new_q.push(clone_notif(&guard.queue[i]));
+                    i = i + 1;
+                }
+                guard.queue = new_q;
+                return Ok(Got(head));
+            }
+            guard = match self.sink.notify.wait(guard) {
+                Ok(g)  => g,
+                Err(_) => return Err(notify_poisoned("sink wait poisoned".clone())),
+            };
+        }
+    }
+
+    /// Block with a deadline. Returns `Drained` on timeout AS WELL AS
+    /// on close — the caller distinguishes by checking if the stream
+    /// is still active afterwards (not currently exposed; close
+    /// status is observable via dispatcher metrics).
+    public fn block_until_next_timeout(&self, timeout_ns: Int)
+        -> Result<NotificationOutcome, DbError>
+    {
+        let mut guard = match self.sink.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return Err(notify_poisoned("sink mutex poisoned".clone())),
+        };
+        if guard.closed && (guard.queue.len() as Int) == 0 {
+            return Ok(Drained);
+        }
+        if (guard.queue.len() as Int) > 0 {
+            return Ok(Got(pop_head_locked(&mut guard)));
+        }
+        match self.sink.notify.wait_timeout(guard, timeout_ns) {
+            Ok((mut g, timed_out)) => {
+                if timed_out {
+                    return Ok(Drained);
+                }
+                if (g.queue.len() as Int) > 0 {
+                    Ok(Got(pop_head_locked(&mut g)))
+                } else if g.closed {
+                    Ok(Drained)
+                } else {
+                    Ok(Drained)            // spurious wake; caller retries
+                }
+            }
+            Err(_) => Err(notify_poisoned("sink wait poisoned".clone())),
+        }
+    }
+
+    /// Per-stream metrics snapshot.
+    public fn metrics(&self) -> StreamMetrics {
+        let guard = match self.sink.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return StreamMetrics.empty(),
+        };
+        StreamMetrics {
+            channel: self.sink.channel.clone(),
+            queued: guard.queue.len() as Int,
+            cap: guard.cap,
+            total_received: guard.total_received,
+            total_dropped: guard.total_dropped,
+            closed: guard.closed,
+        }
+    }
+}
+
+fn pop_head_locked(guard: &mut SinkInner) -> Notification {
+    let head = clone_notif(&guard.queue[0]);
+    let mut new_q: List<Notification> = List.with_capacity(guard.queue.len() as Int);
+    let mut i: Int = 1;
+    while i < guard.queue.len() as Int {
+        new_q.push(clone_notif(&guard.queue[i]));
+        i = i + 1;
+    }
+    guard.queue = new_q;
+    head
+}
+
+// -----------------------------------------------------------------------------
+// NotifyDispatcher — channel-keyed fan-out
+// -----------------------------------------------------------------------------
+//
+// Owns:
+//   * The channel routing table (linear lookup is fine — applications
+//     subscribe to a handful of channels, not thousands).
+//   * Rate-limit metrics for the §6.1 warning.
+//   * Total dispatched / dropped counters.
+//
+// The dispatcher is constructed per-connection (typically owned by
+// `PgConnection`). For a connection-pool variant where every
+// connection's notifications fan out into the same application-level
+// dispatcher, use `Shared<NotifyDispatcher>` and clone it across
+// connections.
+
+type ChannelRoute is {
+    channel: Text,
+    /// Multiple sinks for the same channel ⇒ broadcast.
+    sinks: List<Shared<ChannelSink>>,
+};
+
+type DispatcherInner is {
+    routes: List<ChannelRoute>,
+    /// Total notifications dispatched (sum over all channels).
+    total_dispatched: Int,
+    /// Notifications received with no matching subscriber — silently
+    /// dropped, but counted for diagnostics.
+    total_orphaned: Int,
+    /// Total subscribe calls since construction.
+    total_subscribes: Int,
+    /// Total unsubscribe calls.
+    total_unsubscribes: Int,
+    /// Sliding-window rate counter — events received in the last
+    /// `rate_window_ns`. Used by `should_emit_rate_warning` to
+    /// decide whether to surface §6.1's "this isn't going to scale"
+    /// warning.
+    rate_window_start: Instant,
+    rate_window_count: Int,
+    /// Whether the rate-warning has already been emitted this
+    /// session (avoid log-spam).
+    rate_warning_emitted: Bool,
+};
+
+public type NotifyDispatcher is {
+    inner: Mutex<DispatcherInner>,
+};
+
+/// Threshold for the §6.1 NOTIFY-doesn't-scale warning. If we see
+/// more than this many notifications in `RATE_WINDOW_NS` we emit a
+/// one-shot warning recommending logical replication. Threshold
+/// chosen as 1000/sec — well below the global-lock breaking point
+/// (~10k/s) but high enough that ordinary control-plane pubsub
+/// (config refresh, cache invalidation) doesn't trip it.
+public const NOTIFY_RATE_WARNING_THRESHOLD: Int = 1000;
+public const NOTIFY_RATE_WINDOW_NS: Int        = 1_000_000_000;     // 1 second
+
+implement NotifyDispatcher {
+    public fn new() -> NotifyDispatcher {
+        NotifyDispatcher {
+            inner: Mutex.new(DispatcherInner {
+                routes: List.new(),
+                total_dispatched: 0,
+                total_orphaned: 0,
+                total_subscribes: 0,
+                total_unsubscribes: 0,
+                rate_window_start: Instant.now(),
+                rate_window_count: 0,
+                rate_warning_emitted: false,
+            }),
+        }
+    }
+
+    /// Subscribe to `channel`. Returns a `NotificationStream`; the
+    /// caller blocks on `block_until_next` to consume events.
+    /// Multiple subscribes to the same channel each get an
+    /// independent stream — events fan out to all subscribers.
+    public fn subscribe(&self, channel: Text) -> NotificationStream {
+        self.subscribe_with_cap(channel, NOTIFY_CHANNEL_DEFAULT_CAP)
+    }
+
+    /// Subscribe with an explicit per-stream queue cap. Use when
+    /// the consumer is a slow batch-processor and needs more
+    /// buffering before drops kick in (or, conversely, a real-time
+    /// handler that should drop early).
+    public fn subscribe_with_cap(&self, channel: Text, cap: Int) -> NotificationStream {
+        let sink_owned = ChannelSink.new(channel.clone(), cap);
+        let sink_handle = Shared.new(sink_owned);
+        {
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => return NotificationStream { sink: sink_handle.clone() },
+            };
+            guard.total_subscribes = guard.total_subscribes + 1;
+            // Find an existing route or create a new one.
+            let mut found_idx: Int = -1;
+            let mut i: Int = 0;
+            while i < guard.routes.len() as Int {
+                if guard.routes[i].channel == channel {
+                    found_idx = i;
+                    break;
+                }
+                i = i + 1;
+            }
+            if found_idx >= 0 {
+                guard.routes[found_idx].sinks.push(sink_handle.clone());
+            } else {
+                let mut sinks: List<Shared<ChannelSink>> = List.new();
+                sinks.push(sink_handle.clone());
+                guard.routes.push(ChannelRoute {
+                    channel: channel,
+                    sinks: sinks,
+                });
+            }
+        }
+        NotificationStream { sink: sink_handle }
+    }
+
+    /// Drop every subscription to `channel`. Existing
+    /// `NotificationStream` instances on that channel will see
+    /// `Drained` on their next blocking call.
+    public fn unsubscribe_channel(&self, channel: &Text) {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return,
+        };
+        let mut found_idx: Int = -1;
+        let mut i: Int = 0;
+        while i < guard.routes.len() as Int {
+            if guard.routes[i].channel == *channel {
+                found_idx = i;
+                break;
+            }
+            i = i + 1;
+        }
+        if found_idx < 0 { return; }
+        // Close every sink so blocked consumers wake up.
+        let mut s: Int = 0;
+        while s < guard.routes[found_idx].sinks.len() as Int {
+            guard.routes[found_idx].sinks[s].close();
+            s = s + 1;
+        }
+        // Remove the route. O(N) — fine at small N.
+        let mut new_routes: List<ChannelRoute> = List.with_capacity(guard.routes.len() as Int);
+        let mut k: Int = 0;
+        while k < guard.routes.len() as Int {
+            if k != found_idx {
+                new_routes.push(clone_route(&guard.routes[k]));
+            }
+            k = k + 1;
+        }
+        guard.routes = new_routes;
+        guard.total_unsubscribes = guard.total_unsubscribes + 1;
+    }
+
+    /// Dispatch one wire-level NotificationResponse — invoked by
+    /// the connection's `read_message` after demux. Fan-out to
+    /// every sink subscribed to the notification's channel.
+    /// Notifications with no matching subscriber are counted as
+    /// orphaned and silently dropped.
+    public fn dispatch(&self, resp: &NotificationResponse) {
+        let notif = Notification.from_wire(resp);
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return,
+        };
+        // Update rate-limit counters BEFORE finding the route — the
+        // signal we care about is total inflight pressure, not
+        // per-channel.
+        let now = Instant.now();
+        let elapsed_ns = now.duration_since(guard.rate_window_start)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        if elapsed_ns >= NOTIFY_RATE_WINDOW_NS {
+            guard.rate_window_start = now;
+            guard.rate_window_count = 1;
+        } else {
+            guard.rate_window_count = guard.rate_window_count + 1;
+        }
+        // Find the route. Linear scan; OK for small subscription tables.
+        let mut found_idx: Int = -1;
+        let mut i: Int = 0;
+        while i < guard.routes.len() as Int {
+            if guard.routes[i].channel == resp.channel {
+                found_idx = i;
+                break;
+            }
+            i = i + 1;
+        }
+        if found_idx < 0 {
+            guard.total_orphaned = guard.total_orphaned + 1;
+            return;
+        }
+        // Clone-and-push to every sink in the route.
+        let mut s: Int = 0;
+        while s < guard.routes[found_idx].sinks.len() as Int {
+            guard.routes[found_idx].sinks[s].push(clone_notif(&notif));
+            s = s + 1;
+        }
+        guard.total_dispatched = guard.total_dispatched + 1;
+    }
+
+    /// Mark every subscription as drained — invoked by the
+    /// connection's `close()` so blocked consumers wake up cleanly.
+    public fn close_all(&self) {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return,
+        };
+        let mut i: Int = 0;
+        while i < guard.routes.len() as Int {
+            let mut s: Int = 0;
+            while s < guard.routes[i].sinks.len() as Int {
+                guard.routes[i].sinks[s].close();
+                s = s + 1;
+            }
+            i = i + 1;
+        }
+        guard.routes = List.new();
+    }
+
+    /// Whether the §6.1 rate-limit warning should be emitted to
+    /// the application log. One-shot — returns true at most once
+    /// per dispatcher lifetime, the moment the rate exceeds the
+    /// threshold. Application code calls this in its read loop
+    /// after every dispatch and routes the result to its logger /
+    /// metrics layer.
+    public fn should_emit_rate_warning(&self) -> Bool {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return false,
+        };
+        if guard.rate_warning_emitted { return false; }
+        if guard.rate_window_count > NOTIFY_RATE_WARNING_THRESHOLD {
+            guard.rate_warning_emitted = true;
+            return true;
+        }
+        false
+    }
+
+    /// Snapshot of dispatcher-wide metrics.
+    public fn metrics(&self) -> DispatcherMetrics {
+        let guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => return DispatcherMetrics.empty(),
+        };
+        DispatcherMetrics {
+            total_routes: guard.routes.len() as Int,
+            total_dispatched: guard.total_dispatched,
+            total_orphaned: guard.total_orphaned,
+            total_subscribes: guard.total_subscribes,
+            total_unsubscribes: guard.total_unsubscribes,
+            current_rate_per_window: guard.rate_window_count,
+            rate_warning_emitted: guard.rate_warning_emitted,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Metrics types
+// -----------------------------------------------------------------------------
+
+public type StreamMetrics is {
+    channel: Text,
+    queued: Int,
+    cap: Int,
+    total_received: Int,
+    total_dropped: Int,
+    closed: Bool,
+};
+
+implement StreamMetrics {
+    public fn empty() -> StreamMetrics {
+        StreamMetrics {
+            channel: "".clone(),
+            queued: 0,
+            cap: 0,
+            total_received: 0,
+            total_dropped: 0,
+            closed: false,
+        }
+    }
+}
+
+public type DispatcherMetrics is {
+    total_routes: Int,
+    total_dispatched: Int,
+    total_orphaned: Int,
+    total_subscribes: Int,
+    total_unsubscribes: Int,
+    /// Notifications received in the most recent
+    /// `NOTIFY_RATE_WINDOW_NS` window — feeds the §6.1 warning.
+    current_rate_per_window: Int,
+    /// Whether the rate-warning has fired this session.
+    rate_warning_emitted: Bool,
+};
+
+implement DispatcherMetrics {
+    public fn empty() -> DispatcherMetrics {
+        DispatcherMetrics {
+            total_routes: 0,
+            total_dispatched: 0,
+            total_orphaned: 0,
+            total_subscribes: 0,
+            total_unsubscribes: 0,
+            current_rate_per_window: 0,
+            rate_warning_emitted: false,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_notif(n: &Notification) -> Notification {
+    Notification {
+        channel: n.channel.clone(),
+        payload: n.payload.clone(),
+        sender_pid: n.sender_pid,
+        received_at: n.received_at,
+    }
+}
+
+fn clone_route(r: &ChannelRoute) -> ChannelRoute {
+    let mut sinks: List<Shared<ChannelSink>> = List.with_capacity(r.sinks.len() as Int);
+    let mut i: Int = 0;
+    while i < r.sinks.len() as Int {
+        sinks.push(r.sinks[i].clone());
+        i = i + 1;
+    }
+    ChannelRoute {
+        channel: r.channel.clone(),
+        sinks: sinks,
+    }
+}
+
+fn notify_poisoned(msg: Text) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "NOTIFY_POISONED".clone(),
+        message: msg,
+        retryable: false,
+    })
+}
