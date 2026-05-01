@@ -834,6 +834,23 @@ impl VbcCodegen {
         }
     }
 
+    /// Returns `true` iff `ty` is a generic type whose first type-argument
+    /// resolves (via `extract_base_type_name`) to `inner`.  Used to detect
+    /// e.g. `List<Byte>` → for routing `with_capacity(N)` to the packed
+    /// byte-list intrinsic (red-team §4 ergonomic auto-routing).
+    pub(crate) fn is_generic_first_arg(&self, ty: &verum_ast::ty::Type, inner: &str) -> bool {
+        match &ty.kind {
+            verum_ast::ty::TypeKind::Generic { args, .. } => args.iter().next().is_some_and(|a| {
+                if let verum_ast::ty::GenericArg::Type(t) = a {
+                    self.extract_base_type_name(t).as_deref() == Some(inner)
+                } else {
+                    false
+                }
+            }),
+            _ => false,
+        }
+    }
+
     /// Returns `true` if `name` is registered as a transparent *allocating* wrapper
     /// (i.e. Heap or Shared — a wrapper that allocates on the heap, but NOT Maybe).
     /// Used for the `Wrapper(x)` / `Wrapper::new(x)` call patterns which only apply
@@ -4625,8 +4642,7 @@ impl VbcCodegen {
                 name: StringId(name_string_id),
                 ..Default::default()
             };
-            self.functions
-                .push(VbcFunction::new(stub_descriptor, vec![]));
+            self.push_function_dedup(VbcFunction::new(stub_descriptor, vec![]));
 
             let info = FunctionInfo {
                 id: func_id,
@@ -5475,9 +5491,50 @@ impl VbcCodegen {
         }
 
         let vbc_func = VbcFunction::new(descriptor, instructions);
-        self.functions.push(vbc_func);
+        self.push_function_dedup(vbc_func);
 
         Ok(())
+    }
+
+    /// **VBC-DISP-2: push-time duplicate-id detection** — the
+    /// architecturally-clean alternative to the post-pass dedup at
+    /// `finalize_module` (kept as defense-in-depth).
+    ///
+    /// Blanket-impl replays + generic monomorphization both call
+    /// `register_function` for the same name; under
+    /// `prefer_existing_functions=true` (stdlib loading) the
+    /// registry is first-wins, so the second `register_function`
+    /// is a no-op and the FunctionInfo's id stays the same.  But
+    /// `compile_function` ALWAYS pushes a fresh VbcFunction body —
+    /// producing TWO bodies with the SAME descriptor.id.
+    ///
+    /// This helper enforces the registry's wins-policy at push
+    /// time:
+    ///   * `prefer_existing_functions=true` (first-wins): if the
+    ///     id is already in `self.functions`, SKIP the new push.
+    ///     The first body wins, matching the registry's behaviour.
+    ///   * `prefer_existing_functions=false` (last-wins, user code):
+    ///     REPLACE the existing entry.
+    ///
+    /// The post-pass dedup at `finalize_module` becomes a no-op
+    /// for legitimate code paths but stays as a safety net for
+    /// any push site that bypasses this helper (audit aid).
+    fn push_function_dedup(&mut self, vbc_func: VbcFunction) {
+        let new_id = vbc_func.descriptor.id.0;
+        if let Some(existing_idx) = self.functions.iter().position(|f| f.descriptor.id.0 == new_id)
+        {
+            if self.ctx.prefer_existing_functions {
+                // First-wins: the existing body stays; drop the
+                // new push.  Stdlib loading + protocol-impl path
+                // hit this branch (~25 collapses pre-fix that the
+                // post-pass dedup was cleaning up).
+                return;
+            }
+            // Last-wins: replace.  User-code compilation path.
+            self.functions[existing_idx] = vbc_func;
+            return;
+        }
+        self.functions.push(vbc_func);
     }
 
     /// Registers an FFI extern function for lookup WITHOUT consuming a function ID.
@@ -8209,9 +8266,10 @@ impl VbcCodegen {
             descriptor.register_count = register_count;
             descriptor.locals_count = 0;
 
-            // Create VbcFunction and add it
+            // Create VbcFunction and add it (dedupe via push_function_dedup
+            // so blanket-impl replays don't produce same-id duplicates).
             let vbc_func = VbcFunction::new(descriptor, instructions);
-            self.functions.push(vbc_func);
+            self.push_function_dedup(vbc_func);
         }
 
         Ok(())
@@ -8267,7 +8325,7 @@ impl VbcCodegen {
             descriptor.locals_count = 0;
 
             let vbc_func = VbcFunction::new(descriptor, instructions);
-            self.functions.push(vbc_func);
+            self.push_function_dedup(vbc_func);
 
             // Register as global constructor so it runs before main()
             self.static_init_functions.push(func_id);
@@ -9360,7 +9418,7 @@ impl VbcCodegen {
 
         let vbc_func = VbcFunction::new(descriptor, instructions);
 
-        self.functions.push(vbc_func);
+        self.push_function_dedup(vbc_func);
         Ok(())
     }
 
