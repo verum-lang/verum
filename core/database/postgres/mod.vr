@@ -38,6 +38,7 @@ public module extended;
 public module pipeline;
 public module notify;
 public module pool;
+public module typed_database;
 public module introspect;
 public module transaction;
 public module copy;
@@ -77,6 +78,11 @@ public mount .notify.{
     NotifyDispatcher, ChannelSink,
     StreamMetrics, DispatcherMetrics,
     NOTIFY_CHANNEL_DEFAULT_CAP, NOTIFY_RATE_WARNING_THRESHOLD, NOTIFY_RATE_WINDOW_NS,
+};
+public mount .typed_database.{
+    TxScope,
+    database_from_pool, admin_database_from_pool,
+    notify_database_from_pool, replication_database_from_pool,
 };
 public mount .pool.PgPool;
 public mount .introspect.introspect as introspect_postgres;

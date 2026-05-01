@@ -1,0 +1,485 @@
+// =============================================================================
+// core/database/postgres/typed_database.vr — capability-bounded surface
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §5.4 (capability types), §15.1 (handler use)
+// =============================================================================
+//
+// The capability-bounded method surface for `Database<PgPool, C>`.
+// Until this module exists, the `Database<P, C>` wrapper from
+// `core.database.common.db_handle` plus the `Capability` /
+// `CanRead` / `CanWrite` / `CanTx` / `CanDdl` / `CanNotify` /
+// `CanCopy` / `CanUnsafe` protocols (defined in
+// `core.database.common.capability`) are *decorative*: handlers can
+// construct `Database<PgPool, DbRead>` but no methods actually
+// appear on it. This module wires the lattice into real methods so
+// misuse compiles into a clean "method not in scope" error rather
+// than a runtime SQLSTATE 42501 / 23xxx.
+//
+// # Pattern
+//
+//   implement<C: CanRead> Database<PgPool, C> {
+//       public fn query_simple(&self, sql: &Text)
+//           -> Result<List<List<WireValue>>, DbError>
+//       { ... acquires from pool, delegates, releases ... }
+//   }
+//
+//   implement<C: CanWrite> Database<PgPool, C> { fn execute_simple(...) }
+//   implement<C: CanTx>    Database<PgPool, C> { fn begin(...) / fn run_with_retry(...) }
+//   implement<C: CanDdl>   Database<PgPool, C> { fn execute_ddl(...) }
+//   implement<C: CanNotify>Database<PgPool, C> { fn subscribe_channel / fn notify / ... }
+//   implement<C: CanCopy>  Database<PgPool, C> { fn copy_from_text / fn copy_to_text }
+//   implement<C: CanUnsafe>Database<PgPool, C> { fn execute_raw_unsafe(...) }
+//
+// `implement<P, C: Capability> Database<P, C>` from `db_handle.vr`
+// already gives the universal accessors (`pool_shared`,
+// `capabilities`, `capability_name`); this module fills the
+// adapter-specific behavioural surface.
+//
+// # Naming convention
+//
+// Methods that take a verbatim SQL `&Text` end with `_simple` —
+// they bypass the parameterised binary-protocol path and use the
+// connection's `simple_query` / `execute`. The parameterised
+// surface (which would consume `PreparedQuery<R, P>` from a
+// `sql#"..."` literal) is the spec's "compile-time SQL validation"
+// promise; landed once the meta-fn machinery emits the typed
+// handle. Today's user code reaches for the typed prepared API via
+// `MysqlConnection.prepare` / PG's `extended.vr` directly when
+// they need that.
+//
+// # Async vs sync
+//
+// `PgPool.acquire` and `PgConnection.simple_query` etc. are
+// currently synchronous (Mutex/Condvar primitives, blocking
+// `read_message`). The Database<P, C> methods here mirror that —
+// no `async` annotation. When the adapter migrates to async runtime
+// (a significant follow-up across `pool_impl` / `connection.vr`),
+// this surface adopts `async` uniformly without breaking the
+// capability-gating story.
+// =============================================================================
+
+module core.database.postgres.typed_database;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount base.memory.Shared;
+
+mount core.database.common.error.{DbError, AdapterSpecific, AdPostgres};
+mount core.database.common.types.WireValue;
+mount core.database.common.db_handle.Database;
+mount core.database.common.capability.{
+    Capability, CanRead, CanWrite, CanTx, CanDdl, CanNotify, CanCopy, CanUnsafe,
+    DbRead, DbReadWriteTx, DbAdmin, DbReplication, DbNotify, DbCopy, DbUnsafe,
+    CapabilitySet,
+};
+mount core.database.common.pool_impl.{PooledConnection, ReleaseKind, Healthy, Discard};
+
+mount core.database.postgres.pool.PgPool;
+mount core.database.postgres.connection.{PgConnection, PgSimpleQueryResult};
+mount core.database.postgres.transaction.{PgTransaction, begin_tx};
+mount core.database.postgres.notify.{
+    Notification, NotificationStream, NotifyDispatcher,
+    NOTIFY_CHANNEL_DEFAULT_CAP,
+};
+mount core.database.postgres.copy.{CopyInBuilder, CopyOutBuilder};
+
+// -----------------------------------------------------------------------------
+// Read-bound surface — DbRead / DbReadWriteTx / DbAdmin / DbReplication /
+// DbNotify / DbCopy / DbUnsafe all implement CanRead.
+// -----------------------------------------------------------------------------
+
+implement<C: CanRead> Database<PgPool, C> {
+    /// Run a SELECT against the pool — acquire a connection, run
+    /// `simple_query`, release. Returns the typed
+    /// `PgSimpleQueryResult` so callers see column metadata + rows
+    /// + command_tag in one shape.
+    ///
+    /// Acquire / release happens transparently. On any error the
+    /// connection is RELEASE_DISCARDed so the pool reopens a fresh
+    /// one (matches the spec's drop-on-fault discipline).
+    public fn query_simple(&self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().simple_query(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+
+    /// Convenience — return only the rows (discards column metadata
+    /// and command_tag). Most read-paths want this.
+    public fn query_rows(&self, sql: &Text) -> Result<List<List<WireValue>>, DbError> {
+        match self.query_simple(sql) {
+            Ok(r)  => Ok(r.rows),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Convenience — first row or None.
+    public fn query_first(&self, sql: &Text) -> Result<Maybe<List<WireValue>>, DbError> {
+        match self.query_simple(sql) {
+            Ok(r) => {
+                if (r.rows.len() as Int) == 0 {
+                    Ok(None)
+                } else {
+                    Ok(Some(r.rows[0].clone()))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Write-bound surface — DbReadWriteTx / DbAdmin / DbCopy / DbUnsafe.
+// `execute_simple` runs INSERT / UPDATE / DELETE through the
+// simple-query protocol; the bound rejects accidental writes from
+// `Database<PgPool, DbRead>` at compile time.
+// -----------------------------------------------------------------------------
+
+implement<C: CanWrite> Database<PgPool, C> {
+    /// Run an INSERT / UPDATE / DELETE — acquire, execute, release.
+    /// Returns the server-supplied command_tag (e.g. "INSERT 0 3").
+    /// Callers parse the tag for the affected-rows count or use
+    /// `query_simple` + look at `rows.len()` for RETURNING-clause
+    /// shapes.
+    public fn execute_simple(&self, sql: &Text) -> Result<Text, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().execute(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tx-bound surface — DbReadWriteTx / DbAdmin / DbUnsafe. Begin a
+// transaction; the returned `PgTransaction` is `affine` (must be
+// consumed by commit / rollback per spec §5.5).
+// -----------------------------------------------------------------------------
+
+implement<C: CanTx> Database<PgPool, C> {
+    /// Open a transaction with the pool's default isolation level
+    /// (READ COMMITTED). The returned `PgTransaction` must be
+    /// consumed by `commit_tx` / `rollback_tx` — affine, so the
+    /// type-checker rejects forgotten-rollback paths.
+    ///
+    /// Acquires a connection from the pool and HOLDS IT for the
+    /// duration of the transaction. Caller releases the connection
+    /// implicitly through the affine consume on commit/rollback.
+    /// This mirrors the spec §5.5 affine `Tx` semantics.
+    public fn begin(&self) -> Result<TxScope<PgPool>, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        // begin_tx delegates to PgConnection.begin which sends
+        // BEGIN on the wire and returns a PgTransaction handle
+        // bound to the connection's lifetime.
+        match begin_tx(handle.conn_mut()) {
+            Ok(tx) => Ok(TxScope { tx: tx, handle: handle }),
+            Err(e) => {
+                handle.release_discard(format_err_reason(&e));
+                Err(e)
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// TxScope — affine wrapper bundling the active transaction with
+// the underlying pool checkout. Consumer commits or rolls back; both
+// terminal operations release the connection back to the pool.
+// -----------------------------------------------------------------------------
+
+/// Active-transaction handle. Holds the `PgTransaction` (which owns
+/// a `&mut PgConnection`) plus the `PooledConnection<PgConnection>`
+/// checkout that keeps the connection alive. Consumed by `commit`
+/// or `rollback` — affine, so a forgotten consume is a compile
+/// error.
+public type affine TxScope<P> is {
+    tx: PgTransaction,
+    handle: PooledConnection<PgConnection>,
+};
+
+implement TxScope<PgPool> {
+    /// Borrow the underlying transaction handle for issuing
+    /// queries. The transaction lives until `commit` / `rollback`
+    /// is called; callers can hand `&mut self.tx` into helper
+    /// functions during the body of the transaction.
+    public fn tx_mut(&mut self) -> &mut PgTransaction {
+        &mut self.tx
+    }
+
+    public fn tx_ref(&self) -> &PgTransaction {
+        &self.tx
+    }
+
+    /// COMMIT the transaction and release the pool checkout. The
+    /// underlying connection returns to the pool's idle queue
+    /// (healthy state — commit succeeded).
+    public fn commit(mut self) -> Result<(), DbError> {
+        let result = core.database.postgres.transaction.commit_tx(self.tx);
+        // Release after the wire COMMIT so the connection's state
+        // is observed Ready again before the next acquire reuses
+        // it. On commit failure the connection is in an ambiguous
+        // state — discard it.
+        match &result {
+            Ok(_)  => self.handle.release_healthy(),
+            Err(e) => self.handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+
+    /// ROLLBACK the transaction and release the pool checkout.
+    public fn rollback(mut self) -> Result<(), DbError> {
+        let result = core.database.postgres.transaction.rollback_tx(self.tx);
+        match &result {
+            Ok(_)  => self.handle.release_healthy(),
+            Err(e) => self.handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DDL-bound surface — DbAdmin / DbUnsafe. Compile-time rejected for
+// non-admin handles.
+// -----------------------------------------------------------------------------
+
+implement<C: CanDdl> Database<PgPool, C> {
+    /// Run a DDL statement (CREATE / ALTER / DROP / TRUNCATE / SET
+    /// ROLE). Wraps `execute_simple` but tightens the capability
+    /// bound — `Database<PgPool, DbReadWriteTx>` cannot accidentally
+    /// drop a table because `CanDdl` is not in scope on it.
+    ///
+    /// The body identical to `execute_simple` — DDL goes through
+    /// the simple-query path. The bound is the load-bearing piece.
+    public fn execute_ddl(&self, sql: &Text) -> Result<Text, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().execute(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Notify-bound surface — DbNotify / DbUnsafe. LISTEN/NOTIFY/UNLISTEN
+// + the high-level `subscribe_channel` that returns a
+// `NotificationStream` from `notify.vr`.
+// -----------------------------------------------------------------------------
+
+implement<C: CanNotify> Database<PgPool, C> {
+    /// Send a NOTIFY on `channel` with optional `payload`. The
+    /// notification fires after the surrounding transaction commits
+    /// (Postgres NOTIFY is transactional). When called outside a
+    /// tx, fires immediately on the connection's auto-commit.
+    public fn notify(&self, channel: &Text, payload: &Text) -> Result<(), DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().notify(channel, payload);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+
+    /// Send LISTEN on `channel` — the connection starts receiving
+    /// `NotificationResponse` frames on it. For high-level
+    /// stream-based consumption pair this with `subscribe_channel`
+    /// + `NotifyDispatcher`. For the legacy poll-based API use
+    /// `take_notifications` on the connection directly.
+    ///
+    /// Note: LISTEN registers per-connection. Using a fresh pool
+    /// connection per subscribe is wasteful — production code holds
+    /// a long-lived dedicated connection for the listen loop and
+    /// uses the dispatcher's fan-out to broadcast to subscribers.
+    public fn listen(&self, channel: &Text) -> Result<(), DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().listen(channel);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+
+    /// Send UNLISTEN on `channel` (or "*" to drop all subscriptions).
+    public fn unlisten(&self, channel: &Text) -> Result<(), DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().unlisten(channel);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+
+    /// Subscribe via a `NotifyDispatcher` — the high-level fan-out
+    /// pattern. The dispatcher must already be receiving frames
+    /// from a long-lived listener connection (set up at startup
+    /// outside the request scope).
+    ///
+    /// This method is the dispatcher's `subscribe(channel)` plus a
+    /// LISTEN if the channel is new. The capability bound makes it
+    /// impossible to subscribe from a `Database<PgPool, DbRead>` —
+    /// pub/sub is its own surface, distinct from query/exec.
+    public fn subscribe_channel(
+        &self,
+        dispatcher: &NotifyDispatcher,
+        channel: Text,
+    ) -> Result<NotificationStream, DbError> {
+        // Send LISTEN — idempotent on the server (LISTEN on an
+        // already-listened channel is a no-op).
+        match self.listen(&channel) {
+            Ok(_)  => Ok(dispatcher.subscribe(channel)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Copy-bound surface — DbCopy / DbUnsafe. Bulk-streaming COPY FROM /
+// COPY TO via the existing `copy.vr` builders.
+// -----------------------------------------------------------------------------
+
+implement<C: CanCopy> Database<PgPool, C> {
+    /// COPY FROM STDIN (text format). Acquires a connection, runs
+    /// `copy_in_bytes` with the supplied row payloads, releases.
+    /// Returns the server-reported row count.
+    ///
+    /// `rows` is `&List<List<Byte>>` — each inner List is one
+    /// pre-formatted row body. Production paths use the
+    /// `CopyInBuilder` from `copy.vr` to produce the bytes.
+    public fn copy_in_text(
+        &self,
+        sql: &Text,
+        rows: &List<List<Byte>>,
+    ) -> Result<Int, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().copy_in_bytes(sql, rows);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Unsafe-bound surface — DbUnsafe only. Raw SQL escape hatch per
+// spec §8.9. Call sites MUST be marked `@unsafe` AND `@audit(reason)`
+// — the type bound is the load-bearing gate, the lint annotations
+// are the code-review trail.
+// -----------------------------------------------------------------------------
+
+implement<C: CanUnsafe> Database<PgPool, C> {
+    /// Run an arbitrary SQL string. The capability bound restricts
+    /// this to `Database<PgPool, DbUnsafe>`; combined with the
+    /// `@unsafe` + `@audit(reason)` annotations the spec §8.9
+    /// requires at the call site, every invocation is auditable
+    /// and rare.
+    ///
+    /// Use cases (per spec §8.12 red-team checklist): DBA paths
+    /// like migration tools, pg_dump-output-replay. Application
+    /// handler code SHOULD reach for `query_simple` /
+    /// `execute_simple` with a parameterised `sql#"..."` literal
+    /// instead.
+    public fn execute_raw_unsafe(&self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().simple_query(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(format_err_reason(e)),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Universal helpers — accessible regardless of capability.
+// -----------------------------------------------------------------------------
+
+implement<C: Capability> Database<PgPool, C> {
+    /// Snapshot the underlying pool's metrics for emission to the
+    /// observability layer.
+    public fn pool_stats(&self) -> core.database.common.pool_impl.PoolStatsSnapshot {
+        self.pool.stats()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Construction shortcuts — wire PgPool directly into Database<PgPool, C>
+// without the user having to remember the Shared::new + from_pool dance.
+// -----------------------------------------------------------------------------
+
+/// Construct a read-write-transactional database from a freshly
+/// launched PgPool. Default capability for application accounts.
+public fn database_from_pool(pool: PgPool) -> Database<PgPool, DbReadWriteTx> {
+    Database.from_pool(Shared.new(pool))
+}
+
+/// Admin handle — for migration runners. Surfaces `execute_ddl`
+/// in addition to the read-write-transactional bundle.
+public fn admin_database_from_pool(pool: PgPool) -> Database<PgPool, DbAdmin> {
+    Database.from_admin_pool(Shared.new(pool))
+}
+
+/// Notify handle — for LISTEN/NOTIFY-only consumers. Pair with a
+/// long-lived listener connection + `NotifyDispatcher` for the
+/// fan-out pattern.
+public fn notify_database_from_pool(pool: PgPool) -> Database<PgPool, DbNotify> {
+    let shared = Shared.new(pool);
+    Database {
+        pool: shared,
+        caps: CapabilitySet.empty().add(0x0001).add(0x0020),    // READ + NOTIFY
+        _phantom: (),
+    }
+}
+
+/// Replication handle — for logical-replication consumers. Surfaces
+/// the read-only subset; replication-stream methods land once the
+/// adapter's logical-replication wire path is implemented.
+public fn replication_database_from_pool(pool: PgPool) -> Database<PgPool, DbReplication> {
+    Database.from_replication_pool(Shared.new(pool))
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn format_err_reason(e: &DbError) -> Text {
+    e.message()
+}
