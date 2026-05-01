@@ -4892,13 +4892,35 @@ impl ProofSearchEngine {
 
         // Inject module-level axioms — variant disjointness,
         // user-registered facts. Translate each to Z3 here so
-        // they're visible alongside the goal. Translation
-        // failures silently skip the axiom (conservative — a
-        // unprocessable axiom just doesn't fire).
+        // they're visible alongside the goal.  Translation
+        // failures emit a tracing::warn! so the user sees which
+        // axiom dropped out of the solver context — pre-fix the
+        // failures silently skipped, leading to "axiom proves
+        // X but Z3 says unprovable" mysteries that took hours
+        // to diagnose.  Conservative-correct (the axiom is
+        // genuinely unavailable) but the silence was the bug.
         for ax in &self.module_axioms {
-            if let Ok(dyn_ax) = translator.translate_expr(ax) {
-                if let Some(b) = dyn_ax.as_bool() {
-                    solver.assert(&b);
+            match translator.translate_expr(ax) {
+                Ok(dyn_ax) => {
+                    if let Some(b) = dyn_ax.as_bool() {
+                        solver.assert(&b);
+                    } else {
+                        tracing::warn!(
+                            "module axiom translated to non-Bool Dynamic — \
+                             skipping (axiom expressions must produce a Bool); \
+                             check that the axiom body is a proposition, \
+                             not a value expression"
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "failed to translate module axiom into Z3 ({}); \
+                         the axiom is dropped from the solver context — \
+                         downstream proof obligations may fail to discharge \
+                         because of this gap",
+                        e
+                    );
                 }
             }
         }
