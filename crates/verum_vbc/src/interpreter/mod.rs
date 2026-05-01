@@ -63,6 +63,7 @@ mod dispatch_table;
 mod error;
 pub mod gpu_simulator;
 mod heap;
+pub mod io_engine;
 pub mod kernel;
 pub mod permission;
 pub mod reactor;

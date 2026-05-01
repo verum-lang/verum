@@ -95,6 +95,16 @@ fn __io_remove_raw(engine: Int, fd: Int) -> Int;
 @intrinsic("io_modify")
 fn __io_modify_raw(engine: Int, fd: Int, events: Int) -> Int;
 
+// VBC-IO-ENGINE-1 — non-consuming and consuming readiness queries
+// against the session's ready queue.  Pre-fix the `AsyncIoReady`
+// Future in core/net/tcp.vr called `is_ready` against a method that
+// didn't exist; these intrinsics close that gap.
+@intrinsic("io_is_ready")
+fn __io_is_ready_raw(engine: Int, fd: Int, events: Int) -> Int;
+
+@intrinsic("io_take_ready")
+fn __io_take_ready_raw(engine: Int, fd: Int, events: Int) -> Int;
+
 implement IoEngine {
     /// Create a new I/O engine with the default event capacity (256).
     public fn new() -> IoEngine {
@@ -176,6 +186,29 @@ implement IoEngine {
     /// Check if the engine is valid (non-null handle).
     public fn is_valid(&self) -> Bool {
         self.handle != 0
+    }
+
+    /// Non-consuming check: has `fd` fired for `event` since the
+    /// last `poll`?  Used by `core/net/tcp.vr::AsyncIoReady.poll`
+    /// to drive Future readiness without removing the entry from
+    /// the session's ready queue (so subsequent re-polls see it
+    /// until the caller explicitly consumes via `take_ready`).
+    public fn is_ready(&self, fd: Int, event: IoEvent) -> Bool {
+        if self.handle == 0 || fd < 0 {
+            return false;
+        }
+        __io_is_ready_raw(self.handle, fd, event.flags) != 0
+    }
+
+    /// Consuming variant of `is_ready` — atomically checks AND
+    /// removes the matching entry from the session's ready queue.
+    /// Returns true if a matching entry was present (and consumed),
+    /// false otherwise.
+    public fn take_ready(&self, fd: Int, event: IoEvent) -> Bool {
+        if self.handle == 0 || fd < 0 {
+            return false;
+        }
+        __io_take_ready_raw(self.handle, fd, event.flags) != 0
     }
 }
 

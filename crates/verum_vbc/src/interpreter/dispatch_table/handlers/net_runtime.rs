@@ -105,6 +105,13 @@ fn register(res: NetResource) -> i64 {
     fd
 }
 
+/// Public sibling of `register` for cross-module use (e.g.
+/// `interpreter::io_engine::async_accept` registers an accepted
+/// stream via this helper).  Returns the synthetic fd.
+pub fn register_accepted_stream(stream: TcpStream) -> i64 {
+    register(NetResource::Stream(stream))
+}
+
 // =============================================================================
 // TCP
 // =============================================================================
