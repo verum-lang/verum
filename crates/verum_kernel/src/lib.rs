@@ -686,6 +686,21 @@ pub use soundness::{
     coq::CoqBackend, lean::LeanBackend,
 };
 
+/// Differential-kernel testing harness (#159) — Rust ↔ Verum kernel
+/// agreement framework.  Both kernels are queried independently per
+/// certificate; their verdicts are classified into `BothAccept`,
+/// `BothReject`, `Disagreement`, or `NotYetSelfHosting` (the latter
+/// covering the period where `core/verify/kernel_v0/` is parser-
+/// blocked).  See module docs for the architectural rationale —
+/// scaffolding today, single-line plug-in once the Verum side comes
+/// online.
+pub mod differential;
+pub use differential::{
+    DifferentialAgreement, DifferentialOutcome, DifferentialReport,
+    KernelVerdict, differential_test_rule, run_differential_test,
+    run_differential_test_with_verum,
+};
+
 /// Supporting kernel operations — `shape_of`, `substitute`,
 /// `structural_eq`, `replay_smt_cert`. Split . The
 /// kernel's "infrastructure layer": these don't implement a
