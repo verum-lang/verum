@@ -76,7 +76,7 @@ public fn introduce_sub(
     from_level: Int{>= 0},
     to_level: Int{>= 0},
 ) -> Maybe<Derivation>
-    ensures (result is Maybe.Some) <=> (from_level <= to_level)
+    ensures (result is Maybe.Some) == (from_level <= to_level)
 {
     if from_level > to_level {
         return Maybe.None;

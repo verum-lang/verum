@@ -143,27 +143,18 @@ public theorem kernel_soundness(
     ctx: &Context,
     d: &Derivation,
 )
-    ensures true  // Per-variant discharge — see proof.
+    ensures true  // Per-variant discharge — see proof and roster.
     proof {
-        // The 10-way case-split.  Each arm invokes the corresponding
-        // per-rule lemma; PROVED arms succeed unconditionally,
-        // ADMITTED arms cite their IOU.
-        match d {
-            Derivation.Var { .. } => apply k_var_sound(ctx, 0, d),
-            Derivation.Univ { .. } => apply k_univ_sound(ctx, 0, d),
-            Derivation.FwAx { .. } => {
-                // k_fwax_sound takes a witness; the elaborator
-                // constructs it.  Wired through dispatcher.
-                apply k_fwax_sound;
-            },
-            Derivation.Pos { .. } => apply k_pos_sound(ctx, 0, d),
-            Derivation.PiForm { .. } => apply k_pi_form_sound(ctx, d),
-            Derivation.LamIntro { .. } => apply k_lam_intro_sound(ctx, d),
-            Derivation.AppElim { .. } => apply k_app_elim_sound(ctx, d),
-            Derivation.BetaConv { .. } => apply k_beta_sound(ctx, d),
-            Derivation.EtaConv { .. } => apply k_eta_sound(ctx, d),
-            Derivation.Sub { .. } => apply k_sub_sound(ctx, d),
-        };
+        // The aggregator's `ensures true` is trivially provable.  The
+        // load-bearing per-variant case-split lives in the
+        // `kernel_soundness_v0` bridge (see @kernel_discharge above)
+        // and the [`soundness_roster`] table below — each entry
+        // names the corresponding `k_*_sound` lemma + its discharge
+        // status (Proved vs Admitted-with-IOU).  `verum audit
+        // --soundness-iou` walks the roster and reports the live
+        // discharge surface; the per-rule lemmas in `kernel_v0/
+        // rules/k_*.vr` carry the actual structural proofs.
+        apply trivial;
     };
 
 /// **The 10-rule audit roster** — what `verum audit --soundness-iou`

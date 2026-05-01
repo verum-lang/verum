@@ -55,7 +55,7 @@ public fn introduce_var(
     i: Int{>= 0},
 ) -> Maybe<Derivation>
     requires i < ctx.types.len() || i >= ctx.types.len()
-    ensures (result is Maybe.Some) <=> (i < ctx.types.len())
+    ensures (result is Maybe.Some) == (i < ctx.types.len())
 {
     match ctx.lookup(i) {
         Maybe.Some(t) => {

@@ -146,7 +146,7 @@ public fn introduce_pos(
     constructor_types: List<CoreTerm>,
     result_type: CoreTerm,
 ) -> Maybe<Derivation>
-    ensures (result is Maybe.Some) <=>
+    ensures (result is Maybe.Some) ==
             (constructor_types.all(|ct| is_strictly_positive(ct, i_name)))
 {
     let mut idx = 0;
