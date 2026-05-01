@@ -175,13 +175,57 @@ public type DefinitionalEquality is
     };
 
 /// **Project** — the term whose typing the derivation proves.
+///
+/// Each variant reconstructs the term from its sub-derivations:
+///   - `Var { index }` → `CoreTerm.Var { index }` (atomic).
+///   - `Univ { level }` → `CoreTerm.Universe { level }` (atomic).
+///   - `PiForm { domain_d, codomain_d }`
+///     → `Pi { domain: term_of(domain_d), body: term_of(codomain_d) }`.
+///   - `LamIntro { domain_well_typed, body_d }`
+///     → `Lam { domain: term_of(domain_well_typed), body: term_of(body_d) }`.
+///   - `AppElim { function_d, argument_d }`
+///     → `App { function: term_of(function_d), argument: term_of(argument_d) }`.
+///   - `BetaConv | EtaConv | Sub { original }` → `term_of(original)` —
+///     conversion / cumulativity rules change only the type, not the
+///     term being typed.
+///   - `FwAx { axiom_name, .. }` and `Pos { .. }` carry no concrete
+///     CoreTerm (axiom witnesses live outside the algebraic
+///     core-term language; positivity certifies a constructor SET,
+///     not a single term).  These return `Var { index: 0 }` as a
+///     soundness-neutral placeholder — `soundness.vr`'s consumers
+///     either short-circuit on these kinds before calling `term_of`
+///     or use the placeholder for diagnostics only.
 public fn term_of(d: &Derivation) -> CoreTerm {
     match d {
         Derivation.Var { index, .. } => CoreTerm.Var { index: index },
         Derivation.Univ { level, .. } => CoreTerm.Universe { level: level },
-        // Other cases extract from sub-derivations; full implementation
-        // lands once the Verum compiler can type-check kernel_v0/.
-        _ => CoreTerm.Var { index: 0 },  // placeholder
+        Derivation.PiForm { domain_derivation, codomain_derivation, .. } => {
+            CoreTerm.Pi {
+                domain: Heap(term_of(&*domain_derivation)),
+                body:   Heap(term_of(&*codomain_derivation)),
+            }
+        },
+        Derivation.LamIntro { domain_well_typed, body_derivation, .. } => {
+            CoreTerm.Lam {
+                domain: Heap(term_of(&*domain_well_typed)),
+                body:   Heap(term_of(&*body_derivation)),
+            }
+        },
+        Derivation.AppElim { function_derivation, argument_derivation, .. } => {
+            CoreTerm.App {
+                function: Heap(term_of(&*function_derivation)),
+                argument: Heap(term_of(&*argument_derivation)),
+            }
+        },
+        Derivation.BetaConv { original, .. } => term_of(&*original),
+        Derivation.EtaConv  { original, .. } => term_of(&*original),
+        Derivation.Sub      { original, .. } => term_of(&*original),
+        // FwAx + Pos do not carry a concrete CoreTerm — see docstring.
+        // Returning Var{0} keeps the function total without claiming
+        // a fictitious term.  Verifier consumers gate these kinds
+        // separately (FwAx via the trusted-axiom roster, Pos via
+        // the constructor-set positivity checker).
+        _ => CoreTerm.Var { index: 0 },
     };
 }
 
