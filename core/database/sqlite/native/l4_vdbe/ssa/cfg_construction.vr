@@ -1,0 +1,239 @@
+module core.database.sqlite.native.l4_vdbe.ssa.cfg_construction;
+
+// =============================================================================
+// l4_vdbe/ssa/cfg_construction.vr — Build basic blocks from VdbeProgram
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4
+//
+// Algorithm (textbook):
+//
+//   1. Identify "leaders" — instructions that begin a basic block:
+//        a. instruction at index 0 (entry)
+//        b. every jump target
+//        c. every instruction immediately following a control-flow
+//           instruction (jump / branch / halt / return)
+//   2. Partition the instruction stream into maximal sequences
+//      [leader_i, leader_{i+1}) — those are the basic blocks.
+//   3. Map register-VM jump targets (instruction indices) to BlockIds
+//      via `instr_to_block: HashMap<Int, BlockId>`.
+//
+// Output: a list of `(start_idx, end_idx, block_id)` triples, plus
+// the `instr_to_block` mapping.  The lifting pass uses this to
+// translate per-instruction operands to SSA values + branch targets
+// to BlockIds.
+//
+// Phase ordering note: this pass produces a CFG of EMPTY blocks
+// (just BlockIds and one terminator-shaped placeholder per block).
+// The actual SSA instruction lifting + phi insertion happens in
+// `from_register_vm.vr` AFTER this skeleton is built.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.opcode.{
+    Opcode,
+    Init, Halt, Goto, Gosub, Return, Once,
+    Eq, Ne, Lt, Le, Gt, Ge,
+    If, IfNot, IfNull, NotNull,
+    Rewind, Last, Next, Prev,
+    SeekGE, SeekGT, SeekLE, SeekLT,
+    Found, NotFound, SorterNext
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{BlockId, block_id, block_id_raw};
+
+// -----------------------------------------------------------------------------
+// BlockSpan — describes one basic block's slice of the original program
+// -----------------------------------------------------------------------------
+
+public type BlockSpan is {
+    block: BlockId,
+    start: Int,        // first instruction index (inclusive)
+    end: Int,          // last instruction index (inclusive)
+};
+
+public type CfgSkeleton is {
+    spans: List<BlockSpan>,
+    /// `instr_to_block[i]` is the BlockId of the basic block that
+    /// CONTAINS instruction `i`.  -1 for indices that are out of
+    /// range.  Used by the lifter to translate jump targets.
+    instr_to_block: List<Int>,
+};
+
+// -----------------------------------------------------------------------------
+// Public entry point
+// -----------------------------------------------------------------------------
+
+/// Build the CFG skeleton (block boundaries) for `instructions`.
+/// Does NOT produce SSA values — that's the lifter's job.
+public fn build_cfg_skeleton(instructions: &List<Opcode>) -> CfgSkeleton {
+    let n = instructions.len();
+    if n == 0 {
+        return CfgSkeleton {
+            spans: List.new(),
+            instr_to_block: List.new(),
+        };
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 1: identify leaders (instruction indices that start a block)
+    // -------------------------------------------------------------------------
+    let mut is_leader: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < n { is_leader.push(false); i = i + 1; }
+
+    // 1a. Entry instruction is always a leader.
+    is_leader[0] = true;
+
+    // 1b + 1c: scan instructions for jump targets + post-terminator.
+    let mut idx: Int = 0;
+    while idx < n {
+        let op = &instructions[idx];
+
+        // Mark every jump target as a leader.
+        let targets = jump_targets_of(op);
+        let mut t: Int = 0;
+        while t < targets.len() {
+            let tgt = targets[t];
+            if tgt >= 0 && tgt < n {
+                is_leader[tgt] = true;
+            }
+            t = t + 1;
+        }
+
+        // If `op` is a control-flow instruction, the next instruction
+        // (if any) is a leader too.
+        if is_control_flow(op) && idx + 1 < n {
+            is_leader[idx + 1] = true;
+        }
+
+        idx = idx + 1;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 2: partition into block spans
+    // -------------------------------------------------------------------------
+    let mut spans: List<BlockSpan> = List.new();
+    let mut next_block_id: Int = 0;
+    let mut span_start: Int = 0;
+
+    let mut j: Int = 1;
+    while j < n {
+        if is_leader[j] {
+            spans.push(BlockSpan {
+                block: block_id(next_block_id),
+                start: span_start,
+                end: j - 1,
+            });
+            next_block_id = next_block_id + 1;
+            span_start = j;
+        }
+        j = j + 1;
+    }
+    // Final span (from last leader through n-1).
+    spans.push(BlockSpan {
+        block: block_id(next_block_id),
+        start: span_start,
+        end: n - 1,
+    });
+
+    // -------------------------------------------------------------------------
+    // Phase 3: build instr_to_block mapping
+    // -------------------------------------------------------------------------
+    let mut instr_to_block: List<Int> = List.new();
+    let mut k: Int = 0;
+    while k < n { instr_to_block.push(-1); k = k + 1; }
+
+    let mut s: Int = 0;
+    while s < spans.len() {
+        let span = &spans[s];
+        let raw = block_id_raw(&span.block);
+        let mut p: Int = span.start;
+        while p <= span.end {
+            instr_to_block[p] = raw;
+            p = p + 1;
+        }
+        s = s + 1;
+    }
+
+    CfgSkeleton {
+        spans: spans,
+        instr_to_block: instr_to_block,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Per-opcode classification helpers
+// -----------------------------------------------------------------------------
+
+/// All instruction-index operands of `op` that act as jump targets.
+/// Includes both unconditional jumps and conditional branches.
+fn jump_targets_of(op: &Opcode) -> List<Int> {
+    let mut out: List<Int> = List.new();
+    match op {
+        Init(t)              => { out.push(t); }
+        Goto(t)              => { out.push(t); }
+        Gosub(_, t)          => { out.push(t); }
+        Once(t)              => { out.push(t); }
+        Eq(_, _, t)          => { out.push(t); }
+        Ne(_, _, t)          => { out.push(t); }
+        Lt(_, _, t)          => { out.push(t); }
+        Le(_, _, t)          => { out.push(t); }
+        Gt(_, _, t)          => { out.push(t); }
+        Ge(_, _, t)          => { out.push(t); }
+        If(_, t)             => { out.push(t); }
+        IfNot(_, t)          => { out.push(t); }
+        IfNull(_, t)         => { out.push(t); }
+        NotNull(_, t)        => { out.push(t); }
+        Rewind(_, t)         => { out.push(t); }
+        Last(_, t)           => { out.push(t); }
+        Next(_, t)           => { out.push(t); }
+        Prev(_, t)           => { out.push(t); }
+        SeekGE(_, _, _, t)   => { out.push(t); }
+        SeekGT(_, _, _, t)   => { out.push(t); }
+        SeekLE(_, _, _, t)   => { out.push(t); }
+        SeekLT(_, _, _, t)   => { out.push(t); }
+        Found(_, t, _, _)    => { out.push(t); }
+        NotFound(_, t, _, _) => { out.push(t); }
+        SorterNext(_, t)     => { out.push(t); }
+        _ => {}
+    }
+    out
+}
+
+/// `true` iff `op` ends a basic block.  Includes unconditional
+/// (Goto/Halt/Return) and conditional (all comparison/branch
+/// opcodes).  The instruction AFTER such an op is a leader.
+fn is_control_flow(op: &Opcode) -> Bool {
+    match op {
+        Init(_)              => true,
+        Halt(_, _)           => true,
+        Goto(_)              => true,
+        Gosub(_, _)          => true,
+        Return(_)            => true,
+        Once(_)              => true,
+        Eq(_, _, _)          => true,
+        Ne(_, _, _)          => true,
+        Lt(_, _, _)          => true,
+        Le(_, _, _)          => true,
+        Gt(_, _, _)          => true,
+        Ge(_, _, _)          => true,
+        If(_, _)             => true,
+        IfNot(_, _)          => true,
+        IfNull(_, _)         => true,
+        NotNull(_, _)        => true,
+        Rewind(_, _)         => true,
+        Last(_, _)           => true,
+        Next(_, _)           => true,
+        Prev(_, _)           => true,
+        SeekGE(_, _, _, _)   => true,
+        SeekGT(_, _, _, _)   => true,
+        SeekLE(_, _, _, _)   => true,
+        SeekLT(_, _, _, _)   => true,
+        Found(_, _, _, _)    => true,
+        NotFound(_, _, _, _) => true,
+        SorterNext(_, _)     => true,
+        _ => false,
+    }
+}

@@ -1,0 +1,288 @@
+module core.database.sqlite.native.l4_vdbe.ssa.dominator;
+
+// =============================================================================
+// l4_vdbe/ssa/dominator.vr — Dominator tree + dominance frontier
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4
+//
+// Iterative data-flow algorithm (Cooper / Harvey / Kennedy 2001 —
+// "A Simple, Fast Dominance Algorithm").  Asymptotically slower than
+// Lengauer-Tarjan O(N·α(N)) but simpler to verify and faster in
+// practice for the small CFGs typical of a SQL statement.
+//
+// Algorithm:
+//
+//   1. Reverse-postorder traversal of the CFG yields rpo[].
+//   2. Repeat until idom[] stabilises:
+//        for each node b in rpo[1..]:
+//          new_idom = first processed predecessor
+//          for every other processed pred p:
+//            new_idom = intersect(p, new_idom)
+//          if idom[b] != new_idom: idom[b] = new_idom; changed = true
+//
+// Dominance frontier:
+//
+//   for each node b with ≥ 2 preds:
+//     for each pred p of b:
+//       runner = p
+//       while runner != idom[b]:
+//         add b to DF[runner]
+//         runner = idom[runner]
+//
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{BlockId, block_id, block_id_raw, block_id_eq};
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.Cfg;
+
+// -----------------------------------------------------------------------------
+// DomTree
+// -----------------------------------------------------------------------------
+
+/// Sentinel "no dominator" (-1).  The entry block's idom is -1.
+fn no_idom() -> Int { -1 }
+
+public type DomTree is {
+    /// `idom[b]` is the immediate dominator of block `b` as a raw int
+    /// (-1 for the entry block).  Indexed by raw BlockId.
+    idom: List<Int>,
+
+    /// Reverse-postorder traversal of the CFG; first element is the
+    /// entry block.  Recomputed every time the dominator tree is
+    /// rebuilt.
+    rpo: List<BlockId>,
+
+    /// `dom_frontier[b]` is the set of blocks `y` where `b` dominates
+    /// a predecessor of `y` but does not strictly dominate `y` itself.
+    /// Inserted phi nodes for a definition in `b` go into `DF(b)`
+    /// (Cytron's algorithm).
+    dom_frontier: List<List<BlockId>>,
+}
+
+/// Compute the dominator tree + dominance frontier for `cfg`.
+/// `cfg.compute_preds()` MUST have been called first.
+public fn build_dom_tree(cfg: &Cfg) -> DomTree {
+    let n = cfg.blocks.len();
+    let rpo = compute_rpo(cfg);
+    let idom = compute_idoms(cfg, &rpo, n);
+    let df = compute_dom_frontier(cfg, &idom, n);
+    DomTree { idom: idom, rpo: rpo, dom_frontier: df }
+}
+
+implement DomTree {
+    /// Look up the immediate dominator of `b`.  Returns `None` for
+    /// the entry block (no dominator); panics on out-of-range input.
+    public fn immediate_dominator(&self, b: &BlockId) -> Maybe<BlockId> {
+        let raw = block_id_raw(b);
+        if raw < 0 || raw >= self.idom.len() { return None; }
+        let parent = self.idom[raw];
+        if parent < 0 { return None; }
+        Some(block_id(parent))
+    }
+
+    /// `true` iff `a` dominates `b` (a is on every path from entry
+    /// to b).  O(depth) — walks from `b` up the dominator tree.
+    public fn dominates(&self, a: &BlockId, b: &BlockId) -> Bool {
+        let target = block_id_raw(a);
+        let mut cursor = block_id_raw(b);
+        while cursor >= 0 {
+            if cursor == target { return true; }
+            cursor = self.idom[cursor];
+        }
+        false
+    }
+
+    /// Returns a clone of the dominance frontier for block `b`.
+    public fn frontier_of(&self, b: &BlockId) -> List<BlockId> {
+        let raw = block_id_raw(b);
+        if raw < 0 || raw >= self.dom_frontier.len() {
+            return List.new();
+        }
+        let mut out: List<BlockId> = List.new();
+        let mut i: Int = 0;
+        while i < self.dom_frontier[raw].len() {
+            out.push(self.dom_frontier[raw][i]);
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Reverse-postorder traversal
+// -----------------------------------------------------------------------------
+
+/// DFS post-order then reverse — yields blocks in topological-ish
+/// order respecting the CFG.  Used to seed the iterative dominator
+/// algorithm so most predecessors are processed before successors.
+fn compute_rpo(cfg: &Cfg) -> List<BlockId> {
+    let n = cfg.blocks.len();
+    let mut visited: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < n { visited.push(false); i = i + 1; }
+
+    let mut postorder: List<BlockId> = List.new();
+    dfs_postorder(cfg, &cfg.entry, &mut visited, &mut postorder);
+
+    // Reverse postorder.
+    let mut rpo: List<BlockId> = List.new();
+    let mut j: Int = postorder.len() - 1;
+    while j >= 0 {
+        rpo.push(postorder[j]);
+        j = j - 1;
+    }
+    rpo
+}
+
+fn dfs_postorder(
+    cfg: &Cfg,
+    node: &BlockId,
+    visited: &mut List<Bool>,
+    out: &mut List<BlockId>,
+) {
+    let raw = block_id_raw(node);
+    if raw < 0 || raw >= visited.len() { return; }
+    if visited[raw] { return; }
+    visited[raw] = true;
+
+    let succs = cfg.blocks[raw].successors();
+    let mut i: Int = 0;
+    while i < succs.len() {
+        dfs_postorder(cfg, &succs[i], visited, out);
+        i = i + 1;
+    }
+
+    out.push(block_id(raw));
+}
+
+// -----------------------------------------------------------------------------
+// Iterative idom computation
+// -----------------------------------------------------------------------------
+
+fn compute_idoms(cfg: &Cfg, rpo: &List<BlockId>, n: Int) -> List<Int> {
+    let mut idom: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < n { idom.push(no_idom()); i = i + 1; }
+
+    // Mark the entry block's idom as itself (sentinel for the
+    // intersect helper); convert to -1 at the end.
+    let entry_raw = block_id_raw(&cfg.entry);
+    idom[entry_raw] = entry_raw;
+
+    // Reverse-postorder index lookup (rpo_index[raw_block] = position
+    // in rpo).
+    let mut rpo_index: List<Int> = List.new();
+    let mut k: Int = 0;
+    while k < n { rpo_index.push(-1); k = k + 1; }
+    let mut j: Int = 0;
+    while j < rpo.len() {
+        rpo_index[block_id_raw(&rpo[j])] = j;
+        j = j + 1;
+    }
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        // Iterate rpo[1..] (skip entry).
+        let mut p: Int = 1;
+        while p < rpo.len() {
+            let b_raw = block_id_raw(&rpo[p]);
+            let preds = &cfg.blocks[b_raw].predecessors;
+
+            // Pick first processed predecessor.
+            let mut new_idom: Int = no_idom();
+            let mut q: Int = 0;
+            while q < preds.len() {
+                let pr = block_id_raw(&preds[q]);
+                if idom[pr] != no_idom() {
+                    new_idom = pr;
+                    q = preds.len();        // break
+                } else {
+                    q = q + 1;
+                }
+            }
+
+            // Intersect with all other processed predecessors.
+            let mut q2: Int = 0;
+            while q2 < preds.len() {
+                let pr = block_id_raw(&preds[q2]);
+                if pr != new_idom && idom[pr] != no_idom() {
+                    new_idom = intersect(pr, new_idom, &idom, &rpo_index);
+                }
+                q2 = q2 + 1;
+            }
+
+            if idom[b_raw] != new_idom {
+                idom[b_raw] = new_idom;
+                changed = true;
+            }
+            p = p + 1;
+        }
+    }
+
+    // Convert entry sentinel back to -1.
+    if idom[entry_raw] == entry_raw {
+        idom[entry_raw] = no_idom();
+    }
+    idom
+}
+
+/// Walk both fingers up the dominator tree until they meet.
+fn intersect(b1: Int, b2: Int, idom: &List<Int>, rpo_index: &List<Int>) -> Int {
+    let mut f1 = b1;
+    let mut f2 = b2;
+    while f1 != f2 {
+        while rpo_index[f1] > rpo_index[f2] {
+            f1 = idom[f1];
+            if f1 < 0 { return -1; }     // Should not happen on well-formed CFG.
+        }
+        while rpo_index[f2] > rpo_index[f1] {
+            f2 = idom[f2];
+            if f2 < 0 { return -1; }
+        }
+    }
+    f1
+}
+
+// -----------------------------------------------------------------------------
+// Dominance frontier (Cytron et al. style)
+// -----------------------------------------------------------------------------
+
+fn compute_dom_frontier(cfg: &Cfg, idom: &List<Int>, n: Int) -> List<List<BlockId>> {
+    let mut df: List<List<BlockId>> = List.new();
+    let mut i: Int = 0;
+    while i < n { df.push(List.new()); i = i + 1; }
+
+    let mut b: Int = 0;
+    while b < n {
+        let preds = &cfg.blocks[b].predecessors;
+        if preds.len() >= 2 {
+            let mut p: Int = 0;
+            while p < preds.len() {
+                let mut runner = block_id_raw(&preds[p]);
+                while runner >= 0 && runner != idom[b] {
+                    if !contains_block(&df[runner], b) {
+                        df[runner].push(block_id(b));
+                    }
+                    runner = idom[runner];
+                }
+                p = p + 1;
+            }
+        }
+        b = b + 1;
+    }
+
+    df
+}
+
+fn contains_block(list: &List<BlockId>, raw: Int) -> Bool {
+    let mut i: Int = 0;
+    while i < list.len() {
+        if block_id_raw(&list[i]) == raw { return true; }
+        i = i + 1;
+    }
+    false
+}

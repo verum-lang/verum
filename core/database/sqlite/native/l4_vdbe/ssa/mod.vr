@@ -1,0 +1,43 @@
+module core.database.sqlite.native.l4_vdbe.ssa;
+
+// =============================================================================
+// l4_vdbe/ssa/mod.vr — SSA IR re-export hub
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4
+//
+// Public surface for the SSA-form VDBE IR.  Submodules:
+//
+//   value         — typed `SsaValue { id, kind }`
+//   inst          — typed `SsaInst` enum + classification helpers
+//   block         — `BasicBlock` + `BlockId`
+//   cfg           — `Cfg` (block array, entry, predecessors)
+//   program       — `SsaProgram` (CFG + constants + cursors + metadata)
+//   dominator     — dominator tree + dominance frontier
+//   cfg_construction — partition `VdbeProgram` into basic blocks
+//
+// Phase status (#132):
+//
+//   ✓ value.vr               — typed SSA value (this commit)
+//   ✓ block.vr               — basic block (this commit)
+//   ✓ inst.vr                — typed SSA instruction set (this commit)
+//   ✓ cfg.vr                 — CFG with cached predecessor lists (this commit)
+//   ✓ program.vr             — SsaProgram container (this commit)
+//   ✓ dominator.vr           — Cooper/Harvey/Kennedy dominator algorithm
+//   ✓ cfg_construction.vr    — block partitioning of VdbeProgram
+//   ⏳ from_register_vm.vr   — VdbeProgram → SsaProgram lifting (next commit)
+//   ⏳ phi_insertion.vr      — Cytron-style phi placement (next commit)
+//   ⏳ to_register_vm.vr     — SsaProgram → VdbeProgram lowering (next commit)
+//   ⏳ optimizer integration — once #133 lands
+// =============================================================================
+
+mount core.database.sqlite.native.l4_vdbe.ssa.value;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst;
+mount core.database.sqlite.native.l4_vdbe.ssa.block;
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg;
+mount core.database.sqlite.native.l4_vdbe.ssa.program;
+mount core.database.sqlite.native.l4_vdbe.ssa.dominator;
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg_construction;
+mount core.database.sqlite.native.l4_vdbe.ssa.from_register_vm;
+mount core.database.sqlite.native.l4_vdbe.ssa.phi_insertion;
+mount core.database.sqlite.native.l4_vdbe.ssa.to_register_vm;

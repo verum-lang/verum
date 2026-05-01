@@ -1,0 +1,97 @@
+module core.database.sqlite.native.l4_vdbe.ssa.program;
+
+// =============================================================================
+// l4_vdbe/ssa/program.vr — SSA-form VDBE program
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4
+//
+// `SsaProgram` is the SSA-form analogue of the legacy `VdbeProgram`.
+// It carries:
+//   * a CFG of basic blocks (with phi nodes at their entries)
+//   * the original constant pool (shared with the register VM —
+//     constants are kind-tagged so SSA can refer to them directly)
+//   * result-column metadata
+//   * cursor declarations
+//   * `value_count` — the next ValueId to allocate (used by builders /
+//     transformations that introduce fresh SSA values)
+//
+// The lifting pass (`from_register_vm.vr`) produces an `SsaProgram`
+// from a `VdbeProgram`; the back-translator (`to_register_vm.vr`)
+// goes the other direction for execution by the legacy interpreter.
+//
+// The optimizer (#133, work in progress) operates exclusively on
+// `SsaProgram`.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.program.{
+    ConstantPool, ConstantEntry, ResultColumn, CursorDecl,
+    constant_pool_new
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{ValueId, value_id, value_id_raw};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.BasicBlock;
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.{Cfg, cfg_new};
+
+// -----------------------------------------------------------------------------
+// SsaProgram
+// -----------------------------------------------------------------------------
+
+public type affine SsaProgram is {
+    cfg: Cfg,
+    constants: ConstantPool,
+    result_columns: List<ResultColumn>,
+    cursors: List<CursorDecl>,
+    value_count: Int,            // next ValueId to allocate
+    sql: Text,                   // original SQL for EXPLAIN / trace
+};
+
+public fn ssa_program_new(sql: Text) -> SsaProgram {
+    SsaProgram {
+        cfg: cfg_new(),
+        constants: constant_pool_new(),
+        result_columns: List.new(),
+        cursors: List.new(),
+        value_count: 1,          // ValueId(0) is reserved (see value.vr)
+        sql: sql,
+    }
+}
+
+implement SsaProgram {
+    public fn block_count(&self) -> Int { self.cfg.block_count() }
+
+    /// Allocate a fresh ValueId.  Used by `SsaBuilder` and by
+    /// peephole optimisations that introduce new computations.
+    public fn fresh_value_id(&mut self) -> ValueId {
+        let id = value_id(self.value_count);
+        self.value_count = self.value_count + 1;
+        id
+    }
+
+    /// Total instruction count (sum across all blocks, includes phis
+    /// and terminators).  Used by EXPLAIN + sanity checks.
+    public fn total_instr_count(&self) -> Int {
+        let mut sum: Int = 0;
+        let mut i: Int = 0;
+        while i < self.cfg.blocks.len() {
+            sum = sum + self.cfg.blocks[i].instr_count();
+            i = i + 1;
+        }
+        sum
+    }
+
+    /// Cursor declaration lookup; mirrors the VdbeProgram convenience
+    /// used by the L6 bridge.
+    public fn get_cursor_decl(&self, i: Int) -> Maybe<CursorDecl> {
+        if i < 0 || i >= self.cursors.len() { return None; }
+        let d = &self.cursors[i];
+        Some(CursorDecl {
+            cursor_id: d.cursor_id,
+            kind: d.kind,
+            root_page: d.root_page,
+            n_cols: d.n_cols,
+        })
+    }
+}

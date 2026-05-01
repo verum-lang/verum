@@ -1,0 +1,652 @@
+module core.database.sqlite.native.l4_vdbe.ssa.from_register_vm;
+
+// =============================================================================
+// l4_vdbe/ssa/from_register_vm.vr — VdbeProgram → SsaProgram lifting
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4
+//
+// Two-pass algorithm:
+//
+//   Pass 1: lift each register-VM instruction to its SSA equivalent
+//           using a fresh SSA value for every WRITE to a register.
+//           Reads use the per-block reaching-definition table —
+//           the most recent SSA value written to that register in
+//           the current block, OR a placeholder for cross-block
+//           reads (resolved by phi insertion in pass 2).
+//
+//   Pass 2: insert phi nodes at dominance frontiers using Cytron et
+//           al. — for every register that has multiple definitions
+//           reaching the same join point.
+//
+// This file implements pass 1 + scaffolds the integration.  The
+// per-block reaching-definition table is reset on each block boundary;
+// cross-block flows are recorded for pass 2 to consume.
+//
+// Kind inference rules:
+//
+//   * Integer / Int64                → SkInt
+//   * Real                           → SkReal
+//   * String8                        → SkText
+//   * BlobLit                        → SkBlob
+//   * Null                           → SkNull
+//   * Add/Sub/Mul/Div over (SkInt,SkInt)   → SkInt
+//   * Add/Sub/... over (SkReal,SkReal)     → SkReal
+//   * Eq/Ne/Lt/Le/Gt/Ge              → SkBool (for downstream If/IfNot)
+//   * Column / RowIdOp               → SkAny (cursor schema unknown
+//                                       at lift time; refined later
+//                                       by integration with cursor
+//                                       schema metadata)
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.opcode.{
+    Opcode,
+    Integer, Int64, Real, String8, BlobLit, Null,
+    SoftNull, Move, Copy, SCopy,
+    Add, Subtract, Multiply, Divide, Remainder,
+    BitAnd, BitOr, ShiftLeft, ShiftRight, BitNot,
+    Eq, Ne, Lt, Le, Gt, Ge,
+    If, IfNot, IfNull, NotNull,
+    Init, Halt, Goto, Gosub, Return, Once, Noop,
+    Rewind, Last, Next, Prev,
+    Column, RowIdOp,
+    Insert, Delete, NewRowid, MakeRecord
+};
+mount core.database.sqlite.native.l4_vdbe.program.{
+    VdbeProgram, ConstantPool, ConstantEntry,
+    KInt, KReal, KText, KBlob, KAffinityStr
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{
+    SValueKind, SkInt, SkReal, SkText, SkBlob, SkBool, SkNull, SkRowId, SkAny,
+    ValueId, value_id, value_id_raw,
+    SsaValue, ssa_value, kind_eq
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{
+    SsaInst, CmpKind, CursorOpKind,
+    CkEq, CkNe, CkLt, CkLe, CkGt, CkGe,
+    CoOpenRead, CoOpenWrite, CoOpenEphemeral, CoOpenAutoindex,
+    CoSorterOpen, CoClose,
+    IConst, INull, IIntImm, IAdd, ISub, IMul, IDiv, IRem,
+    IBitAnd, IBitOr, IShiftLeft, IShiftRight, IBitNot,
+    ICmp, ICast, ICursorOpen, ICursorClose, ICursorRewind, ICursorNext,
+    ICursorPrev, ICursorLast, IColumn, IRowId, IMakeRecord,
+    ICursorInsert, ICursorDelete, INewRowId,
+    ICallFn, IAggStep, IAggFinal,
+    IPhi, IResultRow,
+    ITransactionBegin, ITransactionCommit, ITransactionRollback,
+    IBranch, IJump, IHalt, IReturn, IYield,
+    inst_is_terminator
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{
+    BasicBlock, BlockId, block_id, block_id_raw, block_id_eq
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.{Cfg, cfg_new};
+mount core.database.sqlite.native.l4_vdbe.ssa.program.{
+    SsaProgram, ssa_program_new
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg_construction.{
+    CfgSkeleton, BlockSpan, build_cfg_skeleton
+};
+
+// -----------------------------------------------------------------------------
+// LiftState — pass-1 working state
+// -----------------------------------------------------------------------------
+
+/// Per-register reaching-definition table for a single block.
+///
+/// `reaching[reg_idx]` is the SSA value most recently written to
+/// register `reg_idx` within the current block.  `None` means the
+/// value flows in from a predecessor (and will be resolved by phi
+/// insertion in pass 2).
+type RegState = {
+    reaching: List<Maybe<SsaValue>>,
+};
+
+fn reg_state_new(num_regs: Int) -> RegState {
+    let mut r: List<Maybe<SsaValue>> = List.new();
+    let mut i: Int = 0;
+    while i < num_regs { r.push(None); i = i + 1; }
+    RegState { reaching: r }
+}
+
+fn reg_state_read(rs: &RegState, idx: Int) -> Maybe<SsaValue> {
+    if idx < 0 || idx >= rs.reaching.len() { return None; }
+    match &rs.reaching[idx] {
+        None => None,
+        Some(v) => Some(v.clone()),
+    }
+}
+
+fn reg_state_write(rs: &mut RegState, idx: Int, v: SsaValue) {
+    if idx < 0 || idx >= rs.reaching.len() { return; }
+    rs.reaching[idx] = Some(v);
+}
+
+// -----------------------------------------------------------------------------
+// PendingPhi — cross-block read recorded for pass 2 to resolve
+// -----------------------------------------------------------------------------
+
+/// "I read register `reg_idx` in `block` but no in-block definition
+/// reached it — pass 2 must place a phi (or use a cross-block
+/// reaching definition)."  Carries the placeholder SSA value that
+/// pass 2 will substitute or wire.
+public type PendingPhi is {
+    block: BlockId,
+    reg_idx: Int,
+    placeholder: SsaValue,
+};
+
+// -----------------------------------------------------------------------------
+// Lift result
+// -----------------------------------------------------------------------------
+
+/// Pass-1 output.  `prog.cfg` carries the lifted SSA instructions
+/// (with placeholders for cross-block reads).  `pending_phis` lists
+/// the placeholders that pass 2 must wire.
+public type LiftResult is {
+    prog: SsaProgram,
+    pending_phis: List<PendingPhi>,
+};
+
+// -----------------------------------------------------------------------------
+// Public entry point
+// -----------------------------------------------------------------------------
+
+/// Lift `vdbe` to an SSA program (pass 1 only — pending phis must be
+/// resolved by `phi_insertion::resolve_pending_phis(...)` before the
+/// SSA program is consumed by the optimizer).
+pub fn lift_vdbe_to_ssa(vdbe: &VdbeProgram) -> LiftResult {
+    // Build CFG skeleton (block boundaries).
+    let skeleton = build_cfg_skeleton(&vdbe.instructions);
+
+    // Allocate the matching number of empty blocks in the SsaProgram.
+    let mut prog = ssa_program_new(vdbe.sql.clone());
+    // The skeleton allocates one block per span; cfg_new() already
+    // gave us block 0 as entry.
+    let mut b: Int = 1;
+    while b < skeleton.spans.len() {
+        let _ = prog.cfg.new_block();
+        b = b + 1;
+    }
+
+    // Copy constant pool, result columns, cursor decls verbatim
+    // (their representation is unchanged in SSA).
+    copy_constants(&vdbe.constants, &mut prog.constants);
+    copy_result_columns(vdbe, &mut prog);
+    copy_cursor_decls(vdbe, &mut prog);
+
+    // Lift each block.
+    let mut pending_phis: List<PendingPhi> = List.new();
+    let mut s: Int = 0;
+    while s < skeleton.spans.len() {
+        lift_block(
+            vdbe, &skeleton, &skeleton.spans[s],
+            &mut prog, &mut pending_phis,
+        );
+        s = s + 1;
+    }
+
+    // Compute predecessor lists for the lifted CFG.
+    prog.cfg.compute_preds();
+
+    LiftResult { prog: prog, pending_phis: pending_phis }
+}
+
+// -----------------------------------------------------------------------------
+// Constant / metadata copy helpers
+// -----------------------------------------------------------------------------
+
+fn copy_constants(src: &ConstantPool, dst: &mut ConstantPool) {
+    let mut i: Int = 0;
+    while i < src.entries.len() {
+        // ConstantPool.get clones; dst.add appends.
+        let _ = dst.add(src.get(i));
+        i = i + 1;
+    }
+}
+
+fn copy_result_columns(src: &VdbeProgram, dst: &mut SsaProgram) {
+    let mut i: Int = 0;
+    while i < src.result_columns.len() {
+        let rc = &src.result_columns[i];
+        dst.result_columns.push(rc.clone());
+        i = i + 1;
+    }
+}
+
+fn copy_cursor_decls(src: &VdbeProgram, dst: &mut SsaProgram) {
+    let mut i: Int = 0;
+    while i < src.cursors.len() {
+        let cd = &src.cursors[i];
+        dst.cursors.push(cd.clone());
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Per-block lifting
+// -----------------------------------------------------------------------------
+
+fn lift_block(
+    vdbe: &VdbeProgram,
+    skel: &CfgSkeleton,
+    span: &BlockSpan,
+    prog: &mut SsaProgram,
+    pending: &mut List<PendingPhi>,
+) {
+    let mut rs = reg_state_new(vdbe.num_registers);
+    let mut p: Int = span.start;
+    while p <= span.end {
+        let op = &vdbe.instructions[p];
+        // The terminator (last instruction in the block when it's
+        // control-flow) is handled separately so the block's
+        // `terminator` field is set rather than appended to `insts`.
+        let is_term = p == span.end && opcode_is_control_flow(op);
+        if is_term {
+            let term = lift_terminator(prog, &mut rs, span, skel, op, pending);
+            prog.cfg.get_mut(&span.block).set_terminator(term);
+        } else {
+            lift_straight_line(prog, &mut rs, span, skel, op, pending);
+        }
+        p = p + 1;
+    }
+    // If the block ended without an explicit control-flow op (fell
+    // off the end into the next leader), insert an implicit jump to
+    // the next block.
+    if !block_has_terminator(prog, &span.block) {
+        let next_block_raw = block_id_raw(&span.block) + 1;
+        if next_block_raw < prog.cfg.block_count() {
+            prog.cfg.get_mut(&span.block).set_terminator(IJump(block_id(next_block_raw)));
+        } else {
+            // Fall-through past the end of the program → halt(0, "")
+            prog.cfg.get_mut(&span.block).set_terminator(IHalt(0, ""));
+        }
+    }
+}
+
+fn block_has_terminator(prog: &SsaProgram, b: &BlockId) -> Bool {
+    inst_is_terminator(&prog.cfg.get(b).terminator)
+}
+
+fn opcode_is_control_flow(op: &Opcode) -> Bool {
+    match op {
+        Init(_) | Halt(_, _) | Goto(_) | Gosub(_, _) | Return(_) | Once(_)
+            => true,
+        Eq(_,_,_) | Ne(_,_,_) | Lt(_,_,_) | Le(_,_,_) | Gt(_,_,_) | Ge(_,_,_)
+            => true,
+        If(_,_) | IfNot(_,_) | IfNull(_,_) | NotNull(_,_) => true,
+        Rewind(_,_) | Last(_,_) | Next(_,_) | Prev(_,_) => true,
+        _ => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Straight-line lifting
+// -----------------------------------------------------------------------------
+
+fn lift_straight_line(
+    prog: &mut SsaProgram,
+    rs: &mut RegState,
+    span: &BlockSpan,
+    _skel: &CfgSkeleton,
+    op: &Opcode,
+    pending: &mut List<PendingPhi>,
+) {
+    match op {
+        Noop => {}
+
+        Integer(value, reg_dst) => {
+            let dst = mint(prog, SkInt);
+            push_inst(prog, &span.block, IIntImm(dst.clone(), int_to_i64(value)));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        Int64(const_idx, reg_dst) => {
+            let dst = mint(prog, SkInt);
+            push_inst(prog, &span.block, IConst(dst.clone(), const_idx));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        Real(const_idx, reg_dst) => {
+            let dst = mint(prog, SkReal);
+            push_inst(prog, &span.block, IConst(dst.clone(), const_idx));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        String8(const_idx, reg_dst) => {
+            let dst = mint(prog, SkText);
+            push_inst(prog, &span.block, IConst(dst.clone(), const_idx));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        BlobLit(const_idx, reg_dst) => {
+            let dst = mint(prog, SkBlob);
+            push_inst(prog, &span.block, IConst(dst.clone(), const_idx));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        Null(reg_start, reg_end) => {
+            // Range-fill with null SSA values (one per slot).
+            let mut idx = reg_start;
+            while idx <= reg_end {
+                let dst = mint(prog, SkNull);
+                push_inst(prog, &span.block, INull(dst.clone()));
+                reg_state_write(rs, idx, dst);
+                idx = idx + 1;
+            }
+        }
+        SoftNull(reg_dst) => {
+            let dst = mint(prog, SkNull);
+            push_inst(prog, &span.block, INull(dst.clone()));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        Move(src, dst_reg, count) => {
+            // Range move: read N consecutive regs, write to dst..dst+N
+            // (source becomes implicitly null in register-VM semantics —
+            // we mint fresh nulls there to preserve SSA discipline).
+            let mut k: Int = 0;
+            while k < count {
+                let v = read_reg(prog, rs, span, src + k, pending);
+                reg_state_write(rs, dst_reg + k, v);
+                let n = mint(prog, SkNull);
+                push_inst(prog, &span.block, INull(n.clone()));
+                reg_state_write(rs, src + k, n);
+                k = k + 1;
+            }
+        }
+        Copy(src, dst_reg, count) => {
+            let mut k: Int = 0;
+            while k < count {
+                let v = read_reg(prog, rs, span, src + k, pending);
+                reg_state_write(rs, dst_reg + k, v);
+                k = k + 1;
+            }
+        }
+        SCopy(src, dst_reg) => {
+            let v = read_reg(prog, rs, span, src, pending);
+            reg_state_write(rs, dst_reg, v);
+        }
+
+        Add(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp::AddOp, pending),
+        Subtract(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp::SubOp, pending),
+        Multiply(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp::MulOp, pending),
+        Divide(a, b, d)   => arith(prog, rs, span, a, b, d, ArithOp::DivOp, pending),
+        Remainder(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp::RemOp, pending),
+
+        BitAnd(a, b, d)    => bitwise(prog, rs, span, a, b, d, BitOp::AndOp, pending),
+        BitOr(a, b, d)     => bitwise(prog, rs, span, a, b, d, BitOp::OrOp, pending),
+        ShiftLeft(a, b, d) => bitwise(prog, rs, span, a, b, d, BitOp::ShlOp, pending),
+        ShiftRight(a, b, d) => bitwise(prog, rs, span, a, b, d, BitOp::ShrOp, pending),
+        BitNot(s, d) => {
+            let av = read_reg(prog, rs, span, s, pending);
+            let dst = mint(prog, SkInt);
+            push_inst(prog, &span.block, IBitNot(dst.clone(), av));
+            reg_state_write(rs, d, dst);
+        }
+
+        Column(cursor_id, col_idx, reg_dst) => {
+            let dst = mint(prog, SkAny);
+            push_inst(prog, &span.block, IColumn(dst.clone(), cursor_id, col_idx));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        RowIdOp(cursor_id, reg_dst) => {
+            let dst = mint(prog, SkRowId);
+            push_inst(prog, &span.block, IRowId(dst.clone(), cursor_id));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        NewRowid(cursor_id, reg_dst) => {
+            let dst = mint(prog, SkRowId);
+            push_inst(prog, &span.block, INewRowId(dst.clone(), cursor_id));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        MakeRecord(reg_start, n_cols, reg_dst, affinity_const_idx) => {
+            let mut vs: List<SsaValue> = List.new();
+            let mut k: Int = 0;
+            while k < n_cols {
+                vs.push(read_reg(prog, rs, span, reg_start + k, pending));
+                k = k + 1;
+            }
+            // Affinity string is a Text const; if the index is valid we
+            // pass the literal — otherwise empty.
+            let aff_text = constant_text_at(prog, affinity_const_idx);
+            let dst = mint(prog, SkBlob);
+            push_inst(prog, &span.block, IMakeRecord(dst.clone(), vs, aff_text));
+            reg_state_write(rs, reg_dst, dst);
+        }
+        Insert(cursor_id, data_reg, key_reg, flags) => {
+            let rec = read_reg(prog, rs, span, data_reg, pending);
+            let key = read_reg(prog, rs, span, key_reg, pending);
+            push_inst(prog, &span.block, ICursorInsert(cursor_id, rec, key, flags));
+        }
+        Delete(cursor_id) => {
+            push_inst(prog, &span.block, ICursorDelete(cursor_id));
+        }
+
+        // Cursor-open variants are no-result.
+        _ => {
+            // Catch-all for opcodes the SSA lifter doesn't yet
+            // model.  Treated as a no-op SSA-wise but logged as
+            // `IHalt(99, "<unhandled opcode>")` would be too
+            // aggressive — just no-op.  Tracked under #132 follow-up
+            // for full coverage.
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Arithmetic / bitwise helpers
+// -----------------------------------------------------------------------------
+
+type ArithOp is AddOp | SubOp | MulOp | DivOp | RemOp;
+type BitOp is AndOp | OrOp | ShlOp | ShrOp;
+
+fn arith(
+    prog: &mut SsaProgram,
+    rs: &mut RegState,
+    span: &BlockSpan,
+    a: Int,
+    b: Int,
+    d: Int,
+    op: ArithOp,
+    pending: &mut List<PendingPhi>,
+) {
+    let av = read_reg(prog, rs, span, a, pending);
+    let bv = read_reg(prog, rs, span, b, pending);
+    // Result kind: if both Int → Int; if either Real → Real; else Any
+    let dst_kind = arith_result_kind(&av.kind, &bv.kind);
+    let dst = mint(prog, dst_kind);
+    let inst = match op {
+        AddOp => IAdd(dst.clone(), av, bv),
+        SubOp => ISub(dst.clone(), av, bv),
+        MulOp => IMul(dst.clone(), av, bv),
+        DivOp => IDiv(dst.clone(), av, bv),
+        RemOp => IRem(dst.clone(), av, bv),
+    };
+    push_inst(prog, &span.block, inst);
+    reg_state_write(rs, d, dst);
+}
+
+fn bitwise(
+    prog: &mut SsaProgram,
+    rs: &mut RegState,
+    span: &BlockSpan,
+    a: Int,
+    b: Int,
+    d: Int,
+    op: BitOp,
+    pending: &mut List<PendingPhi>,
+) {
+    let av = read_reg(prog, rs, span, a, pending);
+    let bv = read_reg(prog, rs, span, b, pending);
+    let dst = mint(prog, SkInt);
+    let inst = match op {
+        AndOp => IBitAnd(dst.clone(), av, bv),
+        OrOp  => IBitOr(dst.clone(), av, bv),
+        ShlOp => IShiftLeft(dst.clone(), av, bv),
+        ShrOp => IShiftRight(dst.clone(), av, bv),
+    };
+    push_inst(prog, &span.block, inst);
+    reg_state_write(rs, d, dst);
+}
+
+fn arith_result_kind(a: &SValueKind, b: &SValueKind) -> SValueKind {
+    if kind_eq(a, &SkReal) || kind_eq(b, &SkReal) { return SkReal; }
+    if kind_eq(a, &SkInt) && kind_eq(b, &SkInt)   { return SkInt; }
+    SkAny
+}
+
+// -----------------------------------------------------------------------------
+// Terminator lifting
+// -----------------------------------------------------------------------------
+
+fn lift_terminator(
+    prog: &mut SsaProgram,
+    rs: &mut RegState,
+    span: &BlockSpan,
+    skel: &CfgSkeleton,
+    op: &Opcode,
+    pending: &mut List<PendingPhi>,
+) -> SsaInst {
+    match op {
+        Goto(t) => IJump(target_to_block(skel, t)),
+        Halt(code, msg_const) => {
+            let msg = constant_text_at(prog, msg_const);
+            IHalt(code, msg)
+        }
+        Init(t) => {
+            // Init opcode in SQLite is a goto-after-init no-op for our
+            // purposes; SSA treats it as plain jump.
+            IJump(target_to_block(skel, t))
+        }
+        Once(t) => {
+            // Approximate: jump to target on first execution; we lower
+            // to an unconditional jump in the SSA layer (the optimizer
+            // can later wrap with a runtime-flag check).
+            IJump(target_to_block(skel, t))
+        }
+        Gosub(_, t) => {
+            // Sub-program call: simplified to plain jump for SSA.
+            // Return-address tracking is handled by the legacy interpreter
+            // when SSA is back-translated.
+            IJump(target_to_block(skel, t))
+        }
+        Return(reg) => IReturn(value_id(reg)),
+        Eq(a, b, t) => cmp_terminator(prog, rs, span, skel, a, b, t, CkEq, pending),
+        Ne(a, b, t) => cmp_terminator(prog, rs, span, skel, a, b, t, CkNe, pending),
+        Lt(a, b, t) => cmp_terminator(prog, rs, span, skel, a, b, t, CkLt, pending),
+        Le(a, b, t) => cmp_terminator(prog, rs, span, skel, a, b, t, CkLe, pending),
+        Gt(a, b, t) => cmp_terminator(prog, rs, span, skel, a, b, t, CkGt, pending),
+        Ge(a, b, t) => cmp_terminator(prog, rs, span, skel, a, b, t, CkGe, pending),
+        If(reg, t) => {
+            let v = read_reg(prog, rs, span, reg, pending);
+            IBranch(v, target_to_block(skel, t), fallthrough_block(span))
+        }
+        IfNot(reg, t) => {
+            // IfNot jumps when val is FALSY.  We emit an inverted
+            // branch by swapping the targets.
+            let v = read_reg(prog, rs, span, reg, pending);
+            IBranch(v, fallthrough_block(span), target_to_block(skel, t))
+        }
+        IfNull(reg, t) => {
+            let v = read_reg(prog, rs, span, reg, pending);
+            // Materialise (v == NULL) check as ICmp dst:Bool against null.
+            // For the foundation we model as a direct branch tagged
+            // through the value's kind being SkNull at compile-time — the
+            // back-translator restores explicit IfNull semantics.
+            IBranch(v, target_to_block(skel, t), fallthrough_block(span))
+        }
+        NotNull(reg, t) => {
+            let v = read_reg(prog, rs, span, reg, pending);
+            IBranch(v, fallthrough_block(span), target_to_block(skel, t))
+        }
+        Rewind(cur, t) => {
+            ICursorRewind(cur, target_to_block(skel, t))
+        }
+        Last(cur, t) => ICursorLast(cur, target_to_block(skel, t)),
+        Next(cur, t) => ICursorNext(cur, target_to_block(skel, t)),
+        Prev(cur, t) => ICursorPrev(cur, target_to_block(skel, t)),
+        _ => IHalt(0, ""),    // unreachable: lift_block guarantees control-flow shape
+    }
+}
+
+fn cmp_terminator(
+    prog: &mut SsaProgram,
+    rs: &mut RegState,
+    span: &BlockSpan,
+    skel: &CfgSkeleton,
+    a: Int,
+    b: Int,
+    t: Int,
+    kind: CmpKind,
+    pending: &mut List<PendingPhi>,
+) -> SsaInst {
+    let av = read_reg(prog, rs, span, a, pending);
+    let bv = read_reg(prog, rs, span, b, pending);
+    let cmp_dst = mint(prog, SkBool);
+    push_inst(prog, &span.block, ICmp(cmp_dst.clone(), kind, av, bv));
+    IBranch(cmp_dst, target_to_block(skel, t), fallthrough_block(span))
+}
+
+fn target_to_block(skel: &CfgSkeleton, instr_idx: Int) -> BlockId {
+    if instr_idx < 0 || instr_idx >= skel.instr_to_block.len() {
+        return block_id(0);
+    }
+    let raw = skel.instr_to_block[instr_idx];
+    if raw < 0 { return block_id(0); }
+    block_id(raw)
+}
+
+fn fallthrough_block(span: &BlockSpan) -> BlockId {
+    block_id(block_id_raw(&span.block) + 1)
+}
+
+// -----------------------------------------------------------------------------
+// Reading a register: in-block reaching def, or pending placeholder
+// -----------------------------------------------------------------------------
+
+fn read_reg(
+    prog: &mut SsaProgram,
+    rs: &RegState,
+    span: &BlockSpan,
+    reg_idx: Int,
+    pending: &mut List<PendingPhi>,
+) -> SsaValue {
+    match reg_state_read(rs, reg_idx) {
+        Some(v) => v,
+        None => {
+            // Cross-block read — record a placeholder for pass 2.
+            let placeholder = mint(prog, SkAny);
+            pending.push(PendingPhi {
+                block: span.block.clone(),
+                reg_idx: reg_idx,
+                placeholder: placeholder.clone(),
+            });
+            placeholder
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SSA value minting + helpers
+// -----------------------------------------------------------------------------
+
+fn mint(prog: &mut SsaProgram, kind: SValueKind) -> SsaValue {
+    let id = prog.fresh_value_id();
+    ssa_value(id, kind)
+}
+
+fn push_inst(prog: &mut SsaProgram, b: &BlockId, inst: SsaInst) {
+    prog.cfg.get_mut(b).push_inst(inst);
+}
+
+fn constant_text_at(prog: &SsaProgram, idx: Int) -> Text {
+    if idx < 0 || idx >= prog.constants.entries.len() { return ""; }
+    match prog.constants.entries[idx] {
+        KText(s) => s.clone(),
+        KAffinityStr(s) => s.clone(),
+        _ => "",
+    }
+}
+
+fn int_to_i64(v: Int) -> Int64 {
+    // Verum widening; keeps Int64 typing for IIntImm.
+    v as Int64
+}

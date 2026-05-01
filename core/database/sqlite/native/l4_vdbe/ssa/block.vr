@@ -1,0 +1,116 @@
+module core.database.sqlite.native.l4_vdbe.ssa.block;
+
+// =============================================================================
+// l4_vdbe/ssa/block.vr — Basic block + control-flow graph
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4 (SSA IR)
+//
+// A `BasicBlock` is a maximal sequence of straight-line SSA
+// instructions ending in exactly one terminator (Branch / Jump /
+// Halt / Return).  This is the standard textbook structure that
+// dominator analysis + phi insertion operate on.
+//
+// Block boundaries are determined from the legacy `VdbeProgram`
+// instruction list during the lifting pass — every jump target is a
+// block leader, and the instruction following a terminator is a new
+// leader.
+//
+// The CFG carries successor edges (derived from terminators) and
+// predecessor edges (computed once, cached for dominator analysis).
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, IHalt, inst_terminator_targets};
+
+// -----------------------------------------------------------------------------
+// BlockId
+// -----------------------------------------------------------------------------
+
+/// Index into the CFG's block array.  Convention: `BlockId(0)` is the
+/// entry block; the lifting pass guarantees this.
+public type BlockId is (Int);
+
+public fn block_id(n: Int) -> BlockId { BlockId(n) }
+public fn block_id_raw(b: &BlockId) -> Int { match b { BlockId(n) => n } }
+public fn block_id_eq(a: &BlockId, b: &BlockId) -> Bool {
+    block_id_raw(a) == block_id_raw(b)
+}
+
+// -----------------------------------------------------------------------------
+// BasicBlock
+// -----------------------------------------------------------------------------
+
+/// One basic block.  `insts` holds all NON-terminator instructions in
+/// order; `terminator` is the single control-flow instruction at the
+/// end (Branch / Jump / Halt / Return / Yield).
+///
+/// `predecessors` is computed once after CFG assembly (`compute_preds`
+/// in `cfg.vr`).  It is required by phi insertion + dominator
+/// analysis but populated lazily because incrementally maintaining it
+/// during construction adds noise.
+///
+/// `phi_nodes` are the explicit phi instructions at block entry,
+/// inserted by `phi_insertion.vr`.  Each phi maps `predecessors[i]`
+/// to its incoming SSA value.  Phi instructions are NOT in `insts`
+/// because semantically they execute "at entry" rather than after
+/// any straight-line instruction.
+public type BasicBlock is {
+    id: BlockId,
+    phi_nodes: List<SsaInst>,        // semantically before insts; only IPhi variants
+    insts: List<SsaInst>,            // straight-line, no terminators
+    terminator: SsaInst,             // exactly one of: IBranch | IJump | IHalt | IReturn | IYield
+    predecessors: List<BlockId>,     // computed by compute_preds(); empty until then
+};
+
+/// Construct an empty block with a placeholder terminator (`IHalt`).
+/// Callers MUST replace the terminator before passing the block to
+/// the CFG.
+public fn block_new(id: BlockId) -> BasicBlock {
+    BasicBlock {
+        id: id,
+        phi_nodes: List.new(),
+        insts: List.new(),
+        terminator: placeholder_terminator(),
+        predecessors: List.new(),
+    }
+}
+
+/// Synthetic placeholder: `IHalt(0, "")`.  Replaced before the block
+/// is committed to the CFG.
+fn placeholder_terminator() -> SsaInst {
+    IHalt(0, "")
+}
+
+implement BasicBlock {
+    public fn instr_count(&self) -> Int {
+        self.phi_nodes.len() + self.insts.len() + 1   // +1 for terminator
+    }
+
+    /// Push a non-terminator instruction.  Caller MUST ensure `inst`
+    /// is not a terminator; the type-checker pass enforces this.
+    public fn push_inst(&mut self, inst: SsaInst) {
+        self.insts.push(inst);
+    }
+
+    /// Set the terminator; replaces the placeholder.  Idempotent —
+    /// callers may call this multiple times during peephole opt.
+    public fn set_terminator(&mut self, inst: SsaInst) {
+        self.terminator = inst;
+    }
+
+    /// Successor list derived from the terminator (1 for jump/halt,
+    /// 2 for branch, 0 for halt/return).  Computed on every call —
+    /// O(small) since terminators have ≤ 2 successors.
+    public fn successors(&self) -> List<BlockId> {
+        inst_terminator_targets(&self.terminator)
+    }
+
+    /// Append a phi node; ordered by insertion.  The renaming pass
+    /// of phi insertion guarantees unique destination ValueIds.
+    public fn push_phi(&mut self, phi: SsaInst) {
+        self.phi_nodes.push(phi);
+    }
+}
