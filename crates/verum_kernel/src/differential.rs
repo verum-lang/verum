@@ -23,15 +23,22 @@
 //! divergence before it reaches the trust boundary.
 //!
 
-//! ## Current status — Rust-side framework, Verum-side stub
+//! ## Current status — TWO Rust-side kernels active (#159 V1)
 //!
 
-//! The Verum-side checker cannot be invoked live yet: the
-//! `core/verify/kernel_v0/` tree is partially blocked on a parser
-//! issue where soundness theorems silently drop from module exports.
-//! Until that lands, the Verum verdict is recorded as
-//! [`KernelVerdict::NotYetSelfHosting`] and the agreement field is
-//! [`DifferentialAgreement::NotYetSelfHosting`].
+//! Pre-V1 the second slot was stubbed as `NotYetSelfHosting`.
+//! Post-V1 the second slot runs [`crate::proof_checker_nbe`] —
+//! a structurally-distinct algorithmic kernel using
+//! Normalisation-by-Evaluation.  The two implementations
+//! (bidirectional + explicit substitution vs NbE) compute the
+//! same input/output relation via different evaluation strategies;
+//! disagreements are bugs in EITHER side.
+//!
+
+//! The Verum-self-hosted kernel (`core/verify/kernel_v0/`) is
+//! tracked separately under #154 and will land as a THIRD slot
+//! once the parser blocker lands.  Until then `proof_checker_nbe`
+//! is the active second kernel.
 //!
 
 //! This module is **load-bearing scaffolding**: the entire framework
@@ -257,8 +264,20 @@ impl DifferentialReport {
 /// callers.
 pub fn run_differential_test(rule: &KernelV0Rule, certificate: &Certificate) -> DifferentialReport {
     let rust_verdict: KernelVerdict = certificate.verify().into();
-    let verum_verdict = KernelVerdict::NotYetSelfHosting;
-    DifferentialReport::new(rule.name.clone(), rust_verdict, verum_verdict)
+    // **#159 V1 — second algorithmic kernel**.  Pre-V1 the second
+    // slot was stubbed as `NotYetSelfHosting` because no second
+    // implementation existed.  Post-V1 the NbE-based
+    // [`crate::proof_checker_nbe`] runs as the second kernel.
+    // Differential-test catches implementation bugs in EITHER
+    // implementation as Disagreement verdicts.
+    //
+    // The Verum-self-hosted kernel (`core/verify/kernel_v0/`) is
+    // a separate, longer-running project tracked under #154; when
+    // it lands it will become a THIRD slot via a separate
+    // `run_differential_test_with_verum` invocation.
+    let nbe_verdict: KernelVerdict =
+        crate::proof_checker_nbe::verify_certificate(certificate).into();
+    DifferentialReport::new(rule.name.clone(), rust_verdict, nbe_verdict)
 }
 
 /// Variant of [`run_differential_test`] that accepts a Verum-side
@@ -416,13 +435,17 @@ mod tests {
         // Pin the public surface: a report exposes rule_name,
         // rust_verdict, verum_verdict, agreement. Drift here breaks
         // the audit-gate JSON contract.
+        //
+        // **Post-V1 (#159)**: the second slot now runs the NbE
+        // kernel (`proof_checker_nbe`). On the canonical poly-id
+        // certificate both kernels accept → `BothAccept`.
         let rule = synthetic_rule("K-Synth");
         let cert = stub_polymorphic_identity_certificate();
         let report = run_differential_test(&rule, &cert);
         assert_eq!(report.rule_name, "K-Synth");
         assert!(report.rust_verdict.is_accepted());
-        assert!(report.verum_verdict.is_not_yet_self_hosting());
-        assert_eq!(report.agreement, DifferentialAgreement::NotYetSelfHosting);
+        assert!(report.verum_verdict.is_accepted());
+        assert_eq!(report.agreement, DifferentialAgreement::BothAccept);
     }
 
     #[test]
@@ -577,20 +600,20 @@ mod tests {
     }
 
     #[test]
-    fn differential_outcome_no_divergence_when_only_stubbed() {
-        // The current production state: every report comes back as
-        // NotYetSelfHosting because the Verum side isn't online.
-        // The audit gate must NOT flag this as a divergence.
+    fn differential_outcome_no_divergence_with_active_nbe_second_slot() {
+        // **Post-V1 (#159)**: the second slot is the NbE kernel.
+        // On the canonical polymorphic-identity certificate both
+        // kernels accept; the audit gate reports BothAccept for
+        // every rule.  Pre-V1 this test asserted
+        // NotYetSelfHosting, since the second slot was stubbed.
         let reports: Vec<_> = kernel_v0_manifest::manifest()
             .iter()
             .map(|rule| run_differential_test(rule, &stub_polymorphic_identity_certificate()))
             .collect();
         let outcome = DifferentialOutcome::from_reports(&reports);
         assert_eq!(outcome.disagreement, 0);
-        assert_eq!(
-            outcome.not_yet_self_hosting,
-            kernel_v0_manifest::KERNEL_V0_RULE_COUNT,
-        );
+        assert_eq!(outcome.not_yet_self_hosting, 0);
+        assert_eq!(outcome.accepted, kernel_v0_manifest::KERNEL_V0_RULE_COUNT);
         assert!(!outcome.has_divergence());
     }
 
