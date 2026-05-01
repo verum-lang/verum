@@ -460,6 +460,30 @@ pub struct InterpreterState {
     /// they have no concrete receiver type anyway.
     pub method_cache: HashMap<(u32, u32), crate::FunctionId>,
 
+    /// **String-constant singleton cache** (#93, parallels AOT
+    /// `__rodata` Text globals from #92).
+    ///
+    /// Pre-fix: every `LoadK Constant::String(id)` heap-allocated a
+    /// fresh `[len:u64][bytes...]` blob — so a literal in a hot
+    /// loop produced N allocations for 1 unique string.  Post-fix:
+    /// the first load of `(const_id) → Value` populates this cache;
+    /// subsequent loads return the cached `Value::from_ptr` directly,
+    /// matching the C/Rust `&'static str` interning model.  The
+    /// allocation is **module-lifetime** — pinned across the run,
+    /// never freed (the singleton outlives every Drop).  Indexed by
+    /// `ConstId.0 as usize`; `None` slots mean "not yet realised".
+    ///
+    /// Note: small-string-optimized values (≤ 7 bytes via NaN-box)
+    /// don't allocate either way, so they're cached as-is —
+    /// the cache size is `O(N_distinct_string_consts)`, not
+    /// `O(N_distinct_string_consts × call_count)`.
+    ///
+    /// VBC-first architecture: the interpreter's cache and the AOT
+    /// `__rodata` global both implement the same architectural
+    /// invariant — "string constants are loaded once per module,
+    /// not once per invocation."
+    pub string_const_cache: Vec<Option<Value>>,
+
     /// Captured stdout output (for test execution).
     pub stdout_buffer: String,
 
@@ -2373,6 +2397,7 @@ impl InterpreterState {
             gpu_shared_memory: None,
             gpu_shared_mem_offset: 0,
             method_cache: HashMap::new(),
+            string_const_cache: Vec::new(),
             stdout_buffer: String::new(),
             exception_handlers: ExceptionHandlerStack::new(),
             current_exception: None,

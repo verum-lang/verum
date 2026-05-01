@@ -28379,42 +28379,89 @@ fn lower_load_const<'ctx>(
         Constant::Float(v) => ctx.types().f64_type().const_float(*v).into(),
         Constant::String(str_id) => {
             let s = vbc_mod.get_string(*str_id).unwrap_or("");
-            // Create a global string constant for the raw data
-            let global = ctx
-                .builder()
-                .build_global_string_ptr(s, "str_const")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            // Wrap in a Text object {ptr, len, cap=0} via verum_text_alloc.
-            // cap=0 marks this as an immutable static string.
+            // ============================================================
+            // **Static Text literal — zero-allocation path.**
+            //
+            // Pre-fix: every `LoadK String` emitted a runtime call
+            // to `verum_text_alloc` which heap-allocated 24 bytes
+            // for the `{ptr, len, cap}` Text object — even though
+            // the data is statically known at compile time.  For
+            // hello-world that's a malloc + 3 stores + a return
+            // value cast, just to wrap a `__rodata` string.
+            //
+            // Post-fix: emit a static Text global in `__rodata`
+            // with the same `{ptr_to_data, len, 0}` layout that
+            // `verum_text_alloc` produces.  `cap=0` is the
+            // pre-existing "immutable static literal" marker; the
+            // text-method stdlib already respects it (mutating
+            // methods check cap > 0 before writing).
+            //
+            // Performance:
+            //  * Zero malloc / free per literal.
+            //  * Zero runtime call.
+            //  * LLVM constant-propagates the pointer; on aarch64
+            //    `LoadK String` becomes `adrp + add` (2 instrs).
+            //  * The linker dedupes identical `__rodata` literals
+            //    automatically (private + unnamed_addr).
+            //
+            // Architectural mirror in interpreter: VBC-level
+            // ConstId → Value singleton cache (#93).
+            // ============================================================
             let i64_type = ctx.types().i64_type();
-            let ptr_type = ctx.types().ptr_type();
-            let fn_type =
-                i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-            let text_alloc_fn = ctx
-                .get_module()
-                .get_function("verum_text_alloc")
-                .unwrap_or_else(|| {
-                    ctx.get_module()
-                        .add_function("verum_text_alloc", fn_type, None)
-                });
-            let str_len = i64_type.const_int(s.len() as u64, false);
-            let cap_zero = i64_type.const_zero();
-            let text_obj = ctx
-                .builder()
-                .build_call(
-                    text_alloc_fn,
+            let module = ctx.get_module();
+
+            // Reuse a single global Text struct per ConstId — different
+            // VBC instructions referencing the same string-pool entry
+            // share the same `__rodata` slot.  The mangling embeds
+            // `const_id` (not `str_id`) because the constant pool is
+            // already deduplicated upstream by the VBC string table.
+            let global_name = format!("verum_text_const_{}", const_id);
+            let text_obj_ptr = if let Some(existing) = module.get_global(&global_name) {
+                existing.as_pointer_value()
+            } else {
+                // Step 1: emit the raw bytes as a private rodata string.
+                // `build_global_string_ptr` appends a NUL terminator
+                // (harmless — Verum Text stores explicit length, but
+                // having NUL means C-side helpers like `verum_text_get_ptr`
+                // produce a usable c_str without copying).
+                let data_global = ctx
+                    .builder()
+                    .build_global_string_ptr(s, &format!("verum_text_data_{}", const_id))
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                let data_ptr_as_i64 = data_global
+                    .as_pointer_value()
+                    .const_to_int(i64_type);
+
+                // Step 2: emit the `{ptr_i64, len, cap=0}` struct as a
+                // global constant.  Match the runtime `verum_text_alloc`
+                // layout exactly: 3 contiguous i64s, no struct padding.
+                let len_const = i64_type.const_int(s.len() as u64, false);
+                let zero = i64_type.const_zero();
+                let struct_init = ctx.llvm_context().const_struct(
                     &[
-                        global.as_pointer_value().into(),
-                        str_len.into(),
-                        cap_zero.into(),
+                        data_ptr_as_i64.into(),
+                        len_const.into(),
+                        zero.into(),
                     ],
-                    "text_obj",
-                )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            text_obj
-                .try_as_basic_value()
-                .basic()
-                .unwrap_or_else(|| i64_type.const_zero().into())
+                    false, // packed=false → matches malloc'd alignment of 8
+                );
+
+                let struct_ty = struct_init.get_type();
+                let text_global = module.add_global(struct_ty, None, &global_name);
+                text_global.set_initializer(&struct_init);
+                text_global.set_constant(true);
+                text_global.set_linkage(verum_llvm::module::Linkage::Private);
+                text_global.set_unnamed_addr(true);
+                text_global.as_pointer_value()
+            };
+
+            // Result: ptrtoint(@verum_text_const_<id>) — i64-shaped to
+            // match the rest of the VBC register file (Value-tagged at
+            // call sites).  LLVM compiles this to a single
+            // `ptrtoint`-of-constant which becomes an `adrp+add` pair
+            // at codegen time.
+            let result = text_obj_ptr.const_to_int(i64_type);
+            result.into()
         }
         Constant::Function(func_id) => {
             // Function reference — look up as LLVM function pointer
