@@ -81,6 +81,44 @@ pub struct PlatformIR<'ctx> {
 }
 
 impl<'ctx> PlatformIR<'ctx> {
+    /// **ABI bridge: narrow Verum-i64 fd to POSIX-i32 fd.** (#96)
+    ///
+    /// Verum's internal ABI passes file descriptors / int args as
+    /// `i64` (NaN-boxed Value model), but POSIX C ABI uses `int`
+    /// (`i32`) for fd / clock_id / sock_level / sock_opt / etc.
+    /// Use this helper at every libc/libSystem call boundary that
+    /// passes a Verum-side i64 to a POSIX-i32 parameter.
+    ///
+    /// The truncation is bit-correct for all valid fd / opt-id
+    /// values (which fit in i32 by definition).
+    fn fd_to_i32(
+        &self,
+        builder: &verum_llvm::builder::Builder<'ctx>,
+        fd: verum_llvm::values::IntValue<'ctx>,
+    ) -> super::error::Result<verum_llvm::values::IntValue<'ctx>> {
+        let i32_type = self.context.i32_type();
+        builder
+            .build_int_truncate(fd, i32_type, "fd_i32")
+            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+    }
+
+    /// **ABI bridge: extend POSIX-i32 return to Verum-i64.** (#96)
+    ///
+    /// POSIX returns (close/setsockopt/connect/etc.) are `int` (i32),
+    /// but Verum-side return slots are `i64`.  Use this helper at
+    /// every libc-call return site to sign-extend (preserving
+    /// negative-error semantics: `-1` stays `-1` in i64).
+    fn i32_ret_to_i64(
+        &self,
+        builder: &verum_llvm::builder::Builder<'ctx>,
+        ret_i32: verum_llvm::values::IntValue<'ctx>,
+    ) -> super::error::Result<verum_llvm::values::IntValue<'ctx>> {
+        let i64_type = self.context.i64_type();
+        builder
+            .build_int_s_extend(ret_i32, i64_type, "ret_i64")
+            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+    }
+
     /// Direct Linux syscall — libc-free emission of the kernel trap.
     ///
 
@@ -5341,8 +5379,10 @@ impl<'ctx> PlatformIR<'ctx> {
         builder.position_at_end(ret_fail);
         let close_fn = module.get_function("close").or_missing_fn("close")?;
         // Only close if fd >= 0 (may come from entry or sock_ok)
+        // ABI bridge: POSIX close(int fd) expects i32 fd; Verum-side fd is i64.
+        let fd_i32 = self.fd_to_i32(&builder, fd)?;
         builder
-            .build_call(close_fn, &[fd.into()], "")
+            .build_call(close_fn, &[fd_i32.into()], "")
             .or_llvm_err()?;
         builder
             .build_return(Some(&i64_type.const_all_ones()))
@@ -5403,8 +5443,10 @@ impl<'ctx> PlatformIR<'ctx> {
 
         builder.position_at_end(ret_fail);
         let close_fn = module.get_function("close").or_missing_fn("close")?;
+        // ABI bridge: POSIX close(int fd).
+        let fd_i32_close = self.fd_to_i32(&builder, fd)?;
         builder
-            .build_call(close_fn, &[fd.into()], "")
+            .build_call(close_fn, &[fd_i32_close.into()], "")
             .or_llvm_err()?;
         builder
             .build_return(Some(&i64_type.const_all_ones()))
