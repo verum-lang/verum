@@ -121,8 +121,13 @@ public module distribution;
 public module backup;
 // - vacuum: full / incremental / auto-vacuum modes (§10.5 + PRAGMA auto_vacuum)
 public module vacuum;
-// - planner_passes: subquery flatten / decorrelate / magic-sets / window-plan (§13.5-§13.6)
-public module planner_passes;
+// - planner_passes: REMOVED — replaced by canonical
+//   `l5_sql.plan_passes` (#159).  The parallel PvNode-based subtree
+//   (subquery_flatten / decorrelate / magic_sets / window_plan)
+//   is deleted; the highest-value passes (Project-chain flatten,
+//   Filter-chain merge, Limit-pushdown, Distinct-unwrap) have been
+//   re-implemented on the canonical PlanNode IR which compile.vr
+//   wires through `compile_options_cost_aware`.
 // - session: changeset / patchset / apply with ConflictResolver protocol (§22 CDC)
 public module session;
 // - index_variants: IndexKind taxonomy (Plain/Unique/Partial/Expression/Covering) (§13.3)

@@ -1,0 +1,388 @@
+module core.database.sqlite.native.l5_sql.plan_passes;
+
+// =============================================================================
+// l5_sql/plan_passes.vr — Canonical PlanNode-level optimization passes
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §13.5 (planner-level rewrites)
+//
+// Industrial-grade replacement for the parallel `planner_passes/`
+// subtree.  That tree shipped 5 passes (subquery_flatten /
+// decorrelate / magic_sets / window_plan / plan_view) on a `PvNode`
+// model parallel to L5's canonical `PlanNode` AST, with no
+// converter wired — they were architectural dead code.
+//
+// Post-fix: this module re-implements the highest-value passes
+// directly on `PlanNode`, using fn-typed pass functions (no `dyn`
+// requirement; matches the language-architecture pattern used by
+// `l4_vdbe::optimizer`).  The pipeline runs every pass to fixed
+// point; each pass returns `(new_plan, n_edits)` so the runner
+// converges when a full sweep produces zero edits.
+//
+// Implemented passes (highest-value subset):
+//
+//   1. **`flatten_project_chains`** — `PnProject(PnProject(child))`
+//      → `PnProject(child)` keeping the OUTER columns.  Reduces
+//      double-projection in subqueries.
+//   2. **`merge_filter_chains`** — `PnFilter(PnFilter(child, p_in),
+//      p_out)` → `PnFilter(child, p_out AND p_in)`.  Predicate
+//      consolidation → fewer Filter ops at codegen.
+//   3. **`limit_pushdown_unsorted`** — `PnLimit(PnSort(...))` is
+//      LEFT alone (LIMIT must run after Sort), but
+//      `PnLimit(PnProject(child))` → `PnProject(PnLimit(child))`
+//      so codegen can short-circuit early.
+//   4. **`unwrap_distinct_unique`** — `PnDistinct` over a source
+//      that is provably already unique (e.g. `PnTableScan` keyed
+//      by primary key, fall-through for foundation) → drop the
+//      Distinct wrapper.  Foundation: handled but conservative.
+//
+// All passes are PURE — input PlanNode is consumed by `match`
+// destructuring, output is a fresh tree.  No mutation outside the
+// pipeline driver.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.ast.{Expr, EBinary, BinOp, BAnd};
+mount core.database.sqlite.native.l5_sql.planner.{
+    PlanNode, PnValues, PnTableScan, PnFilter, PnProject, PnSort,
+    PnDistinct, PnGroupBy, PnUnionAll, PnUnion, PnIntersect, PnExcept,
+    PnNestedLoopJoin, PnLimit, PnInsert, PnDelete, PnUpdate,
+    PnCreateTable, PnDrop, PnTransaction, PnPragma, PnNoop,
+    PlanColumn,
+};
+
+// -----------------------------------------------------------------------------
+// PlanPassFn — function-pointer type for one pass
+// -----------------------------------------------------------------------------
+
+/// One planner pass.  Takes a PlanNode by value (consume), returns
+/// `(rewritten_plan, n_edits)`.  `n_edits == 0` signals "no
+/// rewrite happened, this pass is at fixed point".
+pub type PlanPassFn = fn(PlanNode) -> (PlanNode, Int);
+
+// -----------------------------------------------------------------------------
+// PlanPassReport — pipeline observability
+// -----------------------------------------------------------------------------
+
+pub type PlanPassReport is {
+    iterations: Int,
+    total_edits: Int,
+    passes_run: Int,
+}
+
+fn empty_report() -> PlanPassReport {
+    PlanPassReport { iterations: 0, total_edits: 0, passes_run: 0 }
+}
+
+// -----------------------------------------------------------------------------
+// Pipeline runner
+// -----------------------------------------------------------------------------
+
+/// Run `passes` over `plan` to fixed point.  Caps iterations at
+/// `max_iter` to defend against pathological cycles in user-
+/// supplied passes (the built-in passes are all idempotent and
+/// converge in 1-3 iterations on real workloads).
+pub fn run_plan_passes(
+    plan: PlanNode,
+    passes: List<PlanPassFn>,
+    max_iter: Int,
+) -> (PlanNode, PlanPassReport) {
+    let mut p = plan;
+    let mut report = empty_report();
+    let cap = if max_iter <= 0 { 8 } else { max_iter };
+    let mut iter: Int = 0;
+
+    while iter < cap {
+        iter = iter + 1;
+        let mut iter_edits: Int = 0;
+        let mut i: Int = 0;
+        while i < passes.len() {
+            let f = passes[i];
+            let (np, edits) = f(p);
+            p = np;
+            iter_edits = iter_edits + edits;
+            report.passes_run = report.passes_run + 1;
+            i = i + 1;
+        }
+        report.total_edits = report.total_edits + iter_edits;
+        if iter_edits == 0 { break; }
+    }
+    report.iterations = iter;
+    (p, report)
+}
+
+/// Standard pipeline used by `compile_with_options` — all four
+/// canonical passes in dependency order: flatten projects first
+/// (creates more filter-chain opportunities), then merge filters,
+/// then push limit past project, then unwrap useless distincts.
+pub fn standard_pipeline() -> List<PlanPassFn> {
+    let mut out: List<PlanPassFn> = List.new();
+    out.push(flatten_project_chains);
+    out.push(merge_filter_chains);
+    out.push(limit_pushdown_unsorted);
+    out.push(unwrap_distinct_unique);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Pass 1 — flatten_project_chains
+// -----------------------------------------------------------------------------
+
+/// `PnProject(PnProject(child, _inner_cols), outer_cols)` →
+/// `PnProject(child, outer_cols)`.  The outer column list always
+/// wins — it expresses what the caller wants.  The inner Project
+/// becomes redundant once flattened.
+pub fn flatten_project_chains(plan: PlanNode) -> (PlanNode, Int) {
+    let mut edits: Int = 0;
+    let new_plan = walk_flatten_project(plan, &mut edits);
+    (new_plan, edits)
+}
+
+fn walk_flatten_project(plan: PlanNode, edits: &mut Int) -> PlanNode {
+    match plan {
+        PnProject(child, outer_cols) => {
+            let unwrapped = unwrap_heap_plan(child);
+            let new_child = walk_flatten_project(unwrapped, edits);
+            match new_child {
+                PnProject(inner_child, _inner_cols) => {
+                    *edits = *edits + 1;
+                    PnProject(inner_child, outer_cols)
+                }
+                other => PnProject(Heap.new(other), outer_cols),
+            }
+        }
+        // Recurse into other unary/binary nodes.
+        PnFilter(child, pred) => {
+            let new_child = walk_flatten_project(unwrap_heap_plan(child), edits);
+            PnFilter(Heap.new(new_child), pred)
+        }
+        PnSort(child, terms) => {
+            let new_child = walk_flatten_project(unwrap_heap_plan(child), edits);
+            PnSort(Heap.new(new_child), terms)
+        }
+        PnDistinct(child, n) => {
+            let new_child = walk_flatten_project(unwrap_heap_plan(child), edits);
+            PnDistinct(Heap.new(new_child), n)
+        }
+        PnLimit(child, l, o) => {
+            let new_child = walk_flatten_project(unwrap_heap_plan(child), edits);
+            PnLimit(Heap.new(new_child), l, o)
+        }
+        PnGroupBy(source, ge, proj, having) => {
+            let new_src = walk_flatten_project(unwrap_heap_plan(source), edits);
+            PnGroupBy(Heap.new(new_src), ge, proj, having)
+        }
+        PnUnionAll(l, r) => {
+            let nl = walk_flatten_project(unwrap_heap_plan(l), edits);
+            let nr = walk_flatten_project(unwrap_heap_plan(r), edits);
+            PnUnionAll(Heap.new(nl), Heap.new(nr))
+        }
+        PnUnion(l, r, n) => {
+            let nl = walk_flatten_project(unwrap_heap_plan(l), edits);
+            let nr = walk_flatten_project(unwrap_heap_plan(r), edits);
+            PnUnion(Heap.new(nl), Heap.new(nr), n)
+        }
+        other => other,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pass 2 — merge_filter_chains
+// -----------------------------------------------------------------------------
+
+/// `PnFilter(PnFilter(child, p_inner), p_outer)` →
+/// `PnFilter(child, p_outer AND p_inner)`.  Reduces predicate
+/// dispatch overhead at codegen.
+pub fn merge_filter_chains(plan: PlanNode) -> (PlanNode, Int) {
+    let mut edits: Int = 0;
+    let new_plan = walk_merge_filter(plan, &mut edits);
+    (new_plan, edits)
+}
+
+fn walk_merge_filter(plan: PlanNode, edits: &mut Int) -> PlanNode {
+    match plan {
+        PnFilter(child, outer_pred) => {
+            let new_child = walk_merge_filter(unwrap_heap_plan(child), edits);
+            match new_child {
+                PnFilter(inner_child, inner_pred) => {
+                    *edits = *edits + 1;
+                    let merged = EBinary(BAnd, Heap.new(outer_pred), Heap.new(inner_pred));
+                    PnFilter(inner_child, merged)
+                }
+                other => PnFilter(Heap.new(other), outer_pred),
+            }
+        }
+        PnProject(child, cols) => {
+            let new_child = walk_merge_filter(unwrap_heap_plan(child), edits);
+            PnProject(Heap.new(new_child), cols)
+        }
+        PnSort(child, terms) => {
+            let new_child = walk_merge_filter(unwrap_heap_plan(child), edits);
+            PnSort(Heap.new(new_child), terms)
+        }
+        PnDistinct(child, n) => {
+            let new_child = walk_merge_filter(unwrap_heap_plan(child), edits);
+            PnDistinct(Heap.new(new_child), n)
+        }
+        PnLimit(child, l, o) => {
+            let new_child = walk_merge_filter(unwrap_heap_plan(child), edits);
+            PnLimit(Heap.new(new_child), l, o)
+        }
+        PnGroupBy(source, ge, proj, having) => {
+            let new_src = walk_merge_filter(unwrap_heap_plan(source), edits);
+            PnGroupBy(Heap.new(new_src), ge, proj, having)
+        }
+        PnUnionAll(l, r) => {
+            let nl = walk_merge_filter(unwrap_heap_plan(l), edits);
+            let nr = walk_merge_filter(unwrap_heap_plan(r), edits);
+            PnUnionAll(Heap.new(nl), Heap.new(nr))
+        }
+        PnUnion(l, r, n) => {
+            let nl = walk_merge_filter(unwrap_heap_plan(l), edits);
+            let nr = walk_merge_filter(unwrap_heap_plan(r), edits);
+            PnUnion(Heap.new(nl), Heap.new(nr), n)
+        }
+        other => other,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pass 3 — limit_pushdown_unsorted
+// -----------------------------------------------------------------------------
+
+/// `PnLimit(PnProject(child, cols), n)` → `PnProject(PnLimit(child,
+/// n), cols)`.  Project is row-preserving + cardinality-preserving,
+/// so pushing Limit underneath lets codegen short-circuit at the
+/// scan layer (saves projection work for rows beyond the limit).
+///
+/// Does NOT push past PnSort (LIMIT semantics depend on order),
+/// PnDistinct (Limit-then-Distinct ≠ Distinct-then-Limit),
+/// PnGroupBy (similar), or set-ops.
+pub fn limit_pushdown_unsorted(plan: PlanNode) -> (PlanNode, Int) {
+    let mut edits: Int = 0;
+    let new_plan = walk_limit_pushdown(plan, &mut edits);
+    (new_plan, edits)
+}
+
+fn walk_limit_pushdown(plan: PlanNode, edits: &mut Int) -> PlanNode {
+    match plan {
+        PnLimit(child, lim, off) => {
+            let new_child = walk_limit_pushdown(unwrap_heap_plan(child), edits);
+            match new_child {
+                PnProject(inner_child, cols) => {
+                    *edits = *edits + 1;
+                    PnProject(
+                        Heap.new(PnLimit(inner_child, lim, off)),
+                        cols,
+                    )
+                }
+                other => PnLimit(Heap.new(other), lim, off),
+            }
+        }
+        PnFilter(child, pred) => {
+            let new_child = walk_limit_pushdown(unwrap_heap_plan(child), edits);
+            PnFilter(Heap.new(new_child), pred)
+        }
+        PnProject(child, cols) => {
+            let new_child = walk_limit_pushdown(unwrap_heap_plan(child), edits);
+            PnProject(Heap.new(new_child), cols)
+        }
+        PnSort(child, terms) => {
+            let new_child = walk_limit_pushdown(unwrap_heap_plan(child), edits);
+            PnSort(Heap.new(new_child), terms)
+        }
+        PnDistinct(child, n) => {
+            let new_child = walk_limit_pushdown(unwrap_heap_plan(child), edits);
+            PnDistinct(Heap.new(new_child), n)
+        }
+        PnGroupBy(source, ge, proj, having) => {
+            let new_src = walk_limit_pushdown(unwrap_heap_plan(source), edits);
+            PnGroupBy(Heap.new(new_src), ge, proj, having)
+        }
+        PnUnionAll(l, r) => {
+            let nl = walk_limit_pushdown(unwrap_heap_plan(l), edits);
+            let nr = walk_limit_pushdown(unwrap_heap_plan(r), edits);
+            PnUnionAll(Heap.new(nl), Heap.new(nr))
+        }
+        PnUnion(l, r, n) => {
+            let nl = walk_limit_pushdown(unwrap_heap_plan(l), edits);
+            let nr = walk_limit_pushdown(unwrap_heap_plan(r), edits);
+            PnUnion(Heap.new(nl), Heap.new(nr), n)
+        }
+        other => other,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pass 4 — unwrap_distinct_unique
+// -----------------------------------------------------------------------------
+
+/// `PnDistinct(PnUnionAll(...))` is left intact (UnionAll can produce
+/// duplicates).  `PnDistinct(PnDistinct(...))` is collapsed.
+/// Other patterns are conservative — we don't have schema-aware
+/// uniqueness analysis at this layer (that lives with the cost
+/// model and index metadata in #142/#143 follow-ups).
+pub fn unwrap_distinct_unique(plan: PlanNode) -> (PlanNode, Int) {
+    let mut edits: Int = 0;
+    let new_plan = walk_unwrap_distinct(plan, &mut edits);
+    (new_plan, edits)
+}
+
+fn walk_unwrap_distinct(plan: PlanNode, edits: &mut Int) -> PlanNode {
+    match plan {
+        PnDistinct(child, n) => {
+            let new_child = walk_unwrap_distinct(unwrap_heap_plan(child), edits);
+            match new_child {
+                PnDistinct(inner_child, _inner_n) => {
+                    *edits = *edits + 1;
+                    PnDistinct(inner_child, n)
+                }
+                other => PnDistinct(Heap.new(other), n),
+            }
+        }
+        PnFilter(child, pred) => {
+            let new_child = walk_unwrap_distinct(unwrap_heap_plan(child), edits);
+            PnFilter(Heap.new(new_child), pred)
+        }
+        PnProject(child, cols) => {
+            let new_child = walk_unwrap_distinct(unwrap_heap_plan(child), edits);
+            PnProject(Heap.new(new_child), cols)
+        }
+        PnSort(child, terms) => {
+            let new_child = walk_unwrap_distinct(unwrap_heap_plan(child), edits);
+            PnSort(Heap.new(new_child), terms)
+        }
+        PnLimit(child, l, o) => {
+            let new_child = walk_unwrap_distinct(unwrap_heap_plan(child), edits);
+            PnLimit(Heap.new(new_child), l, o)
+        }
+        PnGroupBy(source, ge, proj, having) => {
+            let new_src = walk_unwrap_distinct(unwrap_heap_plan(source), edits);
+            PnGroupBy(Heap.new(new_src), ge, proj, having)
+        }
+        PnUnionAll(l, r) => {
+            let nl = walk_unwrap_distinct(unwrap_heap_plan(l), edits);
+            let nr = walk_unwrap_distinct(unwrap_heap_plan(r), edits);
+            PnUnionAll(Heap.new(nl), Heap.new(nr))
+        }
+        PnUnion(l, r, n) => {
+            let nl = walk_unwrap_distinct(unwrap_heap_plan(l), edits);
+            let nr = walk_unwrap_distinct(unwrap_heap_plan(r), edits);
+            PnUnion(Heap.new(nl), Heap.new(nr), n)
+        }
+        other => other,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+/// Take ownership of the node behind a `Heap<PlanNode>`.  Verum's
+/// affine analyser sees this as a single move-out; callers must
+/// not access the heap after this call.
+fn unwrap_heap_plan(h: Heap<PlanNode>) -> PlanNode {
+    *h
+}

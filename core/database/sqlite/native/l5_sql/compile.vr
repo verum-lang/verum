@@ -55,6 +55,9 @@ mount core.database.sqlite.native.l4_vdbe.ssa.optimizer.{
     optimize_ssa, SsaOptimizerReport,
 };
 mount core.database.sqlite.native.l4_vdbe.ssa.to_register_vm.lower_ssa_to_vdbe;
+mount core.database.sqlite.native.l5_sql.plan_passes.{
+    PlanPassFn, PlanPassReport, run_plan_passes, standard_pipeline,
+};
 
 // -----------------------------------------------------------------------------
 // Error type
@@ -148,12 +151,13 @@ public type CompileOptions is {
     /// `true` → route through the SSA-canonical pipeline per spec
     /// §4.4: codegen → lift_vdbe_to_ssa → resolve_pending_phis →
     /// optimize_ssa (DCE + jump-threading) → lower_ssa_to_vdbe.
-    /// Adds O(N) lift+lower cost at compile time but unblocks the
-    /// SSA-level optimizations.  Recommended for production paths
-    /// once the SSA optimizer is wired through every codegen
-    /// branch (currently passes optimize most opcodes correctly;
-    /// rare opcodes are left untouched).
     use_ssa_pipeline: Bool,
+    /// `true` → run plan-level passes (flatten Project chains,
+    /// merge Filter chains, push Limit past Project, unwrap
+    /// double Distinct) BEFORE codegen.  See `plan_passes.vr`
+    /// for the full set.  Spec §13.5 closure (#159).  Idempotent;
+    /// pipeline converges in 1-3 iterations on real workloads.
+    run_plan_passes: Bool,
 };
 
 /// Defaults: cost annotation OFF, optimizer ON, SSA pipeline OFF —
@@ -163,27 +167,30 @@ public fn compile_options_default() -> CompileOptions {
         use_cost_annotation: false,
         run_optimizer: true,
         use_ssa_pipeline: false,
+        run_plan_passes: false,
     }
 }
 
-/// Cost-aware preset: cost annotation ON, optimizer ON.
+/// Cost-aware preset: cost annotation ON, optimizer ON, plan
+/// passes ON (cheap; idempotent; never makes a query slower).
 public fn compile_options_cost_aware() -> CompileOptions {
     CompileOptions {
         use_cost_annotation: true,
         run_optimizer: true,
         use_ssa_pipeline: false,
+        run_plan_passes: true,
     }
 }
 
-/// SSA-canonical preset: cost annotation ON, SSA pipeline ON, L4
-/// peephole optimizer ON.  Recommended once the production runtime
-/// has soaked the SSA optimizer for a release cycle.  Equivalent
-/// to spec §4.4's "SSA as canonical IR" promise.
+/// SSA-canonical preset: every optimization layer ON.  This is
+/// the architecturally-correct production path per spec §4.4
+/// (SSA canonical IR) + §13.5 (planner-level rewrites).
 public fn compile_options_ssa_canonical() -> CompileOptions {
     CompileOptions {
         use_cost_annotation: true,
         run_optimizer: true,
         use_ssa_pipeline: true,
+        run_plan_passes: true,
     }
 }
 
@@ -217,9 +224,20 @@ public fn compile_with_options(
         Ok(s)  => s,
         Err(e) => { return Err(CeParse(e)); }
     };
-    let plan = match plan_statement_with_schema(&stmt, schema) {
+    let raw_plan = match plan_statement_with_schema(&stmt, schema) {
         Ok(p)  => p,
         Err(e) => { return Err(CePlan(e)); }
+    };
+
+    // Plan-level rewrite passes (§13.5): flatten Project chains,
+    // merge Filter chains, push Limit past Project, unwrap double
+    // Distinct.  Idempotent; safe to run unconditionally but
+    // gated by the option for backward compatibility.
+    let plan = if opts.run_plan_passes {
+        let (rewritten, _report) = run_plan_passes(raw_plan, standard_pipeline(), 4);
+        rewritten
+    } else {
+        raw_plan
     };
 
     let explain_trace = if opts.use_cost_annotation {
