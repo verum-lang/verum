@@ -42,6 +42,7 @@ use crate::arch::{Capability, Foundation, Lifecycle, MsfsStratum, Shape, Tier};
 /// agents; documented in spec + on docs site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AntiPatternCode {
+    // ----- Сезон 1 (AP-001..010) — capability/composition core -----
     CapabilityEscalation,    // ATS-V-AP-001
     CapabilityLeak,          // ATS-V-AP-002
     DependencyCycle,         // ATS-V-AP-003
@@ -52,6 +53,32 @@ pub enum AntiPatternCode {
     ResourceStraddling,      // ATS-V-AP-008
     LifecycleRegression,     // ATS-V-AP-009
     CveIncomplete,           // ATS-V-AP-010
+
+    // ----- Сезон 2 base (AP-011..026) — boundary / lifecycle / capability ontology -----
+    AbsoluteBoundaryAttempt,           // ATS-V-AP-011 — stratum = LAbs (AFN-T α violation)
+    InvariantViolation,                // ATS-V-AP-012 — boundary invariant not preserved
+    DanglingMessageType,               // ATS-V-AP-013 — message type без wire encoding
+    UnauthenticatedCrossing,           // ATS-V-AP-014 — Network boundary без AuthenticatedFirst
+    DeterministicViolation,            // ATS-V-AP-015 — DST test использует non-deterministic
+    CapabilityDuplication,             // ATS-V-AP-016 — Linear cap duplicated
+    OrphanCapability,                  // ATS-V-AP-017 — Relevant cap отброшена
+    MissingHandoff,                    // ATS-V-AP-018 — composition cap не в composes_with
+    FoundationDowngrade,               // ATS-V-AP-019 — strong foundation → weak без bridge
+    TimeBoundLeakage,                  // ATS-V-AP-020 — TimeBound cap живёт > TTL
+    PersistenceMismatch,               // ATS-V-AP-021 — Persist cap для non-durable op
+    CapabilityLaundering,              // ATS-V-AP-022 — multi-hop privilege escalation
+    FoundationForgery,                 // ATS-V-AP-023 — declared foundation ≠ cited
+    TransitiveLifecycleRegression,     // ATS-V-AP-024 — transitive [Т]→...→[Г]
+    DeclarationDrift,                  // ATS-V-AP-025 — declared shape ≠ inferred
+    FoundationContentMismatch,         // ATS-V-AP-026 — code-content uses foreign foundation
+
+    // ----- Сезон 2 MTAC (AP-027..032) — modal-temporal-architectural calculus -----
+    TemporalInconsistency,             // ATS-V-AP-027 — invariant breaks across time
+    CounterfactualBrittleness,         // ATS-V-AP-028 — fragile under decision swap
+    MissedAdjoint,                     // ATS-V-AP-029 — refactoring без inverse
+    UniversalPropertyViolation,        // ATS-V-AP-030 — claimed unique но не уникален
+    PhantomEvolution,                  // ATS-V-AP-031 — evolution path с unsat trigger
+    YonedaInequivalentRefactor,        // ATS-V-AP-032 — refactor changes observer-functor
 }
 
 impl AntiPatternCode {
@@ -68,10 +95,32 @@ impl AntiPatternCode {
             AntiPatternCode::ResourceStraddling => "ATS-V-AP-008",
             AntiPatternCode::LifecycleRegression => "ATS-V-AP-009",
             AntiPatternCode::CveIncomplete => "ATS-V-AP-010",
+            AntiPatternCode::AbsoluteBoundaryAttempt => "ATS-V-AP-011",
+            AntiPatternCode::InvariantViolation => "ATS-V-AP-012",
+            AntiPatternCode::DanglingMessageType => "ATS-V-AP-013",
+            AntiPatternCode::UnauthenticatedCrossing => "ATS-V-AP-014",
+            AntiPatternCode::DeterministicViolation => "ATS-V-AP-015",
+            AntiPatternCode::CapabilityDuplication => "ATS-V-AP-016",
+            AntiPatternCode::OrphanCapability => "ATS-V-AP-017",
+            AntiPatternCode::MissingHandoff => "ATS-V-AP-018",
+            AntiPatternCode::FoundationDowngrade => "ATS-V-AP-019",
+            AntiPatternCode::TimeBoundLeakage => "ATS-V-AP-020",
+            AntiPatternCode::PersistenceMismatch => "ATS-V-AP-021",
+            AntiPatternCode::CapabilityLaundering => "ATS-V-AP-022",
+            AntiPatternCode::FoundationForgery => "ATS-V-AP-023",
+            AntiPatternCode::TransitiveLifecycleRegression => "ATS-V-AP-024",
+            AntiPatternCode::DeclarationDrift => "ATS-V-AP-025",
+            AntiPatternCode::FoundationContentMismatch => "ATS-V-AP-026",
+            AntiPatternCode::TemporalInconsistency => "ATS-V-AP-027",
+            AntiPatternCode::CounterfactualBrittleness => "ATS-V-AP-028",
+            AntiPatternCode::MissedAdjoint => "ATS-V-AP-029",
+            AntiPatternCode::UniversalPropertyViolation => "ATS-V-AP-030",
+            AntiPatternCode::PhantomEvolution => "ATS-V-AP-031",
+            AntiPatternCode::YonedaInequivalentRefactor => "ATS-V-AP-032",
         }
     }
 
-    /// Canonical short name (matches spec §7 catalog).
+    /// Canonical short name (matches spec §7 + §26 catalog).
     pub fn name(&self) -> &'static str {
         match self {
             AntiPatternCode::CapabilityEscalation => "CapabilityEscalation",
@@ -84,20 +133,109 @@ impl AntiPatternCode {
             AntiPatternCode::ResourceStraddling => "ResourceStraddling",
             AntiPatternCode::LifecycleRegression => "LifecycleRegression",
             AntiPatternCode::CveIncomplete => "CveIncomplete",
+            AntiPatternCode::AbsoluteBoundaryAttempt => "AbsoluteBoundaryAttempt",
+            AntiPatternCode::InvariantViolation => "InvariantViolation",
+            AntiPatternCode::DanglingMessageType => "DanglingMessageType",
+            AntiPatternCode::UnauthenticatedCrossing => "UnauthenticatedCrossing",
+            AntiPatternCode::DeterministicViolation => "DeterministicViolation",
+            AntiPatternCode::CapabilityDuplication => "CapabilityDuplication",
+            AntiPatternCode::OrphanCapability => "OrphanCapability",
+            AntiPatternCode::MissingHandoff => "MissingHandoff",
+            AntiPatternCode::FoundationDowngrade => "FoundationDowngrade",
+            AntiPatternCode::TimeBoundLeakage => "TimeBoundLeakage",
+            AntiPatternCode::PersistenceMismatch => "PersistenceMismatch",
+            AntiPatternCode::CapabilityLaundering => "CapabilityLaundering",
+            AntiPatternCode::FoundationForgery => "FoundationForgery",
+            AntiPatternCode::TransitiveLifecycleRegression => "TransitiveLifecycleRegression",
+            AntiPatternCode::DeclarationDrift => "DeclarationDrift",
+            AntiPatternCode::FoundationContentMismatch => "FoundationContentMismatch",
+            AntiPatternCode::TemporalInconsistency => "TemporalInconsistency",
+            AntiPatternCode::CounterfactualBrittleness => "CounterfactualBrittleness",
+            AntiPatternCode::MissedAdjoint => "MissedAdjoint",
+            AntiPatternCode::UniversalPropertyViolation => "UniversalPropertyViolation",
+            AntiPatternCode::PhantomEvolution => "PhantomEvolution",
+            AntiPatternCode::YonedaInequivalentRefactor => "YonedaInequivalentRefactor",
         }
     }
 
-    /// Documentation URL — stable per spec §32.4.
+    /// Documentation URL — stable per spec §32.4.  Format
+    /// `https://verum.lang/docs/ats-v/ap-NNN`.
     pub fn docs_url(&self) -> String {
-        format!(
-            "https://verum.lang/docs/ats-v/ap-{:03}",
-            (*self as u32) + 1
+        let n = match self {
+            AntiPatternCode::CapabilityEscalation => 1,
+            AntiPatternCode::CapabilityLeak => 2,
+            AntiPatternCode::DependencyCycle => 3,
+            AntiPatternCode::TierMixing => 4,
+            AntiPatternCode::FoundationDrift => 5,
+            AntiPatternCode::RegisterMixing => 6,
+            AntiPatternCode::TxStraddling => 7,
+            AntiPatternCode::ResourceStraddling => 8,
+            AntiPatternCode::LifecycleRegression => 9,
+            AntiPatternCode::CveIncomplete => 10,
+            AntiPatternCode::AbsoluteBoundaryAttempt => 11,
+            AntiPatternCode::InvariantViolation => 12,
+            AntiPatternCode::DanglingMessageType => 13,
+            AntiPatternCode::UnauthenticatedCrossing => 14,
+            AntiPatternCode::DeterministicViolation => 15,
+            AntiPatternCode::CapabilityDuplication => 16,
+            AntiPatternCode::OrphanCapability => 17,
+            AntiPatternCode::MissingHandoff => 18,
+            AntiPatternCode::FoundationDowngrade => 19,
+            AntiPatternCode::TimeBoundLeakage => 20,
+            AntiPatternCode::PersistenceMismatch => 21,
+            AntiPatternCode::CapabilityLaundering => 22,
+            AntiPatternCode::FoundationForgery => 23,
+            AntiPatternCode::TransitiveLifecycleRegression => 24,
+            AntiPatternCode::DeclarationDrift => 25,
+            AntiPatternCode::FoundationContentMismatch => 26,
+            AntiPatternCode::TemporalInconsistency => 27,
+            AntiPatternCode::CounterfactualBrittleness => 28,
+            AntiPatternCode::MissedAdjoint => 29,
+            AntiPatternCode::UniversalPropertyViolation => 30,
+            AntiPatternCode::PhantomEvolution => 31,
+            AntiPatternCode::YonedaInequivalentRefactor => 32,
+        };
+        format!("https://verum.lang/docs/ats-v/ap-{:03}", n)
+    }
+
+    /// Which Сезон / season introduced this pattern.  Stable for
+    /// version-compat tracking (per spec §29.5 versioning policy).
+    pub fn season(&self) -> u8 {
+        match self {
+            // Сезон 1 — AP-001..010
+            AntiPatternCode::CapabilityEscalation
+            | AntiPatternCode::CapabilityLeak
+            | AntiPatternCode::DependencyCycle
+            | AntiPatternCode::TierMixing
+            | AntiPatternCode::FoundationDrift
+            | AntiPatternCode::RegisterMixing
+            | AntiPatternCode::TxStraddling
+            | AntiPatternCode::ResourceStraddling
+            | AntiPatternCode::LifecycleRegression
+            | AntiPatternCode::CveIncomplete => 1,
+            // Сезон 2 — AP-011..032 (base + MTAC)
+            _ => 2,
+        }
+    }
+
+    /// True iff the pattern is MTAC-specific (modal-temporal,
+    /// per spec §20-§23 + §26).
+    pub fn is_mtac(&self) -> bool {
+        matches!(
+            self,
+            AntiPatternCode::TemporalInconsistency
+                | AntiPatternCode::CounterfactualBrittleness
+                | AntiPatternCode::MissedAdjoint
+                | AntiPatternCode::UniversalPropertyViolation
+                | AntiPatternCode::PhantomEvolution
+                | AntiPatternCode::YonedaInequivalentRefactor
         )
     }
 
-    /// Full canonical list — Сезон 1 covers AP-001..010.
-    pub fn full_list() -> [AntiPatternCode; 10] {
+    /// Full canonical list — Сезон 1+2 = 32 patterns total.
+    pub fn full_list() -> [AntiPatternCode; 32] {
         [
+            // Сезон 1 (10)
             AntiPatternCode::CapabilityEscalation,
             AntiPatternCode::CapabilityLeak,
             AntiPatternCode::DependencyCycle,
@@ -108,6 +246,30 @@ impl AntiPatternCode {
             AntiPatternCode::ResourceStraddling,
             AntiPatternCode::LifecycleRegression,
             AntiPatternCode::CveIncomplete,
+            // Сезон 2 base (16)
+            AntiPatternCode::AbsoluteBoundaryAttempt,
+            AntiPatternCode::InvariantViolation,
+            AntiPatternCode::DanglingMessageType,
+            AntiPatternCode::UnauthenticatedCrossing,
+            AntiPatternCode::DeterministicViolation,
+            AntiPatternCode::CapabilityDuplication,
+            AntiPatternCode::OrphanCapability,
+            AntiPatternCode::MissingHandoff,
+            AntiPatternCode::FoundationDowngrade,
+            AntiPatternCode::TimeBoundLeakage,
+            AntiPatternCode::PersistenceMismatch,
+            AntiPatternCode::CapabilityLaundering,
+            AntiPatternCode::FoundationForgery,
+            AntiPatternCode::TransitiveLifecycleRegression,
+            AntiPatternCode::DeclarationDrift,
+            AntiPatternCode::FoundationContentMismatch,
+            // Сезон 2 MTAC (6)
+            AntiPatternCode::TemporalInconsistency,
+            AntiPatternCode::CounterfactualBrittleness,
+            AntiPatternCode::MissedAdjoint,
+            AntiPatternCode::UniversalPropertyViolation,
+            AntiPatternCode::PhantomEvolution,
+            AntiPatternCode::YonedaInequivalentRefactor,
         ]
     }
 }
@@ -911,5 +1073,68 @@ mod tests {
         let codes: Vec<&str> = AntiPatternCode::full_list().iter().map(|c| c.code()).collect();
         assert_eq!(codes[0], "ATS-V-AP-001");
         assert_eq!(codes[9], "ATS-V-AP-010");
+    }
+
+    #[test]
+    fn architectural_pin_32_total_codes_reserved() {
+        // Сезон 2 catalog completion: 32 canonical patterns total.
+        // Adding more requires RFC ATS-V-006 + community review per
+        // spec §29.2.  Cap=30 in spec §7.1; current 32 includes
+        // 6 MTAC patterns (§26) which are spec-introduced.
+        let codes = AntiPatternCode::full_list();
+        assert_eq!(codes.len(), 32);
+        assert_eq!(codes[0].code(), "ATS-V-AP-001");
+        assert_eq!(codes[31].code(), "ATS-V-AP-032");
+    }
+
+    #[test]
+    fn season_attribution_correct() {
+        // Pin: AP-001..010 are Season 1; AP-011..032 are Season 2.
+        for (i, code) in AntiPatternCode::full_list().iter().enumerate() {
+            let expected = if i < 10 { 1 } else { 2 };
+            assert_eq!(
+                code.season(),
+                expected,
+                "AP {} should be Season {}, got {}",
+                code.code(),
+                expected,
+                code.season(),
+            );
+        }
+    }
+
+    #[test]
+    fn mtac_patterns_recognised() {
+        // Pin: 6 MTAC-specific patterns (AP-027..032) flagged
+        // via is_mtac().  Used by audit gate JSON output to
+        // separate base catalog from MTAC extensions.
+        let mtac_count = AntiPatternCode::full_list()
+            .iter()
+            .filter(|c| c.is_mtac())
+            .count();
+        assert_eq!(mtac_count, 6);
+        assert!(AntiPatternCode::TemporalInconsistency.is_mtac());
+        assert!(AntiPatternCode::YonedaInequivalentRefactor.is_mtac());
+        assert!(!AntiPatternCode::CapabilityEscalation.is_mtac());
+    }
+
+    #[test]
+    fn all_codes_have_distinct_docs_urls() {
+        // Pin: every code's docs_url() is distinct.  Catches off-by-one
+        // bugs in the URL generation (AP-NNN format).
+        let urls: std::collections::BTreeSet<_> = AntiPatternCode::full_list()
+            .iter()
+            .map(|c| c.docs_url())
+            .collect();
+        assert_eq!(urls.len(), 32);
+        // Spot-check format.
+        assert_eq!(
+            AntiPatternCode::CapabilityEscalation.docs_url(),
+            "https://verum.lang/docs/ats-v/ap-001"
+        );
+        assert_eq!(
+            AntiPatternCode::YonedaInequivalentRefactor.docs_url(),
+            "https://verum.lang/docs/ats-v/ap-032"
+        );
     }
 }

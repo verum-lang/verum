@@ -110,6 +110,7 @@ pub mod reflection_tower; // MSFS-grounded meta-soundness reflection tower
 pub mod verdict; // canonical VerificationVerdict + DischargeMethod (ATS-V foundation)
 pub mod arch; // ATS-V architectural primitives (Capability / Boundary / Composition / ...)
 pub mod arch_anti_pattern; // ATS-V anti-pattern catalog with stable error codes
+pub mod arch_composition; // ATS-V composition algebra Shape ⊗ Shape
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type
