@@ -212,89 +212,24 @@ codegen_units = 1
 cbgr_checks = "optimized"
 
 # ============================================================================
-# Example: PGO-Optimized Build Configuration
+# Example recipes — forward-looking sections
 # ============================================================================
-
-# Phase 1: Generate instrumented binary
-# [pgo]
-# enabled = true
-# mode = "generate"
-# profile_dir = "pgo-data"
-
-# Run your instrumented binary with representative workload:
-# $ ./target/release/my-project-instrumented
-
-# Phase 2: Merge profiles (if multiple runs)
-# $ llvm-profdata merge -output=pgo-data/merged.profdata pgo-data/*.profraw
-
-# Phase 3: Build with profile data
-# [pgo]
-# enabled = true
-# mode = "use"
-# profile_dir = "pgo-data"
 #
-# [lto]
-# mode = "fat"
-# aggressive_inlining = true
-
-# ============================================================================
-# Example: Cross-Compilation for ARM64 Linux
-# ============================================================================
-
-# [llvm]
-# target_triple = "aarch64-unknown-linux-gnu"
-# cpu = "cortex-a72"
-# features = "+neon"
+# The PGO / advanced cross-compile / aggressive-vectorize recipes that
+# previously lived here referenced fields the parser does not yet
+# accept (`inline_threshold` / `aggressive_inlining` / `mode = "fat"`
+# / `hot_inline_multiplier` / `vectorization_strategy` etc.).  See
+# the `[optimization]` / `[lto]` / `[pgo]` / `[cross_compile]`
+# sections above for the load-bearing field set.  Recipe blocks
+# will be reinstated once the corresponding parser surfaces land.
 #
-# [cross_compile]
-# enabled = true
-# target_triple = "aarch64-unknown-linux-gnu"
-# sysroot = "/usr/aarch64-linux-gnu"
-# linker = "/usr/bin/aarch64-linux-gnu-gcc"
-
-# ============================================================================
-# Example: Maximum Performance Configuration
-# ============================================================================
-
-# [llvm]
-# cpu = "native"
-# features = "+avx2,+fma,+bmi2"
-#
-# [optimization]
-# inline_threshold = 325
-# unroll_threshold = 200
-# vectorize = true
-# slp_vectorize = true
-# loop_unroll = true
-# loop_interleaving = true
-# vectorization_strategy = "full"
-#
-# [lto]
-# mode = "fat"
-# aggressive_inlining = true
-# enable_devirtualization = true
-#
-# [pgo]
-# enabled = true
-# mode = "use"
-# hot_inline_multiplier = 2.0
-
-# ============================================================================
-# Example: Size-Optimized Configuration
-# ============================================================================
-
-# [optimization]
-# passes = "default<Oz>"
-# inline_threshold = 50
-# unroll_threshold = 0
-# vectorize = false
-# slp_vectorize = false
-# loop_unroll = false
-# merge_functions = true
-#
-# [lto]
-# mode = "thin"
-# aggressive_inlining = false
+# Today the active production-tuning surfaces are:
+#   * `[profile.<dev|release>].opt_level` — controls LLVM's
+#     `default<O0..O3>` pass pipeline.
+#   * `[linker].lto = "thin" | "full"` — controls link-time
+#     optimization.
+#   * `[llvm].target_triple` + `[llvm].target_cpu` +
+#     `[llvm].target_features` — controls codegen target.
 
 # ============================================================================
 # Dependencies
