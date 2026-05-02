@@ -55,6 +55,13 @@
 // Spec: docs/architecture/new-arch-spec.md Section 6
 // =============================================================================
 
+@arch_module(
+    exposes: [Capability.Write(ResourceTag.Memory("heap"))],
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.mem.allocator;
 mount super.header.{AllocationHeader, HEADER_SIZE, GEN_INITIAL};
 mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
