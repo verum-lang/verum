@@ -414,7 +414,7 @@ impl VbcCodegen {
                 // Format: dst:reg, size:reg, init:reg
                 let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
                 self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x49, // NewByteArray sub-opcode (FfiSubOpcode::NewByteArray)
+                    sub_op: 0x49, // NewByteArray sub-opcode (SystemSubOpcode::NewByteArray)
                     operands,
                 });
 
@@ -600,7 +600,7 @@ impl VbcCodegen {
                 init_reg.0 as u8,
             ];
             self.ctx.emit(Instruction::FfiExtended {
-                sub_op: 0x4E, // NewTypedArray sub-opcode (FfiSubOpcode::NewTypedArray)
+                sub_op: 0x4E, // NewTypedArray sub-opcode (SystemSubOpcode::NewTypedArray)
                 operands,
             });
 

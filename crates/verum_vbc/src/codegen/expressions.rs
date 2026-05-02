@@ -13390,7 +13390,7 @@ impl VbcCodegen {
     /// (or `&mut receiver.field as *mut T`).
     ///
 
-    /// Lowers the cast to `FfiSubOpcode::StructFieldAddr` so the
+    /// Lowers the cast to `SystemSubOpcode::StructFieldAddr` so the
     /// resulting raw pointer is the actual heap address of the field
     /// inside the receiver's data section. Required by every atomic
     /// stdlib op (AtomicU8 / AtomicU16 / AtomicU32 etc.) which lowers
@@ -13401,7 +13401,7 @@ impl VbcCodegen {
     /// Returns `Some(reg)` if the pattern was detected and lowered,
     /// `None` otherwise (caller falls through to generic cast paths).
     fn try_compile_struct_field_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
-        use crate::instruction::FfiSubOpcode;
+        use crate::instruction::SystemSubOpcode;
 
         // Unwrap parenthesized expressions.
         let expr = {
@@ -13476,7 +13476,7 @@ impl VbcCodegen {
         operands.push(((field_offset >> 8) & 0xFF) as u8);
 
         self.ctx.emit(Instruction::FfiExtended {
-            sub_op: FfiSubOpcode::StructFieldAddr.to_byte(),
+            sub_op: SystemSubOpcode::StructFieldAddr.to_byte(),
             operands,
         });
 
@@ -13499,7 +13499,7 @@ impl VbcCodegen {
 
     /// Returns `Some(reg)` if the pattern was detected and compiled, `None` otherwise.
     fn try_compile_byte_array_element_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
-        use crate::instruction::FfiSubOpcode;
+        use crate::instruction::SystemSubOpcode;
 
         // Unwrap parenthesized expressions: (&arr[idx]) -> &arr[idx]
         let expr = {
@@ -13578,7 +13578,7 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, idx_reg.0);
 
             self.ctx.emit(Instruction::FfiExtended {
-                sub_op: FfiSubOpcode::ByteArrayElementAddr.to_byte(),
+                sub_op: SystemSubOpcode::ByteArrayElementAddr.to_byte(),
                 operands,
             });
         } else {
@@ -13590,7 +13590,7 @@ impl VbcCodegen {
             operands.push(elem_size as u8);
 
             self.ctx.emit(Instruction::FfiExtended {
-                sub_op: FfiSubOpcode::TypedArrayElementAddr.to_byte(),
+                sub_op: SystemSubOpcode::TypedArrayElementAddr.to_byte(),
                 operands,
             });
         }
@@ -18821,11 +18821,11 @@ impl VbcCodegen {
             InlineSequenceId::SpinlockLock
             | InlineSequenceId::FutexWait
             | InlineSequenceId::FutexWake => {
-                use crate::instruction::FfiSubOpcode;
+                use crate::instruction::SystemSubOpcode;
                 let sub_op = match seq_id {
-                    InlineSequenceId::SpinlockLock => FfiSubOpcode::SpinlockLock as u8,
-                    InlineSequenceId::FutexWait => FfiSubOpcode::FutexWait as u8,
-                    InlineSequenceId::FutexWake => FfiSubOpcode::FutexWake as u8,
+                    InlineSequenceId::SpinlockLock => SystemSubOpcode::SpinlockLock as u8,
+                    InlineSequenceId::FutexWait => SystemSubOpcode::FutexWait as u8,
+                    InlineSequenceId::FutexWake => SystemSubOpcode::FutexWake as u8,
                     _ => unreachable!(),
                 };
                 let mut operands = Vec::<u8>::new();
@@ -26022,9 +26022,9 @@ impl FreeVarAnalyzer {
 }
 
 /// Map a typed-reference's pointee name to the matching typed-deref
-/// `(FfiSubOpcode, size)` pair. Returns `Some` when the pointee is a
+/// `(SystemSubOpcode, size)` pair. Returns `Some` when the pointee is a
 /// C primitive smaller than 8 bytes — signals that `*ptr` should emit
-/// a typed deref (`FfiSubOpcode::DerefRawSigned` / `DerefRaw`) rather
+/// a typed deref (`SystemSubOpcode::DerefRawSigned` / `DerefRaw`) rather
 /// than the generic Value-sized `Deref`.
 ///
 
@@ -26047,8 +26047,8 @@ impl FreeVarAnalyzer {
 /// code derefs an `&Float32`, the upper 4 bytes leak — but that is
 /// an extremely rare FFI shape (most C `float` returns come back via
 /// register, not pointer).
-fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::FfiSubOpcode, u8)> {
-    use crate::instruction::FfiSubOpcode;
+fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::SystemSubOpcode, u8)> {
+    use crate::instruction::SystemSubOpcode;
     let t = t.trim();
     // Strip the reference prefix. The order matters: longer prefixes
     // (e.g. `&unsafe mut`) must be tested before shorter ones
@@ -26071,17 +26071,17 @@ fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::FfiSubO
     let pointee = pointee.trim();
     match pointee {
         // Signed C primitives — sign-extend.
-        "Int8" | "i8" => Some((FfiSubOpcode::DerefRawSigned, 1)),
-        "Int16" | "i16" => Some((FfiSubOpcode::DerefRawSigned, 2)),
-        "Int32" | "i32" => Some((FfiSubOpcode::DerefRawSigned, 4)),
+        "Int8" | "i8" => Some((SystemSubOpcode::DerefRawSigned, 1)),
+        "Int16" | "i16" => Some((SystemSubOpcode::DerefRawSigned, 2)),
+        "Int32" | "i32" => Some((SystemSubOpcode::DerefRawSigned, 4)),
         // Unsigned C primitives + bool/char — zero-extend. `DerefRaw`'s
         // existing default semantics match the unsigned-byte-array
         // invariant (CRC32 / wire-format reads).
-        "UInt8" | "u8" | "Byte" => Some((FfiSubOpcode::DerefRaw, 1)),
-        "UInt16" | "u16" => Some((FfiSubOpcode::DerefRaw, 2)),
-        "UInt32" | "u32" => Some((FfiSubOpcode::DerefRaw, 4)),
-        "Bool" => Some((FfiSubOpcode::DerefRaw, 1)),
-        "Char" => Some((FfiSubOpcode::DerefRaw, 4)),
+        "UInt8" | "u8" | "Byte" => Some((SystemSubOpcode::DerefRaw, 1)),
+        "UInt16" | "u16" => Some((SystemSubOpcode::DerefRaw, 2)),
+        "UInt32" | "u32" => Some((SystemSubOpcode::DerefRaw, 4)),
+        "Bool" => Some((SystemSubOpcode::DerefRaw, 1)),
+        "Char" => Some((SystemSubOpcode::DerefRaw, 4)),
         // 8-byte primitives — generic `Deref` is already correct.
         // Float32 punted (would need typed load-and-fpext path).
         _ => None,

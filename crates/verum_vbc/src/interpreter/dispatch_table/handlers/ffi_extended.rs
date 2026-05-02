@@ -9,7 +9,7 @@ use super::bytecode_io::*;
 use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
 use super::string_helpers::*;
 #[allow(unused_imports)]
-use crate::instruction::{FfiSubOpcode, Reg};
+use crate::instruction::{SystemSubOpcode, Reg};
 #[allow(unused_imports)]
 use crate::module::FfiSymbolId;
 #[allow(unused_imports)]
@@ -160,13 +160,13 @@ pub(in super::super) fn handle_ffi_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
-    let sub_op = FfiSubOpcode::from_byte(sub_op_byte);
+    let sub_op = SystemSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {
         // ================================================================
         // Memory Operations
         // ================================================================
-        Some(FfiSubOpcode::CMemcpy) => {
+        Some(SystemSubOpcode::CMemcpy) => {
             // Format: dst_ptr:reg, src_ptr:reg, size:reg
             let dst_reg = read_reg(state)?;
             let src_reg = read_reg(state)?;
@@ -199,7 +199,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::CMemset) => {
+        Some(SystemSubOpcode::CMemset) => {
             // Format: dst_ptr:reg, value:reg, size:reg
             let dst_reg = read_reg(state)?;
             let value_reg = read_reg(state)?;
@@ -233,7 +233,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::CSecureZero) => {
+        Some(SystemSubOpcode::CSecureZero) => {
             // Format: dst_ptr:reg, size:reg
             //
 
@@ -283,7 +283,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::CMemmove) => {
+        Some(SystemSubOpcode::CMemmove) => {
             // Format: dst_ptr:reg, src_ptr:reg, size:reg
             let dst_reg = read_reg(state)?;
             let src_reg = read_reg(state)?;
@@ -315,7 +315,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::CMemcmp) => {
+        Some(SystemSubOpcode::CMemcmp) => {
             // Format: dst:reg, ptr1:reg, ptr2:reg, size:reg
             let dst = read_reg(state)?;
             let ptr1_reg = read_reg(state)?;
@@ -360,7 +360,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Synchronization Primitives (0xB0-0xBF)
         // ================================================================
-        Some(FfiSubOpcode::FutexWait) => {
+        Some(SystemSubOpcode::FutexWait) => {
             // Format: dst:reg, addr:reg, expected:reg, timeout_ns:reg
             // ABI: `(addr, expected, timeout_ns) -> i64` —
             //   0      → woken
@@ -380,7 +380,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::FutexWake) => {
+        Some(SystemSubOpcode::FutexWake) => {
             // Format: dst:reg, addr:reg, count:reg
             // ABI: `(addr, count) -> i64` returns # waiters woken.
             let dst = read_reg(state)?;
@@ -395,7 +395,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::SpinlockLock) => {
+        Some(SystemSubOpcode::SpinlockLock) => {
             // Format: dst:reg, lock_addr:reg
             // ABI: `(lock_addr: i64) -> i64` (always returns 0)
             // Atomic CAS loop: 0 → 1 means lock acquired.
@@ -433,7 +433,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Byte Array Allocation
         // ================================================================
-        Some(FfiSubOpcode::NewByteArray) => {
+        Some(SystemSubOpcode::NewByteArray) => {
             // Allocate a byte array (contiguous bytes, not Values)
             // Format: dst:reg, size:reg, init:reg
             let dst = read_reg(state)?;
@@ -471,7 +471,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Byte Array Element Address
         // ================================================================
-        Some(FfiSubOpcode::ByteArrayElementAddr) => {
+        Some(SystemSubOpcode::ByteArrayElementAddr) => {
             // Get address of element in byte array (for &mut buf[idx] as *mut Byte)
             // Format: dst:reg, arr:reg, idx:reg
             // Returns: dst = arr_ptr + OBJECT_HEADER_SIZE + idx
@@ -523,7 +523,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Byte Array Load
         // ================================================================
-        Some(FfiSubOpcode::ByteArrayLoad) => {
+        Some(SystemSubOpcode::ByteArrayLoad) => {
             // Load a byte from byte array
             // Format: dst:reg, arr:reg, idx:reg
             let dst = read_reg(state)?;
@@ -573,7 +573,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Byte Array Store
         // ================================================================
-        Some(FfiSubOpcode::ByteArrayStore) => {
+        Some(SystemSubOpcode::ByteArrayStore) => {
             // Store a byte to byte array
             // Format: arr:reg, idx:reg, val:reg
             let arr_reg = read_reg(state)?;
@@ -624,7 +624,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Typed Array Element Address
         // ================================================================
-        Some(FfiSubOpcode::TypedArrayElementAddr) => {
+        Some(SystemSubOpcode::TypedArrayElementAddr) => {
             // Get element address for typed array with specified element size
             // Format: dst:reg, arr:reg, idx:reg, elem_size:u8
             let dst = read_reg(state)?;
@@ -675,7 +675,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // New Typed Array
         // ================================================================
-        Some(FfiSubOpcode::NewTypedArray) => {
+        Some(SystemSubOpcode::NewTypedArray) => {
             // Create new typed array with specified element size
             // Format: dst:reg, count:reg, elem_size:u8, init:reg
             let dst = read_reg(state)?;
@@ -773,7 +773,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Struct Field Address (#37 — atomic-stdlib runtime enabler)
         // ================================================================
-        Some(FfiSubOpcode::StructFieldAddr) => {
+        Some(SystemSubOpcode::StructFieldAddr) => {
             // Get the raw heap address of a struct field.
             //
 
@@ -827,7 +827,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Raw Pointer Operations
         // ================================================================
-        Some(FfiSubOpcode::DerefRaw) => {
+        Some(SystemSubOpcode::DerefRaw) => {
             // Read value through raw pointer
             // Format: dst:reg, ptr:reg, size:u8
             let dst = read_reg(state)?;
@@ -881,7 +881,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::DerefRawSigned) => {
+        Some(SystemSubOpcode::DerefRawSigned) => {
             // Sign-extending sibling of `DerefRaw`. Format and layout
             // identical (`dst:reg, ptr:reg, size:u8`) — only the
             // extension policy differs: we read `size` bytes through
@@ -936,7 +936,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::DerefMutRaw) => {
+        Some(SystemSubOpcode::DerefMutRaw) => {
             // Write value through raw pointer
             // Format: ptr:reg, value:reg, size:u8
             let ptr_reg = read_reg(state)?;
@@ -1018,7 +1018,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::DerefRawPtr) => {
+        Some(SystemSubOpcode::DerefRawPtr) => {
             // Read pointer through raw pointer (for pointer-to-pointer)
             // Format: dst:reg, ptr:reg
             let dst = read_reg(state)?;
@@ -1038,7 +1038,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::PtrAdd) => {
+        Some(SystemSubOpcode::PtrAdd) => {
             // Pointer arithmetic: add offset
             // Format: dst:reg, ptr:reg, offset:reg
             let dst = read_reg(state)?;
@@ -1069,7 +1069,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::PtrSub) => {
+        Some(SystemSubOpcode::PtrSub) => {
             // Pointer arithmetic: subtract offset
             // Format: dst:reg, ptr:reg, offset:reg
             let dst = read_reg(state)?;
@@ -1097,7 +1097,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::PtrDiff) => {
+        Some(SystemSubOpcode::PtrDiff) => {
             // Pointer difference: compute distance in bytes
             // Format: dst:reg, ptr1:reg, ptr2:reg
             let dst = read_reg(state)?;
@@ -1112,7 +1112,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::PtrIsNull) => {
+        Some(SystemSubOpcode::PtrIsNull) => {
             // Check if pointer is null
             // Format: dst:reg, ptr:reg
             let dst = read_reg(state)?;
@@ -1127,7 +1127,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // C-style memory allocation
         // ================================================================
-        Some(FfiSubOpcode::CAlloc) => {
+        Some(SystemSubOpcode::CAlloc) => {
             // Format: dst:reg, size:reg
             let dst = read_reg(state)?;
             let size_reg = read_reg(state)?;
@@ -1151,7 +1151,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::CFree) => {
+        Some(SystemSubOpcode::CFree) => {
             // Format: ptr:reg, size:reg
             let ptr_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
@@ -1176,7 +1176,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Random number generation
         // ================================================================
-        Some(FfiSubOpcode::RandomU64) => {
+        Some(SystemSubOpcode::RandomU64) => {
             // Format: dst:reg
             let dst = read_reg(state)?;
 
@@ -1231,7 +1231,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::RandomFloat) => {
+        Some(SystemSubOpcode::RandomFloat) => {
             // Format: dst:reg
             let dst = read_reg(state)?;
 
@@ -1288,7 +1288,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // Errno operations
         // ================================================================
-        Some(FfiSubOpcode::GetErrno) => {
+        Some(SystemSubOpcode::GetErrno) => {
             let dst = read_reg(state)?;
             #[cfg(feature = "ffi")]
             {
@@ -1303,7 +1303,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::SetErrno) => {
+        Some(SystemSubOpcode::SetErrno) => {
             let src = read_reg(state)?;
             let val = state.get_reg(src);
             #[cfg(feature = "ffi")]
@@ -1320,7 +1320,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::ClearErrno) => {
+        Some(SystemSubOpcode::ClearErrno) => {
             #[cfg(feature = "ffi")]
             {
                 let ffi_runtime = state.get_or_create_ffi_runtime()?;
@@ -1329,7 +1329,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::GetLastError) => {
+        Some(SystemSubOpcode::GetLastError) => {
             let dst = read_reg(state)?;
             // Not implemented on Unix
             state.set_reg(dst, Value::from_i64(0));
@@ -1339,7 +1339,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // FFI Array Marshalling: Verum array → C contiguous buffer
         // ================================================================
-        Some(FfiSubOpcode::ArrayToC) => {
+        Some(SystemSubOpcode::ArrayToC) => {
             // Format: dst:reg, arr_reg:reg, idx_reg:reg, element_type:u8, is_mutable:u8
             let dst_reg = read_reg(state)?;
             let arr_reg = read_reg(state)?;
@@ -1512,7 +1512,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // FFI Create Callback Trampoline (Verum function → C function pointer)
         // ================================================================
-        Some(FfiSubOpcode::CreateCallback) => {
+        Some(SystemSubOpcode::CreateCallback) => {
             // Format: dst:reg, fn_id:u32, signature_idx:u32
             let dst_reg = read_reg(state)?;
             let fn_id = read_u32(state)?;
@@ -1545,7 +1545,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         // FFI Call (C calling convention)
         // ================================================================
-        Some(FfiSubOpcode::CallFfiC) => {
+        Some(SystemSubOpcode::CallFfiC) => {
             // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let symbol_idx = read_u32(state)?;
@@ -1934,26 +1934,26 @@ pub(in super::super) fn handle_ffi_extended(
         // ==============================================================
         // Time Operations (0x70-0x75)
         // ==============================================================
-        Some(FfiSubOpcode::TimeMonotonicNanos) => {
+        Some(SystemSubOpcode::TimeMonotonicNanos) => {
             let dst = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::TimeRealtimeNanos) => {
+        Some(SystemSubOpcode::TimeRealtimeNanos) => {
             let dst = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(realtime_nanos_shared()));
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::TimeMonotonicRawNanos) => {
+        Some(SystemSubOpcode::TimeMonotonicRawNanos) => {
             // Same as MonotonicNanos for VBC interpreter (no NTP distinction)
             let dst = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::TimeSleepNanos) => {
+        Some(SystemSubOpcode::TimeSleepNanos) => {
             let nanos_reg = read_reg(state)?;
             let nanos = state.get_reg(nanos_reg).as_i64();
             if nanos > 0 {
@@ -1962,13 +1962,13 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::TimeThreadCpuNanos) => {
+        Some(SystemSubOpcode::TimeThreadCpuNanos) => {
             let dst = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::TimeProcessCpuNanos) => {
+        Some(SystemSubOpcode::TimeProcessCpuNanos) => {
             let dst = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(monotonic_nanos_shared()));
             Ok(DispatchResult::Continue)
@@ -1977,14 +1977,14 @@ pub(in super::super) fn handle_ffi_extended(
         // ==============================================================
         // System Call Operations (0x80-0x85)
         // ==============================================================
-        Some(FfiSubOpcode::SysGetpid) => {
+        Some(SystemSubOpcode::SysGetpid) => {
             let dst = read_reg(state)?;
             let pid = std::process::id();
             state.set_reg(dst, Value::from_i64(pid as i64));
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::SysGettid) => {
+        Some(SystemSubOpcode::SysGettid) => {
             let dst = read_reg(state)?;
             #[cfg(unix)]
             let tid: u64 = {
@@ -2020,7 +2020,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::SysMmap) => {
+        Some(SystemSubOpcode::SysMmap) => {
             let dst = read_reg(state)?;
             let addr_reg = read_reg(state)?;
             let len_reg = read_reg(state)?;
@@ -2118,7 +2118,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::SysMunmap) => {
+        Some(SystemSubOpcode::SysMunmap) => {
             let dst = read_reg(state)?;
             let addr_reg = read_reg(state)?;
             let len_reg = read_reg(state)?;
@@ -2180,7 +2180,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::SysMadvise) => {
+        Some(SystemSubOpcode::SysMadvise) => {
             let dst = read_reg(state)?;
             let addr_reg = read_reg(state)?;
             let len_reg = read_reg(state)?;
@@ -2222,7 +2222,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::SysGetentropy) => {
+        Some(SystemSubOpcode::SysGetentropy) => {
             let dst = read_reg(state)?;
             let buf_reg = read_reg(state)?;
             let len_reg = read_reg(state)?;
@@ -2278,7 +2278,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ==============================================================
         // Symbol Resolution (0x00-0x02) — stubs
         // ==============================================================
-        Some(FfiSubOpcode::LoadSymbol) => {
+        Some(SystemSubOpcode::LoadSymbol) => {
             // Format: dst:reg, symbol_idx:u32
             let _dst = read_reg(state)?;
             let _symbol_idx = read_u32(state)?;
@@ -2292,7 +2292,7 @@ pub(in super::super) fn handle_ffi_extended(
             })
         }
 
-        Some(FfiSubOpcode::GetLibrary) => {
+        Some(SystemSubOpcode::GetLibrary) => {
             // Format: dst:reg, library_idx:u16
             let _dst = read_reg(state)?;
             let _library_idx = read_u16(state)?;
@@ -2302,7 +2302,7 @@ pub(in super::super) fn handle_ffi_extended(
             })
         }
 
-        Some(FfiSubOpcode::IsSymbolResolved) => {
+        Some(SystemSubOpcode::IsSymbolResolved) => {
             // Format: dst:reg, symbol_idx:u32
             let dst = read_reg(state)?;
             let _symbol_idx = read_u32(state)?;
@@ -2317,11 +2317,11 @@ pub(in super::super) fn handle_ffi_extended(
         // FFI Calling Convention Variants (0x11-0x17)
         // Route through same code path as CallFfiC (0x10)
         // ==============================================================
-        Some(FfiSubOpcode::CallFfiStdcall)
-        | Some(FfiSubOpcode::CallFfiSysV64)
-        | Some(FfiSubOpcode::CallFfiFastcall)
-        | Some(FfiSubOpcode::CallFfiAarch64)
-        | Some(FfiSubOpcode::CallFfiWin64Arm64) => {
+        Some(SystemSubOpcode::CallFfiStdcall)
+        | Some(SystemSubOpcode::CallFfiSysV64)
+        | Some(SystemSubOpcode::CallFfiFastcall)
+        | Some(SystemSubOpcode::CallFfiAarch64)
+        | Some(SystemSubOpcode::CallFfiWin64Arm64) => {
             // Same operand format as CallFfiC:
             // symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             // mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
@@ -2544,7 +2544,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::CallFfiVariadic) => {
+        Some(SystemSubOpcode::CallFfiVariadic) => {
             // Format: symbol_idx:u32, fixed_count:u8, variadic_count:u8, ret_reg:reg, [arg_regs...],
             //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let symbol_idx = read_u32(state)?;
@@ -2711,7 +2711,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::CallFfiIndirect) => {
+        Some(SystemSubOpcode::CallFfiIndirect) => {
             // Format: ptr_reg:reg, signature_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
             let _ptr_reg = read_reg(state)?;
@@ -2738,7 +2738,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ==============================================================
         // Marshalling (0x20-0x27) — stubs (pass values through)
         // ==============================================================
-        Some(FfiSubOpcode::MarshalToC) | Some(FfiSubOpcode::MarshalFromC) => {
+        Some(SystemSubOpcode::MarshalToC) | Some(SystemSubOpcode::MarshalFromC) => {
             // Format: dst:reg, src:reg, c_type:u8
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
@@ -2748,7 +2748,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::StringToC) => {
+        Some(SystemSubOpcode::StringToC) => {
             // Format: dst:reg, src:reg
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
@@ -2757,7 +2757,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::StringFromC) => {
+        Some(SystemSubOpcode::StringFromC) => {
             // Format: dst:reg, src:reg
             let dst = read_reg(state)?;
             let src = read_reg(state)?;
@@ -2766,7 +2766,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::ArrayFromC) => {
+        Some(SystemSubOpcode::ArrayFromC) => {
             // Format: dst:reg, ptr:reg, len:reg, elem_type:u8
             let _dst = read_reg(state)?;
             let _src = read_reg(state)?;
@@ -2783,7 +2783,7 @@ pub(in super::super) fn handle_ffi_extended(
             })
         }
 
-        Some(FfiSubOpcode::StructToC) | Some(FfiSubOpcode::StructFromC) => {
+        Some(SystemSubOpcode::StructToC) | Some(SystemSubOpcode::StructFromC) => {
             // Format: dst:reg, src:reg, layout_idx:u32
             let _dst = read_reg(state)?;
             let _src = read_reg(state)?;
@@ -2801,7 +2801,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ==============================================================
         // CRealloc (0x42)
         // ==============================================================
-        Some(FfiSubOpcode::CRealloc) => {
+        Some(SystemSubOpcode::CRealloc) => {
             // Format: dst:reg, ptr:reg, size:reg
             let dst = read_reg(state)?;
             let _ptr_reg = read_reg(state)?;
@@ -2827,7 +2827,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ==============================================================
         // FreeCallback (0x51) — no-op
         // ==============================================================
-        Some(FfiSubOpcode::FreeCallback) => {
+        Some(SystemSubOpcode::FreeCallback) => {
             // Format: trampoline:reg
             let _callback_reg = read_reg(state)?;
             // No-op: callback trampolines are cleaned up on interpreter exit
@@ -2837,7 +2837,7 @@ pub(in super::super) fn handle_ffi_extended(
         // ==============================================================
         // Mach Kernel Operations (0x90-0x98) — macOS stubs
         // ==============================================================
-        Some(FfiSubOpcode::MachVmAllocate) => {
+        Some(SystemSubOpcode::MachVmAllocate) => {
             // Format: dst:reg, size:reg, anywhere:reg
             let dst = read_reg(state)?;
             let size_reg = read_reg(state)?;
@@ -2857,7 +2857,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::MachVmDeallocate) => {
+        Some(SystemSubOpcode::MachVmDeallocate) => {
             // Format: dst:reg, addr:reg, size:reg
             let _dst = read_reg(state)?;
             let _addr_reg = read_reg(state)?;
@@ -2866,7 +2866,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::MachVmProtect) => {
+        Some(SystemSubOpcode::MachVmProtect) => {
             // Format: dst:reg, addr:reg, size:reg, prot:reg
             let _dst = read_reg(state)?;
             let _addr_reg = read_reg(state)?;
@@ -2876,7 +2876,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::MachSemCreate) => {
+        Some(SystemSubOpcode::MachSemCreate) => {
             // Format: dst:reg, initial_value:reg
             let dst = read_reg(state)?;
             let _value_reg = read_reg(state)?;
@@ -2887,9 +2887,9 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::MachSemDestroy)
-        | Some(FfiSubOpcode::MachSemSignal)
-        | Some(FfiSubOpcode::MachSemWait) => {
+        Some(SystemSubOpcode::MachSemDestroy)
+        | Some(SystemSubOpcode::MachSemSignal)
+        | Some(SystemSubOpcode::MachSemWait) => {
             // Format: dst:reg, sem:reg
             let _dst = read_reg(state)?;
             let _sem_reg = read_reg(state)?;
@@ -2897,7 +2897,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::MachErrorString) => {
+        Some(SystemSubOpcode::MachErrorString) => {
             // Format: dst:reg, kern_return:reg
             let dst = read_reg(state)?;
             let _err_reg = read_reg(state)?;
@@ -2907,7 +2907,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::MachSleepUntil) => {
+        Some(SystemSubOpcode::MachSleepUntil) => {
             // Format: dst:reg, deadline:reg
             let _dst = read_reg(state)?;
             let _deadline_reg = read_reg(state)?;
@@ -2934,8 +2934,8 @@ pub(in super::super) fn handle_ffi_extended(
         // `Ok((ptr, gen, epoch))` continues to work unchanged in user
         // code.
         // =================================================================
-        Some(FfiSubOpcode::CbgrAlloc) | Some(FfiSubOpcode::CbgrAllocZeroed) => {
-            let zeroed = matches!(sub_op, Some(FfiSubOpcode::CbgrAllocZeroed));
+        Some(SystemSubOpcode::CbgrAlloc) | Some(SystemSubOpcode::CbgrAllocZeroed) => {
+            let zeroed = matches!(sub_op, Some(SystemSubOpcode::CbgrAllocZeroed));
             let dst = read_reg(state)?;
             let size_reg = read_reg(state)?;
             let align_reg = read_reg(state)?;
@@ -3057,7 +3057,7 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(FfiSubOpcode::CbgrDealloc) => {
+        Some(SystemSubOpcode::CbgrDealloc) => {
             let _dst = read_reg(state)?;
             let _ptr_reg = read_reg(state)?;
             let _size_reg = read_reg(state)?;

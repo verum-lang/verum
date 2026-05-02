@@ -173,7 +173,8 @@ pub use error::{VbcError, VbcResult};
 pub use format::{MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcFlags, VbcHeader};
 pub use instruction::{
     ArithSubOpcode, CbgrSubOpcode, CmpSubOpcode, FfiSubOpcode, GpuSubOpcode, Instruction,
-    MathSubOpcode, Opcode, Reg, RegRange,
+    MachSubOpcode, MathSubOpcode, Opcode, Reg, RegRange, SyncSubOpcode, SysSubOpcode,
+    SystemSubOpcode, TimeSubOpcode,
 };
 pub use module::{ConstId, FunctionDescriptor, FunctionId, VbcFunction, VbcModule};
 pub use types::{
