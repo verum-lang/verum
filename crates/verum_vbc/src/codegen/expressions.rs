@@ -19872,50 +19872,121 @@ impl VbcCodegen {
             // =================================================================
             // Tensor Operations (for core/math)
             // =================================================================
+            // Direct routing to TensorExtended — same encoding as the
+            // canonical registry path (`intrinsics/codegen.rs`).  Pre-fix
+            // these all routed through `emit_intrinsic_library_call(name,
+            // ...)` → catch-all `_ =>` panic emit.  Each TensorSubOpcode
+            // variant + interpreter handler already exists; this commit
+            // only wires the InlineSequenceId fallback to use it
+            // (mirrors the #89 close-out pattern from commits 0e6bf306
+            // + 43eaa104).
             InlineSequenceId::TensorUnsqueeze => {
-                self.emit_intrinsic_library_call("verum_tensor_unsqueeze", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Unsqueeze,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorMaskedSelect => {
-                self.emit_intrinsic_library_call("verum_tensor_masked_select", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::MaskedSelect,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorLeakyRelu => {
-                self.emit_intrinsic_library_call("verum_tensor_leaky_relu", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::LeakyRelu,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorDiag => {
-                self.emit_intrinsic_library_call("verum_tensor_diag", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Diag,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorTriu => {
-                self.emit_intrinsic_library_call("verum_tensor_triu", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Triu,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorTril => {
-                self.emit_intrinsic_library_call("verum_tensor_tril", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Tril,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorNonzero => {
-                self.emit_intrinsic_library_call("verum_tensor_nonzero", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Nonzero,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorOneHot => {
-                self.emit_intrinsic_library_call("verum_tensor_one_hot", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::OneHot,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorSplit => {
-                self.emit_intrinsic_library_call("verum_tensor_split", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Split,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorSplitAt => {
-                self.emit_intrinsic_library_call("verum_tensor_split_at", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::SplitAt,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorGetScalar => {
-                self.emit_intrinsic_library_call("verum_tensor_get_scalar", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::GetScalar,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorSetScalar => {
-                self.emit_intrinsic_library_call("verum_tensor_set_scalar", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::SetScalar,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorContiguous => {
-                self.emit_intrinsic_library_call("verum_tensor_contiguous", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Contiguous,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorContiguousView => {
-                self.emit_intrinsic_library_call("verum_tensor_contiguous_view", args, dest)?;
+                // ContiguousView lives in TensorExtSubOpcode (extended
+                // tree, 0xFC opcode space) rather than the primary
+                // TensorSubOpcode tree.
+                self.emit_intrinsic_tensor_ext_extended(
+                    crate::instruction::TensorExtSubOpcode::ContiguousView,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::TensorToDevice => {
-                self.emit_intrinsic_library_call("verum_tensor_to_device", args, dest)?;
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::ToDevice,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::MemNewId => {
                 self.emit_intrinsic_library_call("verum_mem_new_id", args, dest)?;
