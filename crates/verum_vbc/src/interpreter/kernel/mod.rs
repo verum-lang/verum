@@ -21,6 +21,13 @@ pub mod tokenizer;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub mod metal;
 
+// MLIR-JIT compute backend (Этап C — compute unification).  Off by
+// default; when enabled, registers alongside `CpuBackend` and provides
+// a forward path for op-by-op migration to MLIR `linalg`/`vector`/`gpu`
+// dialects.
+#[cfg(feature = "mlir-jit")]
+pub mod mlir_jit_backend;
+
 // Re-export commonly used types
 pub use backend::{
     Backend, BackendRegistry, ComputeCapabilities, CpuBackend, MemoryPool, MemoryPoolStats,

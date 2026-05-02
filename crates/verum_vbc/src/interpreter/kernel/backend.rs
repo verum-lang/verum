@@ -498,6 +498,25 @@ impl BackendRegistry {
         // #[cfg(feature = "cuda")]
         // { ... }
 
+        // MLIR-JIT compute backend (Этап C — compute unification).
+        // Registered alongside `CpuBackend` under DeviceId::mlir_jit(0)
+        // when the `mlir-jit` feature is on.  This is the entry point
+        // for the multi-week migration that replaces hand-tuned SIMD
+        // ladders in `kernel/cpu.rs` and the Metal-specific kernels in
+        // `kernel/metal.rs` with a single industrial pipeline going
+        // through `linalg`/`vector`/`gpu` dialects → `ExecutionEngine`
+        // → cached function pointer.  Default routing stays on
+        // `CpuBackend`; explicit `default_backend = mlir_jit(0)` flips
+        // once enough ops are JIT-wired to outperform the SIMD ladder.
+        #[cfg(feature = "mlir-jit")]
+        {
+            let mlir_backend = super::mlir_jit_backend::MlirJitBackend::new();
+            let device_id = mlir_backend.device_id();
+            let backend: Arc<dyn Backend> = Arc::new(mlir_backend);
+            backends.insert(device_id, backend);
+            memory_pools.insert(device_id, MemoryPool::new(device_id));
+        }
+
         Self {
             backends,
             default_backend: default_device,

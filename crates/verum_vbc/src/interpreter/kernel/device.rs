@@ -22,10 +22,21 @@ impl DeviceId {
     pub const GPU_BASE: u16 = 0x1000;
     /// TPU base (TPU0 = 0x2000, ...)
     pub const TPU_BASE: u16 = 0x2000;
+    /// MLIR-JIT base (Этап C — compute unification).  Logically runs
+    /// on the host CPU but goes through the MLIR `linalg`/`vector`/
+    /// `gpu` dialect → JIT compile → cached function-pointer pipeline
+    /// instead of the hand-tuned SIMD kernels in `kernel/cpu.rs`.
+    /// MLIR_JIT0 = 0x3000, MLIR_JIT1 = 0x3001, …
+    pub const MLIR_JIT_BASE: u16 = 0x3000;
 
     /// Create GPU device ID
     pub const fn gpu(index: u16) -> Self {
         DeviceId(Self::GPU_BASE | index)
+    }
+
+    /// Create MLIR-JIT device ID
+    pub const fn mlir_jit(index: u16) -> Self {
+        DeviceId(Self::MLIR_JIT_BASE | index)
     }
 
     /// Check if CPU
@@ -41,6 +52,11 @@ impl DeviceId {
     /// Check if TPU
     pub const fn is_tpu(&self) -> bool {
         (self.0 & Self::TYPE_MASK) == Self::TPU_BASE
+    }
+
+    /// Check if MLIR-JIT (host CPU + MLIR pipeline)
+    pub const fn is_mlir_jit(&self) -> bool {
+        (self.0 & Self::TYPE_MASK) == Self::MLIR_JIT_BASE
     }
 
     /// Get device index within type
