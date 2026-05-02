@@ -435,6 +435,21 @@ pub fn fill_f32(output: &mut TensorHandle, value: f32) -> bool {
 pub fn dispatch_unop(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     let caps = get_capabilities();
 
+    // Этап C — MLIR JIT compute path for unops.  Mirrors the binop
+    // arm in `dispatch_binop` above: when the `mlir-jit` feature is
+    // enabled we attempt the JIT path first and fall through to the
+    // hand-tuned SIMD ladder if the backend doesn't yet wire the
+    // particular (op, dtype) combination.
+    #[cfg(feature = "mlir-jit")]
+    {
+        let registry = get_backend_registry();
+        if let Some(jit_backend) = registry.backend(DeviceId::mlir_jit(0)) {
+            if let Some(result) = jit_backend.unop(a, op) {
+                return Some(result);
+            }
+        }
+    }
+
     // Try Metal GPU for large F32 tensors
     #[cfg(all(target_os = "macos", feature = "metal"))]
     if a.dtype == DType::F32 && a.numel >= MIN_GPU_SIZE {
