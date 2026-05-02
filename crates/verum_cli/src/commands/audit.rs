@@ -15,7 +15,7 @@ pub struct AuditOptions {
     pub verify_proofs: bool,
     pub cbgr_profiles: bool,
     pub fix: bool,
-    /// Only audit direct dependencies, not transitive ones
+ /// Only audit direct dependencies, not transitive ones
     pub direct_only: bool,
 }
 
@@ -40,7 +40,7 @@ pub fn audit(options: AuditOptions) -> Result<()> {
         ui::step("Auditing all dependencies");
     }
 
-    // Find manifest and lockfile
+ // Find manifest and lockfile
     let manifest_dir = Manifest::find_manifest_dir()?;
     let manifest = Manifest::from_file(&Manifest::manifest_path(&manifest_dir))?;
 
@@ -52,7 +52,7 @@ pub fn audit(options: AuditOptions) -> Result<()> {
 
     let lockfile = Lockfile::from_file(&lockfile_path)?;
 
-    // Build set of direct dependencies if filtering
+ // Build set of direct dependencies if filtering
     let direct_deps: std::collections::HashSet<&str> = if options.direct_only {
         manifest
             .dependencies
@@ -65,18 +65,18 @@ pub fn audit(options: AuditOptions) -> Result<()> {
         std::collections::HashSet::new()
     };
 
-    // Collect audit results
+ // Collect audit results
     let mut vulnerabilities = List::new();
     let mut checksum_failures = List::new();
     let mut signature_failures = List::new();
     let mut cbgr_info = List::new();
 
-    // Check for vulnerabilities
+ // Check for vulnerabilities
     ui::info("Checking for vulnerabilities...");
     let client = RegistryClient::from_manifest()?;
 
     for package in &lockfile.packages {
-        // Skip transitive dependencies if direct_only is set
+ // Skip transitive dependencies if direct_only is set
         if options.direct_only && !direct_deps.contains(package.name.as_str()) {
             continue;
         }
@@ -93,7 +93,7 @@ pub fn audit(options: AuditOptions) -> Result<()> {
         }
     }
 
-    // Verify checksums
+ // Verify checksums
     if options.verify_checksums {
         ui::info("Verifying checksums...");
         let cache_dir = crate::registry::cache_dir()?;
@@ -108,24 +108,24 @@ pub fn audit(options: AuditOptions) -> Result<()> {
         }
     }
 
-    // Verify signatures
+ // Verify signatures
     if options.verify_signatures {
         ui::info("Verifying signatures...");
         signature_failures = verify_signatures(&lockfile)?;
     }
 
-    // Verify proofs. Closes the inert-defense pattern around
-    // `AuditOptions.verify_proofs`: pre-fix the field landed on
-    // the options struct + flowed from CLI flags but no audit
-    // path consulted it, so `verum audit --verify-proofs` was a
-    // silent no-op. The full proof-replay integration would
-    // route every cached proof certificate through
-    // `verum_smt::certificates::Generator`'s replay surface,
-    // but the audit command doesn't yet have access to that
-    // pipeline at this layer. Surface the request via UI step
-    // + tracing so the embedder sees the flag was observed and
-    // the verification will gain a real pass when the cert
-    // replay infrastructure lands at this layer.
+ // Verify proofs. Closes the inert-defense pattern around
+ // `AuditOptions.verify_proofs`: pre-fix the field landed on
+ // the options struct + flowed from CLI flags but no audit
+ // path consulted it, so `verum audit --verify-proofs` was a
+ // silent no-op. The full proof-replay integration would
+ // route every cached proof certificate through
+ // `verum_smt::certificates::Generator`'s replay surface,
+ // but the audit command doesn't yet have access to that
+ // pipeline at this layer. Surface the request via UI step
+ // + tracing so the embedder sees the flag was observed and
+ // the verification will gain a real pass when the cert
+ // replay infrastructure lands at this layer.
     if options.verify_proofs {
         ui::info("Verifying proofs (cert-replay integration pending)...");
         tracing::debug!(
@@ -135,13 +135,13 @@ pub fn audit(options: AuditOptions) -> Result<()> {
         );
     }
 
-    // Check CBGR profiles
+ // Check CBGR profiles
     if options.cbgr_profiles {
         ui::info("Analyzing CBGR profiles...");
         cbgr_info = analyze_cbgr_profiles(&lockfile)?;
     }
 
-    // Print report
+ // Print report
     print_audit_report(
         &vulnerabilities,
         &checksum_failures,
@@ -149,13 +149,13 @@ pub fn audit(options: AuditOptions) -> Result<()> {
         &cbgr_info,
     );
 
-    // Fix vulnerabilities if requested
+ // Fix vulnerabilities if requested
     if options.fix && !vulnerabilities.is_empty() {
         ui::step("Fixing vulnerabilities");
         fix_vulnerabilities(&vulnerabilities)?;
     }
 
-    // Determine exit status
+ // Determine exit status
     let has_critical = vulnerabilities.iter().any(|(_, report)| {
         report
             .vulnerabilities
@@ -247,7 +247,7 @@ fn print_audit_report(
     println!("{}", "Audit Report".bold());
     println!("{}", "═".repeat(80));
 
-    // Vulnerabilities
+ // Vulnerabilities
     if vulnerabilities.is_empty() {
         println!("{} No known vulnerabilities found", "✓".green());
     } else {
@@ -276,7 +276,7 @@ fn print_audit_report(
         }
     }
 
-    // Checksums
+ // Checksums
     if !checksum_failures.is_empty() {
         println!("{} Checksum verification failed:", "!".red());
         for failure in checksum_failures {
@@ -285,7 +285,7 @@ fn print_audit_report(
         println!();
     }
 
-    // Signatures
+ // Signatures
     if !signature_failures.is_empty() {
         println!("{} Signature verification failed:", "!".red());
         for failure in signature_failures {
@@ -294,7 +294,7 @@ fn print_audit_report(
         println!();
     }
 
-    // CBGR profiles
+ // CBGR profiles
     if !cbgr_info.is_empty() {
         println!("{}", "CBGR Performance Profiles:".bold());
         for (package, info) in cbgr_info {
@@ -312,7 +312,7 @@ fn fix_vulnerabilities(
 ) -> Result<()> {
     use std::fs;
 
-    // Find manifest
+ // Find manifest
     let manifest_dir = Manifest::find_manifest_dir()?;
     let manifest_path = Manifest::manifest_path(&manifest_dir);
     let lockfile_path = Manifest::lockfile_path(&manifest_dir);
@@ -340,7 +340,7 @@ fn fix_vulnerabilities(
                 continue;
             }
 
-            // Find best patched version (prefer patch/minor updates over major)
+ // Find best patched version (prefer patch/minor updates over major)
             let patched_versions: Vec<String> = vuln
                 .patched_versions
                 .iter()
@@ -353,7 +353,7 @@ fn fix_vulnerabilities(
                 package, report.version, best_patch, vuln.id
             ));
 
-            // Update manifest dependencies
+ // Update manifest dependencies
             let updated = update_manifest_dependency(&mut manifest, package.as_str(), &best_patch);
 
             if !updated {
@@ -365,7 +365,7 @@ fn fix_vulnerabilities(
                 continue;
             }
 
-            // Update lockfile
+ // Update lockfile
             match client.get_metadata(package.as_str(), &best_patch) {
                 Ok(metadata) => {
                     lockfile.update_cog(
@@ -383,14 +383,14 @@ fn fix_vulnerabilities(
         }
     }
 
-    // Write updated files
+ // Write updated files
     if fixed_count > 0 {
-        // Write manifest
+ // Write manifest
         let manifest_content =
             toml::to_string_pretty(&manifest).map_err(crate::error::CliError::ConfigSerialize)?;
         fs::write(&manifest_path, manifest_content)?;
 
-        // Write lockfile
+ // Write lockfile
         lockfile.to_file(&lockfile_path)?;
 
         println!();
@@ -435,9 +435,9 @@ fn find_best_patched_version(patched_versions: &[String], current: &str) -> Resu
         ));
     }
 
-    // Sort by preference: same major > same minor > any
+ // Sort by preference: same major > same minor > any
     candidates.sort_by(|a, b| {
-        // Prefer same major version
+ // Prefer same major version
         if a.major == current_ver.major && b.major != current_ver.major {
             return std::cmp::Ordering::Less;
         }
@@ -445,7 +445,7 @@ fn find_best_patched_version(patched_versions: &[String], current: &str) -> Resu
             return std::cmp::Ordering::Greater;
         }
 
-        // Then prefer same minor version
+ // Then prefer same minor version
         if a.major == current_ver.major {
             if a.minor == current_ver.minor && b.minor != current_ver.minor {
                 return std::cmp::Ordering::Less;
@@ -455,7 +455,7 @@ fn find_best_patched_version(patched_versions: &[String], current: &str) -> Resu
             }
         }
 
-        // Finally, prefer higher version
+ // Finally, prefer higher version
         a.cmp(b).reverse()
     });
 
@@ -466,7 +466,7 @@ fn find_best_patched_version(patched_versions: &[String], current: &str) -> Resu
 fn update_manifest_dependency(manifest: &mut Manifest, package: &str, new_version: &str) -> bool {
     use crate::config::Dependency;
 
-    // Try regular dependencies
+ // Try regular dependencies
     let package_key = Text::from(package);
     if let Some(dep) = manifest.dependencies.get_mut(&package_key) {
         match dep {
@@ -481,7 +481,7 @@ fn update_manifest_dependency(manifest: &mut Manifest, package: &str, new_versio
         }
     }
 
-    // Try dev dependencies
+ // Try dev dependencies
     if let Some(dep) = manifest.dev_dependencies.get_mut(&package_key) {
         match dep {
             Dependency::Simple(v) => {
@@ -495,7 +495,7 @@ fn update_manifest_dependency(manifest: &mut Manifest, package: &str, new_versio
         }
     }
 
-    // Try build dependencies
+ // Try build dependencies
     if let Some(dep) = manifest.build_dependencies.get_mut(&package_key) {
         match dep {
             Dependency::Simple(v) => {
@@ -538,24 +538,24 @@ use verum_compiler::session::Session;
 /// One framework-axiom usage point.
 #[derive(Debug, Clone)]
 pub(crate) struct FrameworkUsage {
-    /// Item name (theorem / axiom / lemma).
+ /// Item name (theorem / axiom / lemma).
     item_name: Text,
-    /// Kind of item the marker was attached to.
+ /// Kind of item the marker was attached to.
     item_kind: &'static str,
-    /// File path relative to project root.
+ /// File path relative to project root.
     file: PathBuf,
-    /// Citation string from the second argument.
+ /// Citation string from the second argument.
     citation: Text,
 }
 
 /// Output format for audit commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditFormat {
-    /// Human-readable output with colours.
+ /// Human-readable output with colours.
     Plain,
-    /// Machine-parseable JSON with a stable schema. `schema_version`
-    /// is included for consumer negotiation; see
-    /// `docs/verification/cli-workflow.md` for the schema.
+ /// Machine-parseable JSON with a stable schema. `schema_version`
+ /// is included for consumer negotiation; see
+ /// `docs/verification/cli-workflow.md` for the schema.
     Json,
 }
 
@@ -598,10 +598,10 @@ pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
         parsed_files += 1;
 
         for item in &module.items {
-            // The parser can place `@framework(...)` either on the outer
-            // Item.attributes or on the inner decl.attributes list (both
-            // storage sites exist across TheoremDecl / AxiomDecl / …), so
-            // we walk both.
+ // The parser can place `@framework(...)` either on the outer
+ // Item.attributes or on the inner decl.attributes list (both
+ // storage sites exist across TheoremDecl / AxiomDecl / …), so
+ // we walk both.
             let (kind_label, item_name, decl_attrs): (
                 &'static str,
                 Text,
@@ -674,7 +674,7 @@ pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
 
 /// reads conflicts from the static Rust matrix
 /// shipped at `crates/verum_verification/src/framework_compat.rs`.
-///  will add per-package declarative conflicts so the
+/// will add per-package declarative conflicts so the
 /// matrix doesn't have to be updated centrally for every new
 /// framework package.
 pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> {
@@ -690,9 +690,9 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
         return Ok(());
     }
 
-    // Collect distinct corpora from every @framework(corpus, "...")
-    // marker in the project. We reuse the framework-axioms walker
-    // here (its by_framework BTreeMap key IS the corpus name).
+ // Collect distinct corpora from every @framework(corpus, "...")
+ // marker in the project. We reuse the framework-axioms walker
+ // here (its by_framework BTreeMap key IS the corpus name).
     let mut by_framework: BTreeMap<Text, Vec<FrameworkUsage>> = BTreeMap::new();
     let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
     let mut parsed_files = 0usize;
@@ -826,15 +826,15 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
 ///
 
 /// **Three categories of report data**:
-///  1. Per-foundation citation count — observability for the
-///  meta-theoretic shape of the corpus.
-///  2. Unresolved citations — framework names not in either bridge.
-///  Surfaced so the corpus author can extend the recogniser or
-///  correct the citation.
-///  3. Foundation conflicts — pairwise incompatibilities (currently
-///  UIP + univalence; see `FoundationProfile::conflicts_with`).
-///  Exits non-zero on any conflict — the corpus would derive
-///  `False` if both foundations are simultaneously assumed.
+/// 1. Per-foundation citation count — observability for the
+/// meta-theoretic shape of the corpus.
+/// 2. Unresolved citations — framework names not in either bridge.
+/// Surfaced so the corpus author can extend the recogniser or
+/// correct the citation.
+/// 3. Foundation conflicts — pairwise incompatibilities (currently
+/// UIP + univalence; see `FoundationProfile::conflicts_with`).
+/// Exits non-zero on any conflict — the corpus would derive
+/// `False` if both foundations are simultaneously assumed.
 ///
 
 /// **Why separate from `--framework-conflicts`**: that gate operates
@@ -886,10 +886,10 @@ pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> 
 
     let dist = FoundationDistribution::from_citations(&all_citations);
 
-    // Always write the JSON report to disk so the bundle dispatcher
-    // and any downstream tooling can read it without re-running the
-    // gate. This matches the "every gate writes JSON unconditionally"
-    // discipline established by task #172.
+ // Always write the JSON report to disk so the bundle dispatcher
+ // and any downstream tooling can read it without re-running the
+ // gate. This matches the "every gate writes JSON unconditionally"
+ // discipline established by task #172.
     let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
     let report_path = report_dir.join("foundation-profiles.json");
@@ -970,23 +970,23 @@ pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> 
                     println!("  {} ⊥ {}: {}", c.left.tag(), c.right.tag(), c.reason,);
                 }
             }
-            // Quick reachability hint that helps the auditor file
-            // follow-ups.
+ // Quick reachability hint that helps the auditor file
+ // follow-ups.
             if !dist.unresolved.is_empty() || !dist.is_coherent() {
                 println!();
                 println!("Report: {}", report_path.display());
             }
-            // Touch FoundationProfile to keep the import alive for
-            // downstream callers cherry-picking this code path
-            // — the linker-level no-op silences the unused-import
-            // warning when FoundationProfile is only mentioned in
-            // doc comments.
+ // Touch FoundationProfile to keep the import alive for
+ // downstream callers cherry-picking this code path
+ // — the linker-level no-op silences the unused-import
+ // warning when FoundationProfile is only mentioned in
+ // doc comments.
             let _ = FoundationProfile::default_profile();
         }
         AuditFormat::Json => {
-            // The unconditional disk write above already produced the
-            // canonical artefact; mirror it to stdout so the bundle
-            // dispatcher and CLI consumers see the same payload.
+ // The unconditional disk write above already produced the
+ // canonical artefact; mirror it to stdout so the bundle
+ // dispatcher and CLI consumers see the same payload.
             println!(
                 "{}",
                 serde_json::to_string(&report_json).unwrap_or_default(),
@@ -994,13 +994,13 @@ pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> 
         }
     }
 
-    // Foundation pluralism (corpus-level multi-foundation citation)
-    // is observability, not a build-breaking error: a corpus can
-    // legitimately host independent theorems in incompatible
-    // foundations as long as no single derivation chain assumes both.
-    // Cross-chain detection (a per-theorem walk) is a future V1 add;
-    // V0 surfaces the corpus-level pluralism so the auditor can
-    // verify isolation manually. Exit 0 unconditionally.
+ // Foundation pluralism (corpus-level multi-foundation citation)
+ // is observability, not a build-breaking error: a corpus can
+ // legitimately host independent theorems in incompatible
+ // foundations as long as no single derivation chain assumes both.
+ // Cross-chain detection (a per-theorem walk) is a future V1 add;
+ // V0 surfaces the corpus-level pluralism so the auditor can
+ // verify isolation manually. Exit 0 unconditionally.
     Ok(())
 }
 
@@ -1071,10 +1071,10 @@ pub fn audit_accessibility_with_format(format: AuditFormat) -> Result<()> {
                 ItemKind::Function(func) => ("fn", func.name.name.clone(), &func.attributes),
                 _ => continue,
             };
-            // Item participates in the audit iff it carries any
-            // @enact marker. Items without @enact are skipped
-            // entirely — they don't reference EpsilonOf and
-            // don't need an accessibility certificate.
+ // Item participates in the audit iff it carries any
+ // @enact marker. Items without @enact are skipped
+ // entirely — they don't reference EpsilonOf and
+ // don't need an accessibility certificate.
             let has_enact = item_attrs_have_named(&item.attributes, "enact")
                 || item_attrs_have_named(decl_attrs, "enact");
             if !has_enact {
@@ -1090,7 +1090,7 @@ pub fn audit_accessibility_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    // Sort for deterministic CI-friendly output.
+ // Sort for deterministic CI-friendly output.
     rows.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
@@ -1125,8 +1125,8 @@ struct AccessibilityRow {
     file: PathBuf,
     item_kind: &'static str,
     item_name: Text,
-    /// `Some(λ)` when the item carries `@accessibility(λ)`,
-    /// `None` otherwise.
+ /// `Some(λ)` when the item carries `@accessibility(λ)`,
+ /// `None` otherwise.
     accessibility: Option<Text>,
 }
 
@@ -1291,7 +1291,7 @@ fn print_accessibility_report_json(
 /// auditors verify the trusted-base by walking this list and
 /// reading the cited implementations.
 pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
-    /// One rule entry.
+ /// One rule entry.
     struct Rule {
         number: u32,
         family: &'static str,
@@ -1299,11 +1299,11 @@ pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
         signature: &'static str,
     }
 
-    // Corresponds to trusted-kernel.md §4.1–§4.5 + VVA §4.4 / §4.4a.
-    // Refinement / framework / coherent / depth-omega rules added per
-    // task #70 — the pre-V8 list listed only 18 rules but the kernel
-    // ships more (depth.rs / eps_mu.rs / cert.rs all carry rules
-    // that hadn't been surfaced to the audit display).
+ // Corresponds to trusted-kernel.md §4.1–§4.5 + VVA §4.4 / §4.4a.
+ // Refinement / framework / coherent / depth-omega rules added per
+ // task #70 — the pre-V8 list listed only 18 rules but the kernel
+ // ships more (depth.rs / eps_mu.rs / cert.rs all carry rules
+ // that hadn't been surfaced to the audit display).
     const RULES: &[Rule] = &[
         Rule {
             number: 1,
@@ -1619,12 +1619,12 @@ pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
 ///
 
 /// Discovery order:
-///  1. `VERUM_STDLIB_ROOT` env var — explicit override.
-///  2. `core/` directory adjacent to the verum binary.
-///  3. `../core/` from the manifest dir's parent (cargo-workspace dev
-///  builds where the corpus is a sibling of the verum source tree).
-///  4. Hardcoded development locations (`~/projects/oldman/verum-lang/
-///  verum/core/`) for repeatable demos.
+/// 1. `VERUM_STDLIB_ROOT` env var — explicit override.
+/// 2. `core/` directory adjacent to the verum binary.
+/// 3. `../core/` from the manifest dir's parent (cargo-workspace dev
+/// builds where the corpus is a sibling of the verum source tree).
+/// 4. Hardcoded development locations (`~/projects/oldman/verum-lang/
+/// verum/core/`) for repeatable demos.
 ///
 
 /// Returns an empty vector if no stdlib root is found — the caller
@@ -1632,12 +1632,12 @@ pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
 /// as `unresolved` per the apply-graph fallback contract.
 pub(crate) fn discover_stdlib_vr_files() -> Vec<PathBuf> {
     let candidates: Vec<PathBuf> = stdlib_root_candidates();
-    // Aggregate from every viable candidate, deduplicate by absolute
-    // path. Returning the first non-empty match (the previous behaviour)
-    // missed sibling subtrees like `core/verify/codegen_soundness/`
-    // when `core/math/` was already populated. Walking each viable
-    // candidate keeps stdlib-side @kernel_discharge axiom discovery
-    // complete across all topic subtrees.
+ // Aggregate from every viable candidate, deduplicate by absolute
+ // path. Returning the first non-empty match (the previous behaviour)
+ // missed sibling subtrees like `core/verify/codegen_soundness/`
+ // when `core/math/` was already populated. Walking each viable
+ // candidate keeps stdlib-side @kernel_discharge axiom discovery
+ // complete across all topic subtrees.
     let mut seen: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
     let mut out: Vec<PathBuf> = Vec::new();
     for root in candidates {
@@ -1665,10 +1665,10 @@ pub(crate) fn discover_stdlib_vr_files() -> Vec<PathBuf> {
 ///
 /// Discovery order mirrors [`stdlib_root_candidates`] but searches
 /// for `core/verify/` rather than `core/math/`:
-///   1. `VERUM_STDLIB_ROOT` env var.
-///   2. Walk up from the verum binary directory.
-///   3. Walk up from the current working directory.
-///   4. Walk up from the manifest directory.
+/// 1. `VERUM_STDLIB_ROOT` env var.
+/// 2. Walk up from the verum binary directory.
+/// 3. Walk up from the current working directory.
+/// 4. Walk up from the manifest directory.
 /// Returns the first match whose `core/verify/` is a directory, or
 /// `None` when no candidate succeeds.
 pub(crate) fn locate_stdlib_root(manifest_dir: &Path) -> Option<PathBuf> {
@@ -1717,14 +1717,14 @@ pub(crate) fn locate_stdlib_root(manifest_dir: &Path) -> Option<PathBuf> {
 
 fn stdlib_root_candidates() -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
-    // The audit consumes per-topic subtrees of `core/`:
-    //   - `core/math/` — MSFS-related axioms, framework-cited theorems.
-    //   - `core/verify/` — kernel-soundness corpora + codegen-attestation
-    //     citations (#162 / `core/verify/codegen_soundness/`).
-    //   - `core/proof/` — kernel-bridge axioms.
-    // Walking every subtree (2000+ files total) would slow the audit;
-    // pinpointing the topic-relevant ones keeps it fast while ensuring
-    // every kernel-discharge citation surfaces.
+ // The audit consumes per-topic subtrees of `core/`:
+ // - `core/math/` — MSFS-related axioms, framework-cited theorems.
+ // - `core/verify/` — kernel-soundness corpora + codegen-attestation
+ // citations (#162 / `core/verify/codegen_soundness/`).
+ // - `core/proof/` — kernel-bridge axioms.
+ // Walking every subtree (2000+ files total) would slow the audit;
+ // pinpointing the topic-relevant ones keeps it fast while ensuring
+ // every kernel-discharge citation surfaces.
     let topic_subdirs: &[&str] = &["math", "verify", "proof"];
     if let Ok(env_root) = std::env::var("VERUM_STDLIB_ROOT") {
         let env_path = PathBuf::from(env_root);
@@ -1786,10 +1786,10 @@ pub(crate) fn parse_file_for_audit(path: &Path) -> std::result::Result<verum_ast
     let mut module = pipeline
         .phase_parse(file_id)
         .map_err(|e| format!("parse: {}", e))?;
-    // Run @delegate expansion post-parse so audit walkers see the
-    // synthesised proof bodies. Rejected outcomes (delegate + manual
-    // body) are dropped silently here — the elaborator surfaces them
-    // when the same file goes through full compilation.
+ // Run @delegate expansion post-parse so audit walkers see the
+ // synthesised proof bodies. Rejected outcomes (delegate + manual
+ // body) are dropped silently here — the elaborator surfaces them
+ // when the same file goes through full compilation.
     let _ = verum_compiler::phases::delegate_expansion::expand_delegates_in_module(&mut module);
     Ok(module)
 }
@@ -1907,8 +1907,8 @@ fn print_framework_report(
 //
 
 // Per + §21 (OWL 2 ecosystem), the eight canonical primitives are
-//  ε_math, ε_compute, ε_observe, ε_prove,
-//  ε_decide, ε_translate, ε_construct, ε_classify
+// ε_math, ε_compute, ε_observe, ε_prove,
+// ε_decide, ε_translate, ε_construct, ε_classify
 // — see `core.action.primitives.Primitive`. Only these eight are
 // recognised. Unknown strings land in the `malformed` bucket with a
 // diagnostic suggesting the expected primitive set. ε_classify is the
@@ -1919,11 +1919,11 @@ fn print_framework_report(
 /// One `@enact(...)` usage collected from the project AST.
 #[derive(Debug, Clone)]
 struct EnactUsage {
-    /// Declared item name (theorem / axiom / lemma / corollary / fn).
+ /// Declared item name (theorem / axiom / lemma / corollary / fn).
     item_name: Text,
-    /// Source kind label (for diagnostics / reports).
+ /// Source kind label (for diagnostics / reports).
     item_kind: &'static str,
-    /// File path relative to project root.
+ /// File path relative to project root.
     file: PathBuf,
 }
 
@@ -2111,10 +2111,10 @@ fn print_kernel_recheck_report_json(
     total_admitted: usize,
     total_rejected: usize,
 ) {
-    // #124 — RFC-8259-safe JSON via serde_json (replaces the
-    // hand-rolled writeln! pipeline that only escaped `\\` + `"`
-    // and produced invalid JSON when KernelRecheckError Display
-    // output carried control chars, newlines, or ` ` bytes).
+ // #124 — RFC-8259-safe JSON via serde_json (replaces the
+ // hand-rolled writeln! pipeline that only escaped `\\` + `"`
+ // and produced invalid JSON when KernelRecheckError Display
+ // output carried control chars, newlines, or ` ` bytes).
     let reports_json: Vec<serde_json::Value> = reports
         .iter()
         .map(|r| {
@@ -2164,21 +2164,21 @@ pub fn audit_kernel_soundness() -> Result<()> {
 /// Drives the kernel-soundness corpus + cross-export pipeline:
 ///
 
-///  1. **Drift check** — confirms the Rust-side rule list
-///  (`verum_kernel::canonical_rules()`) has the expected variant
-///  count. A one-sided edit between the Rust enum and the
-///  `core/verify/kernel_soundness/` corpus fails here.
-///  2. **Per-rule status enumeration** — reports how many of the
-///  35 lemmas are structurally proved versus admitted with a
-///  concrete IOU.
-///  3. **Foreign-tool emission** — produces `kernel_soundness.v`
-///  (Coq) and `KernelSoundness.lean` (Lean 4) files in
-///  `target/audit-reports/kernel-soundness/` for independent
-///  re-checking. External invocation of `coqc` / `lean` is
-///  OPTIONAL and lives in CI; the audit gate itself does not
-///  shell out (so the gate stays hermetic).
-///  4. **Honest IOUs** — the report lists every admitted lemma
-///  with its meta-theoretic prerequisite reason verbatim.
+/// 1. **Drift check** — confirms the Rust-side rule list
+/// (`verum_kernel::canonical_rules()`) has the expected variant
+/// count. A one-sided edit between the Rust enum and the
+/// `core/verify/kernel_soundness/` corpus fails here.
+/// 2. **Per-rule status enumeration** — reports how many of the
+/// 35 lemmas are structurally proved versus admitted with a
+/// concrete IOU.
+/// 3. **Foreign-tool emission** — produces `kernel_soundness.v`
+/// (Coq) and `KernelSoundness.lean` (Lean 4) files in
+/// `target/audit-reports/kernel-soundness/` for independent
+/// re-checking. External invocation of `coqc` / `lean` is
+/// OPTIONAL and lives in CI; the audit gate itself does not
+/// shell out (so the gate stays hermetic).
+/// 4. **Honest IOUs** — the report lists every admitted lemma
+/// with its meta-theoretic prerequisite reason verbatim.
 ///
 
 /// Exits non-zero only on drift; admitted lemmas are accountability
@@ -2199,7 +2199,7 @@ pub fn audit_kernel_soundness_with_format(format: AuditFormat) -> Result<()> {
     let manifest_dir = Manifest::find_manifest_dir()?;
     let exporter = SoundnessExporter::new();
 
-    // 1. Drift check.
+ // 1. Drift check.
     if let Err(reason) = exporter.drift_check() {
         return Err(crate::error::CliError::VerificationFailed(format!(
             "kernel-soundness drift: {}",
@@ -2207,7 +2207,7 @@ pub fn audit_kernel_soundness_with_format(format: AuditFormat) -> Result<()> {
         )));
     }
 
-    // 2. Emit Coq + Lean theory files into target/audit-reports/.
+ // 2. Emit Coq + Lean theory files into target/audit-reports/.
     let report_dir = manifest_dir
         .join("target")
         .join("audit-reports")
@@ -2217,10 +2217,10 @@ pub fn audit_kernel_soundness_with_format(format: AuditFormat) -> Result<()> {
     let coq_text = exporter.emit(&coq);
     let lean_text = exporter.emit(&lean);
 
-    // Best-effort write — failure to mkdir / write is reported as a
-    // notice in plain output and absent fields in JSON, but doesn't
-    // fail the gate. The corpus check above is the load-bearing
-    // assertion; foreign-export emission is bonus accountability.
+ // Best-effort write — failure to mkdir / write is reported as a
+ // notice in plain output and absent fields in JSON, but doesn't
+ // fail the gate. The corpus check above is the load-bearing
+ // assertion; foreign-export emission is bonus accountability.
     let coq_path = report_dir.join(coq.output_filename());
     let lean_path = report_dir.join(lean.output_filename());
     let mut emit_errors: Vec<String> = Vec::new();
@@ -2420,14 +2420,14 @@ fn print_kernel_soundness_report_json(
 /// **Three layers of observability**:
 ///
 
-///  1. **Roster** — per-rule (name, lemma symbol, file path,
-///  Proved / Admitted, IOU citation).
-///  2. **Discharge headline** — proved-count vs admitted-count vs
-///  total. The shrinkage roadmap target is 4-proved + 6-admitted
-///  → 10-proved across V1+ kernel iterations.
-///  3. **Drift gate** — exits non-zero on missing or orphan files.
-///  Adding a rule to `proof_checker.rs` without mirroring it in
-///  `kernel_v0/rules/k_<name>.vr` fails this gate.
+/// 1. **Roster** — per-rule (name, lemma symbol, file path,
+/// Proved / Admitted, IOU citation).
+/// 2. **Discharge headline** — proved-count vs admitted-count vs
+/// total. The shrinkage roadmap target is 4-proved + 6-admitted
+/// → 10-proved across V1+ kernel iterations.
+/// 3. **Drift gate** — exits non-zero on missing or orphan files.
+/// Adding a rule to `proof_checker.rs` without mirroring it in
+/// `kernel_v0/rules/k_<name>.vr` fails this gate.
 ///
 
 /// Output: `target/audit-reports/kernel-v0-roster.json`.
@@ -2443,19 +2443,19 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
 
     let manifest_dir = Manifest::find_manifest_dir()?;
     let rules = manifest();
-    // Stdlib-aware lookup: kernel_v0 rule files live in the embedded
-    // Verum stdlib (`core/verify/kernel_v0/rules/`).  When auditing a
-    // corpus that doesn't contain those files locally, fall back to
-    // the stdlib disk root.  Same architectural pattern as the
-    // codegen-attestation cross-check.
+ // Stdlib-aware lookup: kernel_v0 rule files live in the embedded
+ // Verum stdlib (`core/verify/kernel_v0/rules/`). When auditing a
+ // corpus that doesn't contain those files locally, fall back to
+ // the stdlib disk root. Same architectural pattern as the
+ // codegen-attestation cross-check.
     let stdlib_root = locate_stdlib_root(&manifest_dir);
     let extra_roots: Vec<&Path> = stdlib_root.as_ref().map(|p| vec![p.as_path()]).unwrap_or_default();
     let issues = verify_manifest_with_search_roots(&manifest_dir, &extra_roots);
     let proved = proved_count();
     let admitted = admitted_count();
 
-    // Always write the JSON report — same convention as the rest
-    // of the audit gate suite (#172).
+ // Always write the JSON report — same convention as the rest
+ // of the audit gate suite (#172).
     let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
     let report_path = report_dir.join("kernel-v0-roster.json");
@@ -2628,43 +2628,43 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
     let admitted = admitted_count();
     let pending = pending_count();
 
-    // Cross-reference layer (#162 V2) — each manifest entry must have:
-    //   (a) a matching .vr citation file at
-    //       core/verify/codegen_soundness/<tag>.vr; and
-    //   (b) a kernel intrinsic dispatcher that returns
-    //       Decision { holds: true } for kernel_<tag>_preserves_semantics.
-    //
-    // **Embedded-stdlib lookup**. `core/` is zstd-compressed and embedded
-    // directly into the verum binary at build time (see
-    // `verum_compiler::embedded_stdlib`). The cross-check primarily
-    // queries the embedded archive — installed binaries don't ship a
-    // separate `core/` directory. Source-tree builds get a working
-    // archive too because build.rs walks the project's core/ folder
-    // and generates the archive on every build.
-    //
-    // Disk fallback exists only for the rare developer scenario of
-    // running the audit against a source tree whose embedded archive
-    // is empty (e.g. running `cargo run -- audit ...` immediately
-    // after a `cargo clean` — uncommon in practice).
-    //
-    // Both gaps are reported as `vr_missing` / `dispatcher_missing` rows
-    // in the JSON. A discharged-or-admitted manifest entry whose .vr
-    // citation OR dispatcher is missing flips the audit verdict to
-    // failure — the architecture's bidirectional contract.
+ // Cross-reference layer (#162 V2) — each manifest entry must have:
+ // (a) a matching .vr citation file at
+ // core/verify/codegen_soundness/<tag>.vr; and
+ // (b) a kernel intrinsic dispatcher that returns
+ // Decision { holds: true } for kernel_<tag>_preserves_semantics.
+ //
+ // **Embedded-stdlib lookup**. `core/` is zstd-compressed and embedded
+ // directly into the verum binary at build time (see
+ // `verum_compiler::embedded_stdlib`). The cross-check primarily
+ // queries the embedded archive — installed binaries don't ship a
+ // separate `core/` directory. Source-tree builds get a working
+ // archive too because build.rs walks the project's core/ folder
+ // and generates the archive on every build.
+ //
+ // Disk fallback exists only for the rare developer scenario of
+ // running the audit against a source tree whose embedded archive
+ // is empty (e.g. running `cargo run -- audit ...` immediately
+ // after a `cargo clean` — uncommon in practice).
+ //
+ // Both gaps are reported as `vr_missing` / `dispatcher_missing` rows
+ // in the JSON. A discharged-or-admitted manifest entry whose .vr
+ // citation OR dispatcher is missing flips the audit verdict to
+ // failure — the architecture's bidirectional contract.
     let embedded = verum_compiler::embedded_stdlib::get_embedded_stdlib();
     let stdlib_root_disk = locate_stdlib_root(&manifest_dir);
     let mut vr_missing: Vec<String> = Vec::new();
     let mut dispatcher_missing: Vec<String> = Vec::new();
     let vr_present = |tag: &str| -> bool {
-        // Embedded paths are relative to core/, so the lookup key is
-        // `verify/codegen_soundness/<tag>.vr`.
+ // Embedded paths are relative to core/, so the lookup key is
+ // `verify/codegen_soundness/<tag>.vr`.
         let embedded_key = format!("verify/codegen_soundness/{}.vr", tag);
         if let Some(archive) = embedded {
             if archive.get_file(&embedded_key).is_some() {
                 return true;
             }
         }
-        // Disk fallback for source-tree builds with empty archive.
+ // Disk fallback for source-tree builds with empty archive.
         if let Some(root) = stdlib_root_disk.as_ref() {
             let path = root
                 .join("core")
@@ -2679,15 +2679,15 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
     };
     for p in &passes {
         let intrinsic_name = p.pass.kernel_intrinsic_name();
-        // (a) .vr file presence — only required when the entry is not
-        // `NotYetAttested`. Pending entries by definition haven't yet
-        // landed their citation file.
+ // (a) .vr file presence — only required when the entry is not
+ // `NotYetAttested`. Pending entries by definition haven't yet
+ // landed their citation file.
         if !matches!(p.status, AttestationStatus::NotYetAttested) && !vr_present(p.pass.tag()) {
             vr_missing.push(p.pass.tag().to_string());
         }
-        // (b) Dispatcher presence — required for every entry, regardless
-        // of status, because the audit gate's intrinsic walker looks
-        // these up unconditionally.
+ // (b) Dispatcher presence — required for every entry, regardless
+ // of status, because the audit gate's intrinsic walker looks
+ // these up unconditionally.
         match dispatch_intrinsic(&intrinsic_name, &[]) {
             Some(IntrinsicValue::Decision { holds: true, .. }) => {}
             _ => dispatcher_missing.push(intrinsic_name),
@@ -2695,8 +2695,8 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
     }
     let cross_check_ok = vr_missing.is_empty() && dispatcher_missing.is_empty();
 
-    // Always write the JSON report — same convention as the rest of
-    // the audit gate suite (#172).
+ // Always write the JSON report — same convention as the rest of
+ // the audit gate suite (#172).
     let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
     let report_path = report_dir.join("codegen-attestation.json");
@@ -2710,9 +2710,9 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
         "admitted_count": admitted,
         "pending_count": pending,
         "all_attested_claim_supported": attested == total,
-        // #162 V2 — cross-reference layer: every non-pending entry
-        // must have a matching .vr citation file AND a kernel intrinsic
-        // dispatcher entry. Both gaps surface here for audit consumers.
+ // #162 V2 — cross-reference layer: every non-pending entry
+ // must have a matching .vr citation file AND a kernel intrinsic
+ // dispatcher entry. Both gaps surface here for audit consumers.
         "vr_citations_missing": vr_missing,
         "dispatchers_missing": dispatcher_missing,
         "cross_check_passed": cross_check_ok,
@@ -2790,10 +2790,10 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
                 }
             }
             println!();
-            // Cross-reference summary (#162 V2): the bidirectional
-            // contract between the Rust manifest and the .vr citation
-            // files + kernel dispatchers. Both must agree for the
-            // attestation surface to be load-bearing.
+ // Cross-reference summary (#162 V2): the bidirectional
+ // contract between the Rust manifest and the .vr citation
+ // files + kernel dispatchers. Both must agree for the
+ // attestation surface to be load-bearing.
             if cross_check_ok {
                 println!(
                     "{} cross-check: every non-pending pass has a matching .vr \
@@ -2831,16 +2831,16 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
         }
     }
 
-    // Failure semantics: two distinct surfaces fail the gate.
-    //  (1) Manifest internal-consistency: if attested+admitted+pending
-    //      ever drifts from the total, the data layer has a bug.
-    //  (2) Cross-reference contract: every non-pending entry MUST have
-    //      a matching .vr citation + kernel dispatcher. A discharged
-    //      or admitted entry without its citation file or dispatcher
-    //      is an unsound claim — the audit gate enforces both.
-    //
-    // Pending entries are still observability — a partial-attestation
-    // manifest is an honest report, not a gate failure.
+ // Failure semantics: two distinct surfaces fail the gate.
+ // (1) Manifest internal-consistency: if attested+admitted+pending
+ // ever drifts from the total, the data layer has a bug.
+ // (2) Cross-reference contract: every non-pending entry MUST have
+ // a matching .vr citation + kernel dispatcher. A discharged
+ // or admitted entry without its citation file or dispatcher
+ // is an unsound claim — the audit gate enforces both.
+ //
+ // Pending entries are still observability — a partial-attestation
+ // manifest is an honest report, not a gate failure.
     if attested + admitted + pending != total {
         return Err(crate::error::CliError::Custom(
             format!(
@@ -2920,11 +2920,11 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
     let mut reports: Vec<DifferentialReport> = Vec::with_capacity(rules.len());
 
     for rule in &rules {
-        // `differential_test_rule` returns `None` for unknown rules,
-        // but every name we pass is from `manifest()` directly, so
-        // the lookup is total. We use `if let` to stay defensive —
-        // a future manifest refactor that introduces aliasing should
-        // fail loudly, not silently.
+ // `differential_test_rule` returns `None` for unknown rules,
+ // but every name we pass is from `manifest()` directly, so
+ // the lookup is total. We use `if let` to stay defensive —
+ // a future manifest refactor that introduces aliasing should
+ // fail loudly, not silently.
         if let Some(report) = differential_test_rule(&rule.name) {
             reports.push(report);
         }
@@ -3030,11 +3030,11 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
         }
     }
 
-    // Failure semantics: ANY disagreement fails the gate.
-    // `not_yet_self_hosting` reports are observability — the gate
-    // remains pass-state because there's no second kernel to disagree.
-    // Once the Verum-side adapter lands, the same audit code starts
-    // producing real verdicts and the gate becomes load-bearing.
+ // Failure semantics: ANY disagreement fails the gate.
+ // `not_yet_self_hosting` reports are observability — the gate
+ // remains pass-state because there's no second kernel to disagree.
+ // Once the Verum-side adapter lands, the same audit code starts
+ // producing real verdicts and the gate becomes load-bearing.
     if outcome.disagreement > 0 {
         return Err(crate::error::CliError::Custom(
             format!(
@@ -3054,12 +3054,12 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
 // audit --differential-kernel-fuzz — mutation-based property fuzzing
 // =============================================================================
 
-/// Default iteration count for the fuzz audit gate.  Bounded for
+/// Default iteration count for the fuzz audit gate. Bounded for
 /// CI-friendly runtime; the campaign is deterministic so the same
 /// number of iterations always produces the same coverage.
 const DIFFERENTIAL_FUZZ_DEFAULT_ITERATIONS: usize = 500;
 
-/// Default base seed.  Kept stable so the fuzz output is
+/// Default base seed. Kept stable so the fuzz output is
 /// reproducible across audit runs — a disagreement found at audit
 /// time is bisectable by simply re-running locally with the
 /// recorded seed.
@@ -3222,11 +3222,11 @@ pub fn audit_bridge_discharge() -> Result<()> {
 /// literal-arg call sites. Reports per-bridge:
 ///
 
-///  * **callsites_total** — total `apply` invocations
-///  * **callsites_literal_args** — invocations whose args reduce to literals
-///  * **callsites_non_literal** — invocations with non-literal args
-///  * **dispatcher_decisions** — per-callsite `Decision { holds, reason }`
-///  * **false_discharges** — count where `holds: false`
+/// * **callsites_total** — total `apply` invocations
+/// * **callsites_literal_args** — invocations whose args reduce to literals
+/// * **callsites_non_literal** — invocations with non-literal args
+/// * **dispatcher_decisions** — per-callsite `Decision { holds, reason }`
+/// * **false_discharges** — count where `holds: false`
 ///
 
 /// **Architecture**: this is the *observability layer* for task #80's
@@ -3238,11 +3238,11 @@ pub fn audit_bridge_discharge() -> Result<()> {
 ///
 
 /// Exits non-zero when:
-///  * any bridge invocation has `holds: false` (false discharge — the
-///  proof body cited the bridge but the dispatcher's structural
-///  check rejects the args as written)
-///  * any cited bridge has no dispatcher entry (unknown_bridges
-///  non-empty — gap in the bridge table)
+/// * any bridge invocation has `holds: false` (false discharge — the
+/// proof body cited the bridge but the dispatcher's structural
+/// check rejects the args as written)
+/// * any cited bridge has no dispatcher entry (unknown_bridges
+/// non-empty — gap in the bridge table)
 pub fn audit_bridge_discharge_with_format(format: AuditFormat) -> Result<()> {
     use crate::commands::bridge_discharge::{BridgeReport, finalise_report, walk_module};
 
@@ -3273,9 +3273,9 @@ pub fn audit_bridge_discharge_with_format(format: AuditFormat) -> Result<()> {
 
     let report = finalise_report(aggregator, modules_scanned, items_walked);
 
-    // #172 audit-output discipline: every gate writes its JSON to
-    // disk regardless of `--format` so the bundle dispatcher (#151)
-    // and downstream tooling can read each per-gate report reliably.
+ // #172 audit-output discipline: every gate writes its JSON to
+ // disk regardless of `--format` so the bundle dispatcher (#151)
+ // and downstream tooling can read each per-gate report reliably.
     if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
         let dir = manifest_dir.join("target").join("audit-reports");
         let _ = std::fs::create_dir_all(&dir);
@@ -3404,9 +3404,9 @@ fn print_bridge_discharge_report_json(report: &crate::commands::bridge_discharge
         "unknown_bridges": report.unknown_bridges,
     });
     let pretty = serde_json::to_string_pretty(&payload).unwrap();
-    // #172 audit-output discipline: every gate writes its JSON to
-    // disk regardless of `--format` so bundle dispatcher (#151) and
-    // downstream tooling can reliably read each per-gate report.
+ // #172 audit-output discipline: every gate writes its JSON to
+ // disk regardless of `--format` so bundle dispatcher (#151) and
+ // downstream tooling can reliably read each per-gate report.
     if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
         let dir = manifest_dir.join("target").join("audit-reports");
         let _ = std::fs::create_dir_all(&dir);
@@ -3733,17 +3733,17 @@ fn audit_cross_format_roundtrip_inner(
             let has_proof = proof_body.is_some();
             let declared_strategy = strictest_verify_strategy(&item.attributes, decl_attrs)
                 .map(|t| t.as_str().to_string());
-            // Render the proposition's source text via the AST
-            // pretty-printer so the foreign-tool comment carries
-            // exactly what the user wrote — not a synthetic
-            // placeholder.
+ // Render the proposition's source text via the AST
+ // pretty-printer so the foreign-tool comment carries
+ // exactly what the user wrote — not a synthetic
+ // placeholder.
             let proposition_text = verum_ast::pretty::format_expr(proposition_expr).to_string();
-            // Extract `(name, &Type)` pairs from theorem params for
-            // the type translator (#141 / MSFS-L4.8). Only Regular
-            // params carry a (pattern, ty) pair; self-parameters
-            // and the various reference-self forms aren't applicable
-            // to theorem signatures (theorems aren't methods) but
-            // the walker stays robust by skipping them.
+ // Extract `(name, &Type)` pairs from theorem params for
+ // the type translator (#141 / MSFS-L4.8). Only Regular
+ // params carry a (pattern, ty) pair; self-parameters
+ // and the various reference-self forms aren't applicable
+ // to theorem signatures (theorems aren't methods) but
+ // the walker stays robust by skipping them.
             let mut walker_params: Vec<(String, &verum_ast::ty::Type)> = Vec::new();
             for fp in theorem_params.iter() {
                 if let verum_ast::decl::FunctionParamKind::Regular {
@@ -3757,13 +3757,13 @@ fn audit_cross_format_roundtrip_inner(
                     }
                 }
             }
-            // Extract generic-param `(name, bound_annotation)` pairs
-            // (#145 / MSFS-L4.11). Type generics with a Protocol
-            // bound surface as `"S : RichS"` annotations; bare generics
-            // (no bound) carry an empty annotation. Higher-kinded
-            // / const / lifetime generics are skipped — their
-            // emission requires backend-specific machinery (HK in
-            // Coq is functor-style, const-generics need DepEq, etc.).
+ // Extract generic-param `(name, bound_annotation)` pairs
+ // (#145 / MSFS-L4.11). Type generics with a Protocol
+ // bound surface as `"S : RichS"` annotations; bare generics
+ // (no bound) carry an empty annotation. Higher-kinded
+ // / const / lifetime generics are skipped — their
+ // emission requires backend-specific machinery (HK in
+ // Coq is functor-style, const-generics need DepEq, etc.).
             let mut walker_generics: Vec<(String, String)> = Vec::new();
             for gp in theorem_generics.iter() {
                 if let verum_ast::ty::GenericParamKind::Type {
@@ -3786,12 +3786,12 @@ fn audit_cross_format_roundtrip_inner(
                     walker_generics.push((g_name, annotation));
                 }
             }
-            // Run the per-backend Expr → Prop translators (#140 /
-            // MSFS-L4.7) AND the per-backend Type translators
-            // (#141 / MSFS-L4.8). Successful translations land
-            // in their respective maps; fallbacks leave the entry
-            // absent and the per-format renderer reverts to a
-            // generic placeholder.
+ // Run the per-backend Expr → Prop translators (#140 /
+ // MSFS-L4.7) AND the per-backend Type translators
+ // (#141 / MSFS-L4.8). Successful translations land
+ // in their respective maps; fallbacks leave the entry
+ // absent and the per-format renderer reverts to a
+ // generic placeholder.
             let mut spec = TheoremSpec {
                 name: sanitise_theorem_name(&name),
                 module_path: module_path_text.clone(),
@@ -3806,11 +3806,11 @@ fn audit_cross_format_roundtrip_inner(
             .with_translated_params(&walker_params)
             .with_generics(&walker_generics)
             .with_translated_proposition(proposition_expr);
-            // #153 / Phase 2: when the theorem has a proof body and
-            // its shape is V0-translatable (term-mode or single-apply
-            // tactic), thread the translation into per_backend_proof_tactic.
-            // Untranslatable shapes leave the entry absent and the
-            // renderer falls back to Admitted./sorry.
+ // #153 / Phase 2: when the theorem has a proof body and
+ // its shape is V0-translatable (term-mode or single-apply
+ // tactic), thread the translation into per_backend_proof_tactic.
+ // Untranslatable shapes leave the entry absent and the
+ // renderer falls back to Admitted./sorry.
             if let Some(body) = proof_body {
                 spec = spec.with_translated_proof_body(body);
             }
@@ -3818,21 +3818,21 @@ fn audit_cross_format_roundtrip_inner(
         }
     }
 
-    // Per-backend emission + foreign-tool invocation.
+ // Per-backend emission + foreign-tool invocation.
     let mut roundtrips: Vec<ThmRoundtripPlainRow> = Vec::new();
     let mut foreign_failures = 0usize;
 
     for backend_iter in &backends {
         let backend_dir = report_dir.join(backend_iter.id());
         let _ = std::fs::create_dir_all(&backend_dir);
-        // Backend-aware checker dispatch (#149 / MSFS-L4.15). When
-        // `--docker` is set or VERUM_FOREIGN_TOOL_BACKEND=docker, the
-        // foreign tool runs inside its canonical container image so
-        // hosts without coqc/lean still get real per-theorem verdicts.
-        // #156-closure: dispatch to the canonical checker for every
-        // emitter backend. Pre-this-commit only Coq + Lean had
-        // checker dispatch; Agda / Isabelle / Dedukti emitted to disk
-        // but were never re-checked. Now the corpus walks all 5.
+ // Backend-aware checker dispatch (#149 / MSFS-L4.15). When
+ // `--docker` is set or VERUM_FOREIGN_TOOL_BACKEND=docker, the
+ // foreign tool runs inside its canonical container image so
+ // hosts without coqc/lean still get real per-theorem verdicts.
+ // #156-closure: dispatch to the canonical checker for every
+ // emitter backend. Pre-this-commit only Coq + Lean had
+ // checker dispatch; Agda / Isabelle / Dedukti emitted to disk
+ // but were never re-checked. Now the corpus walks all 5.
         let foreign_checker: Option<Box<dyn ForeignSystemChecker>> = match backend_iter.id() {
             "coq" => verum_smt::cross_format_runner::checker_for_backend(
                 verum_kernel::cross_format_gate::ExportFormat::Coq,
@@ -3996,17 +3996,17 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         );
     }
 
-    // **#159 V4 — N-kernel registry**.  Built once at audit entry;
-    // every certificate runs through every registered kernel via
-    // `registry.verify_all(&cert)`.  Adding a third kernel (#154
-    // self-hosted Verum kernel, future HOAS-based checker, ...)
-    // takes one line at the registry construction site below; the
-    // audit gate's per-cert flow stays unchanged.
+ // **#159 V4 — N-kernel registry**. Built once at audit entry;
+ // every certificate runs through every registered kernel via
+ // `registry.verify_all(&cert)`. Adding a third kernel (#154
+ // self-hosted Verum kernel, future HOAS-based checker, ...)
+ // takes one line at the registry construction site below; the
+ // audit gate's per-cert flow stays unchanged.
     let kernel_registry = KernelRegistry::default();
     let registered_kernel_names: Vec<&'static str> = kernel_registry.names();
 
-    // Discovery: env override → workspace ancestor walk → manifest dir
-    // co-located.
+ // Discovery: env override → workspace ancestor walk → manifest dir
+ // co-located.
     let candidates = proof_term_library_candidates();
     let library_dir = candidates.into_iter().find(|p| p.is_dir());
     let library_dir = match library_dir {
@@ -4020,11 +4020,11 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         }
     };
 
-    // Walk every .vproof file in the library directory + the
-    // `adversarial/` subdirectory (#159 V3). Adversarial
-    // certificates are tagged via metadata.expected_outcome ==
-    // "reject" so the audit gate enforces the inverted contract:
-    // both kernels must REJECT, not ACCEPT.
+ // Walk every .vproof file in the library directory + the
+ // `adversarial/` subdirectory (#159 V3). Adversarial
+ // certificates are tagged via metadata.expected_outcome ==
+ // "reject" so the audit gate enforces the inverted contract:
+ // both kernels must REJECT, not ACCEPT.
     let mut entries: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&library_dir) {
         for e in rd.flatten() {
@@ -4053,19 +4053,19 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     let mut adversarial_rejected = 0usize;
     let mut adversarial_unsoundly_accepted = 0usize;
     let mut malformed = 0usize;
-    // **#159 V2** — every certificate runs through BOTH kernels:
-    // Algorithm A (`proof_checker`, trusted base, bidirectional +
-    // explicit substitution) and Algorithm B (`proof_checker_nbe`,
-    // NbE-based).  Disagreements between the two are bugs in EITHER
-    // implementation; they fail the audit.
+ // **#159 V2** — every certificate runs through BOTH kernels:
+ // Algorithm A (`proof_checker`, trusted base, bidirectional +
+ // explicit substitution) and Algorithm B (`proof_checker_nbe`,
+ // NbE-based). Disagreements between the two are bugs in EITHER
+ // implementation; they fail the audit.
     let mut nbe_disagreements = 0usize;
-    // **#158 V1** — universe-stability check. Every certificate's
-    // verdict is computed at lifts 0..=2 via
-    // `proof_checker_meta::check_universe_stability`. The verdict
-    // must be CONSTANT across lifts — bumping the universe-hierarchy
-    // must NEVER flip the verdict. Non-stable verdicts are
-    // implementation bugs (universe-identity dependence) or
-    // soundness regressions (proof depending on a specific level).
+ // **#158 V1** — universe-stability check. Every certificate's
+ // verdict is computed at lifts 0..=2 via
+ // `proof_checker_meta::check_universe_stability`. The verdict
+ // must be CONSTANT across lifts — bumping the universe-hierarchy
+ // must NEVER flip the verdict. Non-stable verdicts are
+ // implementation bugs (universe-identity dependence) or
+ // soundness regressions (proof depending on a specific level).
     let mut universe_unstable = 0usize;
     const META_MAX_LIFT: u32 = 2;
 
@@ -4078,23 +4078,23 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                         .get("name")
                         .cloned()
                         .unwrap_or_else(|| "(anonymous)".to_string());
-                    // **#159 V3**: dispatch on metadata.expected_outcome.
-                    // Default ("accept") = canonical accept-path library;
-                    // "reject" = adversarial library (both kernels must
-                    // REJECT, not accept).
+ // **#159 V3**: dispatch on metadata.expected_outcome.
+ // Default ("accept") = canonical accept-path library;
+ // "reject" = adversarial library (both kernels must
+ // REJECT, not accept).
                     let expected_reject = cert
                         .metadata
                         .get("expected_outcome")
                         .map(|s| s.as_str() == "reject")
                         .unwrap_or(false);
-                    // **#159 V4 — N-kernel registry verification**.
-                    // Run the certificate through every registered
-                    // kernel; classify agreement; flag disagreements.
+ // **#159 V4 — N-kernel registry verification**.
+ // Run the certificate through every registered
+ // kernel; classify agreement; flag disagreements.
                     let multi_verdict = kernel_registry.verify_all(&cert);
-                    // **#158 V1 universe-stability check** — verify
-                    // the certificate's verdict is invariant under
-                    // universe-lift. Bumping every Universe(n) →
-                    // Universe(n+k) must NEVER flip accept ↔ reject.
+ // **#158 V1 universe-stability check** — verify
+ // the certificate's verdict is invariant under
+ // universe-lift. Bumping every Universe(n) →
+ // Universe(n+k) must NEVER flip accept ↔ reject.
                     let (_, stable) = proof_checker_meta::check_universe_stability(
                         &cert,
                         META_MAX_LIFT,
@@ -4102,11 +4102,11 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                     if !stable {
                         universe_unstable += 1;
                     }
-                    // Disagreement bookkeeping: the `nbe_disagreements`
-                    // counter is preserved for backwards compatibility
-                    // with the schema-version-3 JSON consumers; under
-                    // the N-kernel registry it counts "any pair of
-                    // kernels disagreed".
+ // Disagreement bookkeeping: the `nbe_disagreements`
+ // counter is preserved for backwards compatibility
+ // with the schema-version-3 JSON consumers; under
+ // the N-kernel registry it counts "any pair of
+ // kernels disagreed".
                     if matches!(
                         multi_verdict.agreement,
                         AgreementVerdict::Disagreement { .. }
@@ -4122,7 +4122,7 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                         AgreementVerdict::UnanimousReject,
                     );
                     let (label, detail) = if expected_reject {
-                        // Adversarial path: every kernel MUST reject.
+ // Adversarial path: every kernel MUST reject.
                         if unanimous_reject {
                             adversarial_rejected += 1;
                             (
@@ -4134,8 +4134,8 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                                 ),
                             )
                         } else if unanimous_accept {
-                            // SOUNDNESS BUG: every kernel ACCEPTED a
-                            // certificate marked expected_outcome=reject.
+ // SOUNDNESS BUG: every kernel ACCEPTED a
+ // certificate marked expected_outcome=reject.
                             adversarial_unsoundly_accepted += 1;
                             (
                                 "adversarial_unsoundly_accepted",
@@ -4157,15 +4157,15 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                             )
                         }
                     } else {
-                        // Canonical-accept path: every kernel MUST accept.
+ // Canonical-accept path: every kernel MUST accept.
                         if unanimous_accept {
                             verified += 1;
                             ("verified", String::new())
                         } else if unanimous_reject {
                             rejected += 1;
-                            // Pull the first error summary from the
-                            // outcomes (all are rejecting; the first
-                            // one's message is representative).
+ // Pull the first error summary from the
+ // outcomes (all are rejecting; the first
+ // one's message is representative).
                             let first_err = multi_verdict
                                 .outcomes
                                 .iter()
@@ -4203,7 +4203,7 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         }));
     }
 
-    // Emit JSON to disk for bundle composition.
+ // Emit JSON to disk for bundle composition.
     let manifest_dir = Manifest::find_manifest_dir().ok();
     let report_path = match &manifest_dir {
         Some(d) => d
@@ -4219,27 +4219,27 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         "schema_version": 5,
         "command": "audit-proof-term-library",
         "library_path": library_dir.display().to_string(),
-        // **#159 V4** — list every kernel implementation in the
-        // registered set. Reviewers reading the report can confirm
-        // which independent implementations the corpus was
-        // differential-tested against.
+ // **#159 V4** — list every kernel implementation in the
+ // registered set. Reviewers reading the report can confirm
+ // which independent implementations the corpus was
+ // differential-tested against.
         "registered_kernels": registered_kernel_names,
         "total": entries.len(),
         "verified": verified,
         "rejected": rejected,
         "malformed": malformed,
-        // #159 V2 differential count — number of certificates where
-        // the trusted base and the NbE kernel disagreed.  Any
-        // non-zero value flips the audit gate to failure.
+ // #159 V2 differential count — number of certificates where
+ // the trusted base and the NbE kernel disagreed. Any
+ // non-zero value flips the audit gate to failure.
         "nbe_disagreements": nbe_disagreements,
-        // #159 V3 adversarial counts — every certificate marked
-        // expected_outcome=reject MUST be rejected by both kernels.
-        // adversarial_unsoundly_accepted > 0 → SOUNDNESS BUG.
+ // #159 V3 adversarial counts — every certificate marked
+ // expected_outcome=reject MUST be rejected by both kernels.
+ // adversarial_unsoundly_accepted > 0 → SOUNDNESS BUG.
         "adversarial_rejected": adversarial_rejected,
         "adversarial_unsoundly_accepted": adversarial_unsoundly_accepted,
-        // #158 V1 universe-stability count — number of certificates
-        // whose verdict flipped across lift 0..=META_MAX_LIFT.
-        // Any non-zero value flips the audit gate to failure.
+ // #158 V1 universe-stability count — number of certificates
+ // whose verdict flipped across lift 0..=META_MAX_LIFT.
+ // Any non-zero value flips the audit gate to failure.
         "universe_unstable": universe_unstable,
         "meta_max_lift": META_MAX_LIFT,
         "verifications": verifications,
@@ -4397,8 +4397,8 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
     let mut theorem_specs: Vec<TheoremSpec> = Vec::new();
 
     for abs_path in &vr_files {
-        // Only walk corpus-rooted files; stdlib's theorems aren't
-        // emitted by the cross-format gate.
+ // Only walk corpus-rooted files; stdlib's theorems aren't
+ // emitted by the cross-format gate.
         if !abs_path.starts_with(&manifest_dir) {
             continue;
         }
@@ -4435,22 +4435,22 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
             let declared_strategy = strictest_verify_strategy(&item.attributes, decl_attrs)
                 .map(|t| t.as_str().to_string());
             let proposition_text = verum_ast::pretty::format_expr(proposition_expr).to_string();
-            // **Bug fix**: the signatures gate must construct
-            // `TheoremSpec` with the SAME translator outputs the
-            // cross-format-roundtrip gate uses to emit the .v/.lean
-            // files — otherwise the recomputed signature uses null
-            // proposition + null proof tactic while the file's
-            // signature header was computed with the actual translated
-            // text. Pre-fix this caused 74/74 signatures to mismatch on
-            // the live MSFS corpus despite no real divergence.
-            //
-            // Mirror the cross-format-roundtrip gate's params +
-            // generics population (audit.rs ~L3747-3788).  Without
-            // these, theorems with explicit type-parameters (e.g.
-            // `obstruction_non_negative`) compute a signature
-            // missing the param/generic block while the rendered
-            // .v/.lean carries it — producing a 4-mismatch chain
-            // (coq+lean × theorem × 2 nominally-distinct walks).
+ // **Bug fix**: the signatures gate must construct
+ // `TheoremSpec` with the SAME translator outputs the
+ // cross-format-roundtrip gate uses to emit the .v/.lean
+ // files — otherwise the recomputed signature uses null
+ // proposition + null proof tactic while the file's
+ // signature header was computed with the actual translated
+ // text. Pre-fix this caused 74/74 signatures to mismatch on
+ // the live MSFS corpus despite no real divergence.
+ //
+ // Mirror the cross-format-roundtrip gate's params +
+ // generics population (audit.rs ~L3747-3788). Without
+ // these, theorems with explicit type-parameters (e.g.
+ // `obstruction_non_negative`) compute a signature
+ // missing the param/generic block while the rendered
+ // .v/.lean carries it — producing a 4-mismatch chain
+ // (coq+lean × theorem × 2 nominally-distinct walks).
             let mut walker_params: Vec<(String, &verum_ast::ty::Type)> = Vec::new();
             for fp in theorem_params.iter() {
                 if let verum_ast::decl::FunctionParamKind::Regular {
@@ -4694,10 +4694,10 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
     let manifest_dir = Manifest::find_manifest_dir()?;
     let exporter = SoundnessExporter::new();
 
-    // Group admits by RuleCategory. Within each category sort by
-    // rule_name for stable ordering. `DischargedByFramework` rules
-    // are tracked separately — they're L4-acceptable but downstream
-    // of an external proof.
+ // Group admits by RuleCategory. Within each category sort by
+ // rule_name for stable ordering. `DischargedByFramework` rules
+ // are tracked separately — they're L4-acceptable but downstream
+ // of an external proof.
     let mut by_category: BTreeMap<&'static str, Vec<&verum_kernel::soundness::RuleSpec>> =
         BTreeMap::new();
     let mut total_proved = 0usize;
@@ -4726,7 +4726,7 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
         rules.sort_by_key(|r| r.rule_name.clone());
     }
 
-    // Emit JSON to disk for CI tracking + bundle composition.
+ // Emit JSON to disk for CI tracking + bundle composition.
     let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
     let json_path = report_dir.join("soundness-iou.json");
@@ -4847,7 +4847,7 @@ fn print_soundness_iou_plain(
         println!();
     }
 
-    // Stable category ordering (matches the JSON output).
+ // Stable category ordering (matches the JSON output).
     let category_order = [
         RuleCategory::Structural.tag(),
         RuleCategory::Cubical.tag(),
@@ -4939,16 +4939,16 @@ pub fn audit_apply_graph() -> Result<()> {
 /// **JSON shape.**
 /// ```json
 /// {
-///  "schema_version": 1,
-///  "command": "audit-bundle",
-///  "l4_load_bearing": <bool>,
-///  "gates": {
-///  "bridge_discharge": { ... },
-///  "kernel_discharged_axioms": { ... },
-///  "apply_graph": { ... },
-///  "cross_format_roundtrip": { ... }
-///  },
-///  "summary": { "<gate>": "passed" | "failed" }
+/// "schema_version": 1,
+/// "command": "audit-bundle",
+/// "l4_load_bearing": <bool>,
+/// "gates": {
+/// "bridge_discharge": { ... },
+/// "kernel_discharged_axioms": { ... },
+/// "apply_graph": { ... },
+/// "cross_format_roundtrip": { ... }
+/// },
+/// "summary": { "<gate>": "passed" | "failed" }
 /// }
 /// ```
 /// Extract a compact gate-specific metric string from the gate's
@@ -5070,32 +5070,32 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
     let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
 
-    // Run each gate, capturing its JSON report from disk. Each
-    // gate's `_with_format(Json)` path writes to a known location;
-    // we read it back after invocation. This pattern works because
-    // every gate already produces a JSON file under target/audit-reports
-    // — the bundle reuses the existing artefacts rather than
-    // re-running the audit logic.
+ // Run each gate, capturing its JSON report from disk. Each
+ // gate's `_with_format(Json)` path writes to a known location;
+ // we read it back after invocation. This pattern works because
+ // every gate already produces a JSON file under target/audit-reports
+ // — the bundle reuses the existing artefacts rather than
+ // re-running the audit logic.
     use std::collections::BTreeMap;
     let mut gates: BTreeMap<&'static str, serde_json::Value> = BTreeMap::new();
     let mut summary: BTreeMap<&'static str, &'static str> = BTreeMap::new();
     let mut overall_l4 = true;
 
-    /// Invoke a gate and capture (JSON outcome, "passed"|"failed"
-    /// label). A gate that returns `Err` is recorded as `failed`
-    /// without aborting the bundle — the bundle is observability
-    /// across all gates, not a fail-fast pipeline.
-    ///
+ /// Invoke a gate and capture (JSON outcome, "passed"|"failed"
+ /// label). A gate that returns `Err` is recorded as `failed`
+ /// without aborting the bundle — the bundle is observability
+ /// across all gates, not a fail-fast pipeline.
+ ///
 
-    /// Per-gate JSON stdout is silenced inside the bundle: gates
-    /// invoked under `AuditFormat::Json` normally print their
-    /// payload to stdout, but the bundle's clean output requires
-    /// that output be captured to disk only. We redirect stdout
-    /// for the duration of the gate's invocation by routing the
-    /// captured chunk through a Vec writer; this is best-effort —
-    /// gates that bypass println! (e.g., direct write_all to fd 1)
-    /// will still surface, but the standard `serde_json::to_string_pretty
-    /// + println!` pattern used by every load-bearing audit is captured.
+ /// Per-gate JSON stdout is silenced inside the bundle: gates
+ /// invoked under `AuditFormat::Json` normally print their
+ /// payload to stdout, but the bundle's clean output requires
+ /// that output be captured to disk only. We redirect stdout
+ /// for the duration of the gate's invocation by routing the
+ /// captured chunk through a Vec writer; this is best-effort —
+ /// gates that bypass println! (e.g., direct write_all to fd 1)
+ /// will still surface, but the standard `serde_json::to_string_pretty
+ /// + println!` pattern used by every load-bearing audit is captured.
     fn run_gate<F>(
         gates: &mut BTreeMap<&'static str, serde_json::Value>,
         summary: &mut BTreeMap<&'static str, &'static str>,
@@ -5105,10 +5105,10 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
     ) where
         F: FnOnce() -> Result<()>,
     {
-        // Use Gag (or similar) is heavy; the simpler path is to just
-        // run the gate and accept its stdout noise. The bundle's
-        // headline summary still lands at the bottom and aggregates
-        // every gate's verdict.
+ // Use Gag (or similar) is heavy; the simpler path is to just
+ // run the gate and accept its stdout noise. The bundle's
+ // headline summary still lands at the bottom and aggregates
+ // every gate's verdict.
         let outcome = invoke();
         let label = if outcome.is_ok() { "passed" } else { "failed" };
         summary.insert(name, label);
@@ -5118,11 +5118,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
                 return;
             }
         }
-        // Gate's JSON file unavailable — record stub so the bundle
-        // still surfaces the gate's existence and verdict. The
-        // stub records the gate's verdict label so downstream
-        // tooling can still tell pass-from-fail without parsing the
-        // missing report.
+ // Gate's JSON file unavailable — record stub so the bundle
+ // still surfaces the gate's existence and verdict. The
+ // stub records the gate's verdict label so downstream
+ // tooling can still tell pass-from-fail without parsing the
+ // missing report.
         gates.insert(
             name,
             serde_json::json!({
@@ -5134,8 +5134,8 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         );
     }
 
-    // 1. Bridge-discharge — observability for `apply kernel_*_strict`
-    //  callsites. Pre-cursor to the apply-graph's transitive walk.
+ // 1. Bridge-discharge — observability for `apply kernel_*_strict`
+ // callsites. Pre-cursor to the apply-graph's transitive walk.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5147,8 +5147,8 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 2. Kernel-discharged-axioms — drift check on stdlib's
-    //  @kernel_discharge cross-link.
+ // 2. Kernel-discharged-axioms — drift check on stdlib's
+ // @kernel_discharge cross-link.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5160,11 +5160,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 2b. Kernel-soundness IOU dashboard — observability for the
-    //  trust-base reduction roadmap (Phase 1). Doesn't flip
-    //  l4_load_bearing (the IOUs are accountability surface, not
-    //  L4 failures), but the bundle records the admit count so
-    //  CI tracks trust-base shrinkage over time.
+ // 2b. Kernel-soundness IOU dashboard — observability for the
+ // trust-base reduction roadmap (Phase 1). Doesn't flip
+ // l4_load_bearing (the IOUs are accountability surface, not
+ // L4 failures), but the bundle records the admit count so
+ // CI tracks trust-base shrinkage over time.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5172,10 +5172,10 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         report_dir.join("soundness-iou.json"),
         || audit_soundness_iou_with_format(AuditFormat::Json),
     );
-    // Always passes (observability only).
+ // Always passes (observability only).
 
-    // 3. Apply-graph — transitive load-bearing verdict. This is the
-    //  headline gate for L4 closure.
+ // 3. Apply-graph — transitive load-bearing verdict. This is the
+ // headline gate for L4 closure.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5187,10 +5187,10 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 4. Cross-format-roundtrip — independent foreign-tool re-check
-    //  (Coq + Lean). Surfaces tool_missing on hosts without coqc/
-    //  lean (gate stays GREEN); fails on real foreign-tool
-    //  rejections. Use --docker to force the docker backend.
+ // 4. Cross-format-roundtrip — independent foreign-tool re-check
+ // (Coq + Lean). Surfaces tool_missing on hosts without coqc/
+ // lean (gate stays GREEN); fails on real foreign-tool
+ // rejections. Use --docker to force the docker backend.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5200,19 +5200,19 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
             .join("cross-format-roundtrip.json"),
         || audit_cross_format_roundtrip_with_format(AuditFormat::Json),
     );
-    // Cross-format failures don't drop overall_l4 — when foreign
-    // tools are missing the gate's "verdict" is `tool_missing` which
-    // is by-design observability. Real failures are caught upstream
-    // by the gate's own non-zero exit, which surfaces as Err here.
+ // Cross-format failures don't drop overall_l4 — when foreign
+ // tools are missing the gate's "verdict" is `tool_missing` which
+ // is by-design observability. Real failures are caught upstream
+ // by the gate's own non-zero exit, which surfaces as Err here.
     if summary.get("cross_format_roundtrip") == Some(&"failed") {
         overall_l4 = false;
     }
 
-    // 5. Signature verification — each emitted file carries a
-    //  `verum_signature` header pinning it to a kernel version +
-    //  spec hash; this gate recomputes and matches. Mismatches
-    //  surface drift between the emit step and the signature
-    //  expectation (#174).
+ // 5. Signature verification — each emitted file carries a
+ // `verum_signature` header pinning it to a kernel version +
+ // spec hash; this gate recomputes and matches. Mismatches
+ // surface drift between the emit step and the signature
+ // expectation (#174).
     run_gate(
         &mut gates,
         &mut summary,
@@ -5224,13 +5224,13 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 6. Manifest-coverage — every Verum.toml manifest field's
-    //  wiring status is enumerated in a static table; this gate
-    //  emits the report and verifies no field is silently inert
-    //  (#290). Doesn't flip overall_l4 (forward-looking entries
-    //  are observability, not L4 failures), but the bundle
-    //  records the wired/forward-looking counts so CI tracks
-    //  inert-defense audit progress over time.
+ // 6. Manifest-coverage — every Verum.toml manifest field's
+ // wiring status is enumerated in a static table; this gate
+ // emits the report and verifies no field is silently inert
+ // (#290). Doesn't flip overall_l4 (forward-looking entries
+ // are observability, not L4 failures), but the bundle
+ // records the wired/forward-looking counts so CI tracks
+ // inert-defense audit progress over time.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5238,13 +5238,13 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         report_dir.join("manifest-coverage.json"),
         || audit_manifest_coverage(AuditFormat::Json),
     );
-    // Always passes (observability gate — forward-looking rows
-    // are accountability surface, not failures).
+ // Always passes (observability gate — forward-looking rows
+ // are accountability surface, not failures).
 
-    // 7. MLS-coverage — surface the project's MLS classification
-    //  topology (#296). Always passes (observability only); the
-    //  bundle records counts so CI can track classification
-    //  growth.
+ // 7. MLS-coverage — surface the project's MLS classification
+ // topology (#296). Always passes (observability only); the
+ // bundle records counts so CI can track classification
+ // growth.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5253,11 +5253,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_mls_coverage(AuditFormat::Json),
     );
 
-    // 8. kernel_v0 roster — bootstrap-meta-theory drift gate (#154).
-    //  Confirms the canonical 10-rule manifest matches the
-    //  on-disk verify/kernel_v0/rules/ tree. Drift is an L4
-    //  failure: if proof_checker.rs gains a rule that kernel_v0
-    //  doesn't mirror, the bootstrap chain is broken.
+ // 8. kernel_v0 roster — bootstrap-meta-theory drift gate (#154).
+ // Confirms the canonical 10-rule manifest matches the
+ // on-disk verify/kernel_v0/rules/ tree. Drift is an L4
+ // failure: if proof_checker.rs gains a rule that kernel_v0
+ // doesn't mirror, the bootstrap chain is broken.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5269,11 +5269,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 9. Foundation-profiles — citation-by-foundation classifier.
-    //  Observability-only: surfaces multi-foundation pluralism but
-    //  doesn't flip the L4 verdict, since corpora can legitimately
-    //  host independent theorems in incompatible foundations as
-    //  long as no single derivation chain assumes both.
+ // 9. Foundation-profiles — citation-by-foundation classifier.
+ // Observability-only: surfaces multi-foundation pluralism but
+ // doesn't flip the L4 verdict, since corpora can legitimately
+ // host independent theorems in incompatible foundations as
+ // long as no single derivation chain assumes both.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5282,10 +5282,10 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_foundation_profiles_with_format(AuditFormat::Json),
     );
 
-    // 10. Codegen-attestation — per-pass kernel-discharge manifest
-    //  (CompCert-style verified-compilation surface). V0 baseline
-    //  reports 0 of 6 passes attested; observability-only in V0,
-    //  flips to load-bearing when discharge work lands.
+ // 10. Codegen-attestation — per-pass kernel-discharge manifest
+ // (CompCert-style verified-compilation surface). V0 baseline
+ // reports 0 of 6 passes attested; observability-only in V0,
+ // flips to load-bearing when discharge work lands.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5294,13 +5294,13 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_codegen_attestation_with_format(AuditFormat::Json),
     );
 
-    // 11. Differential-kernel — N-kernel cross-implementation
-    //  agreement (#159 V0+V1+V4). Walks the kernel_v0 manifest's
-    //  10 rules through every registered kernel implementation
-    //  (currently `proof_checker` + `proof_checker_nbe`) on the
-    //  canonical polymorphic-identity certificate. Disagreements
-    //  are kernel-implementation bugs to be fixed; this is the
-    //  load-bearing CI gate that catches them at audit time.
+ // 11. Differential-kernel — N-kernel cross-implementation
+ // agreement (#159 V0+V1+V4). Walks the kernel_v0 manifest's
+ // 10 rules through every registered kernel implementation
+ // (currently `proof_checker` + `proof_checker_nbe`) on the
+ // canonical polymorphic-identity certificate. Disagreements
+ // are kernel-implementation bugs to be fixed; this is the
+ // load-bearing CI gate that catches them at audit time.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5312,13 +5312,13 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 11b. Differential-kernel fuzz — mutation-based property
-    //  fuzzing over the kernel registry. Bounded campaign (default
-    //  500 iterations, deterministic seed) walks structurally
-    //  mutated certificates through every registered kernel; every
-    //  disagreement is a kernel-implementation bug and fails the
-    //  gate. Complements the canonical-certificate roster: roster
-    //  covers the curated surface, fuzz covers the long tail.
+ // 11b. Differential-kernel fuzz — mutation-based property
+ // fuzzing over the kernel registry. Bounded campaign (default
+ // 500 iterations, deterministic seed) walks structurally
+ // mutated certificates through every registered kernel; every
+ // disagreement is a kernel-implementation bug and fails the
+ // gate. Complements the canonical-certificate roster: roster
+ // covers the curated surface, fuzz covers the long tail.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5330,14 +5330,14 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 11c. Reflection-tower — ordinal-indexed meta-soundness.
-    //  Walks every level in REF^0..REF^4 + REF^ω; each finite
-    //  level must discharge against the per-rule kernel-rule
-    //  footprint. Citations are Gödel 1931 + Feferman 1989,
-    //  Pohlers 2009, Beklemishev 2003, Schütte 1965, Feferman
-    //  1962 (one per level). The tower's stability is the
-    //  load-bearing meta-theory invariant of Verum's Gödel-2nd
-    //  escape.
+ // 11c. Reflection-tower — ordinal-indexed meta-soundness.
+ // Walks every level in REF^0..REF^4 + REF^ω; each finite
+ // level must discharge against the per-rule kernel-rule
+ // footprint. Citations are Gödel 1931 + Feferman 1989,
+ // Pohlers 2009, Beklemishev 2003, Schütte 1965, Feferman
+ // 1962 (one per level). The tower's stability is the
+ // load-bearing meta-theory invariant of Verum's Gödel-2nd
+ // escape.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5349,11 +5349,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 11d. ATS-V Architectural Type System discharge registry.
-    //  Walks the 8 kernel-side architectural intrinsics + reports
-    //  the canonical 10-pattern anti-pattern catalog with stable
-    //  RFC error codes (ATS-V-AP-001..010). Сезон 1 registry
-    //  surface; full per-cog dispatch lands in Сезон 2.
+ // 11d. ATS-V Architectural Type System discharge registry.
+ // Walks the 8 kernel-side architectural intrinsics + reports
+ // the canonical 10-pattern anti-pattern catalog with stable
+ // RFC error codes (ATS-V-AP-001..010). registry
+ // surface; full per-cog dispatch lands.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5365,11 +5365,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 11e. ATS-V Сезон 6 — counterfactual reasoning engine pin
-    //  battery.  Verifies every InvariantStatus arm
-    //  (HoldsBoth/HoldsBaseOnly/HoldsAltOnly/HoldsNeither) holds
-    //  its soundness contract; failure means engine arm-routing
-    //  drifted from spec §22.2.
+ // 11e. ATS-V counterfactual reasoning engine pin
+ // battery. Verifies every InvariantStatus arm
+ // (HoldsBoth/HoldsBaseOnly/HoldsAltOnly/HoldsNeither) holds
+ // its soundness contract; failure means engine arm-routing
+ // drifted from spec §22.2.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5381,11 +5381,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 11f. ATS-V Сезон 7 — adjunction analyzer pin battery.
-    //  Verifies each canonical adjunction recogniser (Inline⊣Extract
-    //  / Specialise⊣Generalise / Decompose⊣Compose /
-    //  Strengthen⊣Weaken) classifies the corresponding shape-delta
-    //  correctly; failure means recogniser drifted from spec §20.6.
+ // 11f. ATS-V adjunction analyzer pin battery.
+ // Verifies each canonical adjunction recogniser (Inline⊣Extract
+ // / Specialise⊣Generalise / Decompose⊣Compose /
+ // Strengthen⊣Weaken) classifies the corresponding shape-delta
+ // correctly; failure means recogniser drifted from spec §20.6.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5397,12 +5397,12 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 11g. ATS-V Сезон 8 — Yoneda-equivalence checker pin battery.
-    //  Verifies each canonical Observer's projection respects spec
-    //  §20.7 + §23 — Auditor sees foundation, Adversary sees
-    //  attack surface, EndUser sees public interface, etc.
-    //  Failure means the observer-functor projection drifted from
-    //  spec.
+ // 11g. ATS-V Yoneda-equivalence checker pin battery.
+ // Verifies each canonical Observer's projection respects spec
+ // §20.7 + §23 — Auditor sees foundation, Adversary sees
+ // attack surface, EndUser sees public interface, etc.
+ // Failure means the observer-functor projection drifted from
+ // spec.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5414,15 +5414,15 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
-    // 12. Proof-term-library — N-kernel + universe-stability +
-    //  adversarial verification of the canonical certificate
-    //  library at `core/verify/proof_term_examples/` (#157, #158
-    //  V1, #159 V2-V4). Every certificate runs through every
-    //  registered kernel; the verdict is checked for
-    //  universe-stability across lifts 0..=2 (Gödel-2nd
-    //  workaround foundation); adversarial certificates
-    //  (`expected_outcome=reject` metadata) MUST be unanimously
-    //  rejected — soundness violations flip the gate.
+ // 12. Proof-term-library — N-kernel + universe-stability +
+ // adversarial verification of the canonical certificate
+ // library at `core/verify/proof_term_examples/` (#157, #158
+ // V1, #159 V2-V4). Every certificate runs through every
+ // registered kernel; the verdict is checked for
+ // universe-stability across lifts 0..=2 (Gödel-2nd
+ // workaround foundation); adversarial certificates
+ // (`expected_outcome=reject` metadata) MUST be unanimously
+ // rejected — soundness violations flip the gate.
     run_gate(
         &mut gates,
         &mut summary,
@@ -5457,11 +5457,11 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
                     "passed" => "✓",
                     _ => "✗",
                 };
-                // Append a compact gate-specific summary line for
-                // observability gates that carry useful metrics —
-                // manifest-coverage shows wired/total, mls-coverage
-                // shows classification counts. Other gates show only
-                // their pass/fail label.
+ // Append a compact gate-specific summary line for
+ // observability gates that carry useful metrics —
+ // manifest-coverage shows wired/total, mls-coverage
+ // shows classification counts. Other gates show only
+ // their pass/fail label.
                 let metric = bundle_gate_metric(gate, &gates);
                 if metric.is_empty() {
                     println!("  {}  {:<28} {}", marker, gate, label);
@@ -5499,7 +5499,7 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
 /// Mathematician-facing utility: when an axiom rejects or is
 /// admitted under audit, "which of my theorems lose their
 /// discharge?" is answered without manual dependency tracing.
-/// Walks the apply-graph backwards from the named axiom.  Output:
+/// Walks the apply-graph backwards from the named axiom. Output:
 /// `target/audit-reports/dependent-theorems-<axiom>.json` + plain
 /// or JSON CLI rendering.
 pub fn audit_dependent_theorems_with_format(
@@ -5650,25 +5650,25 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
 
     let manifest_dir = Manifest::find_manifest_dir()?;
     let mut vr_files = discover_vr_files(&manifest_dir);
-    // Extend the scan with the verum stdlib's `core/` tree when it can
-    // be located (#150 follow-up). Without this step every apply-target
-    // resolving into stdlib symbols (e.g., `msfs_lemma_3_4_*`,
-    // `msfs_id_x_violates_pi_4`) surfaces as `unresolved`, blocking the
-    // L4 verdict on chains that legitimately reach paper-cited stdlib
-    // declarations. Discovery: VERUM_STDLIB_ROOT env override, then
-    // a small walk from the verum binary location, then the cargo
-    // workspace root (for dev builds).
+ // Extend the scan with the verum stdlib's `core/` tree when it can
+ // be located (#150 follow-up). Without this step every apply-target
+ // resolving into stdlib symbols (e.g., `msfs_lemma_3_4_*`,
+ // `msfs_id_x_violates_pi_4`) surfaces as `unresolved`, blocking the
+ // L4 verdict on chains that legitimately reach paper-cited stdlib
+ // declarations. Discovery: VERUM_STDLIB_ROOT env override, then
+ // a small walk from the verum binary location, then the cargo
+ // workspace root (for dev builds).
     vr_files.extend(discover_stdlib_vr_files());
 
-    // Pass 1: build the workspace-wide symbol table. Every theorem
-    // gets its proof-body's apply-targets pre-extracted; every axiom
-    // gets classified as kernel-bridge / framework / placeholder.
+ // Pass 1: build the workspace-wide symbol table. Every theorem
+ // gets its proof-body's apply-targets pre-extracted; every axiom
+ // gets classified as kernel-bridge / framework / placeholder.
     let mut graph = ApplyGraph::new();
-    // Track which theorems exist and their source path so the report
-    // can pinpoint the file location of any leaking chain. Only
-    // CORPUS-side theorems (not stdlib delegates) are tracked here so
-    // the report focuses on the audit subject; stdlib theorems still
-    // populate the symbol table for transitive resolution.
+ // Track which theorems exist and their source path so the report
+ // can pinpoint the file location of any leaking chain. Only
+ // CORPUS-side theorems (not stdlib delegates) are tracked here so
+ // the report focuses on the audit subject; stdlib theorems still
+ // populate the symbol table for transitive resolution.
     let mut theorem_sources: std::collections::BTreeMap<String, std::path::PathBuf> =
         std::collections::BTreeMap::new();
     let mut parsed_files = 0usize;
@@ -5691,23 +5691,23 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
                     let name = d.name.name.as_str().to_string();
                     match &d.proof {
                         verum_common::Maybe::Some(body) => {
-                            // Theorem with a proof body — the
-                            // apply-targets become the children in
-                            // the graph.
+ // Theorem with a proof body — the
+ // apply-targets become the children in
+ // the graph.
                             let apply_targets = extract_apply_targets(body);
                             graph.insert(name.clone(), SymbolEntry::Theorem { apply_targets });
-                            // Only track corpus-side theorems for the
-                            // per-theorem report; stdlib theorems
-                            // populate the symbol table for transitive
-                            // resolution but aren't audit subjects.
+ // Only track corpus-side theorems for the
+ // per-theorem report; stdlib theorems
+ // populate the symbol table for transitive
+ // resolution but aren't audit subjects.
                             if abs_path.starts_with(&manifest_dir) {
                                 theorem_sources.insert(name, abs_path.clone());
                             }
                         }
                         verum_common::Maybe::None => {
-                            // Theorem-shaped axiom — classify as a
-                            // leaf based on the @framework attribute
-                            // and the kernel_ prefix.
+ // Theorem-shaped axiom — classify as a
+ // leaf based on the @framework attribute
+ // and the kernel_ prefix.
                             let entry =
                                 classify_axiom_entry(&name, &d.attributes, &item.attributes);
                             graph.insert(name, entry);
@@ -5724,8 +5724,8 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    // Pass 2: walk the transitive apply-graph for every theorem with
-    // a proof body and accumulate the per-theorem composition.
+ // Pass 2: walk the transitive apply-graph for every theorem with
+ // a proof body and accumulate the per-theorem composition.
     const MAX_DEPTH: usize = 16;
     let mut rows: Vec<ApplyGraphRow> = Vec::new();
     let mut leaking_theorems = 0usize;
@@ -5807,9 +5807,9 @@ struct ApplyGraphRow {
     placeholder_axiom: usize,
     unresolved: usize,
     load_bearing: bool,
-    /// Empty when `load_bearing == true`. Otherwise lists every
-    /// leaf-class hit that breaks the L4 property, with the chain
-    /// of intermediate symbols leading to it.
+ /// Empty when `load_bearing == true`. Otherwise lists every
+ /// leaf-class hit that breaks the L4 property, with the chain
+ /// of intermediate symbols leading to it.
     placeholder_leaves: Vec<ApplyGraphLeakHit>,
 }
 
@@ -5825,11 +5825,11 @@ fn classify_axiom_entry(
     decl_attrs: &verum_common::List<verum_ast::attr::Attribute>,
     item_attrs: &verum_common::List<verum_ast::attr::Attribute>,
 ) -> verum_kernel::soundness::apply_graph::SymbolEntry {
-    // Single canonical implementation lives in
-    // `verum_kernel::soundness::apply_graph::classify_axiom_entry_for_attrs`
-    // (#188 / #318). Both audit-time and compile-time graph builders
-    // route through it so leaf classification is identical across
-    // contexts.
+ // Single canonical implementation lives in
+ // `verum_kernel::soundness::apply_graph::classify_axiom_entry_for_attrs`
+ // (#188 / #318). Both audit-time and compile-time graph builders
+ // route through it so leaf classification is identical across
+ // contexts.
     verum_kernel::soundness::apply_graph::classify_axiom_entry_for_attrs(
         name, decl_attrs, item_attrs,
     )
@@ -5916,15 +5916,15 @@ fn generic_bound_to_annotation(bound: &verum_ast::ty::TypeBound) -> Option<Strin
     use verum_ast::ty::TypeBoundKind;
     match &bound.kind {
         TypeBoundKind::Protocol(path) => path.as_ident().map(|i| i.as_str().to_string()),
-        // Generic protocol like `IntoIterator<Item = Int>` — surface
-        // just the head identifier; foreign-tool reviewers see the
-        // bound's name without its generic args. Refining this needs
-        // the type translator from #141, which doesn't currently take
-        // a Path.
+ // Generic protocol like `IntoIterator<Item = Int>` — surface
+ // just the head identifier; foreign-tool reviewers see the
+ // bound's name without its generic args. Refining this needs
+ // the type translator from #141, which doesn't currently take
+ // a Path.
         TypeBoundKind::GenericProtocol(_) => None,
-        // Equality / negative / associated-type bounds are skipped —
-        // their lowering needs more machinery than a single comment
-        // line can carry.
+ // Equality / negative / associated-type bounds are skipped —
+ // their lowering needs more machinery than a single comment
+ // line can carry.
         _ => None,
     }
 }
@@ -5971,7 +5971,7 @@ fn print_cross_format_roundtrip_plain(
     println!("  {} foreign-tool failure(s) detected.", foreign_failures,);
     println!();
 
-    // Per-backend summary line first, then per-theorem rows.
+ // Per-backend summary line first, then per-theorem rows.
     let mut by_backend: BTreeMap<String, Vec<&ThmRoundtripPlainRow>> = BTreeMap::new();
     for r in roundtrips {
         by_backend.entry(r.backend_id.clone()).or_default().push(r);
@@ -6075,10 +6075,10 @@ pub fn audit_epsilon_with_format(format: AuditFormat) -> Result<()> {
         parsed_files += 1;
 
         for item in &module.items {
-            // Collect on the outer Item.attributes AND on inner decl
-            // attributes, mirroring the @framework collection path. A
-            // single declaration may have multiple attributes; each is
-            // processed independently.
+ // Collect on the outer Item.attributes AND on inner decl
+ // attributes, mirroring the @framework collection path. A
+ // single declaration may have multiple attributes; each is
+ // processed independently.
             let (kind_label, item_name, decl_attrs): (
                 &'static str,
                 Text,
@@ -6238,9 +6238,9 @@ fn print_epsilon_report_json(
     by_epsilon: &BTreeMap<Text, Vec<EnactUsage>>,
     malformed: &[(PathBuf, Text)],
 ) {
-    // Hand-rolled JSON for deterministic output; mirrors
-    // `print_framework_report_json` so CI consumers see the same
-    // schema shape for OC and DC audits.
+ // Hand-rolled JSON for deterministic output; mirrors
+ // `print_framework_report_json` so CI consumers see the same
+ // schema shape for OC and DC audits.
     let mut out = String::new();
     out.push_str("{\n");
     out.push_str("  \"schema_version\": 1,\n");
@@ -6364,10 +6364,10 @@ impl CliOrdinal {
         }
     }
 
-    /// lex ordering on (omega_coeff, finite_offset).
-    /// Mirrors `verum_kernel::OrdinalDepth::lt` exactly so the
-    /// CLI side produces identical results to the kernel for any
-    /// shared ordinal pair.
+ /// lex ordering on (omega_coeff, finite_offset).
+ /// Mirrors `verum_kernel::OrdinalDepth::lt` exactly so the
+ /// CLI side produces identical results to the kernel for any
+ /// shared ordinal pair.
     fn lt(&self, other: &Self) -> bool {
         if self.omega_coeff < other.omega_coeff {
             return true;
@@ -6418,16 +6418,16 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
         return Ok(());
     }
 
-    // Re-use the framework collector so OC and coord audits read from one
-    // ground truth.
+ // Re-use the framework collector so OC and coord audits read from one
+ // ground truth.
     let mut by_framework: BTreeMap<Text, Vec<FrameworkUsage>> = BTreeMap::new();
     let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
-    // Per-item @verify(...) strategy. The strategy lifts the framework's
-    // ν-coordinate per VVA §2.3 (`runtime` ↦ 0 / `static` ↦ 1 / `fast` ↦ 2 /
-    // `formal` ↦ ω / `proof` ↦ ω+1 / `thorough` ↦ ω·2 / `reliable` ↦ ω·2+1 /
-    // `certified` ↦ ω·2+2 / `synthesize` ↦ ≤ω·3+1). Theorem-level ν is
-    // max(framework_nu, verify_nu); without `@verify(...)` we project to
-    // the framework's bare ν (axiom-postulated case).
+ // Per-item @verify(...) strategy. The strategy lifts the framework's
+ // ν-coordinate per VVA §2.3 (`runtime` ↦ 0 / `static` ↦ 1 / `fast` ↦ 2 /
+ // `formal` ↦ ω / `proof` ↦ ω+1 / `thorough` ↦ ω·2 / `reliable` ↦ ω·2+1 /
+ // `certified` ↦ ω·2+2 / `synthesize` ↦ ≤ω·3+1). Theorem-level ν is
+ // max(framework_nu, verify_nu); without `@verify(...)` we project to
+ // the framework's bare ν (axiom-postulated case).
     let mut verify_by_item: BTreeMap<(PathBuf, Text, &'static str), Text> = BTreeMap::new();
     let mut parsed_files = 0usize;
     let mut skipped_files = 0usize;
@@ -6476,9 +6476,9 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
                 &mut by_framework,
                 &mut malformed,
             );
-            // Capture `@verify(...)` strategy per item — strictest mode
-            // wins when multiple are declared (e.g. `@verify(formal +
-            // proof)` lifts to `proof`).
+ // Capture `@verify(...)` strategy per item — strictest mode
+ // wins when multiple are declared (e.g. `@verify(formal +
+ // proof)` lifts to `proof`).
             if let Some(strategy) = strictest_verify_strategy(&item.attributes, decl_attrs) {
                 verify_by_item.insert((rel_path.clone(), item_name.clone(), kind_label), strategy);
             }
@@ -6638,14 +6638,14 @@ fn print_coord_report(
         println!();
     }
 
-    // per-theorem inferred-coordinate section.
-    // For each theorem/lemma/corollary, the inferred (Fw, ν, τ)
-    // is the **max-of-cited-coords + lifted by @verify**:
-    //  * framework_nu = max over all `@framework(name, ...)` markers
-    //  * verify_nu = ν of the strictest `@verify(strategy)` (VVA §2.3)
-    //  * theorem_nu = max(framework_nu, verify_nu)
-    // `@verify(formal)` is precisely what lifts an axiom-postulated
-    // theorem from ν=0 (paper-cited) to ν=ω (machine-checked SMT).
+ // per-theorem inferred-coordinate section.
+ // For each theorem/lemma/corollary, the inferred (Fw, ν, τ)
+ // is the **max-of-cited-coords + lifted by @verify**:
+ // * framework_nu = max over all `@framework(name, ...)` markers
+ // * verify_nu = ν of the strictest `@verify(strategy)` (VVA §2.3)
+ // * theorem_nu = max(framework_nu, verify_nu)
+ // `@verify(formal)` is precisely what lifts an axiom-postulated
+ // theorem from ν=0 (paper-cited) to ν=ω (machine-checked SMT).
     let per_theorem = invert_to_per_theorem(by_framework, verify_by_item);
     if !per_theorem.is_empty() {
         println!();
@@ -6709,7 +6709,7 @@ pub(crate) fn invert_to_per_theorem(
     verify_by_item: &BTreeMap<(PathBuf, Text, &'static str), Text>,
 ) -> Vec<PerTheoremCoord> {
     use std::collections::BTreeMap as Map;
-    // Group cited frameworks by (file, item_name, item_kind).
+ // Group cited frameworks by (file, item_name, item_kind).
     let mut per_theorem: Map<(PathBuf, Text, &'static str), Vec<Text>> = Map::new();
     for (fw_name, uses) in by_framework {
         for u in uses {
@@ -6723,14 +6723,14 @@ pub(crate) fn invert_to_per_theorem(
     let mut result: Vec<PerTheoremCoord> = per_theorem
         .into_iter()
         .map(|((file, item_name, item_kind), frameworks_cited)| {
-            // Compute max-of-cited-coords. Fw with maximum ν
-            // wins; ties broken by lex on framework name.
+ // Compute max-of-cited-coords. Fw with maximum ν
+ // wins; ties broken by lex on framework name.
             let mut best: Option<(Text, CliOrdinal, bool)> = None;
             for fw in &frameworks_cited {
                 let (ord, tau) = msfs_lookup(fw.as_str());
                 match &best {
                     Some((_, best_ord, _)) => {
-                        // Lex: ord > best_ord OR equal and fw < best name.
+ // Lex: ord > best_ord OR equal and fw < best name.
                         if best_ord.lt(&ord) {
                             best = Some((fw.clone(), ord, tau));
                         }
@@ -6741,11 +6741,11 @@ pub(crate) fn invert_to_per_theorem(
                 }
             }
             let (inferred_fw, framework_nu, inferred_tau) = best.unwrap();
-            // Lift the framework ν by `@verify(...)` strategy if any —
-            // `@verify(formal)` raises an axiom-postulated theorem to
-            // ν=ω even though its frameworks may carry no ν of their
-            // own. The lift is monotone: theorem_nu = max(framework_nu,
-            // verify_nu).
+ // Lift the framework ν by `@verify(...)` strategy if any —
+ // `@verify(formal)` raises an axiom-postulated theorem to
+ // ν=ω even though its frameworks may carry no ν of their
+ // own. The lift is monotone: theorem_nu = max(framework_nu,
+ // verify_nu).
             let key = (file.clone(), item_name.clone(), item_kind);
             let verify_strategy = verify_by_item.get(&key).cloned();
             let inferred_nu = match &verify_strategy {
@@ -6771,8 +6771,8 @@ pub(crate) fn invert_to_per_theorem(
             }
         })
         .collect();
-    // Stable sort: by file then item_name for deterministic
-    // CI-friendly output.
+ // Stable sort: by file then item_name for deterministic
+ // CI-friendly output.
     result.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
@@ -6791,9 +6791,9 @@ pub(crate) struct PerTheoremCoord {
     pub(crate) inferred_nu: CliOrdinal,
     pub(crate) inferred_tau: bool,
     pub(crate) frameworks_cited: Vec<Text>,
-    /// Strictest `@verify(...)` strategy declared on the item,
-    /// `None` if the item has no `@verify` annotation. The strategy
-    /// lifts `inferred_nu` via VVA §2.3 (per `verify_strategy_ordinal`).
+ /// Strictest `@verify(...)` strategy declared on the item,
+ /// `None` if the item has no `@verify` annotation. The strategy
+ /// lifts `inferred_nu` via VVA §2.3 (per `verify_strategy_ordinal`).
     pub(crate) verify_strategy: Option<Text>,
 }
 
@@ -6818,9 +6818,9 @@ fn print_coord_report_json(
             "      \"framework\": \"{}\",\n",
             json_escape(framework.as_str())
         ));
-        // Structured ν: emit both the human-readable string ("ω", "ω+2",
-        // …) and the (omega_coefficient, finite_offset) pair so JSON
-        // consumers can sort lexicographically without re-parsing.
+ // Structured ν: emit both the human-readable string ("ω", "ω+2",
+ // …) and the (omega_coefficient, finite_offset) pair so JSON
+ // consumers can sort lexicographically without re-parsing.
         out.push_str(&format!(
             "      \"ordinal\": \"{}\",\n",
             json_escape(&ordinal.render())
@@ -6865,8 +6865,8 @@ fn print_coord_report_json(
         });
     }
     out.push_str("  ],\n");
-    // Per-theorem inferred coordinates (schema_version 2 — adds the
-    // `verify_strategy` field and the lifted `inferred_nu` from VVA §2.3).
+ // Per-theorem inferred coordinates (schema_version 2 — adds the
+ // `verify_strategy` field and the lifted `inferred_nu` from VVA §2.3).
     let per_theorem = invert_to_per_theorem(by_framework, verify_by_item);
     out.push_str("  \"per_theorem\": [\n");
     let total_pt = per_theorem.len();
@@ -6953,29 +6953,29 @@ fn print_coord_report_json(
 // "self-X" surface form against the hygiene table:
 //
 
-//  Surface Factorisation (Φ, κ, t)
-//  ────────────────────────────────────── ───────────────────────────
-//  Inductive `Rec(T)` in `type T is Rec(T)` (T_succ, ω, least_fp)
-//  Coinductive `Stream<A> = Cons(A, …)` (T_prod_A, ω^{op}, greatest_fp)
-//  Newtype `type X is (Y)` (Id, 1, Y)
-//  HIT path-cell variant (`Foo() = a..b`) (path_action, ω, base)
-//  `@recursive fn f(… -> Self) …` (unfold_f, ω, fix_f)
-//  `@corecursive fn g(…)` (productivity) (corec_g, ω^{op}, fix_g)
+// Surface Factorisation (Φ, κ, t)
+// ────────────────────────────────────── ───────────────────────────
+// Inductive `Rec(T)` in `type T is Rec(T)` (T_succ, ω, least_fp)
+// Coinductive `Stream<A> = Cons(A, …)` (T_prod_A, ω^{op}, greatest_fp)
+// Newtype `type X is (Y)` (Id, 1, Y)
+// HIT path-cell variant (`Foo() = a..b`) (path_action, ω, base)
+// `@recursive fn f(… -> Self) …` (unfold_f, ω, fix_f)
+// `@corecursive fn g(…)` (productivity) (corec_g, ω^{op}, fix_g)
 //
 
 // V1 scope:
-//  * variant-self-reference detection (a constructor arg that mentions the
-//  surrounding type's own name) — covers Inductive + sum-type recursion;
-//  * explicit Inductive / Coinductive bodies detected via TypeDeclBody;
-//  * HIT path-cell variants flagged by `path_endpoints`;
-//  * `@recursive` / `@corecursive` attributes on FunctionDecl.
+// * variant-self-reference detection (a constructor arg that mentions the
+// surrounding type's own name) — covers Inductive + sum-type recursion;
+// * explicit Inductive / Coinductive bodies detected via TypeDeclBody;
+// * HIT path-cell variants flagged by `path_endpoints`;
+// * `@recursive` / `@corecursive` attributes on FunctionDecl.
 //
 
 // Out of scope (V1, deferred to a kernel-pass follow-up):
-//  * raw `self` keyword usage inside function bodies (requires
-//  expression-tree walk);
-//  * §13.2's `Self::Item` and `&mut self` factorisations (require a typed
-//  resolution layer).
+// * raw `self` keyword usage inside function bodies (requires
+// expression-tree walk);
+// * §13.2's `Self::Item` and `&mut self` factorisations (require a typed
+// resolution layer).
 // =============================================================================
 
 #[derive(Debug, Clone, Copy)]
@@ -7178,11 +7178,11 @@ pub const E_HYGIENE_UNFACTORED_SELF: &str = "E_HYGIENE_UNFACTORED_SELF";
 /// one violation surfaced by the strict hygiene walker.
 #[derive(Debug, Clone)]
 pub struct HygieneSelfViolation {
-    /// Free function in which the raw `self` was found.
+ /// Free function in which the raw `self` was found.
     pub function: Text,
-    /// Source file relative to the manifest root.
+ /// Source file relative to the manifest root.
     pub file: PathBuf,
-    /// Stable error code.
+ /// Stable error code.
     pub code: &'static str,
 }
 
@@ -7242,9 +7242,9 @@ fn expr_contains_raw_self(expr: &verum_ast::expr::Expr) -> bool {
         ExprKind::For { iter, body, .. } => {
             expr_contains_raw_self(iter) || block_contains_raw_self(body)
         }
-        // Conservative leaf for shapes we don't recurse into. The V2
-        // walker covers the common surface; deeper coverage (await,
-        // closures, comprehensions) is V2.1.
+ // Conservative leaf for shapes we don't recurse into. The V2
+ // walker covers the common surface; deeper coverage (await,
+ // closures, comprehensions) is V2.1.
         _ => false,
     }
 }
@@ -7291,7 +7291,7 @@ fn function_body_contains_raw_self(decl: &verum_ast::decl::FunctionDecl) -> bool
     }
 }
 
-///  entry-point — `verum audit --hygiene-strict`.
+/// entry-point — `verum audit --hygiene-strict`.
 ///
 
 /// Walks every top-level **free** function (not inside `implement`
@@ -7329,9 +7329,9 @@ pub fn audit_hygiene_strict_with_format(format: AuditFormat) -> Result<()> {
         parsed_files += 1;
         for item in &module.items {
             if let ItemKind::Function(decl) = &item.kind {
-                // Methods (functions with a self-receiver param) are
-                // NOT in scope — `self` is bound there. Free
-                // functions cannot legally bind `self`.
+ // Methods (functions with a self-receiver param) are
+ // NOT in scope — `self` is bound there. Free
+ // functions cannot legally bind `self`.
                 if decl.is_method() {
                     continue;
                 }
@@ -7607,15 +7607,15 @@ fn print_hygiene_report_json(
 // This is a *graph-aware* audit, not a flat marker enumeration:
 //
 
-//  - subclass closure: each class lists its full ancestor set
-//  - cycle detection: any class that is a subclass of itself
-//  transitively is flagged with the cycle path
-//  - disjoint/subclass conflict: a class C disjoint from D where C is
-//  also a subclass of D (directly or via the closure) is a hard
-//  inconsistency reported with severity = error
-//  - equivalence partition: equivalence is symmetric; we union-find the
-//  equivalence groups so the report shows partitions rather than
-//  redundant pairwise edges
+// - subclass closure: each class lists its full ancestor set
+// - cycle detection: any class that is a subclass of itself
+// transitively is flagged with the cycle path
+// - disjoint/subclass conflict: a class C disjoint from D where C is
+// also a subclass of D (directly or via the closure) is a hard
+// inconsistency reported with severity = error
+// - equivalence partition: equivalence is symmetric; we union-find the
+// equivalence groups so the report shows partitions rather than
+// redundant pairwise edges
 //
 
 // The output mirrors the audit-family schema (plain + JSON, schema
@@ -7750,7 +7750,7 @@ fn print_owl2_report(
     );
     println!();
 
-    // --- Classes with their ancestor closure -------------------------
+ // --- Classes with their ancestor closure -------------------------
     if n_classes > 0 {
         println!("  {}", "▸ Classes (with full ancestor closure)".bold());
         for (name, e) in &graph.entities {
@@ -7791,7 +7791,7 @@ fn print_owl2_report(
         println!();
     }
 
-    // --- Properties with characteristics ----------------------------
+ // --- Properties with characteristics ----------------------------
     if n_properties > 0 {
         println!("  {}", "▸ Properties".bold());
         for (name, e) in &graph.entities {
@@ -7828,7 +7828,7 @@ fn print_owl2_report(
         println!();
     }
 
-    // --- Equivalence partition --------------------------------------
+ // --- Equivalence partition --------------------------------------
     if !partition.is_empty() {
         println!("  {}", "▸ Equivalent-class partitions".bold());
         for group in partition {
@@ -7838,7 +7838,7 @@ fn print_owl2_report(
         println!();
     }
 
-    // --- Cycles -----------------------------------------------------
+ // --- Cycles -----------------------------------------------------
     if !cycles.is_empty() {
         ui::warn(&format!(
             "{} subclass-cycle(s) detected — the ontology is unsatisfiable:",
@@ -7854,7 +7854,7 @@ fn print_owl2_report(
         println!();
     }
 
-    // --- Disjoint/subclass violations -------------------------------
+ // --- Disjoint/subclass violations -------------------------------
     if !violations.is_empty() {
         ui::warn(&format!(
             "{} disjoint/subclass violation(s) — the ontology is inconsistent:",
@@ -8091,10 +8091,10 @@ struct RoundTripEntry {
     file: PathBuf,
     item_name: Text,
     item_kind: &'static str,
-    /// Diakrisis citations attached to the item that *trigger* the
-    /// round-trip audit. Currently the trigger set is `108.T`,
-    /// `109.T`, or any `@framework(diakrisis, "...108.T...")` style
-    /// citation; theorems not citing those are excluded.
+ /// Diakrisis citations attached to the item that *trigger* the
+ /// round-trip audit. Currently the trigger set is `108.T`,
+ /// `109.T`, or any `@framework(diakrisis, "...108.T...")` style
+ /// citation; theorems not citing those are excluded.
     triggers: Vec<Text>,
     status: RoundTripStatus,
 }
@@ -8154,17 +8154,17 @@ pub fn audit_round_trip_with_format(format: AuditFormat) -> Result<()> {
                 continue;
             }
 
-            // Status classifier — finitely-axiomatised theorems
-            // (everything carrying explicit @framework citations to
-            // 108.T) are Decidable per docs/verification/proof-corpora.
-            // The Undecidable verdict is reserved for theorems whose
-            // round-trip would invoke proper-class machinery (#181 V3
-            // territory); the audit conservatively reports them as
-            // SemiDecidable until lands.
+ // Status classifier — finitely-axiomatised theorems
+ // (everything carrying explicit @framework citations to
+ // 108.T) are Decidable per docs/verification/proof-corpora.
+ // The Undecidable verdict is reserved for theorems whose
+ // round-trip would invoke proper-class machinery (#181 V3
+ // territory); the audit conservatively reports them as
+ // SemiDecidable until lands.
             let status = if triggers.iter().any(|t| t.as_str().contains("109.T")) {
-                // 109.T = Dual Boundary Lemma — ε-side; the dual
-                // round-trip uses the same canonicalisation,
-                // Decidable for the same reason.
+ // 109.T = Dual Boundary Lemma — ε-side; the dual
+ // round-trip uses the same canonicalisation,
+ // Decidable for the same reason.
                 RoundTripStatus::Decidable
             } else {
                 RoundTripStatus::Decidable
@@ -8197,10 +8197,10 @@ fn collect_round_trip_triggers(
             if !attr.is_named("framework") {
                 continue;
             }
-            // Reuse the same FrameworkAttr parser the rest of the
-            // audit surface uses; if the citation mentions 108.T,
-            // 109.T, or the AC/OC duality, this theorem participates
-            // in the round-trip.
+ // Reuse the same FrameworkAttr parser the rest of the
+ // audit surface uses; if the citation mentions 108.T,
+ // 109.T, or the AC/OC duality, this theorem participates
+ // in the round-trip.
             if let Maybe::Some(fw) = FrameworkAttr::from_attribute(attr) {
                 let s_str = fw.citation.as_str();
                 if s_str.contains("108.T") || s_str.contains("109.T") || s_str.contains("AC/OC") {
@@ -8331,9 +8331,9 @@ pub fn audit_coherent_with_format(format: AuditFormat) -> Result<()> {
                     if !attr.is_named("verify") {
                         continue;
                     }
-                    // Use the typed `VerifyAttr::from_attribute`
-                    // parser to extract the verification modes; pick
-                    // up any of the three coherent-* variants.
+ // Use the typed `VerifyAttr::from_attribute`
+ // parser to extract the verification modes; pick
+ // up any of the three coherent-* variants.
                     use verum_ast::attr::{FromAttribute, VerificationMode, VerifyAttr};
                     if let Ok(verify) = VerifyAttr::from_attribute(attr) {
                         for mode in verify.modes.iter() {
@@ -8411,11 +8411,11 @@ pub fn audit_coherent_with_format(format: AuditFormat) -> Result<()> {
 // project, classifies every public theorem / axiom by proof-body shape:
 //
 
-//  * `axiom-placeholder` — `public axiom <name>(...)`
-//  * `theorem-no-proof-body` — `public theorem <name>` without proof body
-//  * `theorem-trivial-true` — proof body without any tactic step
-//  * `theorem-axiom-only` — proof body with one tactic application
-//  * `theorem-multi-step` — proof body with ≥ 2 tactic / let steps
+// * `axiom-placeholder` — `public axiom <name>(...)`
+// * `theorem-no-proof-body` — `public theorem <name>` without proof body
+// * `theorem-trivial-true` — proof body without any tactic step
+// * `theorem-axiom-only` — proof body with one tactic application
+// * `theorem-multi-step` — proof body with ≥ 2 tactic / let steps
 //
 
 // Per-row record carries (name, kind, framework_axiom_deps,
@@ -8459,9 +8459,9 @@ struct ProofHonestyRow {
 
 fn count_tactic_applies(t: &verum_ast::decl::TacticExpr) -> usize {
     use verum_ast::decl::TacticExpr;
-    // Walks a TacticExpr counting every leaf-level "apply"-shaped step.
-    // `Seq` is the load-bearing combinator — `apply X; apply Y;` becomes
-    // `Seq([Apply(X), Apply(Y)])`, which we sum to 2.
+ // Walks a TacticExpr counting every leaf-level "apply"-shaped step.
+ // `Seq` is the load-bearing combinator — `apply X; apply Y;` becomes
+ // `Seq([Apply(X), Apply(Y)])`, which we sum to 2.
     match t {
         TacticExpr::Trivial
         | TacticExpr::Assumption
@@ -8495,19 +8495,19 @@ fn count_tactic_applies(t: &verum_ast::decl::TacticExpr) -> usize {
         TacticExpr::Seq(items) | TacticExpr::Alt(items) => {
             items.iter().map(count_tactic_applies).sum()
         }
-        // Default for forms we don't iterate into (Named tactic
-        // invocations etc.) — treat as a single tactic step.
+ // Default for forms we don't iterate into (Named tactic
+ // invocations etc.) — treat as a single tactic step.
         _ => 1,
     }
 }
 
 fn classify_proof_body(proof: &verum_ast::decl::ProofBody) -> (usize, usize, usize) {
     use verum_ast::decl::{ProofBody, ProofStepKind};
-    // Returns (apply_count, let_count, total_proof_step_count).
-    // `apply_count` counts EVERY leaf-level apply / tactic step including
-    // those nested inside `TacticExpr::Seq` — the parser frequently
-    // collapses `apply X; apply Y;` into a single `ProofBody::Tactic(Seq(..))`,
-    // so we must walk into the TacticExpr to recover the real count.
+ // Returns (apply_count, let_count, total_proof_step_count).
+ // `apply_count` counts EVERY leaf-level apply / tactic step including
+ // those nested inside `TacticExpr::Seq` — the parser frequently
+ // collapses `apply X; apply Y;` into a single `ProofBody::Tactic(Seq(..))`,
+ // so we must walk into the TacticExpr to recover the real count.
     match proof {
         ProofBody::Term(_) => (1, 0, 1),
         ProofBody::Tactic(t) => {
@@ -8634,7 +8634,7 @@ pub fn audit_proof_honesty_with_format(format: AuditFormat) -> Result<()> {
         totals[kind_index(r.kind)] += 1;
     }
 
-    // Per-lineage tallies (msfs / diakrisis subpath partition).
+ // Per-lineage tallies (msfs / diakrisis subpath partition).
     let mut by_msfs = [0usize; 5];
     let mut by_diak = [0usize; 5];
     for r in &rows {
@@ -8737,13 +8737,13 @@ pub fn audit_proof_honesty_with_format(format: AuditFormat) -> Result<()> {
 // flags violations:
 //
 
-//  * `Consistent` — `inferred_nu` ≥ each cited framework's bare ν.
-//  * `VerifyLift` — `inferred_nu` exceeds max(cited fw ν) only because
-//  of `@verify(<strict>)` lift; the framework citations alone wouldn't
-//  reach that ν. Informational, not a violation.
-//  * `MissingFramework` — theorem has no `@framework(...)` citation
-//  at all but does have a `@verify(...)` strategy. Defect: the
-//  theorem's claim has no recorded framework lineage.
+// * `Consistent` — `inferred_nu` ≥ each cited framework's bare ν.
+// * `VerifyLift` — `inferred_nu` exceeds max(cited fw ν) only because
+// of `@verify(<strict>)` lift; the framework citations alone wouldn't
+// reach that ν. Informational, not a violation.
+// * `MissingFramework` — theorem has no `@framework(...)` citation
+// at all but does have a `@verify(...)` strategy. Defect: the
+// theorem's claim has no recorded framework lineage.
 //
 
 // Output: `audit-reports/coord-consistency.json` (schema_v=1) +
@@ -8836,27 +8836,27 @@ pub fn audit_coord_consistency_with_format(format: AuditFormat) -> Result<()> {
 
     let per_theorem = invert_to_per_theorem(&by_framework, &verify_by_item);
 
-    // Build a quick lookup-by-key for items with framework citations.
+ // Build a quick lookup-by-key for items with framework citations.
     let mut citation_by_key: std::collections::HashSet<(PathBuf, Text, &'static str)> =
         std::collections::HashSet::new();
     for row in &per_theorem {
         citation_by_key.insert((row.file.clone(), row.item_name.clone(), row.item_kind));
     }
 
-    // Classify every item:
-    //  * In per_theorem AND verify_strategy lifts ν beyond cited fw → VerifyLift.
-    //  * In per_theorem AND no verify-driven lift → Consistent.
-    //  * NOT in per_theorem (no fw citations) AND has_verify → MissingFramework.
-    //  * NOT in per_theorem AND no verify → silent (axiom-anchor placeholder; outside this audit's scope).
+ // Classify every item:
+ // * In per_theorem AND verify_strategy lifts ν beyond cited fw → VerifyLift.
+ // * In per_theorem AND no verify-driven lift → Consistent.
+ // * NOT in per_theorem (no fw citations) AND has_verify → MissingFramework.
+ // * NOT in per_theorem AND no verify → silent (axiom-anchor placeholder; outside this audit's scope).
     let mut consistent = 0usize;
     let mut verify_lift = 0usize;
     let mut missing_fw = 0usize;
     let mut violations: Vec<(PathBuf, Text, &'static str)> = Vec::new();
 
     for row in &per_theorem {
-        // VerifyLift iff inferred_nu strictly exceeds the framework's bare nu
-        // (i.e., verify_strategy lifted it). We approximate by comparing
-        // inferred_fw's bare nu (msfs_lookup) against inferred_nu.
+ // VerifyLift iff inferred_nu strictly exceeds the framework's bare nu
+ // (i.e., verify_strategy lifted it). We approximate by comparing
+ // inferred_fw's bare nu (msfs_lookup) against inferred_nu.
         let (fw_bare_ord, _) = msfs_lookup(row.inferred_fw.as_str());
         let lift = row.inferred_nu.ne(&fw_bare_ord);
         if lift {
@@ -8866,7 +8866,7 @@ pub fn audit_coord_consistency_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    // Items NOT covered by per_theorem but HAS @verify — missing framework citation.
+ // Items NOT covered by per_theorem but HAS @verify — missing framework citation.
     for (path, name, kind, has_verify) in &all_items {
         let key = (path.clone(), name.clone(), *kind);
         if !citation_by_key.contains(&key) && *has_verify {
@@ -8964,11 +8964,11 @@ pub fn audit_coord_consistency_with_format(format: AuditFormat) -> Result<()> {
 // requires-AND-ensures conjunction) as:
 //
 
-//  * `Trivial` — proposition is just `true` literal (placeholder
-//  carrying no propositional content).
-//  * `Sound` — proposition has non-trivial structure (binop /
-//  call / refinement etc.) — passes the corpus-side
-//  K-FwAx-light gate.
+// * `Trivial` — proposition is just `true` literal (placeholder
+// carrying no propositional content).
+// * `Sound` — proposition has non-trivial structure (binop /
+// call / refinement etc.) — passes the corpus-side
+// K-FwAx-light gate.
 //
 
 // Output: `audit-reports/framework-soundness.json` (schema_v=1) +
@@ -9349,7 +9349,7 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
 
     let dispatcher = DefaultLadderDispatcher::new();
 
-    // Per-theorem record.
+ // Per-theorem record.
     struct LadderEntry {
         item_kind: &'static str,
         item_name: Text,
@@ -9391,8 +9391,8 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
                 _ => continue,
             };
             if let Some(strategy) = strictest_verify_strategy(&item.attributes, decl_attrs) {
-                // Project to the typed LadderStrategy + ask the
-                // dispatcher (single source of truth) for impl status.
+ // Project to the typed LadderStrategy + ask the
+ // dispatcher (single source of truth) for impl status.
                 let typed_strategy = LadderStrategy::from_name(strategy.as_str());
                 let (nu_label, status) = match typed_strategy {
                     Some(s) => (s.nu_ordinal_label(), dispatcher.implementation_status(s)),
@@ -9410,7 +9410,7 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
         }
     }
 
-    // Per-strategy histogram.
+ // Per-strategy histogram.
     let mut by_strategy: BTreeMap<Text, usize> = BTreeMap::new();
     let mut by_status: BTreeMap<&'static str, usize> = BTreeMap::new();
     for e in &entries {
@@ -9418,8 +9418,8 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
         *by_status.entry(e.impl_status.name()).or_insert(0) += 1;
     }
 
-    // ν-monotonicity invariant: drop into the verum_verification
-    // dispatcher's own monotonicity check (single source of truth).
+ // ν-monotonicity invariant: drop into the verum_verification
+ // dispatcher's own monotonicity check (single source of truth).
     let monotonicity_ok =
         verum_verification::ladder_dispatch::verify_monotonicity(&dispatcher).is_ok();
 
@@ -9585,7 +9585,7 @@ fn render_kernel_discharge_json(
     ));
     out.push_str("  \"discharges\": [\n");
     for (i, cite) in cites.iter().enumerate() {
-        // Compose the dependents list for unrecognised cites only.
+ // Compose the dependents list for unrecognised cites only.
         let deps_json = if !cite.recognised {
             match dep_listings.get(cite.axiom_name.as_str()) {
                 Some(deps) if !deps.is_empty() => {
@@ -9656,13 +9656,13 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
 
     let manifest_dir = Manifest::find_manifest_dir()?;
     let mut vr_files = discover_vr_files(&manifest_dir);
-    // Extend the scan with the verum stdlib's `core/math/` tree (#136
-    // follow-up). Most `@kernel_discharge` annotations live in stdlib
-    // (e.g., `core/math/syn_mod.vr::lurie_htt_5_1_4_syn_is_grothendieck`,
-    // `core/math/absolute_layer.vr::msfs_id_x_violates_pi_4`) — without
-    // this step, corpus-level audit runs surface 0 discharges even when
-    // the corpus's transitive apply-chains route through these stdlib
-    // axioms. Sibling of `apply_graph`'s stdlib-walker.
+ // Extend the scan with the verum stdlib's `core/math/` tree (#136
+ // follow-up). Most `@kernel_discharge` annotations live in stdlib
+ // (e.g., `core/math/syn_mod.vr::lurie_htt_5_1_4_syn_is_grothendieck`,
+ // `core/math/absolute_layer.vr::msfs_id_x_violates_pi_4`) — without
+ // this step, corpus-level audit runs surface 0 discharges even when
+ // the corpus's transitive apply-chains route through these stdlib
+ // axioms. Sibling of `apply_graph`'s stdlib-walker.
     vr_files.extend(discover_stdlib_vr_files());
 
     if vr_files.is_empty() {
@@ -9670,7 +9670,7 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
         return Ok(());
     }
 
-    /// One @kernel_discharge citation site found in the corpus.
+ /// One @kernel_discharge citation site found in the corpus.
     struct DischargeCite {
         axiom_name: Text,
         intrinsic_name: Text,
@@ -9707,7 +9707,7 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
                     _ => continue,
                 };
 
-            // Scan both the outer item.attributes and the inner decl.attributes.
+ // Scan both the outer item.attributes and the inner decl.attributes.
             let attr_iters: [&verum_common::List<verum_ast::attr::Attribute>; 2] =
                 [&item.attributes, decl_attrs];
 
@@ -9717,8 +9717,8 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
                     if name != "kernel_discharge" {
                         continue;
                     }
-                    // Expect a single string-literal argument identifying
-                    // the kernel intrinsic.
+ // Expect a single string-literal argument identifying
+ // the kernel intrinsic.
                     let args_list = match &attr.args {
                         Maybe::Some(list) => list,
                         Maybe::None => {
@@ -9850,9 +9850,9 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
                 ));
             }
             out.push_str("  ]\n}");
-            // #172 audit-output discipline: write JSON to disk
-            // regardless of `--format` so bundle dispatcher (#151) and
-            // downstream tooling can reliably read each per-gate report.
+ // #172 audit-output discipline: write JSON to disk
+ // regardless of `--format` so bundle dispatcher (#151) and
+ // downstream tooling can reliably read each per-gate report.
             if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
                 let dir = manifest_dir.join("target").join("audit-reports");
                 let _ = std::fs::create_dir_all(&dir);
@@ -9862,7 +9862,7 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
         }
     }
 
-    // Even Plain output writes JSON for the bundle dispatcher (#172).
+ // Even Plain output writes JSON for the bundle dispatcher (#172).
     if matches!(format, AuditFormat::Plain) {
         if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
             let dir = manifest_dir.join("target").join("audit-reports");
@@ -10046,16 +10046,16 @@ pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
 // audit; consumers should call `--reflection-tower` instead.
 
 // =============================================================================
-// ATS-V Сезон 4 — end-to-end verum arch check <file>
+// ATS-V end-to-end verum arch check <file>
 // =============================================================================
 
 /// `verum arch check <file> [--format plain|json] [--strict]` —
-/// end-to-end Сезон 4: parse a .vr file, walk every module
+/// end-to-end parse a .vr file, walk every module
 /// declaration's attributes, extract `@arch_module(...)` named-args,
 /// run the ATS-V phase 6.5, and report architectural violations.
 ///
 /// Per spec §11.4 backward-compat: modules без `@arch_module(...)`
-/// аннотации pass vacuously through default Shape.  Modules с
+/// аннотации pass vacuously through default Shape. Modules с
 /// аннотацией get full Shape inference + 32-pattern catalog check.
 pub fn arch_check(file: &str, format: AuditFormat, strict: bool) -> Result<()> {
     use verum_ast::FileId;
@@ -10066,7 +10066,7 @@ pub fn arch_check(file: &str, format: AuditFormat, strict: bool) -> Result<()> {
         ui::step(&format!("ATS-V arch:check {}", file));
     }
 
-    // Read file (`-` reads stdin).
+ // Read file (`-` reads stdin).
     let source = if file == "-" {
         use std::io::Read;
         let mut s = String::new();
@@ -10080,7 +10080,7 @@ pub fn arch_check(file: &str, format: AuditFormat, strict: bool) -> Result<()> {
         })?
     };
 
-    // Parse via fast parser.
+ // Parse via fast parser.
     let parser = FastParser::new();
     let file_id = FileId::new(0);
     let module = parser.parse_module_str(&source, file_id).map_err(|e| {
@@ -10089,8 +10089,8 @@ pub fn arch_check(file: &str, format: AuditFormat, strict: bool) -> Result<()> {
         )
     })?;
 
-    // Walk module's items, extract @arch_module(...) attribute args
-    // for each Module item.
+ // Walk module's items, extract @arch_module(...) attribute args
+ // for each Module item.
     let modules: Vec<(String, Vec<verum_ast::expr::Expr>)> = module
         .items
         .iter()
@@ -10099,7 +10099,7 @@ pub fn arch_check(file: &str, format: AuditFormat, strict: bool) -> Result<()> {
                 verum_ast::decl::ItemKind::Module(m) => m.name.name.as_str().to_string(),
                 _ => return None, // not a module
             };
-            // Search item.attributes for @arch_module(...).
+ // Search item.attributes for @arch_module(...).
             for attr in item.attributes.iter() {
                 if attr.name.as_str() == "arch_module" {
                     let args: Vec<verum_ast::expr::Expr> = match &attr.args {
@@ -10109,27 +10109,27 @@ pub fn arch_check(file: &str, format: AuditFormat, strict: bool) -> Result<()> {
                     return Some((module_name, args));
                 }
             }
-            // Module без @arch_module — pass empty args.
+ // Module без @arch_module — pass empty args.
             Some((module_name, Vec::new()))
         })
         .collect();
 
-    // Run ATS-V phase.
+ // Run ATS-V phase.
     let module_refs: Vec<(String, &[verum_ast::expr::Expr])> = modules
         .iter()
         .map(|(n, a)| (n.clone(), a.as_slice()))
         .collect();
     let report = run_arch_phase(&module_refs);
 
-    // Decide pass/fail.  Strict mode: any non-load-bearing module → error.
-    // Soft mode: parse_errors → error, anti-pattern violations → warning.
+ // Decide pass/fail. Strict mode: any non-load-bearing module → error.
+ // Soft mode: parse_errors → error, anti-pattern violations → warning.
     let load_bearing = if strict {
         report.is_load_bearing()
     } else {
         report.total_parse_errors() == 0
     };
 
-    // Render output.
+ // Render output.
     let payload = build_arch_check_payload(file, &report, strict, load_bearing);
 
     match format {
@@ -10299,9 +10299,9 @@ fn render_arch_check_plain(
 /// `verum arch explain [cog] [--format plain|json]` — structured
 /// architectural type information per spec §32.4.
 ///
-/// Сезон 2 scope: outputs the canonical Shape (default for
+/// Scope: outputs the canonical Shape (default for
 /// unannotated cogs since ATS-V phase isn't yet wired into the
-/// compiler) + the full anti-pattern catalog roster.  Сезон 3+
+/// compiler) + the full anti-pattern catalog roster. +
 /// resolves `cog` argument against project's cog graph and
 /// reads its `@arch_module(...)` declaration.
 pub fn arch_explain(cog: Option<&str>, format: AuditFormat) -> Result<()> {
@@ -10315,8 +10315,8 @@ pub fn arch_explain(cog: Option<&str>, format: AuditFormat) -> Result<()> {
     }
 
     let cog_name = cog.unwrap_or("<unannotated>").to_string();
-    // Сезон 2: default shape for the requested cog. Сезон 3 reads
-    // actual `@arch_module(...)` declaration.
+ // default shape for the requested cog. reads
+ // actual `@arch_module(...)` declaration.
     let shape = Shape::default_for_unannotated();
     let mut ctx = DiagnosticContext::default();
     ctx.cog_name = cog_name.clone();
@@ -10358,7 +10358,7 @@ pub fn arch_explain(cog: Option<&str>, format: AuditFormat) -> Result<()> {
             println!();
             println!("Cog: {}", cog_name);
             println!("─────────────────────────────────────────────────────");
-            println!("Shape (default for unannotated; Сезон 2 stub):");
+            println!("Shape (default for unannotated;  stub):");
             println!("  exposes:           {} capabilities", shape.exposes.len());
             println!("  requires:          {} capabilities", shape.requires.len());
             println!("  preserves:         {} invariants", shape.preserves.len());
@@ -10393,8 +10393,8 @@ pub fn arch_explain(cog: Option<&str>, format: AuditFormat) -> Result<()> {
                 );
             }
             println!();
-            println!("Сезон 2 stub: no per-cog @arch_module(...) parsing yet.");
-            println!("Сезон 3 wires the compiler's ATS-V phase to read actual cog declarations.");
+            println!(" stub: no per-cog @arch_module(...) parsing yet.");
+            println!(" wires the compiler's ATS-V phase to read actual cog declarations.");
         }
         AuditFormat::Json => {
             println!("{}", serde_json::to_string(&payload).unwrap_or_default());
@@ -10496,7 +10496,7 @@ pub fn arch_catalog(
 }
 
 // =============================================================================
-// ATS-V Architectural Type System audit (Сезон 1)
+// ATS-V Architectural Type System audit
 // =============================================================================
 
 /// `verum audit --arch-discharges` — walks every kernel intrinsic
@@ -10505,9 +10505,9 @@ pub fn arch_catalog(
 /// RFC error codes (ATS-V-AP-NNN), and reports the dual-audience
 /// machine-readable JSON per spec §32.4.
 ///
-/// Сезон 1 scope: registry surface + structured diagnostic shape.
+/// Scope: registry surface + structured diagnostic shape.
 /// Full per-cog dispatch (consuming Shape + DiagnosticContext) lands
-/// in Сезон 2 when the ATS-V phase is wired into the compiler
+/// when the ATS-V phase is wired into the compiler
 /// pipeline.
 pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::arch_anti_pattern::AntiPatternCode;
@@ -10521,9 +10521,9 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
     let _ = std::fs::create_dir_all(&report_dir);
     let report_path = report_dir.join("arch-discharges.json");
 
-    // Roster of ATS-V kernel intrinsics surfaced in this gate.
-    // Stable order matches `verum_kernel::intrinsic_dispatch`
-    // available_intrinsics() listing.
+ // Roster of ATS-V kernel intrinsics surfaced in this gate.
+ // Stable order matches `verum_kernel::intrinsic_dispatch`
+ // available_intrinsics() listing.
     let arch_intrinsics: &[(&str, &str)] = &[
         ("kernel_arch_capability_discipline", "Capability discipline (AP-001 + AP-002)"),
         ("kernel_arch_boundary_check", "Boundary type check"),
@@ -10535,7 +10535,7 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
         ("kernel_arch_soundness_v0", "End-to-end soundness witness"),
     ];
 
-    // Dispatch each intrinsic and collect verdicts.
+ // Dispatch each intrinsic and collect verdicts.
     let intrinsics_json: Vec<serde_json::Value> = arch_intrinsics
         .iter()
         .map(|(name, description)| {
@@ -10556,8 +10556,8 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
         })
         .collect();
 
-    // Anti-pattern catalog with stable RFC error codes
-    // (Сезоны 1+2: 32 canonical patterns — 26 base + 6 MTAC).
+ // Anti-pattern catalog with stable RFC error codes
+ // (canonical anti-pattern catalog: 32 patterns total — 26 base + 6 MTAC).
     let anti_patterns_json: Vec<serde_json::Value> = AntiPatternCode::full_list()
         .iter()
         .map(|code| {
@@ -10604,7 +10604,7 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
             println!("ATS-V Architectural Type System — discharge registry");
             println!("─────────────────────────────────────────────────────");
             println!(
-                "  {} kernel intrinsics dispatched (Сезон 1 registry surface):",
+                "  {} kernel intrinsics dispatched ( registry surface):",
                 arch_intrinsics.len(),
             );
             println!();
@@ -10630,7 +10630,7 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
             }
             println!();
             println!(
-                "  Anti-pattern catalog: 32 canonical patterns (10 Сезон 1 + 16 Сезон 2 base + 6 Сезон 2 MTAC)",
+                "  Anti-pattern catalog: 32 canonical patterns (10  + 16  base + 6  MTAC)",
             );
             println!();
             println!("  {:<14}  {:<32}  {:<7}  Docs URL", "Code", "Name", "Season");
@@ -10658,7 +10658,7 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
             println!();
             if all_intrinsics_dispatch {
                 println!(
-                    "{} ATS-V Сезон 1 registry surface load-bearing: all {} intrinsics \
+                    "{} ATS-V registry surface load-bearing: all {} intrinsics \
                      dispatch successfully.",
                     "✓".green(),
                     arch_intrinsics.len(),
@@ -10692,7 +10692,7 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
-// ATS-V Сезон 6 — Counterfactual reasoning audit
+// ATS-V Counterfactual reasoning audit
 // =============================================================================
 
 /// `verum audit --counterfactual` — runs the counterfactual reasoning
@@ -10717,7 +10717,7 @@ pub fn audit_counterfactual_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::arch_mtac::{ArchProposition, CounterfactualPair, Decision};
 
     if matches!(format, AuditFormat::Plain) {
-        ui::step("ATS-V Сезон 6 — Counterfactual reasoning engine");
+        ui::step("ATS-V Counterfactual reasoning engine");
     }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
@@ -10753,8 +10753,8 @@ pub fn audit_counterfactual_with_format(format: AuditFormat) -> Result<()> {
         resource: ResourceTag::Logger,
     }];
 
-    // Battery — one entry per canonical contract. Each entry pins
-    // engine soundness for a distinct InvariantStatus arm.
+ // Battery — one entry per canonical contract. Each entry pins
+ // engine soundness for a distinct InvariantStatus arm.
     let battery: Vec<(&str, &Shape, &Shape, CounterfactualPair, InvariantStatus)> = vec![
         (
             "identity_holds_both",
@@ -10831,8 +10831,8 @@ pub fn audit_counterfactual_with_format(format: AuditFormat) -> Result<()> {
 
     for (entry_name, base, alt, p, expected) in &battery {
         let report = evaluate_counterfactual(p, base, alt, &baseline);
-        // Each entry has exactly one invariant for the pinned arm —
-        // confirm the engine returned the soundness-contract status.
+ // Each entry has exactly one invariant for the pinned arm —
+ // confirm the engine returned the soundness-contract status.
         let observed = report
             .invariant_evaluations
             .iter()
@@ -10881,7 +10881,7 @@ pub fn audit_counterfactual_with_format(format: AuditFormat) -> Result<()> {
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("ATS-V Сезон 6 — Counterfactual reasoning engine");
+            println!("ATS-V Counterfactual reasoning engine");
             println!("─────────────────────────────────────────────────────");
             println!("  {:<35}  {:<18}  {:<18}  {}", "Battery entry", "Expected", "Observed", "Pin");
             println!("  {}  {}  {}  {}", "─".repeat(35), "─".repeat(18), "─".repeat(18), "─".repeat(3));
@@ -10939,7 +10939,7 @@ pub fn audit_counterfactual_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
-// ATS-V Сезон 7 — Adjunction analyzer audit
+// ATS-V Adjunction analyzer audit
 // =============================================================================
 
 /// `verum audit --adjunctions` — runs the adjunction analyzer over
@@ -10949,7 +10949,7 @@ pub fn audit_counterfactual_with_format(format: AuditFormat) -> Result<()> {
 /// plus a chain composition pin and a preservation-failure case.
 ///
 /// Verifies recogniser soundness + preservation / gain coverage at
-/// audit time.  Output: `target/audit-reports/adjunctions.json`
+/// audit time. Output: `target/audit-reports/adjunctions.json`
 /// with stable schema_version=1.
 pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::arch::{BoundaryInvariant, Capability, Foundation, ResourceTag, Shape};
@@ -10960,7 +10960,7 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::arch_mtac::{AdjunctionWitness, ArchProposition};
 
     if matches!(format, AuditFormat::Plain) {
-        ui::step("ATS-V Сезон 7 — Adjunction analyzer");
+        ui::step("ATS-V Adjunction analyzer");
     }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
@@ -10977,11 +10977,11 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    // -- Battery construction --
+ // -- Battery construction --
     let mut entries: Vec<serde_json::Value> = Vec::new();
     let mut all_pins_ok = true;
 
-    // Entry 1: Inline ⊣ Extract — composition_degree decreases.
+ // Entry 1: Inline ⊣ Extract — composition_degree decreases.
     let mut s_before = Shape::default_for_unannotated();
     s_before.composes_with = vec!["helper_a".into(), "helper_b".into()];
     let s_after_inline = Shape::default_for_unannotated();
@@ -11008,8 +11008,8 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
         "analysis": a_inline,
     }));
 
-    // Entry 2: Specialise ⊣ Generalise — capability set shrinks,
-    // foundation+stratum stable.
+ // Entry 2: Specialise ⊣ Generalise — capability set shrinks,
+ // foundation+stratum stable.
     let mut s_before = Shape::default_for_unannotated();
     s_before.exposes = vec![
         Capability::Read {
@@ -11048,7 +11048,7 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
         "analysis": a_spec,
     }));
 
-    // Entry 3: Decompose ⊣ Compose — composes_with grows.
+ // Entry 3: Decompose ⊣ Compose — composes_with grows.
     let s_before = Shape::default_for_unannotated();
     let mut s_after = Shape::default_for_unannotated();
     s_after.composes_with = vec!["sub_a".into(), "sub_b".into()];
@@ -11077,7 +11077,7 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
         "analysis": a_decomp,
     }));
 
-    // Entry 4: Strengthen ⊣ Weaken — preserves grows.
+ // Entry 4: Strengthen ⊣ Weaken — preserves grows.
     let s_before = Shape::default_for_unannotated();
     let mut s_after = Shape::default_for_unannotated();
     s_after.preserves = vec![BoundaryInvariant::AllOrNothing];
@@ -11106,9 +11106,9 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
         "analysis": a_strong,
     }));
 
-    // Entry 5: Preservation failure — drift foundation, claim
-    // preserved=FoundationStable. Engine MUST surface
-    // PreservationFailure.
+ // Entry 5: Preservation failure — drift foundation, claim
+ // preserved=FoundationStable. Engine MUST surface
+ // PreservationFailure.
     let mut s_before = Shape::default_for_unannotated();
     s_before.foundation = Foundation::ZfcTwoInacc;
     let mut s_after = Shape::default_for_unannotated();
@@ -11135,7 +11135,7 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
         "analysis": a_drift,
     }));
 
-    // Entry 6: Chain composition — two valid forward steps.
+ // Entry 6: Chain composition — two valid forward steps.
     let chain = RefactoringChain {
         steps: vec![r_inline.clone(), r_spec.clone()],
     };
@@ -11173,7 +11173,7 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("ATS-V Сезон 7 — Adjunction analyzer");
+            println!("ATS-V Adjunction analyzer");
             println!("─────────────────────────────────────────────────────");
             println!("  {:<32}  {:<22}  {:<22}  {}", "Battery entry", "Expected", "Observed", "Pin");
             println!(
@@ -11250,7 +11250,7 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
-// ATS-V Сезон 8 — Yoneda-equivalence audit
+// ATS-V Yoneda-equivalence audit
 // =============================================================================
 
 /// `verum audit --yoneda` — runs the Yoneda-equivalence checker
@@ -11262,7 +11262,7 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
 ///
 /// Pin contract: the engine MUST surface each observer-specific
 /// asymmetry exactly — Adversary blind to lifecycle, EndUser blind
-/// to foundation, etc.  Pin failure means the observer-functor
+/// to foundation, etc. Pin failure means the observer-functor
 /// projection drifted from spec §20.7 + §23.
 ///
 /// Output: `target/audit-reports/yoneda.json` (schema_version=1).
@@ -11274,7 +11274,7 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::arch_yoneda::yoneda_equivalent;
 
     if matches!(format, AuditFormat::Plain) {
-        ui::step("ATS-V Сезон 8 — Yoneda-equivalence checker");
+        ui::step("ATS-V Yoneda-equivalence checker");
     }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
@@ -11303,7 +11303,7 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    // Battery: each entry pins one observer-specific contract.
+ // Battery: each entry pins one observer-specific contract.
     let mut entries: Vec<serde_json::Value> = Vec::new();
     let mut all_pins_ok = true;
 
@@ -11328,13 +11328,13 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
         }));
     }
 
-    // Entry 1: identity → equivalent under full canonical roster.
+ // Entry 1: identity → equivalent under full canonical roster.
     let s = Shape::default_for_unannotated();
     let v_id = yoneda_equivalent(&s, &s, &[]);
     record(&mut entries, &mut all_pins_ok, "identity_full_roster", true, &v_id);
 
-    // Entry 2: foundation drift → Auditor distinguishes;
-    // Stakeholder distinguishes; EndUser/PeerCog/Adversary blind.
+ // Entry 2: foundation drift → Auditor distinguishes;
+ // Stakeholder distinguishes; EndUser/PeerCog/Adversary blind.
     let mut s_base = Shape::default_for_unannotated();
     s_base.foundation = Foundation::ZfcTwoInacc;
     let mut s_alt = Shape::default_for_unannotated();
@@ -11346,9 +11346,9 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
     let v_adv_foundation = yoneda_equivalent(&s_base, &s_alt, &[adversary()]);
     record(&mut entries, &mut all_pins_ok, "adversary_blind_to_foundation", true, &v_adv_foundation);
 
-    // Entry 3: outbound network capability → Adversary
-    // distinguishes; EndUser does NOT (only sees exposes, this
-    // change is in requires).
+ // Entry 3: outbound network capability → Adversary
+ // distinguishes; EndUser does NOT (only sees exposes, this
+ // change is in requires).
     let s_base = Shape::default_for_unannotated();
     let mut s_alt = Shape::default_for_unannotated();
     s_alt.requires = vec![Capability::Network {
@@ -11358,10 +11358,10 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
     let v_adv_net = yoneda_equivalent(&s_base, &s_alt, &[adversary()]);
     record(&mut entries, &mut all_pins_ok, "adversary_sees_outbound_network", false, &v_adv_net);
 
-    // Entry 4: exposes change → EndUser distinguishes; Stakeholder
-    // also affected via persistence_capabilities filter (no, only
-    // if it's a Persist capability — this is a Read on Logger so
-    // Stakeholder is blind).
+ // Entry 4: exposes change → EndUser distinguishes; Stakeholder
+ // also affected via persistence_capabilities filter (no, only
+ // if it's a Persist capability — this is a Read on Logger so
+ // Stakeholder is blind).
     let s_base = Shape::default_for_unannotated();
     let mut s_alt = Shape::default_for_unannotated();
     s_alt.exposes = vec![Capability::Read {
@@ -11372,8 +11372,8 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
     let v_stk_logger = yoneda_equivalent(&s_base, &s_alt, &[stakeholder()]);
     record(&mut entries, &mut all_pins_ok, "stakeholder_blind_to_logger_read", true, &v_stk_logger);
 
-    // Entry 5: persistence change → Stakeholder distinguishes
-    // (persistence_capabilities filter catches it).
+ // Entry 5: persistence change → Stakeholder distinguishes
+ // (persistence_capabilities filter catches it).
     let s_base = Shape::default_for_unannotated();
     let mut s_alt = Shape::default_for_unannotated();
     s_alt.exposes = vec![Capability::Persist {
@@ -11404,7 +11404,7 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("ATS-V Сезон 8 — Yoneda-equivalence checker");
+            println!("ATS-V Yoneda-equivalence checker");
             println!("─────────────────────────────────────────────────────");
             println!(
                 "  {:<40}  {:<13}  {:<13}  {}",
@@ -11474,7 +11474,7 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
 ///
 /// **Architectural role**: the base meta-soundness audit
 /// (`--self-recognition`) is rank-1 (kernel sound in
-/// Verum + κ_meta).  This gate exposes the full ordinal-indexed
+/// Verum + κ_meta). This gate exposes the full ordinal-indexed
 /// reflection tower (REF^0..REF^4 + REF^ω) with each level's
 /// published-proof citation. The tower's stability (every finite
 /// level discharges) is the load-bearing soundness contract.
@@ -11525,10 +11525,10 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
         })
         .collect();
 
-    // Per-rule meta-theoretic footprint — the data formerly served
-    // by `audit --self-recognition`.  Now embedded as a sub-block
-    // of the reflection-tower report so the two gates share a
-    // single canonical source.
+ // Per-rule meta-theoretic footprint — the data formerly served
+ // by `audit --self-recognition`. Now embedded as a sub-block
+ // of the reflection-tower report so the two gates share a
+ // single canonical source.
     use verum_kernel::zfc_self_recognition::{
         KernelRuleId, SelfRecognitionAudit, is_zfc_plus_2_inacc_provable, required_meta_theory,
     };
@@ -11564,8 +11564,8 @@ pub fn audit_reflection_tower_with_format(format: AuditFormat) -> Result<()> {
         "constructive_discharges_at_sampled_indices": constructive_summaries,
         "discharged_stage_count": report.discharged_count(),
         "constructive_discharged_count": report.constructive_discharged_count(),
-        // Per-rule meta-theoretic footprint (subsumes the legacy
-        // `audit --self-recognition` payload as a sub-view).
+ // Per-rule meta-theoretic footprint (subsumes the legacy
+ // `audit --self-recognition` payload as a sub-view).
         "base_footprint": {
             "provable_in_zfc_plus_2_inacc": provable_in_zfc_plus_2_inacc,
             "zfc_axioms_required": zfc_required.iter().map(|a| a.name()).collect::<Vec<_>>(),
@@ -11736,7 +11736,7 @@ pub fn audit_kernel_intrinsics(format: AuditFormat) -> Result<()> {
                 ));
             }
             out.push_str("  ]\n}");
-            // Suppress unused warning when format doesn't need it.
+ // Suppress unused warning when format doesn't need it.
             let _ = IntrinsicValue::Unit;
             println!("{}", out);
         }
@@ -11766,7 +11766,7 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
 
     let mut report = CrossFormatReport::new("project");
 
-    // Per-format status: probe tool + run on every certificate file.
+ // Per-format status: probe tool + run on every certificate file.
     struct FormatRow {
         format_name: &'static str,
         extension: &'static str,
@@ -11813,7 +11813,7 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
             "missing"
         };
 
-        // Discover certificate files.
+ // Discover certificate files.
         let pattern_ext = extension.to_string();
         let cert_files: Vec<PathBuf> = match std::fs::read_dir(&certs_dir) {
             Ok(rd) => rd
@@ -11845,7 +11845,7 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
                 )),
             });
         } else {
-            // Actually drive the foreign tool on every cert file.
+ // Actually drive the foreign tool on every cert file.
             for cert in &cert_files {
                 match checker.check_file(cert) {
                     CheckResult::Passed { .. } => files_passed += 1,
@@ -11862,8 +11862,8 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
                         }
                     }
                     CheckResult::ToolMissing { .. } => {
-                        // Should not happen since we checked is_available
-                        // above; treat as runtime tool-disappearance.
+ // Should not happen since we checked is_available
+ // above; treat as runtime tool-disappearance.
                         overall_status = Some(FormatStatus::NotRun {
                             reason: Text::from("tool disappeared mid-run"),
                         });
@@ -12009,17 +12009,17 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind")]
 pub enum ManifestFieldStatus {
-    /// Fully wired — manifest value drives observable production
-    /// behaviour through the documented consumer site.
+ /// Fully wired — manifest value drives observable production
+ /// behaviour through the documented consumer site.
     LoadBearing,
-    /// Wired in part — surface gate fires but full integration
-    /// (e.g. type-level taint propagation) is split out.
+ /// Wired in part — surface gate fires but full integration
+ /// (e.g. type-level taint propagation) is split out.
     LoadBearingPartial,
-    /// Wired only via the embedder path — standard CLI
-    /// auto-routing is documented as a separate scope.
+ /// Wired only via the embedder path — standard CLI
+ /// auto-routing is documented as a separate scope.
     EmbedderLoadBearing,
-    /// Forward-looking infrastructure — value lands on the session
-    /// but the consumer is documented as a phased follow-up.
+ /// Forward-looking infrastructure — value lands on the session
+ /// but the consumer is documented as a phased follow-up.
     ForwardLooking,
 }
 
@@ -12033,7 +12033,7 @@ impl ManifestFieldStatus {
         }
     }
 
-    /// Whether this status counts as "wired" for the bundle audit.
+ /// Whether this status counts as "wired" for the bundle audit.
     fn is_wired(&self) -> bool {
         !matches!(self, Self::ForwardLooking)
     }
@@ -12058,7 +12058,7 @@ struct ManifestFieldEntry {
 fn manifest_field_table() -> Vec<ManifestFieldEntry> {
     use ManifestFieldStatus as S;
     vec![
-        // [types] — all 9 wired.
+ // [types] — all 9 wired.
         ManifestFieldEntry {
             section: "types",
             field: "dependent",
@@ -12122,7 +12122,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
             closure_task: "",
             consumer_site: "TypeChecker.coherence_check_depth → semantic_analysis",
         },
-        // [runtime] — 7/8 wired (async_worker_threads forward-looking).
+ // [runtime] — 7/8 wired (async_worker_threads forward-looking).
         ManifestFieldEntry {
             section: "runtime",
             field: "cbgr_mode",
@@ -12179,7 +12179,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
             closure_task: "#259",
             consumer_site: "AsyncRuntimeConfig.task_stack_size via runtime bridge",
         },
-        // [codegen] — all 4 wired.
+ // [codegen] — all 4 wired.
         ManifestFieldEntry {
             section: "codegen",
             field: "monomorphization_cache",
@@ -12208,7 +12208,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
             closure_task: "#267",
             consumer_site: "vbc_lowering: inline-threshold per-function attr",
         },
-        // [protocols] — all 5 wired.
+ // [protocols] — all 5 wired.
         ManifestFieldEntry {
             section: "protocols",
             field: "resolution_strategy",
@@ -12244,7 +12244,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
             closure_task: "#265",
             consumer_site: "TypeChecker.generic_associated_types_enabled",
         },
-        // [safety] — all 6 wired (Phase 1+2a+2b+3a stack).
+ // [safety] — all 6 wired (Phase 1+2a+2b+3a stack).
         ManifestFieldEntry {
             section: "safety",
             field: "unsafe_allowed",
@@ -12287,7 +12287,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
             closure_task: "#266 + #282 + #283 + #289..#295",
             consumer_site: "11-layer MLS stack: declaration gate + lattice + param/function consistency + sidecar storage + seeding + expression propagation + downflow check + module walker + @declassify + sink detection",
         },
-        // [test] — all 8 wired (Phase 1+2+3+4 closures #298+#273+#299).
+ // [test] — all 8 wired (Phase 1+2+3+4 closures #298+#273+#299).
         ManifestFieldEntry {
             section: "test",
             field: "timeout_secs",
@@ -12344,7 +12344,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
             closure_task: "#299",
             consumer_site: "TestRunCfg.fuzzing → commands/fuzz::run (cargo-fuzz orchestration)",
         },
-        // CompilerOptions surface fields.
+ // CompilerOptions surface fields.
         ManifestFieldEntry {
             section: "options",
             field: "continue_on_error",
@@ -12555,8 +12555,8 @@ mod manifest_coverage_tests {
 
     #[test]
     fn no_duplicate_section_field_pairs() {
-        // Pin: each (section, field) tuple must be unique. Catches
-        // accidental copy-paste duplicates in the table.
+ // Pin: each (section, field) tuple must be unique. Catches
+ // accidental copy-paste duplicates in the table.
         let entries = manifest_field_table();
         let mut seen = std::collections::HashSet::new();
         for entry in &entries {
@@ -12600,7 +12600,7 @@ struct MlsCoverageSummary {
     functions_with_classified_params: usize,
     declassify_boundaries: usize,
     sink_consumers: usize,
-    /// Total count of classified parameters across all functions.
+ /// Total count of classified parameters across all functions.
     total_classified_params: usize,
 }
 
@@ -12824,8 +12824,8 @@ mod mls_coverage_tests {
 
     #[test]
     fn mls_low_classification_sinks_includes_known_sinks() {
-        // Pin: every documented sink in the registry. Catches
-        // accidental removals from the static list.
+ // Pin: every documented sink in the registry. Catches
+ // accidental removals from the static list.
         for required in &["Logger", "FS", "Network", "Stdout"] {
             assert!(
                 MLS_LOW_CLASSIFICATION_SINKS.contains(required),
@@ -12837,8 +12837,8 @@ mod mls_coverage_tests {
 
     #[test]
     fn mls_coverage_summary_default_is_zero() {
-        // Pin: every counter starts at 0 — empty project produces
-        // zero diagnostics + zero counts.
+ // Pin: every counter starts at 0 — empty project produces
+ // zero diagnostics + zero counts.
         let s = MlsCoverageSummary::default();
         assert_eq!(s.total_functions, 0);
         assert_eq!(s.classified_functions, 0);

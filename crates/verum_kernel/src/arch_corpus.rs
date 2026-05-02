@@ -2,34 +2,34 @@
 //!
 //! ## Architectural role
 //!
-//! Per `internal/specs/ats-v.md` §11.3 (Сезон 3 deliverable) +
+//! Per `internal/specs/ats-v.md` §11.3 ( deliverable) +
 //! §16 RFC ATS-V-001, individual `@arch_module(...)` declarations
-//! cover per-cog invariants.  Cross-cog invariants — properties
+//! cover per-cog invariants. Cross-cog invariants — properties
 //! that hold over the entire corpus, not any single cog —
 //! require a separate scope: `@arch_corpus(...)`.
 //!
 //! ## Canonical corpus invariants
 //!
-//! Сезон 4 ships 4 baseline cross-cog invariants:
+//! ships 4 baseline cross-cog invariants:
 //!
-//!   1. **NoCircularDependencies** — composition graph acyclic
-//!      (transitive across all cogs).
-//!   2. **FoundationConsistency** — all cogs share a foundation,
-//!      OR pairs with different foundations have explicit
-//!      `@framework(bridge_corpus, ...)` declarations.
-//!   3. **NoLAbsClaim** — no cog declares `stratum = LAbs`
-//!      (sanity net for the AFN-T α boundary closure; AP-011
-//!      handles per-cog).
-//!   4. **CapabilityClosure** — for every cog A in corpus, every
-//!      capability A.requires either has a producer cog (some B
-//!      with that capability в B.exposes) OR is documented as
-//!      "external" (capability registered as `transfers_privilege:
-//!      true` in capability_ontology).
+//! 1. **NoCircularDependencies** — composition graph acyclic
+//! (transitive across all cogs).
+//! 2. **FoundationConsistency** — all cogs share a foundation,
+//! OR pairs with different foundations have explicit
+//! `@framework(bridge_corpus, ...)` declarations.
+//! 3. **NoLAbsClaim** — no cog declares `stratum = LAbs`
+//! (sanity net for the AFN-T α boundary closure; AP-011
+//! handles per-cog).
+//! 4. **CapabilityClosure** — for every cog A in corpus, every
+//! capability A.requires either has a producer cog (some B
+//! with that capability в B.exposes) OR is documented as
+//! "external" (capability registered as `transfers_privilege:
+//! true` in capability_ontology).
 //!
 //! ## Reuse over invention
 //!
 //! The corpus invariants are **derived** from per-cog Shape data
-//! computed by `arch_phase::run_arch_phase`.  No new parser, no
+//! computed by `arch_phase::run_arch_phase`. No new parser, no
 //! new attribute types — `@arch_corpus(...)` is just another
 //! typed attribute с named-args specifying which invariants to
 //! verify and any cog-specific overrides.
@@ -41,7 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 // CorpusInvariant — kinds of cross-cog invariants
 // =============================================================================
 
-/// Stable enumeration of corpus-level invariants.  Each variant
+/// Stable enumeration of corpus-level invariants. Each variant
 /// has a check function returning structured violations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CorpusInvariant {
@@ -52,7 +52,7 @@ pub enum CorpusInvariant {
 }
 
 impl CorpusInvariant {
-    /// Stable diagnostic tag.
+ /// Stable diagnostic tag.
     pub fn tag(&self) -> &'static str {
         match self {
             CorpusInvariant::NoCircularDependencies => "no_circular_dependencies",
@@ -62,7 +62,7 @@ impl CorpusInvariant {
         }
     }
 
-    /// Human-friendly name.
+ /// Human-friendly name.
     pub fn name(&self) -> &'static str {
         match self {
             CorpusInvariant::NoCircularDependencies => "NoCircularDependencies",
@@ -72,7 +72,7 @@ impl CorpusInvariant {
         }
     }
 
-    /// Full canonical list — Сезон 4 baseline.
+ /// Full canonical list — baseline.
     pub fn full_list() -> [CorpusInvariant; 4] {
         [
             CorpusInvariant::NoCircularDependencies,
@@ -90,13 +90,13 @@ impl CorpusInvariant {
 /// Structured diagnostic produced when a corpus invariant fails.
 #[derive(Debug, Clone)]
 pub struct CorpusViolation {
-    /// Which invariant was violated.
+ /// Which invariant was violated.
     pub invariant: CorpusInvariant,
-    /// One-line summary.
+ /// One-line summary.
     pub summary: String,
-    /// Human-friendly message.
+ /// Human-friendly message.
     pub human_message: String,
-    /// Affected cog(s).
+ /// Affected cog(s).
     pub affected_cogs: Vec<String>,
 }
 
@@ -112,12 +112,12 @@ pub struct CorpusReport {
 }
 
 impl CorpusReport {
-    /// True iff no corpus invariant violated.
+ /// True iff no corpus invariant violated.
     pub fn is_load_bearing(&self) -> bool {
         self.violations.is_empty()
     }
 
-    /// Group violations by invariant.
+ /// Group violations by invariant.
     pub fn by_invariant(&self) -> BTreeMap<&'static str, usize> {
         let mut by = BTreeMap::new();
         for v in &self.violations {
@@ -133,7 +133,7 @@ impl CorpusReport {
 
 /// Verify cross-cog invariants over a corpus.
 ///
-/// `corpus` is a slice of (cog_name, Shape) pairs.  The function
+/// `corpus` is a slice of (cog_name, Shape) pairs. The function
 /// runs all 4 baseline invariants and returns a `CorpusReport`
 /// with structured violations.
 pub fn verify_corpus(corpus: &[(String, Shape)]) -> CorpusReport {
@@ -142,19 +142,19 @@ pub fn verify_corpus(corpus: &[(String, Shape)]) -> CorpusReport {
         violations: Vec::new(),
     };
 
-    // Invariant 1: NoCircularDependencies.
+ // Invariant 1: NoCircularDependencies.
     if let Some(v) = check_no_circular_dependencies(corpus) {
         report.violations.push(v);
     }
-    // Invariant 2: FoundationConsistency.
+ // Invariant 2: FoundationConsistency.
     if let Some(v) = check_foundation_consistency(corpus) {
         report.violations.push(v);
     }
-    // Invariant 3: NoLAbsClaim.
+ // Invariant 3: NoLAbsClaim.
     if let Some(v) = check_no_l_abs_claim(corpus) {
         report.violations.push(v);
     }
-    // Invariant 4: CapabilityClosure.
+ // Invariant 4: CapabilityClosure.
     if let Some(v) = check_capability_closure(corpus) {
         report.violations.push(v);
     }
@@ -169,7 +169,7 @@ pub fn verify_corpus(corpus: &[(String, Shape)]) -> CorpusReport {
 /// Check that the composition graph (composes_with) is acyclic
 /// across all cogs.
 pub fn check_no_circular_dependencies(corpus: &[(String, Shape)]) -> Option<CorpusViolation> {
-    // Build graph: name -> [composes_with].
+ // Build graph: name -> [composes_with].
     let edges: BTreeMap<&str, &[String]> = corpus
         .iter()
         .map(|(n, s)| (n.as_str(), s.composes_with.as_slice()))
@@ -229,8 +229,8 @@ fn has_cycle_from(start: &str, edges: &BTreeMap<&str, &[String]>) -> bool {
 
 /// Check foundation consistency: all cogs share foundation OR
 /// pairs with different foundations have an explicit bridge.
-/// Сезон 4 simplification: we check shared-foundation only;
-/// bridge declarations land in Сезон 5 with framework_translate
+/// simplification: we check shared-foundation only;
+/// bridge declarations land with framework_translate
 /// integration.
 pub fn check_foundation_consistency(corpus: &[(String, Shape)]) -> Option<CorpusViolation> {
     if corpus.is_empty() {
@@ -246,7 +246,7 @@ pub fn check_foundation_consistency(corpus: &[(String, Shape)]) -> Option<Corpus
     if foundations.len() <= 1 {
         return None; // single foundation across corpus
     }
-    // Multiple foundations — check pairwise direct subsumption.
+ // Multiple foundations — check pairwise direct subsumption.
     let unique: Vec<&Foundation> = corpus
         .iter()
         .map(|(_, s)| &s.foundation)
@@ -313,8 +313,8 @@ pub fn check_no_l_abs_claim(corpus: &[(String, Shape)]) -> Option<CorpusViolatio
 /// producer in corpus, OR is registered as external (privilege-
 /// transferring) in capability_ontology.
 pub fn check_capability_closure(corpus: &[(String, Shape)]) -> Option<CorpusViolation> {
-    // Collect all exposed capabilities (their tag strings) keyed
-    // by producer cog.
+ // Collect all exposed capabilities (their tag strings) keyed
+ // by producer cog.
     let mut producers: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (cog_name, shape) in corpus {
         for cap in &shape.exposes {
@@ -325,7 +325,7 @@ pub fn check_capability_closure(corpus: &[(String, Shape)]) -> Option<CorpusViol
         }
     }
 
-    // Find required-but-unproduced.
+ // Find required-but-unproduced.
     let mut affected: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (cog_name, shape) in corpus {
         for cap in &shape.requires {
@@ -380,9 +380,9 @@ fn capability_id(cap: &Capability) -> String {
     }
 }
 
-/// Stub for Сезон 4: capability_ontology.vr resolution.  Сезон 5
+/// Stub: capability_ontology.vr resolution. 
 /// reads the actual ontology file and returns true for registered
-/// names.  For now, conservatively treat custom capabilities
+/// names. For now, conservatively treat custom capabilities
 /// matching well-known ontology names as external.
 fn is_externally_registered(cap: &Capability) -> bool {
     let well_known_external = [
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn foundation_consistency_passes_canonical_subsumption() {
-        // CIC ⊃ MLTT — directly subsumed.
+ // CIC ⊃ MLTT — directly subsumed.
         let mut a = Shape::default_for_unannotated();
         a.foundation = Foundation::Cic;
         let mut b = Shape::default_for_unannotated();
@@ -536,7 +536,7 @@ mod tests {
 
     #[test]
     fn capability_closure_passes_when_satisfied() {
-        // A exposes [logger]; B requires [logger].
+ // A exposes [logger]; B requires [logger].
         let corpus = vec![
             ("A".to_string(), make_shape(vec![], vec![cap("logger")], vec![])),
             ("B".to_string(), make_shape(vec![], vec![], vec![cap("logger")])),
@@ -550,9 +550,9 @@ mod tests {
 
     #[test]
     fn capability_closure_passes_for_externally_registered() {
-        // B requires [logger] but no one exposes it; logger is
-        // in capability_ontology baseline → externally registered
-        // → no violation.
+ // B requires [logger] but no one exposes it; logger is
+ // in capability_ontology baseline → externally registered
+ // → no violation.
         let corpus = vec![("B".to_string(), make_shape(vec![], vec![], vec![cap("logger")]))];
         let report = verify_corpus(&corpus);
         assert!(!report
@@ -563,8 +563,8 @@ mod tests {
 
     #[test]
     fn capability_closure_detects_missing_producer() {
-        // B requires [unknown_capability] which no one produces
-        // and isn't in baseline ontology.
+ // B requires [unknown_capability] which no one produces
+ // and isn't in baseline ontology.
         let corpus = vec![(
             "B".to_string(),
             make_shape(vec![], vec![], vec![cap("totally_unknown")]),
@@ -578,8 +578,8 @@ mod tests {
 
     #[test]
     fn architectural_pin_4_invariants_in_canonical_list() {
-        // Сезон 4 baseline = exactly 4 corpus invariants.
-        // Adding more requires RFC ATS-V-001 (per spec §16).
+ // baseline = exactly 4 corpus invariants.
+ // Adding more requires RFC ATS-V-001 (per spec §16).
         assert_eq!(CorpusInvariant::full_list().len(), 4);
     }
 
@@ -592,8 +592,8 @@ mod tests {
         let corpus = vec![("A".to_string(), bad1), ("B".to_string(), bad2)];
         let report = verify_corpus(&corpus);
         let by = report.by_invariant();
-        // Both LAbs trigger ONE composite violation
-        // (multi-affected).
+ // Both LAbs trigger ONE composite violation
+ // (multi-affected).
         assert!(by.contains_key("no_l_abs_claim"));
     }
 }

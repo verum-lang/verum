@@ -5,29 +5,29 @@
 //! Pre-this-module, "verification verdict" lived in five parallel
 //! shapes:
 //!
-//!   * `Result<(), CheckError>` returned by `proof_checker::Certificate::verify`.
-//!   * `KernelOutcome` returned by `KernelRegistry::verify_all`.
-//!   * `DifferentialReport` returned by `differential::run_differential_test`.
-//!   * `IntrinsicValue::Decision { holds, reason }` returned by intrinsic dispatch.
-//!   * `ad-hoc Result<bool, ...>` in audit-gate Plain/Json formatters.
+//! * `Result<(), CheckError>` returned by `proof_checker::Certificate::verify`.
+//! * `KernelOutcome` returned by `KernelRegistry::verify_all`.
+//! * `DifferentialReport` returned by `differential::run_differential_test`.
+//! * `IntrinsicValue::Decision { holds, reason }` returned by intrinsic dispatch.
+//! * `ad-hoc Result<bool, ...>` in audit-gate Plain/Json formatters.
 //!
 //! Each carrier had its own combination algebra, its own audit-gate
-//! formatting, its own JSON schema.  The bundle audit was a
+//! formatting, its own JSON schema. The bundle audit was a
 //! conjunction of fourteen separate verdict shapes with no unified
 //! algebra.
 //!
 //! This module ships the **canonical [`VerificationVerdict`] type**:
 //! one sum-type that every verification mechanism in `verum_kernel`
-//! converts to.  Audit gates, bundle aggregator, ATS-V phase (when
+//! converts to. Audit gates, bundle aggregator, ATS-V phase (when
 //! it lands per `internal/specs/ats-v.md`) — all consume this single
-//! type.  No parallel verdict shapes; every redundancy in the
+//! type. No parallel verdict shapes; every redundancy in the
 //! verification stack reduces to identity-on-this-type.
 //!
 //! ## Alignment with the ATS-V specification
 //!
 //! Per `internal/specs/ats-v.md` §17.1 (Reuse compliance audit), the
 //! V-axis (verification) of every artifact reduces to the existing
-//! `@verify(strategy)` ladder.  This type's [`DischargeMethod`]
+//! `@verify(strategy)` ladder. This type's [`DischargeMethod`]
 //! enum is the kernel-side mirror of that ladder, plus the broader
 //! discharge surface (kernel intrinsics, framework citations,
 //! differential agreement, MSFS corpus theorems) that exists outside
@@ -41,7 +41,7 @@
 //!
 //! Existing modules retain their per-domain types
 //! (`KernelOutcome`, `DifferentialReport`, etc.) but provide
-//! `Into<VerificationVerdict>` conversions.  The canonical type
+//! `Into<VerificationVerdict>` conversions. The canonical type
 //! becomes the **interchange format** at API boundaries; per-domain
 //! types live as construction conveniences.
 
@@ -55,34 +55,34 @@ use std::collections::BTreeMap;
 ///
 /// **Soundness contract**: every value of `VerificationVerdict`
 /// carries a [`DischargeMethod`] tag identifying which mechanism
-/// produced the verdict.  Audit reports MUST surface the method —
+/// produced the verdict. Audit reports MUST surface the method —
 /// "discharged" is meaningless without the method that did the
 /// discharging.
 #[derive(Debug, Clone)]
 pub enum VerificationVerdict {
-    /// The artifact was discharged by `method`.
-    /// `evidence` carries method-specific witness (proof term hash,
-    /// SMT certificate, kernel intrinsic reason, etc.).
+ /// The artifact was discharged by `method`.
+ /// `evidence` carries method-specific witness (proof term hash,
+ /// SMT certificate, kernel intrinsic reason, etc.).
     Discharged {
         method: DischargeMethod,
         evidence: Evidence,
     },
-    /// The method ran and rejected the artifact.
-    /// `counterexample` carries method-specific failure data.
+ /// The method ran and rejected the artifact.
+ /// `counterexample` carries method-specific failure data.
     Rejected {
         method: DischargeMethod,
         counterexample: Counterexample,
     },
-    /// The method was attempted but did not produce a definite
-    /// answer (timeout, UNKNOWN, IOU pending).  Distinct from
-    /// `Rejected`: `Pending` is "no answer", not "rejected".
+ /// The method was attempted but did not produce a definite
+ /// answer (timeout, UNKNOWN, IOU pending). Distinct from
+ /// `Rejected`: `Pending` is "no answer", not "rejected".
     Pending {
         method: DischargeMethod,
         reason: PendingReason,
     },
-    /// Multiple methods disagreed.  The audit gate's failure mode:
-    /// `accepting` and `rejecting` lists must both be non-empty
-    /// for this variant.
+ /// Multiple methods disagreed. The audit gate's failure mode:
+ /// `accepting` and `rejecting` lists must both be non-empty
+ /// for this variant.
     Conflicted {
         accepting: Vec<DischargeMethod>,
         rejecting: Vec<DischargeMethod>,
@@ -90,7 +90,7 @@ pub enum VerificationVerdict {
 }
 
 impl VerificationVerdict {
-    /// Stable diagnostic tag for audit-report rendering.
+ /// Stable diagnostic tag for audit-report rendering.
     pub fn tag(&self) -> &'static str {
         match self {
             VerificationVerdict::Discharged { .. } => "discharged",
@@ -100,32 +100,32 @@ impl VerificationVerdict {
         }
     }
 
-    /// True iff the verdict is a clean discharge.  Audit gates
-    /// dispatch on this for pass/fail.
+ /// True iff the verdict is a clean discharge. Audit gates
+ /// dispatch on this for pass/fail.
     pub fn is_discharged(&self) -> bool {
         matches!(self, VerificationVerdict::Discharged { .. })
     }
 
-    /// True iff the verdict is a clean rejection (the artifact
-    /// is unsound under the method).  Adversarial-corpus audits
-    /// dispatch on this — they REQUIRE rejection.
+ /// True iff the verdict is a clean rejection (the artifact
+ /// is unsound under the method). Adversarial-corpus audits
+ /// dispatch on this — they REQUIRE rejection.
     pub fn is_rejected(&self) -> bool {
         matches!(self, VerificationVerdict::Rejected { .. })
     }
 
-    /// True iff the verdict is conflicted — load-bearing audit
-    /// failure: methods disagree.
+ /// True iff the verdict is conflicted — load-bearing audit
+ /// failure: methods disagree.
     pub fn is_conflicted(&self) -> bool {
         matches!(self, VerificationVerdict::Conflicted { .. })
     }
 
-    /// True iff the verdict is pending (no definite answer).
+ /// True iff the verdict is pending (no definite answer).
     pub fn is_pending(&self) -> bool {
         matches!(self, VerificationVerdict::Pending { .. })
     }
 
-    /// Method tag (Latin canonical name) when a single method
-    /// produced the verdict; `None` for `Conflicted`.
+ /// Method tag (Latin canonical name) when a single method
+ /// produced the verdict; `None` for `Conflicted`.
     pub fn primary_method(&self) -> Option<&DischargeMethod> {
         match self {
             VerificationVerdict::Discharged { method, .. } => Some(method),
@@ -140,80 +140,80 @@ impl VerificationVerdict {
 // DischargeMethod — every verification mechanism in verum_kernel
 // =============================================================================
 
-/// Every discharge mechanism the kernel recognises.  Single
+/// Every discharge mechanism the kernel recognises. Single
 /// enumeration for all verification entry points.
 ///
 /// The variant set is closed and stable: adding a new variant
-/// requires kernel-version bump + audit-gate migration.  Domain-
+/// requires kernel-version bump + audit-gate migration. Domain-
 /// specific routes (refinement contracts, separation-logic encoder,
 /// codegen attestation) reduce to one of these variants — the
 /// kernel doesn't introduce per-subsystem method enums.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DischargeMethod {
-    /// Z3 / CVC5 / portfolio SMT discharge — `@verify(formal)` and
-    /// stronger ladder strategies.
+ /// Z3 / CVC5 / portfolio SMT discharge — `@verify(formal)` and
+ /// stronger ladder strategies.
     Smt { backend: SmtBackend },
-    /// Per-kernel-impl checker (proof_checker, proof_checker_nbe,
-    /// future Verum-self-hosted kernel via #154).
+ /// Per-kernel-impl checker (proof_checker, proof_checker_nbe,
+ /// future Verum-self-hosted kernel via #154).
     KernelChecker { name: &'static str },
-    /// Kernel intrinsic dispatch arm (e.g., `kernel_truncate_to_level`,
-    /// `kernel_self_soundness_in_meta_universe`,
-    /// `kernel_reflection_tower_*`).  Name matches the
-    /// `available_intrinsics()` roster.
+ /// Kernel intrinsic dispatch arm (e.g., `kernel_truncate_to_level`,
+ /// `kernel_self_soundness_in_meta_universe`,
+ /// `kernel_reflection_tower_*`). Name matches the
+ /// `available_intrinsics()` roster.
     KernelIntrinsic { name: &'static str },
-    /// `@framework(corpus, "citation")` route — trusted-boundary
-    /// axiom citing published proof.
+ /// `@framework(corpus, "citation")` route — trusted-boundary
+ /// axiom citing published proof.
     FrameworkCitation {
         corpus: &'static str,
         citation_key: &'static str,
     },
-    /// Differential-kernel agreement: every registered kernel in
-    /// the `KernelRegistry` produced a unanimous verdict.
+ /// Differential-kernel agreement: every registered kernel in
+ /// the `KernelRegistry` produced a unanimous verdict.
     DifferentialAgreement { kernels: Vec<&'static str> },
-    /// Mutation-based property fuzzing produced unanimous agreement
-    /// across registered kernels.
+ /// Mutation-based property fuzzing produced unanimous agreement
+ /// across registered kernels.
     DifferentialFuzz { iterations: usize },
-    /// Cross-format roundtrip — one of the alternative backends
-    /// (Coq / Lean / Agda / Dedukti / Isabelle) accepted the
-    /// translated artifact.
+ /// Cross-format roundtrip — one of the alternative backends
+ /// (Coq / Lean / Agda / Dedukti / Isabelle) accepted the
+ /// translated artifact.
     CrossFormat { backend: CrossFormatBackend },
-    /// MSFS-corpus machine-verified theorem, with the corpus path
-    /// carrying provenance.
+ /// MSFS-corpus machine-verified theorem, with the corpus path
+ /// carrying provenance.
     MsfsCorpus { corpus_path: &'static str },
-    /// Admitted-with-IOU: the artifact is currently asserted via
-    /// `@admit_reason(...)`.  Audit gates must surface IOU count;
-    /// not a full discharge.
+ /// Admitted-with-IOU: the artifact is currently asserted via
+ /// `@admit_reason(...)`. Audit gates must surface IOU count;
+ /// not a full discharge.
     Iou { reason: IouReason },
-    // ----------------------------------------------------------------
-    // ATS-V foundation slots — placeholders per
-    // `internal/specs/ats-v.md` §4 (architectural primitives).
-    // These variants land empty in v0.1 of the verdict type and
-    // are filled out by the ATS-V phase (Сезон 1 deliverable).
-    // ----------------------------------------------------------------
-    /// ATS-V capability flow check — discharged when a cog's
-    /// declared `requires` list is satisfied by environment + no
-    /// linear/affine capability is leaked.
+ // ----------------------------------------------------------------
+ // ATS-V foundation slots — placeholders per
+ // `internal/specs/ats-v.md` §4 (architectural primitives).
+ // These variants land empty in v0.1 of the verdict type and
+ // are filled out by the ATS-V phase ( deliverable).
+ // ----------------------------------------------------------------
+ /// ATS-V capability flow check — discharged when a cog's
+ /// declared `requires` list is satisfied by environment + no
+ /// linear/affine capability is leaked.
     AtsVCapabilityCheck,
-    /// ATS-V boundary type check — discharged when cross-module
-    /// traffic conforms to the boundary's typed messages +
-    /// invariants.
+ /// ATS-V boundary type check — discharged when cross-module
+ /// traffic conforms to the boundary's typed messages +
+ /// invariants.
     AtsVBoundaryCheck,
-    /// ATS-V composition correctness — discharged when `A ⊗ B`
-    /// satisfies §5.3 composition rules.
+ /// ATS-V composition correctness — discharged when `A ⊗ B`
+ /// satisfies §5.3 composition rules.
     AtsVCompositionCheck,
-    /// ATS-V anti-pattern absence — discharged when none of the
-    /// 26+ canonical anti-patterns match the cog's `arch_type`.
+ /// ATS-V anti-pattern absence — discharged when none of the
+ /// 26+ canonical anti-patterns match the cog's `arch_type`.
     AtsVAntiPatternCheck { pattern_tag: &'static str },
-    /// Multi-level meta-mode stability — discharged when the
-    /// reflection-tower's constructive witness pattern is invariant
-    /// across `[0, max_lift]` universe-ascent indices (MSFS Theorem
-    /// 9.6(b) idempotence).  Surfaces from
-    /// [`crate::reflection_tower::walk_stability_up_to`].
+ /// Multi-level meta-mode stability — discharged when the
+ /// reflection-tower's constructive witness pattern is invariant
+ /// across `[0, max_lift]` universe-ascent indices (MSFS Theorem
+ /// 9.6(b) idempotence). Surfaces from
+ /// [`crate::reflection_tower::walk_stability_up_to`].
     MetaModeStability { max_lift: u32 },
 }
 
 impl DischargeMethod {
-    /// Stable diagnostic tag — short identifier used in audit JSON.
+ /// Stable diagnostic tag — short identifier used in audit JSON.
     pub fn tag(&self) -> &'static str {
         match self {
             DischargeMethod::Smt { .. } => "smt",
@@ -233,7 +233,7 @@ impl DischargeMethod {
         }
     }
 
-    /// Is this method an ATS-V architectural-type check?
+ /// Is this method an ATS-V architectural-type check?
     pub fn is_ats_v(&self) -> bool {
         matches!(
             self,
@@ -255,14 +255,14 @@ impl DischargeMethod {
 /// `metadata` map for downstream processing (audit JSON, LSP hover).
 #[derive(Debug, Clone, Default)]
 pub struct Evidence {
-    /// Human-readable summary (single-line, audit-table friendly).
+ /// Human-readable summary (single-line, audit-table friendly).
     pub summary: String,
-    /// Structured metadata — JSON-encodable key/value pairs.
+ /// Structured metadata — JSON-encodable key/value pairs.
     pub metadata: BTreeMap<String, String>,
 }
 
 impl Evidence {
-    /// Construct from a summary string with empty metadata.
+ /// Construct from a summary string with empty metadata.
     pub fn from_summary(summary: impl Into<String>) -> Self {
         Self {
             summary: summary.into(),
@@ -270,7 +270,7 @@ impl Evidence {
         }
     }
 
-    /// Add a metadata entry, returning self for builder-style chains.
+ /// Add a metadata entry, returning self for builder-style chains.
     pub fn with(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
         self
@@ -280,10 +280,10 @@ impl Evidence {
 /// Method-specific counterexample payload for a `Rejected` verdict.
 #[derive(Debug, Clone, Default)]
 pub struct Counterexample {
-    /// Human-readable summary of the rejection.
+ /// Human-readable summary of the rejection.
     pub summary: String,
-    /// Structured metadata (e.g. SMT model, failing kernel-rule
-    /// position, mutation seed).
+ /// Structured metadata (e.g. SMT model, failing kernel-rule
+ /// position, mutation seed).
     pub metadata: BTreeMap<String, String>,
 }
 
@@ -301,30 +301,30 @@ impl Counterexample {
     }
 }
 
-/// Why a verdict landed in `Pending`.  Distinct cases drive
+/// Why a verdict landed in `Pending`. Distinct cases drive
 /// distinct audit-report categorisation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingReason {
-    /// SMT solver returned UNKNOWN (typically: timeout, fragment
-    /// outside decidable theory, ground out of resources).
+ /// SMT solver returned UNKNOWN (typically: timeout, fragment
+ /// outside decidable theory, ground out of resources).
     SmtUnknown { detail: String },
-    /// Kernel rejected with a "not yet implemented" / "stub" path.
+ /// Kernel rejected with a "not yet implemented" / "stub" path.
     NotYetMechanised { detail: String },
-    /// Differential-kernel slot not available (e.g., #154
-    /// self-hosted Verum kernel pending parser fixes).
+ /// Differential-kernel slot not available (e.g., #154
+ /// self-hosted Verum kernel pending parser fixes).
     NotYetSelfHosting,
-    /// Generic timeout — method was given a bound and exhausted it.
+ /// Generic timeout — method was given a bound and exhausted it.
     Timeout { milliseconds: u64 },
 }
 
 /// Structured IOU reason — admitted-with-citation discharge.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IouReason {
-    /// `@framework(...)` citation to upstream literature.
+ /// `@framework(...)` citation to upstream literature.
     UpstreamCitation { corpus: &'static str },
-    /// `@admit_reason("...")` with structured explanation.
+ /// `@admit_reason("...")` with structured explanation.
     AdmittedWithReason { reason: String },
-    /// Kernel-rule discharge route declared but not yet wired.
+ /// Kernel-rule discharge route declared but not yet wired.
     PendingDispatch { intrinsic: &'static str },
 }
 
@@ -355,25 +355,25 @@ pub enum CrossFormatBackend {
 // MultiVerdict — N-method aggregation
 // =============================================================================
 
-/// Aggregate of N method verdicts on the same artifact.  Used
+/// Aggregate of N method verdicts on the same artifact. Used
 /// by the bundle-audit dispatcher and by the differential-kernel
 /// registry.
 #[derive(Debug, Clone)]
 pub struct MultiVerdict {
-    /// Per-method verdicts.
+ /// Per-method verdicts.
     pub verdicts: Vec<VerificationVerdict>,
 }
 
 impl MultiVerdict {
-    /// Compute the aggregate verdict from per-method verdicts.
-    /// Rules:
-    ///   * All `Discharged` → aggregate `Discharged` (with
-    ///     `DifferentialAgreement` method).
-    ///   * All `Rejected` → aggregate `Rejected` (with
-    ///     `DifferentialAgreement` method).
-    ///   * Mixed `Discharged` + `Rejected` → `Conflicted`.
-    ///   * Any `Pending` mixed in (without conflict) → aggregate
-    ///     pending; pending verdicts are propagated up.
+ /// Compute the aggregate verdict from per-method verdicts.
+ /// Rules:
+ /// * All `Discharged` → aggregate `Discharged` (with
+ /// `DifferentialAgreement` method).
+ /// * All `Rejected` → aggregate `Rejected` (with
+ /// `DifferentialAgreement` method).
+ /// * Mixed `Discharged` + `Rejected` → `Conflicted`.
+ /// * Any `Pending` mixed in (without conflict) → aggregate
+ /// pending; pending verdicts are propagated up.
     pub fn aggregate(&self) -> VerificationVerdict {
         let mut accepting: Vec<DischargeMethod> = Vec::new();
         let mut rejecting: Vec<DischargeMethod> = Vec::new();
@@ -387,7 +387,7 @@ impl MultiVerdict {
                 VerificationVerdict::Rejected { method, .. } => rejecting.push(method.clone()),
                 VerificationVerdict::Pending { method, .. } => pending.push(method.clone()),
                 VerificationVerdict::Conflicted { .. } => {
-                    // A nested conflict propagates as conflict.
+ // A nested conflict propagates as conflict.
                     return VerificationVerdict::Conflicted {
                         accepting,
                         rejecting,
@@ -398,8 +398,8 @@ impl MultiVerdict {
 
         match (accepting.is_empty(), rejecting.is_empty()) {
             (false, true) => {
-                // Unanimous accept.  Pending methods are noted in
-                // metadata but do not block the discharge.
+ // Unanimous accept. Pending methods are noted in
+ // metadata but do not block the discharge.
                 let kernel_names: Vec<&'static str> = accepting
                     .iter()
                     .filter_map(|m| match m {
@@ -428,7 +428,7 @@ impl MultiVerdict {
                 }
             }
             (true, false) => {
-                // Unanimous reject.
+ // Unanimous reject.
                 let kernel_names: Vec<&'static str> = rejecting
                     .iter()
                     .filter_map(|m| match m {
@@ -451,8 +451,8 @@ impl MultiVerdict {
                 rejecting,
             },
             (true, true) => {
-                // No discharge happened (only pending).  Surface
-                // the first pending reason.
+ // No discharge happened (only pending). Surface
+ // the first pending reason.
                 let method = pending.first().cloned().unwrap_or(DischargeMethod::Iou {
                     reason: IouReason::AdmittedWithReason {
                         reason: "no method ran".into(),
@@ -471,17 +471,17 @@ impl MultiVerdict {
         }
     }
 
-    /// Number of verdicts that landed `Discharged`.
+ /// Number of verdicts that landed `Discharged`.
     pub fn discharged_count(&self) -> usize {
         self.verdicts.iter().filter(|v| v.is_discharged()).count()
     }
 
-    /// Number of verdicts that landed `Rejected`.
+ /// Number of verdicts that landed `Rejected`.
     pub fn rejected_count(&self) -> usize {
         self.verdicts.iter().filter(|v| v.is_rejected()).count()
     }
 
-    /// Number of verdicts that landed `Pending`.
+ /// Number of verdicts that landed `Pending`.
     pub fn pending_count(&self) -> usize {
         self.verdicts.iter().filter(|v| v.is_pending()).count()
     }
@@ -550,10 +550,10 @@ mod tests {
 
     #[test]
     fn discharge_method_tags_distinct_includes_ats_v_slots() {
-        // Pin: every variant has a distinct tag, including the
-        // ATS-V foundation slots.  This means future ATS-V
-        // implementation can plug into the canonical verdict
-        // without disturbing the existing audit-tag space.
+ // Pin: every variant has a distinct tag, including the
+ // ATS-V foundation slots. This means future ATS-V
+ // implementation can plug into the canonical verdict
+ // without disturbing the existing audit-tag space.
         let probes = [
             DischargeMethod::Smt {
                 backend: SmtBackend::Z3,
@@ -684,9 +684,9 @@ mod tests {
 
     #[test]
     fn aggregate_pending_does_not_mask_unanimous_accept() {
-        // Pin: a pending verdict alongside unanimous accepts does
-        // not block the discharge — pending is recorded as metadata
-        // only.
+ // Pin: a pending verdict alongside unanimous accepts does
+ // not block the discharge — pending is recorded as metadata
+ // only.
         let mv = MultiVerdict {
             verdicts: vec![
                 discharged_kernel("proof_checker"),

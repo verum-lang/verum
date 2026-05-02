@@ -4,14 +4,14 @@
 //!
 //! Per `internal/specs/ats-v.md` §20-§23 (fundamental rethinking of
 //! architectural types), classical static notations like C4/UML
-//! treat architecture as a **point** in shape-space.  Real
+//! treat architecture as a **point** in shape-space. Real
 //! architecture is a **functor** from time × decisions × observers
 //! to shape:
 //!
-//!   `arch_type<C>: TimeCategory × DecisionCategory × ObserverCategory → ShapeCategory`
+//! `arch_type<C>: TimeCategory × DecisionCategory × ObserverCategory → ShapeCategory`
 //!
 //! MTAC primitives establish the categories that this functor maps
-//! between.  Сезон 5 ships them as data types; Сезон 6+ wires them
+//! between. ships them as data types; + wires them
 //! into anti-pattern checks (TemporalInconsistency,
 //! CounterfactualBrittleness, etc. — AP-027..032 already in the
 //! catalog).
@@ -19,8 +19,8 @@
 //! ## Why Verum, not Coq/Lean
 //!
 //! No production proof assistant treats architecture as a
-//! functor over time + decisions + observers.  Coq/Lean stop at
-//! single-shape types.  Verum's MTAC is the first attempt to
+//! functor over time + decisions + observers. Coq/Lean stop at
+//! single-shape types. Verum's MTAC is the first attempt to
 //! make modal-temporal reasoning about architecture compile-time
 //! enforceable per spec §32.
 
@@ -30,23 +30,23 @@ use serde::{Deserialize, Serialize};
 // TimePoint — point in the time category
 // =============================================================================
 
-/// A point in the time category.  Per spec §20.1, time is a
+/// A point in the time category. Per spec §20.1, time is a
 /// non-linear lattice (branching futures, counterfactual past
 /// branches), not a strict linear order.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TimePoint {
-    /// Past — concrete historical timestamp.
+ /// Past — concrete historical timestamp.
     Past(i64), // unix-epoch seconds
-    /// Now — the current moment.
+ /// Now — the current moment.
     Now,
-    /// Future — projected timestamp (target date).
+ /// Future — projected timestamp (target date).
     Future(i64),
-    /// Counterfactual — alternative-history branch.
+ /// Counterfactual — alternative-history branch.
     Counterfactual { branch: String },
 }
 
 impl TimePoint {
-    /// Stable diagnostic tag.
+ /// Stable diagnostic tag.
     pub fn tag(&self) -> &'static str {
         match self {
             TimePoint::Past(_) => "past",
@@ -56,9 +56,9 @@ impl TimePoint {
         }
     }
 
-    /// Chronological partial order: `self ≤ other`.  Returns
-    /// `false` when the two points are not comparable (different
-    /// counterfactual branches).
+ /// Chronological partial order: `self ≤ other`. Returns
+ /// `false` when the two points are not comparable (different
+ /// counterfactual branches).
     pub fn precedes(&self, other: &TimePoint) -> bool {
         match (self, other) {
             (TimePoint::Past(a), TimePoint::Past(b)) => a <= b,
@@ -67,7 +67,7 @@ impl TimePoint {
             (TimePoint::Now, TimePoint::Now) => true,
             (TimePoint::Now, TimePoint::Future(_)) => true,
             (TimePoint::Future(a), TimePoint::Future(b)) => a <= b,
-            // Counterfactual branches are never directly comparable.
+ // Counterfactual branches are never directly comparable.
             (TimePoint::Counterfactual { branch: a }, TimePoint::Counterfactual { branch: b }) => {
                 a == b
             }
@@ -84,13 +84,13 @@ impl TimePoint {
 /// Per spec §20.1.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Decision {
-    /// Stable name (e.g. "framework_choice").
+ /// Stable name (e.g. "framework_choice").
     pub name: String,
-    /// Possible values for this decision.
+ /// Possible values for this decision.
     pub options: Vec<DecisionOption>,
-    /// Currently-chosen value, if fixed.
+ /// Currently-chosen value, if fixed.
     pub chosen: Option<DecisionOption>,
-    /// Decisions this one depends on.
+ /// Decisions this one depends on.
     pub depends_on: Vec<String>,
 }
 
@@ -101,8 +101,8 @@ pub struct DecisionOption {
 }
 
 impl Decision {
-    /// True iff `self` is a refinement of `other` — self's chosen
-    /// option is one of other's options.
+ /// True iff `self` is a refinement of `other` — self's chosen
+ /// option is one of other's options.
     pub fn refines(&self, other: &Decision) -> bool {
         self.name == other.name
             && match (&self.chosen, &other.chosen) {
@@ -112,7 +112,7 @@ impl Decision {
             }
     }
 
-    /// True iff a decision is fully resolved (chosen value set).
+ /// True iff a decision is fully resolved (chosen value set).
     pub fn is_resolved(&self) -> bool {
         self.chosen.is_some()
     }
@@ -127,15 +127,15 @@ impl Decision {
 /// observers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Observer {
-    /// Generic end-user.
+ /// Generic end-user.
     EndUser { kind: String },
-    /// Another cog in the composition graph.
+ /// Another cog in the composition graph.
     PeerCog { module_path: String },
-    /// Stakeholder with a special role.
+ /// Stakeholder with a special role.
     Stakeholder { role: String },
-    /// Auditor — verifying compliance.
+ /// Auditor — verifying compliance.
     Auditor { audit_kind: String },
-    /// Adversary — threat-model observer.
+ /// Adversary — threat-model observer.
     Adversary { threat_model: String },
 }
 
@@ -150,7 +150,7 @@ impl Observer {
         }
     }
 
-    /// Full canonical observer roster.
+ /// Full canonical observer roster.
     pub fn full_canonical_roster() -> Vec<Observer> {
         vec![
             Observer::EndUser {
@@ -180,20 +180,20 @@ impl Observer {
 /// Combines S4/S5-style modal logic с LTL temporal operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModalAssertion {
-    /// `□ A` — A holds in EVERY possible future / decision branch.
+ /// `□ A` — A holds in EVERY possible future / decision branch.
     Necessity { proposition: ArchProposition },
-    /// `◇ A` — A holds in SOME possible future / decision branch.
+ /// `◇ A` — A holds in SOME possible future / decision branch.
     Possibility { proposition: ArchProposition },
-    /// `◇F A` — A holds in some future time-point.
+ /// `◇F A` — A holds in some future time-point.
     Eventually { proposition: ArchProposition },
-    /// `□G A` — A holds in every future time-point.
+ /// `□G A` — A holds in every future time-point.
     Always { proposition: ArchProposition },
-    /// `A U B` — A holds until B holds.
+ /// `A U B` — A holds until B holds.
     Until {
         first: ArchProposition,
         second: ArchProposition,
     },
-    /// `A ⇨ B` — counterfactual: if A held, B would hold.
+ /// `A ⇨ B` — counterfactual: if A held, B would hold.
     Counterfactual {
         antecedent: ArchProposition,
         consequent: ArchProposition,
@@ -201,7 +201,7 @@ pub enum ModalAssertion {
 }
 
 impl ModalAssertion {
-    /// Stable diagnostic tag.
+ /// Stable diagnostic tag.
     pub fn tag(&self) -> &'static str {
         match self {
             ModalAssertion::Necessity { .. } => "necessity",
@@ -213,7 +213,7 @@ impl ModalAssertion {
         }
     }
 
-    /// True iff this is a temporal operator (Eventually / Always / Until).
+ /// True iff this is a temporal operator (Eventually / Always / Until).
     pub fn is_temporal(&self) -> bool {
         matches!(
             self,
@@ -223,7 +223,7 @@ impl ModalAssertion {
         )
     }
 
-    /// True iff this is a modal operator (Necessity / Possibility).
+ /// True iff this is a modal operator (Necessity / Possibility).
     pub fn is_modal(&self) -> bool {
         matches!(
             self,
@@ -237,18 +237,18 @@ impl ModalAssertion {
 // =============================================================================
 
 /// An architectural proposition — what a modal operator quantifies
-/// over.  Сезон 5 baseline: capability presence + invariant
-/// preservation + foundation stability.  Сезон 6 extends with
+/// over. baseline: capability presence + invariant
+/// preservation + foundation stability. extends with
 /// arbitrary refinement predicates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArchProposition {
-    /// Capability of given name is present in the cog's exposes/requires.
+ /// Capability of given name is present in the cog's exposes/requires.
     HasCapability { capability_tag: String },
-    /// Foundation remains stable across time/decisions.
+ /// Foundation remains stable across time/decisions.
     FoundationStable,
-    /// API is unchanged (public interface invariant).
+ /// API is unchanged (public interface invariant).
     PublicApiUnchanged,
-    /// Custom predicate referenced by name.
+ /// Custom predicate referenced by name.
     Custom { name: String },
 }
 
@@ -272,37 +272,37 @@ impl ArchProposition {
 /// reversibility — all type-level.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchEvolution {
-    /// Trigger condition (e.g. "capability_X_becomes_available").
+ /// Trigger condition (e.g. "capability_X_becomes_available").
     pub trigger: String,
-    /// Target time-point when the evolution is expected.
+ /// Target time-point when the evolution is expected.
     pub expected_time: TimePoint,
-    /// Cost class of the evolution.
+ /// Cost class of the evolution.
     pub cost_class: ComplexityClass,
-    /// Whether the evolution is reversible (adjoint pair exists).
+ /// Whether the evolution is reversible (adjoint pair exists).
     pub reversibility: Reversibility,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ComplexityClass {
-    /// O(1) — trivial change (config flip).
+ /// O(1) — trivial change (config flip).
     Trivial,
-    /// O(N) — small change touching N modules.
+ /// O(N) — small change touching N modules.
     Linear,
-    /// O(N²) — quadratic.
+ /// O(N²) — quadratic.
     Quadratic,
-    /// Architectural redesign — bounded but expensive.
+ /// Architectural redesign — bounded but expensive.
     ArchitecturalRedesign,
-    /// Unbounded — full system rewrite.
+ /// Unbounded — full system rewrite.
     Rewrite,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Reversibility {
-    /// Reversible via adjoint pair (left / right adjoint exists).
+ /// Reversible via adjoint pair (left / right adjoint exists).
     AdjointReversible,
-    /// One-way — cannot undo.
+ /// One-way — cannot undo.
     Irreversible,
-    /// Reversible up to a bound (limited rollback window).
+ /// Reversible up to a bound (limited rollback window).
     BoundedReversible { window_seconds: u64 },
 }
 
@@ -331,15 +331,15 @@ pub struct CounterfactualPair {
 pub struct AdjunctionWitness {
     pub forward_name: String,
     pub backward_name: String,
-    /// Properties preserved under F.
+ /// Properties preserved under F.
     pub preserved: Vec<ArchProposition>,
-    /// Properties gained under F.
+ /// Properties gained under F.
     pub gained: Vec<ArchProposition>,
 }
 
 impl AdjunctionWitness {
-    /// True iff this witness is a left-adjoint of `other`'s right-adjoint.
-    /// Сезон 5 simplification: structural equality of forward names.
+ /// True iff this witness is a left-adjoint of `other`'s right-adjoint.
+ /// simplification: structural equality of forward names.
     pub fn is_adjoint_of(&self, other: &AdjunctionWitness) -> bool {
         self.forward_name == other.backward_name && self.backward_name == other.forward_name
     }
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn time_precedes_chronological() {
-        // Past(0) < Now < Future(1000)
+ // Past(0) < Now < Future(1000)
         assert!(TimePoint::Past(0).precedes(&TimePoint::Past(100)));
         assert!(TimePoint::Past(0).precedes(&TimePoint::Now));
         assert!(TimePoint::Now.precedes(&TimePoint::Future(1000)));
@@ -384,9 +384,9 @@ mod tests {
         let alt_b = TimePoint::Counterfactual {
             branch: "b".into(),
         };
-        // Same branch — comparable.
+ // Same branch — comparable.
         assert!(alt_a.precedes(&alt_a.clone()));
-        // Different branches — NOT comparable.
+ // Different branches — NOT comparable.
         assert!(!alt_a.precedes(&alt_b));
         assert!(!alt_b.precedes(&alt_a));
     }
@@ -504,15 +504,15 @@ mod tests {
 
     #[test]
     fn architectural_pin_mtac_primitive_count() {
-        // Pin: Сезон 5 ships exactly these MTAC primitives.
-        // Adding more requires RFC ATS-V-007 (per spec §29.2).
-        // - TimePoint: 4 variants
-        // - Observer: 5 canonical
-        // - ModalAssertion: 6 operators (Necessity/Possibility/Eventually/Always/Until/Counterfactual)
-        // - ArchProposition: 4 baseline (HasCapability/FoundationStable/PublicApiUnchanged/Custom)
-        // - ComplexityClass: 5 levels
-        // - Reversibility: 3 kinds
+ // Pin: ships exactly these MTAC primitives.
+ // Adding more requires RFC ATS-V-007 (per spec §29.2).
+ // - TimePoint: 4 variants
+ // - Observer: 5 canonical
+ // - ModalAssertion: 6 operators (Necessity/Possibility/Eventually/Always/Until/Counterfactual)
+ // - ArchProposition: 4 baseline (HasCapability/FoundationStable/PublicApiUnchanged/Custom)
+ // - ComplexityClass: 5 levels
+ // - Reversibility: 3 kinds
         assert_eq!(Observer::full_canonical_roster().len(), 5);
-        // 6 ModalAssertion operators verified by tags-distinct test above.
+ // 6 ModalAssertion operators verified by tags-distinct test above.
     }
 }

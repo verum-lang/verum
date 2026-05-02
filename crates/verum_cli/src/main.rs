@@ -55,9 +55,9 @@ struct Cli {
     #[clap(short, long, global = true)]
     verbose: bool,
 
-    /// Print the verification-architecture version stamp and exit.
-    /// The kernel constant `verum_kernel::VVA_VERSION` is the
-    /// single source of truth — bump on every kernel-rule acceptance.
+ /// Print the verification-architecture version stamp and exit.
+ /// The kernel constant `verum_kernel::VVA_VERSION` is the
+ /// single source of truth — bump on every kernel-rule acceptance.
     #[clap(long = "vva-version")]
     vva_version: bool,
 
@@ -70,12 +70,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new Verum project
+ /// Create a new Verum project
     New {
-        /// Project name (used as directory name and cog name)
+ /// Project name (used as directory name and cog name)
         name: String,
 
-        /// Language profile controlling available features
+ /// Language profile controlling available features
         #[clap(
             short, long,
             value_name = "PROFILE",
@@ -83,7 +83,7 @@ enum Commands {
         )]
         profile: Option<String>,
 
-        /// Project template to scaffold
+ /// Project template to scaffold
         #[clap(
             short, long,
             default_value = "binary",
@@ -91,11 +91,11 @@ enum Commands {
         )]
         template: String,
 
-        /// Create a library project (shorthand for --template library)
+ /// Create a library project (shorthand for --template library)
         #[clap(long)]
         lib: bool,
 
-        /// Version control system to initialize
+ /// Version control system to initialize
         #[clap(
             long,
             default_value = "git",
@@ -103,14 +103,14 @@ enum Commands {
         )]
         vcs: String,
 
-        /// Create project at a custom path instead of ./<name>
+ /// Create project at a custom path instead of ./<name>
         #[clap(long, value_name = "DIR")]
         path: Option<String>,
     },
 
-    /// Initialize a Verum project in the current directory
+ /// Initialize a Verum project in the current directory
     Init {
-        /// Language profile controlling available features (required)
+ /// Language profile controlling available features (required)
         #[clap(
             short, long,
             value_name = "PROFILE",
@@ -119,7 +119,7 @@ enum Commands {
         )]
         profile: String,
 
-        /// Project template to scaffold
+ /// Project template to scaffold
         #[clap(
             short, long,
             default_value = "binary",
@@ -127,47 +127,47 @@ enum Commands {
         )]
         template: String,
 
-        /// Create a library project (shorthand for --template library)
+ /// Create a library project (shorthand for --template library)
         #[clap(long)]
         lib: bool,
 
-        /// Overwrite existing verum.toml
+ /// Overwrite existing verum.toml
         #[clap(long)]
         force: bool,
 
-        /// Override project name (default: current directory name)
+ /// Override project name (default: current directory name)
         #[clap(long, value_name = "NAME")]
         name: Option<String>,
     },
 
-    /// Build the project (always AOT compilation)
+ /// Build the project (always AOT compilation)
     Build {
-        /// Optional path to project directory or .vr file
+ /// Optional path to project directory or .vr file
         #[clap(value_name = "PATH")]
         path: Option<Text>,
         #[clap(long, value_name = "NAME")]
         profile: Option<Text>,
-        /// Reference mode: managed (~15ns), checked (0ns), mixed (smart)
+ /// Reference mode: managed (~15ns), checked (0ns), mixed (smart)
         #[clap(
             long,
             value_name = "MODE",
             help = "Reference mode: managed|checked|mixed"
         )]
         refs: Option<Text>,
-        /// Verification strategy controlling formal-verification behavior.
-        ///
+ /// Verification strategy controlling formal-verification behavior.
+ ///
 
-        /// Semantic strategies (backend-agnostic):
-        ///  runtime — runtime assertion only (no formal proof)
-        ///  static — type-level check only
-        ///  formal — balanced default (compiler picks best technique)
-        ///  fast — prefer speed over completeness
-        ///  thorough — maximum completeness (parallel strategies)
-        ///  certified — produce exportable proof certificate
-        ///  synthesize — synthesis problem (generate term from spec)
-        ///
+ /// Semantic strategies (backend-agnostic):
+ /// runtime — runtime assertion only (no formal proof)
+ /// static — type-level check only
+ /// formal — balanced default (compiler picks best technique)
+ /// fast — prefer speed over completeness
+ /// thorough — maximum completeness (parallel strategies)
+ /// certified — produce exportable proof certificate
+ /// synthesize — synthesis problem (generate term from spec)
+ ///
 
-        /// Legacy values "none", "proof" are aliases for "runtime" and "formal".
+ /// Legacy values "none", "proof" are aliases for "runtime" and "formal".
         #[clap(
             long,
             value_name = "STRATEGY",
@@ -175,7 +175,7 @@ enum Commands {
         )]
         verify: Option<Text>,
 
-        /// Print SMT routing statistics after compilation.
+ /// Print SMT routing statistics after compilation.
         #[clap(long, help = "Show SMT solver routing telemetry after build")]
         smt_stats: bool,
         #[clap(short, long)]
@@ -195,49 +195,49 @@ enum Commands {
         #[clap(long)]
         timings: bool,
 
-        // Advanced linking options
-        /// Enable Link-Time Optimization: thin (fast) or full (slower, better)
+ // Advanced linking options
+ /// Enable Link-Time Optimization: thin (fast) or full (slower, better)
         #[clap(long, value_name = "MODE", help = "LTO mode: thin|full")]
         lto: Option<Text>,
 
-        /// Enable static linking (no runtime dependencies)
+ /// Enable static linking (no runtime dependencies)
         #[clap(long, help = "Static linking for portable binary")]
         static_link: bool,
 
-        /// Strip all symbols from output binary
+ /// Strip all symbols from output binary
         #[clap(long, help = "Strip symbols for smaller binary")]
         strip: bool,
 
-        /// Strip debug info only (keep function names)
+ /// Strip debug info only (keep function names)
         #[clap(long, help = "Strip debug info only")]
         strip_debug: bool,
 
-        /// Output assembly instead of binary
+ /// Output assembly instead of binary
         #[clap(long, help = "Emit assembly (.s) file")]
         emit_asm: bool,
 
-        /// Output LLVM IR instead of binary
+ /// Output LLVM IR instead of binary
         #[clap(long, help = "Emit LLVM IR (.ll) file")]
         emit_llvm: bool,
 
-        /// Output LLVM bitcode for LTO
+ /// Output LLVM bitcode for LTO
         #[clap(long, help = "Emit LLVM bitcode (.bc) file")]
         emit_bc: bool,
 
-        /// Emit type metadata (.vtyp) file for separate compilation
+ /// Emit type metadata (.vtyp) file for separate compilation
         #[clap(long, help = "Emit type metadata (.vtyp) file")]
         emit_types: bool,
 
-        /// Emit VBC bytecode dump (human-readable disassembly)
+ /// Emit VBC bytecode dump (human-readable disassembly)
         #[clap(long, help = "Emit VBC bytecode dump (.vbc.txt)")]
         emit_vbc: bool,
 
-        /// Windows PE subsystem. `console` (default) produces a
-        /// standard CLI app that allocates a console window when
-        /// launched. `gui` produces a Win32 GUI app — no console
-        /// flashes on launch, suitable for desktop applications.
-        /// Ignored on non-Windows targets. Overrides the manifest
-        /// `[build].windows_subsystem` setting if present.
+ /// Windows PE subsystem. `console` (default) produces a
+ /// standard CLI app that allocates a console window when
+ /// launched. `gui` produces a Win32 GUI app — no console
+ /// flashes on launch, suitable for desktop applications.
+ /// Ignored on non-Windows targets. Overrides the manifest
+ /// `[build].windows_subsystem` setting if present.
         #[clap(
             long,
             value_name = "MODE",
@@ -245,392 +245,392 @@ enum Commands {
         )]
         windows_subsystem: Option<Text>,
 
-        // Lint configuration options
-        /// Treat all warnings as errors
+ // Lint configuration options
+ /// Treat all warnings as errors
         #[clap(long, help = "Treat all warnings as errors")]
         deny_warnings: bool,
 
-        /// Treat missing intrinsics as errors (default: warnings)
+ /// Treat missing intrinsics as errors (default: warnings)
         #[clap(long, help = "Missing intrinsics become errors")]
         strict_intrinsics: bool,
 
-        /// Set a lint to deny level (e.g., -D missing_intrinsic)
+ /// Set a lint to deny level (e.g., -D missing_intrinsic)
         #[clap(short = 'D', long = "deny", value_name = "LINT")]
         deny_lint: Vec<Text>,
 
-        /// Set a lint to warn level (e.g., -W missing_intrinsic)
+ /// Set a lint to warn level (e.g., -W missing_intrinsic)
         #[clap(short = 'W', long = "warn", value_name = "LINT")]
         warn_lint: Vec<Text>,
 
-        /// Set a lint to allow level (e.g., -A missing_intrinsic)
+ /// Set a lint to allow level (e.g., -A missing_intrinsic)
         #[clap(short = 'A', long = "allow", value_name = "LINT")]
         allow_lint: Vec<Text>,
 
-        /// Set a lint to forbid level (e.g., -F missing_intrinsic)
+ /// Set a lint to forbid level (e.g., -F missing_intrinsic)
         #[clap(short = 'F', long = "forbid", value_name = "LINT")]
         forbid_lint: Vec<Text>,
 
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Run a Verum program (interpreter by default, --aot for native)
+ /// Run a Verum program (interpreter by default, --aot for native)
     Run {
-        /// .vr file to run, project directory, or `-` to read from stdin.
+ /// .vr file to run, project directory, or `-` to read from stdin.
         #[clap(value_name = "FILE")]
         file: Option<Text>,
-        /// Evaluate an inline expression. The expression is wrapped in
-        /// a `print(...)` so its value is shown; pass `-` instead for
-        /// raw stdin without auto-print.
+ /// Evaluate an inline expression. The expression is wrapped in
+ /// a `print(...)` so its value is shown; pass `-` instead for
+ /// raw stdin without auto-print.
         #[clap(long, short = 'e', value_name = "EXPR", conflicts_with = "file")]
         eval: Option<String>,
-        /// Run via interpreter (default, can be omitted)
+ /// Run via interpreter (default, can be omitted)
         #[clap(long, conflicts_with = "aot")]
         interp: bool,
-        /// Compile to native and run (LLVM AOT)
+ /// Compile to native and run (LLVM AOT)
         #[clap(long, conflicts_with = "interp")]
         aot: bool,
         #[clap(short, long)]
         release: bool,
-        /// Show compilation phase timings
+ /// Show compilation phase timings
         #[clap(long)]
         timings: bool,
         #[clap(last = true)]
         args: Vec<String>,
 
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
 
-        /// Script-mode permission overrides. `--allow <scope>`,
-        /// `--allow-all`, `--deny-all`. Applied on top of any
-        /// `permissions = [...]` declaration in the script's
-        /// frontmatter. No-op for non-script invocations.
+ /// Script-mode permission overrides. `--allow <scope>`,
+ /// `--allow-all`, `--deny-all`. Applied on top of any
+ /// `permissions = [...]` declaration in the script's
+ /// frontmatter. No-op for non-script invocations.
         #[clap(flatten)]
         permission_flags: crate::script::permission_flags::PermissionFlags,
     },
 
-    /// Run tests
+ /// Run tests
     Test {
-        /// Substring match on test name (use `--exact` for equality).
+ /// Substring match on test name (use `--exact` for equality).
         #[clap(long)]
         filter: Option<Text>,
         #[clap(short, long)]
         release: bool,
-        /// Don't capture stdout/stderr of test binaries.
+ /// Don't capture stdout/stderr of test binaries.
         #[clap(long)]
         nocapture: bool,
-        /// Max parallel test workers (default: num CPUs when
-        /// [test].parallel = true).
+ /// Max parallel test workers (default: num CPUs when
+ /// [test].parallel = true).
         #[clap(long)]
         test_threads: Option<usize>,
-        /// Enable code coverage instrumentation and report generation.
+ /// Enable code coverage instrumentation and report generation.
         #[clap(long)]
         coverage: bool,
-        /// Run via interpreter (Tier 0, in-process).
+ /// Run via interpreter (Tier 0, in-process).
         #[clap(long, conflicts_with = "aot")]
         interp: bool,
-        /// Compile each test to native and spawn (Tier 1, default).
+ /// Compile each test to native and spawn (Tier 1, default).
         #[clap(long, conflicts_with = "interp")]
         aot: bool,
-        /// Presentation: pretty | terse | json (libtest convention).
+ /// Presentation: pretty | terse | json (libtest convention).
         #[clap(long, value_name = "FMT", default_value = "pretty")]
         format: Text,
-        /// Print discovered tests and exit without running them.
+ /// Print discovered tests and exit without running them.
         #[clap(long)]
         list: bool,
-        /// Run all tests, including @ignore'd.
+ /// Run all tests, including @ignore'd.
         #[clap(long, conflicts_with = "ignored")]
         include_ignored: bool,
-        /// Run ONLY @ignore'd tests.
+ /// Run ONLY @ignore'd tests.
         #[clap(long)]
         ignored: bool,
-        /// Require filter to match the full test name.
+ /// Require filter to match the full test name.
         #[clap(long)]
         exact: bool,
-        /// Skip tests whose name contains this pattern (repeatable).
+ /// Skip tests whose name contains this pattern (repeatable).
         #[clap(long)]
         skip: Vec<Text>,
 
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Run benchmarks
+ /// Run benchmarks
     Bench {
-        /// Substring match on bench name.
+ /// Substring match on bench name.
         #[clap(long)]
         filter: Option<Text>,
-        /// Save current run as a named baseline (target/bench/NAME.json).
+ /// Save current run as a named baseline (target/bench/NAME.json).
         #[clap(long, value_name = "NAME")]
         save_baseline: Option<Text>,
-        /// Diff against a previously saved baseline.
+ /// Diff against a previously saved baseline.
         #[clap(long, value_name = "NAME")]
         baseline: Option<Text>,
-        /// Run each @bench via interpreter (Tier 0, in-process, no spawn).
+ /// Run each @bench via interpreter (Tier 0, in-process, no spawn).
         #[clap(long, conflicts_with = "aot")]
         interp: bool,
-        /// Compile each @bench to a native driver and spawn (Tier 1, default).
+ /// Compile each @bench to a native driver and spawn (Tier 1, default).
         #[clap(long, conflicts_with = "interp")]
         aot: bool,
-        /// Warm-up budget in seconds before timed samples.
+ /// Warm-up budget in seconds before timed samples.
         #[clap(long, value_name = "SECS", default_value = "3.0")]
         warm_up_time: f64,
-        /// Measurement budget in seconds (terminates after min-samples).
+ /// Measurement budget in seconds (terminates after min-samples).
         #[clap(long, value_name = "SECS", default_value = "5.0")]
         measurement_time: f64,
-        /// Lower bound on samples per bench (ignored if --sample-size set).
+ /// Lower bound on samples per bench (ignored if --sample-size set).
         #[clap(long, value_name = "N", default_value = "10")]
         min_samples: usize,
-        /// Upper bound on samples per bench (or fixed count with --sample-size).
+ /// Upper bound on samples per bench (or fixed count with --sample-size).
         #[clap(long, value_name = "N", default_value = "100")]
         max_samples: usize,
-        /// Run exactly this many samples, skipping time-budget logic.
+ /// Run exactly this many samples, skipping time-budget logic.
         #[clap(long, value_name = "N")]
         sample_size: Option<usize>,
-        /// Percent change below which a diff vs baseline is "noise".
+ /// Percent change below which a diff vs baseline is "noise".
         #[clap(long, value_name = "PCT", default_value = "2.0")]
         noise_threshold: f64,
-        /// Output format: table | json | csv | markdown.
+ /// Output format: table | json | csv | markdown.
         #[clap(long, value_name = "FMT", default_value = "table")]
         format: Text,
 
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Check without building (works with projects or single .vr files)
+ /// Check without building (works with projects or single .vr files)
     Check {
-        /// Optional path to project directory or .vr file
+ /// Optional path to project directory or .vr file
         #[clap(value_name = "PATH")]
         path: Option<Text>,
         #[clap(long)]
         workspace: bool,
-        /// Only parse, don't type check (for VCS parse-pass tests)
+ /// Only parse, don't type check (for VCS parse-pass tests)
         #[clap(long)]
         parse_only: bool,
 
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Re-verify a proof-term certificate via the minimal kernel
-    /// (#157). Reads a `.vproof` JSON file containing
-    /// `{ term, claimed_type, metadata }`; runs the 6-rule kernel in
-    /// `verum_kernel::proof_checker`; exits 0 iff the term has the
-    /// claimed type.
-    ///
+ /// Re-verify a proof-term certificate via the minimal kernel
+ /// (#157). Reads a `.vproof` JSON file containing
+ /// `{ term, claimed_type, metadata }`; runs the 6-rule kernel in
+ /// `verum_kernel::proof_checker`; exits 0 iff the term has the
+ /// claimed type.
+ ///
 
-    /// **The trusted-base reference command.** Users who want to
-    /// verify a Verum proof from first principles run this command
-    /// against a published `.vproof` artifact — the verdict depends
-    /// only on the 633-LOC `proof_checker.rs` module, not on the rest
-    /// of Verum's pipeline. Compare: Coq's `coqchk`, Lean 4's
-    /// independent re-checker, HOL Light's article verifier. Verum's
-    /// `check-proof` has the smallest production-shippable trust base
-    /// in the proof-assistant world (633 LOC vs Coq ~10K, Lean ~5K,
-    /// HOL Light ~5K).
+ /// **The trusted-base reference command.** Users who want to
+ /// verify a Verum proof from first principles run this command
+ /// against a published `.vproof` artifact — the verdict depends
+ /// only on the 633-LOC `proof_checker.rs` module, not on the rest
+ /// of Verum's pipeline. Compare: Coq's `coqchk`, Lean 4's
+ /// independent re-checker, HOL Light's article verifier. Verum's
+ /// `check-proof` has the smallest production-shippable trust base
+ /// in the proof-assistant world (633 LOC vs Coq ~10K, Lean ~5K,
+ /// HOL Light ~5K).
     CheckProof {
-        /// Path to the `.vproof` certificate file.
+ /// Path to the `.vproof` certificate file.
         #[clap(value_name = "FILE")]
         file: Text,
 
-        /// **Meta-mode universe lift** (#158 V2 — kernel reflection).
-        /// Re-runs the kernel with every `Universe(n)` interpreted as
-        /// `Universe(n + LIFT)`. Equivalent to running the proof at a
-        /// strictly stronger universe, which is what Gödel's 2nd
-        /// Incompleteness Theorem demands for self-soundness claims.
-        ///
-        /// `--meta-mode` (no value) is equivalent to `--meta-lift 1`.
-        ///
-        /// Soundness invariant: a closed certificate accepts at lift 0
-        /// iff it accepts at any lift k > 0 (universe-cumulativity:
-        /// HTT 1.4, U_n ⊂ U_{n+1}).  Disagreements indicate either a
-        /// shift-implementation bug or an unsound universe-identity
-        /// dependence in the proof structure.
-        ///
-        /// Use case: `verum check-proof foo.vproof --meta-mode` to
-        /// confirm a proof survives meta-level interpretation; useful
-        /// as a sanity check before publishing.
+ /// **Meta-mode universe lift** (#158 V2 — kernel reflection).
+ /// Re-runs the kernel with every `Universe(n)` interpreted as
+ /// `Universe(n + LIFT)`. Equivalent to running the proof at a
+ /// strictly stronger universe, which is what Gödel's 2nd
+ /// Incompleteness Theorem demands for self-soundness claims.
+ ///
+ /// `--meta-mode` (no value) is equivalent to `--meta-lift 1`.
+ ///
+ /// Soundness invariant: a closed certificate accepts at lift 0
+ /// iff it accepts at any lift k > 0 (universe-cumulativity:
+ /// HTT 1.4, U_n ⊂ U_{n+1}). Disagreements indicate either a
+ /// shift-implementation bug or an unsound universe-identity
+ /// dependence in the proof structure.
+ ///
+ /// Use case: `verum check-proof foo.vproof --meta-mode` to
+ /// confirm a proof survives meta-level interpretation; useful
+ /// as a sanity check before publishing.
         #[clap(long, conflicts_with = "meta_lift")]
         meta_mode: bool,
 
-        /// Explicit universe-lift level for meta-mode (#158 V2).
-        /// `--meta-lift 0` is identical to default; higher values
-        /// run the kernel at progressively stronger universes.
+ /// Explicit universe-lift level for meta-mode (#158 V2).
+ /// `--meta-lift 0` is identical to default; higher values
+ /// run the kernel at progressively stronger universes.
         #[clap(long, value_name = "LIFT")]
         meta_lift: Option<u32>,
     },
 
-    /// Elaborate Verum theorems into kernel-checkable certificates.
-    /// Walks every theorem / lemma / corollary in `<file.vr>`, runs
-    /// `tactic_elaborator::elaborate_theorem` on each, and emits
-    /// `<theorem-name>.vproof` files into `<output-dir>` (default:
-    /// `<source-dir>/elaborated/`).
-    ///
+ /// Elaborate Verum theorems into kernel-checkable certificates.
+ /// Walks every theorem / lemma / corollary in `<file.vr>`, runs
+ /// `tactic_elaborator::elaborate_theorem` on each, and emits
+ /// `<theorem-name>.vproof` files into `<output-dir>` (default:
+ /// `<source-dir>/elaborated/`).
+ ///
 
-    /// Together with `verum check-proof`, this command closes the
-    /// round-trip from source theorem to kernel verdict: certificates
-    /// are kernel-checked at construction time and can be
-    /// independently re-verified by `verum check-proof`, whose
-    /// trust base is the 796-LOC `proof_checker.rs`.
-    ///
+ /// Together with `verum check-proof`, this command closes the
+ /// round-trip from source theorem to kernel verdict: certificates
+ /// are kernel-checked at construction time and can be
+ /// independently re-verified by `verum check-proof`, whose
+ /// trust base is the 796-LOC `proof_checker.rs`.
+ ///
 
-    /// Currently supports `proof { apply <lemma>(args); }` and
-    /// `proof = <expr>` bodies with `Bool` / `Path` / `Call` /
-    /// `Binary` / `Unary` propositions. Other tactic forms and
-    /// proposition shapes are gracefully skipped with a structured
-    /// `ElabError` diagnostic (UnsupportedTactic /
-    /// UndeclaredApplyTarget / UnsupportedExpression).
+ /// Currently supports `proof { apply <lemma>(args); }` and
+ /// `proof = <expr>` bodies with `Bool` / `Path` / `Call` /
+ /// `Binary` / `Unary` propositions. Other tactic forms and
+ /// proposition shapes are gracefully skipped with a structured
+ /// `ElabError` diagnostic (UnsupportedTactic /
+ /// UndeclaredApplyTarget / UnsupportedExpression).
     ElaborateProof {
-        /// Path to the `.vr` source file.
+ /// Path to the `.vr` source file.
         #[clap(value_name = "FILE")]
         file: Text,
-        /// Output directory for emitted `.vproof` files. Default:
-        /// `<source-dir>/elaborated/`.
+ /// Output directory for emitted `.vproof` files. Default:
+ /// `<source-dir>/elaborated/`.
         #[clap(long, value_name = "DIR")]
         output_dir: Option<Text>,
     },
 
-    /// Format source code
+ /// Format source code
     Fmt {
         #[clap(long)]
         check: bool,
         #[clap(long)]
         verbose: bool,
-        /// Read source from stdin and write the formatted output to
-        /// stdout. The standard editor format-on-save plumbing
-        /// (rustfmt, gofmt, prettier, ruff format -). Mutually
-        /// exclusive with `--check`.
+ /// Read source from stdin and write the formatted output to
+ /// stdout. The standard editor format-on-save plumbing
+ /// (rustfmt, gofmt, prettier, ruff format -). Mutually
+ /// exclusive with `--check`.
         #[clap(long)]
         stdin: bool,
-        /// Filename hint for stdin mode — used for diagnostics and
-        /// future config resolution. The file at this path is *not*
-        /// read.
+ /// Filename hint for stdin mode — used for diagnostics and
+ /// future config resolution. The file at this path is *not*
+ /// read.
         #[clap(long, value_name = "PATH")]
         stdin_filename: Option<Text>,
-        /// Worker thread count for the parallel file scanner. `0`
-        /// = sequential. Default uses `rayon::current_num_threads()`.
+ /// Worker thread count for the parallel file scanner. `0`
+ /// = sequential. Default uses `rayon::current_num_threads()`.
         #[clap(long, value_name = "N")]
         threads: Option<usize>,
-        /// Behaviour when a file fails to parse:
-        ///  - `fallback` (default): silently apply whitespace
-        ///  normalisation; warn.
-        ///  - `skip`: leave the file untouched; warn.
-        ///  - `error`: leave the file untouched; fail the run.
+ /// Behaviour when a file fails to parse:
+ /// - `fallback` (default): silently apply whitespace
+ /// normalisation; warn.
+ /// - `skip`: leave the file untouched; warn.
+ /// - `error`: leave the file untouched; fail the run.
         #[clap(long, value_name = "MODE")]
         on_parse_error: Option<Text>,
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Static analysis suite — see [Reference → Lint configuration]
-    /// for the full schema in verum.toml.
+ /// Static analysis suite — see [Reference → Lint configuration]
+ /// for the full schema in verum.toml.
     Lint {
-        /// Apply auto-fixes where available; honours [lint.policy].auto_fix.
+ /// Apply auto-fixes where available; honours [lint.policy].auto_fix.
         #[clap(long)]
         fix: bool,
-        /// Treat warnings as errors (CI gate).
+ /// Treat warnings as errors (CI gate).
         #[clap(long)]
         deny_warnings: bool,
-        /// Print every known built-in lint rule and exit.
+ /// Print every known built-in lint rule and exit.
         #[clap(long)]
         list_rules: bool,
-        /// Print every known lint group (`verum::strict`,
-        /// `verum::nursery`, etc.) and the rules they include.
+ /// Print every known lint group (`verum::strict`,
+ /// `verum::nursery`, etc.) and the rules they include.
         #[clap(long)]
         list_groups: bool,
-        /// Print extended documentation for one rule and exit.
+ /// Print extended documentation for one rule and exit.
         #[clap(long, value_name = "RULE")]
         explain: Option<Text>,
-        /// Open the rule's online documentation page in the system
-        /// browser. Requires `--explain RULE`.
+ /// Open the rule's online documentation page in the system
+ /// browser. Requires `--explain RULE`.
         #[clap(long, requires = "explain")]
         open: bool,
-        /// Run only config-validator; exits 0 / non-zero. Useful in pre-commit hooks.
+ /// Run only config-validator; exits 0 / non-zero. Useful in pre-commit hooks.
         #[clap(long)]
         validate_config: bool,
-        /// Output format: pretty (default) | json | github-actions.
+ /// Output format: pretty (default) | json | github-actions.
         #[clap(long, value_name = "FMT", default_value = "pretty")]
         format: Text,
-        /// Apply named profile from `[lint.profiles.<name>]`. Falls
-        /// back to `$VERUM_LINT_PROFILE` env var.
+ /// Apply named profile from `[lint.profiles.<name>]`. Falls
+ /// back to `$VERUM_LINT_PROFILE` env var.
         #[clap(long, value_name = "NAME")]
         profile: Option<Text>,
-        /// Lint only files changed since the given git ref. Calls
-        /// `git diff --name-only <REF>...HEAD -- '*.vr'`.
+ /// Lint only files changed since the given git ref. Calls
+ /// `git diff --name-only <REF>...HEAD -- '*.vr'`.
         #[clap(long, value_name = "GIT_REF")]
         since: Option<Text>,
-        /// Report only NEW issues introduced since GIT_REF.
-        /// Differs from `--since`: --since lints changed FILES (and
-        /// reports every issue in them, including pre-existing).
-        /// --new-only-since lints HEAD and REF, then reports issues
-        /// present in HEAD but absent from REF. Mutually exclusive
-        /// with --since.
+ /// Report only NEW issues introduced since GIT_REF.
+ /// Differs from `--since`: --since lints changed FILES (and
+ /// reports every issue in them, including pre-existing).
+ /// --new-only-since lints HEAD and REF, then reports issues
+ /// present in HEAD but absent from REF. Mutually exclusive
+ /// with --since.
         #[clap(long, value_name = "GIT_REF", conflicts_with = "since")]
         new_only_since: Option<Text>,
-        /// Filter to issues at this level or higher: error | warn | info | hint.
+ /// Filter to issues at this level or higher: error | warn | info | hint.
         #[clap(long, value_name = "LEVEL")]
         severity: Option<Text>,
-        /// Worker thread count for the parallel file scanner. `0`
-        /// falls back to a sequential single-threaded run (useful
-        /// for debugging non-deterministic output). The default is
-        /// `rayon::current_num_threads()`, which honours
-        /// `RAYON_NUM_THREADS` if set.
+ /// Worker thread count for the parallel file scanner. `0`
+ /// falls back to a sequential single-threaded run (useful
+ /// for debugging non-deterministic output). The default is
+ /// `rayon::current_num_threads()`, which honours
+ /// `RAYON_NUM_THREADS` if set.
         #[clap(long, value_name = "N")]
         threads: Option<usize>,
-        /// Bypass the per-file digest cache. Forces every file to
-        /// re-lint on this run; useful when you suspect the cache
-        /// is stale or you want a clean reproduction of CI output.
+ /// Bypass the per-file digest cache. Forces every file to
+ /// re-lint on this run; useful when you suspect the cache
+ /// is stale or you want a clean reproduction of CI output.
         #[clap(long)]
         no_cache: bool,
-        /// Wipe the lint cache (`target/lint-cache/`) and exit
-        /// without running any rules.
+ /// Wipe the lint cache (`target/lint-cache/`) and exit
+ /// without running any rules.
         #[clap(long)]
         clean_cache: bool,
-        /// Read suppressions from FILE (default
-        /// `.verum/lint-baseline.json` if present). Issues that match
-        /// a baseline entry are silenced. Use to adopt strict rules
-        /// incrementally on legacy code.
+ /// Read suppressions from FILE (default
+ /// `.verum/lint-baseline.json` if present). Issues that match
+ /// a baseline entry are silenced. Use to adopt strict rules
+ /// incrementally on legacy code.
         #[clap(long, value_name = "FILE")]
         baseline: Option<Text>,
-        /// Disable baseline lookup for this run, even if the
-        /// default `.verum/lint-baseline.json` exists.
+ /// Disable baseline lookup for this run, even if the
+ /// default `.verum/lint-baseline.json` exists.
         #[clap(long)]
         no_baseline: bool,
-        /// Snapshot the current run's issue set to FILE (or to the
-        /// default baseline path) and exit 0 even if there are
-        /// issues. Use to seed or refresh the baseline.
+ /// Snapshot the current run's issue set to FILE (or to the
+ /// default baseline path) and exit 0 even if there are
+ /// issues. Use to seed or refresh the baseline.
         #[clap(long)]
         write_baseline: bool,
-        /// Fail the run when more than N warnings are emitted (after
-        /// severity_map / per-file overrides / --severity / baseline
-        /// filtering). `0` is equivalent to `--deny-warnings`. Errors
-        /// always fail the run regardless of N.
+ /// Fail the run when more than N warnings are emitted (after
+ /// severity_map / per-file overrides / --severity / baseline
+ /// filtering). `0` is equivalent to `--deny-warnings`. Errors
+ /// always fail the run regardless of N.
         #[clap(long, value_name = "N")]
         max_warnings: Option<usize>,
-        /// Watch the project for changes and re-lint affected files.
-        /// The first run lints everything; subsequent runs use the
-        /// per-file cache so untouched files cost ~nothing. Press
-        /// Ctrl-C to exit.
+ /// Watch the project for changes and re-lint affected files.
+ /// The first run lints everything; subsequent runs use the
+ /// per-file cache so untouched files cost ~nothing. Press
+ /// Ctrl-C to exit.
         #[clap(long)]
         watch: bool,
-        /// When `--watch` is set, clear the screen between runs so
-        /// stale output doesn't pile up. No effect without `--watch`.
+ /// When `--watch` is set, clear the screen between runs so
+ /// stale output doesn't pile up. No effect without `--watch`.
         #[clap(long)]
         watch_clear: bool,
 
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Generate documentation
+ /// Generate documentation
     Doc {
         #[clap(long)]
         open: bool,
@@ -638,45 +638,45 @@ enum Commands {
         document_private_items: bool,
         #[clap(long)]
         no_deps: bool,
-        /// Output format: html, markdown, json (default: html)
+ /// Output format: html, markdown, json (default: html)
         #[clap(long, default_value = "html")]
         format: Text,
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Remove build artifacts
+ /// Remove build artifacts
     Clean {
         #[clap(long)]
         all: bool,
     },
 
-    /// Inspect, export, or clean crash reports written by the Verum
-    /// crash reporter (panics and fatal signals). Reports live under
-    /// `~/.verum/crashes/` and are safe to attach to issue reports —
-    /// environment variables that look sensitive are redacted.
+ /// Inspect, export, or clean crash reports written by the Verum
+ /// crash reporter (panics and fatal signals). Reports live under
+ /// `~/.verum/crashes/` and are safe to attach to issue reports —
+ /// environment variables that look sensitive are redacted.
     #[clap(subcommand)]
     Diagnose(commands::diagnose::DiagnoseCommands),
 
-    /// Manage the script-mode VBC cache (`~/.verum/script-cache/`).
-    /// Subcommands: `path`, `list`, `clear`, `gc`, `show`. The cache
-    /// is content-addressed by source + compiler + flags, so a hit is
-    /// always a valid reuse — there is no "stale cache" failure mode.
-    /// `gc` evicts least-recently-accessed entries until under a budget;
-    /// `clear` removes everything.
+ /// Manage the script-mode VBC cache (`~/.verum/script-cache/`).
+ /// Subcommands: `path`, `list`, `clear`, `gc`, `show`. The cache
+ /// is content-addressed by source + compiler + flags, so a hit is
+ /// always a valid reuse — there is no "stale cache" failure mode.
+ /// `gc` evicts least-recently-accessed entries until under a budget;
+ /// `clear` removes everything.
     #[clap(subcommand)]
     Cache(commands::cache::CacheCommands),
 
-    /// Run a health-check survey of the Verum installation. Verifies
-    /// the home directory is writable, surveys the script cache and
-    /// content store, parses any `verum.lock` in the cwd, and probes
-    /// the permission-grammar surface. `--json` emits NDJSON for
-    /// scripting; `--strict` exits non-zero on warnings as well as
-    /// failures.
+ /// Run a health-check survey of the Verum installation. Verifies
+ /// the home directory is writable, surveys the script cache and
+ /// content store, parses any `verum.lock` in the cwd, and probes
+ /// the permission-grammar surface. `--json` emits NDJSON for
+ /// scripting; `--strict` exits non-zero on warnings as well as
+ /// failures.
     Doctor(commands::doctor::DoctorArgs),
 
-    /// Watch for changes and rebuild
+ /// Watch for changes and rebuild
     Watch {
         #[clap(default_value = "build")]
         command: Text,
@@ -684,102 +684,102 @@ enum Commands {
         clear: bool,
     },
 
-    /// Manage git hooks for the current project. The `install`
-    /// subcommand wires `verum lint --since HEAD --severity error`
-    /// + `verum fmt --check` into `.git/hooks/pre-commit`. Each
-    /// generated hook carries a header marker so `uninstall` only
-    /// touches files we wrote.
+ /// Manage git hooks for the current project. The `install`
+ /// subcommand wires `verum lint --since HEAD --severity error`
+ /// + `verum fmt --check` into `.git/hooks/pre-commit`. Each
+ /// generated hook carries a header marker so `uninstall` only
+ /// touches files we wrote.
     #[clap(subcommand)]
     Hooks(HooksCommands),
 
-    /// Manage dependencies
+ /// Manage dependencies
     #[clap(subcommand)]
     Deps(DepsCommands),
 
-    /// Start interactive REPL (optionally preload a file)
+ /// Start interactive REPL (optionally preload a file)
     Repl {
-        /// Optional file to preload
+ /// Optional file to preload
         #[clap(long)]
         preload: Option<Text>,
         #[clap(long)]
         skip_verify: bool,
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Start Verum Playbook - Interactive notebook environment
-    ///
+ /// Start Verum Playbook - Interactive notebook environment
+ ///
 
-    /// The Playbook provides a Jupyter-like experience in your terminal,
-    /// optimized for exploring Verum's capabilities including:
-    /// - 9-layer math stack (tensors, autodiff, neural networks)
-    /// - CBGR memory safety with configurable tiers
-    /// - Async programming with structured concurrency
-    /// - Full access to core/ standard library
+ /// The Playbook provides a Jupyter-like experience in your terminal,
+ /// optimized for exploring Verum's capabilities including:
+ /// - 9-layer math stack (tensors, autodiff, neural networks)
+ /// - CBGR memory safety with configurable tiers
+ /// - Async programming with structured concurrency
+ /// - Full access to core/ standard library
     Playbook {
-        /// Optional .vrbook file to open
+ /// Optional .vrbook file to open
         #[clap(value_name = "FILE")]
         file: Option<Text>,
 
-        /// Execution tier: 0=interpreter (safe), 1=AOT (fast)
+ /// Execution tier: 0=interpreter (safe), 1=AOT (fast)
         #[clap(long, short = 't', value_name = "TIER", default_value = "0")]
         tier: u8,
 
-        /// Enable vim-style keybindings
+ /// Enable vim-style keybindings
         #[clap(long)]
         vim: bool,
 
-        /// Preload definitions from a .vr file
+ /// Preload definitions from a .vr file
         #[clap(long, value_name = "FILE")]
         preload: Option<Text>,
 
-        /// Start with interactive language tutorial
+ /// Start with interactive language tutorial
         #[clap(long)]
         tutorial: bool,
 
-        /// Enable performance profiling display
+ /// Enable performance profiling display
         #[clap(long)]
         profile: bool,
 
-        /// Export to .vr script on exit
+ /// Export to .vr script on exit
         #[clap(long, value_name = "FILE")]
         export: Option<Text>,
 
-        /// Disable ANSI colors
+ /// Disable ANSI colors
         #[clap(long)]
         no_color: bool,
     },
 
-    /// Playbook format conversion utilities
+ /// Playbook format conversion utilities
     #[clap(subcommand, name = "playbook-convert")]
     PlaybookConvert(PlaybookConvertCommands),
 
-    /// Show version information
+ /// Show version information
     Version {
         #[clap(long)]
         verbose: bool,
     },
 
-    /// Inspect a VBC archive header (magic, version, sections, hashes).
-    /// Tracks #175.
+ /// Inspect a VBC archive header (magic, version, sections, hashes).
+ /// Tracks #175.
     #[clap(name = "vbc-version")]
     VbcVersion {
-        /// Path to the .vbc archive.
+ /// Path to the .vbc archive.
         #[clap(value_name = "ARCHIVE")]
         archive: std::path::PathBuf,
-        /// Emit a single-line key=value form for scripting.
+ /// Emit a single-line key=value form for scripting.
         #[clap(long)]
         raw: bool,
     },
 
-    /// Cog management
+ /// Cog management
     #[clap(subcommand)]
     Package(PackageCommands),
 
-    /// Profile performance (works with projects or single .vr files)
+ /// Profile performance (works with projects or single .vr files)
     Profile {
-        /// Optional .vr file to profile
+ /// Optional .vr file to profile
         #[clap(value_name = "FILE")]
         file: Option<Text>,
         #[clap(long)]
@@ -788,26 +788,26 @@ enum Commands {
         cpu: bool,
         #[clap(long)]
         cache: bool,
-        /// Profile compilation pipeline phases
+ /// Profile compilation pipeline phases
         #[clap(long)]
         compilation: bool,
-        /// Profile everything — memory, cpu, cache, compilation — in one run.
-        /// Equivalent to `--memory --cpu --cache --compilation` and produces
-        /// the unified dashboard described in docs/detailed/25-developer-tooling.md §6.
+ /// Profile everything — memory, cpu, cache, compilation — in one run.
+ /// Equivalent to `--memory --cpu --cache --compilation` and produces
+ /// the unified dashboard described in docs/detailed/25-developer-tooling.md §6.
         #[clap(long, conflicts_with_all = ["memory", "cpu", "cache", "compilation"])]
         all: bool,
         #[clap(long, default_value = "5.0")]
         hot_threshold: f64,
-        /// Sampling rate for CBGR profiling, as a percentage (0.0–100.0).
-        /// Lower values reduce overhead; 1.0 is a safe default for hot paths.
+ /// Sampling rate for CBGR profiling, as a percentage (0.0–100.0).
+ /// Lower values reduce overhead; 1.0 is a safe default for hot paths.
         #[clap(long, value_name = "PERCENT", default_value = "1.0")]
         sample_rate: f64,
-        /// Comma-separated list of function names to restrict profiling to.
-        /// When set, only samples from these functions are reported.
+ /// Comma-separated list of function names to restrict profiling to.
+ /// When set, only samples from these functions are reported.
         #[clap(long, value_name = "NAMES", value_delimiter = ',')]
         functions: Vec<Text>,
-        /// Timing precision: `us` (microseconds, default) or `ns` (RDTSC-based,
-        /// more expensive but distinguishes sub-microsecond checks).
+ /// Timing precision: `us` (microseconds, default) or `ns` (RDTSC-based,
+ /// more expensive but distinguishes sub-microsecond checks).
         #[clap(long, value_name = "UNIT", default_value = "us")]
         precision: Text,
         #[clap(short, long)]
@@ -816,69 +816,69 @@ enum Commands {
         suggest: bool,
     },
 
-    /// Formal verification (works with projects or single .vr files)
+ /// Formal verification (works with projects or single .vr files)
     Verify {
-        /// Optional .vr file to verify
+ /// Optional .vr file to verify
         #[clap(value_name = "FILE")]
         file: Option<Text>,
         #[clap(long, short = 'm', default_value = "proof")]
         mode: Text,
-        /// Enable the verification profiler: per-function timings, bottleneck
-        /// diagnostics, cache stats, ranked recommendations. Results are
-        /// printed to stdout unless `--export` is given.
+ /// Enable the verification profiler: per-function timings, bottleneck
+ /// diagnostics, cache stats, ranked recommendations. Results are
+ /// printed to stdout unless `--export` is given.
         #[clap(long)]
         profile: bool,
-        /// Enable per-obligation profiling: breaks down each function's
-        /// verification time into its individual proof obligations
-        /// (preconditions, postconditions, refinement checks, loop
-        /// invariants, …) and surfaces the slowest obligations
-        /// across the whole run. Implies `--profile`. Output joins the
-        /// standard profile report under a "Per-obligation breakdown"
-        /// section. See `docs/verification/performance.md §5`.
+ /// Enable per-obligation profiling: breaks down each function's
+ /// verification time into its individual proof obligations
+ /// (preconditions, postconditions, refinement checks, loop
+ /// invariants, …) and surfaces the slowest obligations
+ /// across the whole run. Implies `--profile`. Output joins the
+ /// standard profile report under a "Per-obligation breakdown"
+ /// section. See `docs/verification/performance.md §5`.
         #[clap(long)]
         profile_obligation: bool,
-        /// Emit verification diagnostics in Language Server Protocol
-        /// format (one JSON `Diagnostic` per line, newline-delimited)
-        /// on stdout instead of the human-readable report. Intended
-        /// for IDE integrations that pipe `verum verify` through a
-        /// JSON-RPC adapter. Implies no human output on stdout;
-        /// errors still go to stderr. See
-        /// `docs/verification/cli-workflow.md §13`.
+ /// Emit verification diagnostics in Language Server Protocol
+ /// format (one JSON `Diagnostic` per line, newline-delimited)
+ /// on stdout instead of the human-readable report. Intended
+ /// for IDE integrations that pipe `verum verify` through a
+ /// JSON-RPC adapter. Implies no human output on stdout;
+ /// errors still go to stderr. See
+ /// `docs/verification/cli-workflow.md §13`.
         #[clap(long)]
         lsp_mode: bool,
-        /// Dump every SMT-LIB query the verifier generates to the
-        /// given directory. One file per obligation, named
-        /// `<function>-<obligation-idx>.smt2`. Intended for
-        /// debugging "why did Z3 time out on this specific goal".
-        /// The verifier still runs normally; dumping is a
-        /// side-effect. Docs: `docs/verification/cli-workflow.md §14`.
+ /// Dump every SMT-LIB query the verifier generates to the
+ /// given directory. One file per obligation, named
+ /// `<function>-<obligation-idx>.smt2`. Intended for
+ /// debugging "why did Z3 time out on this specific goal".
+ /// The verifier still runs normally; dumping is a
+ /// side-effect. Docs: `docs/verification/cli-workflow.md §14`.
         #[clap(long, value_name = "DIR")]
         dump_smt: Option<std::path::PathBuf>,
-        /// Read an SMT-LIB 2 file from disk and dispatch it to the
-        /// configured solver; print `sat` / `unsat` / `unknown` on
-        /// stdout. Used to replay a dumped query (from
-        /// `--dump-smt`) against a different solver / timeout /
-        /// backend configuration. Incompatible with `FILE` — when
-        /// `--check-smt-formula` is set the positional FILE is
-        /// ignored.
+ /// Read an SMT-LIB 2 file from disk and dispatch it to the
+ /// configured solver; print `sat` / `unsat` / `unknown` on
+ /// stdout. Used to replay a dumped query (from
+ /// `--dump-smt`) against a different solver / timeout /
+ /// backend configuration. Incompatible with `FILE` — when
+ /// `--check-smt-formula` is set the positional FILE is
+ /// ignored.
         #[clap(long, value_name = "SMT_FILE")]
         check_smt_formula: Option<std::path::PathBuf>,
-        /// Log every solver command / response to stderr as it
-        /// happens. Useful for diagnosing solver-quirk issues
-        /// (e.g. Z3 accepting a command CVC5 rejects). One line
-        /// per send/recv, prefixed with `[→]` / `[←]`.
+ /// Log every solver command / response to stderr as it
+ /// happens. Useful for diagnosing solver-quirk issues
+ /// (e.g. Z3 accepting a command CVC5 rejects). One line
+ /// per send/recv, prefixed with `[→]` / `[←]`.
         #[clap(long)]
         solver_protocol: bool,
-        /// Fail the build if total verification time exceeds this budget.
-        /// Accepts human-readable durations: `120s`, `2m`, `90`, `1h`.
+ /// Fail the build if total verification time exceeds this budget.
+ /// Accepts human-readable durations: `120s`, `2m`, `90`, `1h`.
         #[clap(long, value_name = "DURATION")]
         budget: Option<Text>,
-        /// Export the profile report as JSON to the given path (implies `--profile`).
-        /// Intended for CI/CD integration and trend tracking.
+ /// Export the profile report as JSON to the given path (implies `--profile`).
+ /// Intended for CI/CD integration and trend tracking.
         #[clap(long, value_name = "PATH")]
         export: Option<PathBuf>,
-        /// URL of a distributed verification cache (e.g. `s3://bucket/path`).
-        /// Reads/writes proof results so that CI reuses proofs across runs.
+ /// URL of a distributed verification cache (e.g. `s3://bucket/path`).
+ /// Reads/writes proof results so that CI reuses proofs across runs.
         #[clap(long, value_name = "URL")]
         distributed_cache: Option<Text>,
         #[clap(long)]
@@ -887,85 +887,85 @@ enum Commands {
         compare_modes: bool,
         #[clap(long, default_value = "z3")]
         solver: Text,
-        /// Named `[verify.profiles.<name>]` profile from `verum.toml`
-        /// to apply. Profile fields inherit from the base `[verify]`
-        /// block; CLI flags still win over both. Unknown profile name
-        /// surfaces as a warning and falls back to the base block
-        /// (the downstream merge layer is tolerant). See
-        /// `docs/verification/cli-workflow.md §9`.
+ /// Named `[verify.profiles.<name>]` profile from `verum.toml`
+ /// to apply. Profile fields inherit from the base `[verify]`
+ /// block; CLI flags still win over both. Unknown profile name
+ /// surfaces as a warning and falls back to the base block
+ /// (the downstream merge layer is tolerant). See
+ /// `docs/verification/cli-workflow.md §9`.
         #[clap(long, value_name = "NAME")]
         verify_profile: Option<Text>,
-        /// Preferred backend for exporting SMT proof traces when the
-        /// `Certified` strategy races a portfolio. CVC5's ALETHE proof
-        /// format is more stable than Z3's native `(proof …)` format
-        /// across releases, so the default is `cvc5` — matches the
-        /// recommendation in `docs/verification/proof-export.md §7`.
-        /// Only affects proof export; does not change which solver
-        /// closes an obligation.
+ /// Preferred backend for exporting SMT proof traces when the
+ /// `Certified` strategy races a portfolio. CVC5's ALETHE proof
+ /// format is more stable than Z3's native `(proof …)` format
+ /// across releases, so the default is `cvc5` — matches the
+ /// recommendation in `docs/verification/proof-export.md §7`.
+ /// Only affects proof export; does not change which solver
+ /// closes an obligation.
         #[clap(long, value_name = "BACKEND", default_value = "cvc5")]
         smt_proof_preference: Text,
-        // Default 120s: generous enough for induction and coinduction
-        // proofs on realistic programs; too-short default (30s) was
-        // causing spurious timeouts on legitimate verifications.
+ // Default 120s: generous enough for induction and coinduction
+ // proofs on realistic programs; too-short default (30s) was
+ // causing spurious timeouts on legitimate verifications.
         #[clap(long, default_value = "120")]
         timeout: u64,
         #[clap(long)]
         cache: bool,
         #[clap(long)]
         interactive: bool,
-        /// Launch the interactive-tactic REPL after loading. Unlike
-        /// plain `--interactive`, this drops straight into a tactic
-        /// console (Ltac2-style): the current goal is printed, the
-        /// user enters tactics one at a time, and the prompt updates
-        /// with the resulting sub-goals. Useful for proof
-        /// debugging. See `docs/verification/tactic-dsl.md §9.2`.
+ /// Launch the interactive-tactic REPL after loading. Unlike
+ /// plain `--interactive`, this drops straight into a tactic
+ /// console (Ltac2-style): the current goal is printed, the
+ /// user enters tactics one at a time, and the prompt updates
+ /// with the resulting sub-goals. Useful for proof
+ /// debugging. See `docs/verification/tactic-dsl.md §9.2`.
         #[clap(long)]
         interactive_tactic: bool,
-        /// Limit verification to functions whose source has changed
-        /// since the given git reference. Accepts any `git`-parseable
-        /// ref: `HEAD~1`, `HEAD~5`, `main`, `abc123`, … The diff is
-        /// computed against the current working tree; only functions
-        /// whose body lines fall in the changed range are verified.
-        /// Use in CI: `verum verify --diff origin/main` verifies only
-        /// what a PR changed. Docs: `docs/verification/cli-workflow.md §11`.
+ /// Limit verification to functions whose source has changed
+ /// since the given git reference. Accepts any `git`-parseable
+ /// ref: `HEAD~1`, `HEAD~5`, `main`, `abc123`, … The diff is
+ /// computed against the current working tree; only functions
+ /// whose body lines fall in the changed range are verified.
+ /// Use in CI: `verum verify --diff origin/main` verifies only
+ /// what a PR changed. Docs: `docs/verification/cli-workflow.md §11`.
         #[clap(long, value_name = "GIT_REF")]
         diff: Option<Text>,
         #[clap(long)]
         function: Option<Text>,
-        /// Enable the per-theorem closure-hash incremental
-        /// verification cache (#79). When set, theorem proofs whose
-        /// closure hash is in the cache and whose cached verdict was
-        /// Ok are skipped without invoking the SMT / kernel re-check.
-        /// Cache root defaults to
-        /// `<input.parent>/target/.verum_cache/closure-hashes/`;
-        /// override with `--closure-cache-root <PATH>`.
+ /// Enable the per-theorem closure-hash incremental
+ /// verification cache (#79). When set, theorem proofs whose
+ /// closure hash is in the cache and whose cached verdict was
+ /// Ok are skipped without invoking the SMT / kernel re-check.
+ /// Cache root defaults to
+ /// `<input.parent>/target/.verum_cache/closure-hashes/`;
+ /// override with `--closure-cache-root <PATH>`.
         #[clap(long)]
         closure_cache: bool,
 
-        /// Override the closure-cache root directory. Implies
-        /// `--closure-cache` if set. Standard CI use is to point
-        /// this at a shared NFS path so multiple agents reuse cached
-        /// verdicts.
+ /// Override the closure-cache root directory. Implies
+ /// `--closure-cache` if set. Standard CI use is to point
+ /// this at a shared NFS path so multiple agents reuse cached
+ /// verdicts.
         #[clap(long, value_name = "PATH")]
         closure_cache_root: Option<PathBuf>,
 
-        /// Route every `@verify(strategy)` obligation through the
-        /// typed 13-strategy ladder dispatcher
-        /// (`verum_verification::ladder_dispatch::DefaultLadderDispatcher`)
-        /// and emit the per-theorem verdict (Closed / Open /
-        /// DispatchPending / Timeout) plus a totals summary. Exits
-        /// non-zero on any Open / Timeout verdict (real verification
-        /// failure); DispatchPending is advisory because the V0 ladder
-        /// only implements the 2 coarsest strategies. Use
-        /// `--ladder-format=json` for CI / IDE consumption.
+ /// Route every `@verify(strategy)` obligation through the
+ /// typed 13-strategy ladder dispatcher
+ /// (`verum_verification::ladder_dispatch::DefaultLadderDispatcher`)
+ /// and emit the per-theorem verdict (Closed / Open /
+ /// DispatchPending / Timeout) plus a totals summary. Exits
+ /// non-zero on any Open / Timeout verdict (real verification
+ /// failure); DispatchPending is advisory because the V0 ladder
+ /// only implements the 2 coarsest strategies. Use
+ /// `--ladder-format=json` for CI / IDE consumption.
         #[clap(long)]
         ladder: bool,
-        /// Output format for `--ladder`: `plain` (default) or `json`.
+ /// Output format for `--ladder`: `plain` (default) or `json`.
         #[clap(long, value_name = "FORMAT", default_value = "plain")]
         ladder_format: Text,
     },
 
-    /// Static analysis
+ /// Static analysis
     Analyze {
         #[clap(long)]
         escape: bool,
@@ -977,15 +977,15 @@ enum Commands {
         all: bool,
     },
 
-    /// Explain error codes
+ /// Explain error codes
     Explain {
-        /// Error code to explain (e.g., E0312 or 0312)
+ /// Error code to explain (e.g., E0312 or 0312)
         code: Text,
         #[clap(long)]
         no_color: bool,
     },
 
-    /// Display compiler information
+ /// Display compiler information
     Info {
         #[clap(long)]
         features: bool,
@@ -995,1000 +995,1000 @@ enum Commands {
         all: bool,
     },
 
-    /// Start Debug Adapter Protocol server for IDE debugging
+ /// Start Debug Adapter Protocol server for IDE debugging
     Dap {
-        /// Transport mode: stdio (default), socket
+ /// Transport mode: stdio (default), socket
         #[clap(long, value_name = "TRANSPORT", default_value = "stdio")]
         transport: Text,
-        /// Port for socket transport (required when transport=socket)
+ /// Port for socket transport (required when transport=socket)
         #[clap(long, value_name = "PORT")]
         port: Option<u16>,
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Start Language Server Protocol server for IDE integration
+ /// Start Language Server Protocol server for IDE integration
     Lsp {
-        /// Transport mode: stdio (default), socket, pipe
+ /// Transport mode: stdio (default), socket, pipe
         #[clap(long, value_name = "TRANSPORT", default_value = "stdio")]
         transport: Text,
-        /// Port for socket transport (required when transport=socket)
+ /// Port for socket transport (required when transport=socket)
         #[clap(long, value_name = "PORT")]
         port: Option<u16>,
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Security audit of dependencies
-    ///
+ /// Security audit of dependencies
+ ///
 
-    /// Default mode: supply-chain audit (vulns, checksums, signatures).
-    ///
+ /// Default mode: supply-chain audit (vulns, checksums, signatures).
+ ///
 
-    /// Interactive proof-drafting helper. Given a theorem name and
-    /// a description of the focused goal, emits ranked next-step
-    /// tactic suggestions (lemma applications + tactic invocations +
-    /// state navigation) via
-    /// `verum_verification::proof_drafting::SuggestionEngine`.
-    ///
+ /// Interactive proof-drafting helper. Given a theorem name and
+ /// a description of the focused goal, emits ranked next-step
+ /// tactic suggestions (lemma applications + tactic invocations +
+ /// state navigation) via
+ /// `verum_verification::proof_drafting::SuggestionEngine`.
+ ///
 
-    /// Output format:
-    ///  - `--format plain` (default) — human-readable with rationales.
-    ///  - `--format json` — structured (LSP-friendly).
+ /// Output format:
+ /// - `--format plain` (default) — human-readable with rationales.
+ /// - `--format json` — structured (LSP-friendly).
     ProofDraft {
-        /// Theorem name (the proof body's owner — used for diagnostic
-        /// labelling and history attribution).
+ /// Theorem name (the proof body's owner — used for diagnostic
+ /// labelling and history attribution).
         #[clap(long)]
         theorem: String,
 
-        /// The focused goal's proposition rendering (what needs to be
-        /// proved). Pipe via stdin with `--goal -` for multi-line
-        /// goals.
+ /// The focused goal's proposition rendering (what needs to be
+ /// proved). Pipe via stdin with `--goal -` for multi-line
+ /// goals.
         #[clap(long)]
         goal: String,
 
-        /// Available lemmas in scope as `name:::signature` lines (one
-        /// per `--lemma` flag, repeatable). Or use `--lemmas-from
-        /// <file>` to load a `\n`-separated list from a file.
+ /// Available lemmas in scope as `name:::signature` lines (one
+ /// per `--lemma` flag, repeatable). Or use `--lemmas-from
+ /// <file>` to load a `\n`-separated list from a file.
         #[clap(long, value_name = "NAME:::SIGNATURE")]
         lemma: Vec<String>,
 
-        /// Maximum number of suggestions to emit.
+ /// Maximum number of suggestions to emit.
         #[clap(long, default_value = "5")]
         max: usize,
 
-        /// Output format: `plain` or `json`.
+ /// Output format: `plain` or `json`.
         #[clap(long, default_value = "plain")]
         format: String,
     },
 
-    /// Structured repair suggestions for a typed proof / kernel
-    /// failure. Wires
-    /// `verum_diagnostics::proof_repair::DefaultRepairEngine` so IDE /
-    /// LSP / REPL consumers can request ranked drop-in code-snippet
-    /// repairs without depending on the Rust API.
-    ///
+ /// Structured repair suggestions for a typed proof / kernel
+ /// failure. Wires
+ /// `verum_diagnostics::proof_repair::DefaultRepairEngine` so IDE /
+ /// LSP / REPL consumers can request ranked drop-in code-snippet
+ /// repairs without depending on the Rust API.
+ ///
 
-    /// Usage:
-    ///  verum proof-repair --kind unbound-name --field name=foo
-    ///  verum proof-repair --kind refine-depth \
-    ///  --field refined_type=CategoricalLevel \
-    ///  --field predicate_depth=ω·2 --max 3 --format json
-    ///
+ /// Usage:
+ /// verum proof-repair --kind unbound-name --field name=foo
+ /// verum proof-repair --kind refine-depth \
+ /// --field refined_type=CategoricalLevel \
+ /// --field predicate_depth=ω·2 --max 3 --format json
+ ///
 
-    /// Valid `--kind` values: refine-depth, positivity, universe,
-    /// fwax-not-prop, adjunction, type-mismatch, unbound-name,
-    /// apply-mismatch, tactic-open.
+ /// Valid `--kind` values: refine-depth, positivity, universe,
+ /// fwax-not-prop, adjunction, type-mismatch, unbound-name,
+ /// apply-mismatch, tactic-open.
     ProofRepair {
-        /// Failure-kind tag — see command help for the full set.
+ /// Failure-kind tag — see command help for the full set.
         #[clap(long)]
         kind: String,
 
-        /// Per-kind structured fields as `key=value`. Repeatable.
-        /// Required keys differ per kind; missing required keys
-        /// surface as an InvalidArgument error naming the missing key.
+ /// Per-kind structured fields as `key=value`. Repeatable.
+ /// Required keys differ per kind; missing required keys
+ /// surface as an InvalidArgument error naming the missing key.
         #[clap(long, value_name = "KEY=VALUE")]
         field: Vec<String>,
 
-        /// Maximum number of suggestions to emit.
+ /// Maximum number of suggestions to emit.
         #[clap(long, default_value = "5")]
         max: usize,
 
-        /// Output format: `plain` or `json`.
+ /// Output format: `plain` or `json`.
         #[clap(long, default_value = "plain")]
         format: String,
     },
 
-    /// Foreign-system theorem import (#85) — inverse of cross-format
-    /// export. Reads a Coq / Lean4 / Mizar / Isabelle source file
-    /// and emits a Verum `.vr` skeleton with one `@axiom`-bodied
-    /// declaration per imported theorem, attributed back to the
-    /// source via `@framework(<system>, "<source>:<line>")`. The
-    /// user fills in the proof body with Verum tactics, or keeps the
-    /// `@axiom` and treats the foreign system as the trust boundary.
-    ///
+ /// Foreign-system theorem import (#85) — inverse of cross-format
+ /// export. Reads a Coq / Lean4 / Mizar / Isabelle source file
+ /// and emits a Verum `.vr` skeleton with one `@axiom`-bodied
+ /// declaration per imported theorem, attributed back to the
+ /// source via `@framework(<system>, "<source>:<line>")`. The
+ /// user fills in the proof body with Verum tactics, or keeps the
+ /// `@axiom` and treats the foreign system as the trust boundary.
+ ///
 
-    /// Usage:
-    ///  verum foreign-import --from <coq|lean4|mizar|isabelle> <FILE>
-    ///  [--out <PATH>] [--format skeleton|json|summary]
+ /// Usage:
+ /// verum foreign-import --from <coq|lean4|mizar|isabelle> <FILE>
+ /// [--out <PATH>] [--format skeleton|json|summary]
     ForeignImport {
-        /// Foreign system: coq / rocq / lean4 / lean / mathlib /
-        /// mizar / isabelle / hol.
+ /// Foreign system: coq / rocq / lean4 / lean / mathlib /
+ /// mizar / isabelle / hol.
         #[clap(long)]
         from: String,
 
-        /// Source file to parse.
+ /// Source file to parse.
         #[clap(value_name = "FILE")]
         file: PathBuf,
 
-        /// Write rendered output to this path instead of stdout.
+ /// Write rendered output to this path instead of stdout.
         #[clap(long)]
         out: Option<PathBuf>,
 
-        /// Output format: `skeleton` (default — emit `.vr` source),
-        /// `json` (structured payload for tooling), `summary`
-        /// (human-readable list).
+ /// Output format: `skeleton` (default — emit `.vr` source),
+ /// `json` (structured payload for tooling), `summary`
+ /// (human-readable list).
         #[clap(long, default_value = "skeleton")]
         format: String,
     },
 
-    /// Cubical / HoTT first-class catalogue (#78) — typed
-    /// primitive inventory (Path / Refl / J / Transp / Coe /
-    /// Hcomp / Comp / Glue / Equiv / Univalence + 7 more) +
-    /// computation-rule registry + face-formula validator.
-    /// Architectural foundation for foundation-neutral cubical
-    /// type theory in Verum.
-    ///
+ /// Cubical / HoTT first-class catalogue (#78) — typed
+ /// primitive inventory (Path / Refl / J / Transp / Coe /
+ /// Hcomp / Comp / Glue / Equiv / Univalence + 7 more) +
+ /// computation-rule registry + face-formula validator.
+ /// Architectural foundation for foundation-neutral cubical
+ /// type theory in Verum.
+ ///
 
-    /// Subcommands:
-    ///  verum cubical primitives [--category C] [--output ...]
-    ///  verum cubical explain <name> [--output ...]
-    ///  verum cubical rules [--output ...]
-    ///  verum cubical face <formula> [--output ...]
+ /// Subcommands:
+ /// verum cubical primitives [--category C] [--output ...]
+ /// verum cubical explain <name> [--output ...]
+ /// verum cubical rules [--output ...]
+ /// verum cubical face <formula> [--output ...]
     Cubical {
         #[clap(subcommand)]
         sub: CubicalSub,
     },
 
-    /// Cog distribution registry (#82) — publish, lookup, search,
-    /// verify reproducibility envelopes, and check multi-mirror
-    /// consensus. Per-cog reproducibility hash chain (sources +
-    /// build env + output) plus per-cog attestation kinds
-    /// (verified_ci / honesty / coord / cross_format /
-    /// framework_soundness). Immutable releases.
-    ///
+ /// Cog distribution registry (#82) — publish, lookup, search,
+ /// verify reproducibility envelopes, and check multi-mirror
+ /// consensus. Per-cog reproducibility hash chain (sources +
+ /// build env + output) plus per-cog attestation kinds
+ /// (verified_ci / honesty / coord / cross_format /
+ /// framework_soundness). Immutable releases.
+ ///
 
-    /// Subcommands:
-    ///  verum cog-registry publish --manifest FILE [--root DIR] [--registry-id ID] [--output ...]
-    ///  verum cog-registry lookup --name N --version V [--root DIR] [--registry-id ID] [--output ...]
-    ///  verum cog-registry search [--name SUB] [--paper-doi D] [--framework F] [--theorem T]
-    ///  [--require-attestation A] [--root DIR] [--registry-id ID] [--output ...]
-    ///  verum cog-registry verify --name N --version V [--root DIR] [--registry-id ID] [--output ...]
-    ///  verum cog-registry consensus --name N --version V --mirror DIR [--mirror DIR]… [--output ...]
-    ///  verum cog-registry seed-demo [--output ...]
+ /// Subcommands:
+ /// verum cog-registry publish --manifest FILE [--root DIR] [--registry-id ID] [--output ...]
+ /// verum cog-registry lookup --name N --version V [--root DIR] [--registry-id ID] [--output ...]
+ /// verum cog-registry search [--name SUB] [--paper-doi D] [--framework F] [--theorem T]
+ /// [--require-attestation A] [--root DIR] [--registry-id ID] [--output ...]
+ /// verum cog-registry verify --name N --version V [--root DIR] [--registry-id ID] [--output ...]
+ /// verum cog-registry consensus --name N --version V --mirror DIR [--mirror DIR]… [--output ...]
+ /// verum cog-registry seed-demo [--output ...]
     CogRegistry {
         #[clap(subcommand)]
         sub: CogRegistrySub,
     },
 
-    /// SMT certificate replay surface (#81) — multi-backend
-    /// cross-validation with kernel-only structural baseline.
-    /// The kernel-only check is what makes SMT solvers external
-    /// to the trusted computing base: even if Z3 / CVC5 emit a
-    /// fake cert, the kernel catches it before commit.
-    ///
+ /// SMT certificate replay surface (#81) — multi-backend
+ /// cross-validation with kernel-only structural baseline.
+ /// The kernel-only check is what makes SMT solvers external
+ /// to the trusted computing base: even if Z3 / CVC5 emit a
+ /// fake cert, the kernel catches it before commit.
+ ///
 
-    /// Subcommands:
-    ///  verum cert-replay replay --backend <B> [--cert FILE | --format F --theory T --conclusion C --body B]
-    ///  [--output plain|json|markdown]
-    ///  verum cert-replay cross-check [--backend B]… [--cert FILE | --format F …]
-    ///  [--require-consensus] [--output ...]
-    ///  verum cert-replay formats [--output ...]
-    ///  verum cert-replay backends [--output ...]
+ /// Subcommands:
+ /// verum cert-replay replay --backend <B> [--cert FILE | --format F --theory T --conclusion C --body B]
+ /// [--output plain|json|markdown]
+ /// verum cert-replay cross-check [--backend B]… [--cert FILE | --format F …]
+ /// [--require-consensus] [--output ...]
+ /// verum cert-replay formats [--output ...]
+ /// verum cert-replay backends [--output ...]
     CertReplay {
         #[clap(subcommand)]
         sub: CertReplaySub,
     },
 
-    /// Continuous benchmarking surface (#83) — head-to-head vs
-    /// Coq / Lean4 / Isabelle / Agda. Emits a typed comparison
-    /// matrix across the seven canonical metrics: kernel LOC,
-    /// compilation speed, memory peak, cross-format export
-    /// coverage, tactic-library coverage, trust diversification,
-    /// and LLM-tactic acceptance rate.
-    ///
+ /// Continuous benchmarking surface (#83) — head-to-head vs
+ /// Coq / Lean4 / Isabelle / Agda. Emits a typed comparison
+ /// matrix across the seven canonical metrics: kernel LOC,
+ /// compilation speed, memory peak, cross-format export
+ /// coverage, tactic-library coverage, trust diversification,
+ /// and LLM-tactic acceptance rate.
+ ///
 
-    /// Subcommands:
-    ///  verum benchmark run --system <S> --suite-name <N> [--theorem T]…
-    ///  [--format plain|json|markdown|csv]
-    ///  verum benchmark compare [--system S]… --suite-name <N> [--theorem T]…
-    ///  [--format plain|json|markdown|csv]
-    ///  verum benchmark metrics [--format plain|json|markdown|csv]
+ /// Subcommands:
+ /// verum benchmark run --system <S> --suite-name <N> [--theorem T]…
+ /// [--format plain|json|markdown|csv]
+ /// verum benchmark compare [--system S]… --suite-name <N> [--theorem T]…
+ /// [--format plain|json|markdown|csv]
+ /// verum benchmark metrics [--format plain|json|markdown|csv]
     Benchmark {
         #[clap(subcommand)]
         sub: BenchmarkSub,
     },
 
-    /// Live proof REPL — stepwise tactic feedback + proof-tree
-    /// visualisation (#75). Non-interactive batch driver: apply
-    /// tactics, navigate with undo / redo, request hints, render
-    /// the proof tree as Graphviz DOT. Interactive TUI is a
-    /// separate `verum_interactive` integration; the protocol
-    /// shape lives in this command.
-    ///
+ /// Live proof REPL — stepwise tactic feedback + proof-tree
+ /// visualisation (#75). Non-interactive batch driver: apply
+ /// tactics, navigate with undo / redo, request hints, render
+ /// the proof tree as Graphviz DOT. Interactive TUI is a
+ /// separate `verum_interactive` integration; the protocol
+ /// shape lives in this command.
+ ///
 
-    /// Subcommands:
-    ///  verum proof-repl batch --theorem T --goal G [--lemma ...] \
-    ///  [--commands FILE] [--cmd LINE]… [--format plain|json]
-    ///  verum proof-repl tree --theorem T --goal G [--lemma ...] \
-    ///  [--apply STEP]…
+ /// Subcommands:
+ /// verum proof-repl batch --theorem T --goal G [--lemma ...] \
+ /// [--commands FILE] [--cmd LINE]… [--format plain|json]
+ /// verum proof-repl tree --theorem T --goal G [--lemma ...] \
+ /// [--apply STEP]…
     ProofRepl {
         #[clap(subcommand)]
         sub: ProofReplSub,
     },
 
-    /// LCF-style fail-closed LLM tactic proposer (#77). An LLM may
-    /// propose tactic sequences but the kernel re-checks every step
-    /// before committing. Any rejection discards the proposal.
-    /// Every invocation is captured in an append-only audit trail
-    /// keyed by model id + prompt hash + completion hash so the
-    /// proof is reproducible from the log.
+ /// LCF-style fail-closed LLM tactic proposer (#77). An LLM may
+ /// propose tactic sequences but the kernel re-checks every step
+ /// before committing. Any rejection discards the proposal.
+ /// Every invocation is captured in an append-only audit trail
+ /// keyed by model id + prompt hash + completion hash so the
+ /// proof is reproducible from the log.
     LlmTactic {
         #[clap(subcommand)]
         sub: LlmTacticSub,
     },
 
-    /// Auto-paper documentation generator (#84). Walks every
-    /// `.vr` file in the project, projects every public @theorem /
-    /// @lemma / @corollary / @axiom into a typed `DocItem`, and
-    /// renders Markdown / LaTeX / HTML directly from the corpus.
-    /// Eliminates the duplicate-source problem (paper.tex +
-    /// verum-corpus): the corpus IS the paper draft.
-    ///
+ /// Auto-paper documentation generator (#84). Walks every
+ /// `.vr` file in the project, projects every public @theorem /
+ /// @lemma / @corollary / @axiom into a typed `DocItem`, and
+ /// renders Markdown / LaTeX / HTML directly from the corpus.
+ /// Eliminates the duplicate-source problem (paper.tex +
+ /// verum-corpus): the corpus IS the paper draft.
+ ///
 
-    /// Subcommands:
-    ///  verum doc-render render [--format md|latex|html] [--out <PATH>] [--public]
-    ///  verum doc-render graph [--format dot|json] [--public]
-    ///  verum doc-render check-refs [--format plain|json] [--public]
+ /// Subcommands:
+ /// verum doc-render render [--format md|latex|html] [--out <PATH>] [--public]
+ /// verum doc-render graph [--format dot|json] [--public]
+ /// verum doc-render check-refs [--format plain|json] [--public]
     DocRender {
         #[clap(subcommand)]
         sub: DocRenderSub,
     },
 
-    /// Closure-hash incremental verification cache surface. Wires
-    /// `verum_verification::closure_cache::FilesystemCacheStore` to
-    /// the CLI so IDE / CI / users can inspect, list, clear, and
-    /// probe the per-theorem cache without depending on the Rust
-    /// API.
-    ///
+ /// Closure-hash incremental verification cache surface. Wires
+ /// `verum_verification::closure_cache::FilesystemCacheStore` to
+ /// the CLI so IDE / CI / users can inspect, list, clear, and
+ /// probe the per-theorem cache without depending on the Rust
+ /// API.
+ ///
 
-    /// Subcommands:
-    ///  verum cache-closure stat [--root <P>] [--format <F>]
-    ///  verum cache-closure list [--root <P>] [--format <F>]
-    ///  verum cache-closure get <theorem> [--root <P>] [--format <F>]
-    ///  verum cache-closure clear [--root <P>] [--format <F>]
-    ///  verum cache-closure decide <theorem> --signature <s> --body <s> \
-    ///  [--cite <c>]… [--kernel-version <v>] [--root <P>] [--format <F>]
+ /// Subcommands:
+ /// verum cache-closure stat [--root <P>] [--format <F>]
+ /// verum cache-closure list [--root <P>] [--format <F>]
+ /// verum cache-closure get <theorem> [--root <P>] [--format <F>]
+ /// verum cache-closure clear [--root <P>] [--format <F>]
+ /// verum cache-closure decide <theorem> --signature <s> --body <s> \
+ /// [--cite <c>]… [--kernel-version <v>] [--root <P>] [--format <F>]
     CacheClosure {
         #[clap(subcommand)]
         sub: CacheClosureSub,
     },
 
-    /// Industrial-grade tactic combinator catalogue surface. Wires
-    /// `verum_verification::tactic_combinator::DefaultTacticCatalog`
-    /// to the CLI so IDE / docs-generator / CI consumers can read
-    /// the canonical 15-combinator catalogue + its algebraic laws
-    /// without depending on the Rust API.
-    ///
+ /// Industrial-grade tactic combinator catalogue surface. Wires
+ /// `verum_verification::tactic_combinator::DefaultTacticCatalog`
+ /// to the CLI so IDE / docs-generator / CI consumers can read
+ /// the canonical 15-combinator catalogue + its algebraic laws
+ /// without depending on the Rust API.
+ ///
 
-    /// Subcommands:
-    ///  verum tactic list [--category <C>] [--format <F>]
-    ///  verum tactic explain <name> [--format <F>]
-    ///  verum tactic laws [--format <F>]
+ /// Subcommands:
+ /// verum tactic list [--category <C>] [--format <F>]
+ /// verum tactic explain <name> [--format <F>]
+ /// verum tactic laws [--format <F>]
     Tactic {
         #[clap(subcommand)]
         sub: TacticSub,
     },
 
-    /// With `--framework-axioms`: enumerate the trusted-framework boundary
-    /// of the current project — every `@framework(name, "citation")` marker
-    /// on an axiom / theorem / lemma is collected, grouped by framework,
-    /// and printed as a structured report so external reviewers see the
-    /// exact set of Lurie HTT / Schreiber DCCT / Connes / Petz / Arnold /
-    /// Baez-Dolan results the proofs rely on.
+ /// With `--framework-axioms`: enumerate the trusted-framework boundary
+ /// of the current project — every `@framework(name, "citation")` marker
+ /// on an axiom / theorem / lemma is collected, grouped by framework,
+ /// and printed as a structured report so external reviewers see the
+ /// exact set of Lurie HTT / Schreiber DCCT / Connes / Petz / Arnold /
+ /// Baez-Dolan results the proofs rely on.
     Audit {
-        /// Show vulnerability details
+ /// Show vulnerability details
         #[clap(long)]
         details: bool,
-        /// Only check direct dependencies
+ /// Only check direct dependencies
         #[clap(long)]
         direct_only: bool,
-        /// Enumerate the trusted-framework-axiom boundary of this project.
-        /// Prints every `@framework(name, "citation")` marker found in
-        /// .vr sources, grouped by framework. Exits non-zero if any
-        /// malformed `@framework(...)` attribute is found.
+ /// Enumerate the trusted-framework-axiom boundary of this project.
+ /// Prints every `@framework(name, "citation")` marker found in
+ /// .vr sources, grouped by framework. Exits non-zero if any
+ /// malformed `@framework(...)` attribute is found.
         #[clap(long)]
         framework_axioms: bool,
 
-        /// Enumerate the 18 primitive inference rules implemented by
-        /// `verum_kernel`. Useful for auditors verifying the kernel's
-        /// trust boundary corresponds to its documented rule set.
+ /// Enumerate the 18 primitive inference rules implemented by
+ /// `verum_kernel`. Useful for auditors verifying the kernel's
+ /// trust boundary corresponds to its documented rule set.
         #[clap(long)]
         kernel_rules: bool,
 
-        /// Run the kernel re-check (K-Refine-omega / K-Universe-Ascent /
-        /// K-Eps-Mu / K-Round-Trip) against every theorem-shaped +
-        /// axiom + function declaration in the project, surfacing
-        /// per-name admitted / rejected outcomes. Useful as a fast
-        /// first gate in CI pipelines before the verifier dispatcher
-        /// runs. Exits non-zero on any rejection. (#122)
+ /// Run the kernel re-check (K-Refine-omega / K-Universe-Ascent /
+ /// K-Eps-Mu / K-Round-Trip) against every theorem-shaped +
+ /// axiom + function declaration in the project, surfacing
+ /// per-name admitted / rejected outcomes. Useful as a fast
+ /// first gate in CI pipelines before the verifier dispatcher
+ /// runs. Exits non-zero on any rejection. (#122)
         #[clap(long)]
         kernel_recheck: bool,
 
-        /// Run the kernel-soundness corpus check (task #80 / VERUM-TRUST-1).
-        /// Verifies the Rust-side rule list matches the .vr corpus's
-        /// declared rule count, enumerates per-rule proved / admitted
-        /// status, and emits parallel Coq + Lean theory files into
-        /// `target/audit-reports/kernel-soundness/` for independent
-        /// re-checking. Exits non-zero only on Rust↔.vr drift;
-        /// admitted lemmas are accountability surface, not failures.
+ /// Run the kernel-soundness corpus check (task #80 / VERUM-TRUST-1).
+ /// Verifies the Rust-side rule list matches the .vr corpus's
+ /// declared rule count, enumerates per-rule proved / admitted
+ /// status, and emits parallel Coq + Lean theory files into
+ /// `target/audit-reports/kernel-soundness/` for independent
+ /// re-checking. Exits non-zero only on Rust↔.vr drift;
+ /// admitted lemmas are accountability surface, not failures.
         #[clap(long = "kernel-soundness")]
         kernel_soundness: bool,
 
-        /// kernel_v0 roster audit (task #154 / Phase 3).
-        /// Walks the canonical 10-rule kernel_v0 manifest and the
-        /// `core/verify/kernel_v0/rules/` directory on disk.
-        /// Reports per-rule (Proved / Admitted with IOU) and the
-        /// proved-vs-admitted split. Exits non-zero on
-        /// manifest↔filesystem drift (missing or orphan source
-        /// files). Output:
-        /// `target/audit-reports/kernel-v0-roster.json`.
+ /// kernel_v0 roster audit (task #154 / Phase 3).
+ /// Walks the canonical 10-rule kernel_v0 manifest and the
+ /// `core/verify/kernel_v0/rules/` directory on disk.
+ /// Reports per-rule (Proved / Admitted with IOU) and the
+ /// proved-vs-admitted split. Exits non-zero on
+ /// manifest↔filesystem drift (missing or orphan source
+ /// files). Output:
+ /// `target/audit-reports/kernel-v0-roster.json`.
         #[clap(long = "kernel-v0-roster")]
         kernel_v0_roster: bool,
 
-        /// dependent-theorems query (task #188).  Given an axiom
-        /// name, walks the workspace apply-graph and lists every
-        /// theorem whose transitive proof depends on the axiom.
-        /// Mathematician-facing utility — when an axiom rejects or
-        /// is admitted under audit, "which of my theorems lose
-        /// their discharge?" is answered without manual dependency
-        /// tracing.  Output:
-        /// `target/audit-reports/dependent-theorems-<axiom>.json`.
+ /// dependent-theorems query (task #188). Given an axiom
+ /// name, walks the workspace apply-graph and lists every
+ /// theorem whose transitive proof depends on the axiom.
+ /// Mathematician-facing utility — when an axiom rejects or
+ /// is admitted under audit, "which of my theorems lose
+ /// their discharge?" is answered without manual dependency
+ /// tracing. Output:
+ /// `target/audit-reports/dependent-theorems-<axiom>.json`.
         #[clap(long = "dependent-theorems", value_name = "AXIOM")]
         dependent_theorems: Option<String>,
 
-        /// Codegen-pass kernel-discharge attestation audit
-        /// (task #162 / CompCert-style verified compilation).
-        /// Walks the canonical 6-pass codegen manifest from
-        /// `verum_kernel::codegen_attestation` and reports per-pass
-        /// status (Discharged / AdmittedWithIOU / NotYetAttested).
-        /// Each pass entry carries its semantic invariant + the
-        /// concrete proof obligation that would discharge it.
-        /// Foundation surface: V0 has every entry NotYetAttested;
-        /// future per-pass discharge work flips entries individually.
-        /// Output: `target/audit-reports/codegen-attestation.json`.
+ /// Codegen-pass kernel-discharge attestation audit
+ /// (task #162 / CompCert-style verified compilation).
+ /// Walks the canonical 6-pass codegen manifest from
+ /// `verum_kernel::codegen_attestation` and reports per-pass
+ /// status (Discharged / AdmittedWithIOU / NotYetAttested).
+ /// Each pass entry carries its semantic invariant + the
+ /// concrete proof obligation that would discharge it.
+ /// Foundation surface: V0 has every entry NotYetAttested;
+ /// future per-pass discharge work flips entries individually.
+ /// Output: `target/audit-reports/codegen-attestation.json`.
         #[clap(long = "codegen-attestation")]
         codegen_attestation: bool,
 
-        /// Differential-kernel cross-implementation audit
-        /// (task #159 / Rust↔Verum self-hosted kernel agreement).
-        /// Runs every kernel_v0 rule's canonical certificate through
-        /// the Rust trusted base (`verum_kernel::proof_checker`) AND
-        /// the Verum-self-hosted kernel (`core/verify/kernel_v0/`).
-        /// Reports per-rule agreement (`both_accept` / `both_reject` /
-        /// `disagreement` / `not_yet_self_hosting`). Exits non-zero
-        /// on any disagreement; `not_yet_self_hosting` is observability
-        /// (current state — Verum side awaits parser-blocker fix).
-        /// Output: `target/audit-reports/differential-kernel.json`.
+ /// Differential-kernel cross-implementation audit
+ /// (task #159 / Rust↔Verum self-hosted kernel agreement).
+ /// Runs every kernel_v0 rule's canonical certificate through
+ /// the Rust trusted base (`verum_kernel::proof_checker`) AND
+ /// the Verum-self-hosted kernel (`core/verify/kernel_v0/`).
+ /// Reports per-rule agreement (`both_accept` / `both_reject` /
+ /// `disagreement` / `not_yet_self_hosting`). Exits non-zero
+ /// on any disagreement; `not_yet_self_hosting` is observability
+ /// (current state — Verum side awaits parser-blocker fix).
+ /// Output: `target/audit-reports/differential-kernel.json`.
         #[clap(long = "differential-kernel")]
         differential_kernel: bool,
 
-        /// Run the differential-kernel fuzz audit. Mutation-based
-        /// property fuzzing: takes the canonical-certificate roster,
-        /// applies structural mutations (universe lifts, subterm
-        /// swaps, binder rewrites, application injections), runs every
-        /// mutant through every registered kernel. The property
-        /// invariant is that every mutant produces a unanimous
-        /// agreement; any disagreement is a kernel-implementation
-        /// bug and exits non-zero. Bounded deterministic campaign
-        /// (default 500 iterations, fixed seed) — disagreements are
-        /// reproducible across runs.
-        /// Output: `target/audit-reports/differential-kernel-fuzz.json`.
+ /// Run the differential-kernel fuzz audit. Mutation-based
+ /// property fuzzing: takes the canonical-certificate roster,
+ /// applies structural mutations (universe lifts, subterm
+ /// swaps, binder rewrites, application injections), runs every
+ /// mutant through every registered kernel. The property
+ /// invariant is that every mutant produces a unanimous
+ /// agreement; any disagreement is a kernel-implementation
+ /// bug and exits non-zero. Bounded deterministic campaign
+ /// (default 500 iterations, fixed seed) — disagreements are
+ /// reproducible across runs.
+ /// Output: `target/audit-reports/differential-kernel-fuzz.json`.
         #[clap(long = "differential-kernel-fuzz")]
         differential_kernel_fuzz: bool,
 
-        /// Run the reflection-tower audit. Walks every level in the
-        /// ordinal-indexed meta-soundness tower (REF^0 through REF^4
-        /// plus the REF^ω limit), reports per-level discharge verdict
-        /// and citation (Gödel 1931 + Feferman 1989, Pohlers 2009,
-        /// Beklemishev 2003, Schütte 1965, Feferman 1962). Auto-derives
-        /// the minimum reflection level required by the current
-        /// kernel-rule roster from per-rule footprint enumeration. Exits
-        /// non-zero if any finite level fails to discharge.
-        /// Output: `target/audit-reports/reflection-tower.json`.
+ /// Run the reflection-tower audit. Walks every level in the
+ /// ordinal-indexed meta-soundness tower (REF^0 through REF^4
+ /// plus the REF^ω limit), reports per-level discharge verdict
+ /// and citation (Gödel 1931 + Feferman 1989, Pohlers 2009,
+ /// Beklemishev 2003, Schütte 1965, Feferman 1962). Auto-derives
+ /// the minimum reflection level required by the current
+ /// kernel-rule roster from per-rule footprint enumeration. Exits
+ /// non-zero if any finite level fails to discharge.
+ /// Output: `target/audit-reports/reflection-tower.json`.
         #[clap(long = "reflection-tower")]
         reflection_tower: bool,
 
-        /// Run the ATS-V Architectural Type System discharge audit.
-        /// Walks the kernel-side architectural intrinsic registry
-        /// (capability discipline, boundary check, composition algebra,
-        /// lifecycle integrity, foundation consistency, anti-pattern
-        /// catalog, CVE-closure, end-to-end soundness witness) and
-        /// reports stable RFC error codes ATS-V-AP-001..010 from the
-        /// canonical anti-pattern catalog (10 patterns in Сезон 1; 22
-        /// remaining for Сезон 2 per `internal/specs/ats-v.md` §7).
-        /// Output: `target/audit-reports/arch-discharges.json`.
+ /// Run the ATS-V Architectural Type System discharge audit.
+ /// Walks the kernel-side architectural intrinsic registry
+ /// (capability discipline, boundary check, composition algebra,
+ /// lifecycle integrity, foundation consistency, anti-pattern
+ /// catalog, CVE-closure, end-to-end soundness witness) and
+ /// reports stable RFC error codes ATS-V-AP-001..010 from the
+ /// canonical anti-pattern catalog (10 patterns; 22
+ /// remaining per `internal/specs/ats-v.md` §7).
+ /// Output: `target/audit-reports/arch-discharges.json`.
         #[clap(long = "arch-discharges")]
         arch_discharges: bool,
 
-        /// ATS-V Сезон 6 — Counterfactual reasoning audit. Runs the
-        /// counterfactual reasoning engine over a synthetic
-        /// `CounterfactualPair` battery (one per canonical
-        /// `ArchProposition` × baseline metric set) against the
-        /// default Shape, exercising every entry in the engine's
-        /// dispatch table. Verifies the engine's per-arm soundness
-        /// contracts (HoldsBoth/HoldsBaseOnly/...) at audit time and
-        /// surfaces the comparative report as JSON. Output:
-        /// `target/audit-reports/counterfactual.json`.
+ /// ATS-V Counterfactual reasoning audit. Runs the
+ /// counterfactual reasoning engine over a synthetic
+ /// `CounterfactualPair` battery (one per canonical
+ /// `ArchProposition` × baseline metric set) against the
+ /// default Shape, exercising every entry in the engine's
+ /// dispatch table. Verifies the engine's per-arm soundness
+ /// contracts (HoldsBoth/HoldsBaseOnly/...) at audit time and
+ /// surfaces the comparative report as JSON. Output:
+ /// `target/audit-reports/counterfactual.json`.
         #[clap(long = "counterfactual")]
         counterfactual: bool,
 
-        /// ATS-V Сезон 7 — Adjunction analyzer audit. Runs the
-        /// adjunction analyzer over a synthetic battery covering each
-        /// of the four canonical adjunctions (Inline⊣Extract /
-        /// Specialise⊣Generalise / Decompose⊣Compose /
-        /// Strengthen⊣Weaken) plus a chain composition pin and a
-        /// failure case. Verifies recogniser soundness +
-        /// preservation/gain coverage at audit time. Output:
-        /// `target/audit-reports/adjunctions.json`.
+ /// ATS-V Adjunction analyzer audit. Runs the
+ /// adjunction analyzer over a synthetic battery covering each
+ /// of the four canonical adjunctions (Inline⊣Extract /
+ /// Specialise⊣Generalise / Decompose⊣Compose /
+ /// Strengthen⊣Weaken) plus a chain composition pin and a
+ /// failure case. Verifies recogniser soundness +
+ /// preservation/gain coverage at audit time. Output:
+ /// `target/audit-reports/adjunctions.json`.
         #[clap(long = "adjunctions")]
         adjunctions: bool,
 
-        /// ATS-V Сезон 8 — Yoneda-equivalence checker audit. Per
-        /// spec §20.7 + §23, two architectures are equivalent iff
-        /// every Observer in the canonical roster (EndUser /
-        /// PeerCog / Stakeholder / Auditor / Adversary) projects
-        /// the same observation. Runs a synthetic battery covering
-        /// identity (trivially equivalent), per-observer
-        /// distinguishability cases (Auditor sees foundation,
-        /// Adversary sees network, EndUser sees exposes), and the
-        /// trivially-safe refactoring entry. Output:
-        /// `target/audit-reports/yoneda.json`.
+ /// ATS-V Yoneda-equivalence checker audit. Per
+ /// spec §20.7 + §23, two architectures are equivalent iff
+ /// every Observer in the canonical roster (EndUser /
+ /// PeerCog / Stakeholder / Auditor / Adversary) projects
+ /// the same observation. Runs a synthetic battery covering
+ /// identity (trivially equivalent), per-observer
+ /// distinguishability cases (Auditor sees foundation,
+ /// Adversary sees network, EndUser sees exposes), and the
+ /// trivially-safe refactoring entry. Output:
+ /// `target/audit-reports/yoneda.json`.
         #[clap(long = "yoneda")]
         yoneda: bool,
 
-        /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
-        /// Walks every `apply kernel_*_strict(args)` invocation in the
-        /// corpus's proof bodies and replays each literal-arg call
-        /// through `verum_kernel::dispatch_intrinsic`. Reports
-        /// per-bridge: callsite count, literal vs non-literal split,
-        /// dispatcher decisions, and the count of false discharges
-        /// (cases where the dispatcher rejected the args). Exits
-        /// non-zero on any false discharge or on bridges cited
-        /// without a dispatcher entry. This is the observability
-        /// layer for L4 promotion; the elaborator-time wiring that
-        /// makes the verdict load-bearing at compile time is task #135.
+ /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
+ /// Walks every `apply kernel_*_strict(args)` invocation in the
+ /// corpus's proof bodies and replays each literal-arg call
+ /// through `verum_kernel::dispatch_intrinsic`. Reports
+ /// per-bridge: callsite count, literal vs non-literal split,
+ /// dispatcher decisions, and the count of false discharges
+ /// (cases where the dispatcher rejected the args). Exits
+ /// non-zero on any false discharge or on bridges cited
+ /// without a dispatcher entry. This is the observability
+ /// layer for L4 promotion; the elaborator-time wiring that
+ /// makes the verdict load-bearing at compile time is task #135.
         #[clap(long = "bridge-discharge")]
         bridge_discharge: bool,
 
-        /// Run the runtime ν-monotonicity drive (task #139 / MSFS-L4.6).
-        /// For every theorem-shaped item with a `@verify(<strategy>)`
-        /// annotation, dispatches the obligation at every backbone
-        /// strategy from `Runtime` up to and including the declared
-        /// strategy, then verifies the strict-ν-monotonicity
-        /// invariant: `Closes` at any strategy `S_strict` MUST imply
-        /// `Closes` at every coarser backbone strategy `S_coarser ≤
-        /// S_strict`. Exits non-zero on any inversion. This is the
-        /// architectural promise the verification ladder makes by
-        /// design — this audit keeps the promise honest at runtime
-        /// across the live corpus.
+ /// Run the runtime ν-monotonicity drive (task #139 / MSFS-L4.6).
+ /// For every theorem-shaped item with a `@verify(<strategy>)`
+ /// annotation, dispatches the obligation at every backbone
+ /// strategy from `Runtime` up to and including the declared
+ /// strategy, then verifies the strict-ν-monotonicity
+ /// invariant: `Closes` at any strategy `S_strict` MUST imply
+ /// `Closes` at every coarser backbone strategy `S_coarser ≤
+ /// S_strict`. Exits non-zero on any inversion. This is the
+ /// architectural promise the verification ladder makes by
+ /// design — this audit keeps the promise honest at runtime
+ /// across the live corpus.
         #[clap(long = "ladder-monotonicity")]
         ladder_monotonicity: bool,
 
-        /// Run the cross-format roundtrip audit (task #138 / MSFS-L4.5).
-        /// Walks every `@theorem`/`@lemma`/`@corollary` in the
-        /// project, emits per-theorem `.v` (Coq) and `.lean` (Lean 4)
-        /// files into `target/audit-reports/cross-format-roundtrip/`,
-        /// and invokes `coqc` / `lean` against each emitted file.
-        /// Aggregates per-theorem foreign-tool verdicts. Exits
-        /// non-zero only when an AVAILABLE foreign tool reports a
-        /// real failure on at least one emitted file. Hosts without
-        /// the foreign tools installed get `tool_missing`
-        /// observability without failing the gate.
+ /// Run the cross-format roundtrip audit (task #138 / MSFS-L4.5).
+ /// Walks every `@theorem`/`@lemma`/`@corollary` in the
+ /// project, emits per-theorem `.v` (Coq) and `.lean` (Lean 4)
+ /// files into `target/audit-reports/cross-format-roundtrip/`,
+ /// and invokes `coqc` / `lean` against each emitted file.
+ /// Aggregates per-theorem foreign-tool verdicts. Exits
+ /// non-zero only when an AVAILABLE foreign tool reports a
+ /// real failure on at least one emitted file. Hosts without
+ /// the foreign tools installed get `tool_missing`
+ /// observability without failing the gate.
         #[clap(long = "cross-format-roundtrip")]
         cross_format_roundtrip: bool,
 
-        /// Force docker backend for the cross-format gate (#149 / MSFS-L4.15).
-        /// Without this flag the gate uses host PATH-resolved coqc/lean,
-        /// surfacing `tool_missing` if absent. With `--docker`, foreign
-        /// tools run inside their canonical container images
-        /// (coqorg/coq:8.18.0-flambda, leanprovercommunity/lean4:4.5.0
-        /// by default; override via VERUM_DOCKER_IMAGE_COQ /
-        /// VERUM_DOCKER_IMAGE_LEAN env vars). Each emitted .v / .lean
-        /// file is mounted read-only into the container, the foreign
-        /// tool runs against it, and the verdict surfaces as
-        /// `passed`/`failed` instead of `tool_missing`. Equivalent to
-        /// setting `VERUM_FOREIGN_TOOL_BACKEND=docker`.
+ /// Force docker backend for the cross-format gate (#149 / MSFS-L4.15).
+ /// Without this flag the gate uses host PATH-resolved coqc/lean,
+ /// surfacing `tool_missing` if absent. With `--docker`, foreign
+ /// tools run inside their canonical container images
+ /// (coqorg/coq:8.18.0-flambda, leanprovercommunity/lean4:4.5.0
+ /// by default; override via VERUM_DOCKER_IMAGE_COQ /
+ /// VERUM_DOCKER_IMAGE_LEAN env vars). Each emitted .v / .lean
+ /// file is mounted read-only into the container, the foreign
+ /// tool runs against it, and the verdict surfaces as
+ /// `passed`/`failed` instead of `tool_missing`. Equivalent to
+ /// setting `VERUM_FOREIGN_TOOL_BACKEND=docker`.
         #[clap(long = "docker")]
         docker: bool,
 
-        /// Verify the canonical proof-term certificate library (#157
-        /// follow-up). Walks `core/verify/proof_term_examples/*.vproof`
-        /// (or any directory pointed at by `VERUM_PROOF_TERM_EXAMPLES`),
-        /// runs `proof_checker::Certificate::verify()` on each, exits
-        /// non-zero on any rejection. This is the trust-base
-        /// regression suite — the canonical proofs (identity,
-        /// polymorphic identity, K combinator, transitivity) that
-        /// every kernel implementation claiming Verum compatibility
-        /// must accept.
+ /// Verify the canonical proof-term certificate library (#157
+ /// follow-up). Walks `core/verify/proof_term_examples/*.vproof`
+ /// (or any directory pointed at by `VERUM_PROOF_TERM_EXAMPLES`),
+ /// runs `proof_checker::Certificate::verify()` on each, exits
+ /// non-zero on any rejection. This is the trust-base
+ /// regression suite — the canonical proofs (identity,
+ /// polymorphic identity, K combinator, transitivity) that
+ /// every kernel implementation claiming Verum compatibility
+ /// must accept.
         #[clap(long = "proof-term-library")]
         proof_term_library: bool,
 
-        /// Verify provenance signatures on emitted cross-format files
-        /// (#174). Walks the corpus, recomputes each theorem's
-        /// expected `verum_signature` header, and compares it to the
-        /// signature actually present in
-        /// `target/audit-reports/cross-format-roundtrip/{coq,lean}/*`.
-        /// Exits non-zero on any mismatch. Reproducibility primitive:
-        /// a third-party reviewer pulls the published .v / .lean files
-        /// out of supplementary material and runs this gate to confirm
-        /// the files were emitted by the named kernel version against
-        /// the named corpus state.
+ /// Verify provenance signatures on emitted cross-format files
+ /// (#174). Walks the corpus, recomputes each theorem's
+ /// expected `verum_signature` header, and compares it to the
+ /// signature actually present in
+ /// `target/audit-reports/cross-format-roundtrip/{coq,lean}/*`.
+ /// Exits non-zero on any mismatch. Reproducibility primitive:
+ /// a third-party reviewer pulls the published .v / .lean files
+ /// out of supplementary material and runs this gate to confirm
+ /// the files were emitted by the named kernel version against
+ /// the named corpus state.
         #[clap(long = "signatures")]
         signatures: bool,
 
-        /// Run the kernel-soundness IOU dashboard. Enumerates
-        /// every kernel rule whose
-        /// soundness lemma is admitted with an IOU reason in
-        /// `core/verify/kernel_soundness/`; groups by RuleCategory
-        /// (Structural / Cubical / Refinement / Quotient / Inductive /
-        /// SmtAxiom / Diakrisis); emits structured JSON + plain summary.
-        /// Drives discharge prioritisation: high-priority admits surface
-        /// at the top. This is the metric-driven foundation for the
-        /// path to "constructively verified from first principles" —
-        /// each admit closed shrinks Verum's trusted base.
+ /// Run the kernel-soundness IOU dashboard. Enumerates
+ /// every kernel rule whose
+ /// soundness lemma is admitted with an IOU reason in
+ /// `core/verify/kernel_soundness/`; groups by RuleCategory
+ /// (Structural / Cubical / Refinement / Quotient / Inductive /
+ /// SmtAxiom / Diakrisis); emits structured JSON + plain summary.
+ /// Drives discharge prioritisation: high-priority admits surface
+ /// at the top. This is the metric-driven foundation for the
+ /// path to "constructively verified from first principles" —
+ /// each admit closed shrinks Verum's trusted base.
         #[clap(long = "soundness-iou")]
         soundness_iou: bool,
 
-        /// Run the unified audit-bundle (#151). Executes each of the
-        /// load-bearing L1+L2+L3+L4 gates in dependency order
-        /// (`--bridge-discharge`, `--kernel-discharged-axioms`,
-        /// `--apply-graph`, `--cross-format-roundtrip`) and aggregates
-        /// their JSON outputs into a single `target/audit-reports/
-        /// bundle.json`. Top-level `l4_load_bearing: bool` summarises
-        /// the corpus's L4 verdict in one boolean. The bundle is the
-        /// user-facing UX for the verum-corpus L4-readiness gate: one
-        /// command, one verdict, all evidence in one place.
+ /// Run the unified audit-bundle (#151). Executes each of the
+ /// load-bearing L1+L2+L3+L4 gates in dependency order
+ /// (`--bridge-discharge`, `--kernel-discharged-axioms`,
+ /// `--apply-graph`, `--cross-format-roundtrip`) and aggregates
+ /// their JSON outputs into a single `target/audit-reports/
+ /// bundle.json`. Top-level `l4_load_bearing: bool` summarises
+ /// the corpus's L4 verdict in one boolean. The bundle is the
+ /// user-facing UX for the verum-corpus L4-readiness gate: one
+ /// command, one verdict, all evidence in one place.
         #[clap(long = "bundle")]
         bundle: bool,
 
-        /// Run the apply-graph transitive bridge-discharge audit
-        /// (task #150 / MSFS-L4.13). Walks every theorem in the
-        /// project and classifies its TRANSITIVE apply-chain leaves
-        /// — each `apply <symbol>(args)` resolves through the
-        /// workspace symbol table to its body; the recursion
-        /// terminates at axiom leaves classified as
-        /// `kernel_strict` / `framework_axiom` / `placeholder_axiom`
-        /// / `unresolved`. This is the load-bearing complement to
-        /// `--bridge-discharge` (which only checks the immediate
-        /// apply): `--apply-graph` follows the chain across `_full`
-        /// forms and stdlib delegates so a placeholder leak deep in
-        /// the chain surfaces. Exits non-zero when any theorem's
-        /// composition has `placeholder_axiom > 0` or
-        /// `unresolved > 0` — those theorems are not yet L4 load-
-        /// bearing.
+ /// Run the apply-graph transitive bridge-discharge audit
+ /// (task #150 / MSFS-L4.13). Walks every theorem in the
+ /// project and classifies its TRANSITIVE apply-chain leaves
+ /// — each `apply <symbol>(args)` resolves through the
+ /// workspace symbol table to its body; the recursion
+ /// terminates at axiom leaves classified as
+ /// `kernel_strict` / `framework_axiom` / `placeholder_axiom`
+ /// / `unresolved`. This is the load-bearing complement to
+ /// `--bridge-discharge` (which only checks the immediate
+ /// apply): `--apply-graph` follows the chain across `_full`
+ /// forms and stdlib delegates so a placeholder leak deep in
+ /// the chain surfaces. Exits non-zero when any theorem's
+ /// composition has `placeholder_axiom > 0` or
+ /// `unresolved > 0` — those theorems are not yet L4 load-
+ /// bearing.
         #[clap(long = "apply-graph")]
         apply_graph: bool,
 
-        /// Enumerate the ε-distribution (Actic / DC coordinate) of the
-        /// corpus — the dual of `--framework-axioms`. Prints every
-        /// `@enact(epsilon = "...")` marker grouped by ε-primitive
-        /// . Exits non-zero if any malformed marker is
-        /// found (unknown primitive or missing `epsilon = ...` arg).
+ /// Enumerate the ε-distribution (Actic / DC coordinate) of the
+ /// corpus — the dual of `--framework-axioms`. Prints every
+ /// `@enact(epsilon = "...")` marker grouped by ε-primitive
+ /// . Exits non-zero if any malformed marker is
+ /// found (unknown primitive or missing `epsilon = ...` arg).
         #[clap(long)]
         epsilon: bool,
 
-        /// Project the @framework markers to their MSFS coordinate
-        /// (Framework, ν, τ). Reads the same source as
-        /// `--framework-axioms` and additionally annotates each
-        /// framework with its Diakrisis ν-rank and intensional flag.
-        ///
+ /// Project the @framework markers to their MSFS coordinate
+ /// (Framework, ν, τ). Reads the same source as
+ /// `--framework-axioms` and additionally annotates each
+ /// framework with its Diakrisis ν-rank and intensional flag.
+ ///
 
-        /// the per-theorem coord audit is
-        /// **default-on** per `verification-architecture.md` §A.Z.4.
-        /// Bare `verum audit` runs dependency-audit + coord-audit
-        /// together; pass `--no-coord` to skip the coord pass.
-        /// `--coord` (this flag) keeps its legacy meaning of
-        /// "coord-only" mode (skips dependency audit).
+ /// the per-theorem coord audit is
+ /// **default-on** per `verification-architecture.md` §A.Z.4.
+ /// Bare `verum audit` runs dependency-audit + coord-audit
+ /// together; pass `--no-coord` to skip the coord pass.
+ /// `--coord` (this flag) keeps its legacy meaning of
+ /// "coord-only" mode (skips dependency audit).
         #[clap(long)]
         coord: bool,
 
-        /// skip the per-theorem coord audit
-        /// that bare `verum audit` runs by default. Honoured only
-        /// in the default (no-specific-audit-flag) dispatch path —
-        /// other specific audit modes ignore it.
+ /// skip the per-theorem coord audit
+ /// that bare `verum audit` runs by default. Honoured only
+ /// in the default (no-specific-audit-flag) dispatch path —
+ /// other specific audit modes ignore it.
         #[clap(long)]
         no_coord: bool,
 
-        /// Articulation Hygiene audit: walk every type and function
-        /// declaration, classify each self-referential surface form
-        /// against the hygiene table, and report the (Φ, κ, t)
-        /// factorisation for each. Detects inductive, coinductive,
-        /// higher-inductive, newtype, @recursive, and @corecursive
-        /// surfaces.
+ /// Articulation Hygiene audit: walk every type and function
+ /// declaration, classify each self-referential surface form
+ /// against the hygiene table, and report the (Φ, κ, t)
+ /// factorisation for each. Detects inductive, coinductive,
+ /// higher-inductive, newtype, @recursive, and @corecursive
+ /// surfaces.
         #[clap(long)]
         hygiene: bool,
 
-        /// Articulation Hygiene strict enforcement: walk every
-        /// top-level free function body and reject raw `self`
-        /// occurrences with `E_HYGIENE_UNFACTORED_SELF`. Methods
-        /// (functions with a self-receiver param) are skipped —
-        /// `self` is bound there. Exits non-zero on any violation;
-        /// safe to wire into CI.
+ /// Articulation Hygiene strict enforcement: walk every
+ /// top-level free function body and reject raw `self`
+ /// occurrences with `E_HYGIENE_UNFACTORED_SELF`. Methods
+ /// (functions with a self-receiver param) are skipped —
+ /// `self` is bound there. Exits non-zero on any violation;
+ /// safe to wire into CI.
         #[clap(long)]
         hygiene_strict: bool,
 
-        /// OWL 2 classification hierarchy audit: walk every
-        /// Owl2*Attr in the project, build the
-        /// classification graph (subclass closure + equivalence
-        /// partition + disjointness pairs + property characteristics
-        /// + has-key constraints), detect cycles and disjoint /
-        /// subclass conflicts, and emit a graph-aware report. Exits
-        /// non-zero on any cycle or violation.
+ /// OWL 2 classification hierarchy audit: walk every
+ /// Owl2*Attr in the project, build the
+ /// classification graph (subclass closure + equivalence
+ /// partition + disjointness pairs + property characteristics
+ /// + has-key constraints), detect cycles and disjoint /
+ /// subclass conflicts, and emit a graph-aware report. Exits
+ /// non-zero on any cycle or violation.
         #[clap(long)]
         owl2_classify: bool,
 
-        /// Framework-compatibility audit walk every
-        /// `@framework(corpus, ...)` marker in the project, collect
-        /// the distinct corpus identifiers, and check the well-known
-        /// incompatibility matrix (uip ⊥ univalence, anti_classical
-        /// ⊥ classical_lem, etc.). Each match prints the conflict
-        /// reason + literature citation. Exits non-zero if any
-        /// incompatible pair is found — the project's axiom bundle
-        /// would derive False, breaking every theorem.
+ /// Framework-compatibility audit walk every
+ /// `@framework(corpus, ...)` marker in the project, collect
+ /// the distinct corpus identifiers, and check the well-known
+ /// incompatibility matrix (uip ⊥ univalence, anti_classical
+ /// ⊥ classical_lem, etc.). Each match prints the conflict
+ /// reason + literature citation. Exits non-zero if any
+ /// incompatible pair is found — the project's axiom bundle
+ /// would derive False, breaking every theorem.
         #[clap(long)]
         framework_conflicts: bool,
 
-        /// foundation-profiles audit:
-        /// classify every `@framework(<name>, "<citation>")` marker
-        /// by its underlying logical foundation (ZFC family / MLTT
-        /// / HoTT / Cubical / CIC) using the `verum_kernel::
-        /// foundation_profile::FoundationDistribution` analyzer.
-        /// Reports per-foundation citation counts, lists unresolved
-        /// framework names, and detects cross-foundation conflicts
-        /// (UIP ⊥ univalence). Exits non-zero on any conflict.
-        ///
+ /// foundation-profiles audit:
+ /// classify every `@framework(<name>, "<citation>")` marker
+ /// by its underlying logical foundation (ZFC family / MLTT
+ /// / HoTT / Cubical / CIC) using the `verum_kernel::
+ /// foundation_profile::FoundationDistribution` analyzer.
+ /// Reports per-foundation citation counts, lists unresolved
+ /// framework names, and detects cross-foundation conflicts
+ /// (UIP ⊥ univalence). Exits non-zero on any conflict.
+ ///
 
-        /// Output: `target/audit-reports/foundation-profiles.json`.
+ /// Output: `target/audit-reports/foundation-profiles.json`.
         #[clap(long)]
         foundation_profiles: bool,
 
-        /// accessibility audit (item 4):
-        /// walk every `@enact(...)` / EpsilonOf marker in the
-        /// project, cross-reference against `@accessibility(λ)`
-        /// annotations (per Diakrisis Axi-4 λ-accessibility
-        /// premise), and surface any unannotated EpsilonOf site.
-        /// Exit non-zero when at least one missing annotation is
-        /// found (CI gate). This closes the Axi-4 defect from
-        /// by making the framework-author's
-        /// accessibility certification a checkable invariant.
+ /// accessibility audit (item 4):
+ /// walk every `@enact(...)` / EpsilonOf marker in the
+ /// project, cross-reference against `@accessibility(λ)`
+ /// annotations (per Diakrisis Axi-4 λ-accessibility
+ /// premise), and surface any unannotated EpsilonOf site.
+ /// Exit non-zero when at least one missing annotation is
+ /// found (CI gate). This closes the Axi-4 defect from
+ /// by making the framework-author's
+ /// accessibility certification a checkable invariant.
         #[clap(long)]
         accessibility: bool,
 
-        /// 108.T round-trip audit: for every theorem citing the
-        /// AC/OC duality (Diakrisis 108.T) or its `core.theory_interop.
-        /// bridges.oc_dc_bridge` round-trip, classify the canonical
-        /// round-trip status as Decidable / SemiDecidable / Undecidable
-        /// per the operational coherence layer. Emits one entry per
-        /// theorem to `audit-reports/round-trip.json`. Finitely-
-        /// axiomatized theorems must be 100% Decidable to clear the
-        /// corpus acceptance gate (T5.2).
+ /// 108.T round-trip audit: for every theorem citing the
+ /// AC/OC duality (Diakrisis 108.T) or its `core.theory_interop.
+ /// bridges.oc_dc_bridge` round-trip, classify the canonical
+ /// round-trip status as Decidable / SemiDecidable / Undecidable
+ /// per the operational coherence layer. Emits one entry per
+ /// theorem to `audit-reports/round-trip.json`. Finitely-
+ /// axiomatized theorems must be 100% Decidable to clear the
+ /// corpus acceptance gate (T5.2).
         #[clap(long)]
         round_trip: bool,
 
-        /// Operational coherence audit: for every `@verify(coherent)`
-        /// or `@verify(coherent_static / coherent_runtime)` theorem,
-        /// validate the bidirectional α-cert ⟺ ε-cert correspondence
-        /// per the Coherent verification rule family. Emits one entry
-        /// per theorem to `audit-reports/coherent.json`. Currently
-        /// reports a Status::Pending verdict pending the full coherent-
-        /// rule kernel implementation (T2.2); the audit surface itself
-        /// is stable so CI dashboards can pre-wire it.
+ /// Operational coherence audit: for every `@verify(coherent)`
+ /// or `@verify(coherent_static / coherent_runtime)` theorem,
+ /// validate the bidirectional α-cert ⟺ ε-cert correspondence
+ /// per the Coherent verification rule family. Emits one entry
+ /// per theorem to `audit-reports/coherent.json`. Currently
+ /// reports a Status::Pending verdict pending the full coherent-
+ /// rule kernel implementation (T2.2); the audit surface itself
+ /// is stable so CI dashboards can pre-wire it.
         #[clap(long)]
         coherent: bool,
 
-        /// Coord-consistency audit (M4.B): walks every public
-        /// theorem / axiom and validates the (Fw, ν, τ) supremum
-        /// invariant — every theorem's inferred coordinate must
-        /// be ≥ max(cited frameworks' coordinates). Flags
-        /// `missing-framework` violations (theorem has `@verify(...)`
-        /// but no `@framework(...)` citation). Mirrors V8.1 #232's
-        /// kernel-side `check_coord_cite` at corpus-audit time.
-        /// Schema_v=1 JSON to `audit-reports/coord-consistency.json`;
-        /// non-zero exit on any missing-framework violation.
+ /// Coord-consistency audit (M4.B): walks every public
+ /// theorem / axiom and validates the (Fw, ν, τ) supremum
+ /// invariant — every theorem's inferred coordinate must
+ /// be ≥ max(cited frameworks' coordinates). Flags
+ /// `missing-framework` violations (theorem has `@verify(...)`
+ /// but no `@framework(...)` citation). Mirrors V8.1 #232's
+ /// kernel-side `check_coord_cite` at corpus-audit time.
+ /// Schema_v=1 JSON to `audit-reports/coord-consistency.json`;
+ /// non-zero exit on any missing-framework violation.
         #[clap(long)]
         coord_consistency: bool,
 
-        /// Framework-soundness audit (M4.A): walks every
-        /// `public axiom` in the project and classifies its
-        /// proposition (the parser's requires-AND-ensures
-        /// conjunction) as `sound` (has propositional content) or
-        /// `trivial-placeholder` (just `true` literal).
-        ///
+ /// Framework-soundness audit (M4.A): walks every
+ /// `public axiom` in the project and classifies its
+ /// proposition (the parser's requires-AND-ensures
+ /// conjunction) as `sound` (has propositional content) or
+ /// `trivial-placeholder` (just `true` literal).
+ ///
 
-        /// Mirrors the kernel-side K-FwAx
-        /// `SubsingletonRegime::ClosedPropositionOnly` gate at
-        /// corpus-audit time. Emits to
-        /// `audit-reports/framework-soundness.json` (schema_v=1) +
-        /// non-zero exit if any axiom is misclassified.
+ /// Mirrors the kernel-side K-FwAx
+ /// `SubsingletonRegime::ClosedPropositionOnly` gate at
+ /// corpus-audit time. Emits to
+ /// `audit-reports/framework-soundness.json` (schema_v=1) +
+ /// non-zero exit if any axiom is misclassified.
         #[clap(long)]
         framework_soundness: bool,
 
-        /// HTT (Lurie 2009) mechanisation roadmap audit. Emits
-        /// per-section coverage table sourced from
-        /// `verum_kernel::mechanisation_roadmap::htt_roadmap()`.
-        /// Each entry has status Mechanised / Partial / AxiomCited /
-        /// Pending plus the kernel module(s) that discharge it.
+ /// HTT (Lurie 2009) mechanisation roadmap audit. Emits
+ /// per-section coverage table sourced from
+ /// `verum_kernel::mechanisation_roadmap::htt_roadmap()`.
+ /// Each entry has status Mechanised / Partial / AxiomCited /
+ /// Pending plus the kernel module(s) that discharge it.
         #[clap(long)]
         htt_roadmap: bool,
 
-        /// Adámek-Rosický 1994 mechanisation roadmap audit. Emits
-        /// per-section coverage table sourced from
-        /// `verum_kernel::mechanisation_roadmap::adamek_rosicky_roadmap()`.
+ /// Adámek-Rosický 1994 mechanisation roadmap audit. Emits
+ /// per-section coverage table sourced from
+ /// `verum_kernel::mechanisation_roadmap::adamek_rosicky_roadmap()`.
         #[clap(long)]
         ar_roadmap: bool,
 
-        /// Cross-format CI hard gate audit. Lists the four
-        /// required export formats (Coq, Lean4, Isabelle, Dedukti)
-        /// with their replay commands per
-        /// `verum_kernel::cross_format_gate::format_replay_command`.
+ /// Cross-format CI hard gate audit. Lists the four
+ /// required export formats (Coq, Lean4, Isabelle, Dedukti)
+ /// with their replay commands per
+ /// `verum_kernel::cross_format_gate::format_replay_command`.
         #[clap(long)]
         cross_format: bool,
 
-        /// Kernel intrinsic dispatch audit. Lists every kernel_*
-        /// dispatcher backing a `kernel_*` axiom in
-        /// `core/proof/kernel_bridge.vr`. Used to verify the
-        /// Verum-side bridge ↔ Rust-side kernel-function coupling
-        /// is complete.
+ /// Kernel intrinsic dispatch audit. Lists every kernel_*
+ /// dispatcher backing a `kernel_*` axiom in
+ /// `core/proof/kernel_bridge.vr`. Used to verify the
+ /// Verum-side bridge ↔ Rust-side kernel-function coupling
+ /// is complete.
         #[clap(long)]
         kernel_intrinsics: bool,
 
-        /// Kernel-discharged-axioms audit. Walks every
-        /// `@kernel_discharge("<intrinsic>")` attribute in the
-        /// project, verifies the cited dispatcher name appears in
-        /// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
-        /// Exits non-zero on any unmatched citation. Surfaces the
-        /// trusted-base-shrinkage cross-link in machine-checkable form.
+ /// Kernel-discharged-axioms audit. Walks every
+ /// `@kernel_discharge("<intrinsic>")` attribute in the
+ /// project, verifies the cited dispatcher name appears in
+ /// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
+ /// Exits non-zero on any unmatched citation. Surfaces the
+ /// trusted-base-shrinkage cross-link in machine-checkable form.
         #[clap(long)]
         kernel_discharged_axioms: bool,
 
-        /// Verify-ladder audit. Walks every `@verify(strategy)`
-        /// annotation, projects to its ν-ordinal, classifies dispatch
-        /// status (implemented / fallback / pending), and verifies the
-        /// strict-ν-monotonicity invariant. Exits non-zero on any
-        /// monotonicity violation.
+ /// Verify-ladder audit. Walks every `@verify(strategy)`
+ /// annotation, projects to its ν-ordinal, classifies dispatch
+ /// status (implemented / fallback / pending), and verifies the
+ /// strict-ν-monotonicity invariant. Exits non-zero on any
+ /// monotonicity violation.
         #[clap(long)]
         verify_ladder: bool,
 
-        /// Manifest-coverage audit (#290): enumerate every
-        /// `Verum.toml` manifest field, report its wiring status
-        /// (load-bearing / partial / forward-looking), and emit a
-        /// JSON report at `target/audit-reports/manifest-coverage.json`.
-        /// Load-bearing inert-defense gate: any future PR that adds
-        /// a manifest field without wiring it produces a
-        /// `forward-looking` row pointing at the closure follow-up
-        /// task. CI consumers can grep `is_wired:false` rows to
-        /// know what's pending.
+ /// Manifest-coverage audit (#290): enumerate every
+ /// `Verum.toml` manifest field, report its wiring status
+ /// (load-bearing / partial / forward-looking), and emit a
+ /// JSON report at `target/audit-reports/manifest-coverage.json`.
+ /// Load-bearing inert-defense gate: any future PR that adds
+ /// a manifest field without wiring it produces a
+ /// `forward-looking` row pointing at the closure follow-up
+ /// task. CI consumers can grep `is_wired:false` rows to
+ /// know what's pending.
         #[clap(long = "manifest-coverage")]
         manifest_coverage: bool,
 
-        /// MLS-coverage audit (#296): walk the project's .vr files
-        /// counting classified functions, classified parameters,
-        /// `@declassify` boundaries, and sink-context consumers
-        /// (Logger / FS / Network / etc.). Emits JSON to
-        /// `target/audit-reports/mls-coverage.json`. Useful for
-        /// security-review dashboards and CI gates that track
-        /// classification growth in regulated-environment codebases.
+ /// MLS-coverage audit (#296): walk the project's .vr files
+ /// counting classified functions, classified parameters,
+ /// `@declassify` boundaries, and sink-context consumers
+ /// (Logger / FS / Network / etc.). Emits JSON to
+ /// `target/audit-reports/mls-coverage.json`. Useful for
+ /// security-review dashboards and CI gates that track
+ /// classification growth in regulated-environment codebases.
         #[clap(long = "mls-coverage")]
         mls_coverage: bool,
 
-        /// Proof-honesty audit (M0.G): walk every public theorem /
-        /// axiom in the project and classify each by proof-body shape
-        /// — `axiom-placeholder` / `theorem-no-proof-body` /
-        /// `theorem-trivial-true` / `theorem-axiom-only` /
-        /// `theorem-multi-step`. Emits per-row classification + by-
-        /// lineage totals (msfs / diakrisis subpath partition) to
-        /// `audit-reports/proof-honesty.json` (schema_version=1).
-        ///
+ /// Proof-honesty audit (M0.G): walk every public theorem /
+ /// axiom in the project and classify each by proof-body shape
+ /// — `axiom-placeholder` / `theorem-no-proof-body` /
+ /// `theorem-trivial-true` / `theorem-axiom-only` /
+ /// `theorem-multi-step`. Emits per-row classification + by-
+ /// lineage totals (msfs / diakrisis subpath partition) to
+ /// `audit-reports/proof-honesty.json` (schema_version=1).
+ ///
 
-        /// Mirrors the stand-alone Python walker
-        /// `verum-msfs-corpus/tools/proof_honesty_audit.py` (M0.E),
-        /// now first-class via the verum CLI.
+ /// Mirrors the stand-alone Python walker
+ /// `verum-msfs-corpus/tools/proof_honesty_audit.py` (M0.E),
+ /// now first-class via the verum CLI.
         #[clap(long)]
         proof_honesty: bool,
 
-        /// Bridge-admit footprint audit (M-EXPORT V2 / K-Round-Trip):
-        /// walk every public theorem / lemma / corollary, lift the
-        /// proof body to a CoreTerm, run
-        /// `verum_kernel::round_trip::enumerate_bridge_admits`, and
-        /// emit a per-theorem footprint of which Diakrisis preprint
-        /// admits the proof relies on (16.10 confluence, 16.7
-        /// quotient canonical-rep, 14.3 cohesive-adjunction unit/counit).
-        ///
+ /// Bridge-admit footprint audit (M-EXPORT V2 / K-Round-Trip):
+ /// walk every public theorem / lemma / corollary, lift the
+ /// proof body to a CoreTerm, run
+ /// `verum_kernel::round_trip::enumerate_bridge_admits`, and
+ /// emit a per-theorem footprint of which Diakrisis preprint
+ /// admits the proof relies on (16.10 confluence, 16.7
+ /// quotient canonical-rep, 14.3 cohesive-adjunction unit/counit).
+ ///
 
-        /// Empty footprint = decidable corpus. Non-empty = trusted-
-        /// boundary surface: external reviewers see every reliance
-        /// on a preprint-blocked result without re-walking the
-        /// kernel by hand. Schema_v=1 JSON when --format json.
+ /// Empty footprint = decidable corpus. Non-empty = trusted-
+ /// boundary surface: external reviewers see every reliance
+ /// on a preprint-blocked result without re-walking the
+ /// kernel by hand. Schema_v=1 JSON when --format json.
         #[clap(long)]
         bridge_admits: bool,
 
-        /// Output format for the audit report: `plain` (default, human-
-        /// readable) or `json` (machine-parseable, stable schema).
-        ///
+ /// Output format for the audit report: `plain` (default, human-
+ /// readable) or `json` (machine-parseable, stable schema).
+ ///
 
-        /// The `json` format is suitable for CI dashboards and
-        /// supply-chain enforcement — e.g. fail the build if a PR
-        /// introduces a new framework-axiom dependency.
+ /// The `json` format is suitable for CI dashboards and
+ /// supply-chain enforcement — e.g. fail the build if a PR
+ /// introduces a new framework-axiom dependency.
         #[clap(long, value_name = "FORMAT", default_value = "plain")]
         format: String,
     },
 
-    /// Export the project's theorems / lemmas / axioms to an external
-    /// proof assistant's certificate format.
-    ///
+ /// Export the project's theorems / lemmas / axioms to an external
+ /// proof assistant's certificate format.
+ ///
 
-    /// Walks every .vr file in the project, collects every top-level
-    /// axiom / theorem / lemma / corollary declaration, and emits a
-    /// per-format file containing statement-only entries (proofs are
-    /// admitted). `@framework(name, "citation")` markers ride along
-    /// so the trusted boundary is visible in the exported artefact.
-    ///
+ /// Walks every .vr file in the project, collects every top-level
+ /// axiom / theorem / lemma / corollary declaration, and emits a
+ /// per-format file containing statement-only entries (proofs are
+ /// admitted). `@framework(name, "citation")` markers ride along
+ /// so the trusted boundary is visible in the exported artefact.
+ ///
 
-    /// Full proof-term export through verum_kernel is a follow-up
-    /// — it requires SMT proof-replay, which lands per-backend.
+ /// Full proof-term export through verum_kernel is a follow-up
+ /// — it requires SMT proof-replay, which lands per-backend.
     Export {
-        /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
+ /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
         #[clap(long, value_name = "FORMAT")]
         to: String,
-        /// Output file path (defaults to
-        /// `certificates/<format>/export.<ext>`).
+ /// Output file path (defaults to
+ /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
-        /// Emit a per-declaration provenance JSON sidecar at
-        /// `<output>.provenance.json`. The sidecar lists every
-        /// exported declaration with its kind / source-file /
-        /// framework citation / discharge_strategy; downstream
-        /// tools use it to drive SMT replay or fill in proof terms.
-        /// Statement-level export (sorry / Admitted / `?`) is
-        /// unchanged when this flag is absent.
+ /// Emit a per-declaration provenance JSON sidecar at
+ /// `<output>.provenance.json`. The sidecar lists every
+ /// exported declaration with its kind / source-file /
+ /// framework citation / discharge_strategy; downstream
+ /// tools use it to drive SMT replay or fill in proof terms.
+ /// Statement-level export (sorry / Admitted / `?`) is
+ /// unchanged when this flag is absent.
         #[clap(long)]
         with_provenance: bool,
     },
 
-    /// Alias for `export --to <format>` — matches the wording in
-    /// `docs/verification/proof-export.md` and the CLI reference at
-    /// `docs/verification/cli-workflow.md §12`. Behaviour is
-    /// identical to `verum export --to FORMAT`; the alias keeps
-    /// docs-cli parity without duplicating semantics.
+ /// Alias for `export --to <format>` — matches the wording in
+ /// `docs/verification/proof-export.md` and the CLI reference at
+ /// `docs/verification/cli-workflow.md §12`. Behaviour is
+ /// identical to `verum export --to FORMAT`; the alias keeps
+ /// docs-cli parity without duplicating semantics.
     ExportProofs {
-        /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
+ /// Target format: `dedukti` | `coq` | `lean` | `metamath`.
         #[clap(long, value_name = "FORMAT")]
         to: String,
-        /// Output file path (defaults to
-        /// `certificates/<format>/export.<ext>`).
+ /// Output file path (defaults to
+ /// `certificates/<format>/export.<ext>`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
-        /// See `Export::with_provenance`.
+ /// See `Export::with_provenance`.
         #[clap(long)]
         with_provenance: bool,
     },
 
-    /// extract executable
-    /// programs from constructive proofs marked with `@extract` /
-    /// `@extract_witness` / `@extract_contract`. Walks the project
-    /// for marked declarations, dispatches to the program-extraction
-    /// pipeline at the attribute's `ExtractTarget` (Verum / OCaml /
-    /// Lean / Coq), and emits per-target files at
-    /// `<output>/<decl>.{vr,ml,lean,v}`. Default output dir is
-    /// `extracted/`.
+ /// extract executable
+ /// programs from constructive proofs marked with `@extract` /
+ /// `@extract_witness` / `@extract_contract`. Walks the project
+ /// for marked declarations, dispatches to the program-extraction
+ /// pipeline at the attribute's `ExtractTarget` (Verum / OCaml /
+ /// Lean / Coq), and emits per-target files at
+ /// `<output>/<decl>.{vr,ml,lean,v}`. Default output dir is
+ /// `extracted/`.
     Extract {
-        /// Optional explicit input `.vr` path. When absent, all `.vr`
-        /// files under the project's manifest directory are scanned.
+ /// Optional explicit input `.vr` path. When absent, all `.vr`
+ /// files under the project's manifest directory are scanned.
         input: Option<std::path::PathBuf>,
-        /// Output directory (defaults to `extracted/`).
+ /// Output directory (defaults to `extracted/`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
     },
 
-    /// import an external knowledge-
-    /// base format and emit a `.vr` file with the corresponding typed
-    /// attributes. Currently supports OWL 2 Functional-Style Syntax
-    /// (`--from owl2-fs`); round-trips with `verum export --to owl2-fs`.
+ /// import an external knowledge-
+ /// base format and emit a `.vr` file with the corresponding typed
+ /// attributes. Currently supports OWL 2 Functional-Style Syntax
+ /// (`--from owl2-fs`); round-trips with `verum export --to owl2-fs`.
     Import {
-        /// Source format: `owl2-fs` (also `ofn`).
+ /// Source format: `owl2-fs` (also `ofn`).
         #[clap(long, value_name = "FORMAT")]
         from: String,
-        /// Input path. Required.
+ /// Input path. Required.
         input: std::path::PathBuf,
-        /// Output `.vr` path (defaults to `<input>.vr`).
+ /// Output `.vr` path (defaults to `<input>.vr`).
         #[clap(long, short, value_name = "PATH")]
         output: Option<std::path::PathBuf>,
     },
 
-    /// Display dependency tree
+ /// Display dependency tree
     Tree {
-        /// Show duplicate dependencies
+ /// Show duplicate dependencies
         #[clap(long)]
         duplicates: bool,
-        /// Maximum depth to display
+ /// Maximum depth to display
         #[clap(long)]
         depth: Option<usize>,
     },
 
-    /// Manage workspace
+ /// Manage workspace
     #[clap(subcommand)]
     Workspace(WorkspaceCommands),
 
-    // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
-    // Use `verum info` with --stdlib flag for stdlib information if needed.
-    /// Generate shell completion scripts for bash, zsh, fish, or PowerShell.
-    ///
+ // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
+ // Use `verum info` with --stdlib flag for stdlib information if needed.
+ /// Generate shell completion scripts for bash, zsh, fish, or PowerShell.
+ ///
 
-    /// Usage: `verum completions bash > ~/.bash_completion.d/verum`
+ /// Usage: `verum completions bash > ~/.bash_completion.d/verum`
     Completions {
-        /// Shell to generate completions for.
+ /// Shell to generate completions for.
         #[clap(value_enum)]
         shell: clap_complete::Shell,
     },
 
-    /// Show the resolved language-feature set for the current project.
-    ///
+ /// Show the resolved language-feature set for the current project.
+ ///
 
-    /// Loads `verum.toml`, applies any CLI overrides (`--tier`, `-Z …`),
-    /// runs the feature validator, and prints the final effective
-    /// configuration. Useful for debugging flag interactions.
+ /// Loads `verum.toml`, applies any CLI overrides (`--tier`, `-Z …`),
+ /// runs the feature validator, and prints the final effective
+ /// configuration. Useful for debugging flag interactions.
     Config {
         #[clap(subcommand)]
         command: ConfigCommands,
     },
 
-    /// Show formal-verification engine capabilities and backends.
-    ///
+ /// Show formal-verification engine capabilities and backends.
+ ///
 
-    /// This command diagnoses the verifier itself: which verification
-    /// techniques are available, which advanced features (interpolation,
-    /// synthesis, abduction, …) the current build supports. It does not
-    /// touch user code.
+ /// This command diagnoses the verifier itself: which verification
+ /// techniques are available, which advanced features (interpolation,
+ /// synthesis, abduction, …) the current build supports. It does not
+ /// touch user code.
     #[clap(name = "smt-info")]
     SmtInfo {
-        /// Output as machine-readable JSON instead of human-readable text.
+ /// Output as machine-readable JSON instead of human-readable text.
         #[clap(long)]
         json: bool,
     },
 
-    /// Show routing statistics from the most recent verification session.
-    ///
+ /// Show routing statistics from the most recent verification session.
+ ///
 
-    /// Reads telemetry: which strategy ran for each theory, portfolio race
-    /// winners, cross-validation agreement rate, divergence events, and
-    /// per-theory success rates.
+ /// Reads telemetry: which strategy ran for each theory, portfolio race
+ /// winners, cross-validation agreement rate, divergence events, and
+ /// per-theory success rates.
     #[clap(name = "smt-stats")]
     SmtStats {
-        /// Output as JSON instead of formatted report.
+ /// Output as JSON instead of formatted report.
         #[clap(long)]
         json: bool,
-        /// Reset statistics after printing.
+ /// Reset statistics after printing.
         #[clap(long)]
         reset: bool,
     },
 
-    /// ATS-V Architectural Type System operations.
-    /// Per `internal/specs/ats-v.md` §32.4 (dual-audience design),
-    /// these commands provide structured machine-readable surfaces
-    /// for coding-agents alongside human-friendly CLI output.
+ /// ATS-V Architectural Type System operations.
+ /// Per `internal/specs/ats-v.md` §32.4 (dual-audience design),
+ /// these commands provide structured machine-readable surfaces
+ /// for coding-agents alongside human-friendly CLI output.
     Arch {
         #[clap(subcommand)]
         cmd: ArchCommands,
@@ -1997,52 +1997,52 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ArchCommands {
-    /// Show structured architectural type information for a cog.
-    /// Per spec §32.4: outputs `Shape` + anti-pattern violations
-    /// + suggestions in human-friendly plain text or
-    /// machine-readable JSON.
-    ///
-    /// In Сезон 2 (current), without ATS-V phase wiring, the
-    /// command returns the default Shape with the canonical
-    /// anti-pattern catalog roster. After Сезон 3, it consumes
-    /// the cog's actual `@arch_module(...)` declaration and runs
-    /// per-cog dispatch.
+ /// Show structured architectural type information for a cog.
+ /// Per spec §32.4: outputs `Shape` + anti-pattern violations
+ /// + suggestions in human-friendly plain text or
+ /// machine-readable JSON.
+ ///
+ /// In (current), without ATS-V phase wiring, the
+ /// command returns the default Shape with the canonical
+ /// anti-pattern catalog roster. After , it consumes
+ /// the cog's actual `@arch_module(...)` declaration and runs
+ /// per-cog dispatch.
     Explain {
-        /// Cog or module path to explain.  Currently a stub
-        /// argument — Сезон 3 wiring resolves it against the
-        /// project's cog graph.
+ /// Cog or module path to explain. Currently a stub
+ /// argument — wiring resolves it against the
+ /// project's cog graph.
         cog: Option<String>,
-        /// Output format: `plain` (human) or `json` (agent).
+ /// Output format: `plain` (human) or `json` (agent).
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// List the canonical anti-pattern catalog with stable RFC
-    /// codes ATS-V-AP-NNN.  Equivalent to `verum audit
-    /// --arch-discharges` filtered to the catalog table.
+ /// List the canonical anti-pattern catalog with stable RFC
+ /// codes ATS-V-AP-NNN. Equivalent to `verum audit
+ /// --arch-discharges` filtered to the catalog table.
     Catalog {
-        /// Output format: `plain` (human) or `json` (agent).
+ /// Output format: `plain` (human) or `json` (agent).
         #[clap(long, default_value = "plain")]
         format: String,
-        /// Filter to MTAC patterns only (AP-027..032).
+ /// Filter to MTAC patterns only (AP-027..032).
         #[clap(long)]
         mtac_only: bool,
-        /// Filter by season (1 or 2).
+ /// Filter by season (1 or 2).
         #[clap(long, value_name = "N")]
         season: Option<u8>,
     },
-    /// Check ATS-V architectural type invariants on a .vr file.
-    /// Сезон 4 end-to-end: parses the file, walks every module
-    /// declaration, extracts @arch_module(...) attributes, runs
-    /// the canonical 32-pattern catalog, and reports violations.
-    /// Per spec §11.4 — backward-compat: modules без аннотации
-    /// pass vacuously (default Shape).
+ /// Check ATS-V architectural type invariants on a .vr file.
+ /// end-to-end: parses the file, walks every module
+ /// declaration, extracts @arch_module(...) attributes, runs
+ /// the canonical 32-pattern catalog, and reports violations.
+ /// Per spec §11.4 — backward-compat: modules без аннотации
+ /// pass vacuously (default Shape).
     Check {
-        /// Path to a .vr file (or `-` for stdin).
+ /// Path to a .vr file (or `-` for stdin).
         file: String,
-        /// Output format: `plain` (human) or `json` (agent).
+ /// Output format: `plain` (human) or `json` (agent).
         #[clap(long, default_value = "plain")]
         format: String,
-        /// Strict mode: warnings → errors, missing CVE-closure → error.
+ /// Strict mode: warnings → errors, missing CVE-closure → error.
         #[clap(long)]
         strict: bool,
     },
@@ -2050,21 +2050,21 @@ enum ArchCommands {
 
 #[derive(Subcommand)]
 enum ConfigCommands {
-    /// Print the resolved feature set (human-readable or JSON).
+ /// Print the resolved feature set (human-readable or JSON).
     Show {
-        /// Emit machine-readable JSON.
+ /// Emit machine-readable JSON.
         #[clap(long)]
         json: bool,
 
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
-    /// Validate verum.toml without building — check for invalid values,
-    /// inconsistent combinations, and typos.
+ /// Validate verum.toml without building — check for invalid values,
+ /// inconsistent combinations, and typos.
     Validate {
-        /// Language-feature overrides (applied on top of verum.toml).
+ /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
@@ -2073,27 +2073,27 @@ enum ConfigCommands {
 /// `verum hooks <subcommand>` — manage git hooks for the project.
 #[derive(Subcommand)]
 enum CubicalSub {
-    /// List every primitive with a one-line semantics summary.
-    /// Optional `--category` filters to one of: identity / path_ops /
-    /// induction / transport / composition / glue / universe.
+ /// List every primitive with a one-line semantics summary.
+ /// Optional `--category` filters to one of: identity / path_ops /
+ /// induction / transport / composition / glue / universe.
     Primitives {
         #[clap(long)]
         category: Option<String>,
         #[clap(long, default_value = "plain")]
         output: String,
     },
-    /// Full structured doc for a single primitive.
+ /// Full structured doc for a single primitive.
     Explain {
         name: String,
         #[clap(long, default_value = "plain")]
         output: String,
     },
-    /// List every computation / reduction rule.
+ /// List every computation / reduction rule.
     Rules {
         #[clap(long, default_value = "plain")]
         output: String,
     },
-    /// Parse + validate a face formula (e.g. `i = 0 ∧ j = 1`).
+ /// Parse + validate a face formula (e.g. `i = 0 ∧ j = 1`).
     Face {
         formula: String,
         #[clap(long, default_value = "plain")]
@@ -2160,14 +2160,14 @@ enum CogRegistrySub {
         name: String,
         #[clap(long)]
         version: String,
-        /// Repeatable: each mirror is a separate registry root.
+ /// Repeatable: each mirror is a separate registry root.
         #[clap(long, value_name = "DIR")]
         mirror: Vec<PathBuf>,
         #[clap(long, default_value = "plain")]
         output: String,
     },
-    /// Seed an in-process registry with a demo cog and dump its
-    /// metadata. Useful for the docs generator + tutorial walks.
+ /// Seed an in-process registry with a demo cog and dump its
+ /// metadata. Useful for the docs generator + tutorial walks.
     SeedDemo {
         #[clap(long, default_value = "plain")]
         output: String,
@@ -2179,30 +2179,30 @@ enum CertReplaySub {
     Replay {
         #[clap(long)]
         backend: String,
-        /// Read the cert from a JSON file (preferred for real
-        /// proofs). Mutually exclusive with `--format` /
-        /// `--theory` / `--conclusion` / `--body`.
+ /// Read the cert from a JSON file (preferred for real
+ /// proofs). Mutually exclusive with `--format` /
+ /// `--theory` / `--conclusion` / `--body`.
         #[clap(long, value_name = "FILE")]
         cert: Option<PathBuf>,
-        /// Inline cert: format tag.
+ /// Inline cert: format tag.
         #[clap(long, default_value = "")]
         format: String,
-        /// Inline cert: SMT-LIB theory.
+ /// Inline cert: SMT-LIB theory.
         #[clap(long, default_value = "")]
         theory: String,
-        /// Inline cert: theorem-shaped conclusion.
+ /// Inline cert: theorem-shaped conclusion.
         #[clap(long, default_value = "")]
         conclusion: String,
-        /// Inline cert: raw cert body.
+ /// Inline cert: raw cert body.
         #[clap(long, default_value = "")]
         body: String,
         #[clap(long, default_value = "plain")]
         output: String,
     },
     CrossCheck {
-        /// Backend to invoke. Repeatable. When omitted, runs
-        /// every external backend (Z3 / CVC5 / Verit / OpenSmt /
-        /// Mathsat) plus the always-on kernel-only baseline.
+ /// Backend to invoke. Repeatable. When omitted, runs
+ /// every external backend (Z3 / CVC5 / Verit / OpenSmt /
+ /// Mathsat) plus the always-on kernel-only baseline.
         #[clap(long, value_name = "NAME")]
         backend: Vec<String>,
         #[clap(long, value_name = "FILE")]
@@ -2215,10 +2215,10 @@ enum CertReplaySub {
         conclusion: String,
         #[clap(long, default_value = "")]
         body: String,
-        /// Fail with non-zero exit when any available backend
-        /// disagrees with the others. This is the
-        /// `@verify(certified)` semantics: every available solver
-        /// must accept.
+ /// Fail with non-zero exit when any available backend
+ /// disagrees with the others. This is the
+ /// `@verify(certified)` semantics: every available solver
+ /// must accept.
         #[clap(long)]
         require_consensus: bool,
         #[clap(long, default_value = "plain")]
@@ -2236,7 +2236,7 @@ enum CertReplaySub {
 
 #[derive(Subcommand)]
 enum BenchmarkSub {
-    /// Run the suite against a single system and emit raw results.
+ /// Run the suite against a single system and emit raw results.
     Run {
         #[clap(long)]
         system: String,
@@ -2247,9 +2247,9 @@ enum BenchmarkSub {
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// Run the suite against multiple systems and emit a
-    /// comparison matrix. Without any `--system` flag, runs all
-    /// five canonical systems.
+ /// Run the suite against multiple systems and emit a
+ /// comparison matrix. Without any `--system` flag, runs all
+ /// five canonical systems.
     Compare {
         #[clap(long, value_name = "NAME")]
         system: Vec<String>,
@@ -2260,8 +2260,8 @@ enum BenchmarkSub {
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// List every supported metric with its `higher_is_better`
-    /// direction.
+ /// List every supported metric with its `higher_is_better`
+ /// direction.
     Metrics {
         #[clap(long, default_value = "plain")]
         format: String,
@@ -2270,41 +2270,41 @@ enum BenchmarkSub {
 
 #[derive(Subcommand)]
 enum ProofReplSub {
-    /// Run a batch of REPL commands non-interactively. Commands
-    /// can come from a file (`--commands`) and / or repeated
-    /// `--cmd` flags; both are concatenated in CLI order.
-    ///
+ /// Run a batch of REPL commands non-interactively. Commands
+ /// can come from a file (`--commands`) and / or repeated
+ /// `--cmd` flags; both are concatenated in CLI order.
+ ///
 
-    /// Command-script syntax (one per line):
-    ///  - `apply <tactic>` — apply a tactic. Bare lines are
-    ///  also treated as `apply <line>`.
-    ///  - `undo` / `redo` / `status` / `show-goals` /
-    ///  `show-context` / `visualise` — REPL navigation.
-    ///  - `hint` (default 5) / `hint <N>` — proposed next steps.
-    ///  - `# comment` — skipped.
-    ///  - blank line — skipped.
+ /// Command-script syntax (one per line):
+ /// - `apply <tactic>` — apply a tactic. Bare lines are
+ /// also treated as `apply <line>`.
+ /// - `undo` / `redo` / `status` / `show-goals` /
+ /// `show-context` / `visualise` — REPL navigation.
+ /// - `hint` (default 5) / `hint <N>` — proposed next steps.
+ /// - `# comment` — skipped.
+ /// - blank line — skipped.
     Batch {
         #[clap(long)]
         theorem: String,
         #[clap(long)]
         goal: String,
-        /// Lemmas in scope (`name:::signature[:::lineage]`,
-        /// repeatable).
+ /// Lemmas in scope (`name:::signature[:::lineage]`,
+ /// repeatable).
         #[clap(long, value_name = "NAME:::SIGNATURE[:::LINEAGE]")]
         lemma: Vec<String>,
-        /// Read commands from a file.
+ /// Read commands from a file.
         #[clap(long, value_name = "FILE")]
         commands: Option<PathBuf>,
-        /// Inline command. Repeatable — concatenated after
-        /// `--commands` content.
+ /// Inline command. Repeatable — concatenated after
+ /// `--commands` content.
         #[clap(long = "cmd", value_name = "LINE")]
         cmd: Vec<String>,
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// Apply a sequence of tactics and emit the resulting proof
-    /// tree as Graphviz DOT (suitable for `dot -Tsvg`). Non-zero
-    /// exit on any kernel rejection.
+ /// Apply a sequence of tactics and emit the resulting proof
+ /// tree as Graphviz DOT (suitable for `dot -Tsvg`). Non-zero
+ /// exit on any kernel rejection.
     Tree {
         #[clap(long)]
         theorem: String,
@@ -2312,7 +2312,7 @@ enum ProofReplSub {
         goal: String,
         #[clap(long, value_name = "NAME:::SIGNATURE[:::LINEAGE]")]
         lemma: Vec<String>,
-        /// Tactic to apply. Repeatable; ordered as on the CLI.
+ /// Tactic to apply. Repeatable; ordered as on the CLI.
         #[clap(long, value_name = "TACTIC")]
         apply: Vec<String>,
     },
@@ -2356,28 +2356,28 @@ enum LlmTacticSub {
 
 #[derive(Subcommand)]
 enum DocRenderSub {
-    /// Render the corpus as a single document.
+ /// Render the corpus as a single document.
     Render {
-        /// Output format: `markdown`, `md`, `latex`, `tex`, `html`.
+ /// Output format: `markdown`, `md`, `latex`, `tex`, `html`.
         #[clap(long, default_value = "markdown")]
         format: String,
-        /// Write to this path instead of stdout.
+ /// Write to this path instead of stdout.
         #[clap(long)]
         out: Option<PathBuf>,
-        /// Restrict to public-visibility declarations only.
+ /// Restrict to public-visibility declarations only.
         #[clap(long)]
         public: bool,
     },
-    /// Export the citation graph (citing → cited).
+ /// Export the citation graph (citing → cited).
     Graph {
-        /// `dot` (Graphviz) or `json` (edge list).
+ /// `dot` (Graphviz) or `json` (edge list).
         #[clap(long, default_value = "dot")]
         format: String,
         #[clap(long)]
         public: bool,
     },
-    /// Audit broken cross-references; non-zero exit on any dangling
-    /// citation. CI-friendly.
+ /// Audit broken cross-references; non-zero exit on any dangling
+ /// citation. CI-friendly.
     CheckRefs {
         #[clap(long, default_value = "plain")]
         format: String,
@@ -2388,21 +2388,21 @@ enum DocRenderSub {
 
 #[derive(Subcommand)]
 enum CacheClosureSub {
-    /// Show summary stats: entries, size, hit ratio.
+ /// Show summary stats: entries, size, hit ratio.
     Stat {
         #[clap(long)]
         root: Option<String>,
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// List every theorem name currently cached.
+ /// List every theorem name currently cached.
     List {
         #[clap(long)]
         root: Option<String>,
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// Print a single record (fingerprint + verdict).
+ /// Print a single record (fingerprint + verdict).
     Get {
         theorem: String,
         #[clap(long)]
@@ -2410,29 +2410,29 @@ enum CacheClosureSub {
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// Remove every cache entry. Idempotent.
+ /// Remove every cache entry. Idempotent.
     Clear {
         #[clap(long)]
         root: Option<String>,
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// Probe the cache: report Skip / Recheck for the given fingerprint.
+ /// Probe the cache: report Skip / Recheck for the given fingerprint.
     Decide {
         theorem: String,
-        /// Theorem signature payload (hashed by the cache). Pass any
-        /// stable serialisation of the elaborated signature.
+ /// Theorem signature payload (hashed by the cache). Pass any
+ /// stable serialisation of the elaborated signature.
         #[clap(long)]
         signature: String,
-        /// Proof body payload.
+ /// Proof body payload.
         #[clap(long)]
         body: String,
-        /// Repeated `--cite <citation>` for transitive @framework
-        /// citations; sorted+deduped before hashing.
+ /// Repeated `--cite <citation>` for transitive @framework
+ /// citations; sorted+deduped before hashing.
         #[clap(long = "cite")]
         cite: Vec<String>,
-        /// Override the kernel version reported in the fingerprint
-        /// (defaults to the running `verum_kernel::VVA_VERSION`).
+ /// Override the kernel version reported in the fingerprint
+ /// (defaults to the running `verum_kernel::VVA_VERSION`).
         #[clap(long)]
         kernel_version: Option<String>,
         #[clap(long)]
@@ -2444,23 +2444,23 @@ enum CacheClosureSub {
 
 #[derive(Subcommand)]
 enum TacticSub {
-    /// List every combinator in the canonical catalogue with a
-    /// one-line semantics summary.
+ /// List every combinator in the canonical catalogue with a
+ /// one-line semantics summary.
     List {
         #[clap(long, default_value = "plain")]
         format: String,
-        /// Restrict to a single category (identity / composition /
-        /// control / focus / forward).
+ /// Restrict to a single category (identity / composition /
+ /// control / focus / forward).
         #[clap(long)]
         category: Option<String>,
     },
-    /// Print the full structured doc for a single combinator.
+ /// Print the full structured doc for a single combinator.
     Explain {
         name: String,
         #[clap(long, default_value = "plain")]
         format: String,
     },
-    /// List the canonical algebraic-law inventory.
+ /// List the canonical algebraic-law inventory.
     Laws {
         #[clap(long, default_value = "plain")]
         format: String,
@@ -2469,19 +2469,19 @@ enum TacticSub {
 
 #[derive(Subcommand)]
 enum HooksCommands {
-    /// Install `.git/hooks/pre-commit` running `verum lint --since
-    /// HEAD --severity error` and `verum fmt --check`.
+ /// Install `.git/hooks/pre-commit` running `verum lint --since
+ /// HEAD --severity error` and `verum fmt --check`.
     Install {
-        /// Overwrite an existing hook even if it isn't
-        /// verum-managed. Without this flag, install refuses to
-        /// clobber a hand-authored or third-party hook.
+ /// Overwrite an existing hook even if it isn't
+ /// verum-managed. Without this flag, install refuses to
+ /// clobber a hand-authored or third-party hook.
         #[clap(long)]
         force: bool,
     },
-    /// Remove the verum-managed pre-commit hook. Refuses to remove
-    /// hooks that don't carry our header marker.
+ /// Remove the verum-managed pre-commit hook. Refuses to remove
+ /// hooks that don't carry our header marker.
     Uninstall,
-    /// Report whether the hook is installed and whether we manage it.
+ /// Report whether the hook is installed and whether we manage it.
     Status,
 }
 
@@ -2535,27 +2535,27 @@ enum PackageCommands {
 /// Playbook conversion utilities
 #[derive(Subcommand)]
 enum PlaybookConvertCommands {
-    /// Export playbook to Verum script (.vr)
+ /// Export playbook to Verum script (.vr)
     #[clap(name = "to-script")]
     ToScript {
-        /// Input .vrbook file
+ /// Input .vrbook file
         #[clap(value_name = "INPUT")]
         input: Text,
-        /// Output .vr file (defaults to same name with .vr extension)
+ /// Output .vr file (defaults to same name with .vr extension)
         #[clap(short, long, value_name = "OUTPUT")]
         output: Option<Text>,
-        /// Include output comments in exported script
+ /// Include output comments in exported script
         #[clap(long)]
         include_outputs: bool,
     },
 
-    /// Import Verum script into playbook format
+ /// Import Verum script into playbook format
     #[clap(name = "from-script")]
     FromScript {
-        /// Input .vr file
+ /// Input .vr file
         #[clap(value_name = "INPUT")]
         input: Text,
-        /// Output .vrbook file (defaults to same name with .vrbook extension)
+ /// Output .vrbook file (defaults to same name with .vrbook extension)
         #[clap(short, long, value_name = "OUTPUT")]
         output: Option<Text>,
     },
@@ -2563,61 +2563,61 @@ enum PlaybookConvertCommands {
 
 #[derive(Subcommand)]
 enum WorkspaceCommands {
-    /// List workspace members
+ /// List workspace members
     List,
-    /// Add a new member to workspace
+ /// Add a new member to workspace
     Add {
-        /// Path to the new member
+ /// Path to the new member
         path: Text,
     },
-    /// Remove a member from workspace
+ /// Remove a member from workspace
     Remove {
-        /// Name of the member to remove
+ /// Name of the member to remove
         name: Text,
     },
-    /// Run command in all workspace members
+ /// Run command in all workspace members
     Exec {
-        /// Command to execute
+ /// Command to execute
         #[clap(last = true)]
         command: Vec<String>,
     },
 }
 
 fn main() {
-    // Industrial crash reporter: panic hook + fatal-signal handlers +
-    // breadcrumb-enriched structured reports to `~/.verum/crashes/`.
+ // Industrial crash reporter: panic hook + fatal-signal handlers +
+ // breadcrumb-enriched structured reports to `~/.verum/crashes/`.
     verum_error::crash::install(verum_error::crash::CrashReporterConfig::default());
 
-    // Eagerly initialise the LLVM native target on the main thread,
-    // before any rayon worker or Z3 context exists.
-    //
+ // Eagerly initialise the LLVM native target on the main thread,
+ // before any rayon worker or Z3 context exists.
+ //
 
-    // WHY: phase_generate_native was hitting a ~70% SIGSEGV on arm64
-    // macOS. The crash always landed in LLVM pass-registry init
-    // (TargetLibraryInfoWrapperPass / CFIFixup / CallBase) under
-    // __cxa_guard_acquire → __os_semaphore_wait. The cxa guards behind
-    // LLVM's first-use pass-constructor registration are not robust
-    // against other threads' TLS teardown running in parallel. By
-    // registering the native target here — ~zero work, one call, no
-    // rayon workers alive yet — the guards are fully released before
-    // any stdlib parse spawns rayon workers or verify spawns Z3.
-    //
+ // WHY: phase_generate_native was hitting a ~70% SIGSEGV on arm64
+ // macOS. The crash always landed in LLVM pass-registry init
+ // (TargetLibraryInfoWrapperPass / CFIFixup / CallBase) under
+ // __cxa_guard_acquire → __os_semaphore_wait. The cxa guards behind
+ // LLVM's first-use pass-constructor registration are not robust
+ // against other threads' TLS teardown running in parallel. By
+ // registering the native target here — ~zero work, one call, no
+ // rayon workers alive yet — the guards are fully released before
+ // any stdlib parse spawns rayon workers or verify spawns Z3.
+ //
 
-    // The underlying `Target::initialize_native` is idempotent via an
-    // internal `Once`; the later call inside `VbcToLlvmLowering::new`
-    // becomes a no-op.
-    //
+ // The underlying `Target::initialize_native` is idempotent via an
+ // internal `Once`; the later call inside `VbcToLlvmLowering::new`
+ // becomes a no-op.
+ //
 
-    // Diagnosed by running `./target/release/verum build
-    // ./examples/cbgr_demo.vr` 20 times: 14/20 segfaults, all in
-    // phase=compiler.phase.generate_native at 307–350ms, always on
-    // verum-main, all stacks top-heavy with LLVM pass constructors.
+ // Diagnosed by running `./target/release/verum build
+ // ./examples/cbgr_demo.vr` 20 times: 14/20 segfaults, all in
+ // phase=compiler.phase.generate_native at 307–350ms, always on
+ // verum-main, all stacks top-heavy with LLVM pass constructors.
     let _ = verum_llvm::targets::Target::initialize_native(
         &verum_llvm::targets::InitializationConfig::default(),
     );
 
-    // Windows default stack is 1 MB — insufficient for deep recursive
-    // compiler data structures. Spawn on a thread with 16 MB stack.
+ // Windows default stack is 1 MB — insufficient for deep recursive
+ // compiler data structures. Spawn on a thread with 16 MB stack.
     const STACK_SIZE: usize = 16 * 1024 * 1024;
     let builder = std::thread::Builder::new().stack_size(STACK_SIZE);
     let handler = builder
@@ -2629,16 +2629,16 @@ fn main() {
 }
 
 fn main_inner() {
-    // Script-mode dispatch: rewrite `verum path/to/file.vr [args…]` into
-    // `verum run path/to/file.vr [args…]` BEFORE clap sees the argv. See
-    // crate::script for the full rationale and invariants. The rewrite is
-    // a no-op for any normal subcommand invocation.
+ // Script-mode dispatch: rewrite `verum path/to/file.vr [args…]` into
+ // `verum run path/to/file.vr [args…]` BEFORE clap sees the argv. See
+ // crate::script for the full rationale and invariants. The rewrite is
+ // a no-op for any normal subcommand invocation.
     let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
-    // Productivity advisory: catch the `verum file.vr` (no `run`) form
-    // when `file.vr` lacks the mandatory shebang and surface a precise,
-    // actionable error before clap's generic "unknown subcommand" fires.
-    // The Verum execution-mode contract reserves the no-`run` shorthand
-    // for shebang scripts; non-script `.vr` files must use `verum run`.
+ // Productivity advisory: catch the `verum file.vr` (no `run`) form
+ // when `file.vr` lacks the mandatory shebang and surface a precise,
+ // actionable error before clap's generic "unknown subcommand" fires.
+ // The Verum execution-mode contract reserves the no-`run` shorthand
+ // for shebang scripts; non-script `.vr` files must use `verum run`.
     if let Some(msg) = script::missing_shebang_advisory(&argv) {
         eprintln!("error: {}", msg);
         process::exit(2);
@@ -2646,11 +2646,11 @@ fn main_inner() {
     let argv = script::rewrite_argv_for_script_mode(argv);
     let cli = Cli::parse_from(argv);
 
-    // B14 --vva-version short-circuit. Print the kernel
-    // version stamp and exit cleanly without dispatching a
-    // subcommand. Tooling integrations (CI, certificate emitters,
-    // cross-tool replay matrix) read this single line as their
-    // verification-architecture version source of truth.
+ // B14 --vva-version short-circuit. Print the kernel
+ // version stamp and exit cleanly without dispatching a
+ // subcommand. Tooling integrations (CI, certificate emitters,
+ // cross-tool replay matrix) read this single line as their
+ // verification-architecture version source of truth.
     if cli.vva_version {
         println!("{}", verum_kernel::VVA_VERSION);
         process::exit(0);
@@ -2661,8 +2661,8 @@ fn main_inner() {
         process::exit(1);
     }
 
-    // Set VERUM_VERBOSE environment variable based on CLI flags
-    // 0 = quiet, 1 = normal (default), 2 = verbose (debug output enabled)
+ // Set VERUM_VERBOSE environment variable based on CLI flags
+ // 0 = quiet, 1 = normal (default), 2 = verbose (debug output enabled)
     let verbose_level = if cli.quiet {
         0
     } else if cli.verbose {
@@ -2670,17 +2670,17 @@ fn main_inner() {
     } else {
         1
     };
-    // SAFETY: Setting environment variable at program startup before any threads are spawned
+ // SAFETY: Setting environment variable at program startup before any threads are spawned
     unsafe {
         std::env::set_var("VERUM_VERBOSE", verbose_level.to_string());
     }
 
     let verbose = cli.verbose;
 
-    // Run main command in a thread with large stack size (64MB) to prevent
-    // stack overflow on deeply nested expressions during type checking.
-    // Deep expression nesting in select/if/match and files with many nested
-    // imports (e.g., 400+ intrinsics) require a larger stack than the default.
+ // Run main command in a thread with large stack size (64MB) to prevent
+ // stack overflow on deeply nested expressions during type checking.
+ // Deep expression nesting in select/if/match and files with many nested
+ // imports (e.g., 400+ intrinsics) require a larger stack than the default.
     const STACK_SIZE: usize = 256 * 1024 * 1024; // 256MB - needed for deep type checking with full stdlib
 
     let result = std::thread::Builder::new()
@@ -2705,9 +2705,9 @@ fn main_inner() {
 
 /// Resolved target from a user-supplied path argument.
 enum PathTarget {
-    /// A Verum project directory (cwd has been changed to it).
+ /// A Verum project directory (cwd has been changed to it).
     Project,
-    /// A single source file (.vr).
+ /// A single source file (.vr).
     SingleFile(Text),
 }
 
@@ -2746,9 +2746,9 @@ fn resolve_path(path: Option<&Text>) -> Result<PathTarget> {
 }
 
 fn run_command(cli: Cli) -> Result<()> {
-    // After --vva-version short-circuit in main_inner, command is
-    // required. Anything reaching here without one is a clap mis-
-    // configuration; surface it as a user error rather than panic.
+ // After --vva-version short-circuit in main_inner, command is
+ // required. Anything reaching here without one is a clap mis-
+ // configuration; surface it as a user error rather than panic.
     let command = match cli.command {
         Some(c) => c,
         None => {
@@ -2855,7 +2855,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 no_default_features,
                 features,
                 timings,
-                // Advanced linking options
+ // Advanced linking options
                 lto,
                 static_link,
                 strip,
@@ -2866,7 +2866,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 emit_types,
                 emit_vbc,
                 windows_subsystem,
-                // Lint options
+ // Lint options
                 deny_warnings,
                 strict_intrinsics,
                 deny_lint,
@@ -2887,12 +2887,12 @@ fn run_command(cli: Cli) -> Result<()> {
             feature_overrides,
             permission_flags,
         } => {
-            // Tier resolution precedence:
-            //  1. `--interp` / `--aot` shortcuts on the Run command
-            //  2. `--tier` from LanguageFeatureOverrides
-            //  (accepts interpret|aot|check; "check" is invalid
-            //  for `run` and yields an error)
-            //  3. default: interpreter
+ // Tier resolution precedence:
+ // 1. `--interp` / `--aot` shortcuts on the Run command
+ // 2. `--tier` from LanguageFeatureOverrides
+ // (accepts interpret|aot|check; "check" is invalid
+ // for `run` and yields an error)
+ // 3. default: interpreter
             let tier_from_override = feature_overrides
                 .tier
                 .as_ref()
@@ -2932,11 +2932,11 @@ fn run_command(cli: Cli) -> Result<()> {
             verum_error::crash::set_command("run");
             verum_error::crash::set_tier(tier_label);
 
-            // Inline-eval and stdin sources synthesise a temporary
-            // script file with a shebang prefix so they flow through
-            // the same script-mode pipeline as on-disk scripts —
-            // identical parser, identical permission model, identical
-            // exit-code semantics. The temp file is removed on drop.
+ // Inline-eval and stdin sources synthesise a temporary
+ // script file with a shebang prefix so they flow through
+ // the same script-mode pipeline as on-disk scripts —
+ // identical parser, identical permission model, identical
+ // exit-code semantics. The temp file is removed on drop.
             if let Some(expr) = eval {
                 let tmp =
                     commands::file::synthesize_script_temp(&format!("print({});\n", expr), "eval")
@@ -2977,12 +2977,12 @@ fn run_command(cli: Cli) -> Result<()> {
             match resolve_path(file.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
                     verum_error::crash::set_input_file(file_path.as_str());
-                    // The inner `run_script_interpreted` /
-                    // `run_native_compilation` paths print their own
-                    // `Running <file> (interpreter|cached VBC|aot)`
-                    // status with the cache-state-aware label.
-                    // Printing here too would emit a duplicate
-                    // `Running` line on every invocation.
+ // The inner `run_script_interpreted` /
+ // `run_native_compilation` paths print their own
+ // `Running <file> (interpreter|cached VBC|aot)`
+ // status with the cache-state-aware label.
+ // Printing here too would emit a duplicate
+ // `Running` line on every invocation.
                     commands::file::run_with_tier_and_flags(
                         file_path.as_str(),
                         args_list,
@@ -3087,8 +3087,8 @@ fn run_command(cli: Cli) -> Result<()> {
             meta_mode,
             meta_lift,
         } => {
-            // Meta-mode dispatch (#158 V2): `--meta-mode` (no value) →
-            // lift=1; `--meta-lift N` → lift=N; default → lift=0.
+ // Meta-mode dispatch (#158 V2): `--meta-mode` (no value) →
+ // lift=1; `--meta-lift N` → lift=N; default → lift=0.
             let lift = meta_lift.unwrap_or(if meta_mode { 1 } else { 0 });
             commands::check_proof::execute_with_universe_lift(file.as_str(), lift)
         }
@@ -3179,17 +3179,17 @@ fn run_command(cli: Cli) -> Result<()> {
                 return commands::lint::validate_config();
             }
             if no_cache {
-                // SAFETY: env mutation occurs before any worker
-                // thread is spawned by the lint pipeline, so no
-                // other thread can be reading the environment in
-                // parallel.
+ // SAFETY: env mutation occurs before any worker
+ // thread is spawned by the lint pipeline, so no
+ // other thread can be reading the environment in
+ // parallel.
                 unsafe {
                     std::env::set_var("VERUM_LINT_NO_CACHE", "1");
                 }
             }
             let fmt = commands::lint::LintOutputFormat::parse(format.as_str())?;
-            // Profile selection: explicit --profile flag wins over the
-            // VERUM_LINT_PROFILE env var.
+ // Profile selection: explicit --profile flag wins over the
+ // VERUM_LINT_PROFILE env var.
             let profile_name: Option<String> = profile
                 .map(|t| t.as_str().to_string())
                 .or_else(|| std::env::var("VERUM_LINT_PROFILE").ok());
@@ -3206,15 +3206,15 @@ fn run_command(cli: Cli) -> Result<()> {
             };
             let since_ref: Option<String> = since.map(|t| t.as_str().to_string());
 
-            // Thread-pool sizing: `--threads 0` forces a sequential
-            // run (single-thread rayon pool); any other value passes
-            // straight through. We build a *global* pool because
-            // rayon's API only allows it once per process.
+ // Thread-pool sizing: `--threads 0` forces a sequential
+ // run (single-thread rayon pool); any other value passes
+ // straight through. We build a *global* pool because
+ // rayon's API only allows it once per process.
             if let Some(n) = threads {
                 let pool_threads = if n == 0 { 1 } else { n };
-                // Best-effort: if a pool is already initialised
-                // (e.g. by an earlier subcommand), the second call
-                // is a no-op — the existing pool is left in place.
+ // Best-effort: if a pool is already initialised
+ // (e.g. by an earlier subcommand), the second call
+ // is a no-op — the existing pool is left in place.
                 let _ = rayon::ThreadPoolBuilder::new()
                     .num_threads(pool_threads)
                     .build_global();
@@ -3359,8 +3359,8 @@ fn run_command(cli: Cli) -> Result<()> {
             output,
             suggest,
         } => {
-            // Validate sampling knobs at the CLI boundary so the rest of the
-            // profiler can trust its inputs.
+ // Validate sampling knobs at the CLI boundary so the rest of the
+ // profiler can trust its inputs.
             if !(0.0..=100.0).contains(&sample_rate) {
                 eprintln!(
                     "{} --sample-rate must be in [0, 100], got {}",
@@ -3387,7 +3387,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 .filter(|s| !s.is_empty())
                 .collect();
 
-            // `--all` expands to every slice — spec §6 unified dashboard.
+ // `--all` expands to every slice — spec §6 unified dashboard.
             let (memory, cpu, cache, compilation) = if all {
                 (true, true, true, true)
             } else {
@@ -3401,7 +3401,7 @@ fn run_command(cli: Cli) -> Result<()> {
             };
 
             if let Some(file_path) = file {
-                // Profile single file
+ // Profile single file
                 commands::file::profile(
                     file_path.as_str(),
                     memory,
@@ -3410,7 +3410,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     suggest,
                 )
             } else {
-                // Profile project
+ // Profile project
                 let output_str = output.as_ref().map(|s| s.as_str()).unwrap_or("text");
                 commands::profile::execute_with_sampling(
                     memory,
@@ -3450,42 +3450,42 @@ fn run_command(cli: Cli) -> Result<()> {
             closure_cache,
             closure_cache_root,
         } => {
-            // --ladder short-circuits the standard verify pipeline:
-            // route every @verify(strategy) annotation through the
-            // typed dispatcher and emit per-theorem verdicts. Honest
-            // integration of #71's LadderDispatcher trait surface.
+ // --ladder short-circuits the standard verify pipeline:
+ // route every @verify(strategy) annotation through the
+ // typed dispatcher and emit per-theorem verdicts. Honest
+ // integration of #71's LadderDispatcher trait surface.
             if ladder {
                 return commands::verify_ladder::run_verify_ladder(ladder_format.as_str());
             }
-            // --lsp-mode implies no human output; set an env var
-            // the downstream report-renderer reads to switch from
-            // human-readable prose to LSP-JSON. Environment is the
-            // loose-coupling channel the renderer already uses for
-            // output-format toggles (--no-color, --format=json, …).
+ // --lsp-mode implies no human output; set an env var
+ // the downstream report-renderer reads to switch from
+ // human-readable prose to LSP-JSON. Environment is the
+ // loose-coupling channel the renderer already uses for
+ // output-format toggles (--no-color, --format=json, …).
             if lsp_mode {
-                // SAFETY: The env var is used by the downstream
-                // verify_cmd's report-renderer as a loose-coupling
-                // format toggle. Single-threaded context at CLI
-                // entry — no TOCTOU hazard.
+ // SAFETY: The env var is used by the downstream
+ // verify_cmd's report-renderer as a loose-coupling
+ // format toggle. Single-threaded context at CLI
+ // entry — no TOCTOU hazard.
                 unsafe {
                     std::env::set_var("VERUM_LSP_MODE", "1");
                 }
             }
 
-            // SMT debugging flags — propagated to the solver via
-            // env vars the backend-switcher / Z3 / CVC5 wrappers
-            // consult at solver-construction time. Same
-            // loose-coupling pattern as VERUM_LSP_MODE; avoids
-            // plumbing per-flag knobs through every options
-            // struct from CLI → session → solver factory.
+ // SMT debugging flags — propagated to the solver via
+ // env vars the backend-switcher / Z3 / CVC5 wrappers
+ // consult at solver-construction time. Same
+ // loose-coupling pattern as VERUM_LSP_MODE; avoids
+ // plumbing per-flag knobs through every options
+ // struct from CLI → session → solver factory.
             if let Some(ref dir) = dump_smt {
                 std::fs::create_dir_all(dir).map_err(|e| {
                     CliError::Custom(
                         format!("creating --dump-smt dir {}: {}", dir.display(), e).into(),
                     )
                 })?;
-                // SAFETY: single-threaded CLI entry; see --lsp-mode
-                // rationale above.
+ // SAFETY: single-threaded CLI entry; see --lsp-mode
+ // rationale above.
                 unsafe {
                     std::env::set_var("VERUM_DUMP_SMT_DIR", dir.display().to_string());
                 }
@@ -3496,25 +3496,25 @@ fn run_command(cli: Cli) -> Result<()> {
                 }
             }
             if let Some(ref smt_file) = check_smt_formula {
-                // --check-smt-formula short-circuits: read the
-                // file, dispatch to the configured solver, print
-                // sat/unsat/unknown. Skips the whole verify
-                // pipeline because the input is raw SMT-LIB — the
-                // Verum AST / type-checker / VC generator don't
-                // need to run.
+ // --check-smt-formula short-circuits: read the
+ // file, dispatch to the configured solver, print
+ // sat/unsat/unknown. Skips the whole verify
+ // pipeline because the input is raw SMT-LIB — the
+ // Verum AST / type-checker / VC generator don't
+ // need to run.
                 return commands::smt_check::run(smt_file, solver.as_str(), timeout);
             }
-            // `--export` implies `--profile` — you can't dump a profile you
-            // didn't collect. `--profile-obligation` also implies `--profile`
-            // (per-obligation breakdown is rendered as a detail view under
-            // the main profile report). Normalise so downstream sees a
-            // single `profile` flag plus a granularity hint.
+ // `--export` implies `--profile` — you can't dump a profile you
+ // didn't collect. `--profile-obligation` also implies `--profile`
+ // (per-obligation breakdown is rendered as a detail view under
+ // the main profile report). Normalise so downstream sees a
+ // single `profile` flag plus a granularity hint.
             let profile = profile || export.is_some() || profile_obligation;
 
-            // Validate --smt-proof-preference (cvc5 | z3). Down-stream
-            // passes the value to the Certified strategy's export path;
-            // when unrecognised, fail fast rather than silently picking
-            // an arbitrary default.
+ // Validate --smt-proof-preference (cvc5 | z3). Down-stream
+ // passes the value to the Certified strategy's export path;
+ // when unrecognised, fail fast rather than silently picking
+ // an arbitrary default.
             match smt_proof_preference.as_str() {
                 "cvc5" | "z3" => {}
                 other => {
@@ -3527,10 +3527,10 @@ fn run_command(cli: Cli) -> Result<()> {
                     ));
                 }
             }
-            // The preference flag is consumed by the Certified-strategy
-            // export path, not the solver selection path. For now,
-            // record it in telemetry; the export wiring (task #65)
-            // will read it from the session config when it lands.
+ // The preference flag is consumed by the Certified-strategy
+ // export path, not the solver selection path. For now,
+ // record it in telemetry; the export wiring (task #65)
+ // will read it from the session config when it lands.
             tracing::debug!("smt_proof_preference = {}", smt_proof_preference.as_str());
             let _ = smt_proof_preference;
 
@@ -3546,8 +3546,8 @@ fn run_command(cli: Cli) -> Result<()> {
             };
 
             if let Some(file_path) = file {
-                // Single-file mode uses the non-project path; the profile /
-                // budget / export hooks live in the project executor below.
+ // Single-file mode uses the non-project path; the profile /
+ // budget / export hooks live in the project executor below.
                 if profile || budget_duration.is_some() || export.is_some() {
                     eprintln!(
                         "{} --profile / --budget / --export are supported \
@@ -3576,7 +3576,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     closure_cache_enabled: closure_cache,
                     closure_cache_root,
                 };
-                // Verify project
+ // Verify project
                 commands::verify::execute(
                     profile_cfg,
                     show_cost,
@@ -3609,10 +3609,10 @@ fn run_command(cli: Cli) -> Result<()> {
         } => {
             feature_overrides::install(feature_overrides);
 
-            // Gate on [debug].dap_enabled. Resolve from the project
-            // manifest if present; otherwise defaults apply (enabled).
-            // A missing manifest is not an error — `verum dap` can run
-            // outside a Verum project (e.g. for stand-alone IDE use).
+ // Gate on [debug].dap_enabled. Resolve from the project
+ // manifest if present; otherwise defaults apply (enabled).
+ // A missing manifest is not an error — `verum dap` can run
+ // outside a Verum project (e.g. for stand-alone IDE use).
             let (dap_enabled, default_port) = match config::Manifest::find_manifest_dir().ok() {
                 Some(dir) => {
                     let path = config::Manifest::manifest_path(&dir);
@@ -3624,18 +3624,18 @@ fn run_command(cli: Cli) -> Result<()> {
                         )
                     });
                     feature_overrides::apply_global(&mut m)?;
-                    // Surface inert DebugConfig fields not yet wired
-                    // through to the DAP server. `dap_enabled` and
-                    // `port` reach the dispatch logic below; the
-                    // remaining three (`step_granularity`,
-                    // `inspect_depth`, `show_erased_proofs`) flow
-                    // from the manifest into LanguageFeatures but
-                    // verum_dap doesn't consult them at session
-                    // setup. Trace the values at the dispatch entry
-                    // so embedders writing
-                    // `[debug].step_granularity = "instruction"`
-                    // see the value was observed at the CLI
-                    // boundary, gated on any non-default value.
+ // Surface inert DebugConfig fields not yet wired
+ // through to the DAP server. `dap_enabled` and
+ // `port` reach the dispatch logic below; the
+ // remaining three (`step_granularity`,
+ // `inspect_depth`, `show_erased_proofs`) flow
+ // from the manifest into LanguageFeatures but
+ // verum_dap doesn't consult them at session
+ // setup. Trace the values at the dispatch entry
+ // so embedders writing
+ // `[debug].step_granularity = "instruction"`
+ // see the value was observed at the CLI
+ // boundary, gated on any non-default value.
                     if m.debug.step_granularity.as_str() != "statement"
                         || m.debug.inspect_depth != 8
                         || m.debug.show_erased_proofs
@@ -3667,7 +3667,7 @@ fn run_command(cli: Cli) -> Result<()> {
             let transport_mode = match transport.as_str() {
                 "stdio" => commands::dap::Transport::Stdio,
                 "socket" => {
-                    // Precedence: --port > [debug].port > error if both 0.
+ // Precedence: --port > [debug].port > error if both 0.
                     let resolved = port.unwrap_or(default_port);
                     if resolved == 0 {
                         return Err(CliError::InvalidArgument(
@@ -4128,12 +4128,12 @@ fn run_command(cli: Cli) -> Result<()> {
                     direct_only,
                 };
                 let dep_result = commands::audit::audit(options);
-                // per-theorem coord audit is
-                // default-on. Skip with --no-coord.
+ // per-theorem coord audit is
+ // default-on. Skip with --no-coord.
                 if !no_coord {
                     let coord_result = commands::audit::audit_coord_with_format(output_format);
-                    // Surface either failure; prefer the dep-audit
-                    // error for backwards compatibility.
+ // Surface either failure; prefer the dep-audit
+ // error for backwards compatibility.
                     dep_result.and(coord_result)
                 } else {
                     dep_result

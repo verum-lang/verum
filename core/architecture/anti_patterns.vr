@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // **Kernel-discharge attestation surface for the ATS-V architectural
-// type system, Сезон 1.**
+// type system, .**
 //
 // Mirrors `core.verify.codegen_soundness` (#162) and
 // `core.verify.separation_soundness` (#161 V0): each axiom records a
@@ -11,21 +11,21 @@
 // citation-to-the-spec, dispatched through a stable kernel intrinsic.
 //
 // **Stable error codes**: each anti-pattern carries a stable RFC code
-// `ATS-V-AP-NNN` (per spec §32.4). Codes for Сезон 1 are 001..010;
-// remaining codes 011..032 land in Сезон 2 with the rest of the
+// `ATS-V-AP-NNN` (per spec §32.4). Codes are 001..010;
+// remaining codes 011..032 land with the rest of the
 // canonical catalog.
 //
 // **Architectural alignment**: discharge through 8 kernel intrinsics
 // in `verum_kernel::intrinsic_dispatch`:
 //
-//   * `kernel_arch_capability_discipline` — composes AP-001 + AP-002.
-//   * `kernel_arch_boundary_check` — invariants across boundaries.
-//   * `kernel_arch_composition_check` — composition algebra (§5.3 spec).
-//   * `kernel_arch_lifecycle_check` — AP-009 LifecycleRegression.
-//   * `kernel_arch_foundation_consistency` — AP-005 FoundationDrift.
-//   * `kernel_arch_anti_pattern_check` — generic dispatcher (10 patterns).
-//   * `kernel_arch_cve_closure` — AP-010 CveIncomplete (strict mode).
-//   * `kernel_arch_soundness_v0` — composes the 7 above.
+// * `kernel_arch_capability_discipline` — composes AP-001 + AP-002.
+// * `kernel_arch_boundary_check` — invariants across boundaries.
+// * `kernel_arch_composition_check` — composition algebra (§5.3 spec).
+// * `kernel_arch_lifecycle_check` — AP-009 LifecycleRegression.
+// * `kernel_arch_foundation_consistency` — AP-005 FoundationDrift.
+// * `kernel_arch_anti_pattern_check` — generic dispatcher (10 patterns).
+// * `kernel_arch_cve_closure` — AP-010 CveIncomplete (strict mode).
+// * `kernel_arch_soundness_v0` — composes the 7 above.
 // =============================================================================
 
 module core.architecture.anti_patterns;
@@ -70,12 +70,12 @@ public axiom kernel_arch_boundary_check() -> Bool
 /// **Composition algebra: A ⊗ B per spec §5.3.**
 ///
 /// Verifies that composition of cogs A and B satisfies the rules:
-///   * Capability flow valid (B.requires ⊆ A.exposes).
-///   * Foundations compatible (or explicit bridge).
-///   * Tiers compatible.
-///   * Resulting stratum is admissible (not LAbs).
-///   * No dependency cycle (AP-003).
-///   * Composition is associative + decidable (proved RT1.5).
+/// * Capability flow valid (B.requires ⊆ A.exposes).
+/// * Foundations compatible (or explicit bridge).
+/// * Tiers compatible.
+/// * Resulting stratum is admissible (not LAbs).
+/// * No dependency cycle (AP-003).
+/// * Composition is associative + decidable (proved RT1.5).
 @framework(ats_v, "ATS-V Composition algebra (spec internal/specs/ats-v.md §4.4 + §5.3). Composition is associative; decidability per §5.4. Detects AP-003 DependencyCycle, AP-005 FoundationDrift, AP-004 TierMixing through this dispatch.")
 @kernel_discharge("kernel_arch_composition_check")
 public axiom kernel_arch_composition_check() -> Bool
@@ -118,13 +118,15 @@ public axiom kernel_arch_foundation_consistency() -> Bool
 
 /// **Generic anti-pattern dispatcher.**
 ///
-/// Walks the canonical 10-pattern roster (AP-001..010, Сезон 1) and
-/// reports any violations. Сезон 2 extends to AP-011..032.
+/// Walks the canonical 32-pattern roster (AP-001..032) and reports
+/// any violations.  AP-001..010 are the base capability/lifecycle
+/// patterns; AP-011..026 are boundary/composition extensions;
+/// AP-027..032 are MTAC modal-temporal arms.
 ///
 /// Each violation surfaces as `VerificationVerdict::Rejected` with
 /// the pattern's stable code in the diagnostic metadata (per spec
 /// §32.4 dual-audience design).
-@framework(ats_v, "ATS-V anti-pattern catalog (spec internal/specs/ats-v.md §7). Сезон 1: 10 canonical patterns AP-001..010 — CapabilityEscalation, CapabilityLeak, DependencyCycle, TierMixing, FoundationDrift, RegisterMixing, TxStraddling, ResourceStraddling, LifecycleRegression, CveIncomplete. Сезон 2 lands AP-011..032.")
+@framework(ats_v, "ATS-V anti-pattern catalog (spec internal/specs/ats-v.md §7). 32 canonical patterns total: AP-001..010 (CapabilityEscalation, CapabilityLeak, DependencyCycle, TierMixing, FoundationDrift, RegisterMixing, TxStraddling, ResourceStraddling, LifecycleRegression, CveIncomplete) + AP-011..026 (boundary/composition extensions) + AP-027..032 (TemporalInconsistency, CounterfactualBrittleness, MissedAdjoint, UniversalPropertyViolation, PhantomEvolution, YonedaInequivalentRefactor).")
 @kernel_discharge("kernel_arch_anti_pattern_check")
 public axiom kernel_arch_anti_pattern_check() -> Bool
     ensures true;
@@ -148,19 +150,19 @@ public axiom kernel_arch_cve_closure() -> Bool
 // End-to-end soundness witness
 // =============================================================================
 
-/// **ATS-V Сезон 1 soundness witness.**
+/// **ATS-V soundness witness.**
 ///
 /// Composes the 7 above kernel-discharge intrinsics into a single
 /// end-to-end discharge. Per spec §9.2 soundness statement: when
 /// `verum check` accepts a cog with `arch_type T`, all of:
-///   * Capability discipline
-///   * Composition correctness
-///   * Foundation consistency
-///   * CVE closure (strict mode)
-///   * Lifecycle integrity
-///   * Anti-pattern absence (10 canonical patterns Сезон 1)
+/// * Capability discipline
+/// * Composition correctness
+/// * Foundation consistency
+/// * CVE closure (strict mode)
+/// * Lifecycle integrity
+/// * Anti-pattern absence (32 canonical patterns)
 /// hold.
-@framework(ats_v, "ATS-V Сезон 1 soundness witness (spec internal/specs/ats-v.md §9.2). Composes 7 dispatch intrinsics. Сезон 2 expands the soundness chain to include MTAC modal operators (§20-§23 spec). Eventually self-hosted in Сезон 8 (verum_arch CVE-closed Verum cog).")
+@framework(ats_v, "ATS-V soundness witness (spec internal/specs/ats-v.md §9.2). Composes 7 dispatch intrinsics into a single end-to-end discharge. Soundness chain spans the full 32-pattern catalog, including MTAC modal operators (§20-§23 spec). Eventually self-hosted (verum_arch CVE-closed Verum cog).")
 @kernel_discharge("kernel_arch_soundness_v0")
 public axiom kernel_arch_soundness_v0() -> Bool
     ensures true;

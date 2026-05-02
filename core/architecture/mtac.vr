@@ -1,0 +1,164 @@
+// =============================================================================
+// core.architecture.mtac — Modal-Temporal Architectural Calculus
+// =============================================================================
+//
+// **Verum-native mirror of `verum_kernel::arch_mtac`.**
+//
+// Per `internal/specs/ats-v.md` §20-§22, MTAC extends ATS-V with a
+// functorial parameter over (Time × Decisions × Observers).  This
+// cog mirrors the kernel-side primitive types so Verum-side code
+// that constructs `@arch_module(...)` declarations can refer to
+// MTAC concepts by canonical Verum syntax.
+//
+// **Cross-side alignment**: every variant here corresponds 1:1 with
+// a Rust-side enum variant in `verum_kernel::arch_mtac::*`.  Adding
+// a new variant requires updating both sides; pinned by kernel test
+// suite parity checks.
+// =============================================================================
+
+module core.architecture.mtac;
+
+mount core.prelude.{Bool, Int, Maybe, List, Text};
+
+// =============================================================================
+// TimePoint — point in the time category (§20.1)
+// =============================================================================
+
+/// A point in MTAC's time category.  Per spec §20.1, time is a
+/// non-linear lattice (branching futures, counterfactual past
+/// branches), not a strict linear order.
+public type TimePoint is
+    | Past(Int)              // Unix-epoch seconds (concrete past)
+    | Now                    // Current moment
+    | Future(Int)            // Projected timestamp
+    | Counterfactual(Text);  // Alternative-history branch tag
+
+// =============================================================================
+// Decision — point in the decision category (§20.1)
+// =============================================================================
+
+/// A possible value of an architectural decision.
+public type DecisionOption is {
+    name: Text,
+    description: Text,
+};
+
+/// Architectural decision per spec §20.1.  Selects one of several
+/// options; can be unresolved or fixed.
+public type Decision is {
+    name: Text,
+    options: List<DecisionOption>,
+    chosen: Maybe<DecisionOption>,
+    depends_on: List<Text>,
+};
+
+// =============================================================================
+// Observer — point in the observer category (§20.1)
+// =============================================================================
+
+/// Yoneda-driven observer of the system per spec §20.1 + §23.
+/// Architecture is uniquely characterised by what it does to all
+/// observers.
+public type Observer is
+    | EndUser(Text)         // kind
+    | PeerCog(Text)         // module_path
+    | Stakeholder(Text)     // role
+    | Auditor(Text)         // audit_kind
+    | Adversary(Text);      // threat_model
+
+// =============================================================================
+// ArchProposition — propositions modal operators range over
+// =============================================================================
+
+/// Atomic architectural proposition.  Baseline canonical set;
+/// extends with arbitrary refinement predicates via Custom.
+public type ArchProposition is
+    | HasCapability(Text)           // capability_tag
+    | FoundationStable
+    | PublicApiUnchanged
+    | CustomProposition(Text);
+
+// =============================================================================
+// ModalAssertion — Modal Architectural Logic (MAL) operators (§20.3)
+// =============================================================================
+
+/// MAL operators per spec §20.3.  Combines S4/S5-style modal logic
+/// with LTL temporal operators.  6 canonical operators.
+public type ModalAssertion is
+    | Necessity(ArchProposition)                              // □ A
+    | Possibility(ArchProposition)                            // ◇ A
+    | Eventually(ArchProposition)                             // ◇F A
+    | Always(ArchProposition)                                 // □G A
+    | Until(ArchProposition, ArchProposition)                 // A U B
+    | CounterfactualImpl(ArchProposition, ArchProposition);   // A ⇨ B
+
+// =============================================================================
+// ArchEvolution — future-oriented type (§21.3)
+// =============================================================================
+
+public type ComplexityClass is
+    | Trivial
+    | Linear
+    | Quadratic
+    | ArchitecturalRedesign
+    | Rewrite;
+
+public type Reversibility is
+    | AdjointReversible
+    | Irreversible
+    | BoundedReversible(Int);  // window_seconds
+
+/// Expected evolution of the cog's architecture per spec §21.3.
+public type ArchEvolution is {
+    trigger: Text,
+    expected_time: TimePoint,
+    cost_class: ComplexityClass,
+    reversibility: Reversibility,
+};
+
+// =============================================================================
+// CounterfactualPair — what-if pair for §22 reasoning
+// =============================================================================
+
+/// (base, alternative) decision pair used in counterfactual
+/// evaluation per spec §22.  Stability invariants record which
+/// architectural propositions MUST hold across the decision swap.
+public type CounterfactualPair is {
+    name: Text,
+    base: Decision,
+    alternative: Decision,
+    stability_invariants: List<ArchProposition>,
+};
+
+// =============================================================================
+// AdjunctionWitness — refactoring as adjunction (§20.6)
+// =============================================================================
+
+/// Witness pair for refactoring-as-adjunction per spec §20.6.
+/// `forward` is `F: Old → New`, `backward` is `G: New → Old` with
+/// `F ⊣ G`.  `is_adjoint_of` discipline: structural mirror
+/// equality of (forward_name, backward_name) pairs.
+public type AdjunctionWitness is {
+    forward_name: Text,
+    backward_name: Text,
+    preserved: List<ArchProposition>,
+    gained: List<ArchProposition>,
+};
+
+// =============================================================================
+// Kernel-discharge bridge
+// =============================================================================
+
+/// **MTAC primitives + 6 modal-temporal anti-patterns
+/// (ATS-V-AP-027..032).**
+///
+/// Discharges the kernel-side `arch_mtac` module's structural
+/// well-formedness.  Per spec §20-§22, MTAC primitives must
+/// satisfy: TimePoint partial order well-formed, Observer roster
+/// canonical-5, ModalAssertion ↔ propositional-formula bijection,
+/// ArchEvolution trigger satisfiability checked, AdjunctionWitness
+/// `is_adjoint_of` symmetric.
+@framework(ats_v, "ATS-V MTAC primitives (spec internal/specs/ats-v.md §20-§22). Adds 6 modal-temporal anti-patterns AP-027 TemporalInconsistency / AP-028 CounterfactualBrittleness / AP-029 MissedAdjoint / AP-030 UniversalPropertyViolation / AP-031 PhantomEvolution / AP-032 YonedaInequivalentRefactor. Implementation: crates/verum_kernel/src/arch_mtac.rs.")
+@kernel_discharge("kernel_arch_mtac_calculus")
+public axiom kernel_arch_mtac_calculus() -> Bool
+    ensures true;
