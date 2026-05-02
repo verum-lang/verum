@@ -11486,7 +11486,10 @@ fn derive_mounts_from_module(module: &verum_ast::Module) -> Vec<String> {
                 .iter()
                 .map(|s| match s {
                     verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str().to_string(),
-                    _ => "<non_ident>".to_string(),
+                    verum_ast::ty::PathSegment::Super => "super".to_string(),
+                    verum_ast::ty::PathSegment::SelfValue => "self".to_string(),
+                    verum_ast::ty::PathSegment::Cog => "cog".to_string(),
+                    verum_ast::ty::PathSegment::Relative => "".to_string(),
                 })
                 .collect::<Vec<_>>()
                 .join(".")
@@ -11711,6 +11714,419 @@ pub fn audit_arch_coverage_with_format(format: AuditFormat) -> Result<()> {
     // Observability gate — never fails the build.  Adoption is
     // incremental per spec §17.5; an unannotated cog is not a defect.
     Ok(())
+}
+
+// =============================================================================
+// ATS-V whole-corpus cross-cog architectural analysis
+// =============================================================================
+
+/// `verum audit --arch-corpus` — whole-corpus cross-cog
+/// architectural analysis.  Walks every annotated `.vr` file,
+/// builds the global `cog_path → (Shape, mounts)` registry,
+/// aggregates the mount edges into a `composes_graph`, and runs
+/// `check_all_anti_patterns` per cog with `composed_foundations`
+/// + `composes_graph` populated from the corpus aggregate.
+///
+/// Activates AP-003 DependencyCycle and AP-005 FoundationDrift on
+/// real cross-cog architecture.  The per-cog single-cog checks
+/// (AP-026 stratum admissibility, AP-010 CveIncomplete, etc) also
+/// fire — but those are already covered by `--arch-coverage`.
+/// This gate's distinguishing value is the cross-cog reachability
+/// analysis.
+///
+/// Output: `target/audit-reports/arch-corpus.json` (schema_version=1).
+pub fn audit_arch_corpus_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::arch::{Foundation, Shape};
+    use verum_kernel::arch_anti_pattern::{check_all_anti_patterns, DiagnosticContext};
+    use verum_kernel::arch_parse::parse_arch_module;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("ATS-V whole-corpus cross-cog architectural analysis");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let mut vr_files = discover_vr_files(&manifest_dir);
+    vr_files.extend(discover_stdlib_vr_files());
+
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("arch-corpus.json");
+
+    // -------------------------------------------------------------------------
+    // Pass 1: build the corpus registry — one entry per annotated cog.
+    // -------------------------------------------------------------------------
+    struct CogEntry {
+        cog_name: String,
+        shape: Shape,
+        mounts: Vec<String>,
+    }
+    let mut registry: Vec<CogEntry> = Vec::new();
+    let mut name_index: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+
+    for abs_path in &vr_files {
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        // Find @arch_module(...) on the file's first item (the
+        // `module path;` declaration carrying it).
+        let mut arch_args: Option<Vec<verum_ast::expr::Expr>> = None;
+        for attr in module.attributes.iter() {
+            if attr.name.as_str() == "arch_module" {
+                if let verum_common::Maybe::Some(args) = &attr.args {
+                    arch_args = Some(args.iter().cloned().collect());
+                } else {
+                    arch_args = Some(Vec::new());
+                }
+                break;
+            }
+        }
+        if arch_args.is_none() {
+            for item in &module.items {
+                for attr in item.attributes.iter() {
+                    if attr.name.as_str() == "arch_module" {
+                        if let verum_common::Maybe::Some(args) = &attr.args {
+                            arch_args = Some(args.iter().cloned().collect());
+                        } else {
+                            arch_args = Some(Vec::new());
+                        }
+                        break;
+                    }
+                }
+                if arch_args.is_some() {
+                    break;
+                }
+            }
+        }
+
+        let args = match arch_args {
+            Some(a) => a,
+            None => continue,
+        };
+        let shape = match parse_arch_module(&args) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        // Derive cog_name from the first ItemKind::Module declaration's
+        // dotted path; fall back to the file path stem.
+        let cog_name = derive_module_path(&module).unwrap_or_else(|| {
+            abs_path
+                .strip_prefix(&manifest_dir)
+                .unwrap_or(abs_path)
+                .with_extension("")
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, ".")
+        });
+        let mounts = derive_mounts_from_module(&module);
+
+        // Deduplicate by cog_name — stdlib + project walkers may
+        // surface the same file twice; keep the first-seen entry.
+        if name_index.contains_key(&cog_name) {
+            continue;
+        }
+        name_index.insert(cog_name.clone(), registry.len());
+        registry.push(CogEntry {
+            cog_name,
+            shape,
+            mounts,
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Pass 2: aggregate cross-cog graph + per-cog DiagnosticContext fields.
+    // -------------------------------------------------------------------------
+    // composes_graph: every (this_cog → mount_target) edge where
+    // mount_target is itself an annotated cog.  Per-cog foundation
+    // map: every reachable annotated cog's foundation pair.
+    //
+    // Each mount path is resolved against the cog's own parent
+    // namespace so `super.X` becomes `<cog_parent>.X`.  Without this
+    // step, sibling-mounts produce string mismatches against the
+    // canonical `core.foo.bar` form in `name_index`.
+    let mut full_composes_graph: Vec<(String, Vec<String>)> = Vec::new();
+    for entry in &registry {
+        let parent_namespace = parent_namespace_of(&entry.cog_name);
+        let resolved: Vec<String> = entry
+            .mounts
+            .iter()
+            .filter_map(|m| {
+                let canonical = canonicalise_mount_path(m, parent_namespace.as_deref());
+                match_annotated_cog(&canonical, &name_index)
+            })
+            .collect();
+        full_composes_graph.push((entry.cog_name.clone(), resolved));
+    }
+
+    // -------------------------------------------------------------------------
+    // Pass 3: run check_all_anti_patterns per cog.
+    // -------------------------------------------------------------------------
+    let mut cog_reports: Vec<serde_json::Value> = Vec::new();
+    let mut total_violations = 0usize;
+    let mut violation_codes: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+
+    for entry in &registry {
+        let mut ctx = DiagnosticContext::default();
+        ctx.cog_name = entry.cog_name.clone();
+        ctx.composes_graph = full_composes_graph.clone();
+        // Composed foundations: for every mount that resolves to an
+        // annotated cog, record its (mount_path, Foundation).
+        let parent_ns = parent_namespace_of(&entry.cog_name);
+        ctx.composed_foundations = entry
+            .mounts
+            .iter()
+            .filter_map(|m| {
+                let canonical = canonicalise_mount_path(m, parent_ns.as_deref());
+                let resolved = match_annotated_cog(&canonical, &name_index)?;
+                let target_idx = *name_index.get(&resolved)?;
+                Some((resolved, registry[target_idx].shape.foundation.clone()))
+            })
+            .collect();
+
+        let violations = check_all_anti_patterns(&entry.shape, &ctx);
+        total_violations += violations.len();
+        for v in &violations {
+            *violation_codes
+                .entry(v.code.code().to_string())
+                .or_insert(0) += 1;
+        }
+        cog_reports.push(serde_json::json!({
+            "cog": entry.cog_name,
+            "foundation": entry.shape.foundation.tag(),
+            "stratum": entry.shape.stratum.tag(),
+            "lifecycle_tag": lifecycle_tag(&entry.shape),
+            "mount_count": entry.mounts.len(),
+            "annotated_mount_count": full_composes_graph
+                .iter()
+                .find(|(n, _)| n == &entry.cog_name)
+                .map(|(_, e)| e.len())
+                .unwrap_or(0),
+            "violation_count": violations.len(),
+            "violations": violations
+                .iter()
+                .map(|v| {
+                    serde_json::json!({
+                        "code": v.code.code(),
+                        "name": v.code.name(),
+                        "summary": v.summary,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        }));
+    }
+
+    let load_bearing = total_violations == 0;
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "ats_v_arch_corpus",
+        "spec": "internal/specs/ats-v.md#§5.3-§7",
+        "load_bearing": load_bearing,
+        "annotated_cog_count": registry.len(),
+        "total_violation_count": total_violations,
+        "violations_by_code": violation_codes,
+        "cogs": cog_reports,
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("ATS-V whole-corpus cross-cog architectural analysis");
+            println!("─────────────────────────────────────────────────────");
+            println!(
+                "  {} annotated cogs walked; {} cross-cog violations.",
+                registry.len(),
+                total_violations,
+            );
+            println!();
+            println!(
+                "  {:<40}  {:<14}  {:<8}  {:<7}  {}",
+                "Cog", "Foundation", "Stratum", "Mounts", "Violations",
+            );
+            println!(
+                "  {}  {}  {}  {}  {}",
+                "─".repeat(40),
+                "─".repeat(14),
+                "─".repeat(8),
+                "─".repeat(7),
+                "─".repeat(10),
+            );
+            for cog in &cog_reports {
+                let name = cog["cog"].as_str().unwrap_or("");
+                let foundation = cog["foundation"].as_str().unwrap_or("");
+                let stratum = cog["stratum"].as_str().unwrap_or("");
+                let mc = cog["mount_count"].as_u64().unwrap_or(0);
+                let vc = cog["violation_count"].as_u64().unwrap_or(0);
+                println!(
+                    "  {:<40}  {:<14}  {:<8}  {:<7}  {}",
+                    if name.len() > 40 { &name[..40] } else { name },
+                    foundation,
+                    stratum,
+                    mc,
+                    vc,
+                );
+            }
+            println!();
+            if load_bearing {
+                println!(
+                    "{} ATS-V whole-corpus analysis: 0 anti-pattern violations across {} cogs.",
+                    "✓".green(),
+                    registry.len(),
+                );
+            } else {
+                println!(
+                    "{} ATS-V whole-corpus analysis: {} violation(s) across {} cogs.",
+                    "✗".red(),
+                    total_violations,
+                    registry.len(),
+                );
+                if !violation_codes.is_empty() {
+                    println!();
+                    for (code, count) in &violation_codes {
+                        println!("  {} × {}", count, code);
+                    }
+                }
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    if !load_bearing {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "arch-corpus audit: {} cross-cog violation(s) across {} annotated cogs — see {}",
+                total_violations,
+                registry.len(),
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Walk a `Module`'s items looking for the first `ItemKind::Module`
+/// declaration (`module foo.bar.baz;`) and return its dotted-path
+/// name.  Used by `--arch-corpus` to derive a stable cog identity
+/// independent of file path.
+fn derive_module_path(module: &verum_ast::Module) -> Option<String> {
+    use verum_ast::decl::ItemKind;
+    for item in &module.items {
+        if let ItemKind::Module(m) = &item.kind {
+            return Some(m.name.name.as_str().to_string());
+        }
+    }
+    None
+}
+
+/// Resolve a mount path against the corpus registry.  Returns the
+/// cog name iff the mount path either:
+///   - exactly matches an annotated cog's name, OR
+///   - is a glob (`foo.*`) whose prefix matches an annotated cog.
+///
+/// Sub-path mounts (`foo.bar.{X, Y}` flattened to `foo.bar`) are
+/// resolved by walking the prefix until we find an annotated cog.
+fn match_annotated_cog(
+    mount_path: &str,
+    name_index: &std::collections::BTreeMap<String, usize>,
+) -> Option<String> {
+    let stripped = mount_path
+        .strip_suffix(".*")
+        .unwrap_or(mount_path)
+        .strip_prefix("file:")
+        .unwrap_or(mount_path);
+
+    if name_index.contains_key(stripped) {
+        return Some(stripped.to_string());
+    }
+    // Walk parents — `core.io.async_protocols.{X}` flattens to
+    // `core.io.async_protocols`; if that's annotated, resolve to it.
+    let mut cur = stripped;
+    while let Some(idx) = cur.rfind('.') {
+        cur = &cur[..idx];
+        if name_index.contains_key(cur) {
+            return Some(cur.to_string());
+        }
+    }
+    None
+}
+
+/// Stable lifecycle tag for the JSON output.
+fn lifecycle_tag(shape: &verum_kernel::arch::Shape) -> &'static str {
+    use verum_kernel::arch::Lifecycle;
+    match shape.lifecycle {
+        Lifecycle::Hypothesis { .. } => "hypothesis",
+        Lifecycle::Plan { .. } => "plan",
+        Lifecycle::Conditional { .. } => "conditional",
+        Lifecycle::Theorem { .. } => "theorem",
+        Lifecycle::Obsolete { .. } => "obsolete",
+    }
+}
+
+/// Compute the parent module namespace for a cog name.
+/// `core.architecture.yoneda` → `Some("core.architecture")`.
+/// `top_level` → `None`.
+fn parent_namespace_of(cog_name: &str) -> Option<String> {
+    cog_name.rfind('.').map(|idx| cog_name[..idx].to_string())
+}
+
+/// Canonicalise a mount path against the importing cog's parent
+/// namespace.  Verum's `super.foo` mount resolves to
+/// `<cog_parent>.foo`; `self.foo` to `<cog_name>.foo`.  Other
+/// forms pass through unchanged.  Glob (`.*`) and file (`file:`)
+/// markers are preserved.
+fn canonicalise_mount_path(raw: &str, parent_ns: Option<&str>) -> String {
+    // Preserve trailing markers, work on the bare path.
+    let glob = raw.ends_with(".*");
+    let file_prefix = raw.starts_with("file:");
+    let bare = raw
+        .strip_suffix(".*")
+        .unwrap_or(raw)
+        .strip_prefix("file:")
+        .unwrap_or(raw);
+
+    let resolved = if let Some(rest) = bare.strip_prefix("super.") {
+        match parent_ns {
+            Some(parent) if !parent.is_empty() => {
+                // Ascend one more level for `super.X` (since `super`
+                // refers to the parent's parent in Verum's module
+                // hierarchy when used inside a sub-module).  In
+                // practice for our use case, the cog's own parent
+                // namespace IS the resolution target.
+                format!("{}.{}", parent, rest)
+            }
+            _ => bare.to_string(),
+        }
+    } else if let Some(rest) = bare.strip_prefix("self.") {
+        match parent_ns {
+            Some(_) => format!("{}.{}", parent_ns.unwrap_or(""), rest),
+            None => bare.to_string(),
+        }
+    } else {
+        bare.to_string()
+    };
+
+    let mut out = if file_prefix {
+        format!("file:{}", resolved)
+    } else {
+        resolved
+    };
+    if glob {
+        out.push_str(".*");
+    }
+    out
 }
 
 // =============================================================================

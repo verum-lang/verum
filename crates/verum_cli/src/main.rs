@@ -1469,6 +1469,18 @@ enum Commands {
         #[clap(long = "arch-coverage")]
         arch_coverage: bool,
 
+        /// ATS-V whole-corpus cross-cog architectural analysis.
+        /// Walks every `@arch_module(...)`-annotated `.vr` file in
+        /// the project + stdlib, builds the global cog → mounts
+        /// graph, populates each cog's `DiagnosticContext` with
+        /// `composed_foundations` + `composes_graph` edges, then
+        /// runs the canonical 32-pattern checker.  Activates AP-003
+        /// DependencyCycle and AP-005 FoundationDrift on real
+        /// cross-cog architecture.  Output:
+        /// `target/audit-reports/arch-corpus.json`.
+        #[clap(long = "arch-corpus")]
+        arch_corpus: bool,
+
  /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
  /// Walks every `apply kernel_*_strict(args)` invocation in the
  /// corpus's proof bodies and replays each literal-arg call
@@ -3988,6 +4000,7 @@ fn run_command(cli: Cli) -> Result<()> {
             adjunctions,
             yoneda,
             arch_coverage,
+            arch_corpus,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -4062,6 +4075,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_yoneda_with_format(output_format)
             } else if arch_coverage {
                 commands::audit::audit_arch_coverage_with_format(output_format)
+            } else if arch_corpus {
+                commands::audit::audit_arch_corpus_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {
