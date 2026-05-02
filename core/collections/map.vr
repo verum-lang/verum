@@ -397,16 +397,19 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // =========================================================================
 
     // Number of entries.
+    @inline(always)
     public fn len(&self) -> Int {
         self.len
     }
 
     // Allocated capacity.
+    @inline(always)
     public fn capacity(&self) -> Int {
         self.cap
     }
 
     // Check if empty.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.len == 0
     }

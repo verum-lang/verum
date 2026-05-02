@@ -77,16 +77,19 @@ implement<T: Hash + Eq> Set<T> {
     }
 
     // Number of elements.
+    @inline(always)
     public fn len(&self) -> Int {
         self.inner.len()
     }
 
     // Check if empty.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.inner.is_empty()
     }
 
     // Current capacity.
+    @inline(always)
     public fn capacity(&self) -> Int {
         self.inner.capacity()
     }

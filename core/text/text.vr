@@ -483,16 +483,19 @@ implement Text {
     // =========================================================================
 
     /// Length in bytes.
+    @inline(always)
     public fn len(&self) -> Int {
         text_byte_len(self)
     }
 
     /// Check if empty.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         text_byte_len(self) == 0
     }
 
     /// Capacity in bytes.
+    @inline(always)
     public fn capacity(&self) -> Int {
         // Use byte length as capacity proxy (capacity tracking requires runtime support)
         text_byte_len(self)
@@ -504,6 +507,7 @@ implement Text {
 
     /// Since Text IS the string type in Verum, this simply returns &self.
     /// Provided for API compatibility with code that expects an `as_str()` method.
+    @inline(always)
     public fn as_str(&self) -> &Text {
         self
     }
