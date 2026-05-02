@@ -51,6 +51,11 @@
 //  crates/verum_types/src/CLAUDE.md (architectural rule:
 //  "NEVER hardcode stdlib/core type knowledge in the compiler").
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.base.coercion;
 
 // =============================================================================

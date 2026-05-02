@@ -17,6 +17,11 @@
 //  NormedSpace -> BanachSpace -> HilbertSpace
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.analysis;
 
 mount core.math.algebra.{Field, Ring, AbelianGroup};
