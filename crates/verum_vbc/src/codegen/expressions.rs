@@ -19925,43 +19925,128 @@ impl VbcCodegen {
             }
 
             // Existing tensor operations from SSM/FFT section (handled by TensorExtended)
-            InlineSequenceId::SsmScan
-            | InlineSequenceId::MatrixExp
-            | InlineSequenceId::MatrixInverse
-            | InlineSequenceId::ComplexPow
-            | InlineSequenceId::ComplexMul
-            | InlineSequenceId::Rfft
-            | InlineSequenceId::Irfft
-            | InlineSequenceId::Uniform
-            | InlineSequenceId::IsTraining
-            | InlineSequenceId::Bincount
-            | InlineSequenceId::GatherNd
-            | InlineSequenceId::ArangeUsize
-            | InlineSequenceId::TensorRepeat
-            | InlineSequenceId::TensorTanh
-            | InlineSequenceId::TensorSum
-            | InlineSequenceId::TensorFromArray => {
-                // These are primarily handled via TensorExtendedOpcode in the registry.
-                // For fallback, emit a library call.
-                // (RandomFloat01 is split out — handled directly above
-                //  via the FfiExtended RandomFloat sub_op alias, #89.)
+            // **#89 close** — direct routing to `Instruction::TensorExtended`
+            // for intrinsics whose `TensorSubOpcode` variant exists +
+            // has a matching interpreter handler in
+            // `dispatch_table/handlers/tensor_extended.rs`.  Pre-fix
+            // these fell through to `emit_intrinsic_library_call(...)`
+            // catch-all → unknown-name fallback → runtime
+            // `Instruction::Panic { "unimplemented intrinsic: ..." }`.
+            //
+            // Each variant below:
+            //   * has a `TensorSubOpcode::X` variant in instruction.rs
+            //   * has a `Some(TensorSubOpcode::X) => { ... }` arm in
+            //     `tensor_extended.rs` interpreter handler
+            //   * matches the canonical registry path in
+            //     `intrinsics/codegen.rs::emit_tensor_extended` —
+            //     this fallback uses the same opcode encoding.
+            InlineSequenceId::SsmScan => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::SsmScan,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::ComplexPow => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::ComplexPow,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::ComplexMul => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::ComplexMul,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::Rfft => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Rfft,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::Irfft => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Irfft,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::Uniform => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Uniform,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::IsTraining => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::IsTraining,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::Bincount => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Bincount,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::GatherNd => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::GatherNd,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::ArangeUsize => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::ArangeUsize,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::TensorRepeat => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Repeat,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::TensorTanh => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Tanh,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::TensorSum => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::SumAll,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::TensorFromArray => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::FromArray,
+                    args,
+                    dest,
+                );
+            }
+
+            // Remaining intrinsics without a dedicated TensorSubOpcode
+            // variant — keep on the library-call fallback (still
+            // panics until #89 fully closes; needs new sub_op + handler
+            // pair per the task list).
+            InlineSequenceId::MatrixExp | InlineSequenceId::MatrixInverse => {
                 let name = match seq_id {
-                    InlineSequenceId::SsmScan => "verum_ssm_scan",
                     InlineSequenceId::MatrixExp => "verum_matrix_exp",
                     InlineSequenceId::MatrixInverse => "verum_matrix_inverse",
-                    InlineSequenceId::ComplexPow => "verum_complex_pow",
-                    InlineSequenceId::ComplexMul => "verum_complex_mul",
-                    InlineSequenceId::Rfft => "verum_rfft",
-                    InlineSequenceId::Irfft => "verum_irfft",
-                    InlineSequenceId::Uniform => "verum_uniform",
-                    InlineSequenceId::IsTraining => "verum_is_training",
-                    InlineSequenceId::Bincount => "verum_bincount",
-                    InlineSequenceId::GatherNd => "verum_gather_nd",
-                    InlineSequenceId::ArangeUsize => "verum_arange_usize",
-                    InlineSequenceId::TensorRepeat => "verum_tensor_repeat",
-                    InlineSequenceId::TensorTanh => "verum_tensor_tanh",
-                    InlineSequenceId::TensorSum => "verum_tensor_sum",
-                    InlineSequenceId::TensorFromArray => "verum_tensor_from_array",
                     _ => unreachable!(),
                 };
                 self.emit_intrinsic_library_call(name, args, dest)?;
