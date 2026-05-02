@@ -10595,6 +10595,253 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
+// ATS-V Сезон 6 — Counterfactual reasoning audit
+// =============================================================================
+
+/// `verum audit --counterfactual` — runs the counterfactual reasoning
+/// engine over a synthetic battery covering each canonical
+/// [`ArchProposition`] arm + the baseline [`ArchMetric`] set, against
+/// the default `Shape::default_for_unannotated()` plus a divergent
+/// alternative shape. Surfaces per-arm soundness contracts at audit
+/// time:
+///
+/// - `FoundationStable` arm with foundation drift → `HoldsNeither`.
+/// - `PublicApiUnchanged` arm with API change → `HoldsNeither`.
+/// - `HasCapability` arm asymmetry → `HoldsAltOnly` / `HoldsBaseOnly`.
+/// - Identity case (base == alt) → `HoldsBoth`.
+///
+/// Output: `target/audit-reports/counterfactual.json` with stable
+/// schema_version=1.
+pub fn audit_counterfactual_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::arch::{Capability, Foundation, ResourceTag, Shape};
+    use verum_kernel::arch_counterfactual::{
+        evaluate_counterfactual, ArchMetric, InvariantStatus,
+    };
+    use verum_kernel::arch_mtac::{ArchProposition, CounterfactualPair, Decision};
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("ATS-V Сезон 6 — Counterfactual reasoning engine");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("counterfactual.json");
+
+    fn pair(name: &str, base: &str, alt: &str, invs: Vec<ArchProposition>) -> CounterfactualPair {
+        CounterfactualPair {
+            name: name.into(),
+            base: Decision {
+                name: base.into(),
+                options: vec![],
+                chosen: None,
+                depends_on: vec![],
+            },
+            alternative: Decision {
+                name: alt.into(),
+                options: vec![],
+                chosen: None,
+                depends_on: vec![],
+            },
+            stability_invariants: invs,
+        }
+    }
+
+    let base_shape = Shape::default_for_unannotated();
+    let mut foundation_drift_alt = Shape::default_for_unannotated();
+    foundation_drift_alt.foundation = Foundation::Hott;
+
+    let mut api_change_alt = Shape::default_for_unannotated();
+    api_change_alt.exposes = vec![Capability::Read {
+        resource: ResourceTag::Logger,
+    }];
+
+    // Battery — one entry per canonical contract. Each entry pins
+    // engine soundness for a distinct InvariantStatus arm.
+    let battery: Vec<(&str, &Shape, &Shape, CounterfactualPair, InvariantStatus)> = vec![
+        (
+            "identity_holds_both",
+            &base_shape,
+            &base_shape,
+            pair(
+                "self_eq_self",
+                "default",
+                "default",
+                vec![
+                    ArchProposition::FoundationStable,
+                    ArchProposition::PublicApiUnchanged,
+                ],
+            ),
+            InvariantStatus::HoldsBoth,
+        ),
+        (
+            "foundation_drift_holds_neither",
+            &base_shape,
+            &foundation_drift_alt,
+            pair(
+                "drift",
+                "zfc_two_inacc",
+                "hott",
+                vec![ArchProposition::FoundationStable],
+            ),
+            InvariantStatus::HoldsNeither,
+        ),
+        (
+            "api_change_holds_neither",
+            &base_shape,
+            &api_change_alt,
+            pair(
+                "api_breaks",
+                "no_logger",
+                "with_logger",
+                vec![ArchProposition::PublicApiUnchanged],
+            ),
+            InvariantStatus::HoldsNeither,
+        ),
+        (
+            "capability_holds_alt_only",
+            &base_shape,
+            &api_change_alt,
+            pair(
+                "cap_alt_only",
+                "no_cap",
+                "with_cap",
+                vec![ArchProposition::HasCapability {
+                    capability_tag: "read".into(),
+                }],
+            ),
+            InvariantStatus::HoldsAltOnly,
+        ),
+        (
+            "capability_holds_base_only",
+            &api_change_alt,
+            &base_shape,
+            pair(
+                "cap_base_only",
+                "with_cap",
+                "no_cap",
+                vec![ArchProposition::HasCapability {
+                    capability_tag: "read".into(),
+                }],
+            ),
+            InvariantStatus::HoldsBaseOnly,
+        ),
+    ];
+
+    let baseline = ArchMetric::baseline_set();
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    let mut all_arms_pinned = true;
+
+    for (entry_name, base, alt, p, expected) in &battery {
+        let report = evaluate_counterfactual(p, base, alt, &baseline);
+        // Each entry has exactly one invariant for the pinned arm —
+        // confirm the engine returned the soundness-contract status.
+        let observed = report
+            .invariant_evaluations
+            .iter()
+            .map(|e| e.status.tag().to_string())
+            .collect::<Vec<_>>();
+        let pin_ok = report
+            .invariant_evaluations
+            .iter()
+            .any(|e| &e.status == expected);
+        if !pin_ok {
+            all_arms_pinned = false;
+        }
+        entries.push(serde_json::json!({
+            "entry": entry_name,
+            "pair_name": report.pair_name,
+            "base_decision": report.base_decision,
+            "alt_decision": report.alt_decision,
+            "expected_status": expected.tag(),
+            "observed_statuses": observed,
+            "diverging_metric_count": report.diverging_metric_count,
+            "overall_stable": report.overall_stable,
+            "metric_comparisons": report.metric_comparisons,
+            "invariant_evaluations": report.invariant_evaluations,
+            "pin_ok": pin_ok,
+            "schema_version": report.schema_version,
+        }));
+    }
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "ats_v_counterfactual_reasoning",
+        "season": 6,
+        "spec": "internal/specs/ats-v.md#§22",
+        "load_bearing": all_arms_pinned,
+        "baseline_metric_count": baseline.len(),
+        "battery_size": entries.len(),
+        "entries": entries,
+    });
+
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("ATS-V Сезон 6 — Counterfactual reasoning engine");
+            println!("─────────────────────────────────────────────────────");
+            println!("  {:<35}  {:<18}  {:<18}  {}", "Battery entry", "Expected", "Observed", "Pin");
+            println!("  {}  {}  {}  {}", "─".repeat(35), "─".repeat(18), "─".repeat(18), "─".repeat(3));
+            for entry in &payload["entries"].as_array().cloned().unwrap_or_default() {
+                let name = entry["entry"].as_str().unwrap_or("");
+                let expected = entry["expected_status"].as_str().unwrap_or("");
+                let observed = entry["observed_statuses"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .unwrap_or_default();
+                let pin_ok = entry["pin_ok"].as_bool().unwrap_or(false);
+                let glyph = if pin_ok { "✓" } else { "✗" };
+                println!("  {:<35}  {:<18}  {:<18}  {}", name, expected, observed, glyph);
+            }
+            println!();
+            println!(
+                "  Baseline metric battery: {} metrics × {} entries.",
+                baseline.len(),
+                entries.len(),
+            );
+            println!();
+            if all_arms_pinned {
+                println!(
+                    "{} Counterfactual engine load-bearing: every InvariantStatus arm pins.",
+                    "✓".green(),
+                );
+            } else {
+                println!("{} Counterfactual engine FAILED at least one pin.", "✗".red());
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    if !all_arms_pinned {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "Counterfactual audit: at least one InvariantStatus arm \
+                 failed its soundness contract — see {}",
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
 // Reflection-tower audit (#158) — Feferman 1989 / Pohlers / Beklemishev
 // =============================================================================
 

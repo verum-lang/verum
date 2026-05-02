@@ -1423,6 +1423,18 @@ enum Commands {
         #[clap(long = "arch-discharges")]
         arch_discharges: bool,
 
+        /// ATS-V Сезон 6 — Counterfactual reasoning audit. Runs the
+        /// counterfactual reasoning engine over a synthetic
+        /// `CounterfactualPair` battery (one per canonical
+        /// `ArchProposition` × baseline metric set) against the
+        /// default Shape, exercising every entry in the engine's
+        /// dispatch table. Verifies the engine's per-arm soundness
+        /// contracts (HoldsBoth/HoldsBaseOnly/...) at audit time and
+        /// surfaces the comparative report as JSON. Output:
+        /// `target/audit-reports/counterfactual.json`.
+        #[clap(long = "counterfactual")]
+        counterfactual: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -3938,6 +3950,7 @@ fn run_command(cli: Cli) -> Result<()> {
             differential_kernel_fuzz,
             reflection_tower,
             arch_discharges,
+            counterfactual,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -4004,6 +4017,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_reflection_tower_with_format(output_format)
             } else if arch_discharges {
                 commands::audit::audit_arch_discharges_with_format(output_format)
+            } else if counterfactual {
+                commands::audit::audit_counterfactual_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {
