@@ -11467,6 +11467,40 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
 // ATS-V `@arch_module(...)` adoption coverage audit
 // =============================================================================
 
+/// Walk a `Module` looking for `mount` declarations and extract the
+/// dotted-path strings.  Used by `audit_arch_coverage` to surface
+/// the cog's actual import graph alongside its declared
+/// `@arch_module(...)` shape.  Glob mounts (`mount foo.bar.*;`)
+/// produce the prefix path with a trailing `.*` marker so consumers
+/// can distinguish them from concrete-leaf mounts.
+fn derive_mounts_from_module(module: &verum_ast::Module) -> Vec<String> {
+    use verum_ast::decl::{ItemKind, MountTreeKind};
+    let mut paths: Vec<String> = Vec::new();
+    for item in &module.items {
+        let mount_decl = match &item.kind {
+            ItemKind::Mount(d) => d,
+            _ => continue,
+        };
+        let segs_to_string = |path: &verum_ast::ty::Path| -> String {
+            path.segments
+                .iter()
+                .map(|s| match s {
+                    verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str().to_string(),
+                    _ => "<non_ident>".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(".")
+        };
+        match &mount_decl.tree.kind {
+            MountTreeKind::Path(p) => paths.push(segs_to_string(p)),
+            MountTreeKind::Glob(p) => paths.push(format!("{}.*", segs_to_string(p))),
+            MountTreeKind::Nested { prefix, .. } => paths.push(segs_to_string(prefix)),
+            MountTreeKind::File { path, .. } => paths.push(format!("file:{}", path.as_str())),
+        }
+    }
+    paths
+}
+
 /// `verum audit --arch-coverage` — walks every `.vr` file in the
 /// project + stdlib and reports which carry `@arch_module(...)`
 /// declarations.  Observability gate (does not fail the build) per
@@ -11557,12 +11591,33 @@ pub fn audit_arch_coverage_with_format(format: AuditFormat) -> Result<()> {
                 .as_ref()
                 .map(|s| s.stratum.tag().to_string())
                 .unwrap_or_else(|| "<unparsed>".to_string());
+
+            // Derive mount-graph from `module.items` Mount declarations.
+            // Provides observability of the cog's actual import graph
+            // alongside its declared @arch_module shape.  Future work:
+            // cross-cog AP-005 FoundationDrift / AP-003 DependencyCycle
+            // checks consume this graph as a whole-corpus aggregate.
+            let inferred_mounts = derive_mounts_from_module(&module);
+            let exposes_tags: Vec<String> = result
+                .shape
+                .as_ref()
+                .map(|s| s.exposes.iter().map(|c| c.tag().to_string()).collect())
+                .unwrap_or_default();
+            let requires_tags: Vec<String> = result
+                .shape
+                .as_ref()
+                .map(|s| s.requires.iter().map(|c| c.tag().to_string()).collect())
+                .unwrap_or_default();
+
             entries.push(serde_json::json!({
                 "file": rel_path,
                 "annotated": true,
                 "parse_ok": parsed_ok,
                 "foundation": foundation_tag,
                 "stratum": stratum_tag,
+                "exposes": exposes_tags,
+                "requires": requires_tags,
+                "inferred_mounts": inferred_mounts,
                 "violation_count": result.violations.len(),
                 "parse_error_count": result.parse_errors.len(),
                 "parse_errors": result
