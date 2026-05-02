@@ -491,6 +491,20 @@ pub fn dispatch_reduce(
     op: TensorReduceOp,
     axis: Option<usize>,
 ) -> Option<TensorHandle> {
+    // Этап C — MLIR JIT compute path for reductions.  Mirrors the
+    // binop / unop / matmul arms.  Шаг 5a covers F32 / F64 full
+    // reductions (axis = None) for Sum / Prod / Max / Min; other
+    // combinations fall through to the SIMD ladder below.
+    #[cfg(feature = "mlir-jit")]
+    {
+        let registry = get_backend_registry();
+        if let Some(jit_backend) = registry.backend(DeviceId::mlir_jit(0)) {
+            if let Some(result) = jit_backend.reduce(a, op, axis) {
+                return Some(result);
+            }
+        }
+    }
+
     // Try Metal GPU for large F32 full reductions (axis=None)
     #[cfg(all(target_os = "macos", feature = "metal"))]
     if a.dtype == DType::F32 && a.numel >= MIN_GPU_SIZE && axis.is_none() {
