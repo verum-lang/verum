@@ -815,6 +815,228 @@ pub struct DiagnosticContext {
     pub straddling_txs: Vec<String>,
     pub straddling_resources: Vec<String>,
     pub cited_lifecycles: Vec<(String, Lifecycle)>,
+    // ----- MTAC fields (Сезон 5) -----
+    /// Sample shapes at different time points для temporal
+    /// inconsistency detection (AP-027).
+    pub temporal_samples: Vec<(crate::arch_mtac::TimePoint, Shape)>,
+    /// Counterfactual stability properties claimed by the cog
+    /// (AP-028 CounterfactualBrittleness).
+    pub counterfactual_pairs: Vec<crate::arch_mtac::CounterfactualPair>,
+    /// Refactorings claimed на cog without adjoint pair
+    /// (AP-029 MissedAdjoint).
+    pub refactorings_without_adjoint: Vec<String>,
+    /// Universal property claim для cog без uniqueness witness
+    /// (AP-030 UniversalPropertyViolation).
+    pub claimed_universal_property: Option<String>,
+    pub uniqueness_witness: Option<String>,
+    /// Evolution paths declared by cog с potentially-unsat
+    /// triggers (AP-031 PhantomEvolution).
+    pub declared_evolutions: Vec<crate::arch_mtac::ArchEvolution>,
+    /// Refactoring claimed equivalent under Yoneda but
+    /// observer-functor differs (AP-032 YonedaInequivalentRefactor).
+    pub yoneda_observer_diff: Vec<(crate::arch_mtac::Observer, bool)>,
+}
+
+// =============================================================================
+// MTAC anti-pattern checks (Сезон 5) — AP-027..032
+// =============================================================================
+
+/// ATS-V-AP-027 — TemporalInconsistency.
+/// Cog at time t1 has invariant I, at t2 violates it.
+///
+/// **Predicate**: forall (t1, shape1), (t2, shape2) in temporal_samples.
+/// shape1.foundation == shape2.foundation (foundation must be stable
+/// across time).
+pub fn check_temporal_inconsistency(
+    _shape: &Shape,
+    samples: &[(crate::arch_mtac::TimePoint, Shape)],
+) -> Option<AntiPatternViolation> {
+    if samples.len() < 2 {
+        return None;
+    }
+    let first_foundation = &samples[0].1.foundation;
+    let drift_at: Option<&crate::arch_mtac::TimePoint> = samples
+        .iter()
+        .skip(1)
+        .find(|(_, s)| &s.foundation != first_foundation)
+        .map(|(t, _)| t);
+    if drift_at.is_none() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::TemporalInconsistency,
+        severity: Severity::Error,
+        summary: format!(
+            "Foundation drifts across time samples (detected at {:?})",
+            drift_at.unwrap().tag()
+        ),
+        human_message:
+            "An MTAC `Always(Φ)` invariant requires the foundation to be stable across all time \
+             points. This cog's temporal samples show foundation drift between time points."
+                .to_string(),
+        auto_fix_suggestion: Some(
+            "Add an explicit @arch_corpus(foundation_bridge, ...) declaration if the foundation \
+             must change, or align foundation across the temporal trajectory."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-028 — CounterfactualBrittleness.
+/// Cog works only under one decision; alternatives break stability invariants.
+pub fn check_counterfactual_brittleness(
+    _shape: &Shape,
+    pairs: &[crate::arch_mtac::CounterfactualPair],
+) -> Option<AntiPatternViolation> {
+    let brittle: Vec<&crate::arch_mtac::CounterfactualPair> = pairs
+        .iter()
+        .filter(|p| p.stability_invariants.is_empty())
+        .collect();
+    if brittle.is_empty() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::CounterfactualBrittleness,
+        severity: Severity::Warning,
+        summary: format!(
+            "{} counterfactual pair(s) declared без stability invariants",
+            brittle.len()
+        ),
+        human_message: "Counterfactual decision pairs claimed without explicit stability \
+                        invariants — the cog may break under alternative decisions. Per spec §22.2 \
+                        a stable counterfactual MUST declare which invariants hold across \
+                        decision swaps."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Add stability_invariants list to each CounterfactualPair (e.g. PublicApiUnchanged)."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-029 — MissedAdjoint.
+/// Refactoring without inverse — one-way irreversible.
+pub fn check_missed_adjoint(
+    _shape: &Shape,
+    refactorings_without_adjoint: &[String],
+) -> Option<AntiPatternViolation> {
+    if refactorings_without_adjoint.is_empty() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::MissedAdjoint,
+        severity: Severity::Warning,
+        summary: format!(
+            "{} refactoring(s) declared without adjoint pair",
+            refactorings_without_adjoint.len()
+        ),
+        human_message: "Per spec §20.6, every refactoring is a pair (F, G) of functors with F ⊣ G \
+                        (left adjoint). One-way irreversible refactorings violate this discipline."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Pair each refactoring with its adjoint counterpart, or mark explicitly as \
+             irreversible via @arch_module(reversibility = Irreversible)."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-030 — UniversalPropertyViolation.
+/// Cog claims universal property без uniqueness witness.
+pub fn check_universal_property_violation(
+    _shape: &Shape,
+    claimed: &Option<String>,
+    witness: &Option<String>,
+) -> Option<AntiPatternViolation> {
+    if claimed.is_none() {
+        return None; // no claim → no violation
+    }
+    if witness.is_some() {
+        return None; // claim + witness → ok
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::UniversalPropertyViolation,
+        severity: Severity::Error,
+        summary: format!(
+            "Universal property `{}` claimed без uniqueness witness",
+            claimed.as_ref().unwrap()
+        ),
+        human_message:
+            "Per spec §23, every claimed universal property must come with an explicit uniqueness \
+             witness (no other cog provides the same property the same way). Without it, the cog \
+             cannot be a Yoneda-canonical model."
+                .to_string(),
+        auto_fix_suggestion: Some(
+            "Provide uniqueness_witness via @arch_module(universal_property = ..., \
+             uniqueness_witness = ...)."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-031 — PhantomEvolution.
+/// Lifecycle declares evolution path с unsatisfiable trigger.
+pub fn check_phantom_evolution(
+    _shape: &Shape,
+    evolutions: &[crate::arch_mtac::ArchEvolution],
+) -> Option<AntiPatternViolation> {
+    let phantoms: Vec<&crate::arch_mtac::ArchEvolution> = evolutions
+        .iter()
+        .filter(|e| e.trigger.is_empty() || e.trigger == "never")
+        .collect();
+    if phantoms.is_empty() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::PhantomEvolution,
+        severity: Severity::Warning,
+        summary: format!(
+            "{} declared evolution path(s) с unsatisfiable trigger",
+            phantoms.len()
+        ),
+        human_message: "Per spec §21.3, ArchEvolution declarations must have satisfiable triggers. \
+                        Empty / 'never' triggers indicate phantom evolutions that mislead readers \
+                        and agent reasoning."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Either provide a concrete trigger condition or remove the evolution declaration."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-032 — YonedaInequivalentRefactor.
+/// Refactoring claimed equivalent но observer-functor changes.
+pub fn check_yoneda_inequivalent_refactor(
+    _shape: &Shape,
+    observer_diff: &[(crate::arch_mtac::Observer, bool)],
+) -> Option<AntiPatternViolation> {
+    let mismatched: Vec<&(crate::arch_mtac::Observer, bool)> = observer_diff
+        .iter()
+        .filter(|(_, equivalent)| !*equivalent)
+        .collect();
+    if mismatched.is_empty() {
+        return None;
+    }
+    let observer_tags: Vec<&str> = mismatched.iter().map(|(o, _)| o.tag()).collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::YonedaInequivalentRefactor,
+        severity: Severity::Error,
+        summary: format!(
+            "Refactoring claims Yoneda equivalence но observer-functor differs for: {}",
+            observer_tags.join(", ")
+        ),
+        human_message:
+            "Per spec §20.7 + §23, two architectures are Yoneda-equivalent IFF they produce the \
+             same observable behaviour for every observer. The refactoring changes behaviour for \
+             at least one observer — equivalence claim is unsound."
+                .to_string(),
+        auto_fix_suggestion: Some(
+            "Either correct the refactoring to preserve observer-functor equivalence, or downgrade \
+             the equivalence claim to a weaker structural relation."
+                .into(),
+        ),
+    })
 }
 
 /// Walk every canonical anti-pattern check; return all violations.
@@ -855,6 +1077,29 @@ pub fn check_all_anti_patterns(
         violations.push(v);
     }
     if let Some(v) = check_stratum_admissible(shape) {
+        violations.push(v);
+    }
+    // ----- MTAC checks (Сезон 5) — AP-027..032 -----
+    if let Some(v) = check_temporal_inconsistency(shape, &ctx.temporal_samples) {
+        violations.push(v);
+    }
+    if let Some(v) = check_counterfactual_brittleness(shape, &ctx.counterfactual_pairs) {
+        violations.push(v);
+    }
+    if let Some(v) = check_missed_adjoint(shape, &ctx.refactorings_without_adjoint) {
+        violations.push(v);
+    }
+    if let Some(v) = check_universal_property_violation(
+        shape,
+        &ctx.claimed_universal_property,
+        &ctx.uniqueness_witness,
+    ) {
+        violations.push(v);
+    }
+    if let Some(v) = check_phantom_evolution(shape, &ctx.declared_evolutions) {
+        violations.push(v);
+    }
+    if let Some(v) = check_yoneda_inequivalent_refactor(shape, &ctx.yoneda_observer_diff) {
         violations.push(v);
     }
     violations
@@ -1136,5 +1381,262 @@ mod tests {
             AntiPatternCode::YonedaInequivalentRefactor.docs_url(),
             "https://verum.lang/docs/ats-v/ap-032"
         );
+    }
+
+    // =========================================================================
+    // MTAC checkers (Сезон 5) — direct unit pins
+    // =========================================================================
+
+    /// Helper: a Decision with name + no chosen value — sufficient
+    /// for tests that only inspect the wrapper structure.
+    fn dummy_decision(name: &str) -> crate::arch_mtac::Decision {
+        crate::arch_mtac::Decision {
+            name: name.to_string(),
+            options: vec![],
+            chosen: None,
+            depends_on: vec![],
+        }
+    }
+
+    #[test]
+    fn temporal_inconsistency_detects_foundation_drift() {
+        use crate::arch_mtac::TimePoint;
+        let mut s_now = Shape::default_for_unannotated();
+        s_now.foundation = Foundation::ZfcTwoInacc;
+        let mut s_future = Shape::default_for_unannotated();
+        s_future.foundation = Foundation::Hott;
+        let samples = vec![
+            (TimePoint::Now, s_now),
+            (TimePoint::Future(2_000_000_000), s_future),
+        ];
+        let v = check_temporal_inconsistency(&Shape::default_for_unannotated(), &samples);
+        assert!(v.is_some());
+        assert_eq!(v.unwrap().code, AntiPatternCode::TemporalInconsistency);
+    }
+
+    #[test]
+    fn temporal_inconsistency_passes_stable_foundation() {
+        use crate::arch_mtac::TimePoint;
+        let s = Shape::default_for_unannotated();
+        let samples = vec![
+            (TimePoint::Now, s.clone()),
+            (TimePoint::Future(2_000_000_000), s),
+        ];
+        assert!(
+            check_temporal_inconsistency(&Shape::default_for_unannotated(), &samples).is_none()
+        );
+    }
+
+    #[test]
+    fn temporal_inconsistency_no_violation_with_single_sample() {
+        use crate::arch_mtac::TimePoint;
+        let samples = vec![(TimePoint::Now, Shape::default_for_unannotated())];
+        assert!(
+            check_temporal_inconsistency(&Shape::default_for_unannotated(), &samples).is_none()
+        );
+    }
+
+    #[test]
+    fn counterfactual_brittleness_detects_missing_invariants() {
+        use crate::arch_mtac::CounterfactualPair;
+        let pairs = vec![CounterfactualPair {
+            name: "db_choice".into(),
+            base: dummy_decision("use_pgsql"),
+            alternative: dummy_decision("use_sqlite"),
+            stability_invariants: vec![], // ← empty → brittle
+        }];
+        let v = check_counterfactual_brittleness(&Shape::default_for_unannotated(), &pairs);
+        assert!(v.is_some());
+        assert_eq!(v.unwrap().code, AntiPatternCode::CounterfactualBrittleness);
+    }
+
+    #[test]
+    fn counterfactual_brittleness_passes_with_invariants() {
+        use crate::arch_mtac::{ArchProposition, CounterfactualPair};
+        let pairs = vec![CounterfactualPair {
+            name: "db_choice".into(),
+            base: dummy_decision("use_pgsql"),
+            alternative: dummy_decision("use_sqlite"),
+            stability_invariants: vec![ArchProposition::PublicApiUnchanged],
+        }];
+        assert!(
+            check_counterfactual_brittleness(&Shape::default_for_unannotated(), &pairs).is_none()
+        );
+    }
+
+    #[test]
+    fn missed_adjoint_detects_irreversible_refactor() {
+        let refs = vec!["MergeModulesA_B".into()];
+        let v = check_missed_adjoint(&Shape::default_for_unannotated(), &refs);
+        assert!(v.is_some());
+        assert_eq!(v.unwrap().code, AntiPatternCode::MissedAdjoint);
+    }
+
+    #[test]
+    fn missed_adjoint_passes_when_no_refactorings() {
+        assert!(check_missed_adjoint(&Shape::default_for_unannotated(), &[]).is_none());
+    }
+
+    #[test]
+    fn universal_property_violation_detects_claim_without_witness() {
+        let v = check_universal_property_violation(
+            &Shape::default_for_unannotated(),
+            &Some("FreeMonoidOnX".into()),
+            &None,
+        );
+        assert!(v.is_some());
+        assert_eq!(v.unwrap().code, AntiPatternCode::UniversalPropertyViolation);
+    }
+
+    #[test]
+    fn universal_property_violation_passes_with_witness() {
+        let v = check_universal_property_violation(
+            &Shape::default_for_unannotated(),
+            &Some("FreeMonoidOnX".into()),
+            &Some("uniqueness_proof_thm_4_2".into()),
+        );
+        assert!(v.is_none());
+    }
+
+    #[test]
+    fn universal_property_violation_passes_no_claim() {
+        let v = check_universal_property_violation(
+            &Shape::default_for_unannotated(),
+            &None,
+            &None,
+        );
+        assert!(v.is_none());
+    }
+
+    #[test]
+    fn phantom_evolution_detects_unsat_trigger() {
+        use crate::arch_mtac::{
+            ArchEvolution, ComplexityClass, Reversibility, TimePoint,
+        };
+        let evos = vec![ArchEvolution {
+            trigger: "never".into(),
+            expected_time: TimePoint::Future(2_000_000_000),
+            cost_class: ComplexityClass::Linear,
+            reversibility: Reversibility::Irreversible,
+        }];
+        let v = check_phantom_evolution(&Shape::default_for_unannotated(), &evos);
+        assert!(v.is_some());
+        assert_eq!(v.unwrap().code, AntiPatternCode::PhantomEvolution);
+    }
+
+    #[test]
+    fn phantom_evolution_passes_with_concrete_trigger() {
+        use crate::arch_mtac::{
+            ArchEvolution, ComplexityClass, Reversibility, TimePoint,
+        };
+        let evos = vec![ArchEvolution {
+            trigger: "schema_v3 deployed".into(),
+            expected_time: TimePoint::Future(2_000_000_000),
+            cost_class: ComplexityClass::Linear,
+            reversibility: Reversibility::AdjointReversible,
+        }];
+        assert!(check_phantom_evolution(&Shape::default_for_unannotated(), &evos).is_none());
+    }
+
+    #[test]
+    fn yoneda_inequivalent_detects_observer_mismatch() {
+        use crate::arch_mtac::Observer;
+        let diff = vec![
+            (
+                Observer::EndUser {
+                    kind: "default".into(),
+                },
+                true,
+            ),
+            (
+                Observer::Auditor {
+                    audit_kind: "compliance".into(),
+                },
+                false,
+            ), // ← differs under refactor
+        ];
+        let v = check_yoneda_inequivalent_refactor(&Shape::default_for_unannotated(), &diff);
+        assert!(v.is_some());
+        assert_eq!(v.unwrap().code, AntiPatternCode::YonedaInequivalentRefactor);
+    }
+
+    #[test]
+    fn yoneda_inequivalent_passes_when_all_observers_agree() {
+        use crate::arch_mtac::Observer;
+        let diff = vec![
+            (
+                Observer::EndUser {
+                    kind: "default".into(),
+                },
+                true,
+            ),
+            (
+                Observer::Auditor {
+                    audit_kind: "compliance".into(),
+                },
+                true,
+            ),
+            (
+                Observer::PeerCog {
+                    module_path: "core::base".into(),
+                },
+                true,
+            ),
+        ];
+        assert!(
+            check_yoneda_inequivalent_refactor(&Shape::default_for_unannotated(), &diff).is_none()
+        );
+    }
+
+    #[test]
+    fn check_all_routes_through_mtac_checks() {
+        // Pin: check_all_anti_patterns wires the 6 MTAC checks
+        // — feed each violation context once and expect the
+        // corresponding code to appear in the aggregated list.
+        use crate::arch_mtac::{
+            ArchEvolution, ComplexityClass, CounterfactualPair, Observer, Reversibility,
+            TimePoint,
+        };
+        let shape = Shape::default_for_unannotated();
+        let mut alt = Shape::default_for_unannotated();
+        alt.foundation = Foundation::Hott;
+        let ctx = DiagnosticContext {
+            temporal_samples: vec![
+                (TimePoint::Now, shape.clone()),
+                (TimePoint::Future(2_000_000_000), alt),
+            ],
+            counterfactual_pairs: vec![CounterfactualPair {
+                name: "any".into(),
+                base: dummy_decision("a"),
+                alternative: dummy_decision("b"),
+                stability_invariants: vec![],
+            }],
+            refactorings_without_adjoint: vec!["one_way_merge".into()],
+            claimed_universal_property: Some("FreeMonad".into()),
+            uniqueness_witness: None,
+            declared_evolutions: vec![ArchEvolution {
+                trigger: String::new(),
+                expected_time: TimePoint::Future(2_000_000_000),
+                cost_class: ComplexityClass::Linear,
+                reversibility: Reversibility::Irreversible,
+            }],
+            yoneda_observer_diff: vec![(
+                Observer::Auditor {
+                    audit_kind: "compliance".into(),
+                },
+                false,
+            )],
+            ..Default::default()
+        };
+        let violations = check_all_anti_patterns(&shape, &ctx);
+        let codes: std::collections::HashSet<_> =
+            violations.iter().map(|v| v.code).collect();
+        // Each of the 6 MTAC codes must have surfaced.
+        assert!(codes.contains(&AntiPatternCode::TemporalInconsistency));
+        assert!(codes.contains(&AntiPatternCode::CounterfactualBrittleness));
+        assert!(codes.contains(&AntiPatternCode::MissedAdjoint));
+        assert!(codes.contains(&AntiPatternCode::UniversalPropertyViolation));
+        assert!(codes.contains(&AntiPatternCode::PhantomEvolution));
+        assert!(codes.contains(&AntiPatternCode::YonedaInequivalentRefactor));
     }
 }
