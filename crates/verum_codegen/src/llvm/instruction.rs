@@ -21,6 +21,7 @@ use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
 use super::ffi::{FfiLowering, ffi_subop_to_calling_convention};
 use super::runtime::RuntimeLowering;
 use super::types::RefTier;
+use super::target_triple::{target_is_aarch64, target_is_x86_64};
 use super::vbc_lowering::is_primitive_type_name;
 use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt};
 use verum_common::well_known_types::type_names as tn;
@@ -4746,15 +4747,17 @@ pub fn lower_instruction<'ctx>(
                 false,
             );
 
-            #[cfg(target_arch = "x86_64")]
-            let (asm_str, constraints) = (
-                "syscall",
-                "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
-            );
-
-            #[cfg(target_arch = "aarch64")]
-            let (asm_str, constraints) = (
-                "svc #0",
+            // Architecture selection reads the LLVM module's TARGET triple,
+            // not the codegen host's `#[cfg(target_arch=...)]`.  Host gates
+            // miscompile cross-builds (e.g. building on x86_64-darwin for
+            // aarch64-linux would emit `syscall` into an arm64 binary).
+            let module = ctx.get_module();
+            let (asm_str, constraints): (&str, &str) = if target_is_x86_64(module) {
+                (
+                    "syscall",
+                    "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
+                )
+            } else if target_is_aarch64(module) {
                 // Inkwell/LLVM ARM64 register names: x0-x7 for args/return,
                 // x8 for syscall number. Output `={x0}` binds the call's
                 // return value to x0. Inputs in declaration order map to
@@ -4762,16 +4765,18 @@ pub fn lower_instruction<'ctx>(
                 // x86_64 form — kernel may write to user memory pointed
                 // to by syscall args (read/write/getsockname/etc.), so
                 // LLVM must not reorder loads/stores across the syscall.
-                "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
-            );
-
-            // Fallback for other architectures (32-bit ARM, RISC-V, …):
-            // emit a stub that returns -ENOSYS = -38. Linker will not
-            // fail; runtime callers see a clean errno. Production
-            // builds for those targets need their own platform-specific
-            // arm via @cfg in the calling Verum-side syscall wrapper.
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-            let (asm_str, constraints): (&str, &str) = ("", "=r");
+                (
+                    "svc #0",
+                    "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
+                )
+            } else {
+                // Fallback for other architectures (32-bit ARM, RISC-V, …):
+                // emit a stub that returns -ENOSYS = -38. Linker will not
+                // fail; runtime callers see a clean errno. Production
+                // builds for those targets need their own platform-specific
+                // arm via @cfg in the calling Verum-side syscall wrapper.
+                ("", "=r")
+            };
 
             let asm_fn = ctx.llvm_context().create_inline_asm(
                 fn_type,
@@ -24827,13 +24832,16 @@ fn lower_atomic_fence<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ordering: u8) -
         let void_type = ctx.types().context().void_type();
         let fn_type = void_type.fn_type(&[], false);
 
-        // Use LLVM inline asm for the pause/yield hint
-        #[cfg(target_arch = "x86_64")]
-        let asm_str = "pause";
-        #[cfg(target_arch = "aarch64")]
-        let asm_str = "yield";
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        let asm_str = "";
+        // Use LLVM inline asm for the pause/yield hint.  Read the TARGET
+        // triple, never the codegen host's `#[cfg(target_arch)]` — host
+        // gates miscompile cross-builds.
+        let asm_str: &str = if target_is_x86_64(module) {
+            "pause"
+        } else if target_is_aarch64(module) {
+            "yield"
+        } else {
+            ""
+        };
 
         if !asm_str.is_empty() {
             // Build inline asm call: asm volatile("pause"/"yield")
