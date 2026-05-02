@@ -5,6 +5,11 @@
 // pure-C bundled sources when no system zlib is present.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.compress.mod_gzip;
 mount core.*;
 mount core.compress.{Algorithm, CompressError};
