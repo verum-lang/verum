@@ -61,6 +61,7 @@ fn build_module(name: &str, instructions: Vec<Instruction>, reg_count: u8) -> Ar
         func_id_base: 0,
         debug_variables: Vec::new(),
         is_test: false,
+        is_gpu_only: false,
     };
 
     module.functions.push(func_desc);

@@ -8375,6 +8375,50 @@ impl VbcCodegen {
     }
 
     /// Extracts parameter name from function parameter.
+    /// Detect `@device(gpu)` / `@device(GPU)` / `@device("gpu")` on a
+    /// function declaration's attribute list.  Mirrors the predicate
+    /// in `crates/verum_compiler/src/pipeline/gpu_detect.rs`.
+    ///
+    /// Returns true iff the function should be lowered EXCLUSIVELY
+    /// through the MLIR GPU pipeline (the LLVM CPU pipeline emits
+    /// only an extern stub).  Stable: callable from VBC codegen
+    /// without taking `&mut self`.
+    fn function_is_gpu_only(attrs: &verum_common::List<verum_ast::Attribute>) -> bool {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::PathSegment;
+        use verum_common::Maybe;
+
+        for attr in attrs.iter() {
+            if attr.name.as_str() != "device" {
+                continue;
+            }
+            let Maybe::Some(ref args) = attr.args else {
+                continue;
+            };
+            let Some(first_arg) = args.first() else {
+                continue;
+            };
+            match &first_arg.kind {
+                ExprKind::Path(path) => {
+                    if let Some(PathSegment::Name(ident)) = path.segments.first() {
+                        if ident.name.as_str().eq_ignore_ascii_case("gpu") {
+                            return true;
+                        }
+                    }
+                }
+                ExprKind::Literal(lit) => {
+                    if let verum_ast::literal::LiteralKind::Text(s) = &lit.kind {
+                        if s.as_str().eq_ignore_ascii_case("gpu") {
+                            return true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn extract_param_name(&self, param: &verum_ast::FunctionParam) -> Option<String> {
         use verum_ast::FunctionParamKind;
         match &param.kind {
@@ -9408,6 +9452,16 @@ impl VbcCodegen {
         // Set test flag if function has @test attribute (only for user code)
         if self.propagate_test_attr && func.attributes.iter().any(|a| a.is_named("test")) {
             descriptor.is_test = true;
+        }
+
+        // Set is_gpu_only flag if function carries `@device(gpu)` /
+        // `@device(GPU)` / `@device("gpu")`.  Mirrors the predicate
+        // in `crates/verum_compiler/src/pipeline/gpu_detect.rs` —
+        // both AST shapes (path-segment + string-literal) qualify.
+        // Functions tagged here go EXCLUSIVELY through the MLIR GPU
+        // pipeline; the LLVM CPU pipeline emits only an extern stub.
+        if Self::function_is_gpu_only(&func.attributes) {
+            descriptor.is_gpu_only = true;
         }
 
         // Map context names to ContextRef IDs and register in context_names table

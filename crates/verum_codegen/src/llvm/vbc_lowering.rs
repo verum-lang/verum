@@ -1576,6 +1576,25 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         self.declare_functions(vbc_module)?;
 
         // Phase 2: Lower function bodies
+        //
+        // Architectural note (Этап Б): `@device(gpu)` functions
+        // (`is_gpu_only = true`) intentionally lower in BOTH pipelines
+        // for the duration of the hybrid AOT migration:
+        //   * LLVM body  → CPU fallback path used when no GPU device
+        //                  is available at runtime, OR while the host
+        //                  stub generator (Шаг 3 of Этап Б) is not
+        //                  yet wired up.  Without this, a GPU build
+        //                  on a CPU-only host or a build before the
+        //                  MLIR→host-stub linker lands has undefined
+        //                  references at link time.
+        //   * MLIR body  → native GPU compile (linalg/tensor/gpu
+        //                  dialects) → PTX / SPIR-V / Metal artifacts.
+        // Phase 7.5 (hybrid linker) routes runtime calls to whichever
+        // implementation the device-detection layer selects.  Once
+        // Шаг 3 lands, the LLVM body of `is_gpu_only` functions will
+        // collapse to a thin `verum_gpu_launch_kernel(name, args)`
+        // host stub; until then we keep the full LLVM lowering as
+        // the safe fallback.
         for func in functions {
             self.lower_vbc_function(vbc_module, func)?;
         }

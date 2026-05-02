@@ -454,7 +454,18 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
     pub fn lower_module(&mut self, vbc_module: &VbcModule) -> Result<Module<'ctx>> {
         let location = Location::unknown(self.context);
         let module = Module::new(location);
+        // Architectural invariant (Этап Б target-aware routing):
+        // the MLIR GPU pipeline owns ONLY the GPU compute partition —
+        // functions tagged `is_gpu_only = true` (i.e. carrying
+        // `@device(gpu)`).  The CPU host code is owned by the LLVM
+        // pipeline.  Filtering here closes the dual-lowering hole:
+        // a function with no `@device(gpu)` annotation never reaches
+        // the GPU path, even when the module overall has GPU kernels
+        // present.
         for (func_id, func_desc) in vbc_module.functions.iter().enumerate() {
+            if !func_desc.is_gpu_only {
+                continue;
+            }
             let func_op = self.lower_function(func_id as u32, func_desc, vbc_module)?;
             module.body().append_operation(func_op);
             self.stats.functions_lowered += 1;

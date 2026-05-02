@@ -1196,6 +1196,12 @@ impl<'a> Deserializer<'a> {
             func_id_base: 0,
             debug_variables: Vec::new(),
             is_test: false,
+            // Legacy `.vbc` files (pre-Этап-Б) have no GPU-partition
+            // bit on disk; default to false (CPU partition).  Modern
+            // codegen + serializer set this from `@device(gpu)` AST
+            // attributes; the deserializer can either re-derive it
+            // from a future format-version bump or trust the encoder.
+            is_gpu_only: false,
         })
     }
 

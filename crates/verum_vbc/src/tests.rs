@@ -272,6 +272,7 @@ fn test_roundtrip_function_descriptor() {
         func_id_base: 0,
         debug_variables: Vec::new(),
         is_test: false,
+        is_gpu_only: false,
     };
 
     // Add some dummy bytecode
