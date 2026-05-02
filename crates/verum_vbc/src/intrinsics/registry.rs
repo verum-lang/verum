@@ -8245,7 +8245,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Alloc],
         param_count: 2, // shape, dtype
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorNew),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::NewFromArgs),
         mlir_op: Some("verum.tensor_new"),
         doc: "Create uninitialized tensor with shape and dtype",
     },
@@ -8255,7 +8255,14 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Alloc],
         param_count: 3, // shape, value, dtype
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorFull),
+        // Phase 4 of sub-opcode refactor (2026-05-02): canonical
+        // bytecode home is `Instruction::TensorExtended` with
+        // `TensorSubOpcode::FillFromArgs` (0x0E).  The legacy
+        // `Opcode::TensorFull` (0xFE top-level) remains alive in
+        // the compatibility decoder + AOT lowering arm but no
+        // active codegen path references it.  Mirrors the parallel
+        // migration of TENSOR_FROM_SLICE / TENSOR_FROM_DATA.
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::FillFromArgs),
         mlir_op: Some("verum.tensor_fill"),
         doc: "Create tensor filled with a scalar value",
     },
@@ -8367,7 +8374,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, new_shape
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorReshape),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ReshapeFromArgs),
         mlir_op: Some("verum.tensor_reshape"),
         doc: "Reshape tensor to new shape",
     },
@@ -8377,7 +8384,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 1, // tensor
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorTranspose),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::TransposeFromArgs),
         mlir_op: Some("verum.tensor_transpose"),
         doc: "Transpose tensor (swap last two dimensions)",
     },
@@ -8397,7 +8404,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, ranges
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorSlice),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::SliceFromArgs),
         mlir_op: Some("verum.tensor_slice"),
         doc: "Slice tensor along dimensions",
     },
@@ -8508,7 +8515,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // a, b, op
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorBinop),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::BinopFromArgs),
         mlir_op: Some("verum.tensor_binop"),
         doc: "Element-wise binary operation",
     },
@@ -8518,7 +8525,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, op
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorUnop),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::UnopFromArgs),
         mlir_op: Some("verum.tensor_unop"),
         doc: "Element-wise unary operation",
     },
@@ -8609,7 +8616,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // a, b
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorMatmul),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::MatmulFromArgs),
         mlir_op: Some("verum.tensor_matmul"),
         doc: "Matrix multiplication",
     },
@@ -8619,7 +8626,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // a, b
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorMatmul),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::MatmulFromArgs),
         mlir_op: Some("verum.tensor_mm"),
         doc: "Matrix multiplication (alias)",
     },
@@ -8629,7 +8636,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // matrix, vector
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorMatmul),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::MatmulFromArgs),
         mlir_op: Some("verum.tensor_mv"),
         doc: "Matrix-vector multiplication",
     },
@@ -8842,7 +8849,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // tensor, op, axis
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorReduce),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ReduceFromArgs),
         mlir_op: Some("verum.tensor_reduce"),
         doc: "Reduce tensor along axis",
     },
@@ -9969,7 +9976,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 1, // x
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorUnop),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::UnopFromArgs),
         mlir_op: Some("verum.tensor_sigmoid"),
         doc: "Element-wise sigmoid activation",
     },
@@ -10029,7 +10036,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // tensor, start_dim, end_dim
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorReshape),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ReshapeFromArgs),
         mlir_op: Some("verum.flatten"),
         doc: "Flatten tensor dimensions",
     },
@@ -10039,7 +10046,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // tensor, dim0, dim1
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorTranspose),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::TransposeFromArgs),
         mlir_op: Some("verum.transpose"),
         doc: "Transpose tensor dimensions",
     },
