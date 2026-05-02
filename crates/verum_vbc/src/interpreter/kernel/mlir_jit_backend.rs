@@ -412,6 +412,32 @@ impl Backend for MlirJitBackend {
         if !is_float_dtype(a.dtype) {
             return None;
         }
+        // Mean is a post-pass over Sum: compute Σx through the cached
+        // Sum kernel, then divide the scalar result by `n` in Rust.
+        // Reusing the Sum engine keeps cache size bounded and matches
+        // the "compose primitives" pattern used elsewhere in Verum.
+        if op == TensorReduceOp::Mean {
+            let sum = self.reduce(a, TensorReduceOp::Sum, axis)?;
+            let n = a.numel;
+            if n == 0 {
+                return None;
+            }
+            let out_data = sum.data.as_ref()?;
+            unsafe {
+                match a.dtype {
+                    DType::F32 => {
+                        let p = (*out_data.as_ptr()).as_mut_ptr() as *mut f32;
+                        *p /= n as f32;
+                    }
+                    DType::F64 => {
+                        let p = (*out_data.as_ptr()).as_mut_ptr() as *mut f64;
+                        *p /= n as f64;
+                    }
+                    _ => return None,
+                }
+            }
+            return Some(sum);
+        }
         if reduce_arith_op(op).is_none() {
             return None;
         }
@@ -1126,13 +1152,44 @@ mod tests {
 
     #[test]
     fn reduce_falls_through_for_unsupported_op() {
-        // Mean / Var / Std / Norm / LogSumExp / All / Any deferred
-        // to Шаг 5b.
+        // Var / Std / Norm / LogSumExp / All / Any deferred to Шаг
+        // 5c.  Mean has graduated from this pin (now wired via the
+        // Sum-then-divide composition — see `reduce_f32_mean_executes`).
         let backend = MlirJitBackend::new();
         let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
-        assert!(backend.reduce(&a, TensorReduceOp::Mean, None).is_none());
         assert!(backend.reduce(&a, TensorReduceOp::Var, None).is_none());
         assert!(backend.reduce(&a, TensorReduceOp::Norm, None).is_none());
+    }
+
+    #[test]
+    fn reduce_f32_mean_executes() {
+        // Mean = Sum / n, so for [2,4,6,8] mean = 20/4 = 5.0.  The
+        // pin also indirectly verifies the Sum kernel returns the
+        // correct accumulator (we'd see double-divide / wrong-n if
+        // the post-pass and the kernel disagreed on element count).
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[2.0, 4.0, 6.0, 8.0]);
+        let m = backend.reduce(&a, TensorReduceOp::Mean, None).unwrap();
+        let v = read_f32(&m, 1);
+        assert!((v[0] - 5.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn reduce_f64_mean_executes() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[3], DType::F64).unwrap();
+        unsafe {
+            let p = (*a.data.as_ref().unwrap().as_ptr()).as_mut_ptr() as *mut f64;
+            *p.add(0) = 1.0;
+            *p.add(1) = 2.0;
+            *p.add(2) = 3.0;
+        }
+        let m = backend.reduce(&a, TensorReduceOp::Mean, None).unwrap();
+        unsafe {
+            let p = (*m.data.as_ref().unwrap().as_ptr()).as_ptr() as *const f64;
+            assert!((*p - 2.0).abs() < 1e-12);
+        }
     }
 
     #[test]
