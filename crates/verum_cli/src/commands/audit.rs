@@ -10842,6 +10842,317 @@ pub fn audit_counterfactual_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
+// ATS-V Сезон 7 — Adjunction analyzer audit
+// =============================================================================
+
+/// `verum audit --adjunctions` — runs the adjunction analyzer over
+/// a synthetic battery covering each of the four canonical
+/// adjunctions (per spec §20.6): Inline⊣Extract /
+/// Specialise⊣Generalise / Decompose⊣Compose / Strengthen⊣Weaken,
+/// plus a chain composition pin and a preservation-failure case.
+///
+/// Verifies recogniser soundness + preservation / gain coverage at
+/// audit time.  Output: `target/audit-reports/adjunctions.json`
+/// with stable schema_version=1.
+pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::arch::{BoundaryInvariant, Capability, Foundation, ResourceTag, Shape};
+    use verum_kernel::arch_adjunction::{
+        analyze_chain, analyze_refactoring, AdjunctionVerdict, CanonicalAdjunction, Refactoring,
+        RefactoringChain, RefactoringDirection,
+    };
+    use verum_kernel::arch_mtac::{AdjunctionWitness, ArchProposition};
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("ATS-V Сезон 7 — Adjunction analyzer");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("adjunctions.json");
+
+    fn witness(forward: &str, backward: &str) -> AdjunctionWitness {
+        AdjunctionWitness {
+            forward_name: forward.into(),
+            backward_name: backward.into(),
+            preserved: vec![],
+            gained: vec![],
+        }
+    }
+
+    // -- Battery construction --
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    let mut all_pins_ok = true;
+
+    // Entry 1: Inline ⊣ Extract — composition_degree decreases.
+    let mut s_before = Shape::default_for_unannotated();
+    s_before.composes_with = vec!["helper_a".into(), "helper_b".into()];
+    let s_after_inline = Shape::default_for_unannotated();
+    let r_inline = Refactoring {
+        name: "inline_two_helpers".into(),
+        direction: RefactoringDirection::Forward,
+        before_shape: s_before.clone(),
+        after_shape: s_after_inline,
+        witness: witness("inline", "extract"),
+    };
+    let a_inline = analyze_refactoring(&r_inline);
+    let pin_inline = matches!(a_inline.canonical, CanonicalAdjunction::InlineExtract)
+        && a_inline.verdict.is_accepted();
+    if !pin_inline {
+        all_pins_ok = false;
+    }
+    entries.push(serde_json::json!({
+        "entry": "inline_extract",
+        "expected_canonical": "inline_extract",
+        "expected_verdict": "accepted",
+        "observed_canonical": a_inline.canonical.tag(),
+        "observed_verdict": a_inline.verdict.tag(),
+        "pin_ok": pin_inline,
+        "analysis": a_inline,
+    }));
+
+    // Entry 2: Specialise ⊣ Generalise — capability set shrinks,
+    // foundation+stratum stable.
+    let mut s_before = Shape::default_for_unannotated();
+    s_before.exposes = vec![
+        Capability::Read {
+            resource: ResourceTag::Logger,
+        },
+        Capability::Write {
+            resource: ResourceTag::Logger,
+        },
+    ];
+    let mut s_after = Shape::default_for_unannotated();
+    s_after.exposes = vec![Capability::Read {
+        resource: ResourceTag::Logger,
+    }];
+    let r_spec = Refactoring {
+        name: "specialise_iface".into(),
+        direction: RefactoringDirection::Forward,
+        before_shape: s_before,
+        after_shape: s_after,
+        witness: witness("specialise", "generalise"),
+    };
+    let a_spec = analyze_refactoring(&r_spec);
+    let pin_spec = matches!(
+        a_spec.canonical,
+        CanonicalAdjunction::SpecialiseGeneralise
+    ) && a_spec.verdict.is_accepted();
+    if !pin_spec {
+        all_pins_ok = false;
+    }
+    entries.push(serde_json::json!({
+        "entry": "specialise_generalise",
+        "expected_canonical": "specialise_generalise",
+        "expected_verdict": "accepted",
+        "observed_canonical": a_spec.canonical.tag(),
+        "observed_verdict": a_spec.verdict.tag(),
+        "pin_ok": pin_spec,
+        "analysis": a_spec,
+    }));
+
+    // Entry 3: Decompose ⊣ Compose — composes_with grows.
+    let s_before = Shape::default_for_unannotated();
+    let mut s_after = Shape::default_for_unannotated();
+    s_after.composes_with = vec!["sub_a".into(), "sub_b".into()];
+    let r_decomp = Refactoring {
+        name: "split_into_subs".into(),
+        direction: RefactoringDirection::Forward,
+        before_shape: s_before,
+        after_shape: s_after,
+        witness: witness("decompose", "compose"),
+    };
+    let a_decomp = analyze_refactoring(&r_decomp);
+    let pin_decomp = matches!(
+        a_decomp.canonical,
+        CanonicalAdjunction::DecomposeCompose
+    ) && a_decomp.verdict.is_accepted();
+    if !pin_decomp {
+        all_pins_ok = false;
+    }
+    entries.push(serde_json::json!({
+        "entry": "decompose_compose",
+        "expected_canonical": "decompose_compose",
+        "expected_verdict": "accepted",
+        "observed_canonical": a_decomp.canonical.tag(),
+        "observed_verdict": a_decomp.verdict.tag(),
+        "pin_ok": pin_decomp,
+        "analysis": a_decomp,
+    }));
+
+    // Entry 4: Strengthen ⊣ Weaken — preserves grows.
+    let s_before = Shape::default_for_unannotated();
+    let mut s_after = Shape::default_for_unannotated();
+    s_after.preserves = vec![BoundaryInvariant::AllOrNothing];
+    let r_strong = Refactoring {
+        name: "add_invariant".into(),
+        direction: RefactoringDirection::Forward,
+        before_shape: s_before,
+        after_shape: s_after,
+        witness: witness("strengthen", "weaken"),
+    };
+    let a_strong = analyze_refactoring(&r_strong);
+    let pin_strong = matches!(
+        a_strong.canonical,
+        CanonicalAdjunction::StrengthenWeaken
+    ) && a_strong.verdict.is_accepted();
+    if !pin_strong {
+        all_pins_ok = false;
+    }
+    entries.push(serde_json::json!({
+        "entry": "strengthen_weaken",
+        "expected_canonical": "strengthen_weaken",
+        "expected_verdict": "accepted",
+        "observed_canonical": a_strong.canonical.tag(),
+        "observed_verdict": a_strong.verdict.tag(),
+        "pin_ok": pin_strong,
+        "analysis": a_strong,
+    }));
+
+    // Entry 5: Preservation failure — drift foundation, claim
+    // preserved=FoundationStable. Engine MUST surface
+    // PreservationFailure.
+    let mut s_before = Shape::default_for_unannotated();
+    s_before.foundation = Foundation::ZfcTwoInacc;
+    let mut s_after = Shape::default_for_unannotated();
+    s_after.foundation = Foundation::Hott;
+    let mut w_drift = witness("specialise", "generalise");
+    w_drift.preserved = vec![ArchProposition::FoundationStable];
+    let r_drift = Refactoring {
+        name: "foundation_drift".into(),
+        direction: RefactoringDirection::Forward,
+        before_shape: s_before,
+        after_shape: s_after,
+        witness: w_drift,
+    };
+    let a_drift = analyze_refactoring(&r_drift);
+    let pin_drift = matches!(a_drift.verdict, AdjunctionVerdict::PreservationFailure);
+    if !pin_drift {
+        all_pins_ok = false;
+    }
+    entries.push(serde_json::json!({
+        "entry": "preservation_failure_pin",
+        "expected_verdict": "preservation_failure",
+        "observed_verdict": a_drift.verdict.tag(),
+        "pin_ok": pin_drift,
+        "analysis": a_drift,
+    }));
+
+    // Entry 6: Chain composition — two valid forward steps.
+    let chain = RefactoringChain {
+        steps: vec![r_inline.clone(), r_spec.clone()],
+    };
+    let a_chain = analyze_chain(&chain);
+    let pin_chain = a_chain.chain_accepted;
+    if !pin_chain {
+        all_pins_ok = false;
+    }
+    entries.push(serde_json::json!({
+        "entry": "chain_composition",
+        "expected_chain_accepted": true,
+        "observed_chain_accepted": a_chain.chain_accepted,
+        "step_count": a_chain.step_analyses.len(),
+        "pin_ok": pin_chain,
+        "chain_analysis": a_chain,
+    }));
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "ats_v_adjunction_analyzer",
+        "season": 7,
+        "spec": "internal/specs/ats-v.md#§20.6",
+        "load_bearing": all_pins_ok,
+        "canonical_adjunction_count": 4,
+        "battery_size": entries.len(),
+        "entries": entries,
+    });
+
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("ATS-V Сезон 7 — Adjunction analyzer");
+            println!("─────────────────────────────────────────────────────");
+            println!("  {:<32}  {:<22}  {:<22}  {}", "Battery entry", "Expected", "Observed", "Pin");
+            println!(
+                "  {}  {}  {}  {}",
+                "─".repeat(32),
+                "─".repeat(22),
+                "─".repeat(22),
+                "─".repeat(3),
+            );
+            for entry in &payload["entries"].as_array().cloned().unwrap_or_default() {
+                let name = entry["entry"].as_str().unwrap_or("");
+                let expected = entry["expected_verdict"]
+                    .as_str()
+                    .or_else(|| entry["expected_canonical"].as_str())
+                    .or_else(|| {
+                        if entry["expected_chain_accepted"].is_boolean() {
+                            Some("chain_accepted")
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or("");
+                let observed = entry["observed_verdict"]
+                    .as_str()
+                    .or_else(|| entry["observed_canonical"].as_str())
+                    .or_else(|| {
+                        if entry["observed_chain_accepted"].is_boolean() {
+                            Some(if entry["observed_chain_accepted"].as_bool().unwrap_or(false) {
+                                "true"
+                            } else {
+                                "false"
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or("");
+                let pin_ok = entry["pin_ok"].as_bool().unwrap_or(false);
+                let glyph = if pin_ok { "✓" } else { "✗" };
+                println!("  {:<32}  {:<22}  {:<22}  {}", name, expected, observed, glyph);
+            }
+            println!();
+            println!("  Canonical adjunctions covered: 4 (Inline⊣Extract, Specialise⊣Generalise,");
+            println!("                                  Decompose⊣Compose, Strengthen⊣Weaken)");
+            println!();
+            if all_pins_ok {
+                println!(
+                    "{} Adjunction analyzer load-bearing: every canonical arm + failure pin holds.",
+                    "✓".green(),
+                );
+            } else {
+                println!("{} Adjunction analyzer FAILED at least one pin.", "✗".red());
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    if !all_pins_ok {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "Adjunction audit: at least one canonical adjunction failed its \
+                 soundness contract — see {}",
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
 // Reflection-tower audit (#158) — Feferman 1989 / Pohlers / Beklemishev
 // =============================================================================
 

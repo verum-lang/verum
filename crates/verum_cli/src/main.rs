@@ -1435,6 +1435,17 @@ enum Commands {
         #[clap(long = "counterfactual")]
         counterfactual: bool,
 
+        /// ATS-V Сезон 7 — Adjunction analyzer audit. Runs the
+        /// adjunction analyzer over a synthetic battery covering each
+        /// of the four canonical adjunctions (Inline⊣Extract /
+        /// Specialise⊣Generalise / Decompose⊣Compose /
+        /// Strengthen⊣Weaken) plus a chain composition pin and a
+        /// failure case. Verifies recogniser soundness +
+        /// preservation/gain coverage at audit time. Output:
+        /// `target/audit-reports/adjunctions.json`.
+        #[clap(long = "adjunctions")]
+        adjunctions: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -3951,6 +3962,7 @@ fn run_command(cli: Cli) -> Result<()> {
             reflection_tower,
             arch_discharges,
             counterfactual,
+            adjunctions,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -4019,6 +4031,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_arch_discharges_with_format(output_format)
             } else if counterfactual {
                 commands::audit::audit_counterfactual_with_format(output_format)
+            } else if adjunctions {
+                commands::audit::audit_adjunctions_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {

@@ -116,6 +116,7 @@ pub mod arch_phase; // ATS-V phase 6.5 — architectural type checking phase
 pub mod arch_corpus; // ATS-V cross-cog corpus invariants (Сезон 4)
 pub mod arch_mtac; // ATS-V Modal-Temporal Architectural Calculus primitives (Сезон 5)
 pub mod arch_counterfactual; // ATS-V counterfactual reasoning engine + metric extraction (Сезон 6)
+pub mod arch_adjunction; // ATS-V adjunction analyzer for refactoring (Сезон 7)
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type
