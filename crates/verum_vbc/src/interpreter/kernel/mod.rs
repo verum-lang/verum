@@ -296,6 +296,24 @@ pub fn dispatch_binop(
 ) -> Option<TensorHandle> {
     let caps = get_capabilities();
 
+    // Этап C — MLIR JIT compute path.  When the `mlir-jit` feature
+    // is enabled, route binops through the MLIR `arith.*` / `linalg.*`
+    // pipeline first.  The backend returns `None` for ops it has not
+    // yet wired (Шаг 1 contract), so we transparently fall through to
+    // the hand-tuned SIMD ladder below.  Once Шаг 2b lands real JIT
+    // bodies for F32/F64 binops, this becomes the default fast path
+    // for those dtypes — the SIMD ladder stays as a runtime fallback
+    // when MLIR JIT is unavailable (build without feature).
+    #[cfg(feature = "mlir-jit")]
+    {
+        let registry = get_backend_registry();
+        if let Some(jit_backend) = registry.backend(DeviceId::mlir_jit(0)) {
+            if let Some(result) = jit_backend.binop(a, b, op) {
+                return Some(result);
+            }
+        }
+    }
+
     // Try Metal GPU for large F32 tensors
     #[cfg(all(target_os = "macos", feature = "metal"))]
     if a.dtype == DType::F32 && a.numel >= MIN_GPU_SIZE {

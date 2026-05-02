@@ -76,6 +76,12 @@ tokenizers = { workspace = true, optional = true }
 # at first invocation through `linalg`/`vector`/`gpu` dialects.
 verum_mlir = { workspace = true, optional = true }
 
+# Concurrent map for the MLIR JIT cache (Этап C).  Lock-free reads on
+# the hot path; first-call cache-miss compilation is serialised by a
+# `parking_lot::Mutex` over the MLIR Context inside `MlirJitBackend`.
+dashmap = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
+
 # Unix libc for V-LLSI syscall operations
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -109,7 +115,7 @@ parallel = ["dep:rayon"]  # Enable parallel scans and monomorphization
 metal = ["dep:metal", "dep:objc", "dep:block", "dep:foreign-types-shared"]  # Metal GPU backend (macOS)
 ffi = ["dep:libloading", "dep:libffi"]  # FFI runtime support for interpreter
 tokenizers = ["dep:tokenizers"]  # HuggingFace tokenizers for BPE/SentencePiece
-mlir-jit = ["dep:verum_mlir"]  # Этап C — MLIR JIT compute backend for Tier 0 interpreter
+mlir-jit = ["dep:verum_mlir", "dep:dashmap", "dep:parking_lot"]  # Этап C — MLIR JIT compute backend for Tier 0 interpreter
 # Note: cbgr-integration feature removed - verum_cbgr is now always included for industrial quality
 
 [[bench]]
