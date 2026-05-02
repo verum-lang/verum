@@ -19550,6 +19550,26 @@ impl VbcCodegen {
                 });
             }
 
+            // **#89 close** — `verum_random_float_01` is semantically
+            // identical to `verum_random_float` (both produce a
+            // uniform Float in `[0, 1)`).  Pre-fix it routed through
+            // `emit_intrinsic_library_call("verum_random_float_01",
+            // ...)` which has no match arm and emitted
+            // `Instruction::Panic { "unimplemented intrinsic:
+            // verum_random_float_01" }` — every caller in
+            // `core/random/` and ML/tensor init paths crashed at
+            // runtime in interpreter mode.  Aliased to RandomFloat
+            // (FfiExtended sub_op 0x48) so the existing
+            // dispatch_table handler covers both names.
+            InlineSequenceId::RandomFloat01 => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x48, // RandomFloat — uniform in [0, 1)
+                    operands,
+                });
+            }
+
             // Unicode character category
             InlineSequenceId::CharGeneralCategory => {
                 self.emit_intrinsic_library_call("verum_char_general_category", args, dest)?;
@@ -19920,10 +19940,11 @@ impl VbcCodegen {
             | InlineSequenceId::TensorRepeat
             | InlineSequenceId::TensorTanh
             | InlineSequenceId::TensorSum
-            | InlineSequenceId::TensorFromArray
-            | InlineSequenceId::RandomFloat01 => {
+            | InlineSequenceId::TensorFromArray => {
                 // These are primarily handled via TensorExtendedOpcode in the registry.
                 // For fallback, emit a library call.
+                // (RandomFloat01 is split out — handled directly above
+                //  via the FfiExtended RandomFloat sub_op alias, #89.)
                 let name = match seq_id {
                     InlineSequenceId::SsmScan => "verum_ssm_scan",
                     InlineSequenceId::MatrixExp => "verum_matrix_exp",
@@ -19941,7 +19962,6 @@ impl VbcCodegen {
                     InlineSequenceId::TensorTanh => "verum_tensor_tanh",
                     InlineSequenceId::TensorSum => "verum_tensor_sum",
                     InlineSequenceId::TensorFromArray => "verum_tensor_from_array",
-                    InlineSequenceId::RandomFloat01 => "verum_random_float_01",
                     _ => unreachable!(),
                 };
                 self.emit_intrinsic_library_call(name, args, dest)?;
