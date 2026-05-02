@@ -12,8 +12,17 @@
 // Cross-side alignment with `verum_kernel::arch::*` is pinned by
 // the kernel test suite. Adding a new variant here requires
 // updating the kernel-side enum AND vice-versa.
+//
+// **Self-attestation**: this cog is itself ATS-V-typed via the
+// `@arch_module(...)` declaration below — dogfood for the
+// architectural type system.
 // =============================================================================
 
+@arch_module(
+    foundation = Foundation.ZfcTwoInacc,
+    stratum = MsfsStratum.LFnd,
+    lifecycle = Lifecycle.Theorem("v0.1"),
+)
 module core.architecture.types;
 
 mount core.prelude.{Bool, Int, Maybe, List, Text};

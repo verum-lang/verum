@@ -22,8 +22,17 @@
 //
 // **Engine guarantee** (per §20.7): a refactoring is **trivially
 // safe** iff its before/after shapes are Yoneda-equivalent.
+//
+// **Self-attestation**: this cog is itself ATS-V-typed via the
+// `@arch_module(...)` declaration below — dogfood for the
+// architectural type system.
 // =============================================================================
 
+@arch_module(
+    foundation = Foundation.ZfcTwoInacc,
+    stratum = MsfsStratum.LFnd,
+    lifecycle = Lifecycle.Theorem("v0.1"),
+)
 module core.architecture.yoneda;
 
 mount core.prelude.{Bool, Int, List, Text};

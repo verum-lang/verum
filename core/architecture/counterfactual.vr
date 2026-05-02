@@ -22,8 +22,17 @@
 // declared `stability_invariant` evaluates to `HoldsBoth`.  Empty
 // invariants → unstable (engine refuses to claim stability from
 // absence of evidence).
+//
+// **Self-attestation**: this cog is itself ATS-V-typed via the
+// `@arch_module(...)` declaration below — dogfood for the
+// architectural type system.
 // =============================================================================
 
+@arch_module(
+    foundation = Foundation.ZfcTwoInacc,
+    stratum = MsfsStratum.LFnd,
+    lifecycle = Lifecycle.Theorem("v0.1"),
+)
 module core.architecture.counterfactual;
 
 mount core.prelude.{Bool, Float, Int, Maybe, List, Text};

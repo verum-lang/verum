@@ -14,8 +14,17 @@
 // a Rust-side enum variant in `verum_kernel::arch_mtac::*`.  Adding
 // a new variant requires updating both sides; pinned by kernel test
 // suite parity checks.
+//
+// **Self-attestation**: this cog is itself ATS-V-typed via the
+// `@arch_module(...)` declaration below — dogfood for the
+// architectural type system.
 // =============================================================================
 
+@arch_module(
+    foundation = Foundation.ZfcTwoInacc,
+    stratum = MsfsStratum.LFnd,
+    lifecycle = Lifecycle.Theorem("v0.1"),
+)
 module core.architecture.mtac;
 
 mount core.prelude.{Bool, Int, Maybe, List, Text};
