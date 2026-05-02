@@ -24,6 +24,13 @@
 
 // =============================================================================
 
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Memory("stdin")), Capability.Write(ResourceTag.Memory("stdout"))],
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.io.stdio;
 mount core.*;
 mount io.protocols.*;
