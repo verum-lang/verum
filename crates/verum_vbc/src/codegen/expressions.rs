@@ -7085,16 +7085,147 @@ impl VbcCodegen {
                 receiver_reg
             };
 
-        // Emit method call instruction
-        self.ctx.emit(Instruction::CallM {
-            dst: result,
-            receiver: actual_receiver,
-            method_id,
-            args: crate::instruction::RegRange {
-                start: args_start,
-                count: args.len() as u8,
-            },
-        });
+        // **Devirtualization shortcut** (#99 perf parity sub-task).
+        //
+        // When the receiver type is statically known and the resolved
+        // method exists in the function table with matching arity,
+        // emit `Instruction::Call { func_id }` instead of `CallM`.
+        // This eliminates the runtime name-suffix lookup (~50 cyc →
+        // ~20 cyc per call in the interpreter) AND unblocks LLVM
+        // inlining at AOT (LLVM cannot inline through CallM's runtime
+        // resolver but CAN inline through Call's static func_id).
+        //
+        // Skip when:
+        //   * `dyn:Protocol.method` — protocol dispatch must remain
+        //     dynamic (different impls for different concrete types).
+        //   * `byte$` / `int32$` / `uint64$` prefixes — primitive
+        //     method dispatch handled by interpreter's
+        //     `dispatch_primitive_method`, not the function table.
+        //   * `effective_method_name` is bare (no `.`) — receiver
+        //     type wasn't resolved; fall back to runtime dispatch.
+        //   * Function not found, or arity mismatch
+        //     (`func_info.param_count != args.len() + 1` — the +1 is
+        //     for the receiver).
+        //
+        // **Tier-0/Tier-1 semantic equivalence**: both paths consume
+        // the same VBC.  Static `Call` resolves to the same function
+        // body that runtime `CallM` would have found via name-suffix
+        // matching, so there's no semantic divergence.
+        // **Stdlib collection types** that have inline-opcode handling
+        // at AOT codegen and runtime (Strategy 0 in CallM lowering).
+        // Routing these through a static `Call` to their stdlib
+        // bytecode body bypasses the inline-opcode optimization AND
+        // pulls the (often arity-collided) stdlib body into the
+        // reachable LLVM IR set, exposing latent codegen issues
+        // (LoopInfoBase::verify SIGSEGV under O2/O3).  The devirt
+        // skip-list keeps these on the CallM path which preserves
+        // existing optimisations.
+        //
+        // **Why a denylist, not an allowlist**: user-defined types
+        // are the typical method-call target in idiomatic Verum
+        // code, and they NEVER have Strategy 0 handling — devirting
+        // them is always safe.  The stdlib collection types are a
+        // small bounded set that we can enumerate.
+        fn type_prefix_intercepted_by_runtime(qualified: &str) -> bool {
+            let prefix = match qualified.find('.') {
+                Some(p) => &qualified[..p],
+                None => return false,
+            };
+            matches!(
+                prefix,
+                "Text"
+                    | "List"
+                    | "Map"
+                    | "Set"
+                    | "Deque"
+                    | "Slice"
+                    | "Maybe"
+                    | "Result"
+                    | "Option"
+                    | "Heap"
+                    | "Shared"
+                    | "Mutex"
+                    | "RwLock"
+                    | "Channel"
+                    | "Range"
+                    | "Int"
+                    | "Float"
+                    | "Bool"
+                    | "Char"
+                    | "Byte"
+                    | "Int32"
+                    | "UInt64"
+                    | "FatRef"
+                    | "ThinRef"
+            )
+        }
+
+        let devirt_func_id: Option<u32> = if effective_method_name.starts_with("dyn:")
+            || effective_method_name.starts_with("byte$")
+            || effective_method_name.starts_with("int32$")
+            || effective_method_name.starts_with("uint64$")
+            || !effective_method_name.contains('.')
+            || type_prefix_intercepted_by_runtime(&effective_method_name)
+        {
+            None
+        } else {
+            // `lookup_function_with_arity` handles overload sets via the
+            // `name#arity` suffix convention (`compile_static_method_call`
+            // uses the same pathway).  +1 for the receiver `self` slot.
+            self.ctx
+                .lookup_function_with_arity(&effective_method_name, args.len() + 1)
+                .filter(|fi| {
+                    fi.param_count == args.len() + 1
+                        && fi.id.0 != u32::MAX
+                        && fi.id.0 != u32::MAX / 2
+                        && fi.variant_tag.is_none()
+                        && fi.intrinsic_name.is_none()
+                })
+                .map(|fi| fi.id.0)
+        };
+
+        if let Some(func_id) = devirt_func_id {
+            // Allocate a consecutive (receiver, args...) block.
+            let call_block_start = self.ctx.registers.alloc_fresh();
+            for _ in 1..(args.len() + 1) {
+                self.ctx.registers.alloc_fresh();
+            }
+            // Slot 0: receiver.  Use post-RefMut `actual_receiver` so
+            // `&mut self` semantics are preserved.
+            self.ctx.emit(Instruction::Mov {
+                dst: call_block_start,
+                src: actual_receiver,
+            });
+            // Slots 1..N: arguments (already in `args_start..` block).
+            for i in 0..args.len() {
+                self.ctx.emit(Instruction::Mov {
+                    dst: Reg(call_block_start.0 + 1 + i as u16),
+                    src: Reg(args_start.0 + i as u16),
+                });
+            }
+            self.ctx.emit(Instruction::Call {
+                dst: result,
+                func_id,
+                args: crate::instruction::RegRange {
+                    start: call_block_start,
+                    count: (args.len() + 1) as u8,
+                },
+            });
+            // Suppress the unused `method_id` warning when the devirt
+            // path wins — the interned string is harmless and cached.
+            let _ = method_id;
+        } else {
+            // Fallback: emit string-keyed dynamic CallM.
+            self.ctx.emit(Instruction::CallM {
+                dst: result,
+                receiver: actual_receiver,
+                method_id,
+                args: crate::instruction::RegRange {
+                    start: args_start,
+                    count: args.len() as u8,
+                },
+            });
+        }
 
         // Track element type for List variables when push/insert is called.
         // This allows `let n = nodes[0]` to infer the correct element type
