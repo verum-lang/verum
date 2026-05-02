@@ -869,6 +869,24 @@ pub struct FunctionDescriptor {
     /// Used by the test runner to discover and execute test functions.
     #[serde(default)]
     pub is_test: bool,
+
+    /// Is this function annotated with `@device(gpu)` and therefore
+    /// belongs to the GPU-only compute partition?
+    ///
+    /// Architectural invariant: a `is_gpu_only = true` function is
+    /// lowered EXCLUSIVELY through the MLIR pipeline (`linalg`/`tensor`/
+    /// `gpu` dialects) — the LLVM CPU pipeline emits only an `extern`
+    /// stub for it.  Conversely, a `is_gpu_only = false` function is
+    /// lowered EXCLUSIVELY through the LLVM CPU pipeline.  The two
+    /// partitions are mutually exclusive: no compute function is
+    /// lowered through both pipelines (closes the dual-lowering
+    /// architectural violation surfaced by the codegen audit).
+    ///
+    /// Populated by VBC codegen by reading `@device(gpu)` attributes
+    /// from the source AST.  See `crates/verum_compiler/src/pipeline/
+    /// gpu_detect.rs` for the corresponding module-level scan.
+    #[serde(default)]
+    pub is_gpu_only: bool,
 }
 
 /// Debug information for a local variable or parameter.
@@ -920,6 +938,7 @@ impl Default for FunctionDescriptor {
             func_id_base: 0,
             debug_variables: Vec::new(),
             is_test: false,
+            is_gpu_only: false,
         }
     }
 }
