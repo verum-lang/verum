@@ -1,10 +1,10 @@
-//! ATS-V Сезон 8 — Yoneda-equivalence checker.
+//! ATS-V Yoneda-equivalence checker.
 //!
 //! Per spec §20.7 + §23: two architectures are equivalent iff they
 //! produce the same observation for every [`Observer`] in the
-//! canonical roster.  Architecturally, this realises the Yoneda
+//! canonical roster. Architecturally, this realises the Yoneda
 //! lemma — an object `X` of category `C` is uniquely determined by
-//! its representable functor `Hom(-, X) : C^op → Set`.  In ATS-V
+//! its representable functor `Hom(-, X) : C^op → Set`. In ATS-V
 //! terms: a cog is uniquely determined by how every observer sees
 //! it, so two cogs are equivalent iff every observer's projection
 //! agrees.
@@ -12,15 +12,15 @@
 //! # Pipeline
 //!
 //! 1. Caller supplies (`base_shape`, `alt_shape`, `observers`).
-//!    Empty observers → uses [`Observer::full_canonical_roster`].
+//! Empty observers → uses [`Observer::full_canonical_roster`].
 //! 2. [`observe`] projects each Shape from each Observer's
-//!    viewpoint to a [`ShapeObservation`] — a typed subset of the
-//!    Shape's fields the observer is sensitive to.
+//! viewpoint to a [`ShapeObservation`] — a typed subset of the
+//! Shape's fields the observer is sensitive to.
 //! 3. Per-observer agreement is checked by structural equality of
-//!    the two observations.
+//! the two observations.
 //! 4. [`yoneda_equivalent`] returns a [`YonedaVerdict`] with per-
-//!    observer agreement + the aggregate verdict (equivalent iff
-//!    every observer agrees).
+//! observer agreement + the aggregate verdict (equivalent iff
+//! every observer agrees).
 //!
 //! Per spec §20.7, ATS-V accepts a refactoring between
 //! Yoneda-equivalent formulations as **trivially safe**.
@@ -36,29 +36,29 @@ use crate::arch_mtac::Observer;
 
 /// Projection of a [`Shape`] from a single [`Observer`]'s viewpoint.
 /// Variants are per-observer-kind so each carries only the fields
-/// that observer is sensitive to.  Equality of two observations
+/// that observer is sensitive to. Equality of two observations
 /// implies the observer cannot distinguish the two underlying
 /// shapes (Yoneda-relevant agreement).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "observer_kind")]
 pub enum ShapeObservation {
-    /// EndUser sees the public interface: exposes + lifecycle.
+ /// EndUser sees the public interface: exposes + lifecycle.
     EndUser {
         kind: String,
         exposes: Vec<Capability>,
         lifecycle: Lifecycle,
     },
-    /// PeerCog sees what it composes against: composes_with
-    /// containing the cog + the boundary capabilities (requires +
-    /// exposes).
+ /// PeerCog sees what it composes against: composes_with
+ /// containing the cog + the boundary capabilities (requires +
+ /// exposes).
     PeerCog {
         module_path: String,
         is_in_composition: bool,
         requires: Vec<Capability>,
         exposes: Vec<Capability>,
     },
-    /// Stakeholder sees deployment-level concerns: tier, foundation,
-    /// persistence-related capabilities, lifecycle stage.
+ /// Stakeholder sees deployment-level concerns: tier, foundation,
+ /// persistence-related capabilities, lifecycle stage.
     Stakeholder {
         role: String,
         tier: Tier,
@@ -66,9 +66,9 @@ pub enum ShapeObservation {
         lifecycle: Lifecycle,
         persistence_capabilities: Vec<Capability>,
     },
-    /// Auditor sees everything: full Shape projection.  This is the
-    /// strictest observer — two shapes agree under Auditor iff
-    /// their full Shape projections are identical.
+ /// Auditor sees everything: full Shape projection. This is the
+ /// strictest observer — two shapes agree under Auditor iff
+ /// their full Shape projections are identical.
     Auditor {
         audit_kind: String,
         exposes: Vec<Capability>,
@@ -81,9 +81,9 @@ pub enum ShapeObservation {
         composes_with: Vec<String>,
         strict: bool,
     },
-    /// Adversary sees the attack surface: exposes + boundary
-    /// invariants + capability handoffs (which capabilities cross
-    /// the boundary outward).
+ /// Adversary sees the attack surface: exposes + boundary
+ /// invariants + capability handoffs (which capabilities cross
+ /// the boundary outward).
     Adversary {
         threat_model: String,
         attack_surface: Vec<Capability>,
@@ -92,8 +92,8 @@ pub enum ShapeObservation {
 }
 
 impl ShapeObservation {
-    /// Stable single-token observer-kind tag for JSON / agent
-    /// surfaces.
+ /// Stable single-token observer-kind tag for JSON / agent
+ /// surfaces.
     pub fn observer_tag(&self) -> &'static str {
         match self {
             ShapeObservation::EndUser { .. } => "end_user",
@@ -110,7 +110,7 @@ impl ShapeObservation {
 // =============================================================================
 
 /// Project a [`Shape`] from a single [`Observer`]'s viewpoint to a
-/// [`ShapeObservation`].  This is the core Yoneda operation —
+/// [`ShapeObservation`]. This is the core Yoneda operation —
 /// `Hom(-, shape)(observer) = observation`.
 pub fn observe(shape: &Shape, observer: &Observer) -> ShapeObservation {
     match observer {
@@ -175,10 +175,10 @@ pub fn observe(shape: &Shape, observer: &Observer) -> ShapeObservation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgreementStatus {
-    /// Both observations are structurally identical.
+ /// Both observations are structurally identical.
     Agree,
-    /// Observations differ — the observer can distinguish the
-    /// shapes.
+ /// Observations differ — the observer can distinguish the
+ /// shapes.
     Disagree,
 }
 
@@ -195,21 +195,21 @@ impl AgreementStatus {
 pub struct ObserverAgreement {
     pub observer: Observer,
     pub status: AgreementStatus,
-    /// Base-shape observation (for diagnostics).
+ /// Base-shape observation (for diagnostics).
     pub base_observation: ShapeObservation,
-    /// Alt-shape observation (for diagnostics).
+ /// Alt-shape observation (for diagnostics).
     pub alt_observation: ShapeObservation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct YonedaVerdict {
-    /// Stable JSON schema version (per spec §32.4).
+ /// Stable JSON schema version (per spec §32.4).
     pub schema_version: u32,
-    /// Per-observer agreement.
+ /// Per-observer agreement.
     pub agreements: Vec<ObserverAgreement>,
-    /// Aggregate verdict — equivalent iff every observer agrees.
+ /// Aggregate verdict — equivalent iff every observer agrees.
     pub equivalent: bool,
-    /// Number of observers that disagreed.
+ /// Number of observers that disagreed.
     pub disagreement_count: usize,
 }
 
@@ -218,7 +218,7 @@ pub struct YonedaVerdict {
 // =============================================================================
 
 /// Decide Yoneda-equivalence between two shapes against an observer
-/// roster.  Empty roster → use the canonical 5-element roster
+/// roster. Empty roster → use the canonical 5-element roster
 /// (`Observer::full_canonical_roster()`).
 pub fn yoneda_equivalent(
     base_shape: &Shape,
@@ -265,7 +265,7 @@ pub fn yoneda_equivalent(
 }
 
 /// Returns the list of observers under which the two shapes
-/// disagree.  Empty list ⇔ Yoneda-equivalent.
+/// disagree. Empty list ⇔ Yoneda-equivalent.
 pub fn distinguishing_observers(
     base_shape: &Shape,
     alt_shape: &Shape,
@@ -280,7 +280,7 @@ pub fn distinguishing_observers(
 }
 
 /// Per spec §20.7: a refactoring is **trivially safe** iff its
-/// before/after shapes are Yoneda-equivalent.  Direct convenience
+/// before/after shapes are Yoneda-equivalent. Direct convenience
 /// wrapper for refactoring callsites.
 pub fn refactoring_is_trivially_safe(
     before: &Shape,
@@ -336,10 +336,10 @@ mod tests {
 
     #[test]
     fn empty_roster_with_empty_alt_means_unknown() {
-        // When observers list is empty AND we pass through the
-        // canonical-roster default, the verdict is computed against
-        // the canonical 5.  Pin: no possibility of "0 observers,
-        // 0 disagreements → equivalent" gaming.
+ // When observers list is empty AND we pass through the
+ // canonical-roster default, the verdict is computed against
+ // the canonical 5. Pin: no possibility of "0 observers,
+ // 0 disagreements → equivalent" gaming.
         let s = Shape::default_for_unannotated();
         let v = yoneda_equivalent(&s, &s, &[]);
         assert_eq!(v.agreements.len(), 5);
@@ -363,7 +363,7 @@ mod tests {
         let mut s_alt = Shape::default_for_unannotated();
         s_alt.foundation = Foundation::Hott;
         let v = yoneda_equivalent(&s_base, &s_alt, &[end_user()]);
-        // EndUser does not project foundation → cannot distinguish.
+ // EndUser does not project foundation → cannot distinguish.
         assert!(v.equivalent);
     }
 
@@ -401,8 +401,8 @@ mod tests {
             since: "v1".into(),
         };
         let v = yoneda_equivalent(&s_base, &s_alt, &[adversary()]);
-        // Adversary projects only attack_surface + outbound — no
-        // lifecycle field exposed.
+ // Adversary projects only attack_surface + outbound — no
+ // lifecycle field exposed.
         assert!(v.equivalent);
     }
 
@@ -426,7 +426,7 @@ mod tests {
         s_alt.composes_with = vec!["core::base".into()];
         let v = yoneda_equivalent(&s_base, &s_alt, &[peer_cog("core::base")]);
         assert!(!v.equivalent);
-        // Different peer not affected.
+ // Different peer not affected.
         let v2 = yoneda_equivalent(&s_base, &s_alt, &[peer_cog("core::other")]);
         assert!(v2.equivalent); // composes_with does not contain "core::other" in either
     }
@@ -442,10 +442,10 @@ mod tests {
         }];
         let v = yoneda_equivalent(&s_base, &s_alt, &[]);
         assert!(!v.equivalent);
-        // EndUser (sees exposes), PeerCog (sees exposes/requires),
-        // Stakeholder (sees foundation), Auditor (sees everything),
-        // Adversary (sees attack_surface=exposes) — all 5 should
-        // disagree on at least one of the changed fields.
+ // EndUser (sees exposes), PeerCog (sees exposes/requires),
+ // Stakeholder (sees foundation), Auditor (sees everything),
+ // Adversary (sees attack_surface=exposes) — all 5 should
+ // disagree on at least one of the changed fields.
         assert_eq!(v.disagreement_count, 5);
     }
 
@@ -456,8 +456,8 @@ mod tests {
         let mut s_alt = Shape::default_for_unannotated();
         s_alt.foundation = Foundation::Hott;
         let dist = distinguishing_observers(&s_base, &s_alt, &[]);
-        // Stakeholder + Auditor see foundation; EndUser/PeerCog/
-        // Adversary do not.
+ // Stakeholder + Auditor see foundation; EndUser/PeerCog/
+ // Adversary do not.
         assert_eq!(dist.len(), 2);
         for o in &dist {
             assert!(matches!(
@@ -470,7 +470,7 @@ mod tests {
     #[test]
     fn refactoring_is_trivially_safe_under_yoneda_equivalence() {
         let s = Shape::default_for_unannotated();
-        // Pure identity refactoring is trivially safe per §20.7.
+ // Pure identity refactoring is trivially safe per §20.7.
         assert!(refactoring_is_trivially_safe(&s, &s, &[]));
     }
 
@@ -480,13 +480,13 @@ mod tests {
         s_base.strict = false;
         let mut s_alt = Shape::default_for_unannotated();
         s_alt.strict = true;
-        // Auditor sees `strict` flag — not trivially safe.
+ // Auditor sees `strict` flag — not trivially safe.
         assert!(!refactoring_is_trivially_safe(&s_base, &s_alt, &[auditor()]));
     }
 
     #[test]
     fn observation_observer_tags_are_stable() {
-        // Pin: agent surfaces consume these tags directly per §32.4.
+ // Pin: agent surfaces consume these tags directly per §32.4.
         let s = Shape::default_for_unannotated();
         for obs in [end_user(), peer_cog("any"), stakeholder(), auditor(), adversary()] {
             let projection = observe(&s, &obs);
@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn json_round_trip_preserves_verdict() {
-        // Pin: stable schema_version=1 across serde.
+ // Pin: stable schema_version=1 across serde.
         let s_base = Shape::default_for_unannotated();
         let s_alt = Shape::default_for_unannotated();
         let v = yoneda_equivalent(&s_base, &s_alt, &[]);
@@ -516,11 +516,11 @@ mod tests {
 
     #[test]
     fn architectural_pin_yoneda_lemma_self_observation() {
-        // Pin (spec §20.7 + §23): a shape's observation under each
-        // canonical observer is structurally identical to itself.
-        // This is the algorithmic statement of the Yoneda lemma —
-        // `Hom(-, X)(X) ≅ id_X` projected onto observer-functor
-        // form.
+ // Pin (spec §20.7 + §23): a shape's observation under each
+ // canonical observer is structurally identical to itself.
+ // This is the algorithmic statement of the Yoneda lemma —
+ // `Hom(-, X)(X) ≅ id_X` projected onto observer-functor
+ // form.
         let s = Shape::default_for_unannotated();
         for o in Observer::full_canonical_roster() {
             let obs1 = observe(&s, &o);

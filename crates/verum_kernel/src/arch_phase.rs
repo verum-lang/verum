@@ -4,29 +4,29 @@
 //!
 //! Per `internal/specs/ats-v.md` §3 (Architectural слоёный пирог),
 //! ATS-V phase sits between type inference (Phase 4-6) and VBC
-//! codegen (Phase 7).  Its job:
+//! codegen (Phase 7). Its job:
 //!
-//!   1. Walk every module in the parsed AST.
-//!   2. Extract `@arch_module(...)` attributes via [`crate::arch_parse`].
-//!   3. Build [`crate::arch::Shape`] for each module.
-//!   4. Run all 32 anti-pattern checks (Сезоны 1+2 catalog).
-//!   5. Aggregate violations into [`ArchPhaseReport`] for downstream
-//!      diagnostic emission.
+//! 1. Walk every module in the parsed AST.
+//! 2. Extract `@arch_module(...)` attributes via [`crate::arch_parse`].
+//! 3. Build [`crate::arch::Shape`] for each module.
+//! 4. Run all 32 anti-pattern checks (full canonical catalog).
+//! 5. Aggregate violations into [`ArchPhaseReport`] for downstream
+//! diagnostic emission.
 //!
 //! ## Why this lives in `verum_kernel` not `verum_compiler`
 //!
 //! `verum_kernel` already has all the carrier types (Shape,
-//! Capability, Boundary, anti-pattern catalog, parser).  Putting
+//! Capability, Boundary, anti-pattern catalog, parser). Putting
 //! the phase orchestration here keeps the kernel self-contained and
 //! testable without pulling in the full compiler pipeline.
 //! `verum_compiler` invokes this module's `run_arch_phase`
 //! function during its actual pipeline at Phase 6.5; CLI
 //! consumers (`verum arch explain`) call it directly.
 //!
-//! ## Сезон 3 scope
+//! ## scope
 //!
 //! Phase produces an `ArchPhaseReport` from a list of
-//! `(module_name, attribute_args)` pairs.  Сезон 4 wires the
+//! `(module_name, attribute_args)` pairs. wires the
 //! Phase into the actual `verum_compiler::pipeline` between
 //! Phase 4 (type inference) and Phase 7 (VBC codegen) — that
 //! requires touching `Session::run` which is multi-day.
@@ -45,21 +45,21 @@ use verum_ast::expr::Expr;
 /// Per-module result of running ATS-V phase.
 #[derive(Debug, Clone)]
 pub struct ModuleArchResult {
-    /// Stable module path (e.g. "core.database.postgres").
+ /// Stable module path (e.g. "core.database.postgres").
     pub module_name: String,
-    /// Parsed Shape, or `None` if the module had no `@arch_module(...)`
-    /// annotation (uses default shape; no violations expected per
-    /// spec §17.5 backward-compat).
+ /// Parsed Shape, or `None` if the module had no `@arch_module(...)`
+ /// annotation (uses default shape; no violations expected per
+ /// spec §17.5 backward-compat).
     pub shape: Option<Shape>,
-    /// Parser errors (if any) produced during shape extraction.
+ /// Parser errors (if any) produced during shape extraction.
     pub parse_errors: Vec<ArchParseError>,
-    /// Anti-pattern violations detected for this module.
+ /// Anti-pattern violations detected for this module.
     pub violations: Vec<AntiPatternViolation>,
 }
 
 impl ModuleArchResult {
-    /// True iff the module's arch_type is load-bearing — no parse
-    /// errors AND no anti-pattern violations.
+ /// True iff the module's arch_type is load-bearing — no parse
+ /// errors AND no anti-pattern violations.
     pub fn is_load_bearing(&self) -> bool {
         self.parse_errors.is_empty() && self.violations.is_empty()
     }
@@ -68,34 +68,34 @@ impl ModuleArchResult {
 /// Aggregated ATS-V phase report across all modules.
 #[derive(Debug, Clone, Default)]
 pub struct ArchPhaseReport {
-    /// Per-module results in iteration order.
+ /// Per-module results in iteration order.
     pub modules: Vec<ModuleArchResult>,
 }
 
 impl ArchPhaseReport {
-    /// True iff every module is load-bearing — phase compiles cleanly.
+ /// True iff every module is load-bearing — phase compiles cleanly.
     pub fn is_load_bearing(&self) -> bool {
         self.modules.iter().all(|m| m.is_load_bearing())
     }
 
-    /// Total count of anti-pattern violations across all modules.
+ /// Total count of anti-pattern violations across all modules.
     pub fn total_violations(&self) -> usize {
         self.modules.iter().map(|m| m.violations.len()).sum()
     }
 
-    /// Total count of parse errors across all modules.
+ /// Total count of parse errors across all modules.
     pub fn total_parse_errors(&self) -> usize {
         self.modules.iter().map(|m| m.parse_errors.len()).sum()
     }
 
-    /// Count of modules that have an explicit `@arch_module(...)`
-    /// declaration (vs. those falling back to default shape).
+ /// Count of modules that have an explicit `@arch_module(...)`
+ /// declaration (vs. those falling back to default shape).
     pub fn annotated_module_count(&self) -> usize {
         self.modules.iter().filter(|m| m.shape.is_some()).count()
     }
 
-    /// Group violations by stable RFC code for agent-friendly
-    /// pattern-matching (per spec §32.4).
+ /// Group violations by stable RFC code for agent-friendly
+ /// pattern-matching (per spec §32.4).
     pub fn violations_by_code(&self) -> std::collections::BTreeMap<&'static str, usize> {
         let mut by_code = std::collections::BTreeMap::new();
         for module in &self.modules {
@@ -118,7 +118,7 @@ impl ArchPhaseReport {
 /// module's `@arch_module(...)` attribute (or empty if the
 /// module has no annotation).
 ///
-/// Returns `ArchPhaseReport` with per-module results.  No early
+/// Returns `ArchPhaseReport` with per-module results. No early
 /// exit — the phase walks every module so the agent / human gets
 /// a complete violation roster in one pass.
 pub fn run_arch_phase(modules: &[(String, &[Expr])]) -> ArchPhaseReport {
@@ -130,13 +130,13 @@ pub fn run_arch_phase(modules: &[(String, &[Expr])]) -> ArchPhaseReport {
     report
 }
 
-/// Run the phase for a single module.  Public для CLI consumers
+/// Run the phase for a single module. Public для CLI consumers
 /// that want per-module dispatch (e.g. `verum arch explain <cog>`).
 pub fn run_arch_phase_one(module_name: String, attribute_args: &[Expr]) -> ModuleArchResult {
-    // Step 1: parse Shape from attribute args.
+ // Step 1: parse Shape from attribute args.
     let (shape, parse_errors) = if attribute_args.is_empty() {
-        // Module has no @arch_module annotation — use default shape
-        // per spec §17.5 backward-compat.
+ // Module has no @arch_module annotation — use default shape
+ // per spec §17.5 backward-compat.
         (None, Vec::new())
     } else {
         match parse_arch_module(attribute_args) {
@@ -145,9 +145,9 @@ pub fn run_arch_phase_one(module_name: String, attribute_args: &[Expr]) -> Modul
         }
     };
 
-    // Step 2: run anti-pattern checks.  Use parsed shape OR
-    // default shape (so default-shape modules still get checked
-    // for sanity — vacuous violations).
+ // Step 2: run anti-pattern checks. Use parsed shape OR
+ // default shape (so default-shape modules still get checked
+ // for sanity — vacuous violations).
     let shape_for_checks = shape
         .clone()
         .unwrap_or_else(Shape::default_for_unannotated);
@@ -167,7 +167,7 @@ pub fn run_arch_phase_one(module_name: String, attribute_args: &[Expr]) -> Modul
 // CompositionVerification — cross-module composition check
 // =============================================================================
 
-/// Verify a chain of compositions across multiple modules.  Per
+/// Verify a chain of compositions across multiple modules. Per
 /// spec §5.3 + §17.5: when modules declare `composes_with`,
 /// the phase verifies pairwise compatibility (capability flow,
 /// foundation, tier, stratum).
@@ -176,11 +176,11 @@ pub fn verify_composition_chain(modules: &[(&str, &Shape)]) -> CompositionVerifi
     let mut steps: Vec<CompositionStep> = Vec::new();
 
     if modules.len() < 2 {
-        // Single or no module — no composition needed.
+ // Single or no module — no composition needed.
         return CompositionVerificationReport { steps };
     }
 
-    // Left-fold: A ⊗ B ⊗ C = ((A ⊗ B) ⊗ C).
+ // Left-fold: A ⊗ B ⊗ C = ((A ⊗ B) ⊗ C).
     let (first_name, first_shape) = modules[0];
     let mut acc = first_shape.clone();
     let mut acc_name = first_name.to_string();
@@ -207,9 +207,9 @@ pub fn verify_composition_chain(modules: &[(&str, &Shape)]) -> CompositionVerifi
                         .map(|v| (v.code, v.summary.clone()))
                         .collect(),
                 });
-                // Stop on first rejection — composition is order-
-                // dependent in failure case; subsequent steps lose
-                // meaning.
+ // Stop on first rejection — composition is order-
+ // dependent in failure case; subsequent steps lose
+ // meaning.
                 break;
             }
         }
@@ -302,8 +302,8 @@ mod tests {
 
     #[test]
     fn unannotated_module_uses_default_shape_no_violations() {
-        // Module with empty attribute args = no @arch_module(...).
-        // Default shape passes all anti-pattern checks vacuously.
+ // Module with empty attribute args = no @arch_module(...).
+ // Default shape passes all anti-pattern checks vacuously.
         let report = run_arch_phase(&[("test_cog".to_string(), &[])]);
         assert!(report.is_load_bearing());
         assert_eq!(report.modules.len(), 1);
@@ -352,9 +352,9 @@ mod tests {
         let report = run_arch_phase(&[("escape_attempt".to_string(), &args)]);
         assert!(!report.is_load_bearing());
         assert!(report.total_violations() >= 1);
-        // Anti-pattern catalog has both stratum_admissible (uses
-        // FoundationDrift code as proxy) AND
-        // AbsoluteBoundaryAttempt — at least one fires.
+ // Anti-pattern catalog has both stratum_admissible (uses
+ // FoundationDrift code as proxy) AND
+ // AbsoluteBoundaryAttempt — at least one fires.
         let by_code = report.violations_by_code();
         assert!(!by_code.is_empty());
     }
@@ -371,17 +371,17 @@ mod tests {
             ("bad_cog".to_string(), &bad_args),
             ("unannotated".to_string(), &[]),
         ]);
-        // Phase walks all 3 modules even though one has violations.
+ // Phase walks all 3 modules even though one has violations.
         assert_eq!(report.modules.len(), 3);
-        // Bad cog is non-load-bearing.
+ // Bad cog is non-load-bearing.
         assert!(!report.is_load_bearing());
-        // Good cog still has its shape.
+ // Good cog still has its shape.
         assert!(report.modules[0].shape.is_some());
         assert!(report.modules[0].is_load_bearing());
-        // Bad cog has shape (parser succeeded) but with violation.
+ // Bad cog has shape (parser succeeded) but with violation.
         assert!(report.modules[1].shape.is_some());
         assert!(!report.modules[1].is_load_bearing());
-        // Unannotated has no shape but is vacuously load-bearing.
+ // Unannotated has no shape but is vacuously load-bearing.
         assert!(report.modules[2].shape.is_none());
         assert!(report.modules[2].is_load_bearing());
     }
@@ -406,7 +406,7 @@ mod tests {
         let c = Shape::default_for_unannotated();
         let report = verify_composition_chain(&[("A", &a), ("B", &b), ("C", &c)]);
         assert!(!report.is_load_bearing());
-        // Stopped after A⊗B failed.
+ // Stopped after A⊗B failed.
         assert_eq!(report.steps.len(), 1);
         assert!(!report.steps[0].composed);
     }
@@ -422,7 +422,7 @@ mod tests {
             ("second_bad".to_string(), &bad_args),
         ]);
         let by_code = report.violations_by_code();
-        // Both modules produce same violation code → count 2.
+ // Both modules produce same violation code → count 2.
         for (_, count) in &by_code {
             assert!(*count >= 1);
         }
@@ -430,9 +430,9 @@ mod tests {
 
     #[test]
     fn architectural_pin_phase_does_not_early_exit() {
-        // Pin: phase walks ALL modules even after finding violations
-        // in earlier ones — humans / agents need complete violation
-        // rosters per spec §32.4 dual-audience design.
+ // Pin: phase walks ALL modules even after finding violations
+ // in earlier ones — humans / agents need complete violation
+ // rosters per spec §32.4 dual-audience design.
         let bad_args = vec![named_arg(
             "stratum",
             dotted_path_expr(&["MsfsStratum", "LAbs"]),
@@ -443,7 +443,7 @@ mod tests {
             ("third".to_string(), &bad_args),
         ]);
         assert_eq!(report.modules.len(), 3);
-        // Each module reports its own violation.
+ // Each module reports its own violation.
         for m in &report.modules {
             assert!(!m.violations.is_empty());
         }

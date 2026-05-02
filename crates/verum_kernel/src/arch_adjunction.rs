@@ -1,4 +1,4 @@
-//! ATS-V Сезон 7 — Adjunction analyzer for refactoring.
+//! ATS-V Adjunction analyzer for refactoring.
 //!
 //! Per spec §20.6: every refactoring is a pair of functors
 //! `(F, G)` where `F: Old → New` ⊣ `G: New → Old` (left adjoint).
@@ -8,27 +8,27 @@
 //!
 //! # Canonical adjunctions (spec §20.6)
 //!
-//! | Forward (F)  | Backward (G)  | Recogniser                       |
+//! | Forward (F) | Backward (G) | Recogniser |
 //! |--------------|---------------|----------------------------------|
-//! | Inline       | Extract       | composition_degree decreases     |
-//! | Specialise   | Generalise    | foundation/stratum stable        |
-//! | Decompose    | Compose       | composes_with grows              |
-//! | Strengthen   | Weaken        | preserves grows                  |
+//! | Inline | Extract | composition_degree decreases |
+//! | Specialise | Generalise | foundation/stratum stable |
+//! | Decompose | Compose | composes_with grows |
+//! | Strengthen | Weaken | preserves grows |
 //!
 //! # Pipeline
 //!
 //! 1. Caller supplies a [`Refactoring`] (Old shape, New shape,
-//!    witness, direction).
+//! witness, direction).
 //! 2. [`classify_refactoring`] inspects shape-delta + witness
-//!    to recognise one of the four canonical adjunctions (or
-//!    `Custom`).
+//! to recognise one of the four canonical adjunctions (or
+//! `Custom`).
 //! 3. [`verify_adjoint_pair`] checks the witness's
-//!    forward/backward names form a valid adjoint pair using
-//!    `AdjunctionWitness::is_adjoint_of`.
+//! forward/backward names form a valid adjoint pair using
+//! `AdjunctionWitness::is_adjoint_of`.
 //! 4. [`analyze_refactoring`] returns a structured
-//!    [`AdjunctionAnalysis`] carrying the verdict +
-//!    soundness diagnostics + preserved/gained property
-//!    coverage.
+//! [`AdjunctionAnalysis`] carrying the verdict +
+//! soundness diagnostics + preserved/gained property
+//! coverage.
 
 use serde::{Deserialize, Serialize};
 
@@ -40,35 +40,35 @@ use crate::arch_mtac::{AdjunctionWitness, ArchProposition};
 // CanonicalAdjunction — the four spec-§20.6 recognisers
 // =============================================================================
 
-/// Recognised canonical adjunction from spec §20.6.  Custom
+/// Recognised canonical adjunction from spec §20.6. Custom
 /// captures user-declared refactorings that name a forward/backward
 /// pair outside the canonical roster — they are accepted iff the
 /// witness still forms a valid adjoint pair (closure under
 /// `is_adjoint_of`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CanonicalAdjunction {
-    /// Inline ⊣ Extract — forward inlines, backward extracts.
-    /// Recogniser: `before.composes_with` ⊋ `after.composes_with`
-    /// in the forward direction (composition degree decreases).
+ /// Inline ⊣ Extract — forward inlines, backward extracts.
+ /// Recogniser: `before.composes_with` ⊋ `after.composes_with`
+ /// in the forward direction (composition degree decreases).
     InlineExtract,
-    /// Specialise ⊣ Generalise — forward instantiates a generic,
-    /// backward generalises.  Recogniser: foundation + stratum stay
-    /// fixed; capability set may shrink.
+ /// Specialise ⊣ Generalise — forward instantiates a generic,
+ /// backward generalises. Recogniser: foundation + stratum stay
+ /// fixed; capability set may shrink.
     SpecialiseGeneralise,
-    /// Decompose ⊣ Compose — forward splits a cog into sub-cogs,
-    /// backward re-composes.  Recogniser:
-    /// `after.composes_with` ⊋ `before.composes_with`.
+ /// Decompose ⊣ Compose — forward splits a cog into sub-cogs,
+ /// backward re-composes. Recogniser:
+ /// `after.composes_with` ⊋ `before.composes_with`.
     DecomposeCompose,
-    /// Strengthen ⊣ Weaken — forward adds refinement / preserved
-    /// invariants; backward removes them.  Recogniser:
-    /// `after.preserves` ⊋ `before.preserves`.
+ /// Strengthen ⊣ Weaken — forward adds refinement / preserved
+ /// invariants; backward removes them. Recogniser:
+ /// `after.preserves` ⊋ `before.preserves`.
     StrengthenWeaken,
-    /// User-defined refactoring outside the canonical roster.
+ /// User-defined refactoring outside the canonical roster.
     Custom { tag: String },
 }
 
 impl CanonicalAdjunction {
-    /// Stable tag for JSON / agent surfaces (per spec §32.4).
+ /// Stable tag for JSON / agent surfaces (per spec §32.4).
     pub fn tag(&self) -> &'static str {
         match self {
             CanonicalAdjunction::InlineExtract => "inline_extract",
@@ -79,7 +79,7 @@ impl CanonicalAdjunction {
         }
     }
 
-    /// The full canonical roster (excluding Custom).
+ /// The full canonical roster (excluding Custom).
     pub fn canonical_roster() -> Vec<CanonicalAdjunction> {
         vec![
             CanonicalAdjunction::InlineExtract,
@@ -97,11 +97,11 @@ impl CanonicalAdjunction {
 /// Which functor of the adjoint pair the refactoring applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RefactoringDirection {
-    /// `F: Old → New` — left adjoint (Inline / Specialise /
-    /// Decompose / Strengthen).
+ /// `F: Old → New` — left adjoint (Inline / Specialise /
+ /// Decompose / Strengthen).
     Forward,
-    /// `G: New → Old` — right adjoint (Extract / Generalise /
-    /// Compose / Weaken).
+ /// `G: New → Old` — right adjoint (Extract / Generalise /
+ /// Compose / Weaken).
     Backward,
 }
 
@@ -125,21 +125,21 @@ impl RefactoringDirection {
 // Refactoring — caller-supplied transformation
 // =============================================================================
 
-/// A concrete refactoring instance.  Carries the before/after
+/// A concrete refactoring instance. Carries the before/after
 /// shapes + the adjunction witness + direction (which leg of the
 /// adjoint pair is being applied).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Refactoring {
-    /// Stable name (e.g. "extract_logger_into_separate_cog").
+ /// Stable name (e.g. "extract_logger_into_separate_cog").
     pub name: String,
-    /// Direction (Forward = F, Backward = G).
+ /// Direction (Forward = F, Backward = G).
     pub direction: RefactoringDirection,
-    /// Shape before refactoring.
+ /// Shape before refactoring.
     pub before_shape: Shape,
-    /// Shape after refactoring.
+ /// Shape after refactoring.
     pub after_shape: Shape,
-    /// Adjunction witness (forward_name, backward_name, preserved,
-    /// gained).
+ /// Adjunction witness (forward_name, backward_name, preserved,
+ /// gained).
     pub witness: AdjunctionWitness,
 }
 
@@ -150,38 +150,38 @@ pub struct Refactoring {
 /// Structured verdict from [`analyze_refactoring`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdjunctionAnalysis {
-    /// Stable JSON schema version.
+ /// Stable JSON schema version.
     pub schema_version: u32,
-    /// Refactoring name.
+ /// Refactoring name.
     pub refactoring_name: String,
-    /// Recognised canonical adjunction (or Custom).
+ /// Recognised canonical adjunction (or Custom).
     pub canonical: CanonicalAdjunction,
-    /// Direction the refactoring applies.
+ /// Direction the refactoring applies.
     pub direction: RefactoringDirection,
-    /// True iff the witness forms a valid adjoint pair (forward and
-    /// backward names match across the witness pair under
-    /// `is_adjoint_of`).
+ /// True iff the witness forms a valid adjoint pair (forward and
+ /// backward names match across the witness pair under
+ /// `is_adjoint_of`).
     pub adjoint_pair_present: bool,
-    /// Per-preserved-property: did it actually hold in both shapes?
+ /// Per-preserved-property: did it actually hold in both shapes?
     pub preserved_coverage: Vec<PreservedCoverage>,
-    /// Per-gained-property: did it become true in `after` but not
-    /// in `before`?
+ /// Per-gained-property: did it become true in `after` but not
+ /// in `before`?
     pub gained_coverage: Vec<GainedCoverage>,
-    /// Final verdict — accept refactoring as ATS-V-typed
-    /// transformation.
+ /// Final verdict — accept refactoring as ATS-V-typed
+ /// transformation.
     pub verdict: AdjunctionVerdict,
-    /// Diagnostic message for failure verdicts (empty otherwise).
+ /// Diagnostic message for failure verdicts (empty otherwise).
     pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreservedCoverage {
     pub proposition: ArchProposition,
-    /// True iff held in `before_shape`.
+ /// True iff held in `before_shape`.
     pub held_before: bool,
-    /// True iff held in `after_shape`.
+ /// True iff held in `after_shape`.
     pub held_after: bool,
-    /// `true` iff held_before && held_after (preservation actual).
+ /// `true` iff held_before && held_after (preservation actual).
     pub preserved_actual: bool,
 }
 
@@ -190,23 +190,23 @@ pub struct GainedCoverage {
     pub proposition: ArchProposition,
     pub held_before: bool,
     pub held_after: bool,
-    /// True iff !held_before && held_after (gain actual).
+ /// True iff !held_before && held_after (gain actual).
     pub gained_actual: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AdjunctionVerdict {
-    /// Refactoring accepted — adjoint pair valid + preservation /
-    /// gain claims hold.
+ /// Refactoring accepted — adjoint pair valid + preservation /
+ /// gain claims hold.
     Accepted,
-    /// Adjoint pair structurally invalid (forward/backward names
-    /// don't form a valid pair).
+ /// Adjoint pair structurally invalid (forward/backward names
+ /// don't form a valid pair).
     BrokenAdjointPair,
-    /// Adjoint pair valid but at least one preserved property is
-    /// not actually preserved (broken `F` law).
+ /// Adjoint pair valid but at least one preserved property is
+ /// not actually preserved (broken `F` law).
     PreservationFailure,
-    /// Adjoint pair valid + preservation OK, but at least one
-    /// "gained" property is not actually gained.
+ /// Adjoint pair valid + preservation OK, but at least one
+ /// "gained" property is not actually gained.
     GainClaimFailure,
 }
 
@@ -242,28 +242,28 @@ pub fn classify_refactoring(refactoring: &Refactoring) -> CanonicalAdjunction {
             (&refactoring.before_shape, &refactoring.after_shape)
         }
         RefactoringDirection::Backward => {
-            // For Backward: the "logical" forward direction is
-            // (after, before) — we swap so the recogniser sees the
-            // F-direction shape delta regardless of leg applied.
+ // For Backward: the "logical" forward direction is
+ // (after, before) — we swap so the recogniser sees the
+ // F-direction shape delta regardless of leg applied.
             (&refactoring.after_shape, &refactoring.before_shape)
         }
     };
 
-    // Strengthen ⊣ Weaken — preserves grows under F.
+ // Strengthen ⊣ Weaken — preserves grows under F.
     if after.preserves.len() > before.preserves.len() {
         return CanonicalAdjunction::StrengthenWeaken;
     }
-    // Decompose ⊣ Compose — composes_with grows under F.
+ // Decompose ⊣ Compose — composes_with grows under F.
     if after.composes_with.len() > before.composes_with.len() {
         return CanonicalAdjunction::DecomposeCompose;
     }
-    // Inline ⊣ Extract — composes_with shrinks under F (function
-    // calls absorbed into the caller).
+ // Inline ⊣ Extract — composes_with shrinks under F (function
+ // calls absorbed into the caller).
     if after.composes_with.len() < before.composes_with.len() {
         return CanonicalAdjunction::InlineExtract;
     }
-    // Specialise ⊣ Generalise — capability set shrinks (or stays)
-    // under F; foundation + stratum stable.
+ // Specialise ⊣ Generalise — capability set shrinks (or stays)
+ // under F; foundation + stratum stable.
     if after.exposes.len() <= before.exposes.len()
         && after.foundation == before.foundation
         && after.stratum == before.stratum
@@ -285,7 +285,7 @@ pub fn classify_refactoring(refactoring: &Refactoring) -> CanonicalAdjunction {
 ///
 /// `is_adjoint_of` checks: `self.forward_name == other.backward_name
 /// && self.backward_name == other.forward_name` — i.e. the two
-/// witnesses are mirror images.  A single witness paired with
+/// witnesses are mirror images. A single witness paired with
 /// itself is a valid degenerate case (when forward_name ==
 /// backward_name, e.g. an identity refactoring).
 pub fn verify_adjoint_pair(
@@ -317,7 +317,7 @@ pub fn synthesize_mirror(witness: &AdjunctionWitness) -> AdjunctionWitness {
 /// 1. Classify into a [`CanonicalAdjunction`].
 /// 2. Synthesize the mirror witness + verify the pair.
 /// 3. Walk preserved/gained props and check against before/after
-///    shapes.
+/// shapes.
 /// 4. Aggregate to an [`AdjunctionVerdict`].
 pub fn analyze_refactoring(refactoring: &Refactoring) -> AdjunctionAnalysis {
     let canonical = classify_refactoring(refactoring);
@@ -408,7 +408,7 @@ pub fn analyze_refactoring(refactoring: &Refactoring) -> AdjunctionAnalysis {
 
 /// Relational propositions (FoundationStable / PublicApiUnchanged)
 /// require comparing both shapes; per-shape `proposition_holds` is
-/// trivially true for them.  This helper does the cross-shape
+/// trivially true for them. This helper does the cross-shape
 /// equality check the relational arms require.
 fn relational_proposition_preserved(
     prop: &ArchProposition,
@@ -430,8 +430,8 @@ fn relational_proposition_preserved(
 // Refactoring chain — sequential composition with associativity pin
 // =============================================================================
 
-/// A sequence of refactorings.  Adjunctions compose: `(F ∘ F') ⊣
-/// (G' ∘ G)`.  The chain is accepted iff every step is accepted
+/// A sequence of refactorings. Adjunctions compose: `(F ∘ F') ⊣
+/// (G' ∘ G)`. The chain is accepted iff every step is accepted
 /// individually.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RefactoringChain {
@@ -442,11 +442,11 @@ pub struct RefactoringChain {
 pub struct ChainAnalysis {
     pub schema_version: u32,
     pub step_analyses: Vec<AdjunctionAnalysis>,
-    /// True iff every step's verdict is `Accepted`.
+ /// True iff every step's verdict is `Accepted`.
     pub chain_accepted: bool,
 }
 
-/// Analyze a chain — every step verified individually.  Per spec
+/// Analyze a chain — every step verified individually. Per spec
 /// §20.6, sequential composition of adjunctions is itself an
 /// adjunction (`(F ∘ F') ⊣ (G' ∘ G)`), so the chain is accepted
 /// iff every step is.
@@ -498,8 +498,8 @@ mod tests {
 
     #[test]
     fn canonical_roster_is_four() {
-        // Pin: spec §20.6 declares exactly four canonical
-        // adjunctions; adding more requires RFC ATS-V-007.
+ // Pin: spec §20.6 declares exactly four canonical
+ // adjunctions; adding more requires RFC ATS-V-007.
         assert_eq!(CanonicalAdjunction::canonical_roster().len(), 4);
     }
 
@@ -594,8 +594,8 @@ mod tests {
         after.exposes = vec![Capability::Read {
             resource: ResourceTag::Logger,
         }];
-        // exposes grew → not Specialise; foundation differs → still
-        // not Specialise. composes_with stable; preserves stable.
+ // exposes grew → not Specialise; foundation differs → still
+ // not Specialise. composes_with stable; preserves stable.
         let r = refactoring(
             "weird_change",
             RefactoringDirection::Forward,
@@ -611,14 +611,14 @@ mod tests {
 
     #[test]
     fn classify_backward_swaps_shapes() {
-        // A Backward Decompose is logically a Compose — the
-        // recogniser should see (before, after) swapped for the
-        // shape delta.
+ // A Backward Decompose is logically a Compose — the
+ // recogniser should see (before, after) swapped for the
+ // shape delta.
         let mut shape_a = Shape::default_for_unannotated();
         shape_a.composes_with = vec!["X".into()];
         let mut shape_b = Shape::default_for_unannotated();
         shape_b.composes_with = vec!["X".into(), "Y".into()];
-        // Backward leg: before=B (composed), after=A (decomposed).
+ // Backward leg: before=B (composed), after=A (decomposed).
         let r = refactoring(
             "compose_back",
             RefactoringDirection::Backward,
@@ -626,8 +626,8 @@ mod tests {
             shape_a,
             witness("decompose", "compose"),
         );
-        // Even in Backward direction, classifier sees the F-direction
-        // delta after swap → DecomposeCompose.
+ // Even in Backward direction, classifier sees the F-direction
+ // delta after swap → DecomposeCompose.
         assert_eq!(
             classify_refactoring(&r),
             CanonicalAdjunction::DecomposeCompose
@@ -677,25 +677,25 @@ mod tests {
 
     #[test]
     fn analyze_rejects_broken_adjoint_pair() {
-        // Witness with same name on both legs and EMPTY string —
-        // swapped is identical, so adjoint_of() trivially holds.
-        // To break it, we need names where forward != self after
-        // swap. Synthesize: forward="A", backward="B"; mirror has
-        // forward="B", backward="A". is_adjoint_of checks: orig.fwd
-        // == mirror.back ("A"=="A") AND orig.back == mirror.fwd
-        // ("B"=="B") → true. So mirror always holds. To break,
-        // pass two witnesses that aren't mirror images.  Test
-        // verify_adjoint_pair directly above.
-        // For analyze_refactoring, the broken-adjoint case requires
-        // patching the witness manually to inject mismatch — we use
-        // a witness where forward == backward but unequal → the
-        // mirror still holds because is_adjoint_of compares the two
-        // strings equal in both legs. So broken_adjoint_pair via
-        // mirror synth is unreachable through public API; that's
-        // correct — the analyzer's is_adjoint_pair_present is
-        // load-bearing for direct two-witness inputs.  Pin: test
-        // verify_adjoint_pair_rejects_unrelated above covers it.
-        // Here we pin that the verdict is computed honestly.
+ // Witness with same name on both legs and EMPTY string —
+ // swapped is identical, so adjoint_of() trivially holds.
+ // To break it, we need names where forward != self after
+ // swap. Synthesize: forward="A", backward="B"; mirror has
+ // forward="B", backward="A". is_adjoint_of checks: orig.fwd
+ // == mirror.back ("A"=="A") AND orig.back == mirror.fwd
+ // ("B"=="B") → true. So mirror always holds. To break,
+ // pass two witnesses that aren't mirror images. Test
+ // verify_adjoint_pair directly above.
+ // For analyze_refactoring, the broken-adjoint case requires
+ // patching the witness manually to inject mismatch — we use
+ // a witness where forward == backward but unequal → the
+ // mirror still holds because is_adjoint_of compares the two
+ // strings equal in both legs. So broken_adjoint_pair via
+ // mirror synth is unreachable through public API; that's
+ // correct — the analyzer's is_adjoint_pair_present is
+ // load-bearing for direct two-witness inputs. Pin: test
+ // verify_adjoint_pair_rejects_unrelated above covers it.
+ // Here we pin that the verdict is computed honestly.
         let s = Shape::default_for_unannotated();
         let r = refactoring(
             "trivial",
@@ -705,9 +705,9 @@ mod tests {
             witness("F", "G"),
         );
         let a = analyze_refactoring(&r);
-        // mirror of (F, G) = (G, F); is_adjoint_of asserts
-        // F.fwd==mirror.back && F.back==mirror.fwd, which is
-        // (F=="F" && G=="G") → true. So adjoint_pair_present holds.
+ // mirror of (F, G) = (G, F); is_adjoint_of asserts
+ // F.fwd==mirror.back && F.back==mirror.fwd, which is
+ // (F=="F" && G=="G") → true. So adjoint_pair_present holds.
         assert!(a.adjoint_pair_present);
     }
 
@@ -739,8 +739,8 @@ mod tests {
     fn analyze_flags_gain_claim_failure() {
         let s = Shape::default_for_unannotated();
         let mut w = witness("specialise", "generalise");
-        // Claim we GAIN HasCapability("read"), but neither shape
-        // has it → gain_actual=false.
+ // Claim we GAIN HasCapability("read"), but neither shape
+ // has it → gain_actual=false.
         w.gained = vec![ArchProposition::HasCapability {
             capability_tag: "read".into(),
         }];
@@ -838,14 +838,14 @@ mod tests {
     fn empty_chain_is_rejected() {
         let chain = RefactoringChain { steps: vec![] };
         let a = analyze_chain(&chain);
-        // Per spec §20.6, an empty chain cannot be a refactoring —
-        // analyzer refuses to claim acceptance from empty evidence.
+ // Per spec §20.6, an empty chain cannot be a refactoring —
+ // analyzer refuses to claim acceptance from empty evidence.
         assert!(!a.chain_accepted);
     }
 
     #[test]
     fn architectural_pin_canonical_tags_are_stable() {
-        // Pin: agent surfaces consume these tags directly.
+ // Pin: agent surfaces consume these tags directly.
         assert_eq!(CanonicalAdjunction::InlineExtract.tag(), "inline_extract");
         assert_eq!(
             CanonicalAdjunction::SpecialiseGeneralise.tag(),

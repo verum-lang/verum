@@ -5,20 +5,20 @@
 //! Per `internal/specs/ats-v.md` §7 (Anti-pattern catalog) +
 //! §32.4 (Stable error codes), each canonical anti-pattern has:
 //!
-//!   * Stable RFC error code `ATS-V-AP-NNN` (machine-readable).
-//!   * Refinement predicate over [`crate::arch::Shape`] (algorithmic
-//!     check).
-//!   * Structured diagnostic JSON shape (dual-audience: human
-//!     `human_message` + agent `auto_fix_diff`).
-//!   * Docs URL (`https://verum.lang/docs/ats-v/ap-NNN`).
+//! * Stable RFC error code `ATS-V-AP-NNN` (machine-readable).
+//! * Refinement predicate over [`crate::arch::Shape`] (algorithmic
+//! check).
+//! * Structured diagnostic JSON shape (dual-audience: human
+//! `human_message` + agent `auto_fix_diff`).
+//! * Docs URL (`https://verum.lang/docs/ats-v/ap-NNN`).
 //!
 //! This module ships the first 10 canonical anti-patterns
-//! (Сезон 1.2).  Remaining 22 land in Сезон 2 (per spec §11).
+//! (.2). Remaining 22 land (per spec §11).
 //!
 //! ## Discharge route
 //!
 //! Each anti-pattern is checked by a `check_*` function returning
-//! `Option<AntiPatternViolation>`.  `None` means the predicate
+//! `Option<AntiPatternViolation>`. `None` means the predicate
 //! holds (no violation); `Some(v)` carries the structured diagnostic.
 //!
 //! [`check_all_anti_patterns`] walks every check_* function over
@@ -38,11 +38,11 @@ use crate::arch::{Capability, Foundation, Lifecycle, MsfsStratum, Shape, Tier};
 // AntiPatternCode — stable RFC code
 // =============================================================================
 
-/// Stable RFC error code `ATS-V-AP-NNN`.  Pattern-matchable by
+/// Stable RFC error code `ATS-V-AP-NNN`. Pattern-matchable by
 /// agents; documented in spec + on docs site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AntiPatternCode {
-    // ----- Сезон 1 (AP-001..010) — capability/composition core -----
+ // ----- (AP-001..010) — capability/composition core -----
     CapabilityEscalation,    // ATS-V-AP-001
     CapabilityLeak,          // ATS-V-AP-002
     DependencyCycle,         // ATS-V-AP-003
@@ -54,7 +54,7 @@ pub enum AntiPatternCode {
     LifecycleRegression,     // ATS-V-AP-009
     CveIncomplete,           // ATS-V-AP-010
 
-    // ----- Сезон 2 base (AP-011..026) — boundary / lifecycle / capability ontology -----
+ // ----- base (AP-011..026) — boundary / lifecycle / capability ontology -----
     AbsoluteBoundaryAttempt,           // ATS-V-AP-011 — stratum = LAbs (AFN-T α violation)
     InvariantViolation,                // ATS-V-AP-012 — boundary invariant not preserved
     DanglingMessageType,               // ATS-V-AP-013 — message type без wire encoding
@@ -72,7 +72,7 @@ pub enum AntiPatternCode {
     DeclarationDrift,                  // ATS-V-AP-025 — declared shape ≠ inferred
     FoundationContentMismatch,         // ATS-V-AP-026 — code-content uses foreign foundation
 
-    // ----- Сезон 2 MTAC (AP-027..032) — modal-temporal-architectural calculus -----
+ // ----- MTAC (AP-027..032) — modal-temporal-architectural calculus -----
     TemporalInconsistency,             // ATS-V-AP-027 — invariant breaks across time
     CounterfactualBrittleness,         // ATS-V-AP-028 — fragile under decision swap
     MissedAdjoint,                     // ATS-V-AP-029 — refactoring без inverse
@@ -82,7 +82,7 @@ pub enum AntiPatternCode {
 }
 
 impl AntiPatternCode {
-    /// Stable error code string `ATS-V-AP-NNN`.
+ /// Stable error code string `ATS-V-AP-NNN`.
     pub fn code(&self) -> &'static str {
         match self {
             AntiPatternCode::CapabilityEscalation => "ATS-V-AP-001",
@@ -120,7 +120,7 @@ impl AntiPatternCode {
         }
     }
 
-    /// Canonical short name (matches spec §7 + §26 catalog).
+ /// Canonical short name (matches spec §7 + §26 catalog).
     pub fn name(&self) -> &'static str {
         match self {
             AntiPatternCode::CapabilityEscalation => "CapabilityEscalation",
@@ -158,8 +158,8 @@ impl AntiPatternCode {
         }
     }
 
-    /// Documentation URL — stable per spec §32.4.  Format
-    /// `https://verum.lang/docs/ats-v/ap-NNN`.
+ /// Documentation URL — stable per spec §32.4. Format
+ /// `https://verum.lang/docs/ats-v/ap-NNN`.
     pub fn docs_url(&self) -> String {
         let n = match self {
             AntiPatternCode::CapabilityEscalation => 1,
@@ -198,11 +198,11 @@ impl AntiPatternCode {
         format!("https://verum.lang/docs/ats-v/ap-{:03}", n)
     }
 
-    /// Which Сезон / season introduced this pattern.  Stable for
-    /// version-compat tracking (per spec §29.5 versioning policy).
+ /// Which roadmap section introduced this pattern. Stable for
+ /// version-compat tracking (per spec §29.5 versioning policy).
     pub fn season(&self) -> u8 {
         match self {
-            // Сезон 1 — AP-001..010
+ // AP-001..010
             AntiPatternCode::CapabilityEscalation
             | AntiPatternCode::CapabilityLeak
             | AntiPatternCode::DependencyCycle
@@ -213,13 +213,13 @@ impl AntiPatternCode {
             | AntiPatternCode::ResourceStraddling
             | AntiPatternCode::LifecycleRegression
             | AntiPatternCode::CveIncomplete => 1,
-            // Сезон 2 — AP-011..032 (base + MTAC)
+ // AP-011..032 (base + MTAC)
             _ => 2,
         }
     }
 
-    /// True iff the pattern is MTAC-specific (modal-temporal,
-    /// per spec §20-§23 + §26).
+ /// True iff the pattern is MTAC-specific (modal-temporal,
+ /// per spec §20-§23 + §26).
     pub fn is_mtac(&self) -> bool {
         matches!(
             self,
@@ -232,10 +232,10 @@ impl AntiPatternCode {
         )
     }
 
-    /// Full canonical list — Сезон 1+2 = 32 patterns total.
+ /// Full canonical list — = 32 patterns total.
     pub fn full_list() -> [AntiPatternCode; 32] {
         [
-            // Сезон 1 (10)
+ // (10)
             AntiPatternCode::CapabilityEscalation,
             AntiPatternCode::CapabilityLeak,
             AntiPatternCode::DependencyCycle,
@@ -246,7 +246,7 @@ impl AntiPatternCode {
             AntiPatternCode::ResourceStraddling,
             AntiPatternCode::LifecycleRegression,
             AntiPatternCode::CveIncomplete,
-            // Сезон 2 base (16)
+ // base (16)
             AntiPatternCode::AbsoluteBoundaryAttempt,
             AntiPatternCode::InvariantViolation,
             AntiPatternCode::DanglingMessageType,
@@ -263,7 +263,7 @@ impl AntiPatternCode {
             AntiPatternCode::TransitiveLifecycleRegression,
             AntiPatternCode::DeclarationDrift,
             AntiPatternCode::FoundationContentMismatch,
-            // Сезон 2 MTAC (6)
+ // MTAC (6)
             AntiPatternCode::TemporalInconsistency,
             AntiPatternCode::CounterfactualBrittleness,
             AntiPatternCode::MissedAdjoint,
@@ -283,24 +283,24 @@ impl AntiPatternCode {
 /// `auto_fix_suggestion` for agent automated remediation.
 #[derive(Debug, Clone)]
 pub struct AntiPatternViolation {
-    /// Stable RFC code.
+ /// Stable RFC code.
     pub code: AntiPatternCode,
-    /// Severity (anti-patterns default to error in strict mode,
-    /// warning in soft).
+ /// Severity (anti-patterns default to error in strict mode,
+ /// warning in soft).
     pub severity: Severity,
-    /// One-line summary (machine-friendly).
+ /// One-line summary (machine-friendly).
     pub summary: String,
-    /// Human-friendly message (review-friendly).
+ /// Human-friendly message (review-friendly).
     pub human_message: String,
-    /// Auto-fix hint (agent-actionable).
+ /// Auto-fix hint (agent-actionable).
     pub auto_fix_suggestion: Option<String>,
 }
 
 impl AntiPatternViolation {
-    /// Convert to canonical `VerificationVerdict::Rejected` per the
-    /// foundation type in `verum_kernel::verdict`.  Used when the
-    /// ATS-V phase wants to surface the anti-pattern through the
-    /// canonical verdict pipeline.
+ /// Convert to canonical `VerificationVerdict::Rejected` per the
+ /// foundation type in `verum_kernel::verdict`. Used when the
+ /// ATS-V phase wants to surface the anti-pattern through the
+ /// canonical verdict pipeline.
     pub fn into_verdict(self) -> crate::verdict::VerificationVerdict {
         use crate::verdict::*;
         VerificationVerdict::Rejected {
@@ -420,8 +420,8 @@ pub fn check_dependency_cycle(
     composes_graph: &[(String, Vec<String>)],
 ) -> Option<AntiPatternViolation> {
     let _ = shape;
-    // Tarjan-style SCC: any cycle involving `cog_name` is a
-    // violation.
+ // Tarjan-style SCC: any cycle involving `cog_name` is a
+ // violation.
     if has_cycle_involving(cog_name, composes_graph) {
         return Some(AntiPatternViolation {
             code: AntiPatternCode::DependencyCycle,
@@ -560,7 +560,7 @@ pub fn check_foundation_drift(
 
 /// ATS-V-AP-006 — RegisterMixing.
 /// Formal theorem cites authoritative-appeal / phenomenological /
-/// traditional source.  CVE §6.7 L6 antiphilosophical invariant.
+/// traditional source. CVE §6.7 L6 antiphilosophical invariant.
 ///
 /// **Predicate**: `forall theorem.cited. ¬∃ ref ∈ cites. ref.kind ∈ {AuthoritativeAppeal, Phenomenological, Traditional}`.
 pub fn check_register_mixing(
@@ -774,15 +774,15 @@ pub fn check_cve_incomplete(shape: &Shape) -> Option<AntiPatternViolation> {
 /// Separate check: `MsfsStratum::LAbs` is NOT a runtime-enforced
 /// anti-pattern (it's structurally impossible per AFN-T α).
 /// Checking it here as a sanity net: any cog that somehow ends
-/// up declaring `LAbs` is flagged.  Reuses MsfsStratum's
+/// up declaring `LAbs` is flagged. Reuses MsfsStratum's
 /// `is_admissible()` predicate.
 pub fn check_stratum_admissible(shape: &Shape) -> Option<AntiPatternViolation> {
     if shape.stratum.is_admissible() {
         return None;
     }
-    // Re-use AP-005 FoundationDrift code for now since it shares the
-    // semantic class "structurally impossible cross-stratum
-    // composition"; future evolution may give LAbs its own code.
+ // Re-use AP-005 FoundationDrift code for now since it shares the
+ // semantic class "structurally impossible cross-stratum
+ // composition"; future evolution may give LAbs its own code.
     Some(AntiPatternViolation {
         code: AntiPatternCode::FoundationDrift,
         severity: Severity::Error,
@@ -801,7 +801,7 @@ pub fn check_stratum_admissible(shape: &Shape) -> Option<AntiPatternViolation> {
 // =============================================================================
 
 /// Diagnostic context — extra inputs the per-pattern checks need
-/// beyond the Shape itself.  Populated by the ATS-V phase from
+/// beyond the Shape itself. Populated by the ATS-V phase from
 /// cog source analysis.
 #[derive(Debug, Default)]
 pub struct DiagnosticContext {
@@ -815,30 +815,30 @@ pub struct DiagnosticContext {
     pub straddling_txs: Vec<String>,
     pub straddling_resources: Vec<String>,
     pub cited_lifecycles: Vec<(String, Lifecycle)>,
-    // ----- MTAC fields (Сезон 5) -----
-    /// Sample shapes at different time points для temporal
-    /// inconsistency detection (AP-027).
+ // ----- MTAC fields -----
+ /// Sample shapes at different time points для temporal
+ /// inconsistency detection (AP-027).
     pub temporal_samples: Vec<(crate::arch_mtac::TimePoint, Shape)>,
-    /// Counterfactual stability properties claimed by the cog
-    /// (AP-028 CounterfactualBrittleness).
+ /// Counterfactual stability properties claimed by the cog
+ /// (AP-028 CounterfactualBrittleness).
     pub counterfactual_pairs: Vec<crate::arch_mtac::CounterfactualPair>,
-    /// Refactorings claimed на cog without adjoint pair
-    /// (AP-029 MissedAdjoint).
+ /// Refactorings claimed на cog without adjoint pair
+ /// (AP-029 MissedAdjoint).
     pub refactorings_without_adjoint: Vec<String>,
-    /// Universal property claim для cog без uniqueness witness
-    /// (AP-030 UniversalPropertyViolation).
+ /// Universal property claim для cog без uniqueness witness
+ /// (AP-030 UniversalPropertyViolation).
     pub claimed_universal_property: Option<String>,
     pub uniqueness_witness: Option<String>,
-    /// Evolution paths declared by cog с potentially-unsat
-    /// triggers (AP-031 PhantomEvolution).
+ /// Evolution paths declared by cog с potentially-unsat
+ /// triggers (AP-031 PhantomEvolution).
     pub declared_evolutions: Vec<crate::arch_mtac::ArchEvolution>,
-    /// Refactoring claimed equivalent under Yoneda but
-    /// observer-functor differs (AP-032 YonedaInequivalentRefactor).
+ /// Refactoring claimed equivalent under Yoneda but
+ /// observer-functor differs (AP-032 YonedaInequivalentRefactor).
     pub yoneda_observer_diff: Vec<(crate::arch_mtac::Observer, bool)>,
 }
 
 // =============================================================================
-// MTAC anti-pattern checks (Сезон 5) — AP-027..032
+// MTAC anti-pattern checks — AP-027..032
 // =============================================================================
 
 /// ATS-V-AP-027 — TemporalInconsistency.
@@ -1079,7 +1079,7 @@ pub fn check_all_anti_patterns(
     if let Some(v) = check_stratum_admissible(shape) {
         violations.push(v);
     }
-    // ----- MTAC checks (Сезон 5) — AP-027..032 -----
+ // ----- MTAC checks — AP-027..032 -----
     if let Some(v) = check_temporal_inconsistency(shape, &ctx.temporal_samples) {
         violations.push(v);
     }
@@ -1232,9 +1232,9 @@ mod tests {
     #[test]
     fn cve_incomplete_only_in_strict_mode() {
         let mut shape = Shape::default_for_unannotated();
-        // Soft mode — no error even with empty CVE.
+ // Soft mode — no error even with empty CVE.
         assert!(check_cve_incomplete(&shape).is_none());
-        // Strict mode — empty CVE is error.
+ // Strict mode — empty CVE is error.
         shape.strict = true;
         let v = check_cve_incomplete(&shape);
         assert!(v.is_some());
@@ -1279,15 +1279,15 @@ mod tests {
         let shape = Shape::default_for_unannotated();
         let ctx = DiagnosticContext::default();
         let violations = check_all_anti_patterns(&shape, &ctx);
-        // Default-shape is trivially compliant.
+ // Default-shape is trivially compliant.
         assert!(violations.is_empty(), "default shape must pass all anti-pattern checks");
     }
 
     #[test]
     fn violation_to_verdict_carries_code_and_docs_url() {
-        // Pin: the canonical Verdict carrier preserves the anti-pattern
-        // code + docs URL in metadata, so audit JSON can surface them
-        // verbatim per spec §32.4.
+ // Pin: the canonical Verdict carrier preserves the anti-pattern
+ // code + docs URL in metadata, so audit JSON can surface them
+ // verbatim per spec §32.4.
         let v = AntiPatternViolation {
             code: AntiPatternCode::CapabilityEscalation,
             severity: Severity::Error,
@@ -1313,8 +1313,8 @@ mod tests {
 
     #[test]
     fn architectural_pin_first_10_codes_reserved() {
-        // Pin: the first 10 anti-patterns claim codes ATS-V-AP-001..010.
-        // RFC stability — these never get re-used per spec §29.5.
+ // Pin: the first 10 anti-patterns claim codes ATS-V-AP-001..010.
+ // RFC stability — these never get re-used per spec §29.5.
         let codes: Vec<&str> = AntiPatternCode::full_list().iter().map(|c| c.code()).collect();
         assert_eq!(codes[0], "ATS-V-AP-001");
         assert_eq!(codes[9], "ATS-V-AP-010");
@@ -1322,10 +1322,10 @@ mod tests {
 
     #[test]
     fn architectural_pin_32_total_codes_reserved() {
-        // Сезон 2 catalog completion: 32 canonical patterns total.
-        // Adding more requires RFC ATS-V-006 + community review per
-        // spec §29.2.  Cap=30 in spec §7.1; current 32 includes
-        // 6 MTAC patterns (§26) which are spec-introduced.
+ // catalog completion: 32 canonical patterns total.
+ // Adding more requires RFC ATS-V-006 + community review per
+ // spec §29.2. Cap=30 in spec §7.1; current 32 includes
+ // 6 MTAC patterns (§26) which are spec-introduced.
         let codes = AntiPatternCode::full_list();
         assert_eq!(codes.len(), 32);
         assert_eq!(codes[0].code(), "ATS-V-AP-001");
@@ -1334,7 +1334,7 @@ mod tests {
 
     #[test]
     fn season_attribution_correct() {
-        // Pin: AP-001..010 are Season 1; AP-011..032 are Season 2.
+ // Pin: AP-001..010 are Season 1; AP-011..032 are Season 2.
         for (i, code) in AntiPatternCode::full_list().iter().enumerate() {
             let expected = if i < 10 { 1 } else { 2 };
             assert_eq!(
@@ -1350,9 +1350,9 @@ mod tests {
 
     #[test]
     fn mtac_patterns_recognised() {
-        // Pin: 6 MTAC-specific patterns (AP-027..032) flagged
-        // via is_mtac().  Used by audit gate JSON output to
-        // separate base catalog from MTAC extensions.
+ // Pin: 6 MTAC-specific patterns (AP-027..032) flagged
+ // via is_mtac(). Used by audit gate JSON output to
+ // separate base catalog from MTAC extensions.
         let mtac_count = AntiPatternCode::full_list()
             .iter()
             .filter(|c| c.is_mtac())
@@ -1365,14 +1365,14 @@ mod tests {
 
     #[test]
     fn all_codes_have_distinct_docs_urls() {
-        // Pin: every code's docs_url() is distinct.  Catches off-by-one
-        // bugs in the URL generation (AP-NNN format).
+ // Pin: every code's docs_url() is distinct. Catches off-by-one
+ // bugs in the URL generation (AP-NNN format).
         let urls: std::collections::BTreeSet<_> = AntiPatternCode::full_list()
             .iter()
             .map(|c| c.docs_url())
             .collect();
         assert_eq!(urls.len(), 32);
-        // Spot-check format.
+ // Spot-check format.
         assert_eq!(
             AntiPatternCode::CapabilityEscalation.docs_url(),
             "https://verum.lang/docs/ats-v/ap-001"
@@ -1383,12 +1383,12 @@ mod tests {
         );
     }
 
-    // =========================================================================
-    // MTAC checkers (Сезон 5) — direct unit pins
-    // =========================================================================
+ // =========================================================================
+ // MTAC checkers — direct unit pins
+ // =========================================================================
 
-    /// Helper: a Decision with name + no chosen value — sufficient
-    /// for tests that only inspect the wrapper structure.
+ /// Helper: a Decision with name + no chosen value — sufficient
+ /// for tests that only inspect the wrapper structure.
     fn dummy_decision(name: &str) -> crate::arch_mtac::Decision {
         crate::arch_mtac::Decision {
             name: name.to_string(),
@@ -1590,9 +1590,9 @@ mod tests {
 
     #[test]
     fn check_all_routes_through_mtac_checks() {
-        // Pin: check_all_anti_patterns wires the 6 MTAC checks
-        // — feed each violation context once and expect the
-        // corresponding code to appear in the aggregated list.
+ // Pin: check_all_anti_patterns wires the 6 MTAC checks
+ // — feed each violation context once and expect the
+ // corresponding code to appear in the aggregated list.
         use crate::arch_mtac::{
             ArchEvolution, ComplexityClass, CounterfactualPair, Observer, Reversibility,
             TimePoint,
@@ -1631,7 +1631,7 @@ mod tests {
         let violations = check_all_anti_patterns(&shape, &ctx);
         let codes: std::collections::HashSet<_> =
             violations.iter().map(|v| v.code).collect();
-        // Each of the 6 MTAC codes must have surfaced.
+ // Each of the 6 MTAC codes must have surfaced.
         assert!(codes.contains(&AntiPatternCode::TemporalInconsistency));
         assert!(codes.contains(&AntiPatternCode::CounterfactualBrittleness));
         assert!(codes.contains(&AntiPatternCode::MissedAdjoint));

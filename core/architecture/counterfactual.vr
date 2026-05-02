@@ -1,0 +1,122 @@
+// =============================================================================
+// core.architecture.counterfactual — Counterfactual reasoning engine surface
+// =============================================================================
+//
+// **Verum-native mirror of `verum_kernel::arch_counterfactual`.**
+//
+// Per `internal/specs/ats-v.md` §20.4 + §22.1, the counterfactual
+// engine evaluates a cog's architectural Shape under base +
+// alternative decisions WITHOUT actually switching implementations.
+// Comparative metric extraction at type level.
+//
+// **Pipeline**:
+//   1. Caller supplies `(CounterfactualPair, base_shape, alt_shape)`.
+//   2. `extract_metric` projects each Shape to typed `MetricValue`s.
+//   3. `evaluate_invariant` walks each `ArchProposition` against both
+//      shapes — returns `InvariantStatus`.
+//   4. `CounterfactualReport` carries the comparative payload with
+//      stable JSON `schema_version=1` for agent surfaces (per spec
+//      §32.4).
+//
+// **Soundness contract** (per §22.2): `overall_stable` iff every
+// declared `stability_invariant` evaluates to `HoldsBoth`.  Empty
+// invariants → unstable (engine refuses to claim stability from
+// absence of evidence).
+// =============================================================================
+
+module core.architecture.counterfactual;
+
+mount core.prelude.{Bool, Float, Int, Maybe, List, Text};
+mount super.mtac.{ArchProposition, CounterfactualPair};
+
+// =============================================================================
+// ArchMetric — canonical metric set
+// =============================================================================
+
+/// Architectural metric projectable from a `Shape`.  Baseline set
+/// of 11 metrics; extending the catalog requires RFC ATS-V-006 per
+/// spec §29.2.
+public type ArchMetric is
+    | ExposedCapabilityCount
+    | RequiredCapabilityCount
+    | ReadCapabilityCount
+    | WriteCapabilityCount
+    | NetworkCapabilityCount
+    | BoundaryInvariantCount
+    | CompositionDegree
+    | LinearResourceCount
+    | StratumOrdinal
+    | CveCompleteness
+    | StrictModeFlag
+    | CustomMetric(Text);
+
+// =============================================================================
+// MetricValue — projection target
+// =============================================================================
+
+/// Result of projecting an `ArchMetric` from a `Shape`.
+public type MetricValue is
+    | IntegerMetric(Int)
+    | FloatMetric(Float)
+    | CategoricalMetric(Text)
+    | UnknownMetric;
+
+// =============================================================================
+// InvariantStatus — relational evaluation outcome
+// =============================================================================
+
+/// Status of an `ArchProposition` under a counterfactual evaluation.
+/// Per spec §22.2, **only** `HoldsBoth` satisfies counterfactual
+/// stability — a relational property requiring presence under both
+/// decisions.
+public type InvariantStatus is
+    | HoldsBoth
+    | HoldsBaseOnly
+    | HoldsAltOnly
+    | HoldsNeither;
+
+// =============================================================================
+// CounterfactualReport — engine output
+// =============================================================================
+
+/// Per-metric comparison entry.
+public type MetricComparison is {
+    metric: ArchMetric,
+    base: MetricValue,
+    alt: MetricValue,
+    diverges: Bool,
+};
+
+/// Per-invariant evaluation entry.
+public type InvariantEvaluation is {
+    proposition: ArchProposition,
+    status: InvariantStatus,
+};
+
+/// Counterfactual engine output per spec §22.1.
+public type CounterfactualReport is {
+    schema_version: Int,
+    pair_name: Text,
+    base_decision: Text,
+    alt_decision: Text,
+    metric_comparisons: List<MetricComparison>,
+    invariant_evaluations: List<InvariantEvaluation>,
+    overall_stable: Bool,
+    diverging_metric_count: Int,
+};
+
+// =============================================================================
+// Kernel-discharge bridge
+// =============================================================================
+
+/// **Counterfactual reasoning engine — non-destructive evaluation.**
+///
+/// Discharges the kernel-side `arch_counterfactual` module's
+/// soundness contracts: 4-arm `InvariantStatus` arms each pin to a
+/// distinct relational outcome (HoldsBoth iff both shapes satisfy;
+/// HoldsBaseOnly iff base satisfies but alt does not; etc).  Empty
+/// invariants → unstable by default per spec §22.2.
+@framework(ats_v, "ATS-V counterfactual reasoning engine (spec internal/specs/ats-v.md §20.4 + §22.1). Non-destructive what-if evaluation at type level — both decisions remain types. 11-metric baseline catalog. Implementation: crates/verum_kernel/src/arch_counterfactual.rs.")
+@kernel_discharge("kernel_arch_counterfactual_engine")
+public axiom kernel_arch_counterfactual_engine() -> Bool
+    ensures true;

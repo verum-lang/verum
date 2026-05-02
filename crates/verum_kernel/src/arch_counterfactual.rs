@@ -1,17 +1,17 @@
-//! ATS-V Сезон 6 — Counterfactual Reasoning Engine.
+//! ATS-V Counterfactual Reasoning Engine.
 //!
 //! Per spec §20.4 + §22.1, evaluates a cog's architectural Shape
 //! under base + alternative decisions WITHOUT actually switching
-//! implementations.  Comparative metric extraction at type level.
+//! implementations. Comparative metric extraction at type level.
 //!
 //! Pipeline:
-//!   1. Caller supplies (CounterfactualPair, base_shape, alt_shape).
-//!   2. [`extract_metric`] walks both shapes, projects to [`MetricValue`]s.
-//!   3. [`evaluate_invariant`] checks each [`ArchProposition`] from
-//!      `pair.stability_invariants` against both shapes — returns
-//!      [`InvariantStatus`].
-//!   4. [`CounterfactualReport`] carries the comparative payload with
-//!      stable JSON schema_version=1 for agent surfaces (per spec §32.4).
+//! 1. Caller supplies (CounterfactualPair, base_shape, alt_shape).
+//! 2. [`extract_metric`] walks both shapes, projects to [`MetricValue`]s.
+//! 3. [`evaluate_invariant`] checks each [`ArchProposition`] from
+//! `pair.stability_invariants` against both shapes — returns
+//! [`InvariantStatus`].
+//! 4. [`CounterfactualReport`] carries the comparative payload with
+//! stable JSON schema_version=1 for agent surfaces (per spec §32.4).
 //!
 //! Non-destructive by construction — the engine never instantiates
 //! either decision; both shapes are passed in as types.
@@ -26,41 +26,41 @@ use crate::arch_mtac::{ArchProposition, CounterfactualPair};
 // =============================================================================
 
 /// An architectural metric that can be projected from a [`Shape`].
-/// Сезон 6 ships the canonical baseline — extending the catalog
+/// ships the canonical baseline — extending the catalog
 /// requires RFC ATS-V-006 per spec §29.2.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ArchMetric {
-    /// Number of exposed capabilities (interface surface).
+ /// Number of exposed capabilities (interface surface).
     ExposedCapabilityCount,
-    /// Number of required capabilities (dependency surface).
+ /// Number of required capabilities (dependency surface).
     RequiredCapabilityCount,
-    /// Sum of read-tag capabilities (exposed + required).
+ /// Sum of read-tag capabilities (exposed + required).
     ReadCapabilityCount,
-    /// Sum of write-tag capabilities.
+ /// Sum of write-tag capabilities.
     WriteCapabilityCount,
-    /// Sum of network-tag capabilities.
+ /// Sum of network-tag capabilities.
     NetworkCapabilityCount,
-    /// Number of preserved boundary invariants.
+ /// Number of preserved boundary invariants.
     BoundaryInvariantCount,
-    /// Number of cogs this composes with (composition degree).
+ /// Number of cogs this composes with (composition degree).
     CompositionDegree,
-    /// Number of consumed linear/affine resources.
+ /// Number of consumed linear/affine resources.
     LinearResourceCount,
-    /// MSFS stratum — encoded as ordinal (LFnd=0, LCls=1, LClsTop=2,
-    /// LAbs=3 although LAbs is itself a defect).
+ /// MSFS stratum — encoded as ordinal (LFnd=0, LCls=1, LClsTop=2,
+ /// LAbs=3 although LAbs is itself a defect).
     StratumOrdinal,
-    /// CVE-closure completeness 0..=3 (axes discharged).
+ /// CVE-closure completeness 0..=3 (axes discharged).
     CveCompleteness,
-    /// Strict-mode flag (0 / 1).
+ /// Strict-mode flag (0 / 1).
     StrictModeFlag,
-    /// Custom metric — caller-defined name; engine returns
-    /// `MetricValue::Unknown` (extensibility hook for Сезон 8
-    /// self-hosted reasoning).
+ /// Custom metric — caller-defined name; engine returns
+ /// `MetricValue::Unknown` (extensibility hook
+ /// self-hosted reasoning).
     Custom { name: String },
 }
 
 impl ArchMetric {
-    /// Stable single-token tag for JSON serialisation.
+ /// Stable single-token tag for JSON serialisation.
     pub fn tag(&self) -> &'static str {
         match self {
             ArchMetric::ExposedCapabilityCount => "exposed_capability_count",
@@ -78,9 +78,9 @@ impl ArchMetric {
         }
     }
 
-    /// The canonical baseline metric set.  The default battery
-    /// `evaluate_counterfactual` runs when caller passes an empty
-    /// metric list.
+ /// The canonical baseline metric set. The default battery
+ /// `evaluate_counterfactual` runs when caller passes an empty
+ /// metric list.
     pub fn baseline_set() -> Vec<ArchMetric> {
         vec![
             ArchMetric::ExposedCapabilityCount,
@@ -106,19 +106,19 @@ impl ArchMetric {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value")]
 pub enum MetricValue {
-    /// Integer projection — count-style metrics.
+ /// Integer projection — count-style metrics.
     Integer(i64),
-    /// Floating-point projection (Сезон 7 reserved — ratios, etc.).
+ /// Floating-point projection ( reserved — ratios, etc.).
     Float(f64),
-    /// Categorical — for non-ordinal metrics (e.g. stratum tag).
+ /// Categorical — for non-ordinal metrics (e.g. stratum tag).
     Categorical(String),
-    /// Engine cannot derive value for this Shape (e.g. custom metric
-    /// without registered extractor).
+ /// Engine cannot derive value for this Shape (e.g. custom metric
+ /// without registered extractor).
     Unknown,
 }
 
 impl MetricValue {
-    /// True iff the two values are identical projections.
+ /// True iff the two values are identical projections.
     pub fn equivalent(&self, other: &MetricValue) -> bool {
         match (self, other) {
             (MetricValue::Integer(a), MetricValue::Integer(b)) => a == b,
@@ -183,7 +183,7 @@ fn stratum_ordinal(s: &MsfsStratum) -> i64 {
 // Proposition evaluation — ArchProposition × Shape → Bool
 // =============================================================================
 
-/// True iff the proposition holds for the given Shape.  Сезон 6
+/// True iff the proposition holds for the given Shape. 
 /// covers the four canonical [`ArchProposition`] variants; `Custom`
 /// is conservatively rejected (no registered evaluator).
 pub fn proposition_holds(prop: &ArchProposition, shape: &Shape) -> bool {
@@ -197,14 +197,14 @@ pub fn proposition_holds(prop: &ArchProposition, shape: &Shape) -> bool {
                 .any(|c| c.tag() == needle)
         }
         ArchProposition::FoundationStable => {
-            // Single-shape evaluation: trivially holds (stability is
-            // a binary observation across two shapes — see
-            // [`evaluate_invariant`]).
+ // Single-shape evaluation: trivially holds (stability is
+ // a binary observation across two shapes — see
+ // [`evaluate_invariant`]).
             true
         }
         ArchProposition::PublicApiUnchanged => {
-            // Single-shape evaluation: trivially holds (relational
-            // proposition — handled by [`evaluate_invariant`]).
+ // Single-shape evaluation: trivially holds (relational
+ // proposition — handled by [`evaluate_invariant`]).
             true
         }
         ArchProposition::Custom { .. } => false,
@@ -217,13 +217,13 @@ pub fn proposition_holds(prop: &ArchProposition, shape: &Shape) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum InvariantStatus {
-    /// Proposition holds under both base + alternative.
+ /// Proposition holds under both base + alternative.
     HoldsBoth,
-    /// Holds only under base.
+ /// Holds only under base.
     HoldsBaseOnly,
-    /// Holds only under alternative.
+ /// Holds only under alternative.
     HoldsAltOnly,
-    /// Holds under neither.
+ /// Holds under neither.
     HoldsNeither,
 }
 
@@ -237,9 +237,9 @@ impl InvariantStatus {
         }
     }
 
-    /// True iff the proposition is stable under decision swap — the
-    /// only status that satisfies counterfactual stability per spec
-    /// §22.2.
+ /// True iff the proposition is stable under decision swap — the
+ /// only status that satisfies counterfactual stability per spec
+ /// §22.2.
     pub fn is_stable(&self) -> bool {
         matches!(self, InvariantStatus::HoldsBoth)
     }
@@ -256,28 +256,28 @@ pub struct MetricComparison {
     pub metric: ArchMetric,
     pub base: MetricValue,
     pub alt: MetricValue,
-    /// True iff base != alt.
+ /// True iff base != alt.
     pub diverges: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CounterfactualReport {
-    /// Stable JSON schema version (per spec §32.4).
+ /// Stable JSON schema version (per spec §32.4).
     pub schema_version: u32,
-    /// Counterfactual-pair identifier (`pair.name`).
+ /// Counterfactual-pair identifier (`pair.name`).
     pub pair_name: String,
-    /// Base decision name (`pair.base.name`).
+ /// Base decision name (`pair.base.name`).
     pub base_decision: String,
-    /// Alternative decision name (`pair.alternative.name`).
+ /// Alternative decision name (`pair.alternative.name`).
     pub alt_decision: String,
-    /// Per-metric comparison.
+ /// Per-metric comparison.
     pub metric_comparisons: Vec<MetricComparison>,
-    /// Per-invariant evaluation.
+ /// Per-invariant evaluation.
     pub invariant_evaluations: Vec<InvariantEvaluation>,
-    /// True iff every declared stability invariant holds under both
-    /// decisions (i.e. cog is counterfactually stable per §22.2).
+ /// True iff every declared stability invariant holds under both
+ /// decisions (i.e. cog is counterfactually stable per §22.2).
     pub overall_stable: bool,
-    /// Number of metrics that diverged.
+ /// Number of metrics that diverged.
     pub diverging_metric_count: usize,
 }
 
@@ -286,7 +286,7 @@ pub struct CounterfactualReport {
 // =============================================================================
 
 /// Evaluate a single counterfactual pair against the supplied
-/// metric set + base/alt shapes.  Empty metric list → baseline set.
+/// metric set + base/alt shapes. Empty metric list → baseline set.
 pub fn evaluate_counterfactual(
     pair: &CounterfactualPair,
     base_shape: &Shape,
@@ -375,7 +375,7 @@ pub fn evaluate_invariant(
 }
 
 /// Batch-evaluate a counterfactual *set* — one base + many
-/// alternatives.  Per spec §22.1 (`@arch_counterfactual_set`).
+/// alternatives. Per spec §22.1 (`@arch_counterfactual_set`).
 pub fn evaluate_counterfactual_set(
     pair_name: &str,
     base_decision_name: &str,
@@ -499,8 +499,8 @@ mod tests {
 
     #[test]
     fn baseline_metric_set_is_canonical_size() {
-        // Pin: baseline metric battery is 11 (Сезон 6 catalog).
-        // Adding more requires RFC ATS-V-006 per spec §29.2.
+ // Pin: baseline metric battery is 11 ( catalog).
+ // Adding more requires RFC ATS-V-006 per spec §29.2.
         assert_eq!(ArchMetric::baseline_set().len(), 11);
     }
 
@@ -510,12 +510,12 @@ mod tests {
         s_base.foundation = Foundation::ZfcTwoInacc;
         let mut s_alt = Shape::default_for_unannotated();
         s_alt.foundation = Foundation::Hott;
-        // Drift across alternatives
+ // Drift across alternatives
         assert_eq!(
             evaluate_invariant(&ArchProposition::FoundationStable, &s_base, &s_alt),
             InvariantStatus::HoldsNeither
         );
-        // Identity case
+ // Identity case
         assert_eq!(
             evaluate_invariant(&ArchProposition::FoundationStable, &s_base, &s_base),
             InvariantStatus::HoldsBoth
@@ -588,9 +588,9 @@ mod tests {
 
     #[test]
     fn report_no_invariants_is_unstable_by_default() {
-        // Per spec §22.2: a counterfactual without declared stability
-        // invariants cannot be claimed stable — the engine refuses to
-        // synthesize a positive verdict from absence of evidence.
+ // Per spec §22.2: a counterfactual without declared stability
+ // invariants cannot be claimed stable — the engine refuses to
+ // synthesize a positive verdict from absence of evidence.
         let s = Shape::default_for_unannotated();
         let pair = pair("no_invariants", vec![]);
         let report = evaluate_counterfactual(&pair, &s, &s, &[]);
@@ -626,9 +626,9 @@ mod tests {
 
     #[test]
     fn json_round_trip_preserves_payload() {
-        // serde_json is dev-only in this crate; the round-trip is a
-        // pin that the report's `Serialize`/`Deserialize` derives stay
-        // structurally compatible across schema_version=1.
+ // serde_json is dev-only in this crate; the round-trip is a
+ // pin that the report's `Serialize`/`Deserialize` derives stay
+ // structurally compatible across schema_version=1.
         let s = Shape::default_for_unannotated();
         let pair = pair("json_pin", vec![ArchProposition::FoundationStable]);
         let report = evaluate_counterfactual(&pair, &s, &s, &[]);
@@ -661,16 +661,16 @@ mod tests {
         assert_eq!(reports.len(), 2);
         assert_eq!(reports[0].pair_name, "fw_choice::a");
         assert_eq!(reports[1].pair_name, "fw_choice::b");
-        // alt_a changes API → stable=false
+ // alt_a changes API → stable=false
         assert!(!reports[0].overall_stable);
-        // alt_b changes foundation → stable=false
+ // alt_b changes foundation → stable=false
         assert!(!reports[1].overall_stable);
     }
 
     #[test]
     fn architectural_pin_invariant_status_tags_are_stable() {
-        // Pin: the four canonical statuses surface their stable tags
-        // exactly as referenced by audit JSON consumers (per spec §32.4).
+ // Pin: the four canonical statuses surface their stable tags
+ // exactly as referenced by audit JSON consumers (per spec §32.4).
         assert_eq!(InvariantStatus::HoldsBoth.tag(), "holds_both");
         assert_eq!(InvariantStatus::HoldsBaseOnly.tag(), "holds_base_only");
         assert_eq!(InvariantStatus::HoldsAltOnly.tag(), "holds_alt_only");
@@ -679,9 +679,9 @@ mod tests {
 
     #[test]
     fn architectural_pin_only_holds_both_is_stable() {
-        // Pin: per spec §22.2, ONLY HoldsBoth satisfies counterfactual
-        // stability — a relational property requiring presence under
-        // both decisions.
+ // Pin: per spec §22.2, ONLY HoldsBoth satisfies counterfactual
+ // stability — a relational property requiring presence under
+ // both decisions.
         assert!(InvariantStatus::HoldsBoth.is_stable());
         assert!(!InvariantStatus::HoldsBaseOnly.is_stable());
         assert!(!InvariantStatus::HoldsAltOnly.is_stable());

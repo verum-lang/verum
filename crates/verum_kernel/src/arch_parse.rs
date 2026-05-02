@@ -13,15 +13,15 @@
 //!
 //! The parser is **structure-driven**: each Shape field has a
 //! corresponding parser method that pattern-matches on the AST
-//! `ExprKind`.  No new grammar — just typed extraction from the
+//! `ExprKind`. No new grammar — just typed extraction from the
 //! generic AST shape per V8.1 META1 architectural principle.
 //!
 //! ## Soundness contract
 //!
 //! `parse_arch_module` returns `Ok(Shape)` only when EVERY
-//! recognised field parses cleanly.  Unknown fields produce
+//! recognised field parses cleanly. Unknown fields produce
 //! [`ArchParseError::UnknownField`]; type mismatches produce
-//! [`ArchParseError::InvalidValue`].  The kernel never silently
+//! [`ArchParseError::InvalidValue`]. The kernel never silently
 //! ignores or down-casts.
 
 use crate::arch::*;
@@ -33,26 +33,26 @@ use verum_ast::literal::{LiteralKind, StringLit};
 // =============================================================================
 
 /// Error produced when `@arch_module(...)` cannot be parsed into a
-/// canonical `Shape`.  Each variant carries enough information to
+/// canonical `Shape`. Each variant carries enough information to
 /// produce both human-friendly diagnostics and agent-actionable
 /// auto-fix suggestions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArchParseError {
-    /// Field name is not in the canonical roster.
+ /// Field name is not in the canonical roster.
     UnknownField { name: String, suggestion: Option<String> },
-    /// Field value has wrong AST shape.  e.g. `at_tier = 42` where
-    /// `at_tier` expects a `Tier` variant.
+ /// Field value has wrong AST shape. e.g. `at_tier = 42` where
+ /// `at_tier` expects a `Tier` variant.
     InvalidValue { field: String, expected: &'static str },
-    /// Required field missing in strict mode.
+ /// Required field missing in strict mode.
     MissingRequired { field: &'static str },
-    /// Capability variant references unknown ResourceTag/etc.
+ /// Capability variant references unknown ResourceTag/etc.
     UnknownVariant { kind: &'static str, value: String },
-    /// Generic AST mismatch (caller didn't pass a Call expression).
+ /// Generic AST mismatch (caller didn't pass a Call expression).
     NotAnArchModuleAttribute,
 }
 
 impl ArchParseError {
-    /// Human-friendly message.
+ /// Human-friendly message.
     pub fn human_message(&self) -> String {
         match self {
             ArchParseError::UnknownField { name, suggestion } => {
@@ -89,7 +89,7 @@ impl ArchParseError {
 /// canonical [`Shape`].
 ///
 /// Caller passes the AST `Expr` representing the attribute call
-/// (typically `attribute_item.attribute.attribute_args`).  Each
+/// (typically `attribute_item.attribute.attribute_args`). Each
 /// argument MUST be `ExprKind::NamedArg { name, value }`;
 /// positional args are rejected.
 pub fn parse_arch_module(args: &[Expr]) -> Result<Shape, ArchParseError> {
@@ -155,8 +155,8 @@ pub fn parse_arch_module(args: &[Expr]) -> Result<Shape, ArchParseError> {
         }
     }
 
-    // Strict-mode requirement: full CVE-closure must be present.
-    // Per spec §4.8 + AP-010 CveIncomplete.
+ // Strict-mode requirement: full CVE-closure must be present.
+ // Per spec §4.8 + AP-010 CveIncomplete.
     if shape.strict {
         if shape.cve_closure.constructive.is_none() {
             return Err(ArchParseError::MissingRequired {
@@ -301,14 +301,14 @@ fn parse_capability_list(expr: &Expr) -> Result<Vec<Capability>, ArchParseError>
     }
 }
 
-/// Parse one capability from path-or-call expression.  Accepts
+/// Parse one capability from path-or-call expression. Accepts
 /// canonical variants: `Capability::Logger` (enum-shorthand), or
 /// `Capability::Read(ResourceTag::Logger)` (full call form).
 fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
-    // The pragmatic approach: accept simple identifier paths as a
-    // proxy for capabilities — Сезон 3 stub.  Full parser with
-    // ResourceTag / ExecTarget / etc. argument unpacking lands in
-    // Сезон 4 when the elaborator is wired.
+ // The pragmatic approach: accept simple identifier paths as a
+ // proxy for capabilities — stub. Full parser with
+ // ResourceTag / ExecTarget / etc. argument unpacking lands in
+ // when the elaborator is wired.
     let path = parse_path_string(expr, "capability")?;
     Ok(Capability::Custom {
         tag: path,
@@ -347,8 +347,8 @@ fn parse_invariant(expr: &Expr) -> Result<BoundaryInvariant, ArchParseError> {
 }
 
 fn parse_tier(expr: &Expr) -> Result<Tier, ArchParseError> {
-    // Accept either bare identifier (Tier::Aot) or
-    // `Tier::MultiTier([...])` call.
+ // Accept either bare identifier (Tier::Aot) or
+ // `Tier::MultiTier([...])` call.
     if let ExprKind::Call { func, args, .. } = &expr.kind {
         let path = parse_path_string(func, "tier")?;
         let last = path.split('.').last().unwrap_or(&path);
@@ -357,7 +357,7 @@ fn parse_tier(expr: &Expr) -> Result<Tier, ArchParseError> {
                 field: "at_tier".to_string(),
                 expected: "Tier::MultiTier(allowed_list)",
             })?;
-            // The arg should itself be an array literal.
+ // The arg should itself be an array literal.
             let allowed = parse_tier_list(inner)?;
             return Ok(Tier::MultiTier { allowed });
         }
@@ -429,8 +429,8 @@ fn parse_stratum(expr: &Expr) -> Result<MsfsStratum, ArchParseError> {
 }
 
 fn parse_lifecycle(expr: &Expr) -> Result<Lifecycle, ArchParseError> {
-    // Accept bare identifier (Lifecycle::Theorem) defaults to
-    // Theorem("unspecified"), or call form Lifecycle::Theorem("v0.1").
+ // Accept bare identifier (Lifecycle::Theorem) defaults to
+ // Theorem("unspecified"), or call form Lifecycle::Theorem("v0.1").
     if let ExprKind::Call { func, args, .. } = &expr.kind {
         let path = parse_path_string(func, "lifecycle")?;
         let last = path.split('.').last().unwrap_or(&path);
@@ -586,8 +586,8 @@ mod tests {
     #[test]
     fn parse_strict_true_sets_field() {
         let args = vec![named_arg("strict", bool_lit(true))];
-        // Strict requires CVE-closure complete — so without
-        // cve_closure fields it errors.
+ // Strict requires CVE-closure complete — so without
+ // cve_closure fields it errors.
         let r = parse_arch_module(&args);
         assert!(matches!(r, Err(ArchParseError::MissingRequired { .. })));
     }
@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn parse_unknown_field_suggests_correction() {
-        // Typo: `expose` instead of `exposes`.
+ // Typo: `expose` instead of `exposes`.
         let args = vec![named_arg("expose", array_expr(vec![]))];
         let r = parse_arch_module(&args);
         match r {
@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn parse_full_arch_module_realistic_example() {
-        // Mirror the worked example from spec §17.2.
+ // Mirror the worked example from spec §17.2.
         let args = vec![
             named_arg(
                 "exposes",
@@ -806,8 +806,8 @@ mod tests {
 
     #[test]
     fn architectural_pin_no_positional_args() {
-        // Positional args (not NamedArg wrapped) are rejected —
-        // @arch_module(...) is named-args only per spec §8.
+ // Positional args (not NamedArg wrapped) are rejected —
+ // @arch_module(...) is named-args only per spec §8.
         let args = vec![bool_lit(true)]; // not wrapped as NamedArg
         let r = parse_arch_module(&args);
         match r {
