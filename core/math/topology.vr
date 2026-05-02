@@ -10,6 +10,11 @@
 // and algebraic topology structures (fundamental group, homology).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.topology;
 
 mount core.math.algebra.{Group, AbelianGroup, Ring, Field};

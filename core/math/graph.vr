@@ -37,6 +37,11 @@
 // every model through the model-verification pipeline.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.graph;
 
 mount core.math.category.{Category, Functor};

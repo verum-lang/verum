@@ -27,6 +27,11 @@
 //  core/math/infinity_topos.vr — ∞-sheaves (heavy users of Kan exts)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.kan_extension;
 
 mount core.math.infinity_category.{

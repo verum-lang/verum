@@ -37,6 +37,11 @@
 // Spec: docs/architecture/math-spec.md Section 3
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.elementary;
 
 mount super.constants.*;
