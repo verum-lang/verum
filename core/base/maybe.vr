@@ -33,6 +33,7 @@ implement<T> Maybe<T> {
     // =========================================================================
 
     /// Returns true if contains a value.
+    @inline(always)
     public fn is_some(&self) -> Bool {
         match self {
             Some(_) => true,
@@ -41,6 +42,7 @@ implement<T> Maybe<T> {
     }
 
     /// Returns true if empty.
+    @inline(always)
     public fn is_none(&self) -> Bool {
         match self {
             Some(_) => false,

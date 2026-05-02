@@ -30,6 +30,7 @@ implement<T, E> Result<T, E> {
     // =========================================================================
 
     /// Returns true if this is Ok.
+    @inline(always)
     public fn is_ok(&self) -> Bool {
         match self {
             Ok(_) => true,
@@ -38,6 +39,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Returns true if this is Err.
+    @inline(always)
     public fn is_err(&self) -> Bool {
         match self {
             Ok(_) => false,
