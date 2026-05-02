@@ -1,8 +1,19 @@
 # Sub-Opcode Space Refactor — Architecture Plan
 
-**Status**: design / multi-week migration
+**Status**: Phases 0+1+2 done (commits 6a66648f, c109b778,
+92ccdd61); Phases 3+4 pending.
 **Owners**: VBC codegen + interpreter dispatch + AOT lowering
 **Tracking**: see #91 perf parity (this is a sub-task)
+
+## Phase status
+
+| Phase | Status | Commit | Notes |
+|-------|--------|--------|-------|
+| 0     | DONE   | 6a66648f | Audit + rename FfiSubOpcode→SystemSubOpcode + this doc |
+| 1     | DONE   | c109b778 | TimeSubOpcode, SysSubOpcode, MachSubOpcode, SyncSubOpcode + CbgrSubOpcode 0x60-0x6F |
+| 2     | DONE   | 92ccdd61 | 194 source renames in 5 consumer files |
+| 3     | PEND   | —        | `verum audit --subop-cleanliness` gate |
+| 4     | PEND   | —        | Reclaim top-level Opcode bytes — multi-day per opcode |
 
 ## Motivation
 
