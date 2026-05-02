@@ -230,6 +230,13 @@ pub struct GpuLoweringStats {
     pub tensor_core_ops: usize,
     /// CPU-only instructions skipped during GPU lowering.
     pub skipped_cpu_ops: usize,
+    /// `Instruction::GpuExtended` occurrences whose sub-opcode has no
+    /// MLIR handler yet.  Architectural invariant: every GPU compute
+    /// sub-opcode MUST eventually be lowered to a `gpu.*` / `linalg.*`
+    /// MLIR op — silent skip used to mask gaps as "CPU-only instruction".
+    /// Non-zero readings here indicate Этап C (compute unification) is
+    /// incomplete.
+    pub unhandled_gpu_extended: usize,
 }
 
 impl GpuLoweringStats {
@@ -918,6 +925,24 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
             }
             Instruction::RetV => {
                 block.append_operation(func::r#return(&[], location));
+            }
+
+            // `Instruction::GpuExtended` is the canonical post-Phase-1
+            // dispatch shape for all GPU primitives (Launch / Sync /
+            // Memcpy / Alloc / Free / Graph* / Profile* / Stream* /
+            // Event* / …).  When the GPU path sees one with no MLIR
+            // handler, that's an architectural gap (Этап C compute
+            // unification incomplete) — NOT a "CPU-only instruction".
+            // Track it separately so we can surface the gap instead of
+            // silently masking it.
+            Instruction::GpuExtended { sub_op, .. } => {
+                self.stats.unhandled_gpu_extended += 1;
+                tracing::warn!(
+                    "GPU lowering: GpuExtended sub_op=0x{:02X} has no MLIR \
+                     handler yet — falling through (Этап C compute \
+                     unification gap)",
+                    sub_op
+                );
             }
 
             // CPU-only instructions: not lowered to MLIR GPU path.
