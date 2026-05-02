@@ -53,7 +53,7 @@ use verum_llvm::values::{
     BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
 use verum_llvm::{AddressSpace, IntPredicate};
-use verum_vbc::instruction::FfiSubOpcode;
+use verum_vbc::instruction::SystemSubOpcode;
 
 use super::context::FunctionContext;
 use super::error::{LlvmLoweringError, Result};
@@ -1071,15 +1071,15 @@ impl TargetPlatform {
 }
 
 /// Map VBC FFI sub-opcode to LLVM calling convention.
-pub fn ffi_subop_to_calling_convention(sub_op: FfiSubOpcode) -> u32 {
+pub fn ffi_subop_to_calling_convention(sub_op: SystemSubOpcode) -> u32 {
     match sub_op {
-        FfiSubOpcode::CallFfiC | FfiSubOpcode::CallFfiVariadic => calling_conventions::C,
-        FfiSubOpcode::CallFfiStdcall => calling_conventions::X86_STDCALL,
-        FfiSubOpcode::CallFfiSysV64 => calling_conventions::X86_64_SYSV,
-        FfiSubOpcode::CallFfiFastcall => calling_conventions::X86_FASTCALL,
-        FfiSubOpcode::CallFfiAarch64 => calling_conventions::AARCH64_AAPCS,
-        FfiSubOpcode::CallFfiWin64Arm64 => calling_conventions::WIN64, // Windows ARM64 uses WIN64 variant
-        FfiSubOpcode::CallFfiIndirect => calling_conventions::C,       // Default for indirect
+        SystemSubOpcode::CallFfiC | SystemSubOpcode::CallFfiVariadic => calling_conventions::C,
+        SystemSubOpcode::CallFfiStdcall => calling_conventions::X86_STDCALL,
+        SystemSubOpcode::CallFfiSysV64 => calling_conventions::X86_64_SYSV,
+        SystemSubOpcode::CallFfiFastcall => calling_conventions::X86_FASTCALL,
+        SystemSubOpcode::CallFfiAarch64 => calling_conventions::AARCH64_AAPCS,
+        SystemSubOpcode::CallFfiWin64Arm64 => calling_conventions::WIN64, // Windows ARM64 uses WIN64 variant
+        SystemSubOpcode::CallFfiIndirect => calling_conventions::C,       // Default for indirect
         _ => calling_conventions::C,                                   // Default
     }
 }
@@ -1091,19 +1091,19 @@ mod tests {
     #[test]
     fn test_calling_convention_mapping() {
         assert_eq!(
-            ffi_subop_to_calling_convention(FfiSubOpcode::CallFfiC),
+            ffi_subop_to_calling_convention(SystemSubOpcode::CallFfiC),
             calling_conventions::C
         );
         assert_eq!(
-            ffi_subop_to_calling_convention(FfiSubOpcode::CallFfiStdcall),
+            ffi_subop_to_calling_convention(SystemSubOpcode::CallFfiStdcall),
             calling_conventions::X86_STDCALL
         );
         assert_eq!(
-            ffi_subop_to_calling_convention(FfiSubOpcode::CallFfiSysV64),
+            ffi_subop_to_calling_convention(SystemSubOpcode::CallFfiSysV64),
             calling_conventions::X86_64_SYSV
         );
         assert_eq!(
-            ffi_subop_to_calling_convention(FfiSubOpcode::CallFfiFastcall),
+            ffi_subop_to_calling_convention(SystemSubOpcode::CallFfiFastcall),
             calling_conventions::X86_FASTCALL
         );
     }

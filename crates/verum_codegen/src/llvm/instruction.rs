@@ -10,7 +10,7 @@ use verum_llvm::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, Fun
 use verum_llvm::{AtomicOrdering, AtomicRMWBinOp, FloatPredicate, IntPredicate};
 use verum_vbc::instruction::{
     ArithSubOpcode, BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CmpSubOpcode,
-    CompareOp, FfiSubOpcode, FloatToIntMode, Instruction, MathSubOpcode, Reg, SimdSubOpcode,
+    CompareOp, SystemSubOpcode, FloatToIntMode, Instruction, MathSubOpcode, Reg, SimdSubOpcode,
     UnaryFloatOp, UnaryIntOp,
 };
 use verum_vbc::module::{CType, ConstId, Constant, FfiSymbolId, FunctionId};
@@ -21906,14 +21906,14 @@ fn lower_ffi_extended<'ctx>(
     sub_op: u8,
     operands: &[u8],
 ) -> Result<()> {
-    let sub_opcode = FfiSubOpcode::from_byte(sub_op);
+    let sub_opcode = SystemSubOpcode::from_byte(sub_op);
     let mut ffi = FfiLowering::new(ctx.llvm_context());
 
     match sub_opcode {
         // ================================================================
         // Memory Operations (0x40-0x4F)
         // ================================================================
-        Some(FfiSubOpcode::CMemcpy) => {
+        Some(SystemSubOpcode::CMemcpy) => {
             // Format: dst_ptr:reg, src_ptr:reg, size:reg
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -21933,7 +21933,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CMemset) => {
+        Some(SystemSubOpcode::CMemset) => {
             // Format: dst_ptr:reg, value:reg, size:reg
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -21953,7 +21953,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CSecureZero) => {
+        Some(SystemSubOpcode::CSecureZero) => {
             // Format: dst_ptr:reg, size:reg
             //
 
@@ -21986,7 +21986,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CMemmove) => {
+        Some(SystemSubOpcode::CMemmove) => {
             // Format: dst_ptr:reg, src_ptr:reg, size:reg
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -22006,7 +22006,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CMemcmp) => {
+        Some(SystemSubOpcode::CMemcmp) => {
             // Format: dst:reg, ptr1:reg, ptr2:reg, size:reg
             if operands.len() < 4 {
                 return Err(LlvmLoweringError::internal(
@@ -22036,7 +22036,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CAlloc) => {
+        Some(SystemSubOpcode::CAlloc) => {
             // Format: dst:reg, size:reg
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal("CAlloc: insufficient operands"));
@@ -22053,7 +22053,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CFree) => {
+        Some(SystemSubOpcode::CFree) => {
             // Format: ptr:reg
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal("CFree: insufficient operands"));
@@ -22067,7 +22067,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CRealloc) => {
+        Some(SystemSubOpcode::CRealloc) => {
             // Format: dst:reg, ptr:reg, size:reg
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -22091,7 +22091,7 @@ fn lower_ffi_extended<'ctx>(
         // ================================================================
         // Error Handling (0x30-0x3F)
         // ================================================================
-        Some(FfiSubOpcode::GetErrno) => {
+        Some(SystemSubOpcode::GetErrno) => {
             // Format: dst:reg
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -22114,7 +22114,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::SetErrno) => {
+        Some(SystemSubOpcode::SetErrno) => {
             // Format: value:reg
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -22140,7 +22140,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::ClearErrno) => {
+        Some(SystemSubOpcode::ClearErrno) => {
             // Format: (no operands)
             let i32_type = ctx.types().i32_type();
             let zero = i32_type.const_zero();
@@ -22153,7 +22153,7 @@ fn lower_ffi_extended<'ctx>(
         // ================================================================
         // Raw Pointer Operations (0x60-0x6F)
         // ================================================================
-        Some(FfiSubOpcode::DerefRaw) => {
+        Some(SystemSubOpcode::DerefRaw) => {
             // Format: dst:reg, ptr:reg, size:u8
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -22237,7 +22237,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::DerefRawSigned) => {
+        Some(SystemSubOpcode::DerefRawSigned) => {
             // The AOT `DerefRaw` lowering above already emits a
             // `build_int_s_extend` for sub-i64 reads, so the AOT
             // semantics match `DerefRawSigned`'s contract (the
@@ -22246,10 +22246,10 @@ fn lower_ffi_extended<'ctx>(
             // there). Reuse the same path: parse the same
             // `(dst, ptr, size)` operand layout and recurse into the
             // existing handler.
-            return lower_ffi_extended(ctx, FfiSubOpcode::DerefRaw as u8, operands);
+            return lower_ffi_extended(ctx, SystemSubOpcode::DerefRaw as u8, operands);
         }
 
-        Some(FfiSubOpcode::DerefMutRaw) => {
+        Some(SystemSubOpcode::DerefMutRaw) => {
             // Format: ptr:reg, value:reg, size:u8
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -22267,7 +22267,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::DerefRawPtr) => {
+        Some(SystemSubOpcode::DerefRawPtr) => {
             // Format: dst:reg, ptr:reg
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
@@ -22284,7 +22284,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::PtrAdd) => {
+        Some(SystemSubOpcode::PtrAdd) => {
             // Format: dst:reg, ptr:reg, offset:reg
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal("PtrAdd: insufficient operands"));
@@ -22302,7 +22302,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::PtrSub) => {
+        Some(SystemSubOpcode::PtrSub) => {
             // Format: dst:reg, ptr:reg, offset:reg
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal("PtrSub: insufficient operands"));
@@ -22320,7 +22320,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::PtrDiff) => {
+        Some(SystemSubOpcode::PtrDiff) => {
             // Format: dst:reg, ptr1:reg, ptr2:reg
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -22340,7 +22340,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::PtrIsNull) => {
+        Some(SystemSubOpcode::PtrIsNull) => {
             // Format: dst:reg, ptr:reg
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
@@ -22360,12 +22360,12 @@ fn lower_ffi_extended<'ctx>(
         // ================================================================
         // FFI Calls (0x10-0x1F) - zero-cost FFI via LLVM native calls
         // ================================================================
-        Some(FfiSubOpcode::CallFfiC)
-        | Some(FfiSubOpcode::CallFfiStdcall)
-        | Some(FfiSubOpcode::CallFfiSysV64)
-        | Some(FfiSubOpcode::CallFfiFastcall)
-        | Some(FfiSubOpcode::CallFfiAarch64)
-        | Some(FfiSubOpcode::CallFfiWin64Arm64) => {
+        Some(SystemSubOpcode::CallFfiC)
+        | Some(SystemSubOpcode::CallFfiStdcall)
+        | Some(SystemSubOpcode::CallFfiSysV64)
+        | Some(SystemSubOpcode::CallFfiFastcall)
+        | Some(SystemSubOpcode::CallFfiAarch64)
+        | Some(SystemSubOpcode::CallFfiWin64Arm64) => {
             // Get VBC module for FFI symbol table access
             let vbc_module = ctx.vbc_module().ok_or_else(|| {
                 LlvmLoweringError::internal(
@@ -22543,7 +22543,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CallFfiVariadic) => {
+        Some(SystemSubOpcode::CallFfiVariadic) => {
             // Get VBC module for FFI symbol table access
             let vbc_module = ctx.vbc_module().ok_or_else(|| {
                 LlvmLoweringError::internal("Variadic FFI calls require VBC module")
@@ -22603,7 +22603,7 @@ fn lower_ffi_extended<'ctx>(
                 existing
             } else {
                 let func = llvm_module.add_function(symbol_name, fn_type, None);
-                func.set_call_conventions(ffi_subop_to_calling_convention(FfiSubOpcode::CallFfiC));
+                func.set_call_conventions(ffi_subop_to_calling_convention(SystemSubOpcode::CallFfiC));
                 func
             };
 
@@ -22679,7 +22679,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CallFfiIndirect) => {
+        Some(SystemSubOpcode::CallFfiIndirect) => {
             // Indirect call through function pointer
             // Operand format: ptr_reg:u8, signature_idx:u32, arg_count:u8, ret_reg:u8, [arg_regs...]
             let vbc_module = ctx.vbc_module().ok_or_else(|| {
@@ -22796,7 +22796,7 @@ fn lower_ffi_extended<'ctx>(
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
             // Set C calling convention (default for indirect)
-            call_site.set_call_convention(ffi_subop_to_calling_convention(FfiSubOpcode::CallFfiC));
+            call_site.set_call_convention(ffi_subop_to_calling_convention(SystemSubOpcode::CallFfiC));
 
             // Store return value
             if let Some(ret_val) = call_site.try_as_basic_value().basic() {
@@ -22812,7 +22812,7 @@ fn lower_ffi_extended<'ctx>(
         // ================================================================
         // Symbol Resolution (0x00-0x0F) - AOT uses link-time resolution
         // ================================================================
-        Some(FfiSubOpcode::LoadSymbol) => {
+        Some(SystemSubOpcode::LoadSymbol) => {
             // In AOT compilation, symbols are resolved by the linker.
             // LoadSymbol emits a reference to the external symbol.
             let vbc_module = ctx
@@ -22872,7 +22872,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::GetLibrary) => {
+        Some(SystemSubOpcode::GetLibrary) => {
             // In AOT compilation, libraries are linked statically
             // Return a placeholder (null) for now
             if operands.len() < 2 {
@@ -22887,7 +22887,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::IsSymbolResolved) => {
+        Some(SystemSubOpcode::IsSymbolResolved) => {
             // In AOT compilation, symbols are always resolved at link time
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -22904,7 +22904,7 @@ fn lower_ffi_extended<'ctx>(
         // ================================================================
         // Marshalling (0x20-0x2F) - type conversion
         // ================================================================
-        Some(FfiSubOpcode::MarshalToC) | Some(FfiSubOpcode::MarshalFromC) => {
+        Some(SystemSubOpcode::MarshalToC) | Some(SystemSubOpcode::MarshalFromC) => {
             // In AOT mode, Verum values map directly to LLVM types
             // MarshalToC/MarshalFromC is essentially a pass-through
             if operands.len() < 2 {
@@ -22918,7 +22918,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::StringToC) => {
+        Some(SystemSubOpcode::StringToC) => {
             // Verum Text is already a null-terminated C string pointer
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
@@ -22932,7 +22932,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::StringFromC) => {
+        Some(SystemSubOpcode::StringFromC) => {
             // C string (char*) becomes Verum Text — copy to managed memory
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
@@ -22946,7 +22946,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::ArrayToC) | Some(FfiSubOpcode::ArrayFromC) => {
+        Some(SystemSubOpcode::ArrayToC) | Some(SystemSubOpcode::ArrayFromC) => {
             // Array marshalling: pass data pointer through
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
@@ -22959,7 +22959,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::StructToC) | Some(FfiSubOpcode::StructFromC) => {
+        Some(SystemSubOpcode::StructToC) | Some(SystemSubOpcode::StructFromC) => {
             // Struct marshalling: pass pointer through (same layout in AOT)
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
@@ -22975,7 +22975,7 @@ fn lower_ffi_extended<'ctx>(
         // ================================================================
         // Other operations
         // ================================================================
-        Some(FfiSubOpcode::GetLastError) => {
+        Some(SystemSubOpcode::GetLastError) => {
             // Windows-specific: GetLastError().  Target-triple-dispatched
             // (NOT host `#[cfg]`) so cross-compiles emit the right code.
             // Pre-fix this used `#[cfg(target_os = "windows")]` which
@@ -23009,7 +23009,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::RandomU64) => {
+        Some(SystemSubOpcode::RandomU64) => {
             // Generate random u64 via runtime
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -23034,7 +23034,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::RandomFloat) => {
+        Some(SystemSubOpcode::RandomFloat) => {
             // Generate random float [0.0, 1.0) via runtime
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -23059,7 +23059,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::NewByteArray) => {
+        Some(SystemSubOpcode::NewByteArray) => {
             // Allocate byte array: dst = verum_alloc_bytes(size)
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
@@ -23088,7 +23088,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::ByteArrayElementAddr) => {
+        Some(SystemSubOpcode::ByteArrayElementAddr) => {
             // Get pointer to element: dst = base_ptr + index
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -23109,7 +23109,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::ByteArrayLoad) => {
+        Some(SystemSubOpcode::ByteArrayLoad) => {
             // Load byte: dst = *(base_ptr + index) as i64
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -23139,7 +23139,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::ByteArrayStore) => {
+        Some(SystemSubOpcode::ByteArrayStore) => {
             // Store byte: *(base_ptr + index) = value & 0xFF
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -23166,7 +23166,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::TypedArrayElementAddr) | Some(FfiSubOpcode::NewTypedArray) => {
+        Some(SystemSubOpcode::TypedArrayElementAddr) | Some(SystemSubOpcode::NewTypedArray) => {
             // Typed arrays use same allocation as byte arrays with stride
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -23174,7 +23174,7 @@ fn lower_ffi_extended<'ctx>(
                 ));
             }
             let dst_reg = op_reg(operands, 0);
-            if sub_op == FfiSubOpcode::NewTypedArray as u8 {
+            if sub_op == SystemSubOpcode::NewTypedArray as u8 {
                 // Allocate: same as NewByteArray but size = count * element_size
                 let size = if operands.len() >= 2 {
                     ctx.get_register(op_reg(operands, 1))?
@@ -23214,7 +23214,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::StructFieldAddr) => {
+        Some(SystemSubOpcode::StructFieldAddr) => {
             // Get raw heap address of a struct field — task #37 closure.
             //
 
@@ -23255,7 +23255,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::CreateCallback) | Some(FfiSubOpcode::FreeCallback) => {
+        Some(SystemSubOpcode::CreateCallback) | Some(SystemSubOpcode::FreeCallback) => {
             // Callback trampolines: pass through function pointer as-is for now
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -23274,7 +23274,7 @@ fn lower_ffi_extended<'ctx>(
         }
 
         // Time sub-opcodes (0x70-0x75) — call runtime time functions
-        Some(FfiSubOpcode::TimeMonotonicNanos) => {
+        Some(SystemSubOpcode::TimeMonotonicNanos) => {
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
                     "TimeMonotonicNanos: insufficient operands",
@@ -23302,7 +23302,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::TimeRealtimeNanos) => {
+        Some(SystemSubOpcode::TimeRealtimeNanos) => {
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
                     "TimeRealtimeNanos: insufficient operands",
@@ -23328,7 +23328,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::TimeMonotonicRawNanos) => {
+        Some(SystemSubOpcode::TimeMonotonicRawNanos) => {
             // On macOS, same as MonotonicNanos; on Linux, CLOCK_MONOTONIC_RAW
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -23357,7 +23357,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::TimeSleepNanos) => {
+        Some(SystemSubOpcode::TimeSleepNanos) => {
             if operands.is_empty() {
                 return Ok(());
             }
@@ -23374,7 +23374,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::TimeThreadCpuNanos) | Some(FfiSubOpcode::TimeProcessCpuNanos) => {
+        Some(SystemSubOpcode::TimeThreadCpuNanos) | Some(SystemSubOpcode::TimeProcessCpuNanos) => {
             // Use monotonic time as fallback for CPU time
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -23404,7 +23404,7 @@ fn lower_ffi_extended<'ctx>(
         }
 
         // System Call Operations (0x80-0x85)
-        Some(FfiSubOpcode::SysGetpid) => {
+        Some(SystemSubOpcode::SysGetpid) => {
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
                     "SysGetpid: insufficient operands",
@@ -23428,7 +23428,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::SysGettid) => {
+        Some(SystemSubOpcode::SysGettid) => {
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
                     "SysGettid: insufficient operands",
@@ -23452,7 +23452,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::SysMmap) => {
+        Some(SystemSubOpcode::SysMmap) => {
             // mmap(addr, length, prot, flags, fd, offset) -> ptr
             if operands.len() < 7 {
                 return Err(LlvmLoweringError::internal(
@@ -23495,7 +23495,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::SysMunmap) => {
+        Some(SystemSubOpcode::SysMunmap) => {
             // munmap(addr, length)
             if operands.len() < 2 {
                 return Ok(());
@@ -23518,7 +23518,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::SysMadvise) => {
+        Some(SystemSubOpcode::SysMadvise) => {
             // madvise(addr, length, advice)
             if operands.len() < 3 {
                 return Ok(());
@@ -23551,7 +23551,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::SysGetentropy) => {
+        Some(SystemSubOpcode::SysGetentropy) => {
             // getentropy(buf, length) -> 0 on success
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
@@ -23582,15 +23582,15 @@ fn lower_ffi_extended<'ctx>(
         }
 
         // Mach Kernel Operations (0x90-0x98) — macOS-specific, stub for portability
-        Some(FfiSubOpcode::MachVmAllocate)
-        | Some(FfiSubOpcode::MachVmDeallocate)
-        | Some(FfiSubOpcode::MachVmProtect)
-        | Some(FfiSubOpcode::MachSemCreate)
-        | Some(FfiSubOpcode::MachSemDestroy)
-        | Some(FfiSubOpcode::MachSemSignal)
-        | Some(FfiSubOpcode::MachSemWait)
-        | Some(FfiSubOpcode::MachErrorString)
-        | Some(FfiSubOpcode::MachSleepUntil) => {
+        Some(SystemSubOpcode::MachVmAllocate)
+        | Some(SystemSubOpcode::MachVmDeallocate)
+        | Some(SystemSubOpcode::MachVmProtect)
+        | Some(SystemSubOpcode::MachSemCreate)
+        | Some(SystemSubOpcode::MachSemDestroy)
+        | Some(SystemSubOpcode::MachSemSignal)
+        | Some(SystemSubOpcode::MachSemWait)
+        | Some(SystemSubOpcode::MachErrorString)
+        | Some(SystemSubOpcode::MachSleepUntil) => {
             // Mach kernel ops: return 0/null on non-macOS, delegate to runtime on macOS
             if operands.is_empty() {
                 return Ok(());
@@ -23606,7 +23606,7 @@ fn lower_ffi_extended<'ctx>(
         // C runtime's `verum_cbgr_allocate` / `verum_cbgr_deallocate`
         // helpers which own the actual page/slot machinery; this mirrors
         // how the slice ops at 0x06-0x09 call `verum_cbgr_allocate`.
-        Some(FfiSubOpcode::CbgrAlloc) | Some(FfiSubOpcode::CbgrAllocZeroed) => {
+        Some(SystemSubOpcode::CbgrAlloc) | Some(SystemSubOpcode::CbgrAllocZeroed) => {
             if operands.len() < 3 {
                 return Ok(());
             }
@@ -23616,7 +23616,7 @@ fn lower_ffi_extended<'ctx>(
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             let module = ctx.get_module();
-            let alloc_name = if matches!(sub_opcode, Some(FfiSubOpcode::CbgrAllocZeroed)) {
+            let alloc_name = if matches!(sub_opcode, Some(SystemSubOpcode::CbgrAllocZeroed)) {
                 "verum_cbgr_allocate_zeroed"
             } else {
                 "verum_cbgr_allocate"
@@ -23641,7 +23641,7 @@ fn lower_ffi_extended<'ctx>(
             ctx.set_register(dst, ptr);
             Ok(())
         }
-        Some(FfiSubOpcode::CbgrDealloc) => {
+        Some(SystemSubOpcode::CbgrDealloc) => {
             if operands.len() < 4 {
                 return Ok(());
             }
@@ -23673,7 +23673,7 @@ fn lower_ffi_extended<'ctx>(
         // (declared and bodied later in this file at lines ~10034+).
         // The interpreter implements these directly via park/unpark
         // on a shared address keyed by the lock cell.
-        Some(FfiSubOpcode::FutexWait) => {
+        Some(SystemSubOpcode::FutexWait) => {
             if operands.len() < 4 {
                 return Err(LlvmLoweringError::internal(
                     "FutexWait: insufficient operands",
@@ -23711,7 +23711,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::FutexWake) => {
+        Some(SystemSubOpcode::FutexWake) => {
             if operands.len() < 3 {
                 return Err(LlvmLoweringError::internal(
                     "FutexWake: insufficient operands",
@@ -23742,7 +23742,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::SpinlockLock) => {
+        Some(SystemSubOpcode::SpinlockLock) => {
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
                     "SpinlockLock: insufficient operands",
@@ -23767,7 +23767,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(FfiSubOpcode::DerefRawSigned) => {
+        Some(SystemSubOpcode::DerefRawSigned) => {
             // 0x67 — sign-extending raw deref. The existing
             // `DerefRaw` arm already performs sign-extension at
             // the i64-narrowing site (see comment on the
@@ -23779,7 +23779,7 @@ fn lower_ffi_extended<'ctx>(
             // a follow-up commit; this arm just stops the
             // non-exhaustive-match build error from blocking
             // downstream crates.
-            return lower_ffi_extended(ctx, FfiSubOpcode::DerefRaw as u8, operands);
+            return lower_ffi_extended(ctx, SystemSubOpcode::DerefRaw as u8, operands);
         }
 
         None => Err(LlvmLoweringError::internal(format!(
