@@ -116,16 +116,19 @@ implement<T> Deque<T> {
     }
 
     // Number of elements.
+    @inline(always)
     public fn len(&self) -> Int {
         self.len
     }
 
     // Check if empty.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.len == 0
     }
 
     // Current capacity.
+    @inline(always)
     public fn capacity(&self) -> Int {
         self.cap
     }
