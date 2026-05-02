@@ -102,6 +102,9 @@ enum KernelKind {
     /// kernel itself is dtype-only-parametrised (one cached engine
     /// per float dtype).
     Matmul,
+    /// Full-tensor reduction (axis = None).  Sum/Prod/Max/Min wired
+    /// in Шаг 5a; axis-specific reduction is Шаг 5b.
+    Reduce(TensorReduceOp),
 }
 
 /// Wrapper that encapsulates the unsafe `Send + Sync` claim for an
@@ -394,12 +397,58 @@ impl Backend for MlirJitBackend {
 
     fn reduce(
         &self,
-        _a: &TensorHandle,
-        _op: TensorReduceOp,
-        _axis: Option<usize>,
+        a: &TensorHandle,
+        op: TensorReduceOp,
+        axis: Option<usize>,
     ) -> Option<TensorHandle> {
-        // Шаг 5 wiring point.
-        None
+        // Шаг 5a: full-axis reduction for F32 / F64 + Sum/Prod/Max/Min.
+        // Axis-specific reduction (`axis = Some(i)`) and the higher-
+        // level ops (Mean / Var / Std / Norm / LogSumExp / All / Any)
+        // defer to Шаг 5b.  Until then, those cases fall through to
+        // the hand-tuned `cpu::reduce_*` ladder.
+        if axis.is_some() {
+            return None;
+        }
+        if !is_float_dtype(a.dtype) {
+            return None;
+        }
+        if reduce_arith_op(op).is_none() {
+            return None;
+        }
+        let n = a.numel;
+        if n == 0 {
+            // Reducing an empty tensor → identity element.  Honest
+            // semantics differ across libraries (PyTorch raises,
+            // NumPy returns identity); our hand-tuned path handles
+            // this — fall through.
+            return None;
+        }
+        // Scalar (ndim = 0) output tensor.  The CPU `reduce_*` kernels
+        // return ndim=0; matching that contract keeps callers' shape
+        // assertions stable across the JIT and SIMD paths.
+        let out = TensorHandle::zeros(&[], a.dtype)?;
+        let holder = self.get_or_compile(KernelKind::Reduce(op), a.dtype)?;
+
+        let a_data = a.data.as_ref()?;
+        let out_data = out.data.as_ref()?;
+        let mut a_ptr: *const u8 = unsafe { (*a_data.as_ptr()).as_ptr() };
+        let mut out_ptr: *mut u8 = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
+        let mut n_arg: i64 = n as i64;
+        let mut packed_args: [*mut (); 3] = [
+            (&mut a_ptr) as *mut _ as *mut (),
+            (&mut out_ptr) as *mut _ as *mut (),
+            (&mut n_arg) as *mut _ as *mut (),
+        ];
+        let result = unsafe { holder.engine.invoke_packed("kernel", &mut packed_args) };
+        if result.is_err() {
+            tracing::warn!(
+                "MLIR-JIT reduce invocation failed for op={:?} dtype={:?}",
+                op,
+                a.dtype
+            );
+            return None;
+        }
+        Some(out)
     }
 
     fn matmul(&self, a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
@@ -593,6 +642,24 @@ fn unop_arith_op(op: TensorUnaryOp, dtype: DType) -> Option<&'static str> {
     })
 }
 
+/// Resolve the (init-literal, accumulator-op) pair for a reduce
+/// operation.  Only Sum/Prod/Max/Min are wired (Шаг 5a); the
+/// statistical ops (Mean / Var / Std / Norm / LogSumExp) need a
+/// post-pass over the accumulator and are deferred to Шаг 5b.
+fn reduce_arith_op(op: TensorReduceOp) -> Option<(&'static str, &'static str)> {
+    use TensorReduceOp::*;
+    Some(match op {
+        // (init-shape, accumulator-op).  For float reductions, init
+        // is the identity element of the operation: 0 for sum,
+        // 1 for prod, +inf for min, -inf for max.
+        Sum => ("zero", "arith.addf"),
+        Prod => ("one", "arith.mulf"),
+        Max => ("neg_inf", "arith.maximumf"),
+        Min => ("pos_inf", "arith.minimumf"),
+        _ => return None,
+    })
+}
+
 // =============================================================================
 // Kernel synthesis — MLIR text → ExecutionEngine
 //
@@ -641,6 +708,66 @@ fn build_binop_kernel_text(op: TensorBinaryOp, dtype: DType) -> Option<String> {
 "#,
         elem = elem_ty,
         arith = arith,
+    ))
+}
+
+/// Build the MLIR text for a full-tensor reduction.
+///
+/// Signature: `void kernel(*const T input, *mut T output, i64 n)`.
+/// Iterates the input once, carrying the accumulator in a
+/// block-arg-typed loop; on exit, stores the final accumulator to
+/// `*output`.  LLVM auto-vectorises the loop into a tree-reduction
+/// of vector lanes for ops where the accumulator is associative
+/// (Sum / Prod / Max / Min on float — strictly speaking float Sum
+/// is non-associative but `-ffast-math`-style assumptions inside
+/// LLVM's loop vectoriser make this acceptable in practice; users
+/// who need bit-exact reductions should add an explicit dispatch
+/// guard upstream).
+fn build_reduce_kernel_text(op: TensorReduceOp, dtype: DType) -> Option<String> {
+    let elem_ty = mlir_elem_type(dtype)?;
+    if !is_float_dtype(dtype) {
+        return None;
+    }
+    let (init_kind, accum) = reduce_arith_op(op)?;
+    // For F32/F64 the IEEE-754 specials parse via `arith.constant`
+    // with appropriate float literals.  Hex floats avoid rounding
+    // ambiguity in the parser.
+    let init_literal = match (init_kind, dtype) {
+        ("zero", DType::F32) => "0.0 : f32",
+        ("zero", DType::F64) => "0.0 : f64",
+        ("one", DType::F32) => "1.0 : f32",
+        ("one", DType::F64) => "1.0 : f64",
+        ("pos_inf", DType::F32) => "0x7F800000 : f32",
+        ("pos_inf", DType::F64) => "0x7FF0000000000000 : f64",
+        ("neg_inf", DType::F32) => "0xFF800000 : f32",
+        ("neg_inf", DType::F64) => "0xFFF0000000000000 : f64",
+        _ => return None,
+    };
+    Some(format!(
+        r#"module {{
+  func.func @kernel(%a: !llvm.ptr, %out: !llvm.ptr, %n: i64) attributes {{ llvm.emit_c_interface }} {{
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %init = arith.constant {init_lit}
+    cf.br ^loop(%c0, %init : i64, {elem})
+  ^loop(%i: i64, %acc: {elem}):
+    %done = arith.cmpi sge, %i, %n : i64
+    cf.cond_br %done, ^store, ^body
+  ^body:
+    %ap = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+    %va = llvm.load %ap : !llvm.ptr -> {elem}
+    %new_acc = {accum} %acc, %va : {elem}
+    %i_next = arith.addi %i, %c1 : i64
+    cf.br ^loop(%i_next, %new_acc : i64, {elem})
+  ^store:
+    llvm.store %acc, %out : {elem}, !llvm.ptr
+    return
+  }}
+}}
+"#,
+        elem = elem_ty,
+        init_lit = init_literal,
+        accum = accum,
     ))
 }
 
@@ -772,6 +899,7 @@ fn compile_kernel(
         KernelKind::Binop(op) => build_binop_kernel_text(op, dtype)?,
         KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
         KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
+        KernelKind::Reduce(op) => build_reduce_kernel_text(op, dtype)?,
     };
     let _location = Location::unknown(context);
     let mut module = match Module::parse(context, &text) {
@@ -980,13 +1108,91 @@ mod tests {
     }
 
     #[test]
-    fn reduce_still_returns_none() {
-        // Шаг 5 contract: reduce returns None so the dispatcher
-        // falls through to `CpuBackend`.  Matmul has graduated from
-        // this pin (now wired in Шаг 4 — see `matmul_*` tests below).
+    fn reduce_falls_through_for_axis_specific() {
+        // Шаг 5b wiring point: axis-specific reductions need a
+        // different kernel (rank-aware loop nest); Шаг 5a covers
+        // only `axis = None` (full-tensor reduction).
         let backend = MlirJitBackend::new();
-        let a = TensorHandle::zeros(&[2], DType::F32).unwrap();
+        let a = TensorHandle::zeros(&[2, 3], DType::F32).unwrap();
+        assert!(backend.reduce(&a, TensorReduceOp::Sum, Some(0)).is_none());
+    }
+
+    #[test]
+    fn reduce_falls_through_for_int_dtype() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::I32).unwrap();
         assert!(backend.reduce(&a, TensorReduceOp::Sum, None).is_none());
+    }
+
+    #[test]
+    fn reduce_falls_through_for_unsupported_op() {
+        // Mean / Var / Std / Norm / LogSumExp / All / Any deferred
+        // to Шаг 5b.
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        assert!(backend.reduce(&a, TensorReduceOp::Mean, None).is_none());
+        assert!(backend.reduce(&a, TensorReduceOp::Var, None).is_none());
+        assert!(backend.reduce(&a, TensorReduceOp::Norm, None).is_none());
+    }
+
+    #[test]
+    fn reduce_f32_sum_executes() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[5], DType::F32).unwrap();
+        fill_f32(&a, &[1.0, 2.0, 3.0, 4.0, 5.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Sum, None).unwrap();
+        let v = read_f32(&r, 1);
+        assert!((v[0] - 15.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn reduce_f32_prod_max_min_execute() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[2.0, 3.0, 5.0, 1.0]);
+        let p = backend.reduce(&a, TensorReduceOp::Prod, None).unwrap();
+        let mx = backend.reduce(&a, TensorReduceOp::Max, None).unwrap();
+        let mn = backend.reduce(&a, TensorReduceOp::Min, None).unwrap();
+        assert!((read_f32(&p, 1)[0] - 30.0).abs() < 1e-5);
+        assert!((read_f32(&mx, 1)[0] - 5.0).abs() < 1e-5);
+        assert!((read_f32(&mn, 1)[0] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn reduce_f64_sum_executes() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[3], DType::F64).unwrap();
+        unsafe {
+            let p = (*a.data.as_ref().unwrap().as_ptr()).as_mut_ptr() as *mut f64;
+            *p.add(0) = 1.5;
+            *p.add(1) = 2.5;
+            *p.add(2) = 3.0;
+        }
+        let r = backend.reduce(&a, TensorReduceOp::Sum, None).unwrap();
+        unsafe {
+            let p = (*r.data.as_ref().unwrap().as_ptr()).as_ptr() as *const f64;
+            assert!((*p - 7.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn reduce_max_with_negatives() {
+        // Max init is -inf — pin against accidentally using 0.
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[-5.0, -3.0, -7.0, -1.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Max, None).unwrap();
+        assert!((read_f32(&r, 1)[0] - (-1.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn reduce_min_with_positives() {
+        // Min init is +inf — pin against accidentally using 0.
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[5.0, 3.0, 7.0, 1.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Min, None).unwrap();
+        assert!((read_f32(&r, 1)[0] - 1.0).abs() < 1e-5);
     }
 
     #[test]
