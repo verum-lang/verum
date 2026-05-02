@@ -833,66 +833,11 @@ fn write_instruction(
         }
 
         // ── Tensor (common) ──
-        TensorNew { dst, dtype, dims } => {
-            let dregs: Vec<String> = dims.iter().map(r).collect();
-            write!(
-                out,
-                "T_NEW     {}, {:?}, dims=[{}]",
-                r(dst),
-                dtype,
-                dregs.join(", ")
-            )
-        }
-        TensorBinop { op, dst, a, b } => {
-            write!(out, "T_BINOP   {}, {}, {} ({:?})", r(dst), r(a), r(b), op)
-        }
-        TensorUnop { op, dst, src } => write!(out, "T_UNOP    {}, {} ({:?})", r(dst), r(src), op),
-        TensorMatmul { dst, a, b } => write!(out, "T_MATMUL  {}, {}, {}", r(dst), r(a), r(b)),
-        TensorReduce {
-            op,
-            dst,
-            src,
-            axes,
-            keepdim,
-        } => write!(
-            out,
-            "T_REDUCE  {}, {} ({:?}, axes={:?}, keep={})",
-            r(dst),
-            r(src),
-            op,
-            axes,
-            keepdim
-        ),
-        TensorReshape { dst, src, shape } => {
-            let sregs: Vec<String> = shape.iter().map(r).collect();
-            write!(
-                out,
-                "T_RESHAPE {}, {}, [{}]",
-                r(dst),
-                r(src),
-                sregs.join(", ")
-            )
-        }
-        TensorTranspose { dst, src, perm } => {
-            write!(out, "T_TRANSP  {}, {}, perm={:?}", r(dst), r(src), perm)
-        }
-        TensorSlice {
-            dst,
-            src,
-            starts,
-            ends,
-        } => {
-            let s: Vec<String> = starts.iter().map(r).collect();
-            let e: Vec<String> = ends.iter().map(r).collect();
-            write!(
-                out,
-                "T_SLICE   {}, {}, [{}]..[{}]",
-                r(dst),
-                r(src),
-                s.join(","),
-                e.join(",")
-            )
-        }
+        // Phase 4: legacy TensorNew/Binop/Unop/Matmul/Reduce/Reshape/
+        // Transpose/Slice disassemble arms deleted along with their
+        // Instruction variants; sub-opcode forms emitted via
+        // `TensorExtended` get rendered by the existing extended-op
+        // path further down.
         TensorClone { dst, src } => write!(out, "T_CLONE   {}, {}", r(dst), r(src)),
 
         // ── GPU (common) ──

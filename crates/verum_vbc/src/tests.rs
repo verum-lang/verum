@@ -467,10 +467,16 @@ fn test_validate_invalid_type_reference() {
 
 #[test]
 fn test_opcode_all_values_valid() {
-    // Ensure all 256 byte values map to valid opcodes
+    // Ensure every byte value either maps to a live opcode (round-trip
+    // preserved) or to the Phase-4-reclaimed sentinel `Unreachable`
+    // (lossy by design — see `Opcode::from_byte` doc comment).
     for byte in 0..=255u8 {
         let op = Opcode::from_byte(byte);
-        assert_eq!(op.to_byte(), byte);
+        if matches!(byte, 0xF0..=0xF7 | 0xFE | 0xFF) {
+            assert_eq!(op, Opcode::Unreachable);
+        } else {
+            assert_eq!(op.to_byte(), byte);
+        }
     }
 }
 
@@ -493,16 +499,14 @@ fn test_opcode_categories() {
     assert!(Opcode::CallV.is_call());
     assert!(!Opcode::Jmp.is_call());
 
-    // Tensors
-    assert!(Opcode::TensorNew.is_tensor());
-    assert!(Opcode::TensorMatmul.is_tensor());
+    // Tensors — Phase 4: legacy TensorNew/TensorMatmul direct opcodes
+    // deleted; only TensorExtended remains for tensor instructions.
     assert!(Opcode::TensorExtended.is_tensor());
     assert!(!Opcode::AddI.is_tensor());
 
     // GPU
     assert!(Opcode::GpuExtended.is_gpu());
     assert!(Opcode::GpuSync.is_gpu());
-    assert!(!Opcode::TensorMatmul.is_gpu());
 }
 
 #[test]

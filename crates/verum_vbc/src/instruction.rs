@@ -811,22 +811,18 @@ pub enum Opcode {
     // ========================================================================
     // Tensor + GPU (0xF0-0xFF)
     // ========================================================================
-    /// Create tensor with shape.
-    TensorNew = 0xF0,
-    /// Binary element-wise op.
-    TensorBinop = 0xF1,
-    /// Unary element-wise op.
-    TensorUnop = 0xF2,
-    /// Matrix multiplication.
-    TensorMatmul = 0xF3,
-    /// Reduction ops (sum, max, mean, etc.).
-    TensorReduce = 0xF4,
-    /// Reshape tensor.
-    TensorReshape = 0xF5,
-    /// Transpose tensor.
-    TensorTranspose = 0xF6,
-    /// Slice tensor.
-    TensorSlice = 0xF7,
+    //
+    // Phase 4 (sub-opcode refactor close-out, 2026-05-02): bytes
+    // 0xF0-0xF7 + 0xFE + 0xFF were occupied by ten legacy
+    // top-level Tensor* opcodes (TensorNew/Binop/Unop/Matmul/
+    // Reduce/Reshape/Transpose/Slice/Full/FromSlice).  Codegen
+    // now routes ALL of them through `TensorExtended` (0xFC) +
+    // `TensorSubOpcode::*FromArgs` since the immediate-encoding
+    // form they used couldn't represent register-arg intrinsics.
+    // Reclaiming the bytes opens 10 free top-level slots for
+    // future extended-byte gateways (e.g. dedicated `Async*` /
+    // `Stream*` / `Fast*` prefixes).  See
+    // `docs/architecture/sub-opcode-refactor-plan.md`.
     /// GPU extended operations prefix.
     ///
 
@@ -870,16 +866,7 @@ pub enum Opcode {
 
     /// Format: `[0xFD] [sub_opcode:u8] [operands...]`
     MlExtended = 0xFD,
-    /// Create tensor filled with a value.
-    ///
-
-    /// Format: `dst:reg, dtype:u8, rank:u8, dims..., value:f64`
-    TensorFull = 0xFE,
-    /// Create tensor from data slice.
-    ///
-
-    /// Format: `dst:reg, data_reg:reg, shape_reg:reg, dtype:u8`
-    TensorFromSlice = 0xFF,
+    // 0xFE + 0xFF: free (Phase 4 reclaim — were TensorFull / TensorFromSlice)
 }
 
 // ============================================================================
@@ -9227,18 +9214,25 @@ impl ExtendedSubOpcode {
 impl Opcode {
     /// Creates an opcode from a byte value.
     ///
-
     /// # Safety invariant
     ///
-
-    /// This relies on all 256 u8 values being valid `Opcode` variants (the enum
-    /// covers 0x00..=0xFF). The compile-time assertion above verifies the enum
-    /// is u8-sized. If a variant is ever removed without a replacement, this
-    /// transmute becomes unsound and must be replaced with a match.
+    /// Phase 4 of the sub-opcode refactor reclaimed bytes 0xF0-0xF7,
+    /// 0xFE, and 0xFF (the legacy top-level Tensor* opcodes), so the
+    /// previous "all 256 u8 values are valid" assumption no longer
+    /// holds.  Reclaimed bytes map to `Opcode::Unreachable` — the
+    /// closest existing sentinel — and the decoder catches them via
+    /// the corresponding match-all path that returns
+    /// `Instruction::Unreachable`.  When a future opcode reuses one
+    /// of the reclaimed bytes, remove that range from the explicit
+    /// guard below.
     pub fn from_byte(byte: u8) -> Self {
-        // SAFETY: All 256 values (0x00..=0xFF) are valid Opcode variants.
-        // Verified by: (1) compile-time size assertion above, (2) the enum definition
-        // explicitly assigns every value from 0x00 to 0xFF.
+        if matches!(byte, 0xF0..=0xF7 | 0xFE | 0xFF) {
+            return Opcode::Unreachable;
+        }
+        // SAFETY: every byte outside the reclaimed range above maps to
+        // a valid `Opcode` variant.  Verified by (1) the compile-time
+        // size assertion above, (2) the enum definition assigning
+        // every byte in 0x00..=0xEF, 0xF8..=0xFD a variant.
         unsafe { std::mem::transmute(byte) }
     }
 
@@ -9469,15 +9463,9 @@ impl Opcode {
             Opcode::GradCheckpoint => "GRAD_CHECKPOINT",
             Opcode::GradAccumulate => "GRAD_ACCUMULATE",
             Opcode::GradStop => "GRAD_STOP",
-            // Tensor + GPU (0xF0-0xFF)
-            Opcode::TensorNew => "TENSOR_NEW",
-            Opcode::TensorBinop => "TENSOR_BINOP",
-            Opcode::TensorUnop => "TENSOR_UNOP",
-            Opcode::TensorMatmul => "TENSOR_MATMUL",
-            Opcode::TensorReduce => "TENSOR_REDUCE",
-            Opcode::TensorReshape => "TENSOR_RESHAPE",
-            Opcode::TensorTranspose => "TENSOR_TRANSPOSE",
-            Opcode::TensorSlice => "TENSOR_SLICE",
+            // Tensor + GPU (0xF0-0xFF) — Phase 4: legacy
+            // TensorNew/Binop/Unop/Matmul/Reduce/Reshape/Transpose/
+            // Slice mnemonics deleted along with their Opcode bytes.
             Opcode::GpuExtended => "GPU_EXTENDED",
             Opcode::GpuSync => "GPU_SYNC",
             Opcode::GpuMemcpy => "GPU_MEMCPY",
@@ -10927,59 +10915,19 @@ pub enum Instruction {
     },
 
     // ========================================================================
-    // Tensor Operations (simplified - full tensor ops have more variants)
+    // Tensor Operations
     // ========================================================================
-    /// Create tensor.
-    TensorNew {
-        /// Destination register for new tensor.
-        dst: Reg,
-        /// Data type of tensor elements.
-        dtype: TensorDType,
-        /// Registers containing dimension sizes.
-        dims: Vec<Reg>,
-    },
-    /// Tensor binary operation.
-    TensorBinop {
-        /// Binary operation type.
-        op: TensorBinaryOp,
-        /// Destination register for result tensor.
-        dst: Reg,
-        /// Left operand tensor register.
-        a: Reg,
-        /// Right operand tensor register.
-        b: Reg,
-    },
-    /// Tensor unary operation.
-    TensorUnop {
-        /// Unary operation type.
-        op: TensorUnaryOp,
-        /// Destination register for result tensor.
-        dst: Reg,
-        /// Source tensor register.
-        src: Reg,
-    },
-    /// Matrix multiplication.
-    TensorMatmul {
-        /// Destination register for result tensor.
-        dst: Reg,
-        /// Left matrix tensor register.
-        a: Reg,
-        /// Right matrix tensor register.
-        b: Reg,
-    },
-    /// Tensor reduction.
-    TensorReduce {
-        /// Reduction operation type.
-        op: TensorReduceOp,
-        /// Destination register for result tensor.
-        dst: Reg,
-        /// Source tensor register.
-        src: Reg,
-        /// Axes along which to reduce.
-        axes: Vec<u8>,
-        /// Whether to keep reduced dimensions as size 1.
-        keepdim: bool,
-    },
+    //
+    // Phase 4 (sub-opcode refactor close-out, 2026-05-02): the legacy
+    // top-level `TensorNew/Binop/Unop/Matmul/Reduce/Reshape/Transpose/
+    // Slice/Full/FromSlice` Instruction variants were deleted along
+    // with their Opcode bytes (0xF0-0xF7, 0xFE, 0xFF).  All tensor
+    // operations now flow through `Instruction::TensorExtended` (0xFC)
+    // + `TensorSubOpcode::*FromArgs` — see codegen path
+    // `emit_intrinsic_tensor_extended` which is the single canonical
+    // emission point.  Higher-level tensor ops (FlashAttention,
+    // RmsNorm, etc.) that retained dedicated Instruction variants
+    // because they encode richer operand structure are kept below.
     /// Flash attention.
     TensorFlashAttention {
         /// Destination register for attention output tensor.
@@ -11656,28 +11604,8 @@ pub enum Instruction {
     // ========================================================================
     // Additional Tensor Operations
     // ========================================================================
-    /// Create tensor filled with constant value.
-    TensorFull {
-        /// Destination register.
-        dst: Reg,
-        /// Fill value register.
-        value: Reg,
-        /// Shape registers.
-        shape: Vec<Reg>,
-        /// Data type.
-        dtype: TensorDType,
-    },
-    /// Create tensor from slice of values.
-    TensorFromSlice {
-        /// Destination register.
-        dst: Reg,
-        /// Source data register (list or array).
-        data: Reg,
-        /// Shape registers.
-        shape: Vec<Reg>,
-        /// Data type.
-        dtype: TensorDType,
-    },
+    // Phase 4: TensorFull / TensorFromSlice — see header comment;
+    // routed through `TensorExtended` + FillFromArgs / FromSliceArgs.
     /// Create range tensor [start, end) with step.
     TensorArange {
         /// Destination register.
@@ -11729,35 +11657,9 @@ pub enum Instruction {
         /// Data type.
         dtype: TensorDType,
     },
-    /// Reshape tensor (view if contiguous).
-    TensorReshape {
-        /// Destination register.
-        dst: Reg,
-        /// Source tensor register.
-        src: Reg,
-        /// New shape registers.
-        shape: Vec<Reg>,
-    },
-    /// Transpose tensor axes.
-    TensorTranspose {
-        /// Destination register.
-        dst: Reg,
-        /// Source tensor register.
-        src: Reg,
-        /// Permutation of axes (empty = reverse).
-        perm: Vec<u8>,
-    },
-    /// Slice tensor along dimensions.
-    TensorSlice {
-        /// Destination register.
-        dst: Reg,
-        /// Source tensor register.
-        src: Reg,
-        /// Start indices registers.
-        starts: Vec<Reg>,
-        /// End indices registers.
-        ends: Vec<Reg>,
-    },
+    // Phase 4: TensorReshape / TensorTranspose / TensorSlice — see
+    // header comment; routed through `TensorExtended` + ReshapeFromArgs
+    // / TransposeFromArgs / SliceFromArgs.
     /// Index selection.
     TensorIndex {
         /// Destination register.
@@ -13393,6 +13295,15 @@ mod tests {
     #[test]
     fn test_opcode_roundtrip() {
         for byte in 0..=255u8 {
+            // Phase 4: bytes 0xF0-0xF7, 0xFE, 0xFF were reclaimed
+            // (legacy Tensor* opcodes deleted).  `from_byte` maps
+            // them to `Unreachable` rather than transmuting into an
+            // invalid discriminant; the roundtrip on those bytes is
+            // therefore lossy by design and excluded.
+            if matches!(byte, 0xF0..=0xF7 | 0xFE | 0xFF) {
+                assert_eq!(Opcode::from_byte(byte), Opcode::Unreachable);
+                continue;
+            }
             let op = Opcode::from_byte(byte);
             assert_eq!(op.to_byte(), byte);
         }
@@ -13453,11 +13364,10 @@ mod tests {
         assert_eq!(Opcode::Deref.to_byte(), 0x72);
         assert_eq!(Opcode::ChkRef.to_byte(), 0x74);
 
-        // Tensor (0xF0-0xFF)
-        assert_eq!(Opcode::TensorNew.to_byte(), 0xF0);
-        assert_eq!(Opcode::TensorBinop.to_byte(), 0xF1);
-        assert_eq!(Opcode::TensorMatmul.to_byte(), 0xF3);
-        assert_eq!(Opcode::TensorReduce.to_byte(), 0xF4);
+        // Tensor (0xF0-0xFF) — Phase 4: 0xF0-0xF7 + 0xFE/0xFF reclaimed
+        // (legacy TensorNew/Binop/Unop/Matmul/Reduce/Reshape/Transpose/
+        // Slice/Full/FromSlice deleted).  Remaining live byte assignments
+        // assert below.
 
         // GPU (0xF8-0xFB)
         assert_eq!(Opcode::GpuExtended.to_byte(), 0xF8);
@@ -13470,7 +13380,6 @@ mod tests {
     fn test_opcode_from_byte() {
         assert_eq!(Opcode::from_byte(0x00), Opcode::Mov);
         assert_eq!(Opcode::from_byte(0x50), Opcode::Jmp);
-        assert_eq!(Opcode::from_byte(0xF0), Opcode::TensorNew);
         assert_eq!(Opcode::from_byte(0xFC), Opcode::TensorExtended);
     }
 
@@ -13485,7 +13394,6 @@ mod tests {
         assert_eq!(Opcode::JmpIf.mnemonic(), "JMP_IF");
         assert_eq!(Opcode::Ret.mnemonic(), "RET");
         assert_eq!(Opcode::Call.mnemonic(), "CALL");
-        assert_eq!(Opcode::TensorMatmul.mnemonic(), "TENSOR_MATMUL");
         assert_eq!(Opcode::GpuExtended.mnemonic(), "GPU_EXTENDED");
         assert_eq!(Opcode::GradBegin.mnemonic(), "GRAD_BEGIN");
         assert_eq!(Opcode::CtxGet.mnemonic(), "CTX_GET");
@@ -13546,13 +13454,9 @@ mod tests {
         assert!(!Opcode::Ret.is_call());
         assert!(!Opcode::Jmp.is_call());
 
-        // Tensor instructions (0xD0-0xFF)
-        assert!(Opcode::TensorNew.is_tensor());
-        assert!(Opcode::TensorFull.is_tensor());
-        assert!(Opcode::TensorReshape.is_tensor());
-        assert!(Opcode::TensorBinop.is_tensor());
-        assert!(Opcode::TensorMatmul.is_tensor());
-        assert!(Opcode::TensorReduce.is_tensor());
+        // Tensor instructions (0xD0-0xFF) — Phase 4: legacy
+        // TensorNew/Full/Reshape/Binop/Matmul/Reduce direct opcode
+        // assertions deleted along with the variants.
         assert!(Opcode::GpuExtended.is_tensor()); // GPU ops are in tensor range
         assert!(Opcode::TensorExtended.is_tensor());
         assert!(!Opcode::Call.is_tensor());
@@ -13563,7 +13467,6 @@ mod tests {
         assert!(Opcode::GpuSync.is_gpu());
         assert!(Opcode::GpuMemcpy.is_gpu());
         assert!(Opcode::GpuAlloc.is_gpu());
-        assert!(!Opcode::TensorMatmul.is_gpu());
         assert!(!Opcode::Call.is_gpu());
     }
 
@@ -14856,103 +14759,10 @@ mod tests {
     // Instruction Variant Tests - Tensor Operations
     // ========================================================================
 
-    #[test]
-    fn test_instruction_tensor_new() {
-        let instr = Instruction::TensorNew {
-            dst: Reg(0),
-            dtype: TensorDType::F32,
-            dims: vec![Reg(1), Reg(2), Reg(3)],
-        };
-
-        if let Instruction::TensorNew { dst, dtype, dims } = instr {
-            assert_eq!(dst, Reg(0));
-            assert_eq!(dtype, TensorDType::F32);
-            assert_eq!(dims, vec![Reg(1), Reg(2), Reg(3)]);
-        } else {
-            panic!("Expected TensorNew instruction");
-        }
-    }
-
-    #[test]
-    fn test_instruction_tensor_binop() {
-        let instr = Instruction::TensorBinop {
-            op: TensorBinaryOp::Add,
-            dst: Reg(0),
-            a: Reg(1),
-            b: Reg(2),
-        };
-
-        if let Instruction::TensorBinop { op, dst, a, b } = instr {
-            assert_eq!(op, TensorBinaryOp::Add);
-            assert_eq!(dst, Reg(0));
-            assert_eq!(a, Reg(1));
-            assert_eq!(b, Reg(2));
-        } else {
-            panic!("Expected TensorBinop instruction");
-        }
-    }
-
-    #[test]
-    fn test_instruction_tensor_unop() {
-        let instr = Instruction::TensorUnop {
-            op: TensorUnaryOp::Relu,
-            dst: Reg(0),
-            src: Reg(1),
-        };
-
-        if let Instruction::TensorUnop { op, dst, src } = instr {
-            assert_eq!(op, TensorUnaryOp::Relu);
-            assert_eq!(dst, Reg(0));
-            assert_eq!(src, Reg(1));
-        } else {
-            panic!("Expected TensorUnop instruction");
-        }
-    }
-
-    #[test]
-    fn test_instruction_tensor_matmul() {
-        let instr = Instruction::TensorMatmul {
-            dst: Reg(0),
-            a: Reg(1),
-            b: Reg(2),
-        };
-
-        if let Instruction::TensorMatmul { dst, a, b } = instr {
-            assert_eq!(dst, Reg(0));
-            assert_eq!(a, Reg(1));
-            assert_eq!(b, Reg(2));
-        } else {
-            panic!("Expected TensorMatmul instruction");
-        }
-    }
-
-    #[test]
-    fn test_instruction_tensor_reduce() {
-        let instr = Instruction::TensorReduce {
-            op: TensorReduceOp::Sum,
-            dst: Reg(0),
-            src: Reg(1),
-            axes: vec![0, 1],
-            keepdim: true,
-        };
-
-        if let Instruction::TensorReduce {
-            op,
-            dst,
-            src,
-            axes,
-            keepdim,
-        } = instr
-        {
-            assert_eq!(op, TensorReduceOp::Sum);
-            assert_eq!(dst, Reg(0));
-            assert_eq!(src, Reg(1));
-            assert_eq!(axes, vec![0, 1]);
-            assert!(keepdim);
-        } else {
-            panic!("Expected TensorReduce instruction");
-        }
-    }
+    // Phase 4: per-variant Instruction tests for the deleted legacy
+    // TensorNew/Binop/Unop/Matmul/Reduce variants removed.  Coverage
+    // for the canonical `TensorExtended` form lives in the codegen
+    // tests under `crates/verum_vbc/src/codegen/`.
 
     #[test]
     fn test_instruction_tensor_flash_attention() {

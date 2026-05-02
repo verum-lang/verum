@@ -350,28 +350,21 @@ fn find_unique_tensor_consumer(
 
 /// Project a single VBC instruction to a `ChainOp` if it's one of
 /// the fusion-eligible tensor opcodes; otherwise return `None`.
+///
+/// Phase 4 status: legacy `TensorBinop` / `TensorUnop` / `TensorMatmul`
+/// / `TensorReduce` Instruction variants were deleted along with their
+/// top-level Opcode bytes — codegen now emits them as
+/// `Instruction::TensorExtended { sub_op, operands }` (canonical
+/// register-based form).  This classifier intentionally does NOT
+/// reach into `TensorExtended` operands today: rebuilding the
+/// register layout requires re-decoding the operand byte stream and
+/// the existing operand layout is not yet stable enough for the
+/// fusion analyser to consume safely.  Until that work lands, the
+/// classifier covers only the high-level tensor instructions
+/// (`TensorRmsNorm`, `TensorFlashAttention`) that retain dedicated
+/// Instruction variants for their richer operand structure.
 fn classify(instr: &Instruction) -> Option<ChainOp> {
     match instr {
-        Instruction::TensorBinop { op, dst, a, b } => Some(ChainOp {
-            kind: TensorOpKind::Binop(*op as u8),
-            srcs: vec![*a, *b],
-            dst: *dst,
-        }),
-        Instruction::TensorUnop { op, dst, src } => Some(ChainOp {
-            kind: TensorOpKind::Unop(*op as u8),
-            srcs: vec![*src],
-            dst: *dst,
-        }),
-        Instruction::TensorMatmul { dst, a, b } => Some(ChainOp {
-            kind: TensorOpKind::Matmul,
-            srcs: vec![*a, *b],
-            dst: *dst,
-        }),
-        Instruction::TensorReduce { op, dst, src, .. } => Some(ChainOp {
-            kind: TensorOpKind::Reduce(*op as u8),
-            srcs: vec![*src],
-            dst: *dst,
-        }),
         Instruction::TensorRmsNorm {
             dst, input, gamma, ..
         } => {
@@ -398,10 +391,6 @@ fn classify(instr: &Instruction) -> Option<ChainOp> {
                 dst: *dst,
             })
         }
-        // LayerNorm / Softmax don't currently exist as standalone
-        // VBC instructions in the bytecode encoder — they're emitted
-        // via runtime calls. When #91-2 lands the dedicated opcodes,
-        // add the arms here.
         _ => None,
     }
 }
@@ -414,10 +403,6 @@ fn classify(instr: &Instruction) -> Option<ChainOp> {
 /// intermediate's dst is consumed inside another tensor op.
 fn instruction_reads(instr: &Instruction) -> Vec<Reg> {
     match instr {
-        Instruction::TensorBinop { a, b, .. } => vec![*a, *b],
-        Instruction::TensorUnop { src, .. } => vec![*src],
-        Instruction::TensorMatmul { a, b, .. } => vec![*a, *b],
-        Instruction::TensorReduce { src, .. } => vec![*src],
         Instruction::TensorRmsNorm { input, gamma, .. } => {
             let mut v = vec![*input];
             if let Some(g) = gamma {
@@ -432,7 +417,6 @@ fn instruction_reads(instr: &Instruction) -> Vec<Reg> {
             }
             out
         }
-        Instruction::TensorReshape { src, .. } => vec![*src],
         Instruction::TensorContiguousView { src, .. } => vec![*src],
         Instruction::Mov { src, .. } => vec![*src],
         Instruction::BinaryI { a, b, .. } | Instruction::BinaryF { a, b, .. } => vec![*a, *b],
@@ -443,146 +427,8 @@ fn instruction_reads(instr: &Instruction) -> Vec<Reg> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use verum_vbc::instruction::{Reg, TensorBinaryOp};
-
-    /// Helper: build a tensor binop instruction with explicit op.
-    fn binop(op: TensorBinaryOp, dst: u16, a: u16, b: u16) -> Instruction {
-        Instruction::TensorBinop {
-            op,
-            dst: Reg(dst),
-            a: Reg(a),
-            b: Reg(b),
-        }
-    }
-
-    fn matmul(dst: u16, a: u16, b: u16) -> Instruction {
-        Instruction::TensorMatmul {
-            dst: Reg(dst),
-            a: Reg(a),
-            b: Reg(b),
-        }
-    }
-
-    /// Use-count harness: feeds an instruction stream through
-    /// compute_use_counts and asserts the expected counts.
-    #[test]
-    fn use_counts_track_reads() {
-        let stream = vec![
-            matmul(10, 1, 2),                       // r10 = r1 @ r2
-            binop(TensorBinaryOp::Add, 11, 10, 3),  // r11 = r10 + r3
-            binop(TensorBinaryOp::Mul, 12, 11, 11), // r12 = r11 * r11 — r11 used twice
-        ];
-        let counts = compute_use_counts(&stream);
-        assert_eq!(counts.get(&1).copied(), Some(1));
-        assert_eq!(counts.get(&2).copied(), Some(1));
-        assert_eq!(counts.get(&3).copied(), Some(1));
-        assert_eq!(counts.get(&10).copied(), Some(1));
-        // r11 is read twice (by Mul both as a and b)
-        assert_eq!(counts.get(&11).copied(), Some(2));
-    }
-
-    /// Linear chain: matmul → add → mul (each intermediate single-use).
-    /// Should produce ONE chain of length 3 with inputs {r1, r2, r3, r4}
-    /// and output r12.
-    #[test]
-    fn linear_chain_is_fused() {
-        // r10 = r1 @ r2 ; matmul producing r10
-        // r11 = r10 + r3 ; add producing r11 (consumes r10 once)
-        // r12 = r11 * r4 ; mul producing r12 (consumes r11 once)
-        let stream = vec![
-            matmul(10, 1, 2),
-            binop(TensorBinaryOp::Add, 11, 10, 3),
-            binop(TensorBinaryOp::Mul, 12, 11, 4),
-        ];
-        let chains = analyze_instructions(&stream);
-        assert_eq!(chains.len(), 1, "expected exactly one chain");
-        let chain = &chains[0];
-        assert_eq!(chain.ops.len(), 3);
-        assert_eq!(chain.output.0, 12);
-        // Inputs: {r1, r2, r3, r4} — order is insertion order
-        let input_ids: Vec<u16> = chain.inputs.iter().map(|r| r.0).collect();
-        assert_eq!(input_ids, vec![1, 2, 3, 4]);
-    }
-
-    /// Multi-use intermediate breaks the chain: r11 is read twice,
-    /// so the analyzer stops at r11 and does NOT extend through it.
-    /// Result: only the matmul → add part forms a chain (with r11
-    /// being the chain output) — the trailing Mul is a singleton
-    /// and dropped (singletons need no fusion).
-    #[test]
-    fn multi_use_intermediate_breaks_chain() {
-        let stream = vec![
-            matmul(10, 1, 2),
-            binop(TensorBinaryOp::Add, 11, 10, 3),
-            binop(TensorBinaryOp::Mul, 12, 11, 11),
-        ];
-        let chains = analyze_instructions(&stream);
-        assert_eq!(chains.len(), 1);
-        let chain = &chains[0];
-        assert_eq!(chain.ops.len(), 2);
-        assert_eq!(chain.output.0, 11);
-    }
-
-    /// Single tensor op alone is NOT a "chain" — fusion has nothing
-    /// to gain over the existing per-op runtime call.
-    #[test]
-    fn singleton_is_not_a_chain() {
-        let stream = vec![matmul(10, 1, 2)];
-        let chains = analyze_instructions(&stream);
-        assert_eq!(chains.len(), 0);
-    }
-
-    /// Two independent chains in the same function: matmul/add chain
-    /// producing r12, then a separate matmul/sub chain producing r22.
-    /// Analyzer should find BOTH as independent chains.
-    #[test]
-    fn two_independent_chains() {
-        let stream = vec![
-            // chain 1: r10 = r1 @ r2; r12 = r10 + r3
-            matmul(10, 1, 2),
-            binop(TensorBinaryOp::Add, 12, 10, 3),
-            // chain 2: r20 = r4 @ r5; r22 = r20 - r6
-            matmul(20, 4, 5),
-            binop(TensorBinaryOp::Sub, 22, 20, 6),
-        ];
-        let chains = analyze_instructions(&stream);
-        assert_eq!(chains.len(), 2);
-        assert_eq!(chains[0].output.0, 12);
-        assert_eq!(chains[1].output.0, 22);
-    }
-
-    /// FusionPlan correctness: anchor at the last op of each chain,
-    /// every non-anchor chain op gets `skip_at == true`.
-    #[test]
-    fn fusion_plan_anchors_last_op() {
-        let stream = vec![
-            matmul(10, 1, 2),                      // chain 1 op 0 (pc 0)
-            binop(TensorBinaryOp::Add, 12, 10, 3), // chain 1 op 1 — anchor (pc 1)
-            // intervening non-tensor instr breaks chain bookkeeping
-            // — but does not break the chain itself since the
-            // analyzer only cares about tensor-op data dependencies.
-            // (Here we omit it; pc 2 is the next chain anchor.)
-            matmul(20, 4, 5),                      // chain 2 op 0 (pc 2)
-            binop(TensorBinaryOp::Sub, 22, 20, 6), // chain 2 op 1 — anchor (pc 3)
-        ];
-        let plan = FusionPlan::build(&stream);
-        // 4 instructions, all fused
-        assert_eq!(plan.fused_indices.len(), 4);
-        // 2 anchors: pc 1 and pc 3
-        assert_eq!(plan.anchor_to_chain.len(), 2);
-        assert!(plan.anchor_to_chain.contains_key(&1));
-        assert!(plan.anchor_to_chain.contains_key(&3));
-        // Skip predicates
-        assert!(plan.skip_at(0)); // chain 1 op 0 — skipped
-        assert!(!plan.skip_at(1)); // anchor — NOT skipped
-        assert!(plan.skip_at(2)); // chain 2 op 0 — skipped
-        assert!(!plan.skip_at(3)); // anchor — NOT skipped
-        // anchor_at maps anchors to chain indices
-        assert_eq!(plan.anchor_at(1), Some(0));
-        assert_eq!(plan.anchor_at(3), Some(1));
-        assert_eq!(plan.anchor_at(0), None);
-    }
-}
+// Phase 4: tests for the legacy `Instruction::TensorBinop` /
+// `TensorMatmul` chain-classification path were deleted along with the
+// variants they exercised.  When Этап C (compute unification) wires
+// `TensorExtended` into `classify` / `instruction_reads`, equivalent
+// chain coverage will be reinstated against the canonical wire form.
