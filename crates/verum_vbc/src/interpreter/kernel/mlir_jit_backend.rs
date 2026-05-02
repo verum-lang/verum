@@ -98,6 +98,10 @@ struct JitKey {
 enum KernelKind {
     Binop(TensorBinaryOp),
     Unop(TensorUnaryOp),
+    /// Scalar triple-loop matmul; `M`/`K`/`N` are runtime args, the
+    /// kernel itself is dtype-only-parametrised (one cached engine
+    /// per float dtype).
+    Matmul,
 }
 
 /// Wrapper that encapsulates the unsafe `Send + Sync` claim for an
@@ -398,9 +402,65 @@ impl Backend for MlirJitBackend {
         None
     }
 
-    fn matmul(&self, _a: &TensorHandle, _b: &TensorHandle) -> Option<TensorHandle> {
-        // Шаг 4 wiring point.
-        None
+    fn matmul(&self, a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
+        // Шаг 4a: scalar triple-loop matmul JIT for F32/F64 + 2D inputs.
+        // The kernel computes `out[i,j] = sum_k a[i,k] * b[k,j]` over
+        // row-major arrays passed as `!llvm.ptr` + (M, K, N) i64 shape
+        // args.  LLVM's auto-vectoriser at opt_level=2 hoists the
+        // accumulator into a register and vectorises the K loop with
+        // FMA chains — competitive with a plain BLAS kernel for small
+        // / medium matrices.  Шаг 4b will swap this for `linalg.matmul`
+        // via the memref ABI and unlock MLIR's tile-and-fuse machinery,
+        // delivering cuBLAS / MKL-class throughput on large matrices.
+        if a.dtype != b.dtype {
+            return None;
+        }
+        if !is_float_dtype(a.dtype) {
+            return None;
+        }
+        if a.ndim != 2 || b.ndim != 2 {
+            return None;
+        }
+        let m = a.shape[0];
+        let k_a = a.shape[1];
+        let k_b = b.shape[0];
+        let n = b.shape[1];
+        if k_a != k_b {
+            return None;
+        }
+        if m == 0 || n == 0 {
+            return Some(TensorHandle::zeros(&[m, n], a.dtype)?);
+        }
+
+        let out = TensorHandle::zeros(&[m, n], a.dtype)?;
+        let holder = self.get_or_compile(KernelKind::Matmul, a.dtype)?;
+
+        let a_data = a.data.as_ref()?;
+        let b_data = b.data.as_ref()?;
+        let out_data = out.data.as_ref()?;
+        let mut a_ptr: *const u8 = unsafe { (*a_data.as_ptr()).as_ptr() };
+        let mut b_ptr: *const u8 = unsafe { (*b_data.as_ptr()).as_ptr() };
+        let mut out_ptr: *mut u8 = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
+        let mut m_arg: i64 = m as i64;
+        let mut k_arg: i64 = k_a as i64;
+        let mut n_arg: i64 = n as i64;
+        let mut packed_args: [*mut (); 6] = [
+            (&mut a_ptr) as *mut _ as *mut (),
+            (&mut b_ptr) as *mut _ as *mut (),
+            (&mut out_ptr) as *mut _ as *mut (),
+            (&mut m_arg) as *mut _ as *mut (),
+            (&mut k_arg) as *mut _ as *mut (),
+            (&mut n_arg) as *mut _ as *mut (),
+        ];
+        let result = unsafe { holder.engine.invoke_packed("kernel", &mut packed_args) };
+        if result.is_err() {
+            tracing::warn!(
+                "MLIR-JIT matmul invocation failed for dtype={:?}; falling back to CpuBackend",
+                a.dtype
+            );
+            return None;
+        }
+        Some(out)
     }
 
     fn memory_info(&self) -> (usize, usize) {
@@ -584,6 +644,86 @@ fn build_binop_kernel_text(op: TensorBinaryOp, dtype: DType) -> Option<String> {
     ))
 }
 
+/// Build the MLIR text for a row-major 2D matmul kernel.
+///
+/// Signature (after `convert-to-llvm`):
+///   `void kernel(*const T a, *const T b, *mut T out, i64 m, i64 k, i64 n)`
+///
+/// where `a` is `(m, k)`, `b` is `(k, n)`, `out` is `(m, n)`, all
+/// row-major contiguous.  The kernel is a textbook `ijk` loop nest
+/// that holds the accumulator in a block-arg-carried register; LLVM
+/// at `opt_level = 2` auto-vectorises the inner K loop with FMA
+/// chains on architectures that support it.
+///
+/// Шаг 4b will replace this with a `linalg.matmul` op that triggers
+/// MLIR's tile-and-fuse + vectorise scheduler — the path that closes
+/// the gap to cuBLAS / MKL throughput on large matrices.
+fn build_matmul_kernel_text(dtype: DType) -> Option<String> {
+    let elem_ty = mlir_elem_type(dtype)?;
+    if !is_float_dtype(dtype) {
+        return None;
+    }
+    let zero_lit = if dtype == DType::F32 { "0.0 : f32" } else { "0.0 : f64" };
+    Some(format!(
+        r#"module {{
+  func.func @kernel(
+    %a: !llvm.ptr,
+    %b: !llvm.ptr,
+    %out: !llvm.ptr,
+    %m: i64,
+    %k: i64,
+    %n: i64
+  ) attributes {{ llvm.emit_c_interface }} {{
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %f0 = arith.constant {zero_lit}
+    cf.br ^outer(%c0 : i64)
+  ^outer(%i: i64):
+    %i_done = arith.cmpi sge, %i, %m : i64
+    cf.cond_br %i_done, ^exit, ^middle_init
+  ^middle_init:
+    cf.br ^middle(%c0 : i64)
+  ^middle(%j: i64):
+    %j_done = arith.cmpi sge, %j, %n : i64
+    cf.cond_br %j_done, ^outer_next, ^inner_init
+  ^inner_init:
+    cf.br ^inner(%c0, %f0 : i64, {elem})
+  ^inner(%kk: i64, %sum: {elem}):
+    %kk_done = arith.cmpi sge, %kk, %k : i64
+    cf.cond_br %kk_done, ^store, ^inner_body
+  ^inner_body:
+    %ik = arith.muli %i, %k : i64
+    %a_idx = arith.addi %ik, %kk : i64
+    %ap = llvm.getelementptr inbounds %a[%a_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+    %va = llvm.load %ap : !llvm.ptr -> {elem}
+    %kn = arith.muli %kk, %n : i64
+    %b_idx = arith.addi %kn, %j : i64
+    %bp = llvm.getelementptr inbounds %b[%b_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+    %vb = llvm.load %bp : !llvm.ptr -> {elem}
+    %prod = arith.mulf %va, %vb : {elem}
+    %new_sum = arith.addf %sum, %prod : {elem}
+    %kk_next = arith.addi %kk, %c1 : i64
+    cf.br ^inner(%kk_next, %new_sum : i64, {elem})
+  ^store:
+    %in = arith.muli %i, %n : i64
+    %out_idx = arith.addi %in, %j : i64
+    %op = llvm.getelementptr inbounds %out[%out_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+    llvm.store %sum, %op : {elem}, !llvm.ptr
+    %j_next = arith.addi %j, %c1 : i64
+    cf.br ^middle(%j_next : i64)
+  ^outer_next:
+    %i_next = arith.addi %i, %c1 : i64
+    cf.br ^outer(%i_next : i64)
+  ^exit:
+    return
+  }}
+}}
+"#,
+        elem = elem_ty,
+        zero_lit = zero_lit,
+    ))
+}
+
 fn build_unop_kernel_text(op: TensorUnaryOp, dtype: DType) -> Option<String> {
     let elem_ty = mlir_elem_type(dtype)?;
     let arith = unop_arith_op(op, dtype)?;
@@ -631,6 +771,7 @@ fn compile_kernel(
     let text = match kind {
         KernelKind::Binop(op) => build_binop_kernel_text(op, dtype)?,
         KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
+        KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
     };
     let _location = Location::unknown(context);
     let mut module = match Module::parse(context, &text) {
@@ -839,16 +980,95 @@ mod tests {
     }
 
     #[test]
-    fn reduce_matmul_still_return_none() {
-        // Шагов 4/5 contract: until they land, reduce/matmul return
-        // None so the dispatcher falls through to `CpuBackend`.
-        // Unop has graduated from this pin (now wired in Шаг 3 — see
-        // the dedicated `unop_*_executes_correctly` tests below).
+    fn reduce_still_returns_none() {
+        // Шаг 5 contract: reduce returns None so the dispatcher
+        // falls through to `CpuBackend`.  Matmul has graduated from
+        // this pin (now wired in Шаг 4 — see `matmul_*` tests below).
         let backend = MlirJitBackend::new();
         let a = TensorHandle::zeros(&[2], DType::F32).unwrap();
-        let b = TensorHandle::zeros(&[2], DType::F32).unwrap();
         assert!(backend.reduce(&a, TensorReduceOp::Sum, None).is_none());
+    }
+
+    #[test]
+    fn matmul_falls_through_for_non_2d() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        let b = TensorHandle::zeros(&[4], DType::F32).unwrap();
         assert!(backend.matmul(&a, &b).is_none());
+    }
+
+    #[test]
+    fn matmul_falls_through_for_int() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[2, 2], DType::I32).unwrap();
+        let b = TensorHandle::zeros(&[2, 2], DType::I32).unwrap();
+        assert!(backend.matmul(&a, &b).is_none());
+    }
+
+    #[test]
+    fn matmul_falls_through_for_shape_mismatch() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[2, 3], DType::F32).unwrap();
+        let b = TensorHandle::zeros(&[4, 2], DType::F32).unwrap();
+        assert!(backend.matmul(&a, &b).is_none());
+    }
+
+    #[test]
+    fn matmul_f32_2x3_times_3x2() {
+        let backend = MlirJitBackend::new();
+        // a = [[1,2,3],[4,5,6]]  (2×3)
+        // b = [[7,8],[9,10],[11,12]]  (3×2)
+        // out = a @ b = [[58, 64], [139, 154]]
+        let a = TensorHandle::zeros(&[2, 3], DType::F32).unwrap();
+        let b = TensorHandle::zeros(&[3, 2], DType::F32).unwrap();
+        fill_f32(&a, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        fill_f32(&b, &[7.0, 8.0, 9.0, 10.0, 11.0, 12.0]);
+        let out = backend.matmul(&a, &b).expect("JIT matmul");
+        let r = read_f32(&out, 4);
+        assert!((r[0] - 58.0).abs() < 1e-4, "out[0,0] = {}", r[0]);
+        assert!((r[1] - 64.0).abs() < 1e-4, "out[0,1] = {}", r[1]);
+        assert!((r[2] - 139.0).abs() < 1e-4, "out[1,0] = {}", r[2]);
+        assert!((r[3] - 154.0).abs() < 1e-4, "out[1,1] = {}", r[3]);
+    }
+
+    #[test]
+    fn matmul_f32_identity_round_trip() {
+        let backend = MlirJitBackend::new();
+        // a = identity 3×3, b = arbitrary 3×2 → out == b
+        let a = TensorHandle::zeros(&[3, 3], DType::F32).unwrap();
+        let b = TensorHandle::zeros(&[3, 2], DType::F32).unwrap();
+        fill_f32(&a, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+        fill_f32(&b, &[2.0, 3.0, 5.0, 7.0, 11.0, 13.0]);
+        let out = backend.matmul(&a, &b).unwrap();
+        assert_eq!(read_f32(&out, 6), vec![2.0, 3.0, 5.0, 7.0, 11.0, 13.0]);
+    }
+
+    #[test]
+    fn matmul_f64_2x2() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[2, 2], DType::F64).unwrap();
+        let b = TensorHandle::zeros(&[2, 2], DType::F64).unwrap();
+        unsafe {
+            let pa = (*a.data.as_ref().unwrap().as_ptr()).as_mut_ptr() as *mut f64;
+            let pb = (*b.data.as_ref().unwrap().as_ptr()).as_mut_ptr() as *mut f64;
+            *pa.add(0) = 1.0;
+            *pa.add(1) = 2.0;
+            *pa.add(2) = 3.0;
+            *pa.add(3) = 4.0;
+            *pb.add(0) = 5.0;
+            *pb.add(1) = 6.0;
+            *pb.add(2) = 7.0;
+            *pb.add(3) = 8.0;
+        }
+        // [[1,2],[3,4]] @ [[5,6],[7,8]] = [[19,22],[43,50]]
+        let out = backend.matmul(&a, &b).unwrap();
+        unsafe {
+            let p = (*out.data.as_ref().unwrap().as_ptr()).as_ptr() as *const f64;
+            assert!((*p.add(0) - 19.0).abs() < 1e-12);
+            assert!((*p.add(1) - 22.0).abs() < 1e-12);
+            assert!((*p.add(2) - 43.0).abs() < 1e-12);
+            assert!((*p.add(3) - 50.0).abs() < 1e-12);
+        }
     }
 
     // -----------------------------------------------------------------
