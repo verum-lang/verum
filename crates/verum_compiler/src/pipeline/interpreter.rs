@@ -837,22 +837,35 @@ impl<'s> CompilationPipeline<'s> {
             .record_phase_metrics("Code Generation", t0.elapsed(), 0);
         drop(_bc_codegen);
 
-        // Phase 6b: GPU compilation (MLIR path) — auto-triggered by @device(gpu) detection
-        // Runs alongside CPU compilation to produce GPU kernel binaries.
+        // Phase 6b: GPU compilation (MLIR path) — auto-triggered by
+        // `@device(gpu)` detection.  Runs alongside CPU compilation to
+        // produce GPU kernel binaries.
+        //
+
+        // Architectural invariant: when GPU compilation is requested
+        // (annotation present + target supports it), failure is FATAL.
+        // The previous fail-soft path ("CPU binary still valid") was
+        // silent miscompile: the CPU lowering of a `@device(gpu)`
+        // function references GPU-runtime symbols (`verum_gpu_launch`
+        // / kernel handles) that only Phase 6b populates — without
+        // GPU artifacts the binary links but segfaults at the first
+        // GPU call.  Fail-fast surfaces the issue at compile time.
         if self.session.options().has_gpu_kernels {
             info!("Auto-detected GPU kernels — running MLIR GPU compilation");
             let t0 = Instant::now();
-            match self.run_mlir_aot() {
-                Ok(gpu_binary) => {
-                    info!("GPU compilation produced: {}", gpu_binary.display());
-                    self.session
-                        .record_phase_metrics("GPU Compilation", t0.elapsed(), 0);
-                }
-                Err(e) => {
-                    // GPU compilation failure is non-fatal — CPU binary is still valid
-                    warn!("GPU compilation failed (CPU binary still valid): {}", e);
-                }
-            }
+            let gpu_binary = self.run_mlir_aot().map_err(|e| {
+                anyhow::anyhow!(
+                    "GPU compilation failed for @device(gpu) annotated code: {}. \
+                     The CPU binary alone would silently miscompile (missing GPU \
+                     runtime symbols at link time, or segfault at first GPU call). \
+                     Either fix the GPU lowering error, remove @device(gpu) \
+                     annotations, or pass --no-gpu to compile as CPU-only.",
+                    e
+                )
+            })?;
+            info!("GPU compilation produced: {}", gpu_binary.display());
+            self.session
+                .record_phase_metrics("GPU Compilation", t0.elapsed(), 0);
         }
 
         // Save incremental compilation cache for next build.
