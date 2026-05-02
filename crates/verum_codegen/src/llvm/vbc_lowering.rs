@@ -822,6 +822,16 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         &self.module
     }
 
+    /// Replace the LLVM module wholesale.  Used by `native_codegen`
+    /// to install a bitcode-roundtripped module before
+    /// `Module::run_passes` (#98) — fresh-parsed modules carry no
+    /// dirty analysis-manager / loop-info state that could trip
+    /// LoopInfoBase::verify SIGBUS during pass execution on
+    /// arity-collided modules.
+    pub fn replace_module(&mut self, new_module: Module<'ctx>) {
+        self.module = new_module;
+    }
+
     /// Get the configuration.
     pub fn config(&self) -> &LoweringConfig {
         &self.config
@@ -3746,7 +3756,16 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         let num_blocks = block_starts.len();
 
-        let total_deleted = cleanup_orphan_blocks_in_function(llvm_fn, ctx.builder());
+        // **#98 diagnostic**: VERUM_SKIP_ORPHAN_SWEEP=1 disables BOTH
+        // the per-function and module-wide orphan-block cleanup
+        // passes — used to bisect whether the deletions leave LLVM
+        // metadata in a state that crashes bitcode write / loop-pass
+        // pipelines.
+        let total_deleted = if std::env::var_os("VERUM_SKIP_ORPHAN_SWEEP").is_some() {
+            0
+        } else {
+            cleanup_orphan_blocks_in_function(llvm_fn, ctx.builder())
+        };
         if total_deleted > 0 && std::env::var_os("VERUM_TRACE_PASSES").is_some() {
             let fn_name = llvm_fn.get_name().to_string_lossy().to_string();
             eprintln!(
