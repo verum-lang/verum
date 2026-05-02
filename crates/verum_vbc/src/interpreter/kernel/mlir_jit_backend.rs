@@ -133,6 +133,12 @@ enum KernelKind {
     /// Full-tensor reduction (axis = None).  Sum/Prod/Max/Min wired
     /// in Шаг 5a; axis-specific reduction is Шаг 5b.
     Reduce(TensorReduceOp),
+    /// Full-tensor `Σ x²` (sum of squares) — primitive used by
+    /// `Var` (`E[X²] − E[X]²`), `Std` (`√Var`) and `Norm` (`√Σx²`).
+    /// Wired in Шаг 5c; the `op` field is unused but kept so
+    /// hashing of `KernelKind` discriminates this variant from the
+    /// closely-related `Reduce(Sum)` engine.
+    SumOfSquares,
 }
 
 /// Wrapper that encapsulates the unsafe `Send + Sync` claim for an
@@ -226,6 +232,126 @@ impl MlirJitBackend {
             context: Mutex::new(ContextHolder { context }),
             cache: DashMap::new(),
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Composition helpers for statistical reductions (Шаг 5c).
+    //
+    // Each helper takes a scalar `TensorHandle` (ndim = 0, numel = 1)
+    // and either mutates it in place or runs another cached kernel
+    // and returns a new scalar.  All operate on F32/F64 only.
+    // -----------------------------------------------------------------
+
+    fn invoke_sum_of_squares(&self, a: &TensorHandle) -> Option<TensorHandle> {
+        if !is_float_dtype(a.dtype) {
+            return None;
+        }
+        let n = a.numel;
+        if n == 0 {
+            return None;
+        }
+        let out = TensorHandle::zeros(&[], a.dtype)?;
+        let holder = self.get_or_compile(KernelKind::SumOfSquares, a.dtype)?;
+        let a_data = a.data.as_ref()?;
+        let out_data = out.data.as_ref()?;
+        let mut a_ptr: *const u8 = unsafe { (*a_data.as_ptr()).as_ptr() };
+        let mut out_ptr: *mut u8 = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
+        let mut n_arg: i64 = n as i64;
+        let mut packed: [*mut (); 3] = [
+            (&mut a_ptr) as *mut _ as *mut (),
+            (&mut out_ptr) as *mut _ as *mut (),
+            (&mut n_arg) as *mut _ as *mut (),
+        ];
+        let r = unsafe { holder.engine.invoke_packed("kernel", &mut packed) };
+        if r.is_err() {
+            return None;
+        }
+        Some(out)
+    }
+
+    fn scalar_div_by_n(&self, scalar: &TensorHandle, n: usize, dtype: DType) -> Option<()> {
+        if n == 0 {
+            return None;
+        }
+        let data = scalar.data.as_ref()?;
+        unsafe {
+            match dtype {
+                DType::F32 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f32;
+                    *p /= n as f32;
+                }
+                DType::F64 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f64;
+                    *p /= n as f64;
+                }
+                _ => return None,
+            }
+        }
+        Some(())
+    }
+
+    fn scalar_apply_sqrt(&self, scalar: &TensorHandle, dtype: DType) -> Option<()> {
+        let data = scalar.data.as_ref()?;
+        unsafe {
+            match dtype {
+                DType::F32 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f32;
+                    let v = *p;
+                    *p = if v < 0.0 { 0.0 } else { v.sqrt() };
+                }
+                DType::F64 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f64;
+                    let v = *p;
+                    *p = if v < 0.0 { 0.0 } else { v.sqrt() };
+                }
+                _ => return None,
+            }
+        }
+        Some(())
+    }
+
+    fn scalar_square_in_place(&self, scalar: &TensorHandle, dtype: DType) -> Option<()> {
+        let data = scalar.data.as_ref()?;
+        unsafe {
+            match dtype {
+                DType::F32 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f32;
+                    *p = (*p) * (*p);
+                }
+                DType::F64 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f64;
+                    *p = (*p) * (*p);
+                }
+                _ => return None,
+            }
+        }
+        Some(())
+    }
+
+    fn scalar_sub_in_place(
+        &self,
+        lhs: &TensorHandle,
+        rhs: &TensorHandle,
+        dtype: DType,
+    ) -> Option<()> {
+        let l_data = lhs.data.as_ref()?;
+        let r_data = rhs.data.as_ref()?;
+        unsafe {
+            match dtype {
+                DType::F32 => {
+                    let lp = (*l_data.as_ptr()).as_mut_ptr() as *mut f32;
+                    let rp = (*r_data.as_ptr()).as_ptr() as *const f32;
+                    *lp -= *rp;
+                }
+                DType::F64 => {
+                    let lp = (*l_data.as_ptr()).as_mut_ptr() as *mut f64;
+                    let rp = (*r_data.as_ptr()).as_ptr() as *const f64;
+                    *lp -= *rp;
+                }
+                _ => return None,
+            }
+        }
+        Some(())
     }
 
     /// Look up the cached engine for `(kind, dtype)` or compile and insert.
@@ -440,31 +566,39 @@ impl Backend for MlirJitBackend {
         if !is_float_dtype(a.dtype) {
             return None;
         }
-        // Mean is a post-pass over Sum: compute Σx through the cached
-        // Sum kernel, then divide the scalar result by `n` in Rust.
-        // Reusing the Sum engine keeps cache size bounded and matches
-        // the "compose primitives" pattern used elsewhere in Verum.
-        if op == TensorReduceOp::Mean {
-            let sum = self.reduce(a, TensorReduceOp::Sum, axis)?;
-            let n = a.numel;
-            if n == 0 {
-                return None;
+        // Compose statistical reductions out of cached primitives.
+        // Each branch reuses Sum / SumOfSquares engines + a small
+        // scalar post-pass — no new MLIR kernel per statistical op.
+        match op {
+            TensorReduceOp::Mean => {
+                let sum = self.reduce(a, TensorReduceOp::Sum, axis)?;
+                self.scalar_div_by_n(&sum, a.numel, a.dtype)?;
+                return Some(sum);
             }
-            let out_data = sum.data.as_ref()?;
-            unsafe {
-                match a.dtype {
-                    DType::F32 => {
-                        let p = (*out_data.as_ptr()).as_mut_ptr() as *mut f32;
-                        *p /= n as f32;
-                    }
-                    DType::F64 => {
-                        let p = (*out_data.as_ptr()).as_mut_ptr() as *mut f64;
-                        *p /= n as f64;
-                    }
-                    _ => return None,
-                }
+            TensorReduceOp::Norm => {
+                // L2 norm: √(Σ x²)
+                let s2 = self.invoke_sum_of_squares(a)?;
+                self.scalar_apply_sqrt(&s2, a.dtype)?;
+                return Some(s2);
             }
-            return Some(sum);
+            TensorReduceOp::Var => {
+                // Var = E[X²] − E[X]².  Two-pass formula; numerically
+                // less stable than Welford but cheap and matches
+                // PyTorch's `torch.var(..., unbiased=False)` semantics.
+                let s2 = self.invoke_sum_of_squares(a)?;
+                self.scalar_div_by_n(&s2, a.numel, a.dtype)?;
+                let s = self.reduce(a, TensorReduceOp::Sum, axis)?;
+                self.scalar_div_by_n(&s, a.numel, a.dtype)?;
+                self.scalar_square_in_place(&s, a.dtype)?;
+                self.scalar_sub_in_place(&s2, &s, a.dtype)?;
+                return Some(s2);
+            }
+            TensorReduceOp::Std => {
+                let v = self.reduce(a, TensorReduceOp::Var, axis)?;
+                self.scalar_apply_sqrt(&v, a.dtype)?;
+                return Some(v);
+            }
+            _ => {}
         }
         if reduce_arith_op(op).is_none() {
             return None;
@@ -850,6 +984,46 @@ fn build_reduce_kernel_text(op: TensorReduceOp, dtype: DType) -> Option<String> 
     ))
 }
 
+/// Build the MLIR text for `Σ x²` over a flat 1-D buffer.
+///
+/// Same scaffold as `build_reduce_kernel_text(Sum, dtype)` but with
+/// `arith.mulf` between the load and the accumulator add — i.e. the
+/// loop computes `acc += x * x` per element.  Used as the building
+/// block for L2 norm, variance, and standard deviation in the
+/// `reduce()` composition path.
+fn build_sum_of_squares_kernel_text(dtype: DType) -> Option<String> {
+    let elem_ty = mlir_elem_type(dtype)?;
+    if !is_float_dtype(dtype) {
+        return None;
+    }
+    let zero_lit = if dtype == DType::F32 { "0.0 : f32" } else { "0.0 : f64" };
+    Some(format!(
+        r#"module {{
+  func.func @kernel(%a: !llvm.ptr, %out: !llvm.ptr, %n: i64) attributes {{ llvm.emit_c_interface }} {{
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %f0 = arith.constant {zero_lit}
+    cf.br ^loop(%c0, %f0 : i64, {elem})
+  ^loop(%i: i64, %acc: {elem}):
+    %done = arith.cmpi sge, %i, %n : i64
+    cf.cond_br %done, ^store, ^body
+  ^body:
+    %ap = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+    %va = llvm.load %ap : !llvm.ptr -> {elem}
+    %sq = arith.mulf %va, %va : {elem}
+    %new_acc = arith.addf %acc, %sq : {elem}
+    %i_next = arith.addi %i, %c1 : i64
+    cf.br ^loop(%i_next, %new_acc : i64, {elem})
+  ^store:
+    llvm.store %acc, %out : {elem}, !llvm.ptr
+    return
+  }}
+}}
+"#,
+        elem = elem_ty,
+    ))
+}
+
 /// Build the MLIR text for a row-major 2D matmul kernel using
 /// `linalg.matmul` over dynamically-shaped memrefs.
 ///
@@ -973,6 +1147,7 @@ fn compile_kernel(
         KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
         KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
         KernelKind::Reduce(op) => build_reduce_kernel_text(op, dtype)?,
+        KernelKind::SumOfSquares => build_sum_of_squares_kernel_text(dtype)?,
     };
     let _location = Location::unknown(context);
     let mut module = match Module::parse(context, &text) {
@@ -1210,13 +1385,104 @@ mod tests {
 
     #[test]
     fn reduce_falls_through_for_unsupported_op() {
-        // Var / Std / Norm / LogSumExp / All / Any deferred to Шаг
-        // 5c.  Mean has graduated from this pin (now wired via the
-        // Sum-then-divide composition — see `reduce_f32_mean_executes`).
+        // LogSumExp / All / Any deferred to Шаг 5d.  Var / Std / Norm
+        // graduated in Шаг 5c (see dedicated tests below).  Mean
+        // graduated in Шаг 5b.
         let backend = MlirJitBackend::new();
         let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
-        assert!(backend.reduce(&a, TensorReduceOp::Var, None).is_none());
-        assert!(backend.reduce(&a, TensorReduceOp::Norm, None).is_none());
+        assert!(backend.reduce(&a, TensorReduceOp::LogSumExp, None).is_none());
+        assert!(backend.reduce(&a, TensorReduceOp::All, None).is_none());
+        assert!(backend.reduce(&a, TensorReduceOp::Any, None).is_none());
+    }
+
+    // -----------------------------------------------------------------
+    // Шаг 5c coverage: statistical reductions via composition
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn reduce_norm_executes() {
+        // L2 norm of [3, 4] is 5 (Pythagorean triple).
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[2], DType::F32).unwrap();
+        fill_f32(&a, &[3.0, 4.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Norm, None).unwrap();
+        let v = read_f32(&r, 1);
+        assert!((v[0] - 5.0).abs() < 1e-5, "L2 norm = {}", v[0]);
+    }
+
+    #[test]
+    fn reduce_norm_zero_vector() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[3], DType::F32).unwrap();
+        fill_f32(&a, &[0.0, 0.0, 0.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Norm, None).unwrap();
+        assert!(read_f32(&r, 1)[0].abs() < 1e-6);
+    }
+
+    #[test]
+    fn reduce_var_executes() {
+        // Var([2, 4, 4, 4, 5, 5, 7, 9]) = 4.0 (population variance).
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[8], DType::F32).unwrap();
+        fill_f32(&a, &[2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Var, None).unwrap();
+        let v = read_f32(&r, 1);
+        assert!((v[0] - 4.0).abs() < 1e-4, "Var = {}", v[0]);
+    }
+
+    #[test]
+    fn reduce_std_executes() {
+        // Std = √Var, so for the same input as above Std = 2.0.
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[8], DType::F32).unwrap();
+        fill_f32(&a, &[2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Std, None).unwrap();
+        let v = read_f32(&r, 1);
+        assert!((v[0] - 2.0).abs() < 1e-4, "Std = {}", v[0]);
+    }
+
+    #[test]
+    fn reduce_var_constant_is_zero() {
+        // A constant vector has zero variance — pin guards against
+        // accidentally swapping `E[X]²` for `E[X²]` (or vice versa).
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[5], DType::F32).unwrap();
+        fill_f32(&a, &[3.0, 3.0, 3.0, 3.0, 3.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Var, None).unwrap();
+        assert!(read_f32(&r, 1)[0].abs() < 1e-5);
+    }
+
+    #[test]
+    fn reduce_norm_f64() {
+        // [1, 2, 3] → √14 ≈ 3.741657...
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[3], DType::F64).unwrap();
+        unsafe {
+            let p = (*a.data.as_ref().unwrap().as_ptr()).as_mut_ptr() as *mut f64;
+            *p.add(0) = 1.0;
+            *p.add(1) = 2.0;
+            *p.add(2) = 3.0;
+        }
+        let r = backend.reduce(&a, TensorReduceOp::Norm, None).unwrap();
+        unsafe {
+            let p = (*r.data.as_ref().unwrap().as_ptr()).as_ptr() as *const f64;
+            assert!((*p - 14.0_f64.sqrt()).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn reduce_var_uses_separate_cache_entry() {
+        // SumOfSquares is a distinct KernelKind from Reduce(Sum), so
+        // computing both Sum and Var should populate two cache slots
+        // (plus one more for Sum that Var composes over).
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[1.0, 2.0, 3.0, 4.0]);
+        let _ = backend.reduce(&a, TensorReduceOp::Sum, None).unwrap();
+        let _ = backend.reduce(&a, TensorReduceOp::Var, None).unwrap();
+        // Var composes: Sum (already cached) + SumOfSquares (new).
+        // Cache should have at least 2 distinct entries.
+        assert!(backend.cache.len() >= 2);
     }
 
     #[test]
