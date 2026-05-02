@@ -8859,7 +8859,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, op
         return_count: 1,
-        strategy: CodegenStrategy::OpcodeWithMode(Opcode::TensorReduce, 0xFF),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ReduceFromArgs),
         mlir_op: Some("verum.tensor_reduce_all"),
         doc: "Reduce tensor over all elements",
     },
@@ -8869,7 +8869,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // tensor, op, axis
         return_count: 1,
-        strategy: CodegenStrategy::OpcodeWithMode(Opcode::TensorReduce, 1),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ReduceFromArgs),
         mlir_op: Some("verum.tensor_reduce_keepdim"),
         doc: "Reduce tensor keeping dimension",
     },
