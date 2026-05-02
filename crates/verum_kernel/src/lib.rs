@@ -111,6 +111,8 @@ pub mod verdict; // canonical VerificationVerdict + DischargeMethod (ATS-V found
 pub mod arch; // ATS-V architectural primitives (Capability / Boundary / Composition / ...)
 pub mod arch_anti_pattern; // ATS-V anti-pattern catalog with stable error codes
 pub mod arch_composition; // ATS-V composition algebra Shape ⊗ Shape
+pub mod arch_parse; // ATS-V parser: @arch_module(...) named-args → Shape
+pub mod arch_phase; // ATS-V phase 6.5 — architectural type checking phase
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type
