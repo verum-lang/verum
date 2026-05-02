@@ -20039,17 +20039,28 @@ impl VbcCodegen {
                 );
             }
 
-            // Remaining intrinsics without a dedicated TensorSubOpcode
-            // variant — keep on the library-call fallback (still
-            // panics until #89 fully closes; needs new sub_op + handler
-            // pair per the task list).
-            InlineSequenceId::MatrixExp | InlineSequenceId::MatrixInverse => {
-                let name = match seq_id {
-                    InlineSequenceId::MatrixExp => "verum_matrix_exp",
-                    InlineSequenceId::MatrixInverse => "verum_matrix_inverse",
-                    _ => unreachable!(),
-                };
-                self.emit_intrinsic_library_call(name, args, dest)?;
+            // **#89 final close-out** — MatrixExp/MatrixInverse routed
+            // through their existing TensorSubOpcode variants (Expm =
+            // 0x74, Inverse = 0x76).  Both already have interpreter
+            // handlers in `tensor_extended.rs` AND the canonical
+            // registry path (`registry.rs:9112,9122` →
+            // CodegenStrategy::TensorExtendedOpcode).  This commit
+            // wires the legacy InlineSequenceId fallback path that
+            // previously fell through to `emit_intrinsic_library_call`
+            // → unknown-name → runtime Panic.
+            InlineSequenceId::MatrixExp => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Expm,
+                    args,
+                    dest,
+                );
+            }
+            InlineSequenceId::MatrixInverse => {
+                self.emit_intrinsic_tensor_extended(
+                    crate::instruction::TensorSubOpcode::Inverse,
+                    args,
+                    dest,
+                );
             }
 
             // =================================================================
