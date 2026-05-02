@@ -102,6 +102,7 @@ use crate::staged_pipeline::{StagedConfig, StagedPipeline};
 // crate's `pub(crate)` surface via `super::*`, so private fields
 // of `CompilationPipeline` remain genuinely private — only methods
 // move out of this file, not access boundaries.
+mod ats_v_phase;
 mod audit;
 mod bounds_stats;
 mod cbgr;
@@ -1998,6 +1999,15 @@ impl<'s> CompilationPipeline<'s> {
 
         let r = self.phase_type_check(module);
         self.session.collect_phase_error("type_check", r)?;
+
+        // ATS-V phase 6.5 — architectural type checking. Walks every
+        // `@arch_module(...)` declaration, runs the canonical 32-pattern
+        // anti-pattern checker (AP-001..032), and emits per-violation
+        // diagnostics with stable RFC codes per spec §17.4 + §32.4.
+        // Modules without `@arch_module(...)` are silently skipped per
+        // spec §17.5 backward-compat.
+        let r = self.phase_ats_v(module);
+        self.session.collect_phase_error("ats_v", r)?;
 
         // Post-typecheck parallel fan-out (#104). Same architectural
         // contract as `run_native_compilation`: every gate is `&self`,
