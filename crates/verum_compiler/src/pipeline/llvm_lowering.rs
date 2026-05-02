@@ -274,9 +274,15 @@ impl<'s> CompilationPipeline<'s> {
         let runtime_stubs_path = self.generate_runtime_stubs(&build_dir)?;
         let runtime_obj = self.compile_c_file(&runtime_stubs_path, &build_dir)?;
 
-        // Link into executable
+        // Link into executable.  GPU-usage probe (#100): if the
+        // post-pass module has no `verum_metal_ensure_init` body,
+        // skip Metal/Foundation/objc framework links.
+        let needs_metal = llvm_module
+            .get_function("verum_metal_ensure_init")
+            .map(|f| f.count_basic_blocks() > 0)
+            .unwrap_or(false);
         info!("  Linking executable to {}", output_path.display());
-        self.link_executable(&[obj_path, runtime_obj], &output_path)?;
+        self.link_executable(&[obj_path, runtime_obj], &output_path, needs_metal)?;
 
         Ok(output_path)
     }

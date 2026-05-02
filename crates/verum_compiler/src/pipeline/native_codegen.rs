@@ -770,6 +770,33 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // **#100 GPU-usage detection** — after `run_passes` (which
+        // includes globaldce), check whether any Metal/GPU runtime
+        // function survived elimination.  If the entire Metal IR was
+        // DCE'd, the user's program doesn't use GPU and we can skip
+        // the framework links downstream.
+        //
+        // Pre-fix every macOS Verum AOT binary unconditionally
+        // dragged in `-framework Metal -framework Foundation -lobjc`
+        // even when `nm <bin>` showed zero Metal symbols.  That's
+        // pure dead weight in the binary's `LC_LOAD_DYLIB` table.
+        //
+        // Detection probe: `verum_metal_ensure_init` is the entry
+        // point that every Metal-using path eventually calls
+        // (`metal_ir.rs::emit_ensure_init`).  If it has a body, GPU
+        // is used; if globaldce stripped it, GPU is unused.
+        let needs_metal = lowering
+            .module()
+            .get_function("verum_metal_ensure_init")
+            .map(|f| f.count_basic_blocks() > 0)
+            .unwrap_or(false);
+        if std::env::var("VERUM_TRACE_PASSES").is_ok() {
+            eprintln!(
+                "[verum-passes] gpu-usage probe: verum_metal_ensure_init has body = {}",
+                needs_metal,
+            );
+        }
+
         target_machine
             .write_to_file(lowering.module(), FileType::Object, &obj_path)
             .map_err(|e| anyhow::anyhow!("Failed to write object file: {}", e))?;
@@ -865,7 +892,14 @@ impl<'s> CompilationPipeline<'s> {
                     .into_owned()
             }
         };
-        if verum_codegen::llvm::target_triple::triple_str_is_darwin(&triple_for_frameworks) {
+        if verum_codegen::llvm::target_triple::triple_str_is_darwin(&triple_for_frameworks)
+            && needs_metal
+        {
+            // Only link Metal/Foundation/objc when the program
+            // actually uses GPU (post-globaldce probe — see #100).
+            // Programs with no `@device(GPU)` and no tensor ops
+            // above the GPU threshold get a leaner binary
+            // (libSystem-only `LC_LOAD_DYLIB` table).
             linker_config.extra_flags.push("-framework Metal".into());
             linker_config
                 .extra_flags
@@ -880,7 +914,7 @@ impl<'s> CompilationPipeline<'s> {
             link_objects.push(metal.clone());
             info!("  Including Metal GPU runtime in link");
         }
-        self.link_with_config(&link_objects, &output_path, &linker_config)?;
+        self.link_with_config(&link_objects, &output_path, &linker_config, needs_metal)?;
 
         // Clean up intermediate files
         let _ = std::fs::remove_file(&runtime_stubs_path);
@@ -1048,6 +1082,7 @@ impl<'s> CompilationPipeline<'s> {
         &self,
         object_files: &[PathBuf],
         output_path: &PathBuf,
+        needs_metal: bool,
     ) -> Result<()> {
         let linker = self.detect_c_compiler()?;
 
@@ -1158,12 +1193,16 @@ impl<'s> CompilationPipeline<'s> {
             cmd.arg("-Wl,-undefined,dynamic_lookup");
             // 16MB stack for recursive algorithms (default 8MB causes SIGSEGV in deep recursion)
             cmd.arg("-Wl,-stack_size,0x1000000");
-            // Link Metal + Foundation frameworks for GPU compute on Apple Silicon.
-            // metal_ir.rs emits LLVM IR that calls MTLCreateSystemDefaultDevice,
-            // objc_msgSend, sel_registerName, objc_getClass — all from these frameworks.
-            cmd.arg("-framework").arg("Metal");
-            cmd.arg("-framework").arg("Foundation");
-            cmd.arg("-lobjc");
+            // Link Metal + Foundation frameworks ONLY when the program
+            // actually uses GPU (post-globaldce probe — see #100).
+            // Pre-fix every macOS Verum binary unconditionally pulled
+            // these in even when the compiled module had zero Metal
+            // symbols, bloating `LC_LOAD_DYLIB` for hello-world.
+            if needs_metal {
+                cmd.arg("-framework").arg("Metal");
+                cmd.arg("-framework").arg("Foundation");
+                cmd.arg("-lobjc");
+            }
         }
 
         if target_is_linux {
@@ -1246,6 +1285,7 @@ impl<'s> CompilationPipeline<'s> {
         object_files: &[PathBuf],
         output_path: &PathBuf,
         config: &LinkingConfig,
+        needs_metal: bool,
     ) -> Result<()> {
         // Clone config and set output path
         let mut link_config = config.clone();
@@ -1262,11 +1302,16 @@ impl<'s> CompilationPipeline<'s> {
         );
 
         if link_config.use_llvm_linker {
-            // Use FinalLinker with LLD for AOT compilation
+            // Use FinalLinker with LLD for AOT compilation.  Metal
+            // framework links flow through `link_config.extra_flags`
+            // (gated upstream by the same `needs_metal` probe), so
+            // the LLD path doesn't need an explicit `needs_metal`
+            // parameter here.
             self.link_with_lld(object_files, &link_config)
         } else {
-            // Fall back to system linker
-            self.link_executable(object_files, output_path)
+            // Fall back to system linker — Metal framework gating is
+            // explicit since this path doesn't consume `extra_flags`.
+            self.link_executable(object_files, output_path, needs_metal)
         }
     }
 
