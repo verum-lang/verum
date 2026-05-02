@@ -8265,7 +8265,15 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Alloc],
         param_count: 3, // data, shape, dtype
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorFromSlice),
+        // Phase 4 of sub-opcode refactor (2026-05-02): canonical
+        // bytecode home is `Instruction::TensorExtended` with
+        // `TensorSubOpcode::FromSliceArgs` (0x0F).  The legacy
+        // `Opcode::TensorFromSlice` (0xFF top-level) is kept alive
+        // by the compatibility decoder but no longer referenced
+        // from active codegen paths.  This change removes the last
+        // registry-side reference and unblocks future reclamation
+        // of the 0xFF Opcode byte for a new dedicated gateway.
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::FromSliceArgs),
         mlir_op: Some("verum.tensor_from_slice"),
         doc: "Create tensor from slice data",
     },
@@ -8275,7 +8283,10 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Alloc],
         param_count: 3, // data, shape, device
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TensorFromSlice),
+        // Same Phase 4 migration as TENSOR_FROM_SLICE above — the
+        // semantic is identical at the bytecode layer; the registry
+        // distinguishes by name + mlir_op for backend dispatch.
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::FromSliceArgs),
         mlir_op: Some("verum.tensor_from_data"),
         doc: "Create tensor from data array",
     },
