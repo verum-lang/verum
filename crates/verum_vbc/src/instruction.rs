@@ -4424,40 +4424,73 @@ impl MlSubOpcode {
 // FFI Extended Sub-Opcodes
 // ============================================================================
 
-/// FFI extended sub-opcodes for use with `FfiExtended` (0xBC) prefix.
+/// System extended sub-opcodes for use with `FfiExtended` (0xBC) prefix.
 ///
 
-/// Provides comprehensive FFI operations for:
-/// - Symbol resolution and caching
-/// - C calling convention calls
-/// - Platform-specific calling conventions (stdcall, sysv64)
-/// - Variadic calls (printf-style)
-/// - Value marshalling between Verum and C
-/// - Error handling (errno)
+/// **Architectural note** (2026-05-02 refactor per
+/// `docs/architecture/sub-opcode-refactor-plan.md`):
+/// despite the host-instruction name `FfiExtended` and the
+/// historical enum name `FfiSubOpcode` (kept as a deprecated
+/// type alias for backward bytecode compat), this enum carries
+/// the entire **system layer** — FFI, time, syscalls, Mach kernel,
+/// CBGR allocator, sync primitives.
 ///
-
+/// Top-level Opcode space is at 256/256 capacity, so adding new
+/// `Instruction::TimeExtended` / `SysExtended` / etc. is not
+/// possible without reclaiming an existing top-level byte.  The
+/// next-best architectural improvement is to:
+///   1. Rename the enum semantically (FFI → System).
+///   2. Group entries by category with explicit byte ranges.
+///   3. Reserve future-growth space within each category.
+///   4. Document the layout for future sub-opcode reclamation.
+///
+/// The byte layout below is **stable bytecode ABI**:
+///
+/// | Range       | Category               | Live | Reserve |
+/// |-------------|------------------------|------|---------|
+/// | 0x00-0x0F   | FFI symbol management  | 3    | 13      |
+/// | 0x10-0x1F   | FFI calling convs      | 8    | 8       |
+/// | 0x20-0x2F   | FFI marshalling        | 8    | 8       |
+/// | 0x30-0x3F   | FFI errno/error        | 4    | 12      |
+/// | 0x40-0x4F   | C-allocator + bytearr  | 11   | 5       |
+/// | 0x50-0x5F   | FFI callbacks          | 2    | 14      |
+/// | 0x60-0x6F   | Raw pointer ops        | 8    | 8       |
+/// | 0x70-0x7F   | **Time clocks**        | 6    | 10      |
+/// | 0x80-0x8F   | **System (POSIX)**     | 6    | 10      |
+/// | 0x90-0x9F   | **Mach kernel (Apple)**| 9    | 7       |
+/// | 0xA0-0xAF   | **CBGR allocator**     | 4    | 12      |
+/// | 0xB0-0xBF   | **Sync primitives**    | 3    | 13      |
+/// | 0xC0-0xFF   | RESERVED (cross-cat)   | 0    | 64      |
+///
+/// 47 genuine FFI ops live in 0x00-0x6F.  The 30 entries at
+/// 0x70-0xBF are system-layer ops that semantically belong in
+/// dedicated enums (Time / Sys / Mach / CBGR / Sync) but cannot
+/// be moved without reclaiming top-level Opcode space.  When a
+/// future cleanup reclaims an unused top-level byte (or merges
+/// two existing ones), these entries can be re-homed via the
+/// migration plan in `docs/architecture/sub-opcode-refactor-plan.md`.
+///
 /// # Encoding
 ///
-
 /// ```text
 /// [0xBC] [sub_opcode:u8] [operands...]
 /// ```
 ///
-
 /// # Example
 ///
-
 /// ```text
-/// // Call getpid() from libc
+/// // Call getpid() from libc (genuine FFI, 0x10 range)
 /// FfiExtended CallFfiC symbol_idx:u32, arg_count:0, ret_reg:r0
 ///
-
 /// // Call printf with variadic args
 /// FfiExtended CallFfiVariadic symbol_idx:u32, arg_count:2, ret_reg:r0
+///
+/// // Get monotonic nanos (Time category, 0x70 range)
+/// FfiExtended TimeMonotonicNanos ret_reg:r0
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
-pub enum FfiSubOpcode {
+pub enum SystemSubOpcode {
     // ========================================================================
     // Symbol Resolution (0x00-0x0F)
     // ========================================================================
@@ -5177,7 +5210,20 @@ pub enum FfiSubOpcode {
     SpinlockLock = 0xB2,
 }
 
-impl FfiSubOpcode {
+/// Backward-compatibility alias.  The enum was renamed
+/// `FfiSubOpcode` → `SystemSubOpcode` on 2026-05-02 because the
+/// 30/77 misplaced entries (Time/Sys/Mach/CBGR/Sync) made the
+/// FFI name semantically wrong.  This alias preserves source
+/// compatibility for the 7 consumer files (`ffi_extended.rs`,
+/// `verum_codegen/src/llvm/ffi.rs`, codegen `expressions.rs` /
+/// `statements.rs`, AOT `instruction.rs`, etc.) — they continue
+/// to work without a token-level rename, and the underlying
+/// `Instruction::FfiExtended` opcode + byte ABI is unchanged.
+///
+/// New code should reference `SystemSubOpcode` directly.
+pub type FfiSubOpcode = SystemSubOpcode;
+
+impl SystemSubOpcode {
     /// Creates an FFI sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
         match byte {
