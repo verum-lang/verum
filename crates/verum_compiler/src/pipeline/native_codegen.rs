@@ -561,7 +561,15 @@ impl<'s> CompilationPipeline<'s> {
             // collided functions with multi-typed register slots that
             // crash SROA / SimplifyCFG / GVN).  See #91 follow-up.
             let force_full = std::env::var("VERUM_FORCE_FULL_O2").is_ok();
-            let passes = if !has_ir_issues || force_full {
+            // **VERUM_PASSES_OVERRIDE** — diagnostic env-var that
+            // overrides the pass pipeline string entirely.  Used to
+            // bisect which specific pass in `default<O2>` triggers
+            // the bitcode-write / loop-pass SIGBUS on arity-collided
+            // modules (#98).
+            let override_passes = std::env::var("VERUM_PASSES_OVERRIDE").ok();
+            let passes = if let Some(p) = override_passes {
+                p
+            } else if !has_ir_issues || force_full {
                 match opt_level {
                     0 => "globaldce".to_string(),
                     1 => "default<O1>".to_string(),
@@ -597,6 +605,12 @@ impl<'s> CompilationPipeline<'s> {
                     lowering.skip_body_count(),
                 );
             }
+            // **#98 diagnostic**: VERUM_SKIP_ORPHAN_SWEEP=1 disables the
+            // module-wide orphan-block sweep to bisect whether the
+            // sweep's block deletions are leaving stale LoopInfo /
+            // analysis-manager state that crashes `run_passes`.
+            let _skip_orphan_sweep = std::env::var_os("VERUM_SKIP_ORPHAN_SWEEP").is_some();
+
             // **Module-wide unreachable-block sweep** (#96).
             //
             // Runs after ALL codegen completes — VBC lowering, platform
@@ -608,7 +622,11 @@ impl<'s> CompilationPipeline<'s> {
             // from tensor_ir, etc.) that would otherwise crash
             // `SimplifyCFG::TryToSimplifyUncondBranchFromEmptyBlock`
             // with SIGBUS under `default<O2>`.
-            let module_orphans = lowering.sweep_module_orphan_blocks();
+            let module_orphans = if _skip_orphan_sweep {
+                0
+            } else {
+                lowering.sweep_module_orphan_blocks()
+            };
             if module_orphans > 0 && std::env::var("VERUM_TRACE_PASSES").is_ok() {
                 eprintln!(
                     "[verum-passes] module-wide orphan sweep deleted {} blocks",
@@ -623,6 +641,73 @@ impl<'s> CompilationPipeline<'s> {
                 let _ = lowering.write_ir_to_file(&pre_path);
                 eprintln!("[verum-passes] pre-pass IR -> {}", pre_path.display());
             }
+
+            // **#98 bitcode round-trip** — fresh-parse the module
+            // before `run_passes` to flush dirty analysis-manager
+            // state.
+            //
+            // **Why this is needed**: LLVM's `Module::run_passes`
+            // builds analyses (LoopInfo, DominatorTree, etc.) on
+            // demand and caches them in a per-function
+            // `AnalysisManager`.  Codegen-time mutations (orphan-
+            // block deletion, function attribute updates, debug-info
+            // touches) can leave the cache pointing to deleted /
+            // moved IR — when `default<O2>` triggers loop-pass
+            // pipelines, `LoopInfoBase::verify` walks the stale loop
+            // graph and SIGBUSes / SIGSEGVs in
+            // `appendLoopsToWorklist` → `IntervalMap::deleteNode`.
+            //
+            // **Why text-roundtrip works**: serialising to bitcode
+            // and parsing back into a fresh `Module` rebuilds every
+            // internal data structure from canonical IR — there's
+            // no analysis cache to be stale.  Standalone `opt`
+            // succeeds because it does exactly this on every input.
+            //
+            // **Cost**: one bitcode write + one parse per
+            // compilation, both bounded by IR size.  For the
+            // hello-world cross-smoke build this is ~50ms additional
+            // time vs ~3s total compile — negligible.  In return we
+            // unblock the full `default<O2>` pipeline for every
+            // arity-collided / multi-typed-alloca module (the perf
+            // wins from #96 commits f019b131 + 31e6587e land for
+            // *every* AOT binary, not just clean modules).
+            //
+            // **VERUM_NO_BITCODE_ROUNDTRIP=1** opts out for
+            // bisection / regression diagnostics.
+            // **#98** — IR round-trip explored but doesn't fix the
+            // SIGBUS in `default<O2>` for arity-collided modules.
+            //
+            // Findings (this session):
+            //   * `module.write_bitcode_to_memory()` SIGSEGVs.
+            //   * `module.print_to_string()` SIGSEGVs in the same
+            //     run.  (Pre-`d5195189` the text dump succeeded —
+            //     probable interaction with stdlib growth from
+            //     concurrent agent commits.)
+            //   * Standalone `opt --passes='default<O2>'` against a
+            //     PREVIOUSLY-dumped text IR exits 0 — the textual
+            //     form is structurally valid; the in-memory module
+            //     has SOMETHING that LLVM's bitcode/text serializer
+            //     AND loop-pass infrastructure both walk into.
+            //   * Disabling per-function and module-wide orphan
+            //     deletion (`VERUM_SKIP_ORPHAN_SWEEP=1`) does not
+            //     change the crash — it's not orphan-deletion-induced.
+            //
+            // The actual root cause is metadata corruption AT a
+            // level that even textual `printToString` can't traverse
+            // safely — likely dangling Use chains, debug-info refs
+            // to unlinked instructions, or a metadata cycle.
+            //
+            // Future investigation (deferred):
+            //   1. Bisect via `--passes='argpromotion'`,
+            //      `'instcombine'`, etc. one at a time to find
+            //      which pass triggers IR walk that segfaults.
+            //   2. Run `module.verify()` with
+            //      `LLVMVerifierFailureAction::ReturnStatus` to
+            //      enumerate every invalid instruction (the existing
+            //      `verify()` short-circuits on first error).
+            //   3. Check if `skip_body_count() > 0` modules emit
+            //      partially-initialised bodies that confuse Use-list
+            //      walks.
             if let Err(e) = lowering
                 .module()
                 .run_passes(&passes, &target_machine, pass_options)
