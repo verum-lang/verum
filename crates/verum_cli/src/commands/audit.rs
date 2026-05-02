@@ -5414,6 +5414,25 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
+    // 11h. ATS-V whole-corpus cross-cog architectural firewall.
+    //  Walks every annotated cog, builds the global mount-graph,
+    //  populates per-cog `DiagnosticContext` (composes_graph +
+    //  composed_foundations), runs the 32-pattern checker.
+    //  Activates AP-003 DependencyCycle + AP-005 FoundationDrift on
+    //  real cross-cog architecture.  Failure means a cog declared
+    //  an incompatible foundation against a mounted-and-annotated
+    //  cog — a real architectural defect.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "arch_corpus",
+        report_dir.join("arch-corpus.json"),
+        || audit_arch_corpus_with_format(AuditFormat::Json),
+    );
+    if summary.get("arch_corpus") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
  // 12. Proof-term-library — N-kernel + universe-stability +
  // adversarial verification of the canonical certificate
  // library at `core/verify/proof_term_examples/` (#157, #158
