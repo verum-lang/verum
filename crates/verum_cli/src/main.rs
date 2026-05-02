@@ -1994,6 +1994,22 @@ enum ArchCommands {
         #[clap(long, value_name = "N")]
         season: Option<u8>,
     },
+    /// Check ATS-V architectural type invariants on a .vr file.
+    /// Сезон 4 end-to-end: parses the file, walks every module
+    /// declaration, extracts @arch_module(...) attributes, runs
+    /// the canonical 32-pattern catalog, and reports violations.
+    /// Per spec §11.4 — backward-compat: modules без аннотации
+    /// pass vacuously (default Shape).
+    Check {
+        /// Path to a .vr file (or `-` for stdin).
+        file: String,
+        /// Output format: `plain` (human) or `json` (agent).
+        #[clap(long, default_value = "plain")]
+        format: String,
+        /// Strict mode: warnings → errors, missing CVE-closure → error.
+        #[clap(long)]
+        strict: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -4199,6 +4215,22 @@ fn run_command(cli: Cli) -> Result<()> {
                     }
                 };
                 commands::audit::arch_catalog(output_format, mtac_only, season)
+            }
+            ArchCommands::Check {
+                file,
+                format,
+                strict,
+            } => {
+                let output_format = match format.as_str() {
+                    "plain" => commands::audit::AuditFormat::Plain,
+                    "json" => commands::audit::AuditFormat::Json,
+                    other => {
+                        return Err(CliError::InvalidArgument(
+                            format!("--format must be 'plain' or 'json', got '{}'", other).into(),
+                        ));
+                    }
+                };
+                commands::audit::arch_check(&file, output_format, strict)
             }
         },
     }

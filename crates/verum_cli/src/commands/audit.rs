@@ -9949,6 +9949,253 @@ pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
 // audit; consumers should call `--reflection-tower` instead.
 
 // =============================================================================
+// ATS-V Сезон 4 — end-to-end verum arch check <file>
+// =============================================================================
+
+/// `verum arch check <file> [--format plain|json] [--strict]` —
+/// end-to-end Сезон 4: parse a .vr file, walk every module
+/// declaration's attributes, extract `@arch_module(...)` named-args,
+/// run the ATS-V phase 6.5, and report architectural violations.
+///
+/// Per spec §11.4 backward-compat: modules без `@arch_module(...)`
+/// аннотации pass vacuously through default Shape.  Modules с
+/// аннотацией get full Shape inference + 32-pattern catalog check.
+pub fn arch_check(file: &str, format: AuditFormat, strict: bool) -> Result<()> {
+    use verum_ast::FileId;
+    use verum_fast_parser::FastParser;
+    use verum_kernel::arch_phase::{run_arch_phase, ArchPhaseReport};
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step(&format!("ATS-V arch:check {}", file));
+    }
+
+    // Read file (`-` reads stdin).
+    let source = if file == "-" {
+        use std::io::Read;
+        let mut s = String::new();
+        std::io::stdin()
+            .read_to_string(&mut s)
+            .map_err(|e| crate::error::CliError::Custom(format!("stdin read: {}", e).into()))?;
+        s
+    } else {
+        std::fs::read_to_string(file).map_err(|e| {
+            crate::error::CliError::Custom(format!("read {}: {}", file, e).into())
+        })?
+    };
+
+    // Parse via fast parser.
+    let parser = FastParser::new();
+    let file_id = FileId::new(0);
+    let module = parser.parse_module_str(&source, file_id).map_err(|e| {
+        crate::error::CliError::Custom(
+            format!("parse {} failed: {:?}", file, e).into(),
+        )
+    })?;
+
+    // Walk module's items, extract @arch_module(...) attribute args
+    // for each Module item.
+    let modules: Vec<(String, Vec<verum_ast::expr::Expr>)> = module
+        .items
+        .iter()
+        .filter_map(|item| {
+            let module_name = match &item.kind {
+                verum_ast::decl::ItemKind::Module(m) => m.name.name.as_str().to_string(),
+                _ => return None, // not a module
+            };
+            // Search item.attributes for @arch_module(...).
+            for attr in item.attributes.iter() {
+                if attr.name.as_str() == "arch_module" {
+                    let args: Vec<verum_ast::expr::Expr> = match &attr.args {
+                        verum_common::Maybe::Some(a) => a.iter().cloned().collect(),
+                        verum_common::Maybe::None => Vec::new(),
+                    };
+                    return Some((module_name, args));
+                }
+            }
+            // Module без @arch_module — pass empty args.
+            Some((module_name, Vec::new()))
+        })
+        .collect();
+
+    // Run ATS-V phase.
+    let module_refs: Vec<(String, &[verum_ast::expr::Expr])> = modules
+        .iter()
+        .map(|(n, a)| (n.clone(), a.as_slice()))
+        .collect();
+    let report = run_arch_phase(&module_refs);
+
+    // Decide pass/fail.  Strict mode: any non-load-bearing module → error.
+    // Soft mode: parse_errors → error, anti-pattern violations → warning.
+    let load_bearing = if strict {
+        report.is_load_bearing()
+    } else {
+        report.total_parse_errors() == 0
+    };
+
+    // Render output.
+    let payload = build_arch_check_payload(file, &report, strict, load_bearing);
+
+    match format {
+        AuditFormat::Plain => render_arch_check_plain(file, &report, strict, load_bearing),
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    if !load_bearing {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "ATS-V arch check on {}: {} module(s) failed.  See diagnostics.",
+                file,
+                report.modules.iter().filter(|m| !m.is_load_bearing()).count(),
+            )
+            .into(),
+        ));
+    }
+    Ok(())
+}
+
+fn build_arch_check_payload(
+    file: &str,
+    report: &verum_kernel::arch_phase::ArchPhaseReport,
+    strict: bool,
+    load_bearing: bool,
+) -> serde_json::Value {
+    let modules_json: Vec<serde_json::Value> = report
+        .modules
+        .iter()
+        .map(|m| {
+            let shape_json = m
+                .shape
+                .as_ref()
+                .map(|s| serde_json::to_value(s).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            let parse_errors: Vec<serde_json::Value> = m
+                .parse_errors
+                .iter()
+                .map(|e| serde_json::json!({ "human_message": e.human_message() }))
+                .collect();
+            let violations_json: Vec<serde_json::Value> = m
+                .violations
+                .iter()
+                .map(|v| {
+                    serde_json::json!({
+                        "code": v.code.code(),
+                        "name": v.code.name(),
+                        "severity": v.severity.tag(),
+                        "summary": v.summary,
+                        "human_message": v.human_message,
+                        "auto_fix_suggestion": v.auto_fix_suggestion,
+                        "docs_url": v.code.docs_url(),
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "module_name": m.module_name,
+                "annotated": m.shape.is_some(),
+                "load_bearing": m.is_load_bearing(),
+                "shape": shape_json,
+                "parse_errors": parse_errors,
+                "violations": violations_json,
+            })
+        })
+        .collect();
+
+    let by_code = report.violations_by_code();
+    let violations_by_code_json: serde_json::Value = serde_json::Value::Object(
+        by_code
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), serde_json::json!(*v)))
+            .collect(),
+    );
+
+    serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "ats_v_arch_check",
+        "spec": "internal/specs/ats-v.md",
+        "file": file,
+        "strict_mode": strict,
+        "load_bearing": load_bearing,
+        "annotated_module_count": report.annotated_module_count(),
+        "total_module_count": report.modules.len(),
+        "total_parse_errors": report.total_parse_errors(),
+        "total_violations": report.total_violations(),
+        "violations_by_code": violations_by_code_json,
+        "modules": modules_json,
+    })
+}
+
+fn render_arch_check_plain(
+    file: &str,
+    report: &verum_kernel::arch_phase::ArchPhaseReport,
+    strict: bool,
+    load_bearing: bool,
+) {
+    println!();
+    println!("File: {}", file);
+    println!("─────────────────────────────────────────────────────");
+    println!(
+        "Modules:                {} ({} с @arch_module(...))",
+        report.modules.len(),
+        report.annotated_module_count(),
+    );
+    println!("Mode:                   {}", if strict { "strict" } else { "soft" });
+    println!("Total parse errors:     {}", report.total_parse_errors());
+    println!("Total violations:       {}", report.total_violations());
+    println!();
+
+    if !report.modules.is_empty() {
+        println!(
+            "  {:<40}  {:<11}  {:<6}  {}",
+            "Module", "Annotated", "Loads", "Violations"
+        );
+        println!(
+            "  {}  {}  {}  {}",
+            "─".repeat(40),
+            "─".repeat(11),
+            "─".repeat(6),
+            "─".repeat(20)
+        );
+        for m in &report.modules {
+            let glyph = if m.is_load_bearing() { "✓" } else { "✗" };
+            println!(
+                "  {:<40}  {:<11}  {} {:<3}  {} violations",
+                m.module_name,
+                if m.shape.is_some() { "yes" } else { "no" },
+                glyph,
+                if m.is_load_bearing() { "yes" } else { "NO" },
+                m.violations.len(),
+            );
+            for v in &m.violations {
+                println!(
+                    "      {} {}: {}",
+                    v.code.code(),
+                    v.code.name(),
+                    v.summary
+                );
+            }
+            for e in &m.parse_errors {
+                println!("      [parse error] {}", e.human_message());
+            }
+        }
+    }
+    println!();
+
+    if load_bearing {
+        println!(
+            "{} ATS-V arch check passed — file is architecturally load-bearing.",
+            "✓".green(),
+        );
+    } else {
+        println!(
+            "{} ATS-V arch check FAILED — see diagnostics above.",
+            "✗".red(),
+        );
+    }
+}
+
+// =============================================================================
 // ATS-V — agent-readable surfaces (verum arch:explain, arch:catalog)
 // =============================================================================
 
