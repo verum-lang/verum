@@ -11905,6 +11905,15 @@ pub fn audit_arch_corpus_with_format(format: AuditFormat) -> Result<()> {
             })
             .collect();
 
+        // Mount-derived capability inference: a cog that mounts
+        // from `sys.*.syscall.*` or `sys.darwin.libsystem.*` MUST
+        // declare `Capability.Exec(...)` in its requires.  Same for
+        // network / persistence patterns (extend as adoption grows).
+        // This activates AP-001 CapabilityEscalation on the
+        // mount-graph signal alone, without requiring full AST
+        // body inference.
+        ctx.inferred_used_capabilities = infer_capabilities_from_mounts(&entry.mounts);
+
         let violations = check_all_anti_patterns(&entry.shape, &ctx);
         total_violations += violations.len();
         for v in &violations {
@@ -12080,6 +12089,61 @@ fn match_annotated_cog(
         }
     }
     None
+}
+
+/// Mount-derived capability inference.  Walks a cog's
+/// `inferred_mounts` and produces the Capability set the cog's
+/// usage implies.  MVP recogniser:
+///
+///  * `sys.*.syscall.*` / `sys.darwin.libsystem.*` /
+///    `sys.windows.kernel32.*` → `Capability::Exec(<inferred>)`
+///  * `sys.*.network*` / known networking sub-modules →
+///    `Capability::Network(Tcp, Bidirectional)` (placeholder)
+///  * `sys.io_engine` → `Capability::Exec(<inferred>)` (the IO
+///    engine routes through syscalls)
+///
+/// All inferences produce real `Capability` variants (not Custom)
+/// so structural equality matches the same variants when produced
+/// by `parse_capability` from the cog's declared `requires`.
+/// Unrecognised mounts contribute nothing — this is conservative,
+/// designed to fire AP-001 only when the inference is
+/// well-grounded.
+fn infer_capabilities_from_mounts(mounts: &[String]) -> Vec<verum_kernel::arch::Capability> {
+    use verum_kernel::arch::{Capability, ExecTarget, NetDirection, NetProtocol, ResourceTag};
+    let mut out: Vec<Capability> = Vec::new();
+    let mut seen_exec = false;
+    let mut seen_network = false;
+    for m in mounts {
+        let bare = m.strip_suffix(".*").unwrap_or(m);
+        if !seen_exec
+            && (bare.starts_with("sys.") && bare.contains(".syscall")
+                || bare.starts_with("sys.darwin.libsystem")
+                || bare.starts_with("sys.windows.kernel32")
+                || bare.starts_with("sys.windows.winsock2")
+                || bare == "sys.io_engine")
+        {
+            out.push(Capability::Exec {
+                target: ExecTarget::Custom("<inferred>".to_string()),
+            });
+            seen_exec = true;
+        }
+        if !seen_network
+            && (bare.starts_with("sys.windows.winsock2")
+                || (bare.starts_with("sys.") && bare.contains("net")))
+        {
+            out.push(Capability::Network {
+                protocol: NetProtocol::Tcp,
+                direction: NetDirection::Bidirectional,
+            });
+            seen_network = true;
+        }
+        // Unused-warning silencer — the ResourceTag import is
+        // here for future expansion (Read/Write capability
+        // inference from filesystem-touching mounts) without
+        // adding a separate use statement when wired.
+        let _ = ResourceTag::Logger;
+    }
+    out
 }
 
 /// Stable lifecycle tag for the JSON output.
