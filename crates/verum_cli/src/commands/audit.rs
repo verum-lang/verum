@@ -11464,6 +11464,201 @@ pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
+// ATS-V `@arch_module(...)` adoption coverage audit
+// =============================================================================
+
+/// `verum audit --arch-coverage` — walks every `.vr` file in the
+/// project + stdlib and reports which carry `@arch_module(...)`
+/// declarations.  Observability gate (does not fail the build) per
+/// spec §17.5 backward-compat: coverage grows incrementally.
+///
+/// For each annotated module, also surfaces:
+///   - whether the declaration parses cleanly into a `Shape`,
+///   - the parsed foundation / stratum / lifecycle,
+///   - any anti-pattern violations the kernel checker surfaces.
+///
+/// Output: `target/audit-reports/arch-coverage.json`
+/// (schema_version=1).
+pub fn audit_arch_coverage_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::arch_phase::run_arch_phase_one;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("ATS-V @arch_module adoption coverage");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let mut vr_files = discover_vr_files(&manifest_dir);
+    vr_files.extend(discover_stdlib_vr_files());
+
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("arch-coverage.json");
+
+    let mut total_files = 0usize;
+    let mut annotated = 0usize;
+    let mut total_violations = 0usize;
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+
+    for abs_path in &vr_files {
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        total_files += 1;
+
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_string_lossy()
+            .to_string();
+
+        // Walk module-level + per-item attributes for `@arch_module`.
+        let mut found_attr_args: Option<Vec<verum_ast::expr::Expr>> = None;
+        for attr in module.attributes.iter() {
+            if attr.name.as_str() == "arch_module" {
+                if let verum_common::Maybe::Some(args) = &attr.args {
+                    found_attr_args = Some(args.iter().cloned().collect());
+                } else {
+                    found_attr_args = Some(Vec::new());
+                }
+                break;
+            }
+        }
+        if found_attr_args.is_none() {
+            for item in &module.items {
+                for attr in item.attributes.iter() {
+                    if attr.name.as_str() == "arch_module" {
+                        if let verum_common::Maybe::Some(args) = &attr.args {
+                            found_attr_args = Some(args.iter().cloned().collect());
+                        } else {
+                            found_attr_args = Some(Vec::new());
+                        }
+                        break;
+                    }
+                }
+                if found_attr_args.is_some() {
+                    break;
+                }
+            }
+        }
+
+        if let Some(args) = found_attr_args {
+            annotated += 1;
+            let result = run_arch_phase_one(rel_path.clone(), &args);
+            total_violations += result.violations.len();
+            let parsed_ok = result.parse_errors.is_empty() && result.shape.is_some();
+            let foundation_tag = result
+                .shape
+                .as_ref()
+                .map(|s| s.foundation.tag().to_string())
+                .unwrap_or_else(|| "<unparsed>".to_string());
+            let stratum_tag = result
+                .shape
+                .as_ref()
+                .map(|s| s.stratum.tag().to_string())
+                .unwrap_or_else(|| "<unparsed>".to_string());
+            entries.push(serde_json::json!({
+                "file": rel_path,
+                "annotated": true,
+                "parse_ok": parsed_ok,
+                "foundation": foundation_tag,
+                "stratum": stratum_tag,
+                "violation_count": result.violations.len(),
+                "parse_error_count": result.parse_errors.len(),
+                "parse_errors": result
+                    .parse_errors
+                    .iter()
+                    .map(|e| format!("{:?}", e))
+                    .collect::<Vec<_>>(),
+                "violations": result
+                    .violations
+                    .iter()
+                    .map(|v| {
+                        serde_json::json!({
+                            "code": v.code.code(),
+                            "name": v.code.name(),
+                            "summary": v.summary,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            }));
+        }
+    }
+
+    let coverage_pct = if total_files == 0 {
+        0.0
+    } else {
+        (annotated as f64) * 100.0 / (total_files as f64)
+    };
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "ats_v_arch_module_coverage",
+        "spec": "internal/specs/ats-v.md#§17",
+        "total_files": total_files,
+        "annotated_count": annotated,
+        "coverage_percent": coverage_pct,
+        "total_violation_count": total_violations,
+        "annotated_modules": entries,
+    });
+
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("ATS-V @arch_module adoption coverage");
+            println!("─────────────────────────────────────────────────────");
+            println!(
+                "  Walked {} `.vr` file(s); {} carry @arch_module ({:.2}% coverage).",
+                total_files, annotated, coverage_pct,
+            );
+            println!("  Total anti-pattern violations: {}", total_violations);
+            if annotated > 0 {
+                println!();
+                println!(
+                    "  {:<60}  {:<14}  {:<10}  {}",
+                    "File", "Foundation", "Stratum", "Violations",
+                );
+                println!(
+                    "  {}  {}  {}  {}",
+                    "─".repeat(60),
+                    "─".repeat(14),
+                    "─".repeat(10),
+                    "─".repeat(10),
+                );
+                for entry in &entries {
+                    let file = entry["file"].as_str().unwrap_or("");
+                    let foundation = entry["foundation"].as_str().unwrap_or("");
+                    let stratum = entry["stratum"].as_str().unwrap_or("");
+                    let vc = entry["violation_count"].as_u64().unwrap_or(0);
+                    println!(
+                        "  {:<60}  {:<14}  {:<10}  {}",
+                        if file.len() > 60 { &file[file.len() - 60..] } else { file },
+                        foundation,
+                        stratum,
+                        vc,
+                    );
+                }
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    // Observability gate — never fails the build.  Adoption is
+    // incremental per spec §17.5; an unannotated cog is not a defect.
+    Ok(())
+}
+
+// =============================================================================
 // Reflection-tower audit (#158) — Feferman 1989 / Pohlers / Beklemishev
 // =============================================================================
 

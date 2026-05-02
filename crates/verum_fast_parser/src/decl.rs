@@ -5527,7 +5527,7 @@ impl<'a> RecursiveParser<'a> {
         }
 
         let span = self.stream.make_span(start_pos);
-        Ok(Item::new(
+        Ok(Item::new_with_attrs(
             ItemKind::Module(ModuleDecl {
                 visibility: vis,
                 name: Ident::new(name, name_span),
@@ -5537,6 +5537,7 @@ impl<'a> RecursiveParser<'a> {
                 contexts: context_requirements.into_iter().collect(),
                 span,
             }),
+            attrs.into_iter().collect(),
             span,
         ))
     }

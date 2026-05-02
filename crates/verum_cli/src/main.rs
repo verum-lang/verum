@@ -1459,6 +1459,16 @@ enum Commands {
         #[clap(long = "yoneda")]
         yoneda: bool,
 
+        /// ATS-V `@arch_module(...)` adoption coverage audit. Walks
+        /// every `.vr` file in the project + stdlib, reports which
+        /// modules carry `@arch_module(...)` declarations vs. the
+        /// total module count, and surfaces a per-module status list
+        /// as JSON. Observability gate — does not fail the build;
+        /// coverage grows incrementally per spec §17.5 backward-
+        /// compat. Output: `target/audit-reports/arch-coverage.json`.
+        #[clap(long = "arch-coverage")]
+        arch_coverage: bool,
+
  /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
  /// Walks every `apply kernel_*_strict(args)` invocation in the
  /// corpus's proof bodies and replays each literal-arg call
@@ -3977,6 +3987,7 @@ fn run_command(cli: Cli) -> Result<()> {
             counterfactual,
             adjunctions,
             yoneda,
+            arch_coverage,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -4049,6 +4060,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_adjunctions_with_format(output_format)
             } else if yoneda {
                 commands::audit::audit_yoneda_with_format(output_format)
+            } else if arch_coverage {
+                commands::audit::audit_arch_coverage_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {
