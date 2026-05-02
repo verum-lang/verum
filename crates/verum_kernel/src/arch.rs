@@ -477,7 +477,7 @@ impl MsfsStratum {
 /// mode (`@arch_module(strict=true)`), all three fields MUST be
 /// present; in soft mode, missing axes produce warnings but not
 /// errors.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CveClosure {
     /// C — Constructive witness (function or constructor path).
     pub constructive: Option<String>,

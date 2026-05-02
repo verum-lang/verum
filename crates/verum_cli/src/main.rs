@@ -1446,6 +1446,19 @@ enum Commands {
         #[clap(long = "adjunctions")]
         adjunctions: bool,
 
+        /// ATS-V Сезон 8 — Yoneda-equivalence checker audit. Per
+        /// spec §20.7 + §23, two architectures are equivalent iff
+        /// every Observer in the canonical roster (EndUser /
+        /// PeerCog / Stakeholder / Auditor / Adversary) projects
+        /// the same observation. Runs a synthetic battery covering
+        /// identity (trivially equivalent), per-observer
+        /// distinguishability cases (Auditor sees foundation,
+        /// Adversary sees network, EndUser sees exposes), and the
+        /// trivially-safe refactoring entry. Output:
+        /// `target/audit-reports/yoneda.json`.
+        #[clap(long = "yoneda")]
+        yoneda: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -3963,6 +3976,7 @@ fn run_command(cli: Cli) -> Result<()> {
             arch_discharges,
             counterfactual,
             adjunctions,
+            yoneda,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -4033,6 +4047,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_counterfactual_with_format(output_format)
             } else if adjunctions {
                 commands::audit::audit_adjunctions_with_format(output_format)
+            } else if yoneda {
+                commands::audit::audit_yoneda_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {

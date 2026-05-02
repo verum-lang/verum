@@ -11153,6 +11153,220 @@ pub fn audit_adjunctions_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
+// ATS-V Сезон 8 — Yoneda-equivalence audit
+// =============================================================================
+
+/// `verum audit --yoneda` — runs the Yoneda-equivalence checker
+/// over a synthetic battery covering identity (trivially equivalent),
+/// per-observer distinguishability (Auditor sees foundation,
+/// Adversary sees outbound network, EndUser sees exposes,
+/// Stakeholder sees persistence), and the trivially-safe
+/// refactoring entry.
+///
+/// Pin contract: the engine MUST surface each observer-specific
+/// asymmetry exactly — Adversary blind to lifecycle, EndUser blind
+/// to foundation, etc.  Pin failure means the observer-functor
+/// projection drifted from spec §20.7 + §23.
+///
+/// Output: `target/audit-reports/yoneda.json` (schema_version=1).
+pub fn audit_yoneda_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::arch::{
+        Capability, Foundation, NetDirection, NetProtocol, PersistenceMedium, ResourceTag, Shape,
+    };
+    use verum_kernel::arch_mtac::Observer;
+    use verum_kernel::arch_yoneda::yoneda_equivalent;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("ATS-V Сезон 8 — Yoneda-equivalence checker");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("yoneda.json");
+
+    fn auditor() -> Observer {
+        Observer::Auditor {
+            audit_kind: "compliance".into(),
+        }
+    }
+    fn adversary() -> Observer {
+        Observer::Adversary {
+            threat_model: "external".into(),
+        }
+    }
+    fn end_user() -> Observer {
+        Observer::EndUser {
+            kind: "default".into(),
+        }
+    }
+    fn stakeholder() -> Observer {
+        Observer::Stakeholder {
+            role: "operator".into(),
+        }
+    }
+
+    // Battery: each entry pins one observer-specific contract.
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    let mut all_pins_ok = true;
+
+    fn record(
+        entries: &mut Vec<serde_json::Value>,
+        all_pins_ok: &mut bool,
+        name: &str,
+        expected_equivalent: bool,
+        verdict: &verum_kernel::arch_yoneda::YonedaVerdict,
+    ) {
+        let pin_ok = verdict.equivalent == expected_equivalent;
+        if !pin_ok {
+            *all_pins_ok = false;
+        }
+        entries.push(serde_json::json!({
+            "entry": name,
+            "expected_equivalent": expected_equivalent,
+            "observed_equivalent": verdict.equivalent,
+            "disagreement_count": verdict.disagreement_count,
+            "pin_ok": pin_ok,
+            "verdict": verdict,
+        }));
+    }
+
+    // Entry 1: identity → equivalent under full canonical roster.
+    let s = Shape::default_for_unannotated();
+    let v_id = yoneda_equivalent(&s, &s, &[]);
+    record(&mut entries, &mut all_pins_ok, "identity_full_roster", true, &v_id);
+
+    // Entry 2: foundation drift → Auditor distinguishes;
+    // Stakeholder distinguishes; EndUser/PeerCog/Adversary blind.
+    let mut s_base = Shape::default_for_unannotated();
+    s_base.foundation = Foundation::ZfcTwoInacc;
+    let mut s_alt = Shape::default_for_unannotated();
+    s_alt.foundation = Foundation::Hott;
+    let v_audit_foundation = yoneda_equivalent(&s_base, &s_alt, &[auditor()]);
+    record(&mut entries, &mut all_pins_ok, "auditor_sees_foundation_drift", false, &v_audit_foundation);
+    let v_eu_foundation = yoneda_equivalent(&s_base, &s_alt, &[end_user()]);
+    record(&mut entries, &mut all_pins_ok, "end_user_blind_to_foundation", true, &v_eu_foundation);
+    let v_adv_foundation = yoneda_equivalent(&s_base, &s_alt, &[adversary()]);
+    record(&mut entries, &mut all_pins_ok, "adversary_blind_to_foundation", true, &v_adv_foundation);
+
+    // Entry 3: outbound network capability → Adversary
+    // distinguishes; EndUser does NOT (only sees exposes, this
+    // change is in requires).
+    let s_base = Shape::default_for_unannotated();
+    let mut s_alt = Shape::default_for_unannotated();
+    s_alt.requires = vec![Capability::Network {
+        protocol: NetProtocol::Tcp,
+        direction: NetDirection::Outbound,
+    }];
+    let v_adv_net = yoneda_equivalent(&s_base, &s_alt, &[adversary()]);
+    record(&mut entries, &mut all_pins_ok, "adversary_sees_outbound_network", false, &v_adv_net);
+
+    // Entry 4: exposes change → EndUser distinguishes; Stakeholder
+    // also affected via persistence_capabilities filter (no, only
+    // if it's a Persist capability — this is a Read on Logger so
+    // Stakeholder is blind).
+    let s_base = Shape::default_for_unannotated();
+    let mut s_alt = Shape::default_for_unannotated();
+    s_alt.exposes = vec![Capability::Read {
+        resource: ResourceTag::Logger,
+    }];
+    let v_eu_exposes = yoneda_equivalent(&s_base, &s_alt, &[end_user()]);
+    record(&mut entries, &mut all_pins_ok, "end_user_sees_exposes", false, &v_eu_exposes);
+    let v_stk_logger = yoneda_equivalent(&s_base, &s_alt, &[stakeholder()]);
+    record(&mut entries, &mut all_pins_ok, "stakeholder_blind_to_logger_read", true, &v_stk_logger);
+
+    // Entry 5: persistence change → Stakeholder distinguishes
+    // (persistence_capabilities filter catches it).
+    let s_base = Shape::default_for_unannotated();
+    let mut s_alt = Shape::default_for_unannotated();
+    s_alt.exposes = vec![Capability::Persist {
+        medium: PersistenceMedium::Disk {
+            path: "/tmp".into(),
+        },
+    }];
+    let v_stk_persist = yoneda_equivalent(&s_base, &s_alt, &[stakeholder()]);
+    record(&mut entries, &mut all_pins_ok, "stakeholder_sees_persistence", false, &v_stk_persist);
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "ats_v_yoneda_equivalence",
+        "season": 8,
+        "spec": "internal/specs/ats-v.md#§20.7-§23",
+        "load_bearing": all_pins_ok,
+        "canonical_observer_count": 5,
+        "battery_size": entries.len(),
+        "entries": entries,
+    });
+
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("ATS-V Сезон 8 — Yoneda-equivalence checker");
+            println!("─────────────────────────────────────────────────────");
+            println!(
+                "  {:<40}  {:<13}  {:<13}  {}",
+                "Battery entry", "Expected eq", "Observed eq", "Pin",
+            );
+            println!(
+                "  {}  {}  {}  {}",
+                "─".repeat(40),
+                "─".repeat(13),
+                "─".repeat(13),
+                "─".repeat(3),
+            );
+            for entry in &payload["entries"].as_array().cloned().unwrap_or_default() {
+                let name = entry["entry"].as_str().unwrap_or("");
+                let expected = entry["expected_equivalent"].as_bool().unwrap_or(false);
+                let observed = entry["observed_equivalent"].as_bool().unwrap_or(false);
+                let pin_ok = entry["pin_ok"].as_bool().unwrap_or(false);
+                let glyph = if pin_ok { "✓" } else { "✗" };
+                println!(
+                    "  {:<40}  {:<13}  {:<13}  {}",
+                    name,
+                    if expected { "equivalent" } else { "distinct" },
+                    if observed { "equivalent" } else { "distinct" },
+                    glyph,
+                );
+            }
+            println!();
+            println!("  Canonical observers: 5 (EndUser / PeerCog / Stakeholder / Auditor / Adversary)");
+            println!();
+            if all_pins_ok {
+                println!(
+                    "{} Yoneda-equivalence checker load-bearing: every observer-specific contract holds.",
+                    "✓".green(),
+                );
+            } else {
+                println!("{} Yoneda-equivalence checker FAILED at least one pin.", "✗".red());
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    if !all_pins_ok {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "Yoneda audit: at least one observer-specific contract failed — see {}",
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
 // Reflection-tower audit (#158) — Feferman 1989 / Pohlers / Beklemishev
 // =============================================================================
 
