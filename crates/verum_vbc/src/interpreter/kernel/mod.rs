@@ -531,6 +531,20 @@ pub fn dispatch_reduce(
 
 /// Dispatch matrix multiplication to appropriate kernel
 pub fn dispatch_matmul(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
+    // Этап C — MLIR JIT compute path for matmul (Шаг 4a: scalar
+    // triple-loop with auto-vectorised inner K loop).  Шаг 4b will
+    // route through `linalg.matmul` with tile-and-fuse for cuBLAS /
+    // MKL-class throughput on large matrices.
+    #[cfg(feature = "mlir-jit")]
+    {
+        let registry = get_backend_registry();
+        if let Some(jit_backend) = registry.backend(DeviceId::mlir_jit(0)) {
+            if let Some(result) = jit_backend.matmul(a, b) {
+                return Some(result);
+            }
+        }
+    }
+
     // Try Metal GPU for large F32 matrices
     #[cfg(all(target_os = "macos", feature = "metal"))]
     if a.dtype == DType::F32 && a.numel >= MIN_GPU_SIZE {
