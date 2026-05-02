@@ -97,11 +97,52 @@ pub fn parse_arch_module(args: &[Expr]) -> Result<Shape, ArchParseError> {
 
     for arg in args {
         let (name, value) = match &arg.kind {
+            // Function-call named arg: `foo(name = value)` — produced
+            // by `parse_call_arg` when the argument list uses `:`
+            // syntax outside attribute-arg context.
             ExprKind::NamedArg { name, value } => (name.name.as_str().to_string(), value.as_ref()),
+            // Attribute-arg named pair: `@attr(name: value)` — the
+            // attribute-argument parser represents `name: value` as
+            // `Binary { op: Assign, left: Path(name), right: value }`.
+            // We unify both surfaces here so callers can write either
+            // form (the canonical `@arch_module(...)` form is the
+            // attribute-arg `:` style).
+            ExprKind::Binary {
+                op: verum_ast::expr::BinOp::Assign,
+                left,
+                right,
+            } => match &left.kind {
+                ExprKind::Path(p) => {
+                    let name = p
+                        .segments
+                        .iter()
+                        .filter_map(|seg| match seg {
+                            verum_ast::ty::PathSegment::Name(ident) => {
+                                Some(ident.name.as_str().to_string())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    if name.is_empty() {
+                        return Err(ArchParseError::InvalidValue {
+                            field: "<binary-assign-lhs>".to_string(),
+                            expected: "named argument with single-segment ident on LHS",
+                        });
+                    }
+                    (name, right.as_ref())
+                }
+                _ => {
+                    return Err(ArchParseError::InvalidValue {
+                        field: "<binary-assign-lhs>".to_string(),
+                        expected: "named argument with Path on LHS",
+                    });
+                }
+            },
             _ => {
                 return Err(ArchParseError::InvalidValue {
                     field: "<positional>".to_string(),
-                    expected: "named argument `name = value`",
+                    expected: "named argument `name: value` or `name = value`",
                 })
             }
         };
@@ -245,8 +286,15 @@ fn parse_bool(expr: &Expr) -> Result<bool, ArchParseError> {
     }
 }
 
-/// Parse a string from a path expression (treats `foo.bar.baz` as
-/// `"foo.bar.baz"` — the parser-level identifier path).
+/// Parse a string from a path-like expression.  Accepts three forms:
+///
+///  * `ExprKind::Path` — direct path like `Foundation.ZfcTwoInacc`
+///    when the parser collapses dotted segments.
+///  * `ExprKind::Field` — field access `obj.field` chain.  We walk
+///    the chain to produce the canonical dotted form (so
+///    `Foundation.ZfcTwoInacc` parses as the two-segment string
+///    "Foundation.ZfcTwoInacc").
+///  * `ExprKind::Literal(Text)` — string literal form.
 fn parse_path_string(expr: &Expr, field: &str) -> Result<String, ArchParseError> {
     match &expr.kind {
         ExprKind::Path(p) => {
@@ -260,6 +308,7 @@ fn parse_path_string(expr: &Expr, field: &str) -> Result<String, ArchParseError>
                 .collect();
             Ok(segs.join("."))
         }
+        ExprKind::Field { .. } => collapse_field_chain(expr, field),
         ExprKind::Literal(lit) => match &lit.kind {
             LiteralKind::Text(StringLit::Regular(s)) | LiteralKind::Text(StringLit::MultiLine(s)) => {
                 Ok(s.as_str().to_string())
@@ -273,6 +322,43 @@ fn parse_path_string(expr: &Expr, field: &str) -> Result<String, ArchParseError>
             field: field.to_string(),
             expected: "identifier path or string literal",
         }),
+    }
+}
+
+/// Walk a `Foundation.ZfcTwoInacc`-style field-access chain and
+/// collapse it to a dotted-path string.  Recurses through nested
+/// `ExprKind::Field` until it hits the base `ExprKind::Path`.
+fn collapse_field_chain(expr: &Expr, field_name: &str) -> Result<String, ArchParseError> {
+    let mut tail: Vec<String> = Vec::new();
+    let mut cur = expr;
+    loop {
+        match &cur.kind {
+            ExprKind::Field { expr: inner, field } => {
+                tail.push(field.name.as_str().to_string());
+                cur = inner.as_ref();
+            }
+            ExprKind::Path(p) => {
+                let mut head: Vec<String> = p
+                    .segments
+                    .iter()
+                    .map(|s| match s {
+                        verum_ast::ty::PathSegment::Name(ident) => {
+                            ident.name.as_str().to_string()
+                        }
+                        _ => "<non_ident>".to_string(),
+                    })
+                    .collect();
+                tail.reverse();
+                head.extend(tail);
+                return Ok(head.join("."));
+            }
+            _ => {
+                return Err(ArchParseError::InvalidValue {
+                    field: field_name.to_string(),
+                    expected: "identifier path or string literal",
+                });
+            }
+        }
     }
 }
 
@@ -429,12 +515,29 @@ fn parse_stratum(expr: &Expr) -> Result<MsfsStratum, ArchParseError> {
 }
 
 fn parse_lifecycle(expr: &Expr) -> Result<Lifecycle, ArchParseError> {
- // Accept bare identifier (Lifecycle::Theorem) defaults to
- // Theorem("unspecified"), or call form Lifecycle::Theorem("v0.1").
-    if let ExprKind::Call { func, args, .. } = &expr.kind {
-        let path = parse_path_string(func, "lifecycle")?;
+    // Accept bare identifier (`Lifecycle.Theorem`) defaulting to
+    // Theorem("unspecified"), call form `Lifecycle::Theorem("v0.1")`,
+    // OR method-call form `Lifecycle.Theorem("v0.1")` (the canonical
+    // `@arch_module(...)` surface form).
+    let call_view: Option<(String, Option<&Expr>)> = match &expr.kind {
+        ExprKind::Call { func, args, .. } => Some((
+            parse_path_string(func, "lifecycle")?,
+            args.iter().next(),
+        )),
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            let receiver_path = parse_path_string(receiver, "lifecycle")?;
+            let combined = format!("{}.{}", receiver_path, method.name.as_str());
+            Some((combined, args.iter().next()))
+        }
+        _ => None,
+    };
+    if let Some((path, arg)) = call_view {
         let last = path.split('.').last().unwrap_or(&path);
-        let arg = args.iter().next();
         return Ok(match (last, arg) {
             ("Theorem", Some(a)) => Lifecycle::Theorem {
                 since: parse_path_string(a, "since")?,
