@@ -1048,9 +1048,12 @@ theorem meet_is_min(a: EpistemicStatus, b: EpistemicStatus)
     ensures a.meet(&b).rank() == (if a.rank() <= b.rank() { a.rank() } else { b.rank() })
     proof by auto;
 
-/// The obstruction deviation is non-negative at every claim.
+/// The epistemic obstruction's max-deviation is non-negative at
+/// every claim.  Disambiguated from `math.kan_extension` which has
+/// a separate `obstruction_non_negative` over Kan-extension
+/// averages.
 @verify(formal)
-theorem obstruction_non_negative(
+theorem epistemic_obstruction_max_deviation_non_negative(
     theory:      &Theory,
     subsite_ids: &List<Text>,
 )

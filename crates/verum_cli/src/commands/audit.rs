@@ -4414,20 +4414,23 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
             .trim_end_matches(".vr")
             .to_string();
         for item in &module.items {
-            let (name, decl_attrs, proof_body, proposition_expr) = match &item.kind {
-                verum_ast::decl::ItemKind::Theorem(d)
-                | verum_ast::decl::ItemKind::Lemma(d)
-                | verum_ast::decl::ItemKind::Corollary(d) => (
-                    d.name.name.as_str().to_string(),
-                    &d.attributes,
-                    match &d.proof {
-                        verum_common::Maybe::Some(b) => Some(b),
-                        verum_common::Maybe::None => None,
-                    },
-                    d.proposition.as_ref(),
-                ),
-                _ => continue,
-            };
+            let (name, decl_attrs, proof_body, proposition_expr, theorem_params, theorem_generics) =
+                match &item.kind {
+                    verum_ast::decl::ItemKind::Theorem(d)
+                    | verum_ast::decl::ItemKind::Lemma(d)
+                    | verum_ast::decl::ItemKind::Corollary(d) => (
+                        d.name.name.as_str().to_string(),
+                        &d.attributes,
+                        match &d.proof {
+                            verum_common::Maybe::Some(b) => Some(b),
+                            verum_common::Maybe::None => None,
+                        },
+                        d.proposition.as_ref(),
+                        &d.params,
+                        &d.generics,
+                    ),
+                    _ => continue,
+                };
             let has_proof = proof_body.is_some();
             let declared_strategy = strictest_verify_strategy(&item.attributes, decl_attrs)
                 .map(|t| t.as_str().to_string());
@@ -4440,6 +4443,49 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
             // signature header was computed with the actual translated
             // text. Pre-fix this caused 74/74 signatures to mismatch on
             // the live MSFS corpus despite no real divergence.
+            //
+            // Mirror the cross-format-roundtrip gate's params +
+            // generics population (audit.rs ~L3747-3788).  Without
+            // these, theorems with explicit type-parameters (e.g.
+            // `obstruction_non_negative`) compute a signature
+            // missing the param/generic block while the rendered
+            // .v/.lean carries it — producing a 4-mismatch chain
+            // (coq+lean × theorem × 2 nominally-distinct walks).
+            let mut walker_params: Vec<(String, &verum_ast::ty::Type)> = Vec::new();
+            for fp in theorem_params.iter() {
+                if let verum_ast::decl::FunctionParamKind::Regular {
+                    pattern,
+                    ty,
+                    default_value: _,
+                } = &fp.kind
+                {
+                    if let Some(pname) = ident_pattern_name(pattern) {
+                        walker_params.push((sanitise_theorem_name(&pname), ty));
+                    }
+                }
+            }
+            let mut walker_generics: Vec<(String, String)> = Vec::new();
+            for gp in theorem_generics.iter() {
+                if let verum_ast::ty::GenericParamKind::Type {
+                    name,
+                    bounds,
+                    default: _,
+                } = &gp.kind
+                {
+                    let g_name = sanitise_theorem_name(name.as_str());
+                    let bound_text = bounds
+                        .iter()
+                        .filter_map(generic_bound_to_annotation)
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    let annotation = if bound_text.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{} : {}", g_name, bound_text)
+                    };
+                    walker_generics.push((g_name, annotation));
+                }
+            }
             let mut spec = TheoremSpec {
                 name: sanitise_theorem_name(&name),
                 module_path: module_path_text.clone(),
@@ -4451,6 +4497,8 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
                 per_backend_proof_tactic: std::collections::BTreeMap::new(),
                 declared_strategy,
             }
+            .with_translated_params(&walker_params)
+            .with_generics(&walker_generics)
             .with_translated_proposition(proposition_expr);
             if let Some(body) = proof_body {
                 spec = spec.with_translated_proof_body(body);
@@ -5314,6 +5362,55 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_arch_discharges_with_format(AuditFormat::Json),
     );
     if summary.get("arch_discharges") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
+    // 11e. ATS-V Сезон 6 — counterfactual reasoning engine pin
+    //  battery.  Verifies every InvariantStatus arm
+    //  (HoldsBoth/HoldsBaseOnly/HoldsAltOnly/HoldsNeither) holds
+    //  its soundness contract; failure means engine arm-routing
+    //  drifted from spec §22.2.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "counterfactual",
+        report_dir.join("counterfactual.json"),
+        || audit_counterfactual_with_format(AuditFormat::Json),
+    );
+    if summary.get("counterfactual") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
+    // 11f. ATS-V Сезон 7 — adjunction analyzer pin battery.
+    //  Verifies each canonical adjunction recogniser (Inline⊣Extract
+    //  / Specialise⊣Generalise / Decompose⊣Compose /
+    //  Strengthen⊣Weaken) classifies the corresponding shape-delta
+    //  correctly; failure means recogniser drifted from spec §20.6.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "adjunctions",
+        report_dir.join("adjunctions.json"),
+        || audit_adjunctions_with_format(AuditFormat::Json),
+    );
+    if summary.get("adjunctions") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
+    // 11g. ATS-V Сезон 8 — Yoneda-equivalence checker pin battery.
+    //  Verifies each canonical Observer's projection respects spec
+    //  §20.7 + §23 — Auditor sees foundation, Adversary sees
+    //  attack surface, EndUser sees public interface, etc.
+    //  Failure means the observer-functor projection drifted from
+    //  spec.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "yoneda",
+        report_dir.join("yoneda.json"),
+        || audit_yoneda_with_format(AuditFormat::Json),
+    );
+    if summary.get("yoneda") != Some(&"passed") {
         overall_l4 = false;
     }
 
