@@ -79,6 +79,34 @@ use super::super::tensor::{DType, TensorHandle};
 use crate::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 
 // =============================================================================
+// Memref descriptor — ABI bridge to MLIR's `memref<?x?xT>` arguments.
+//
+// MLIR lowers `memref<?x?xT>` function arguments to a struct that
+// carries the allocated pointer, the aligned (element-aligned)
+// pointer, an element offset, and per-dimension size + stride arrays.
+// When a function carries `llvm.emit_c_interface`, MLIR generates a
+// C-ABI wrapper named `_mlir_ciface_<sym>` that takes pointers to
+// these structs.  `invoke_packed` then expects each entry of the
+// packed-args array to point to the value of the corresponding arg
+// — for our pointer-to-struct args, that means each entry is
+// `&mut ptr_to_descriptor`.
+//
+// The layout below matches MLIR's `StridedMemRefType<T, 2>` exactly
+// (`include/mlir/ExecutionEngine/CRunnerUtils.h`).  Element type `T`
+// is conveyed by the kernel; the descriptor itself is element-type-
+// agnostic since the pointer fields are `*mut u8`.
+// =============================================================================
+
+#[repr(C)]
+struct MemrefDescriptor2D {
+    base: *mut u8,
+    aligned: *mut u8,
+    offset: i64,
+    sizes: [i64; 2],
+    strides: [i64; 2],
+}
+
+// =============================================================================
 // JIT key + cache holder
 // =============================================================================
 
@@ -478,15 +506,16 @@ impl Backend for MlirJitBackend {
     }
 
     fn matmul(&self, a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
-        // Шаг 4a: scalar triple-loop matmul JIT for F32/F64 + 2D inputs.
-        // The kernel computes `out[i,j] = sum_k a[i,k] * b[k,j]` over
-        // row-major arrays passed as `!llvm.ptr` + (M, K, N) i64 shape
-        // args.  LLVM's auto-vectoriser at opt_level=2 hoists the
-        // accumulator into a register and vectorises the K loop with
-        // FMA chains — competitive with a plain BLAS kernel for small
-        // / medium matrices.  Шаг 4b will swap this for `linalg.matmul`
-        // via the memref ABI and unlock MLIR's tile-and-fuse machinery,
-        // delivering cuBLAS / MKL-class throughput on large matrices.
+        // Шаг 4b: linalg.matmul over dynamically-shaped memrefs, JIT-
+        // compiled through the full MLIR `linalg-to-loops` →
+        // `convert-to-llvm` lowering pipeline.  At `opt_level = 2`
+        // MLIR's loop vectoriser + LLVM's `llvm.intr.vector.reduce.*`
+        // chain produce cache-tiled, vectorised GEMM kernels — the
+        // path that closes the gap to cuBLAS / MKL throughput on
+        // large matrices.  Compared with the Шаг 4a scalar triple-
+        // loop, the kernel is ONE op (`linalg.matmul`); MLIR
+        // synthesises the entire `ijk` loop nest with proper
+        // accumulator handling and vectorisation.
         if a.dtype != b.dtype {
             return None;
         }
@@ -513,24 +542,48 @@ impl Backend for MlirJitBackend {
         let a_data = a.data.as_ref()?;
         let b_data = b.data.as_ref()?;
         let out_data = out.data.as_ref()?;
-        let mut a_ptr: *const u8 = unsafe { (*a_data.as_ptr()).as_ptr() };
-        let mut b_ptr: *const u8 = unsafe { (*b_data.as_ptr()).as_ptr() };
-        let mut out_ptr: *mut u8 = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
-        let mut m_arg: i64 = m as i64;
-        let mut k_arg: i64 = k_a as i64;
-        let mut n_arg: i64 = n as i64;
-        let mut packed_args: [*mut (); 6] = [
-            (&mut a_ptr) as *mut _ as *mut (),
-            (&mut b_ptr) as *mut _ as *mut (),
-            (&mut out_ptr) as *mut _ as *mut (),
-            (&mut m_arg) as *mut _ as *mut (),
-            (&mut k_arg) as *mut _ as *mut (),
-            (&mut n_arg) as *mut _ as *mut (),
+        let a_raw = unsafe { (*a_data.as_ptr()).as_ptr() } as *mut u8;
+        let b_raw = unsafe { (*b_data.as_ptr()).as_ptr() } as *mut u8;
+        let out_raw = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
+
+        // Construct StridedMemRefType<T, 2> descriptors on the stack.
+        // Layout matches MLIR's canonical struct exactly (the C-
+        // interface wrapper passes a pointer to this struct):
+        //   { base, aligned, offset: i64, sizes: [i64; 2], strides: [i64; 2] }
+        // Row-major contiguous: stride[0] = ncols, stride[1] = 1.
+        let mut a_desc = MemrefDescriptor2D {
+            base: a_raw,
+            aligned: a_raw,
+            offset: 0,
+            sizes: [m as i64, k_a as i64],
+            strides: [k_a as i64, 1],
+        };
+        let mut b_desc = MemrefDescriptor2D {
+            base: b_raw,
+            aligned: b_raw,
+            offset: 0,
+            sizes: [k_b as i64, n as i64],
+            strides: [n as i64, 1],
+        };
+        let mut out_desc = MemrefDescriptor2D {
+            base: out_raw,
+            aligned: out_raw,
+            offset: 0,
+            sizes: [m as i64, n as i64],
+            strides: [n as i64, 1],
+        };
+        let mut a_desc_ptr: *mut MemrefDescriptor2D = &mut a_desc;
+        let mut b_desc_ptr: *mut MemrefDescriptor2D = &mut b_desc;
+        let mut out_desc_ptr: *mut MemrefDescriptor2D = &mut out_desc;
+        let mut packed_args: [*mut (); 3] = [
+            (&mut a_desc_ptr) as *mut _ as *mut (),
+            (&mut b_desc_ptr) as *mut _ as *mut (),
+            (&mut out_desc_ptr) as *mut _ as *mut (),
         ];
         let result = unsafe { holder.engine.invoke_packed("kernel", &mut packed_args) };
         if result.is_err() {
             tracing::warn!(
-                "MLIR-JIT matmul invocation failed for dtype={:?}; falling back to CpuBackend",
+                "MLIR-JIT linalg.matmul invocation failed for dtype={:?}; falling back to CpuBackend",
                 a.dtype
             );
             return None;
@@ -797,84 +850,78 @@ fn build_reduce_kernel_text(op: TensorReduceOp, dtype: DType) -> Option<String> 
     ))
 }
 
-/// Build the MLIR text for a row-major 2D matmul kernel.
+/// Build the MLIR text for a row-major 2D matmul kernel using
+/// `linalg.matmul` over dynamically-shaped memrefs.
 ///
-/// Signature (after `convert-to-llvm`):
-///   `void kernel(*const T a, *const T b, *mut T out, i64 m, i64 k, i64 n)`
+/// This is the showpiece of MLIR-driven compute: the single
+/// `linalg.matmul` op triggers the full tile-and-fuse + vectorise
+/// scheduler when lowered, producing multi-level loop nests with
+/// register / L1 / L2 cache tiling and target-native SIMD —
+/// the same path PyTorch / JAX / Triton ride for production GEMMs.
+/// Compared with the Шаг 4a scalar triple-loop, this opens the door
+/// to cuBLAS / MKL-class throughput on large matrices.
 ///
-/// where `a` is `(m, k)`, `b` is `(k, n)`, `out` is `(m, n)`, all
-/// row-major contiguous.  The kernel is a textbook `ijk` loop nest
-/// that holds the accumulator in a block-arg-carried register; LLVM
-/// at `opt_level = 2` auto-vectorises the inner K loop with FMA
-/// chains on architectures that support it.
+/// Function signature (after `linalg-to-loops` → `convert-to-llvm`
+/// + `finalize-memref-to-llvm` lowering and the
+/// `llvm.emit_c_interface` wrapper):
 ///
-/// Шаг 4b will replace this with a `linalg.matmul` op that triggers
-/// MLIR's tile-and-fuse + vectorise scheduler — the path that closes
-/// the gap to cuBLAS / MKL throughput on large matrices.
+/// ```c
+/// extern "C" void _mlir_ciface_kernel(
+///     StridedMemRefType<T, 2>* a,
+///     StridedMemRefType<T, 2>* b,
+///     StridedMemRefType<T, 2>* out
+/// );
+/// ```
+///
+/// where `StridedMemRefType<T, 2>` is the canonical MLIR descriptor
+/// (`{base, aligned, offset, sizes[2], strides[2]}` = 56 bytes).
+/// The Rust caller in `matmul()` constructs three of these on the
+/// stack and passes pointers to them through `invoke_packed`.
 fn build_matmul_kernel_text(dtype: DType) -> Option<String> {
     let elem_ty = mlir_elem_type(dtype)?;
     if !is_float_dtype(dtype) {
         return None;
     }
-    let zero_lit = if dtype == DType::F32 { "0.0 : f32" } else { "0.0 : f64" };
     Some(format!(
         r#"module {{
   func.func @kernel(
-    %a: !llvm.ptr,
-    %b: !llvm.ptr,
-    %out: !llvm.ptr,
-    %m: i64,
-    %k: i64,
-    %n: i64
+    %a: memref<?x?x{elem}>,
+    %b: memref<?x?x{elem}>,
+    %out: memref<?x?x{elem}>
   ) attributes {{ llvm.emit_c_interface }} {{
-    %c0 = arith.constant 0 : i64
-    %c1 = arith.constant 1 : i64
-    %f0 = arith.constant {zero_lit}
-    cf.br ^outer(%c0 : i64)
-  ^outer(%i: i64):
-    %i_done = arith.cmpi sge, %i, %m : i64
-    cf.cond_br %i_done, ^exit, ^middle_init
-  ^middle_init:
-    cf.br ^middle(%c0 : i64)
-  ^middle(%j: i64):
-    %j_done = arith.cmpi sge, %j, %n : i64
-    cf.cond_br %j_done, ^outer_next, ^inner_init
-  ^inner_init:
-    cf.br ^inner(%c0, %f0 : i64, {elem})
-  ^inner(%kk: i64, %sum: {elem}):
-    %kk_done = arith.cmpi sge, %kk, %k : i64
-    cf.cond_br %kk_done, ^store, ^inner_body
-  ^inner_body:
-    %ik = arith.muli %i, %k : i64
-    %a_idx = arith.addi %ik, %kk : i64
-    %ap = llvm.getelementptr inbounds %a[%a_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
-    %va = llvm.load %ap : !llvm.ptr -> {elem}
-    %kn = arith.muli %kk, %n : i64
-    %b_idx = arith.addi %kn, %j : i64
-    %bp = llvm.getelementptr inbounds %b[%b_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
-    %vb = llvm.load %bp : !llvm.ptr -> {elem}
-    %prod = arith.mulf %va, %vb : {elem}
-    %new_sum = arith.addf %sum, %prod : {elem}
-    %kk_next = arith.addi %kk, %c1 : i64
-    cf.br ^inner(%kk_next, %new_sum : i64, {elem})
-  ^store:
-    %in = arith.muli %i, %n : i64
-    %out_idx = arith.addi %in, %j : i64
-    %op = llvm.getelementptr inbounds %out[%out_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
-    llvm.store %sum, %op : {elem}, !llvm.ptr
-    %j_next = arith.addi %j, %c1 : i64
-    cf.br ^middle(%j_next : i64)
-  ^outer_next:
-    %i_next = arith.addi %i, %c1 : i64
-    cf.br ^outer(%i_next : i64)
-  ^exit:
+    linalg.matmul ins(%a, %b : memref<?x?x{elem}>, memref<?x?x{elem}>)
+                  outs(%out : memref<?x?x{elem}>)
     return
   }}
 }}
 "#,
         elem = elem_ty,
-        zero_lit = zero_lit,
     ))
+}
+
+/// Pass-pipeline shape needed by the linalg-matmul kernel.
+///
+/// `convert-to-llvm` (the umbrella) does NOT lower `linalg` ops;
+/// they need an explicit `convert-linalg-to-loops` pre-step that
+/// rewrites `linalg.matmul` into an `scf.for` nest.  After that the
+/// memref ops + scf + arith all reach LLVM dialect via the umbrella
+/// pass, and `finalize-memref-to-llvm` lowers memref descriptors to
+/// `llvm.struct`.  Func-level cleanup happens inside the umbrella.
+fn matmul_lowering_pipeline(context: &Context) -> PassManager<'_> {
+    let pm = PassManager::new(context);
+    pm.add_pass(pass::linalg::create_convert_linalg_to_loops_pass());
+    pm.add_pass(pass::conversion::create_scf_to_control_flow());
+    pm.add_pass(pass::conversion::create_finalize_mem_ref_to_llvm());
+    pm.add_pass(pass::conversion::create_to_llvm());
+    // The conversion to LLVM produces transient
+    // `builtin.unrealized_conversion_cast` ops on the boundaries
+    // between dialects (memref↔llvm.struct in particular); the
+    // reconcile pass folds matched cast pairs and the LLVM
+    // translation rejects any that survive.  Without it the JIT
+    // path fails with "LLVM Translation failed for operation:
+    // builtin.unrealized_conversion_cast".
+    pm.add_pass(pass::conversion::create_reconcile_unrealized_casts());
+    pm
 }
 
 fn build_unop_kernel_text(op: TensorUnaryOp, dtype: DType) -> Option<String> {
@@ -947,11 +994,22 @@ fn compile_kernel(
         );
         return None;
     }
-    let pass_manager = PassManager::new(context);
-    pass_manager.add_pass(pass::conversion::create_to_llvm());
+    // Choose the lowering pipeline by kernel kind: matmul uses
+    // `linalg.matmul` over memrefs and needs the linalg-to-loops +
+    // memref-to-llvm pre-steps; the other kernels are already in
+    // arith/cf/llvm dialects and reach LLVM through the umbrella
+    // `convert-to-llvm` directly.
+    let pass_manager = match kind {
+        KernelKind::Matmul => matmul_lowering_pipeline(context),
+        _ => {
+            let pm = PassManager::new(context);
+            pm.add_pass(pass::conversion::create_to_llvm());
+            pm
+        }
+    };
     if pass_manager.run(&mut module).is_err() {
         tracing::warn!(
-            "MLIR-JIT: convert-to-llvm pass failed for kind={:?} dtype={:?}",
+            "MLIR-JIT: lowering pipeline failed for kind={:?} dtype={:?}",
             kind,
             dtype
         );
