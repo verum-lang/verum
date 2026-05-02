@@ -68,6 +68,14 @@ libffi = { version = "5.1", optional = true }
 # Tokenization (HuggingFace, optional)
 tokenizers = { workspace = true, optional = true }
 
+# MLIR JIT execution engine for Tier 0 interpreter compute path
+# (Этап C — compute unification).  Behind `mlir-jit` feature flag,
+# off by default since enabling MLIR adds compile cost on the cold
+# path (~ms first call).  When on, `MlirJitBackend` registers with
+# the kernel `BackendRegistry` and tensor compute ops are JIT-compiled
+# at first invocation through `linalg`/`vector`/`gpu` dialects.
+verum_mlir = { workspace = true, optional = true }
+
 # Unix libc for V-LLSI syscall operations
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -101,6 +109,7 @@ parallel = ["dep:rayon"]  # Enable parallel scans and monomorphization
 metal = ["dep:metal", "dep:objc", "dep:block", "dep:foreign-types-shared"]  # Metal GPU backend (macOS)
 ffi = ["dep:libloading", "dep:libffi"]  # FFI runtime support for interpreter
 tokenizers = ["dep:tokenizers"]  # HuggingFace tokenizers for BPE/SentencePiece
+mlir-jit = ["dep:verum_mlir"]  # Этап C — MLIR JIT compute backend for Tier 0 interpreter
 # Note: cbgr-integration feature removed - verum_cbgr is now always included for industrial quality
 
 [[bench]]
