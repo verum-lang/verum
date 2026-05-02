@@ -53,6 +53,8 @@
 // =============================================================================
 
 @arch_module(
+    exposes: [Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1"),
