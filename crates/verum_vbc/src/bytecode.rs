@@ -728,51 +728,10 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // Tensor Operations
         // ====================================================================
-        Instruction::TensorNew { dst, dtype, dims } => {
-            output.push(Opcode::TensorNew.to_byte());
-            encode_reg(*dst, output);
-            output.push(*dtype as u8);
-            encode_reg_vec(dims, output);
-        }
-
-        Instruction::TensorBinop { op, dst, a, b } => {
-            output.push(Opcode::TensorBinop.to_byte());
-            output.push(*op as u8);
-            encode_reg(*dst, output);
-            encode_reg(*a, output);
-            encode_reg(*b, output);
-        }
-
-        Instruction::TensorUnop { op, dst, src } => {
-            output.push(Opcode::TensorUnop.to_byte());
-            output.push(*op as u8);
-            encode_reg(*dst, output);
-            encode_reg(*src, output);
-        }
-
-        Instruction::TensorMatmul { dst, a, b } => {
-            output.push(Opcode::TensorMatmul.to_byte());
-            encode_reg(*dst, output);
-            encode_reg(*a, output);
-            encode_reg(*b, output);
-        }
-
-        Instruction::TensorReduce {
-            op,
-            dst,
-            src,
-            axes,
-            keepdim,
-        } => {
-            output.push(Opcode::TensorReduce.to_byte());
-            output.push(*op as u8);
-            encode_reg(*dst, output);
-            encode_reg(*src, output);
-            encode_varint(axes.len() as u64, output);
-            output.extend_from_slice(axes);
-            output.push(if *keepdim { 1 } else { 0 });
-        }
-
+        // Phase 4: TensorNew/Binop/Unop/Matmul/Reduce — encoder arms
+        // deleted along with their Instruction variants.  All these
+        // ops now flow through `Instruction::TensorExtended { sub_op,
+        // operands }` which has its own canonical encoder below.
         Instruction::TensorFlashAttention {
             dst,
             q,
@@ -1521,32 +1480,8 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // Additional Tensor Operations
         // ====================================================================
-        Instruction::TensorFull {
-            dst,
-            value,
-            shape,
-            dtype,
-        } => {
-            output.push(Opcode::TensorFull.to_byte());
-            encode_reg(*dst, output);
-            encode_reg(*value, output);
-            encode_reg_vec(shape, output);
-            output.push(*dtype as u8);
-        }
-
-        Instruction::TensorFromSlice {
-            dst,
-            data,
-            shape,
-            dtype,
-        } => {
-            output.push(Opcode::TensorFromSlice.to_byte());
-            encode_reg(*dst, output);
-            encode_reg(*data, output);
-            encode_reg_vec(shape, output);
-            output.push(*dtype as u8);
-        }
-
+        // Phase 4: TensorFull / TensorFromSlice — encoder arms deleted;
+        // see header comment.  Emission flows through TensorExtended.
         Instruction::TensorArange {
             dst,
             start,
@@ -1602,34 +1537,8 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*dtype as u8);
         }
 
-        Instruction::TensorReshape { dst, src, shape } => {
-            output.push(Opcode::TensorReshape.to_byte());
-            encode_reg(*dst, output);
-            encode_reg(*src, output);
-            encode_reg_vec(shape, output);
-        }
-
-        Instruction::TensorTranspose { dst, src, perm } => {
-            output.push(Opcode::TensorTranspose.to_byte());
-            encode_reg(*dst, output);
-            encode_reg(*src, output);
-            encode_varint(perm.len() as u64, output);
-            output.extend_from_slice(perm);
-        }
-
-        Instruction::TensorSlice {
-            dst,
-            src,
-            starts,
-            ends,
-        } => {
-            output.push(Opcode::TensorSlice.to_byte());
-            encode_reg(*dst, output);
-            encode_reg(*src, output);
-            encode_reg_vec(starts, output);
-            encode_reg_vec(ends, output);
-        }
-
+        // Phase 4: TensorReshape / TensorTranspose / TensorSlice —
+        // encoder arms deleted; emission via TensorExtended.
         Instruction::TensorIndex {
             dst,
             src,
@@ -2572,7 +2481,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             total_size,
             data,
         } => {
-            output.push(Opcode::TensorNew.to_byte());
+            // Phase 4: previously piggy-backed on the legacy `TensorNew`
+            // top-level byte (0xF0); after the reclaim we route through
+            // `TensorExtended` (0xFC) + `NewFromArgs` sub-opcode.  The
+            // operand layout (shape_len/total_size/data) is preserved
+            // verbatim so decode round-trips byte-for-byte.
+            output.push(Opcode::TensorExtended.to_byte());
+            output.push(crate::instruction::TensorSubOpcode::NewFromArgs.to_byte());
             encode_reg(*dst, output);
             encode_varint(*shape_len as u64, output);
             encode_varint(*total_size as u64, output);
@@ -3088,6 +3003,18 @@ fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
 /// Updates `offset` to point past the decoded instruction.
 pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruction> {
     let opcode_byte = decode_u8(data, offset)?;
+
+    // Phase 4 of the sub-opcode refactor reclaimed bytes 0xF0-0xF7,
+    // 0xFE, and 0xFF (the legacy top-level Tensor* opcodes).  The
+    // decoder rejects those bytes explicitly so a bytecode artifact
+    // produced by a pre-Phase-4 toolchain — or a corrupted byte
+    // stream — surfaces as a clean `InvalidOpcode` error rather than
+    // silently decoding to `Unreachable` (which `Opcode::from_byte`
+    // returns as the in-memory sentinel for the reclaimed range).
+    if matches!(opcode_byte, 0xF0..=0xF7 | 0xFE | 0xFF) {
+        return Err(VbcError::InvalidOpcode(opcode_byte));
+    }
+
     let opcode = Opcode::from_byte(opcode_byte);
 
     match opcode {
@@ -3910,117 +3837,9 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // ====================================================================
         // Tensor Operations
         // ====================================================================
-        Opcode::TensorNew => {
-            let dst = decode_reg(data, offset)?;
-            let dtype_byte = decode_u8(data, offset)?;
-            let dtype = TensorDType::try_from(dtype_byte).unwrap_or(TensorDType::F64);
-            let dims = decode_reg_vec(data, offset)?;
-            Ok(Instruction::TensorNew { dst, dtype, dims })
-        }
-
-        Opcode::TensorBinop => {
-            let op_byte = decode_u8(data, offset)?;
-            let op = TensorBinaryOp::try_from(op_byte).unwrap_or(TensorBinaryOp::Add);
-            let dst = decode_reg(data, offset)?;
-            let a = decode_reg(data, offset)?;
-            let b = decode_reg(data, offset)?;
-            Ok(Instruction::TensorBinop { op, dst, a, b })
-        }
-
-        Opcode::TensorUnop => {
-            let op_byte = decode_u8(data, offset)?;
-            let op = TensorUnaryOp::try_from(op_byte).unwrap_or(TensorUnaryOp::Neg);
-            let dst = decode_reg(data, offset)?;
-            let src = decode_reg(data, offset)?;
-            Ok(Instruction::TensorUnop { op, dst, src })
-        }
-
-        Opcode::TensorMatmul => {
-            let dst = decode_reg(data, offset)?;
-            let a = decode_reg(data, offset)?;
-            let b = decode_reg(data, offset)?;
-            Ok(Instruction::TensorMatmul { dst, a, b })
-        }
-
-        Opcode::TensorReduce => {
-            let op_byte = decode_u8(data, offset)?;
-            let op = TensorReduceOp::try_from(op_byte).unwrap_or(TensorReduceOp::Sum);
-            let dst = decode_reg(data, offset)?;
-            let src = decode_reg(data, offset)?;
-            let axes_len = decode_varint(data, offset)? as usize;
-            let mut axes = Vec::with_capacity(axes_len);
-            for _ in 0..axes_len {
-                axes.push(decode_u8(data, offset)?);
-            }
-            let keepdim = decode_u8(data, offset)? != 0;
-            Ok(Instruction::TensorReduce {
-                op,
-                dst,
-                src,
-                axes,
-                keepdim,
-            })
-        }
-
-        // Additional Tensor Operations
-        Opcode::TensorFull => {
-            let dst = decode_reg(data, offset)?;
-            let value = decode_reg(data, offset)?;
-            let shape = decode_reg_vec(data, offset)?;
-            let dtype_byte = decode_u8(data, offset)?;
-            let dtype = TensorDType::try_from(dtype_byte).unwrap_or(TensorDType::F32);
-            Ok(Instruction::TensorFull {
-                dst,
-                value,
-                shape,
-                dtype,
-            })
-        }
-
-        Opcode::TensorFromSlice => {
-            let dst = decode_reg(data, offset)?;
-            let data_reg = decode_reg(data, offset)?;
-            let shape = decode_reg_vec(data, offset)?;
-            let dtype_byte = decode_u8(data, offset)?;
-            let dtype = TensorDType::try_from(dtype_byte).unwrap_or(TensorDType::F32);
-            Ok(Instruction::TensorFromSlice {
-                dst,
-                data: data_reg,
-                shape,
-                dtype,
-            })
-        }
-
-        Opcode::TensorReshape => {
-            let dst = decode_reg(data, offset)?;
-            let src = decode_reg(data, offset)?;
-            let shape = decode_reg_vec(data, offset)?;
-            Ok(Instruction::TensorReshape { dst, src, shape })
-        }
-
-        Opcode::TensorTranspose => {
-            let dst = decode_reg(data, offset)?;
-            let src = decode_reg(data, offset)?;
-            let perm_len = decode_varint(data, offset)? as usize;
-            let mut perm = Vec::with_capacity(perm_len);
-            for _ in 0..perm_len {
-                perm.push(decode_u8(data, offset)?);
-            }
-            Ok(Instruction::TensorTranspose { dst, src, perm })
-        }
-
-        Opcode::TensorSlice => {
-            let dst = decode_reg(data, offset)?;
-            let src = decode_reg(data, offset)?;
-            let starts = decode_reg_vec(data, offset)?;
-            let ends = decode_reg_vec(data, offset)?;
-            Ok(Instruction::TensorSlice {
-                dst,
-                src,
-                starts,
-                ends,
-            })
-        }
+        // Phase 4: decoder arms for the ten legacy top-level Tensor*
+        // opcodes were deleted along with their Opcode bytes (0xF0-0xF7,
+        // 0xFE, 0xFF).  Decoded bytecode flows through TensorExtended.
 
         Opcode::TensorExtended => {
             let sub_opcode_byte = decode_u8(data, offset)?;
@@ -6978,77 +6797,10 @@ mod tests {
         test_roundtrip(&Instruction::Unreachable);
     }
 
-    #[test]
-    fn test_tensor_new_roundtrip() {
-        test_roundtrip(&Instruction::TensorNew {
-            dst: Reg(0),
-            dtype: TensorDType::F64,
-            dims: vec![],
-        });
-        test_roundtrip(&Instruction::TensorNew {
-            dst: Reg(0),
-            dtype: TensorDType::F32,
-            dims: vec![Reg(1), Reg(2)],
-        });
-    }
-
-    #[test]
-    fn test_tensor_binop_roundtrip() {
-        for op in [
-            TensorBinaryOp::Add,
-            TensorBinaryOp::Sub,
-            TensorBinaryOp::Mul,
-            TensorBinaryOp::Div,
-        ] {
-            test_roundtrip(&Instruction::TensorBinop {
-                op,
-                dst: Reg(0),
-                a: Reg(1),
-                b: Reg(2),
-            });
-        }
-    }
-
-    #[test]
-    fn test_tensor_unop_roundtrip() {
-        test_roundtrip(&Instruction::TensorUnop {
-            op: TensorUnaryOp::Neg,
-            dst: Reg(0),
-            src: Reg(1),
-        });
-        test_roundtrip(&Instruction::TensorUnop {
-            op: TensorUnaryOp::Relu,
-            dst: Reg(0),
-            src: Reg(1),
-        });
-    }
-
-    #[test]
-    fn test_tensor_matmul_roundtrip() {
-        test_roundtrip(&Instruction::TensorMatmul {
-            dst: Reg(0),
-            a: Reg(1),
-            b: Reg(2),
-        });
-    }
-
-    #[test]
-    fn test_tensor_reduce_roundtrip() {
-        test_roundtrip(&Instruction::TensorReduce {
-            op: TensorReduceOp::Sum,
-            dst: Reg(0),
-            src: Reg(1),
-            axes: vec![0, 1],
-            keepdim: false,
-        });
-        test_roundtrip(&Instruction::TensorReduce {
-            op: TensorReduceOp::Mean,
-            dst: Reg(0),
-            src: Reg(1),
-            axes: vec![],
-            keepdim: true,
-        });
-    }
+    // Phase 4: roundtrip tests for legacy TensorNew/Binop/Unop/Matmul/
+    // Reduce Instruction variants deleted along with the variants
+    // themselves.  Roundtrip coverage for the canonical
+    // `TensorExtended` form lives in the existing extended-op tests.
 
     #[test]
     fn test_tensor_flash_attention_roundtrip() {
@@ -7583,16 +7335,18 @@ mod tests {
     #[test]
     fn test_incomplete_instruction_handling() {
         // Test that incomplete instructions return errors, not panics.
-        // After opcode reorganization, all 256 opcodes map to valid instructions,
-        // but most require operand bytes. Providing only the opcode should give Err,
-        // not panic.
+        // Most live opcodes require operand bytes; providing only the
+        // opcode should give Err, not panic.  Phase 4 reclaim removed
+        // 0xF0 (legacy TensorNew); the 0xFC `TensorExtended` byte
+        // covers the same surface area now and is the right test
+        // input — it wraps a sub-opcode + operands.
         let sample_opcodes = [
             0x00, // Mov - needs 2 register bytes
             0x10, // AddI - needs 3 register bytes
             0x20, // AddF - needs 3 register bytes
             0x40, // EqI - needs 3 register bytes
             0x50, // Jmp - needs jump offset
-            0xF0, // TensorNew - needs register + shape info
+            0xFC, // TensorExtended - needs sub-opcode + operands
         ];
 
         for &opcode in &sample_opcodes {
@@ -7812,116 +7566,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_all_tensor_dtypes() {
-        let dtypes = [
-            TensorDType::F64,
-            TensorDType::F32,
-            TensorDType::F16,
-            TensorDType::BF16,
-            TensorDType::I64,
-            TensorDType::I32,
-            TensorDType::I16,
-            TensorDType::I8,
-            TensorDType::U64,
-            TensorDType::U32,
-            TensorDType::U16,
-            TensorDType::U8,
-            TensorDType::Bool,
-            TensorDType::Complex64,
-            TensorDType::Complex128,
-        ];
-        for dtype in dtypes {
-            test_roundtrip(&Instruction::TensorNew {
-                dst: Reg(0),
-                dtype,
-                dims: vec![Reg(1), Reg(2)],
-            });
-        }
-    }
-
-    #[test]
-    fn test_all_tensor_binary_ops() {
-        let ops = [
-            TensorBinaryOp::Add,
-            TensorBinaryOp::Sub,
-            TensorBinaryOp::Mul,
-            TensorBinaryOp::Div,
-            TensorBinaryOp::Pow,
-            TensorBinaryOp::Mod,
-            TensorBinaryOp::Min,
-            TensorBinaryOp::Max,
-        ];
-        for op in ops {
-            test_roundtrip(&Instruction::TensorBinop {
-                op,
-                dst: Reg(0),
-                a: Reg(1),
-                b: Reg(2),
-            });
-        }
-    }
-
-    #[test]
-    fn test_all_tensor_unary_ops() {
-        let ops = [
-            TensorUnaryOp::Neg,
-            TensorUnaryOp::Abs,
-            TensorUnaryOp::Sqrt,
-            TensorUnaryOp::Exp,
-            TensorUnaryOp::Log,
-            TensorUnaryOp::Sin,
-            TensorUnaryOp::Cos,
-            TensorUnaryOp::Tan,
-            TensorUnaryOp::Tanh,
-            TensorUnaryOp::Sigmoid,
-            TensorUnaryOp::Relu,
-            TensorUnaryOp::Gelu,
-            TensorUnaryOp::Silu,
-            TensorUnaryOp::Floor,
-            TensorUnaryOp::Ceil,
-            TensorUnaryOp::Round,
-            TensorUnaryOp::Sign,
-            TensorUnaryOp::Rsqrt,
-            TensorUnaryOp::Erf,
-            TensorUnaryOp::Log2,
-            TensorUnaryOp::Softplus,
-            TensorUnaryOp::Mish,
-        ];
-        for op in ops {
-            test_roundtrip(&Instruction::TensorUnop {
-                op,
-                dst: Reg(0),
-                src: Reg(1),
-            });
-        }
-    }
-
-    #[test]
-    fn test_all_tensor_reduce_ops() {
-        let ops = [
-            TensorReduceOp::Sum,
-            TensorReduceOp::Prod,
-            TensorReduceOp::Max,
-            TensorReduceOp::Min,
-            TensorReduceOp::Mean,
-            TensorReduceOp::Var,
-            TensorReduceOp::Std,
-            TensorReduceOp::Norm,
-            TensorReduceOp::LogSumExp,
-            TensorReduceOp::All,
-            TensorReduceOp::Any,
-        ];
-        for op in ops {
-            test_roundtrip(&Instruction::TensorReduce {
-                op,
-                dst: Reg(0),
-                src: Reg(1),
-                axes: vec![0, 1, 2],
-                keepdim: true,
-            });
-        }
-    }
+    // Phase 4: extended-coverage roundtrip tests (test_all_tensor_dtypes,
+    // test_all_tensor_binary_ops, test_all_tensor_unary_ops,
+    // test_all_tensor_reduce_ops) deleted along with the legacy
+    // TensorNew/Binop/Unop/Reduce Instruction variants they parametrised
+    // over.  The TensorBinaryOp/UnaryOp/ReduceOp / DType enums remain
+    // live and are exercised through the canonical `TensorExtended`
+    // codegen tests under `crates/verum_vbc/src/codegen/`.
 
     #[test]
     fn test_all_grad_modes() {

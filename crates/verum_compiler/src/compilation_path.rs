@@ -504,32 +504,25 @@ fn analyze_instruction(instr: &Instruction, offset: usize, analysis: &mut Functi
             analysis.gpu_regions.push((offset, offset + 1));
         }
 
-        // Tensor operations
-        Instruction::TensorNew { .. }
-        | Instruction::TensorFull { .. }
-        | Instruction::TensorFromSlice { .. }
-        | Instruction::TensorArange { .. }
+        // Tensor operations — Phase 4: TensorNew/Full/FromSlice/
+        // Reshape/Transpose/Slice/Binop/Unop/Matmul/Reduce variants
+        // deleted; they're now subsumed by `TensorExtended`.
+        Instruction::TensorArange { .. }
         | Instruction::TensorLinspace { .. }
         | Instruction::TensorRand { .. }
         | Instruction::TensorClone { .. }
         | Instruction::TensorIdentity { .. }
-        | Instruction::TensorReshape { .. }
-        | Instruction::TensorTranspose { .. }
-        | Instruction::TensorSlice { .. }
         | Instruction::TensorIndex { .. }
         | Instruction::TensorConcat { .. }
         | Instruction::TensorStack { .. }
         | Instruction::TensorBroadcast { .. }
         | Instruction::TensorSqueeze { .. }
-        | Instruction::TensorBinop { .. }
-        | Instruction::TensorUnop { .. }
         | Instruction::TensorCmp { .. }
         | Instruction::TensorWhere { .. }
         | Instruction::TensorClamp { .. }
         | Instruction::TensorCast { .. }
         | Instruction::TensorMaskedFill { .. }
         | Instruction::TensorLerp { .. }
-        | Instruction::TensorMatmul { .. }
         | Instruction::TensorDot { .. }
         | Instruction::TensorConv { .. }
         | Instruction::TensorBatchMatmul { .. }
@@ -537,7 +530,6 @@ fn analyze_instruction(instr: &Instruction, offset: usize, analysis: &mut Functi
         | Instruction::TensorOuter { .. }
         | Instruction::TensorTriSolve { .. }
         | Instruction::TensorCholesky { .. }
-        | Instruction::TensorReduce { .. }
         | Instruction::TensorArgmax { .. }
         | Instruction::TensorTopk { .. }
         | Instruction::TensorCumulative { .. }
@@ -548,7 +540,8 @@ fn analyze_instruction(instr: &Instruction, offset: usize, analysis: &mut Functi
         | Instruction::TensorFlashAttention { .. }
         | Instruction::TensorFft { .. }
         | Instruction::TensorScatter { .. }
-        | Instruction::TensorPool { .. } => {
+        | Instruction::TensorPool { .. }
+        | Instruction::TensorExtended { .. } => {
             analysis.tensor_op_count += 1;
         }
 

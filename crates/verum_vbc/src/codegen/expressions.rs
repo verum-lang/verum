@@ -18318,49 +18318,11 @@ impl VbcCodegen {
                 });
             }
 
-            // Tensor operations: route through TensorExtended with register-based sub-opcodes.
-            // The direct opcode format uses immediate values for shapes/axes which
-            // doesn't work for intrinsic calls where everything is a register argument.
-            Opcode::TensorNew => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::NewFromArgs, args, dest);
-            }
-            Opcode::TensorFull => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::FillFromArgs, args, dest);
-            }
-            Opcode::TensorFromSlice => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::FromSliceArgs, args, dest);
-            }
-            Opcode::TensorBinop => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::BinopFromArgs, args, dest);
-            }
-            Opcode::TensorUnop => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::UnopFromArgs, args, dest);
-            }
-            Opcode::TensorMatmul => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::MatmulFromArgs, args, dest);
-            }
-            Opcode::TensorReduce => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::ReduceFromArgs, args, dest);
-            }
-            Opcode::TensorReshape => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::ReshapeFromArgs, args, dest);
-            }
-            Opcode::TensorTranspose => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::TransposeFromArgs, args, dest);
-            }
-            Opcode::TensorSlice => {
-                use crate::instruction::TensorSubOpcode;
-                self.emit_intrinsic_tensor_extended(TensorSubOpcode::SliceFromArgs, args, dest);
-            }
+            // Phase 4: Tensor*-direct-opcode arms deleted along with the
+            // 0xF0-0xF7 / 0xFE / 0xFF Opcode bytes.  Registry strategies
+            // for these intrinsics now use `TensorExtendedOpcode(...)`
+            // directly, dispatching via the canonical
+            // `emit_intrinsic_tensor_extended` path above.
 
             // Memory operations: ptr_read / ptr_write
             Opcode::Deref
