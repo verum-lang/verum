@@ -5223,6 +5223,173 @@ pub enum SystemSubOpcode {
 /// New code should reference `SystemSubOpcode` directly.
 pub type FfiSubOpcode = SystemSubOpcode;
 
+// ============================================================================
+// Phase 1 (sub-opcode refactor) — dedicated enums for misplaced groups
+// ============================================================================
+//
+// These enums are DEFINED here (Phase 1 prep) but not yet WIRED — full
+// activation requires reclaiming a top-level Opcode byte for each new
+// `Instruction::*Extended` gateway (Phase 4 of the migration plan in
+// `docs/architecture/sub-opcode-refactor-plan.md`).
+//
+// Defining them now:
+//   * Pins the byte layout (forward compatibility).
+//   * Lets future codegen/interpreter/AOT diff against a stable target.
+//   * Documents the canonical names users should reach for in spec
+//     references, even before the dispatch path lands.
+//
+// Until Phase 4, the same operations remain reachable via the
+// corresponding `SystemSubOpcode` byte values (0x70-0xBF range).
+
+/// Time clock operations — extracted from `SystemSubOpcode::Time*`.
+///
+/// Bytecode home (post-Phase-4): `Instruction::TimeExtended { sub_op,
+/// operands }`.  Until then, callers route through
+/// `SystemSubOpcode::TimeMonotonicNanos` (0x70) etc. via FfiExtended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum TimeSubOpcode {
+    /// `clock_gettime(CLOCK_MONOTONIC)` — nanoseconds since boot.
+    MonotonicNanos = 0x00,
+    /// `clock_gettime(CLOCK_REALTIME)` — wall-clock nanoseconds.
+    RealtimeNanos = 0x01,
+    /// `clock_gettime(CLOCK_MONOTONIC_RAW)` — raw monotonic
+    /// (excludes NTP adjustments on Linux/macOS).
+    MonotonicRawNanos = 0x02,
+    /// `nanosleep` — sleep for N nanoseconds.
+    SleepNanos = 0x03,
+    /// `clock_gettime(CLOCK_THREAD_CPUTIME_ID)`.
+    ThreadCpuNanos = 0x04,
+    /// `clock_gettime(CLOCK_PROCESS_CPUTIME_ID)`.
+    ProcessCpuNanos = 0x05,
+    // 0x06-0x1F  RESERVED for cross-platform time
+    //              (Windows QueryPerformanceCounter, POSIX
+    //               timer_create, monotonic-since-epoch helpers).
+    // 0x20-0xFF  RESERVED for general future growth.
+}
+
+/// POSIX-syscall operations — extracted from `SystemSubOpcode::Sys*`.
+///
+/// Bytecode home (post-Phase-4): `Instruction::SysExtended { sub_op,
+/// operands }`.  Until then, callers route through
+/// `SystemSubOpcode::SysGetpid` (0x80) etc. via FfiExtended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum SysSubOpcode {
+    /// `getpid()`.
+    GetPid = 0x00,
+    /// `gettid()` (Linux) / `pthread_threadid_np` (Darwin).
+    GetTid = 0x01,
+    /// `mmap()` — direct-syscall path, no libc.
+    Mmap = 0x02,
+    /// `munmap()`.
+    Munmap = 0x03,
+    /// `madvise()`.
+    Madvise = 0x04,
+    /// `getentropy()` — fill buffer with cryptographically-secure bytes.
+    GetEntropy = 0x05,
+    // 0x06-0x1F  RESERVED for syscalls
+    //              (fork, exec*, signal, sigaction, waitpid,
+    //               prctl, ptrace, etc.).
+    // 0x20-0x3F  RESERVED for /proc & /sys access.
+    // 0x40-0xFF  RESERVED.
+}
+
+/// Mach kernel operations (Apple-specific) — extracted from
+/// `SystemSubOpcode::Mach*`.
+///
+/// Bytecode home (post-Phase-4): `Instruction::MachExtended { sub_op,
+/// operands }`.  Until then, callers route through
+/// `SystemSubOpcode::MachVmAllocate` (0x90) etc. via FfiExtended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum MachSubOpcode {
+    /// `vm_allocate(task, &addr, size, flags)`.
+    VmAllocate = 0x00,
+    /// `vm_deallocate(task, addr, size)`.
+    VmDeallocate = 0x01,
+    /// `vm_protect(task, addr, size, set_max, prot)`.
+    VmProtect = 0x02,
+    /// `semaphore_create(task, &sem, policy, init)`.
+    SemCreate = 0x10,
+    /// `semaphore_destroy(task, sem)`.
+    SemDestroy = 0x11,
+    /// `semaphore_signal(sem)`.
+    SemSignal = 0x12,
+    /// `semaphore_wait(sem)`.
+    SemWait = 0x13,
+    /// `mach_error_string(kr)` — error code → human-readable string.
+    ErrorString = 0x20,
+    /// `mach_wait_until(deadline)` — sleep until absolute Mach
+    /// timebase deadline (used by `core/sys/darwin/clock.vr`).
+    SleepUntil = 0x21,
+    // 0x22-0xFF  RESERVED for Mach kernel additions
+    //              (port rights, IPC primitives, host_info, etc.).
+}
+
+/// Cross-platform synchronization primitives — extracted from
+/// `SystemSubOpcode::Futex*` / `Spinlock*`.
+///
+/// Bytecode home (post-Phase-4): `Instruction::SyncExtended { sub_op,
+/// operands }`.  Until then, callers route through
+/// `SystemSubOpcode::FutexWait` (0xB0) etc. via FfiExtended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum SyncSubOpcode {
+    /// `futex(addr, FUTEX_WAIT, val, timeout)` — Linux.
+    /// On macOS routes through `__ulock_wait`.
+    FutexWait = 0x00,
+    /// `futex(addr, FUTEX_WAKE, count)` — wake up to N waiters.
+    FutexWake = 0x01,
+    /// Wake all waiters (count = `INT_MAX`).
+    FutexWakeAll = 0x02,
+    /// CAS-loop spinlock acquire — busy-wait with `pause`/`yield`
+    /// backoff.  Interpreter spins via `AtomicU8::compare_exchange`
+    /// + `std::thread::yield_now`.
+    SpinlockLock = 0x10,
+    /// Try-lock variant — returns immediately if contended.
+    SpinlockTryLock = 0x11,
+    /// Spinlock release — atomic store with release ordering.
+    SpinlockUnlock = 0x12,
+    /// `thread.park(ns)` — park current thread for N nanoseconds
+    /// (Rust-style park, distinct from `nanosleep` because parks
+    /// can be unparked early).
+    ParkNs = 0x20,
+    /// `thread.unpark(handle)` — wake a parked thread.
+    Unpark = 0x21,
+    // 0x22-0xFF  RESERVED for sync primitives (semaphore,
+    //              condvar, atomic memory-ordering helpers,
+    //              cross-platform shims).
+}
+
+// ============================================================================
+// Note for Phase 4 implementer
+// ============================================================================
+//
+// To wire these enums into bytecode dispatch you need:
+//
+//   1. Reclaim a top-level `Opcode` byte (e.g., `TensorFromSlice =
+//      0xFF` migrates to `TensorExtended { sub_op:
+//      TensorSubOpcode::TensorFromSliceUsize }`).
+//
+//   2. Define a new gateway opcode at the reclaimed byte, e.g.:
+//        SystemExtendedV2 = 0xFF
+//
+//   3. Add new `Instruction` variant:
+//        SystemExtendedV2 {
+//            category: u8,   // 0=Time, 1=Sys, 2=Mach, 3=Sync
+//            sub_op: u8,
+//            operands: Vec<u8>,
+//        }
+//
+//   4. Cascade to:
+//        * `crates/verum_vbc/src/codegen/`: emit_intrinsic_*
+//        * `crates/verum_vbc/src/interpreter/dispatch_table/`: handle_*
+//        * `crates/verum_codegen/src/llvm/instruction.rs`: lower_*
+//
+//   5. Run `verum audit --subop-cleanliness` to catch any
+//      remaining FfiExtended emit-site for a migrated op.
+
 impl SystemSubOpcode {
     /// Creates an FFI sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -7924,6 +8091,47 @@ pub enum CbgrSubOpcode {
     /// Returns statistics about CBGR operations.
     /// Format: `dst:reg`
     GetStats = 0x55,
+
+    // ========================================================================
+    // CBGR Allocator (0x60-0x6F) — added 2026-05-02 per sub-opcode
+    // refactor plan.  These are the canonical home for the entries
+    // currently misplaced at `SystemSubOpcode::CbgrAlloc` (0xA0) /
+    // `CbgrAllocZeroed` (0xA1) / `CbgrDealloc` (0xA2) / `CSecureZero`
+    // (0xA3).  Phase 4 of the migration plan re-homes the codegen +
+    // interpreter dispatch + AOT lowering to these byte values.  The
+    // `SystemSubOpcode` entries remain as deprecated aliases for
+    // bytecode backward-compat until at least one release cycle
+    // post-migration.
+    // ========================================================================
+
+    /// Allocate uninitialised CBGR-tracked memory.
+    ///
+    /// Format: `dst:reg, size:reg, align:reg`
+    /// Returns: Pointer to allocated region (with allocation header).
+    Alloc = 0x60,
+
+    /// Allocate zero-initialised CBGR-tracked memory.
+    ///
+    /// Format: `dst:reg, size:reg, align:reg`
+    /// Returns: Pointer to allocated region (zeroed).
+    AllocZeroed = 0x61,
+
+    /// Deallocate CBGR-tracked memory.
+    ///
+    /// Format: `ptr:reg, size:reg, align:reg`
+    /// Invalidates the allocation generation; subsequent
+    /// dereferences via Tier-0 refs will fail validation.
+    Dealloc = 0x62,
+
+    /// Securely zero a memory region (compiler can't elide).
+    ///
+    /// Format: `ptr:reg, size:reg`
+    /// Used for cryptographic zeroization (key material, etc.).
+    /// Maps to `explicit_bzero` / `SecureZeroMemory` per platform.
+    SecureZero = 0x63,
+    // 0x64-0x6F  RESERVED for allocator-side primitives
+    //              (e.g. realloc-in-place, alloc-with-tag,
+    //               heap-statistics-snapshot).
 }
 
 impl CbgrSubOpcode {
@@ -7975,6 +8183,13 @@ impl CbgrSubOpcode {
             0x53 => Some(Self::BypassBegin),
             0x54 => Some(Self::BypassEnd),
             0x55 => Some(Self::GetStats),
+
+            // Allocator (0x60-0x6F) — added 2026-05-02 per refactor plan
+            0x60 => Some(Self::Alloc),
+            0x61 => Some(Self::AllocZeroed),
+            0x62 => Some(Self::Dealloc),
+            0x63 => Some(Self::SecureZero),
+
             _ => None,
         }
     }
@@ -8026,6 +8241,11 @@ impl CbgrSubOpcode {
             Self::BypassBegin => "CBGR_BYPASS_BEGIN",
             Self::BypassEnd => "CBGR_BYPASS_END",
             Self::GetStats => "CBGR_GET_STATS",
+            // Allocator (0x60-0x6F)
+            Self::Alloc => "CBGR_ALLOC",
+            Self::AllocZeroed => "CBGR_ALLOC_ZEROED",
+            Self::Dealloc => "CBGR_DEALLOC",
+            Self::SecureZero => "CBGR_SECURE_ZERO",
         }
     }
 
@@ -8038,6 +8258,7 @@ impl CbgrSubOpcode {
             0x30..=0x3F => "Reference Conversion",
             0x40..=0x4F => "Debug/Introspection",
             0x50..=0x5F => "CBGR Management",
+            0x60..=0x6F => "CBGR Allocator",
             _ => "Unknown",
         }
     }

@@ -1720,6 +1720,27 @@ pub(in super::super) fn handle_cbgr_extended(
         }
 
         // ================================================================
+        // Allocator (0x60-0x6F) — added 2026-05-02 per refactor plan.
+        //
+        // These are reachable Phase-1 stubs for the new
+        // `CbgrSubOpcode::Alloc` / `AllocZeroed` / `Dealloc` /
+        // `SecureZero` byte values.  The full Phase-4 wiring will
+        // route emitting from `core/intrinsics/runtime/cbgr.vr`
+        // through these handlers; until then they remain reachable
+        // but unused (codegen still emits the legacy
+        // `SystemSubOpcode::CbgrAlloc` 0xA0 / etc. via FfiExtended).
+        // Dispatching to them now means a forward-rolled bytecode
+        // file that uses the new home will execute correctly.
+        // ================================================================
+        Some(CbgrSubOpcode::Alloc)
+        | Some(CbgrSubOpcode::AllocZeroed)
+        | Some(CbgrSubOpcode::Dealloc)
+        | Some(CbgrSubOpcode::SecureZero) => Err(InterpreterError::NotImplemented {
+            feature: "cbgr_extended allocator (Phase 4 of subop refactor not yet wired)",
+            opcode: Some(Opcode::CbgrExtended),
+        }),
+
+        // ================================================================
         // Unimplemented sub-opcodes
         // ================================================================
         None => Err(InterpreterError::NotImplemented {
