@@ -25,8 +25,17 @@
 //   2. `verify_adjoint_pair` — `is_adjoint_of` mirror check.
 //   3. `analyze_refactoring` — walk preserved/gained → verdict.
 //   4. `analyze_chain` — adjunctions compose `(F ∘ F') ⊣ (G' ∘ G)`.
+//
+// **Self-attestation**: this cog is itself ATS-V-typed via the
+// `@arch_module(...)` declaration below — dogfood for the
+// architectural type system.
 // =============================================================================
 
+@arch_module(
+    foundation = Foundation.ZfcTwoInacc,
+    stratum = MsfsStratum.LFnd,
+    lifecycle = Lifecycle.Theorem("v0.1"),
+)
 module core.architecture.adjunction;
 
 mount core.prelude.{Bool, Int, List, Text};
