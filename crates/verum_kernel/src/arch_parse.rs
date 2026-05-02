@@ -388,16 +388,30 @@ fn parse_capability_list(expr: &Expr) -> Result<Vec<Capability>, ArchParseError>
 }
 
 /// Parse one capability from path-or-call expression. Accepts
-/// canonical variants: `Capability::Logger` (enum-shorthand), or
-/// `Capability::Read(ResourceTag::Logger)` (full call form).
+/// canonical variants: `Capability::Logger` (enum-shorthand),
+/// `Capability::Read(ResourceTag::Logger)` (Call form), AND
+/// `Capability.Read(ResourceTag.File("*"))` (MethodCall form, the
+/// surface used by `@arch_module(...)` declarations).
 fn parse_capability(expr: &Expr) -> Result<Capability, ArchParseError> {
- // The pragmatic approach: accept simple identifier paths as a
- // proxy for capabilities — stub. Full parser with
- // ResourceTag / ExecTarget / etc. argument unpacking lands in
- // when the elaborator is wired.
-    let path = parse_path_string(expr, "capability")?;
+    // Pragmatic stub: accept any identifier path / field-chain /
+    // method-call as a proxy for the capability tag.  Full parser
+    // with ResourceTag / ExecTarget / etc. argument unpacking lands
+    // when the elaborator is wired.
+    //
+    // For MethodCall (`Capability.Read(...)`) we ignore the args and
+    // record the method name as the canonical tag.
+    let tag = match &expr.kind {
+        ExprKind::MethodCall {
+            receiver, method, ..
+        } => {
+            let receiver_path = parse_path_string(receiver, "capability")?;
+            format!("{}.{}", receiver_path, method.name.as_str())
+        }
+        ExprKind::Call { func, .. } => parse_path_string(func, "capability")?,
+        _ => parse_path_string(expr, "capability")?,
+    };
     Ok(Capability::Custom {
-        tag: path,
+        tag,
         schema: CapabilitySchema {
             description: "parsed from @arch_module".to_string(),
             transfers_privilege: false,

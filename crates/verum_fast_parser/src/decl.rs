@@ -7631,6 +7631,15 @@ impl<'a> RecursiveParser<'a> {
 
         // Special case: keywords used as identifiers in attribute arguments
         // This allows @verify(proof), @verify(static), @target(module), etc.
+        //
+        // The reserved keywords below can also serve as attribute-arg
+        // NAMES — e.g. `@arch_module(requires: [...])` per ATS-V spec
+        // §17.4.  When followed by `:`, treat the keyword as the LHS
+        // of a `name: value` pair (lowered to `Binary { Assign, Path,
+        // value }` for parity with the ident-based named-arg form
+        // below).  Without this special-case, `requires: [...]` would
+        // be eagerly consumed as a bare-keyword Path and the caller
+        // would then trip over the unconsumed `:`.
         if let Some(Token { kind, span }) = self.stream.peek() {
             match kind {
                 TokenKind::Static
@@ -7642,7 +7651,10 @@ impl<'a> RecursiveParser<'a> {
                 | TokenKind::Proof
                 | TokenKind::Pure
                 | TokenKind::Async
-                | TokenKind::Where => {
+                | TokenKind::Where
+                | TokenKind::Requires
+                | TokenKind::Ensures
+                | TokenKind::Mount => {
                     let span = *span;
                     let keyword_name = match kind {
                         TokenKind::Static => "static",
@@ -7655,8 +7667,34 @@ impl<'a> RecursiveParser<'a> {
                         TokenKind::Pure => "pure",
                         TokenKind::Async => "async",
                         TokenKind::Where => "where",
+                        TokenKind::Requires => "requires",
+                        TokenKind::Ensures => "ensures",
+                        TokenKind::Mount => "mount",
                         _ => unreachable!(),
                     };
+                    // Named-arg path: `keyword: value`.
+                    if self.stream.peek_nth_kind(1) == Some(&TokenKind::Colon) {
+                        let start_pos = self.stream.position();
+                        self.stream.advance(); // consume keyword
+                        self.stream.advance(); // consume ':'
+                        let value = self.parse_expr()?;
+                        let span = self.stream.make_span(start_pos);
+                        return Ok(Expr::new(
+                            verum_ast::ExprKind::Binary {
+                                op: verum_ast::BinOp::Assign,
+                                left: Heap::new(Expr::new(
+                                    verum_ast::ExprKind::Path(Path::from_ident(Ident::new(
+                                        Text::from(keyword_name),
+                                        span,
+                                    ))),
+                                    span,
+                                )),
+                                right: Heap::new(value),
+                            },
+                            span,
+                        ));
+                    }
+                    // Bare-keyword path (e.g. `@verify(proof)`).
                     self.stream.advance();
                     return Ok(Expr::new(
                         verum_ast::ExprKind::Path(Path::from_ident(Ident::new(
