@@ -1,0 +1,242 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l1_pager, wal, wal_index, shm, hash_table, reader_marks
+// @timeout: 15000
+// @description: WAL-index .shm protocol — header / hash sections /
+//               reader marks / checkpoint coordination (#150).
+//               Exercises find_frame / append_frame / hash chains,
+//               reader-mark acquire/release/min, backfill bound,
+//               and the salt-rotation reset path.
+//
+// Spec: sqlite.org/walformat.html §3 (WAL-index layout) +
+//       sqlite.org/wal.html (multi-reader/single-writer protocol)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l1_pager.{
+    WalIndex, WalIndexHdr, WalCkptInfo, WalReaderMark,
+    WalIndexHashSection, WalShmBackend, WsbInMemory,
+    HASHTABLE_NPAGE, HASHTABLE_NSLOT, HASHTABLE_HASH_MUL,
+    N_READER_MARK, READMARK_NOT_USED, WALINDEX_HDR_VERSION,
+    wal_index_new, wal_hash_slot, hash_section_empty,
+};
+
+// -----------------------------------------------------------------------------
+// 1. wal_index_new produces an uninitialised index
+// -----------------------------------------------------------------------------
+
+fn fresh_index_uninitialised() {
+    let idx = wal_index_new(4096);
+    assert(!idx.is_initialised());
+    assert_eq(idx.mx_frame(), 0);
+    assert_eq(idx.n_page(), 0);
+    assert_eq(idx.n_backfill(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 2. Hash function matches the SQLite spec (page * 383 mod 8192)
+// -----------------------------------------------------------------------------
+
+fn hash_slot_pin_values() {
+    // Pin the formula by hand-computing a few values.
+    assert_eq(wal_hash_slot(1), (1 * HASHTABLE_HASH_MUL) & (HASHTABLE_NSLOT - 1));
+    assert_eq(wal_hash_slot(100), (100 * HASHTABLE_HASH_MUL) & (HASHTABLE_NSLOT - 1));
+    assert_eq(wal_hash_slot(8192), 0);  // 8192 * 383 mod 8192 = 0
+}
+
+// -----------------------------------------------------------------------------
+// 3. append_frame + find_frame round-trip
+// -----------------------------------------------------------------------------
+
+fn append_then_find_round_trip() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(42, 1);   // page 42 → frame 1
+    idx.append_frame(99, 2);   // page 99 → frame 2
+    idx.append_frame(42, 3);   // page 42 again → frame 3 (newer wins)
+
+    // Snapshot at mx_frame=10, n_backfill=0 — both pages visible,
+    // page 42's frame should be 3 (the newest).
+    let r1 = idx.find_frame(42, 10, 0);
+    match r1 {
+        Some(f) => assert_eq(f, 3),
+        None    => panic("page 42 should be findable"),
+    }
+    let r2 = idx.find_frame(99, 10, 0);
+    match r2 {
+        Some(f) => assert_eq(f, 2),
+        None    => panic("page 99 should be findable"),
+    }
+    let r3 = idx.find_frame(7, 10, 0);
+    match r3 {
+        None => {},  // page 7 was never appended
+        _    => panic("page 7 should not be findable"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4. find_frame respects mx_frame_clamp (reader snapshot semantics)
+// -----------------------------------------------------------------------------
+
+fn find_frame_respects_snapshot() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(42, 1);
+    idx.append_frame(42, 5);   // newer frame for page 42
+
+    // Reader snapshot frozen at mx_frame=3 must NOT see frame 5.
+    let r = idx.find_frame(42, 3, 0);
+    match r {
+        Some(f) => assert_eq(f, 1),  // frame 1, not 5 (5 > snapshot)
+        None    => panic("page 42 should still be findable at frame 1"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 5. find_frame respects n_backfill_clamp (skip checkpointed frames)
+// -----------------------------------------------------------------------------
+
+fn find_frame_skips_backfilled() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(42, 1);   // backfilled
+    idx.append_frame(42, 5);   // newer
+
+    // n_backfill=3 means frames 1..3 already in main DB → reader
+    // should fall through to frame 5 (or main DB if frame 5 weren't
+    // there).
+    let r = idx.find_frame(42, 10, 3);
+    match r {
+        Some(f) => assert_eq(f, 5),
+        None    => panic("page 42 should be findable at frame 5"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 6. commit_header populates init flag + bumps change counter
+// -----------------------------------------------------------------------------
+
+fn commit_header_init_flag() {
+    let mut idx = wal_index_new(4096);
+    let pre_change = idx.hdr.change_count as Int;
+    idx.commit_header(7, 100 as u32, 0xDEAD as u32, 0xBEEF as u32);
+    assert(idx.is_initialised());
+    assert_eq(idx.mx_frame(), 7);
+    assert_eq(idx.n_page(), 100);
+    let post_change = idx.hdr.change_count as Int;
+    assert(post_change > pre_change);
+}
+
+// -----------------------------------------------------------------------------
+// 7. Reader marks: acquire returns slot, release decrements refcount
+// -----------------------------------------------------------------------------
+
+fn reader_mark_lifecycle() {
+    let mut idx = wal_index_new(4096);
+    idx.commit_header(10, 0 as u32, 1 as u32, 2 as u32);
+    let s1 = idx.try_acquire_reader_mark();
+    assert(s1 >= 1 && s1 < N_READER_MARK);
+    // Second reader at same mx_frame should get the SAME slot
+    // (refcount-bump semantics).
+    let s2 = idx.try_acquire_reader_mark();
+    assert_eq(s1, s2);
+    // Verify refcount actually went to 2.
+    assert_eq(idx.ckpt.read_marks[s1].refcount, 2);
+    // Release one — refcount should drop to 1, slot still claimed.
+    idx.release_reader_mark(s1);
+    assert_eq(idx.ckpt.read_marks[s1].refcount, 1);
+    assert_eq(idx.ckpt.read_marks[s1].mx_frame, 10);
+    // Release the other — slot becomes UNUSED.
+    idx.release_reader_mark(s1);
+    assert_eq(idx.ckpt.read_marks[s1].refcount, 0);
+    assert_eq(idx.ckpt.read_marks[s1].mx_frame, READMARK_NOT_USED);
+}
+
+// -----------------------------------------------------------------------------
+// 8. min_active_reader_mark: bound that the checkpointer respects
+// -----------------------------------------------------------------------------
+
+fn min_reader_mark_bounds_checkpoint() {
+    let mut idx = wal_index_new(4096);
+    idx.commit_header(20, 0 as u32, 1 as u32, 2 as u32);
+    let s_a = idx.try_acquire_reader_mark();
+    let _ = s_a;
+    // Bump mx_frame; second reader claims a different slot.
+    idx.commit_header(50, 0 as u32, 1 as u32, 2 as u32);
+    let s_b = idx.try_acquire_reader_mark();
+    assert(s_b >= 1);
+    let min = idx.min_active_reader_mark();
+    // Reader A holds mark 20, reader B holds 50; min must be 20.
+    assert_eq(min, 20);
+}
+
+// -----------------------------------------------------------------------------
+// 9. advance_backfill clamps to min_active_reader_mark
+// -----------------------------------------------------------------------------
+
+fn backfill_clamped_by_readers() {
+    let mut idx = wal_index_new(4096);
+    idx.commit_header(20, 0 as u32, 1 as u32, 2 as u32);
+    let _ = idx.try_acquire_reader_mark();   // claim mark at 20
+    // Try to backfill past 20 — should clamp.
+    let advanced = idx.advance_backfill(50);
+    assert(advanced);
+    assert_eq(idx.n_backfill(), 20);  // clamped
+}
+
+// -----------------------------------------------------------------------------
+// 10. reset_after_checkpoint drops sections + bumps change counter
+// -----------------------------------------------------------------------------
+
+fn reset_drops_sections_bumps_counter() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(1, 1);
+    idx.append_frame(2, 2);
+    idx.commit_header(2, 2 as u32, 0xAA as u32, 0xBB as u32);
+    let pre_change = idx.hdr.change_count as Int;
+    idx.reset_after_checkpoint(0xCC as u32, 0xDD as u32);
+    assert_eq(idx.mx_frame(), 0);
+    assert_eq(idx.sections.len(), 0);
+    assert_eq(idx.hdr.salt1 as Int, 0xCC as Int);
+    let post_change = idx.hdr.change_count as Int;
+    assert(post_change > pre_change);
+}
+
+// -----------------------------------------------------------------------------
+// 11. WAL-index header version pin
+// -----------------------------------------------------------------------------
+
+fn header_version_pin() {
+    assert_eq(WALINDEX_HDR_VERSION, 3007000);
+    assert_eq(HASHTABLE_NPAGE, 4096);
+    assert_eq(HASHTABLE_NSLOT, 8192);
+    assert_eq(N_READER_MARK, 5);
+}
+
+// -----------------------------------------------------------------------------
+// 12. WalShmBackend variant smoke — in-memory backend round-trip
+// -----------------------------------------------------------------------------
+
+fn shm_backend_in_memory_smoke() {
+    let idx = wal_index_new(4096);
+    let backend = WsbInMemory(idx);
+    match backend {
+        WsbInMemory(ref i) => {
+            assert(!i.is_initialised());
+        }
+    }
+}
+
+fn main() {
+    fresh_index_uninitialised();
+    hash_slot_pin_values();
+    append_then_find_round_trip();
+    find_frame_respects_snapshot();
+    find_frame_skips_backfilled();
+    commit_header_init_flag();
+    reader_mark_lifecycle();
+    min_reader_mark_bounds_checkpoint();
+    backfill_clamped_by_readers();
+    reset_drops_sections_bumps_counter();
+    header_version_pin();
+    shm_backend_in_memory_smoke();
+}
