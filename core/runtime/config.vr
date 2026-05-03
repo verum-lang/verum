@@ -35,6 +35,12 @@
 /// - 0xF4: io_uring/kqueue submit
 /// - 0xF5: clock_gettime
 
+@arch_module(
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module runtime.config;
 
 mount sys.{
