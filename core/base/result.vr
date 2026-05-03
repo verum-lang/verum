@@ -556,6 +556,8 @@ implement<T, E: Default> FromResidual<Maybe<Never>> for Result<T, E> {
 // Spec: docs/improvements.md Section 16 - Error Handling Evolution
 // =============================================================================
 
+implement<T, E> Result<T, E> {
+
     // =========================================================================
     // Tap Combinators (Side Effects)
     // =========================================================================

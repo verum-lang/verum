@@ -1,0 +1,216 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l1_pager, wal, checksum, salt, fossil, pipeline
+// @timeout: 15000
+// @description: WAL writer rolling-Fossil-checksum chain (#149) +
+//               Vfs-PRNG salt rotation (#153).  Exercises the
+//               post-fix `wal_writer_append_frame` path that
+//               actually computes per-frame checksums + the
+//               salt-rotation entry points that pull entropy from
+//               the platform Vfs instead of accepting deterministic
+//               salts.
+//
+// Spec: internal/specs/sqlite-native.md §6.4 (WAL frame format) +
+//                                       §8.4 (checkpoint salt rotation)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l1_pager.{
+    WalWriter, WalBackend, WbMem, WbFile,
+    wal_writer_create, wal_writer_create_with_random,
+    wal_writer_open, wal_writer_append_frame,
+    wal_writer_reset, wal_writer_reset_with_random,
+    wal_writer_set_running, wal_writer_running,
+};
+mount core.database.sqlite.native.l1_pager.journal.{
+    WalChecksum, wal_running_checksum,
+};
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.{
+    MemDbFile, MemDbVfs, open_memory_rwc,
+};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
+    LockKind, Unlocked,
+};
+
+fn fresh_backend() -> WalBackend {
+    let f = open_memory_rwc(&"wal_test".clone());
+    // Decompose Result via fold-style helper — avoid the Result-pattern
+    // upstream regression noted in #157/#158 work.
+    let file: MemDbFile = if f.is_ok() { f.unwrap_or(default_memdb()) } else { default_memdb() };
+    WbMem(file)
+}
+
+fn default_memdb() -> MemDbFile {
+    MemDbFile {
+        name: "default".clone(),
+        bytes: List.new(),
+        lock_state: Unlocked,
+        closed: false,
+    }
+}
+
+fn make_page(byte: Byte, page_size: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < page_size { out.push(byte); i = i + 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// 1. wal_writer_create seeds the rolling checksum from the file header
+// -----------------------------------------------------------------------------
+
+fn create_seeds_running_checksum() {
+    let backend = fresh_backend();
+    let result = wal_writer_create(backend, 4096, 0xAABB1122_u32, 0x33445566_u32);
+    let w = if result.is_ok() {
+        result.unwrap_or_else(|_| panic_writer())
+    } else {
+        panic_writer()
+    };
+    let r = wal_writer_running(&w);
+    // After `wal_writer_create`, the rolling state is the running
+    // checksum of the 24-byte file header prefix.  It MUST NOT be
+    // (0, 0) — that was the pre-fix bug where every frame's
+    // checksum was zero, breaking SQLite's frame-validation.
+    let nonzero = (r.s1 as Int) != 0 || (r.s2 as Int) != 0;
+    assert(nonzero);
+}
+
+// -----------------------------------------------------------------------------
+// 2. wal_writer_running advances on every append
+// -----------------------------------------------------------------------------
+
+fn append_advances_running() {
+    let backend = fresh_backend();
+    let result = wal_writer_create(backend, 4096, 0xAABB1122_u32, 0x33445566_u32);
+    let mut w = if result.is_ok() {
+        result.unwrap_or_else(|_| panic_writer())
+    } else {
+        panic_writer()
+    };
+    let r0 = wal_writer_running(&w);
+    let page = make_page(0x55 as Byte, 4096);
+    let _ = wal_writer_append_frame(&mut w, 1, page.as_slice(), 0);
+    let r1 = wal_writer_running(&w);
+    // The running state after one frame must differ from the
+    // post-create seed — proves the chain is actually advancing.
+    let advanced = (r0.s1 as Int) != (r1.s1 as Int) || (r0.s2 as Int) != (r1.s2 as Int);
+    assert(advanced);
+}
+
+// -----------------------------------------------------------------------------
+// 3. wal_writer_set_running overrides the chain — for recovery seam
+// -----------------------------------------------------------------------------
+
+fn set_running_overrides_state() {
+    let backend = fresh_backend();
+    let result = wal_writer_create(backend, 4096, 1_u32, 2_u32);
+    let mut w = if result.is_ok() {
+        result.unwrap_or_else(|_| panic_writer())
+    } else {
+        panic_writer()
+    };
+    let synth = WalChecksum { s1: 0xDEADBEEF_u32, s2: 0xC0FFEE00_u32 };
+    wal_writer_set_running(&mut w, synth.clone());
+    let after = wal_writer_running(&w);
+    assert_eq(after.s1 as Int, 0xDEADBEEF as Int);
+    assert_eq(after.s2 as Int, 0xC0FFEE00 as Int);
+}
+
+// -----------------------------------------------------------------------------
+// 4. wal_writer_reset rotates salts AND restarts the checksum chain
+// -----------------------------------------------------------------------------
+
+fn reset_rotates_chain() {
+    let backend = fresh_backend();
+    let result = wal_writer_create(backend, 4096, 0x11_u32, 0x22_u32);
+    let mut w = if result.is_ok() {
+        result.unwrap_or_else(|_| panic_writer())
+    } else {
+        panic_writer()
+    };
+    let page = make_page(0x42 as Byte, 4096);
+    let _ = wal_writer_append_frame(&mut w, 1, page.as_slice(), 0);
+    let pre_reset_running = wal_writer_running(&w);
+    let _ = wal_writer_reset(&mut w, 0xAA_u32, 0xBB_u32);
+    let post_reset_running = wal_writer_running(&w);
+    // Post-reset chain MUST differ from pre-reset (new salts → new
+    // file-header bytes → new running seed).
+    let rotated = (pre_reset_running.s1 as Int) != (post_reset_running.s1 as Int) ||
+                  (pre_reset_running.s2 as Int) != (post_reset_running.s2 as Int);
+    assert(rotated);
+}
+
+// -----------------------------------------------------------------------------
+// 5. wal_running_checksum: same input → same output (determinism pin)
+// -----------------------------------------------------------------------------
+
+fn rolling_checksum_deterministic() {
+    let mut data: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 32 { data.push(i as Byte); i = i + 1; }
+    let seed = WalChecksum { s1: 0_u32, s2: 0_u32 };
+    let r1 = wal_running_checksum(seed.clone(), data.as_slice());
+    let r2 = wal_running_checksum(seed.clone(), data.as_slice());
+    assert_eq(r1.s1 as Int, r2.s1 as Int);
+    assert_eq(r1.s2 as Int, r2.s2 as Int);
+}
+
+// -----------------------------------------------------------------------------
+// 6. Adjacent-frame checksums advance in distinct steps
+// -----------------------------------------------------------------------------
+
+fn distinct_pages_distinct_chains() {
+    let backend = fresh_backend();
+    let result = wal_writer_create(backend, 4096, 7_u32, 11_u32);
+    let mut w = if result.is_ok() {
+        result.unwrap_or_else(|_| panic_writer())
+    } else {
+        panic_writer()
+    };
+    let page_a = make_page(0x10 as Byte, 4096);
+    let page_b = make_page(0x20 as Byte, 4096);
+    let _ = wal_writer_append_frame(&mut w, 1, page_a.as_slice(), 0);
+    let after_a = wal_writer_running(&w);
+    let _ = wal_writer_append_frame(&mut w, 2, page_b.as_slice(), 0);
+    let after_b = wal_writer_running(&w);
+    let advanced = (after_a.s1 as Int) != (after_b.s1 as Int) ||
+                   (after_a.s2 as Int) != (after_b.s2 as Int);
+    assert(advanced);
+}
+
+// -----------------------------------------------------------------------------
+// 7. wal_writer_create_with_random: smoke-test the Vfs PRNG path
+// -----------------------------------------------------------------------------
+
+fn create_with_random_vfs_smoke() {
+    let backend = fresh_backend();
+    let vfs = MemDbVfs {};
+    let result = wal_writer_create_with_random(backend, 4096, &vfs);
+    // The MemDbVfs random_bytes implementation is deterministic-ish
+    // (cycles a counter) — we just verify the API path doesn't panic
+    // and produces a well-formed writer.
+    assert(result.is_ok());
+}
+
+// -----------------------------------------------------------------------------
+// Helpers — fail-loud panics used in place of Result destructuring
+// (worked around the upstream Result-pattern parser regression).
+// -----------------------------------------------------------------------------
+
+fn panic_writer() -> WalWriter {
+    panic("test: wal_writer construction failed")
+}
+
+fn main() {
+    create_seeds_running_checksum();
+    append_advances_running();
+    set_running_overrides_state();
+    reset_rotates_chain();
+    rolling_checksum_deterministic();
+    distinct_pages_distinct_chains();
+    create_with_random_vfs_smoke();
+}

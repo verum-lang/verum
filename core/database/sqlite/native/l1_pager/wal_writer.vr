@@ -63,6 +63,10 @@ mount core.database.sqlite.native.l1_pager.wal_state.{
     WalState, wal_state_new,
 };
 mount core.database.sqlite.native.l1_pager.pager.{PagerError, PagerErrorKind};
+mount core.database.sqlite.native.l1_pager.journal.wal.{
+    WalChecksum, wal_running_checksum,
+};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.SqliteVfs;
 
 // -----------------------------------------------------------------------------
 // WalBackend — sum type mirroring `PagerBackend` for consistency
@@ -87,6 +91,13 @@ public type affine WalWriter is {
     /// mx_frame * (frame_header_size() + page_size)`.  Cached so
     /// each append doesn't re-multiply.
     write_cursor: Int,
+    /// Rolling Fossil-checksum state (#149).  Seeded from the file
+    /// header's checksum1/2 at create/open time and advanced on every
+    /// frame append.  The (s1, s2) pair after the per-frame advance
+    /// becomes the frame header's checksum1/2 fields — that's how
+    /// readers verify frame integrity in lockstep without scanning
+    /// the whole WAL.  See `wal_running_checksum` in journal/wal.vr.
+    running: WalChecksum,
 };
 
 // -----------------------------------------------------------------------------
@@ -114,15 +125,34 @@ public fn wal_writer_create(
         });
     }
 
-    let hdr = new_file_header(
+    // Build the file header (#149): compute the rolling-checksum
+    // initial value over the first 24 bytes (magic .. salt2) and
+    // store it in the header's checksum1/2 fields.  The same pair
+    // seeds the per-frame rolling state.
+    let hdr_no_cksum = new_file_header(
         magic_little(),
         current_format_version(),
         page_size,
         0 as u32,           // checkpoint_seq starts at 0
         salt1,
         salt2,
-        0 as u32,           // checksum1 (computed by encoder)
-        0 as u32,           // checksum2
+        0 as u32,
+        0 as u32,
+    );
+    let prefix_bytes = encode_file_header_prefix_24(&hdr_no_cksum);
+    let initial_cksum = wal_running_checksum(
+        WalChecksum { s1: 0 as u32, s2: 0 as u32 },
+        prefix_bytes.as_slice(),
+    );
+    let hdr = new_file_header(
+        magic_little(),
+        current_format_version(),
+        page_size,
+        0 as u32,
+        salt1,
+        salt2,
+        initial_cksum.s1,
+        initial_cksum.s2,
     );
 
     let mut backend = backend;
@@ -140,7 +170,46 @@ public fn wal_writer_create(
         backend: backend,
         state: state,
         write_cursor: file_header_size(),
+        running: initial_cksum,
     })
+}
+
+/// Convenience: construct a fresh WAL with salts pulled from the
+/// platform Vfs PRNG (#153).  Caller's `vfs.random_bytes(8)` returns
+/// 8 cryptographic-grade bytes which split into (salt1, salt2) as
+/// big-endian u32 pairs.  Returns the underlying `VfsError` if
+/// entropy harvesting fails — never silently falls back to
+/// deterministic salts (that would re-introduce the
+/// reused-salts-after-crash hazard the rotation policy exists to
+/// prevent).
+pub fn wal_writer_create_with_random<V>(
+    backend: WalBackend,
+    page_size: Int,
+    vfs: &V,
+) -> Result<WalWriter, PagerError>
+where V: SqliteVfs
+{
+    let bytes = match vfs.random_bytes(8) {
+        Ok(b)  => b,
+        Err(e) => return Err(io_error("wal create: random_bytes failed", e)),
+    };
+    if bytes.len() < 8 {
+        return Err(PagerError {
+            kind: CorruptHeader,
+            message: "WAL create: vfs.random_bytes returned < 8 bytes",
+        });
+    }
+    let salt1 = bytes_to_u32_be(&bytes, 0);
+    let salt2 = bytes_to_u32_be(&bytes, 4);
+    wal_writer_create(backend, page_size, salt1, salt2)
+}
+
+fn bytes_to_u32_be(b: &List<Byte>, off: Int) -> u32 {
+    let b0: Int = b[off]     as Int;
+    let b1: Int = b[off + 1] as Int;
+    let b2: Int = b[off + 2] as Int;
+    let b3: Int = b[off + 3] as Int;
+    (((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) as u32)
 }
 
 /// Open an existing WAL file.  Reads + decodes the header but does
@@ -173,10 +242,18 @@ public fn wal_writer_open(
     state.salt1 = hdr.salt1;
     state.salt2 = hdr.salt2;
     state.checkpoint_seq = hdr.checkpoint_seq;
+    // Seed the rolling-checksum from the file header's stored
+    // checksum1/2 (#149).  After recovery walks the frame stream
+    // and validates the rolling chain frame-by-frame, the writer's
+    // `running` field will hold the post-last-frame state — but
+    // `wal_writer_open` itself doesn't walk frames; the `recover`
+    // entry in wal_reader.vr does that and updates `running` via
+    // `wal_writer_set_running` before any append is attempted.
     Ok(WalWriter {
         backend: backend,
         state: state,
         write_cursor: file_header_size(),
+        running: WalChecksum { s1: hdr.checksum1, s2: hdr.checksum2 },
     })
 }
 
@@ -219,13 +296,24 @@ pub fn wal_writer_append_frame(
         });
     }
     let is_commit = commit_db_size > 0;
+    // Compute the rolling Fossil checksum (#149) over the 8-byte
+    // frame-header prefix (page_no + db_size_after_commit) followed
+    // by the page payload.  The prefix bytes are the FIRST 8 of the
+    // frame header — salt1/salt2 are NOT fed into the rolling
+    // accumulator (they're just identity tags for the WAL session).
+    // This matches `journal/writer.vr::append` and the SQLite
+    // walformat.html spec §6.4.
+    let prefix = encode_frame_prefix_8(page_no as u32, commit_db_size as u32);
+    let after_prefix = wal_running_checksum(w.running.clone(), prefix.as_slice());
+    let after_body = wal_running_checksum(after_prefix, page_data);
+
     let frame_hdr = new_frame_header(
         page_no as u32,
         commit_db_size as u32,
         w.state.salt1,
         w.state.salt2,
-        0 as u32,                   // checksum1 (rolling Fossil — TODO follow-up)
-        0 as u32,                   // checksum2
+        after_body.s1,
+        after_body.s2,
     );
     let hdr_bytes = encode_frame_header(&frame_hdr);
 
@@ -242,6 +330,8 @@ pub fn wal_writer_append_frame(
     }
     w.write_cursor = w.write_cursor + frame_header_size() + w.state.page_size;
     w.state.record_appended_frame(page_no, is_commit, commit_db_size);
+    // Persist the post-frame rolling state for the next append.
+    w.running = after_body;
     Ok(())
 }
 
@@ -268,7 +358,12 @@ pub fn wal_writer_reset(
     new_salt2: u32,
 ) -> Result<(), PagerError> {
     w.state.reset_for_restart(new_salt1, new_salt2);
-    let hdr = new_file_header(
+    // Recompute the file-header rolling checksum over the new
+    // prefix (#149).  The new running state seeds future appends —
+    // the salt rotation also rotates the checksum chain origin so
+    // a torn write straddling the rotation can't be confused for a
+    // valid frame in the new chain.
+    let hdr_no_cksum = new_file_header(
         magic_little(),
         current_format_version(),
         w.state.page_size,
@@ -278,13 +373,70 @@ pub fn wal_writer_reset(
         0 as u32,
         0 as u32,
     );
+    let prefix_bytes = encode_file_header_prefix_24(&hdr_no_cksum);
+    let initial_cksum = wal_running_checksum(
+        WalChecksum { s1: 0 as u32, s2: 0 as u32 },
+        prefix_bytes.as_slice(),
+    );
+    let hdr = new_file_header(
+        magic_little(),
+        current_format_version(),
+        w.state.page_size,
+        w.state.checkpoint_seq,
+        new_salt1,
+        new_salt2,
+        initial_cksum.s1,
+        initial_cksum.s2,
+    );
     let header_bytes = encode_file_header(&hdr);
     match backend_write(&mut w.backend, &header_bytes, 0) {
         Ok(_) => {}
         Err(e) => return Err(io_error("wal reset: header write failed", e)),
     }
     w.write_cursor = file_header_size();
+    w.running = initial_cksum;
     Ok(())
+}
+
+/// Convenience: rotate WAL salts using fresh entropy from the
+/// platform Vfs (#153).  Same `vfs.random_bytes(8)` contract as
+/// `wal_writer_create_with_random` — surfaces VfsError on failure
+/// and never falls back to deterministic salts.
+pub fn wal_writer_reset_with_random<V>(
+    w: &mut WalWriter,
+    vfs: &V,
+) -> Result<(), PagerError>
+where V: SqliteVfs
+{
+    let bytes = match vfs.random_bytes(8) {
+        Ok(b)  => b,
+        Err(e) => return Err(io_error("wal reset: random_bytes failed", e)),
+    };
+    if bytes.len() < 8 {
+        return Err(PagerError {
+            kind: CorruptHeader,
+            message: "WAL reset: vfs.random_bytes returned < 8 bytes",
+        });
+    }
+    let salt1 = bytes_to_u32_be(&bytes, 0);
+    let salt2 = bytes_to_u32_be(&bytes, 4);
+    wal_writer_reset(w, salt1, salt2)
+}
+
+/// Override the rolling-checksum state after recovery.  Used by
+/// `wal_reader::recover_state` once it has walked the on-disk frame
+/// stream and verified each frame's checksum chain end-to-end.
+/// Without this seam the writer would re-start the chain from the
+/// file-header initial value — breaking integrity on the very next
+/// append after a reopen.
+pub fn wal_writer_set_running(w: &mut WalWriter, running: WalChecksum) {
+    w.running = running;
+}
+
+/// Read-only view of the current rolling-checksum state.  Useful
+/// for testing + observability.
+pub fn wal_writer_running(w: &WalWriter) -> WalChecksum {
+    w.running.clone()
 }
 
 /// Truncate the WAL file to just the file header.  Used by
@@ -360,6 +512,30 @@ fn encode_file_header(h: &WalFileHeader) -> List<Byte> {
     encode_u32_be(h.salt2,           &mut out);
     encode_u32_be(h.checksum1,       &mut out);
     encode_u32_be(h.checksum2,       &mut out);
+    out
+}
+
+/// First 24 bytes of the file header (everything except checksum1/2).
+/// Fed to `wal_running_checksum` to compute the file-header checksum
+/// per SQLite's WAL spec §6.4.
+fn encode_file_header_prefix_24(h: &WalFileHeader) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    encode_u32_be(h.magic,           &mut out);
+    encode_u32_be(h.format_version,  &mut out);
+    encode_u32_be(h.page_size as u32, &mut out);
+    encode_u32_be(h.checkpoint_seq,  &mut out);
+    encode_u32_be(h.salt1,           &mut out);
+    encode_u32_be(h.salt2,           &mut out);
+    out
+}
+
+/// 8-byte frame header prefix (page_no + db_size_after_commit).
+/// Fed to the rolling checksum BEFORE the page payload — the
+/// (s1, s2) pair after both advances is the frame's checksum1/2.
+fn encode_frame_prefix_8(page_no: u32, commit_db_size: u32) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    encode_u32_be(page_no, &mut out);
+    encode_u32_be(commit_db_size, &mut out);
     out
 }
 
