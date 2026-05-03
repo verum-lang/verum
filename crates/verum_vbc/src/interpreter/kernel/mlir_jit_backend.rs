@@ -961,7 +961,12 @@ fn unop_arith_op(op: TensorUnaryOp, dtype: DType) -> Option<&'static str> {
         Ceil => "math.ceil",
         Round => "math.roundeven",
         Rsqrt => "math.rsqrt",
-        Erf => "math.erf",
+        // `math.erf` reaches LLVM IR translation as an unsupported
+        // op (missing LLVMTranslationDialectInterface).  Lowering it
+        // properly requires a math-to-funcs / math-to-libm pass that
+        // declares an extern `erff` / `erf` libm symbol — defer until
+        // the FFI-binding work for libm symbols lands.
+        Erf => return None,
         // Composed forms — Шаг 3b wiring point.
         Sigmoid | Relu | Gelu | Silu | Softplus | Mish | Sign => return None,
     })
@@ -1518,8 +1523,20 @@ fn compile_kernel(
     let pass_manager = match kind {
         KernelKind::Matmul => matmul_lowering_pipeline(context),
         _ => {
+            // The umbrella `convert-to-llvm` covers arith / cf / func /
+            // memref but NOT every `math.*` op — `erf`, `log2`, etc.
+            // need an explicit math-to-libm pre-step (lowers to libm
+            // calls) followed by math-to-llvm (rewrites the few ops
+            // that map to LLVM intrinsics directly).  Without these,
+            // the LLVM-IR translation step at `ExecutionEngine::new`
+            // fails with "missing LLVMTranslationDialectInterface
+            // registration for dialect for op: math.erf" on the first
+            // unop kernel that uses an unhandled math op.
             let pm = PassManager::new(context);
+            pm.add_pass(pass::conversion::create_math_to_libm());
+            pm.add_pass(pass::conversion::create_math_to_llvm());
             pm.add_pass(pass::conversion::create_to_llvm());
+            pm.add_pass(pass::conversion::create_reconcile_unrealized_casts());
             pm
         }
     };

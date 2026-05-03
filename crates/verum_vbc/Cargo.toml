@@ -106,7 +106,19 @@ verum_fast_parser = { workspace = true }
 verum_lexer = { workspace = true }
 
 [features]
-default = ["compression", "table_dispatch"]
+# `mlir-jit` ships in the default feature set as of Этап C Шаг 9: the
+# MLIR-driven compute pipeline (linalg/tensor/gpu/vector dialects → LLVM
+# JIT) is now the canonical hot path for Tier-0 tensor compute, with the
+# hand-tuned `kernel/cpu.rs` SIMD ladder serving as a runtime fallback
+# for op×dtype combinations the JIT doesn't yet wire.  Cross-path
+# equivalence is pinned by the dedicated integration test suite under
+# `tests/jit_cpu_equivalence.rs` — every (op, dtype) on both paths must
+# produce bit-equivalent (or ε-equivalent for float reductions) results
+# or the build fails.
+#
+# Embedded / minimal builds that don't want MLIR can opt out via
+# `--no-default-features --features compression,table_dispatch`.
+default = ["compression", "table_dispatch", "mlir-jit"]
 compression = ["dep:zstd", "dep:lz4_flex"]
 computed_goto = []  # Enable computed goto dispatch (platform-specific)
 table_dispatch = []  # Function table dispatch (~40% faster) - ALWAYS USED
