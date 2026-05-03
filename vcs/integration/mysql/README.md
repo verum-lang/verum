@@ -59,6 +59,7 @@ plugin Spindle accepts in the safe path).
 | `t09_binlog_rows.vr` | TABLE_MAP_EVENT + WRITE_ROWS_V2 type-aware tuple decoder; pairs RowsEvent with cached TABLE_MAP via `decode_with_table_map`; verifies INSERTs propagate as decoded RowValues (spec §6.3.7 row events) |
 | `t10_async_binlog.vr` | AsyncMysqlBinlogStream actor — connect_binlog_async + next_event_message drains canonical events from a side-channel INSERT (spec §6.3.6 + §6.3.7 async surface) |
 | `t11_typed_row.vr` | MysqlTypedRow protocol + NEWDECIMAL canonical-text decoder; rows_typed_my::<(Int, Text, Text)> lifts INSERT'd rows including DECIMAL(12,4) values "1234.5678" / "-9.0001" (spec §6.3.7 typed lift) |
+| `t12_binlog_json.vr` | MySQL binary-JSON decoder via binlog ROW event: INSERT JSON_OBJECT with scalars/array/nested object/null/true/false/100000 → decoded canonical JSON text contains every expected key+value (spec §6.3.7 JSON decode) |
 
 ## Adding tests
 

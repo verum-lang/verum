@@ -48,6 +48,7 @@ public module binlog;
 public module binlog_rows;
 public module async_binlog;
 public module typed_row;
+public module json_binary;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -154,4 +155,10 @@ public mount .async_binlog.{
 };
 public mount .typed_row.{
     MysqlTypedRow, rows_typed_my,
+};
+public mount .json_binary.{
+    decode_json_binary,
+    JT_SMALL_OBJECT, JT_LARGE_OBJECT, JT_SMALL_ARRAY, JT_LARGE_ARRAY,
+    JT_LITERAL, JT_INT16, JT_UINT16, JT_INT32, JT_UINT32,
+    JT_INT64, JT_UINT64, JT_DOUBLE, JT_UTF8_STRING, JT_OPAQUE,
 };

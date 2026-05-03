@@ -678,7 +678,20 @@ fn decode_value_for_type(
             Ok(b)  => b,
             Err(_) => { return Err(bad_rows("JSON truncated")); }
         };
-        return Ok((RvBytes(bytes), p + len));
+        // Decode the MySQL binary-JSON wire into the canonical
+        // JsonValue ADT, then re-serialise to compact JSON text
+        // for downstream consumption. Empty payload (NULL JSON
+        // surfaces above as RvNull; this path only fires for
+        // a present JSON column).
+        if (bytes.len() as Int) == 0 {
+            return Ok((RvText("null".clone()), p + len));
+        }
+        let jv = match core.database.mysql.json_binary.decode_json_binary(bytes) {
+            Ok(v)  => v,
+            Err(e) => { return Err(e); }
+        };
+        let text = core.encoding.json.stringify(&jv);
+        return Ok((RvText(text), p + len));
     }
     if t == COL_TYPE_NULL {
         return Ok((RvNull, 0));
