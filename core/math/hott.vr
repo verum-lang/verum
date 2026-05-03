@@ -30,6 +30,20 @@
 //  core/math/simplicial.vr — SimplicialSet, KanComplex, ∞-Groupoid
 // =============================================================================
 
+// Foundation note: this cog provides Verum-level primitives that
+// MODEL Homotopy Type Theory (HoTT-Book), but the `.vr` source
+// itself is implemented within Verum's standard foundation
+// (ZFC + 2 strongly-inaccessibles).  The `Foundation.ZfcTwoInacc`
+// tag below describes the implementation meta-theory, not the
+// theory whose primitives are exposed.  Cogs that implement
+// `Foundation.Hott` semantics (i.e. cogs whose own .vr source
+// requires HoTT to be sound) would tag `Foundation.Hott` directly;
+// no such cog exists in the current corpus.
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.hott;
 
 // =============================================================================
