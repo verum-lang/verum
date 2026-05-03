@@ -53,10 +53,13 @@ pub enum ArchMetric {
     CveCompleteness,
  /// Strict-mode flag (0 / 1).
     StrictModeFlag,
- /// Custom metric — caller-defined name; engine returns
- /// `MetricValue::Unknown` (extensibility hook
- /// self-hosted reasoning).
-    Custom { name: String },
+    /// Custom metric — caller-defined name; engine returns
+    /// `MetricValue::Unknown` (extensibility hook
+    /// self-hosted reasoning).
+    Custom {
+        /// Caller-supplied metric name (resolved by self-hosted code).
+        name: String,
+    },
 }
 
 impl ArchMetric {
@@ -215,19 +218,23 @@ pub fn proposition_holds(prop: &ArchProposition, shape: &Shape) -> bool {
 // CounterfactualReport — engine output
 // =============================================================================
 
+/// Whether a stability invariant holds across the (base, alternative)
+/// counterfactual pair. Only `HoldsBoth` witnesses counterfactual
+/// stability (per spec §22.2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum InvariantStatus {
- /// Proposition holds under both base + alternative.
+    /// Proposition holds under both base + alternative.
     HoldsBoth,
- /// Holds only under base.
+    /// Holds only under base.
     HoldsBaseOnly,
- /// Holds only under alternative.
+    /// Holds only under alternative.
     HoldsAltOnly,
- /// Holds under neither.
+    /// Holds under neither.
     HoldsNeither,
 }
 
 impl InvariantStatus {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             InvariantStatus::HoldsBoth => "holds_both",
@@ -245,39 +252,47 @@ impl InvariantStatus {
     }
 }
 
+/// One stability invariant's outcome under a counterfactual swap.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvariantEvaluation {
+    /// Proposition the invariant tracks.
     pub proposition: ArchProposition,
+    /// Whether the proposition holds under base / alternative / both / neither.
     pub status: InvariantStatus,
 }
 
+/// One metric's projection across a counterfactual pair.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricComparison {
+    /// Metric being compared.
     pub metric: ArchMetric,
+    /// Metric value under the base decision.
     pub base: MetricValue,
+    /// Metric value under the alternative decision.
     pub alt: MetricValue,
- /// True iff base != alt.
+    /// True iff base != alt.
     pub diverges: bool,
 }
 
+/// Aggregate report describing a counterfactual evaluation outcome.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CounterfactualReport {
- /// Stable JSON schema version (per spec §32.4).
+    /// Stable JSON schema version (per spec §32.4).
     pub schema_version: u32,
- /// Counterfactual-pair identifier (`pair.name`).
+    /// Counterfactual-pair identifier (`pair.name`).
     pub pair_name: String,
- /// Base decision name (`pair.base.name`).
+    /// Base decision name (`pair.base.name`).
     pub base_decision: String,
- /// Alternative decision name (`pair.alternative.name`).
+    /// Alternative decision name (`pair.alternative.name`).
     pub alt_decision: String,
- /// Per-metric comparison.
+    /// Per-metric comparison.
     pub metric_comparisons: Vec<MetricComparison>,
- /// Per-invariant evaluation.
+    /// Per-invariant evaluation.
     pub invariant_evaluations: Vec<InvariantEvaluation>,
- /// True iff every declared stability invariant holds under both
- /// decisions (i.e. cog is counterfactually stable per §22.2).
+    /// True iff every declared stability invariant holds under both
+    /// decisions (i.e. cog is counterfactually stable per §22.2).
     pub overall_stable: bool,
- /// Number of metrics that diverged.
+    /// Number of metrics that diverged.
     pub diverging_metric_count: usize,
 }
 

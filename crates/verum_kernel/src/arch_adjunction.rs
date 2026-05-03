@@ -63,8 +63,11 @@ pub enum CanonicalAdjunction {
  /// invariants; backward removes them. Recogniser:
  /// `after.preserves` ⊋ `before.preserves`.
     StrengthenWeaken,
- /// User-defined refactoring outside the canonical roster.
-    Custom { tag: String },
+    /// User-defined refactoring outside the canonical roster.
+    Custom {
+        /// Caller-supplied tag identifying the custom refactoring.
+        tag: String,
+    },
 }
 
 impl CanonicalAdjunction {
@@ -106,6 +109,7 @@ pub enum RefactoringDirection {
 }
 
 impl RefactoringDirection {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             RefactoringDirection::Forward => "forward",
@@ -113,6 +117,7 @@ impl RefactoringDirection {
         }
     }
 
+    /// Flip Forward ↔ Backward (the involution on direction).
     pub fn flipped(&self) -> RefactoringDirection {
         match self {
             RefactoringDirection::Forward => RefactoringDirection::Backward,
@@ -174,43 +179,52 @@ pub struct AdjunctionAnalysis {
     pub diagnostics: Vec<String>,
 }
 
+/// Preservation-claim outcome for one proposition under a refactoring.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreservedCoverage {
+    /// Proposition the preservation claim concerns.
     pub proposition: ArchProposition,
- /// True iff held in `before_shape`.
+    /// True iff held in `before_shape`.
     pub held_before: bool,
- /// True iff held in `after_shape`.
+    /// True iff held in `after_shape`.
     pub held_after: bool,
- /// `true` iff held_before && held_after (preservation actual).
+    /// `true` iff held_before && held_after (preservation actual).
     pub preserved_actual: bool,
 }
 
+/// Gain-claim outcome for one proposition under a refactoring.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GainedCoverage {
+    /// Proposition the gain claim concerns.
     pub proposition: ArchProposition,
+    /// True iff held in `before_shape`.
     pub held_before: bool,
+    /// True iff held in `after_shape`.
     pub held_after: bool,
- /// True iff !held_before && held_after (gain actual).
+    /// True iff !held_before && held_after (gain actual).
     pub gained_actual: bool,
 }
 
+/// Final verdict on whether a refactoring is accepted as an
+/// ATS-V-typed transformation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AdjunctionVerdict {
- /// Refactoring accepted — adjoint pair valid + preservation /
- /// gain claims hold.
+    /// Refactoring accepted — adjoint pair valid + preservation /
+    /// gain claims hold.
     Accepted,
- /// Adjoint pair structurally invalid (forward/backward names
- /// don't form a valid pair).
+    /// Adjoint pair structurally invalid (forward/backward names
+    /// don't form a valid pair).
     BrokenAdjointPair,
- /// Adjoint pair valid but at least one preserved property is
- /// not actually preserved (broken `F` law).
+    /// Adjoint pair valid but at least one preserved property is
+    /// not actually preserved (broken `F` law).
     PreservationFailure,
- /// Adjoint pair valid + preservation OK, but at least one
- /// "gained" property is not actually gained.
+    /// Adjoint pair valid + preservation OK, but at least one
+    /// "gained" property is not actually gained.
     GainClaimFailure,
 }
 
 impl AdjunctionVerdict {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             AdjunctionVerdict::Accepted => "accepted",
@@ -220,6 +234,7 @@ impl AdjunctionVerdict {
         }
     }
 
+    /// True iff the verdict is `Accepted`.
     pub fn is_accepted(&self) -> bool {
         matches!(self, AdjunctionVerdict::Accepted)
     }
