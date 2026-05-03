@@ -117,7 +117,7 @@ implement<T> ThinRef<T> {
     /// - `ptr` is non-null and properly aligned for T
     /// - `ptr` points to memory with a valid AllocationHeader at offset -32
     /// - `generation` and `epoch` match the header values
-    @inline
+    @inline(always)
     public unsafe fn new(
         ptr: &unsafe T,
         generation: UInt32,
@@ -138,7 +138,7 @@ implement<T> ThinRef<T> {
     ///
 
     /// This creates an invalid ThinRef that will fail validation.
-    @inline
+    @inline(always)
     public unsafe fn null() -> ThinRef<T> {
         ThinRef {
             ptr: 0 as &unsafe T,
@@ -155,7 +155,7 @@ implement<T> ThinRef<T> {
 
     /// Caller must ensure `header` is valid and `ptr` is the user data
     /// pointer corresponding to that header.
-    @inline
+    @inline(always)
     public unsafe fn from_header(
         ptr: &unsafe T,
         header: &AllocationHeader,
@@ -170,55 +170,55 @@ implement<T> ThinRef<T> {
     // =========================================================================
 
     /// Check if this is a null reference.
-    @inline
+    @inline(always)
     public fn is_null(&self) -> Bool {
         self.generation == GEN_UNALLOCATED || self.ptr as Int == 0
     }
 
     /// Get raw pointer (unsafe, bypasses validation).
-    @inline
+    @inline(always)
     public fn as_ptr(&self) -> &unsafe T {
         self.ptr
     }
 
     /// Get generation counter.
-    @inline
+    @inline(always)
     public fn generation(&self) -> UInt32 {
         self.generation
     }
 
     /// Get epoch counter (unpacked from epoch_and_caps).
-    @inline
+    @inline(always)
     public fn epoch(&self) -> UInt16 {
         unpack_epoch(self.epoch_and_caps)
     }
 
     /// Get capabilities (unpacked from epoch_and_caps).
-    @inline
+    @inline(always)
     public fn capabilities(&self) -> UInt16 {
         unpack_caps(self.epoch_and_caps)
     }
 
     /// Check if reference has a specific capability.
-    @inline
+    @inline(always)
     public fn has_capability(&self, cap: UInt16) -> Bool {
         has_capability(self.capabilities(), cap)
     }
 
     /// Check if reference has read capability.
-    @inline
+    @inline(always)
     public fn can_read(&self) -> Bool {
         self.has_capability(CAP_READ)
     }
 
     /// Check if reference has write capability.
-    @inline
+    @inline(always)
     public fn can_write(&self) -> Bool {
         validate_write(self.capabilities())
     }
 
     /// Check if reference can be revoked.
-    @inline
+    @inline(always)
     public fn can_revoke(&self) -> Bool {
         self.has_capability(CAP_REVOKE)
     }

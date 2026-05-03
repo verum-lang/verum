@@ -5634,6 +5634,7 @@ dependencies = [
  "blake3",
  "block",
  "criterion",
+ "dashmap 6.1.0",
  "foreign-types-shared 0.3.1",
  "indexmap",
  "libc",
@@ -5642,6 +5643,7 @@ dependencies = [
  "lz4_flex",
  "metal",
  "objc",
+ "parking_lot",
  "pretty_assertions",
  "proptest",
  "rayon",
@@ -5657,6 +5659,7 @@ dependencies = [
  "verum_common",
  "verum_fast_parser",
  "verum_lexer",
+ "verum_mlir",
  "windows-sys 0.59.0",
  "zstd",
 ]
