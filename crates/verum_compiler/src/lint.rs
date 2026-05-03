@@ -204,15 +204,41 @@ pub struct LintConfig {
     pub deny_warnings: bool,
     /// Missing intrinsics are errors (strict mode).
     pub strict_intrinsics: bool,
+    /// Strict-codegen mode (#110): bug-class skips in
+    /// `compile_item_lenient` are promoted to hard errors instead of
+    /// being demoted to warn-level traces.
+    ///
+    /// Default `false` — preserves the historical lenient behaviour
+    /// while migration is in progress. CI / release builds can opt in
+    /// via `--strict-codegen` (CLI flag) or `[build].strict-codegen`
+    /// (manifest key). The intended endpoint of #110 is to flip this
+    /// default to `true` for new scripts; that flip is staged behind
+    /// the migration of every existing fixture / test that relies on
+    /// silent skips.
+    ///
+    /// `Irreducible` skips (interpreter limitations like FFI
+    /// prototypes, unimplemented expression kinds, GPU shaders)
+    /// remain debug traces regardless of this flag — they are not
+    /// codebase defects.
+    pub strict_codegen: bool,
     /// Per-lint level overrides.
     pub lint_levels: HashMap<IntrinsicLint, LintLevel>,
 }
 
 impl Default for LintConfig {
     fn default() -> Self {
+        // Honour `VERUM_STRICT_CODEGEN=1` env var (#110). Matches the
+        // process-scoped pattern of `VERUM_FULL_STDLIB` (#109) and
+        // `VERUM_NO_PARALLEL_ANALYZE` so any entry point — single-file
+        // build, project build, vtest harness — picks up strict mode
+        // without requiring a per-call-site flag thread-through. The
+        // CLI `--strict-codegen` flag sets this env var before pipeline
+        // construction; CI / release scripts can set it directly.
+        let strict_codegen_env = std::env::var("VERUM_STRICT_CODEGEN").is_ok();
         Self {
             deny_warnings: false,
             strict_intrinsics: false,
+            strict_codegen: strict_codegen_env,
             lint_levels: HashMap::new(),
         }
     }
@@ -233,6 +259,16 @@ impl LintConfig {
     /// Builder: Enable strict_intrinsics mode.
     pub fn with_strict_intrinsics(mut self, enabled: bool) -> Self {
         self.strict_intrinsics = enabled;
+        self
+    }
+
+    /// Builder: Enable strict_codegen mode (#110). When true,
+    /// `compile_item_lenient` promotes bug-class skips
+    /// (UndefinedFunction, WrongArgumentCount, TypeMismatch, …) to
+    /// hard errors instead of warn-level traces. `Irreducible` skips
+    /// remain debug traces.
+    pub fn with_strict_codegen(mut self, enabled: bool) -> Self {
+        self.strict_codegen = enabled;
         self
     }
 
