@@ -1961,6 +1961,19 @@ fn convert_ast_type_to_internal(ast_ty: &verum_ast::ty::Type) -> Type {
             }
         }
 
+        // Volatile pointer types: *volatile T, *volatile mut T
+        // (MMIO / hardware-register access).  Without this arm the
+        // fall-through fresh-typevar path silently drops the volatile
+        // bit when function signatures are imported during module
+        // loading, breaking signature unification at call sites.
+        TypeKind::VolatilePointer { inner, mutable } => {
+            let inner_type = convert_ast_type_to_internal(inner);
+            Type::VolatilePointer {
+                inner: Box::new(inner_type),
+                mutable: *mutable,
+            }
+        }
+
         // Qualified type: <T as Protocol>::AssocType
         TypeKind::Qualified {
             self_ty,
