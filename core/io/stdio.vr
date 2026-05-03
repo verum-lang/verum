@@ -337,16 +337,19 @@ implement Write for StderrLock {
 // =============================================================================
 
 // Get stdin handle.
+@inline(always)
 public fn stdin() -> Stdin {
     Stdin.new()
 }
 
 // Get stdout handle.
+@inline(always)
 public fn stdout() -> Stdout {
     Stdout.new()
 }
 
 // Get stderr handle.
+@inline(always)
 public fn stderr() -> Stderr {
     Stderr.new()
 }
