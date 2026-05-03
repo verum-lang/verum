@@ -274,6 +274,9 @@ public type MemSegment is {
     slices: [SliceInfo; 512],
 };
 
+/// Public alias — short canonical name.
+public type Segment is MemSegment;
+
 /// MemSegment kinds
 public const SEGMENT_NORMAL: UInt8 = 0;
 public const SEGMENT_HUGE: UInt8 = 1;

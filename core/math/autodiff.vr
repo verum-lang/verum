@@ -1029,6 +1029,9 @@ public type NodeId is (USize);
 // Unique identifier for tensors
 public type AutodiffTensorId is (USize);
 
+/// Public alias — short canonical name.
+public type TensorId is AutodiffTensorId;
+
 // Operation type enumeration
 public type OpType is
     | Add
