@@ -213,6 +213,9 @@ public type GuardrailPattern is {
     regex_str: Text,
 };
 
+/// Public alias — short canonical name.
+public type Pattern is GuardrailPattern;
+
 implement GuardrailPattern {
     public fn new(name: Text, regex_str: Text) -> Self {
         GuardrailPattern { name, regex_str }
