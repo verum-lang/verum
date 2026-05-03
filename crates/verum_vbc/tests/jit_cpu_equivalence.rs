@@ -560,12 +560,12 @@ fn binop_f32_suffix_broadcast_2d_match_equivalent() {
 }
 
 #[test]
-fn binop_f32_prefix_broadcast_falls_through() {
- // `[M] op [M,N]` — b is LARGER than a; not a suffix and not a
- // scalar.  This must NOT match either broadcast pattern; the
- // dispatcher should return None and let the caller's outer
- // dispatch path handle it (potentially returning the
- // mathematically-correct fallback or surfacing an error).
+fn binop_f32_b_larger_than_a_falls_through() {
+ // `[M] op [M,N]` — b has more elements than a.  The output
+ // should be the broadcast shape `[M,N]`, but the dispatcher
+ // materialises `out` as `a.shape == [M]`, so this can't run
+ // through the JIT lane.  Pin: the dispatcher must return None
+ // and let the upstream rebroadcast-then-call path handle it.
  let mut state: u64 = 0xFEED_5E54;
  let jit = MlirJitBackend::new();
  let a = make_f32_tensor(&[3], &mut state, 0.5, 4.0);
@@ -573,7 +573,134 @@ fn binop_f32_prefix_broadcast_falls_through() {
  let r = jit.binop(&a, &b, TensorBinaryOp::Add);
  assert!(
  r.is_none(),
- "prefix-broadcast `[M] op [M,N]` must fall through (got JIT-routed result)"
+ "b-larger-than-a `[M] op [M,N]` must fall through (got JIT-routed result)"
+ );
+}
+
+// ============================================================================
+// Шаг 5e+2 — prefix-broadcast (`[M,N] op [M]`, `[M,N] op [M,1]` etc.)
+// ============================================================================
+
+#[test]
+fn binop_f32_prefix_broadcast_1d_equivalent() {
+ // `[M,N] op [M]` — bias is a per-row scalar; broadcast across
+ // every column.
+ let mut state: u64 = 0xFEED_5E60;
+ let jit = MlirJitBackend::new();
+ let m = 5_usize;
+ let n_inner = 8_usize;
+ for &op in &[
+ TensorBinaryOp::Add,
+ TensorBinaryOp::Sub,
+ TensorBinaryOp::Mul,
+ ] {
+ let a = make_f32_tensor(&[m, n_inner], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[m], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, op)
+ .unwrap_or_else(|| panic!("JIT prefix-broadcast missing for binop F32 {:?}", op));
+ let av = read_f32(&a, m * n_inner);
+ let bv = read_f32(&b, m);
+ let mut expected = vec![0.0_f32; m * n_inner];
+ for i in 0..(m * n_inner) {
+ let bj = i / n_inner;
+ expected[i] = match op {
+ TensorBinaryOp::Add => av[i] + bv[bj],
+ TensorBinaryOp::Sub => av[i] - bv[bj],
+ TensorBinaryOp::Mul => av[i] * bv[bj],
+ _ => unreachable!(),
+ };
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n_inner),
+ &expected,
+ &format!("binop F32 prefix-broadcast 1D {:?}", op),
+ );
+ }
+}
+
+#[test]
+fn binop_f32_prefix_broadcast_with_trailing_1_equivalent() {
+ // `[M,N] op [M,1]` — same semantics as `[M,N] op [M]`, but b
+ // declares its rank-2 shape.  After stripping the trailing 1,
+ // b's effective shape is `[M]`, so this routes through the
+ // same prefix-broadcast kernel with `inner_size = N`.
+ let mut state: u64 = 0xFEED_5E61;
+ let jit = MlirJitBackend::new();
+ let m = 4_usize;
+ let n_inner = 6_usize;
+ let a = make_f32_tensor(&[m, n_inner], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[m, 1], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Mul)
+ .expect("JIT prefix-broadcast with trailing-1 missing for Mul");
+ let av = read_f32(&a, m * n_inner);
+ let bv = read_f32(&b, m);
+ let mut expected = vec![0.0_f32; m * n_inner];
+ for i in 0..(m * n_inner) {
+ expected[i] = av[i] * bv[i / n_inner];
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n_inner),
+ &expected,
+ "binop F32 [M,N] op [M,1] Mul",
+ );
+}
+
+#[test]
+fn binop_f32_prefix_broadcast_3d_per_batch_equivalent() {
+ // `[B,M,N] op [B]` — per-batch scalar; broadcast over every
+ // (m, n) cell.  inner_size = M*N.
+ let mut state: u64 = 0xFEED_5E62;
+ let jit = MlirJitBackend::new();
+ let b_dim = 3_usize;
+ let m = 2_usize;
+ let n_inner = 4_usize;
+ let total = b_dim * m * n_inner;
+ let a = make_f32_tensor(&[b_dim, m, n_inner], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[b_dim], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Add)
+ .expect("JIT 3D prefix-broadcast missing for Add");
+ let av = read_f32(&a, total);
+ let bv = read_f32(&b, b_dim);
+ let mut expected = vec![0.0_f32; total];
+ let inner = m * n_inner;
+ for i in 0..total {
+ expected[i] = av[i] + bv[i / inner];
+ }
+ assert_f32_close(
+ &read_f32(&r, total),
+ &expected,
+ "binop F32 [B,M,N] op [B] Add",
+ );
+}
+
+#[test]
+fn binop_f32_prefix_broadcast_3d_per_batch_row_equivalent() {
+ // `[B,M,N] op [B,M]` — per-(batch,row) gain; broadcast over
+ // the trailing N dim.  inner_size = N.
+ let mut state: u64 = 0xFEED_5E63;
+ let jit = MlirJitBackend::new();
+ let b_dim = 2_usize;
+ let m = 3_usize;
+ let n_inner = 5_usize;
+ let total = b_dim * m * n_inner;
+ let a = make_f32_tensor(&[b_dim, m, n_inner], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[b_dim, m], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Mul)
+ .expect("JIT 3D-on-2D prefix-broadcast missing for Mul");
+ let av = read_f32(&a, total);
+ let bv = read_f32(&b, b_dim * m);
+ let mut expected = vec![0.0_f32; total];
+ for i in 0..total {
+ expected[i] = av[i] * bv[i / n_inner];
+ }
+ assert_f32_close(
+ &read_f32(&r, total),
+ &expected,
+ "binop F32 [B,M,N] op [B,M] Mul",
  );
 }
 
