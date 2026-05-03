@@ -41,6 +41,12 @@
 
 // =============================================================================
 
+@arch_module(
+    exposes: [Capability.Spawn(TaskLifetime.Detached)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.concurrency.process;
 
 mount core.*;

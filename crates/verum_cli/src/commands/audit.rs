@@ -11873,7 +11873,7 @@ pub fn audit_arch_corpus_with_format(format: AuditFormat) -> Result<()> {
             .iter()
             .filter_map(|m| {
                 let canonical = canonicalise_mount_path(m, parent_namespace.as_deref());
-                match_annotated_cog(&canonical, &name_index)
+                resolve_mount_canonical(&canonical, &entry.cog_name, &name_index)
             })
             .collect();
         full_composes_graph.push((entry.cog_name.clone(), resolved));
@@ -11899,7 +11899,8 @@ pub fn audit_arch_corpus_with_format(format: AuditFormat) -> Result<()> {
             .iter()
             .filter_map(|m| {
                 let canonical = canonicalise_mount_path(m, parent_ns.as_deref());
-                let resolved = match_annotated_cog(&canonical, &name_index)?;
+                let resolved =
+                    resolve_mount_canonical(&canonical, &entry.cog_name, &name_index)?;
                 let target_idx = *name_index.get(&resolved)?;
                 Some((resolved, registry[target_idx].shape.foundation.clone()))
             })
@@ -12210,6 +12211,121 @@ fn canonicalise_mount_path(raw: &str, parent_ns: Option<&str>) -> String {
         out.push_str(".*");
     }
     out
+}
+
+/// Resolve a canonicalised mount path into an annotated cog name
+/// using Verum's module-resolution rules:
+///
+///   * Single-segment bare paths (e.g. `runtime`) resolve ONLY
+///     against the cog's own namespace (`<cog_own_ns>.<bare>`).
+///     They do NOT fall through to top-level sibling lookup —
+///     in Verum, reaching a top-level sibling requires explicit
+///     `super.X` or qualified `core.X`.
+///
+///   * Multi-segment paths whose first segment is NOT a known
+///     top-level namespace prefix (`core`, `sys`, `cog`, `super`,
+///     `self`) are also cog-relative — `runtime.time.X` inside
+///     `module core.intrinsics;` means `core.intrinsics.runtime.
+///     time.X`.
+///
+///   * Multi-segment paths starting with `core.` / `sys.` are
+///     top-level — walked via parent-prefix lookup.
+///
+/// Self-loops (path resolves to the cog itself) are filtered out
+/// — `mod.vr` re-exporting its own children is not a cycle.
+///
+/// Returns `Some(cog_name)` only when the resolution lands on a
+/// DIFFERENT annotated cog (not the importing cog itself).
+fn resolve_mount_canonical(
+    canonical: &str,
+    cog_own_ns: &str,
+    name_index: &std::collections::BTreeMap<String, usize>,
+) -> Option<String> {
+    let stripped = canonical
+        .strip_suffix(".*")
+        .unwrap_or(canonical)
+        .strip_prefix("file:")
+        .unwrap_or(canonical);
+
+    // Determine if path is cog-relative.  Single-segment is always
+    // cog-relative.  Multi-segment is cog-relative iff first
+    // segment is NOT a recognised top-level prefix.
+    const TOP_LEVEL_PREFIXES: &[&str] = &["core", "sys", "cog", "super", "self"];
+    let first_seg = stripped.split('.').next().unwrap_or(stripped);
+    let cog_relative =
+        !stripped.contains('.') || !TOP_LEVEL_PREFIXES.contains(&first_seg);
+
+    let result = if cog_relative {
+        if cog_own_ns.is_empty() {
+            return None;
+        }
+        let candidate = format!("{}.{}", cog_own_ns, stripped);
+        // Walk parent prefixes of the cog-relative candidate.
+        match_annotated_cog(&candidate, name_index)
+    } else {
+        match_annotated_cog(canonical, name_index)
+    };
+
+    // Filter self-loops:
+    //   * Direct: resolved name == cog_own_ns.
+    //   * Ancestor: resolved name is a strict prefix of
+    //     cog_own_ns.  Hitting an ancestor means the parent-walk
+    //     overshot into the cog's own namespace tree (e.g. a leaf
+    //     cog `core.intrinsics.platform` mounts
+    //     `super.runtime.sync.spin_hint` which resolves to the
+    //     unannotated `core.intrinsics.runtime.sync.spin_hint`,
+    //     and parent-walk lands on the annotated ancestor
+    //     `core.intrinsics`.  This is a self-reference, not a
+    //     cycle).
+    match result {
+        Some(name)
+            if name == cog_own_ns
+                || cog_own_ns.starts_with(&format!("{}.", name)) =>
+        {
+            None
+        }
+        x => x,
+    }
+}
+
+/// Try to resolve a bare mount path (no `super.` / `self.` prefix
+/// and no leading `core.` namespace marker) against the importing
+/// cog's own namespace.  Used as a fallback after the canonical
+/// `match_annotated_cog` walk has already failed.
+///
+/// Verum resolution rule: inside `module core.X;`, a bare mount
+/// `Y` resolves to `core.X.Y` (a child of the importing module).
+/// My walker has to mirror this so e.g. `mod.vr` re-exporting
+/// child modules via `public mount runtime;` doesn't accidentally
+/// resolve to a sibling `runtime` cog with the same short name.
+fn resolve_bare_against_cog_ns(
+    canonical: &str,
+    cog_own_ns: &str,
+    name_index: &std::collections::BTreeMap<String, usize>,
+) -> Option<String> {
+    if cog_own_ns.is_empty() {
+        return None;
+    }
+    let stripped = canonical
+        .strip_suffix(".*")
+        .unwrap_or(canonical)
+        .strip_prefix("file:")
+        .unwrap_or(canonical);
+    // Only attempt this fallback for unqualified paths — not paths
+    // that already start with a top-level namespace marker.  A path
+    // is "qualified" if its first segment is the start of an
+    // existing annotated cog's name.  Cheaper test: if the path
+    // already contains a `.`, treat the head as a possible top-
+    // level marker and skip the cog-relative fallback (it would be
+    // ambiguous).
+    if stripped.contains('.') {
+        return None;
+    }
+    let candidate = format!("{}.{}", cog_own_ns, stripped);
+    if name_index.contains_key(&candidate) {
+        return Some(candidate);
+    }
+    None
 }
 
 // =============================================================================
