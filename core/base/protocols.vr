@@ -184,6 +184,7 @@ public type DefaultHasher is {
 };
 
 implement DefaultHasher {
+    @inline(always)
     public fn new() -> DefaultHasher {
         // Canonical FxHash starts at 0 — the first byte
         // contributes via the XOR step before any multiply, so
