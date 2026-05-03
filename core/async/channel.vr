@@ -176,22 +176,27 @@ implement Channel<T> {
         let _ = sys_futex_wake(&self.notify_seq.value, 1);
     }
 
+    @inline(always)
     public fn is_closed(&self) -> Bool {
         self.closed.load(MemoryOrdering.Relaxed) != 0
     }
 
+    @inline(always)
     public fn len(&self) -> Int {
         self.len.load(MemoryOrdering.Relaxed)
     }
 
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.len.load(MemoryOrdering.Relaxed) == 0
     }
 
+    @inline(always)
     public fn is_full(&self) -> Bool {
         self.len.load(MemoryOrdering.Relaxed) >= self.cap
     }
 
+    @inline(always)
     public fn capacity(&self) -> Int {
         self.cap
     }
@@ -374,6 +379,7 @@ implement<T> Sender<T> {
     }
 
     // Check if receiver has been dropped.
+    @inline(always)
     public fn is_closed(&self) -> Bool {
         self.inner.closed.load(MemoryOrdering.Relaxed)
     }
@@ -389,6 +395,7 @@ implement<T> Sender<T> {
     }
 
     // Get capacity (None for unbounded).
+    @inline(always)
     public fn capacity(&self) -> Maybe<Int> {
         self.inner.capacity
     }
