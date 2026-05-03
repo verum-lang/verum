@@ -60,31 +60,39 @@ use std::collections::BTreeMap;
 /// discharging.
 #[derive(Debug, Clone)]
 pub enum VerificationVerdict {
- /// The artifact was discharged by `method`.
- /// `evidence` carries method-specific witness (proof term hash,
- /// SMT certificate, kernel intrinsic reason, etc.).
+    /// The artifact was discharged by `method`.
+    /// `evidence` carries method-specific witness (proof term hash,
+    /// SMT certificate, kernel intrinsic reason, etc.).
     Discharged {
+        /// Mechanism that produced the discharge.
         method: DischargeMethod,
+        /// Method-specific witness backing the discharge.
         evidence: Evidence,
     },
- /// The method ran and rejected the artifact.
- /// `counterexample` carries method-specific failure data.
+    /// The method ran and rejected the artifact.
+    /// `counterexample` carries method-specific failure data.
     Rejected {
+        /// Mechanism that produced the rejection.
         method: DischargeMethod,
+        /// Method-specific failure data the auditor inspects.
         counterexample: Counterexample,
     },
- /// The method was attempted but did not produce a definite
- /// answer (timeout, UNKNOWN, IOU pending). Distinct from
- /// `Rejected`: `Pending` is "no answer", not "rejected".
+    /// The method was attempted but did not produce a definite
+    /// answer (timeout, UNKNOWN, IOU pending). Distinct from
+    /// `Rejected`: `Pending` is "no answer", not "rejected".
     Pending {
+        /// Mechanism that was attempted.
         method: DischargeMethod,
+        /// Why the method failed to produce a definite verdict.
         reason: PendingReason,
     },
- /// Multiple methods disagreed. The audit gate's failure mode:
- /// `accepting` and `rejecting` lists must both be non-empty
- /// for this variant.
+    /// Multiple methods disagreed. The audit gate's failure mode:
+    /// `accepting` and `rejecting` lists must both be non-empty
+    /// for this variant.
     Conflicted {
+        /// Methods that accepted the artifact.
         accepting: Vec<DischargeMethod>,
+        /// Methods that rejected the artifact.
         rejecting: Vec<DischargeMethod>,
     },
 }
@@ -150,66 +158,98 @@ impl VerificationVerdict {
 /// kernel doesn't introduce per-subsystem method enums.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DischargeMethod {
- /// Z3 / CVC5 / portfolio SMT discharge — `@verify(formal)` and
- /// stronger ladder strategies.
-    Smt { backend: SmtBackend },
- /// Per-kernel-impl checker (proof_checker, proof_checker_nbe,
- /// future Verum-self-hosted kernel via #154).
-    KernelChecker { name: &'static str },
- /// Kernel intrinsic dispatch arm (e.g., `kernel_truncate_to_level`,
- /// `kernel_self_soundness_in_meta_universe`,
- /// `kernel_reflection_tower_*`). Name matches the
- /// `available_intrinsics()` roster.
-    KernelIntrinsic { name: &'static str },
- /// `@framework(corpus, "citation")` route — trusted-boundary
- /// axiom citing published proof.
+    /// Z3 / CVC5 / portfolio SMT discharge — `@verify(formal)` and
+    /// stronger ladder strategies.
+    Smt {
+        /// SMT backend that produced the verdict.
+        backend: SmtBackend,
+    },
+    /// Per-kernel-impl checker (proof_checker, proof_checker_nbe,
+    /// future Verum-self-hosted kernel via #154).
+    KernelChecker {
+        /// Kernel implementation name (matches `KernelChecker::name`).
+        name: &'static str,
+    },
+    /// Kernel intrinsic dispatch arm (e.g., `kernel_truncate_to_level`,
+    /// `kernel_self_soundness_in_meta_universe`,
+    /// `kernel_reflection_tower_*`). Name matches the
+    /// `available_intrinsics()` roster.
+    KernelIntrinsic {
+        /// Intrinsic name (matches an `available_intrinsics()` entry).
+        name: &'static str,
+    },
+    /// `@framework(corpus, "citation")` route — trusted-boundary
+    /// axiom citing published proof.
     FrameworkCitation {
+        /// Framework-corpus identifier.
         corpus: &'static str,
+        /// Citation key inside the corpus.
         citation_key: &'static str,
     },
- /// Differential-kernel agreement: every registered kernel in
- /// the `KernelRegistry` produced a unanimous verdict.
-    DifferentialAgreement { kernels: Vec<&'static str> },
- /// Mutation-based property fuzzing produced unanimous agreement
- /// across registered kernels.
-    DifferentialFuzz { iterations: usize },
- /// Cross-format roundtrip — one of the alternative backends
- /// (Coq / Lean / Agda / Dedukti / Isabelle) accepted the
- /// translated artifact.
-    CrossFormat { backend: CrossFormatBackend },
- /// MSFS-corpus machine-verified theorem, with the corpus path
- /// carrying provenance.
-    MsfsCorpus { corpus_path: &'static str },
- /// Admitted-with-IOU: the artifact is currently asserted via
- /// `@admit_reason(...)`. Audit gates must surface IOU count;
- /// not a full discharge.
-    Iou { reason: IouReason },
- // ----------------------------------------------------------------
- // ATS-V foundation slots — placeholders per
- // `internal/specs/ats-v.md` §4 (architectural primitives).
- // These variants land empty in v0.1 of the verdict type and
- // are filled out by the ATS-V phase ( deliverable).
- // ----------------------------------------------------------------
- /// ATS-V capability flow check — discharged when a cog's
- /// declared `requires` list is satisfied by environment + no
- /// linear/affine capability is leaked.
+    /// Differential-kernel agreement: every registered kernel in
+    /// the `KernelRegistry` produced a unanimous verdict.
+    DifferentialAgreement {
+        /// Names of every kernel that participated in the agreement.
+        kernels: Vec<&'static str>,
+    },
+    /// Mutation-based property fuzzing produced unanimous agreement
+    /// across registered kernels.
+    DifferentialFuzz {
+        /// Number of mutation iterations the fuzzer ran.
+        iterations: usize,
+    },
+    /// Cross-format roundtrip — one of the alternative backends
+    /// (Coq / Lean / Agda / Dedukti / Isabelle) accepted the
+    /// translated artifact.
+    CrossFormat {
+        /// Cross-format backend that accepted the translation.
+        backend: CrossFormatBackend,
+    },
+    /// MSFS-corpus machine-verified theorem, with the corpus path
+    /// carrying provenance.
+    MsfsCorpus {
+        /// Path inside the MSFS corpus that carries the verified theorem.
+        corpus_path: &'static str,
+    },
+    /// Admitted-with-IOU: the artifact is currently asserted via
+    /// `@admit_reason(...)`. Audit gates must surface IOU count;
+    /// not a full discharge.
+    Iou {
+        /// Structured reason explaining why the IOU was admitted.
+        reason: IouReason,
+    },
+    // ----------------------------------------------------------------
+    // ATS-V foundation slots — placeholders per
+    // `internal/specs/ats-v.md` §4 (architectural primitives).
+    // These variants land empty in v0.1 of the verdict type and
+    // are filled out by the ATS-V phase ( deliverable).
+    // ----------------------------------------------------------------
+    /// ATS-V capability flow check — discharged when a cog's
+    /// declared `requires` list is satisfied by environment + no
+    /// linear/affine capability is leaked.
     AtsVCapabilityCheck,
- /// ATS-V boundary type check — discharged when cross-module
- /// traffic conforms to the boundary's typed messages +
- /// invariants.
+    /// ATS-V boundary type check — discharged when cross-module
+    /// traffic conforms to the boundary's typed messages +
+    /// invariants.
     AtsVBoundaryCheck,
- /// ATS-V composition correctness — discharged when `A ⊗ B`
- /// satisfies §5.3 composition rules.
+    /// ATS-V composition correctness — discharged when `A ⊗ B`
+    /// satisfies §5.3 composition rules.
     AtsVCompositionCheck,
- /// ATS-V anti-pattern absence — discharged when none of the
- /// 26+ canonical anti-patterns match the cog's `arch_type`.
-    AtsVAntiPatternCheck { pattern_tag: &'static str },
- /// Multi-level meta-mode stability — discharged when the
- /// reflection-tower's constructive witness pattern is invariant
- /// across `[0, max_lift]` universe-ascent indices (MSFS Theorem
- /// 9.6(b) idempotence). Surfaces from
- /// [`crate::reflection_tower::walk_stability_up_to`].
-    MetaModeStability { max_lift: u32 },
+    /// ATS-V anti-pattern absence — discharged when none of the
+    /// 26+ canonical anti-patterns match the cog's `arch_type`.
+    AtsVAntiPatternCheck {
+        /// Anti-pattern tag whose absence the verdict witnesses.
+        pattern_tag: &'static str,
+    },
+    /// Multi-level meta-mode stability — discharged when the
+    /// reflection-tower's constructive witness pattern is invariant
+    /// across `[0, max_lift]` universe-ascent indices (MSFS Theorem
+    /// 9.6(b) idempotence). Surfaces from
+    /// [`crate::reflection_tower::walk_stability_up_to`].
+    MetaModeStability {
+        /// Highest universe-ascent index walked while pinning stability.
+        max_lift: u32,
+    },
 }
 
 impl DischargeMethod {
@@ -288,6 +328,7 @@ pub struct Counterexample {
 }
 
 impl Counterexample {
+    /// Construct from a summary string with empty metadata.
     pub fn from_summary(summary: impl Into<String>) -> Self {
         Self {
             summary: summary.into(),
@@ -295,6 +336,7 @@ impl Counterexample {
         }
     }
 
+    /// Add a metadata entry, returning self for builder-style chains.
     pub fn with(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
         self
@@ -305,27 +347,45 @@ impl Counterexample {
 /// distinct audit-report categorisation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingReason {
- /// SMT solver returned UNKNOWN (typically: timeout, fragment
- /// outside decidable theory, ground out of resources).
-    SmtUnknown { detail: String },
- /// Kernel rejected with a "not yet implemented" / "stub" path.
-    NotYetMechanised { detail: String },
- /// Differential-kernel slot not available (e.g., #154
- /// self-hosted Verum kernel pending parser fixes).
+    /// SMT solver returned UNKNOWN (typically: timeout, fragment
+    /// outside decidable theory, ground out of resources).
+    SmtUnknown {
+        /// Free-form solver-supplied explanation.
+        detail: String,
+    },
+    /// Kernel rejected with a "not yet implemented" / "stub" path.
+    NotYetMechanised {
+        /// Which sub-feature is not yet mechanised.
+        detail: String,
+    },
+    /// Differential-kernel slot not available (e.g., #154
+    /// self-hosted Verum kernel pending parser fixes).
     NotYetSelfHosting,
- /// Generic timeout — method was given a bound and exhausted it.
-    Timeout { milliseconds: u64 },
+    /// Generic timeout — method was given a bound and exhausted it.
+    Timeout {
+        /// Wall-clock budget the method exhausted.
+        milliseconds: u64,
+    },
 }
 
 /// Structured IOU reason — admitted-with-citation discharge.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IouReason {
- /// `@framework(...)` citation to upstream literature.
-    UpstreamCitation { corpus: &'static str },
- /// `@admit_reason("...")` with structured explanation.
-    AdmittedWithReason { reason: String },
- /// Kernel-rule discharge route declared but not yet wired.
-    PendingDispatch { intrinsic: &'static str },
+    /// `@framework(...)` citation to upstream literature.
+    UpstreamCitation {
+        /// Framework corpus where the upstream proof lives.
+        corpus: &'static str,
+    },
+    /// `@admit_reason("...")` with structured explanation.
+    AdmittedWithReason {
+        /// Free-form explanation accompanying the admit.
+        reason: String,
+    },
+    /// Kernel-rule discharge route declared but not yet wired.
+    PendingDispatch {
+        /// Intrinsic name reserved for the future dispatch.
+        intrinsic: &'static str,
+    },
 }
 
 // =============================================================================
@@ -335,19 +395,28 @@ pub enum IouReason {
 /// SMT backend identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SmtBackend {
+    /// Z3 from Microsoft Research.
     Z3,
+    /// CVC5 from the cvc5 project.
     Cvc5,
+    /// Z3 + CVC5 in parallel; first-wins or cross-validate per strategy.
     Portfolio,
 }
 
 /// Cross-format export backend identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CrossFormatBackend {
+    /// Coq.
     Coq,
+    /// Lean 4.
     Lean,
+    /// Agda.
     Agda,
+    /// Dedukti / λΠ-calculus modulo theory.
     Dedukti,
+    /// Isabelle/HOL.
     Isabelle,
+    /// Metamath.
     Metamath,
 }
 
@@ -360,7 +429,7 @@ pub enum CrossFormatBackend {
 /// registry.
 #[derive(Debug, Clone)]
 pub struct MultiVerdict {
- /// Per-method verdicts.
+    /// Per-method verdicts.
     pub verdicts: Vec<VerificationVerdict>,
 }
 
