@@ -107,6 +107,7 @@ public type Component is
 
 implement Component {
     /// Get the underlying text if this is a normal component.
+    @inline(always)
     public fn as_text(&self) -> Maybe<&Text> {
         match self {
             Normal(s) => Some(s),
