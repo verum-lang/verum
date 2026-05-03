@@ -756,6 +756,10 @@ public type AllocatorLocalHeap is {
     bytes_allocated: UInt64,
 };
 
+/// Public alias — short canonical name; conformance tests
+/// `mount core.mem.allocator.{LocalHeap}`.
+public type LocalHeap is AllocatorLocalHeap;
+
 implement AllocatorLocalHeap {
     /// Create a new thread-local heap.
     public fn new(thread_id: UInt32) -> AllocatorLocalHeap {
