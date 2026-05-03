@@ -93,14 +93,15 @@ public mount .ops.{
     Residual,
 };
 
-// From maybe
-public mount .maybe.Maybe;
-// Note: None, Some variants accessed via Maybe.None, Maybe.Some or pattern matching
+// From maybe — re-export the type AND its variant constructors so
+// callers can write `Some(x)` / `None` directly without having to
+// reach for `Maybe.Some` / `Maybe.None`.
+public mount .maybe.{Maybe, Some, None};
 
-// From result
-public mount .result.Result;
-// Note: Ok, Err variants accessed via Result.Ok, Result.Err or pattern matching
-public mount .result.Error;
+// From result — same: expose `Ok` / `Err` as bare names alongside
+// the wrapper type, matching idiomatic `Ok(value)` / `Err(error)`
+// usage everywhere in the codebase and the conformance tests.
+public mount .result.{Result, Ok, Err, Error};
 
 // From protocols
 public mount .protocols.{

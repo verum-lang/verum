@@ -9,7 +9,7 @@
 mount sys.mmio;
 
 fn main() -> Int {
-    let cmd_reg: Register<UInt32, WriteOnly> = Register.at(0x4000_0000);
+    let cmd_reg: MmioRegister<UInt32, WriteOnly> = MmioRegister.at(0x4000_0000);
 
     // ERROR: Cannot read from a WriteOnly register
     let val = cmd_reg.read();

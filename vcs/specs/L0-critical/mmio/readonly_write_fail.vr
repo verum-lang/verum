@@ -9,7 +9,7 @@
 mount sys.mmio;
 
 fn main() -> Int {
-    let status_reg: Register<UInt32, ReadOnly> = Register.at(0x4000_0000);
+    let status_reg: MmioRegister<UInt32, ReadOnly> = MmioRegister.at(0x4000_0000);
 
     // ERROR: Cannot write to a ReadOnly register
     status_reg.write(0x0001);
