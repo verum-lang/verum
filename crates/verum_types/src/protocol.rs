@@ -6809,6 +6809,19 @@ impl ProtocolChecker {
 
     /// Generic protocol implementations: "implement<T: Bound> Protocol for Container<T>" with blanket impls
     pub fn get_implementations(&self, ty: &Type) -> List<&ProtocolImpl> {
+        // Fresh type-vars without specific bindings can't implement any
+        // concrete protocol — every blanket impl would optimistically match
+        // them via `try_match_type` on a Var, polluting downstream method
+        // dispatch with unrelated candidates (e.g. `Stream.next` for an
+        // `Iterator.next` call site). The correct dispatch path for
+        // `<T: P>` generic-param receivers is the bound-fallback at
+        // `infer.rs::infer_method_call_inner_impl` Step 4, which queries
+        // `ctx.env.all_type_params()` directly. Returning empty here lets
+        // that fallback fire (its gate is `candidates.is_empty()`).
+        if matches!(ty, Type::Var(_)) {
+            return List::new();
+        }
+
         let type_key = self.make_type_key(ty);
         let mut impls = List::new();
 
