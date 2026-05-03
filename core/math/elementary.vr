@@ -37,10 +37,11 @@
 // Spec: docs/architecture/math-spec.md Section 3
 // =============================================================================
 
-// TODO(ats-v): @arch_module declaration deferred — `super.elementary.trunc`
-// is re-exported from `core/math/ieee754.vr:368`, creating a real
-// elementary ↔ ieee754 cycle.  Adopting @arch_module here surfaces
-// AP-003 DependencyCycle until the architectural cycle is broken.
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.elementary;
 
 mount super.constants.*;
