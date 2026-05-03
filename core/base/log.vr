@@ -57,6 +57,7 @@ public type LogLevel is Trace | Debug | Info | Warn | Error;
 
 implement LogLevel {
     /// Returns the numeric severity (0=Trace, 4=Error).
+    @inline(always)
     public fn severity(&self) -> Int {
         match self {
             Trace => 0,
@@ -68,6 +69,7 @@ implement LogLevel {
     }
 
     /// Returns the level name as text.
+    @inline(always)
     public fn name(&self) -> Text {
         match self {
             Trace => "TRACE",
