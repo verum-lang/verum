@@ -92,17 +92,20 @@ public type Task<T> is {
 
 implement<T> Task<T> {
     // Get task ID.
+    @inline(always)
     public fn id(&self) -> TaskId {
         self.id
     }
 
     // Check if task is finished.
+    @inline(always)
     public fn is_finished(&self) -> Bool {
         let state = self.state.load(MemoryOrdering.Acquire);
         state >= 2  // Completed || Cancelled
     }
 
     // Check if task was cancelled.
+    @inline(always)
     public fn is_cancelled(&self) -> Bool {
         self.state.load(MemoryOrdering.Acquire) == 3
     }
@@ -133,21 +136,25 @@ public type JoinHandle<T> is {
 
 implement<T> JoinHandle<T> {
     // Get task ID.
+    @inline(always)
     public fn id(&self) -> TaskId {
         self.task.id()
     }
 
     // Check if task is finished.
+    @inline(always)
     public fn is_finished(&self) -> Bool {
         self.task.is_finished()
     }
 
     // Cancel the task.
+    @inline(always)
     public fn cancel(&self) {
         self.task.cancel();
     }
 
     // Detach from task - let it run to completion without waiting.
+    @inline(always)
     public fn detach(self) {
         // Just drop the handle
     }
@@ -430,6 +437,7 @@ public type JoinSet<T> is {
 
 implement<T> JoinSet<T> {
     // Create empty join set.
+    @inline(always)
     public fn new() -> JoinSet<T> {
         JoinSet { handles: List.new() }
     }
@@ -442,11 +450,13 @@ implement<T> JoinSet<T> {
     }
 
     // Number of tasks in set.
+    @inline(always)
     public fn len(&self) -> Int {
         self.handles.len()
     }
 
     // Check if empty.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.handles.is_empty()
     }
