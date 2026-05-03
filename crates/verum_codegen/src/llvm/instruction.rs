@@ -15030,19 +15030,19 @@ fn lower_call_method<'ctx>(
                 resolved_func_name = Some("__inline_text_len".to_string());
             }
             "parse_int" if args.count == 0 => {
-                // Route to compiled Text.to_int (pure Verum) instead of C verum_string_parse_int
+                // Route to compiled Text.to_int (pure Verum) instead of C verum_text_parse_int
                 let i64_type = ctx.types().i64_type();
                 let module = ctx.get_module();
                 let to_int_fn = if let Some(f) = module.get_function("Text.to_int") {
                     f
                 } else {
-                    // C fallback: verum_string_parse_int(char*) -> i64
+                    // C fallback: verum_text_parse_int(char*) -> i64
                     let ptr_type = ctx.types().ptr_type();
                     let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
                     let parse_fn = module
-                        .get_function("verum_string_parse_int")
+                        .get_function("verum_text_parse_int")
                         .unwrap_or_else(|| {
-                            module.add_function("verum_string_parse_int", fn_type, None)
+                            module.add_function("verum_text_parse_int", fn_type, None)
                         });
                     let str_ptr = text_extract_cptr!(receiver.0, "parse_int_str");
                     let result = ctx
@@ -15077,19 +15077,19 @@ fn lower_call_method<'ctx>(
                 return Ok(());
             }
             "parse_float" if args.count == 0 => {
-                // Route to compiled Text.to_float (pure Verum) instead of C verum_string_parse_float
+                // Route to compiled Text.to_float (pure Verum) instead of C verum_text_parse_float
                 let i64_type = ctx.types().i64_type();
                 let module = ctx.get_module();
                 let to_float_fn = if let Some(f) = module.get_function("Text.to_float") {
                     f
                 } else {
-                    // C fallback: verum_string_parse_float(char*) -> i64 (float bits)
+                    // C fallback: verum_text_parse_float(char*) -> i64 (float bits)
                     let ptr_type = ctx.types().ptr_type();
                     let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
                     let parse_fn = module
-                        .get_function("verum_string_parse_float")
+                        .get_function("verum_text_parse_float")
                         .unwrap_or_else(|| {
-                            module.add_function("verum_string_parse_float", fn_type, None)
+                            module.add_function("verum_text_parse_float", fn_type, None)
                         });
                     let str_ptr = text_extract_cptr!(receiver.0, "parse_float_str");
                     let result = ctx
