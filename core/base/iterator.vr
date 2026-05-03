@@ -994,14 +994,17 @@ public type Rev<I> is { iter: I };
 implement<I: DoubleEndedIterator> Iterator for Rev<I> {
     type Item = I.Item;
 
+    @inline(always)
     fn next(&mut self) -> Maybe<I.Item> {
         self.iter.next_back()
     }
 
+    @inline(always)
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         self.iter.size_hint()
     }
 
+    @inline(always)
     fn nth(&mut self, n: Int) -> Maybe<I.Item> {
         self.iter.nth_back(n)
     }
@@ -1509,16 +1512,19 @@ public type Extend<T> is protocol {
 implement<I: Iterator, B, F: fn(I.Item) -> B> Iterator for MappedIter<I, F> {
     type Item = B;
 
+    @inline(always)
     fn next(&mut self) -> Maybe<B> {
         self.iter.next().map(self.f)
     }
 
+    @inline(always)
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         self.iter.size_hint()
     }
 }
 
 implement<I: DoubleEndedIterator, B, F: fn(I.Item) -> B> DoubleEndedIterator for MappedIter<I, F> {
+    @inline(always)
     fn next_back(&mut self) -> Maybe<B> {
         self.iter.next_back().map(self.f)
     }
@@ -1619,6 +1625,7 @@ implement<I: Iterator, U: Iterator, F: fn(I.Item) -> U> Iterator for FlatMapIter
 implement<I: Iterator> Iterator for TakeIter<I> {
     type Item = I.Item;
 
+    @inline(always)
     fn next(&mut self) -> Maybe<I.Item> {
         if self.remaining > 0 {
             self.remaining = self.remaining - 1;
@@ -1792,6 +1799,7 @@ implement<T, A: DoubleEndedIterator<Item>, B: DoubleEndedIterator<Item>> DoubleE
 implement<A: Iterator, B: Iterator> Iterator for ZipIter<A, B> {
     type Item = (A.Item, B.Item);
 
+    @inline(always)
     fn next(&mut self) -> Maybe<(A.Item, B.Item)> {
         self.a.next().zip(self.b.next())
     }
@@ -1811,6 +1819,7 @@ implement<A: Iterator, B: Iterator> Iterator for ZipIter<A, B> {
 implement<I: Iterator> Iterator for EnumerateIter<I> {
     type Item = (Int, I.Item);
 
+    @inline(always)
     fn next(&mut self) -> Maybe<(Int, I.Item)> {
         let item = self.iter.next()?;
         let index = self.index;
@@ -1818,6 +1827,7 @@ implement<I: Iterator> Iterator for EnumerateIter<I> {
         Some((index, item))
     }
 
+    @inline(always)
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         self.iter.size_hint()
     }
@@ -1979,12 +1989,14 @@ implement<I: Iterator> Iterator for StepByIter<I> {
 implement<I: Iterator, F: fn(&I.Item)> Iterator for InspectIter<I, F> {
     type Item = I.Item;
 
+    @inline(always)
     fn next(&mut self) -> Maybe<I.Item> {
         let item = self.iter.next()?;
         (self.f)(&item);
         Some(item)
     }
 
+    @inline(always)
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         self.iter.size_hint()
     }
@@ -2044,16 +2056,19 @@ implement<I: DoubleEndedIterator> DoubleEndedIterator for FuseIter<I> {
 implement<I: Iterator> Iterator for ByRef<I> {
     type Item = I.Item;
 
+    @inline(always)
     fn next(&mut self) -> Maybe<I.Item> {
         self.inner.next()
     }
 
+    @inline(always)
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         self.inner.size_hint()
     }
 }
 
 implement<I: DoubleEndedIterator> DoubleEndedIterator for ByRef<I> {
+    @inline(always)
     fn next_back(&mut self) -> Maybe<I.Item> {
         self.inner.next_back()
     }
@@ -2062,16 +2077,19 @@ implement<I: DoubleEndedIterator> DoubleEndedIterator for ByRef<I> {
 implement<T: Clone, I: Iterator<Item = &T>> Iterator for Cloned<I> {
     type Item = T;
 
+    @inline(always)
     fn next(&mut self) -> Maybe<T> {
         self.inner.next().map(|x| x.clone())
     }
 
+    @inline(always)
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         self.inner.size_hint()
     }
 }
 
 implement<T: Clone, I: DoubleEndedIterator<Item = &T>> DoubleEndedIterator for Cloned<I> {
+    @inline(always)
     fn next_back(&mut self) -> Maybe<T> {
         self.inner.next_back().map(|x| x.clone())
     }
@@ -2080,10 +2098,12 @@ implement<T: Clone, I: DoubleEndedIterator<Item = &T>> DoubleEndedIterator for C
 implement<T: Copy, I: Iterator<Item = &T>> Iterator for Copied<I> {
     type Item = T;
 
+    @inline(always)
     fn next(&mut self) -> Maybe<T> {
         self.inner.next().map(|x| *x)
     }
 
+    @inline(always)
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         self.inner.size_hint()
     }
