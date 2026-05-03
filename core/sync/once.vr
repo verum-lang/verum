@@ -364,6 +364,7 @@ public type OnceLock<T> is {
 
 implement<T> OnceLock<T> {
     // Create new empty OnceLock.
+    @inline(always)
     public fn new() -> OnceLock<T> {
         OnceLock {
             once: Once.new(),
@@ -426,6 +427,7 @@ implement<T> OnceLock<T> {
     }
 
     // Check if initialized.
+    @inline(always)
     public fn is_initialized(&self) -> Bool {
         self.once.is_completed()
     }
