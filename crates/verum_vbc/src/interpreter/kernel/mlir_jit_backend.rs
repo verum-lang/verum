@@ -124,6 +124,12 @@ enum KernelKind {
  /// loop) and the cache key must discriminate to avoid a same-
  /// shape kernel servicing a broadcast call site.
  BinopScalarBroadcast(TensorBinaryOp),
+ /// Suffix-broadcast binop: `a` and `b`'s shape match in the
+ /// trailing dims; `b` repeats over the leading dims.  Common
+ /// patterns: `[M,N] op [N]`, `[B,M,N] op [M,N]`, `[B,M,N] op [N]`.
+ /// Kernel signature: `(a, b, out, n_total, period)` — element
+ /// `i` reads `a[i]` and `b[i mod period]`.
+ BinopSuffixBroadcast(TensorBinaryOp),
  Unop(TensorUnaryOp),
  /// Scalar triple-loop matmul; `M`/`K`/`N` are runtime args, the
  /// kernel itself is dtype-only-parametrised (one cached engine
@@ -545,20 +551,35 @@ impl Backend for MlirJitBackend {
  return Some(TensorHandle::zeros(a_shape, a.dtype)?);
  }
 
- // **Шаг 5e — broadcast support: scalar broadcast.**
+ // **Шаг 5e / 5e+1 — broadcast support.**
  //
- // Three legitimate scalar-broadcast shapes for `b`:
- //   * empty shape `[]` (rank-0 scalar, numel=1),
- //   * any rank with all-1 dims `[1]`/`[1,1]`/… (numel=1),
- // both reduce to "load `b[0]` once, apply binop to every `a[i]`".
+ // Three patterns are JIT-able from this dispatcher:
  //
- // We dispatch into `KernelKind::BinopScalarBroadcast` whenever
- // shapes mismatch BUT b.numel == 1.  Same-shape stays on the
- // canonical `Binop` kernel; non-scalar broadcast (e.g. [M,N] vs
- // [N]) is a Шаг 5e+1 deferral — return `None` and let the upstream
- // CpuBackend handle it for now.
- let scalar_broadcast = a_shape != b_shape && b.numel == 1;
- if a_shape != b_shape && !scalar_broadcast {
+ //   1. **Same shape**: a_shape == b_shape — canonical `Binop`
+ //      kernel.
+ //   2. **Scalar broadcast**: b.numel == 1 (rank-0 scalar `[]`,
+ //      or any rank with all-1 dims `[1]`/`[1,1]`/…).  Routes to
+ //      `BinopScalarBroadcast` which loads `b[0]` once outside
+ //      the loop.
+ //   3. **Suffix broadcast**: b's shape is a strict trailing
+ //      slice of a's shape (e.g. `[M,N] op [N]`,
+ //      `[B,M,N] op [M,N]`, `[B,M,N] op [N]`).  Routes to
+ //      `BinopSuffixBroadcast` which reads `b[i mod period]`
+ //      with `period = b.numel`.  A power-of-two period folds to
+ //      a bitwise AND under LLVM's strength reduction; non-pow2
+ //      stays on `arith.remsi` which most CPUs handle in one
+ //      µ-op.
+ //
+ // Anything else (prefix broadcast `[M] op [M,N]`, mid-axis
+ // broadcast `[M,1,K] op [M,N,K]`, …) returns `None` and falls
+ // through to `CpuBackend`.
+ let same_shape = a_shape == b_shape;
+ let scalar_broadcast = !same_shape && b.numel == 1;
+ let suffix_broadcast = !same_shape
+ && !scalar_broadcast
+ && b_shape.len() < a_shape.len()
+ && a_shape[a_shape.len() - b_shape.len()..] == *b_shape;
+ if !same_shape && !scalar_broadcast && !suffix_broadcast {
  return None;
  }
 
@@ -568,20 +589,20 @@ impl Backend for MlirJitBackend {
  let out = TensorHandle::zeros(a_shape, a.dtype)?;
  let kind = if scalar_broadcast {
  KernelKind::BinopScalarBroadcast(op)
+ } else if suffix_broadcast {
+ KernelKind::BinopSuffixBroadcast(op)
  } else {
  KernelKind::Binop(op)
  };
  let holder = self.get_or_compile(kind, a.dtype)?;
 
- // ABI marshalling: the JIT kernel signature is
- // `void kernel(*ptr a, *ptr b, *ptr out, i64 n)`
- // and `mlirExecutionEngineInvokePacked` expects an array of
- // `*mut ()` where each entry points to the *value* of the
- // argument (so for pointer args we pass &mut ptr_value).
+ // ABI marshalling differs by kernel kind:
+ //   * `Binop` / `BinopScalarBroadcast`: 4 args (a, b, out, n).
+ //   * `BinopSuffixBroadcast`:           5 args (a, b, out, n, period).
  //
- // Both Binop and BinopScalarBroadcast share the 4-arg signature
- // `(a, b, out, n)`; the broadcast kernel just dereferences `b`
- // exactly once at function entry instead of per-iteration.
+ // `mlirExecutionEngineInvokePacked` expects an array of `*mut ()`
+ // where each entry points to the *value* of the argument (so for
+ // pointer args we pass &mut ptr_value).
  let a_data = a.data.as_ref()?;
  let b_data = b.data.as_ref()?;
  let out_data = out.data.as_ref()?;
@@ -589,24 +610,39 @@ impl Backend for MlirJitBackend {
  let mut b_ptr: *const u8 = unsafe { (*b_data.as_ptr()).as_ptr() };
  let mut out_ptr: *mut u8 = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
  let mut n_arg: i64 = n as i64;
- let mut packed_args: [*mut (); 4] = [
+ let mut period_arg: i64 = b.numel as i64;
+ let result = if suffix_broadcast {
+ let mut packed: [*mut (); 5] = [
+ (&mut a_ptr) as *mut _ as *mut (),
+ (&mut b_ptr) as *mut _ as *mut (),
+ (&mut out_ptr) as *mut _ as *mut (),
+ (&mut n_arg) as *mut _ as *mut (),
+ (&mut period_arg) as *mut _ as *mut (),
+ ];
+ unsafe { holder.engine.invoke_packed("kernel", &mut packed) }
+ } else {
+ let mut packed: [*mut (); 4] = [
  (&mut a_ptr) as *mut _ as *mut (),
  (&mut b_ptr) as *mut _ as *mut (),
  (&mut out_ptr) as *mut _ as *mut (),
  (&mut n_arg) as *mut _ as *mut (),
  ];
- // The MLIR JIT exposes the kernel under its C-ABI wrapper name
- // (`_mlir_ciface_kernel`) when the function carries the
- // `llvm.emit_c_interface` attribute. `invoke_packed` resolves
- // that wrapper symbol automatically for the bare name.
- let result = unsafe { holder.engine.invoke_packed("kernel", &mut packed_args) };
+ // The MLIR JIT exposes the kernel under its C-ABI wrapper
+ // name (`_mlir_ciface_kernel`) when the function carries
+ // the `llvm.emit_c_interface` attribute. `invoke_packed`
+ // resolves that wrapper symbol automatically for the bare
+ // name.
+ unsafe { holder.engine.invoke_packed("kernel", &mut packed) }
+ };
  if result.is_err() {
  tracing::warn!(
- "MLIR-JIT binop invocation failed for op={:?} dtype={:?} broadcast={}; \
- falling back to CpuBackend",
+ "MLIR-JIT binop invocation failed for op={:?} dtype={:?} \
+ same_shape={} scalar_bcast={} suffix_bcast={}; falling back to CpuBackend",
  op,
  a.dtype,
- scalar_broadcast
+ same_shape,
+ scalar_broadcast,
+ suffix_broadcast
  );
  return None;
  }
@@ -1105,6 +1141,65 @@ fn build_binop_scalar_broadcast_kernel_text(
  ))
 }
 
+/// Build the MLIR text for a **suffix-broadcast** binary op:
+/// `out[i] = a[i] op b[i mod period]` for `i ∈ [0, n_total)`.
+///
+/// Signature: `void kernel(*const T a, *const T b, *mut T out, i64 n, i64 period)`.
+/// `period` is `b.numel` — the size of the trailing block that `b`
+/// covers and which we cycle through over `a`'s leading dims.
+/// Examples:
+///
+///  * `a = [M,N]`, `b = [N]` → `n = M*N`, `period = N`.
+///  * `a = [B,M,N]`, `b = [M,N]` → `n = B*M*N`, `period = M*N`.
+///  * `a = [B,M,N]`, `b = [N]` → `n = B*M*N`, `period = N`.
+///
+/// Pre-condition (enforced by [`MlirJitBackend::binop`]): `b`'s
+/// shape is a strict trailing slice of `a`'s shape — without that,
+/// a single `i mod period` index is insufficient and a multi-axis
+/// stride scheme would be needed (deferred — Шаг 5e+2).
+///
+/// LLVM's strength-reduction folds `arith.remsi i, period` to a
+/// bitwise AND when `period` is a power of two — common for the
+/// `[B,M,N] op [M,N]` and similar nn-style call sites where the
+/// trailing matrix is sized to align with vector lanes.  Non-pow2
+/// `period` stays on `remsi` which modern x86 / aarch64 CPUs
+/// retire in 1 µ-op + a few cycles.
+fn build_binop_suffix_broadcast_kernel_text(
+ op: TensorBinaryOp,
+ dtype: DType,
+) -> Option<String> {
+ let elem_ty = mlir_elem_type(dtype)?;
+ let arith = binop_arith_op(op, dtype)?;
+ Some(format!(
+ r#"module {{
+ func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64, %period: i64) attributes {{ llvm.emit_c_interface }} {{
+ %c0 = arith.constant 0 : i64
+ %c1 = arith.constant 1 : i64
+ cf.br ^loop(%c0 : i64)
+ ^loop(%i: i64):
+ %cond = arith.cmpi slt, %i, %n : i64
+ cf.cond_br %cond, ^body, ^exit
+ ^body:
+ %bi_idx = arith.remsi %i, %period : i64
+ %ai = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %bi = llvm.getelementptr inbounds %b[%bi_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %va = llvm.load %ai : !llvm.ptr -> {elem}
+ %vb = llvm.load %bi : !llvm.ptr -> {elem}
+ %vc = {arith} %va, %vb : {elem}
+ %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ llvm.store %vc, %ci : {elem}, !llvm.ptr
+ %i_next = arith.addi %i, %c1 : i64
+ cf.br ^loop(%i_next : i64)
+ ^exit:
+ return
+ }}
+}}
+"#,
+ elem = elem_ty,
+ arith = arith,
+ ))
+}
+
 /// Build the MLIR text for a full-tensor reduction.
 ///
 /// Signature: `void kernel(*const T input, *mut T output, i64 n)`.
@@ -1542,6 +1637,9 @@ fn compile_kernel(
  KernelKind::Binop(op) => build_binop_kernel_text(op, dtype)?,
  KernelKind::BinopScalarBroadcast(op) => {
  build_binop_scalar_broadcast_kernel_text(op, dtype)?
+ }
+ KernelKind::BinopSuffixBroadcast(op) => {
+ build_binop_suffix_broadcast_kernel_text(op, dtype)?
  }
  KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
  KernelKind::Matmul => build_matmul_kernel_text(dtype)?,

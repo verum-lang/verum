@@ -460,6 +460,123 @@ fn binop_f32_scalar_broadcast_equivalent() {
  }
 }
 
+// ============================================================================
+// Шаг 5e+1 — suffix-broadcast (`[M,N] op [N]` etc.)
+// ============================================================================
+
+#[test]
+fn binop_f32_suffix_broadcast_equivalent() {
+ // `[M,N] op [N]` — b is the trailing-axis stride that repeats
+ // M times across a's leading dim.
+ let mut state: u64 = 0xFEED_5E51;
+ let jit = MlirJitBackend::new();
+ let m = 5_usize;
+ let n_inner = 8_usize;
+ for &op in &[
+ TensorBinaryOp::Add,
+ TensorBinaryOp::Sub,
+ TensorBinaryOp::Mul,
+ TensorBinaryOp::Div,
+ ] {
+ let a = make_f32_tensor(&[m, n_inner], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[n_inner], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, op)
+ .unwrap_or_else(|| panic!("JIT suffix-broadcast missing for binop F32 {:?}", op));
+ let av = read_f32(&a, m * n_inner);
+ let bv = read_f32(&b, n_inner);
+ let mut expected = vec![0.0_f32; m * n_inner];
+ for i in 0..(m * n_inner) {
+ let bj = i % n_inner;
+ expected[i] = match op {
+ TensorBinaryOp::Add => av[i] + bv[bj],
+ TensorBinaryOp::Sub => av[i] - bv[bj],
+ TensorBinaryOp::Mul => av[i] * bv[bj],
+ TensorBinaryOp::Div => av[i] / bv[bj],
+ _ => unreachable!(),
+ };
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n_inner),
+ &expected,
+ &format!("binop F32 suffix-broadcast {:?}", op),
+ );
+ }
+}
+
+#[test]
+fn binop_f32_suffix_broadcast_3d_equivalent() {
+ // `[B,M,N] op [N]` — b repeats over both leading axes.  Period
+ // is `n_inner` so the modulo cycle covers `B * M` blocks.
+ let mut state: u64 = 0xFEED_5E52;
+ let jit = MlirJitBackend::new();
+ let b_dim = 2_usize;
+ let m = 3_usize;
+ let n_inner = 4_usize;
+ let total = b_dim * m * n_inner;
+ let a = make_f32_tensor(&[b_dim, m, n_inner], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[n_inner], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Mul)
+ .expect("JIT 3D suffix-broadcast missing for Mul");
+ let av = read_f32(&a, total);
+ let bv = read_f32(&b, n_inner);
+ let mut expected = vec![0.0_f32; total];
+ for i in 0..total {
+ expected[i] = av[i] * bv[i % n_inner];
+ }
+ assert_f32_close(&read_f32(&r, total), &expected, "binop F32 3D suffix-broadcast Mul");
+}
+
+#[test]
+fn binop_f32_suffix_broadcast_2d_match_equivalent() {
+ // `[B,M,N] op [M,N]` — period is `m * n_inner`, the full 2D
+ // sub-block.  Tests that the ABI correctly threads
+ // `period = b.numel` (not just the inner-most dim) when b is
+ // multi-dimensional.
+ let mut state: u64 = 0xFEED_5E53;
+ let jit = MlirJitBackend::new();
+ let b_dim = 2_usize;
+ let m = 3_usize;
+ let n_inner = 4_usize;
+ let total = b_dim * m * n_inner;
+ let period = m * n_inner;
+ let a = make_f32_tensor(&[b_dim, m, n_inner], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[m, n_inner], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Add)
+ .expect("JIT 3D-on-2D suffix-broadcast missing for Add");
+ let av = read_f32(&a, total);
+ let bv = read_f32(&b, period);
+ let mut expected = vec![0.0_f32; total];
+ for i in 0..total {
+ expected[i] = av[i] + bv[i % period];
+ }
+ assert_f32_close(
+ &read_f32(&r, total),
+ &expected,
+ "binop F32 [B,M,N] op [M,N] Add",
+ );
+}
+
+#[test]
+fn binop_f32_prefix_broadcast_falls_through() {
+ // `[M] op [M,N]` — b is LARGER than a; not a suffix and not a
+ // scalar.  This must NOT match either broadcast pattern; the
+ // dispatcher should return None and let the caller's outer
+ // dispatch path handle it (potentially returning the
+ // mathematically-correct fallback or surfacing an error).
+ let mut state: u64 = 0xFEED_5E54;
+ let jit = MlirJitBackend::new();
+ let a = make_f32_tensor(&[3], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[3, 4], &mut state, 0.5, 4.0);
+ let r = jit.binop(&a, &b, TensorBinaryOp::Add);
+ assert!(
+ r.is_none(),
+ "prefix-broadcast `[M] op [M,N]` must fall through (got JIT-routed result)"
+ );
+}
+
 #[test]
 fn binop_f64_scalar_broadcast_equivalent() {
  let mut state: u64 = 0xCAFE_BABE_5E5E;
