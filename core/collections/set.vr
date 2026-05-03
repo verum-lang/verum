@@ -34,6 +34,7 @@ public type Set<T: Hash + Eq> is {
 
 implement<T: Hash + Eq> Set<T> {
     // Create empty set.
+    @inline(always)
     public fn new() -> Set<T> {
         Set { inner: Map.new() }
     }
