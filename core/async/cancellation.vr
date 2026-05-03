@@ -268,6 +268,7 @@ implement CancellationFlag {
         }
     }
 
+    @inline(always)
     public fn is_cancelled(&self) -> Bool {
         self.state.load(MemoryOrdering.Acquire) == STATE_CANCELLED
     }
@@ -443,6 +444,7 @@ implement CancellationToken {
     }
 
     /// Quick synchronous check.
+    @inline(always)
     public fn is_cancelled(&self) -> Bool {
         self.inner.is_cancelled()
     }
