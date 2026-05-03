@@ -180,3 +180,11 @@ implement Default for TextBuilder {
         TextBuilder.new()
     }
 }
+
+/// Length protocol — enables free-function `len(builder)` dispatch.
+implement Length for TextBuilder {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.buf.len()
+    }
+}
