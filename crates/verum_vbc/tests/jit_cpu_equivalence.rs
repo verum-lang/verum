@@ -560,6 +560,119 @@ fn binop_f32_suffix_broadcast_2d_match_equivalent() {
 }
 
 // ============================================================================
+// Шаг 5e+5 — bilateral broadcast (`[M,1] op [1,N]` etc.)
+// ============================================================================
+//
+// Closes the LAST broadcast frontier: when neither a's shape nor b's shape
+// is the broadcast output (both have size-1 dims that expand to the other).
+
+#[test]
+fn binop_f32_bilateral_broadcast_2d_outer_product_equivalent() {
+ // `[M,1] op [1,N]` → output `[M,N]` — outer-product shape.
+ // The two operands EACH have one broadcast axis; output is
+ // larger than both.
+ let mut state: u64 = 0xFEED_5EA0;
+ let jit = MlirJitBackend::new();
+ let m = 4_usize;
+ let n = 5_usize;
+ for &op in &[
+ TensorBinaryOp::Add,
+ TensorBinaryOp::Sub,
+ TensorBinaryOp::Mul,
+ TensorBinaryOp::Div,
+ ] {
+ let a = make_f32_tensor(&[m, 1], &mut state, 1.0, 4.0);
+ let b = make_f32_tensor(&[1, n], &mut state, 1.0, 4.0);
+ let r = jit
+ .binop(&a, &b, op)
+ .unwrap_or_else(|| panic!("bilateral kernel missing for [M,1] {:?} [1,N]", op));
+ assert_eq!(r.numel, m * n, "bilateral output size wrong for {:?}", op);
+ let av = read_f32(&a, m);
+ let bv = read_f32(&b, n);
+ let mut expected = vec![0.0_f32; m * n];
+ for i in 0..(m * n) {
+ let mi = i / n;
+ let ni = i % n;
+ expected[i] = match op {
+ TensorBinaryOp::Add => av[mi] + bv[ni],
+ TensorBinaryOp::Sub => av[mi] - bv[ni],
+ TensorBinaryOp::Mul => av[mi] * bv[ni],
+ TensorBinaryOp::Div => av[mi] / bv[ni],
+ _ => unreachable!(),
+ };
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n),
+ &expected,
+ &format!("bilateral [M,1] {:?} [1,N]", op),
+ );
+ }
+}
+
+#[test]
+fn binop_f32_bilateral_broadcast_3d_equivalent() {
+ // `[A,1,C] op [1,B,1]` → output `[A,B,C]`.  Each operand has
+ // two size-1 axes; both expand simultaneously.
+ let mut state: u64 = 0xFEED_5EA1;
+ let jit = MlirJitBackend::new();
+ let a_dim = 2_usize;
+ let b_dim = 3_usize;
+ let c_dim = 4_usize;
+ let total = a_dim * b_dim * c_dim;
+ let a = make_f32_tensor(&[a_dim, 1, c_dim], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[1, b_dim, 1], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Mul)
+ .expect("bilateral 3D kernel missing for [A,1,C] Mul [1,B,1]");
+ assert_eq!(r.numel, total);
+ let av = read_f32(&a, a_dim * c_dim);
+ let bv = read_f32(&b, b_dim);
+ let mut expected = vec![0.0_f32; total];
+ for i in 0..total {
+ let ai = i / (b_dim * c_dim);
+ let bi = (i / c_dim) % b_dim;
+ let ci = i % c_dim;
+ expected[i] = av[ai * c_dim + ci] * bv[bi];
+ }
+ assert_f32_close(
+ &read_f32(&r, total),
+ &expected,
+ "bilateral [A,1,C] Mul [1,B,1]",
+ );
+}
+
+#[test]
+fn binop_f32_bilateral_broadcast_rank_pad_equivalent() {
+ // `[N] op [M,1]` — operands have different ranks.  Pad shorter
+ // (a = [N]) to common rank by left-padding with 1: a_padded =
+ // [1,N], b_padded = [M,1], output shape = [M,N].  Each
+ // operand has one broadcast axis.  Mul (commutative).
+ let mut state: u64 = 0xFEED_5EA2;
+ let jit = MlirJitBackend::new();
+ let m = 3_usize;
+ let n = 4_usize;
+ let a = make_f32_tensor(&[n], &mut state, 1.0, 4.0);
+ let b = make_f32_tensor(&[m, 1], &mut state, 1.0, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Add)
+ .expect("bilateral rank-pad kernel missing for [N] Add [M,1]");
+ assert_eq!(r.numel, m * n);
+ let av = read_f32(&a, n);
+ let bv = read_f32(&b, m);
+ let mut expected = vec![0.0_f32; m * n];
+ for i in 0..(m * n) {
+ let mi = i / n;
+ let ni = i % n;
+ expected[i] = av[ni] + bv[mi];
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n),
+ &expected,
+ "bilateral rank-pad [N] Add [M,1]",
+ );
+}
+
+// ============================================================================
 // Шаг 5e+4 — flipped-arg kernels for non-commutative b > a
 // ============================================================================
 //
