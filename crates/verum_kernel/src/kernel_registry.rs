@@ -20,7 +20,7 @@
 //!     pairwise-agreement classification.
 //!
 //! Adding a new kernel implementation is now ONE line:
-//! ```rust
+//! ```ignore
 //! registry.register(MyKernelImpl);
 //! ```
 //! No changes to the differential dispatcher, the audit gate, or
