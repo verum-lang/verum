@@ -89,6 +89,7 @@ public type SystemTime is {
 
 implement SystemTime {
     /// The Unix epoch: January 1, 1970, 00:00:00 UTC.
+    @inline(always)
     public fn UNIX_EPOCH() -> SystemTime {
         SystemTime { secs: 0, nanos: 0 }
     }
@@ -100,6 +101,7 @@ implement SystemTime {
     /// - Linux: clock_gettime(CLOCK_REALTIME)
     /// - macOS: clock_gettime(CLOCK_REALTIME)
     /// - Windows: GetSystemTimePreciseAsFileTime()
+    @inline(always)
     public fn now() -> SystemTime {
         let total_nanos = realtime_nanos() as Int;
         let secs = total_nanos / NANOS_PER_SEC;
@@ -112,6 +114,7 @@ implement SystemTime {
 
     /// Returns None if the time is before the epoch (rare, but possible
     /// on misconfigured systems).
+    @inline(always)
     public fn duration_since_epoch(&self) -> Duration {
         Duration.new(self.secs, self.nanos)
     }
@@ -171,26 +174,31 @@ implement SystemTime {
     }
 
     /// Get Unix timestamp in seconds.
+    @inline(always)
     public fn timestamp(&self) -> Int {
         self.secs
     }
 
     /// Get Unix timestamp in milliseconds.
+    @inline(always)
     public fn timestamp_millis(&self) -> Int {
         self.secs * 1000 + self.nanos / 1_000_000
     }
 
     /// Get Unix timestamp in nanoseconds.
+    @inline(always)
     public fn timestamp_nanos(&self) -> Int {
         self.secs * 1_000_000_000 + self.nanos
     }
 
     /// Create from Unix timestamp in seconds.
+    @inline(always)
     public fn from_timestamp(secs: Int) -> SystemTime {
         SystemTime { secs: secs, nanos: 0 }
     }
 
     /// Create from Unix timestamp in milliseconds.
+    @inline(always)
     public fn from_timestamp_millis(ms: Int) -> SystemTime {
         SystemTime {
             secs: ms / 1000,
