@@ -555,6 +555,10 @@ implement<T, F: Future<Output>> Future for JoinAll<T, F> {
 /// Error returned when a timeout expires.
 public type SelectTimeoutError is ();
 
+/// Public alias — short name used by consumers of `core.async.select`.
+/// (The async/timer.vr `TimeoutError` is unrelated and lives there.)
+public type TimeoutError is SelectTimeoutError;
+
 implement Display for SelectTimeoutError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("select: timeout")
