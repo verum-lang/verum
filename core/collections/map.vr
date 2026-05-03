@@ -325,6 +325,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // =========================================================================
 
     // Create empty map.
+    @inline(always)
     public fn new() -> Map<K, V> {
         Map {
             entries: null_ptr(),

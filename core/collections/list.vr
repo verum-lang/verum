@@ -111,6 +111,7 @@ implement<T> List<T> {
     // =========================================================================
 
     // Create empty list.
+    @inline(always)
     public fn new() -> List<T> {
         List {
             ptr: null_ptr(),
