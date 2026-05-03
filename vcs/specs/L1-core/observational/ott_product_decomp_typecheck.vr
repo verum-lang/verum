@@ -20,23 +20,11 @@ mount core.math.observational.{
 
 fn exercise_atom_decisions() {
     // Bool — direct decision.
-    assert(matches!(
-        ott_decide(OttBool, OttBoolVal { value: true }, OttBoolVal { value: true }),
-        OttTrue
-    ));
-    assert(matches!(
-        ott_decide(OttBool, OttBoolVal { value: true }, OttBoolVal { value: false }),
-        OttFalse
-    ));
+    assert(ott_decide(OttBool, OttBoolVal { value: true }, OttBoolVal { value: true }) is OttTrue);
+    assert(ott_decide(OttBool, OttBoolVal { value: true }, OttBoolVal { value: false }) is OttFalse);
     // Nat.
-    assert(matches!(
-        ott_decide(OttNat, OttNatVal { value: 42 }, OttNatVal { value: 42 }),
-        OttTrue
-    ));
-    assert(matches!(
-        ott_decide(OttNat, OttNatVal { value: 1 }, OttNatVal { value: 2 }),
-        OttFalse
-    ));
+    assert(ott_decide(OttNat, OttNatVal { value: 42 }, OttNatVal { value: 42 }) is OttTrue);
+    assert(ott_decide(OttNat, OttNatVal { value: 1 }, OttNatVal { value: 2 }) is OttFalse);
 }
 
 fn exercise_product_equal() {
@@ -53,7 +41,7 @@ fn exercise_product_equal() {
         first:  Heap.new(OttBoolVal { value: true }),
         second: Heap.new(OttNatVal  { value: 7 }),
     };
-    assert(matches!(ott_decide(bool_nat, lhs, rhs), OttTrue));
+    assert(ott_decide(bool_nat, lhs, rhs) is OttTrue);
 }
 
 fn exercise_product_first_differs() {
@@ -70,7 +58,7 @@ fn exercise_product_first_differs() {
         first:  Heap.new(OttBoolVal { value: false }),
         second: Heap.new(OttNatVal  { value: 7 }),
     };
-    assert(matches!(ott_decide(bool_nat, lhs, rhs), OttFalse));
+    assert(ott_decide(bool_nat, lhs, rhs) is OttFalse);
 }
 
 fn exercise_product_second_differs() {
@@ -87,7 +75,7 @@ fn exercise_product_second_differs() {
         first:  Heap.new(OttBoolVal { value: true }),
         second: Heap.new(OttNatVal  { value: 8 }),
     };
-    assert(matches!(ott_decide(bool_nat, lhs, rhs), OttFalse));
+    assert(ott_decide(bool_nat, lhs, rhs) is OttFalse);
 }
 
 fn exercise_nested_product() {
@@ -112,7 +100,7 @@ fn exercise_nested_product() {
         first:  Heap.new(inner_pair),
         second: Heap.new(OttUnitVal),
     };
-    assert(matches!(ott_decide(outer, lhs, rhs), OttTrue));
+    assert(ott_decide(outer, lhs, rhs) is OttTrue);
 }
 
 fn main() {
