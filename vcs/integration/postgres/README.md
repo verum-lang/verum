@@ -148,6 +148,14 @@ Test list per `internal/specs/database.md` follow-up:
   start_logical_pgoutput → drain CdcInsert events with their
   RelationMessage attached + assert insert_count ≥ 3 + relation
   cache populated (spec §6.1.7 / §6.1.8)
+- `t24_async_pgoutput_buffered.vr` — streamed-tx grouping
+  consumer V0: AsyncPgoutputBufferedConsumer wraps the raw
+  consumer; verifies BcRegular pass-through path delivers
+  CdcRelationOnly + 3× CdcInsert at proto_version=1 (no
+  streaming). The full streamed-tx path (BcStreamedTx /
+  BcStreamedAbort) is decoder-tested via the state machine;
+  triggering a real streamed transaction requires
+  `logical_decoding_work_mem` tuning out of V0 scope.
 
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags
