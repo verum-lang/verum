@@ -139,6 +139,22 @@ enum KernelKind {
  /// Kernel signature: `(a, b, out, n_total, inner_size)` —
  /// element `i` reads `a[i]` and `b[i div inner_size]`.
  BinopPrefixBroadcast(TensorBinaryOp),
+ /// Generic mid-axis broadcast binop: `b` has the same rank as
+ /// `a` (after leading-1 padding) but one or more axes are
+ /// size-1 in `b` and >1 in `a`.  Patterns: `[M,1,K] op [M,N,K]`
+ /// (mid-axis size-1), `[M,1] op [M,N]`, multi-axis combinations.
+ /// Pre-condition: a's shape is the broadcast output shape; b's
+ /// shape (after left-pad with 1s) matches a per-axis with each
+ /// axis being either equal or 1 (size-1 axes are broadcast).
+ ///
+ /// Kernel signature: `(a, b, out, n_total, ndim, out_shape*, b_stride*)`
+ /// where `out_shape` and `b_stride` are `i64*` arrays of
+ /// length `ndim`.  `b_stride[k]` is `0` for axes broadcast
+ /// from b, otherwise the canonical row-major stride of b at
+ /// axis k.  Inside the kernel: walk axes from innermost to
+ /// outermost, decompose `i` into multi-axis indices via
+ /// `out_shape`, accumulate `b_off += idx[k] * b_stride[k]`.
+ BinopMidAxisBroadcast(TensorBinaryOp),
  Unop(TensorUnaryOp),
  /// Scalar triple-loop matmul; `M`/`K`/`N` are runtime args, the
  /// kernel itself is dtype-only-parametrised (one cached engine
@@ -615,7 +631,41 @@ impl Backend for MlirJitBackend {
  1
  };
 
+ // **Шаг 5e+3 — generic mid-axis broadcast.**
+ //
+ // Pad b's shape on the left with 1s to match a's rank, then
+ // check NumPy-style broadcastability: every axis must satisfy
+ // `b_padded[k] == 1 || b_padded[k] == a_shape[k]`.  When at
+ // least one axis is 1 in b (broadcast) and the rest match —
+ // and we haven't already hit one of the three single-parameter
+ // patterns above — we route through `BinopMidAxisBroadcast`.
+ let mut mid_axis_broadcast = false;
+ let mut padded_b_shape: [usize; crate::interpreter::tensor::MAX_DIMS] =
+ [1; crate::interpreter::tensor::MAX_DIMS];
  if !same_shape && !scalar_broadcast && !suffix_broadcast && !prefix_broadcast {
+ if b_shape.len() <= a_shape.len() {
+ let pad = a_shape.len() - b_shape.len();
+ for (i, &d) in b_shape.iter().enumerate() {
+ padded_b_shape[pad + i] = d;
+ }
+ let mut ok = true;
+ for k in 0..a_shape.len() {
+ let bk = padded_b_shape[k];
+ if bk != 1 && bk != a_shape[k] {
+ ok = false;
+ break;
+ }
+ }
+ mid_axis_broadcast = ok;
+ }
+ }
+
+ if !same_shape
+ && !scalar_broadcast
+ && !suffix_broadcast
+ && !prefix_broadcast
+ && !mid_axis_broadcast
+ {
  return None;
  }
 
@@ -629,15 +679,45 @@ impl Backend for MlirJitBackend {
  KernelKind::BinopSuffixBroadcast(op)
  } else if prefix_broadcast {
  KernelKind::BinopPrefixBroadcast(op)
+ } else if mid_axis_broadcast {
+ KernelKind::BinopMidAxisBroadcast(op)
  } else {
  KernelKind::Binop(op)
  };
  let holder = self.get_or_compile(kind, a.dtype)?;
 
+ // Pre-compute mid-axis broadcast metadata (out_shape + b_stride
+ // arrays) when we're routing through `BinopMidAxisBroadcast`.
+ // Both arrays are length `ndim = a_shape.len()`.  `b_stride[k]`
+ // is the canonical row-major stride of b at axis `k` if the
+ // padded b dim matches a's dim there, else 0 (broadcast).
+ let mut out_shape_buf: [i64; crate::interpreter::tensor::MAX_DIMS] = [0; _];
+ let mut b_stride_buf: [i64; crate::interpreter::tensor::MAX_DIMS] = [0; _];
+ if mid_axis_broadcast {
+ let ndim = a_shape.len();
+ for k in 0..ndim {
+ out_shape_buf[k] = a_shape[k] as i64;
+ }
+ // Canonical b strides over the PADDED shape, in elements.
+ // Walk axes inner→outer to accumulate.  An axis with
+ // padded_b_shape[k] == 1 gets stride 0 (broadcast).
+ let mut running: i64 = 1;
+ for k in (0..ndim).rev() {
+ if padded_b_shape[k] == 1 {
+ b_stride_buf[k] = 0;
+ } else {
+ b_stride_buf[k] = running;
+ }
+ running *= padded_b_shape[k] as i64;
+ }
+ }
+
  // ABI marshalling differs by kernel kind:
  //   * `Binop` / `BinopScalarBroadcast`: 4 args (a, b, out, n).
  //   * `BinopSuffixBroadcast`:            5 args (a, b, out, n, period).
  //   * `BinopPrefixBroadcast`:            5 args (a, b, out, n, inner_size).
+ //   * `BinopMidAxisBroadcast`:           7 args (a, b, out, n, ndim,
+ //                                                out_shape*, b_stride*).
  //
  // `mlirExecutionEngineInvokePacked` expects an array of `*mut ()`
  // where each entry points to the *value* of the argument (so for
@@ -651,6 +731,9 @@ impl Backend for MlirJitBackend {
  let mut n_arg: i64 = n as i64;
  let mut period_arg: i64 = b.numel as i64;
  let mut inner_arg: i64 = inner_size as i64;
+ let mut ndim_arg: i64 = a_shape.len() as i64;
+ let mut out_shape_ptr: *const i64 = out_shape_buf.as_ptr();
+ let mut b_stride_ptr: *const i64 = b_stride_buf.as_ptr();
  let result = if suffix_broadcast {
  let mut packed: [*mut (); 5] = [
  (&mut a_ptr) as *mut _ as *mut (),
@@ -667,6 +750,17 @@ impl Backend for MlirJitBackend {
  (&mut out_ptr) as *mut _ as *mut (),
  (&mut n_arg) as *mut _ as *mut (),
  (&mut inner_arg) as *mut _ as *mut (),
+ ];
+ unsafe { holder.engine.invoke_packed("kernel", &mut packed) }
+ } else if mid_axis_broadcast {
+ let mut packed: [*mut (); 7] = [
+ (&mut a_ptr) as *mut _ as *mut (),
+ (&mut b_ptr) as *mut _ as *mut (),
+ (&mut out_ptr) as *mut _ as *mut (),
+ (&mut n_arg) as *mut _ as *mut (),
+ (&mut ndim_arg) as *mut _ as *mut (),
+ (&mut out_shape_ptr) as *mut _ as *mut (),
+ (&mut b_stride_ptr) as *mut _ as *mut (),
  ];
  unsafe { holder.engine.invoke_packed("kernel", &mut packed) }
  } else {
@@ -686,14 +780,15 @@ impl Backend for MlirJitBackend {
  if result.is_err() {
  tracing::warn!(
  "MLIR-JIT binop invocation failed for op={:?} dtype={:?} \
- same_shape={} scalar_bcast={} suffix_bcast={} prefix_bcast={}; \
+ same_shape={} scalar_bcast={} suffix_bcast={} prefix_bcast={} mid_axis_bcast={}; \
  falling back to CpuBackend",
  op,
  a.dtype,
  same_shape,
  scalar_broadcast,
  suffix_broadcast,
- prefix_broadcast
+ prefix_broadcast,
+ mid_axis_broadcast
  );
  return None;
  }
@@ -1306,6 +1401,93 @@ fn build_binop_prefix_broadcast_kernel_text(
  ))
 }
 
+/// Build the MLIR text for a **mid-axis (NumPy-generic) broadcast**
+/// binary op: `out[i] = a[i] op b[b_off(i)]` where `b_off(i)`
+/// decodes `i` into multi-axis indices via `out_shape` and
+/// accumulates contributions weighted by `b_stride`.
+///
+/// Signature: `void kernel(*const T a, *const T b, *mut T out,
+///                          i64 n, i64 ndim, i64* out_shape,
+///                          i64* b_stride)`.
+///
+/// Pre-condition (enforced by the dispatcher): `a`'s shape is the
+/// broadcast OUTPUT shape (so `a` reads canonically by `i`); `b`
+/// has been left-padded with 1s to match `ndim`, and `b_stride[k]`
+/// is `0` for axes broadcast from b (size-1) or the canonical
+/// row-major stride of b for matching axes.
+///
+/// Inner axis-decoder is a block-arg-threaded loop:
+///
+///   rem  = i,    b_off = 0,    axis_left = ndim
+///   while axis_left > 0:
+///     ax = axis_left - 1
+///     d  = out_shape[ax]
+///     c  = rem mod d
+///     rem = rem div d
+///     b_off += c * b_stride[ax]
+///     axis_left = ax
+///   out[i] = a[i] op b[b_off]
+///
+/// The decoder is single-iteration-per-axis so total cost is
+/// `O(ndim)` per element — for `MAX_DIMS = 8` that's at most 8
+/// `remsi` + 8 `divsi` + 8 `muli` + 8 `addi` + 8 array loads,
+/// dominated on modern microarchitectures by the divsi/remsi
+/// pair (1 cycle each on x86 / aarch64).
+///
+/// The kernel is `(op, dtype)`-parametrised — one cached engine
+/// services every `(op, dtype)` regardless of rank, since `ndim`
+/// is a runtime arg and the per-axis arrays decode at runtime.
+fn build_binop_mid_axis_broadcast_kernel_text(
+ op: TensorBinaryOp,
+ dtype: DType,
+) -> Option<String> {
+ let elem_ty = mlir_elem_type(dtype)?;
+ let arith = binop_arith_op(op, dtype)?;
+ Some(format!(
+ r#"module {{
+ func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64, %ndim: i64, %out_shape: !llvm.ptr, %b_stride: !llvm.ptr) attributes {{ llvm.emit_c_interface }} {{
+ %c0 = arith.constant 0 : i64
+ %c1 = arith.constant 1 : i64
+ cf.br ^outer(%c0 : i64)
+ ^outer(%i: i64):
+ %cond_i = arith.cmpi slt, %i, %n : i64
+ cf.cond_br %cond_i, ^body, ^exit
+ ^body:
+ cf.br ^axis(%i, %c0, %ndim : i64, i64, i64)
+ ^axis(%rem: i64, %b_off: i64, %axis_left: i64):
+ %has_axis = arith.cmpi sgt, %axis_left, %c0 : i64
+ cf.cond_br %has_axis, ^axis_body, ^axis_done(%b_off : i64)
+ ^axis_body:
+ %ax = arith.subi %axis_left, %c1 : i64
+ %d_ptr = llvm.getelementptr inbounds %out_shape[%ax] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+ %d = llvm.load %d_ptr : !llvm.ptr -> i64
+ %c = arith.remsi %rem, %d : i64
+ %rem_next = arith.divsi %rem, %d : i64
+ %s_ptr = llvm.getelementptr inbounds %b_stride[%ax] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+ %s = llvm.load %s_ptr : !llvm.ptr -> i64
+ %inc = arith.muli %c, %s : i64
+ %b_off_next = arith.addi %b_off, %inc : i64
+ cf.br ^axis(%rem_next, %b_off_next, %ax : i64, i64, i64)
+ ^axis_done(%final_b_off: i64):
+ %ai = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %bi = llvm.getelementptr inbounds %b[%final_b_off] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %va = llvm.load %ai : !llvm.ptr -> {elem}
+ %vb = llvm.load %bi : !llvm.ptr -> {elem}
+ %vc = {arith} %va, %vb : {elem}
+ %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ llvm.store %vc, %ci : {elem}, !llvm.ptr
+ %i_next = arith.addi %i, %c1 : i64
+ cf.br ^outer(%i_next : i64)
+ ^exit:
+ return
+ }}
+}}
+"#,
+ elem = elem_ty,
+ arith = arith,
+ ))
+}
+
 /// Build the MLIR text for a full-tensor reduction.
 ///
 /// Signature: `void kernel(*const T input, *mut T output, i64 n)`.
@@ -1749,6 +1931,9 @@ fn compile_kernel(
  }
  KernelKind::BinopPrefixBroadcast(op) => {
  build_binop_prefix_broadcast_kernel_text(op, dtype)?
+ }
+ KernelKind::BinopMidAxisBroadcast(op) => {
+ build_binop_mid_axis_broadcast_kernel_text(op, dtype)?
  }
  KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
  KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
