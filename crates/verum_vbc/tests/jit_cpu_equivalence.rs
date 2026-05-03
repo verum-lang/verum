@@ -411,3 +411,82 @@ fn jit_cache_persists_between_backend_instances() {
  assert_eq!(read_f32(&r1, 8), read_f32(&r2, 8));
  drop(jit_backend); // suppress unused warning
 }
+
+// ============================================================================
+// Шаг 5e — broadcast support: scalar broadcast equivalence
+// ============================================================================
+
+#[test]
+fn binop_f32_scalar_broadcast_equivalent() {
+ // `a[N] op scalar` should produce `out[N]` where each element is
+ // `a[i] op b[0]`.  Verified against a manually computed reference
+ // (the CPU dispatcher's broadcast path is upstream of the JIT and
+ // routes to the same MlirJitBackend::binop entry, so the only
+ // independent reference is the closed-form math).
+ let mut state: u64 = 0xBEEF_FACE_5E5E;
+ let jit = MlirJitBackend::new();
+ for &op in &[
+ TensorBinaryOp::Add,
+ TensorBinaryOp::Sub,
+ TensorBinaryOp::Mul,
+ TensorBinaryOp::Div,
+ TensorBinaryOp::Min,
+ TensorBinaryOp::Max,
+ ] {
+ let a = make_f32_tensor(&[64], &mut state, 0.5, 4.0);
+ let scalar = make_f32_tensor(&[1], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &scalar, op)
+ .unwrap_or_else(|| panic!("JIT broadcast missing for binop F32 {:?}", op));
+ let av = read_f32(&a, 64);
+ let s = read_f32(&scalar, 1)[0];
+ let mut expected = vec![0.0_f32; 64];
+ for i in 0..64 {
+ expected[i] = match op {
+ TensorBinaryOp::Add => av[i] + s,
+ TensorBinaryOp::Sub => av[i] - s,
+ TensorBinaryOp::Mul => av[i] * s,
+ TensorBinaryOp::Div => av[i] / s,
+ TensorBinaryOp::Min => av[i].min(s),
+ TensorBinaryOp::Max => av[i].max(s),
+ _ => unreachable!(),
+ };
+ }
+ assert_f32_close(
+ &read_f32(&r, 64),
+ &expected,
+ &format!("binop F32 broadcast {:?}", op),
+ );
+ }
+}
+
+#[test]
+fn binop_f64_scalar_broadcast_equivalent() {
+ let mut state: u64 = 0xCAFE_BABE_5E5E;
+ let jit = MlirJitBackend::new();
+ for &op in &[
+ TensorBinaryOp::Add,
+ TensorBinaryOp::Mul,
+ ] {
+ let a = make_f64_tensor(&[32], &mut state, 1.0, 5.0);
+ let scalar = make_f64_tensor(&[1], &mut state, 1.0, 5.0);
+ let r = jit
+ .binop(&a, &scalar, op)
+ .unwrap_or_else(|| panic!("JIT broadcast missing for binop F64 {:?}", op));
+ let av = read_f64(&a, 32);
+ let s = read_f64(&scalar, 1)[0];
+ let mut expected = vec![0.0_f64; 32];
+ for i in 0..32 {
+ expected[i] = match op {
+ TensorBinaryOp::Add => av[i] + s,
+ TensorBinaryOp::Mul => av[i] * s,
+ _ => unreachable!(),
+ };
+ }
+ assert_f64_close(
+ &read_f64(&r, 32),
+ &expected,
+ &format!("binop F64 broadcast {:?}", op),
+ );
+ }
+}

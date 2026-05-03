@@ -118,6 +118,12 @@ struct JitKey {
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 enum KernelKind {
  Binop(TensorBinaryOp),
+ /// Scalar-broadcast binop: `a[N] op b[1]` → `out[N]`.
+ /// Distinct from `Binop` because the kernel signature differs
+ /// (no per-element `b` index — `b` is loaded once outside the
+ /// loop) and the cache key must discriminate to avoid a same-
+ /// shape kernel servicing a broadcast call site.
+ BinopScalarBroadcast(TensorBinaryOp),
  Unop(TensorUnaryOp),
  /// Scalar triple-loop matmul; `M`/`K`/`N` are runtime args, the
  /// kernel itself is dtype-only-parametrised (one cached engine
@@ -532,31 +538,50 @@ impl Backend for MlirJitBackend {
  if binop_arith_op(op, a.dtype).is_none() {
  return None;
  }
- // For now, only same-shape inputs. Broadcasting goes through
- // `dispatch_binop_broadcast` upstream which already routes
- // scalar-broadcast cases to dedicated SIMD kernels; reaching
- // this arm implies same-shape data.
  let a_shape = &a.shape[..a.ndim as usize];
  let b_shape = &b.shape[..b.ndim as usize];
- if a_shape != b_shape {
- return None;
- }
  let n = a.numel;
  if n == 0 {
  return Some(TensorHandle::zeros(a_shape, a.dtype)?);
+ }
+
+ // **Шаг 5e — broadcast support: scalar broadcast.**
+ //
+ // Three legitimate scalar-broadcast shapes for `b`:
+ //   * empty shape `[]` (rank-0 scalar, numel=1),
+ //   * any rank with all-1 dims `[1]`/`[1,1]`/… (numel=1),
+ // both reduce to "load `b[0]` once, apply binop to every `a[i]`".
+ //
+ // We dispatch into `KernelKind::BinopScalarBroadcast` whenever
+ // shapes mismatch BUT b.numel == 1.  Same-shape stays on the
+ // canonical `Binop` kernel; non-scalar broadcast (e.g. [M,N] vs
+ // [N]) is a Шаг 5e+1 deferral — return `None` and let the upstream
+ // CpuBackend handle it for now.
+ let scalar_broadcast = a_shape != b_shape && b.numel == 1;
+ if a_shape != b_shape && !scalar_broadcast {
+ return None;
  }
 
  // Materialise the output tensor on the host. MLIR JIT'd
  // kernels read/write through caller-supplied pointers; we own
  // the output buffer here.
  let out = TensorHandle::zeros(a_shape, a.dtype)?;
- let holder = self.get_or_compile(KernelKind::Binop(op), a.dtype)?;
+ let kind = if scalar_broadcast {
+ KernelKind::BinopScalarBroadcast(op)
+ } else {
+ KernelKind::Binop(op)
+ };
+ let holder = self.get_or_compile(kind, a.dtype)?;
 
  // ABI marshalling: the JIT kernel signature is
  // `void kernel(*ptr a, *ptr b, *ptr out, i64 n)`
  // and `mlirExecutionEngineInvokePacked` expects an array of
  // `*mut ()` where each entry points to the *value* of the
  // argument (so for pointer args we pass &mut ptr_value).
+ //
+ // Both Binop and BinopScalarBroadcast share the 4-arg signature
+ // `(a, b, out, n)`; the broadcast kernel just dereferences `b`
+ // exactly once at function entry instead of per-iteration.
  let a_data = a.data.as_ref()?;
  let b_data = b.data.as_ref()?;
  let out_data = out.data.as_ref()?;
@@ -577,10 +602,11 @@ impl Backend for MlirJitBackend {
  let result = unsafe { holder.engine.invoke_packed("kernel", &mut packed_args) };
  if result.is_err() {
  tracing::warn!(
- "MLIR-JIT binop invocation failed for op={:?} dtype={:?}; \
+ "MLIR-JIT binop invocation failed for op={:?} dtype={:?} broadcast={}; \
  falling back to CpuBackend",
  op,
- a.dtype
+ a.dtype,
+ scalar_broadcast
  );
  return None;
  }
@@ -1032,6 +1058,53 @@ fn build_binop_kernel_text(op: TensorBinaryOp, dtype: DType) -> Option<String> {
  ))
 }
 
+/// Build the MLIR text for a **scalar-broadcast** binary op:
+/// `out[i] = a[i] op b[0]` for `i ∈ [0, n)`.
+///
+/// Signature: `void kernel(*const T a, *const T b_scalar, *mut T out, i64 n)`.
+/// Identical to [`build_binop_kernel_text`] except the loop reads
+/// `b` from the same address every iteration — LLVM's loop-invariant
+/// code motion hoists that load to the pre-header so it executes
+/// exactly once even at -O0, and the inner body becomes a single
+/// `llvm.load %a[i] / arith.{op} %va, %vb / llvm.store %out[i]`
+/// triple ready for the auto-vectoriser.
+///
+/// Caller must guarantee `b.numel == 1` (rank-0 scalar or all-1
+/// shape); the kernel itself only ever touches `b[0]`.
+fn build_binop_scalar_broadcast_kernel_text(
+ op: TensorBinaryOp,
+ dtype: DType,
+) -> Option<String> {
+ let elem_ty = mlir_elem_type(dtype)?;
+ let arith = binop_arith_op(op, dtype)?;
+ Some(format!(
+ r#"module {{
+ func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64) attributes {{ llvm.emit_c_interface }} {{
+ %c0 = arith.constant 0 : i64
+ %c1 = arith.constant 1 : i64
+ %vb = llvm.load %b : !llvm.ptr -> {elem}
+ cf.br ^loop(%c0 : i64)
+ ^loop(%i: i64):
+ %cond = arith.cmpi slt, %i, %n : i64
+ cf.cond_br %cond, ^body, ^exit
+ ^body:
+ %ai = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %va = llvm.load %ai : !llvm.ptr -> {elem}
+ %vc = {arith} %va, %vb : {elem}
+ %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ llvm.store %vc, %ci : {elem}, !llvm.ptr
+ %i_next = arith.addi %i, %c1 : i64
+ cf.br ^loop(%i_next : i64)
+ ^exit:
+ return
+ }}
+}}
+"#,
+ elem = elem_ty,
+ arith = arith,
+ ))
+}
+
 /// Build the MLIR text for a full-tensor reduction.
 ///
 /// Signature: `void kernel(*const T input, *mut T output, i64 n)`.
@@ -1467,6 +1540,9 @@ fn compile_kernel(
 ) -> Option<ExecutionEngine> {
  let text = match kind {
  KernelKind::Binop(op) => build_binop_kernel_text(op, dtype)?,
+ KernelKind::BinopScalarBroadcast(op) => {
+ build_binop_scalar_broadcast_kernel_text(op, dtype)?
+ }
  KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
  KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
  KernelKind::Reduce(op) => build_reduce_kernel_text(op, dtype)?,
