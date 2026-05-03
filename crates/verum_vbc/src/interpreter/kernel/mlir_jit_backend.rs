@@ -569,6 +569,21 @@ impl Backend for MlirJitBackend {
  if binop_arith_op(op, a.dtype).is_none() {
  return None;
  }
+
+ // **Commutative-op swap** — if `b` has MORE elements than `a`
+ // (b would broadcast to a's superset shape), and the op is
+ // commutative (Add/Mul/Min/Max), we can rewrite `a op b` as
+ // `b op a` and route through the same kernel set.  The output
+ // shape becomes b's shape (the broadcast superset) instead of
+ // a's.  Non-commutative ops (Sub/Div/Mod/Pow) where b > a
+ // would need flipped-arg kernels — that's deferred (return
+ // None and let CpuBackend handle).
+ let (a, b) = if b.numel > a.numel && op_is_commutative(op) {
+ (b, a)
+ } else {
+ (a, b)
+ };
+
  let a_shape = &a.shape[..a.ndim as usize];
  let b_shape = &b.shape[..b.ndim as usize];
  let n = a.numel;
@@ -1092,6 +1107,21 @@ fn mlir_elem_type(dtype: DType) -> Option<&'static str> {
 }
 
 /// Resolve the MLIR `arith.*` / `math.*` op spelling for the given
+/// True iff `op` is mathematically commutative.  Used by the
+/// broadcast dispatcher to swap argument order when `b.numel >
+/// a.numel`: `a op b == b op a` for commutative ops, so we can
+/// route through the canonical "b broadcasts into a's shape"
+/// kernel set after the swap.
+///
+/// Non-commutative ops (Sub / Div / Mod / Pow) where b is larger
+/// than a would need flipped-arg variants of every broadcast
+/// kernel.  That's deferred — those call sites currently fall
+/// through to `CpuBackend`.
+fn op_is_commutative(op: TensorBinaryOp) -> bool {
+ use TensorBinaryOp::*;
+ matches!(op, Add | Mul | Min | Max)
+}
+
 /// `(binop, dtype)` pair. Returning `None` signals "not yet wired —
 /// fall through to `CpuBackend`". The table is exhaustive on the
 /// supported numeric range but intentionally conservative on

@@ -560,20 +560,91 @@ fn binop_f32_suffix_broadcast_2d_match_equivalent() {
 }
 
 #[test]
-fn binop_f32_b_larger_than_a_falls_through() {
- // `[M] op [M,N]` — b has more elements than a.  The output
- // should be the broadcast shape `[M,N]`, but the dispatcher
- // materialises `out` as `a.shape == [M]`, so this can't run
- // through the JIT lane.  Pin: the dispatcher must return None
- // and let the upstream rebroadcast-then-call path handle it.
+fn binop_f32_b_larger_than_a_non_commutative_falls_through() {
+ // `[M] op [M,N]` Sub — b has more elements than a, AND op is
+ // non-commutative.  We can't transparently swap a/b because
+ // `a - b != b - a`.  Dispatcher must return None and let the
+ // upstream rebroadcast-then-call path handle it.
  let mut state: u64 = 0xFEED_5E54;
  let jit = MlirJitBackend::new();
  let a = make_f32_tensor(&[3], &mut state, 0.5, 4.0);
  let b = make_f32_tensor(&[3, 4], &mut state, 0.5, 4.0);
- let r = jit.binop(&a, &b, TensorBinaryOp::Add);
+ let r = jit.binop(&a, &b, TensorBinaryOp::Sub);
  assert!(
  r.is_none(),
- "b-larger-than-a `[M] op [M,N]` must fall through (got JIT-routed result)"
+ "non-commutative `[M] Sub [M,N]` must fall through (got JIT-routed result)"
+ );
+}
+
+#[test]
+fn binop_f32_b_larger_than_a_commutative_swaps() {
+ // `[M] Add [M,N]` — b larger but op is commutative.  Swap to
+ // `[M,N] Add [M]` (prefix-broadcast pattern) and JIT-route.
+ // Output shape should match b (the larger), values should
+ // match closed-form `a[m] + b[m,n]`.
+ let mut state: u64 = 0xFEED_5E80;
+ let jit = MlirJitBackend::new();
+ let m = 3_usize;
+ let n = 4_usize;
+ let a = make_f32_tensor(&[m], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[m, n], &mut state, 0.5, 4.0);
+ for &op in &[
+ TensorBinaryOp::Add,
+ TensorBinaryOp::Mul,
+ TensorBinaryOp::Min,
+ TensorBinaryOp::Max,
+ ] {
+ let r = jit
+ .binop(&a, &b, op)
+ .unwrap_or_else(|| panic!("commutative swap failed for {:?}", op));
+ // Output shape must be b's shape (the larger).
+ assert_eq!(r.numel, m * n, "swap produced wrong size for {:?}", op);
+ let av = read_f32(&a, m);
+ let bv = read_f32(&b, m * n);
+ let mut expected = vec![0.0_f32; m * n];
+ for i in 0..(m * n) {
+ let mi = i / n;
+ expected[i] = match op {
+ TensorBinaryOp::Add => av[mi] + bv[i],
+ TensorBinaryOp::Mul => av[mi] * bv[i],
+ TensorBinaryOp::Min => av[mi].min(bv[i]),
+ TensorBinaryOp::Max => av[mi].max(bv[i]),
+ _ => unreachable!(),
+ };
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n),
+ &expected,
+ &format!("commutative-swap [M] {:?} [M,N]", op),
+ );
+ }
+}
+
+#[test]
+fn binop_f32_scalar_b_larger_commutative_swaps() {
+ // `scalar Add [M,N]` — b dominates, op commutative.  After
+ // swap: `[M,N] Add scalar` which routes through scalar-
+ // broadcast.  Pin: output shape must match b (M*N), not a (1).
+ let mut state: u64 = 0xFEED_5E81;
+ let jit = MlirJitBackend::new();
+ let m = 4_usize;
+ let n = 5_usize;
+ let a = make_f32_tensor(&[1], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[m, n], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Mul)
+ .expect("commutative scalar-on-left swap missing for Mul");
+ assert_eq!(r.numel, m * n);
+ let av = read_f32(&a, 1);
+ let bv = read_f32(&b, m * n);
+ let mut expected = vec![0.0_f32; m * n];
+ for i in 0..(m * n) {
+ expected[i] = av[0] * bv[i];
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n),
+ &expected,
+ "commutative-swap scalar Mul [M,N]",
  );
 }
 

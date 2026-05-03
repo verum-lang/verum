@@ -1,0 +1,191 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l6_session, sql_value, prepared_statement, pipeline
+// @timeout: 15000
+// @description: Rich SqlValue type + UTF-16 + column-coercion surface
+//               (#158).  Exercises VNull/VInt/VReal/VText/VBlob construction,
+//               type-class tagging, and every coercion path that sqlite3_column_*
+//               implements (int/double/text/text16/blob/bytes/bytes16).
+//
+// Spec: internal/specs/sqlite-native.md §17 (PreparedStatement column extraction)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l6_session.{
+    SqlValue, VNull, VInt, VReal, VText, VBlob,
+    ColumnType, CtNull, CtInt, CtReal, CtText, CtBlob,
+    value_type, value_to_int, value_to_real, value_to_text,
+    value_to_blob, value_to_text16, value_bytes, value_bytes16,
+    sql_null, sql_int, sql_real, sql_text, sql_blob,
+    sql_text_from_utf16, column_type_code,
+    sql_value_from_register, register_from_sql_value,
+};
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
+};
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn col_type_eq(a: &ColumnType, b: &ColumnType) -> Bool {
+    match a {
+        CtNull => match b { CtNull => true, _ => false },
+        CtInt  => match b { CtInt  => true, _ => false },
+        CtReal => match b { CtReal => true, _ => false },
+        CtText => match b { CtText => true, _ => false },
+        CtBlob => match b { CtBlob => true, _ => false },
+    }
+}
+
+fn sql_value_is_null(v: &SqlValue) -> Bool {
+    match v {
+        VNull => true,
+        _ => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 1. Construction helpers produce the right variants
+// -----------------------------------------------------------------------------
+
+fn construction_helpers() {
+    let n = sql_null();
+    assert(sql_value_is_null(&n));
+    let i = sql_int(42_i64);
+    assert(col_type_eq(&value_type(&i), &CtInt));
+    let r = sql_real(3.14_f64);
+    assert(col_type_eq(&value_type(&r), &CtReal));
+    let t = sql_text("hello".clone());
+    assert(col_type_eq(&value_type(&t), &CtText));
+    let b: List<Byte> = List.new();
+    let bv = sql_blob(b);
+    assert(col_type_eq(&value_type(&bv), &CtBlob));
+}
+
+// -----------------------------------------------------------------------------
+// 2. Storage-class tag matches SQLite C API codes
+// -----------------------------------------------------------------------------
+
+fn type_codes_match_sqlite_c() {
+    assert_eq(column_type_code(&CtInt), 1);
+    assert_eq(column_type_code(&CtReal), 2);
+    assert_eq(column_type_code(&CtText), 3);
+    assert_eq(column_type_code(&CtBlob), 4);
+    assert_eq(column_type_code(&CtNull), 5);
+}
+
+// -----------------------------------------------------------------------------
+// 3. value_to_int coercions
+// -----------------------------------------------------------------------------
+
+fn coerce_to_int_paths() {
+    assert_eq(value_to_int(&VNull), 0_i64);
+    assert_eq(value_to_int(&VInt(42_i64)), 42_i64);
+    assert_eq(value_to_int(&VReal(3.7_f64)), 3_i64);
+    assert_eq(value_to_int(&VReal(-2.9_f64)), -2_i64);
+    assert_eq(value_to_int(&VText("123".clone())), 123_i64);
+    assert_eq(value_to_int(&VText("-45".clone())), -45_i64);
+    assert_eq(value_to_int(&VText("not-a-number".clone())), 0_i64);
+    let empty_blob: List<Byte> = List.new();
+    assert_eq(value_to_int(&VBlob(empty_blob)), 0_i64);
+}
+
+// -----------------------------------------------------------------------------
+// 4. value_to_real coercions
+// -----------------------------------------------------------------------------
+
+fn coerce_to_real_paths() {
+    assert_eq(value_to_real(&VNull), 0.0);
+    assert_eq(value_to_real(&VInt(7_i64)), 7.0);
+    assert_eq(value_to_real(&VReal(1.5_f64)), 1.5);
+    let parsed = value_to_real(&VText("2.5".clone()));
+    // Tolerance for the cheap parse_leading_real implementation.
+    assert(parsed > 2.4 && parsed < 2.6);
+}
+
+// -----------------------------------------------------------------------------
+// 5. value_to_text coercions
+// -----------------------------------------------------------------------------
+
+fn coerce_to_text_paths() {
+    assert_eq(value_to_text(&VNull), "".clone());
+    assert_eq(value_to_text(&VText("hi".clone())), "hi".clone());
+    let int_text = value_to_text(&VInt(42_i64));
+    assert_eq(int_text, "42".clone());
+    let neg_text = value_to_text(&VInt(-7_i64));
+    assert_eq(neg_text, "-7".clone());
+}
+
+// -----------------------------------------------------------------------------
+// 6. value_to_blob: TEXT → UTF-8 bytes; INT → empty
+// -----------------------------------------------------------------------------
+
+fn coerce_to_blob_paths() {
+    let empty_blob = value_to_blob(&VInt(99_i64));
+    assert_eq(empty_blob.len(), 0);
+    let text_bytes = value_to_blob(&VText("abc".clone()));
+    assert_eq(text_bytes.len(), 3);
+    assert_eq(text_bytes[0], 0x61 as Byte);
+    assert_eq(text_bytes[1], 0x62 as Byte);
+    assert_eq(text_bytes[2], 0x63 as Byte);
+}
+
+// -----------------------------------------------------------------------------
+// 7. value_bytes: TEXT byte length, NULL/INT/REAL → 0
+// -----------------------------------------------------------------------------
+
+fn value_bytes_lengths() {
+    assert_eq(value_bytes(&VNull), 0);
+    assert_eq(value_bytes(&VInt(123_i64)), 0);
+    assert_eq(value_bytes(&VText("hello".clone())), 5);
+    let mut blob: List<Byte> = List.new();
+    blob.push(1 as Byte); blob.push(2 as Byte); blob.push(3 as Byte);
+    assert_eq(value_bytes(&VBlob(blob)), 3);
+}
+
+// -----------------------------------------------------------------------------
+// 8. UTF-16 round-trip: TEXT → UTF-16 → bytes16
+// -----------------------------------------------------------------------------
+
+fn utf16_round_trip() {
+    let v = VText("hi".clone());
+    let units = value_to_text16(&v);
+    assert_eq(units.len(), 2);  // "hi" = 2 BMP chars = 2 UTF-16 code units
+    assert_eq(value_bytes16(&v), 4);
+}
+
+// -----------------------------------------------------------------------------
+// 9. Register adapter — Register → SqlValue → Register round-trip
+// -----------------------------------------------------------------------------
+
+fn register_round_trip() {
+    let r1 = RInt(42_i64);
+    let v1 = sql_value_from_register(&r1);
+    let back = register_from_sql_value(&v1);
+    match back {
+        RInt(i) => assert_eq(i, 42_i64),
+        _ => panic("expected RInt(42)"),
+    }
+    // RRowId folds into VInt at the API surface
+    let r2 = RRowId(100_i64);
+    let v2 = sql_value_from_register(&r2);
+    match v2 {
+        VInt(i) => assert_eq(i, 100_i64),
+        _ => panic("RRowId should fold to VInt at API surface"),
+    }
+}
+
+fn main() {
+    construction_helpers();
+    type_codes_match_sqlite_c();
+    coerce_to_int_paths();
+    coerce_to_real_paths();
+    coerce_to_text_paths();
+    coerce_to_blob_paths();
+    value_bytes_lengths();
+    utf16_round_trip();
+    register_round_trip();
+}

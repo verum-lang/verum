@@ -40,6 +40,14 @@ mount core.database.sqlite.native.l4_vdbe.interpreter.{
 mount core.database.sqlite.native.l6_session.statement.{
     PreparedStatement, StmtError,
 };
+mount core.database.sqlite.native.l6_session.sql_value.{
+    SqlValue, VNull, VInt, VReal, VText, VBlob,
+    ColumnType, CtNull, CtInt, CtReal, CtText, CtBlob,
+    sql_value_from_register, register_from_sql_value,
+    value_type, value_to_int, value_to_real, value_to_text,
+    value_to_blob, value_to_text16, value_bytes, value_bytes16,
+    sql_text_from_utf16, column_type_code,
+};
 
 // -----------------------------------------------------------------------------
 // StmtLifecycleError — augments StmtError with lifecycle-specific cases
@@ -246,6 +254,108 @@ pub fn column_value(stmt: &PreparedStatement, i: Int) -> Register {
 /// / BLOB).  Wraps `register_kind` over `column_value`.
 pub fn column_kind(stmt: &PreparedStatement, i: Int) -> RegisterKind {
     register_kind(&column_value(stmt, i))
+}
+
+// =============================================================================
+// Rich column accessors (#158) — `SqlValue`-based API matching
+// the sqlite3_column_* C surface 1-to-1.
+// =============================================================================
+
+/// `sqlite3_column_value` — return the column as a first-class
+/// `SqlValue`.  Out-of-range index → `VNull`, matching SQLite's
+/// defensive default.  `RRowId` from the L4 register folds into
+/// `VInt` (the rowid distinction is invisible at the API surface).
+pub fn column_sql_value(stmt: &PreparedStatement, i: Int) -> SqlValue {
+    if i < 0 || i >= stmt.last_row_cols { return VNull; }
+    let reg_idx = stmt.last_row_start + i;
+    let r = stmt.state.regs.get(reg_idx);
+    sql_value_from_register(&r)
+}
+
+/// `sqlite3_column_type` — return the column's storage class.
+pub fn column_type(stmt: &PreparedStatement, i: Int) -> ColumnType {
+    value_type(&column_sql_value(stmt, i))
+}
+
+/// `sqlite3_column_int64` — coerce the column to Int64.  NULL → 0,
+/// REAL → trunc(...), TEXT → parse_leading_decimal_int, BLOB → 0.
+pub fn column_int(stmt: &PreparedStatement, i: Int) -> Int64 {
+    value_to_int(&column_sql_value(stmt, i))
+}
+
+/// `sqlite3_column_double` — coerce to Float64.  NULL → 0.0,
+/// INT → cast, TEXT → parse_leading_decimal_real, BLOB → 0.0.
+pub fn column_double(stmt: &PreparedStatement, i: Int) -> Float64 {
+    value_to_real(&column_sql_value(stmt, i))
+}
+
+/// `sqlite3_column_text` — coerce to UTF-8 Text.  NULL → "",
+/// INT/REAL → decimal repr, TEXT → bytes, BLOB → "".
+pub fn column_text(stmt: &PreparedStatement, i: Int) -> Text {
+    value_to_text(&column_sql_value(stmt, i))
+}
+
+/// `sqlite3_column_text16` — coerce to UTF-16 code units (each
+/// `Int` carries one 16-bit code unit; surrogate pairs naturally
+/// expanded for code points > U+FFFF).
+pub fn column_text16(stmt: &PreparedStatement, i: Int) -> List<Int> {
+    value_to_text16(&column_sql_value(stmt, i))
+}
+
+/// `sqlite3_column_blob` — coerce to a Blob (List<Byte>).
+/// TEXT → UTF-8 bytes; INT/REAL/NULL → empty.
+pub fn column_blob(stmt: &PreparedStatement, i: Int) -> List<Byte> {
+    value_to_blob(&column_sql_value(stmt, i))
+}
+
+/// `sqlite3_column_bytes` — byte length of the column's storage
+/// representation (TEXT → UTF-8 byte count, BLOB → blob length,
+/// INT/REAL/NULL → 0).
+pub fn column_bytes(stmt: &PreparedStatement, i: Int) -> Int {
+    value_bytes(&column_sql_value(stmt, i))
+}
+
+/// `sqlite3_column_bytes16` — byte length of the UTF-16 encoding
+/// (= 2 × number of UTF-16 code units).
+pub fn column_bytes16(stmt: &PreparedStatement, i: Int) -> Int {
+    value_bytes16(&column_sql_value(stmt, i))
+}
+
+/// Numeric column-type code matching the SQLite C constants
+/// (1 = INTEGER, 2 = FLOAT, 3 = TEXT, 4 = BLOB, 5 = NULL).
+/// Useful for FFI bindings + serialisation.
+pub fn column_type_int(stmt: &PreparedStatement, i: Int) -> Int {
+    column_type_code(&column_type(stmt, i))
+}
+
+// =============================================================================
+// Rich bind accessors — symmetric with the column_* surface
+// =============================================================================
+
+/// `sqlite3_bind_value` analogue — bind a positional parameter via
+/// the rich `SqlValue` type.  Lowers through the existing register
+/// table so all bind paths converge in `bind_positional`.
+pub fn bind_sql_value(
+    stmt: &mut PreparedStatement,
+    idx: Int,
+    v: SqlValue,
+) -> Result<(), LifecycleError> {
+    let r = register_from_sql_value(&v);
+    bind_positional(stmt, idx, r)
+}
+
+/// `sqlite3_bind_text16` analogue — decode the UTF-16 code units
+/// into UTF-8 Text and bind.  Returns `LeIndexOutOfRange` on bad
+/// indices; emits `VNull` for unrecoverable UTF-16 (mismatched
+/// surrogates) — matches SQLite's "best-effort" decode policy.
+pub fn bind_text16(
+    stmt: &mut PreparedStatement,
+    idx: Int,
+    units: &List<Int>,
+) -> Result<(), LifecycleError> {
+    let v = sql_text_from_utf16(units);
+    let r = register_from_sql_value(&v);
+    bind_positional(stmt, idx, r)
 }
 
 // -----------------------------------------------------------------------------
