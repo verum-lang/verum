@@ -224,3 +224,14 @@ public type TtlCacheStats is {
     evicted: UInt64,  // capacity pressure
     expired: UInt64,  // TTL expiry
 };
+
+// =============================================================================
+// Length protocol — enables free-function `len(cache)` dispatch
+// =============================================================================
+
+implement<K: Hash + Eq, V> Length for TtlCache<K, V> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.store.len()
+    }
+}
