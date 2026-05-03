@@ -74,6 +74,7 @@ implement<T> Future for ReadyFuture<T> {
 }
 
 // Create a future that is immediately ready.
+@inline(always)
 public fn ready<T>(value: T) -> ReadyFuture<T> {
     ReadyFuture { value: Some(value) }
 }
@@ -94,6 +95,7 @@ implement<T> Future for PendingFuture<T> {
 }
 
 // Create a future that is always pending.
+@inline(always)
 public fn pending<T>() -> PendingFuture<T> {
     let result: PendingFuture<T> = PendingFuture;
     result
@@ -120,6 +122,7 @@ implement<F: fn() -> T, T> Future for Lazy<F, T> {
 }
 
 // Create a lazy future from a closure.
+@inline(always)
 public fn lazy<F: fn() -> T, T>(f: F) -> Lazy<F, T> {
     Lazy { f: Some(f) }
 }
