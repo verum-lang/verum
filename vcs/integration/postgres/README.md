@@ -162,6 +162,11 @@ Test list per `internal/specs/database.md` follow-up:
   decode_typed_from_bytes against RelationMessage column OIDs;
   asserts (Int, Text, Int) tuples decoded correctly through
   TvLifted(TvInt4/TvText/TvInt8) (spec §6.1.7 + §6.1.4)
+- `t26_async_listener.vr` — async LISTEN/NOTIFY end-to-end:
+  AsyncPgListener actor on its own dedicated PgConnection;
+  listen + subscribe; side-channel NOTIFY arrives on the
+  subscriber's Receiver<Notification> with channel + payload +
+  sender_pid populated (spec §6.1.6 + §6.1.8)
 
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags
