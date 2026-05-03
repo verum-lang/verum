@@ -1845,3 +1845,14 @@ public unsafe fn make_slice<T>(ptr: &unsafe T, len: Int) -> &[T] {
 public unsafe fn make_slice_mut<T>(ptr: &unsafe T, len: Int) -> &mut [T] {
     slice_from_raw_parts_mut(ptr as *mut T, len as USize)
 }
+
+// =============================================================================
+// Length protocol — enables free-function `len(slice)` dispatch
+// =============================================================================
+
+implement<T> Length for [T] {
+    @inline(always)
+    fn len(&self) -> Int {
+        slice_len(self) as Int
+    }
+}
