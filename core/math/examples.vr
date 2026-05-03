@@ -1392,7 +1392,11 @@ implement Site<IntegerPathCategory> for TrivialSite {
     }
 }
 
+/// Public alias — short name for the topos example.
+public type MaximalSieve is ToposExampleMaximalSieve;
+
 /// Smart constructor for the maximal sieve.
+@inline(always)
 public fn maximal_sieve() -> ToposExampleMaximalSieve {
     ToposExampleMaximalSieve { marker: 0 }
 }
