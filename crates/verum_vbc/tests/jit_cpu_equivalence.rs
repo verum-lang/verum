@@ -560,6 +560,99 @@ fn binop_f32_suffix_broadcast_2d_match_equivalent() {
 }
 
 // ============================================================================
+// Batched matmul `[B,M,K] @ [B,K,N]` → `[B,M,N]`
+// ============================================================================
+
+#[test]
+fn matmul_f32_batched_3d_equivalent() {
+ // Per-batch independent matmul.  Verify against a pure-Rust
+ // closed-form reference: for each batch b, out[b,m,n] =
+ // Σ_k a[b,m,k] * b[b,k,n].
+ let mut state: u64 = 0xFEED_BA01;
+ let jit = MlirJitBackend::new();
+ let bb = 3_usize;
+ let m = 4_usize;
+ let k = 2_usize;
+ let n = 5_usize;
+ let a = make_f32_tensor(&[bb, m, k], &mut state, -1.0, 1.0);
+ let b = make_f32_tensor(&[bb, k, n], &mut state, -1.0, 1.0);
+ let r = jit
+ .matmul(&a, &b)
+ .expect("batched matmul missing for [B,M,K] @ [B,K,N]");
+ assert_eq!(r.numel, bb * m * n);
+ let av = read_f32(&a, bb * m * k);
+ let bv = read_f32(&b, bb * k * n);
+ let mut expected = vec![0.0_f32; bb * m * n];
+ for batch in 0..bb {
+ for mi in 0..m {
+ for ni in 0..n {
+ let mut acc = 0.0_f32;
+ for ki in 0..k {
+ acc += av[batch * m * k + mi * k + ki]
+ * bv[batch * k * n + ki * n + ni];
+ }
+ expected[batch * m * n + mi * n + ni] = acc;
+ }
+ }
+ }
+ assert_f32_close(
+ &read_f32(&r, bb * m * n),
+ &expected,
+ "batched matmul [B,M,K] @ [B,K,N]",
+ );
+}
+
+#[test]
+fn matmul_f64_batched_3d_equivalent() {
+ // F64 batched matmul.  Same shape, smaller dims for test
+ // speed.
+ let mut state: u64 = 0xFEED_BA02;
+ let jit = MlirJitBackend::new();
+ let bb = 2_usize;
+ let m = 3_usize;
+ let k = 2_usize;
+ let n = 3_usize;
+ let a = make_f64_tensor(&[bb, m, k], &mut state, -1.0, 1.0);
+ let b = make_f64_tensor(&[bb, k, n], &mut state, -1.0, 1.0);
+ let r = jit
+ .matmul(&a, &b)
+ .expect("F64 batched matmul missing");
+ assert_eq!(r.numel, bb * m * n);
+ let av = read_f64(&a, bb * m * k);
+ let bv = read_f64(&b, bb * k * n);
+ let mut expected = vec![0.0_f64; bb * m * n];
+ for batch in 0..bb {
+ for mi in 0..m {
+ for ni in 0..n {
+ let mut acc = 0.0_f64;
+ for ki in 0..k {
+ acc += av[batch * m * k + mi * k + ki]
+ * bv[batch * k * n + ki * n + ni];
+ }
+ expected[batch * m * n + mi * n + ni] = acc;
+ }
+ }
+ }
+ assert_f64_close(
+ &read_f64(&r, bb * m * n),
+ &expected,
+ "F64 batched matmul",
+ );
+}
+
+#[test]
+fn matmul_3d_mismatched_batch_falls_through() {
+ // Different batch dims should fall through (no broadcasting
+ // in batch matmul yet — that's a future step).
+ let mut state: u64 = 0xFEED_BA03;
+ let jit = MlirJitBackend::new();
+ let a = make_f32_tensor(&[3, 2, 4], &mut state, -1.0, 1.0);
+ let b = make_f32_tensor(&[2, 4, 5], &mut state, -1.0, 1.0);
+ let r = jit.matmul(&a, &b);
+ assert!(r.is_none(), "mismatched batch dim must fall through");
+}
+
+// ============================================================================
 // Шаг 5e+5 — bilateral broadcast (`[M,1] op [1,N]` etc.)
 // ============================================================================
 //

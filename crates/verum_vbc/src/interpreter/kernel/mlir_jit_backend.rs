@@ -99,6 +99,19 @@ struct MemrefDescriptor2D {
  strides: [i64; 2],
 }
 
+/// 3-D `StridedMemRefType<T, 3>`.  Used by `linalg.batch_matmul`
+/// where the leading axis carries a batch index.  Layout matches
+/// the canonical MLIR descriptor exactly:
+/// `{ base, aligned, offset, sizes[3], strides[3] }` — 72 bytes.
+#[repr(C)]
+struct MemrefDescriptor3D {
+ base: *mut u8,
+ aligned: *mut u8,
+ offset: i64,
+ sizes: [i64; 3],
+ strides: [i64; 3],
+}
+
 // =============================================================================
 // JIT key + cache holder
 // =============================================================================
@@ -186,6 +199,11 @@ enum KernelKind {
  /// kernel itself is dtype-only-parametrised (one cached engine
  /// per float dtype).
  Matmul,
+ /// Batched matmul `[B,M,K] @ [B,K,N]` → `[B,M,N]` via
+ /// `linalg.batch_matmul`.  Same dtype-only parametrisation as
+ /// `Matmul` — `B`/`M`/`K`/`N` flow through 3D memref
+ /// descriptors at runtime.  Used when both inputs are rank-3.
+ BatchMatmul,
  /// Full-tensor reduction (axis = None). Sum/Prod/Max/Min wired
  /// in a future iteration; axis-specific reduction is a future iteration.
  Reduce(TensorReduceOp),
@@ -1170,6 +1188,71 @@ impl Backend for MlirJitBackend {
  if !is_float_dtype(a.dtype) {
  return None;
  }
+ // **Batched matmul** — `[B,M,K] @ [B,K,N]` → `[B,M,N]` via
+ // `linalg.batch_matmul`.  Same batch dim required; broadcasting
+ // a 2-D operand across batches (e.g. `[B,M,K] @ [K,N]`) would
+ // need an extra expand step and is deferred.
+ if a.ndim == 3 && b.ndim == 3 {
+ let bb_a = a.shape[0];
+ let m = a.shape[1];
+ let k_a = a.shape[2];
+ let bb_b = b.shape[0];
+ let k_b = b.shape[1];
+ let n = b.shape[2];
+ if bb_a != bb_b || k_a != k_b {
+ return None;
+ }
+ if bb_a == 0 || m == 0 || n == 0 {
+ return Some(TensorHandle::zeros(&[bb_a, m, n], a.dtype)?);
+ }
+ let out = TensorHandle::zeros(&[bb_a, m, n], a.dtype)?;
+ let holder = self.get_or_compile(KernelKind::BatchMatmul, a.dtype)?;
+ let a_data = a.data.as_ref()?;
+ let b_data = b.data.as_ref()?;
+ let out_data = out.data.as_ref()?;
+ let a_raw = unsafe { (*a_data.as_ptr()).as_ptr() } as *mut u8;
+ let b_raw = unsafe { (*b_data.as_ptr()).as_ptr() } as *mut u8;
+ let out_raw = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
+ let mut a_desc = MemrefDescriptor3D {
+ base: a_raw,
+ aligned: a_raw,
+ offset: 0,
+ sizes: [bb_a as i64, m as i64, k_a as i64],
+ strides: [(m * k_a) as i64, k_a as i64, 1],
+ };
+ let mut b_desc = MemrefDescriptor3D {
+ base: b_raw,
+ aligned: b_raw,
+ offset: 0,
+ sizes: [bb_b as i64, k_b as i64, n as i64],
+ strides: [(k_b * n) as i64, n as i64, 1],
+ };
+ let mut out_desc = MemrefDescriptor3D {
+ base: out_raw,
+ aligned: out_raw,
+ offset: 0,
+ sizes: [bb_a as i64, m as i64, n as i64],
+ strides: [(m * n) as i64, n as i64, 1],
+ };
+ let mut a_desc_ptr: *mut MemrefDescriptor3D = &mut a_desc;
+ let mut b_desc_ptr: *mut MemrefDescriptor3D = &mut b_desc;
+ let mut out_desc_ptr: *mut MemrefDescriptor3D = &mut out_desc;
+ let mut packed: [*mut (); 3] = [
+ (&mut a_desc_ptr) as *mut _ as *mut (),
+ (&mut b_desc_ptr) as *mut _ as *mut (),
+ (&mut out_desc_ptr) as *mut _ as *mut (),
+ ];
+ let result = unsafe { holder.engine.invoke_packed("kernel", &mut packed) };
+ if result.is_err() {
+ tracing::warn!(
+ "MLIR-JIT batch_matmul invocation failed for dtype={:?}; falling back",
+ a.dtype
+ );
+ return None;
+ }
+ return Some(out);
+ }
+
  if a.ndim != 2 || b.ndim != 2 {
  return None;
  }
@@ -2084,6 +2167,38 @@ fn build_matmul_kernel_text(dtype: DType) -> Option<String> {
  ))
 }
 
+/// Build the MLIR text for `linalg.batch_matmul`.
+///
+/// Signature: `void kernel(memref<?x?x?xT> a, memref<?x?x?xT> b,
+///                          memref<?x?x?xT> out)` — shapes are
+/// `[B, M, K]` × `[B, K, N]` → `[B, M, N]`.  Same lowering pipeline
+/// as the 2-D `linalg.matmul` (linalg-to-loops → scf-to-cf →
+/// memref-to-llvm → convert-to-llvm), but the inner loop nest is
+/// `for b in 0..B { matmul kernel over [M,K] × [K,N] → [M,N] }`.
+/// MLIR's vectoriser can vectorise across the batch dim too on
+/// architectures with wide SIMD.
+fn build_batch_matmul_kernel_text(dtype: DType) -> Option<String> {
+ let elem_ty = mlir_elem_type(dtype)?;
+ if !is_float_dtype(dtype) {
+ return None;
+ }
+ Some(format!(
+ r#"module {{
+ func.func @kernel(
+ %a: memref<?x?x?x{elem}>,
+ %b: memref<?x?x?x{elem}>,
+ %out: memref<?x?x?x{elem}>
+ ) attributes {{ llvm.emit_c_interface }} {{
+ linalg.batch_matmul ins(%a, %b : memref<?x?x?x{elem}>, memref<?x?x?x{elem}>)
+ outs(%out : memref<?x?x?x{elem}>)
+ return
+ }}
+}}
+"#,
+ elem = elem_ty,
+ ))
+}
+
 /// Pass-pipeline shape needed by the linalg-matmul kernel.
 ///
 /// `convert-to-llvm` (the umbrella) does NOT lower `linalg` ops;
@@ -2313,6 +2428,7 @@ fn compile_kernel(
  }
  KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
  KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
+ KernelKind::BatchMatmul => build_batch_matmul_kernel_text(dtype)?,
  KernelKind::Reduce(op) => build_reduce_kernel_text(op, dtype)?,
  KernelKind::SumOfSquares => build_sum_of_squares_kernel_text(dtype)?,
  KernelKind::SumOfExp => build_sum_of_exp_kernel_text(dtype)?,
@@ -2356,7 +2472,7 @@ fn compile_kernel(
  // arith/cf/llvm dialects and reach LLVM through the umbrella
  // `convert-to-llvm` directly.
  let pass_manager = match kind {
- KernelKind::Matmul => matmul_lowering_pipeline(context),
+ KernelKind::Matmul | KernelKind::BatchMatmul => matmul_lowering_pipeline(context),
  _ => {
  // The umbrella `convert-to-llvm` covers arith / cf / func /
  // memref but NOT every `math.*` op — `erf`, `log2`, etc.
