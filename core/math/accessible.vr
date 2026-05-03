@@ -41,6 +41,11 @@
 // the κ_1-accessible witness for S_S^global from MSFS §3.3).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.accessible;
 
 mount core.math.category.{Category};

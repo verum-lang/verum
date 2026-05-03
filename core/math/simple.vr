@@ -39,6 +39,11 @@
 // Spec: docs/architecture/math-spec.md Section 6 - Progressive API Disclosure
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.simple;
 
 mount super.tensor.{

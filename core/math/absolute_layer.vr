@@ -33,6 +33,11 @@
 // lands in `theorems/msfs/05_afnt_alpha/`.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.absolute_layer;
 
 mount core.math.strata.{MathObject};

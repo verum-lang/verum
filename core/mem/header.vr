@@ -49,6 +49,11 @@
 
 mount core.intrinsics.atomic.{ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL, ORDERING_SEQ_CST};
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.mem.header;
 mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
 

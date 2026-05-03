@@ -4,6 +4,11 @@
 // Spec: docs/detailed/16-context-system.md
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module error;
 
 /// Error type for context system failures.

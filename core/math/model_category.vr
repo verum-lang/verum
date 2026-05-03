@@ -27,6 +27,11 @@
 //  - core/math/infinity_topos.vr (presentable ∞-topoi ≃ combinatorial model categories)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.model_category;
 
 mount core.math.category.{Category, Pullback, Pushout};

@@ -25,6 +25,11 @@
 // `@verify(formal)` obligations that concrete implementations discharge.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.infinity_category;
 
 mount core.math.simplicial.{Simplex, SimplicialSet, Horn, KanComplex, horn_is_inner};

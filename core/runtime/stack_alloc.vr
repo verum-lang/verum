@@ -65,6 +65,11 @@
 /// - Deterministic allocation time (suitable for hard real-time)
 /// - Optional bounds checking (controlled via CBGR tier)
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module runtime.stack_alloc;
 
 mount mem.{Alloc, Layout, AllocError};

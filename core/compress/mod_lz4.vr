@@ -5,6 +5,11 @@
 // Dense I/O hot paths: QUIC key offload, RDMA payloads, in-process IPC.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.compress.mod_lz4;
 mount core.*;
 mount core.compress.{Algorithm, CompressError};

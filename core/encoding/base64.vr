@@ -18,6 +18,11 @@
 // Unpadded URL-safe output matches the JOSE/JWT convention.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.encoding.base64;
 
 mount core.*;

@@ -69,6 +69,11 @@
 
 // Import intrinsics as functions
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.mem.hazard;
 mount core.intrinsics.{
     atomic_load_ptr, atomic_store_ptr, atomic_cmpxchg_ptr,

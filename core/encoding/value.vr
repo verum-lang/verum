@@ -64,6 +64,11 @@
 // non-Text map key) is involved.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.encoding.value;
 
 mount core.*;

@@ -40,6 +40,11 @@
 // `result.<accessor>()` — see M0.I follow-up.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.diakrisis_primitive;
 
 // =============================================================================

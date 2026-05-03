@@ -49,6 +49,11 @@
 //  consumes cohesive structure
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.cohesive;
 
 mount core.math.infinity_topos.{
