@@ -21,10 +21,9 @@ pub mod tokenizer;
 #[cfg(all(target_os = "macos", feature = "metal"))]
 pub mod metal;
 
-// MLIR-JIT compute backend (Этап C — compute unification).  Off by
-// default; when enabled, registers alongside `CpuBackend` and provides
-// a forward path for op-by-op migration to MLIR `linalg`/`vector`/`gpu`
-// dialects.
+// MLIR-JIT compute backend.  When the `mlir-jit` feature is on it
+// registers alongside `CpuBackend` and routes tensor compute through
+// the MLIR `linalg` / `vector` / `gpu` dialects → LLVM JIT path.
 #[cfg(feature = "mlir-jit")]
 pub mod mlir_jit_backend;
 
@@ -294,16 +293,10 @@ pub fn dispatch_binop(
     b: &TensorHandle,
     op: TensorBinaryOp,
 ) -> Option<TensorHandle> {
-    let caps = get_capabilities();
-
-    // Этап C — MLIR JIT compute path.  When the `mlir-jit` feature
-    // is enabled, route binops through the MLIR `arith.*` / `linalg.*`
-    // pipeline first.  The backend returns `None` for ops it has not
-    // yet wired (Шаг 1 contract), so we transparently fall through to
-    // the hand-tuned SIMD ladder below.  Once Шаг 2b lands real JIT
-    // bodies for F32/F64 binops, this becomes the default fast path
-    // for those dtypes — the SIMD ladder stays as a runtime fallback
-    // when MLIR JIT is unavailable (build without feature).
+    // MLIR JIT compute path.  When the `mlir-jit` feature is enabled,
+    // route binops through the `arith.*` / `linalg.*` pipeline first;
+    // unwired (op, dtype) combinations return `None` and fall through
+    // to the per-dtype scalar arms further down.
     #[cfg(feature = "mlir-jit")]
     {
         let registry = get_backend_registry();
@@ -324,25 +317,26 @@ pub fn dispatch_binop(
         }
     }
 
-    match (a.dtype, caps.kernel_variant) {
-        (DType::F32, KernelVariant::Avx512) if a.numel >= 128 => cpu::binop_f32_avx512(a, b, op),
-        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => cpu::binop_f32_avx2(a, b, op),
-        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => cpu::binop_f32_neon(a, b, op),
-        (DType::F32, _) => cpu::binop_f32_scalar(a, b, op),
-        (DType::F64, _) => cpu::binop_f64_scalar(a, b, op),
-        (DType::I32, _) => cpu::binop_i32_scalar(a, b, op),
-        (DType::I64, _) => cpu::binop_i64_scalar(a, b, op),
-        (DType::I8, _) => cpu::binop_i8_scalar(a, b, op),
-        (DType::I16, _) => cpu::binop_i16_scalar(a, b, op),
-        (DType::U8, _) => cpu::binop_u8_scalar(a, b, op),
-        (DType::U16, _) => cpu::binop_u16_scalar(a, b, op),
-        (DType::U32, _) => cpu::binop_u32_scalar(a, b, op),
-        (DType::U64, _) => cpu::binop_u64_scalar(a, b, op),
-        (DType::F16, _) => cpu::binop_f16_scalar(a, b, op),
-        (DType::BF16, _) => cpu::binop_bf16_scalar(a, b, op),
-        (DType::Complex64, _) => cpu::binop_complex64_scalar(a, b, op),
-        (DType::Complex128, _) => cpu::binop_complex128_scalar(a, b, op),
-        (DType::Bool, _) => cpu::binop_bool_scalar(a, b, op),
+    // The per-dtype scalar arm is the canonical fallback for every
+    // dtype.  Hand-coded SIMD intrinsic variants were retired once
+    // the JIT pipeline (and rustc auto-vectorisation in builds
+    // without it) proved they offered no measurable advantage.
+    match a.dtype {
+        DType::F32 => cpu::binop_f32_scalar(a, b, op),
+        DType::F64 => cpu::binop_f64_scalar(a, b, op),
+        DType::I32 => cpu::binop_i32_scalar(a, b, op),
+        DType::I64 => cpu::binop_i64_scalar(a, b, op),
+        DType::I8 => cpu::binop_i8_scalar(a, b, op),
+        DType::I16 => cpu::binop_i16_scalar(a, b, op),
+        DType::U8 => cpu::binop_u8_scalar(a, b, op),
+        DType::U16 => cpu::binop_u16_scalar(a, b, op),
+        DType::U32 => cpu::binop_u32_scalar(a, b, op),
+        DType::U64 => cpu::binop_u64_scalar(a, b, op),
+        DType::F16 => cpu::binop_f16_scalar(a, b, op),
+        DType::BF16 => cpu::binop_bf16_scalar(a, b, op),
+        DType::Complex64 => cpu::binop_complex64_scalar(a, b, op),
+        DType::Complex128 => cpu::binop_complex128_scalar(a, b, op),
+        DType::Bool => cpu::binop_bool_scalar(a, b, op),
     }
 }
 
@@ -356,8 +350,6 @@ pub fn dispatch_binop_broadcast(
     b: &TensorHandle,
     op: TensorBinaryOp,
 ) -> Option<TensorHandle> {
-    let caps = get_capabilities();
-
     // Check for scalar broadcast optimization (one operand has numel=1)
     let a_is_scalar = a.numel == 1;
     let b_is_scalar = b.numel == 1;
@@ -367,38 +359,16 @@ pub fn dispatch_binop_broadcast(
         return dispatch_binop(a, b, op);
     }
 
-    // Scalar broadcast optimization for F32
+    // F32 scalar-broadcast specialisation.  LLVM auto-vectorisation
+    // handles the simple splat-and-loop pattern well in both the JIT
+    // and rustc compile paths.
     if a.dtype == DType::F32 && b.dtype == DType::F32 {
         if a_is_scalar {
-            // a is scalar, b is tensor: compute b op a (scalar on left)
             let scalar_val = unsafe { *a.data_ptr_f32() };
-            return match caps.kernel_variant {
-                KernelVariant::Avx512 if b.numel >= 128 => {
-                    cpu::binop_f32_scalar_broadcast_avx512(b, scalar_val, op, false)
-                }
-                KernelVariant::Avx2 if b.numel >= 64 => {
-                    cpu::binop_f32_scalar_broadcast_avx2(b, scalar_val, op, false)
-                }
-                KernelVariant::Neon if b.numel >= 64 => {
-                    cpu::binop_f32_scalar_broadcast_neon(b, scalar_val, op, false)
-                }
-                _ => cpu::binop_f32_scalar_broadcast_scalar(b, scalar_val, op, false),
-            };
+            return cpu::binop_f32_scalar_broadcast_scalar(b, scalar_val, op, false);
         } else if b_is_scalar {
-            // b is scalar, a is tensor: compute a op b (scalar on right)
             let scalar_val = unsafe { *b.data_ptr_f32() };
-            return match caps.kernel_variant {
-                KernelVariant::Avx512 if a.numel >= 128 => {
-                    cpu::binop_f32_scalar_broadcast_avx512(a, scalar_val, op, true)
-                }
-                KernelVariant::Avx2 if a.numel >= 64 => {
-                    cpu::binop_f32_scalar_broadcast_avx2(a, scalar_val, op, true)
-                }
-                KernelVariant::Neon if a.numel >= 64 => {
-                    cpu::binop_f32_scalar_broadcast_neon(a, scalar_val, op, true)
-                }
-                _ => cpu::binop_f32_scalar_broadcast_scalar(a, scalar_val, op, true),
-            };
+            return cpu::binop_f32_scalar_broadcast_scalar(a, scalar_val, op, true);
         }
     }
 
@@ -419,27 +389,21 @@ pub fn dispatch_binop_broadcast(
     dispatch_binop(&a_expanded, &b_expanded, op)
 }
 
-/// Fill tensor with a scalar value using SIMD acceleration.
+/// Fill tensor with a scalar value.
+///
+/// LLVM auto-vectorisation rewrites the scalar fill loop into a
+/// vector splat-and-store on every supported architecture, so a
+/// dedicated SIMD intrinsic ladder is no longer required.
 pub fn fill_f32(output: &mut TensorHandle, value: f32) -> bool {
-    let caps = get_capabilities();
-
-    match caps.kernel_variant {
-        KernelVariant::Avx512 if output.numel >= 128 => cpu::fill_f32_avx512(output, value),
-        KernelVariant::Avx2 if output.numel >= 64 => cpu::fill_f32_avx2(output, value),
-        KernelVariant::Neon if output.numel >= 64 => cpu::fill_f32_neon(output, value),
-        _ => cpu::fill_f32_scalar(output, value),
-    }
+    cpu::fill_f32_scalar(output, value)
 }
 
 /// Dispatch unary operation to appropriate kernel
 pub fn dispatch_unop(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
-    let caps = get_capabilities();
-
-    // Этап C — MLIR JIT compute path for unops.  Mirrors the binop
-    // arm in `dispatch_binop` above: when the `mlir-jit` feature is
-    // enabled we attempt the JIT path first and fall through to the
-    // hand-tuned SIMD ladder if the backend doesn't yet wire the
-    // particular (op, dtype) combination.
+    // MLIR JIT compute path mirrors the binop arm above: when the
+    // `mlir-jit` feature is enabled, the JIT backend gets first try;
+    // any (op, dtype) it doesn't wire falls through to the per-dtype
+    // scalar arms below.
     #[cfg(feature = "mlir-jit")]
     {
         let registry = get_backend_registry();
@@ -460,25 +424,26 @@ pub fn dispatch_unop(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle
         }
     }
 
-    match (a.dtype, caps.kernel_variant) {
-        (DType::F32, KernelVariant::Avx512) if a.numel >= 128 => cpu::unop_f32_avx512(a, op),
-        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => cpu::unop_f32_avx2(a, op),
-        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => cpu::unop_f32_neon(a, op),
-        (DType::F32, _) => cpu::unop_f32_scalar(a, op),
-        (DType::F64, _) => cpu::unop_f64_scalar(a, op),
-        (DType::I32, _) => cpu::unop_i32_scalar(a, op),
-        (DType::I64, _) => cpu::unop_i64_scalar(a, op),
-        (DType::I8, _) => cpu::unop_i8_scalar(a, op),
-        (DType::I16, _) => cpu::unop_i16_scalar(a, op),
-        (DType::U8, _) => cpu::unop_u8_scalar(a, op),
-        (DType::U16, _) => cpu::unop_u16_scalar(a, op),
-        (DType::U32, _) => cpu::unop_u32_scalar(a, op),
-        (DType::U64, _) => cpu::unop_u64_scalar(a, op),
-        (DType::F16, _) => cpu::unop_f16_scalar(a, op),
-        (DType::BF16, _) => cpu::unop_bf16_scalar(a, op),
-        (DType::Complex64, _) => cpu::unop_complex64_scalar(a, op),
-        (DType::Complex128, _) => cpu::unop_complex128_scalar(a, op),
-        (DType::Bool, _) => cpu::unop_bool_scalar(a, op),
+    // Per-dtype scalar arms are the only remaining unop path.
+    // LLVM auto-vectorisation in the JIT pipeline (and in the rustc
+    // compile of these scalar bodies for builds without it)
+    // recovers SIMD throughput from the simple element-wise loop.
+    match a.dtype {
+        DType::F32 => cpu::unop_f32_scalar(a, op),
+        DType::F64 => cpu::unop_f64_scalar(a, op),
+        DType::I32 => cpu::unop_i32_scalar(a, op),
+        DType::I64 => cpu::unop_i64_scalar(a, op),
+        DType::I8 => cpu::unop_i8_scalar(a, op),
+        DType::I16 => cpu::unop_i16_scalar(a, op),
+        DType::U8 => cpu::unop_u8_scalar(a, op),
+        DType::U16 => cpu::unop_u16_scalar(a, op),
+        DType::U32 => cpu::unop_u32_scalar(a, op),
+        DType::U64 => cpu::unop_u64_scalar(a, op),
+        DType::F16 => cpu::unop_f16_scalar(a, op),
+        DType::BF16 => cpu::unop_bf16_scalar(a, op),
+        DType::Complex64 => cpu::unop_complex64_scalar(a, op),
+        DType::Complex128 => cpu::unop_complex128_scalar(a, op),
+        DType::Bool => cpu::unop_bool_scalar(a, op),
     }
 }
 
@@ -491,10 +456,11 @@ pub fn dispatch_reduce(
     op: TensorReduceOp,
     axis: Option<usize>,
 ) -> Option<TensorHandle> {
-    // Этап C — MLIR JIT compute path for reductions.  Mirrors the
-    // binop / unop / matmul arms.  Шаг 5a covers F32 / F64 full
-    // reductions (axis = None) for Sum / Prod / Max / Min; other
-    // combinations fall through to the SIMD ladder below.
+    // MLIR JIT compute path for reductions, mirroring the binop /
+    // unop / matmul arms.  F32 / F64 full reductions (axis = None)
+    // for Sum / Prod / Max / Min / Mean / Var / Std / Norm /
+    // LogSumExp / All / Any are covered; other combinations fall
+    // through to the per-dtype scalar arms further down.
     #[cfg(feature = "mlir-jit")]
     {
         let registry = get_backend_registry();
@@ -515,40 +481,31 @@ pub fn dispatch_reduce(
         }
     }
 
-    let caps = get_capabilities();
-
-    match (a.dtype, caps.kernel_variant) {
-        // Float types with SIMD optimization
-        (DType::F32, KernelVariant::Avx512) if a.numel >= 128 => {
-            cpu::reduce_f32_avx512(a, op, axis)
-        }
-        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => cpu::reduce_f32_avx2(a, op, axis),
-        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => cpu::reduce_f32_neon(a, op, axis),
-        (DType::F32, _) => cpu::reduce_f32_scalar(a, op, axis),
-        (DType::F64, _) => cpu::reduce_f64_scalar(a, op, axis),
-        // Signed integer types
-        (DType::I8, _) => cpu::reduce_i8_scalar(a, op, axis),
-        (DType::I16, _) => cpu::reduce_i16_scalar(a, op, axis),
-        (DType::I32, _) => cpu::reduce_i32_scalar(a, op, axis),
-        (DType::I64, _) => cpu::reduce_i64_scalar(a, op, axis),
-        // Unsigned integer types
-        (DType::U8, _) => cpu::reduce_u8_scalar(a, op, axis),
-        (DType::U16, _) => cpu::reduce_u16_scalar(a, op, axis),
-        (DType::U32, _) => cpu::reduce_u32_scalar(a, op, axis),
-        (DType::U64, _) => cpu::reduce_u64_scalar(a, op, axis),
-        // Bool type (stored as u8, 0=false, non-zero=true)
-        (DType::Bool, _) => cpu::reduce_bool_scalar(a, op, axis),
-        // Other types not yet supported
+    // Per-dtype scalar arms.  The hand-coded SIMD reduce variants
+    // were removed; LLVM auto-vectorisation produces equivalent
+    // tree-reductions on the simple loop bodies.
+    match a.dtype {
+        DType::F32 => cpu::reduce_f32_scalar(a, op, axis),
+        DType::F64 => cpu::reduce_f64_scalar(a, op, axis),
+        DType::I8 => cpu::reduce_i8_scalar(a, op, axis),
+        DType::I16 => cpu::reduce_i16_scalar(a, op, axis),
+        DType::I32 => cpu::reduce_i32_scalar(a, op, axis),
+        DType::I64 => cpu::reduce_i64_scalar(a, op, axis),
+        DType::U8 => cpu::reduce_u8_scalar(a, op, axis),
+        DType::U16 => cpu::reduce_u16_scalar(a, op, axis),
+        DType::U32 => cpu::reduce_u32_scalar(a, op, axis),
+        DType::U64 => cpu::reduce_u64_scalar(a, op, axis),
+        DType::Bool => cpu::reduce_bool_scalar(a, op, axis),
         _ => None,
     }
 }
 
 /// Dispatch matrix multiplication to appropriate kernel
 pub fn dispatch_matmul(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
-    // Этап C — MLIR JIT compute path for matmul (Шаг 4a: scalar
-    // triple-loop with auto-vectorised inner K loop).  Шаг 4b will
-    // route through `linalg.matmul` with tile-and-fuse for cuBLAS /
-    // MKL-class throughput on large matrices.
+    // MLIR JIT compute path for matmul: lowers `linalg.matmul`
+    // through the tile-and-fuse + vectorise scheduler — the
+    // production GEMM path.  Falls through to the scalar fallback
+    // below for builds without `mlir-jit`.
     #[cfg(feature = "mlir-jit")]
     {
         let registry = get_backend_registry();
@@ -569,11 +526,14 @@ pub fn dispatch_matmul(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandl
         }
     }
 
-    // Use SIMD-optimized matmul with automatic dispatch
-    // The SIMD functions internally fall back to tiled/scalar for small matrices
+    // The JIT path above lowers `linalg.matmul` through MLIR's
+    // tile-and-fuse + vectorise scheduler — the production GEMM
+    // path.  When the JIT is not available, the scalar fallback
+    // here is the backstop; rustc auto-vectorisation recovers
+    // SIMD throughput on the simple triple-loop body.
     match a.dtype {
-        DType::F32 => cpu::matmul_f32_simd(a, b),
-        DType::F64 => cpu::matmul_f64_simd(a, b),
+        DType::F32 => cpu::matmul_f32_scalar(a, b),
+        DType::F64 => cpu::matmul_f64_scalar(a, b),
         _ => None,
     }
 }

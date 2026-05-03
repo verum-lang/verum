@@ -15,9 +15,9 @@ workspace = true
 # Internal crates
 verum_common = { workspace = true }
 verum_ast = { workspace = true, optional = true }
-verum_lexer = { workspace = true, optional = true }  # For TokenStream serialization in meta-system
-verum_cbgr = { workspace = true }  # CBGR tier analysis (always enabled for industrial quality)
-verum_fast_parser = { workspace = true, optional = true }  # For mount resolution in codegen (compilation parser; LSP extras live in verum_parser)
+verum_lexer = { workspace = true, optional = true } # For TokenStream serialization in meta-system
+verum_cbgr = { workspace = true } # CBGR tier analysis (always enabled for industrial quality)
+verum_fast_parser = { workspace = true, optional = true } # For mount resolution in codegen (compilation parser; LSP extras live in verum_parser)
 
 # Data structures
 bitflags = { workspace = true }
@@ -68,16 +68,14 @@ libffi = { version = "5.1", optional = true }
 # Tokenization (HuggingFace, optional)
 tokenizers = { workspace = true, optional = true }
 
-# MLIR JIT execution engine for Tier 0 interpreter compute path
-# (Этап C — compute unification).  Behind `mlir-jit` feature flag,
-# off by default since enabling MLIR adds compile cost on the cold
-# path (~ms first call).  When on, `MlirJitBackend` registers with
+# MLIR JIT execution engine for the Tier-0 interpreter compute path.
+# When the `mlir-jit` feature is on, `MlirJitBackend` registers with
 # the kernel `BackendRegistry` and tensor compute ops are JIT-compiled
 # at first invocation through `linalg`/`vector`/`gpu` dialects.
 verum_mlir = { workspace = true, optional = true }
 
-# Concurrent map for the MLIR JIT cache (Этап C).  Lock-free reads on
-# the hot path; first-call cache-miss compilation is serialised by a
+# Concurrent map for the MLIR JIT cache.  Lock-free reads on the hot
+# path; first-call cache-miss compilation is serialised by a
 # `parking_lot::Mutex` over the MLIR Context inside `MlirJitBackend`.
 dashmap = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
@@ -106,28 +104,25 @@ verum_fast_parser = { workspace = true }
 verum_lexer = { workspace = true }
 
 [features]
-# `mlir-jit` ships in the default feature set as of Этап C Шаг 9: the
-# MLIR-driven compute pipeline (linalg/tensor/gpu/vector dialects → LLVM
-# JIT) is now the canonical hot path for Tier-0 tensor compute, with the
-# hand-tuned `kernel/cpu.rs` SIMD ladder serving as a runtime fallback
-# for op×dtype combinations the JIT doesn't yet wire.  Cross-path
-# equivalence is pinned by the dedicated integration test suite under
-# `tests/jit_cpu_equivalence.rs` — every (op, dtype) on both paths must
-# produce bit-equivalent (or ε-equivalent for float reductions) results
-# or the build fails.
+# `mlir-jit` is part of the default feature set: the MLIR-driven
+# compute pipeline (linalg/tensor/gpu/vector dialects → LLVM JIT) is
+# the canonical hot path for Tier-0 tensor compute. Cross-path
+# equivalence between the JIT and the scalar fallback is pinned by
+# `tests/jit_cpu_equivalence.rs` — bit-equivalent (or ε-equivalent
+# for float reductions) results are a build invariant.
 #
 # Embedded / minimal builds that don't want MLIR can opt out via
 # `--no-default-features --features compression,table_dispatch`.
 default = ["compression", "table_dispatch", "mlir-jit"]
 compression = ["dep:zstd", "dep:lz4_flex"]
-computed_goto = []  # Enable computed goto dispatch (platform-specific)
-table_dispatch = []  # Function table dispatch (~40% faster) - ALWAYS USED
-codegen = ["dep:verum_ast", "dep:verum_lexer", "dep:verum_fast_parser"]  # Enable AST to VBC code generation with mount resolution
-parallel = ["dep:rayon"]  # Enable parallel scans and monomorphization
-metal = ["dep:metal", "dep:objc", "dep:block", "dep:foreign-types-shared"]  # Metal GPU backend (macOS)
-ffi = ["dep:libloading", "dep:libffi"]  # FFI runtime support for interpreter
-tokenizers = ["dep:tokenizers"]  # HuggingFace tokenizers for BPE/SentencePiece
-mlir-jit = ["dep:verum_mlir", "dep:dashmap", "dep:parking_lot"]  # Этап C — MLIR JIT compute backend for Tier 0 interpreter
+computed_goto = [] # Enable computed goto dispatch (platform-specific)
+table_dispatch = [] # Function table dispatch (~40% faster) - ALWAYS USED
+codegen = ["dep:verum_ast", "dep:verum_lexer", "dep:verum_fast_parser"] # Enable AST to VBC code generation with mount resolution
+parallel = ["dep:rayon"] # Enable parallel scans and monomorphization
+metal = ["dep:metal", "dep:objc", "dep:block", "dep:foreign-types-shared"] # Metal GPU backend (macOS)
+ffi = ["dep:libloading", "dep:libffi"] # FFI runtime support for interpreter
+tokenizers = ["dep:tokenizers"] # HuggingFace tokenizers for BPE/SentencePiece
+mlir-jit = ["dep:verum_mlir", "dep:dashmap", "dep:parking_lot"] # MLIR JIT compute backend for Tier 0 interpreter
 # Note: cbgr-integration feature removed - verum_cbgr is now always included for industrial quality
 
 [[bench]]
@@ -161,7 +156,7 @@ required-features = ["codegen"]
 
 # Cross-module type-table consistency tests (#170) compile real stdlib
 # `.vr` files via `compile_module_with_mounts` and assert the unified
-# type table satisfies the global hygiene invariants.  Needs the
+# type table satisfies the global hygiene invariants. Needs the
 # `codegen` feature for the same reason as the layout verifier above
 # (and additionally needs `verum_parser` to parse the stdlib sources).
 [[test]]
