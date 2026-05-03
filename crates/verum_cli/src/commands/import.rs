@@ -298,7 +298,6 @@ fn process_ontology_axiom(head: &str, args: &[OwlSExpr], graph: &mut Owl2Graph) 
                     "Class" => {
                         graph.add_entity(Owl2Entity::new_class(
                             Text::from(name),
-                            None,
                             PathBuf::from("imported.ofn"),
                         ));
                     }
@@ -377,7 +376,7 @@ fn process_ontology_axiom(head: &str, args: &[OwlSExpr], graph: &mut Owl2Graph) 
                 if !key.is_empty() {
                     let class_key = Text::from(class_name);
                     let entry = graph.entities.entry(class_key.clone()).or_insert_with(|| {
-                        Owl2Entity::new_class(class_key, None, PathBuf::from("imported.ofn"))
+                        Owl2Entity::new_class(class_key, PathBuf::from("imported.ofn"))
                     });
                     entry.keys.push(key);
                 }
@@ -558,12 +557,9 @@ fn emit_vr_from_graph(graph: &Owl2Graph) -> String {
 }
 
 fn emit_class(out: &mut String, name: &Text, e: &Owl2Entity, graph: &Owl2Graph) {
-    // @owl2_class — open-world flag if explicitly OpenWorld.
-    if matches!(e.semantics, Some(verum_ast::attr::Owl2Semantics::OpenWorld)) {
-        out.push_str("@owl2_class(open_world)\n");
-    } else {
-        out.push_str("@owl2_class\n");
-    }
+    // @owl2_class — OWL 2 Direct Semantics is open-world per W3C §5.6.
+    // No per-class semantics flag is emitted.
+    out.push_str("@owl2_class\n");
 
     // @owl2_subclass_of for every direct parent.
     let parents: Vec<&Text> = graph
