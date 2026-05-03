@@ -37,6 +37,14 @@ mount core.database.sqlite.native.l3_btree.{
     btree_new, cursor_new, cursor_root,
 };
 mount core.database.sqlite.native.l3_btree.cursor.PathStep;
+mount core.database.sqlite.native.l3_btree.record_compare.{
+    ColumnSchema, RecordSchema, record_schema_binary,
+};
+mount core.database.sqlite.native.l2_record.collation.{
+    CollationKind, Binary, Nocase, Rtrim, UserDefined,
+    CollationRegistry, binary_cmp, nocase_cmp, rtrim_cmp,
+};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.database.sqlite.native.l4_vdbe.register.Register;
 
 // -----------------------------------------------------------------------------
@@ -175,6 +183,88 @@ fn compare_rows_prefix(
         k = k + 1;
     }
     0
+}
+
+/// Schema-aware row comparator (#157).  Same shape as
+/// `compare_rows_prefix` but each TEXT comparison runs through the
+/// per-column collation chosen by `schema`.  Non-text registers fall
+/// back to the existing `cmp_register` semantics (which already
+/// implements SQLite's type-class ordering).  `dir_bits` overrides
+/// `schema[k].desc` when the bit is set — the L5 ORDER BY codegen
+/// uses dir_bits as the canonical source-of-truth, schema.desc is
+/// the per-index default.
+fn compare_rows_prefix_with_schema(
+    a: &List<Register>,
+    b: &List<Register>,
+    n_keys: Int,
+    dir_bits: Int,
+    schema: &RecordSchema,
+    registry: Maybe<&CollationRegistry>,
+) -> Int {
+    let mut k: Int = 0;
+    while k < n_keys {
+        if k >= a.len() || k >= b.len() { return 0; }
+        // Pick the collation for this key column; default to BINARY
+        // when the schema is shorter than the key prefix.
+        let coll: CollationKind = if k < schema.columns.len() {
+            clone_collation_kind(&schema.columns[k].collation)
+        } else {
+            Binary
+        };
+        let c = cmp_register_with_collation(&a[k], &b[k], &coll, registry);
+        if c != 0 {
+            let bit_desc = ((dir_bits >> k) & 1) == 1;
+            let sch_desc = if k < schema.columns.len() { schema.columns[k].desc } else { false };
+            let desc = bit_desc || sch_desc;
+            if desc { return -c; } else { return c; }
+        }
+        k = k + 1;
+    }
+    0
+}
+
+fn clone_collation_kind(k: &CollationKind) -> CollationKind {
+    match k {
+        Binary => Binary,
+        Nocase => Nocase,
+        Rtrim => Rtrim,
+        UserDefined(ref name) => UserDefined(name.clone()),
+    }
+}
+
+/// Per-register comparator with per-column collation dispatch.  When
+/// both sides are RText, dispatches through `coll` + `registry`.
+/// Otherwise falls through to the standard `cmp_register` shape.
+fn cmp_register_with_collation(
+    a: &Register, b: &Register,
+    coll: &CollationKind,
+    registry: Maybe<&CollationRegistry>,
+) -> Int {
+    match a {
+        RText(ref xs) => match b {
+            RText(ref ys) => {
+                let ord: Ordering = match coll {
+                    Binary => binary_cmp(xs, ys),
+                    Nocase => nocase_cmp(xs, ys),
+                    Rtrim  => rtrim_cmp(xs, ys),
+                    UserDefined(ref name) => match registry {
+                        Some(r) => match r.user_fn_for(name) {
+                            Some(fn_cmp) => fn_cmp(xs, ys),
+                            None => binary_cmp(xs, ys),
+                        },
+                        None => binary_cmp(xs, ys),
+                    },
+                };
+                match ord {
+                    Less => -1,
+                    Equal => 0,
+                    Greater => 1,
+                }
+            }
+            _ => cmp_register(a, b),
+        }
+        _ => cmp_register(a, b),
+    }
 }
 
 fn cursor_slot_empty(cursor_id: Int) -> CursorSlot {
@@ -627,6 +717,43 @@ implement CursorTable {
             let mut j: Int = i;
             while j > 0 {
                 let cmp = compare_rows_prefix(&s.rows[j - 1], &s.rows[j], n_keys, dir_bits);
+                if cmp <= 0 { break; }
+                let tmp = s.rows[j - 1].clone();
+                s.rows[j - 1] = s.rows[j].clone();
+                s.rows[j] = tmp;
+                j = j - 1;
+            }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Schema-aware variant of `sort_by_prefix` (#157) — for ORDER
+    /// BY clauses that reference a column with an explicit COLLATE
+    /// modifier OR that sort an indexed column whose schema declares
+    /// a non-BINARY collation.  `schema` provides per-key collation
+    /// + per-key DESC default; `dir_bits` overrides DESC for keys
+    /// whose bit is set.  `registry` carries any user-defined
+    /// comparator fns referenced via `UserDefined(name)`.
+    public fn sort_by_prefix_with_schema(
+        &mut self,
+        cursor_id: Int,
+        n_keys: Int,
+        dir_bits: Int,
+        schema: &RecordSchema,
+        registry: Maybe<&CollationRegistry>,
+    ) -> Bool {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
+        if n_keys <= 0 { return true; }
+        let s = &mut self.slots[cursor_id];
+        let n = s.rows.len();
+        let mut i: Int = 1;
+        while i < n {
+            let mut j: Int = i;
+            while j > 0 {
+                let cmp = compare_rows_prefix_with_schema(
+                    &s.rows[j - 1], &s.rows[j], n_keys, dir_bits, schema, registry,
+                );
                 if cmp <= 0 { break; }
                 let tmp = s.rows[j - 1].clone();
                 s.rows[j - 1] = s.rows[j].clone();

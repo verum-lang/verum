@@ -38,6 +38,7 @@ public module balance;
 public module overflow;
 public module integrity;
 public module comparator;
+public module record_compare;
 public module cursor_seek;
 public module page_writer;
 public module balance_apply;
@@ -90,6 +91,14 @@ public mount .comparator.{
     seek_key_kind, ordering_name, reverse_ordering,
     cmp_int64, cmp_bytes, cmp_keys,
     BinarySearchResult, binary_search_cells,
+};
+
+public mount .record_compare.{
+    ColumnSchema, RecordSchema, TypeClass,
+    TcNull, TcNumeric, TcText, TcBlob,
+    RecordCompareError, RcRecord, RcShortPayload,
+    record_schema_binary, record_schema_from_choices,
+    cmp_records_with_schema, cmp_byte_records,
 };
 
 public mount .cursor_seek.{

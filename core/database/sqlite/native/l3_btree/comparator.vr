@@ -133,6 +133,13 @@ public type CellKey is
 /// Compare a `target` key against a `cell` key.  Both sides MUST
 /// have the same kind — comparing a rowid target against a record
 /// cell is a programming error and returns `Err`.
+///
+/// **Note**: this entry point does BYTE-comparison on records
+/// (`SkRecord` / `CkRecord`).  For collation-aware comparison, use
+/// `record_compare::cmp_records_with_schema(...)` directly with a
+/// `RecordSchema` — that path is what index seeks should drive.
+/// This entry remains for table-scan / rowid-only paths and as
+/// fallback for legacy callers without a schema.
 pub fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<KeyOrdering, Text> {
     match target {
         SkRowId(t) => match cell {

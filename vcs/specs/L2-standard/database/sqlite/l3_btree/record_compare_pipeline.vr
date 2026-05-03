@@ -1,0 +1,229 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l3_btree, l2_record, collation, comparator, pipeline
+// @timeout: 15000
+// @description: Schema-aware record comparator + collation registry +
+//               sort-with-schema — exercises BINARY / NOCASE / RTRIM /
+//               UserDefined dispatch end-to-end (#157).
+//
+// Spec: internal/specs/sqlite-native.md §10.4 (key ordering) + §9.5 (collation)
+//
+// Note: this test uses the `cmp_byte_records` back-compat shim that
+// returns `KeyOrdering` directly (no Result wrapper) — the upstream
+// stdlib parser has a regression on `Result` destructuring that's
+// unrelated to #157.  The shim covers the same dispatch path.
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Text, Maybe};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.database.sqlite.native.l3_btree.{
+    KeyOrdering, KoLess, KoEqual, KoGreater,
+    ColumnSchema, RecordSchema,
+    record_schema_binary, record_schema_from_choices,
+    cmp_byte_records,
+};
+mount core.database.sqlite.native.l2_record.{
+    Collation, CollationKind, Binary, Nocase, Rtrim, UserDefined,
+    CollationRegistry, collation_registry_new,
+    binary_cmp, nocase_cmp, rtrim_cmp,
+};
+mount core.database.sqlite.native.l2_record.record.{
+    SerialType, StText, StInt8, StNull,
+    encode_record_header,
+};
+
+// -----------------------------------------------------------------------------
+// Helpers — build minimal SQLite records by hand
+// -----------------------------------------------------------------------------
+
+fn text_record(value: Text) -> List<Byte> {
+    let bytes = value.as_bytes();
+    let mut header_types: List<SerialType> = List.new();
+    header_types.push(StText(bytes.len()));
+    let header = encode_record_header(&header_types);
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < header.len() { out.push(header[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < bytes.len() { out.push(bytes[j]); j = j + 1; }
+    out
+}
+
+fn binary_schema_n(n: Int) -> RecordSchema {
+    record_schema_binary(n)
+}
+
+fn nocase_schema_one() -> RecordSchema {
+    let mut colls: List<CollationKind> = List.new();
+    colls.push(Nocase);
+    let mut descs: List<Bool> = List.new();
+    descs.push(false);
+    record_schema_from_choices(&colls, &descs, 1)
+}
+
+fn rtrim_schema_one() -> RecordSchema {
+    let mut colls: List<CollationKind> = List.new();
+    colls.push(Rtrim);
+    let mut descs: List<Bool> = List.new();
+    descs.push(false);
+    record_schema_from_choices(&colls, &descs, 1)
+}
+
+fn user_schema_one(name: Text) -> RecordSchema {
+    let mut colls: List<CollationKind> = List.new();
+    colls.push(UserDefined(name));
+    let mut descs: List<Bool> = List.new();
+    descs.push(false);
+    record_schema_from_choices(&colls, &descs, 1)
+}
+
+fn key_ordering_eq(a: &KeyOrdering, b: &KeyOrdering) -> Bool {
+    match a {
+        KoLess => match b { KoLess => true, _ => false },
+        KoEqual => match b { KoEqual => true, _ => false },
+        KoGreater => match b { KoGreater => true, _ => false },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 1. record_schema_binary builds N BINARY-asc columns
+// -----------------------------------------------------------------------------
+
+fn binary_schema_size() {
+    let s = record_schema_binary(3);
+    assert_eq(s.columns.len(), 3);
+    let mut i: Int = 0;
+    while i < 3 {
+        match s.columns[i].collation {
+            Binary => {},
+            _ => panic("expected Binary"),
+        }
+        assert(!s.columns[i].desc);
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2. BINARY: "Hello" < "hello" (uppercase H = 0x48 < lowercase h = 0x68)
+// -----------------------------------------------------------------------------
+
+fn binary_text_compare() {
+    let a = text_record("Hello".clone());
+    let b = text_record("hello".clone());
+    let s = binary_schema_n(1);
+    let ord = cmp_byte_records(&a, &b, &s, None);
+    assert(key_ordering_eq(&ord, &KoLess));
+}
+
+// -----------------------------------------------------------------------------
+// 3. NOCASE: "Hello" == "hello" under ASCII case folding
+// -----------------------------------------------------------------------------
+
+fn nocase_text_compare() {
+    let a = text_record("Hello".clone());
+    let b = text_record("hello".clone());
+    let s = nocase_schema_one();
+    let ord = cmp_byte_records(&a, &b, &s, None);
+    assert(key_ordering_eq(&ord, &KoEqual));
+}
+
+// -----------------------------------------------------------------------------
+// 4. RTRIM: "abc " == "abc" (trailing space stripped before BINARY)
+// -----------------------------------------------------------------------------
+
+fn rtrim_text_compare() {
+    let a = text_record("abc ".clone());
+    let b = text_record("abc".clone());
+    let s = rtrim_schema_one();
+    let ord = cmp_byte_records(&a, &b, &s, None);
+    assert(key_ordering_eq(&ord, &KoEqual));
+}
+
+// -----------------------------------------------------------------------------
+// 5. Collation registry seeded with built-ins
+// -----------------------------------------------------------------------------
+
+fn registry_seeded_with_builtins() {
+    let r = collation_registry_new();
+    assert(r.find(&"BINARY".clone()));
+    assert(r.find(&"NOCASE".clone()));
+    assert(r.find(&"RTRIM".clone()));
+    assert_eq(r.len(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// 6. register_user adds a fn-pointer entry; user_fn_for retrieves it
+// -----------------------------------------------------------------------------
+
+fn reverse_bytes_cmp(a: &Text, b: &Text) -> Ordering {
+    // Reverse-of-BINARY — Greater becomes Less etc.
+    let o = binary_cmp(a, b);
+    match o {
+        Less => Greater,
+        Equal => Equal,
+        Greater => Less,
+    }
+}
+
+fn registry_user_collation_round_trip() {
+    let mut r = collation_registry_new();
+    r.register_user("REVERSE".clone(), reverse_bytes_cmp);
+    assert(r.find(&"REVERSE".clone()));
+    let user_fn = r.user_fn_for(&"REVERSE".clone());
+    assert(user_fn.is_some());
+    let builtin_fn = r.user_fn_for(&"BINARY".clone());
+    assert(builtin_fn.is_none());
+}
+
+// -----------------------------------------------------------------------------
+// 7. UserDefined collation dispatches through the registered fn
+// -----------------------------------------------------------------------------
+
+fn user_collation_dispatches() {
+    let mut r = collation_registry_new();
+    r.register_user("REVERSE".clone(), reverse_bytes_cmp);
+    let a = text_record("Apple".clone());
+    let b = text_record("Banana".clone());
+    let s = user_schema_one("REVERSE".clone());
+    // Under REVERSE, Apple > Banana (BINARY < flips to >).
+    let ord = cmp_byte_records(&a, &b, &s, Some(&r));
+    assert(key_ordering_eq(&ord, &KoGreater));
+}
+
+// -----------------------------------------------------------------------------
+// 8. cmp_byte_records back-compat shim — empty schema = lex byte cmp
+// -----------------------------------------------------------------------------
+
+fn back_compat_shim_byte_compare() {
+    let a = text_record("aaa".clone());
+    let b = text_record("aab".clone());
+    let s = record_schema_binary(0);  // empty schema → defaults to BINARY-asc
+    let result = cmp_byte_records(&a, &b, &s, None);
+    assert(key_ordering_eq(&result, &KoLess));
+}
+
+// -----------------------------------------------------------------------------
+// 9. Schema columns beyond the records are ignored (no panic)
+// -----------------------------------------------------------------------------
+
+fn extra_schema_columns_ignored() {
+    let a = text_record("x".clone());
+    let b = text_record("x".clone());
+    let s = record_schema_binary(5);  // 5-col schema; records have 1 col
+    let ord = cmp_byte_records(&a, &b, &s, None);
+    assert(key_ordering_eq(&ord, &KoEqual));
+}
+
+fn main() {
+    binary_schema_size();
+    binary_text_compare();
+    nocase_text_compare();
+    rtrim_text_compare();
+    registry_seeded_with_builtins();
+    registry_user_collation_round_trip();
+    user_collation_dispatches();
+    back_compat_shim_byte_compare();
+    extra_schema_columns_ignored();
+}
