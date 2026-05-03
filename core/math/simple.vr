@@ -90,6 +90,10 @@ mount super.random.RandomKey;
 // Uses Float (F64) for maximum precision in prototyping
 public type SimpleTensor is DynTensor<Float>;
 
+/// Public alias — short canonical name; conformance tests
+/// `mount core.math.simple.{Tensor}` for the simple API.
+public type Tensor is SimpleTensor;
+
 // Alias for 32-bit tensor (ML training)
 public type Tensor32 is DynTensor<Float32>;
 
