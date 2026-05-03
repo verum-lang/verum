@@ -75,12 +75,14 @@ implement ExitStatus {
     /// A child terminated by a signal — even SIGTERM — is *not* a success;
     /// callers that treat such a child as having exited 0 will mis-classify
     /// SIGSEGV / SIGKILL as "succeeded", masking real crashes.
+    @inline(always)
     public fn success(&self) -> Bool {
         self.is_exited() && self.code() == 0
     }
 
     /// Returns true iff the process exited normally (POSIX WIFEXITED).
     /// On Windows there is no signal/exit distinction, so this is always true.
+    @inline(always)
     public fn is_exited(&self) -> Bool {
         @cfg(any(target_os = "linux", target_os = "macos"))
         { (self.raw & 0x7F) == 0 }
@@ -91,6 +93,7 @@ implement ExitStatus {
 
     /// Returns true iff the process was terminated by a signal (POSIX WIFSIGNALED).
     /// Always false on Windows.
+    @inline(always)
     public fn is_signaled(&self) -> Bool {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
@@ -104,6 +107,7 @@ implement ExitStatus {
 
     /// Returns the signal number that terminated the process (POSIX WTERMSIG),
     /// or 0 if the process was not signal-terminated. Always 0 on Windows.
+    @inline(always)
     public fn signal(&self) -> Int {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
@@ -117,6 +121,7 @@ implement ExitStatus {
     /// Returns the WEXITSTATUS exit code. Only meaningful when
     /// `is_exited()` is true; for signal-terminated processes the
     /// caller should consult `signal()` instead.
+    @inline(always)
     public fn code(&self) -> Int {
         // Unix: raw is waitpid status — WEXITSTATUS = (status >> 8) & 0xFF
         // Windows: raw is the exit code directly
@@ -304,6 +309,7 @@ public type Child is {
 
 implement Child {
     /// Returns the OS process id (PID on Unix, handle-as-int on Windows).
+    @inline(always)
     public fn id(&self) -> Int { self.pid }
 
     /// Waits for the child to finish and returns its exit status.
