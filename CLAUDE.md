@@ -317,7 +317,7 @@ perf(crate): Optimize by X%
 | Cog Management | `docs/detailed/15-cog-management.md` |
 | Roadmap | `docs/detailed/28-implementation-roadmap.md` |
 | Z3 examples | `experiments/z3.rs/` |
-| Inkwell examples | `experiments/inkwell/` |
+| verum_llvm fork  | `crates/llvm/verum_llvm/` (in-tree LLVM bindings; do NOT use `inkwell`) |
 
 ## VCS: Verum Conformance Suite
 

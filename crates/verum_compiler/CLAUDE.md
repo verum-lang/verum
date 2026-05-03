@@ -113,7 +113,7 @@ VBC Bytecode
 - `verum_types`: Type checking and inference
 - `verum_fast_parser`: Fast recursive-descent parser
 - `verum_codegen`: Dual-path code generation
-  - `llvm/` - CPU: VBC → LLVM IR (inkwell)
+  - `llvm/` - CPU: VBC → LLVM IR (verum_llvm — in-tree fork at `crates/llvm/verum_llvm`)
   - `mlir/` - GPU: VBC → MLIR → GPU binaries
 - `verum_smt`: SMT verification with Z3
 
