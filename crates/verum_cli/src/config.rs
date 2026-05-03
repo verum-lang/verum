@@ -1245,6 +1245,27 @@ pub struct BuildConfig {
     ///  4. Default Console.
     #[serde(default)]
     pub windows_subsystem: Option<WindowsSubsystem>,
+
+    /// Strict-codegen mode (#110): when `true`, bug-class lenient
+    /// skips in `compile_item_lenient` (UndefinedFunction,
+    /// WrongArgumentCount, TypeMismatch, NonExhaustivePattern, …)
+    /// are promoted to hard errors instead of warn-level traces.
+    /// `Irreducible` skips (FFI prototypes, unimplemented language
+    /// features, GPU shaders) remain tolerated.
+    ///
+    /// Default `false` — preserves the historical lenient behaviour.
+    /// Per-project opt-in via this manifest key. The CLI
+    /// `--strict-codegen` flag takes precedence (sets the
+    /// `VERUM_STRICT_CODEGEN=1` env var which both manifest and CLI
+    /// paths consume).
+    ///
+    /// Resolution order, highest precedence first:
+    ///  1. `VERUM_STRICT_CODEGEN=1` env var (CI / debug runs).
+    ///  2. CLI `--strict-codegen` flag (sets the env var above).
+    ///  3. Manifest `[build].strict_codegen` (this field).
+    ///  4. Default `false`.
+    #[serde(default, alias = "strict-codegen")]
+    pub strict_codegen: bool,
 }
 
 /// Windows PE subsystem selection. Determines whether the loader

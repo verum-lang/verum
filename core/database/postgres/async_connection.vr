@@ -283,6 +283,29 @@ implement AsyncPgConnection {
         }
     }
 
+    /// Wire a CancellationToken — when it flips, automatically
+    /// fire `cancel_running_query()` so the SERVER-side query
+    /// terminates without caller intervention. Spawns a one-shot
+    /// background watcher task that awaits `token.cancelled()`.
+    ///
+    /// The watcher exits naturally when the token fires; if the
+    /// connection closes first, the cancel becomes a no-op
+    /// (CancelRequest against a dead session is silently
+    /// ignored by PG).
+    ///
+    /// Multiple tokens may be attached — each spawns its own
+    /// watcher; ANY one firing triggers the cancel.
+    public fn attach_cancellation_token(
+        &self,
+        token: core.async.cancellation.CancellationToken,
+    ) {
+        let conn_clone = self.clone();
+        let _ = core.async.task.spawn(async move {
+            let _ = token.cancelled().await;
+            let _ = conn_clone.cancel_running_query().await;
+        });
+    }
+
     /// Borrow the request channel for layered modules
     /// (`async_transaction`, `async_typed_database`) that build
     /// their own `PgRequest` variants and need to dispatch them

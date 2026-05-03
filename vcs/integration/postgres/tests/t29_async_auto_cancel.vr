@@ -1,0 +1,91 @@
+// =============================================================================
+// t29_async_auto_cancel.vr — auto-fire CancelRequest on token flip
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.2 + §6.1.8 (async + cancel auto-wire).
+// =============================================================================
+//
+// V0:
+//   1. AsyncPgConnection.connect.
+//   2. attach_cancellation_token(token) — spawns the watcher.
+//   3. Spawn `SELECT pg_sleep(10)` on the actor.
+//   4. token.cancel() — watcher fires CancelRequest automatically;
+//      caller never invokes cancel_running_query() directly.
+//   5. Awaited query returns Err within ~5s.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    AsyncPgConnection,
+    async_connect,
+};
+mount core.async.executor.block_on;
+mount core.async.task.{spawn, sleep};
+mount core.async.cancellation.CancellationToken;
+mount core.time.Duration;
+
+fn main() {
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-async-auto-cancel".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let conn = expect_ok(
+            async_connect(&cfg, 8).await,
+            &"async_connect failed".clone(),
+        );
+
+        // Wire the token to auto-fire CancelRequest.
+        let token = CancellationToken.new();
+        conn.attach_cancellation_token(token.clone());
+
+        // Long-running query.
+        let query_conn = conn.clone();
+        let started = core.time.SystemClock.now();
+        let query_handle = spawn(async move {
+            query_conn.simple_query(&"SELECT pg_sleep(10)".clone()).await
+        });
+
+        // Let the actor dispatch.
+        sleep(Duration.from_millis(200)).await;
+
+        // Flip the token — watcher MUST fire cancel automatically.
+        token.cancel();
+
+        let result = match query_handle.join().await {
+            Ok(r)  => r,
+            Err(_) => {
+                expect(false, &"query task join failed".clone());
+                return;
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                expect(false, &"pg_sleep(10) returned Ok — auto-cancel didn't fire".clone());
+            }
+            Err(_) => {
+                // Expected — server cancelled with SQLSTATE 57014.
+            }
+        }
+
+        let elapsed_ms = started.elapsed().as_milliseconds();
+        expect(
+            elapsed_ms < 5_000,
+            &f"auto-cancel took {elapsed_ms}ms — should be < 5s",
+        );
+
+        let _ = conn.close().await;
+
+        pass(&"t29_async_auto_cancel".clone());
+    });
+}
