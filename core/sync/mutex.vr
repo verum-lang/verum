@@ -39,6 +39,7 @@ public type Mutex<T> is {
 
 implement<T> Mutex<T> {
     // Create new mutex with initial value.
+    @inline(always)
     public fn new(data: T) -> Mutex<T> {
         Mutex {
             futex: FutexLock.new(),
