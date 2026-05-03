@@ -157,12 +157,14 @@ implement Uuid {
     }
 
     // The reserved nil UUID, all zeros.
+    @inline(always)
     public fn nil() -> Uuid {
         Uuid { hi: 0, lo: 0 }
     }
 
     // Version field (0..15) extracted from the top nibble of the
     // 7th byte. 4 for random, 7 for time-ordered, etc.
+    @inline(always)
     public fn version(&self) -> Int {
         ((self.hi >> 12) & 0x0F)
     }
