@@ -42,51 +42,76 @@ use crate::arch_mtac::Observer;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "observer_kind")]
 pub enum ShapeObservation {
- /// EndUser sees the public interface: exposes + lifecycle.
+    /// EndUser sees the public interface: exposes + lifecycle.
     EndUser {
+        /// End-user category (default / power / admin / ...).
         kind: String,
+        /// Capabilities the cog exposes to end-user code.
         exposes: Vec<Capability>,
+        /// Lifecycle stage visible to the end-user.
         lifecycle: Lifecycle,
     },
- /// PeerCog sees what it composes against: composes_with
- /// containing the cog + the boundary capabilities (requires +
- /// exposes).
+    /// PeerCog sees what it composes against: composes_with
+    /// containing the cog + the boundary capabilities (requires +
+    /// exposes).
     PeerCog {
+        /// Dotted module path of the peer cog.
         module_path: String,
+        /// True iff the observed shape lists this peer in `composes_with`.
         is_in_composition: bool,
+        /// Capabilities the cog requires from the peer.
         requires: Vec<Capability>,
+        /// Capabilities the cog exposes to the peer.
         exposes: Vec<Capability>,
     },
- /// Stakeholder sees deployment-level concerns: tier, foundation,
- /// persistence-related capabilities, lifecycle stage.
+    /// Stakeholder sees deployment-level concerns: tier, foundation,
+    /// persistence-related capabilities, lifecycle stage.
     Stakeholder {
+        /// Stakeholder role (operator / regulator / customer / ...).
         role: String,
+        /// Execution tier the stakeholder cares about.
         tier: Tier,
+        /// Foundation profile relevant to the stakeholder.
         foundation: Foundation,
+        /// Lifecycle stage visible to the stakeholder.
         lifecycle: Lifecycle,
+        /// Persistence-related capabilities surfacing in the shape.
         persistence_capabilities: Vec<Capability>,
     },
- /// Auditor sees everything: full Shape projection. This is the
- /// strictest observer — two shapes agree under Auditor iff
- /// their full Shape projections are identical.
+    /// Auditor sees everything: full Shape projection. This is the
+    /// strictest observer — two shapes agree under Auditor iff
+    /// their full Shape projections are identical.
     Auditor {
+        /// Audit kind the observer is performing.
         audit_kind: String,
+        /// Full `exposes` list.
         exposes: Vec<Capability>,
+        /// Full `requires` list.
         requires: Vec<Capability>,
+        /// Foundation profile.
         foundation: Foundation,
+        /// MSFS stratum.
         stratum: MsfsStratum,
+        /// CVE-closure triple.
         cve_closure: CveClosure,
+        /// Execution tier.
         tier: Tier,
+        /// Lifecycle stage.
         lifecycle: Lifecycle,
+        /// Cogs the shape composes with.
         composes_with: Vec<String>,
+        /// Strict-mode flag.
         strict: bool,
     },
- /// Adversary sees the attack surface: exposes + boundary
- /// invariants + capability handoffs (which capabilities cross
- /// the boundary outward).
+    /// Adversary sees the attack surface: exposes + boundary
+    /// invariants + capability handoffs (which capabilities cross
+    /// the boundary outward).
     Adversary {
+        /// Threat model the adversary operates under.
         threat_model: String,
+        /// Capabilities the cog exposes externally.
         attack_surface: Vec<Capability>,
+        /// Capabilities flowing outbound (Network / Exec).
         outbound_capabilities: Vec<Capability>,
     },
 }
@@ -173,16 +198,18 @@ pub fn observe(shape: &Shape, observer: &Observer) -> ShapeObservation {
 // YonedaVerdict — equivalence outcome
 // =============================================================================
 
+/// Per-observer outcome of a Yoneda comparison between two shapes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgreementStatus {
- /// Both observations are structurally identical.
+    /// Both observations are structurally identical.
     Agree,
- /// Observations differ — the observer can distinguish the
- /// shapes.
+    /// Observations differ — the observer can distinguish the
+    /// shapes.
     Disagree,
 }
 
 impl AgreementStatus {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             AgreementStatus::Agree => "agree",
@@ -191,25 +218,30 @@ impl AgreementStatus {
     }
 }
 
+/// One observer's verdict on whether two shapes agree from its
+/// viewpoint, plus the projected observations for diagnostic display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObserverAgreement {
+    /// Observer whose viewpoint produced this agreement record.
     pub observer: Observer,
+    /// Whether the observer's projections agree.
     pub status: AgreementStatus,
- /// Base-shape observation (for diagnostics).
+    /// Base-shape observation (for diagnostics).
     pub base_observation: ShapeObservation,
- /// Alt-shape observation (for diagnostics).
+    /// Alt-shape observation (for diagnostics).
     pub alt_observation: ShapeObservation,
 }
 
+/// Aggregate verdict on Yoneda equivalence across an observer roster.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct YonedaVerdict {
- /// Stable JSON schema version (per spec §32.4).
+    /// Stable JSON schema version (per spec §32.4).
     pub schema_version: u32,
- /// Per-observer agreement.
+    /// Per-observer agreement.
     pub agreements: Vec<ObserverAgreement>,
- /// Aggregate verdict — equivalent iff every observer agrees.
+    /// Aggregate verdict — equivalent iff every observer agrees.
     pub equivalent: bool,
- /// Number of observers that disagreed.
+    /// Number of observers that disagreed.
     pub disagreement_count: usize,
 }
 
