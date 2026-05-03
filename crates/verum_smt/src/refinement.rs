@@ -27,6 +27,8 @@ use z3::ast::{Bool, Dynamic, Int, Real};
 
 use crate::context::Context;
 use crate::cost::{CostMeasurement, VerificationCost};
+use crate::count_o_dispatch::{CountOResult, dispatch_count_o};
+use crate::count_o_recognizer::try_extract_count_o_query;
 use crate::counterexample::{CounterExampleExtractor, generate_suggestions};
 use crate::pattern_quantifiers::{PatternConfig, PatternGenerator, needs_patterns};
 use crate::proof_extraction::{ProofExtractor, ProofGenerationConfig, ProofTerm};
@@ -134,6 +136,19 @@ impl RefinementVerifier {
                 ));
             }
         };
+
+        // Pre-pass: when the predicate matches the canonical OWL 2
+        // `count_o_unbounded` shape (a cardinality bound conjoined
+        // with a count_o_unbounded call), dispatch through CVC5
+        // Finite Model Finding instead of falling through to Z3.
+        // The dispatcher returns `Unsupported` in stub mode (CVC5
+        // not linked) and the caller's V1 fallback path runs —
+        // existing-runtime semantics preserved.
+        if mode != VerifyMode::Runtime {
+            if let Some(verdict) = try_count_o_dispatch(predicate) {
+                return verdict;
+            }
+        }
 
         // Check mode and decide strategy
         match mode {
@@ -876,6 +891,66 @@ pub fn extract_predicate(ty: &Type) -> Option<&Expr> {
     match &ty.kind {
         TypeKind::Refined { predicate, .. } => Some(&predicate.expr),
         _ => None,
+    }
+}
+
+/// Pre-pass dispatcher for OWL 2 `count_o_unbounded` predicates.
+///
+/// Walks `predicate` looking for the canonical conjunctive shape
+/// (`{x | x ≤ K ∧ x = count_o_unbounded(_, λy. P(y))}`). When
+/// matched, builds a `CountOQuery` and dispatches through
+/// [`crate::count_o_dispatch`]; the result is mapped to a
+/// `VerificationResult`:
+///
+/// - `Decided { count, model_smtlib, elapsed_ms }` — load-bearing
+///   discharge; returns `Ok(ProofResult)` carrying the count and
+///   the model summary.
+/// - `BoundExceeded { bound, elapsed_ms }` — refinement claim is
+///   structurally false; returns `Err(VerificationError::Failed)`.
+/// - `Unsupported { reason }` / `Timeout { elapsed_ms }` — falls
+///   through to the standard SMT verification path (returns
+///   `None` so the caller continues into the Z3 flow).
+///
+/// Returns `None` when the predicate doesn't match — the
+/// recognizer is purely additive; never blocks the existing path.
+fn try_count_o_dispatch(predicate: &Expr) -> Option<VerificationResult> {
+    let query = try_extract_count_o_query(predicate, "it")?;
+    let measurement = CostMeasurement::start("count_o_fmf_dispatch");
+    let result = dispatch_count_o(&query);
+    match result {
+        CountOResult::Decided {
+            count,
+            model_smtlib,
+            elapsed_ms,
+        } => {
+            let _ = elapsed_ms;
+            let cost = measurement.finish(true);
+            let proof = ProofResult::new(cost).with_raw_proof(
+                format!(
+                    "count_o_fmf: count={count}; model_size={}",
+                    model_smtlib.len()
+                )
+                .into(),
+            );
+            Some(Ok(proof))
+        }
+        CountOResult::BoundExceeded { bound, elapsed_ms } => {
+            let _ = elapsed_ms;
+            let _ = measurement.finish(false);
+            Some(Err(VerificationError::SolverError(
+                format!(
+                    "count_o_fmf: bound {} cannot be satisfied — no finite model exists",
+                    bound.tag()
+                )
+                .into(),
+            )))
+        }
+        CountOResult::Unsupported { .. } | CountOResult::Timeout { .. } => {
+            // Fall through to the standard SMT path; the existing
+            // verifier may still discharge via Z3 (or surface its
+            // own diagnostic if it cannot).
+            None
+        }
     }
 }
 
