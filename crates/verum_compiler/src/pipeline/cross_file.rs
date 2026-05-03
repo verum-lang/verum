@@ -584,6 +584,56 @@ impl<'s> CompilationPipeline<'s> {
         self.register_modules_for_cross_file_resolution_filtered(None)
     }
 
+    /// Compute the union of stdlib reachability closures over a set of
+    /// user module paths (#109).
+    ///
+    /// Looks up each user module's AST in `self.modules` and runs
+    /// `stdlib_reachability::compute_reachable_stdlib_modules` on it,
+    /// merging the per-module closures into a single set. Honours the
+    /// `VERUM_FULL_STDLIB=1` env-var opt-out (returns `None` so the
+    /// filtered helper falls through to legacy full-registration
+    /// behaviour).
+    ///
+    /// Returns:
+    /// * `Some(set)` — caller should pass into the filtered Phase 1.5
+    ///   helper. Set contains every stdlib module path needed by *any*
+    ///   user source's mount tree plus the implicit prelude.
+    /// * `None` — full-stdlib mode is active, or the embedded dep
+    ///   graph is unavailable (minimal builds without `core/`).
+    ///
+    /// The `user_paths` slice should contain only paths the caller
+    /// considers part of the user-side compilation unit — typically
+    /// the keys of the `sources` map passed to `compile_multi_pass`,
+    /// or the single user file in `run_check_only`. Stdlib-loaded
+    /// modules in `self.modules` should not be included; they would
+    /// trivially resolve their own mounts and inflate the closure.
+    pub(super) fn compute_user_reachable_stdlib(
+        &self,
+        user_paths: &[Text],
+    ) -> Option<std::collections::HashSet<String>> {
+        if std::env::var("VERUM_FULL_STDLIB").is_ok() {
+            return None;
+        }
+        let mut union: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut any_resolved = false;
+        for path in user_paths {
+            let Some(module_rc) = self.modules.get(path) else {
+                continue;
+            };
+            let Some(set) =
+                crate::stdlib_reachability::compute_reachable_stdlib_modules(module_rc)
+            else {
+                // Embedded dep graph unavailable — bail to full-registration mode.
+                return None;
+            };
+            any_resolved = true;
+            for m in set {
+                union.insert(m);
+            }
+        }
+        if any_resolved { Some(union) } else { None }
+    }
+
     /// Filtered variant of [`register_modules_for_cross_file_resolution`].
     ///
     /// When `reachable_stdlib` is `Some(set)`, stdlib modules (paths under
