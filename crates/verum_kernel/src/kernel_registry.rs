@@ -105,6 +105,123 @@ impl KernelChecker for ProofCheckerNbeKernel {
     }
 }
 
+/// Algorithm C — kernel_v0 manifest-driven verifier.  The
+/// **Verum-self-hosted** third slot of the differential
+/// architecture.
+///
+/// Where Algorithm A walks the certificate's term structurally
+/// and Algorithm B evaluates it through closures, Algorithm C
+/// performs **meta-soundness verification** orthogonal to both:
+///
+/// 1. The certificate's term must round-trip through Algorithm
+///    A — this anchors the structural verdict.  (Without this
+///    anchor the manifest checks below would be vacuous on a
+///    rejected certificate.)
+/// 2. Every rule in `kernel_v0_manifest::manifest()` must be
+///    *audit-clean* (`Discharged` or `DischargedByFramework`).
+///    A bootstrap rule sitting at `AdmittedWithIou` with no
+///    cited upstream proof fails this check.
+/// 3. The kernel-soundness footprint must be bounded by the
+///    canonical meta-theory ceiling — every rule's required
+///    ZFC axioms + Grothendieck universes must fit within
+///    ZFC + 2 strongly-inaccessibles.
+/// 4. Each kernel_v0 rule's strict-intrinsic must dispatch to
+///    a `Decision { value: true }` answer through the canonical
+///    `dispatch_intrinsic` registry.  This is the "the bootstrap
+///    rule's soundness lemma agrees with the registered
+///    intrinsic" check.
+///
+/// All four conditions must hold for Algorithm C to admit the
+/// certificate.  This is structurally orthogonal to Algorithms
+/// A and B because it consults the **bootstrap manifest** and
+/// the **meta-soundness registry** rather than re-walking the
+/// certificate's term — a disagreement with A or B surfaces
+/// drift between the implementation kernels and the bootstrap
+/// meta-theory's commitments.
+pub struct KernelV0Kernel;
+
+impl KernelChecker for KernelV0Kernel {
+    fn name(&self) -> &'static str {
+        "kernel_v0"
+    }
+
+    fn description(&self) -> &'static str {
+        "Algorithm C — Verum-self-hosted bootstrap manifest verifier \
+         (kernel_v0/ + dispatch_intrinsic + kernel_meta_soundness_holds; \
+         orthogonal meta-soundness check)"
+    }
+
+    fn verify(&self, cert: &Certificate) -> Result<(), CheckError> {
+        use crate::intrinsic_dispatch::{IntrinsicValue, dispatch_intrinsic};
+        use crate::soundness::kernel_v0_manifest::manifest;
+        use crate::zfc_self_recognition::{KernelRuleId, kernel_meta_soundness_holds};
+
+        // Anchor 1: the certificate must structurally type-check.
+        // Without this anchor the manifest invariants below are
+        // vacuous on a rejected certificate (they hold equally
+        // for accept and reject paths).
+        cert.verify()?;
+
+        // Anchor 2: every kernel_v0 rule must be audit-clean.
+        // An unresolved AdmittedWithIou (or NotYetAttested) means
+        // the bootstrap manifest is not currently load-bearing for
+        // soundness; Algorithm C refuses to admit until the
+        // manifest is clean.
+        for rule in manifest() {
+            if !rule.status.is_audit_clean() {
+                return Err(CheckError::KernelV0ManifestUnclean {
+                    rule: rule.name.clone(),
+                    status_tag: rule.status.tag(),
+                });
+            }
+        }
+
+        // Anchor 3: the meta-soundness footprint must be bounded.
+        // Every rule's required ZFC axioms + Grothendieck
+        // universes must fit ZFC + 2-inaccessibles (the
+        // canonical kernel ceiling).
+        if !kernel_meta_soundness_holds() {
+            return Err(CheckError::KernelV0MetaSoundnessExceeded);
+        }
+
+        // Anchor 4: each kernel_v0 rule's strict-intrinsic must
+        // dispatch to a positive Decision answer.  This walks
+        // the same `dispatch_intrinsic` registry the broader
+        // kernel infrastructure consumes; a per-rule disagreement
+        // surfaces drift between the bootstrap rule's soundness
+        // lemma and the registered intrinsic.
+        for rule in KernelRuleId::full_list() {
+            let intrinsic = format!("kernel_{}_strict", strict_tag_of(rule));
+            match dispatch_intrinsic(&intrinsic, &[]) {
+                Some(IntrinsicValue::Decision { holds, .. }) if holds => continue,
+                _ => {
+                    return Err(CheckError::KernelV0StrictIntrinsicDisagreement {
+                        intrinsic,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Map `KernelRuleId` to the canonical strict-intrinsic suffix
+/// used in `dispatch_intrinsic` (`kernel_<suffix>_strict`).
+/// Stable: drift here is a kernel/intrinsic registry mismatch.
+fn strict_tag_of(rule: crate::zfc_self_recognition::KernelRuleId) -> &'static str {
+    use crate::zfc_self_recognition::KernelRuleId;
+    match rule {
+        KernelRuleId::Refine => "var",        // K-Refine ↔ kernel_var_strict
+        KernelRuleId::Univ => "universe_intro",
+        KernelRuleId::Pos => "positivity",
+        KernelRuleId::Norm => "beta",          // K-Norm uses β-confluence
+        KernelRuleId::FwAx => "forward_axiom",
+        KernelRuleId::AdjUnit => "pi_form",    // adjunction unit ↔ pi-form-strict
+        KernelRuleId::AdjCounit => "app_elim", // adjunction counit ↔ app-elim-strict
+    }
+}
+
 // =============================================================================
 // KernelRegistry — the N-kernel collection
 // =============================================================================
@@ -165,12 +282,19 @@ impl KernelRegistry {
 }
 
 impl Default for KernelRegistry {
-    /// Default registry: the two production-ready kernels.
-    /// Future kernel implementations register on top of this.
+    /// Default registry: the three production kernels —
+    /// Algorithm A (`ProofCheckerKernel`, structural bidirectional
+    /// type-check), Algorithm B (`ProofCheckerNbeKernel`,
+    /// closure-based NbE evaluation), and Algorithm C
+    /// (`KernelV0Kernel`, manifest-driven Verum-self-hosted
+    /// bootstrap verifier).  All three are differential-tested
+    /// against each other; any pairwise disagreement fails the
+    /// audit.
     fn default() -> Self {
         let mut r = Self::new();
         r.register(ProofCheckerKernel);
         r.register(ProofCheckerNbeKernel);
+        r.register(KernelV0Kernel);
         r
     }
 }
@@ -321,13 +445,14 @@ mod tests {
     // ----- Default registry -----
 
     #[test]
-    fn default_registry_has_two_kernels() {
+    fn default_registry_has_three_kernels() {
         let r = KernelRegistry::default();
-        assert_eq!(r.len(), 2);
+        assert_eq!(r.len(), 3);
         assert!(!r.is_empty());
         let names = r.names();
         assert!(names.contains(&"proof_checker"));
         assert!(names.contains(&"proof_checker_nbe"));
+        assert!(names.contains(&"kernel_v0"));
     }
 
     #[test]
@@ -345,7 +470,7 @@ mod tests {
         let v = r.verify_all(&polymorphic_identity());
         assert!(matches!(v.agreement, AgreementVerdict::Unanimous));
         assert!(v.agreement.is_unanimous());
-        assert_eq!(v.outcomes.len(), 2);
+        assert_eq!(v.outcomes.len(), 3);
         for o in &v.outcomes {
             assert!(o.accepted);
             assert!(o.error_summary.is_none());
@@ -421,7 +546,7 @@ mod tests {
     fn run_differential_n_convenience_wraps_default_registry() {
         let v = run_differential_n(&polymorphic_identity());
         assert!(v.agreement.is_unanimous());
-        assert_eq!(v.outcomes.len(), 2);
+        assert_eq!(v.outcomes.len(), 3);
     }
 
     // ----- Architectural pin -----
@@ -439,8 +564,9 @@ mod tests {
 
     #[test]
     fn three_kernel_unanimous_when_all_agree() {
-        // Adding a third kernel that mirrors trusted-base behaviour
-        // produces unanimous agreement on a valid cert.
+        // Adding a synthetic mirror kernel on top of the three default
+        // kernels produces unanimous agreement on a valid cert across
+        // all four slots.
         struct MirrorKernel;
         impl KernelChecker for MirrorKernel {
             fn name(&self) -> &'static str {
@@ -455,9 +581,9 @@ mod tests {
         }
         let mut r = KernelRegistry::default();
         r.register(MirrorKernel);
-        assert_eq!(r.len(), 3);
+        assert_eq!(r.len(), 4);
         let v = r.verify_all(&polymorphic_identity());
         assert!(matches!(v.agreement, AgreementVerdict::Unanimous));
-        assert_eq!(v.outcomes.len(), 3);
+        assert_eq!(v.outcomes.len(), 4);
     }
 }

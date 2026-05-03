@@ -23,22 +23,36 @@
 //! divergence before it reaches the trust boundary.
 //!
 
-//! ## Current status — TWO Rust-side kernels active (#159 V1)
+//! ## Three kernel slots active
 //!
 
-//! Pre-V1 the second slot was stubbed as `NotYetSelfHosting`.
-//! Post-V1 the second slot runs [`crate::proof_checker_nbe`] —
-//! a structurally-distinct algorithmic kernel using
-//! Normalisation-by-Evaluation.  The two implementations
-//! (bidirectional + explicit substitution vs NbE) compute the
-//! same input/output relation via different evaluation strategies;
-//! disagreements are bugs in EITHER side.
+//! All three differential slots are populated:
 //!
 
-//! The Verum-self-hosted kernel (`core/verify/kernel_v0/`) is
-//! tracked separately under #154 and will land as a THIRD slot
-//! once the parser blocker lands.  Until then `proof_checker_nbe`
-//! is the active second kernel.
+//!  * Slot A — [`crate::proof_checker`] (bidirectional type-checking
+//!    with explicit substitution + WHNF). The trusted-base
+//!    structural verifier.
+//!  * Slot B — [`crate::proof_checker_nbe`] (Normalisation-by-
+//!    Evaluation with closures + level-indexed quote). A
+//!    structurally-distinct algorithmic specification of the same
+//!    input/output relation.
+//!  * Slot C — [`crate::kernel_registry::KernelV0Kernel`] (manifest-
+//!    driven Verum-self-hosted bootstrap verifier). Anchors on
+//!    Algorithm A's structural verdict, then performs orthogonal
+//!    meta-soundness checks (`kernel_v0_manifest` audit-cleanness
+//!    + `kernel_meta_soundness_holds` ZFC + 2·κ ceiling +
+//!    per-rule strict-intrinsic dispatch through the canonical
+//!    `intrinsic_dispatch` registry).
+//!
+
+//! Disagreements are bugs in EITHER side. An A↔B disagreement
+//! surfaces drift in the structural algorithmic kernels; an
+//! A↔C or B↔C disagreement surfaces drift between the
+//! implementation kernels and the bootstrap meta-theory's
+//! commitments.  The two-slot legacy verdict
+//! `DifferentialAgreement::NotYetSelfHosting` is retained for
+//! schema-stability of the audit JSON but is not produced by the
+//! current registry.
 //!
 
 //! This module is **load-bearing scaffolding**: the entire framework

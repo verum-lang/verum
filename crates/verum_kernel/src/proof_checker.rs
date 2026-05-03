@@ -386,6 +386,36 @@ pub enum CheckError {
     /// T-Conv: expected and inferred types are not definitionally
     /// equal.
     TypeMismatch { expected: Term, actual: Term },
+    /// **Algorithm C — bootstrap-manifest failure.**  The kernel_v0
+    /// manifest contains a rule that is not audit-clean (its
+    /// `DischargeStatus` is `AdmittedWithIou` or `NotYetAttested`
+    /// rather than `Discharged` / `DischargedByFramework`).  The
+    /// payload carries the rule name + the failing status's tag
+    /// for diagnostic surface.  Algorithm A and B do not produce
+    /// this variant; only the manifest-driven third slot does.
+    KernelV0ManifestUnclean {
+        /// Stable rule identifier (e.g. `"K-Beta"`).
+        rule: String,
+        /// Failing-status tag (e.g. `"admitted_with_iou"`).
+        status_tag: &'static str,
+    },
+    /// **Algorithm C — meta-soundness footprint exceeds canonical
+    /// ceiling.**  Some kernel rule's required meta-theory is not
+    /// bounded by `ZFC + 2 strongly-inaccessibles`; the bootstrap
+    /// claim fails its own ceiling and the manifest-driven slot
+    /// refuses to admit.  Algorithm A and B do not produce this
+    /// variant.
+    KernelV0MetaSoundnessExceeded,
+    /// **Algorithm C — strict-intrinsic dispatch disagreement.**
+    /// A canonical kernel-rule's `kernel_<rule>_strict` intrinsic
+    /// returned a non-positive `Decision` (or no `Decision` at
+    /// all).  Surfaces drift between the bootstrap rule's
+    /// soundness lemma and the registered intrinsic.  Algorithm
+    /// A and B do not produce this variant.
+    KernelV0StrictIntrinsicDisagreement {
+        /// The intrinsic name that failed to dispatch positively.
+        intrinsic: String,
+    },
 }
 
 /// Infer the type of `term` in `ctx`. Returns the unique type or
