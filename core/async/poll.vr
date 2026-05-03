@@ -32,6 +32,7 @@ public type Poll<T> is
 
 implement<T> Poll<T> {
     // Check if ready.
+    @inline(always)
     public fn is_ready(&self) -> Bool {
         match self {
             Ready(_) => true,
@@ -40,6 +41,7 @@ implement<T> Poll<T> {
     }
 
     // Check if pending.
+    @inline(always)
     public fn is_pending(&self) -> Bool {
         match self {
             Ready(_) => false,
@@ -48,6 +50,7 @@ implement<T> Poll<T> {
     }
 
     // Map the ready value.
+    @inline(always)
     public fn map<U, F: fn(T) -> U>(self, f: F) -> Poll<U> {
         match self {
             Ready(t) => Ready(f(t)),
@@ -56,6 +59,7 @@ implement<T> Poll<T> {
     }
 
     // Get the ready value, panicking if pending.
+    @inline(always)
     public fn unwrap(self) -> T {
         match self {
             Ready(t) => t,
@@ -64,6 +68,7 @@ implement<T> Poll<T> {
     }
 
     // Get ready value or default.
+    @inline(always)
     public fn unwrap_or(self, default: T) -> T {
         match self {
             Ready(t) => t,
@@ -72,6 +77,7 @@ implement<T> Poll<T> {
     }
 
     // Convert to Maybe.
+    @inline(always)
     public fn ready(self) -> Maybe<T> {
         match self {
             Ready(t) => Some(t),
@@ -93,11 +99,13 @@ implement<T> Poll<T> {
 // unreachable()` arm covered the type-confusion gap silently.
 implement<T, E> Poll<Result<T, E>> {
     // Shorthand for creating Ready(Ok(t)).
+    @inline(always)
     public fn ready_ok(t: T) -> Poll<Result<T, E>> {
         Ready(Ok(t))
     }
 
     // Shorthand for creating Ready(Err(e)).
+    @inline(always)
     public fn ready_err(e: E) -> Poll<Result<T, E>> {
         Ready(Err(e))
     }
