@@ -1,0 +1,121 @@
+// =============================================================================
+// t15_multi_query.vr — sync + async MySQL multi-statement query
+// =============================================================================
+// Spec: internal/specs/database.md §6.3.3 (COM_QUERY multi-statement).
+// =============================================================================
+//
+// V0:
+//   1. Sync — INSERT + SELECT LAST_INSERT_ID() + UPDATE in a single
+//      multi_query; assert 3 result-sets in declaration order with
+//      correct affected_rows / last_insert_id / SELECT row count.
+//   2. Async — same batch via AsyncMysqlConnection.multi_query.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.mysql.{
+    MysqlConfig, MtmDisable,
+    AsyncMysqlConnection,
+    async_mysql_connect,
+};
+mount core.async.executor.block_on;
+
+fn main() {
+    // -------------------------------------------------------------------------
+    // Setup target table.
+    // -------------------------------------------------------------------------
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app failed".clone(),
+    );
+    let _ = conn.simple_query(&"DROP TABLE IF EXISTS multi_query_smoke".clone());
+    expect_ok(
+        conn.simple_query(&
+            "CREATE TABLE multi_query_smoke ( \
+                id INT AUTO_INCREMENT PRIMARY KEY, \
+                payload VARCHAR(255) NOT NULL \
+             ) ENGINE=InnoDB".clone()
+        ),
+        &"CREATE TABLE failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 1. Sync multi_query — INSERT + SELECT + UPDATE.
+    // -------------------------------------------------------------------------
+    let batch = "INSERT INTO multi_query_smoke (payload) VALUES ('a'); \
+                 SELECT id, payload FROM multi_query_smoke WHERE id = LAST_INSERT_ID(); \
+                 UPDATE multi_query_smoke SET payload = 'a-updated' \
+                  WHERE id = LAST_INSERT_ID()".clone();
+    let results = expect_ok(
+        conn.multi_query(&batch),
+        &"sync multi_query failed".clone(),
+    );
+    expect_eq_int(
+        results.len() as Int, 3,
+        &"sync multi_query result count".clone(),
+    );
+    // 1st: INSERT — affected_rows == 1 + last_insert_id > 0.
+    expect_eq_int(results[0].affected_rows, 1,
+        &"INSERT affected_rows".clone());
+    expect(results[0].last_insert_id > 0,
+        &"INSERT last_insert_id > 0".clone());
+    // 2nd: SELECT — one row, two columns.
+    expect_eq_int(results[1].rows.len() as Int, 1,
+        &"SELECT row count".clone());
+    expect_eq_int(results[1].columns.len() as Int, 2,
+        &"SELECT col count".clone());
+    // 3rd: UPDATE — affected_rows == 1.
+    expect_eq_int(results[2].affected_rows, 1,
+        &"UPDATE affected_rows".clone());
+
+    // Cleanup before async run.
+    let _ = conn.simple_query(&"DELETE FROM multi_query_smoke".clone());
+
+    // -------------------------------------------------------------------------
+    // 2. Async multi_query — same batch via actor.
+    // -------------------------------------------------------------------------
+    block_on(async move {
+        let cfg = MysqlConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            character_set: 255,
+            tls_mode: MtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let aconn = expect_ok(
+            async_mysql_connect(&cfg, 8).await,
+            &"async_mysql_connect failed".clone(),
+        );
+
+        let abatch = "INSERT INTO multi_query_smoke (payload) VALUES ('b'); \
+                      SELECT id, payload FROM multi_query_smoke \
+                       WHERE id = LAST_INSERT_ID(); \
+                      UPDATE multi_query_smoke SET payload = 'b-async' \
+                       WHERE id = LAST_INSERT_ID()".clone();
+        let aresults = expect_ok(
+            aconn.multi_query(&abatch).await,
+            &"async multi_query failed".clone(),
+        );
+        expect_eq_int(
+            aresults.len() as Int, 3,
+            &"async multi_query result count".clone(),
+        );
+        expect_eq_int(aresults[0].affected_rows, 1,
+            &"async INSERT affected_rows".clone());
+        expect_eq_int(aresults[1].rows.len() as Int, 1,
+            &"async SELECT row count".clone());
+        expect_eq_int(aresults[2].affected_rows, 1,
+            &"async UPDATE affected_rows".clone());
+
+        let _ = aconn.execute(&"DROP TABLE multi_query_smoke".clone()).await;
+        let _ = aconn.close().await;
+
+        pass(&"t15_multi_query".clone());
+    });
+}

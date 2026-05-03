@@ -74,7 +74,7 @@ mount core.database.mysql.wire.backend.{
 };
 mount core.database.mysql.wire.types.{
     PKT_OK, PKT_EOF, PKT_ERROR, CAP_PROTOCOL_41, CAP_DEPRECATE_EOF,
-    CAP_SSL, SPINDLE_CLIENT_FLAGS,
+    CAP_SSL, SPINDLE_CLIENT_FLAGS, STATUS_MORE_RESULTS,
     plugin_caching_sha2_password,
 };
 mount core.database.mysql.auth.caching_sha2.{
@@ -349,6 +349,169 @@ implement MysqlConnection {
             Ok(result) => Ok(result.affected_rows),
             Err(e)     => Err(e),
         }
+    }
+
+    /// Multi-statement COM_QUERY — `;`-separated SQL where each
+    /// statement produces one MySimpleQueryResult. Returns the
+    /// list in declaration order. Server signals "more results
+    /// coming" via the OK/EOF packet's `STATUS_MORE_RESULTS`
+    /// status flag; the loop terminates once that flag clears.
+    ///
+    /// Requires CLIENT_MULTI_STATEMENTS in the handshake (added
+    /// to SPINDLE_CLIENT_FLAGS unconditionally) and
+    /// CLIENT_MULTI_RESULTS for SELECT batches (also negotiated).
+    /// On error mid-batch the server emits an ERR packet that
+    /// terminates the entire batch — every prior result-set is
+    /// returned alongside the Err so callers can decide whether
+    /// to roll back already-applied work.
+    public fn multi_query(&mut self, sql: &Text)
+        -> Result<List<MySimpleQueryResult>, DbError>
+    {
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "multi_query requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = McsBusy;
+        self.sequence = 0;
+        let payload = com_query(sql);
+        send_packet(self, payload.as_slice())?;
+
+        let mut results: List<MySimpleQueryResult> = List.new();
+        loop {
+            let (result, more) = self.read_one_resultset()?;
+            results.push(result);
+            if !more { break; }
+        }
+        self.state = McsReady;
+        Ok(results)
+    }
+
+    /// Internal — drive one result-set's wire packets and return
+    /// (result, more_results_flag). After the result-set's
+    /// terminating OK/EOF the bool reflects STATUS_MORE_RESULTS;
+    /// the caller (multi_query) loops until the flag clears.
+    fn read_one_resultset(&mut self)
+        -> Result<(MySimpleQueryResult, Bool), DbError>
+    {
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        let kind = classify(body.as_slice(), self.capabilities);
+        match kind {
+            SkError => {
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("multi.ERR")); }
+                };
+                self.state = McsReady;
+                return Err(dberr_from_mysql(err));
+            }
+            SkOk => {
+                let ok = match parse_ok(body.as_slice(), self.capabilities) {
+                    Ok(p)  => p,
+                    Err(_) => { return Err(bad_decode("multi.OK")); }
+                };
+                let more = (ok.status_flags & STATUS_MORE_RESULTS) != 0;
+                return Ok((MySimpleQueryResult {
+                    columns: List.new(),
+                    rows: List.new(),
+                    affected_rows: ok.affected_rows,
+                    last_insert_id: ok.last_insert_id,
+                    info: ok.info,
+                }, more));
+            }
+            SkLocalInfile => {
+                self.state = McsFailed;
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdMysql,
+                    code: "LOCAL_INFILE_DISABLED".clone(),
+                    message: "LOCAL INFILE not supported in multi_query".clone(),
+                    retryable: false,
+                }));
+            }
+            _ => {}    // column-count LEI; fall through
+        }
+
+        let (col_count, _, _) = match decode_lei(body.as_slice(), 0) {
+            Ok(t)  => t,
+            Err(_) => { return Err(bad_decode("multi.column count LEI")); }
+        };
+
+        let mut columns: List<MyColumnDef> = List.new();
+        let mut i: Int = 0;
+        while i < col_count {
+            let p = recv_packet(self)?;
+            let cd = match parse_column_def(p.payload().as_slice()) {
+                Ok(c)  => c,
+                Err(_) => { return Err(bad_decode("multi.MyColumnDef41")); }
+            };
+            columns.push(cd);
+            i = i + 1;
+        }
+
+        let deprecate_eof = (self.capabilities & CAP_DEPRECATE_EOF) != 0;
+        if !deprecate_eof {
+            let _ = recv_packet(self)?;
+        }
+
+        let mut rows: List<List<MysqlTextValue>> = List.new();
+        let mut more: Bool = false;
+        loop {
+            let p = recv_packet(self)?;
+            let payload = p.into_payload();
+            let pk = classify(payload.as_slice(), self.capabilities);
+            match pk {
+                SkError => {
+                    let err = match parse_err(payload.as_slice(), self.capabilities) {
+                        Ok(e)  => e,
+                        Err(_) => { return Err(bad_decode("multi.row.ERR")); }
+                    };
+                    self.state = McsReady;
+                    return Err(dberr_from_mysql(err));
+                }
+                SkEof => {
+                    // EOF (non-DEPRECATE_EOF mode) — parse the
+                    // EOF packet's status_flags. Format:
+                    //   0xFE + warnings:u16 + status_flags:u16.
+                    let pl = payload.as_slice();
+                    if (pl.len() as Int) >= 5 {
+                        let sf = ((pl[3] as Int) & 0xFF)
+                               | (((pl[4] as Int) & 0xFF) << 8);
+                        more = (sf & STATUS_MORE_RESULTS) != 0;
+                    }
+                    break;
+                }
+                SkOk => {
+                    // DEPRECATE_EOF mode — terminating OK packet
+                    // carries status_flags directly.
+                    let ok = match parse_ok(payload.as_slice(), self.capabilities) {
+                        Ok(p)  => p,
+                        Err(_) => { return Err(bad_decode("multi.row.OK")); }
+                    };
+                    more = (ok.status_flags & STATUS_MORE_RESULTS) != 0;
+                    break;
+                }
+                _ => {
+                    let row = match decode_text_row(payload.as_slice(), col_count) {
+                        Ok(r)  => r,
+                        Err(_) => { return Err(bad_decode("multi.DataRow")); }
+                    };
+                    rows.push(row);
+                }
+            }
+        }
+
+        Ok((MySimpleQueryResult {
+            columns: columns,
+            rows: rows,
+            affected_rows: 0,
+            last_insert_id: 0,
+            info: "".clone(),
+        }, more))
     }
 
     /// Convenience — run a SELECT and return only the rows. Drops the

@@ -73,6 +73,7 @@ public const SPINDLE_CLIENT_FLAGS: Int =
     | CAP_LONG_FLAG
     | CAP_DEPRECATE_EOF
     | CAP_MULTI_RESULTS
+    | CAP_MULTI_STATEMENTS
     | CAP_LOCAL_FILES;
 
 // -----------------------------------------------------------------------------
