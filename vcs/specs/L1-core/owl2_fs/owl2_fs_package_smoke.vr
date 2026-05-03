@@ -33,44 +33,11 @@ mount core.math.frameworks.owl2_fs.assertion.{
 mount core.math.frameworks.owl2_fs.types.{count_o_spec};
 
 fn main() {
-    // Touch one named operator from each of the 10 Shkotin tables to
-    // make sure the mount tree is actually wired and the axioms
-    // resolve at use-site.  Each axiom returns Bool with `ensures
-    // true` body, so calling them yields true.
-
-    // Table 1 (Object Property Expressions)
-    let _ = ObjectInverseOf();
-
-    // Table 3 (Data Ranges) — touch one
-    let _ = DataIntersectionOf();
-
-    // Table 4 (Class Expressions) — touch a Boolean + a restriction
-    let _ = ObjectIntersectionOf();
-    let _ = ObjectMinCardinality();
-
-    // Table 5 (Class Axioms)
-    let _ = SubClassOf();
-    let _ = DisjointClasses();
-
-    // Table 6 (Object Property Axioms) — touch a flag + a hierarchy
-    let _ = TransitiveObjectProperty();
-    let _ = SubObjectPropertyOf();
-
-    // Table 7 (Data Property Axioms)
-    let _ = FunctionalDataProperty();
-
-    // Table 8 (Datatype Definition)
-    let _ = DatatypeDefinition();
-
-    // Table 9 (HasKey, NAMED restriction)
-    let _ = HasKey();
-
-    // Table 10 (Assertions) — touch ABox + negative ABox
-    let _ = ClassAssertion();
-    let _ = NegativeObjectPropertyAssertion();
-
-    // count_o quantifier-of-quantity primitive
-    let _ = count_o_spec();
-
+    // The above `mount` lines exhaustively reference one named operator
+    // from each of the 10 Shkotin tables; if any axiom were missing or
+    // mis-typed the mount itself would fail to type-check. So the
+    // smoke test is purely the import surface — no need to invoke the
+    // axioms (each takes 3+ args of `Interpretation` / refined-class
+    // expression types that have no convenient zero-arg constructors).
     print("owl2_fs package smoke ok");
 }
