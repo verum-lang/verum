@@ -140,6 +140,17 @@ enum KernelKind {
     /// hashing of `KernelKind` discriminates this variant from the
     /// closely-related `Reduce(Sum)` engine.
     SumOfSquares,
+    /// Full-tensor `Σ exp(x)` — primitive used by `LogSumExp`
+    /// (`log Σ eˣ`).  Wired in Шаг 5d.  Note: the naive sum-of-exp
+    /// has overflow issues for large `x`; production callers that
+    /// need numerical stability should use the max-shifted variant
+    /// `m + log Σ e^(x − m)`, which is a Шаг-5e wiring point that
+    /// requires broadcast support.
+    SumOfExp,
+    /// Full-tensor count of non-zero elements (as a float scalar).
+    /// Backbone of `All` (`count == n`) and `Any` (`count > 0`).
+    /// Wired in Шаг 5d.
+    CountNonzero,
 }
 
 /// Wrapper that encapsulates the unsafe `Send + Sync` claim for an
@@ -243,7 +254,19 @@ impl MlirJitBackend {
     // and returns a new scalar.  All operate on F32/F64 only.
     // -----------------------------------------------------------------
 
-    fn invoke_sum_of_squares(&self, a: &TensorHandle) -> Option<TensorHandle> {
+    fn invoke_sum_of_exp(&self, a: &TensorHandle) -> Option<TensorHandle> {
+        self.invoke_unary_kernel(KernelKind::SumOfExp, a)
+    }
+
+    fn invoke_count_nonzero(&self, a: &TensorHandle) -> Option<TensorHandle> {
+        self.invoke_unary_kernel(KernelKind::CountNonzero, a)
+    }
+
+    /// Generic invocation helper for the family of single-input,
+    /// scalar-output kernels (`SumOfSquares` / `SumOfExp` /
+    /// `CountNonzero`).  All three share the same `(*const T, *mut T,
+    /// i64)` ABI; the only thing that differs is the kernel body.
+    fn invoke_unary_kernel(&self, kind: KernelKind, a: &TensorHandle) -> Option<TensorHandle> {
         if !is_float_dtype(a.dtype) {
             return None;
         }
@@ -252,7 +275,7 @@ impl MlirJitBackend {
             return None;
         }
         let out = TensorHandle::zeros(&[], a.dtype)?;
-        let holder = self.get_or_compile(KernelKind::SumOfSquares, a.dtype)?;
+        let holder = self.get_or_compile(kind, a.dtype)?;
         let a_data = a.data.as_ref()?;
         let out_data = out.data.as_ref()?;
         let mut a_ptr: *const u8 = unsafe { (*a_data.as_ptr()).as_ptr() };
@@ -268,6 +291,69 @@ impl MlirJitBackend {
             return None;
         }
         Some(out)
+    }
+
+    fn scalar_apply_log(&self, scalar: &TensorHandle, dtype: DType) -> Option<()> {
+        let data = scalar.data.as_ref()?;
+        unsafe {
+            match dtype {
+                DType::F32 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f32;
+                    *p = (*p).ln();
+                }
+                DType::F64 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f64;
+                    *p = (*p).ln();
+                }
+                _ => return None,
+            }
+        }
+        Some(())
+    }
+
+    /// Set the scalar to `1.0` if it equals `n_target`, else `0.0`.
+    /// Used by `All`: count of non-zero equals total → all are true.
+    fn scalar_set_eq_n(&self, scalar: &TensorHandle, n_target: usize, dtype: DType) -> Option<()> {
+        let data = scalar.data.as_ref()?;
+        let target = n_target as f64;
+        unsafe {
+            match dtype {
+                DType::F32 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f32;
+                    *p = if (*p as f64 - target).abs() < 0.5 { 1.0 } else { 0.0 };
+                }
+                DType::F64 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f64;
+                    *p = if (*p - target).abs() < 0.5 { 1.0 } else { 0.0 };
+                }
+                _ => return None,
+            }
+        }
+        Some(())
+    }
+
+    /// Set the scalar to `1.0` if `*scalar > 0`, else `0.0`.
+    /// Used by `Any`: count of non-zero > 0 → at least one is true.
+    fn scalar_set_gt_zero(&self, scalar: &TensorHandle, dtype: DType) -> Option<()> {
+        let data = scalar.data.as_ref()?;
+        unsafe {
+            match dtype {
+                DType::F32 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f32;
+                    *p = if *p > 0.5 { 1.0 } else { 0.0 };
+                }
+                DType::F64 => {
+                    let p = (*data.as_ptr()).as_mut_ptr() as *mut f64;
+                    *p = if *p > 0.5 { 1.0 } else { 0.0 };
+                }
+                _ => return None,
+            }
+        }
+        Some(())
+    }
+
+    fn invoke_sum_of_squares(&self, a: &TensorHandle) -> Option<TensorHandle> {
+        self.invoke_unary_kernel(KernelKind::SumOfSquares, a)
     }
 
     fn scalar_div_by_n(&self, scalar: &TensorHandle, n: usize, dtype: DType) -> Option<()> {
@@ -598,6 +684,31 @@ impl Backend for MlirJitBackend {
                 let v = self.reduce(a, TensorReduceOp::Var, axis)?;
                 self.scalar_apply_sqrt(&v, a.dtype)?;
                 return Some(v);
+            }
+            TensorReduceOp::LogSumExp => {
+                // Naive log Σ eˣ — fast and correct for small / well-
+                // conditioned inputs.  Production code that needs
+                // numerical stability against large positive x should
+                // pre-shift by max (Шаг 5e once broadcast lands).
+                let s = self.invoke_sum_of_exp(a)?;
+                self.scalar_apply_log(&s, a.dtype)?;
+                return Some(s);
+            }
+            TensorReduceOp::All => {
+                // All non-zero ⇔ count of non-zero == n.  Result is
+                // 1.0 (all true) or 0.0 (some zero).  Float result
+                // matches PyTorch's bool-as-uint8 / NumPy's bool
+                // tensors lowered to float when dtype is F32/F64.
+                let count = self.invoke_count_nonzero(a)?;
+                self.scalar_set_eq_n(&count, a.numel, a.dtype)?;
+                return Some(count);
+            }
+            TensorReduceOp::Any => {
+                // Any non-zero ⇔ count > 0.  Same float-bool encoding
+                // as All.
+                let count = self.invoke_count_nonzero(a)?;
+                self.scalar_set_gt_zero(&count, a.dtype)?;
+                return Some(count);
             }
             _ => {}
         }
@@ -1025,6 +1136,92 @@ fn build_sum_of_squares_kernel_text(dtype: DType) -> Option<String> {
     ))
 }
 
+/// Build the MLIR text for `Σ exp(x)` over a flat buffer.
+///
+/// Same scaffold as `build_sum_of_squares_kernel_text` but with
+/// `math.exp` between the load and the accumulator add.  Used as
+/// the primitive for `LogSumExp` (`log Σ eˣ`) — we materialise the
+/// scalar `Σ eˣ` here and the caller applies `log` in Rust.
+///
+/// Numerical caveat: this is the naive sum-of-exp.  For inputs with
+/// very large positive `x`, the sum overflows; the production form
+/// is `m + log Σ e^(x − m)` where `m = max(x)`, which requires
+/// broadcast subtraction (Шаг 5e wiring point).
+fn build_sum_of_exp_kernel_text(dtype: DType) -> Option<String> {
+    let elem_ty = mlir_elem_type(dtype)?;
+    if !is_float_dtype(dtype) {
+        return None;
+    }
+    let zero_lit = if dtype == DType::F32 { "0.0 : f32" } else { "0.0 : f64" };
+    Some(format!(
+        r#"module {{
+  func.func @kernel(%a: !llvm.ptr, %out: !llvm.ptr, %n: i64) attributes {{ llvm.emit_c_interface }} {{
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %f0 = arith.constant {zero_lit}
+    cf.br ^loop(%c0, %f0 : i64, {elem})
+  ^loop(%i: i64, %acc: {elem}):
+    %done = arith.cmpi sge, %i, %n : i64
+    cf.cond_br %done, ^store, ^body
+  ^body:
+    %ap = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+    %va = llvm.load %ap : !llvm.ptr -> {elem}
+    %ev = math.exp %va : {elem}
+    %new_acc = arith.addf %acc, %ev : {elem}
+    %i_next = arith.addi %i, %c1 : i64
+    cf.br ^loop(%i_next, %new_acc : i64, {elem})
+  ^store:
+    llvm.store %acc, %out : {elem}, !llvm.ptr
+    return
+  }}
+}}
+"#,
+        elem = elem_ty,
+    ))
+}
+
+/// Build the MLIR text for a count-of-non-zero reduction.
+///
+/// The kernel produces a float scalar equal to `|{ i : x[i] ≠ 0 }|`.
+/// The non-zero predicate uses `arith.cmpf one` (ordered-not-equal:
+/// excludes NaN-vs-NaN equality), then sign-extends the i1 result to
+/// the element type via `arith.uitofp` so we can accumulate with the
+/// existing `arith.addf` chain.  Backbone of the boolean reductions
+/// `All` (`count == n`) and `Any` (`count > 0`).
+fn build_count_nonzero_kernel_text(dtype: DType) -> Option<String> {
+    let elem_ty = mlir_elem_type(dtype)?;
+    if !is_float_dtype(dtype) {
+        return None;
+    }
+    let zero_lit = if dtype == DType::F32 { "0.0 : f32" } else { "0.0 : f64" };
+    Some(format!(
+        r#"module {{
+  func.func @kernel(%a: !llvm.ptr, %out: !llvm.ptr, %n: i64) attributes {{ llvm.emit_c_interface }} {{
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %f0 = arith.constant {zero_lit}
+    cf.br ^loop(%c0, %f0 : i64, {elem})
+  ^loop(%i: i64, %acc: {elem}):
+    %done = arith.cmpi sge, %i, %n : i64
+    cf.cond_br %done, ^store, ^body
+  ^body:
+    %ap = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+    %va = llvm.load %ap : !llvm.ptr -> {elem}
+    %nz = arith.cmpf one, %va, %f0 : {elem}
+    %incr = arith.uitofp %nz : i1 to {elem}
+    %new_acc = arith.addf %acc, %incr : {elem}
+    %i_next = arith.addi %i, %c1 : i64
+    cf.br ^loop(%i_next, %new_acc : i64, {elem})
+  ^store:
+    llvm.store %acc, %out : {elem}, !llvm.ptr
+    return
+  }}
+}}
+"#,
+        elem = elem_ty,
+    ))
+}
+
 /// Build the MLIR text for a row-major 2D matmul kernel using
 /// `linalg.matmul` over dynamically-shaped memrefs.
 ///
@@ -1278,6 +1475,8 @@ fn compile_kernel(
         KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
         KernelKind::Reduce(op) => build_reduce_kernel_text(op, dtype)?,
         KernelKind::SumOfSquares => build_sum_of_squares_kernel_text(dtype)?,
+        KernelKind::SumOfExp => build_sum_of_exp_kernel_text(dtype)?,
+        KernelKind::CountNonzero => build_count_nonzero_kernel_text(dtype)?,
     };
 
     // Persistent on-disk cache lookup.  Hits skip MLIR parse + every
@@ -1536,15 +1735,34 @@ mod tests {
     }
 
     #[test]
-    fn reduce_falls_through_for_unsupported_op() {
-        // LogSumExp / All / Any deferred to Шаг 5d.  Var / Std / Norm
-        // graduated in Шаг 5c (see dedicated tests below).  Mean
-        // graduated in Шаг 5b.
+    fn reduce_full_op_coverage_pinned() {
+        // After Шаг 5d every `TensorReduceOp` variant has a JIT path
+        // for F32 full-axis reduction.  The catch-all guard now
+        // covers only the dimensions outside the JIT matrix
+        // (axis-specific reductions, integer dtypes) — tested in
+        // their own dedicated `*_falls_through_*` pins.
         let backend = MlirJitBackend::new();
         let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
-        assert!(backend.reduce(&a, TensorReduceOp::LogSumExp, None).is_none());
-        assert!(backend.reduce(&a, TensorReduceOp::All, None).is_none());
-        assert!(backend.reduce(&a, TensorReduceOp::Any, None).is_none());
+        fill_f32(&a, &[1.0, 2.0, 3.0, 4.0]);
+        for op in [
+            TensorReduceOp::Sum,
+            TensorReduceOp::Prod,
+            TensorReduceOp::Max,
+            TensorReduceOp::Min,
+            TensorReduceOp::Mean,
+            TensorReduceOp::Var,
+            TensorReduceOp::Std,
+            TensorReduceOp::Norm,
+            TensorReduceOp::LogSumExp,
+            TensorReduceOp::All,
+            TensorReduceOp::Any,
+        ] {
+            assert!(
+                backend.reduce(&a, op, None).is_some(),
+                "reduce({:?}) returned None — every TensorReduceOp variant must have a JIT path after Шаг 5d",
+                op
+            );
+        }
     }
 
     // -----------------------------------------------------------------
@@ -1620,6 +1838,77 @@ mod tests {
             let p = (*r.data.as_ref().unwrap().as_ptr()).as_ptr() as *const f64;
             assert!((*p - 14.0_f64.sqrt()).abs() < 1e-12);
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Шаг 5d coverage: LogSumExp / All / Any
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn reduce_logsumexp_executes() {
+        // log(eˣ + eʸ + e^z) for [0, 0, 0] = log(3) ≈ 1.0986
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[3], DType::F32).unwrap();
+        fill_f32(&a, &[0.0, 0.0, 0.0]);
+        let r = backend.reduce(&a, TensorReduceOp::LogSumExp, None).unwrap();
+        let v = read_f32(&r, 1);
+        assert!((v[0] - 3.0_f32.ln()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn reduce_logsumexp_arbitrary() {
+        // Arbitrary-input check.
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F64).unwrap();
+        unsafe {
+            let p = (*a.data.as_ref().unwrap().as_ptr()).as_mut_ptr() as *mut f64;
+            *p.add(0) = 1.0;
+            *p.add(1) = 2.0;
+            *p.add(2) = 3.0;
+            *p.add(3) = 4.0;
+        }
+        let r = backend.reduce(&a, TensorReduceOp::LogSumExp, None).unwrap();
+        let expected: f64 = (1.0_f64.exp() + 2.0_f64.exp() + 3.0_f64.exp() + 4.0_f64.exp()).ln();
+        unsafe {
+            let p = (*r.data.as_ref().unwrap().as_ptr()).as_ptr() as *const f64;
+            assert!((*p - expected).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn reduce_all_true_when_no_zeros() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[1.0, -2.0, 3.0, 0.5]);
+        let r = backend.reduce(&a, TensorReduceOp::All, None).unwrap();
+        assert!((read_f32(&r, 1)[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reduce_all_false_when_one_zero() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[1.0, 0.0, 3.0, 4.0]);
+        let r = backend.reduce(&a, TensorReduceOp::All, None).unwrap();
+        assert!(read_f32(&r, 1)[0].abs() < 1e-6);
+    }
+
+    #[test]
+    fn reduce_any_true_when_one_nonzero() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[0.0, 0.0, 7.0, 0.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Any, None).unwrap();
+        assert!((read_f32(&r, 1)[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reduce_any_false_when_all_zero() {
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[0.0, 0.0, 0.0, 0.0]);
+        let r = backend.reduce(&a, TensorReduceOp::Any, None).unwrap();
+        assert!(read_f32(&r, 1)[0].abs() < 1e-6);
     }
 
     #[test]
