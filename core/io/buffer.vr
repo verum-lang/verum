@@ -655,6 +655,10 @@ public type BufferCursor<T> is {
     pos: Int,
 };
 
+/// Public alias — `Cursor` matches std-library naming conventions
+/// where the receiver type names the wrapper, not the contents.
+public type Cursor<T> is BufferCursor<T>;
+
 implement<T> BufferCursor<T> {
     /// Create a new BufferCursor wrapping the given buffer.
     @inline(always)

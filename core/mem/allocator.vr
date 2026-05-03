@@ -500,6 +500,10 @@ public type AllocPageHeader is {
     reserved: [UInt32; 4],
 };
 
+/// Public alias — `PageHeader` is the canonical short name; legacy
+/// internal call sites continue using `AllocPageHeader`.
+public type PageHeader is AllocPageHeader;
+
 /// Page header size
 public const PAGE_HEADER_SIZE: Int = 64;
 
