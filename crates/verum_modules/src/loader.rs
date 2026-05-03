@@ -174,6 +174,16 @@ pub fn validate_module_headers_against_filesystem(
             let submodule_name: Text = Text::from(module_decl.name.name.as_str());
             let span = module_decl.span;
 
+            // A dotted-path declaration (`module core.intrinsics.runtime.time;`)
+            // at the top of a file is the file's OWN module-path header, not
+            // a forward declaration of a submodule.  Skip validation: the
+            // header is positional metadata for the type-checker, not a
+            // promise that a sibling source file exists at
+            // `<dotted-name>.vr`.
+            if submodule_name.as_str().contains('.') {
+                continue;
+            }
+
             match &module_decl.items {
                 Maybe::None => {
                     // Forward decl. Check that at least one of the
@@ -1054,7 +1064,7 @@ impl ModuleLoader {
         let span = Span::new(0, 0, file_id); // Synthetic span
 
         let mut segments = List::new();
-        segments.push(PathSegment::Name(Ident::new(Text::from("std"), span)));
+        segments.push(PathSegment::Name(Ident::new(Text::from("core"), span)));
         segments.push(PathSegment::Name(Ident::new(Text::from("prelude"), span)));
 
         let path = Path::new(segments, span);

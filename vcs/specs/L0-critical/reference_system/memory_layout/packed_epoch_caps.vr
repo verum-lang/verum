@@ -63,12 +63,12 @@ fn test_capability_flags() {
     let mut_ref: &mut Int = &mut value2;
 
     // Immutable should have read but not write
-    assert(immut_ref.capabilities().can_read());
-    assert(!immut_ref.capabilities().can_write());
+    assert(immut_ref.can_read());
+    assert(!immut_ref.can_write());
 
     // Mutable should have both read and write
-    assert(mut_ref.capabilities().can_read());
-    assert(mut_ref.capabilities().can_write());
+    assert(mut_ref.can_read());
+    assert(mut_ref.can_write());
 }
 
 /// Test epoch value extraction from references

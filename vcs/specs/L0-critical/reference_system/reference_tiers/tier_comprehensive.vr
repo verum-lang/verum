@@ -61,8 +61,8 @@ fn test_tier_0_managed_mutable() {
     assert(*mutable == 100);
 
     // Mutable reference has write capability
-    assert(mut_ref.capabilities().can_write());
-    assert(mut_ref.capabilities().can_read());
+    assert(mut_ref.can_write());
+    assert(mut_ref.can_read());
 }
 
 /// Test generation tracking distinguishes allocations

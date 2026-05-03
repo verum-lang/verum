@@ -98,18 +98,18 @@ fn test_capability_tracking() {
 
     // Immutable reference has read capability
     let immut_ref: &Int = &*value_for_immut;
-    assert(immut_ref.capabilities().can_read());
-    assert(!immut_ref.capabilities().can_write());
+    assert(immut_ref.can_read());
+    assert(!immut_ref.can_write());
 
     // Mutable reference has read and write
     let mut_ref: &mut Int = &mut value_for_mut;
-    assert(mut_ref.capabilities().can_read());
-    assert(mut_ref.capabilities().can_write());
+    assert(mut_ref.can_read());
+    assert(mut_ref.can_write());
 
     // Capability downgrade is allowed (mutable -> immutable)
     let downgraded: &Int = &*mut_ref;
-    assert(downgraded.capabilities().can_read());
-    assert(!downgraded.capabilities().can_write());
+    assert(downgraded.can_read());
+    assert(!downgraded.can_write());
 }
 
 /// Test ThinRef structure components

@@ -225,6 +225,23 @@ fn install_canonical_module_aliases(registry: &mut ModuleRegistry) {
     // Semantic shorthand aliases — let user code address well-known
     // modules under intuitive short names without having to memorise
     // their exact submodule path.
+    //
+    // `std.*` is the historical alias root used by the loader's
+    // synthetic prelude import (`use std.prelude.*;`).  The Verum
+    // stdlib lives at `core.*`, so we install the `std → core` family
+    // here so the prelude injection in `verum_modules::loader::
+    // inject_prelude` resolves.  Without this, every module would
+    // silently lose access to Maybe/Result/Ok/Err/etc.
+    registry.register_path_alias("std", "core");
+    registry.register_path_alias("std.prelude", "core.prelude");
+    registry.register_path_alias("std.base", "core.base");
+    registry.register_path_alias("std.maybe", "core.base.maybe");
+    registry.register_path_alias("std.result", "core.base.result");
+    registry.register_path_alias("std.collections", "core.collections");
+    registry.register_path_alias("std.io", "core.io");
+    registry.register_path_alias("std.sync", "core.sync");
+    registry.register_path_alias("std.time", "core.time");
+    registry.register_path_alias("std.math", "core.math");
     registry.register_path_alias("core.memory", "core.base.memory");
     registry.register_path_alias("core.maybe", "core.base.maybe");
     registry.register_path_alias("core.result", "core.base.result");

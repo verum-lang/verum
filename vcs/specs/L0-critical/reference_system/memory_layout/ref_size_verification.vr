@@ -89,7 +89,7 @@ fn show_thin_ref_layout() {
     let epoch_caps = ref_val.epoch_caps();
 
     print("ThinRef layout:");
-    print("  Pointer:    " + ptr.to_string());
+    print("  Pointer:    " + (ptr as Int).to_string());
     print("  Generation: " + generation.to_string());
     print("  Epoch/Caps: " + epoch_caps.to_string());
 }
@@ -111,7 +111,7 @@ fn show_fat_ref_layout() {
     let len = slice_ref.len();
 
     print("FatRef layout:");
-    print("  Pointer: " + ptr.to_string());
+    print("  Pointer: " + (ptr as Int).to_string());
     print("  Generation: " + generation.to_string());
     print("  Length: " + len.to_string());
 }

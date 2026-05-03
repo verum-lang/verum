@@ -9,7 +9,7 @@ mount sys.mmio;
 
 /// Test ReadOnly register - can only read.
 fn test_readonly_register() {
-    let status_reg: Register<UInt32, ReadOnly> = Register.at(0x4000_0000);
+    let status_reg: MmioRegister<UInt32, ReadOnly> = MmioRegister.at(0x4000_0000);
 
     // Should compile: read operation
     let status = status_reg.read();
@@ -19,7 +19,7 @@ fn test_readonly_register() {
 
 /// Test WriteOnly register - can only write.
 fn test_writeonly_register() {
-    let cmd_reg: Register<UInt32, WriteOnly> = Register.at(0x4000_0004);
+    let cmd_reg: MmioRegister<UInt32, WriteOnly> = MmioRegister.at(0x4000_0004);
 
     // Should compile: write operation
     cmd_reg.write(0x0001);
@@ -29,7 +29,7 @@ fn test_writeonly_register() {
 
 /// Test ReadWrite register - can read and write.
 fn test_readwrite_register() {
-    let config_reg: Register<UInt32, ReadWrite> = Register.at(0x4000_0008);
+    let config_reg: MmioRegister<UInt32, ReadWrite> = MmioRegister.at(0x4000_0008);
 
     // Should compile: both operations
     let current = config_reg.read();
@@ -41,7 +41,7 @@ fn test_readwrite_register() {
 
 /// Test WriteOneToClear register - read and write-1-to-clear.
 fn test_write_one_to_clear() {
-    let int_status: Register<UInt32, WriteOneToClear> = Register.at(0x4000_000C);
+    let int_status: MmioRegister<UInt32, WriteOneToClear> = MmioRegister.at(0x4000_000C);
 
     // Read to check which interrupts are pending
     let pending = int_status.read();
@@ -55,7 +55,7 @@ fn test_write_one_to_clear() {
 
 /// Test WriteOneToSet register - read and write-1-to-set.
 fn test_write_one_to_set() {
-    let int_enable: Register<UInt32, WriteOneToSet> = Register.at(0x4000_0010);
+    let int_enable: MmioRegister<UInt32, WriteOneToSet> = MmioRegister.at(0x4000_0010);
 
     // Read current state
     let enabled = int_enable.read();

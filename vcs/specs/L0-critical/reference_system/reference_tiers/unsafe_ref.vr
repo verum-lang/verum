@@ -91,7 +91,7 @@ fn test_managed_ref_overhead_components() {
     assert(ref_val.is_epoch_valid());
 
     // Component 4: Capability bits
-    assert(ref_val.capabilities().can_read());
+    assert(ref_val.can_read());
 
     // Total Tier 0 overhead: ~15ns per access
     // Tier 2 (&unsafe): 0ns per access (all checks skipped)

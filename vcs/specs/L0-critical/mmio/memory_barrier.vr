@@ -42,8 +42,8 @@ fn test_convenience_barriers() {
 
 /// Test barrier usage pattern for device initialization.
 fn test_device_init_pattern() {
-    let ctrl: Register<UInt32, ReadWrite> = Register.at(0x4000_0000);
-    let data: Register<UInt32, WriteOnly> = Register.at(0x4000_0004);
+    let ctrl: MmioRegister<UInt32, ReadWrite> = MmioRegister.at(0x4000_0000);
+    let data: MmioRegister<UInt32, WriteOnly> = MmioRegister.at(0x4000_0004);
 
     // Configure the device
     ctrl.write(0x0001);

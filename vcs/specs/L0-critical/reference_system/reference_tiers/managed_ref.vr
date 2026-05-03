@@ -92,7 +92,7 @@ fn test_managed_ref_structure() {
     let generation = ref_val.stored_generation();
     let epoch_caps = ref_val.epoch_caps();
 
-    print("Pointer: " + ptr.to_string());
+    print("Pointer: " + (ptr as Int).to_string());
     print("Generation: " + generation.to_string());
     print("Epoch+Caps: " + epoch_caps.to_string());
 }
