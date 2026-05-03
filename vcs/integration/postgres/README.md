@@ -142,3 +142,11 @@ Test list per `internal/specs/database.md` follow-up:
   with 3 typed fields; CREATE TYPE smoke_pair (n int4, s text)
   + SELECT ROW(99, 'beta')::smoke_pair exercises user-defined
   composite path (spec §6.1.4 composite codec)
+
+Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
+proto_version 2+): the decoder now recognises these tags
+end-to-end (exercised through t11_replication.vr's pump if the
+server emits them). Triggering a real streamed transaction
+requires `logical_decoding_work_mem` lower than the test
+transaction's size; that fixture isn't wired today so the
+streaming path is decoder-tested via the existing pump.
