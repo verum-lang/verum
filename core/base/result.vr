@@ -7,16 +7,12 @@
 
 // Import intrinsics as functions
 
-// TODO(ats-v): @arch_module declaration deferred — line 16 mounts
-// `core.intrinsics.{sleep_ms, random_float}` for the retry helpers
-// (lines 631, 921), creating a `core.base.result → core.intrinsics`
-// edge that combined with `core.intrinsics → core.intrinsics.control →
-// core.base.result` forms a real cycle.  Architectural fix: extract
-// retry-with-backoff into a separate module that mounts both
-// `core.base.result` and `core.intrinsics`, leaving the Result type
-// itself foundation-clean.
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.base.result;
-mount core.intrinsics.{sleep_ms, random_float};
 
 // Import types from other core modules
 mount core.maybe.{Maybe, Some, None};
@@ -549,167 +545,6 @@ implement<T, E: Default> FromResidual<Maybe<Never>> for Result<T, E> {
 // Spec: docs/improvements.md Section 16 - Error Handling Evolution
 // =============================================================================
 
-implement<T, E> Result<T, E> {
-    // =========================================================================
-    // Retry Combinators
-    // =========================================================================
-
-    /// Retry an operation with exponential backoff.
-    ///
-
-    /// Retries the operation up to `max_attempts` times with exponential
-    /// backoff between retries. Initial delay is `initial_delay_ms`,
-    /// doubling each retry up to `max_delay_ms`.
-    ///
-
-    /// # Example
-    /// ```verum
-    /// let result = Result.retry(3, 100, 5000, || fetch_data());
-    /// ```
-    fn retry<F: fn() -> Result<T, E>>(
-        max_attempts: Int,
-        initial_delay_ms: Int,
-        max_delay_ms: Int,
-        operation: F
-    ) -> Result<T, E>
-    where E: Clone {
-        Result.retry_with_strategy(
-            operation,
-            RetryOptions {
-                max_attempts: max_attempts,
-                strategy: RetryBackoff.Exponential {
-                    initial_ms: initial_delay_ms,
-                    max_ms: max_delay_ms,
-                    multiplier: 2.0,
-                },
-                should_retry: |_| true,
-            }
-        )
-    }
-
-    /// Retry with a custom retry configuration.
-    ///
-
-    /// # Example
-    /// ```verum
-    /// let config = RetryOptions {
-    ///  max_attempts: 5,
-    ///  strategy: RetryBackoff.Linear { delay_ms: 500 },
-    ///  should_retry: |e| e.is_retryable(),
-    /// };
-    /// let result = Result.retry_with_strategy(|| risky_op(), config);
-    /// ```
-    fn retry_with_strategy<F: fn() -> Result<T, E>>(
-        operation: F,
-        config: RetryOptions<E>
-    ) -> Result<T, E>
-    where E: Clone {
-        // Pre-condition: `max_attempts >= 1`. Calling with 0 (or
-        // a negative value) would skip the loop entirely and
-        // panic on the post-loop fallthrough — a poor failure
-        // mode for a misconfiguration the API can detect at
-        // entry. Assert so the contract violation surfaces with
-        // a precise message instead of "retry: no attempts made"
-        // miles below.
-        assert(
-            config.max_attempts >= 1,
-            "Result.retry_with_strategy: max_attempts must be >= 1",
-        );
-
-        let mut attempt = 0;
-        let mut last_error: Maybe<E> = None;
-
-        while attempt < config.max_attempts {
-            match operation() {
-                Ok(v) => return Ok(v),
-                Err(e) => {
-                    if attempt + 1 >= config.max_attempts {
-                        return Err(e);
-                    }
-                    if !(config.should_retry)(&e) {
-                        return Err(e);
-                    }
-                    last_error = Some(e.clone());
-                    let delay = config.strategy.delay_for_attempt(attempt);
-                    sleep_ms(delay);
-                    attempt = attempt + 1;
-                }
-            }
-        }
-
-        // Provably dead given `max_attempts >= 1` (asserted
-        // above): the loop body always returns on the final
-        // iteration. Kept as a defensive fallback so any future
-        // refactor of the loop exit conditions still produces a
-        // sensible diagnostic instead of UB.
-        match last_error {
-            Some(e) => Err(e),
-            None => panic("retry: invariant violation — loop exited without returning"),
-        }
-    }
-
-    /// Retry with linear backoff.
-    ///
-
-    /// Retries with constant delay between attempts.
-    fn retry_linear<F: fn() -> Result<T, E>>(
-        max_attempts: Int,
-        delay_ms: Int,
-        operation: F
-    ) -> Result<T, E>
-    where E: Clone {
-        Result.retry_with_strategy(
-            operation,
-            RetryOptions {
-                max_attempts: max_attempts,
-                strategy: RetryBackoff.Linear { delay_ms: delay_ms },
-                should_retry: |_| true,
-            }
-        )
-    }
-
-    /// Retry with no delay between attempts.
-    fn retry_immediate<F: fn() -> Result<T, E>>(
-        max_attempts: Int,
-        operation: F
-    ) -> Result<T, E>
-    where E: Clone {
-        Result.retry_with_strategy(
-            operation,
-            RetryOptions {
-                max_attempts: max_attempts,
-                strategy: RetryBackoff.None,
-                should_retry: |_| true,
-            }
-        )
-    }
-
-    /// Retry with jittered exponential backoff.
-    ///
-
-    /// Adds random jitter to prevent thundering herd problem.
-    fn retry_jittered<F: fn() -> Result<T, E>>(
-        max_attempts: Int,
-        initial_delay_ms: Int,
-        max_delay_ms: Int,
-        operation: F
-    ) -> Result<T, E>
-    where E: Clone {
-        Result.retry_with_strategy(
-            operation,
-            RetryOptions {
-                max_attempts: max_attempts,
-                strategy: RetryBackoff.ExponentialJitter {
-                    initial_ms: initial_delay_ms,
-                    max_ms: max_delay_ms,
-                    multiplier: 2.0,
-                    jitter_factor: 0.1,
-                },
-                should_retry: |_| true,
-            }
-        )
-    }
-
     // =========================================================================
     // Tap Combinators (Side Effects)
     // =========================================================================
@@ -893,92 +728,6 @@ implement<T, E> Result<T, E> {
     }
 }
 
-// =============================================================================
-// Backoff Strategy
-// Spec: docs/improvements.md Section 16 - Rich combinators
-// =============================================================================
-
-/// Strategy for calculating delay between retry attempts.
-public type RetryBackoff is
-    /// No delay between retries.
-    | None
-    /// Constant delay between retries.
-    | Linear { delay_ms: Int }
-    /// Exponential backoff: delay doubles each attempt.
-    | Exponential { initial_ms: Int, max_ms: Int, multiplier: Float }
-    /// Exponential with random jitter to prevent thundering herd.
-    | ExponentialJitter { initial_ms: Int, max_ms: Int, multiplier: Float, jitter_factor: Float };
-
-implement RetryBackoff {
-    /// Calculate delay for the given attempt number (0-indexed).
-    public fn delay_for_attempt(&self, attempt: Int) -> Int {
-        match self {
-            None => 0,
-            Linear { delay_ms } => *delay_ms,
-            Exponential { initial_ms, max_ms, multiplier } => {
-                let delay = (*initial_ms as Float) * multiplier.pow(attempt as Float);
-                delay.min(*max_ms as Float).round() as Int
-            }
-            ExponentialJitter { initial_ms, max_ms, multiplier, jitter_factor } => {
-                let base_delay = (*initial_ms as Float) * multiplier.pow(attempt as Float);
-                let jitter = base_delay * jitter_factor * random_float();
-                let delay = base_delay + jitter;
-                delay.min(*max_ms as Float).round() as Int
-            }
-        }
-    }
-}
-
-// =============================================================================
-// Retry Configuration
-// =============================================================================
-
-/// Configuration for retry behavior.
-public type RetryOptions<E> is {
-    /// Maximum number of attempts (including initial attempt).
-    max_attempts: Int,
-    /// Backoff strategy between attempts.
-    strategy: RetryBackoff,
-    /// Predicate to determine if error is retryable.
-    should_retry: fn(&E) -> Bool,
-};
-
-implement<E> RetryOptions<E> {
-    /// Create a simple config with max attempts and no delay.
-    public fn simple(max_attempts: Int) -> RetryOptions<E> {
-        RetryOptions {
-            max_attempts: max_attempts,
-            strategy: RetryBackoff.None,
-            should_retry: |_| true,
-        }
-    }
-
-    /// Create config with exponential backoff.
-    public fn exponential(
-        max_attempts: Int,
-        initial_ms: Int,
-        max_ms: Int
-    ) -> RetryOptions<E> {
-        RetryOptions {
-            max_attempts: max_attempts,
-            strategy: RetryBackoff.Exponential {
-                initial_ms: initial_ms,
-                max_ms: max_ms,
-                multiplier: 2.0,
-            },
-            should_retry: |_| true,
-        }
-    }
-
-    /// Set a custom should_retry predicate.
-    public fn with_filter<P: fn(&E) -> Bool>(self, predicate: P) -> RetryOptions<E> {
-        RetryOptions {
-            max_attempts: self.max_attempts,
-            strategy: self.strategy,
-            should_retry: predicate,
-        }
-    }
-}
 
 // =============================================================================
 // Context Error - Error with context chain
@@ -1767,7 +1516,10 @@ public fn partition_results<T, E, I: Iterator<Item = Result<T, E>>>(mut iter: I)
 }
 
 // =============================================================================
-// Note: sleep_ms and random_float are imported from stdlib.intrinsics at the top
-// of this file and used directly by RetryBackoff.delay_for_attempt().
+// Note: retry-with-backoff combinators (RetryBackoff / RetryOptions /
+// retry / retry_with_strategy / retry_linear / retry_immediate /
+// retry_jittered) live in `core/base/retry.vr` — extracted to break a
+// real architectural cycle (Result → intrinsics → intrinsics.control
+// → Result).  Use `mount core.base.retry.{retry, ...};` from callers.
 // =============================================================================
 
