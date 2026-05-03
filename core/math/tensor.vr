@@ -109,6 +109,9 @@ public type TensorLayout is
     | ColumnMajor     // Fortran-style
     | Strided(List<ISize>);  // Custom strides
 
+/// Public alias — short canonical name.
+public type Layout is TensorLayout;
+
 implement TensorLayout {
     // Compute strides for given shape
     public fn compute_strides(&self, shape: &[USize]) -> List<ISize> {

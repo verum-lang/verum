@@ -542,11 +542,17 @@ public type Agent is protocol {
 // AgentMessage role in conversation
 public type AgentRole is System | User | Assistant | ToolResult;
 
+/// Public alias — short canonical name.
+public type Role is AgentRole;
+
 // Conversation message
 public type AgentMessage is {
     role: AgentRole,
     content: Text,
 };
+
+/// Public alias — short canonical name.
+public type Message is AgentMessage;
 
 // LLM-based agent with tool use capability
 public type LLMAgent<M, Tok> is {
