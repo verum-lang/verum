@@ -314,13 +314,13 @@ impl CodegenTiersPhase {
     fn codegen_aot_llvm(
         &mut self,
         modules: &[Module],
-        llvm_ctx: &inkwell::context::Context,
+        llvm_ctx: &verum_llvm::context::Context,
     ) -> Result<()> {
-        use inkwell::targets::{
-            CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
-        };
         use verum_codegen::{
             AotCompiler, CBGROptimizationPass, Codegen, LtoManager, LtoMode, OptimizationPipeline,
+        };
+        use verum_llvm::targets::{
+            CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
         };
 
         tracing::debug!("Generating AOT LLVM code with full optimization");
@@ -330,7 +330,7 @@ impl CodegenTiersPhase {
 
         // Determine target triple
         let target_triple = match &self.aot_config.target_triple {
-            Some(triple) => inkwell::targets::TargetTriple::create(triple.as_str()),
+            Some(triple) => verum_llvm::targets::TargetTriple::create(triple.as_str()),
             None => TargetMachine::get_default_triple(),
         };
 
@@ -340,11 +340,11 @@ impl CodegenTiersPhase {
 
         // Convert optimization level
         let opt_level = match self.aot_config.opt_level {
-            AotOptLevel::O0 => inkwell::OptimizationLevel::None,
-            AotOptLevel::O1 => inkwell::OptimizationLevel::Less,
-            AotOptLevel::O2 => inkwell::OptimizationLevel::Default,
+            AotOptLevel::O0 => verum_llvm::OptimizationLevel::None,
+            AotOptLevel::O1 => verum_llvm::OptimizationLevel::Less,
+            AotOptLevel::O2 => verum_llvm::OptimizationLevel::Default,
             AotOptLevel::O3 | AotOptLevel::Os | AotOptLevel::Oz => {
-                inkwell::OptimizationLevel::Aggressive
+                verum_llvm::OptimizationLevel::Aggressive
             }
         };
 
@@ -953,7 +953,7 @@ impl CompilationPhase for CodegenTiersPhase {
         // fallback (AOT -> Interpreter) multiple Contexts leaked.
         // This single Context is reused, preventing memory leaks.
         #[cfg(feature = "llvm")]
-        let llvm_ctx = inkwell::context::Context::create();
+        let llvm_ctx = verum_llvm::context::Context::create();
 
         // Run appropriate code generation tier with graceful fallback (two-tier model)
         let result = match phase.tier {
