@@ -18,10 +18,15 @@
 //  guard surfaced by user code via `assert_finite_domain`).
 //
 
-// V2 wires CVC5 Finite Model Finding into the SMT routing so
-// `count_o_unbounded` is decided automatically when the domain has a
-// CVC5-discoverable cardinality bound; the diagnostic is then promoted
-// to a hard error from a user-emittable warning.
+// V2 (landed) wires CVC5 Finite Model Finding into the SMT routing
+// via `crates/verum_smt/src/count_o_dispatch.rs`. When the surrounding
+// refinement type carries an explicit cardinality bound (e.g.
+// `{ x : Int | x ≤ K ∧ x = count_o(_, P) }`) the verifier constructs
+// a `CountOQuery`, emits an `FmfQuery` over an uninterpreted
+// individual sort with cardinality ≤ K, and asks CVC5 to enumerate
+// the satisfying interpretations. The model's count of `pred(d) = true`
+// slots is the recovered `count_o` value; the V1 `Maybe.None` path
+// remains as the stub-mode fallback when CVC5 is not linked.
 //
 
 // This file deliberately keeps `count_o` as a *parameterised* fold
@@ -83,11 +88,15 @@ public fn count_o<I: Individual>(
 /// §5.6), so no implicit closure of the universe is performed
 /// at this layer.
 ///
-/// Future work will dispatch to CVC5 Finite Model Finding when
-/// the witness is `Maybe.None` AND the surrounding refinement
-/// type carries an explicit finite-cardinality bound (a Verum
-/// refinement-type-level claim, distinct from any OWL 2 CWA
-/// flag).
+/// V2 (landed): when the witness is `Maybe.None` AND the
+/// surrounding refinement type carries an explicit finite-
+/// cardinality bound, the verifier dispatches to CVC5 Finite
+/// Model Finding via `verum_smt::count_o_dispatch`. The
+/// dispatcher constructs a `CountOQuery`, asks CVC5 to enumerate
+/// satisfying interpretations, and recovers the count from the
+/// model. In stub mode (CVC5 not linked) the dispatcher returns
+/// `CountOResult::Unsupported`, and this function's
+/// `Maybe.None` branch is the honest fallback.
 public fn count_o_unbounded<I: Individual>(
     domain: Maybe<List<I>>,
     pred:   fn(I) -> Bool,

@@ -196,6 +196,7 @@ pub mod config;
 pub mod capability_router; // Complementary Z3 + CVC5 routing (capability-based dispatcher)
 pub mod certificates;
 pub mod cvc5_advanced; // SyGuS, abduction, QE, FMF (CVC5-exclusive features)
+pub mod count_o_dispatch; // OWL 2 count_o → CVC5 FMF dispatch (VVA §21.5 / C9 V2)
 pub mod distributed_cache;
 pub mod portfolio_executor; // Parallel Z3 + CVC5 execution with first-wins/cross-validate semantics
 pub mod proof_extraction;
