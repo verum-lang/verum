@@ -121,6 +121,7 @@ fn ordering_to_u8(order: MemoryOrdering) -> UInt8 {
 // Uses native CPU fence instructions:
 // - x86_64: mfence (SeqCst), lfence (Acquire), sfence (Release)
 // - ARM64: dmb ish variants
+@inline(always)
 public fn fence(order: MemoryOrdering) {
     match order {
         Relaxed => {}  // No fence needed
@@ -235,11 +236,13 @@ implement AtomicInt {
     }
 
     // Increment && return new value.
+    @inline(always)
     public fn increment(&self, order: MemoryOrdering) -> Int {
         self.fetch_add(1, order) + 1
     }
 
     // Decrement && return new value.
+    @inline(always)
     public fn decrement(&self, order: MemoryOrdering) -> Int {
         self.fetch_sub(1, order) - 1
     }

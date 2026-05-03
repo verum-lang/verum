@@ -132,6 +132,7 @@ public type VacantEntry<K: Hash + Eq, V> is {
 
 implement<K: Hash + Eq, V> MapEntry<K, V> {
     /// Get the key for this entry.
+    @inline(always)
     public fn key(&self) -> &K {
         match self {
             Occupied(entry) => &entry.key,
@@ -222,21 +223,22 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
 
 implement<K: Hash + Eq, V> OccupiedEntry<K, V> {
     /// Get the key for this entry.
+    @inline(always)
     public fn key(&self) -> &K {
         &self.key
     }
 
     /// Get a reference to the value.
     /// Returns a reference with lifetime tied to the underlying map entry.
+    @inline(always)
     public fn get(&self) -> &V {
-        // Return reference directly to avoid intermediate local lifetime issue
         unsafe { &(*self.map.entries.offset(self.idx)).value }
     }
 
     /// Get a mutable reference to the value.
     /// Returns a mutable reference with lifetime tied to the underlying map entry.
+    @inline(always)
     public fn get_mut(&mut self) -> &mut V {
-        // Return reference directly to avoid intermediate local lifetime issue
         unsafe { &mut (*self.map.entries.offset(self.idx)).value }
     }
 
@@ -270,19 +272,21 @@ implement<K: Hash + Eq, V> OccupiedEntry<K, V> {
     }
 
     /// Convert to mutable reference to value.
+    @inline(always)
     public fn into_mut(self) -> &mut V {
-        // Return reference directly to avoid intermediate local lifetime issue
         unsafe { &mut (*self.map.entries.offset(self.idx)).value }
     }
 }
 
 implement<K: Hash + Eq, V> VacantEntry<K, V> {
     /// Get the key that would be used when inserting.
+    @inline(always)
     public fn key(&self) -> &K {
         &self.key
     }
 
     /// Take ownership of the key.
+    @inline(always)
     public fn into_key(self) -> K {
         self.key
     }
