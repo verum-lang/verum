@@ -85,6 +85,7 @@ implement<T> Maybe<T> {
 
     /// Unwrap the value, panicking if None.
     /// Use only when you are certain the value exists.
+    @inline(always)
     public fn unwrap(self) -> T {
         match self {
             Some(v) => v,
@@ -93,6 +94,7 @@ implement<T> Maybe<T> {
     }
 
     /// Unwrap with a custom panic message.
+    @inline(always)
     public fn expect(self, msg: &Text) -> T {
         match self {
             Some(v) => v,
@@ -101,6 +103,7 @@ implement<T> Maybe<T> {
     }
 
     /// Return the value || a default.
+    @inline(always)
     public fn unwrap_or(self, default: T) -> T {
         match self {
             Some(v) => v,
@@ -109,6 +112,7 @@ implement<T> Maybe<T> {
     }
 
     /// Return the value || compute a default from a function.
+    @inline(always)
     public fn unwrap_or_else<F: fn() -> T>(self, f: F) -> T {
         match self {
             Some(v) => v,
@@ -117,6 +121,7 @@ implement<T> Maybe<T> {
     }
 
     /// Return the value || the default for the type.
+    @inline(always)
     public fn unwrap_or_default(self) -> T
     where T: Default {
         match self {
@@ -130,6 +135,7 @@ implement<T> Maybe<T> {
     // =========================================================================
 
     /// Transform the inner value with a function.
+    @inline(always)
     public fn map<U, F: fn(T) -> U>(self, f: F) -> Maybe<U> {
         match self {
             Some(v) => Some(f(v)),
@@ -138,6 +144,7 @@ implement<T> Maybe<T> {
     }
 
     /// Transform with a function that returns Maybe (flatMap/bind).
+    @inline(always)
     public fn and_then<U, F: fn(T) -> Maybe<U>>(self, f: F) -> Maybe<U> {
         match self {
             Some(v) => f(v),
@@ -150,11 +157,13 @@ implement<T> Maybe<T> {
     /// `Monad` protocol's bind operation is typically called); Verum
     /// Maybe supports both spellings so HKT-generic code written
     /// against a `Monad`-bounded type parameter Just Works on Maybe.
+    @inline(always)
     public fn flat_map<U, F: fn(T) -> Maybe<U>>(self, f: F) -> Maybe<U> {
         self.and_then(f)
     }
 
     /// Apply a default-returning function if None.
+    @inline(always)
     public fn or_else<F: fn() -> Maybe<T>>(self, f: F) -> Maybe<T> {
         match self {
             Some(v) => Some(v),
@@ -163,6 +172,7 @@ implement<T> Maybe<T> {
     }
 
     /// Transform the value with a function, providing a default if None.
+    @inline(always)
     public fn map_or<U, F: fn(T) -> U>(self, default: U, f: F) -> U {
         match self {
             Some(v) => f(v),
