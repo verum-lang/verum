@@ -95,10 +95,22 @@ fn rtrim_spaces(t: &Text) -> Text {
 // Registry
 // -----------------------------------------------------------------------------
 
-/// Name → collation metadata. Seeded with BINARY / NOCASE / RTRIM;
-/// user code can register more via `register`.
+/// User-collation comparator signature.  Two `&Text` inputs, one
+/// `Ordering` output.  Stored alongside the metadata so the L3
+/// comparator can dispatch through it without a name → fn lookup
+/// per comparison.
+public type UserCollationFn = fn(&Text, &Text) -> Ordering;
+
+/// Name → collation metadata + optional fn-pointer for UserDefined
+/// kinds.  Seeded with BINARY / NOCASE / RTRIM;  user code registers
+/// further entries via `register_user(name, fn)`.
 public type CollationRegistry is {
     entries: Map<Text, Collation>,
+    /// Parallel map: name → comparator fn.  Populated only for
+    /// `UserDefined(name)` entries; built-ins (BINARY / NOCASE /
+    /// RTRIM) dispatch through their CollationKind variant directly
+    /// at the L3 comparator and skip this lookup.
+    user_fns: Map<Text, UserCollationFn>,
 };
 
 public fn collation_registry_new() -> CollationRegistry {
@@ -115,13 +127,27 @@ public fn collation_registry_new() -> CollationRegistry {
         "RTRIM".clone(),
         Collation { name: "RTRIM".clone(), kind: Rtrim },
     );
-    CollationRegistry { entries: entries }
+    CollationRegistry { entries: entries, user_fns: Map.new() }
 }
 
 implement CollationRegistry {
-    /// Register (or replace) a named collation.
+    /// Register (or replace) a named collation.  For built-in
+    /// kinds prefer the `register_user` shorthand below, which also
+    /// records the comparator fn.
     public fn register(&mut self, coll: Collation) {
         let _ = self.entries.insert(coll.name.clone(), coll);
+    }
+
+    /// Register (or replace) a user-defined collation via its name +
+    /// comparator fn.  The metadata kind is set to
+    /// `UserDefined(name)` automatically.  Names should be passed
+    /// upper-case for case-insensitive lookup.
+    public fn register_user(&mut self, name: Text, cmp: UserCollationFn) {
+        let _ = self.entries.insert(
+            name.clone(),
+            Collation { name: name.clone(), kind: UserDefined(name.clone()) },
+        );
+        let _ = self.user_fns.insert(name, cmp);
     }
 
     /// Look up by name. SQLite collations are case-insensitive; we
@@ -129,6 +155,17 @@ implement CollationRegistry {
     /// pass upper-case names.
     public fn find(&self, name: &Text) -> Bool {
         self.entries.contains_key(name.clone())
+    }
+
+    /// Look up the comparator fn for a user-defined collation.
+    /// Returns `None` for built-ins (which the caller should
+    /// dispatch through `CollationKind` directly).
+    public fn user_fn_for(&self, name: &Text) -> Maybe<UserCollationFn> {
+        if self.user_fns.contains_key(name.clone()) {
+            Some(self.user_fns.get(name.clone()))
+        } else {
+            None
+        }
     }
 
     public fn len(&self) -> Int { self.entries.len() }

@@ -1,0 +1,468 @@
+module core.database.sqlite.native.l3_btree.record_compare;
+
+// =============================================================================
+// l3_btree/record_compare.vr — Column-aware record comparator (#157)
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.4 (key ordering) + §9.5 (collation)
+//
+// Pre-fix: `comparator.vr::cmp_bytes` byte-compared the entire SQLite
+// record blob — sound for INTEGER PRIMARY KEY indices but WRONG for
+// every TEXT-keyed index.  Two TEXT values that compare equal under
+// NOCASE (e.g. `"Hello"` vs `"hello"`) compare unequal byte-wise; the
+// pre-fix B-tree would route them to different leaves and break
+// uniqueness for `CREATE UNIQUE INDEX ... COLLATE NOCASE`.
+//
+// Post-fix: this module decodes the SQLite record format header
+// column-by-column and dispatches per-column comparison through a
+// `RecordSchema` carrying the chosen collation per text column.
+// Numeric / blob / NULL columns ignore the schema (collation is a
+// text-only concept per SQLite §9.5).
+//
+// The comparator is PURE — input borrowed, output is a `KeyOrdering`.
+// It does NOT touch the pager and does NOT mutate the schema.  All
+// dispatch tables are sum-type-keyed (no `dyn` requirement) so codegen
+// monomorphises the comparator chains at the call site.
+//
+// SQLite type-class ordering (§9.4):
+//
+//     NULL  <  NUMERIC (INT / REAL / Zero / One)  <  TEXT  <  BLOB
+//
+// Within each class, the per-class comparator runs (numeric: float
+// compare; text: collation dispatch; blob: byte compare).
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l2_record.record.{
+    SerialType, StNull, StInt8, StInt16, StInt24, StInt32, StInt48, StInt64,
+    StReal, StZero, StOne, StBlob, StText,
+    serial_type_payload_size, decode_record_header, RecordError,
+};
+mount core.database.sqlite.native.l2_record.collation.{
+    CollationKind, Binary, Nocase, Rtrim, UserDefined, Collation,
+    CollationRegistry, UserCollationFn,
+    binary_cmp, nocase_cmp, rtrim_cmp,
+};
+mount core.database.sqlite.native.l3_btree.comparator.{
+    KeyOrdering, KoLess, KoEqual, KoGreater, cmp_int64, cmp_bytes,
+};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// -----------------------------------------------------------------------------
+// RecordSchema — per-column collation choice
+// -----------------------------------------------------------------------------
+
+/// One entry per column of an index key (or any record being
+/// compared).  `collation` is consulted ONLY for `StText` payload —
+/// numeric, blob, and NULL columns ignore it.  `desc = true` reverses
+/// the per-column ordering for `ORDER BY col DESC` and for descending
+/// indices.
+public type ColumnSchema is {
+    collation: CollationKind,
+    desc: Bool,
+};
+
+/// A record's column schema — list of `ColumnSchema` in column order.
+/// Empty schema is treated as "all BINARY ascending" (back-compat
+/// with the historical `cmp_bytes` fast path).
+public type RecordSchema is {
+    columns: List<ColumnSchema>,
+};
+
+/// Default-BINARY schema with `n` columns.  Used by callers that
+/// haven't propagated explicit collation (table-scan paths, sorter
+/// without ORDER BY COLLATE).
+public fn record_schema_binary(n: Int) -> RecordSchema {
+    let mut cols: List<ColumnSchema> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        cols.push(ColumnSchema { collation: Binary, desc: false });
+        i = i + 1;
+    }
+    RecordSchema { columns: cols }
+}
+
+/// Build a schema from per-column collation choices (text columns)
+/// and direction flags.  Columns beyond `len(collations)` default
+/// to BINARY-ascending.
+pub fn record_schema_from_choices(
+    collations: &List<CollationKind>,
+    descs: &List<Bool>,
+    n_cols: Int,
+) -> RecordSchema {
+    let mut cols: List<ColumnSchema> = List.new();
+    let mut i: Int = 0;
+    while i < n_cols {
+        let coll = if i < collations.len() { clone_collation_kind(&collations[i]) } else { Binary };
+        let desc = if i < descs.len() { descs[i] } else { false };
+        cols.push(ColumnSchema { collation: coll, desc: desc });
+        i = i + 1;
+    }
+    RecordSchema { columns: cols }
+}
+
+fn clone_collation_kind(k: &CollationKind) -> CollationKind {
+    match k {
+        Binary => Binary,
+        Nocase => Nocase,
+        Rtrim => Rtrim,
+        UserDefined(ref name) => UserDefined(name.clone()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Type-class ordering (SQLite §9.4)
+// -----------------------------------------------------------------------------
+
+/// Coarse type class for cross-class ordering.  When two values have
+/// the same class, fall through to the per-class comparator; when
+/// classes differ, this dictates the ordering.
+public type TypeClass is TcNull | TcNumeric | TcText | TcBlob;
+
+fn type_class_of(st: &SerialType) -> TypeClass {
+    match st {
+        StNull => TcNull,
+        StInt8 => TcNumeric,
+        StInt16 => TcNumeric,
+        StInt24 => TcNumeric,
+        StInt32 => TcNumeric,
+        StInt48 => TcNumeric,
+        StInt64 => TcNumeric,
+        StReal => TcNumeric,
+        StZero => TcNumeric,
+        StOne => TcNumeric,
+        StBlob(_) => TcBlob,
+        StText(_) => TcText,
+    }
+}
+
+fn type_class_rank(tc: &TypeClass) -> Int {
+    match tc {
+        TcNull => 0,
+        TcNumeric => 1,
+        TcText => 2,
+        TcBlob => 3,
+    }
+}
+
+fn cmp_type_classes(a: &TypeClass, b: &TypeClass) -> KeyOrdering {
+    let ra = type_class_rank(a);
+    let rb = type_class_rank(b);
+    if ra < rb { KoLess }
+    else if ra > rb { KoGreater }
+    else { KoEqual }
+}
+
+// -----------------------------------------------------------------------------
+// Per-class comparators
+// -----------------------------------------------------------------------------
+
+/// Decode an integer-class serial-type's payload into i64 for comparison.
+/// `StZero` / `StOne` are zero-byte payloads encoding the constants 0/1.
+/// The big-endian int decoders match SQLite §6.4.
+fn decode_int_payload(st: &SerialType, buf: &[Byte], start: Int) -> Int64 {
+    match st {
+        StInt8 => {
+            let b = buf[start] as Int64;
+            // Sign-extend from 8 bits.
+            if (b & 0x80_i64) != 0_i64 { b | (-0x100_i64) } else { b }
+        }
+        StInt16 => decode_be_signed(buf, start, 2),
+        StInt24 => decode_be_signed(buf, start, 3),
+        StInt32 => decode_be_signed(buf, start, 4),
+        StInt48 => decode_be_signed(buf, start, 6),
+        StInt64 => decode_be_signed(buf, start, 8),
+        StZero => 0_i64,
+        StOne => 1_i64,
+        _ => 0_i64,  // unreachable for caller guarantee
+    }
+}
+
+fn decode_be_signed(buf: &[Byte], start: Int, n: Int) -> Int64 {
+    let mut v: Int64 = 0_i64;
+    let mut i: Int = 0;
+    while i < n {
+        v = (v << 8_i64) | ((buf[start + i] as Int64) & 0xFF_i64);
+        i = i + 1;
+    }
+    // Sign-extend from `n*8` bits.
+    let bits = (n as Int64) * 8_i64;
+    let sign_bit = 1_i64 << (bits - 1_i64);
+    if (v & sign_bit) != 0_i64 {
+        v | (((-1_i64) << bits))
+    } else {
+        v
+    }
+}
+
+/// Decode an `StReal` payload (8 big-endian bytes, IEEE-754 double).
+fn decode_real_payload(buf: &[Byte], start: Int) -> Float64 {
+    let bits = decode_be_signed(buf, start, 8);
+    Float64.from_bits(bits as UInt64)
+}
+
+/// Compare two numeric payloads at the same scale — Verum stays in
+/// the integer domain when both sides are integer to avoid float
+/// precision loss for big rowids; promotes to f64 only when one side
+/// is real.  Matches `sqlite3MemCompare` numeric branch.
+fn cmp_numeric(
+    a_st: &SerialType, a_buf: &[Byte], a_start: Int,
+    b_st: &SerialType, b_buf: &[Byte], b_start: Int,
+) -> KeyOrdering {
+    let a_is_real = match a_st { StReal => true, _ => false };
+    let b_is_real = match b_st { StReal => true, _ => false };
+    if !a_is_real && !b_is_real {
+        let ai = decode_int_payload(a_st, a_buf, a_start);
+        let bi = decode_int_payload(b_st, b_buf, b_start);
+        cmp_int64(ai, bi)
+    } else {
+        let af: Float64 = if a_is_real {
+            decode_real_payload(a_buf, a_start)
+        } else {
+            decode_int_payload(a_st, a_buf, a_start) as Float64
+        };
+        let bf: Float64 = if b_is_real {
+            decode_real_payload(b_buf, b_start)
+        } else {
+            decode_int_payload(b_st, b_buf, b_start) as Float64
+        };
+        cmp_float64(af, bf)
+    }
+}
+
+fn cmp_float64(a: Float64, b: Float64) -> KeyOrdering {
+    if a < b { KoLess }
+    else if a > b { KoGreater }
+    else { KoEqual }
+}
+
+/// Compare two text payloads under the chosen collation.  Falls back
+/// to BINARY when the collation name is unknown to the registry —
+/// matches SQLite's `xCompare` lookup-failure semantics where the
+/// statement preparation refuses to bind an unknown collation
+/// (the actual fallback is here only for the "unknown-collation
+/// at compare-time" race when the user dropped the collation
+/// between prepare and step).
+fn cmp_text(
+    coll: &CollationKind,
+    registry: Maybe<&CollationRegistry>,
+    a_buf: &[Byte], a_start: Int, a_len: Int,
+    b_buf: &[Byte], b_start: Int, b_len: Int,
+) -> KeyOrdering {
+    let a_text = bytes_to_text(a_buf, a_start, a_len);
+    let b_text = bytes_to_text(b_buf, b_start, b_len);
+    let ord: Ordering = match coll {
+        Binary => binary_cmp(&a_text, &b_text),
+        Nocase => nocase_cmp(&a_text, &b_text),
+        Rtrim  => rtrim_cmp(&a_text, &b_text),
+        UserDefined(ref name) => {
+            // Look up the user-defined comparator fn in the registry
+            // and dispatch through it.  When the registry is absent
+            // OR the name is unknown OR no fn was registered, fall
+            // back to BINARY — matches SQLite's safety net for the
+            // "user dropped collation between prepare and step" race.
+            match registry {
+                Some(r) => match r.user_fn_for(name) {
+                    Some(cmp) => cmp(&a_text, &b_text),
+                    None => binary_cmp(&a_text, &b_text),
+                },
+                None => binary_cmp(&a_text, &b_text),
+            }
+        }
+    };
+    ordering_to_key_ordering(&ord)
+}
+
+fn ordering_to_key_ordering(o: &Ordering) -> KeyOrdering {
+    match o {
+        Less => KoLess,
+        Equal => KoEqual,
+        Greater => KoGreater,
+    }
+}
+
+fn bytes_to_text(buf: &[Byte], start: Int, len: Int) -> Text {
+    let mut acc: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < len {
+        acc.push(buf[start + i]);
+        i = i + 1;
+    }
+    Text.from_bytes(&acc).unwrap_or("".clone())
+}
+
+fn cmp_blob(
+    a_buf: &[Byte], a_start: Int, a_len: Int,
+    b_buf: &[Byte], b_start: Int, b_len: Int,
+) -> KeyOrdering {
+    let n = if a_len < b_len { a_len } else { b_len };
+    let mut i: Int = 0;
+    while i < n {
+        let av = a_buf[a_start + i] as Int;
+        let bv = b_buf[b_start + i] as Int;
+        if av < bv { return KoLess; }
+        if av > bv { return KoGreater; }
+        i = i + 1;
+    }
+    if a_len < b_len { KoLess }
+    else if a_len > b_len { KoGreater }
+    else { KoEqual }
+}
+
+// -----------------------------------------------------------------------------
+// Per-column dispatch
+// -----------------------------------------------------------------------------
+
+/// Compare a single column's payload using the column's schema.
+/// `a_st` / `b_st` are the column's serial types from each record's
+/// header; `a_start` / `b_start` are byte offsets into the records'
+/// payload regions.  Returns the per-column ordering before applying
+/// the schema's `desc` flag — that's the caller's job.
+fn cmp_one_column(
+    a_st: &SerialType, a_buf: &[Byte], a_start: Int,
+    b_st: &SerialType, b_buf: &[Byte], b_start: Int,
+    col: &ColumnSchema,
+    registry: Maybe<&CollationRegistry>,
+) -> KeyOrdering {
+    let a_class = type_class_of(a_st);
+    let b_class = type_class_of(b_st);
+    let class_ord = cmp_type_classes(&a_class, &b_class);
+    match class_ord {
+        KoLess    => return KoLess,
+        KoGreater => return KoGreater,
+        KoEqual   => {},
+    }
+    // Same class — dispatch the per-class comparator.
+    match a_class {
+        TcNull => KoEqual,
+        TcNumeric => cmp_numeric(a_st, a_buf, a_start, b_st, b_buf, b_start),
+        TcText => {
+            let a_len = serial_type_payload_size(*a_st);
+            let b_len = serial_type_payload_size(*b_st);
+            cmp_text(&col.collation, registry,
+                     a_buf, a_start, a_len,
+                     b_buf, b_start, b_len)
+        }
+        TcBlob => {
+            let a_len = serial_type_payload_size(*a_st);
+            let b_len = serial_type_payload_size(*b_st);
+            cmp_blob(a_buf, a_start, a_len,
+                     b_buf, b_start, b_len)
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------------
+
+/// Errors specific to the column-aware comparator.  Wraps the
+/// underlying L2 record-decode error so the seek loop can route
+/// corruption signals up consistently.
+public type RecordCompareError is
+      RcRecord(RecordError)
+    | RcShortPayload(Text);
+
+/// Column-aware record comparison.  Walks both records' headers in
+/// lockstep and dispatches per-column.  When the records have
+/// different column counts, the shorter is treated as "less" once
+/// every shared column compares equal — matches SQLite's
+/// `nField`-aware unpack behaviour.
+///
+/// `registry` is `Some` when the connection has registered named
+/// collations the schema may reference via `UserDefined(name)`.
+/// `None` is acceptable for paths that only use built-ins.
+pub fn cmp_records_with_schema(
+    a: &List<Byte>,
+    b: &List<Byte>,
+    schema: &RecordSchema,
+    registry: Maybe<&CollationRegistry>,
+) -> Result<KeyOrdering, RecordCompareError> {
+    let a_buf = a.as_slice();
+    let b_buf = b.as_slice();
+    let (a_types, a_hdr_len) = match decode_record_header(a_buf, 0) {
+        Ok(r)  => r,
+        Err(e) => { return Err(RcRecord(e)); }
+    };
+    let (b_types, b_hdr_len) = match decode_record_header(b_buf, 0) {
+        Ok(r)  => r,
+        Err(e) => { return Err(RcRecord(e)); }
+    };
+
+    let n = if a_types.len() < b_types.len() { a_types.len() } else { b_types.len() };
+    let mut a_off: Int = a_hdr_len;
+    let mut b_off: Int = b_hdr_len;
+    let mut i: Int = 0;
+    while i < n {
+        let a_st = a_types[i];
+        let b_st = b_types[i];
+        let a_payload = serial_type_payload_size(a_st);
+        let b_payload = serial_type_payload_size(b_st);
+        if a_off + a_payload > a_buf.len() {
+            return Err(RcShortPayload("record a payload truncated".clone()));
+        }
+        if b_off + b_payload > b_buf.len() {
+            return Err(RcShortPayload("record b payload truncated".clone()));
+        }
+        // Schema column for this position — falls back to BINARY-asc.
+        let col = if i < schema.columns.len() {
+            &schema.columns[i]
+        } else {
+            &DEFAULT_COL_SCHEMA
+        };
+        let mut ord = cmp_one_column(&a_st, a_buf, a_off, &b_st, b_buf, b_off, col, registry);
+        if col.desc {
+            ord = match ord {
+                KoLess => KoGreater,
+                KoEqual => KoEqual,
+                KoGreater => KoLess,
+            };
+        }
+        match ord {
+            KoEqual => {},
+            _ => { return Ok(ord); }
+        }
+        a_off = a_off + a_payload;
+        b_off = b_off + b_payload;
+        i = i + 1;
+    }
+    // All shared columns equal — shorter record wins.
+    if a_types.len() < b_types.len() { Ok(KoLess) }
+    else if a_types.len() > b_types.len() { Ok(KoGreater) }
+    else { Ok(KoEqual) }
+}
+
+/// Module-local default schema entry — BINARY ascending — used when
+/// the caller's schema has fewer columns than the records being
+/// compared (a case that should be rare in practice but the comparator
+/// must handle it without panicking).
+const DEFAULT_COL_SCHEMA: ColumnSchema = ColumnSchema {
+    collation: Binary,
+    desc: false,
+};
+
+// -----------------------------------------------------------------------------
+// Convenience: schema-aware variant of cmp_keys (back-compat shim)
+// -----------------------------------------------------------------------------
+
+/// Schema-aware byte-record comparator entry.  Same observable
+/// behaviour as `cmp_bytes` when `schema` is empty (every column
+/// defaults to BINARY-ascending).  Callers that have a schema in
+/// hand (index seek, ORDER BY codegen, sorter with COLLATE) pass
+/// it through; legacy table-scan paths can pass an empty schema.
+pub fn cmp_byte_records(
+    a: &List<Byte>,
+    b: &List<Byte>,
+    schema: &RecordSchema,
+    registry: Maybe<&CollationRegistry>,
+) -> KeyOrdering {
+    match cmp_records_with_schema(a, b, schema, registry) {
+        Ok(o) => o,
+        // On corruption, fall back to the lex byte compare so the
+        // B-tree never returns Err mid-seek.  Callers that need the
+        // structured error use `cmp_records_with_schema` directly.
+        Err(_) => cmp_bytes(a, b),
+    }
+}
