@@ -214,73 +214,73 @@ implement<T> FatRef<T> {
     // =========================================================================
 
     /// Check if this is a null reference.
-    @inline
+    @inline(always)
     public fn is_null(&self) -> Bool {
         self.generation == GEN_UNALLOCATED || self.ptr as Int == 0
     }
 
     /// Get raw pointer (unsafe, bypasses validation).
-    @inline
+    @inline(always)
     public fn as_ptr(&self) -> &unsafe Byte {
         self.ptr
     }
 
     /// Get generation counter.
-    @inline
+    @inline(always)
     public fn generation(&self) -> UInt32 {
         self.generation
     }
 
     /// Get epoch counter (unpacked from epoch_and_caps).
-    @inline
+    @inline(always)
     public fn epoch(&self) -> UInt16 {
         unpack_epoch(self.epoch_and_caps)
     }
 
     /// Get capabilities (unpacked from epoch_and_caps).
-    @inline
+    @inline(always)
     public fn capabilities(&self) -> UInt16 {
         unpack_caps(self.epoch_and_caps)
     }
 
     /// Get metadata (length for slices, vtable for dyn traits).
-    @inline
+    @inline(always)
     public fn metadata(&self) -> Int {
         self.metadata
     }
 
     /// Get length (for slices).
-    @inline
+    @inline(always)
     public fn len(&self) -> Int {
         self.metadata
     }
 
     /// Check if slice is empty.
-    @inline
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.metadata == 0
     }
 
     /// Get offset from base allocation.
-    @inline
+    @inline(always)
     public fn offset_from_base(&self) -> UInt32 {
         self.offset_from_base
     }
 
     /// Check if reference has a specific capability.
-    @inline
+    @inline(always)
     public fn has_capability(&self, cap: UInt16) -> Bool {
         has_capability(self.capabilities(), cap)
     }
 
     /// Check if reference has read capability.
-    @inline
+    @inline(always)
     public fn can_read(&self) -> Bool {
         self.has_capability(CAP_READ)
     }
 
     /// Check if reference has write capability.
-    @inline
+    @inline(always)
     public fn can_write(&self) -> Bool {
         validate_write(self.capabilities())
     }
