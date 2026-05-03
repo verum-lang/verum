@@ -1188,24 +1188,40 @@ impl Backend for MlirJitBackend {
  if !is_float_dtype(a.dtype) {
  return None;
  }
- // **Batched matmul** — `[B,M,K] @ [B,K,N]` → `[B,M,N]` via
- // `linalg.batch_matmul`.  Same batch dim required; broadcasting
- // a 2-D operand across batches (e.g. `[B,M,K] @ [K,N]`) would
- // need an extra expand step and is deferred.
- if a.ndim == 3 && b.ndim == 3 {
- let bb_a = a.shape[0];
- let m = a.shape[1];
- let k_a = a.shape[2];
- let bb_b = b.shape[0];
- let k_b = b.shape[1];
- let n = b.shape[2];
- if bb_a != bb_b || k_a != k_b {
+ // **Batched matmul family** — covers three patterns via the
+ // same `linalg.batch_matmul` kernel, with stride-0 broadcast
+ // for the 2-D operand cases:
+ //
+ //   * `[B,M,K] @ [B,K,N]` → `[B,M,N]` (canonical batched)
+ //   * `[B,M,K] @ [K,N]`   → `[B,M,N]` (broadcast b across batches)
+ //   * `[M,K] @ [B,K,N]`   → `[B,M,N]` (broadcast a across batches)
+ //
+ // The trick: `linalg.batch_matmul` accepts a 3-D memref where
+ // the batch-axis stride can be 0 — that produces "read the
+ // same matrix for every batch" semantics without copying.  We
+ // synthesise an inflated 3-D descriptor over the 2-D buffer.
+ if (a.ndim == 3 || a.ndim == 2) && (b.ndim == 3 || b.ndim == 2)
+ && (a.ndim == 3 || b.ndim == 3)
+ {
+ // Resolve the (possibly broadcasted) batched dims.
+ let (bb, m, k_a) = if a.ndim == 3 {
+ (a.shape[0], a.shape[1], a.shape[2])
+ } else {
+ // a is 2-D, batch dim borrowed from b.
+ (b.shape[0], a.shape[0], a.shape[1])
+ };
+ let (bb_b, k_b, n) = if b.ndim == 3 {
+ (b.shape[0], b.shape[1], b.shape[2])
+ } else {
+ (bb, b.shape[0], b.shape[1])
+ };
+ if (a.ndim == 3 && b.ndim == 3 && bb != bb_b) || k_a != k_b {
  return None;
  }
- if bb_a == 0 || m == 0 || n == 0 {
- return Some(TensorHandle::zeros(&[bb_a, m, n], a.dtype)?);
+ if bb == 0 || m == 0 || n == 0 {
+ return Some(TensorHandle::zeros(&[bb, m, n], a.dtype)?);
  }
- let out = TensorHandle::zeros(&[bb_a, m, n], a.dtype)?;
+ let out = TensorHandle::zeros(&[bb, m, n], a.dtype)?;
  let holder = self.get_or_compile(KernelKind::BatchMatmul, a.dtype)?;
  let a_data = a.data.as_ref()?;
  let b_data = b.data.as_ref()?;
@@ -1213,25 +1229,29 @@ impl Backend for MlirJitBackend {
  let a_raw = unsafe { (*a_data.as_ptr()).as_ptr() } as *mut u8;
  let b_raw = unsafe { (*b_data.as_ptr()).as_ptr() } as *mut u8;
  let out_raw = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
+ // a's strides: full per-batch when a is 3-D, stride-0 batch
+ // when a is 2-D (broadcast).
+ let a_batch_stride: i64 = if a.ndim == 3 { (m * k_a) as i64 } else { 0 };
+ let b_batch_stride: i64 = if b.ndim == 3 { (k_b * n) as i64 } else { 0 };
  let mut a_desc = MemrefDescriptor3D {
  base: a_raw,
  aligned: a_raw,
  offset: 0,
- sizes: [bb_a as i64, m as i64, k_a as i64],
- strides: [(m * k_a) as i64, k_a as i64, 1],
+ sizes: [bb as i64, m as i64, k_a as i64],
+ strides: [a_batch_stride, k_a as i64, 1],
  };
  let mut b_desc = MemrefDescriptor3D {
  base: b_raw,
  aligned: b_raw,
  offset: 0,
- sizes: [bb_b as i64, k_b as i64, n as i64],
- strides: [(k_b * n) as i64, n as i64, 1],
+ sizes: [bb as i64, k_b as i64, n as i64],
+ strides: [b_batch_stride, n as i64, 1],
  };
  let mut out_desc = MemrefDescriptor3D {
  base: out_raw,
  aligned: out_raw,
  offset: 0,
- sizes: [bb_a as i64, m as i64, n as i64],
+ sizes: [bb as i64, m as i64, n as i64],
  strides: [(m * n) as i64, n as i64, 1],
  };
  let mut a_desc_ptr: *mut MemrefDescriptor3D = &mut a_desc;
@@ -1245,8 +1265,10 @@ impl Backend for MlirJitBackend {
  let result = unsafe { holder.engine.invoke_packed("kernel", &mut packed) };
  if result.is_err() {
  tracing::warn!(
- "MLIR-JIT batch_matmul invocation failed for dtype={:?}; falling back",
- a.dtype
+ "MLIR-JIT batch_matmul invocation failed for dtype={:?} a.ndim={} b.ndim={}; falling back",
+ a.dtype,
+ a.ndim,
+ b.ndim
  );
  return None;
  }
