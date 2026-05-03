@@ -568,6 +568,7 @@ implement Text {
     }
 
     /// Get byte at index.
+    @inline(always)
     public fn byte_at(&self, idx: Int) -> Maybe<Byte> {
         let bytes = self.as_bytes();
         if idx >= 0 && idx < bytes.len() {

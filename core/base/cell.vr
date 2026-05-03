@@ -189,6 +189,7 @@ public type RefMut<T> is {
 
 implement<T> RefCell<T> {
     /// Create a new RefCell with the given value.
+    @inline(always)
     public fn new(value: T) -> RefCell<T> {
         RefCell {
             value: value,
@@ -269,6 +270,7 @@ implement<T> RefCell<T> {
 
     /// Returns 0 for unborrowed, positive for shared borrows,
     /// -1 for exclusive borrow.
+    @inline(always)
     public fn borrow_count(&self) -> Int {
         self.borrow_state.count
     }
@@ -401,16 +403,19 @@ public type OnceCell<T> is { value: Maybe<T> };
 
 implement<T> OnceCell<T> {
     /// Create a new empty OnceCell.
+    @inline(always)
     public fn new() -> OnceCell<T> {
         OnceCell { value: None }
     }
 
     /// Create a new OnceCell with an initial value.
+    @inline(always)
     public fn new_with(value: T) -> OnceCell<T> {
         OnceCell { value: Some(value) }
     }
 
     /// Returns true if the cell has been initialized.
+    @inline(always)
     public fn is_initialized(&self) -> Bool {
         self.value.is_some()
     }
@@ -473,6 +478,7 @@ implement<T> OnceCell<T> {
     ///
 
     /// Returns `Some(value)` if initialized, `None` otherwise.
+    @inline(always)
     public fn into_inner(self) -> Maybe<T> {
         self.value
     }
@@ -573,6 +579,7 @@ implement<T> LazyCell<T> {
     ///
 
     /// The function will not be called until `force()` is invoked.
+    @inline(always)
     public fn new(init: fn() -> T) -> LazyCell<T> {
         LazyCell {
             value: None,
@@ -599,6 +606,7 @@ implement<T> LazyCell<T> {
     }
 
     /// Returns true if the cell has been initialized.
+    @inline(always)
     public fn is_initialized(&self) -> Bool {
         self.value.is_some()
     }
