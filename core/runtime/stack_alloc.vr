@@ -815,5 +815,8 @@ public type MediumArena is ArenaAllocator<16384, 32>;
 /// Connection pool (1KB blocks, 128 connections)
 public type ConnectionPoolArena is PoolAllocator<1024, 128>;
 
+/// Public alias — short canonical name.
+public type ConnectionPool is ConnectionPoolArena;
+
 /// Request context pool (256B blocks, 256 contexts)
 public type RequestContextPool is PoolAllocator<256, 256>;
