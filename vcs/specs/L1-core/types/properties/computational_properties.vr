@@ -325,7 +325,7 @@ using [Network, Console]
     *counter += 1;
 
     // IO
-    Console.print(&format("Fetching {}", url));
+    Console.print(&f"Fetching {url}");
 
     // Async + IO
     let response = Network.get(url);
