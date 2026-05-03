@@ -405,23 +405,23 @@ pub enum BoundaryPhysicalLayer {
 
 /// Lifecycle stage. Per spec §4.5.
 ///
-/// Transitions are typed: `[Г] → [П] → [С] → [Т]` upward; `→ [О]`
-/// downward. Citing higher from lower (e.g. `[Т]` cites `[Г]`) is
+/// Transitions are typed: `[H] → [P] → [C] → [T]` upward; `→ [D]`
+/// downward. Citing higher from lower (e.g. `[T]` cites `[H]`) is
 /// `LifecycleRegression` anti-pattern (ATS-V-AP-009).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Lifecycle {
-    /// `[Г]` Hypothesis — speculation; no implementation.  CVE
-    /// configuration: К partial (formulation only), В absent, И
+    /// `[H]` Hypothesis — speculation; no implementation.  CVE
+    /// configuration: C partial (formulation only), V absent, E
     /// absent.  Must carry an explicit "plan to mature" — see CVE
-    /// §3.5 boundary `[Г]`/`[И]`: a hypothesis without a maturation
-    /// plan degrades to `[И]` Interpretation (defective).
+    /// §3.5 boundary `[H]`/`[I]`: a hypothesis without a maturation
+    /// plan degrades to `[I]` Interpretation (defective).
     Hypothesis {
         /// Confidence level the author assigns to the hypothesis.
         confidence: ConfidenceLevel,
     },
     /// `[Plan]` ATS-V legacy variant — "committed but not yet
     /// implemented" (TODO with target completion date).  Distinct
-    /// from CVE `[П]` Postulate.  Retained for backward compatibility
+    /// from CVE `[P]` Postulate.  Retained for backward compatibility
     /// with existing `@arch_module(lifecycle = Lifecycle.Plan(..))`
     /// declarations.  New code SHOULD prefer:
     ///   - `Hypothesis` for not-yet-formalised intent
@@ -431,9 +431,9 @@ pub enum Lifecycle {
         /// ISO-format target date (or free-form text) for completion.
         target_completion: String,
     },
-    /// `[П]` Postulate — base architectural assumption accepted
+    /// `[P]` Postulate — base architectural assumption accepted
     /// without proof at this layer (CVE §3.5).  CVE configuration:
-    /// К accepted, В absent, И accepted.  The kernel-discharge
+    /// C accepted, V absent, E accepted.  The kernel-discharge
     /// axioms in `core/proof/kernel_bridge.vr` are canonical
     /// examples — admitted-with-citation against an external
     /// trusted base.
@@ -442,37 +442,37 @@ pub enum Lifecycle {
         /// `@framework(corpus, "...")` reference.
         citation: String,
     },
-    /// `[О]` Definition — postulated by fiat, not proven.  CVE
-    /// §3.5 configuration: К present (the definition itself), В
-    /// trivial (definitions are not theorems), И present.  Used
+    /// `[D]` Definition — postulated by fiat, not proven.  CVE
+    /// §3.5 configuration: C present (the definition itself), V
+    /// trivial (definitions are not theorems), E present.  Used
     /// for foundational types / capability-ontology entries that
     /// set boundaries rather than discharge them.
     Definition,
-    /// `[С]` Conditional — proven under explicit assumptions.
-    /// CVE configuration: К ∧ В ∧ И *relative to the listed
-    /// conditions*.  Reading-as-`[Т]` in the context where the
+    /// `[C]` Conditional — proven under explicit assumptions.
+    /// CVE configuration: C ∧ V ∧ E *relative to the listed
+    /// conditions*.  Reading-as-`[T]` in the context where the
     /// conditions hold; outside that context, marked
     /// non-applicable without losing strength in the original.
     Conditional {
         /// Explicit assumptions under which the proof discharges.
         conditions: Vec<String>,
     },
-    /// `[Т]` Theorem — fully proven, load-bearing.  CVE
-    /// configuration: КВИ⁺ (full triple closure).  Mature
+    /// `[T]` Theorem — fully proven, load-bearing.  CVE
+    /// configuration: CVE⁺ (full triple closure).  Mature
     /// artifact at the highest class.
     Theorem {
-        /// Version at which the theorem reached `[Т]` (load-bearing).
+        /// Version at which the theorem reached `[T]` (load-bearing).
         since: String,
     },
-    /// `[И]` Interpretation — KVI-violator; CVE §3.5 transitional
+    /// `[I]` Interpretation — CVE-violator; CVE §3.5 transitional
     /// status.  All three CVE axes absent AND no plan to mature.
     /// Permitted ONLY in transitional corpus revisions; mature
     /// corpus must contain ZERO Interpretation entries (each
-    /// transformed to `[Т]`/`[С]` via proof, downgraded to `[Г]` with
+    /// transformed to `[T]`/`[C]` via proof, downgraded to `[H]` with
     /// a maturation plan, or removed).  Annotating a cog as
     /// Interpretation in strict mode is a defect (AP candidate).
     Interpretation {
-        /// Why the artefact was admitted as `[И]`-status.
+        /// Why the artefact was admitted as `[I]`-status.
         reason: String,
     },
     /// `[✗]` Retracted — previously declared but withdrawn /
@@ -488,7 +488,7 @@ pub enum Lifecycle {
     /// strict than Retracted: the artifact still functions but is
     /// expected to be replaced.  Legacy ATS-V variant; new code
     /// SHOULD use `Retracted` for explicit withdrawals and
-    /// `Definition` for the `[О]` CVE status.
+    /// `Definition` for the `[D]` CVE status.
     Obsolete {
         /// Reason the artefact is being phased out.
         deprecation_reason: String,
@@ -497,7 +497,7 @@ pub enum Lifecycle {
     },
 }
 
-/// Confidence the author assigns to a `[Г]` Hypothesis. Used by audit
+/// Confidence the author assigns to a `[H]` Hypothesis. Used by audit
 /// reports to prioritise hypothesis maturation work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ConfidenceLevel {
@@ -530,22 +530,25 @@ impl Lifecycle {
 
     /// CVE §3.5 single-character status code — for compact
     /// rendering in cross-format outputs and stable error codes.
+    /// Canonical ASCII glyphs: `H` Hypothesis, `P` Postulate,
+    /// `D` Definition, `C` Conditional, `T` Theorem,
+    /// `I` Interpretation, `O` Obsolete, `✗` Retracted.
     pub fn cve_glyph(&self) -> &'static str {
         match self {
-            Lifecycle::Hypothesis { .. } => "Г",
-            Lifecycle::Plan { .. } => "Plan",   // ATS-V legacy — no CVE glyph
-            Lifecycle::Postulate { .. } => "П",
-            Lifecycle::Definition => "О",
-            Lifecycle::Conditional { .. } => "С",
-            Lifecycle::Theorem { .. } => "Т",
-            Lifecycle::Interpretation { .. } => "И",
+            Lifecycle::Hypothesis { .. } => "H",
+            Lifecycle::Plan { .. } => "Plan", // ATS-V legacy — no CVE glyph
+            Lifecycle::Postulate { .. } => "P",
+            Lifecycle::Definition => "D",
+            Lifecycle::Conditional { .. } => "C",
+            Lifecycle::Theorem { .. } => "T",
+            Lifecycle::Interpretation { .. } => "I",
             Lifecycle::Retracted { .. } => "✗",
-            Lifecycle::Obsolete { .. } => "O", // legacy — distinct from [О]
+            Lifecycle::Obsolete { .. } => "O",
         }
     }
 
     /// Lifecycle ordering for `LifecycleRegression` (AP-009).
-    /// `[Т] > [О] = [С] > [П] > [Г] > [И] > [✗] > Obsolete`.
+    /// `[T] > [D] = [C] > [P] > [H] > [I] > [✗] > Obsolete`.
     /// CVE §3.5 + §3.1: definitions / conditionals / postulates
     /// rank above hypotheses (mature artifacts cite mature
     /// artifacts); interpretations and retractions rank LOWEST
@@ -565,7 +568,7 @@ impl Lifecycle {
     }
 
     /// True iff the lifecycle is one CVE §6.7 forbids in mature
-    /// corpus: `[И]` Interpretation without a maturation plan.
+    /// corpus: `[I]` Interpretation without a maturation plan.
     /// Used by future anti-pattern check
     /// `InterpretationInMatureCorpus`.
     pub fn is_mature_corpus_forbidden(&self) -> bool {
@@ -1084,7 +1087,7 @@ mod tests {
 
     #[test]
     fn shape_default_for_unannotated_passes_default_invariants() {
- // Pin: cog без @arch_module gets a Shape that vacuously
+        // Pin: a cog without @arch_module gets a Shape that vacuously
  // satisfies every anti-pattern (per spec §17.5
  // backward-compat). Default trivial — no requires, no
  // exposes, multi-tier, ZFC foundation.
