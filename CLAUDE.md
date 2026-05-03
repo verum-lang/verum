@@ -258,7 +258,7 @@ The `core/` directory contains the Verum standard library written in `.vr` files
 
 | Library | Version | Crate | Purpose |
 |---------|---------|-------|---------|
-| **Z3** | 0.19.5 | verum_smt | SMT solving, refinement verification |
+| **SMT backend** | 0.19.5 | verum_smt | SMT solving, refinement verification |
 | **LLVM** | 21.x | verum_codegen | Native code generation (AOT) |
 | **logos** | 0.15.1 | verum_lexer | DFA-based lexer generation |
 | **rayon** | 1.11 | verum_compiler | Parallel compilation |
@@ -316,7 +316,7 @@ perf(crate): Optimize by X%
 | Cog Distribution | `docs/detailed/15-cog-distribution-architecture.md` |
 | Cog Management | `docs/detailed/15-cog-management.md` |
 | Roadmap | `docs/detailed/28-implementation-roadmap.md` |
-| Z3 examples | `experiments/z3.rs/` |
+| SMT backend examples | `experiments/smt.rs/` |
 | verum_llvm fork  | `crates/llvm/verum_llvm/` (in-tree LLVM bindings; do NOT use `inkwell`) |
 
 ## VCS: Verum Conformance Suite

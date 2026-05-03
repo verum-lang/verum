@@ -77,7 +77,7 @@ src/
 
 - Translate `contract#"..."` to SMT-LIB
 - Generate verification conditions
-- Invoke Z3/CVC5 solver
+- Invoke multiple SMT backends solver
 - Verify preconditions ⇒ postconditions
 
 **Output**: Verified AST or errors

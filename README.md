@@ -99,7 +99,7 @@ fn find<T: Eq>(xs: &NonEmpty<T>, key: &T) -> Maybe<Int>
 
 **Prerequisites.** A Rust toolchain at the version pinned in
 `rust-toolchain.toml` and LLVM 21. The current SMT backend bundles
-Z3 and CVC5 as build-time dependencies; the language itself is not
+multiple SMT backends as build-time dependencies; the language itself is not
 committed to this choice and a Verum-native solver is on the
 roadmap. Platform-specific notes are in the
 [installation guide](https://verum-lang.org/docs/getting-started/installation).
