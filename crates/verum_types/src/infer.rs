@@ -46670,7 +46670,16 @@ impl TypeChecker {
             // protocol bounds (e.g. `iter: I` where `I: Iterator`), the
             // bounds list IS the parent protocol set — use it just like
             // the impls list.
-            {
+            // Skip when receiver is a fresh type-var: `get_implementations`
+            // returns spurious matches (every blanket-impl unifies with a
+            // fresh var), so the parent_proto_names list would be polluted
+            // with unrelated protocols (Stream, MaybeIter, etc.) and the
+            // sub-protocol scan would suggest wrong methods. Type-var
+            // receivers fall through to the existing bound-fallback at
+            // Step 4 (line 47005) which queries `all_type_params()`
+            // for the registered bounds — that path is correct for
+            // `<T: P>` generic-param dispatch.
+            if !matches!(&resolved_ty, Type::Var(_)) {
                 let parent_proto_names: Vec<String> = impls
                     .iter()
                     .filter_map(|impl_| {
