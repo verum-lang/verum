@@ -2172,3 +2172,14 @@ theorem inner_product_self_non_negative(x: Int)
 theorem scalar_mul_distributes(c: Int, u: Int, v: Int)
     ensures c * (u + v) == c * u + c * v
     proof by auto;
+
+// =============================================================================
+// Length protocol — enables free-function `len(vector)` dispatch
+// =============================================================================
+
+implement<T: Numeric> Length for Vector<T> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.data.len()
+    }
+}
