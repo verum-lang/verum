@@ -67,6 +67,15 @@ public type MysqlRequest is
         sql: Text,
         reply: OneshotSender<Result<Int, DbError>>,
     }
+    /// Multi-statement COM_QUERY — `;`-separated SQL where each
+    /// statement returns one result-set. Reply carries the list
+    /// in declaration order; ERR mid-batch terminates the entire
+    /// batch and the prior results are surfaced via the Err
+    /// path's structured-source-info trail.
+    | MyReqMultiQuery {
+        sql: Text,
+        reply: OneshotSender<Result<List<MySimpleQueryResult>, DbError>>,
+    }
     | MyReqPing {
         reply: OneshotSender<Result<(), DbError>>,
     }
@@ -165,6 +174,27 @@ implement AsyncMysqlConnection {
         }
     }
 
+    /// Multi-statement COM_QUERY — `;`-separated SQL where each
+    /// statement returns one result-set. Reply carries the list
+    /// in declaration order. Mirror of sync MysqlConnection
+    /// .multi_query.
+    public async fn multi_query(&self, sql: &Text)
+        -> Result<List<MySimpleQueryResult>, DbError>
+    {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(MyReqMultiQuery {
+            sql: sql.clone(),
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("multi_query")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("multi_query reply")),
+        }
+    }
+
     public async fn ping(&self) -> Result<(), DbError> {
         let (rs, rr) = oneshot();
         match self.tx.send_async(MyReqPing { reply: rs }).await {
@@ -240,6 +270,10 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
             }
             MyReqExecute { sql, reply } => {
                 let r = conn.execute(&sql);
+                let _ = reply.send(r);
+            }
+            MyReqMultiQuery { sql, reply } => {
+                let r = conn.multi_query(&sql);
                 let _ = reply.send(r);
             }
             MyReqPing { reply } => {
