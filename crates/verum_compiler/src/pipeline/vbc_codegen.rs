@@ -193,11 +193,17 @@ impl<'s> CompilationPipeline<'s> {
             is_interpretable: profile.is_vbc_interpretable(),
             is_systems_profile: profile == crate::profile_system::Profile::Systems,
             is_embedded: self.session.options().is_embedded(),
-            // Default lenient — pipeline-driven user builds tolerate
-            // partial / forward-referenced stdlib state. CI / release
-            // gating that wants to reject any bug-class skip should
-            // build via `CodegenConfig::with_strict_codegen()` instead.
-            strict_codegen: false,
+            // #110 strict-codegen plumbing: read from
+            // `LintConfig.strict_codegen`. Default remains lenient
+            // (the field defaults to false) so existing pipelines
+            // are unaffected. CI / release / `--strict-codegen` CLI
+            // flag flip it on — bug-class skips
+            // (UndefinedFunction, WrongArgumentCount, TypeMismatch,
+            // …) become hard errors. `Irreducible` skips
+            // (UnsupportedExpr, NotImplemented, …) remain debug
+            // traces regardless — those are interpreter limitations,
+            // not codebase defects.
+            strict_codegen: self.session.options().lint_config.strict_codegen,
         };
 
         let mut codegen = VbcCodegen::with_config(config);

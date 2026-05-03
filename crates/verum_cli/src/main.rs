@@ -254,6 +254,18 @@ enum Commands {
         #[clap(long, help = "Missing intrinsics become errors")]
         strict_intrinsics: bool,
 
+ /// Promote bug-class lenient skips (#110) to hard errors. When set,
+ /// `compile_item_lenient` no longer demotes UndefinedFunction /
+ /// WrongArgumentCount / TypeMismatch / NonExhaustivePattern to
+ /// warn-level traces — they fail the build. Irreducible skips
+ /// (FFI prototypes, unimplemented language features, GPU shaders)
+ /// remain tolerated. Recommended for CI / release pipelines.
+        #[clap(
+            long,
+            help = "Bug-class lenient skips become hard errors (#110 strict mode)"
+        )]
+        strict_codegen: bool,
+
  /// Set a lint to deny level (e.g., -D missing_intrinsic)
         #[clap(short = 'D', long = "deny", value_name = "LINT")]
         deny_lint: Vec<Text>,
@@ -2839,6 +2851,7 @@ fn run_command(cli: Cli) -> Result<()> {
             windows_subsystem,
             deny_warnings,
             strict_intrinsics,
+            strict_codegen,
             deny_lint,
             warn_lint,
             allow_lint,
@@ -2846,6 +2859,20 @@ fn run_command(cli: Cli) -> Result<()> {
             feature_overrides,
         } => {
             let _smt_stats = smt_stats; // Will be plumbed into session options
+            // #110 strict-codegen propagation. The flag is process-scoped so
+            // every entry point — `commands::file::build`, `commands::build::execute`,
+            // sub-process compilations — picks it up via `LintConfig::default()`
+            // without needing to thread the field through every signature.
+            // Mirrors `VERUM_FULL_STDLIB` (#109) and `VERUM_NO_PARALLEL_ANALYZE`.
+            if strict_codegen {
+                // SAFETY: writing to the process environment is safe in single-
+                // threaded CLI startup; the flag is set before the pipeline
+                // constructs any threads. Rust 2024 unsafe-edition compatibility:
+                // wrap in unsafe block.
+                unsafe {
+                    std::env::set_var("VERUM_STRICT_CODEGEN", "1");
+                }
+            }
             feature_overrides::install(feature_overrides);
             verum_error::crash::set_command("build");
             match resolve_path(path.as_ref())? {
