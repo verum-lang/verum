@@ -106,7 +106,7 @@ This document describes the implementation of the Verum compiler driver and CLI,
 **Output Format**:
 ```
 Verification Report:
-  ✓ algorithm(): Proved in 1.2s (Z3)
+  ✓ algorithm(): Proved in 1.2s (the SMT backend)
   ⚠ complex_fn(): Timeout after 30s, falling back to runtime
   ✗ invalid_fn(): Counterexample found: n = 0
 

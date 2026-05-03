@@ -176,7 +176,7 @@ These are **pre-existing issues** unrelated to this integration work.
 │ - Extract contracts from function attributes and body           │
 │ - Parse RSL (Refinement Specification Language)                 │
 │ - Translate to SMT-LIB                                          │
-│ - Verify with Z3                                                │
+│ - Verify with the SMT backend                                                │
 │ - Register verified contracts in VerifiedContractRegistry       │
 │ Output: PhaseData::AstModulesWithContracts {                    │
 │     modules: List<Module>,                                      │
@@ -295,14 +295,14 @@ Based on implementation:
 
 - **Contract Registration**: O(1) per contract
 - **Registry Lookup**: O(n) linear search (TODO: optimize with HashMap)
-- **Verification Overhead**: ~15-30ms per contract (Z3 solver time)
+- **Verification Overhead**: ~15-30ms per contract (the SMT backend solver time)
 - **Memory Overhead**: ~200 bytes per verified contract
 
 ### Optimization Opportunities
 
 1. **Registry Indexing**: Use HashMap for O(1) lookup by function name
 2. **Parallel Verification**: Leverage Rayon for parallel contract verification
-3. **Result Caching**: Cache Z3 results for identical contracts
+3. **Result Caching**: Cache the SMT backend results for identical contracts
 4. **Incremental Verification**: Only re-verify modified contracts
 
 ## Compatibility

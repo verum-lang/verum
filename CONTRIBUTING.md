@@ -11,7 +11,7 @@ what the project expects from a PR.
 - LLVM 21.x built locally under `llvm/install/` (see
   `llvm/build.sh`). `verum_llvm_sys` and `verum_codegen` link against
   it.
-- Z3 (for SMT verification) — ships vendored via `z3-sys`.
+- The SMT backend (for SMT verification) — ships vendored via `smt-backend-sys`.
 - macOS / Linux. Windows is not currently tested on CI.
 
 ## Quick Build

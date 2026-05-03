@@ -132,7 +132,7 @@ gets:
   system, kernel, or stdlib that was present in the LTS version.
 - **Build / toolchain compat patches** — fixes needed to keep the LTS
   line buildable on supported platforms (current cargo, current
-  LLVM, current Z3).
+  LLVM, current SMT backend).
 
 LTS lines do **NOT** get:
 - New features.
