@@ -5878,6 +5878,7 @@ impl ProtocolChecker {
             key: stack_key.clone(),
         };
 
+
         // Stage 1: Try exact match first (most common case, O(1))
         if self
             .impl_index
@@ -7801,6 +7802,14 @@ impl ProtocolChecker {
         self.protocols.contains_key(&name_text)
     }
 
+    /// Iterate over all registered protocols. Used by the
+    /// protocol-typed-receiver dispatch fallback in
+    /// `infer.rs::infer_method_call_inner_impl` to find sub-protocols
+    /// extending the receiver's protocol (e.g. `StreamExt extends Stream`).
+    pub fn all_protocols(&self) -> impl Iterator<Item = &Protocol> {
+        self.protocols.values()
+    }
+
     /// Check if a type implements a protocol (by name)
     pub fn implements_protocol(&self, ty: &Type, protocol_name: &str) -> bool {
         let protocol_text: Text = protocol_name.into();
@@ -9706,6 +9715,78 @@ impl ProtocolChecker {
             }
         }
 
+        // ====================================================================
+        // Protocol-typed receiver (dyn-style usage of named protocols).
+        // ====================================================================
+        // When the receiver type IS a known protocol used as a type — e.g.
+        // `let x: Stream<Int> = ...` or the result of a stream comprehension
+        // (`Type::Generic { name: "Stream", ... }`) — pull methods directly
+        // from the protocol declaration AND from any sub-protocol that
+        // `extends` it. The latter handles patterns like `StreamExt extends
+        // Stream` where users expect `fold`/`map` (declared on StreamExt) to
+        // resolve when calling them on a Stream-typed value.
+        //
+        // This is the analogue of the `DynProtocol` arm above, but for
+        // protocols spelled as `Stream<Int>` instead of `dyn Stream<Int>`.
+        let receiver_proto_name: Option<Text> = match ty {
+            Type::Named { path, .. } => path.as_ident().map(|id| id.as_str().into()),
+            Type::Generic { name, .. } => Some(name.clone()),
+            _ => None,
+        };
+        if let Some(ref recv_name) = receiver_proto_name
+            && self.is_protocol_by_name(recv_name.as_str())
+        {
+            // Substitution map: `Self` → the receiver type. Without this, the
+            // protocol method's `Self`/`Self.Item` references stay symbolic
+            // and the call-site param-type unification fails.
+            let mut self_subst: Map<Text, Type> = Map::new();
+            self_subst.insert(Text::from("Self"), ty.clone());
+
+            // Direct: method declared on the receiver's own protocol.
+            if let Maybe::Some(proto) = self.get_protocol(recv_name) {
+                if let Some(pm) = proto.methods.get(method_name) {
+                    let substituted = self.substitute_type_params(&pm.ty, &self_subst);
+                    results.push(substituted);
+                }
+            }
+            // Sub-protocols: any protocol that `extends` this receiver
+            // protocol contributes its methods (default impls), as long as
+            // there's a blanket impl `<S: ReceiverProto> SubProto for S {}`.
+            //
+            // Match either single-identifier paths (`Stream`) or the trailing
+            // segment of fully qualified ones (`core.async.stream.Stream`).
+            for sub_proto in self.protocols.values() {
+                let extends_receiver = sub_proto.super_protocols.iter().any(|sb| {
+                    let ident_match = sb
+                        .protocol
+                        .as_ident()
+                        .map(|id| id.as_str() == recv_name.as_str())
+                        .unwrap_or(false);
+                    if ident_match {
+                        return true;
+                    }
+                    sb.protocol
+                        .segments
+                        .last()
+                        .and_then(|seg| match seg {
+                            verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                            _ => None,
+                        })
+                        .map(|last| last == recv_name.as_str())
+                        .unwrap_or(false)
+                });
+                if extends_receiver {
+                    if let Some(pm) = sub_proto.methods.get(method_name) {
+                        let substituted = self.substitute_type_params(&pm.ty, &self_subst);
+                        results.push(substituted);
+                    }
+                }
+            }
+            if !results.is_empty() {
+                return Ok(results);
+            }
+        }
+
         let impls = self.get_implementations(ty);
 
         // Fetch the protocol's method-level type-param names (if we
@@ -10244,6 +10325,7 @@ impl ProtocolChecker {
         }
         key
     }
+
 
     /// Extract the simple protocol name from a path
     ///
@@ -10940,10 +11022,10 @@ impl ProtocolChecker {
     /// };
     /// let mut subst_map: Map<Text, Type> = Map::new();
     /// subst_map.insert("T".into(), Type::Int);
-    /// // Private method - for internal use only
-    /// // let result = checker.substitute_type_params(&list_t, &subst_map);
+    /// // Public — used by infer.rs dispatch paths.
+    /// let result = checker.substitute_type_params(&list_t, &subst_map);
     /// ```
-    fn substitute_type_params(&self, ty: &Type, subst_map: &Map<Text, Type>) -> Type {
+    pub fn substitute_type_params(&self, ty: &Type, subst_map: &Map<Text, Type>) -> Type {
         // Depth guard to prevent stack overflow on deeply nested or cyclic type structures
         let depth = SUBST_TYPE_PARAMS_DEPTH.with(|d| {
             let current = *d.borrow();

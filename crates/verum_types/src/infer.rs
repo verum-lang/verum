@@ -46550,6 +46550,103 @@ impl TypeChecker {
             let protocol_checker_guard = self.protocol_checker.read();
             let impls = protocol_checker_guard.get_implementations(&resolved_ty);
 
+            // ============================================================
+            // Protocol-typed receiver fallback.
+            // ============================================================
+            // When the receiver is itself a known protocol (used dyn-style,
+            // e.g. `let computed: Stream<Int> = stream [...]; computed.fold(...)`),
+            // no concrete impl is registered for `Stream` as a `for_type` —
+            // so `get_implementations` returns nothing, and the dispatch
+            // search below would fail with MethodNotFound. Pull methods
+            // directly from the protocol declaration AND from any
+            // sub-protocol whose `super_protocols` chain contains it
+            // (e.g. `StreamExt extends Stream` contributes `fold/map/...`).
+            //
+            // Mirrors the `Type::DynProtocol` arm in
+            // `lookup_all_protocol_methods` but for protocols spelled as
+            // `Type::Named { path: "Stream", ... }` or
+            // `Type::Generic { name: "Stream", ... }` — common when the
+            // user writes the protocol name directly as a type (most
+            // frequently from stream-comprehension type inference).
+            let receiver_proto_name: Option<Text> = match &resolved_ty {
+                Type::Named { path, .. } => path.as_ident().map(|id| id.as_str().into()),
+                Type::Generic { name, .. } => Some(name.clone()),
+                _ => None,
+            };
+            if let Some(ref recv_name) = receiver_proto_name
+                && protocol_checker_guard.is_protocol_by_name(recv_name.as_str())
+            {
+                // Self-substitution map for protocol method type signatures.
+                let mut self_subst: verum_common::Map<Text, Type> = verum_common::Map::new();
+                self_subst.insert(Text::from("Self"), resolved_ty.clone());
+
+                // Direct: methods declared on the receiver protocol.
+                if let Maybe::Some(proto) = protocol_checker_guard.get_protocol(recv_name) {
+                    if let Some(pm) = proto.methods.get(&method_name) {
+                        let substituted = protocol_checker_guard
+                            .substitute_type_params(&pm.ty, &self_subst);
+                        let proto_path = verum_ast::ty::Path::single(verum_ast::Ident::new(
+                            verum_common::Text::from(recv_name.as_str()),
+                            method.span,
+                        ));
+                        let key: Text = recv_name.clone();
+                        if !seen_protocols.contains(&key) {
+                            seen_protocols.insert(key);
+                            candidates.push((proto_path, substituted));
+                        }
+                    }
+                }
+
+                // Sub-protocols: any registered protocol whose super_protocols
+                // names this receiver protocol contributes its default
+                // method bodies (the StreamExt-extends-Stream pattern).
+                let receiver_proto_str = recv_name.as_str().to_string();
+                let sub_protos: Vec<(Text, Type)> = protocol_checker_guard
+                    .all_protocols()
+                    .filter_map(|sub_proto| {
+                        let extends_receiver =
+                            sub_proto.super_protocols.iter().any(|sb| {
+                                if let Some(id) = sb.protocol.as_ident() {
+                                    if id.as_str() == receiver_proto_str {
+                                        return true;
+                                    }
+                                }
+                                sb.protocol
+                                    .segments
+                                    .last()
+                                    .and_then(|seg| match seg {
+                                        verum_ast::ty::PathSegment::Name(id) => {
+                                            Some(id.name.as_str())
+                                        }
+                                        _ => None,
+                                    })
+                                    .map(|last| last == receiver_proto_str)
+                                    .unwrap_or(false)
+                            });
+                        if !extends_receiver {
+                            return None;
+                        }
+                        sub_proto
+                            .methods
+                            .get(&method_name)
+                            .map(|pm| (sub_proto.name.clone(), pm.ty.clone()))
+                    })
+                    .collect();
+                for (sub_name, sub_ty) in sub_protos {
+                    if seen_protocols.contains(&sub_name) {
+                        continue;
+                    }
+                    seen_protocols.insert(sub_name.clone());
+                    let substituted =
+                        protocol_checker_guard.substitute_type_params(&sub_ty, &self_subst);
+                    let sub_path = verum_ast::ty::Path::single(verum_ast::Ident::new(
+                        sub_name,
+                        method.span,
+                    ));
+                    candidates.push((sub_path, substituted));
+                }
+            }
+
             for impl_ in impls {
                 // Check if this implementation has the method directly
                 let method_ty_opt = impl_.methods.get(&method_name).cloned();
