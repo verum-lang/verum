@@ -2032,6 +2032,7 @@ implement<K: Hash + Eq + Clone, V: Clone> Clone for Map<K, V> {
 implement<K: Hash + Eq, V> Index<K> for Map<K, V> {
     type Output = V;
 
+    @inline(always)
     fn index(&self, key: K) -> &V {
         match self.get_key_value(&key) {
             Some(pair) => pair.1,
