@@ -71,6 +71,13 @@
 /// | Memory per task | < 4KB | ~2.5KB |
 /// | Allocations per spawn | 0 | 0 (stack) |
 
+@arch_module(
+    exposes: [Capability.Spawn(TaskLifetime.Detached)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module runtime;
 
 // =============================================================================

@@ -69,6 +69,13 @@
 /// - Inline context storage (up to 4 contexts)
 /// - Overflow to heap only for >4 contexts (rare)
 
+@arch_module(
+    exposes: [Capability.Spawn(TaskLifetime.Detached)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module runtime.spawn;
 
 mount core.{List, Map, Text, Maybe, Result, TypeId, Any};

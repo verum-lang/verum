@@ -60,6 +60,13 @@
 /// | Escalation notify | < 500ns | ~300ns |
 /// | Shutdown all children | < 10ms | ~5ms |
 
+@arch_module(
+    exposes: [Capability.Spawn(TaskLifetime.Detached)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module runtime.supervisor;
 
 mount sys.{monotonic_nanos, monotonic_millis};

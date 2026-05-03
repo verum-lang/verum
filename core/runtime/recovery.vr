@@ -45,6 +45,12 @@
 /// | Backoff calculation | < 50ns | ~30ns |
 /// | State transition | < 30ns | ~20ns |
 
+@arch_module(
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module runtime.recovery;
 
 mount sys.{monotonic_nanos};
