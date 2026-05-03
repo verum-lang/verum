@@ -70,6 +70,10 @@ public type X86CpuFeatures is {
     has_cx16: Bool,
 };
 
+/// Public alias — short canonical name; mirrors aarch64.vr's
+/// existing `public type CpuFeatures is Aarch64CpuFeatures` pattern.
+public type CpuFeatures is X86CpuFeatures;
+
 /// Detect CPU features at runtime using CPUID instruction.
 @inline(never)
 public fn cpu_features() -> X86CpuFeatures {
