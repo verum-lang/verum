@@ -11,6 +11,7 @@ public module database;
 public module transaction;
 public module backup;
 public module hooks;
+public module hook_registry;
 public module pragma_api;
 public module blob;
 public module capability;
@@ -42,6 +43,18 @@ public mount .hooks.{
     set_pre_update_hook,
     set_authorizer, has_authorizer,
     set_busy_handler, set_progress_handler, set_trace_hook,
+};
+
+public mount .hook_registry.{
+    HookKind, HkUpdate, HkPreUpdate, HkCommit, HkRollback,
+    HkWal, HkBusy, HkProgress, HkAuthorizer, HkTrace,
+    HookHandle, HookSlot, HookHandleRegistry,
+    HsUpdate, HsPreUpdate, HsCommit, HsRollback, HsWal,
+    HsBusy, HsProgress, HsAuthorizer, HsTrace,
+    UpdateHookFn, CommitHookFn, RollbackHookFn, WalHookFn,
+    BusyHandlerFn, ProgressHandlerFn, AuthorizerFn, TraceHookFn,
+    hook_kind_name, hook_handle_invalid, hook_handle_is_valid,
+    hook_handle_registry_new,
 };
 
 public mount .pragma_api.{

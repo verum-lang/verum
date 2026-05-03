@@ -1,0 +1,289 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7_api, hooks, ffi, registry, dispatch
+// @timeout: 15000
+// @description: L7 hook handle registry (#151) — exercises register/
+//               unregister lifecycle for every hook surface
+//               (update/pre_update/commit/rollback/wal/busy/
+//               progress/authorizer/trace), handle stability across
+//               unregister-of-other-slots, sum-typed dispatch via
+//               fire_*, multi-subscriber composition (commit veto
+//               OR-fold, busy retry AND-fold, authorizer
+//               most-restrictive), per-kind active count, and
+//               cross-kind unregister rejection.
+//
+// Spec: internal/specs/sqlite-native.md §13.6 (hooks) +
+//       SQLite C API (sqlite3_update_hook / commit_hook / wal_hook /
+//                     etc.)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l7_api.{
+    HookKind, HkUpdate, HkPreUpdate, HkCommit, HkRollback,
+    HkWal, HkBusy, HkProgress, HkAuthorizer, HkTrace,
+    HookHandle, HookSlot, HookHandleRegistry,
+    UpdateHookFn, CommitHookFn, RollbackHookFn, WalHookFn,
+    BusyHandlerFn, ProgressHandlerFn, AuthorizerFn, TraceHookFn,
+    hook_kind_name, hook_handle_invalid, hook_handle_is_valid,
+    hook_handle_registry_new,
+};
+mount core.database.sqlite.native.ext.hooks.{
+    ExtUpdateOp, UoInsert, UoUpdate, UoDelete,
+    AuthAction, AuthDecision, AdAllow, AdDeny, AdIgnore,
+    AaSelect, AaInsert,
+};
+
+// -----------------------------------------------------------------------------
+// Test callbacks — pure functions matching each fn-pointer signature.
+// (Verum fn-pointers can be top-level fns; closures-with-state come
+// later via the user-data pattern.)
+// -----------------------------------------------------------------------------
+
+fn always_allow_commit() -> Bool { false }    // false = no veto
+fn always_veto_commit() -> Bool { true }
+fn no_op_rollback() {}
+fn no_op_update(_op: ExtUpdateOp, _db: &Text, _table: &Text, _rowid: Int64) {}
+fn wal_returns_zero(_db: &Text, _n: Int) -> Int { 0 }
+fn wal_returns_seven(_db: &Text, _n: Int) -> Int { 7 }
+fn busy_always_retry(_n: Int) -> Bool { true }
+fn busy_never_retry(_n: Int) -> Bool { false }
+fn progress_no_interrupt() -> Bool { false }
+fn progress_interrupt() -> Bool { true }
+fn auth_allow(_a: &AuthAction) -> AuthDecision { AdAllow }
+fn auth_deny(_a: &AuthAction) -> AuthDecision { AdDeny }
+fn auth_ignore(_a: &AuthAction) -> AuthDecision { AdIgnore }
+fn trace_noop(_sql: &Text) {}
+
+fn assert_handle_kind(h: &HookHandle, want: &HookKind) {
+    let h_name = hook_kind_name(&h.kind);
+    let w_name = hook_kind_name(want);
+    assert_eq(h_name, w_name);
+}
+
+// -----------------------------------------------------------------------------
+// 1. Fresh registry — empty, sentinel handle invalid
+// -----------------------------------------------------------------------------
+
+fn fresh_registry_empty() {
+    let r = hook_handle_registry_new();
+    assert_eq(r.active_count(), 0);
+    assert_eq(r.capacity(), 0);
+    let bad = hook_handle_invalid();
+    assert(!hook_handle_is_valid(&bad));
+}
+
+// -----------------------------------------------------------------------------
+// 2. register_update returns valid handle of right kind
+// -----------------------------------------------------------------------------
+
+fn register_update_handle_shape() {
+    let mut r = hook_handle_registry_new();
+    let h = r.register_update(no_op_update);
+    assert(hook_handle_is_valid(&h));
+    assert_handle_kind(&h, &HkUpdate);
+    assert_eq(r.active_count(), 1);
+    assert(r.is_live(&h));
+}
+
+// -----------------------------------------------------------------------------
+// 3. unregister returns true once, false thereafter
+// -----------------------------------------------------------------------------
+
+fn unregister_idempotent() {
+    let mut r = hook_handle_registry_new();
+    let h = r.register_commit(always_allow_commit);
+    let first = r.unregister(&h);
+    assert(first);
+    let second = r.unregister(&h);
+    assert(!second);
+    assert(!r.is_live(&h));
+    assert_eq(r.active_count(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 4. Handle IDs are stable across unregister-of-other-slots
+// -----------------------------------------------------------------------------
+
+fn handle_ids_never_reused() {
+    let mut r = hook_handle_registry_new();
+    let h0 = r.register_update(no_op_update);
+    let h1 = r.register_commit(always_allow_commit);
+    let _ = r.unregister(&h0);
+    // h1 must STILL be live — the unregister didn't shift its slot.
+    assert(r.is_live(&h1));
+    // A subsequent registration gets a NEW id (no reuse of h0.id).
+    let h2 = r.register_rollback(no_op_rollback);
+    assert(h2.id != h0.id);
+    assert(h2.id != h1.id);
+}
+
+// -----------------------------------------------------------------------------
+// 5. Cross-kind unregister rejected (handle.kind validation)
+// -----------------------------------------------------------------------------
+
+fn cross_kind_unregister_rejected() {
+    let mut r = hook_handle_registry_new();
+    let h = r.register_commit(always_allow_commit);
+    // Forge a handle that points to the same id but claims a
+    // different kind — unregister must reject.
+    let forged = HookHandle { id: h.id, kind: HkUpdate };
+    let rejected = r.unregister(&forged);
+    assert(!rejected);
+    // Original handle still live.
+    assert(r.is_live(&h));
+}
+
+// -----------------------------------------------------------------------------
+// 6. fire_commit OR-folds across multiple subscribers
+// -----------------------------------------------------------------------------
+
+fn fire_commit_or_fold() {
+    let mut r = hook_handle_registry_new();
+    let _ = r.register_commit(always_allow_commit);
+    let _ = r.register_commit(always_allow_commit);
+    let no_veto = r.fire_commit();
+    assert(!no_veto);
+    // Add a vetoing subscriber — any single veto turns the whole
+    // commit into a rollback.
+    let _ = r.register_commit(always_veto_commit);
+    let veto = r.fire_commit();
+    assert(veto);
+}
+
+// -----------------------------------------------------------------------------
+// 7. fire_busy AND-folds: all-must-retry or give-up
+// -----------------------------------------------------------------------------
+
+fn fire_busy_and_fold() {
+    let mut r = hook_handle_registry_new();
+    // No subscribers → return false (no retry).
+    let none = r.fire_busy(0);
+    assert(!none);
+    let _ = r.register_busy(busy_always_retry);
+    let _ = r.register_busy(busy_always_retry);
+    let all_retry = r.fire_busy(1);
+    assert(all_retry);
+    // Add a give-up subscriber — composition must return false.
+    let _ = r.register_busy(busy_never_retry);
+    let mixed = r.fire_busy(2);
+    assert(!mixed);
+}
+
+// -----------------------------------------------------------------------------
+// 8. fire_wal returns FIRST non-zero return code
+// -----------------------------------------------------------------------------
+
+fn fire_wal_first_error_wins() {
+    let mut r = hook_handle_registry_new();
+    let _ = r.register_wal(wal_returns_zero);
+    let zero = r.fire_wal(&"main".clone(), 100);
+    assert_eq(zero, 0);
+    let _ = r.register_wal(wal_returns_seven);
+    let _ = r.register_wal(wal_returns_zero);
+    // wal_returns_seven returns 7; that's the first non-zero so 7 wins.
+    let seven = r.fire_wal(&"main".clone(), 100);
+    assert_eq(seven, 7);
+}
+
+// -----------------------------------------------------------------------------
+// 9. fire_progress: any single interrupt request wins
+// -----------------------------------------------------------------------------
+
+fn fire_progress_any_interrupt_wins() {
+    let mut r = hook_handle_registry_new();
+    let _ = r.register_progress(progress_no_interrupt);
+    let none = r.fire_progress();
+    assert(!none);
+    let _ = r.register_progress(progress_interrupt);
+    let _ = r.register_progress(progress_no_interrupt);
+    let interrupt = r.fire_progress();
+    assert(interrupt);
+}
+
+// -----------------------------------------------------------------------------
+// 10. fire_authorize: most-restrictive wins (Deny > Ignore > Allow)
+// -----------------------------------------------------------------------------
+
+fn fire_authorize_most_restrictive_wins() {
+    let mut r = hook_handle_registry_new();
+    let _ = r.register_authorizer(auth_allow);
+    let action = AaSelect;
+    match r.fire_authorize(&action) {
+        AdAllow => {},
+        _       => panic("single Allow → Allow"),
+    }
+    let _ = r.register_authorizer(auth_ignore);
+    match r.fire_authorize(&action) {
+        AdIgnore => {},
+        _        => panic("Allow + Ignore → Ignore"),
+    }
+    let _ = r.register_authorizer(auth_deny);
+    match r.fire_authorize(&action) {
+        AdDeny => {},
+        _      => panic("Allow + Ignore + Deny → Deny (most restrictive)"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 11. Per-kind active count
+// -----------------------------------------------------------------------------
+
+fn per_kind_active_count() {
+    let mut r = hook_handle_registry_new();
+    let _ = r.register_update(no_op_update);
+    let _ = r.register_update(no_op_update);
+    let _ = r.register_commit(always_allow_commit);
+    let _ = r.register_wal(wal_returns_zero);
+    assert_eq(r.active_count_of(&HkUpdate), 2);
+    assert_eq(r.active_count_of(&HkCommit), 1);
+    assert_eq(r.active_count_of(&HkWal), 1);
+    assert_eq(r.active_count_of(&HkRollback), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 12. fire_update / fire_rollback / fire_trace smoke (no return value
+//     to assert; these are observation-only surfaces — we just verify
+//     the dispatch path runs to completion without panic).
+// -----------------------------------------------------------------------------
+
+fn observation_hooks_smoke() {
+    let mut r = hook_handle_registry_new();
+    let _ = r.register_update(no_op_update);
+    let _ = r.register_rollback(no_op_rollback);
+    let _ = r.register_trace(trace_noop);
+    r.fire_update(UoInsert, &"main".clone(), &"users".clone(), 42_i64);
+    r.fire_rollback();
+    r.fire_trace(&"SELECT 1".clone());
+}
+
+// -----------------------------------------------------------------------------
+// 13. PreUpdate fires distinct from Update
+// -----------------------------------------------------------------------------
+
+fn pre_update_distinct_from_update() {
+    let mut r = hook_handle_registry_new();
+    let h_pre = r.register_pre_update(no_op_update);
+    let h_post = r.register_update(no_op_update);
+    assert_handle_kind(&h_pre, &HkPreUpdate);
+    assert_handle_kind(&h_post, &HkUpdate);
+    assert_eq(r.active_count_of(&HkPreUpdate), 1);
+    assert_eq(r.active_count_of(&HkUpdate), 1);
+}
+
+fn main() {
+    fresh_registry_empty();
+    register_update_handle_shape();
+    unregister_idempotent();
+    handle_ids_never_reused();
+    cross_kind_unregister_rejected();
+    fire_commit_or_fold();
+    fire_busy_and_fold();
+    fire_wal_first_error_wins();
+    fire_progress_any_interrupt_wins();
+    fire_authorize_most_restrictive_wins();
+    per_kind_active_count();
+    observation_hooks_smoke();
+    pre_update_distinct_from_update();
+}
