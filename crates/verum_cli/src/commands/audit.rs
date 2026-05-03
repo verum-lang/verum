@@ -7650,7 +7650,6 @@ fn print_hygiene_report_json(
 
 use crate::commands::owl2::{Owl2EntityKind, Owl2Graph, collect_owl2_attrs};
 use std::collections::BTreeSet;
-use verum_ast::attr::Owl2Semantics;
 
 pub fn audit_owl2_classify() -> Result<()> {
     audit_owl2_classify_with_format(AuditFormat::Plain)
@@ -7778,15 +7777,12 @@ fn print_owl2_report(
             }
             let anc = closure.get(name).cloned().unwrap_or_default();
             let other_anc: Vec<&Text> = anc.iter().filter(|a| *a != name).collect();
-            let semantics_label = match e.semantics {
-                Some(Owl2Semantics::OpenWorld) => " [OpenWorld]",
-                _ => "",
-            };
+            // OWL 2 Direct Semantics is OWA per W3C §5.6 — no
+            // per-entity semantics flag is rendered.
             print!(
-                "    {} {}{}",
+                "    {} {}",
                 "·".dimmed(),
                 name.as_str().cyan(),
-                semantics_label,
             );
             if !other_anc.is_empty() {
                 let parents: Vec<&str> = other_anc.iter().map(|a| a.as_str()).collect();
@@ -7922,17 +7918,15 @@ fn print_owl2_report_json(
         let anc = closure.get(name).cloned().unwrap_or_default();
         let mut anc_list: Vec<&Text> = anc.iter().filter(|a| *a != name).collect();
         anc_list.sort();
-        let semantics = match e.semantics {
-            Some(Owl2Semantics::OpenWorld) => "OpenWorld",
-            Some(Owl2Semantics::ClosedWorld) => "ClosedWorld",
-            None => "ClosedWorld",
-        };
         out.push_str("    {\n");
         out.push_str(&format!(
             "      \"name\": \"{}\",\n",
             json_escape(name.as_str())
         ));
-        out.push_str(&format!("      \"semantics\": \"{}\",\n", semantics));
+        // OWL 2 Direct Semantics is OWA per W3C §5.6. The audit JSON
+        // pins this as a corpus-wide invariant rather than a per-class
+        // field — schema_v=2 drops the previous per-entity
+        // "semantics" key.
         out.push_str("      \"ancestors\": [");
         for (i, a) in anc_list.iter().enumerate() {
             out.push_str(&format!("\"{}\"", json_escape(a.as_str())));

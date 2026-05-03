@@ -6550,79 +6550,44 @@ impl std::fmt::Display for AccessibilityAttr {
 // that case rather than silently dropping the attribute.
 // =============================================================================
 
-/// Open-world / closed-world semantics flag. OWL 2 DS is normally
-/// open-world; Verum's typed refinement system is closed-world.
-/// picks CWA as the default and admits OWA only when
-/// the user explicitly opts in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Owl2Semantics {
-    /// Open World Assumption — absence of an assertion does not imply
-    /// negation. Queries return `Maybe<Bool>` with `Unknown` when the
-    /// class membership is neither provable nor refutable.
-    OpenWorld,
-    /// Closed World Assumption — a predicate either holds or fails.
-    /// Queries return plain `Bool`. Default for `@owl2_class` without
-    /// an explicit `semantics` argument.
-    ClosedWorld,
-}
-
-impl Owl2Semantics {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::OpenWorld => "OpenWorld",
-            Self::ClosedWorld => "ClosedWorld",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "OpenWorld" | "open_world" | "OWA" => Some(Self::OpenWorld),
-            "ClosedWorld" | "closed_world" | "CWA" => Some(Self::ClosedWorld),
-            _ => None,
-        }
-    }
-}
-
-/// `@owl2_class` — marks a Verum type as an OWL 2 Class. Optional
-/// `semantics = "OpenWorld" | "ClosedWorld"` argument selects the
-/// semantic regime.
+/// `@owl2_class` — marks a Verum type as an OWL 2 Class.
+///
+/// **Semantics:** Open World Assumption (OWA) per W3C OWL 2 Direct
+/// Semantics §5.6. The earlier ClosedWorld opt-in has been removed —
+/// it conflicted with the Direct Semantics' formal interpretation
+/// (interpretations need not satisfy closed assertions about what
+/// must hold universally).
+///
+/// Code that needs closed-world reasoning over a finite domain
+/// expresses it directly through Verum's refinement-type system or
+/// through `core.math.frameworks.owl2_fs.count.count_o` which takes
+/// an explicit finite domain witness — neither path requires an
+/// OWL-level CWA flag.
+///
+/// The attribute admits no arguments. `@owl2_class` is the canonical
+/// form; `@owl2_class()` is also accepted for parser uniformity.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Owl2ClassAttr {
-    /// Optional semantics qualifier; default is ClosedWorld.
-    pub semantics: Maybe<Owl2Semantics>,
     pub span: Span,
 }
 
 impl Owl2ClassAttr {
-    pub fn new(semantics: Maybe<Owl2Semantics>, span: Span) -> Self {
-        Self { semantics, span }
+    pub fn new(span: Span) -> Self {
+        Self { span }
     }
 
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
         if !attr.is_named("owl2_class") {
             return Maybe::None;
         }
-        let args = match &attr.args {
-            Maybe::Some(a) => a,
-            Maybe::None => {
-                // `@owl2_class` without args is valid — defaults to
-                // ClosedWorld semantics.
-                return Maybe::Some(Self::new(Maybe::None, attr.span));
-            }
-        };
-        if args.is_empty() {
-            return Maybe::Some(Self::new(Maybe::None, attr.span));
-        }
-        if args.len() != 1 {
-            return Maybe::None;
-        }
-        // Expect a single named-arg `semantics: "..."` lowered to
-        // Binary { Assign, Path("semantics"), Literal("...") }.
-        let semantics = parse_named_string_arg(args.get(0)?, "semantics")
-            .and_then(|s| Owl2Semantics::parse(s.as_str()));
-        match semantics {
-            Some(sem) => Maybe::Some(Self::new(Maybe::Some(sem), attr.span)),
-            None => Maybe::None,
+        // OWL 2 Direct Semantics is OWA-only — no `semantics = ...`
+        // argument is admitted. Reject any args defensively so a
+        // misuse (e.g. holdover from the legacy ClosedWorld surface)
+        // surfaces as a parse miss rather than silently succeeding.
+        match &attr.args {
+            Maybe::None => Maybe::Some(Self::new(attr.span)),
+            Maybe::Some(args) if args.is_empty() => Maybe::Some(Self::new(attr.span)),
+            Maybe::Some(_) => Maybe::None,
         }
     }
 }

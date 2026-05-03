@@ -230,7 +230,6 @@ pub use typed::{
     Owl2EquivalentClassAttr,
     Owl2HasKeyAttr,
     Owl2PropertyAttr,
-    Owl2Semantics,
     Owl2SubClassOfAttr,
     ParallelAttr,
     PerformanceContract,

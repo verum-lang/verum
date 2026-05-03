@@ -964,31 +964,53 @@ fn class_array(names: &[&str]) -> Expr {
 }
 
 // ----- @owl2_class -----
+//
+// OWL 2 Direct Semantics is open-world per W3C §5.6 — `@owl2_class`
+// admits no `semantics = ...` argument. The earlier ClosedWorld
+// opt-in surface has been removed; CWA-style closed-domain
+// reasoning is expressed through Verum's refinement-type system or
+// `count_o`'s explicit-witness contract, neither of which lives at
+// this attribute layer.
 
 #[test]
-fn owl2_class_attr_no_args_defaults_to_closed_world() {
+fn owl2_class_attr_no_args_accepts() {
     let raw = Attribute::new(Text::from("owl2_class"), Maybe::None, Span::default());
     let typed = Owl2ClassAttr::from_attribute(&raw);
-    match typed {
-        Maybe::Some(c) => assert!(matches!(c.semantics, Maybe::None)),
-        Maybe::None => panic!("@owl2_class without args must default-accept"),
-    }
+    assert!(
+        matches!(typed, Maybe::Some(_)),
+        "@owl2_class without args must parse"
+    );
 }
 
 #[test]
-fn owl2_class_attr_open_world_explicit() {
+fn owl2_class_attr_empty_args_accepts() {
+    // `@owl2_class()` is parser-uniform with `@owl2_class`.
+    let args: List<Expr> = List::new();
+    let raw = Attribute::new(Text::from("owl2_class"), Maybe::Some(args), Span::default());
+    let typed = Owl2ClassAttr::from_attribute(&raw);
+    assert!(
+        matches!(typed, Maybe::Some(_)),
+        "@owl2_class() with empty args must parse"
+    );
+}
+
+#[test]
+fn owl2_class_attr_rejects_legacy_semantics_arg() {
+    // Holdover `semantics = "OpenWorld"` / `"ClosedWorld"` from
+    // the legacy surface MUST be rejected — OWL 2 DS is OWA-only
+    // per W3C §5.6, no per-class semantics flag is admitted.
     let mut args: List<Expr> = List::new();
     args.push(named_string("semantics", "OpenWorld"));
     let raw = Attribute::new(Text::from("owl2_class"), Maybe::Some(args), Span::default());
-    let typed = Owl2ClassAttr::from_attribute(&raw);
-    match typed {
-        Maybe::Some(c) => assert!(matches!(c.semantics, Maybe::Some(Owl2Semantics::OpenWorld))),
-        Maybe::None => panic!("@owl2_class(semantics: OpenWorld) must parse"),
-    }
+    assert!(
+        matches!(Owl2ClassAttr::from_attribute(&raw), Maybe::None),
+        "@owl2_class(semantics: OpenWorld) must NOT parse — surface is OWA-only"
+    );
 }
 
 #[test]
-fn owl2_class_attr_rejects_unknown_semantics() {
+fn owl2_class_attr_rejects_any_args() {
+    // Defensive: arbitrary args should not be silently accepted.
     let mut args: List<Expr> = List::new();
     args.push(named_string("semantics", "TimeShared"));
     let raw = Attribute::new(Text::from("owl2_class"), Maybe::Some(args), Span::default());

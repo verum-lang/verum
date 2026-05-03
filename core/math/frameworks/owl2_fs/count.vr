@@ -33,12 +33,17 @@
 
 mount core.math.frameworks.owl2_fs.types;
 
-/// `E_OWL2_UNBOUNDED_COUNT` diagnostic name. Returned as part of a
-/// `Maybe.None` from `count_o_unbounded` and surfaced by the typed
-/// elaboration layer (`verum_ast.attr.typed.Owl2ClassAttr`) when a
-/// `count_o` query is issued against a class that lacks
-/// `@owl2_class(semantics = ClosedWorld)` or an explicit
-/// `closed_domain = true` annotation.
+/// `E_OWL2_UNBOUNDED_COUNT` diagnostic name. Returned as part of
+/// `Maybe.None` from `count_o_unbounded` when the user does not
+/// supply a finite-domain witness for the comprehension.
+///
+/// **OWA-only stance.** OWL 2 Direct Semantics is open-world per
+/// W3C §5.6 — there is no per-class CWA opt-in at the framework
+/// layer. A `count_o` query needs a `List<Individual>` witness
+/// because the HOL comprehension `|{y : Individual | P(y)}|` is
+/// only well-defined when the bound set is finite. Code that
+/// calls `count_o` without a witness must accept `Maybe.None`
+/// or wrap the call in `assert_finite_domain` to fail loudly.
 public let E_OWL2_UNBOUNDED_COUNT: Text = "E_OWL2_UNBOUNDED_COUNT";
 
 /// Bounded count: walks `domain` and returns the number of
@@ -71,11 +76,18 @@ public fn count_o<I: Individual>(
     hits
 }
 
-/// Unbounded count: returns `Maybe.Some(n)` iff the domain witness
-/// can be supplied; otherwise `Maybe.None` to signal
-/// `E_OWL2_UNBOUNDED_COUNT`. V1 always requires a witness; Future work will
-/// dispatch to CVC5 FMF when the witness is `Maybe.None` and the
-/// surrounding `@owl2_class` carries `semantics = ClosedWorld`.
+/// Unbounded count: returns `Maybe.Some(n)` iff the domain
+/// witness can be supplied; otherwise `Maybe.None` to signal
+/// `E_OWL2_UNBOUNDED_COUNT`. The witness is always required at
+/// the call site — OWL 2 Direct Semantics is open-world (W3C
+/// §5.6), so no implicit closure of the universe is performed
+/// at this layer.
+///
+/// Future work will dispatch to CVC5 Finite Model Finding when
+/// the witness is `Maybe.None` AND the surrounding refinement
+/// type carries an explicit finite-cardinality bound (a Verum
+/// refinement-type-level claim, distinct from any OWL 2 CWA
+/// flag).
 public fn count_o_unbounded<I: Individual>(
     domain: Maybe<List<I>>,
     pred:   fn(I) -> Bool,
@@ -86,14 +98,16 @@ public fn count_o_unbounded<I: Individual>(
     }
 }
 
-/// Compile-time-style guard: panics with `E_OWL2_UNBOUNDED_COUNT` if
-/// the count's domain is not bounded. Use at the top of a function
-/// that issues a `count_o` query so the failure mode is loud.
+/// Compile-time-style guard: panics with `E_OWL2_UNBOUNDED_COUNT`
+/// if the count's domain is not bounded. Use at the top of a
+/// function that issues a `count_o` query so the failure mode
+/// is loud.
 ///
-
-/// The panic body cites the spec's @owl2_class opt-in as the fix:
-/// add `@owl2_class(semantics = ClosedWorld)` to the consuming
-/// class declaration to commit to the closed-domain interpretation.
+/// The panic body's remediation is to *supply the witness* —
+/// pass an explicit `List<I>` enumerating the relevant
+/// individuals. There is no OWL-level CWA flag to set; OWL 2
+/// Direct Semantics is OWA-only by W3C §5.6, and finite-domain
+/// reasoning is a witness-level concern.
 public fn assert_finite_domain<I: Individual>(domain: Maybe<List<I>>) -> List<I> {
     match domain {
         Maybe.Some(d) => d,

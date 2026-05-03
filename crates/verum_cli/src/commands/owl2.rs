@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use verum_ast::Item;
 use verum_ast::attr::{
     Owl2Characteristic, Owl2CharacteristicAttr, Owl2ClassAttr, Owl2DisjointWithAttr,
-    Owl2EquivalentClassAttr, Owl2HasKeyAttr, Owl2PropertyAttr, Owl2Semantics, Owl2SubClassOfAttr,
+    Owl2EquivalentClassAttr, Owl2HasKeyAttr, Owl2PropertyAttr, Owl2SubClassOfAttr,
 };
 use verum_ast::decl::ItemKind;
 use verum_common::{Maybe, Text};
@@ -45,13 +45,15 @@ impl Owl2EntityKind {
 }
 
 /// One declared OWL 2 entity with the metadata the walker collected.
+///
+/// **Semantics note.** OWL 2 Direct Semantics is open-world per W3C
+/// §5.6; the walker carries no per-entity CWA/OWA flag. Closed-world
+/// reasoning over a finite domain is expressed in user code via
+/// Verum's refinement-type system or `count_o`, not at this layer.
 #[derive(Debug, Clone)]
 pub struct Owl2Entity {
     pub name: Text,
     pub kind: Owl2EntityKind,
-    /// Open-world flag (only for classes). `None` ⇒ default ClosedWorld
-    ///.
-    pub semantics: Option<Owl2Semantics>,
     /// Source file the entity was declared in.
     pub file: PathBuf,
     /// Property metadata — only populated when kind == Property.
@@ -64,11 +66,10 @@ pub struct Owl2Entity {
 }
 
 impl Owl2Entity {
-    pub fn new_class(name: Text, semantics: Option<Owl2Semantics>, file: PathBuf) -> Self {
+    pub fn new_class(name: Text, file: PathBuf) -> Self {
         Self {
             name,
             kind: Owl2EntityKind::Class,
-            semantics,
             file,
             property_domain: None,
             property_range: None,
@@ -89,7 +90,6 @@ impl Owl2Entity {
         Self {
             name,
             kind: Owl2EntityKind::Property,
-            semantics: None,
             file,
             property_domain: domain,
             property_range: range,
@@ -143,9 +143,6 @@ impl Owl2Graph {
             Some(existing) if matches!(existing.kind, Owl2EntityKind::Class) => {
                 for k in &e.keys {
                     existing.keys.push(k.clone());
-                }
-                if existing.semantics.is_none() && e.semantics.is_some() {
-                    existing.semantics = e.semantics;
                 }
             }
             _ => {
@@ -285,7 +282,6 @@ pub fn collect_owl2_attrs(item: &Item, rel_path: &Path, graph: &mut Owl2Graph) {
     let attr_lists = [&item.attributes, decl_attrs];
 
     let mut is_class = false;
-    let mut class_semantics: Option<Owl2Semantics> = None;
     let mut subclass_parents: Vec<Text> = Vec::new();
     let mut equivalent_classes: Vec<Text> = Vec::new();
     let mut disjoint_classes: Vec<Text> = Vec::new();
@@ -298,11 +294,8 @@ pub fn collect_owl2_attrs(item: &Item, rel_path: &Path, graph: &mut Owl2Graph) {
 
     for list in &attr_lists {
         for attr in list.iter() {
-            if let Maybe::Some(c) = Owl2ClassAttr::from_attribute(attr) {
+            if let Maybe::Some(_c) = Owl2ClassAttr::from_attribute(attr) {
                 is_class = true;
-                if let Maybe::Some(sem) = c.semantics {
-                    class_semantics = Some(sem);
-                }
             }
             if let Maybe::Some(s) = Owl2SubClassOfAttr::from_attribute(attr) {
                 is_class = true;
@@ -345,8 +338,7 @@ pub fn collect_owl2_attrs(item: &Item, rel_path: &Path, graph: &mut Owl2Graph) {
     }
 
     if is_class {
-        let mut entity =
-            Owl2Entity::new_class(item_name.clone(), class_semantics, rel_path.to_path_buf());
+        let mut entity = Owl2Entity::new_class(item_name.clone(), rel_path.to_path_buf());
         entity.keys = keys;
         graph.add_entity(entity);
         for p in subclass_parents {

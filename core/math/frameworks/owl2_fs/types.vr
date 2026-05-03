@@ -42,16 +42,38 @@ public type Literal is protocol {
     fn lexical_form(self) -> Text;
 };
 
-/// VVA §21.5 — quantifier of quantity. `count_o(pred)` is the
-/// number of `Individual`s satisfying `pred`. Returns `Int >= 0`
-/// at runtime. When the domain is not finite, the V2 SMT dispatch
-/// returns `E_OWL2_UNBOUNDED_COUNT`. ships the axiom with a
-/// `true` placeholder body; Future work will replace it with the full HOL
-/// definition `#y:o P(y) ≡ |{y : Individual | P(y)}|` plus the
-/// finite-domain side condition.
+/// VVA §21.5 — quantifier of quantity. Shkotin's `#y:o P(y)` is
+/// realised constructively as
+/// `core.math.frameworks.owl2_fs.count.count_o(domain, pred)` —
+/// a bounded fold over an explicit finite-domain witness. The
+/// HOL definition `#y:o P(y) ≡ |{y : Individual | P(y)}|`
+/// translates directly: when the OWL 2 universe is presented as
+/// a list of individuals, `count_o` returns the cardinality of
+/// the comprehension `{y : Individual | pred(y)}`.
+///
+/// The framework-axiom *marker* below pins the load-bearing
+/// post-condition: the count is in `[0, domain.len()]` for any
+/// finite domain. The full equational HOL body
+/// `count_o(domain, pred) = |{y ∈ domain | pred(y)}|` is the
+/// constructive content of the function's implementation in
+/// `count.vr` — this axiom states the soundness of *that*
+/// implementation against the HOL definition.
+///
+/// **Finite-domain side condition.** The HOL definition is only
+/// well-defined for finite comprehensions. Verum requires a
+/// `List<I>` witness syntactically — `List` is finite by
+/// construction (`List.len() : Int`), so the side condition is
+/// discharged by the witness's existence. Unbounded counts are
+/// the domain of `count_o_unbounded` which returns `Maybe<Int>`
+/// and surfaces `E_OWL2_UNBOUNDED_COUNT` when the witness is
+/// absent.
 @framework(owl2_fs, "Shkotin 2019. DS2HOL-1 §Notation (quantifier of quantity #)")
-public axiom count_o_spec() -> Bool
-    ensures true;
+public axiom count_o_spec<I: Individual>(
+    domain: List<I>,
+    pred:   fn(I) -> Bool,
+) -> Int
+    ensures result >= 0
+        && result <= domain.len() as Int;
 
 // ─── #134 / C7 V2 — Direct-Semantics carrier sorts ──────────────────
 //
