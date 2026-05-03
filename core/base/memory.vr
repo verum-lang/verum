@@ -347,11 +347,13 @@ implement<T> Heap<T> {
     }
 
     /// Get the stored generation (for debugging/testing).
+    @inline(always)
     public fn generation(&self) -> UInt32 {
         self.generation
     }
 
     /// Get the stored epoch (for debugging/testing).
+    @inline(always)
     public fn epoch(&self) -> UInt16 {
         self.epoch
     }
@@ -636,6 +638,7 @@ implement<T> Shared<T> {
     }
 
     /// Get the current strong reference count.
+    @inline(always)
     public fn strong_count(&self) -> Int {
         unsafe {
             atomic_load_u32(&(*self.ptr).strong_count as *const UInt32, ORDERING_ACQUIRE) as Int
@@ -643,6 +646,7 @@ implement<T> Shared<T> {
     }
 
     /// Get the current weak reference count.
+    @inline(always)
     public fn weak_count(&self) -> Int {
         unsafe {
             atomic_load_u32(&(*self.ptr).weak_count as *const UInt32, ORDERING_ACQUIRE) as Int
@@ -650,6 +654,7 @@ implement<T> Shared<T> {
     }
 
     /// Check if this is the only strong reference.
+    @inline(always)
     public fn is_unique(&self) -> Bool {
         self.strong_count() == 1
     }
