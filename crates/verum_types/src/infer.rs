@@ -46647,6 +46647,100 @@ impl TypeChecker {
                 }
             }
 
+            // ============================================================
+            // Sub-protocol auto-promotion (default-method dispatch).
+            // ============================================================
+            // When `T` implements protocol `P` and there's another protocol
+            // `P'` such that:
+            //   * P' extends P (`type P' is protocol extends P { ... }`)
+            //   * the queried method is declared on P' with a default body
+            //   * P' has not been explicitly impl'd for T (no override needed)
+            // … then dispatch should resolve to P''s default body. This
+            // matches the user expectation that a sub-protocol with all
+            // default methods is automatically usable on any type
+            // implementing its parent — without forcing every stdlib type
+            // to repeat `implement<T: P> P' for T {}` blanket impls.
+            //
+            // Mirrors the protocol-typed-receiver block above (commit
+            // 3a6b58af) but for the concrete-type case: there the
+            // receiver IS the parent protocol; here the receiver
+            // implements the parent.
+            //
+            // Generic-param case: if `resolved_ty` is a `Type::Var` with
+            // protocol bounds (e.g. `iter: I` where `I: Iterator`), the
+            // bounds list IS the parent protocol set — use it just like
+            // the impls list.
+            {
+                let parent_proto_names: Vec<String> = impls
+                    .iter()
+                    .filter_map(|impl_| {
+                        impl_.protocol.as_ident().map(|id| id.name.as_str().to_string())
+                    })
+                    .collect();
+
+                if !parent_proto_names.is_empty() {
+                    // Self-substitution map for sub-protocol method type signatures.
+                    let mut self_subst: verum_common::Map<Text, Type> =
+                        verum_common::Map::new();
+                    self_subst.insert(Text::from("Self"), resolved_ty.clone());
+
+                    let sub_proto_methods: Vec<(Text, Type)> = protocol_checker_guard
+                        .all_protocols()
+                        .filter_map(|sub_proto| {
+                            // Skip if this IS one of the parent protocols
+                            // already directly implemented (would be a
+                            // duplicate of the explicit impl-walk below).
+                            if parent_proto_names.iter().any(|n| n.as_str() == sub_proto.name.as_str()) {
+                                return None;
+                            }
+                            // Does this sub_proto extend any of the
+                            // parent protocols T implements?
+                            let extends_one_of_parents =
+                                sub_proto.super_protocols.iter().any(|sb| {
+                                    let last = sb
+                                        .protocol
+                                        .as_ident()
+                                        .map(|id| id.as_str().to_string())
+                                        .or_else(|| {
+                                            sb.protocol.segments.last().and_then(|seg| {
+                                                match seg {
+                                                    verum_ast::ty::PathSegment::Name(id) => {
+                                                        Some(id.name.as_str().to_string())
+                                                    }
+                                                    _ => None,
+                                                }
+                                            })
+                                        });
+                                    last.map(|s| {
+                                        parent_proto_names.iter().any(|p| p.as_str() == s)
+                                    })
+                                    .unwrap_or(false)
+                                });
+                            if !extends_one_of_parents {
+                                return None;
+                            }
+                            sub_proto
+                                .methods
+                                .get(&method_name)
+                                .map(|pm| (sub_proto.name.clone(), pm.ty.clone()))
+                        })
+                        .collect();
+                    for (sub_name, sub_ty) in sub_proto_methods {
+                        if seen_protocols.contains(&sub_name) {
+                            continue;
+                        }
+                        seen_protocols.insert(sub_name.clone());
+                        let substituted = protocol_checker_guard
+                            .substitute_type_params(&sub_ty, &self_subst);
+                        let sub_path = verum_ast::ty::Path::single(verum_ast::Ident::new(
+                            sub_name,
+                            method.span,
+                        ));
+                        candidates.push((sub_path, substituted));
+                    }
+                }
+            }
+
             for impl_ in impls {
                 // Check if this implementation has the method directly
                 let method_ty_opt = impl_.methods.get(&method_name).cloned();
