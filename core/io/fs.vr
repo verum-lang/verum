@@ -148,7 +148,8 @@ const S_IFDIR: UInt32 = 0o040000;  // Directory
 const S_IFLNK: UInt32 = 0o120000;  // Symbolic link
 
 /// Internal metadata structure derived from syscall Stat.
-type FsMetadataRaw is {
+/// Public so test suites can inspect the raw fields.
+public type FsMetadataRaw is {
     size: Int,
     modified_secs: Int,
     modified_nanos: Int,
