@@ -57,6 +57,7 @@ plugin Spindle accepts in the safe path).
 | `t07_async_transaction.vr` | async typed Database<AsyncMysqlPool, _> + AsyncMysqlTxScope rollback / commit (spec §6.3.6 async surface) |
 | `t08_binlog.vr` | COM_BINLOG_DUMP_GTID + binlog event header + canonical event decoders (FORMAT_DESCRIPTION / QUERY / XID / GTID / ROTATE / HEARTBEAT) (spec §6.3.7) |
 | `t09_binlog_rows.vr` | TABLE_MAP_EVENT + WRITE_ROWS_V2 type-aware tuple decoder; pairs RowsEvent with cached TABLE_MAP via `decode_with_table_map`; verifies INSERTs propagate as decoded RowValues (spec §6.3.7 row events) |
+| `t10_async_binlog.vr` | AsyncMysqlBinlogStream actor — connect_binlog_async + next_event_message drains canonical events from a side-channel INSERT (spec §6.3.6 + §6.3.7 async surface) |
 
 ## Adding tests
 

@@ -1,0 +1,125 @@
+// =============================================================================
+// t10_async_binlog.vr — async binlog dump V0
+// =============================================================================
+// Spec: internal/specs/database.md §6.3.7 (binlog replication),
+//       §6.3.6 (async surface).
+// =============================================================================
+//
+// Mirror of t08_binlog.vr through the async actor:
+//
+//   1. Side-channel INSERT.
+//   2. connect_binlog_async with empty GTID set (start from earliest).
+//   3. Drain ≤ 50 events via next_event_message.
+//   4. Assert FORMAT_DESCRIPTION + at least one Query/Xid/Gtid/Rotate.
+//   5. close().
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    connect_app,
+};
+mount core.database.mysql.{
+    MysqlConfig, MtmDisable,
+    BinlogConfig, BinlogStream,
+    BinlogEvent, BeFormatDescription, BeQuery, BeXid, BeRotate,
+    BeGtid, BeHeartbeat, BeOther,
+    BeTableMap, BeWriteRows, BeUpdateRows, BeDeleteRows,
+    AsyncMysqlBinlogStream, MysqlBinlogActorEvent,
+    connect_binlog_async,
+};
+mount core.async.executor.block_on;
+
+const SERVER_ID: Int = 16777218;
+
+fn admin_mysql_cfg() -> MysqlConfig {
+    MysqlConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        character_set: 255,
+        tls_mode: MtmDisable,
+        connect_timeout_ms: 10_000,
+    }
+}
+
+fn write_row_on_side_channel() {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS async_binlog_smoke (id INT PRIMARY KEY, payload TEXT NOT NULL)"
+            .clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM async_binlog_smoke".clone());
+    let _ = expect_ok(
+        side.simple_query(&
+            "INSERT INTO async_binlog_smoke (id, payload) VALUES (1, 'first')".clone()
+        ),
+        &"side-channel INSERT failed".clone(),
+    );
+}
+
+fn main() {
+    write_row_on_side_channel();
+
+    block_on(async move {
+        let bcfg = BinlogConfig.from_gtid(SERVER_ID, "".clone());
+        let stream = expect_ok(
+            connect_binlog_async(admin_mysql_cfg(), bcfg).await,
+            &"connect_binlog_async failed".clone(),
+        );
+
+        let mut saw_format_desc: Bool = false;
+        let mut saw_dml_marker: Bool = false;
+        let mut total_events: Int = 0;
+        let mut i: Int = 0;
+        while i < 50 {
+            let r = expect_ok(
+                stream.next_event_message().await,
+                &f"next_event_message #{i} failed",
+            );
+            match r {
+                Some(ev) => {
+                    total_events = total_events + 1;
+                    match ev {
+                        BeFormatDescription { .. } => { saw_format_desc = true; }
+                        BeQuery { .. } | BeXid { .. } | BeGtid { .. }
+                        | BeRotate { .. } => {
+                            saw_dml_marker = true;
+                        }
+                        BeHeartbeat { .. } => {}
+                        BeTableMap { .. } | BeWriteRows { .. }
+                        | BeUpdateRows { .. } | BeDeleteRows { .. } => {
+                            saw_dml_marker = true;
+                        }
+                        BeOther { .. } => {}
+                    }
+                    if saw_format_desc && saw_dml_marker { break; }
+                }
+                None => { break; }
+            }
+            i = i + 1;
+        }
+
+        expect(
+            total_events > 0,
+            &"async binlog stream produced no events".clone(),
+        );
+        expect(
+            saw_format_desc,
+            &"never saw FORMAT_DESCRIPTION_EVENT through async actor".clone(),
+        );
+        expect(
+            saw_dml_marker,
+            &"never saw a Query/Xid/Gtid/Rotate via async actor".clone(),
+        );
+
+        let _ = stream.close().await;
+
+        pass(&"t10_async_binlog".clone());
+    });
+}

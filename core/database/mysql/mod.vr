@@ -46,6 +46,7 @@ public module async_transaction;
 public module async_typed_database;
 public module binlog;
 public module binlog_rows;
+public module async_binlog;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -143,4 +144,10 @@ public mount .binlog_rows.{
     COL_TYPE_FLOAT, COL_TYPE_DOUBLE, COL_TYPE_VARCHAR, COL_TYPE_BLOB,
     COL_TYPE_TIMESTAMP, COL_TYPE_DATETIME, COL_TYPE_NEWDECIMAL,
     COL_TYPE_JSON, COL_TYPE_NULL,
+};
+public mount .async_binlog.{
+    AsyncMysqlBinlogStream, MysqlBinlogActorEvent,
+    MbaEvent, MbaTerminated, MbaClosed,
+    connect_binlog_async,
+    DEFAULT_EVENT_CAPACITY,
 };

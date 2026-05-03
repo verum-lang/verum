@@ -1,0 +1,273 @@
+// =============================================================================
+// core/database/mysql/async_binlog.vr — async binlog dump V0
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.7 (binlog replication),
+//       §6.3.6 (async surface).
+// =============================================================================
+//
+// Async wrapper over sync `binlog.vr`. CDC consumers running on
+// the async runtime can subscribe to binlog events without
+// dropping into spawn_blocking by hand.
+//
+// Architecture — single actor (MySQL binlog wire is server-push
+// only in V0; no client→server replies needed for COM_BINLOG_DUMP[
+// _GTID]). Simpler than PG async replication where the standby-
+// status update path required a writer queue.
+//
+// The actor:
+//   1. Owns BinlogStream from connect_binlog (sync).
+//   2. Loops next_event (which blocks on binlog_recv_packet).
+//   3. Each decoded event pushed into Sender<MysqlBinlogActorEvent>.
+//   4. On EOF (server-side end-of-binlog under non_blocking) emits
+//      ReaClosed + exits cleanly.
+//   5. On wire error emits ReaTerminated(err) + exits.
+//
+// V0 surface:
+//   * AsyncMysqlBinlogStream — Send+Clone handle.
+//   * connect_binlog_async(mysql_cfg, binlog_cfg)
+//       → Future<Result<AsyncMysqlBinlogStream, …>>
+//   * .next_event().await → Maybe<MysqlBinlogActorEvent>
+//   * .next_event_message().await convenience —
+//       Result<Maybe<BinlogEvent>, DbError>
+//   * .close().await
+//
+// Sync binlog.vr canonical / unchanged.
+//
+// OUT of V0:
+//   * COM_REGISTER_SLAVE (semi-sync replication).
+//   * Rate-limit watchdog (per-table or per-event-type).
+//   * Async TableMapCache lifecycle — caller pairs ROW events
+//     with cached TABLE_MAP by hand (or via a non-actor utility).
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.DatabaseMedium("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.async_binlog;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.config.MysqlConfig;
+mount core.database.mysql.binlog.{
+    BinlogConfig, BinlogStream, BinlogEvent,
+    connect_binlog as sync_connect_binlog,
+};
+mount core.async.channel.{
+    Sender, Receiver, OneshotSender,
+    bounded_channel, oneshot,
+};
+mount core.async.task.{spawn_blocking, JoinHandle};
+
+// =============================================================================
+// Tunables
+// =============================================================================
+
+/// Capacity of the actor → caller event channel. Bounds buffered
+/// binlog events; backpressures the wire (TCP advertised window
+/// shrinks naturally if caller is slow to drain).
+public const DEFAULT_EVENT_CAPACITY: Int = 256;
+
+// =============================================================================
+// Actor protocol
+// =============================================================================
+
+public type MysqlBinlogActorEvent is
+      MbaEvent(BinlogEvent)
+    | MbaTerminated(DbError)
+    | MbaClosed;
+
+/// Single shutdown command — V0 has no other control variants
+/// because the wire is single-direction streaming once
+/// COM_BINLOG_DUMP[_GTID] is in flight.
+type BinlogActorCommand is
+      BcShutdown {
+        ack: OneshotSender<Result<(), DbError>>,
+    };
+
+// =============================================================================
+// Public handle
+// =============================================================================
+
+public type AsyncMysqlBinlogStream is {
+    cmd_tx: Sender<BinlogActorCommand>,
+    event_rx: Shared<sync.mutex.Mutex<Receiver<MysqlBinlogActorEvent>>>,
+    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+};
+
+implement AsyncMysqlBinlogStream {
+    public fn clone(&self) -> AsyncMysqlBinlogStream {
+        AsyncMysqlBinlogStream {
+            cmd_tx: self.cmd_tx.clone(),
+            event_rx: self.event_rx.clone(),
+            join: self.join.clone(),
+        }
+    }
+
+    /// Pull the next actor event. Returns:
+    ///   * Some(MbaEvent(ev)) — a decoded BinlogEvent.
+    ///   * Some(MbaTerminated(err)) — wire died; subsequent calls
+    ///     return None.
+    ///   * Some(MbaClosed) — clean shutdown observed.
+    ///   * None — channel closed unexpectedly.
+    public async fn next_event(&self) -> Maybe<MysqlBinlogActorEvent> {
+        let mut g = self.event_rx.lock().unwrap_or_else(|p| p.into_inner());
+        let fut = g.recv_fut();
+        drop(g);
+        fut.await
+    }
+
+    /// Convenience — flattens MbaEvent into Some(ev),
+    /// MbaTerminated into Err(e), MbaClosed / None into Ok(None).
+    public async fn next_event_message(&self) -> Result<Maybe<BinlogEvent>, DbError> {
+        match self.next_event().await {
+            Some(MbaEvent(ev))      => Ok(Some(ev)),
+            Some(MbaTerminated(e))  => Err(e),
+            Some(MbaClosed)         => Ok(None),
+            None                    => Ok(None),
+        }
+    }
+
+    /// Tear down the actor cleanly. Sends Shutdown, awaits the
+    /// actor's reply, then joins the actor task.
+    public async fn close(&self) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(BcShutdown { ack: rs }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("close")); }
+        }
+        let _ = rr.await;
+        let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.take() {
+            Some(jh) => { let _ = jh.join().await; }
+            None     => {}
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+/// Open a sync binlog stream (offloaded to spawn_blocking — the
+/// SCRAM handshake + COM_BINLOG_DUMP[_GTID] are sync), then launch
+/// the actor.
+public async fn connect_binlog_async(
+    mysql_cfg: MysqlConfig,
+    binlog_cfg: BinlogConfig,
+) -> Result<AsyncMysqlBinlogStream, DbError> {
+    let mysql_cfg_owned = mysql_cfg.clone();
+    let binlog_cfg_owned = binlog_cfg.clone();
+    let conn_jh = spawn_blocking(move || -> Result<BinlogStream, DbError> {
+        sync_connect_binlog(&mysql_cfg_owned, binlog_cfg_owned)
+    });
+    let stream = match conn_jh.join().await {
+        Ok(r)  => r?,
+        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+    };
+
+    let (cmd_tx, cmd_rx) = bounded_channel::<BinlogActorCommand>(4);
+    let (event_tx, event_rx) = bounded_channel::<MysqlBinlogActorEvent>(DEFAULT_EVENT_CAPACITY);
+
+    let join = spawn_blocking(move || -> () {
+        run_actor(stream, cmd_rx, event_tx);
+    });
+
+    Ok(AsyncMysqlBinlogStream {
+        cmd_tx: cmd_tx,
+        event_rx: Shared.new(sync.mutex.Mutex.new(event_rx)),
+        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+    })
+}
+
+// =============================================================================
+// Actor body
+// =============================================================================
+
+fn run_actor(
+    stream: BinlogStream,
+    mut cmd_rx: Receiver<BinlogActorCommand>,
+    event_tx: Sender<MysqlBinlogActorEvent>,
+) {
+    // BinlogStream.close consumes self, so we wrap it in an Option
+    // and take() at the exit branches. Between iterations we hold
+    // it via &mut for next_event.
+    let mut slot: Maybe<BinlogStream> = Some(stream);
+
+    loop {
+        // Drain any pending control commands first.
+        match cmd_rx.try_recv() {
+            Ok(BcShutdown { ack }) => {
+                let r = match slot.take() {
+                    Some(s) => s.close(),
+                    None    => Ok(()),
+                };
+                let _ = ack.send(r);
+                let _ = event_tx.send(MbaClosed);
+                return;
+            }
+            Err(_) => {}
+        }
+
+        // Borrow the stream mutably for the read.
+        let next_outcome = match &mut slot {
+            Some(s) => s.next_event(),
+            None    => { return; }
+        };
+
+        match next_outcome {
+            Ok(Some(ev)) => {
+                match event_tx.send(MbaEvent(ev)) {
+                    Ok(())  => {}
+                    Err(_)  => {
+                        // Caller dropped the receiver — clean up.
+                        match slot.take() {
+                            Some(s) => { let _ = s.close(); }
+                            None    => {}
+                        }
+                        return;
+                    }
+                }
+            }
+            Ok(None) => {
+                // EOF — server closed the stream cleanly.
+                match slot.take() {
+                    Some(s) => { let _ = s.close(); }
+                    None    => {}
+                }
+                let _ = event_tx.send(MbaClosed);
+                return;
+            }
+            Err(e) => {
+                match slot.take() {
+                    Some(s) => { let _ = s.close(); }
+                    None    => {}
+                }
+                let _ = event_tx.send(MbaTerminated(e));
+                return;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "BINLOG_ACTOR_CLOSED".clone(),
+        message: f"async binlog actor unavailable during {what}",
+        retryable: false,
+    })
+}
