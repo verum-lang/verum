@@ -782,7 +782,7 @@ public fn pending_forever<T>() -> NeverFuture<T> {
 }
 
 /// A future that never resolves.
-type NeverFuture<T> is {
+public type NeverFuture<T> is {
     _marker: (),
 };
 
@@ -815,6 +815,12 @@ public fn ready<T>(value: T) -> SelectReadyFuture<T> {
 public type SelectReadyFuture<T> is {
     value: Maybe<T>,
 };
+
+/// Public alias — short canonical name; internal type uses
+/// `SelectReadyFuture` to disambiguate from `ReadyFuture` in
+/// `core.async.future` (different semantics: this is a select-arm
+/// resolver, that one is a top-level Future combinator).
+public type ReadyFuture<T> is SelectReadyFuture<T>;
 
 implement<T> Future for SelectReadyFuture<T> {
     type Output = T;
