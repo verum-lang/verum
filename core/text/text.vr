@@ -512,6 +512,7 @@ implement Text {
         self
     }
 
+    @inline(always)
     public fn as_bytes(&self) -> &[Byte] {
         if self.len == 0 {
             slice_from_raw_parts(null_ptr(), 0)
@@ -521,6 +522,7 @@ implement Text {
     }
 
     /// Get raw pointer to bytes.
+    @inline(always)
     public fn as_ptr(&self) -> &unsafe Byte {
         self.ptr
     }
@@ -3403,12 +3405,14 @@ implement Ord for Text {
 }
 
 implement Hash for Text {
+    @inline(always)
     fn hash(&self, hasher: &mut Hasher) {
         hasher.write(self.as_bytes());
     }
 }
 
 implement Default for Text {
+    @inline(always)
     fn default() -> Text {
         Text.new()
     }

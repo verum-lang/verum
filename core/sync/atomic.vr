@@ -159,12 +159,14 @@ public type AtomicInt is {
 
 implement AtomicInt {
     // Create new atomic with initial value.
+    @inline(always)
     public fn new(val: Int) -> AtomicInt {
         AtomicInt { value: val }
     }
 
     // Load value with ordering.
     // Uses typed atomic_load_u64 intrinsic (Int is 64-bit).
+    @inline(always)
     public fn load(&self, order: MemoryOrdering) -> Int {
         let ptr = &self.value as *const Int as *const UInt64;
         atomic_load_u64(ptr, ordering_to_u8(order)) as Int
@@ -172,6 +174,7 @@ implement AtomicInt {
 
     // Store value with ordering.
     // Uses typed atomic_store_u64 intrinsic.
+    @inline(always)
     public fn store(&self, val: Int, order: MemoryOrdering) {
         let ptr = &self.value as *const Int as *mut UInt64;
         atomic_store_u64(ptr, val as UInt64, ordering_to_u8(order));
@@ -217,6 +220,7 @@ implement AtomicInt {
 
     // Atomic fetch-add, returns old value.
     // Uses typed atomic_fetch_add_u64 intrinsic.
+    @inline(always)
     public fn fetch_add(&self, val: Int, order: MemoryOrdering) -> Int {
         let ptr = &self.value as *const Int as *mut UInt64;
         atomic_fetch_add_u64(ptr, val as UInt64, ordering_to_u8(order)) as Int
@@ -224,6 +228,7 @@ implement AtomicInt {
 
     // Atomic fetch-sub, returns old value.
     // Uses typed atomic_fetch_sub_u64 intrinsic.
+    @inline(always)
     public fn fetch_sub(&self, val: Int, order: MemoryOrdering) -> Int {
         let ptr = &self.value as *const Int as *mut UInt64;
         atomic_fetch_sub_u64(ptr, val as UInt64, ordering_to_u8(order)) as Int
@@ -321,12 +326,14 @@ public type AtomicU8 is {
 
 implement AtomicU8 {
     // Create new atomic with initial value.
+    @inline(always)
     public fn new(val: Byte) -> AtomicU8 {
         AtomicU8 { value: val }
     }
 
     // Load value with ordering.
     // Uses typed atomic_load_u8 intrinsic.
+    @inline(always)
     public fn load(&self, order: MemoryOrdering) -> Byte {
         let ptr = &self.value as *const Byte as *const UInt8;
         atomic_load_u8(ptr, ordering_to_u8(order)) as Byte
@@ -334,6 +341,7 @@ implement AtomicU8 {
 
     // Store value with ordering.
     // Uses typed atomic_store_u8 intrinsic.
+    @inline(always)
     public fn store(&self, val: Byte, order: MemoryOrdering) {
         let ptr = &self.value as *const Byte as *mut UInt8;
         atomic_store_u8(ptr, val as UInt8, ordering_to_u8(order));
@@ -394,6 +402,7 @@ implement AtomicU8 {
     // other threads (perfectly legitimate operations on
     // unrelated atomics) caused our CAS to retry indefinitely
     // and could observe torn reads of the neighbour data.
+    @inline(always)
     public fn fetch_add(&self, val: Byte, order: MemoryOrdering) -> Byte {
         let ptr = &self.value as *const Byte as *mut UInt8;
         atomic_fetch_add_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
@@ -404,6 +413,7 @@ implement AtomicU8 {
 
     // Direct `atomic_fetch_sub_u8` intrinsic — same rationale
     // as `fetch_add` above.
+    @inline(always)
     public fn fetch_sub(&self, val: Byte, order: MemoryOrdering) -> Byte {
         let ptr = &self.value as *const Byte as *mut UInt8;
         atomic_fetch_sub_u8(ptr, val as UInt8, ordering_to_u8(order)) as Byte
@@ -475,12 +485,14 @@ public type AtomicU16 is {
 
 implement AtomicU16 {
     // Create new atomic with initial value.
+    @inline(always)
     public fn new(val: UInt16) -> AtomicU16 {
         AtomicU16 { value: val }
     }
 
     // Load value with ordering.
     // Uses typed atomic_load_u16 intrinsic.
+    @inline(always)
     public fn load(&self, order: MemoryOrdering) -> UInt16 {
         let ptr = &self.value as *const UInt16;
         atomic_load_u16(ptr, ordering_to_u8(order))
@@ -488,6 +500,7 @@ implement AtomicU16 {
 
     // Store value with ordering.
     // Uses typed atomic_store_u16 intrinsic.
+    @inline(always)
     public fn store(&self, val: UInt16, order: MemoryOrdering) {
         let ptr = &self.value as *const UInt16 as *mut UInt16;
         atomic_store_u16(ptr, val, ordering_to_u8(order));
@@ -657,12 +670,14 @@ public type AtomicU32 is {
 
 implement AtomicU32 {
     // Create new atomic with initial value.
+    @inline(always)
     public fn new(val: UInt32) -> AtomicU32 {
         AtomicU32 { value: val }
     }
 
     // Load value with ordering.
     // Uses typed atomic_load_u32 intrinsic.
+    @inline(always)
     public fn load(&self, order: MemoryOrdering) -> UInt32 {
         let ptr = &self.value as *const UInt32;
         atomic_load_u32(ptr, ordering_to_u8(order))
@@ -670,6 +685,7 @@ implement AtomicU32 {
 
     // Store value with ordering.
     // Uses typed atomic_store_u32 intrinsic.
+    @inline(always)
     public fn store(&self, val: UInt32, order: MemoryOrdering) {
         let ptr = &self.value as *const UInt32 as *mut UInt32;
         atomic_store_u32(ptr, val, ordering_to_u8(order));
@@ -788,12 +804,14 @@ public type AtomicU64 is {
 
 implement AtomicU64 {
     // Create new atomic with initial value.
+    @inline(always)
     public fn new(val: UInt64) -> AtomicU64 {
         AtomicU64 { value: val }
     }
 
     // Load value with ordering.
     // Uses typed atomic_load_u64 intrinsic.
+    @inline(always)
     public fn load(&self, order: MemoryOrdering) -> UInt64 {
         let ptr = &self.value as *const UInt64;
         atomic_load_u64(ptr, ordering_to_u8(order))
@@ -801,6 +819,7 @@ implement AtomicU64 {
 
     // Store value with ordering.
     // Uses typed atomic_store_u64 intrinsic.
+    @inline(always)
     public fn store(&self, val: UInt64, order: MemoryOrdering) {
         let ptr = &self.value as *const UInt64 as *mut UInt64;
         atomic_store_u64(ptr, val, ordering_to_u8(order));
@@ -903,12 +922,14 @@ public type AtomicBool is {
 
 implement AtomicBool {
     // Create new atomic with initial value.
+    @inline(always)
     public fn new(val: Bool) -> AtomicBool {
         AtomicBool { value: if val { 1 } else { 0 } }
     }
 
     // Load value with ordering.
     // Uses typed atomic_load_u8 intrinsic (Bool stored as Byte).
+    @inline(always)
     public fn load(&self, order: MemoryOrdering) -> Bool {
         let ptr = &self.value as *const Byte as *const UInt8;
         atomic_load_u8(ptr, ordering_to_u8(order)) != 0
@@ -916,6 +937,7 @@ implement AtomicBool {
 
     // Store value with ordering.
     // Uses typed atomic_store_u8 intrinsic.
+    @inline(always)
     public fn store(&self, val: Bool, order: MemoryOrdering) {
         let ptr = &self.value as *const Byte as *mut UInt8;
         atomic_store_u8(ptr, if val { 1 } else { 0 }, ordering_to_u8(order));
