@@ -91,6 +91,10 @@ public type MetaSpan is {
     flags: SpanFlags,
 };
 
+/// Public alias — `Span` is the canonical short name expected by
+/// macro / quote-API users; `MetaSpan` is the internal verbose form.
+public type Span is MetaSpan;
+
 /// MetaSpan flags
 @repr(UInt8)
 public type SpanFlags is {
