@@ -3932,8 +3932,14 @@ public type Utf8Error is {
 };
 
 implement Utf8Error {
+    @inline(always)
     fn new(valid_up_to: Int) -> Utf8Error {
         Utf8Error { valid_up_to: valid_up_to }
+    }
+
+    /// Render this error as a Text (matches Display.fmt output).
+    public fn to_text(&self) -> Text {
+        f"invalid utf-8: error at byte index {self.valid_up_to}"
     }
 }
 
