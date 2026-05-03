@@ -95,11 +95,13 @@ implement<R: Read> BufReader<R> {
     }
 
     /// Get a reference to the underlying reader.
+    @inline(always)
     public fn get_ref(&self) -> &R {
         &self.inner
     }
 
     /// Get a mutable reference to the underlying reader.
+    @inline(always)
     public fn get_mut(&mut self) -> &mut R {
         &mut self.inner
     }
@@ -108,11 +110,13 @@ implement<R: Read> BufReader<R> {
     ///
 
     /// Note: Any data remaining in the buffer will be lost.
+    @inline(always)
     public fn into_inner(self) -> R {
         self.inner
     }
 
     /// Returns the number of bytes the internal buffer can hold.
+    @inline(always)
     public fn capacity(&self) -> Int {
         self.buf.len()
     }
@@ -230,15 +234,18 @@ public type FdReader is {
 
 implement FdReader {
     /// Wrap a fd without taking ownership. Caller closes.
+    @inline(always)
     public fn from_borrowed_fd(fd: Int) -> FdReader {
         FdReader { fd, owned: false }
     }
 
     /// Wrap a fd and take ownership — drop closes the fd.
+    @inline(always)
     public fn from_owned_fd(fd: Int) -> FdReader {
         FdReader { fd, owned: true }
     }
 
+    @inline(always)
     public fn raw_fd(&self) -> Int { self.fd }
 }
 
@@ -396,11 +403,13 @@ implement<W: Write> BufWriter<W> {
     }
 
     /// Get a reference to the underlying writer.
+    @inline(always)
     public fn get_ref(&self) -> &W {
         &self.inner
     }
 
     /// Get a mutable reference to the underlying writer.
+    @inline(always)
     public fn get_mut(&mut self) -> &mut W {
         &mut self.inner
     }
@@ -418,11 +427,13 @@ implement<W: Write> BufWriter<W> {
     }
 
     /// Returns the buffer capacity.
+    @inline(always)
     public fn capacity(&self) -> Int {
         self.buf.capacity()
     }
 
     /// Returns the number of bytes currently in the buffer.
+    @inline(always)
     public fn buffer_len(&self) -> Int {
         self.buf.len()
     }
@@ -555,11 +566,13 @@ implement<W: Write> LineWriter<W> {
     }
 
     /// Get a reference to the underlying writer.
+    @inline(always)
     public fn get_ref(&self) -> &W {
         self.inner.get_ref()
     }
 
     /// Get a mutable reference to the underlying writer.
+    @inline(always)
     public fn get_mut(&mut self) -> &mut W {
         self.inner.get_mut()
     }
@@ -644,6 +657,7 @@ public type BufferCursor<T> is {
 
 implement<T> BufferCursor<T> {
     /// Create a new BufferCursor wrapping the given buffer.
+    @inline(always)
     public fn new(inner: T) -> BufferCursor<T> {
         BufferCursor {
             inner: inner,
@@ -652,26 +666,31 @@ implement<T> BufferCursor<T> {
     }
 
     /// Get a reference to the underlying buffer.
+    @inline(always)
     public fn get_ref(&self) -> &T {
         &self.inner
     }
 
     /// Get a mutable reference to the underlying buffer.
+    @inline(always)
     public fn get_mut(&mut self) -> &mut T {
         &mut self.inner
     }
 
     /// Consume the BufferCursor && return the underlying buffer.
+    @inline(always)
     public fn into_inner(self) -> T {
         self.inner
     }
 
     /// Get the current position.
+    @inline(always)
     public fn position(&self) -> Int {
         self.pos
     }
 
     /// Set the current position.
+    @inline(always)
     public fn set_position(&mut self, pos: Int) {
         self.pos = pos;
     }
