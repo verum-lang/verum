@@ -581,12 +581,36 @@ impl<'s> CompilationPipeline<'s> {
     /// Phase 1.5: builds export tables (public types, functions) and extracts
     /// contexts/protocols from each module for cross-file name and context resolution.
     pub(super) fn register_modules_for_cross_file_resolution(&mut self) -> Result<()> {
+        self.register_modules_for_cross_file_resolution_filtered(None)
+    }
+
+    /// Filtered variant of [`register_modules_for_cross_file_resolution`].
+    ///
+    /// When `reachable_stdlib` is `Some(set)`, stdlib modules (paths under
+    /// `core.*`) not present in the set are skipped — they will be parsed
+    /// and the AST kept in `self.modules`, but no `ModuleInfo` is created
+    /// in the session registry. The lazy resolver picks them up on
+    /// demand if a downstream phase actually references their symbols.
+    ///
+    /// When `reachable_stdlib` is `None`, every module is registered
+    /// (legacy behaviour — full-stdlib mode, used by `verum audit
+    /// --framework-axioms` and any caller that needs every stdlib type
+    /// in the registry).
+    ///
+    /// User modules (anything outside the `core.*` namespace) are
+    /// *always* registered regardless of the filter — the filter only
+    /// applies to stdlib reachability pruning.
+    pub(super) fn register_modules_for_cross_file_resolution_filtered(
+        &mut self,
+        reachable_stdlib: Option<&std::collections::HashSet<String>>,
+    ) -> Result<()> {
         use verum_modules::{
             ModuleInfo, extract_contexts_from_module, extract_exports_from_module,
         };
 
         let start = Instant::now();
         let mut registered_count = 0;
+        let mut skipped_unreachable = 0u64;
 
         // Get the module registry from session
         let registry = self.session.module_registry();
@@ -604,6 +628,24 @@ impl<'s> CompilationPipeline<'s> {
             self.modules.iter().collect();
         sorted_modules.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
         for (path_text, module_rc) in sorted_modules {
+            // Reachability filter (#109): when the caller has computed
+            // the user's transitive mount closure, skip stdlib modules
+            // that are not in it. User modules (paths outside `core.*`)
+            // are always registered — they may name symbols of any
+            // stdlib module via dotted paths, but the registration of
+            // the user module itself is always needed for diagnostics
+            // and codegen. The lazy resolver picks up on-demand
+            // unreached stdlib modules if a downstream phase walks
+            // into them.
+            if let Some(reachable) = reachable_stdlib {
+                let path_str = path_text.as_str();
+                let is_stdlib =
+                    path_str == "core" || path_str.starts_with("core.");
+                if is_stdlib && !reachable.contains(path_str) {
+                    skipped_unreachable += 1;
+                    continue;
+                }
+            }
             // The path_text is already in module path format (e.g., "domain.errors")
             // since it was converted when loading sources in check_project.
             // We just need to create a ModulePath from the string directly.
@@ -695,12 +737,23 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         let elapsed = start.elapsed();
-        info!(
-            "  Registered {} modules for cross-file resolution in {:.2}ms ({} contexts)",
-            registered_count,
-            elapsed.as_secs_f64() * 1000.0,
-            self.collected_contexts.len()
-        );
+        if skipped_unreachable > 0 {
+            info!(
+                "  Registered {} modules for cross-file resolution in {:.2}ms \
+                 ({} contexts; {} stdlib modules pruned by reachability filter)",
+                registered_count,
+                elapsed.as_secs_f64() * 1000.0,
+                self.collected_contexts.len(),
+                skipped_unreachable,
+            );
+        } else {
+            info!(
+                "  Registered {} modules for cross-file resolution in {:.2}ms ({} contexts)",
+                registered_count,
+                elapsed.as_secs_f64() * 1000.0,
+                self.collected_contexts.len()
+            );
+        }
 
         Ok(())
     }
