@@ -559,20 +559,143 @@ fn binop_f32_suffix_broadcast_2d_match_equivalent() {
  );
 }
 
+// ============================================================================
+// Шаг 5e+4 — flipped-arg kernels for non-commutative b > a
+// ============================================================================
+//
+// After this step, the JIT lane covers EVERY broadcast pattern (commutative
+// or not) where one of {a, b} is the broadcast output shape.
+
 #[test]
-fn binop_f32_b_larger_than_a_non_commutative_falls_through() {
- // `[M] op [M,N]` Sub — b has more elements than a, AND op is
- // non-commutative.  We can't transparently swap a/b because
- // `a - b != b - a`.  Dispatcher must return None and let the
- // upstream rebroadcast-then-call path handle it.
- let mut state: u64 = 0xFEED_5E54;
+fn binop_f32_non_commutative_b_larger_prefix_equivalent() {
+ // `[M] Sub [M,N]` — non-commutative, b larger.  Dispatcher
+ // swaps `(a, b) → (b, a)` AND sets flipped=true; routes
+ // through `BinopPrefixBroadcastFlipped` which emits the arith
+ // op with reversed operands, computing `b op a` (post-swap
+ // names) ≡ caller's original `orig_a Sub orig_b`.
+ let mut state: u64 = 0xFEED_5E90;
  let jit = MlirJitBackend::new();
- let a = make_f32_tensor(&[3], &mut state, 0.5, 4.0);
- let b = make_f32_tensor(&[3, 4], &mut state, 0.5, 4.0);
- let r = jit.binop(&a, &b, TensorBinaryOp::Sub);
- assert!(
- r.is_none(),
- "non-commutative `[M] Sub [M,N]` must fall through (got JIT-routed result)"
+ let m = 4_usize;
+ let n = 5_usize;
+ let a = make_f32_tensor(&[m], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[m, n], &mut state, 0.5, 4.0);
+ for &op in &[
+ TensorBinaryOp::Sub,
+ TensorBinaryOp::Div,
+ ] {
+ let r = jit
+ .binop(&a, &b, op)
+ .unwrap_or_else(|| panic!("flipped-arg kernel missing for [M] {:?} [M,N]", op));
+ assert_eq!(r.numel, m * n, "swap produced wrong size for {:?}", op);
+ let av = read_f32(&a, m);
+ let bv = read_f32(&b, m * n);
+ let mut expected = vec![0.0_f32; m * n];
+ for i in 0..(m * n) {
+ let mi = i / n;
+ expected[i] = match op {
+ TensorBinaryOp::Sub => av[mi] - bv[i],
+ TensorBinaryOp::Div => av[mi] / bv[i],
+ _ => unreachable!(),
+ };
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n),
+ &expected,
+ &format!("flipped [M] {:?} [M,N]", op),
+ );
+ }
+}
+
+#[test]
+fn binop_f32_non_commutative_b_larger_scalar_equivalent() {
+ // `[1] Sub [M,N]` — scalar on left, non-commutative.  Swap +
+ // flip → `BinopScalarBroadcastFlipped` computing `a[i] - b[0]`
+ // (post-swap names) ≡ `orig_b[0] - orig_a[i]` … wait that's
+ // backwards.  Let me re-derive:
+ //
+ // Caller: orig_a op orig_b where orig_a=[1], orig_b=[M,N].
+ // We want: out[i] = orig_a[0] - orig_b[i].
+ //
+ // After swap: a=[M,N] (was orig_b), b=[1] (was orig_a).
+ // Kernel reads: a[i] (=orig_b[i]) and b[0] (=orig_a[0]).
+ // Non-flipped would compute a[i] - b[0] = orig_b[i] - orig_a[0]. ✗
+ // Flipped computes b[0] - a[i] = orig_a[0] - orig_b[i]. ✓
+ let mut state: u64 = 0xFEED_5E91;
+ let jit = MlirJitBackend::new();
+ let m = 3_usize;
+ let n = 4_usize;
+ let a = make_f32_tensor(&[1], &mut state, 1.0, 5.0);
+ let b = make_f32_tensor(&[m, n], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Sub)
+ .expect("flipped scalar kernel missing for [1] Sub [M,N]");
+ let av = read_f32(&a, 1);
+ let bv = read_f32(&b, m * n);
+ let mut expected = vec![0.0_f32; m * n];
+ for i in 0..(m * n) {
+ expected[i] = av[0] - bv[i];
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n),
+ &expected,
+ "flipped scalar [1] Sub [M,N]",
+ );
+}
+
+#[test]
+fn binop_f32_non_commutative_b_larger_suffix_equivalent() {
+ // `[N] Div [M,N]` — non-commutative, b larger.  Suffix pattern
+ // after swap; flipped variant computes `b[i mod N] op a[i]`
+ // post-swap names ≡ original `orig_a[i mod N] / orig_b[i]`.
+ let mut state: u64 = 0xFEED_5E92;
+ let jit = MlirJitBackend::new();
+ let m = 3_usize;
+ let n = 5_usize;
+ let a = make_f32_tensor(&[n], &mut state, 1.0, 5.0);
+ let b = make_f32_tensor(&[m, n], &mut state, 1.0, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Div)
+ .expect("flipped suffix kernel missing for [N] Div [M,N]");
+ let av = read_f32(&a, n);
+ let bv = read_f32(&b, m * n);
+ let mut expected = vec![0.0_f32; m * n];
+ for i in 0..(m * n) {
+ expected[i] = av[i % n] / bv[i];
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n),
+ &expected,
+ "flipped suffix [N] Div [M,N]",
+ );
+}
+
+#[test]
+fn binop_f32_non_commutative_b_larger_mid_axis_equivalent() {
+ // `[M,1,K] Sub [M,N,K]` — non-commutative, b larger, mid-axis.
+ let mut state: u64 = 0xFEED_5E93;
+ let jit = MlirJitBackend::new();
+ let m = 2_usize;
+ let n = 3_usize;
+ let k = 4_usize;
+ let total = m * n * k;
+ let a = make_f32_tensor(&[m, 1, k], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[m, n, k], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Sub)
+ .expect("flipped mid-axis kernel missing for [M,1,K] Sub [M,N,K]");
+ let av = read_f32(&a, m * k);
+ let bv = read_f32(&b, total);
+ let mut expected = vec![0.0_f32; total];
+ for i in 0..total {
+ let mi = i / (n * k);
+ let ki = i % k;
+ let a_off = mi * k + ki;
+ expected[i] = av[a_off] - bv[i];
+ }
+ assert_f32_close(
+ &read_f32(&r, total),
+ &expected,
+ "flipped mid-axis [M,1,K] Sub [M,N,K]",
  );
 }
 
