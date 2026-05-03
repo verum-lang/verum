@@ -40,6 +40,7 @@ public type ControlFlow<B, C> is
 
 implement<B, C> ControlFlow<B, C> {
     /// Returns true if this is Continue.
+    @inline(always)
     public fn is_continue(&self) -> Bool {
         match self {
             Continue(_) => true,
@@ -48,6 +49,7 @@ implement<B, C> ControlFlow<B, C> {
     }
 
     /// Returns true if this is Break.
+    @inline(always)
     public fn is_break(&self) -> Bool {
         match self {
             Continue(_) => false,

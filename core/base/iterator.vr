@@ -2529,16 +2529,19 @@ implement<T> IntCoercible for RangeInclusive<T> {}
 implement<T> RangeLike for RangeInclusive<T> {}
 
 /// Create a range iterator [start, end).
+@inline(always)
 public fn range(start: Int, end: Int) -> Range<Int> {
     Range { current: start, end: end }
 }
 
 /// Create an inclusive range iterator [start, end].
+@inline(always)
 public fn range_inclusive(start: Int, end: Int) -> RangeInclusive<Int> {
     RangeInclusive { current: start, end: end, done: false }
 }
 
 /// Create an infinite counter starting from value.
+@inline(always)
 public fn count_from(start: Int) -> CountFrom {
     CountFrom { current: start }
 }

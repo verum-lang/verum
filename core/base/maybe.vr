@@ -270,6 +270,7 @@ implement<T> Maybe<T> {
     // =========================================================================
 
     /// Get a reference to the inner value.
+    @inline(always)
     public fn as_ref(&self) -> Maybe<&T> {
         match self {
             Some(ref v) => Some(v),
@@ -278,6 +279,7 @@ implement<T> Maybe<T> {
     }
 
     /// Get a mutable reference to the inner value.
+    @inline(always)
     public fn as_mut(&mut self) -> Maybe<&mut T> {
         match self {
             Some(ref mut v) => Some(v),
@@ -290,6 +292,7 @@ implement<T> Maybe<T> {
     // =========================================================================
 
     /// Take the value out, leaving None in its place.
+    @inline(always)
     public fn take(&mut self) -> Maybe<T> {
         let old = *self;
         *self = None;
@@ -297,6 +300,7 @@ implement<T> Maybe<T> {
     }
 
     /// Replace the value with a new one, returning the old.
+    @inline(always)
     public fn replace(&mut self, value: T) -> Maybe<T> {
         let old = *self;
         *self = Some(value);
