@@ -76,26 +76,32 @@ public type Process is
 // 2. Smart constructors
 // =============================================================================
 
+@inline(always)
 public fn proc_zero() -> Process {
     Process.Zero
 }
 
+@inline(always)
 public fn proc_par(p: Process, q: Process) -> Process {
     Process.Par { left: Heap(p), right: Heap(q) }
 }
 
+@inline(always)
 public fn proc_restrict(name: Text, body: Process) -> Process {
     Process.Restrict { name, body: Heap(body) }
 }
 
+@inline(always)
 public fn proc_send(channel: Text, message: Text, cont: Process) -> Process {
     Process.Send { channel, message, cont: Heap(cont) }
 }
 
+@inline(always)
 public fn proc_recv(channel: Text, binder: Text, cont: Process) -> Process {
     Process.Recv { channel, binder, cont: Heap(cont) }
 }
 
+@inline(always)
 public fn proc_replicate(inner: Process) -> Process {
     Process.Replicate { inner: Heap(inner) }
 }
