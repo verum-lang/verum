@@ -30,6 +30,13 @@
 // Postgres + MySQL CHECK introspection lands in T23b/T23c.
 // =============================================================================
 
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.Disk("*"))],
+    requires: [Capability.Exec(ExecTarget.Syscall(0))],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.introspect;
 
 mount core.*;
