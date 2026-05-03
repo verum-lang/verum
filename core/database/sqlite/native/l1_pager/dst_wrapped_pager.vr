@@ -1,0 +1,342 @@
+module core.database.sqlite.native.l1_pager.dst_wrapped_pager;
+
+// =============================================================================
+// l1_pager/dst_wrapped_pager.vr — DST fault-injection Pager wrapper (#154)
+// =============================================================================
+// Layer: 1 (with DST integration)
+// Spec: sqlite-native.md §22.5 (DST) +
+//       sqlite-native.md §4.10 (VFS injection)
+//
+// Pre-fix: `pager_open_with_vfs(ViDstWrapped(...))` returned
+// `Err(PagerError { kind: IoError, "DST harness wiring tracked
+// under #137 follow-up" })` — the DST harness existed but had no
+// path to actually inject faults into a live pager.  The bridge
+// in `dst/bridge.vr` ran in "execution-replay only" mode and
+// could not validate crash-recovery invariants.
+//
+// Post-fix: this module ships the `DstWrappedPager` — a wrapper
+// around a real `Pager` that intercepts every read/write/sync at
+// the Pager API surface, consults a `FaultSchedule` keyed by
+// monotonic op count, and either delegates to the inner pager OR
+// short-circuits with the scheduled fault.  Faults are
+// observable through `injected_faults()` for after-the-fact
+// oracle comparison.  Terminal faults (FaultPowerLoss) flip the
+// `crashed` bit; every subsequent op short-circuits with a
+// PagerError so the caller's recovery path can run.
+//
+// Architectural choice: orthogonal wrapping (DST wraps Pager,
+// not PagerBackend).  Two reasons:
+//
+//   1. Avoids touching every existing `match backend { BeMemory
+//      | BeFile }` site (would have been ~10 arms across
+//      pager.vr / wal_writer.vr / wal_reader.vr).
+//   2. Keeps DST as a strict OBSERVER+CONTROLLER over the pager
+//      surface — the inner Pager is unaware it's being faulted.
+//      Matches the "VFS proxy" pattern from the SQLite C
+//      implementation (sqlite3_io_methods chain).
+//
+// Pager API methods are wrapped 1-to-1 — `dst_pager_read` /
+// `dst_pager_write` / `dst_pager_sync` etc. delegate AFTER the
+// fault check.  Existing callers of `pager_read` / `pager_write`
+// continue to work unmodified; DST-aware callers route through
+// the dst_pager_* surface to opt in to fault injection.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l1_pager.pager.{
+    Pager, PageFrame, PagerError, PagerErrorKind,
+    pager_open_memory_with_size, pager_read, pager_write,
+    pager_flush, pager_commit, pager_close,
+};
+mount core.database.sqlite.native.dst.fault.{
+    Fault, ScheduledFault, FaultSchedule,
+    FaultPowerLoss, FaultDiskFull, FaultIoError,
+    FaultSlowFsync, FaultPartialWrite, FaultClockSkew,
+    generate_schedule, default_density, is_terminal,
+    fault_kind_name,
+};
+mount core.database.sqlite.native.dst.seed.{
+    DstSeed, seed_from_u64,
+};
+
+// -----------------------------------------------------------------------------
+// DstFaultEvent — observability log entry
+// -----------------------------------------------------------------------------
+
+/// One fault injection record.  The bridge captures these for
+/// oracle comparison after a run completes.
+public type DstFaultEvent is {
+    op_idx: Int,
+    op_kind: Text,            // "read" / "write" / "sync" / "flush" / "commit"
+    page_no: Int,             // -1 for non-page-keyed ops (sync/commit)
+    fault_kind: Text,
+    /// `true` when the fault terminated the run (subsequent ops
+    /// short-circuit immediately).
+    terminal: Bool,
+};
+
+// -----------------------------------------------------------------------------
+// DstWrappedPager — the wrapper
+// -----------------------------------------------------------------------------
+
+/// Pager wrapper that intercepts every API op for fault injection.
+/// Owns the inner `Pager` outright — the wrapper IS the pager
+/// surface from the caller's perspective.  Affine, single-owner.
+public type affine DstWrappedPager is {
+    inner: Pager,
+    schedule: FaultSchedule,
+    /// Monotonic op counter — bumped on EVERY wrapped op (read,
+    /// write, sync, flush, commit).  Indexes into the schedule.
+    op_counter: Int,
+    /// Set to `true` once a terminal fault has been injected.
+    /// Subsequent ops return PagerError immediately without
+    /// touching the inner pager.
+    crashed: Bool,
+    /// Observability: every fault that fired, in order.
+    injected: List<DstFaultEvent>,
+};
+
+/// Construct a DST-wrapped pager.  The inner Pager is opened
+/// in-memory (DST is for crash-recovery testing, not file I/O
+/// performance — file-backed inner pagers can be added later
+/// when needed).  The fault schedule is derived deterministically
+/// from `seed` so the same seed reproduces the same fault
+/// sequence — that's the WHOLE POINT of DST.
+pub fn dst_wrapped_pager_open(
+    seed: Int64,
+    total_ops: Int,
+    page_size: Int,
+) -> Result<DstWrappedPager, PagerError> {
+    let inner = match pager_open_memory_with_size(page_size) {
+        Ok(p)  => p,
+        Err(e) => { return Err(e); }
+    };
+    // Derive a separate seed for the schedule so fault choices are
+    // statistically independent of any op-stream draws done by the
+    // higher-level harness.  Matches `dst::harness::harness_from_seed`.
+    let mut sched_seed = seed_from_u64(seed + 1_i64);
+    let schedule = generate_schedule(&mut sched_seed, total_ops, &default_density());
+    Ok(DstWrappedPager {
+        inner: inner,
+        schedule: schedule,
+        op_counter: 0,
+        crashed: false,
+        injected: List.new(),
+    })
+}
+
+implement DstWrappedPager {
+    pub fn page_size(&self) -> Int { self.inner.page_size_view() }
+    pub fn op_count(&self) -> Int { self.op_counter }
+    pub fn is_crashed(&self) -> Bool { self.crashed }
+    pub fn injected_faults(&self) -> &List<DstFaultEvent> { &self.injected }
+    pub fn injected_count(&self) -> Int { self.injected.len() }
+
+    /// Snapshot the inner pager's dirty-count for oracle diff.
+    pub fn observed_dirty_count(&self) -> Int { self.inner.dirty_count_view() }
+
+    /// Drain the injection log — useful when the bridge wants to
+    /// claim ownership of the events (oracle replay) without
+    /// dropping the wrapper.
+    pub fn take_injected(&mut self) -> List<DstFaultEvent> {
+        let mut out: List<DstFaultEvent> = List.new();
+        let mut i: Int = 0;
+        while i < self.injected.len() {
+            let e = &self.injected[i];
+            out.push(DstFaultEvent {
+                op_idx: e.op_idx,
+                op_kind: e.op_kind.clone(),
+                page_no: e.page_no,
+                fault_kind: e.fault_kind.clone(),
+                terminal: e.terminal,
+            });
+            i = i + 1;
+        }
+        self.injected = List.new();
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Op-level fault dispatch
+// -----------------------------------------------------------------------------
+
+/// Result of consulting the schedule for the current op_counter.
+/// `Some(fault)` means inject; `None` means delegate to the
+/// inner pager normally.
+fn consult_schedule(p: &DstWrappedPager) -> Maybe<Fault> {
+    match p.schedule.next_after(p.op_counter - 1) {
+        Some(sched) => {
+            if sched.at_op == p.op_counter {
+                Some(clone_fault(&sched.fault))
+            } else {
+                None
+            }
+        }
+        None => None,
+    }
+}
+
+fn clone_fault(f: &Fault) -> Fault {
+    match f {
+        FaultPowerLoss             => FaultPowerLoss,
+        FaultDiskFull              => FaultDiskFull,
+        FaultIoError(ref d)        => FaultIoError(d.clone()),
+        FaultSlowFsync(ns)         => FaultSlowFsync(ns),
+        FaultPartialWrite(b)       => FaultPartialWrite(b),
+        FaultClockSkew(ns)         => FaultClockSkew(ns),
+    }
+}
+
+/// Map a Fault to the PagerError the wrapper returns.  Distinct
+/// kinds map to distinct PagerError messages so the recovery path
+/// can branch on the cause via message inspection (PagerErrorKind
+/// itself is too coarse; only IoError / CorruptHeader available).
+fn fault_to_pager_error(f: &Fault) -> PagerError {
+    match f {
+        FaultPowerLoss => PagerError {
+            kind: IoError,
+            message: "DST: power loss",
+        },
+        FaultDiskFull => PagerError {
+            kind: IoError,
+            message: "DST: disk full",
+        },
+        FaultIoError(_) => PagerError {
+            kind: IoError,
+            message: "DST: I/O error",
+        },
+        FaultSlowFsync(_) => PagerError {
+            kind: IoError,
+            message: "DST: slow fsync (timeout)",
+        },
+        FaultPartialWrite(_) => PagerError {
+            kind: IoError,
+            message: "DST: partial write (torn)",
+        },
+        FaultClockSkew(_) => PagerError {
+            kind: IoError,
+            message: "DST: clock skew detected",
+        },
+    }
+}
+
+fn record_fault(
+    p: &mut DstWrappedPager,
+    op_kind: Text,
+    page_no: Int,
+    f: &Fault,
+) {
+    let terminal = is_terminal(f);
+    if terminal { p.crashed = true; }
+    p.injected.push(DstFaultEvent {
+        op_idx: p.op_counter,
+        op_kind: op_kind,
+        page_no: page_no,
+        fault_kind: fault_kind_name(f).clone(),
+        terminal: terminal,
+    });
+}
+
+/// Crashed-pager short-circuit error — every op after a terminal
+/// fault returns this without touching the inner pager.
+fn crashed_error() -> PagerError {
+    PagerError {
+        kind: IoError,
+        message: "DST: pager is in crashed state — recovery required",
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Wrapped pager API — 1-to-1 mirror of pager.vr's surface
+// -----------------------------------------------------------------------------
+
+/// Read a page through the wrapper.  Bumps the op counter, consults
+/// the schedule, either injects a fault OR delegates to
+/// `pager_read`.
+pub fn dst_pager_read(p: &mut DstWrappedPager, page_no: Int) -> Result<PageFrame, PagerError> {
+    if p.crashed { return Err(crashed_error()); }
+    p.op_counter = p.op_counter + 1;
+    match consult_schedule(p) {
+        Some(f) => {
+            let err = fault_to_pager_error(&f);
+            record_fault(p, "read".clone(), page_no, &f);
+            Err(err)
+        }
+        None => pager_read(&mut p.inner, page_no),
+    }
+}
+
+/// Write a page through the wrapper.  Same fault-check semantics
+/// as `dst_pager_read`.
+pub fn dst_pager_write(p: &mut DstWrappedPager, frame: &PageFrame) -> Result<(), PagerError> {
+    if p.crashed { return Err(crashed_error()); }
+    p.op_counter = p.op_counter + 1;
+    match consult_schedule(p) {
+        Some(f) => {
+            let err = fault_to_pager_error(&f);
+            record_fault(p, "write".clone(), frame.page_no, &f);
+            Err(err)
+        }
+        None => pager_write(&mut p.inner, frame),
+    }
+}
+
+/// Flush dirty pages through the wrapper.
+pub fn dst_pager_flush(p: &mut DstWrappedPager) -> Result<(), PagerError> {
+    if p.crashed { return Err(crashed_error()); }
+    p.op_counter = p.op_counter + 1;
+    match consult_schedule(p) {
+        Some(f) => {
+            let err = fault_to_pager_error(&f);
+            record_fault(p, "flush".clone(), -1, &f);
+            Err(err)
+        }
+        None => pager_flush(&mut p.inner),
+    }
+}
+
+/// Commit through the wrapper.
+pub fn dst_pager_commit(p: &mut DstWrappedPager) -> Result<(), PagerError> {
+    if p.crashed { return Err(crashed_error()); }
+    p.op_counter = p.op_counter + 1;
+    match consult_schedule(p) {
+        Some(f) => {
+            let err = fault_to_pager_error(&f);
+            record_fault(p, "commit".clone(), -1, &f);
+            Err(err)
+        }
+        None => pager_commit(&mut p.inner),
+    }
+}
+
+/// Close the wrapped pager — delegates to `pager_close` and resets
+/// the wrapper state.  After close, the wrapper is unusable and
+/// must be discarded.
+pub fn dst_pager_close(p: &mut DstWrappedPager) -> Result<(), PagerError> {
+    pager_close(&mut p.inner)
+}
+
+// -----------------------------------------------------------------------------
+// Recovery seam — reopen after a crash
+// -----------------------------------------------------------------------------
+
+/// After a terminal fault, the bridge opens a FRESH pager (the
+/// "machine reboot" simulation) and replays the durable history.
+/// This helper tears down the wrapper's inner pager and constructs
+/// a new one — the schedule + injection log are PRESERVED so the
+/// post-crash run continues to consult faults at the same op
+/// indices.  The op_counter is NOT reset (faults indexed by total
+/// ops across the run, including pre-crash and post-crash).
+pub fn dst_pager_reopen_after_crash(p: &mut DstWrappedPager, page_size: Int) -> Result<(), PagerError> {
+    let _ = pager_close(&mut p.inner);
+    let fresh = match pager_open_memory_with_size(page_size) {
+        Ok(np) => np,
+        Err(e) => { return Err(e); }
+    };
+    p.inner = fresh;
+    p.crashed = false;  // post-recovery the wrapper accepts ops again
+    Ok(())
+}

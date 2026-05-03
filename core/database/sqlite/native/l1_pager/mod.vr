@@ -74,6 +74,7 @@ public module wal_pager;
 public module wal_actor_bridge;
 public module wal_index;
 public module wal_page_arena;
+public module dst_wrapped_pager;
 public module vfs_injection;
 
 public mount .pager.{
@@ -175,6 +176,13 @@ public mount .wal_page_arena.{
     PageHandle, PageSlab, PageHandleMap,
     page_handle_invalid, page_handle_is_valid,
     page_slab_new, page_handle_map_new,
+};
+
+public mount .dst_wrapped_pager.{
+    DstWrappedPager, DstFaultEvent,
+    dst_wrapped_pager_open,
+    dst_pager_read, dst_pager_write, dst_pager_flush, dst_pager_commit,
+    dst_pager_close, dst_pager_reopen_after_crash,
 };
 
 public mount .wal_reader.{
