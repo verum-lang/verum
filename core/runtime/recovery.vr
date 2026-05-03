@@ -103,6 +103,10 @@ public type RecoveryRetryPolicy is {
     last_error: Maybe<Text>,
 };
 
+/// Public alias — short canonical name; internal call sites use
+/// the verbose `RecoveryRetryPolicy`.
+public type RetryPolicy is RecoveryRetryPolicy;
+
 implement RecoveryRetryPolicy {
     /// Create new retry policy from config
     public fn new(config: RuntimeRetryConfig) -> Self {
