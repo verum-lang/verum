@@ -147,10 +147,20 @@ impl<'s> CompilationPipeline<'s> {
             self.meta_registry.all_macros().len()
         );
 
-        // PASS 1.5: Register modules in session registry for cross-file resolution
-        // This builds export tables and allows types to be resolved across files
+        // PASS 1.5: Register modules in session registry for cross-file resolution.
+        // This builds export tables and allows types to be resolved across files.
+        //
+        // #109 lazy stdlib monomorphization — compute the transitive
+        // closure of stdlib modules referenced by ANY user source's
+        // mount tree (plus the implicit prelude) and pass it to the
+        // filtered registration helper. Stdlib modules outside the
+        // closure skip ModuleInfo creation; the lazy resolver picks
+        // them up if a downstream phase walks into them. Opt-out via
+        // `VERUM_FULL_STDLIB=1`.
         info!("Pass 1.5: Module registration for cross-file resolution");
-        self.register_modules_for_cross_file_resolution()?;
+        let user_paths_vec: Vec<Text> = sources.keys().cloned().collect();
+        let reachable = self.compute_user_reachable_stdlib(&user_paths_vec);
+        self.register_modules_for_cross_file_resolution_filtered(reachable.as_ref())?;
 
         // PASS 2: Staged Compilation with Caching
         // Uses StagedPipeline for N-level metaprogramming with fine-grained caching.
@@ -159,8 +169,36 @@ impl<'s> CompilationPipeline<'s> {
         self.current_pass = CompilerPass::Pass2Expansion;
         info!("Pass 2: Staged compilation with caching");
 
-        // Collect module paths to avoid borrowing issues
-        let module_paths: List<Text> = self.modules.keys().cloned().collect();
+        // Collect module paths — filtered through the reachability
+        // closure so Pass 2 / 2.5 / 2.75 / 3 / 4 all skip stdlib
+        // modules outside the user's mount tree. User modules (paths
+        // not under `core.*`) are always retained.
+        let module_paths: List<Text> = if let Some(ref reachable_set) = reachable {
+            self.modules
+                .keys()
+                .filter(|p| {
+                    let s = p.as_str();
+                    let is_stdlib = s == "core" || s.starts_with("core.");
+                    !is_stdlib || reachable_set.contains(s)
+                })
+                .cloned()
+                .collect()
+        } else {
+            self.modules.keys().cloned().collect()
+        };
+        if let Some(ref reachable_set) = reachable {
+            let total = self.modules.len();
+            let kept = module_paths.len();
+            info!(
+                "  Pass 2 working set: {} modules retained from {} loaded ({} pruned by #109 reachability)",
+                kept,
+                total,
+                total - kept,
+            );
+            // Drop unused borrow to silence the linter — the filter set
+            // is consumed by the closure above; we only need the count.
+            let _ = reachable_set;
+        }
         let mut total_cache_hits = 0u64;
         let mut total_meta_executions = 0u64;
 
