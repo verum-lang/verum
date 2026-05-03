@@ -221,6 +221,7 @@ public fn asin(x: Float{it >= -1.0 && it <= 1.0}) -> Float{it >= -FRAC_PI_2 && i
 }
 
 // Safe arcsine for potentially out-of-domain values
+@inline(always)
 public fn asin_safe(x: Float) -> Maybe<Float> {
     if x < -1.0 || x > 1.0 {
         Maybe.None
@@ -231,11 +232,13 @@ public fn asin_safe(x: Float) -> Maybe<Float> {
 
 // Arccosine function
 // Domain: [-1, 1], Range: [0, π]
+@inline(always)
 public fn acos(x: Float{it >= -1.0 && it <= 1.0}) -> Float{it >= 0.0 && it <= PI} {
     FRAC_PI_2 - asin(x)
 }
 
 // Safe arccosine
+@inline(always)
 public fn acos_safe(x: Float) -> Maybe<Float> {
     if x < -1.0 || x > 1.0 {
         Maybe.None
@@ -394,6 +397,7 @@ public fn log(x: Float{> 0.0}) -> Float {
 }
 
 // Safe logarithm for potentially non-positive values
+@inline(always)
 public fn log_safe(x: Float) -> Maybe<Float> {
     if x <= 0.0 {
         Maybe.None
@@ -403,11 +407,13 @@ public fn log_safe(x: Float) -> Maybe<Float> {
 }
 
 // Base-2 logarithm
+@inline(always)
 public fn log2(x: Float{> 0.0}) -> Float {
     log(x) * LOG2_E
 }
 
 // Base-10 logarithm
+@inline(always)
 public fn log10(x: Float{> 0.0}) -> Float {
     log(x) * LOG10_E
 }
@@ -487,6 +493,7 @@ public fn sqrt(x: Float{>= 0.0}) -> Float{>= 0.0};
 public fn sqrt_f32(x: Float32{>= 0.0}) -> Float32{>= 0.0};
 
 // Safe square root
+@inline(always)
 public fn sqrt_safe(x: Float) -> Maybe<Float{>= 0.0}> {
     if x < 0.0 { Maybe.None } else { Maybe.Some(sqrt(x)) }
 }
