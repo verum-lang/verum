@@ -70,7 +70,7 @@ fn main() {
     // === Unit Literal Inference ===
 
     // Unit literal
-    let u: Unit = ();  // Unit type
+    let u: () = ();  // Unit type (Verum's unit type is the empty tuple `()`)
 
     // === Collection Literal Inference ===
 
