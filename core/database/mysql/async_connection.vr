@@ -223,6 +223,28 @@ implement AsyncMysqlConnection {
         }
     }
 
+    /// Wire a CancellationToken — when it flips, automatically
+    /// fire `cancel_running_query()` so the SERVER-side query
+    /// terminates without caller intervention. Spawns a one-shot
+    /// background watcher task that awaits `token.cancelled()`.
+    ///
+    /// The watcher exits naturally when the token fires; if the
+    /// connection closes first, the cancel becomes a no-op
+    /// (KILL QUERY against a missing thread id silently ignored).
+    ///
+    /// Multiple tokens may be attached — each spawns its own
+    /// watcher; ANY one firing triggers the cancel.
+    public fn attach_cancellation_token(
+        &self,
+        token: core.async.cancellation.CancellationToken,
+    ) {
+        let conn_clone = self.clone();
+        let _ = core.async.task.spawn(async move {
+            let _ = token.cancelled().await;
+            let _ = conn_clone.cancel_running_query().await;
+        });
+    }
+
     public async fn simple_query(&self, sql: &Text)
         -> Result<MySimpleQueryResult, DbError>
     {

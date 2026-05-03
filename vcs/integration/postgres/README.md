@@ -178,6 +178,10 @@ Test list per `internal/specs/database.md` follow-up:
   separate task call cancel_running_query() → fresh-socket
   CancelRequest aborts the query within seconds (spec §6.1.2 +
   §6.1.8)
+- `t29_async_auto_cancel.vr` — auto-fire CancelRequest on
+  CancellationToken flip: attach_cancellation_token spawns a
+  watcher; token.cancel() fires CancelRequest without caller
+  intervention (spec §6.1.2 + §6.1.8 auto-wire)
 
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags

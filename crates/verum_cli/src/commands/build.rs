@@ -74,6 +74,26 @@ pub fn execute(
     crate::feature_overrides::apply_global(&mut manifest)?;
     manifest.validate()?;
 
+    // #119 / #110 manifest gate — when `[build].strict_codegen = true`
+    // is set in `verum.toml`, surface it via the same
+    // `VERUM_STRICT_CODEGEN` env-var pathway used by the CLI flag and
+    // CI invocations. Resolution order, highest precedence first:
+    //   1. Existing env var (e.g. CI sets it directly).
+    //   2. CLI `--strict-codegen` flag (sets the env var on the
+    //      caller side before reaching us).
+    //   3. This manifest key (sets the env var if neither above did).
+    //   4. Default `false` (legacy lenient behaviour).
+    // We only set the env var if it's not already present, so the CLI
+    // flag and direct env-var settings both win uniformly.
+    if manifest.build.strict_codegen && std::env::var("VERUM_STRICT_CODEGEN").is_err() {
+        // SAFETY: writing to the process environment is safe in single-
+        // threaded CLI startup; the flag is set before the pipeline
+        // constructs any threads. Edition-2024 unsafe-edition compatible.
+        unsafe {
+            std::env::set_var("VERUM_STRICT_CODEGEN", "1");
+        }
+    }
+
     // Determine profile (dev/release)
     let using_release = profile_name.as_ref().map(|s| s.as_str()) == Some("release") || release;
     let profile = manifest.get_profile(using_release);
