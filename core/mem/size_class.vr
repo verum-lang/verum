@@ -346,6 +346,9 @@ public type SizeClassKind is
     | Huge      // Dedicated segment for sizes > 5 MiB
     ;
 
+/// Public alias — short canonical name.
+public type PageKind is SizeClassKind;
+
 /// Get page kind for a bin
 @inline
 public fn page_kind_for_bin(bin: Int) -> SizeClassKind {
