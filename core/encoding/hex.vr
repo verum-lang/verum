@@ -89,11 +89,13 @@ implement Eq for HexError {
 }
 
 // Encode using lowercase hex digits ('0'-'9', 'a'-'f').
+@inline(always)
 public fn encode(input: &[Byte]) -> Text {
     encode_with(input, false)
 }
 
 // Encode using uppercase hex digits ('0'-'9', 'A'-'F').
+@inline(always)
 public fn encode_upper(input: &[Byte]) -> Text {
     encode_with(input, true)
 }
