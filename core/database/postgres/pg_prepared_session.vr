@@ -1,0 +1,331 @@
+// =============================================================================
+// core/database/postgres/pg_prepared_session.vr — sync + async LRU session
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.4 (extended-query / prepared cache).
+// =============================================================================
+//
+// High-level wrapper around `PgPreparedStatement` lifecycle:
+//
+//   * `prepare_cached(conn, sql)` — fingerprint(sql) → cache; on
+//     miss invokes `conn.prepare`; on cap-overflow Closes the
+//     evicted statement on the wire.
+//   * `query_cached(conn, sql, typed_params)` /
+//     `execute_cached(conn, sql, params)` — convenience that
+//     fetch + execute in one call. On PG SQLSTATE 26000
+//     (`invalid_sql_statement_name`) the cache entry is dropped
+//     and the call is retried once with a fresh prepare. Mirrors
+//     MySQL's MY_ER_UNKNOWN_STMT_HANDLER recovery in
+//     `prepared.vr`.
+//   * `drain_cache_on_close(conn)` — close every cached statement
+//     on the wire BEFORE COM_TERMINATE. Reduces server-side
+//     statement-count immediately + plays nicely with
+//     pgbouncer-style proxies that observe explicit Close to free
+//     bookkeeping.
+//
+// Cache state lives in the PgPreparedSession (caller-side).
+// Cross-connection sharing is unsafe because PG statement names
+// are session-scoped — `PgPreparedSession` MUST stay paired with
+// the connection that prepared its slots.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*"))],
+    requires: [Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.pg_prepared_session;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.connection.{
+    PgConnection, PgPreparedStatement, PgSimpleQueryResult,
+    PgTypedQueryResult,
+};
+mount core.database.postgres.async_connection.{
+    AsyncPgConnection, AsyncPgPreparedStatement,
+};
+mount core.database.postgres.wire.typed.TypedValue;
+mount core.database.postgres.pg_stmt_cache.{
+    PgStmtCache, PgStmtCacheMetrics,
+    DEFAULT_PG_STMT_CACHE_CAP,
+    fingerprint as compute_fingerprint,
+};
+
+// =============================================================================
+// PG SQLSTATE — invalidated statement name
+// =============================================================================
+
+/// Server-side prepared statement vanished (e.g. ALTER TABLE
+/// invalidated the plan, or DEALLOCATE was issued). Maps to PG's
+/// SQLSTATE 26000 / errcode `INVALID_SQL_STATEMENT_NAME`. Cache
+/// entry must be dropped and the call retried with a fresh
+/// prepare.
+public const PG_INVALID_SQL_STATEMENT_NAME: Text = "26000".clone();
+
+// =============================================================================
+// Sync session
+// =============================================================================
+
+public type PgPreparedSession is {
+    cache: PgStmtCache,
+};
+
+implement PgPreparedSession {
+    public fn new() -> PgPreparedSession {
+        PgPreparedSession { cache: PgStmtCache.new() }
+    }
+
+    public fn with_cache_cap(cap: Int) -> PgPreparedSession {
+        PgPreparedSession { cache: PgStmtCache.with_cap(cap) }
+    }
+
+    public fn cache_metrics(&self) -> PgStmtCacheMetrics {
+        self.cache.metrics()
+    }
+
+    public fn cache_len(&self) -> Int { self.cache.len() }
+    public fn cache_cap(&self) -> Int { self.cache.cap() }
+
+    /// Cache-aware prepare. On miss invokes `conn.prepare`; on
+    /// cap overflow Closes the evicted statement on the wire.
+    public fn prepare_cached(
+        &mut self,
+        conn: &mut PgConnection,
+        sql: &Text,
+    ) -> Result<PgPreparedStatement, DbError> {
+        let fp = compute_fingerprint(sql);
+        match self.cache.lookup(fp) {
+            Some(stmt) => Ok(stmt),
+            None => {
+                let stmt = conn.prepare(sql)?;
+                let evicted = self.cache.insert(fp, clone_stmt(&stmt));
+                match evicted {
+                    Some(old) => { let _ = conn.close_prepared(&old); }
+                    None      => {}
+                }
+                Ok(stmt)
+            }
+        }
+    }
+
+    /// Cache-aware query — typed params + binary results. Auto
+    /// invalidates + retries once on SQLSTATE 26000.
+    public fn query_cached(
+        &mut self,
+        conn: &mut PgConnection,
+        sql: &Text,
+        typed_params: &List<Maybe<TypedValue>>,
+    ) -> Result<PgTypedQueryResult, DbError> {
+        let fp = compute_fingerprint(sql);
+        let stmt = self.prepare_cached(conn, sql)?;
+        match conn.execute_prepared_typed(&stmt, typed_params) {
+            Ok(r)  => Ok(r),
+            Err(e) => {
+                if is_invalid_stmt_name(&e) {
+                    let _ = self.cache.invalidate(fp);
+                    let fresh = self.prepare_cached(conn, sql)?;
+                    conn.execute_prepared_typed(&fresh, typed_params)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Cache-aware execute — text-format params (caller supplies
+    /// pre-encoded bytes). Same recovery semantics as
+    /// `query_cached`. Returns `PgSimpleQueryResult` because the
+    /// untyped path doesn't go through TypedValue.
+    public fn execute_cached(
+        &mut self,
+        conn: &mut PgConnection,
+        sql: &Text,
+        params: &List<Maybe<List<Byte>>>,
+    ) -> Result<PgSimpleQueryResult, DbError> {
+        let fp = compute_fingerprint(sql);
+        let stmt = self.prepare_cached(conn, sql)?;
+        match conn.execute_prepared(&stmt, params) {
+            Ok(r)  => Ok(r),
+            Err(e) => {
+                if is_invalid_stmt_name(&e) {
+                    let _ = self.cache.invalidate(fp);
+                    let fresh = self.prepare_cached(conn, sql)?;
+                    conn.execute_prepared(&fresh, params)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Drop a single cache entry; no wire traffic (caller decides
+    /// whether to also Close on the wire).
+    public fn invalidate(&mut self, sql: &Text) -> Bool {
+        let fp = compute_fingerprint(sql);
+        self.cache.invalidate(fp).is_some()
+    }
+
+    /// Drop every cache entry without wire traffic.
+    public fn clear_cache_no_close(&mut self) {
+        let _ = self.cache.drain();
+    }
+
+    /// Close every cached statement on the wire, freeing the
+    /// server-side slots. Call this from the connection's own
+    /// `close()` path BEFORE COM_TERMINATE — the server WOULD
+    /// drop unclosed prepared statements at session end, but
+    /// emitting Close explicitly:
+    ///   1. Reduces in-flight statement count immediately.
+    ///   2. Lets the server free per-statement memory before
+    ///      TCP close-wait.
+    ///   3. Plays nicely with pgbouncer-style proxies that observe
+    ///      the explicit Close to free their own bookkeeping.
+    /// Returns the count of statements closed. Errors on individual
+    /// closes are silently dropped — connection is shutting down.
+    public fn drain_cache_on_close(
+        &mut self,
+        conn: &mut PgConnection,
+    ) -> Int {
+        let drained = self.cache.drain();
+        let mut closed: Int = 0;
+        let mut i: Int = 0;
+        while i < (drained.len() as Int) {
+            let _ = conn.close_prepared(&drained[i]);
+            closed = closed + 1;
+            i = i + 1;
+        }
+        closed
+    }
+}
+
+// =============================================================================
+// Async session — wraps the sync cache + dispatches via the actor
+// =============================================================================
+
+/// Async counterpart of `PgPreparedSession`. Holds the same LRU
+/// cache caller-side; prepare / execute / close go through the
+/// actor channel.
+///
+/// The cached handles are `AsyncPgPreparedStatement` (which
+/// internally wraps `PgPreparedStatement`); the cache stores
+/// the inner sync handles to keep the cache module agnostic of
+/// the async layer.
+public type AsyncPgPreparedSession is {
+    cache: PgStmtCache,
+};
+
+implement AsyncPgPreparedSession {
+    public fn new() -> AsyncPgPreparedSession {
+        AsyncPgPreparedSession { cache: PgStmtCache.new() }
+    }
+
+    public fn with_cache_cap(cap: Int) -> AsyncPgPreparedSession {
+        AsyncPgPreparedSession { cache: PgStmtCache.with_cap(cap) }
+    }
+
+    public fn cache_metrics(&self) -> PgStmtCacheMetrics {
+        self.cache.metrics()
+    }
+
+    public async fn prepare_cached(
+        &mut self,
+        conn: &AsyncPgConnection,
+        sql: &Text,
+    ) -> Result<AsyncPgPreparedStatement, DbError> {
+        let fp = compute_fingerprint(sql);
+        match self.cache.lookup(fp) {
+            Some(stmt) => Ok(AsyncPgPreparedStatement { inner: stmt }),
+            None => {
+                let astmt = conn.prepare(sql).await?;
+                let evicted = self.cache.insert(fp, clone_stmt(astmt.inner()));
+                match evicted {
+                    Some(old) => {
+                        let evicted_handle = AsyncPgPreparedStatement { inner: old };
+                        let _ = conn.close_prepared(evicted_handle).await;
+                    }
+                    None => {}
+                }
+                Ok(astmt)
+            }
+        }
+    }
+
+    public async fn query_cached(
+        &mut self,
+        conn: &AsyncPgConnection,
+        sql: &Text,
+        typed_params: List<Maybe<TypedValue>>,
+    ) -> Result<PgTypedQueryResult, DbError> {
+        let fp = compute_fingerprint(sql);
+        let stmt = self.prepare_cached(conn, sql).await?;
+        let typed_clone = typed_params.clone();
+        match conn.execute_prepared_typed(&stmt, typed_params).await {
+            Ok(r)  => Ok(r),
+            Err(e) => {
+                if is_invalid_stmt_name(&e) {
+                    let _ = self.cache.invalidate(fp);
+                    let fresh = self.prepare_cached(conn, sql).await?;
+                    conn.execute_prepared_typed(&fresh, typed_clone).await
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    pub fn invalidate(&mut self, sql: &Text) -> Bool {
+        let fp = compute_fingerprint(sql);
+        self.cache.invalidate(fp).is_some()
+    }
+
+    public async fn drain_cache_on_close(
+        &mut self,
+        conn: &AsyncPgConnection,
+    ) -> Int {
+        let drained = self.cache.drain();
+        let mut closed: Int = 0;
+        let mut i: Int = 0;
+        while i < (drained.len() as Int) {
+            let h = AsyncPgPreparedStatement { inner: drained[i].clone() };
+            let _ = conn.close_prepared(h).await;
+            closed = closed + 1;
+            i = i + 1;
+        }
+        closed
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn clone_stmt(s: &PgPreparedStatement) -> PgPreparedStatement {
+    PgPreparedStatement {
+        name: s.name.clone(),
+        sql: s.sql.clone(),
+        param_oids: s.param_oids.clone(),
+        row_description: s.row_description.clone(),
+    }
+}
+
+/// Detect the canonical "server forgot the statement" error so
+/// `query_cached` / `execute_cached` can drop their cache entry
+/// and retry once. PG SQLSTATE 26000 is the spec answer.
+fn is_invalid_stmt_name(e: &DbError) -> Bool {
+    match e {
+        DbError.Adapter(spec) => {
+            let code = &spec.code;
+            // PG diagnostic SQLSTATE field surfaces as the
+            // adapter-specific code via dberr_from_pg.
+            *code == PG_INVALID_SQL_STATEMENT_NAME
+        }
+        _ => false,
+    }
+}

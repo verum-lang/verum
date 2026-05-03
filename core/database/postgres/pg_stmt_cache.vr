@@ -1,0 +1,325 @@
+// =============================================================================
+// core/database/postgres/pg_stmt_cache.vr — LRU prepared-statement cache
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.4 (extended-query / prepared cache).
+// =============================================================================
+//
+// Per-connection LRU cache of (sql_fingerprint → PgPreparedStatement)
+// — analogue of `core/database/mysql/stmt_cache.vr`. Two queries
+// that differ only in whitespace share one cache slot via the
+// canonicalised FNV-1a fingerprint.
+//
+// Eviction discipline:
+//   * `lookup` updates `last_seen` so cache survival follows LRU.
+//   * `insert` returns the evicted statement so the caller can
+//     issue Close(S, name) on the wire — silent drop would orphan
+//     the server-side slot until session end.
+//   * `invalidate` is called in response to PG SQLSTATE 26000
+//     (`invalid_sql_statement_name`) where the server has already
+//     forgotten the slot — caller does NOT re-Close.
+//
+// Cache state lives caller-side (per-connection). Cross-connection
+// sharing is unsafe because PG statement names are session-scoped
+// (allocated by `PgConnection.prepare_counter`).
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.pg_stmt_cache;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.postgres.connection.{PgPreparedStatement};
+
+// =============================================================================
+// SQL fingerprinting — canonicalise + FNV-1a 64
+// =============================================================================
+
+fn canonicalise(sql: &Text) -> Text {
+    let bytes = sql.as_bytes();
+    let n = bytes.len() as Int;
+    let mut out: List<Byte> = List.with_capacity(n);
+    let mut i: Int = 0;
+    let mut prev_was_space: Bool = true;
+    while i < n {
+        let b = (bytes[i] as Int) & 0xFF;
+        let is_space = b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D;
+        if is_space {
+            if !prev_was_space {
+                out.push(0x20 as Byte);
+            }
+            prev_was_space = true;
+        } else {
+            out.push(bytes[i]);
+            prev_was_space = false;
+        }
+        i = i + 1;
+    }
+    if (out.len() as Int) > 0 && (out[(out.len() as Int) - 1] as Int) == 0x20 {
+        let trimmed_len = (out.len() as Int) - 1;
+        let mut trimmed: List<Byte> = List.with_capacity(trimmed_len);
+        let mut k: Int = 0;
+        while k < trimmed_len {
+            trimmed.push(out[k]);
+            k = k + 1;
+        }
+        out = trimmed;
+    }
+    match Text.from_utf8(out) {
+        Ok(t)  => t,
+        Err(_) => sql.clone(),
+    }
+}
+
+fn fnv1a_64(s: &Text) -> Int {
+    let bytes = s.as_bytes();
+    let mut h: Int = -3750763034362895579;       // FNV offset basis
+    let prime: Int = 1099511628211;
+    let mut i: Int = 0;
+    let n = bytes.len() as Int;
+    while i < n {
+        h = h ^ ((bytes[i] as Int) & 0xFF);
+        h = h * prime;
+        i = i + 1;
+    }
+    h
+}
+
+/// Stable cache fingerprint for `sql`. Two queries with the same
+/// canonical form share the same fingerprint.
+public fn fingerprint(sql: &Text) -> Int {
+    let canon = canonicalise(sql);
+    fnv1a_64(&canon)
+}
+
+// =============================================================================
+// Cache entry
+// =============================================================================
+
+public type PgCacheEntry is {
+    fingerprint: Int,
+    stmt: PgPreparedStatement,
+    last_seen: Int,
+};
+
+// =============================================================================
+// Cap — sits below PG's default max_prepared_statements per session
+// (effectively unlimited but practically bounded by RAM). 128 slots
+// per connection × 128 conns = 16K total — comfortable for most
+// production deployments.
+// =============================================================================
+
+public const DEFAULT_PG_STMT_CACHE_CAP: Int = 128;
+
+// =============================================================================
+// PgStmtCache
+// =============================================================================
+
+public type PgStmtCache is {
+    entries: List<PgCacheEntry>,
+    cap: Int,
+    clock: Int,
+    total_hits: Int,
+    total_inserts: Int,
+    total_evictions: Int,
+    total_invalidations: Int,
+};
+
+implement PgStmtCache {
+    public fn new() -> PgStmtCache {
+        PgStmtCache.with_cap(DEFAULT_PG_STMT_CACHE_CAP)
+    }
+
+    public fn with_cap(cap: Int) -> PgStmtCache {
+        let actual = if cap < 1 { 1 } else { cap };
+        PgStmtCache {
+            entries: List.new(),
+            cap: actual,
+            clock: 0,
+            total_hits: 0,
+            total_inserts: 0,
+            total_evictions: 0,
+            total_invalidations: 0,
+        }
+    }
+
+    public fn len(&self) -> Int { self.entries.len() as Int }
+    public fn cap(&self) -> Int { self.cap }
+
+    /// Look up by fingerprint. Updates LRU recency. Returns a
+    /// clone of the cached statement on hit; `None` on miss.
+    public fn lookup(&mut self, fingerprint: Int) -> Maybe<PgPreparedStatement> {
+        self.clock = self.clock + 1;
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].fingerprint == fingerprint {
+                self.entries[i].last_seen = self.clock;
+                self.total_hits = self.total_hits + 1;
+                return Some(clone_stmt(&self.entries[i].stmt));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Insert a freshly-prepared statement under `fingerprint`.
+    /// Returns the evicted statement (if cap exceeded) so the
+    /// caller can issue Close(S, name) for it. Returns `None`
+    /// when no eviction was necessary.
+    ///
+    /// Eviction MUST be visible to the caller — silently dropping
+    /// a `PgPreparedStatement` orphans the server-side slot until
+    /// session end.
+    public fn insert(
+        &mut self,
+        fingerprint: Int,
+        stmt: PgPreparedStatement,
+    ) -> Maybe<PgPreparedStatement> {
+        self.clock = self.clock + 1;
+        self.total_inserts = self.total_inserts + 1;
+        let mut evicted: Maybe<PgPreparedStatement> = None;
+        if self.entries.len() as Int >= self.cap {
+            evicted = self.evict_one_internal();
+        }
+        self.entries.push(PgCacheEntry {
+            fingerprint: fingerprint,
+            stmt: stmt,
+            last_seen: self.clock,
+        });
+        evicted
+    }
+
+    /// Drop the entry matching `fingerprint`. Returns the entry
+    /// for symmetry with `insert`; caller typically does NOT
+    /// Close it on the wire (invalidation usually responds to
+    /// SQLSTATE 26000 where the server has already forgotten
+    /// the slot).
+    public fn invalidate(&mut self, fingerprint: Int) -> Maybe<PgPreparedStatement> {
+        let mut victim: Int = -1;
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].fingerprint == fingerprint {
+                victim = i;
+                break;
+            }
+            i = i + 1;
+        }
+        if victim < 0 {
+            return None;
+        }
+        self.total_invalidations = self.total_invalidations + 1;
+        self.remove_at(victim)
+    }
+
+    /// Drain every cached statement. Caller issues Close(S, name)
+    /// on each before connection close.
+    public fn drain(&mut self) -> List<PgPreparedStatement> {
+        let mut out: List<PgPreparedStatement> = List.new();
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            out.push(clone_stmt(&self.entries[i].stmt));
+            i = i + 1;
+        }
+        self.entries = List.new();
+        out
+    }
+
+    public fn metrics(&self) -> PgStmtCacheMetrics {
+        PgStmtCacheMetrics {
+            cap: self.cap,
+            len: self.entries.len() as Int,
+            total_hits: self.total_hits,
+            total_inserts: self.total_inserts,
+            total_evictions: self.total_evictions,
+            total_invalidations: self.total_invalidations,
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Internals
+    // -------------------------------------------------------------------------
+
+    fn evict_one_internal(&mut self) -> Maybe<PgPreparedStatement> {
+        if (self.entries.len() as Int) == 0 {
+            return None;
+        }
+        let mut victim: Int = 0;
+        let mut oldest: Int = self.entries[0].last_seen;
+        let mut i: Int = 1;
+        while i < self.entries.len() as Int {
+            if self.entries[i].last_seen < oldest {
+                oldest = self.entries[i].last_seen;
+                victim = i;
+            }
+            i = i + 1;
+        }
+        self.total_evictions = self.total_evictions + 1;
+        self.remove_at(victim)
+    }
+
+    fn remove_at(&mut self, idx: Int) -> Maybe<PgPreparedStatement> {
+        let n = self.entries.len() as Int;
+        if idx < 0 || idx >= n {
+            return None;
+        }
+        let evicted = clone_stmt(&self.entries[idx].stmt);
+        let mut new_entries: List<PgCacheEntry> = List.with_capacity(n - 1);
+        let mut k: Int = 0;
+        while k < n {
+            if k != idx {
+                new_entries.push(PgCacheEntry {
+                    fingerprint: self.entries[k].fingerprint,
+                    stmt: clone_stmt(&self.entries[k].stmt),
+                    last_seen: self.entries[k].last_seen,
+                });
+            }
+            k = k + 1;
+        }
+        self.entries = new_entries;
+        Some(evicted)
+    }
+}
+
+// =============================================================================
+// Helpers — PgPreparedStatement clone
+// =============================================================================
+
+fn clone_stmt(s: &PgPreparedStatement) -> PgPreparedStatement {
+    PgPreparedStatement {
+        name: s.name.clone(),
+        sql: s.sql.clone(),
+        param_oids: s.param_oids.clone(),
+        row_description: s.row_description.clone(),
+    }
+}
+
+// =============================================================================
+// Metrics snapshot
+// =============================================================================
+
+public type PgStmtCacheMetrics is {
+    cap: Int,
+    len: Int,
+    total_hits: Int,
+    total_inserts: Int,
+    total_evictions: Int,
+    total_invalidations: Int,
+};
+
+implement PgStmtCacheMetrics {
+    /// Hit ratio in the [0, 1000] integer-fixed-point range so
+    /// callers can render `f"{ratio_x1000 / 10}.{ratio_x1000 % 10}%"`
+    /// without pulling in floating-point arithmetic.
+    public fn hit_ratio_per_mille(&self) -> Int {
+        let total = self.total_hits + self.total_inserts;
+        if total <= 0 { return 0; }
+        (self.total_hits * 1000) / total
+    }
+}
