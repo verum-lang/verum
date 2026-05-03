@@ -143,6 +143,12 @@ Test list per `internal/specs/database.md` follow-up:
   + SELECT ROW(99, 'beta')::smoke_pair exercises user-defined
   composite path (spec §6.1.4 composite codec)
 
+- `t23_async_pgoutput.vr` — pgoutput async consumer with relation-
+  cache lifecycle: connect_replication_async + create slot +
+  start_logical_pgoutput → drain CdcInsert events with their
+  RelationMessage attached + assert insert_count ≥ 3 + relation
+  cache populated (spec §6.1.7 / §6.1.8)
+
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags
 end-to-end (exercised through t11_replication.vr's pump if the

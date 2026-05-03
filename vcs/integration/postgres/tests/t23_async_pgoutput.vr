@@ -1,0 +1,179 @@
+// =============================================================================
+// t23_async_pgoutput.vr — pgoutput async consumer with relation-cache lifecycle
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.7 / §6.1.8.
+// =============================================================================
+//
+// V0:
+//   1. Async replication connect (admin role).
+//   2. create_logical_slot (TEMPORARY pgoutput).
+//   3. start_logical_pgoutput → AsyncPgoutputConsumer.
+//   4. Side-channel INSERT (3 rows).
+//   5. Drain next_change events; assert ≥1 CdcRelationOnly + ≥3
+//      CdcInsert with relation context attached, all referring
+//      to the same relation name.
+//   6. close + drop slot (slot is TEMPORARY so it auto-vanishes).
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable, PgConnection, connect as pg_connect,
+    PgReplicationConfig, PgReplicationConnection,
+    LogicalReplicationOptions,
+    Lsn,
+    AsyncPgReplicationConnection,
+    connect_replication_async,
+    AsyncPgoutputConsumer, PgoutputChange,
+    CdcBegin, CdcCommit, CdcRelationOnly,
+    CdcInsert, CdcUpdate, CdcDelete,
+    CdcStreamStart, CdcStreamStop, CdcStreamCommit, CdcStreamAbort,
+    CdcRaw, CdcTerminated, CdcClosed,
+    start_logical_pgoutput,
+};
+mount core.async.executor.block_on;
+
+fn admin_replication_config() -> PgReplicationConfig {
+    PgReplicationConfig.logical(PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-async-pgo".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    })
+}
+
+fn ensure_publication() {
+    let mut admin = expect_ok(
+        pg_connect(&PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: ADMIN_USER.clone(),
+            password: ADMIN_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-async-pgo-setup".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        }),
+        &"admin connect for publication setup failed".clone(),
+    );
+    let _ = admin.simple_query(&"DROP PUBLICATION IF EXISTS spindle_test_pub".clone());
+    expect_ok(
+        admin.simple_query(&"CREATE PUBLICATION spindle_test_pub FOR ALL TABLES".clone()),
+        &"CREATE PUBLICATION failed".clone(),
+    );
+}
+
+fn write_rows_on_side_channel() {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS async_pgo_smoke (id integer PRIMARY KEY, payload text NOT NULL)"
+            .clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM async_pgo_smoke".clone());
+    expect_ok(
+        side.simple_query(
+            &"INSERT INTO async_pgo_smoke (id, payload) VALUES \
+              (1, 'first'), (2, 'second'), (3, 'third')".clone()
+        ),
+        &"side-channel INSERT 3 rows failed".clone(),
+    );
+}
+
+fn main() {
+    ensure_publication();
+
+    block_on(async move {
+        let cfg = admin_replication_config();
+        let repl = expect_ok(
+            connect_replication_async(cfg).await,
+            &"connect_replication_async failed".clone(),
+        );
+
+        let slot = "spindle_async_pgo_slot".clone();
+        let _ = repl.drop_slot(&slot, false).await;
+        expect_ok(
+            repl.create_logical_slot(&slot, &"pgoutput".clone(), true).await,
+            &"create_logical_slot failed".clone(),
+        );
+
+        let opts = LogicalReplicationOptions.pgoutput(slot.clone())
+            .with_option("proto_version".clone(), "1".clone())
+            .with_option("publication_names".clone(), "spindle_test_pub".clone());
+
+        let consumer = expect_ok(
+            start_logical_pgoutput(repl, opts, Lsn.zero()).await,
+            &"start_logical_pgoutput failed".clone(),
+        );
+
+        // Trigger DML.
+        write_rows_on_side_channel();
+
+        let mut saw_relation: Bool = false;
+        let mut insert_count: Int = 0;
+        let mut last_relation_name: Text = "".clone();
+        let mut iters: Int = 0;
+        while iters < 50 {
+            match consumer.next_change().await {
+                None => { break; }
+                Some(change) => {
+                    match change {
+                        CdcBegin(_) | CdcCommit(_) => {}
+                        CdcRelationOnly(rel) => {
+                            saw_relation = true;
+                            last_relation_name = rel.name.clone();
+                        }
+                        CdcInsert { relation, new_tuple } => {
+                            let _ = new_tuple;
+                            if &relation.name == &"async_pgo_smoke".clone() {
+                                insert_count = insert_count + 1;
+                                last_relation_name = relation.name.clone();
+                            }
+                        }
+                        CdcUpdate { .. } | CdcDelete { .. } => {}
+                        CdcStreamStart(_) | CdcStreamStop
+                        | CdcStreamCommit(_) | CdcStreamAbort(_) => {}
+                        CdcRaw(_) => {}
+                        CdcTerminated(e) => {
+                            expect(false, &f"replication terminated: {e}");
+                        }
+                        CdcClosed => { break; }
+                    }
+                    if insert_count >= 3 { break; }
+                }
+            }
+            iters = iters + 1;
+        }
+
+        expect(
+            saw_relation,
+            &"async pgoutput consumer did not surface CdcRelationOnly".clone(),
+        );
+        expect(
+            insert_count >= 3,
+            &f"expected ≥3 CdcInsert events for async_pgo_smoke, got {insert_count}",
+        );
+        expect(
+            &last_relation_name == &"async_pgo_smoke".clone(),
+            &f"last relation name: {last_relation_name}",
+        );
+        expect(
+            consumer.relation_cache_len() >= 1,
+            &"relation cache should hold ≥1 entry after RelationOnly".clone(),
+        );
+
+        let _ = consumer.close().await;
+
+        pass(&"t23_async_pgoutput".clone());
+    });
+}

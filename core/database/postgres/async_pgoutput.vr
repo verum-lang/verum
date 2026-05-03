@@ -1,0 +1,314 @@
+// =============================================================================
+// core/database/postgres/async_pgoutput.vr — async pgoutput consumer V0
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (logical replication / pgoutput),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// AsyncPgReplicationConnection emits raw XLogData payloads. CDC
+// consumers must hand-decode each via decode_pgoutput AND maintain
+// their own PgoRelationCache so Insert/Update/Delete events arrive
+// with their relation metadata attached. Every consumer rewrites
+// the same boilerplate. This module wraps the stream into a typed
+// consumer that does both for you.
+//
+// Architecture:
+//
+//   AsyncPgoutputConsumer
+//     ├── conn:  AsyncPgReplicationConnection   (cloneable)
+//     └── cache: Shared<Mutex<PgoRelationCache>> — mutated when
+//                Relation messages arrive; queried for Insert/
+//                Update/Delete dispatch. Mutex (not RwLock)
+//                because the consumer is naturally single-
+//                consumer: each next_change call serialises the
+//                pump.
+//
+//   .next_change().await:
+//     1. Pull next ReplicationMessage from the underlying conn.
+//     2. If XLogData: decode_pgoutput(payload).
+//        * Relation → record into cache, surface CdcRelationOnly.
+//        * Insert/Update/Delete → look up relation, surface typed
+//          event with relation attached.
+//        * Stream events → pass through as CdcStream*.
+//        * Unknown / Origin / Type / Truncate / etc → CdcRaw.
+//     3. If Keepalive: surface CdcRaw(PgoUnknown stub) — V0 keeps
+//        the consumer narrow; callers wanting keepalive control
+//        loop directly on conn.next_event.
+//
+// Sync replication.vr / pgoutput.vr / async_replication.vr
+// canonical / unchanged.
+//
+// V0 surface:
+//   * start_logical_pgoutput(repl, opts, start_lsn) →
+//       Future<Result<AsyncPgoutputConsumer, …>>
+//   * .next_change().await → Maybe<PgoutputChange>
+//   * .send_standby_status(…) — passthrough.
+//   * .close().await — passthrough.
+//
+// OUT of V0:
+//   * Streaming-tx ordering (V0 surfaces CdcStreamStart/Stop/Commit
+//     /Abort as-is; caller groups by xid).
+//   * Typed-tuple lift (caller decodes TupleColumn via typed.vr
+//     per relation column metadata — per-cell typing is the
+//     downstream's choice).
+//   * Per-tx batching with size / time bounds.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.DatabaseMedium("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.async_pgoutput;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.replication.{
+    LogicalReplicationOptions, Lsn, ReplicationMessage,
+    RmXLogData, RmKeepalive, RmOther,
+};
+mount core.database.postgres.async_replication.{
+    AsyncPgReplicationConnection,
+    ReplActorEvent, ReaEvent, ReaTerminated, ReaClosed,
+};
+mount core.database.postgres.pgoutput.{
+    PgoMessage, PgoBegin, PgoCommit, PgoRelation, PgoInsert,
+    PgoUpdate, PgoDelete, PgoUnknown,
+    PgoStreamStart, PgoStreamStop, PgoStreamCommit, PgoStreamAbort,
+    BeginMessage, CommitMessage, RelationMessage, InsertMessage,
+    UpdateMessage, DeleteMessage,
+    StreamStartMessage, StreamCommitMessage, StreamAbortMessage,
+    OldTupleVariant, OldTupleKind, TupleData,
+    PgoRelationCache, decode_pgoutput,
+};
+
+// =============================================================================
+// Typed CDC events
+// =============================================================================
+
+public type PgoutputChange is
+      CdcBegin(BeginMessage)
+    | CdcCommit(CommitMessage)
+    /// Schema-only event — relation metadata recorded into the
+    /// cache; downstream typically just notes the schema for
+    /// observability.
+    | CdcRelationOnly(RelationMessage)
+    | CdcInsert {
+        relation: RelationMessage,
+        new_tuple: TupleData,
+    }
+    | CdcUpdate {
+        relation: RelationMessage,
+        old_tuple: Maybe<OldTupleVariant>,
+        new_tuple: TupleData,
+    }
+    | CdcDelete {
+        relation: RelationMessage,
+        old_tuple_kind: OldTupleKind,
+        old_tuple: TupleData,
+    }
+    | CdcStreamStart(StreamStartMessage)
+    | CdcStreamStop
+    | CdcStreamCommit(StreamCommitMessage)
+    | CdcStreamAbort(StreamAbortMessage)
+    /// Anything V0 doesn't classify (Origin / Type / Truncate /
+    /// Logical message / unknown). Caller can dispatch on the
+    /// inner PgoMessage if they care.
+    | CdcRaw(PgoMessage)
+    /// Wire terminated mid-stream — surfaces the underlying
+    /// replication actor's terminal error.
+    | CdcTerminated(DbError)
+    /// Replication stream closed cleanly (slot dropped, server
+    /// shutdown, etc). Subsequent next_change calls return None.
+    | CdcClosed;
+
+// =============================================================================
+// Consumer handle
+// =============================================================================
+
+public type AsyncPgoutputConsumer is {
+    conn: AsyncPgReplicationConnection,
+    cache: Shared<sync.mutex.Mutex<PgoRelationCache>>,
+};
+
+implement AsyncPgoutputConsumer {
+    public fn clone(&self) -> AsyncPgoutputConsumer {
+        AsyncPgoutputConsumer {
+            conn: self.conn.clone(),
+            cache: self.cache.clone(),
+        }
+    }
+
+    /// Borrow the underlying replication conn for advanced
+    /// operations (send_standby_status / close / next_event with
+    /// raw access). Use the consumer's own methods for typed CDC.
+    public fn conn_ref(&self) -> &AsyncPgReplicationConnection {
+        &self.conn
+    }
+
+    /// Snapshot of the relation cache — useful for downstream
+    /// consumers that want to inspect schema on demand. Returns
+    /// the count for diagnostics; full inspection happens via
+    /// the cache's own lookup() if exposed (V1).
+    public fn relation_cache_len(&self) -> Int {
+        let g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+        g.len()
+    }
+
+    /// Pull the next typed CDC change. Pumps the underlying
+    /// replication stream, decodes XLogData via decode_pgoutput,
+    /// updates the relation cache for Relation messages, and
+    /// pairs DML events with their cached relation. Returns
+    /// `None` only when the stream cleanly closes.
+    public async fn next_change(&self) -> Maybe<PgoutputChange> {
+        loop {
+            let ev = self.conn.next_event().await;
+            match ev {
+                None => { return None; }
+                Some(ReaTerminated(e)) => {
+                    return Some(CdcTerminated(e));
+                }
+                Some(ReaClosed) => {
+                    return Some(CdcClosed);
+                }
+                Some(ReaEvent(rmsg)) => {
+                    match rmsg {
+                        RmKeepalive(_) | RmOther { .. } => {
+                            // Keepalives / unknown — keep
+                            // looping for the next real event.
+                        }
+                        RmXLogData(x) => {
+                            let pgm = match decode_pgoutput(x.payload) {
+                                Ok(v)  => v,
+                                Err(e) => {
+                                    return Some(CdcTerminated(e));
+                                }
+                            };
+                            return Some(self.classify(pgm));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Convenience — passthrough to the underlying conn's
+    /// send_standby_status. Periodic acknowledgement is the
+    /// caller's responsibility.
+    public async fn send_standby_status(
+        &self,
+        write: Lsn, flush: Lsn, apply: Lsn,
+        client_time_us: Int,
+        reply_requested: Bool,
+    ) -> Result<(), DbError> {
+        self.conn.send_standby_status(
+            write, flush, apply, client_time_us, reply_requested,
+        ).await
+    }
+
+    /// Tear down the underlying replication conn + actor.
+    public async fn close(&self) -> Result<(), DbError> {
+        self.conn.close().await
+    }
+
+    // -------------------------------------------------------------------------
+    // Internals
+    // -------------------------------------------------------------------------
+
+    /// Map a PgoMessage to a typed PgoutputChange, threading the
+    /// relation cache for DML events.
+    fn classify(&self, pgm: PgoMessage) -> PgoutputChange {
+        match pgm {
+            PgoBegin(b)  => CdcBegin(b),
+            PgoCommit(c) => CdcCommit(c),
+            PgoRelation(rel) => {
+                let mut g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+                g.record(rel.clone());
+                drop(g);
+                CdcRelationOnly(rel)
+            }
+            PgoInsert(ins) => {
+                match self.lookup_relation(ins.relid) {
+                    Some(rel) => CdcInsert {
+                        relation: rel,
+                        new_tuple: ins.new_tuple,
+                    },
+                    None => CdcRaw(PgoInsert(ins)),
+                }
+            }
+            PgoUpdate(upd) => {
+                match self.lookup_relation(upd.relid) {
+                    Some(rel) => CdcUpdate {
+                        relation: rel,
+                        old_tuple: upd.old_tuple,
+                        new_tuple: upd.new_tuple,
+                    },
+                    None => CdcRaw(PgoUpdate(upd)),
+                }
+            }
+            PgoDelete(del) => {
+                match self.lookup_relation(del.relid) {
+                    Some(rel) => CdcDelete {
+                        relation: rel,
+                        old_tuple_kind: del.old_tuple_kind,
+                        old_tuple: del.old_tuple,
+                    },
+                    None => CdcRaw(PgoDelete(del)),
+                }
+            }
+            PgoStreamStart(s)  => CdcStreamStart(s),
+            PgoStreamStop      => CdcStreamStop,
+            PgoStreamCommit(s) => CdcStreamCommit(s),
+            PgoStreamAbort(s)  => CdcStreamAbort(s),
+            PgoUnknown { .. }  => CdcRaw(pgm),
+        }
+    }
+
+    fn lookup_relation(&self, relid: Int) -> Maybe<RelationMessage> {
+        let g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+        match g.lookup(relid) {
+            Some(rel) => Some(clone_relation(rel)),
+            None      => None,
+        }
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+/// Issue START_REPLICATION SLOT … LOGICAL on the supplied async
+/// replication conn + return a consumer that auto-decodes
+/// pgoutput payloads.
+public async fn start_logical_pgoutput(
+    repl: AsyncPgReplicationConnection,
+    opts: LogicalReplicationOptions,
+    start_lsn: Lsn,
+) -> Result<AsyncPgoutputConsumer, DbError> {
+    repl.start_logical(opts, start_lsn).await?;
+    Ok(AsyncPgoutputConsumer {
+        conn: repl,
+        cache: Shared.new(sync.mutex.Mutex.new(PgoRelationCache.new())),
+    })
+}
+
+// =============================================================================
+// Helpers — RelationMessage clone (PgoRelationCache stores by ref)
+// =============================================================================
+
+fn clone_relation(r: &RelationMessage) -> RelationMessage {
+    RelationMessage {
+        relid: r.relid,
+        namespace: r.namespace.clone(),
+        name: r.name.clone(),
+        replica_identity: r.replica_identity,
+        columns: r.columns.clone(),
+    }
+}

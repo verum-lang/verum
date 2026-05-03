@@ -60,6 +60,7 @@ public module async_typed_database;
 public module async_copy;
 public module async_replication;
 public module async_base_backup;
+public module async_pgoutput;
 public module typed_row;
 public module pg_stmt_cache;
 public module pg_prepared_session;
@@ -174,6 +175,14 @@ public mount .async_base_backup.{
     BseTsChunk, BseTsEnd, BseManifestChunk, BseManifestEnd,
     BseFinished, BseFailed,
     connect_and_start_async,
+};
+public mount .async_pgoutput.{
+    AsyncPgoutputConsumer, PgoutputChange,
+    CdcBegin, CdcCommit, CdcRelationOnly,
+    CdcInsert, CdcUpdate, CdcDelete,
+    CdcStreamStart, CdcStreamStop, CdcStreamCommit, CdcStreamAbort,
+    CdcRaw, CdcTerminated, CdcClosed,
+    start_logical_pgoutput,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
