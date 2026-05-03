@@ -41,8 +41,11 @@ pub enum TimePoint {
     Now,
  /// Future — projected timestamp (target date).
     Future(i64),
- /// Counterfactual — alternative-history branch.
-    Counterfactual { branch: String },
+    /// Counterfactual — alternative-history branch.
+    Counterfactual {
+        /// Identifier naming the counterfactual branch.
+        branch: String,
+    },
 }
 
 impl TimePoint {
@@ -94,9 +97,13 @@ pub struct Decision {
     pub depends_on: Vec<String>,
 }
 
+/// One option within a [`Decision`] — a candidate value the
+/// architectural decision can resolve to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DecisionOption {
+    /// Stable identifier for this option.
     pub name: String,
+    /// Human-readable explanation of the option.
     pub description: String,
 }
 
@@ -127,19 +134,35 @@ impl Decision {
 /// observers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Observer {
- /// Generic end-user.
-    EndUser { kind: String },
- /// Another cog in the composition graph.
-    PeerCog { module_path: String },
- /// Stakeholder with a special role.
-    Stakeholder { role: String },
- /// Auditor — verifying compliance.
-    Auditor { audit_kind: String },
- /// Adversary — threat-model observer.
-    Adversary { threat_model: String },
+    /// Generic end-user.
+    EndUser {
+        /// End-user category (default / power / admin / ...).
+        kind: String,
+    },
+    /// Another cog in the composition graph.
+    PeerCog {
+        /// Dotted module path of the peer cog.
+        module_path: String,
+    },
+    /// Stakeholder with a special role.
+    Stakeholder {
+        /// Stakeholder role (operator / regulator / customer / ...).
+        role: String,
+    },
+    /// Auditor — verifying compliance.
+    Auditor {
+        /// Audit kind (compliance / security / financial / ...).
+        audit_kind: String,
+    },
+    /// Adversary — threat-model observer.
+    Adversary {
+        /// Threat model the adversary operates under.
+        threat_model: String,
+    },
 }
 
 impl Observer {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             Observer::EndUser { .. } => "end_user",
@@ -180,22 +203,38 @@ impl Observer {
 /// Combines S4/S5-style modal logic с LTL temporal operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModalAssertion {
- /// `□ A` — A holds in EVERY possible future / decision branch.
-    Necessity { proposition: ArchProposition },
- /// `◇ A` — A holds in SOME possible future / decision branch.
-    Possibility { proposition: ArchProposition },
- /// `◇F A` — A holds in some future time-point.
-    Eventually { proposition: ArchProposition },
- /// `□G A` — A holds in every future time-point.
-    Always { proposition: ArchProposition },
- /// `A U B` — A holds until B holds.
+    /// `□ A` — A holds in EVERY possible future / decision branch.
+    Necessity {
+        /// Proposition that must hold in every branch.
+        proposition: ArchProposition,
+    },
+    /// `◇ A` — A holds in SOME possible future / decision branch.
+    Possibility {
+        /// Proposition that holds in at least one branch.
+        proposition: ArchProposition,
+    },
+    /// `◇F A` — A holds in some future time-point.
+    Eventually {
+        /// Proposition that eventually holds.
+        proposition: ArchProposition,
+    },
+    /// `□G A` — A holds in every future time-point.
+    Always {
+        /// Proposition that holds at every future time-point.
+        proposition: ArchProposition,
+    },
+    /// `A U B` — A holds until B holds.
     Until {
+        /// Proposition `A` that must hold until `B` arrives.
         first: ArchProposition,
+        /// Proposition `B` that ends the `Until` window.
         second: ArchProposition,
     },
- /// `A ⇨ B` — counterfactual: if A held, B would hold.
+    /// `A ⇨ B` — counterfactual: if A held, B would hold.
     Counterfactual {
+        /// Counterfactual antecedent (`A`).
         antecedent: ArchProposition,
+        /// Counterfactual consequent (`B`).
         consequent: ArchProposition,
     },
 }
@@ -242,17 +281,24 @@ impl ModalAssertion {
 /// arbitrary refinement predicates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArchProposition {
- /// Capability of given name is present in the cog's exposes/requires.
-    HasCapability { capability_tag: String },
- /// Foundation remains stable across time/decisions.
+    /// Capability of given name is present in the cog's exposes/requires.
+    HasCapability {
+        /// Capability tag (per `Capability::tag`).
+        capability_tag: String,
+    },
+    /// Foundation remains stable across time/decisions.
     FoundationStable,
- /// API is unchanged (public interface invariant).
+    /// API is unchanged (public interface invariant).
     PublicApiUnchanged,
- /// Custom predicate referenced by name.
-    Custom { name: String },
+    /// Custom predicate referenced by name.
+    Custom {
+        /// Refinement-predicate name resolved at audit time.
+        name: String,
+    },
 }
 
 impl ArchProposition {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             ArchProposition::HasCapability { .. } => "has_capability",
@@ -272,38 +318,43 @@ impl ArchProposition {
 /// reversibility — all type-level.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchEvolution {
- /// Trigger condition (e.g. "capability_X_becomes_available").
+    /// Trigger condition (e.g. "capability_X_becomes_available").
     pub trigger: String,
- /// Target time-point when the evolution is expected.
+    /// Target time-point when the evolution is expected.
     pub expected_time: TimePoint,
- /// Cost class of the evolution.
+    /// Cost class of the evolution.
     pub cost_class: ComplexityClass,
- /// Whether the evolution is reversible (adjoint pair exists).
+    /// Whether the evolution is reversible (adjoint pair exists).
     pub reversibility: Reversibility,
 }
 
+/// Asymptotic cost class of an [`ArchEvolution`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ComplexityClass {
- /// O(1) — trivial change (config flip).
+    /// O(1) — trivial change (config flip).
     Trivial,
- /// O(N) — small change touching N modules.
+    /// O(N) — small change touching N modules.
     Linear,
- /// O(N²) — quadratic.
+    /// O(N²) — quadratic.
     Quadratic,
- /// Architectural redesign — bounded but expensive.
+    /// Architectural redesign — bounded but expensive.
     ArchitecturalRedesign,
- /// Unbounded — full system rewrite.
+    /// Unbounded — full system rewrite.
     Rewrite,
 }
 
+/// Reversibility of an [`ArchEvolution`] under refactoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Reversibility {
- /// Reversible via adjoint pair (left / right adjoint exists).
+    /// Reversible via adjoint pair (left / right adjoint exists).
     AdjointReversible,
- /// One-way — cannot undo.
+    /// One-way — cannot undo.
     Irreversible,
- /// Reversible up to a bound (limited rollback window).
-    BoundedReversible { window_seconds: u64 },
+    /// Reversible up to a bound (limited rollback window).
+    BoundedReversible {
+        /// Rollback window measured in seconds.
+        window_seconds: u64,
+    },
 }
 
 // =============================================================================
@@ -314,9 +365,13 @@ pub enum Reversibility {
 /// evaluation per spec §22.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CounterfactualPair {
+    /// Stable identifier for the counterfactual pair.
     pub name: String,
+    /// The base / actual decision.
     pub base: Decision,
+    /// The alternative / counterfactual decision.
     pub alternative: Decision,
+    /// Propositions that must remain stable under the swap.
     pub stability_invariants: Vec<ArchProposition>,
 }
 
@@ -329,11 +384,13 @@ pub struct CounterfactualPair {
 /// and an adjoint `G: New → Old` with `F ⊣ G`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdjunctionWitness {
+    /// Name of the forward functor `F`.
     pub forward_name: String,
+    /// Name of the backward functor `G`.
     pub backward_name: String,
- /// Properties preserved under F.
+    /// Properties preserved under F.
     pub preserved: Vec<ArchProposition>,
- /// Properties gained under F.
+    /// Properties gained under F.
     pub gained: Vec<ArchProposition>,
 }
 
