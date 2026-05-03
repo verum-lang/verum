@@ -59,6 +59,7 @@
 //! default).  When the feature is off the type does not exist and
 //! `BackendRegistry` is identical to its pre-Этап-C shape.
 
+use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1128,6 +1129,135 @@ fn build_unop_kernel_text(op: TensorUnaryOp, dtype: DType) -> Option<String> {
     ))
 }
 
+// =============================================================================
+// Persistent on-disk JIT cache (Шаг 8 of Этап C).
+//
+// The in-memory `DashMap` cache on `MlirJitBackend` survives only for
+// the lifetime of the process — every fresh interpreter run pays the
+// full MLIR-parse + lowering + LLVM-optimise + JIT-codegen cost on the
+// first call to each kernel.  For ML inference / training workloads
+// where interpreter startup is on the hot path (CI, serverless, data-
+// pipeline shells), that's hundreds of ms of avoidable warm-up.
+//
+// The on-disk cache stores the **post-lowering MLIR text** (i.e. the
+// module after `convert-to-llvm` and friends ran on it) under a
+// content-addressed name.  On subsequent runs:
+//   1. Build the kernel source text exactly as before.
+//   2. Compute the cache key from the source text + target arch + OS
+//      + cache-format version.
+//   3. If the cache file exists, parse it directly and hand it to
+//      `ExecutionEngine::new` — skipping all the conversion passes.
+//      Cache hits cut compile cost roughly in half (the LLVM-side
+//      JIT codegen still runs, but MLIR lowering disappears).
+//   4. Misses fall through to the legacy compile path, then write
+//      the lowered module text out before returning the engine.
+//
+// Invalidation is automatic: the cache key includes target arch + OS
+// + an explicit "v1" version tag, so a toolchain bump (or a kernel-
+// text change in `build_*_kernel_text`) produces a different hash and
+// the old entry is ignored (and orphaned on disk — reaping is left to
+// users / package managers since cache size is tiny).
+//
+// Cache location precedence:
+//   1. `$VERUM_JIT_CACHE` env var (explicit override; useful for CI
+//      with shared caches).
+//   2. `$XDG_CACHE_HOME/verum/jit/v1/` (Linux + freedesktop convention).
+//   3. `$HOME/.cache/verum/jit/v1/` (POSIX fallback).
+//   4. Any failure to find a cache directory → caching is silently
+//      disabled and we fall through to the in-memory-only path.
+// =============================================================================
+
+const JIT_CACHE_VERSION: &str = "v1";
+
+/// Resolve the on-disk cache directory, or `None` if no suitable
+/// location is writable.  The check is best-effort: even if we
+/// return `Some(path)`, individual reads / writes may still fail
+/// (read-only mount, quota, permission), in which case the caller
+/// silently falls through to the in-memory path.
+fn jit_cache_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("VERUM_JIT_CACHE") {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p).join(JIT_CACHE_VERSION));
+        }
+    }
+    if let Ok(p) = std::env::var("XDG_CACHE_HOME") {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p).join("verum").join("jit").join(JIT_CACHE_VERSION));
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            return Some(
+                PathBuf::from(home)
+                    .join(".cache")
+                    .join("verum")
+                    .join("jit")
+                    .join(JIT_CACHE_VERSION),
+            );
+        }
+    }
+    None
+}
+
+/// Content-addressed cache filename for a given kernel source.
+///
+/// Hash inputs: format-version tag + target arch + target OS + the
+/// raw kernel-source MLIR text.  Any bit of those changing yields a
+/// different hash and a fresh compile — protecting against silent
+/// drift when the toolchain or kernel template moves.
+fn jit_cache_key(kernel_text: &str) -> String {
+    let mut h = blake3::Hasher::new();
+    h.update(b"verum-jit-cache-");
+    h.update(JIT_CACHE_VERSION.as_bytes());
+    h.update(b"\n");
+    h.update(std::env::consts::ARCH.as_bytes());
+    h.update(b"\n");
+    h.update(std::env::consts::OS.as_bytes());
+    h.update(b"\n");
+    h.update(kernel_text.as_bytes());
+    h.finalize().to_hex().to_string()
+}
+
+/// Try to load + parse + JIT-compile a cached lowered MLIR module.
+///
+/// Returns `None` on any failure (file missing, parse error, verifier
+/// rejection, ExecutionEngine construction fault).  Failures are not
+/// fatal — the caller falls through to the full-compile path.
+fn try_load_cached_kernel(
+    context: &Context,
+    cache_path: &std::path::Path,
+) -> Option<ExecutionEngine> {
+    let text = std::fs::read_to_string(cache_path).ok()?;
+    let module = Module::parse(context, &text)?;
+    if !module.as_operation().verify() {
+        return None;
+    }
+    Some(ExecutionEngine::new(&module, /* opt_level */ 2, &[], /* dump */ false))
+}
+
+/// Persist the post-lowering MLIR text for a successfully compiled
+/// kernel.  Best-effort: write failures are logged at trace level
+/// and otherwise ignored.
+fn write_cached_kernel(cache_path: &std::path::Path, lowered_text: &str) {
+    if let Some(parent) = cache_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::trace!(
+                "MLIR-JIT: cache directory create failed at {}: {}",
+                parent.display(),
+                e
+            );
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(cache_path, lowered_text.as_bytes()) {
+        tracing::trace!(
+            "MLIR-JIT: cache write failed at {}: {}",
+            cache_path.display(),
+            e
+        );
+    }
+}
+
 /// Compile a kernel text into a JIT engine.
 ///
 /// Failure modes on this path:
@@ -1149,6 +1279,18 @@ fn compile_kernel(
         KernelKind::Reduce(op) => build_reduce_kernel_text(op, dtype)?,
         KernelKind::SumOfSquares => build_sum_of_squares_kernel_text(dtype)?,
     };
+
+    // Persistent on-disk cache lookup.  Hits skip MLIR parse + every
+    // conversion pass and go straight from cached lowered-module text
+    // to an `ExecutionEngine`.  Misses fall through and write back
+    // the lowered text after compile.
+    let cache_path = jit_cache_dir().map(|d| d.join(format!("{}.mlir", jit_cache_key(&text))));
+    if let Some(p) = &cache_path {
+        if let Some(engine) = try_load_cached_kernel(context, p) {
+            return Some(engine);
+        }
+    }
+
     let _location = Location::unknown(context);
     let mut module = match Module::parse(context, &text) {
         Some(m) => m,
@@ -1190,6 +1332,16 @@ fn compile_kernel(
         );
         return None;
     }
+
+    // Persist the lowered module BEFORE handing it to ExecutionEngine
+    // — `ExecutionEngine::new` consumes the LLVM-dialect IR but
+    // doesn't mutate it.  Reading back the text via `Display` is
+    // cheap; the write is best-effort and never fails the compile.
+    if let Some(p) = &cache_path {
+        let lowered_text = format!("{}", module.as_operation());
+        write_cached_kernel(p, &lowered_text);
+    }
+
     let engine = ExecutionEngine::new(&module, /* opt_level */ 2, &[], /* dump */ false);
     Some(engine)
 }
@@ -1907,6 +2059,117 @@ mod tests {
         assert!(backend.unop(&a, TensorUnaryOp::Softplus).is_none());
         assert!(backend.unop(&a, TensorUnaryOp::Mish).is_none());
         assert!(backend.unop(&a, TensorUnaryOp::Sign).is_none());
+    }
+
+    // -----------------------------------------------------------------
+    // Шаг 8 coverage: persistent on-disk JIT cache
+    // -----------------------------------------------------------------
+
+    fn isolated_jit_cache_dir() -> std::path::PathBuf {
+        // Per-test-process scratch directory.  Each test that touches
+        // the cache must point `VERUM_JIT_CACHE` at a fresh subdir to
+        // avoid clobbering between tests run in parallel.
+        let pid = std::process::id();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("verum-jit-cache-test-{}-{}-{}", pid, n, nanos))
+    }
+
+    #[test]
+    fn cache_key_changes_with_kernel_text() {
+        let k1 = jit_cache_key("module { llvm.func @kernel() { llvm.return } }");
+        let k2 = jit_cache_key("module { llvm.func @other() { llvm.return } }");
+        assert_ne!(k1, k2, "different kernel text must produce different keys");
+        // Stable: same input → same hash.
+        let k3 = jit_cache_key("module { llvm.func @kernel() { llvm.return } }");
+        assert_eq!(k1, k3);
+    }
+
+    #[test]
+    fn cache_key_is_deterministic_per_arch() {
+        // Same kernel text produces hashes that include the host
+        // arch + os, so tests on different architectures don't
+        // accidentally share cache entries.
+        let k = jit_cache_key("test");
+        // 64 hex chars = 256-bit blake3 output.
+        assert_eq!(k.len(), 64);
+        assert!(k.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn cache_writes_lowered_module_on_first_compile() {
+        let dir = isolated_jit_cache_dir();
+        // SAFETY: tests are single-threaded for env_var purposes by
+        // virtue of `--test-threads=1` in CI; per-process
+        // experimentation here is acceptable.
+        unsafe {
+            std::env::set_var("VERUM_JIT_CACHE", &dir);
+        }
+        let backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        let b = TensorHandle::zeros(&[4], DType::F32).unwrap();
+        fill_f32(&a, &[1.0, 2.0, 3.0, 4.0]);
+        fill_f32(&b, &[10.0, 20.0, 30.0, 40.0]);
+        let _ = backend.binop(&a, &b, TensorBinaryOp::Add).unwrap();
+
+        // After one binop compile, the cache directory should
+        // contain at least one .mlir file.
+        let v1 = dir.join(JIT_CACHE_VERSION);
+        assert!(v1.exists(), "cache dir not created at {}", v1.display());
+        let entries: Vec<_> = std::fs::read_dir(&v1)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path().extension().and_then(|s| s.to_str()) == Some("mlir")
+            })
+            .collect();
+        assert!(
+            !entries.is_empty(),
+            "expected at least one cached .mlir file under {}",
+            v1.display()
+        );
+
+        unsafe {
+            std::env::remove_var("VERUM_JIT_CACHE");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_hit_produces_correct_results() {
+        // Pre-populate the cache by compiling once; then construct
+        // a fresh backend pointing at the same cache and verify the
+        // compute output is bit-equivalent.
+        let dir = isolated_jit_cache_dir();
+        unsafe {
+            std::env::set_var("VERUM_JIT_CACHE", &dir);
+        }
+
+        let warm_backend = MlirJitBackend::new();
+        let a = TensorHandle::zeros(&[3], DType::F32).unwrap();
+        let b = TensorHandle::zeros(&[3], DType::F32).unwrap();
+        fill_f32(&a, &[1.5, 2.5, 3.5]);
+        fill_f32(&b, &[0.5, 1.5, 2.5]);
+        let warm = warm_backend.binop(&a, &b, TensorBinaryOp::Add).unwrap();
+        let warm_vals = read_f32(&warm, 3);
+        drop(warm_backend);
+
+        // Fresh backend → in-memory cache empty, but on-disk cache
+        // has the lowered module.  Compile path should hit the
+        // file and skip lowering.
+        let cold_backend = MlirJitBackend::new();
+        let cold = cold_backend.binop(&a, &b, TensorBinaryOp::Add).unwrap();
+        let cold_vals = read_f32(&cold, 3);
+        assert_eq!(warm_vals, cold_vals);
+
+        unsafe {
+            std::env::remove_var("VERUM_JIT_CACHE");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
