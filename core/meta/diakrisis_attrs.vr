@@ -74,6 +74,11 @@ public type DiakrisisEffectKind is
     | Quantum     // VVA §14.4 quantum effect class.
     ;
 
+/// Public alias — short canonical name; internal type uses
+/// the verbose `Diakrisis` prefix to disambiguate from other
+/// effect classifications.
+public type EffectKind is DiakrisisEffectKind;
+
 implement DiakrisisEffectKind {
     /// Parse an effect-kind identifier (case-insensitive). Returns
     /// `Maybe.Some(kind)` for canonical names + `exn` / `non_det`
