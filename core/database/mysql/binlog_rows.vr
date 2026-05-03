@@ -938,6 +938,27 @@ fn decode_value_for_type(
         return Ok((RvNull, 0));
     }
 
+    if t == COL_TYPE_GEOMETRY {
+        // Same length-prefix protocol as BLOB family — meta.metadata's
+        // low byte holds prefix width (1..4).
+        let prefix = if meta.metadata > 0 && meta.metadata <= 4 { meta.metadata } else { 4 };
+        let (len, p) = read_var_length(buf, off, prefix)?;
+        let bytes = match read_bytes(buf, off + p, len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_rows("GEOMETRY truncated")); }
+        };
+        if (bytes.len() as Int) == 0 {
+            // Empty geometry — surface as JSON null.
+            return Ok((RvText("null".clone()), p + len));
+        }
+        let geom = match core.database.mysql.wkb_decoder.decode_geometry_with_srid(bytes) {
+            Ok(v)  => v,
+            Err(e) => { return Err(e); }
+        };
+        let text = core.encoding.json.stringify(&geom);
+        return Ok((RvText(text), p + len));
+    }
+
     if t == COL_TYPE_ENUM {
         // metadata: low byte holds element-byte-width (1 or 2).
         // Wire: 1 or 2 byte LE index, 1-based; 0 = empty/invalid.

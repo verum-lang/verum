@@ -1,0 +1,390 @@
+// =============================================================================
+// core/database/mysql/wkb_decoder.vr — WKB → GeoJSON decoder
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.7 (binlog row / GEOMETRY).
+// Refs: OGC 06-103r4 (Simple Features Common Architecture);
+//       MySQL src/sql/spatial.cc (Geometry::create_from_wkb).
+// =============================================================================
+//
+// Well-Known Binary (WKB) is the canonical wire format for
+// geometry values in MySQL binlog ROW events. Each value is a
+// length-prefixed buffer carrying:
+//
+//   4 bytes: SRID (Spatial Reference System Identifier, LE)
+//   WKB body:
+//     1 byte: byte order (0 = BE, 1 = LE)
+//     4 bytes: WKB type (LE or BE per the byte-order byte)
+//     per-type body
+//
+// V0 dispatches on WKB type into GeoJSON-compatible JsonValue
+// shapes (RFC 7946):
+//
+//   1 Point              { type: "Point",
+//                          coordinates: [x, y] }
+//   2 LineString         { type: "LineString",
+//                          coordinates: [[x,y], ...] }
+//   3 Polygon            { type: "Polygon",
+//                          coordinates: [[[x,y], ...], ...] }
+//   4 MultiPoint         { type: "MultiPoint",
+//                          coordinates: [[x,y], ...] }
+//   5 MultiLineString    { type: "MultiLineString",
+//                          coordinates: [...] }
+//   6 MultiPolygon       { type: "MultiPolygon",
+//                          coordinates: [...] }
+//   7 GeometryCollection { type: "GeometryCollection",
+//                          geometries: [...] }
+//
+// SRID surfaces as the optional `crs` member when non-zero
+// (matches GeoJSON's CRS extension, RFC 7946 §4 — caller can
+// strip if their GIS doesn't accept it).
+//
+// OUT of V0:
+//   * WKB sub-types beyond the 7 standard (LinearRing 2.5, Triangle 17,
+//     TIN 16) — rare in production binlog.
+//   * EWKB extensions (PostGIS) — different SRID embedding.
+//   * 3D / 4D coordinate variants (XYZ, XYM, XYZM) — caller can
+//     post-process via the standard XY decoder + custom dispatch.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.wkb_decoder;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.{List, Map};
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.encoding.json.{
+    JsonValue, JsonNull, JsonBool, JsonInt, JsonFloat, JsonString,
+    JsonArray, JsonObject,
+};
+
+// =============================================================================
+// WKB type constants
+// =============================================================================
+
+public const WKB_POINT:                Int = 1;
+public const WKB_LINE_STRING:          Int = 2;
+public const WKB_POLYGON:              Int = 3;
+public const WKB_MULTI_POINT:          Int = 4;
+public const WKB_MULTI_LINE_STRING:    Int = 5;
+public const WKB_MULTI_POLYGON:        Int = 6;
+public const WKB_GEOMETRY_COLLECTION:  Int = 7;
+
+// Byte-order markers.
+public const WKB_BO_BIG_ENDIAN:    Int = 0;
+public const WKB_BO_LITTLE_ENDIAN: Int = 1;
+
+// =============================================================================
+// Reader cursor — handles both byte orders
+// =============================================================================
+
+type WkbReader is {
+    bytes: List<Byte>,
+    pos: Int,
+    /// `true` = little-endian for current geometry. WKB allows
+    /// each nested geometry (e.g. inside GeometryCollection) to
+    /// carry its OWN byte-order byte; we re-read on each recurse.
+    little_endian: Bool,
+};
+
+implement WkbReader {
+    fn new(bytes: List<Byte>) -> WkbReader {
+        WkbReader { bytes: bytes, pos: 0, little_endian: true }
+    }
+
+    fn read_u8(&mut self) -> Result<Int, DbError> {
+        if self.pos >= (self.bytes.len() as Int) {
+            return Err(bad_wkb("u8 truncated"));
+        }
+        let b = (self.bytes[self.pos] as Int) & 0xFF;
+        self.pos = self.pos + 1;
+        Ok(b)
+    }
+
+    fn read_u32(&mut self) -> Result<Int, DbError> {
+        if self.pos + 4 > (self.bytes.len() as Int) {
+            return Err(bad_wkb("u32 truncated"));
+        }
+        let p = self.pos;
+        let v: Int;
+        if self.little_endian {
+            v = ((self.bytes[p]     as Int) & 0xFF)
+              | (((self.bytes[p + 1] as Int) & 0xFF) << 8)
+              | (((self.bytes[p + 2] as Int) & 0xFF) << 16)
+              | (((self.bytes[p + 3] as Int) & 0xFF) << 24);
+        } else {
+            v = (((self.bytes[p]     as Int) & 0xFF) << 24)
+              | (((self.bytes[p + 1] as Int) & 0xFF) << 16)
+              | (((self.bytes[p + 2] as Int) & 0xFF) << 8)
+              | ((self.bytes[p + 3] as Int) & 0xFF);
+        }
+        self.pos = self.pos + 4;
+        Ok(v)
+    }
+
+    fn read_f64(&mut self) -> Result<Float, DbError> {
+        if self.pos + 8 > (self.bytes.len() as Int) {
+            return Err(bad_wkb("f64 truncated"));
+        }
+        let p = self.pos;
+        let bits: Int;
+        if self.little_endian {
+            bits = ((self.bytes[p]     as Int) & 0xFF)
+                 | (((self.bytes[p + 1] as Int) & 0xFF) << 8)
+                 | (((self.bytes[p + 2] as Int) & 0xFF) << 16)
+                 | (((self.bytes[p + 3] as Int) & 0xFF) << 24)
+                 | (((self.bytes[p + 4] as Int) & 0xFF) << 32)
+                 | (((self.bytes[p + 5] as Int) & 0xFF) << 40)
+                 | (((self.bytes[p + 6] as Int) & 0xFF) << 48)
+                 | (((self.bytes[p + 7] as Int) & 0xFF) << 56);
+        } else {
+            bits = (((self.bytes[p]     as Int) & 0xFF) << 56)
+                 | (((self.bytes[p + 1] as Int) & 0xFF) << 48)
+                 | (((self.bytes[p + 2] as Int) & 0xFF) << 40)
+                 | (((self.bytes[p + 3] as Int) & 0xFF) << 32)
+                 | (((self.bytes[p + 4] as Int) & 0xFF) << 24)
+                 | (((self.bytes[p + 5] as Int) & 0xFF) << 16)
+                 | (((self.bytes[p + 6] as Int) & 0xFF) << 8)
+                 | ((self.bytes[p + 7] as Int) & 0xFF);
+        }
+        self.pos = self.pos + 8;
+        Ok(core.intrinsics.float.f64_from_bits(bits))
+    }
+}
+
+// =============================================================================
+// Public entry — decode WKB into GeoJSON JsonValue
+// =============================================================================
+
+/// Decode a length-prefixed MySQL geometry buffer:
+///   4 bytes: SRID (LE)
+///   WKB body
+/// Returns a GeoJSON-compatible JsonValue. SRID surfaces as the
+/// optional `crs` field when non-zero.
+public fn decode_geometry_with_srid(bytes: List<Byte>)
+    -> Result<JsonValue, DbError>
+{
+    if (bytes.len() as Int) < 5 {
+        return Err(bad_wkb("geometry payload < 5 bytes"));
+    }
+    // SRID is LE u32.
+    let srid = ((bytes[0] as Int) & 0xFF)
+             | (((bytes[1] as Int) & 0xFF) << 8)
+             | (((bytes[2] as Int) & 0xFF) << 16)
+             | (((bytes[3] as Int) & 0xFF) << 24);
+    // WKB body starts at byte 4.
+    let mut wkb_bytes: List<Byte> = List.with_capacity((bytes.len() as Int) - 4);
+    let mut i: Int = 4;
+    while i < (bytes.len() as Int) {
+        wkb_bytes.push(bytes[i]);
+        i = i + 1;
+    }
+    let geom = decode_wkb(wkb_bytes)?;
+    if srid != 0 {
+        return Ok(attach_crs(geom, srid));
+    }
+    Ok(geom)
+}
+
+/// Decode a raw WKB buffer (no SRID prefix). Caller-friendly
+/// for tools that already have the SRID separated.
+public fn decode_wkb(bytes: List<Byte>) -> Result<JsonValue, DbError> {
+    let mut r = WkbReader.new(bytes);
+    decode_geometry(&mut r)
+}
+
+// =============================================================================
+// Recursive geometry decoder
+// =============================================================================
+
+fn decode_geometry(r: &mut WkbReader) -> Result<JsonValue, DbError> {
+    // Each geometry header repeats the byte-order byte (WKB allows
+    // mixed endianness within a single document — e.g. inside a
+    // GeometryCollection — so we re-set on every recurse).
+    let bo = r.read_u8()?;
+    if bo == WKB_BO_LITTLE_ENDIAN {
+        r.little_endian = true;
+    } else if bo == WKB_BO_BIG_ENDIAN {
+        r.little_endian = false;
+    } else {
+        return Err(bad_wkb("unknown byte-order byte"));
+    }
+    let typ = r.read_u32()?;
+    if typ == WKB_POINT             { return decode_point(r); }
+    if typ == WKB_LINE_STRING       { return decode_line_string(r); }
+    if typ == WKB_POLYGON           { return decode_polygon(r); }
+    if typ == WKB_MULTI_POINT       { return decode_multi_point(r); }
+    if typ == WKB_MULTI_LINE_STRING { return decode_multi_line_string(r); }
+    if typ == WKB_MULTI_POLYGON     { return decode_multi_polygon(r); }
+    if typ == WKB_GEOMETRY_COLLECTION { return decode_collection(r); }
+    Err(bad_wkb(&f"unknown WKB type {typ}"))
+}
+
+fn decode_point(r: &mut WkbReader) -> Result<JsonValue, DbError> {
+    let x = r.read_f64()?;
+    let y = r.read_f64()?;
+    Ok(geo_object("Point", JsonArray(coords_pair(x, y))))
+}
+
+fn decode_line_string(r: &mut WkbReader) -> Result<JsonValue, DbError> {
+    let n = r.read_u32()?;
+    let pts = read_point_list(r, n)?;
+    Ok(geo_object("LineString", JsonArray(pts)))
+}
+
+fn decode_polygon(r: &mut WkbReader) -> Result<JsonValue, DbError> {
+    let nrings = r.read_u32()?;
+    let mut rings: List<JsonValue> = List.with_capacity(nrings);
+    let mut i: Int = 0;
+    while i < nrings {
+        let npoints = r.read_u32()?;
+        let pts = read_point_list(r, npoints)?;
+        rings.push(JsonArray(pts));
+        i = i + 1;
+    }
+    Ok(geo_object("Polygon", JsonArray(rings)))
+}
+
+fn decode_multi_point(r: &mut WkbReader) -> Result<JsonValue, DbError> {
+    // Each sub-Point carries its own byte-order + type header.
+    // GeoJSON MultiPoint coordinates is [[x,y], …].
+    let n = r.read_u32()?;
+    let mut coords: List<JsonValue> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let pt_geom = decode_geometry(r)?;
+        // Extract the coordinates array.
+        match pt_geom {
+            JsonObject(map) => {
+                match map.get(&"coordinates".clone()) {
+                    Some(c) => coords.push(c.clone()),
+                    None    => { return Err(bad_wkb("MultiPoint sub-Point missing coords")); }
+                }
+            }
+            _ => { return Err(bad_wkb("MultiPoint sub not an object")); }
+        }
+        i = i + 1;
+    }
+    Ok(geo_object("MultiPoint", JsonArray(coords)))
+}
+
+fn decode_multi_line_string(r: &mut WkbReader) -> Result<JsonValue, DbError> {
+    let n = r.read_u32()?;
+    let mut lines: List<JsonValue> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let ls = decode_geometry(r)?;
+        match ls {
+            JsonObject(map) => {
+                match map.get(&"coordinates".clone()) {
+                    Some(c) => lines.push(c.clone()),
+                    None    => { return Err(bad_wkb("MultiLineString sub missing coords")); }
+                }
+            }
+            _ => { return Err(bad_wkb("MultiLineString sub not an object")); }
+        }
+        i = i + 1;
+    }
+    Ok(geo_object("MultiLineString", JsonArray(lines)))
+}
+
+fn decode_multi_polygon(r: &mut WkbReader) -> Result<JsonValue, DbError> {
+    let n = r.read_u32()?;
+    let mut polys: List<JsonValue> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let poly = decode_geometry(r)?;
+        match poly {
+            JsonObject(map) => {
+                match map.get(&"coordinates".clone()) {
+                    Some(c) => polys.push(c.clone()),
+                    None    => { return Err(bad_wkb("MultiPolygon sub missing coords")); }
+                }
+            }
+            _ => { return Err(bad_wkb("MultiPolygon sub not an object")); }
+        }
+        i = i + 1;
+    }
+    Ok(geo_object("MultiPolygon", JsonArray(polys)))
+}
+
+fn decode_collection(r: &mut WkbReader) -> Result<JsonValue, DbError> {
+    let n = r.read_u32()?;
+    let mut geoms: List<JsonValue> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let g = decode_geometry(r)?;
+        geoms.push(g);
+        i = i + 1;
+    }
+    let mut obj: Map<Text, JsonValue> = Map.new();
+    obj.insert("type".clone(), JsonString("GeometryCollection".clone()));
+    obj.insert("geometries".clone(), JsonArray(geoms));
+    Ok(JsonObject(obj))
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn read_point_list(r: &mut WkbReader, n: Int) -> Result<List<JsonValue>, DbError> {
+    let mut out: List<JsonValue> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let x = r.read_f64()?;
+        let y = r.read_f64()?;
+        out.push(JsonArray(coords_pair(x, y)));
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+fn coords_pair(x: Float, y: Float) -> List<JsonValue> {
+    let mut out: List<JsonValue> = List.with_capacity(2);
+    out.push(JsonFloat(x));
+    out.push(JsonFloat(y));
+    out
+}
+
+fn geo_object(typ: &str, coords: JsonValue) -> JsonValue {
+    let mut obj: Map<Text, JsonValue> = Map.new();
+    obj.insert("type".clone(), JsonString(typ.to_text()));
+    obj.insert("coordinates".clone(), coords);
+    JsonObject(obj)
+}
+
+fn attach_crs(geom: JsonValue, srid: Int) -> JsonValue {
+    match geom {
+        JsonObject(mut obj) => {
+            // GeoJSON RFC 7946 §4 — `crs` member with named CRS:
+            //   { type: "name", properties: { name: "EPSG:<srid>" } }
+            let mut props: Map<Text, JsonValue> = Map.new();
+            props.insert("name".clone(),
+                         JsonString(f"EPSG:{srid}"));
+            let mut crs: Map<Text, JsonValue> = Map.new();
+            crs.insert("type".clone(), JsonString("name".clone()));
+            crs.insert("properties".clone(), JsonObject(props));
+            obj.insert("crs".clone(), JsonObject(crs));
+            JsonObject(obj)
+        }
+        other => other,
+    }
+}
+
+fn bad_wkb(what: &Text) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "WKB_DECODE".clone(),
+        message: f"WKB decode error: {what}",
+        retryable: false,
+    })
+}

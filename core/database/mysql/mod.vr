@@ -50,6 +50,7 @@ public module async_binlog;
 public module typed_row;
 public module json_binary;
 public module async_load_data;
+public module wkb_decoder;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -173,4 +174,11 @@ public mount .json_binary.{
 public mount .async_load_data.{
     AsyncMysqlInfileWriter,
     load_data_local_async,
+};
+public mount .wkb_decoder.{
+    decode_wkb, decode_geometry_with_srid,
+    WKB_POINT, WKB_LINE_STRING, WKB_POLYGON,
+    WKB_MULTI_POINT, WKB_MULTI_LINE_STRING, WKB_MULTI_POLYGON,
+    WKB_GEOMETRY_COLLECTION,
+    WKB_BO_BIG_ENDIAN, WKB_BO_LITTLE_ENDIAN,
 };
