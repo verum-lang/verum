@@ -47,6 +47,7 @@ public module async_typed_database;
 public module binlog;
 public module binlog_rows;
 public module async_binlog;
+public module typed_row;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -150,4 +151,7 @@ public mount .async_binlog.{
     MbaEvent, MbaTerminated, MbaClosed,
     connect_binlog_async,
     DEFAULT_EVENT_CAPACITY,
+};
+public mount .typed_row.{
+    MysqlTypedRow, rows_typed_my,
 };
