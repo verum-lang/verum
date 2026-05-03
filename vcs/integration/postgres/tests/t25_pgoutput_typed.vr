@@ -1,0 +1,206 @@
+// =============================================================================
+// t25_pgoutput_typed.vr — typed-tuple lift over async pgoutput
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.7 (logical replication / pgoutput),
+//       §6.1.4 (typed wire).
+// =============================================================================
+//
+// V0:
+//   1. Side-channel INSERT 3 rows with mixed-type columns:
+//      (id INT, payload TEXT, count BIGINT).
+//   2. AsyncPgoutputConsumer drains via next_change.
+//   3. lift_change converts each CdcInsert → TpcInsert with
+//      List<TupleValue>; each cell decoded via decode_typed_from_bytes
+//      against the column's type_oid from RelationMessage.
+//   4. Assert TvLifted(TvText("first")) / TvLifted(TvInt8(100))
+//      arrive correctly typed.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable, PgConnection, connect as pg_connect,
+    PgReplicationConfig, PgReplicationConnection,
+    LogicalReplicationOptions,
+    Lsn,
+    AsyncPgReplicationConnection,
+    connect_replication_async,
+    AsyncPgoutputConsumer, PgoutputChange,
+    CdcBegin, CdcCommit, CdcRelationOnly,
+    CdcInsert, CdcUpdate, CdcDelete,
+    CdcStreamStart, CdcStreamStop, CdcStreamCommit, CdcStreamAbort,
+    CdcRaw, CdcTerminated, CdcClosed,
+    start_logical_pgoutput,
+    TupleValue, TvLifted, TvNullField, TvUnchangedToastField,
+    TypedPgoutputChange,
+    TpcBegin, TpcCommit, TpcRelationOnly,
+    TpcInsert, TpcUpdate, TpcDelete,
+    TpcStreamStart, TpcStreamStop, TpcStreamCommit, TpcStreamAbort,
+    TpcRaw, TpcTerminated, TpcClosed,
+    lift_change,
+};
+mount core.database.postgres.wire.typed.{
+    TypedValue, TvInt4, TvInt8, TvText,
+};
+mount core.database.common.arena.SpindleArena;
+mount core.async.executor.block_on;
+
+fn admin_replication_config() -> PgReplicationConfig {
+    PgReplicationConfig.logical(PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-pgo-typed".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    })
+}
+
+fn ensure_publication() {
+    let mut admin = expect_ok(
+        pg_connect(&PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: ADMIN_USER.clone(),
+            password: ADMIN_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-pgo-typed-setup".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        }),
+        &"admin connect for publication setup failed".clone(),
+    );
+    let _ = admin.simple_query(&"DROP PUBLICATION IF EXISTS spindle_test_pub".clone());
+    expect_ok(
+        admin.simple_query(&"CREATE PUBLICATION spindle_test_pub FOR ALL TABLES".clone()),
+        &"CREATE PUBLICATION failed".clone(),
+    );
+}
+
+fn write_rows() {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS pgo_typed_smoke ( \
+            id integer PRIMARY KEY, \
+            payload text NOT NULL, \
+            count bigint NOT NULL)".clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM pgo_typed_smoke".clone());
+    expect_ok(
+        side.simple_query(
+            &"INSERT INTO pgo_typed_smoke (id, payload, count) VALUES \
+              (1, 'first', 100), \
+              (2, 'second', 200), \
+              (3, 'third', 300)".clone()
+        ),
+        &"side-channel INSERT 3 rows failed".clone(),
+    );
+}
+
+fn main() {
+    ensure_publication();
+
+    block_on(async move {
+        let cfg = admin_replication_config();
+        let repl = expect_ok(
+            connect_replication_async(cfg).await,
+            &"connect_replication_async failed".clone(),
+        );
+
+        let slot = "spindle_pgo_typed_slot".clone();
+        let _ = repl.drop_slot(&slot, false).await;
+        expect_ok(
+            repl.create_logical_slot(&slot, &"pgoutput".clone(), true).await,
+            &"create_logical_slot failed".clone(),
+        );
+
+        let opts = LogicalReplicationOptions.pgoutput(slot.clone())
+            .with_option("proto_version".clone(), "1".clone())
+            .with_option("publication_names".clone(), "spindle_test_pub".clone());
+
+        let consumer = expect_ok(
+            start_logical_pgoutput(repl, opts, Lsn.zero()).await,
+            &"start_logical_pgoutput failed".clone(),
+        );
+
+        write_rows();
+
+        // Per-row decode arena (reused across changes).
+        let mut arena = SpindleArena.new_connection(0);
+        let mut typed_inserts: List<(Int, Text, Int)> = List.new();
+        let mut iters: Int = 0;
+        while iters < 50 {
+            match consumer.next_change().await {
+                None => { break; }
+                Some(change) => {
+                    let typed = expect_ok(
+                        lift_change(change, &mut arena),
+                        &"lift_change failed".clone(),
+                    );
+                    match typed {
+                        TpcInsert { relation, new_tuple } => {
+                            if &relation.name == &"pgo_typed_smoke".clone() {
+                                expect_eq_int(new_tuple.len() as Int, 3,
+                                    &"insert tuple arity".clone());
+                                let id = match &new_tuple[0] {
+                                    TvLifted(TvInt4(n)) => *n,
+                                    _ => -1,
+                                };
+                                let payload = match &new_tuple[1] {
+                                    TvLifted(TvText(s)) => s.clone(),
+                                    _ => "".clone(),
+                                };
+                                let count = match &new_tuple[2] {
+                                    TvLifted(TvInt8(n)) => *n,
+                                    _ => -1,
+                                };
+                                typed_inserts.push((id, payload, count));
+                            }
+                        }
+                        TpcBegin(_) | TpcCommit(_) | TpcRelationOnly(_)
+                        | TpcUpdate { .. } | TpcDelete { .. }
+                        | TpcStreamStart(_) | TpcStreamStop
+                        | TpcStreamCommit(_) | TpcStreamAbort(_)
+                        | TpcRaw(_) => {}
+                        TpcTerminated(e) => {
+                            expect(false, &f"replication terminated: {e}");
+                        }
+                        TpcClosed => { break; }
+                    }
+                    if (typed_inserts.len() as Int) >= 3 { break; }
+                }
+            }
+            iters = iters + 1;
+        }
+
+        expect_eq_int(
+            typed_inserts.len() as Int, 3,
+            &"expected 3 typed Insert tuples".clone(),
+        );
+
+        // Row 1.
+        let r0 = &typed_inserts[0];
+        expect_eq_int(r0.0, 1,                                   &"row[0].id".clone());
+        expect(&r0.1 == &"first".clone(),  &"row[0].payload == first".clone());
+        expect_eq_int(r0.2, 100,                                 &"row[0].count".clone());
+
+        // Row 3.
+        let r2 = &typed_inserts[2];
+        expect_eq_int(r2.0, 3,                                   &"row[2].id".clone());
+        expect(&r2.1 == &"third".clone(),  &"row[2].payload == third".clone());
+        expect_eq_int(r2.2, 300,                                 &"row[2].count".clone());
+
+        let _ = consumer.close().await;
+
+        pass(&"t25_pgoutput_typed".clone());
+    });
+}

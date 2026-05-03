@@ -156,6 +156,12 @@ Test list per `internal/specs/database.md` follow-up:
   BcStreamedAbort) is decoder-tested via the state machine;
   triggering a real streamed transaction requires
   `logical_decoding_work_mem` tuning out of V0 scope.
+- `t25_pgoutput_typed.vr` — typed-tuple lift over async pgoutput:
+  lift_change converts CdcInsert/Update/Delete TupleData into
+  TpcInsert/Update/Delete with List<TupleValue> via per-column
+  decode_typed_from_bytes against RelationMessage column OIDs;
+  asserts (Int, Text, Int) tuples decoded correctly through
+  TvLifted(TvInt4/TvText/TvInt8) (spec §6.1.7 + §6.1.4)
 
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags

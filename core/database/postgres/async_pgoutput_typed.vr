@@ -1,0 +1,235 @@
+// =============================================================================
+// core/database/postgres/async_pgoutput_typed.vr — typed-tuple lift V0
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (logical replication / pgoutput),
+//       §6.1.4 (typed wire).
+// =============================================================================
+//
+// CdcInsert/Update/Delete carry TupleData where each column is one
+// of:
+//   TcNull / TcUnchangedToast / TcText(bytes) / TcBinary(bytes).
+//
+// Production CDC consumers want decoded TypedValue per column via
+// decode_typed_from_bytes(column.type_oid, bytes). Without this
+// lift consumers re-implement the dispatch every time.
+//
+// V0 surface:
+//
+//   * TupleValue ADT — TvLifted(TypedValue) / TvNullField /
+//     TvUnchangedToastField. The TvUnchangedToastField sentinel
+//     is distinct from TvNullField so callers can tell "SQL NULL"
+//     from "unchanged TOAST — look up prior value from own
+//     state."
+//
+//   * typed_tuple(tuple, relation, &mut arena) →
+//       Result<List<TupleValue>, DbError>:
+//     Per column dispatches via relation.columns[i].type_oid.
+//
+//   * TypedPgoutputChange — analogue of PgoutputChange with
+//     typed tuples instead of raw TupleData.
+//
+//   * lift_change(change, &mut arena) → TypedPgoutputChange:
+//     Pass-through for non-DML; field-by-field decode for
+//     Insert/Update/Delete.
+//
+// Sync wire / async_pgoutput.vr canonical / unchanged.
+//
+// OUT of V0:
+//   * Consumer wrapper around AsyncPgoutputBufferedConsumer —
+//     caller composes typed lift after they've decided on
+//     per-row vs per-tx semantics (they may want only some
+//     events typed, e.g. CDC sink that ships JSON).
+//   * Arena lifetime hooks for true zero-copy lift (V0 uses
+//     decode_typed_from_bytes which copies into arena owned-
+//     bytes).
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.async_pgoutput_typed;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.common.arena.SpindleArena;
+mount core.database.postgres.pgoutput.{
+    TupleData, TupleColumn,
+    TcNull, TcUnchangedToast, TcText, TcBinary,
+    RelationMessage, RelationColumn,
+    BeginMessage, CommitMessage, InsertMessage, UpdateMessage,
+    DeleteMessage, OldTupleVariant, OtvKey, OtvOld, OldTupleKind,
+    OtkKey, OtkOld,
+    StreamStartMessage, StreamCommitMessage, StreamAbortMessage,
+    PgoMessage,
+};
+mount core.database.postgres.async_pgoutput.{
+    PgoutputChange,
+    CdcBegin, CdcCommit, CdcRelationOnly,
+    CdcInsert, CdcUpdate, CdcDelete,
+    CdcStreamStart, CdcStreamStop, CdcStreamCommit, CdcStreamAbort,
+    CdcRaw, CdcTerminated, CdcClosed,
+};
+mount core.database.postgres.wire.typed.{
+    TypedValue, decode_typed_from_bytes,
+};
+
+// =============================================================================
+// Per-column lifted value
+// =============================================================================
+
+public type TupleValue is
+      TvLifted(TypedValue)
+    /// Column was SQL NULL on the wire (TcNull).
+    | TvNullField
+    /// Column omitted by PG's TOAST optimisation (TcUnchangedToast).
+    /// Consumer must look up the previous value from its own state
+    /// — pgoutput intentionally avoids re-shipping unchanged
+    /// values for large columns.
+    | TvUnchangedToastField;
+
+// =============================================================================
+// typed_tuple
+// =============================================================================
+
+/// Decode every column of `tuple` against the per-column OIDs
+/// from `relation`. Position-aligned with `tuple.columns`. Returns
+/// `Err` if the dispatch fails for any column (which usually
+/// means the column's OID isn't yet registered in
+/// decode_typed_from_bytes — caller can extend via the typed.vr
+/// dispatch table).
+public fn typed_tuple(
+    tuple: &TupleData,
+    relation: &RelationMessage,
+    arena: &mut SpindleArena,
+) -> Result<List<TupleValue>, DbError> {
+    let n = tuple.columns.len() as Int;
+    let rel_n = relation.columns.len() as Int;
+    if n != rel_n {
+        return Err(DbError.Adapter(AdapterSpecific {
+            adapter: AdPostgres,
+            code: "PGOUTPUT_TYPED_ARITY".clone(),
+            message: f"typed_tuple: tuple has {n} columns, relation has {rel_n}",
+            retryable: false,
+        }));
+    }
+    let mut out: List<TupleValue> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let oid = relation.columns[i].type_oid;
+        match &tuple.columns[i] {
+            TcNull              => { out.push(TvNullField); }
+            TcUnchangedToast    => { out.push(TvUnchangedToastField); }
+            TcText(bytes) | TcBinary(bytes) => {
+                let v = decode_typed_from_bytes(oid, bytes.as_slice(), arena)?;
+                out.push(TvLifted(v));
+            }
+        }
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+// =============================================================================
+// Typed PgoutputChange
+// =============================================================================
+
+public type TypedPgoutputChange is
+      TpcBegin(BeginMessage)
+    | TpcCommit(CommitMessage)
+    | TpcRelationOnly(RelationMessage)
+    | TpcInsert {
+        relation: RelationMessage,
+        new_tuple: List<TupleValue>,
+    }
+    | TpcUpdate {
+        relation: RelationMessage,
+        old_tuple: Maybe<TypedOldTuple>,
+        new_tuple: List<TupleValue>,
+    }
+    | TpcDelete {
+        relation: RelationMessage,
+        old_tuple_kind: OldTupleKind,
+        old_tuple: List<TupleValue>,
+    }
+    | TpcStreamStart(StreamStartMessage)
+    | TpcStreamStop
+    | TpcStreamCommit(StreamCommitMessage)
+    | TpcStreamAbort(StreamAbortMessage)
+    | TpcRaw(PgoMessage)
+    | TpcTerminated(DbError)
+    | TpcClosed;
+
+/// Update events carry an OPTIONAL old tuple — either the key
+/// columns ('K') or the full prior row ('O'). Mirrors PG's
+/// OldTupleVariant but with typed values.
+public type TypedOldTuple is
+      ToKey(List<TupleValue>)
+    | ToOld(List<TupleValue>);
+
+// =============================================================================
+// lift_change
+// =============================================================================
+
+/// Lift a `PgoutputChange` into a typed counterpart. Non-DML
+/// variants pass through unchanged; Insert/Update/Delete walk
+/// their tuples through `typed_tuple`.
+///
+/// Errors short-circuit on the first decode failure — caller
+/// wraps subsequent calls in their own retry/skip logic.
+public fn lift_change(
+    change: PgoutputChange,
+    arena: &mut SpindleArena,
+) -> Result<TypedPgoutputChange, DbError> {
+    match change {
+        CdcBegin(b)         => Ok(TpcBegin(b)),
+        CdcCommit(c)        => Ok(TpcCommit(c)),
+        CdcRelationOnly(r)  => Ok(TpcRelationOnly(r)),
+        CdcInsert { relation, new_tuple } => {
+            let lifted = typed_tuple(&new_tuple, &relation, arena)?;
+            Ok(TpcInsert { relation: relation, new_tuple: lifted })
+        }
+        CdcUpdate { relation, old_tuple, new_tuple } => {
+            let lifted_new = typed_tuple(&new_tuple, &relation, arena)?;
+            let lifted_old = match old_tuple {
+                None => None,
+                Some(OtvKey(t)) => {
+                    let v = typed_tuple(&t, &relation, arena)?;
+                    Some(ToKey(v))
+                }
+                Some(OtvOld(t)) => {
+                    let v = typed_tuple(&t, &relation, arena)?;
+                    Some(ToOld(v))
+                }
+            };
+            Ok(TpcUpdate {
+                relation: relation,
+                old_tuple: lifted_old,
+                new_tuple: lifted_new,
+            })
+        }
+        CdcDelete { relation, old_tuple_kind, old_tuple } => {
+            let lifted = typed_tuple(&old_tuple, &relation, arena)?;
+            Ok(TpcDelete {
+                relation: relation,
+                old_tuple_kind: old_tuple_kind,
+                old_tuple: lifted,
+            })
+        }
+        CdcStreamStart(s)   => Ok(TpcStreamStart(s)),
+        CdcStreamStop       => Ok(TpcStreamStop),
+        CdcStreamCommit(s)  => Ok(TpcStreamCommit(s)),
+        CdcStreamAbort(s)   => Ok(TpcStreamAbort(s)),
+        CdcRaw(m)           => Ok(TpcRaw(m)),
+        CdcTerminated(e)    => Ok(TpcTerminated(e)),
+        CdcClosed           => Ok(TpcClosed),
+    }
+}
