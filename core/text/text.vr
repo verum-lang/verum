@@ -3419,6 +3419,15 @@ implement Default for Text {
     }
 }
 
+/// Length protocol — enables free-function `len(text)` dispatch.
+/// Reports byte length (consistent with Text.len()).
+implement Length for Text {
+    @inline(always)
+    fn len(&self) -> Int {
+        text_byte_len(self)
+    }
+}
+
 implement Debug for Text {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_char('"')?;

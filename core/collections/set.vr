@@ -990,3 +990,14 @@ where T: Clone
 public fn set_from_iter<T: Hash + Eq, I: Iterator<Item>>(iter: I) -> Set<T> {
     Set.from_iter(iter)
 }
+
+// =============================================================================
+// Length protocol — enables free-function `len(set)` dispatch
+// =============================================================================
+
+implement<T: Hash + Eq> Length for Set<T> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.inner.len()
+    }
+}

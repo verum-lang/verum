@@ -1010,3 +1010,52 @@ public type ShlAssign<Rhs> is protocol {
 public type ShrAssign<Rhs> is protocol {
     fn shr_assign(&mut self, rhs: Rhs);
 };
+
+// =============================================================================
+// Length Protocol — UFCS-style free `len()` dispatch
+// =============================================================================
+
+/// Protocol for types that report a length / count.
+///
+/// Universal `len(x)` free-function dispatch is provided via this
+/// protocol — every type that has an inherent `.len(&self) -> Int`
+/// method should `implement Length` so that callers can write
+/// `len(x)` (the refinement-contract idiom in Dafny/Z3-style specs)
+/// without colliding with module-local free `len(...)` overloads
+/// such as `core.database.sqlite.native.cte_api.clause::len(&WithClause)`.
+///
+/// **Why a protocol** (rather than a single non-generic free fn):
+///
+/// * Verum's overload resolution prefers more-specific candidates
+///   over more-generic ones, so a constrained `len<T: Length>` does
+///   NOT shadow specialised `len(&WithClause)` etc.
+/// * Inherent methods like `List.len(&self)` are kept as the
+///   single source of truth — `Length` impls are one-line
+///   delegators with `@inline(always)`, so the free-fn form
+///   collapses to the inherent method at every call site.
+public type Length is protocol {
+    fn len(&self) -> Int;
+};
+
+/// Universal free-function `len(x)`.
+///
+/// Resolves via the `Length` protocol — works for any type that
+/// implements `Length` (List, Map, Set, Deque, Text, slices,
+/// HashMap-style containers).
+///
+/// This is the canonical entry point for refinement-contract code
+/// (`requires idx <= len(arr)`, `decreases len(arr) - idx`, etc.).
+@inline(always)
+public fn len<T: Length>(container: &T) -> Int {
+    container.len()
+}
+
+/// Universal free-function `is_empty(x)`.
+///
+/// Mirror of `len(x)` for the `is_empty()` predicate. Returns
+/// `len(container) == 0` so a `Length` impl is sufficient — no
+/// separate `IsEmpty` protocol needed.
+@inline(always)
+public fn is_empty<T: Length>(container: &T) -> Bool {
+    container.len() == 0
+}
