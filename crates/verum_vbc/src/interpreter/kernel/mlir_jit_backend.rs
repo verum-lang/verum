@@ -130,6 +130,15 @@ enum KernelKind {
  /// Kernel signature: `(a, b, out, n_total, period)` — element
  /// `i` reads `a[i]` and `b[i mod period]`.
  BinopSuffixBroadcast(TensorBinaryOp),
+ /// Prefix-broadcast binop: `a`'s leading dims match `b`'s
+ /// (non-trailing-1) shape; `b` repeats over `a`'s trailing dims.
+ /// Common patterns: `[M,N] op [M]` (column-wise bias),
+ /// `[M,N] op [M,1]` (broadcast 2D form),
+ /// `[B,M,N] op [B,M]` (per-(batch,row) gain),
+ /// `[B,M,N] op [B]` (per-batch scaling).
+ /// Kernel signature: `(a, b, out, n_total, inner_size)` —
+ /// element `i` reads `a[i]` and `b[i div inner_size]`.
+ BinopPrefixBroadcast(TensorBinaryOp),
  Unop(TensorUnaryOp),
  /// Scalar triple-loop matmul; `M`/`K`/`N` are runtime args, the
  /// kernel itself is dtype-only-parametrised (one cached engine
@@ -551,9 +560,9 @@ impl Backend for MlirJitBackend {
  return Some(TensorHandle::zeros(a_shape, a.dtype)?);
  }
 
- // **Шаг 5e / 5e+1 — broadcast support.**
+ // **Шаг 5e / 5e+1 / 5e+2 — broadcast support.**
  //
- // Three patterns are JIT-able from this dispatcher:
+ // Four patterns are JIT-able from this dispatcher:
  //
  //   1. **Same shape**: a_shape == b_shape — canonical `Binop`
  //      kernel.
@@ -565,21 +574,48 @@ impl Backend for MlirJitBackend {
  //      slice of a's shape (e.g. `[M,N] op [N]`,
  //      `[B,M,N] op [M,N]`, `[B,M,N] op [N]`).  Routes to
  //      `BinopSuffixBroadcast` which reads `b[i mod period]`
- //      with `period = b.numel`.  A power-of-two period folds to
- //      a bitwise AND under LLVM's strength reduction; non-pow2
- //      stays on `arith.remsi` which most CPUs handle in one
- //      µ-op.
+ //      with `period = b.numel`.
+ //   4. **Prefix broadcast**: b's effective shape (after
+ //      stripping trailing-1 dims) is a strict leading slice of
+ //      a's shape (`[M,N] op [M]`, `[M,N] op [M,1]`,
+ //      `[B,M,N] op [B,M]`, `[B,M,N] op [B]`).  Routes to
+ //      `BinopPrefixBroadcast` which reads `b[i div inner_size]`
+ //      with `inner_size = numel(a_shape[b_eff_len..])`.
  //
- // Anything else (prefix broadcast `[M] op [M,N]`, mid-axis
- // broadcast `[M,1,K] op [M,N,K]`, …) returns `None` and falls
- // through to `CpuBackend`.
+ // Anything else (mid-axis size-1 broadcast `[M,1,K] op [M,N,K]`,
+ // mixed expand+contract patterns) returns `None` and falls
+ // through to `CpuBackend`.  That's Шаг 5e+3 (multi-axis stride
+ // scheme) — deferred.
  let same_shape = a_shape == b_shape;
  let scalar_broadcast = !same_shape && b.numel == 1;
  let suffix_broadcast = !same_shape
  && !scalar_broadcast
  && b_shape.len() < a_shape.len()
  && a_shape[a_shape.len() - b_shape.len()..] == *b_shape;
- if !same_shape && !scalar_broadcast && !suffix_broadcast {
+
+ // Effective b shape: trim trailing 1s.  `[M,1]` → `[M]`,
+ // `[M,1,1]` → `[M]`, `[1]` → `[]` (would be scalar already).
+ let b_eff_len = b_shape
+ .iter()
+ .rposition(|&d| d != 1)
+ .map(|i| i + 1)
+ .unwrap_or(0);
+ let b_eff = &b_shape[..b_eff_len];
+ let prefix_broadcast = !same_shape
+ && !scalar_broadcast
+ && !suffix_broadcast
+ && b_eff_len > 0
+ && b_eff_len < a_shape.len()
+ && a_shape[..b_eff_len] == *b_eff;
+ // `inner_size = ∏(a_shape[b_eff_len..])`.  For `[M,N] op [M]`
+ // this is `N`; for `[B,M,N] op [B]` it's `M*N`.
+ let inner_size: usize = if prefix_broadcast {
+ a_shape[b_eff_len..].iter().product()
+ } else {
+ 1
+ };
+
+ if !same_shape && !scalar_broadcast && !suffix_broadcast && !prefix_broadcast {
  return None;
  }
 
@@ -591,6 +627,8 @@ impl Backend for MlirJitBackend {
  KernelKind::BinopScalarBroadcast(op)
  } else if suffix_broadcast {
  KernelKind::BinopSuffixBroadcast(op)
+ } else if prefix_broadcast {
+ KernelKind::BinopPrefixBroadcast(op)
  } else {
  KernelKind::Binop(op)
  };
@@ -598,7 +636,8 @@ impl Backend for MlirJitBackend {
 
  // ABI marshalling differs by kernel kind:
  //   * `Binop` / `BinopScalarBroadcast`: 4 args (a, b, out, n).
- //   * `BinopSuffixBroadcast`:           5 args (a, b, out, n, period).
+ //   * `BinopSuffixBroadcast`:            5 args (a, b, out, n, period).
+ //   * `BinopPrefixBroadcast`:            5 args (a, b, out, n, inner_size).
  //
  // `mlirExecutionEngineInvokePacked` expects an array of `*mut ()`
  // where each entry points to the *value* of the argument (so for
@@ -611,6 +650,7 @@ impl Backend for MlirJitBackend {
  let mut out_ptr: *mut u8 = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
  let mut n_arg: i64 = n as i64;
  let mut period_arg: i64 = b.numel as i64;
+ let mut inner_arg: i64 = inner_size as i64;
  let result = if suffix_broadcast {
  let mut packed: [*mut (); 5] = [
  (&mut a_ptr) as *mut _ as *mut (),
@@ -618,6 +658,15 @@ impl Backend for MlirJitBackend {
  (&mut out_ptr) as *mut _ as *mut (),
  (&mut n_arg) as *mut _ as *mut (),
  (&mut period_arg) as *mut _ as *mut (),
+ ];
+ unsafe { holder.engine.invoke_packed("kernel", &mut packed) }
+ } else if prefix_broadcast {
+ let mut packed: [*mut (); 5] = [
+ (&mut a_ptr) as *mut _ as *mut (),
+ (&mut b_ptr) as *mut _ as *mut (),
+ (&mut out_ptr) as *mut _ as *mut (),
+ (&mut n_arg) as *mut _ as *mut (),
+ (&mut inner_arg) as *mut _ as *mut (),
  ];
  unsafe { holder.engine.invoke_packed("kernel", &mut packed) }
  } else {
@@ -637,12 +686,14 @@ impl Backend for MlirJitBackend {
  if result.is_err() {
  tracing::warn!(
  "MLIR-JIT binop invocation failed for op={:?} dtype={:?} \
- same_shape={} scalar_bcast={} suffix_bcast={}; falling back to CpuBackend",
+ same_shape={} scalar_bcast={} suffix_bcast={} prefix_bcast={}; \
+ falling back to CpuBackend",
  op,
  a.dtype,
  same_shape,
  scalar_broadcast,
- suffix_broadcast
+ suffix_broadcast,
+ prefix_broadcast
  );
  return None;
  }
@@ -1200,6 +1251,61 @@ fn build_binop_suffix_broadcast_kernel_text(
  ))
 }
 
+/// Build the MLIR text for a **prefix-broadcast** binary op:
+/// `out[i] = a[i] op b[i div inner_size]` for `i ∈ [0, n_total)`.
+///
+/// Signature: `void kernel(*const T a, *const T b, *mut T out, i64 n, i64 inner_size)`.
+/// `inner_size` is the product of `a_shape[b_eff_len..]` — the
+/// number of consecutive `a` elements that share the same `b`
+/// value.  Examples:
+///
+///  * `a = [M,N]`, `b = [M]` (or `[M,1]`) → `n = M*N`,
+///    `inner_size = N`.
+///  * `a = [B,M,N]`, `b = [B,M]` → `n = B*M*N`, `inner_size = N`.
+///  * `a = [B,M,N]`, `b = [B]` → `n = B*M*N`, `inner_size = M*N`.
+///
+/// The MLIR `arith.divsi` lowers to a single `idiv` on x86 / `sdiv`
+/// on aarch64; for `inner_size == power-of-two` LLVM strength-
+/// reduces to a `shr` (right shift) automatically.  Compared to
+/// `BinopSuffixBroadcast`'s `arith.remsi` cost, `divsi` and
+/// `remsi` are roughly the same — they retire on the same execution
+/// unit and a single cycle each on modern microarchitectures.
+fn build_binop_prefix_broadcast_kernel_text(
+ op: TensorBinaryOp,
+ dtype: DType,
+) -> Option<String> {
+ let elem_ty = mlir_elem_type(dtype)?;
+ let arith = binop_arith_op(op, dtype)?;
+ Some(format!(
+ r#"module {{
+ func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64, %inner: i64) attributes {{ llvm.emit_c_interface }} {{
+ %c0 = arith.constant 0 : i64
+ %c1 = arith.constant 1 : i64
+ cf.br ^loop(%c0 : i64)
+ ^loop(%i: i64):
+ %cond = arith.cmpi slt, %i, %n : i64
+ cf.cond_br %cond, ^body, ^exit
+ ^body:
+ %bi_idx = arith.divsi %i, %inner : i64
+ %ai = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %bi = llvm.getelementptr inbounds %b[%bi_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %va = llvm.load %ai : !llvm.ptr -> {elem}
+ %vb = llvm.load %bi : !llvm.ptr -> {elem}
+ %vc = {arith} %va, %vb : {elem}
+ %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ llvm.store %vc, %ci : {elem}, !llvm.ptr
+ %i_next = arith.addi %i, %c1 : i64
+ cf.br ^loop(%i_next : i64)
+ ^exit:
+ return
+ }}
+}}
+"#,
+ elem = elem_ty,
+ arith = arith,
+ ))
+}
+
 /// Build the MLIR text for a full-tensor reduction.
 ///
 /// Signature: `void kernel(*const T input, *mut T output, i64 n)`.
@@ -1640,6 +1746,9 @@ fn compile_kernel(
  }
  KernelKind::BinopSuffixBroadcast(op) => {
  build_binop_suffix_broadcast_kernel_text(op, dtype)?
+ }
+ KernelKind::BinopPrefixBroadcast(op) => {
+ build_binop_prefix_broadcast_kernel_text(op, dtype)?
  }
  KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
  KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
