@@ -49,6 +49,7 @@ public mount .char.CharPattern;
 public mount .char.AnyChar;
 public mount .char.CharRange;
 public mount .char.char_any_of;
+public mount .char.any_of;
 public mount .char.char_range;
 
 // Formatting

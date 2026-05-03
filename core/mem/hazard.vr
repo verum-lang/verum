@@ -155,7 +155,7 @@ public type ThreadHazardRecord is {
 };
 
 /// Retired node waiting for reclamation.
-type RetiredNode is {
+public type RetiredNode is {
     /// Pointer to the retired allocation.
     ptr: &unsafe Byte,
 
