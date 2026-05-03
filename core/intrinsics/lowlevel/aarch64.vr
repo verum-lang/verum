@@ -468,6 +468,247 @@ public fn wfe();
 public fn sev();
 
 // =============================================================================
+// TRANSLATION TABLE BASE REGISTERS (#81 — privileged-instruction completion)
+// =============================================================================
+//
+// TTBR0_EL1 / TTBR1_EL1 hold the page-table base addresses for
+// user-space (TTBR0) and kernel-space (TTBR1) virtual address
+// ranges respectively.  Switching processes flips TTBR0_EL1; kernel
+// boot writes TTBR1_EL1 once.
+
+/// Read Translation Table Base Register 0 (EL1) — user-space PT root.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, ttbr0_el1")
+public unsafe fn read_ttbr0_el1() -> UInt64;
+
+/// Read Translation Table Base Register 1 (EL1) — kernel-space PT root.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, ttbr1_el1")
+public unsafe fn read_ttbr1_el1() -> UInt64;
+
+/// Write Translation Table Base Register 0 (EL1).
+///
+/// # Safety
+/// Process-switch primitive.  Must be paired with TLB invalidation
+/// (`tlbi vmalle1`) and an `isb` to ensure the new PT root takes
+/// effect before subsequent loads.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("msr ttbr0_el1, {0}")
+public unsafe fn write_ttbr0_el1(value: UInt64);
+
+/// Write Translation Table Base Register 1 (EL1).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("msr ttbr1_el1, {0}")
+public unsafe fn write_ttbr1_el1(value: UInt64);
+
+// =============================================================================
+// SYSTEM CONTROL / TRANSLATION CONTROL (#81)
+// =============================================================================
+
+/// Read System Control Register (EL1) — the master MMU/cache/etc.
+/// enable bits.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, sctlr_el1")
+public unsafe fn read_sctlr_el1() -> UInt64;
+
+/// Write System Control Register (EL1).
+///
+/// # Safety
+/// Some bits (e.g. M = MMU enable) require precise MMU-quiescent
+/// sequences before the write.  ARM DDI 0487 §D7.2 documents the
+/// SCTLR_EL1 lifecycle constraints — read it before flipping any
+/// bit.  ISB after write to commit the new state.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("msr sctlr_el1, {0}")
+public unsafe fn write_sctlr_el1(value: UInt64);
+
+/// Read Translation Control Register (EL1).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, tcr_el1")
+public unsafe fn read_tcr_el1() -> UInt64;
+
+/// Write Translation Control Register (EL1).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("msr tcr_el1, {0}")
+public unsafe fn write_tcr_el1(value: UInt64);
+
+/// Read Memory Attribute Indirection Register (EL1).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, mair_el1")
+public unsafe fn read_mair_el1() -> UInt64;
+
+/// Write Memory Attribute Indirection Register (EL1).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("msr mair_el1, {0}")
+public unsafe fn write_mair_el1(value: UInt64);
+
+// =============================================================================
+// EXCEPTION SYNDROME / FAULT ADDRESS / VECTOR BASE (#81)
+// =============================================================================
+
+/// Read Exception Syndrome Register (EL1).  Encodes class +
+/// instruction-specific fields for the most recent EL1 exception.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, esr_el1")
+public unsafe fn read_esr_el1() -> UInt64;
+
+/// Read Fault Address Register (EL1) — virtual address of the
+/// faulting access for translation/permission/alignment faults.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, far_el1")
+public unsafe fn read_far_el1() -> UInt64;
+
+/// Read Vector Base Address Register (EL1) — exception-table base.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mrs {0}, vbar_el1")
+public unsafe fn read_vbar_el1() -> UInt64;
+
+/// Write Vector Base Address Register (EL1) — install a new
+/// exception vector table.
+///
+/// # Safety
+/// Address must be 2KB-aligned (low 11 bits zero) and point to a
+/// valid 2KB exception-table region.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("msr vbar_el1, {0}")
+public unsafe fn write_vbar_el1(value: UInt64);
+
+// =============================================================================
+// TLB INVALIDATION (#81)
+// =============================================================================
+
+/// Invalidate ALL TLB entries on the local CPU's EL1 stage-1.
+/// Coarsest-granularity TLBI — used at process switch and after
+/// large PT-root rewrites.
+///
+/// # Safety
+/// Costly — flushes every translation cached on the local CPU.
+/// Pair with `dsb ish` to make the invalidation observable to
+/// other CPUs and `isb` to commit on the local CPU.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("tlbi vmalle1")
+public unsafe fn tlbi_vmalle1();
+
+/// Invalidate the local CPU's TLB entries for a single virtual
+/// address (cheaper than `vmalle1` when the change is small).
+///
+/// # Safety
+/// Must `dsb ish` then `isb` to commit.  Address is in 4KB pages
+/// (shift right 12 before passing).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("tlbi vaae1, {0}")
+public unsafe fn tlbi_vaae1(va: UInt64);
+
+/// Inner-shareable TLB invalidate (broadcast to every CPU in the
+/// inner shareable domain).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("tlbi vmalle1is")
+public unsafe fn tlbi_vmalle1is();
+
+// =============================================================================
+// CACHE MAINTENANCE (#81)
+// =============================================================================
+
+/// Data Cache: Clean by Virtual Address to PoC.  Writes the cache
+/// line containing `va` back to the Point of Coherency (memory) but
+/// leaves the cached copy.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dc cvac, {0}")
+public unsafe fn dc_cvac(va: USize);
+
+/// Data Cache: Clean and Invalidate by Virtual Address to PoC.
+/// Writes back AND invalidates — typical DMA-prep pattern.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dc civac, {0}")
+public unsafe fn dc_civac(va: USize);
+
+/// Data Cache: Invalidate by Virtual Address to PoC (without
+/// write-back — discards dirty data).
+///
+/// # Safety
+/// Drops dirty cache contents for `va`.  Use only on regions
+/// known to have no live writes.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dc ivac, {0}")
+public unsafe fn dc_ivac(va: USize);
+
+/// Data Cache: Clean by Virtual Address to PoU.  Used to bring
+/// the I-cache and D-cache into coherence after JIT-emitted code
+/// (paired with `ic ivau`).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("dc cvau, {0}")
+public unsafe fn dc_cvau(va: USize);
+
+/// Instruction Cache: Invalidate ALL local I-cache entries.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("ic iallu")
+public unsafe fn ic_iallu();
+
+/// Instruction Cache: Invalidate by Virtual Address to PoU.
+/// Pair with `dc cvau` for JIT correctness on aarch64 (D-side write
+/// → write-back → I-side invalidate → fetch sees fresh code).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("ic ivau, {0}")
+public unsafe fn ic_ivau(va: USize);
+
+// =============================================================================
+// EXCEPTION RETURN / HYPERVISOR / SECURE MONITOR CALLS (#81)
+// =============================================================================
+
+/// Exception Return — pop ELR_EL1 + SPSR_EL1 and resume the
+/// interrupted context at the previous EL.
+///
+/// # Safety
+/// Last instruction in an EL1 exception handler.  Stack discipline
+/// must match the entry's saved-state contract or it'll resume to
+/// a poisoned address.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("eret")
+public unsafe fn eret();
+
+/// Hypervisor Call — trap to EL2.  Bottom 16 bits of `imm` go into
+/// the HVC instruction encoding (passed via inline-asm immediate).
+///
+/// # Safety
+/// Only meaningful when EL2 is implemented and a hypervisor is
+/// installed.  At EL1 with no EL2 the instruction is undefined.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("hvc #0")
+public unsafe fn hvc();
+
+/// Secure Monitor Call — trap to EL3.  Used for PSCI / TEE / SMC
+/// calling convention transitions.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("smc #0")
+public unsafe fn smc();
+
+// =============================================================================
 // LINUX HWCAP ACCESS (no libc)
 // =============================================================================
 

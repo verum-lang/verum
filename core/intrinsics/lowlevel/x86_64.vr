@@ -417,3 +417,246 @@ public unsafe fn inl(port: UInt16) -> UInt32;
 @inline(always)
 @llvm_only(reason = "inline assembly")
 public unsafe fn outl(port: UInt16, value: UInt32);
+
+// =============================================================================
+// DESCRIPTOR TABLES (#81 — privileged-instruction completion)
+// =============================================================================
+//
+// IDT / GDT / TR / LDTR are the four descriptor-table registers x86_64
+// kernels manipulate during boot, mode-switch, and context-switch
+// paths.  Loads happen exactly once per CPU at boot under a serialising
+// barrier; stores are diagnostic only — the CPU's protected-mode state
+// machine forbids speculative reads from these registers.
+//
+// Each descriptor pointer is the address of a 10-byte (in 64-bit mode:
+// 16-bit limit + 64-bit base) descriptor record in memory.  Caller is
+// responsible for the record's alignment + lifetime.
+
+/// Load Interrupt Descriptor Table register.
+///
+/// # Safety
+/// Requires kernel mode (Ring 0) AND interrupts disabled before the
+/// load completes.  Loading an invalid IDT pointer corrupts every
+/// subsequent interrupt and faults the CPU.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("lidt [{0}]")
+public unsafe fn lidt(idt_ptr: USize);
+
+/// Store Interrupt Descriptor Table register (diagnostic only).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("sidt [{0}]")
+public unsafe fn sidt(out_ptr: USize);
+
+/// Load Global Descriptor Table register.
+///
+/// # Safety
+/// Requires kernel mode (Ring 0).  After load, segment registers
+/// must be reloaded with a far-jump trampoline to refresh hidden
+/// segment-cache state — bare LGDT does not flush per-segment
+/// caches.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("lgdt [{0}]")
+public unsafe fn lgdt(gdt_ptr: USize);
+
+/// Store Global Descriptor Table register (diagnostic only).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("sgdt [{0}]")
+public unsafe fn sgdt(out_ptr: USize);
+
+/// Load Task Register.
+///
+/// # Safety
+/// Requires kernel mode.  Selector must reference a valid TSS
+/// descriptor in the current GDT.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("ltr {0:x}")
+public unsafe fn ltr(selector: UInt16);
+
+/// Store Task Register (diagnostic only).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("str {0:x}")
+public unsafe fn x86_str() -> UInt16;
+
+/// Load Local Descriptor Table register.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("lldt {0:x}")
+public unsafe fn lldt(selector: UInt16);
+
+/// Store Local Descriptor Table register (diagnostic only).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("sldt {0:x}")
+public unsafe fn sldt() -> UInt16;
+
+// =============================================================================
+// INTERRUPT CONTROL (#81)
+// =============================================================================
+
+/// Clear interrupt flag — disable maskable interrupts on this CPU.
+///
+/// # Safety
+/// Requires CPL <= IOPL.  Lifecycle pattern: `cli ... <critical> ...
+/// sti` so the window between the two is bounded — a never-paired
+/// `cli` deadlocks every external IRQ.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("cli")
+public unsafe fn cli();
+
+/// Set interrupt flag — re-enable maskable interrupts.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("sti")
+public unsafe fn sti();
+
+/// Halt the CPU until the next interrupt.
+///
+/// # Safety
+/// Sleeps the core indefinitely if interrupts are masked (`cli`
+/// without paired `sti`), since `hlt` only wakes on external IRQ.
+/// Idle threads loop `hlt` to save power; never call from a path
+/// where forward progress is required.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("hlt")
+public unsafe fn hlt();
+
+/// Interrupt return — pop {RIP, CS, RFLAGS, RSP, SS} off the
+/// interrupt stack frame and resume the interrupted context.
+///
+/// # Safety
+/// Stack must hold the canonical 5-word IRET frame.  Wrong layout
+/// either GP-faults or returns to a poisoned address.  Typically
+/// the last instruction in an interrupt handler.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("iretq")
+public unsafe fn iretq();
+
+/// Swap GS base register with KernelGSBase MSR.
+///
+/// # Safety
+/// CPU's standard kernel-entry / kernel-exit pattern: at syscall
+/// entry, `swapgs` flips user/kernel GS bases so per-CPU data is
+/// addressable; at exit, paired `swapgs` restores user view.
+/// Calling at the wrong privilege transition produces silent data
+/// corruption (kernel reads/writes user TLS).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("swapgs")
+public unsafe fn swapgs();
+
+// =============================================================================
+// CACHE CONTROL (#81)
+// =============================================================================
+
+/// Write-back-and-invalidate: flush the entire L1+L2+L3 cache to
+/// memory and mark every line invalid.  Microarchitecturally
+/// expensive — millions of cycles on modern CPUs.
+///
+/// # Safety
+/// Used in kernel paths around DMA-coherence-sensitive transitions
+/// (suspend, hypercalls).  Application code never needs this.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("wbinvd")
+public unsafe fn wbinvd();
+
+/// Flush a single cache line covering `addr`.  Cheaper than
+/// `wbinvd` and addressable — typical for DMA buffer prep.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("clflush [{0}]")
+public unsafe fn clflush(addr: USize);
+
+/// Optimised flush variant — same effect as `clflush` but without
+/// the implicit ordering guarantees, hence faster on Skylake-X
+/// onward.  Pair with `mfence` if ordering matters.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("clflushopt [{0}]")
+public unsafe fn clflushopt(addr: USize);
+
+/// Cache-line write-back without invalidation.  Useful for
+/// persistent-memory journals where you want the line to hit
+/// memory but stay in cache for re-read.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("clwb [{0}]")
+public unsafe fn clwb(addr: USize);
+
+// =============================================================================
+// CONTROL REGISTERS — CR2, CR4 (#81)
+// =============================================================================
+//
+// CR0 / CR3 are already exposed above.  CR2 is the page-fault
+// linear address (read-only by hardware, written on #PF).  CR4
+// holds the feature-enable bits (PAE, PGE, PSE, OSFXSR, OSXMMEXCPT,
+// VMXE, SMXE, UMIP, FSGSBASE, …).
+
+/// Read CR2 — the linear address that triggered the most recent
+/// page fault.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mov {0}, cr2")
+public unsafe fn read_cr2() -> UInt64;
+
+/// Read CR4 — feature-enable register.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mov {0}, cr4")
+public unsafe fn read_cr4() -> UInt64;
+
+/// Write CR4 — toggle CPU feature flags.
+///
+/// # Safety
+/// Some bits are sticky (cleared only at reset), some require
+/// quiescent-state preconditions (e.g., flushing the TLB before
+/// flipping PGE).  Writing a reserved bit triggers #GP.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mov cr4, {0}")
+public unsafe fn write_cr4(value: UInt64);
+
+/// Read CR8 — task-priority register (alias for the local APIC's
+/// TPR on long-mode systems).
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mov {0}, cr8")
+public unsafe fn read_cr8() -> UInt64;
+
+/// Write CR8 — set local APIC task priority.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("mov cr8, {0}")
+public unsafe fn write_cr8(value: UInt64);
+
+// =============================================================================
+// SYSCALL FAST PATH (#81)
+// =============================================================================
+
+/// Fast system call entry — paired with `sysret` for kernel exit.
+/// Loads RIP from MSR LSTAR, RFLAGS from MSR FMASK, CS/SS from MSR
+/// STAR.
+///
+/// # Safety
+/// Caller (user-mode) saves callee-clobbered registers per the
+/// kernel ABI before issuing.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("syscall")
+public unsafe fn syscall_fast();
+
+/// Fast system call return — flips back to user mode using the
+/// MSR-stashed CS/SS selectors and resumes user RIP.
+@inline(always)
+@llvm_only(reason = "inline assembly")
+@asm("sysretq")
+public unsafe fn sysretq();
