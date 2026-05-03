@@ -559,6 +559,47 @@ implement PgReplicationConnection {
         }
     }
 
+    /// Set the underlying TCP recv timeout — passes through to
+    /// `PgConnection.set_recv_timeout_ms`. Used by the async
+    /// replication wrapper so its actor can alternate reads with
+    /// pending standby-status writes.
+    public fn set_recv_timeout_ms(&mut self, timeout_ms: Maybe<Int>)
+        -> Result<(), DbError>
+    {
+        self.conn.set_recv_timeout_ms(timeout_ms)
+    }
+
+    /// Timeout-bounded variant of `next_message`. Returns
+    /// `Ok(Some(msg))` for a real frame, `Ok(None)` if the read
+    /// timed out (caller should retry, optionally after handling
+    /// pending writes), or `Err(_)` on terminate.
+    public fn try_next_message(&mut self)
+        -> Result<Maybe<ReplicationMessage>, DbError>
+    {
+        if !self.streaming {
+            return Err(bad_replication("try_next_message before START_REPLICATION"));
+        }
+        loop {
+            let opt = self.conn.try_read_replication_message()?;
+            match opt {
+                None => { return Ok(None); }
+                Some(msg) => {
+                    match msg {
+                        BmCopyData { bytes } => {
+                            return Ok(Some(decode_copy_data(bytes)?));
+                        }
+                        BmCopyDone => {
+                            return Ok(Some(RmOther { tag: 0 as Byte, payload: List.new() }));
+                        }
+                        BmError(d) => { return Err(dberr_from_pg(d)); }
+                        BmNotice(_) | BmParameterStatus(_) => { continue; }
+                        _ => { continue; }
+                    }
+                }
+            }
+        }
+    }
+
     /// Send a Standby Status Update — `'r'` CopyData. Three LSNs
     /// (write / flush / apply) and a microsecond timestamp + a
     /// reply_requested flag the server echoes back to ask for a

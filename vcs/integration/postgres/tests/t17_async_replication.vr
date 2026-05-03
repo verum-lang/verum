@@ -1,0 +1,190 @@
+// =============================================================================
+// t17_async_replication.vr — async logical replication V0
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.7 (streaming replication),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// Mirror of t11_replication.vr through the async actor:
+//
+//   1. connect_replication_async(logical) using admin role.
+//   2. identify_system → assert systemid + timeline.
+//   3. create_logical_slot (TEMPORARY pgoutput) → drop_slot to
+//      pre-clean → create.
+//   4. start_logical with publication_names='spindle_test_pub'.
+//   5. Side-channel INSERT in a separate sync connection.
+//   6. Drain ≤ 30 events via next_message; verify at least one
+//      XLogData arrived; reply with send_standby_status.
+//   7. Clean close.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable, PgConnection, connect as pg_connect,
+    PgReplicationConfig, PgReplicationConnection,
+    LogicalReplicationOptions,
+    Lsn, ReplicationMessage, RmXLogData, RmKeepalive, RmOther,
+    AsyncPgReplicationConnection,
+    ReplActorEvent, ReaEvent, ReaTerminated, ReaClosed,
+    connect_replication_async,
+};
+mount core.async.executor.block_on;
+mount core.time.SystemClock;
+
+fn admin_replication_config() -> PgReplicationConfig {
+    PgReplicationConfig.logical(PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-async-repl".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    })
+}
+
+fn ensure_publication() {
+    let mut admin = expect_ok(
+        pg_connect(&PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: ADMIN_USER.clone(),
+            password: ADMIN_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-async-repl-setup".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        }),
+        &"admin connect for publication setup failed".clone(),
+    );
+    let _ = admin.simple_query(&"DROP PUBLICATION IF EXISTS spindle_test_pub".clone());
+    let _ = expect_ok(
+        admin.simple_query(&"CREATE PUBLICATION spindle_test_pub FOR ALL TABLES".clone()),
+        &"CREATE PUBLICATION failed".clone(),
+    );
+}
+
+fn write_row_on_side_channel() {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS async_repl_smoke (id integer PRIMARY KEY, payload text NOT NULL)"
+            .clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM async_repl_smoke".clone());
+    let _ = expect_ok(
+        side.simple_query(&"INSERT INTO async_repl_smoke (id, payload) VALUES (1, 'first')".clone()),
+        &"side-channel INSERT failed".clone(),
+    );
+}
+
+fn main() {
+    ensure_publication();
+
+    block_on(async move {
+        let cfg = admin_replication_config();
+        let repl = expect_ok(
+            connect_replication_async(cfg).await,
+            &"connect_replication_async failed".clone(),
+        );
+
+        // -------------------------------------------------------------------
+        // 1. IDENTIFY_SYSTEM through the actor.
+        // -------------------------------------------------------------------
+        let id = expect_ok(
+            repl.identify_system().await,
+            &"async identify_system failed".clone(),
+        );
+        expect(
+            id.timeline >= 1,
+            &f"async identify_system timeline = {id.timeline}",
+        );
+
+        // -------------------------------------------------------------------
+        // 2. Slot lifecycle.
+        // -------------------------------------------------------------------
+        let slot = "spindle_async_repl_slot".clone();
+        let _ = repl.drop_slot(&slot, false).await;     // best-effort pre-clean
+        expect_ok(
+            repl.create_logical_slot(&slot, &"pgoutput".clone(), true).await,
+            &"async create_logical_slot failed".clone(),
+        );
+
+        // -------------------------------------------------------------------
+        // 3. start_logical.
+        // -------------------------------------------------------------------
+        let opts = LogicalReplicationOptions.pgoutput(slot.clone())
+            .with_option("proto_version".clone(), "1".clone())
+            .with_option("publication_names".clone(), "spindle_test_pub".clone());
+        expect_ok(
+            repl.start_logical(opts, Lsn.zero()).await,
+            &"async start_logical failed".clone(),
+        );
+
+        // -------------------------------------------------------------------
+        // 4. Trigger DML on side-channel.
+        // -------------------------------------------------------------------
+        write_row_on_side_channel();
+
+        // -------------------------------------------------------------------
+        // 5. Drain up to N events; expect ≥ 1 XLogData; reply with
+        //    standby status when we see one.
+        // -------------------------------------------------------------------
+        let mut saw_xlog: Bool = false;
+        let mut total_events: Int = 0;
+        let mut i: Int = 0;
+        while i < 30 {
+            match repl.next_event().await {
+                Some(ReaEvent(msg)) => {
+                    total_events = total_events + 1;
+                    match msg {
+                        RmXLogData(x) => {
+                            saw_xlog = true;
+                            let now_us = SystemClock.now().as_microseconds();
+                            let _ = repl.send_standby_status(
+                                x.wal_end, x.wal_end, x.wal_end, now_us, false,
+                            ).await;
+                            break;
+                        }
+                        RmKeepalive(k) => {
+                            if k.reply_requested {
+                                let now_us = SystemClock.now().as_microseconds();
+                                let _ = repl.send_standby_status(
+                                    k.wal_end, k.wal_end, k.wal_end, now_us, false,
+                                ).await;
+                            }
+                        }
+                        RmOther { .. } => {}
+                    }
+                }
+                Some(ReaTerminated(e)) => {
+                    expect(false, &f"replication wire terminated unexpectedly: {e}");
+                }
+                Some(ReaClosed) => { break; }
+                None => { break; }
+            }
+            i = i + 1;
+        }
+
+        expect(
+            total_events > 0,
+            &"async replication produced no events at all".clone(),
+        );
+        expect(
+            saw_xlog,
+            &"async replication: never saw an XLogData; side-channel did not propagate".clone(),
+        );
+
+        let _ = repl.close().await;
+
+        pass(&"t17_async_replication".clone());
+    });
+}
