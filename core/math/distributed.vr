@@ -920,6 +920,9 @@ public type DistributedSupervisionStrategy is
     // Restart all children (for correlated failures)
     | RestartAll;
 
+/// Public alias — short canonical name.
+public type SupervisionStrategy is DistributedSupervisionStrategy;
+
 // Mesh failure descriptor
 public type MeshFailure is {
     failed_actors: List<ActorId>,

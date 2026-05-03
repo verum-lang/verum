@@ -143,6 +143,12 @@ public type AsyncRuntimeConfig is {
     poll_budget: Int,
 };
 
+/// Public alias — short canonical name; conformance tests
+/// `mount core.async.executor.{RuntimeConfig}` for the async
+/// runtime config (distinct from the protocol-typed `RuntimeConfig`
+/// in core.runtime.config — those are different abstractions).
+public type RuntimeConfig is AsyncRuntimeConfig;
+
 // Manifest→runtime bridge (#261). Each getter loads from a
 // const-initialised LLVM global emitted by
 // `platform_ir.rs::emit_runtime_globals` whose initial value flows
