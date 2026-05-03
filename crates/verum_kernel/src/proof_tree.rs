@@ -1090,7 +1090,7 @@ impl Ord for KernelRule {
 ///  • For composite constructors (App / Pair / Refl / etc.)
 ///  the function recurses to build premise sub-trees.
 ///  • The conclusion is the term being typed; the inferred_ty
-///  is the result of [`crate::infer`] on it.
+///  is the result of [`crate::infer()`] on it.
 ///  • If `infer` fails for the term or any sub-term, the
 ///  reconstruction returns `None` rather than a partial
 ///  tree (the caller can re-run `infer` to get the precise

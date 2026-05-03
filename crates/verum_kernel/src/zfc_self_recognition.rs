@@ -41,8 +41,8 @@
 //!  4. [`MetaTheoryRequirements`] — per-rule decomposition record
 //!  `(zfc_axioms, inaccessibles)` listing exactly which
 //!  meta-theoretic assumptions the rule rests on.
-//!  5. [`required_meta_theory(rule)`] — algorithmic decomposition.
-//!  6. [`is_zfc_plus_2_inacc_provable(rule)`] — decision predicate.
+//!  5. [`required_meta_theory`] — algorithmic decomposition.
+//!  6. [`is_zfc_plus_2_inacc_provable`] — decision predicate.
 //!  7. [`SelfRecognitionAudit`] — accumulator structure that records
 //!  every kernel-rule citation and surfaces the union of
 //!  meta-theory requirements (the "trusted-base report").

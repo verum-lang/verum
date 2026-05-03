@@ -22,13 +22,13 @@
 //! the two highest-frequency shapes in the corpus:
 //!
 
-//!  * **Term-mode** ([`ProofBody::Term`]): the proof is an explicit
+//!  * **Term-mode** (`ProofBody::Term`): the proof is an explicit
 //!  expression (Curry-Howard). Pass through the existing
 //!  [`super::expr_translate::ExprRenderer`]. Coq form:
 //!  `exact (<expr>).` Lean form: `<expr>` (term-mode, no `by`).
 //!
 
-//!  * **Single-apply tactic-mode** ([`ProofBody::Tactic`] with
+//!  * **Single-apply tactic-mode** (`ProofBody::Tactic` with
 //!  [`TacticExpr::Apply`]): the proof is `apply <name>(args)`.
 //!  This is the shape produced by the `@delegate(target)`
 //!  attribute (#146) — every delegating MSFS theorem currently
@@ -36,7 +36,7 @@
 //!  form: `by apply <name>`.
 //!
 
-//! Other shapes ([`ProofBody::Structured`], [`ProofBody::ByMethod`],
+//! Other shapes (`ProofBody::Structured`, `ProofBody::ByMethod`,
 //! complex tactic chains) fall back to [`TranslatedProofBody::Fallback`]
 //! and the renderer reverts to `Admitted.` / `sorry` — partial
 //! coverage is safe, no broken artefacts emitted.

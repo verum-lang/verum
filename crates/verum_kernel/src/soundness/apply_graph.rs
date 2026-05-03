@@ -64,7 +64,7 @@
 //! Three layers:
 //!
 
-//!  1. [`ApplyTarget`] — one resolved apply-callsite reference.
+//!  1. `ApplyTarget` — one resolved apply-callsite reference.
 //!  2. [`SymbolEntry`] / [`ApplyGraph`] — workspace-wide symbol
 //!  lookup table with each entry classified at construction time.
 //!  3. [`walk_transitive`] — DFS over the graph from a root theorem,
@@ -151,9 +151,13 @@ pub struct LeafHit {
 /// `unresolved == 0`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LeafComposition {
+    /// Number of leaves classified as `KernelStrict`.
     pub kernel_strict: usize,
+    /// Number of leaves classified as `FrameworkAxiom`.
     pub framework_axiom: usize,
+    /// Number of leaves classified as `PlaceholderAxiom` (rejects L4).
     pub placeholder_axiom: usize,
+    /// Number of leaves the walker could not resolve.
     pub unresolved: usize,
     /// Per-leaf details for human-readable rendering / programmatic
     /// post-processing (e.g., the audit JSON).
@@ -230,6 +234,7 @@ impl SymbolEntry {
 /// scan of every `.vr` file under the manifest root.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ApplyGraph {
+    /// Symbol-name → classification entries built from the workspace scan.
     pub entries: BTreeMap<String, SymbolEntry>,
 }
 

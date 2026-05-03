@@ -136,7 +136,7 @@ pub enum CoreTerm {
         /// Type-family `motive : B → U` along whose image the path
         /// lies. Stored as the raw motive expression (no eta-
         /// expansion) so substitution and normalisation operate
-        /// uniformly with [`PathTy`].
+        /// uniformly with `PathTy`.
         motive: Heap<CoreTerm>,
         /// Constructor-path in the base type `B`. Typically
         /// `Var(point_ctor)` ↝ `Var(point_ctor')` for a HIT path-

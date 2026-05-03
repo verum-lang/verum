@@ -860,7 +860,7 @@ pub enum EpsInvariant {
 /// The bridge is **canonical** (independent of how the Actic
 /// ε-token was constructed) and **lossless** under the V0
 /// encoding — every Actic ε that fits Cantor-normal-form
-/// below ε_0 maps to a unique [`OrdinalDepth`].
+/// below ε_0 maps to a unique [`crate::OrdinalDepth`].
 pub fn convert_eps_to_md_omega(eps: &EpsInvariant) -> crate::OrdinalDepth {
     match eps {
         EpsInvariant::Zero => crate::OrdinalDepth::finite(0),

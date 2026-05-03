@@ -86,7 +86,7 @@
 //! ```
 //!
 
-//! Tests pin this for every variant. Drift between [`Term`] and
+//! Tests pin this for every variant. Drift between `Term` and
 //! [`ReflectedTerm`] is the failure mode: adding a variant to one
 //! without the other breaks the round-trip.
 
@@ -100,16 +100,16 @@ use crate::proof_checker::Term;
 // ReflectedTerm — serializable mirror of proof_checker::Term
 // =============================================================================
 
-/// Serializable mirror of [`proof_checker::Term`].
+/// Serializable mirror of `proof_checker::Term`.
 ///
 
-/// Variants are 1:1 with [`Term`]; the payloads are recursively
+/// Variants are 1:1 with `Term`; the payloads are recursively
 /// reflected. This indirection lets non-trusted callers (audit
 /// gates, future meta-tactics) consume the kernel's term grammar as
 /// data — *without* importing `proof_checker.rs` directly.
 ///
 
-/// The lossless round-trip [`Term`] ↔ [`ReflectedTerm`] is pinned by
+/// The lossless round-trip `Term` ↔ [`ReflectedTerm`] is pinned by
 /// the test suite below.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

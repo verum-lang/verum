@@ -15,7 +15,7 @@
 //! Hilbert-style proofs run inside the kernel itself; tactic-style
 //! proofs are *productivity sugar* whose semantics IS proof-term
 //! construction. Without the second half, the trust base
-//! ([`proof_checker`], `core/verify/kernel_v0/`) is theoretically
+//! ([`crate::proof_checker`], `core/verify/kernel_v0/`) is theoretically
 //! trustworthy but practically unused — no Verum theorem reduces
 //! to a kernel-readable term.
 //!
@@ -343,8 +343,8 @@ pub fn placeholder_proposition() -> Term {
 ///  - `Path` / `Field` / `Call` → axiom resolution + App chain via
 ///  [`expr_to_term`].
 ///  - `Binary` / `Unary` → opaque connective axiom application.
-///  The connective name is mapped via [`binop_to_axiom_name`] /
-///  [`unop_to_axiom_name`]; the surrounding context must register
+///  The connective name is mapped via `binop_to_axiom_name` /
+///  `unop_to_axiom_name`; the surrounding context must register
 ///  the matching axiom (see [`register_propositional_connectives`]).
 ///
 

@@ -221,18 +221,28 @@ pub fn verify_composition_chain(modules: &[(&str, &Shape)]) -> CompositionVerifi
 /// Per-step result of cross-module composition verification.
 #[derive(Debug, Clone)]
 pub struct CompositionStep {
+    /// Module-path of the left composition arm.
     pub left: String,
+    /// Module-path of the right composition arm.
     pub right: String,
+    /// True iff the two arms compose without violating any
+    /// anti-pattern.
     pub composed: bool,
+    /// Any anti-pattern violations the composition surfaced.
     pub violations: Vec<(AntiPatternCode, String)>,
 }
 
+/// Aggregate report describing every composition step the phase
+/// verified across the mounted module graph.
 #[derive(Debug, Clone)]
 pub struct CompositionVerificationReport {
+    /// Per-step composition results.
     pub steps: Vec<CompositionStep>,
 }
 
 impl CompositionVerificationReport {
+    /// True iff every composition step succeeded — the audit-gate
+    /// load-bearing predicate.
     pub fn is_load_bearing(&self) -> bool {
         self.steps.iter().all(|s| s.composed)
     }

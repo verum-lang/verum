@@ -325,7 +325,7 @@ pub trait CorpusBackend {
     fn render_theorem(&self, spec: &TheoremSpec) -> RenderedTheorem;
 
     /// Canonical foreign-system handle. Default implementation
-    /// resolves [`id`](Self::id) via [`ForeignSystem::from_name`];
+    /// resolves [`id`](Self::id) via `ForeignSystem::from_name`;
     /// override when the backend's ID doesn't match the canonical
     /// alias set. Lets consumers dispatch by typed enum rather
     /// than string comparison.
@@ -677,9 +677,10 @@ fn render_generics_for_backend(spec: &TheoremSpec, _backend_id: &str) -> String 
 // Trait dispatcher — used by the audit gate to enumerate backends
 // =============================================================================
 
-/// Box<dyn> for dynamic dispatch over the per-format backends. The
-/// audit gate iterates `[Box::new(CoqCorpusBackend), …]` and calls
-/// each one's `render_theorem` over every walked corpus theorem.
+/// `Box<dyn CorpusBackend>` for dynamic dispatch over the per-format
+/// backends. The audit gate iterates
+/// `[Box::new(CoqCorpusBackend), …]` and calls each one's
+/// `render_theorem` over every walked corpus theorem.
 pub fn all_corpus_backends() -> Vec<Box<dyn CorpusBackend>> {
     vec![
         Box::new(CoqCorpusBackend::new()),

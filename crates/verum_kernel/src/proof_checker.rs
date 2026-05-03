@@ -382,10 +382,20 @@ pub enum CheckError {
     /// T-App-Elim: function side isn't a Pi type.
     NotAFunction(Term),
     /// T-App-Elim: argument's type doesn't match the Pi's domain.
-    DomainMismatch { expected: Term, actual: Term },
+    DomainMismatch {
+        /// Domain type expected by the Pi.
+        expected: Term,
+        /// Type the argument actually has.
+        actual: Term,
+    },
     /// T-Conv: expected and inferred types are not definitionally
     /// equal.
-    TypeMismatch { expected: Term, actual: Term },
+    TypeMismatch {
+        /// Type the caller asked the term to have.
+        expected: Term,
+        /// Type the kernel inferred for the term.
+        actual: Term,
+    },
     /// **Algorithm C — bootstrap-manifest failure.**  The kernel_v0
     /// manifest contains a rule that is not audit-clean (its
     /// `DischargeStatus` is `AdmittedWithIou` or `NotYetAttested`
@@ -425,7 +435,7 @@ pub enum CheckError {
 /// **The six rules at a glance.**
 ///
 
-///  T-Var: ctx[i] = T → Var(i) : T
+///  T-Var: `ctx[i]` = T → Var(i) : T
 ///  T-Univ: Universe(n) : Universe(n+1)
 ///  T-Pi-Form: A : Universe(n), B : Universe(m) under (A:: ctx)
 ///  → Pi(A, B) : Universe(max(n, m))

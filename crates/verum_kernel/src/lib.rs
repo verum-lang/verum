@@ -677,8 +677,8 @@ pub use zfc_self_recognition::{
 ///  `representable_in_pa` — class-membership predicates.
 ///
 
-/// Future work: full kernel-CoreTerm round-trip via [`encode_term`] /
-/// [`decode_term`] (ships symbol-level cells).
+/// Future work: full kernel-CoreTerm round-trip via `encode_term` /
+/// `decode_term` (ships symbol-level cells).
 pub mod godel_coding;
 pub use godel_coding::{
     GodelEncoding, MuRecursive, PrimitiveRecursive, cantor_pair, cantor_unpair, decode_list,

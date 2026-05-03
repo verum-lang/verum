@@ -45,9 +45,13 @@ use std::collections::{BTreeMap, BTreeSet};
 /// has a check function returning structured violations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CorpusInvariant {
+    /// No circular dependencies in the cross-cog mount graph (AP-003).
     NoCircularDependencies,
+    /// Foundations of composed cogs match or have a registered bridge (AP-005).
     FoundationConsistency,
+    /// No cog claims `MsfsStratum::LAbs` (AP-011 — AFN-T α violation).
     NoLAbsClaim,
+    /// Every required capability is exposed by some cog in the mount graph.
     CapabilityClosure,
 }
 
@@ -107,7 +111,9 @@ pub struct CorpusViolation {
 /// Aggregated cross-cog verification report.
 #[derive(Debug, Clone, Default)]
 pub struct CorpusReport {
+    /// Total number of cogs the corpus walker visited.
     pub total_cogs: usize,
+    /// Per-violation diagnostics surfaced during the walk.
     pub violations: Vec<CorpusViolation>,
 }
 

@@ -329,7 +329,7 @@ pub enum ManifestIssue {
 /// embedded into the binary at build time. When auditing a corpus
 /// (e.g. MSFS) the project root doesn't contain these files; the
 /// caller passes the stdlib root via `extra_search_roots` (or the
-/// embedded-stdlib alternative [`verify_manifest_with_embedded_stdlib`]
+/// embedded-stdlib alternative `verify_manifest_with_embedded_stdlib`
 /// for installed binaries).
 pub fn verify_manifest(project_root: &Path) -> Vec<ManifestIssue> {
     verify_manifest_with_search_roots(project_root, &[])

@@ -450,14 +450,19 @@ fn relational_proposition_preserved(
 /// individually.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RefactoringChain {
+    /// Sequential steps that compose to the chain.
     pub steps: Vec<Refactoring>,
 }
 
+/// Verdict for a [`RefactoringChain`] — per-step analyses plus the
+/// composite accept/reject decision.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainAnalysis {
+    /// Stable JSON schema version (per spec §32.4).
     pub schema_version: u32,
+    /// Per-step analysis result.
     pub step_analyses: Vec<AdjunctionAnalysis>,
- /// True iff every step's verdict is `Accepted`.
+    /// True iff every step's verdict is `Accepted`.
     pub chain_accepted: bool,
 }
 

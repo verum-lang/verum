@@ -14,7 +14,7 @@
 //!
 
 //! Every cross-export target implements one trait, [`SoundnessBackend`].
-//! Concrete instances ([`coq::CoqBackend`], [`lean::LeanBackend`]) are
+//! Concrete instances (`coq::CoqBackend`, `lean::LeanBackend`) are
 //! short — they just say "for this fragment of the corpus, render this
 //! syntax." The corpus walk is shared in [`SoundnessExporter`], which
 //! drives the trait methods in canonical order.
@@ -646,7 +646,7 @@ pub trait SoundnessBackend {
     fn id(&self) -> &'static str;
 
     /// Canonical foreign-system handle. Default implementation
-    /// resolves [`id`](Self::id) via [`ForeignSystem::from_name`];
+    /// resolves [`id`](Self::id) via `ForeignSystem::from_name`;
     /// override when the backend's ID doesn't match the canonical
     /// alias set. Lets consumers dispatch by typed enum rather
     /// than string comparison.
