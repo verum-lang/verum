@@ -1,0 +1,106 @@
+// =============================================================================
+// t26_async_listener.vr — async LISTEN/NOTIFY end-to-end
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.6 (LISTEN/NOTIFY),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// V0:
+//   1. AsyncPgListener.connect → its own dedicated PgConnection.
+//   2. listen("spindle_test_chan") → server registers the channel.
+//   3. subscribe("spindle_test_chan") → Receiver<Notification>.
+//   4. Side-channel sync conn issues NOTIFY spindle_test_chan,
+//      'hello payload'.
+//   5. Receiver.recv_fut().await yields the Notification with
+//      matching channel + payload.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    AsyncPgListener, connect_listener_async,
+};
+mount core.database.postgres.notify.Notification;
+mount core.async.executor.block_on;
+
+fn listener_cfg() -> PgConfig {
+    PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: APP_USER.clone(),
+        password: APP_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-listener".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    }
+}
+
+fn issue_notify_on_side_channel(payload: &Text) {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let sql = f"NOTIFY spindle_test_chan, '{payload}'";
+    expect_ok(
+        side.simple_query(&sql),
+        &"side-channel NOTIFY failed".clone(),
+    );
+}
+
+fn main() {
+    block_on(async move {
+        let listener = expect_ok(
+            connect_listener_async(listener_cfg()).await,
+            &"connect_listener_async failed".clone(),
+        );
+
+        // Register channel server-side.
+        expect_ok(
+            listener.listen(&"spindle_test_chan".clone()).await,
+            &"listen failed".clone(),
+        );
+
+        // Subscribe client-side.
+        let mut rx = expect_ok(
+            listener.subscribe(&"spindle_test_chan".clone(), 16).await,
+            &"subscribe failed".clone(),
+        );
+
+        // Trigger a NOTIFY from a separate connection.
+        issue_notify_on_side_channel(&"hello payload".clone());
+
+        // Drain the next notification — give the actor's recv
+        // loop a moment to demux + deliver.
+        let notif = match rx.recv_fut().await {
+            Some(n) => n,
+            None    => {
+                expect(false, &"subscriber channel closed without delivery".clone());
+                return;
+            }
+        };
+
+        expect(
+            &notif.channel == &"spindle_test_chan".clone(),
+            &f"notification channel: expected spindle_test_chan, got {notif.channel}",
+        );
+        expect(
+            &notif.payload == &"hello payload".clone(),
+            &f"notification payload: expected 'hello payload', got '{notif.payload}'",
+        );
+        expect(
+            notif.sender_pid > 0,
+            &"sender_pid should be set".clone(),
+        );
+
+        // Cleanup.
+        let _ = listener.unlisten(&"spindle_test_chan".clone()).await;
+        let _ = listener.close().await;
+
+        pass(&"t26_async_listener".clone());
+    });
+}

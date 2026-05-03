@@ -1,0 +1,392 @@
+// =============================================================================
+// core/database/postgres/async_listener.vr — async LISTEN/NOTIFY V0
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.6 (LISTEN/NOTIFY),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// Sync PG ships NotifyDispatcher with channel-keyed routing. Async
+// surface is 0% — event-driven apps that want async-stream
+// subscription to PG NOTIFY channels currently spawn_blocking by
+// hand and poll conn.take_notifications.
+//
+// Architecture — dedicated listener actor:
+//
+//   The listener owns its OWN PgConnection (NOT shared with the
+//   regular query actor). Production pattern is one connection
+//   per listener; avoids LISTEN's wire-blocking interaction with
+//   concurrent queries. This is the same separation
+//   AsyncPgReplicationConnection uses.
+//
+//   The actor's main loop:
+//     1. Drain pending control commands (Listen/Unlisten/Subscribe/
+//        Shutdown) via try_recv on a bounded mpsc.
+//     2. try_read_replication_message with short timeout
+//        (DEFAULT_RECV_TIMEOUT_MS = 1_000ms) — yields when no
+//        notifications arrive so control commands stay
+//        responsive.
+//     3. On BmNotification: walk the subscriber registry
+//        + send via matching channel-keyed mpsc Senders.
+//     4. Loop.
+//
+// V0 surface:
+//   * connect_listener_async(cfg) → AsyncPgListener.
+//   * .listen(channel).await — issues LISTEN "channel".
+//   * .unlisten(channel).await — issues UNLISTEN "channel".
+//   * .subscribe(channel, capacity) → Receiver<Notification>
+//     — caller-side mpsc, bounded for backpressure.
+//   * .close().await — shutdown actor + close wire.
+//
+// Sync wire / sync NotifyDispatcher canonical / unchanged.
+// Listener uses its OWN subscriber registry (not the existing
+// dispatcher) so it composes naturally with Verum's async mpsc
+// primitives.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.async_listener;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.connection.{
+    PgConnection, PgConnState, PcsReady,
+    connect as sync_connect,
+};
+mount core.database.postgres.config.PgConfig;
+mount core.database.postgres.notify.Notification;
+mount core.database.postgres.wire.backend.{
+    BackendMessage,
+    BmNotification,
+    NotificationResponse,
+};
+mount core.async.channel.{
+    Sender, Receiver, OneshotSender,
+    bounded_channel, oneshot,
+};
+mount core.async.task.{spawn_blocking, JoinHandle};
+
+// =============================================================================
+// Tunables
+// =============================================================================
+
+/// TCP recv timeout for the actor's read loop. Small enough to
+/// surface pending control commands within bounded latency, big
+/// enough that a quiet wire doesn't burn CPU on tight retries.
+public const DEFAULT_RECV_TIMEOUT_MS: Int = 1_000;
+
+/// Default per-subscriber capacity. Bounded so a slow consumer
+/// can't grow the listener's memory without bound; on overflow
+/// `try_send` drops events for that subscriber.
+public const DEFAULT_SUBSCRIBER_CAPACITY: Int = 128;
+
+// =============================================================================
+// Actor protocol
+// =============================================================================
+
+/// One unit of work the actor runs. Subscribe carries the
+/// per-channel mpsc Sender — actor stores it in the registry so
+/// future BmNotification frames fan out to it.
+type ListenerCommand is
+      LcListen { channel: Text, ack: OneshotSender<Result<(), DbError>> }
+    | LcUnlisten { channel: Text, ack: OneshotSender<Result<(), DbError>> }
+    | LcSubscribe { channel: Text, tx: Sender<Notification> }
+    | LcShutdown { ack: OneshotSender<Result<(), DbError>> };
+
+// =============================================================================
+// Public handle
+// =============================================================================
+
+public type AsyncPgListener is {
+    cmd_tx: Sender<ListenerCommand>,
+    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+};
+
+implement AsyncPgListener {
+    public fn clone(&self) -> AsyncPgListener {
+        AsyncPgListener {
+            cmd_tx: self.cmd_tx.clone(),
+            join: self.join.clone(),
+        }
+    }
+
+    /// Issue `LISTEN "channel"`. Idempotent — the server treats
+    /// re-issuing as a no-op. Returns once the actor confirms the
+    /// command went through.
+    public async fn listen(&self, channel: &Text) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(LcListen {
+            channel: channel.clone(),
+            ack: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("listen")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("listen reply")),
+        }
+    }
+
+    public async fn unlisten(&self, channel: &Text) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(LcUnlisten {
+            channel: channel.clone(),
+            ack: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("unlisten")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("unlisten reply")),
+        }
+    }
+
+    /// Subscribe to NOTIFY events on `channel`. Returns a bounded
+    /// `Receiver<Notification>` — the actor pushes via `try_send`,
+    /// dropping events for slow consumers (no head-of-line
+    /// blocking).
+    ///
+    /// Multiple subscribes to the same channel each get an
+    /// independent Receiver — events fan out to all subscribers.
+    /// Caller MUST also call `.listen(channel).await` to actually
+    /// register the channel server-side; subscribe alone only
+    /// wires the local routing.
+    public async fn subscribe(
+        &self,
+        channel: &Text,
+        capacity: Int,
+    ) -> Result<Receiver<Notification>, DbError> {
+        let cap = if capacity < 1 { DEFAULT_SUBSCRIBER_CAPACITY } else { capacity };
+        let (tx, rx) = bounded_channel::<Notification>(cap);
+        match self.cmd_tx.send_async(LcSubscribe {
+            channel: channel.clone(),
+            tx: tx,
+        }).await {
+            Ok(()) => Ok(rx),
+            Err(_) => Err(actor_dropped("subscribe")),
+        }
+    }
+
+    public async fn close(&self) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(LcShutdown { ack: rs }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("close")); }
+        }
+        let _ = rr.await;
+        let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.take() {
+            Some(jh) => { let _ = jh.join().await; }
+            None     => {}
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+/// Open a fresh PG connection dedicated to LISTEN/NOTIFY and
+/// launch the listener actor.
+public async fn connect_listener_async(
+    cfg: PgConfig,
+) -> Result<AsyncPgListener, DbError> {
+    let cfg_owned = cfg.clone();
+    let conn_jh = spawn_blocking(move || -> Result<PgConnection, DbError> {
+        sync_connect(&cfg_owned)
+    });
+    let mut conn = match conn_jh.join().await {
+        Ok(r)  => r?,
+        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+    };
+
+    // Set the recv timeout so the actor's read loop can poll for
+    // control commands between wire reads.
+    let _ = conn.set_recv_timeout_ms(Some(DEFAULT_RECV_TIMEOUT_MS));
+
+    let (cmd_tx, cmd_rx) = bounded_channel::<ListenerCommand>(16);
+
+    let join = spawn_blocking(move || -> () {
+        run_actor(conn, cmd_rx);
+    });
+
+    Ok(AsyncPgListener {
+        cmd_tx: cmd_tx,
+        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+    })
+}
+
+// =============================================================================
+// Actor body
+// =============================================================================
+
+/// Per-channel subscriber set. Linear scan because typical apps
+/// listen on O(10) channels; HashMap overhead isn't worth it.
+type Subscribers is {
+    entries: List<(Text, List<Sender<Notification>>)>,
+};
+
+implement Subscribers {
+    fn new() -> Subscribers {
+        Subscribers { entries: List.new() }
+    }
+
+    fn add(&mut self, channel: Text, tx: Sender<Notification>) {
+        let mut i: Int = 0;
+        while i < (self.entries.len() as Int) {
+            if &self.entries[i].0 == &channel {
+                self.entries[i].1.push(tx);
+                return;
+            }
+            i = i + 1;
+        }
+        let mut subs: List<Sender<Notification>> = List.new();
+        subs.push(tx);
+        self.entries.push((channel, subs));
+    }
+
+    /// Dispatch a notification by matching channel name. Calls
+    /// try_send on each Sender — drops on full (slow consumer
+    /// must not block fast ones).
+    fn dispatch(&mut self, notif: &Notification) {
+        let mut i: Int = 0;
+        while i < (self.entries.len() as Int) {
+            if &self.entries[i].0 == &notif.channel {
+                let mut k: Int = 0;
+                while k < (self.entries[i].1.len() as Int) {
+                    let _ = self.entries[i].1[k].try_send(notif.clone());
+                    k = k + 1;
+                }
+                return;
+            }
+            i = i + 1;
+        }
+    }
+}
+
+fn run_actor(
+    mut conn: PgConnection,
+    mut cmd_rx: Receiver<ListenerCommand>,
+) {
+    let mut subscribers = Subscribers.new();
+
+    loop {
+        // Drain pending control commands.
+        loop {
+            match cmd_rx.try_recv() {
+                Ok(LcListen { channel, ack }) => {
+                    let sql = format_listen_sql(&channel);
+                    let r = match conn.execute(&sql) {
+                        Ok(_)  => Ok(()),
+                        Err(e) => Err(e),
+                    };
+                    let _ = ack.send(r);
+                }
+                Ok(LcUnlisten { channel, ack }) => {
+                    let sql = format_unlisten_sql(&channel);
+                    let r = match conn.execute(&sql) {
+                        Ok(_)  => Ok(()),
+                        Err(e) => Err(e),
+                    };
+                    let _ = ack.send(r);
+                }
+                Ok(LcSubscribe { channel, tx }) => {
+                    subscribers.add(channel, tx);
+                }
+                Ok(LcShutdown { ack }) => {
+                    let r = conn.close();
+                    let _ = ack.send(r);
+                    return;
+                }
+                Err(_) => { break; }
+            }
+        }
+
+        // Try to read one wire message within the recv timeout.
+        match conn.try_read_replication_message() {
+            Ok(Some(msg)) => {
+                match msg {
+                    BmNotification(n) => {
+                        let notif = Notification.from_wire(&n);
+                        subscribers.dispatch(&notif);
+                    }
+                    _ => {
+                        // Ignore — only LISTEN/UNLISTEN execute
+                        // results land here, and they're already
+                        // consumed by conn.execute above. Anything
+                        // else is unexpected but safe to drop.
+                    }
+                }
+            }
+            Ok(None) => {
+                // Recv timeout — loop back to drain commands.
+            }
+            Err(_) => {
+                // Wire died — exit. Future calls fail with
+                // ACTOR_CLOSED via the dropped cmd_rx.
+                return;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// SQL formatting — quote channel names defensively
+// =============================================================================
+
+/// Format a LISTEN command. PG identifier-quotes the channel name
+/// so embedded `"` characters double-up; `;` etc. stay safe.
+fn format_listen_sql(channel: &Text) -> Text {
+    let mut out = "LISTEN \"".clone();
+    out.push_str(&quote_identifier(channel));
+    out.push_str("\"");
+    out
+}
+
+fn format_unlisten_sql(channel: &Text) -> Text {
+    let mut out = "UNLISTEN \"".clone();
+    out.push_str(&quote_identifier(channel));
+    out.push_str("\"");
+    out
+}
+
+fn quote_identifier(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < (bytes.len() as Int) {
+        if (bytes[i] as Int) == ('"' as Int) {
+            out.push_str("\"\"");      // double-up to escape
+        } else {
+            out.push_byte(bytes[i]);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "LISTENER_ACTOR_CLOSED".clone(),
+        message: f"async listener actor unavailable during {what}",
+        retryable: false,
+    })
+}
