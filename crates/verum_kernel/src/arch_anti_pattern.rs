@@ -42,43 +42,75 @@ use crate::arch::{Capability, Foundation, Lifecycle, Shape, Tier};
 /// agents; documented in spec + on docs site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AntiPatternCode {
- // ----- (AP-001..010) — capability/composition core -----
-    CapabilityEscalation,    // ATS-V-AP-001
-    CapabilityLeak,          // ATS-V-AP-002
-    DependencyCycle,         // ATS-V-AP-003
-    TierMixing,              // ATS-V-AP-004
-    FoundationDrift,         // ATS-V-AP-005
-    RegisterMixing,          // ATS-V-AP-006
-    TxStraddling,            // ATS-V-AP-007
-    ResourceStraddling,      // ATS-V-AP-008
-    LifecycleRegression,     // ATS-V-AP-009
-    CveIncomplete,           // ATS-V-AP-010
+    // ----- (AP-001..010) — capability/composition core -----
+    /// `ATS-V-AP-001` — capability escalation across a boundary.
+    CapabilityEscalation,
+    /// `ATS-V-AP-002` — capability leaks past its declared scope.
+    CapabilityLeak,
+    /// `ATS-V-AP-003` — composes-with graph contains a dependency cycle.
+    DependencyCycle,
+    /// `ATS-V-AP-004` — module mixes execution tiers without a bridge.
+    TierMixing,
+    /// `ATS-V-AP-005` — composing modules with incompatible foundations.
+    FoundationDrift,
+    /// `ATS-V-AP-006` — register-machine state mixes incompatible domains.
+    RegisterMixing,
+    /// `ATS-V-AP-007` — operation straddles a transactional boundary.
+    TxStraddling,
+    /// `ATS-V-AP-008` — single resource accessed across boundary lines.
+    ResourceStraddling,
+    /// `ATS-V-AP-009` — citation regresses to a less-mature lifecycle stage.
+    LifecycleRegression,
+    /// `ATS-V-AP-010` — CVE-closure triple is missing axes in strict mode.
+    CveIncomplete,
 
- // ----- base (AP-011..026) — boundary / lifecycle / capability ontology -----
-    AbsoluteBoundaryAttempt,           // ATS-V-AP-011 — stratum = LAbs (AFN-T α violation)
-    InvariantViolation,                // ATS-V-AP-012 — boundary invariant not preserved
-    DanglingMessageType,               // ATS-V-AP-013 — message type без wire encoding
-    UnauthenticatedCrossing,           // ATS-V-AP-014 — Network boundary без AuthenticatedFirst
-    DeterministicViolation,            // ATS-V-AP-015 — DST test использует non-deterministic
-    CapabilityDuplication,             // ATS-V-AP-016 — Linear cap duplicated
-    OrphanCapability,                  // ATS-V-AP-017 — Relevant cap отброшена
-    MissingHandoff,                    // ATS-V-AP-018 — composition cap не в composes_with
-    FoundationDowngrade,               // ATS-V-AP-019 — strong foundation → weak без bridge
-    TimeBoundLeakage,                  // ATS-V-AP-020 — TimeBound cap живёт > TTL
-    PersistenceMismatch,               // ATS-V-AP-021 — Persist cap для non-durable op
-    CapabilityLaundering,              // ATS-V-AP-022 — multi-hop privilege escalation
-    FoundationForgery,                 // ATS-V-AP-023 — declared foundation ≠ cited
-    TransitiveLifecycleRegression,     // ATS-V-AP-024 — transitive [Т]→...→[Г]
-    DeclarationDrift,                  // ATS-V-AP-025 — declared shape ≠ inferred
-    FoundationContentMismatch,         // ATS-V-AP-026 — code-content uses foreign foundation
+    // ----- base (AP-011..026) — boundary / lifecycle / capability ontology -----
+    /// `ATS-V-AP-011` — stratum = `LAbs` (AFN-T α violation).
+    AbsoluteBoundaryAttempt,
+    /// `ATS-V-AP-012` — declared boundary invariant is not preserved.
+    InvariantViolation,
+    /// `ATS-V-AP-013` — message type declared without a wire encoding.
+    DanglingMessageType,
+    /// `ATS-V-AP-014` — `Network` boundary without `AuthenticatedFirst`.
+    UnauthenticatedCrossing,
+    /// `ATS-V-AP-015` — DST test depends on non-deterministic primitives.
+    DeterministicViolation,
+    /// `ATS-V-AP-016` — `Linear` capability used twice (duplication).
+    CapabilityDuplication,
+    /// `ATS-V-AP-017` — `Relevant` capability declared but never used.
+    OrphanCapability,
+    /// `ATS-V-AP-018` — composition capability missing from `composes_with`.
+    MissingHandoff,
+    /// `ATS-V-AP-019` — strong foundation downgraded without a bridge.
+    FoundationDowngrade,
+    /// `ATS-V-AP-020` — `TimeBound` capability outlives its declared TTL.
+    TimeBoundLeakage,
+    /// `ATS-V-AP-021` — `Persist` capability declared for a non-durable op.
+    PersistenceMismatch,
+    /// `ATS-V-AP-022` — multi-hop privilege escalation chain.
+    CapabilityLaundering,
+    /// `ATS-V-AP-023` — declared foundation does not match cited axioms.
+    FoundationForgery,
+    /// `ATS-V-AP-024` — transitive lifecycle regression chain.
+    TransitiveLifecycleRegression,
+    /// `ATS-V-AP-025` — declared shape diverges from inferred shape.
+    DeclarationDrift,
+    /// `ATS-V-AP-026` — code body uses constructs from a foreign foundation.
+    FoundationContentMismatch,
 
- // ----- MTAC (AP-027..032) — modal-temporal-architectural calculus -----
-    TemporalInconsistency,             // ATS-V-AP-027 — invariant breaks across time
-    CounterfactualBrittleness,         // ATS-V-AP-028 — fragile under decision swap
-    MissedAdjoint,                     // ATS-V-AP-029 — refactoring без inverse
-    UniversalPropertyViolation,        // ATS-V-AP-030 — claimed unique но не уникален
-    PhantomEvolution,                  // ATS-V-AP-031 — evolution path с unsat trigger
-    YonedaInequivalentRefactor,        // ATS-V-AP-032 — refactor changes observer-functor
+    // ----- MTAC (AP-027..032) — modal-temporal-architectural calculus -----
+    /// `ATS-V-AP-027` — invariant fails to hold across time-points.
+    TemporalInconsistency,
+    /// `ATS-V-AP-028` — verdict is fragile under counterfactual decision swap.
+    CounterfactualBrittleness,
+    /// `ATS-V-AP-029` — refactoring claimed without its inverse adjoint.
+    MissedAdjoint,
+    /// `ATS-V-AP-030` — universal-property uniqueness claim is violated.
+    UniversalPropertyViolation,
+    /// `ATS-V-AP-031` — evolution path passes through an unsatisfiable trigger.
+    PhantomEvolution,
+    /// `ATS-V-AP-032` — refactor changes the observer-functor (Yoneda inequivalent).
+    YonedaInequivalentRefactor,
 }
 
 impl AntiPatternCode {
@@ -316,14 +348,21 @@ impl AntiPatternViolation {
     }
 }
 
+/// Diagnostic severity assigned to an [`AntiPatternViolation`]. Maps onto
+/// the host diagnostic system's three-level surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
+    /// Hard error — fails the audit; mature corpus must close.
     Error,
+    /// Warning — non-blocking but visible; soft-mode default for
+    /// not-yet-strict cogs.
     Warning,
+    /// Hint — gentle nudge for code that could be cleaner.
     Hint,
 }
 
 impl Severity {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             Severity::Error => "error",
@@ -604,23 +643,37 @@ pub fn check_register_mixing(
     })
 }
 
+/// One forbidden-register citation discovered in a cog's source.
+/// Surface for the `RegisterMixing` anti-pattern checker.
 #[derive(Debug, Clone)]
 pub struct ForbiddenCitation {
+    /// Which forbidden register the citation belongs to.
     pub kind: ForbiddenRegisterKind,
+    /// Source-file location of the offending citation.
     pub location: String,
+    /// The cited source string (human-readable).
     pub source: String,
 }
 
+/// Closed taxonomy of forbidden citation registers (per CVE §6.7
+/// "L6 antiphilosophical invariant"). A formal theorem must not
+/// cite any of these as load-bearing justification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ForbiddenRegisterKind {
+    /// Appeal to an authority (person / institution) instead of a structural argument.
     AuthoritativeAppeal,
+    /// Phenomenological / experiential framing ("it feels true").
     Phenomenological,
+    /// Tradition / consensus framing ("everyone agrees").
     Traditional,
+    /// Hermeneutic / interpretive framing instead of a formal one.
     Interpretive,
+    /// Ontological declaration without structural commitment.
     OntologicalDeclaration,
 }
 
 impl ForbiddenRegisterKind {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             ForbiddenRegisterKind::AuthoritativeAppeal => "authoritative_appeal",
@@ -820,35 +873,47 @@ pub fn check_stratum_admissible(shape: &Shape) -> Option<AntiPatternViolation> {
 /// cog source analysis.
 #[derive(Debug, Default)]
 pub struct DiagnosticContext {
+    /// Name of the cog the checks run over.
     pub cog_name: String,
+    /// `composes-with` graph as (cog, neighbours) edges.
     pub composes_graph: Vec<(String, Vec<String>)>,
+    /// Capabilities inferred from the cog's body (vs those declared).
     pub inferred_used_capabilities: Vec<Capability>,
+    /// Capabilities flagged as escaping the declared scope.
     pub leaked_capabilities: Vec<Capability>,
+    /// Tier of each callee the cog reaches.
     pub callee_tiers: Vec<(String, Tier)>,
+    /// Foundation of each cog the current cog composes with.
     pub composed_foundations: Vec<(String, Foundation)>,
+    /// Citations the corpus walker classified as forbidden registers.
     pub forbidden_citations: Vec<ForbiddenCitation>,
+    /// Transactions that cross an async boundary without a structured scope.
     pub straddling_txs: Vec<String>,
+    /// Linear resources that outlive their declared scope.
     pub straddling_resources: Vec<String>,
+    /// Lifecycle stage of each cited cog (used for regression checks).
     pub cited_lifecycles: Vec<(String, Lifecycle)>,
- // ----- MTAC fields -----
- /// Sample shapes at different time points для temporal
- /// inconsistency detection (AP-027).
+    // ----- MTAC fields -----
+    /// Sample shapes at different time points for temporal-inconsistency
+    /// detection (AP-027).
     pub temporal_samples: Vec<(crate::arch_mtac::TimePoint, Shape)>,
- /// Counterfactual stability properties claimed by the cog
- /// (AP-028 CounterfactualBrittleness).
+    /// Counterfactual stability properties claimed by the cog
+    /// (AP-028 `CounterfactualBrittleness`).
     pub counterfactual_pairs: Vec<crate::arch_mtac::CounterfactualPair>,
- /// Refactorings claimed на cog without adjoint pair
- /// (AP-029 MissedAdjoint).
+    /// Refactorings claimed on the cog without an adjoint pair
+    /// (AP-029 `MissedAdjoint`).
     pub refactorings_without_adjoint: Vec<String>,
- /// Universal property claim для cog без uniqueness witness
- /// (AP-030 UniversalPropertyViolation).
+    /// Universal-property claim attached to the cog without a uniqueness
+    /// witness (AP-030 `UniversalPropertyViolation`).
     pub claimed_universal_property: Option<String>,
+    /// Optional witness term that discharges the universal-property claim.
     pub uniqueness_witness: Option<String>,
- /// Evolution paths declared by cog с potentially-unsat
- /// triggers (AP-031 PhantomEvolution).
+    /// Evolution paths declared by the cog with potentially-unsat triggers
+    /// (AP-031 `PhantomEvolution`).
     pub declared_evolutions: Vec<crate::arch_mtac::ArchEvolution>,
- /// Refactoring claimed equivalent under Yoneda but
- /// observer-functor differs (AP-032 YonedaInequivalentRefactor).
+    /// Refactoring claimed equivalent under Yoneda where the
+    /// observer-functor actually differs (AP-032
+    /// `YonedaInequivalentRefactor`).
     pub yoneda_observer_diff: Vec<(crate::arch_mtac::Observer, bool)>,
 }
 
