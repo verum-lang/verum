@@ -2346,12 +2346,21 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit verum_runtime_init() and verum_runtime_cleanup() — minimal stubs.
     /// Full initialization (TLS, context, allocator) happens in core/sys/init.vr.
+    ///
+    /// **Inlining policy**: both functions are emitted with the
+    /// `alwaysinline` attribute so the cut-down `always-inline,globaldce`
+    /// pipeline (post-#98) erases the call sites in `main` for trivial
+    /// programs whose runtime stubs are still no-ops. With the call sites
+    /// gone, `globaldce` then removes the dead bodies. Net result: a
+    /// "hello world" AOT binary no longer carries the `call verum_runtime_init`
+    /// / `call verum_runtime_cleanup` instructions in `main`'s prologue/epilogue.
     pub fn emit_runtime_init(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let void_type = ctx.void_type();
         let fn_type = void_type.fn_type(&[], false);
 
-        // verum_runtime_init — currently no-op
+        // verum_runtime_init — currently no-op; alwaysinline so callers
+        // collapse the empty body at the call site.
         let init_fn = module
             .get_function("verum_runtime_init")
             .unwrap_or_else(|| module.add_function("verum_runtime_init", fn_type, None));
@@ -2360,9 +2369,11 @@ impl<'ctx> PlatformIR<'ctx> {
             let builder = ctx.create_builder();
             builder.position_at_end(entry);
             builder.build_return(None).or_llvm_err()?;
+            self.add_alwaysinline_attr(init_fn);
         }
 
-        // verum_runtime_cleanup — currently no-op
+        // verum_runtime_cleanup — currently no-op; alwaysinline so callers
+        // collapse the empty body at the call site.
         let cleanup_fn = module
             .get_function("verum_runtime_cleanup")
             .unwrap_or_else(|| module.add_function("verum_runtime_cleanup", fn_type, None));
@@ -2371,8 +2382,21 @@ impl<'ctx> PlatformIR<'ctx> {
             let builder = ctx.create_builder();
             builder.position_at_end(entry);
             builder.build_return(None).or_llvm_err()?;
+            self.add_alwaysinline_attr(cleanup_fn);
         }
         Ok(())
+    }
+
+    /// Helper: attach the LLVM `alwaysinline` function attribute. Used by
+    /// no-op runtime stubs (init/cleanup, push/pop_stack_frame) so the
+    /// post-codegen cut-down pipeline collapses their call sites in
+    /// `main`'s prologue/epilogue.
+    fn add_alwaysinline_attr(&self, func: verum_llvm::values::FunctionValue<'ctx>) {
+        let kind_id = verum_llvm::attributes::Attribute::get_named_enum_kind_id("alwaysinline");
+        if kind_id != 0 {
+            let attr = self.context.create_enum_attribute(kind_id, 0);
+            func.add_attribute(verum_llvm::attributes::AttributeLoc::Function, attr);
+        }
     }
 
     /// Emit verum_push/pop_stack_frame — no-op stubs (debug only).
@@ -2400,6 +2424,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let builder = ctx.create_builder();
             builder.position_at_end(entry);
             builder.build_return(None).or_llvm_err()?;
+            self.add_alwaysinline_attr(push_fn);
         }
 
         // verum_pop_stack_frame()
@@ -2412,6 +2437,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let builder = ctx.create_builder();
             builder.position_at_end(entry);
             builder.build_return(None).or_llvm_err()?;
+            self.add_alwaysinline_attr(pop_fn);
         }
         Ok(())
     }
