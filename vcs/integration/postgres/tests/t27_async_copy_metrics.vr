@@ -1,0 +1,164 @@
+// =============================================================================
+// t27_async_copy_metrics.vr — copy metrics + cancellation token
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.6 (COPY metrics + cancellation).
+// =============================================================================
+//
+// V0:
+//   1. copy_in_async — write 5 chunks of 100 rows each; assert
+//      writer.metrics() reports chunks_sent == 5 and bytes_sent
+//      matches the cumulative payload + last_write_us > 0.
+//   2. copy_in_async_with_token — open with a token, write 1
+//      chunk, fire token.cancel(), next write returns CANCELLED
+//      + cancellations counter bumps.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    AsyncPgConnection,
+    async_connect,
+    AsyncCopyInWriter,
+    copy_in_async, copy_in_async_with_token,
+};
+mount core.async.executor.block_on;
+mount core.async.cancellation.CancellationToken;
+
+const ROWS_PER_CHUNK: Int = 100;
+const N_CHUNKS_OK: Int = 5;
+
+fn build_chunk(start_id: Int) -> List<Byte> {
+    let mut buf: List<Byte> = List.new();
+    let mut k: Int = 0;
+    while k < ROWS_PER_CHUNK {
+        let row_text = f"{start_id + k}\tpayload-{start_id + k}\n";
+        let bytes = row_text.as_bytes();
+        let mut i: Int = 0;
+        while i < (bytes.len() as Int) {
+            buf.push(bytes[i]);
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    buf
+}
+
+fn main() {
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-copy-metrics".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let conn = expect_ok(
+            async_connect(&cfg, 8).await,
+            &"async_connect failed".clone(),
+        );
+
+        // Setup table.
+        let _ = conn.execute(&"DROP TABLE IF EXISTS copy_metrics_smoke".clone()).await;
+        expect_ok(
+            conn.execute(&
+                "CREATE TABLE copy_metrics_smoke (id integer PRIMARY KEY, payload text NOT NULL)"
+                    .clone()
+            ).await,
+            &"CREATE TABLE failed".clone(),
+        );
+
+        // -------------------------------------------------------------------
+        // 1. Metrics on a normal happy-path COPY.
+        // -------------------------------------------------------------------
+        let writer = expect_ok(
+            copy_in_async(
+                &conn,
+                &"COPY copy_metrics_smoke (id, payload) FROM STDIN".clone(),
+                4,
+            ).await,
+            &"copy_in_async failed".clone(),
+        );
+
+        let mut total_bytes: Int = 0;
+        let mut chunk_idx: Int = 0;
+        while chunk_idx < N_CHUNKS_OK {
+            let chunk = build_chunk(chunk_idx * ROWS_PER_CHUNK);
+            total_bytes = total_bytes + (chunk.len() as Int);
+            expect_ok(
+                writer.write(chunk).await,
+                &f"writer.write {chunk_idx} failed",
+            );
+            chunk_idx = chunk_idx + 1;
+        }
+
+        // Metrics snapshot BEFORE finish (still owns writer).
+        let snap = writer.metrics();
+        expect_eq_int(snap.chunks_sent, N_CHUNKS_OK,
+            &"chunks_sent matches N_CHUNKS_OK".clone());
+        expect_eq_int(snap.bytes_sent, total_bytes,
+            &"bytes_sent matches total payload".clone());
+        expect(snap.last_write_us > 0,
+            &"last_write_us populated".clone());
+        expect_eq_int(snap.cancellations, 0,
+            &"no cancellations".clone());
+
+        let written = expect_ok(
+            writer.finish().await,
+            &"writer.finish failed".clone(),
+        );
+        expect_eq_int(written, N_CHUNKS_OK * ROWS_PER_CHUNK,
+            &"COPY FROM affected_rows".clone());
+
+        // -------------------------------------------------------------------
+        // 2. Cancellation token short-circuits subsequent writes.
+        // -------------------------------------------------------------------
+        let _ = conn.execute(&"DELETE FROM copy_metrics_smoke".clone()).await;
+
+        let token = CancellationToken.new();
+        let writer2 = expect_ok(
+            copy_in_async_with_token(
+                &conn,
+                &"COPY copy_metrics_smoke (id, payload) FROM STDIN".clone(),
+                4,
+                Some(token.clone()),
+            ).await,
+            &"copy_in_async_with_token failed".clone(),
+        );
+
+        // First chunk goes through.
+        expect_ok(
+            writer2.write(build_chunk(0)).await,
+            &"writer2.write 0 failed".clone(),
+        );
+
+        // Trigger cancellation; next write must short-circuit.
+        token.cancel();
+
+        match writer2.write(build_chunk(100)).await {
+            Ok(()) => {
+                expect(false, &"write after cancel should fail".clone());
+            }
+            Err(_) => {
+                // Expected — CANCELLED
+            }
+        }
+
+        let snap2 = writer2.metrics();
+        expect(snap2.cancellations > 0,
+            &"cancellations counter bumped".clone());
+
+        // Caller's explicit cancel — best effort wire reset.
+        let _ = writer2.cancel(&"test-end".clone()).await;
+
+        let _ = conn.execute(&"DROP TABLE copy_metrics_smoke".clone()).await;
+        let _ = conn.close().await;
+
+        pass(&"t27_async_copy_metrics".clone());
+    });
+}

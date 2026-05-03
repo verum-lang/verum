@@ -1,0 +1,134 @@
+// =============================================================================
+// core/database/common/copy_metrics.vr — bulk-copy backpressure metrics
+// =============================================================================
+// Layer: 3 (Database — common helpers)
+// Spec: internal/specs/database.md §6.1.6 / §6.3.6.1 (async COPY metrics).
+// =============================================================================
+//
+// Cross-cutting metric counters for bulk-copy operations:
+//   * PG AsyncCopyInWriter / AsyncCopyOutReader.
+//   * MySQL AsyncMysqlInfileWriter.
+//
+// Production CDC / ETL pipelines need:
+//   * Visibility into chunks in flight + total bytes pumped
+//     (alerting on unexpected stalls).
+//   * Last-write timestamp to detect hangs.
+//   * Cancellation count + last-cancellation-reason for audit
+//     trails.
+//
+// V0 surface:
+//   * CopyMetrics — Shared atomic counters; cheap to clone +
+//     read from any task.
+//   * snapshot() — single-shot read returning the full counter
+//     set as plain values (no lock contention on hot read path).
+//
+// All counters are monotonic (never decrement); consumers track
+// rates via repeated snapshots or by subtracting baselines.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.common.copy_metrics;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount core.time.SystemClock;
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+
+// =============================================================================
+// CopyMetrics — atomic counter bundle
+// =============================================================================
+
+public type CopyMetrics is {
+    /// Number of CHUNKS sent successfully (write completed
+    /// without wire error).
+    chunks_sent: Shared<AtomicInt>,
+    /// Total BYTES sent across all successful chunks.
+    bytes_sent: Shared<AtomicInt>,
+    /// Wall-clock microseconds since UNIX epoch at the most
+    /// recent successful write. 0 means "no successful write
+    /// yet."
+    last_write_us: Shared<AtomicInt>,
+    /// Count of cancellation events fired against this writer
+    /// (regardless of source — explicit caller cancel(), token
+    /// flip, channel close, …).
+    cancellations: Shared<AtomicInt>,
+};
+
+implement CopyMetrics {
+    public fn new() -> CopyMetrics {
+        CopyMetrics {
+            chunks_sent:    Shared.new(AtomicInt.new(0)),
+            bytes_sent:     Shared.new(AtomicInt.new(0)),
+            last_write_us:  Shared.new(AtomicInt.new(0)),
+            cancellations:  Shared.new(AtomicInt.new(0)),
+        }
+    }
+
+    public fn clone(&self) -> CopyMetrics {
+        CopyMetrics {
+            chunks_sent:    self.chunks_sent.clone(),
+            bytes_sent:     self.bytes_sent.clone(),
+            last_write_us:  self.last_write_us.clone(),
+            cancellations:  self.cancellations.clone(),
+        }
+    }
+
+    /// Record a successful chunk write. `bytes` is the chunk's
+    /// payload size; chunks_sent bumps by 1, bytes_sent by
+    /// `bytes`, last_write_us to the current wall-clock.
+    @inline(always)
+    public fn record_chunk(&self, bytes: Int) {
+        let _ = self.chunks_sent.fetch_add(1, MemoryOrdering.Release);
+        let _ = self.bytes_sent.fetch_add(bytes, MemoryOrdering.Release);
+        let now_us = SystemClock.now().as_microseconds();
+        self.last_write_us.store(now_us, MemoryOrdering.Release);
+    }
+
+    /// Record a cancellation event. Increments the counter; does
+    /// NOT touch chunk/byte totals (those reflect successful
+    /// progress only).
+    @inline(always)
+    public fn record_cancellation(&self) {
+        let _ = self.cancellations.fetch_add(1, MemoryOrdering.Release);
+    }
+
+    /// Single-shot snapshot of all counters. Reads each atomic
+    /// independently — values from different fields may reflect
+    /// slightly different moments under heavy concurrent writes,
+    /// which is fine for monitoring (drift bounded by one
+    /// chunk's wall-clock).
+    public fn snapshot(&self) -> CopyMetricsSnapshot {
+        CopyMetricsSnapshot {
+            chunks_sent:    self.chunks_sent.load(MemoryOrdering.Acquire),
+            bytes_sent:     self.bytes_sent.load(MemoryOrdering.Acquire),
+            last_write_us:  self.last_write_us.load(MemoryOrdering.Acquire),
+            cancellations:  self.cancellations.load(MemoryOrdering.Acquire),
+        }
+    }
+}
+
+/// Plain-value snapshot of CopyMetrics, suitable for serializing
+/// into health/metric endpoints without holding atomic refs.
+public type CopyMetricsSnapshot is {
+    chunks_sent: Int,
+    bytes_sent: Int,
+    last_write_us: Int,
+    cancellations: Int,
+};
+
+implement CopyMetricsSnapshot {
+    /// Microseconds since the last successful write, or `-1` if
+    /// no write yet. Use to drive stall-detection alerts.
+    public fn microseconds_since_last_write(&self) -> Int {
+        if self.last_write_us == 0 { return -1; }
+        let now = SystemClock.now().as_microseconds();
+        if now < self.last_write_us { return 0; }
+        now - self.last_write_us
+    }
+}

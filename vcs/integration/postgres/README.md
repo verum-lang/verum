@@ -167,6 +167,11 @@ Test list per `internal/specs/database.md` follow-up:
   listen + subscribe; side-channel NOTIFY arrives on the
   subscriber's Receiver<Notification> with channel + payload +
   sender_pid populated (spec §6.1.6 + §6.1.8)
+- `t27_async_copy_metrics.vr` — async COPY metrics + cancellation
+  token: chunks_sent/bytes_sent/last_write_us populated after
+  5 chunks; copy_in_async_with_token short-circuits subsequent
+  writes after token.cancel() + bumps cancellations counter
+  (spec §6.1.6 metrics + cancellation)
 
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags
