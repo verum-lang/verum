@@ -446,7 +446,7 @@ implement<T> Maybe<T> {
 // =============================================================================
 
 /// Iterator over Maybe that yields 0 || 1 elements.
-type MaybeIter<T> is { inner: Maybe<T> };
+public type MaybeIter<T> is { inner: Maybe<T> };
 
 implement<T> Iterator for MaybeIter<T> {
     type Item = T;

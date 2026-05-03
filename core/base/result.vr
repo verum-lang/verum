@@ -316,7 +316,7 @@ implement<T, E> Result<T, E> {
 // =============================================================================
 
 /// Iterator over Result that yields 0 || 1 Ok values.
-type ResultIter<T> is { inner: Maybe<T> };
+public type ResultIter<T> is { inner: Maybe<T> };
 
 implement<T> Iterator for ResultIter<T> {
     type Item = T;
