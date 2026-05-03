@@ -4348,6 +4348,60 @@ impl Unifier {
                     subst.insert(var, broken);
                     return Ok(subst);
                 }
+                // #115 — extend cycle-breaking to Function types so HKT
+                // closure-pattern destructuring (`Maybe.Some(f)` where
+                // `f: fn(A) -> B`) doesn't trip the occurs-check when the
+                // outer A/B fresh vars happen to alias internally during
+                // pattern-binding inference. Mirrors the Reference pattern
+                // above: replace each recursive var occurrence in params /
+                // return with a fresh var.
+                //
+                // The semantics matches `Reference` cycle-breaking: we
+                // accept that the function shape stays but its concrete
+                // parameter / return types are unknown. This is sound
+                // because any caller that needs to *invoke* the broken
+                // function will further unify the holes against concrete
+                // types at the call site — if there's a real type error,
+                // it will surface there with a proper Mismatch diagnostic
+                // instead of being masked by an InfiniteType earlier in
+                // the inference walk.
+                Type::Function {
+                    params,
+                    return_type,
+                    contexts,
+                    type_params,
+                    properties,
+                } if params
+                    .iter()
+                    .any(|p| p.free_vars().contains(&var))
+                    || return_type.free_vars().contains(&var) =>
+                {
+                    let new_params: verum_common::List<Type> = params
+                        .iter()
+                        .map(|p| {
+                            if p.free_vars().contains(&var) {
+                                Type::Var(TypeVar::fresh())
+                            } else {
+                                p.clone()
+                            }
+                        })
+                        .collect();
+                    let new_return = if return_type.free_vars().contains(&var) {
+                        Box::new(Type::Var(TypeVar::fresh()))
+                    } else {
+                        return_type.clone()
+                    };
+                    let broken = Type::Function {
+                        params: new_params,
+                        return_type: new_return,
+                        contexts: contexts.clone(),
+                        type_params: type_params.clone(),
+                        properties: properties.clone(),
+                    };
+                    let mut subst = Substitution::new();
+                    subst.insert(var, broken);
+                    return Ok(subst);
+                }
                 _ => {
                     return Err(TypeError::InfiniteType {
                         var: var.to_text(),
