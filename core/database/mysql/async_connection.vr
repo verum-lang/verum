@@ -130,6 +130,18 @@ public type LoadDataChunk is
 public type AsyncMysqlConnection is {
     tx: Sender<MysqlRequest>,
     join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    /// MySQL thread-id (server's `connection_id` from initial
+    /// handshake). Required input to `KILL QUERY <id>`. Captured
+    /// once at connect time so cancel doesn't round-trip the
+    /// busy actor.
+    connection_id: Int,
+    /// Cached MysqlConfig — the side-cancel session re-opens
+    /// against the same server using these credentials.
+    /// `KILL QUERY` only works when the killer is the same user
+    /// (or has PROCESS privilege); using the same cfg keeps
+    /// it inside MySQL's same-user gate without any extra
+    /// privilege.
+    cancel_cfg: MysqlConfig,
 };
 
 implement AsyncMysqlConnection {
@@ -137,10 +149,79 @@ implement AsyncMysqlConnection {
         AsyncMysqlConnection {
             tx: self.tx.clone(),
             join: self.join.clone(),
+            connection_id: self.connection_id,
+            cancel_cfg: self.cancel_cfg.clone(),
         }
     }
 
     public fn tx_ref(&self) -> &Sender<MysqlRequest> { &self.tx }
+
+    /// Cached MySQL connection_id (thread id). Required input
+    /// to KILL QUERY. Returns 0 when the handshake didn't
+    /// populate it (extremely rare — pre-3.21 servers).
+    public fn connection_id(&self) -> Int { self.connection_id }
+
+    /// Issue `KILL QUERY <connection_id>` from a fresh side
+    /// connection to abort the current statement on the actor's
+    /// connection. Best-effort — server may have already
+    /// finished the query.
+    ///
+    /// Bypasses the actor entirely: spawn_blocking opens a fresh
+    /// sync MysqlConnection using the cached cfg, sends the
+    /// KILL command, closes. The actor's connection stays
+    /// blocked on its current read, but the server-side query
+    /// terminates with ER_QUERY_INTERRUPTED so the actor's
+    /// recv_packet returns with that error.
+    public async fn cancel_running_query(&self) -> Result<(), DbError> {
+        if self.connection_id == 0 {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "CANCEL_NO_CONN_ID".clone(),
+                message: "connection_id absent — handshake didn't populate".clone(),
+                retryable: false,
+            }));
+        }
+        self.fire_kill(false).await
+    }
+
+    /// Issue bare `KILL <connection_id>` — terminates the entire
+    /// session, not just the running statement. Use sparingly:
+    /// the actor's wire dies + every subsequent request fails
+    /// with ACTOR_CLOSED.
+    public async fn cancel_session(&self) -> Result<(), DbError> {
+        if self.connection_id == 0 {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "CANCEL_NO_CONN_ID".clone(),
+                message: "connection_id absent — handshake didn't populate".clone(),
+                retryable: false,
+            }));
+        }
+        self.fire_kill(true).await
+    }
+
+    async fn fire_kill(&self, full_session: Bool) -> Result<(), DbError> {
+        let cfg = self.cancel_cfg.clone();
+        let conn_id = self.connection_id;
+        let jh = spawn_blocking(move || -> Result<(), DbError> {
+            let mut side = sync_connect(&cfg)?;
+            let sql = if full_session {
+                f"KILL {conn_id}"
+            } else {
+                f"KILL QUERY {conn_id}"
+            };
+            let r = side.simple_query(&sql);
+            let _ = side.close();
+            match r {
+                Ok(_)  => Ok(()),
+                Err(e) => Err(e),
+            }
+        });
+        match jh.join().await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("cancel: blocking-pool join")),
+        }
+    }
 
     public async fn simple_query(&self, sql: &Text)
         -> Result<MySimpleQueryResult, DbError>
@@ -232,6 +313,7 @@ public async fn connect(
     mailbox_capacity: Int,
 ) -> Result<AsyncMysqlConnection, DbError> {
     let cfg_owned = cfg.clone();
+    let cancel_cfg = cfg.clone();
     let conn_jh = spawn_blocking(move || -> Result<MysqlConnection, DbError> {
         sync_connect(&cfg_owned)
     });
@@ -239,6 +321,11 @@ public async fn connect(
         Ok(r)  => r?,
         Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
     };
+
+    // Snapshot connection_id BEFORE handing the conn to the
+    // actor — once the actor owns it, we can no longer read
+    // from the sync handle.
+    let connection_id = conn.connection_id();
 
     let cap = if mailbox_capacity < 1 { 1 } else { mailbox_capacity };
     let (tx, rx) = bounded_channel::<MysqlRequest>(cap);
@@ -250,6 +337,8 @@ public async fn connect(
     Ok(AsyncMysqlConnection {
         tx: tx,
         join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        connection_id: connection_id,
+        cancel_cfg: cancel_cfg,
     })
 }
 
