@@ -2432,9 +2432,10 @@ fn print_kernel_soundness_report_json(
 
 /// Output: `target/audit-reports/kernel-v0-roster.json`.
 pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::soundness::DischargeStatus;
     use verum_kernel::soundness::kernel_v0_manifest::{
-        KERNEL_V0_RULE_COUNT, KernelV0Status, ManifestIssue, admitted_count, manifest,
-        proved_count, verify_manifest_with_search_roots,
+        KERNEL_V0_RULE_COUNT, ManifestIssue, admitted_count, manifest, proved_count,
+        verify_manifest_with_search_roots,
     };
 
     if matches!(format, AuditFormat::Plain) {
@@ -2473,7 +2474,7 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
                 "file_path": r.file_path.to_string_lossy(),
                 "status": r.status.tag(),
                 "description": r.description,
-                "iou_citation": r.iou_citation,
+                "iou_citation": r.status.iou().unwrap_or(""),
             }))
             .collect::<Vec<_>>(),
         "issues": issues
@@ -2516,9 +2517,10 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
             );
             println!();
             for r in &rules {
-                let status_glyph = match r.status {
-                    KernelV0Status::Proved => "✓",
-                    KernelV0Status::Admitted => "○",
+                let status_glyph = match &r.status {
+                    DischargeStatus::Discharged => "✓",
+                    DischargeStatus::AdmittedWithIou { .. } => "○",
+                    DischargeStatus::NotYetAttested => "·",
                 };
                 println!(
                     "  {} {:<14}  {:<22}  {}",
@@ -2527,8 +2529,8 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
                     r.lemma_symbol,
                     r.file_path.display(),
                 );
-                if !r.iou_citation.is_empty() {
-                    println!("       IOU: {}", r.iou_citation);
+                if let Some(iou) = r.status.iou() {
+                    println!("       IOU: {}", iou);
                 }
             }
             if issues.is_empty() {

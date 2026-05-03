@@ -60,53 +60,18 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
-// KernelV0Status — discharge classification
-// =============================================================================
-
-/// Discharge status for one bootstrap-meta-theory rule. Mirrors
-/// [`super::LemmaStatus`] but is **manifest-local**: pre-this-module
-/// the canonical-rules roster lived only in
-/// [`super::canonical_rules`] (38 rules of the broader kernel),
-/// while `kernel_v0/`'s 10-rule subset had no programmatic surface.
-/// Adding it here keeps the bootstrap-manifest data layer
-/// self-contained.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum KernelV0Status {
-    /// Soundness lemma proved structurally — no IOU.
-    Proved,
-    /// Soundness lemma admitted with a structural-property IOU
-    /// (substitution-lemma, β-confluence, etc.).
-    Admitted,
-}
-
-impl KernelV0Status {
-    /// Stable diagnostic tag — matches the serde representation.
-    pub fn tag(self) -> &'static str {
-        match self {
-            KernelV0Status::Proved => "proved",
-            KernelV0Status::Admitted => "admitted",
-        }
-    }
-
-    /// Human-readable display name.
-    pub fn display_name(self) -> &'static str {
-        match self {
-            KernelV0Status::Proved => "Proved",
-            KernelV0Status::Admitted => "Admitted",
-        }
-    }
-}
-
-impl std::fmt::Display for KernelV0Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.display_name())
-    }
-}
-
-// =============================================================================
 // KernelV0Rule — one row in the manifest
 // =============================================================================
+//
+// **Status field uses the canonical [`DischargeStatus`] enum** from
+// `super::discharge_status`. Pre-unification this manifest carried a
+// local `KernelV0Status { Proved | Admitted }` enum + a separate
+// `iou_citation: String` field. Both have been migrated to the
+// canonical type — IOU embedded in the `AdmittedWithIou` variant,
+// single source of truth across kernel_v0 + codegen attestation
+// manifests.
+
+use super::discharge_status::DischargeStatus;
 
 /// One bootstrap-meta-theory rule + its file location + its
 /// discharge status. The `file_path` is RELATIVE to a Verum project
@@ -124,12 +89,26 @@ pub struct KernelV0Rule {
     pub lemma_symbol: String,
     /// Project-relative path to the rule's source file.
     pub file_path: PathBuf,
-    /// Discharge status.
-    pub status: KernelV0Status,
+    /// Discharge status — the canonical
+    /// [`DischargeStatus`] enum. `Discharged` for structurally-proved
+    /// rules; `AdmittedWithIou { iou }` for admitted rules where the
+    /// `iou` payload carries the citation that the legacy surface
+    /// used to keep in a separate `iou_citation` field. Bootstrap
+    /// rules always have at least an admit citation, so the
+    /// `NotYetAttested` variant is never constructed by this
+    /// manifest.
+    pub status: DischargeStatus,
     /// One-line description of what the rule asserts.
     pub description: String,
-    /// IOU citation when `Admitted`; empty when `Proved`.
-    pub iou_citation: String,
+}
+
+/// Backward-compatibility shim — reads the IOU payload from the
+/// `status` field. Previously the manifest carried a separate
+/// `iou_citation: String` field; consumers that read it now go
+/// through this accessor. Returns the empty string when the rule is
+/// `Discharged` or `NotYetAttested`.
+pub fn iou_citation(rule: &KernelV0Rule) -> &str {
+    rule.status.iou().unwrap_or("")
 }
 
 // =============================================================================
@@ -166,81 +145,83 @@ pub fn manifest() -> Vec<KernelV0Rule> {
             name: "K-Var".to_string(),
             lemma_symbol: "k_var_sound".to_string(),
             file_path: rules_dir.join("k_var.vr"),
-            status: KernelV0Status::Proved,
+            status: DischargeStatus::Discharged,
             description: "Variable lookup in context".to_string(),
-            iou_citation: String::new(),
         },
         KernelV0Rule {
             name: "K-Univ".to_string(),
             lemma_symbol: "k_univ_sound".to_string(),
             file_path: rules_dir.join("k_univ.vr"),
-            status: KernelV0Status::Proved,
+            status: DischargeStatus::Discharged,
             description: "Universe stratification: Universe(n) : Universe(n+1)".to_string(),
-            iou_citation: String::new(),
         },
         KernelV0Rule {
             name: "K-Pi-Form".to_string(),
             lemma_symbol: "k_pi_form_sound".to_string(),
             file_path: rules_dir.join("k_pi_form.vr"),
-            status: KernelV0Status::Admitted,
+            status: DischargeStatus::AdmittedWithIou {
+                iou: "kind-preservation lemma for Π-forms (textbook CIC)".to_string(),
+            },
             description: "Pi-type formation: (A:U(n))→(B:U(m)) lives in U(max(n,m))".to_string(),
-            iou_citation: "kind-preservation lemma for Π-forms (textbook CIC)".to_string(),
         },
         KernelV0Rule {
             name: "K-Lam-Intro".to_string(),
             lemma_symbol: "k_lam_intro_sound".to_string(),
             file_path: rules_dir.join("k_lam_intro.vr"),
-            status: KernelV0Status::Admitted,
+            status: DischargeStatus::AdmittedWithIou {
+                iou: "context-extension lemma (substitution-stable)".to_string(),
+            },
             description: "Lambda introduction: body-type-under-binder gives Pi type".to_string(),
-            iou_citation: "context-extension lemma (substitution-stable)".to_string(),
         },
         KernelV0Rule {
             name: "K-App-Elim".to_string(),
             lemma_symbol: "k_app_elim_sound".to_string(),
             file_path: rules_dir.join("k_app_elim.vr"),
-            status: KernelV0Status::Admitted,
+            status: DischargeStatus::AdmittedWithIou {
+                iou: "substitution-lemma (textbook CIC)".to_string(),
+            },
             description: "Apply elimination + substitution".to_string(),
-            iou_citation: "substitution-lemma (textbook CIC)".to_string(),
         },
         KernelV0Rule {
             name: "K-Beta".to_string(),
             lemma_symbol: "k_beta_sound".to_string(),
             file_path: rules_dir.join("k_beta.vr"),
-            status: KernelV0Status::Admitted,
+            status: DischargeStatus::AdmittedWithIou {
+                iou: "β-confluence + type-preservation (Church-Rosser)".to_string(),
+            },
             description: "Beta-reduction (λx.M) N ⤳ M[N/x] is type-preserving".to_string(),
-            iou_citation: "β-confluence + type-preservation (Church-Rosser)".to_string(),
         },
         KernelV0Rule {
             name: "K-Eta".to_string(),
             lemma_symbol: "k_eta_sound".to_string(),
             file_path: rules_dir.join("k_eta.vr"),
-            status: KernelV0Status::Admitted,
+            status: DischargeStatus::AdmittedWithIou {
+                iou: "function-extensionality (Hofmann-Streicher 1996)".to_string(),
+            },
             description: "Eta-equivalence λx.(f x) ≡ f when x ∉ FV(f)".to_string(),
-            iou_citation: "function-extensionality (Hofmann-Streicher 1996)".to_string(),
         },
         KernelV0Rule {
             name: "K-Sub".to_string(),
             lemma_symbol: "k_sub_sound".to_string(),
             file_path: rules_dir.join("k_sub.vr"),
-            status: KernelV0Status::Admitted,
+            status: DischargeStatus::AdmittedWithIou {
+                iou: "cumulativity preservation across reduction".to_string(),
+            },
             description: "Subtyping (universe cumulativity)".to_string(),
-            iou_citation: "cumulativity preservation across reduction".to_string(),
         },
         KernelV0Rule {
             name: "K-FwAx".to_string(),
             lemma_symbol: "k_fwax_sound".to_string(),
             file_path: rules_dir.join("k_fwax.vr"),
-            status: KernelV0Status::Proved,
+            status: DischargeStatus::Discharged,
             description: "Foundation-aware axiom admission (Prop-only)".to_string(),
-            iou_citation: String::new(),
         },
         KernelV0Rule {
             name: "K-Pos".to_string(),
             lemma_symbol: "k_pos_sound".to_string(),
             file_path: rules_dir.join("k_pos.vr"),
-            status: KernelV0Status::Proved,
+            status: DischargeStatus::Discharged,
             description: "Positivity check (Berardi 1998 — non-positive ⇒ ⊥)".to_string(),
-            iou_citation: String::new(),
         },
     ]
 }
@@ -249,21 +230,14 @@ pub fn manifest() -> Vec<KernelV0Rule> {
 /// "10 minimal rules" table in `core/verify/kernel_v0/README.md`.
 pub const KERNEL_V0_RULE_COUNT: usize = 10;
 
-/// Number of rules currently in `Proved` status (no IOU).
+/// Number of rules currently in `Discharged` status (no IOU).
 pub fn proved_count() -> usize {
-    manifest()
-        .iter()
-        .filter(|r| r.status == KernelV0Status::Proved)
-        .count()
+    manifest().iter().filter(|r| r.status.is_discharged()).count()
 }
 
-/// Number of rules currently in `Admitted` status (with structural
-/// IOU).
+/// Number of rules currently in `AdmittedWithIou` status.
 pub fn admitted_count() -> usize {
-    manifest()
-        .iter()
-        .filter(|r| r.status == KernelV0Status::Admitted)
-        .count()
+    manifest().iter().filter(|r| r.status.is_admitted()).count()
 }
 
 // =============================================================================
@@ -516,10 +490,10 @@ mod tests {
     #[test]
     fn proved_rules_have_no_iou_citation() {
         for rule in manifest() {
-            if rule.status == KernelV0Status::Proved {
+            if rule.status.is_discharged() {
                 assert!(
-                    rule.iou_citation.is_empty(),
-                    "Proved rule {:?} must not carry an IOU citation",
+                    rule.status.iou().is_none(),
+                    "Discharged rule {:?} must not carry an IOU citation",
                     rule.name,
                 );
             }
@@ -529,9 +503,9 @@ mod tests {
     #[test]
     fn admitted_rules_carry_iou_citation() {
         for rule in manifest() {
-            if rule.status == KernelV0Status::Admitted {
+            if rule.status.is_admitted() {
                 assert!(
-                    !rule.iou_citation.is_empty(),
+                    rule.status.iou().is_some_and(|iou| !iou.is_empty()),
                     "Admitted rule {:?} must carry an IOU citation describing the missing structural lemma",
                     rule.name,
                 );
@@ -541,10 +515,16 @@ mod tests {
 
     #[test]
     fn status_serde_round_trip() {
-        for status in [KernelV0Status::Proved, KernelV0Status::Admitted] {
-            let json = serde_json::to_string(&status).unwrap();
-            let restored: KernelV0Status = serde_json::from_str(&json).unwrap();
-            assert_eq!(restored, status);
+        let states = [
+            DischargeStatus::Discharged,
+            DischargeStatus::AdmittedWithIou {
+                iou: "test".to_string(),
+            },
+        ];
+        for status in &states {
+            let json = serde_json::to_string(status).unwrap();
+            let restored: DischargeStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(&restored, status);
         }
     }
 
@@ -558,12 +538,12 @@ mod tests {
 
     #[test]
     fn proved_rules_match_canonical_set() {
-        // The 4 structurally-proved rules. Mirrors the README's
+        // The 4 structurally-discharged rules. Mirrors the README's
         // "Proved" rows and `verum_kernel::proof_checker`'s
         // hand-audit set.
         let proved: std::collections::BTreeSet<_> = manifest()
             .iter()
-            .filter(|r| r.status == KernelV0Status::Proved)
+            .filter(|r| r.status.is_discharged())
             .map(|r| r.name.clone())
             .collect();
         let expected: std::collections::BTreeSet<_> = ["K-Var", "K-Univ", "K-FwAx", "K-Pos"]

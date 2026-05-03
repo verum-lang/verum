@@ -437,14 +437,13 @@ mod tests {
     /// Build a minimal `KernelV0Rule` for synthetic-path tests so we
     /// don't have to materialise the full manifest.
     fn synthetic_rule(name: &str) -> KernelV0Rule {
-        use kernel_v0_manifest::KernelV0Status;
+        use crate::soundness::DischargeStatus;
         KernelV0Rule {
             name: name.to_string(),
             lemma_symbol: format!("k_{}_sound", name.to_ascii_lowercase()),
             file_path: std::path::PathBuf::from("verify/kernel_v0/rules/k_synth.vr"),
-            status: KernelV0Status::Proved,
+            status: DischargeStatus::Discharged,
             description: "synthetic test rule".to_string(),
-            iou_citation: String::new(),
         }
     }
 
