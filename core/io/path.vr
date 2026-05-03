@@ -193,31 +193,37 @@ implement Path {
     /// ```verum
     /// let path = Path.new("/home/user");
     /// ```
+    @inline(always)
     public fn new(s: &Text) -> Path {
         Path { inner: s.clone() }
     }
 
     /// Create path from raw string.
+    @inline(always)
     public fn from_str(s: &str) -> Path {
         Path { inner: Text.from(s) }
     }
 
     /// Get the path as a Text reference.
+    @inline(always)
     public fn as_str(&self) -> &Text {
         &self.inner
     }
 
     /// Convert to owned Text.
+    @inline(always)
     public fn to_text(&self) -> Text {
         self.inner.clone()
     }
 
     /// Convert to owned PathBuf.
+    @inline(always)
     public fn to_path_buf(&self) -> PathBuf {
         PathBuf { inner: self.inner.clone() }
     }
 
     /// Check if the path is empty.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.inner.is_empty()
     }
@@ -256,11 +262,13 @@ implement Path {
     }
 
     /// Check if the path is relative.
+    @inline(always)
     public fn is_relative(&self) -> Bool {
         !self.is_absolute()
     }
 
     /// Check if path has a root.
+    @inline(always)
     public fn has_root(&self) -> Bool {
         self.is_absolute()
     }
