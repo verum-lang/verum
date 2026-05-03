@@ -72,6 +72,7 @@ implement<T, E> Result<T, E> {
     // =========================================================================
 
     /// Convert to Maybe<T>, discarding the error.
+    @inline(always)
     public fn ok(self) -> Maybe<T> {
         match self {
             Ok(v) => Some(v),
@@ -80,6 +81,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Convert to Maybe<E>, discarding the success value.
+    @inline(always)
     public fn err(self) -> Maybe<E> {
         match self {
             Ok(_) => None,
@@ -92,6 +94,7 @@ implement<T, E> Result<T, E> {
     // =========================================================================
 
     /// Unwrap the Ok value, panicking if Err.
+    @inline(always)
     public fn unwrap(self) -> T
     where E: Debug {
         match self {
@@ -101,6 +104,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Unwrap the Err value, panicking if Ok.
+    @inline(always)
     public fn unwrap_err(self) -> E
     where T: Debug {
         match self {
@@ -110,6 +114,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Unwrap with a custom panic message.
+    @inline(always)
     public fn expect(self, msg: &Text) -> T
     where E: Debug {
         match self {
@@ -119,6 +124,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Unwrap error with a custom panic message.
+    @inline(always)
     public fn expect_err(self, msg: &Text) -> E
     where T: Debug {
         match self {
@@ -128,6 +134,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Return Ok value || a default.
+    @inline(always)
     public fn unwrap_or(self, default: T) -> T {
         match self {
             Ok(v) => v,
@@ -136,6 +143,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Return Ok value || compute default from error.
+    @inline(always)
     public fn unwrap_or_else<F: fn(E) -> T>(self, f: F) -> T {
         match self {
             Ok(v) => v,
@@ -144,6 +152,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Return Ok value || the type's default.
+    @inline(always)
     public fn unwrap_or_default(self) -> T
     where T: Default {
         match self {
@@ -157,6 +166,7 @@ implement<T, E> Result<T, E> {
     // =========================================================================
 
     /// Transform the Ok value.
+    @inline(always)
     public fn map<U, F: fn(T) -> U>(self, f: F) -> Result<U, E> {
         match self {
             Ok(v) => Ok(f(v)),
@@ -165,6 +175,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Transform the Err value.
+    @inline(always)
     public fn map_err<F, O: fn(E) -> F>(self, f: O) -> Result<T, F> {
         match self {
             Ok(v) => Ok(v),
