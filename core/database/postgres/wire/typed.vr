@@ -99,7 +99,13 @@ public type TypedValue is
     | TvTime(Int)               // microseconds since midnight
     | TvTimestamp(Int)          // microseconds since 2000-01-01 00:00:00 (naive)
     | TvTimestamptz(Int)        // microseconds since 2000-01-01 00:00:00 UTC
-    | TvInterval(TypedInterval);
+    | TvInterval(TypedInterval)
+    /// Composite / record — anonymous (PG_TYPE_RECORD = 2249) OR
+    /// any user-defined composite type. PG binary wire is
+    /// SELF-DESCRIBING per field (each field carries its own
+    /// type_oid), so the same encoder/decoder works for both
+    /// flavours regardless of the outer OID.
+    | TvComposite(TypedComposite);
 
 public type TypedInet is {
     family: Int,                // 2 = IPv4, 3 = IPv6
@@ -135,6 +141,22 @@ public type TypedInterval is {
     microseconds: Int,
 };
 
+/// One field of a composite/record value. `type_oid` carries the
+/// per-field PG OID (the wire is self-describing); `value` is
+/// `None` for SQL NULL fields.
+public type TypedField is {
+    type_oid: Int,
+    value: Maybe<TypedValue>,
+};
+
+/// Composite / record value. Field positions are significant
+/// (matches the schema's column order); names are NOT carried in
+/// V0 — callers using user-defined composite types pair positions
+/// with their own schema-aware accessor.
+public type TypedComposite is {
+    fields: List<TypedField>,
+};
+
 implement TypedValue {
     public fn is_null(&self) -> Bool {
         match self { TvNull => true, _ => false }
@@ -165,6 +187,7 @@ implement TypedValue {
             TvTimestamp(_) => "timestamp".clone(),
             TvTimestamptz(_)=> "timestamptz".clone(),
             TvInterval(_)  => "interval".clone(),
+            TvComposite(_) => "composite".clone(),
         }
     }
 }
@@ -519,7 +542,14 @@ public fn encode_typed(
             _ => return Err(encode_fault(f"oid array, got {value.type_name()}")),
         }
     } else {
-        return Err(encode_fault(f"oid {oid}: no codec dispatch entry"));
+        // Catch-all: composite / record / user-defined composite.
+        // The wire is self-describing per field, so we don't need
+        // a pg_type registry for the outer OID — TvComposite +
+        // any OID dispatches to encode_composite.
+        match value {
+            TvComposite(c) => encode_composite(buf, arena, c)?,
+            _ => return Err(encode_fault(f"oid {oid}: no codec dispatch entry")),
+        }
     };
 
     if !ok {
@@ -772,9 +802,145 @@ public fn decode_typed(
     } else if element_oid_for_array(oid).is_some() {
         let elem_oid = element_oid_for_array(oid).unwrap();
         decode_array_typed(slice, arena, elem_oid)
+    } else if oid == PG_TYPE_RECORD {
+        // Anonymous record (OID 2249). User-defined composites
+        // have allocated OIDs the caller knows from pg_type;
+        // they should call decode_composite_at(slice, arena)
+        // directly when they recognise their OID.
+        decode_composite_at(slice, arena)
     } else {
         Err(decode_fault(f"oid {oid}: no decoder registered"))
     }
+}
+
+// =============================================================================
+// Composite / record encoders + decoders
+// =============================================================================
+//
+// PG binary composite wire (per src/backend/utils/adt/rowtypes.c
+// `record_send`):
+//
+//   ncolumns:i32
+//   per column:
+//     type_oid:i32     — each field's OID (self-describing).
+//     length:i32       — `-1` for SQL NULL.
+//     bytes:[length]   — per-OID binary encoding.
+
+fn encode_composite(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    c: &TypedComposite,
+) -> Result<Bool, DbError> {
+    let n = c.fields.len() as Int;
+    if !buf.put_i32_be(arena, n) { return Ok(false); }
+    let mut i: Int = 0;
+    while i < n {
+        let f = &c.fields[i];
+        if !buf.put_i32_be(arena, f.type_oid) { return Ok(false); }
+        match &f.value {
+            None => {
+                if !buf.put_i32_be(arena, -1) { return Ok(false); }
+            }
+            Some(v) => {
+                // Encode the field into a scratch arena buffer,
+                // copy bytes out + rewind. Same pattern as
+                // encode_typed_array / encode_params_for_bind.
+                let scope = core.database.common.arena.ArenaScope.begin(
+                    arena,
+                    core.database.common.arena.ApQuery,
+                );
+                let mut sub = ArenaWireBuf.with_arena(arena, 32);
+                match encode_typed(f.type_oid, v, &mut sub, arena) {
+                    Ok(_) => {
+                        let slice = sub.as_slice();
+                        // Write length prefix then bytes.
+                        if !buf.put_i32_be(arena, slice.len) {
+                            scope.discard(arena);
+                            return Ok(false);
+                        }
+                        let mut k: Int = 0;
+                        while k < slice.len {
+                            let b = (load_byte(slice.ptr + k) & 0xFF) as Int;
+                            if !buf.put_u8(arena, b) {
+                                scope.discard(arena);
+                                return Ok(false);
+                            }
+                            k = k + 1;
+                        }
+                        scope.discard(arena);
+                    }
+                    Err(e) => {
+                        scope.discard(arena);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    Ok(true)
+}
+
+/// Decode a composite/record value from `slice`. Public so callers
+/// who know an "unknown" OID is actually a user-defined composite
+/// can dispatch it directly.
+public fn decode_composite_at(
+    slice: &ArenaSlice,
+    arena: &SpindleArena,
+) -> Result<TypedValue, DbError> {
+    let ncols = slice_i32_be_or_err(slice, 0, "composite.ncolumns")?;
+    if ncols < 0 || ncols > 4096 {
+        return Err(decode_fault(f"composite: ncolumns {ncols} out of range"));
+    }
+    let mut off: Int = 4;
+    let mut fields: List<TypedField> = List.with_capacity(ncols);
+    let mut i: Int = 0;
+    while i < ncols {
+        let oid = slice_i32_be_or_err(slice, off, "composite.field.oid")?;
+        off = off + 4;
+        let len = slice_i32_be_or_err(slice, off, "composite.field.len")?;
+        off = off + 4;
+        if len < 0 {
+            fields.push(TypedField { type_oid: oid, value: None });
+        } else {
+            let body = subslice_or_err(slice, off, len, "composite.field.body")?;
+            let v = decode_typed(oid, &body, arena)?;
+            fields.push(TypedField { type_oid: oid, value: Some(v) });
+            off = off + len;
+        }
+        i = i + 1;
+    }
+    Ok(TvComposite(TypedComposite { fields: fields }))
+}
+
+fn slice_i32_be_or_err(slice: &ArenaSlice, off: Int, what: &str) -> Result<Int, DbError> {
+    if (slice.len < off + 4) {
+        return Err(decode_fault(f"{what} truncated"));
+    }
+    let p = slice.ptr + off;
+    let b0 = (load_byte(p)     & 0xFF) << 24;
+    let b1 = (load_byte(p + 1) & 0xFF) << 16;
+    let b2 = (load_byte(p + 2) & 0xFF) << 8;
+    let b3 = (load_byte(p + 3) & 0xFF);
+    let u = b0 | b1 | b2 | b3;
+    if (u & 0x80000000) != 0 {
+        Ok(u | (-1 ^ 0xFFFFFFFF))
+    } else {
+        Ok(u)
+    }
+}
+
+fn subslice_or_err(slice: &ArenaSlice, off: Int, n: Int, what: &str)
+    -> Result<ArenaSlice, DbError>
+{
+    if slice.len < off + n {
+        return Err(decode_fault(f"{what}: subslice out of range"));
+    }
+    Ok(ArenaSlice {
+        ptr: slice.ptr + off,
+        len: n,
+        generation: slice.generation,
+    })
 }
 
 // =============================================================================

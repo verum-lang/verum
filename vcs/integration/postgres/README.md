@@ -137,3 +137,8 @@ Test list per `internal/specs/database.md` follow-up:
   prepare_cached double-call asserts cache hit; query_cached
   round-trip; drain_cache_on_close issues Close(S, name) for
   every cached slot (spec §6.1.4 prepared cache)
+- `t22_composite.vr` — composite/record binary round-trip:
+  SELECT ROW(42, 'spindle', 1.5)::record decoded as TvComposite
+  with 3 typed fields; CREATE TYPE smoke_pair (n int4, s text)
+  + SELECT ROW(99, 'beta')::smoke_pair exercises user-defined
+  composite path (spec §6.1.4 composite codec)
