@@ -1507,8 +1507,58 @@ pub(in super::super) fn handle_call_method(
         return Ok(DispatchResult::Continue);
     }
 
+    // Method not found anywhere — emit a diagnostic that pins down the
+    // *runtime* shape of the receiver and, when the receiver carries
+    // an object-tag, lists the methods that DO exist on it. The
+    // previous one-line "method 'X' not found on value" message gave
+    // no hint about what the receiver actually was, which made every
+    // stdlib bug-class-skip surface look identical at runtime
+    // (`has_next` / `into` / `clone` / ... all flattened to the same
+    // string). The structured form below routes to
+    // `verum diagnose` consumers and is also human-readable.
+    let receiver_kind = if receiver.is_int() {
+        "Int"
+    } else if receiver.is_float() {
+        "Float"
+    } else if receiver.is_bool() {
+        "Bool"
+    } else if receiver.is_unit() {
+        "()"
+    } else if receiver.is_nil() {
+        "<nil>"
+    } else if receiver.is_small_string() {
+        "Text<small>"
+    } else if receiver.is_generator() {
+        "Generator"
+    } else if receiver.is_func_ref() {
+        "FunctionRef"
+    } else if receiver.is_type_ref() {
+        "TypeRef"
+    } else if receiver.is_thin_ref() {
+        "ThinRef"
+    } else if receiver.is_fat_ref() {
+        "FatRef"
+    } else if receiver.is_cbgr_ref() {
+        "CbgrRef"
+    } else if receiver.is_regular_ptr() {
+        "Object"
+    } else {
+        "<unknown-tag>"
+    };
     Err(InterpreterError::Panic {
-        message: format!("method '{}' not found on value", method_name),
+        message: format!(
+            "method '{}' not found on receiver of runtime kind `{}`. \
+             This typically indicates one of three architectural gaps: \
+             (1) the stdlib function defining `{}` was lenient-skipped \
+             at compile time (look for `[lenient] SKIP ... bug-class` \
+             warnings on stderr); (2) the receiver's monomorphised \
+             type lost a method-table entry during VBC codegen \
+             (open a verum-vbc report); (3) the call site dispatched \
+             to the wrong protocol implementation. Run with \
+             `RUST_BACKTRACE=1 RUST_LOG=verum_vbc=debug` for the \
+             dispatch trace.",
+            method_name, receiver_kind, method_name
+        ),
     })
 }
 
