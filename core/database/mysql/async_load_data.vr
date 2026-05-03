@@ -82,12 +82,35 @@ mount core.async.channel.{
 /// the chunk channel closes.
 public type affine AsyncMysqlInfileWriter is {
     chunk_tx: Sender<LoadDataChunk>,
+    metrics: core.database.common.copy_metrics.CopyMetrics,
+    token: Maybe<core.async.cancellation.CancellationToken>,
 };
 
 implement AsyncMysqlInfileWriter {
+    public fn metrics(&self) -> core.database.common.copy_metrics.CopyMetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
     public async fn write(&self, bytes: List<Byte>) -> Result<(), DbError> {
+        match &self.token {
+            Some(t) => {
+                if t.is_cancelled() {
+                    self.metrics.record_cancellation();
+                    let _ = self.chunk_tx.send_async(LdcCancel {
+                        reason: "cancellation token fired".clone(),
+                        reply: oneshot::<Result<(), DbError>>().0,
+                    }).await;
+                    return Err(cancelled_err("load_data.write"));
+                }
+            }
+            None => {}
+        }
+        let n = bytes.len() as Int;
         match self.chunk_tx.send_async(LdcBytes(bytes)).await {
-            Ok(())  => Ok(()),
+            Ok(())  => {
+                self.metrics.record_chunk(n);
+                Ok(())
+            }
             Err(_)  => Err(actor_dropped("load_data.write")),
         }
     }
@@ -105,6 +128,7 @@ implement AsyncMysqlInfileWriter {
     }
 
     public async fn cancel(self, reason: &Text) -> Result<(), DbError> {
+        self.metrics.record_cancellation();
         let (rs, rr) = oneshot();
         match self.chunk_tx.send_async(LdcCancel {
             reason: reason.clone(),
@@ -139,6 +163,18 @@ public async fn load_data_local_async(
     sql: &Text,
     chunk_capacity: Int,
 ) -> Result<AsyncMysqlInfileWriter, DbError> {
+    load_data_local_async_with_token(conn, sql, chunk_capacity, None).await
+}
+
+/// Sibling that wires a caller-side CancellationToken. When the
+/// token flips, the next `write` short-circuits with CANCELLED
+/// and emits a best-effort LdcCancel to the actor.
+public async fn load_data_local_async_with_token(
+    conn: &AsyncMysqlConnection,
+    sql: &Text,
+    chunk_capacity: Int,
+    token: Maybe<core.async.cancellation.CancellationToken>,
+) -> Result<AsyncMysqlInfileWriter, DbError> {
     let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
     let (chunk_tx, chunk_rx) = bounded_channel::<LoadDataChunk>(cap);
     let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
@@ -156,7 +192,20 @@ public async fn load_data_local_async(
         Ok(Err(e))  => { return Err(e); }
         Err(_)      => { return Err(actor_dropped("load_data_local_async ack")); }
     }
-    Ok(AsyncMysqlInfileWriter { chunk_tx: chunk_tx })
+    Ok(AsyncMysqlInfileWriter {
+        chunk_tx: chunk_tx,
+        metrics: core.database.common.copy_metrics.CopyMetrics.new(),
+        token: token,
+    })
+}
+
+fn cancelled_err(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "CANCELLED".clone(),
+        message: f"async LOAD DATA cancelled at {what}",
+        retryable: false,
+    })
 }
 
 // =============================================================================

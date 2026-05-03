@@ -79,12 +79,44 @@ mount core.async.channel.{
 /// the chunk channel closes.
 public type affine AsyncCopyInWriter is {
     chunk_tx: Sender<CopyInChunk>,
+    /// Per-writer metric counters. Cloneable Shared atomics —
+    /// `metrics()` returns a CopyMetricsSnapshot at any time.
+    metrics: core.database.common.copy_metrics.CopyMetrics,
+    /// Optional caller-side cancellation. When triggered, the
+    /// next `write` call short-circuits and emits a CicCancel
+    /// to the actor (best-effort wire-cancel).
+    token: Maybe<core.async.cancellation.CancellationToken>,
 };
 
 implement AsyncCopyInWriter {
+    /// Snapshot the per-writer atomic counters. Cheap (4 atomic
+    /// loads); safe to call from any task.
+    public fn metrics(&self) -> core.database.common.copy_metrics.CopyMetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
     public async fn write(&self, bytes: List<Byte>) -> Result<(), DbError> {
+        // Cancellation gate — short-circuit if the caller
+        // flipped the token.
+        match &self.token {
+            Some(t) => {
+                if t.is_cancelled() {
+                    self.metrics.record_cancellation();
+                    let _ = self.chunk_tx.send_async(CicCancel {
+                        reason: "cancellation token fired".clone(),
+                        reply: oneshot::<Result<(), DbError>>().0,
+                    }).await;
+                    return Err(cancelled_err("copy_in.write"));
+                }
+            }
+            None => {}
+        }
+        let n = bytes.len() as Int;
         match self.chunk_tx.send_async(CicBytes(bytes)).await {
-            Ok(())  => Ok(()),
+            Ok(())  => {
+                self.metrics.record_chunk(n);
+                Ok(())
+            }
             Err(_)  => Err(actor_dropped("copy_in.write")),
         }
     }
@@ -102,6 +134,7 @@ implement AsyncCopyInWriter {
     }
 
     public async fn cancel(self, reason: &Text) -> Result<(), DbError> {
+        self.metrics.record_cancellation();
         let (rs, rr) = oneshot();
         match self.chunk_tx.send_async(CicCancel { reason: reason.clone(), reply: rs }).await {
             Ok(())  => {}
@@ -122,6 +155,7 @@ public type affine AsyncCopyOutReader is {
     /// Set once the actor signals end-of-stream. Holds the
     /// row count or the wire-level failure.
     completion: Maybe<Result<Int, DbError>>,
+    metrics: core.database.common.copy_metrics.CopyMetrics,
 };
 
 /// Internal — the chunk channel carries either a data frame or
@@ -132,6 +166,13 @@ public type CopyOutEvent is
     | CoeDone(Result<Int, DbError>);
 
 implement AsyncCopyOutReader {
+    /// Snapshot the per-reader counters. chunks_sent reflects the
+    /// number of chunks delivered to the caller; bytes_sent is
+    /// the cumulative payload bytes received.
+    public fn metrics(&self) -> core.database.common.copy_metrics.CopyMetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
     /// `Ok(Some(bytes))` for each CopyData frame; `Ok(None)`
     /// exactly once when the stream ends. Subsequent calls also
     /// return `Ok(None)`.
@@ -141,7 +182,10 @@ implement AsyncCopyOutReader {
             None    => {}
         }
         match self.chunk_rx.recv_fut().await {
-            Some(CoeBytes(b)) => Ok(Some(b)),
+            Some(CoeBytes(b)) => {
+                self.metrics.record_chunk(b.len() as Int);
+                Ok(Some(b))
+            }
             Some(CoeDone(r)) => {
                 self.completion = Some(r);
                 Ok(None)
@@ -194,6 +238,19 @@ public async fn copy_in_async(
     copy_sql: &Text,
     chunk_capacity: Int,
 ) -> Result<AsyncCopyInWriter, DbError> {
+    copy_in_async_with_token(conn, copy_sql, chunk_capacity, None).await
+}
+
+/// Sibling of `copy_in_async` that wires a caller-side
+/// CancellationToken. The writer's `write` short-circuits with
+/// `CANCELLED` when the token flips; the actor receives a
+/// best-effort CicCancel so the wire returns to Ready.
+public async fn copy_in_async_with_token(
+    conn: &AsyncPgConnection,
+    copy_sql: &Text,
+    chunk_capacity: Int,
+    token: Maybe<core.async.cancellation.CancellationToken>,
+) -> Result<AsyncCopyInWriter, DbError> {
     let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
     let (chunk_tx, chunk_rx) = bounded_channel::<CopyInChunk>(cap);
     let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
@@ -211,7 +268,11 @@ public async fn copy_in_async(
         Ok(Err(e))  => { return Err(e); }
         Err(_)      => { return Err(actor_dropped("copy_in_async ack")); }
     }
-    Ok(AsyncCopyInWriter { chunk_tx: chunk_tx })
+    Ok(AsyncCopyInWriter {
+        chunk_tx: chunk_tx,
+        metrics: core.database.common.copy_metrics.CopyMetrics.new(),
+        token: token,
+    })
 }
 
 /// Open a streaming COPY TO. The actor issues `copy_sql` and
@@ -239,7 +300,20 @@ public async fn copy_out_async(
         Ok(Err(e))  => { return Err(e); }
         Err(_)      => { return Err(actor_dropped("copy_out_async ack")); }
     }
-    Ok(AsyncCopyOutReader { chunk_rx: chunk_rx, completion: None })
+    Ok(AsyncCopyOutReader {
+        chunk_rx: chunk_rx,
+        completion: None,
+        metrics: core.database.common.copy_metrics.CopyMetrics.new(),
+    })
+}
+
+fn cancelled_err(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "CANCELLED".clone(),
+        message: f"async COPY cancelled at {what}",
+        retryable: false,
+    })
 }
 
 fn actor_dropped(what: &str) -> DbError {

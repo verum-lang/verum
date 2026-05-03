@@ -61,3 +61,4 @@ public module pool_supervisor;
 public module into_response;
 public module schema;
 public module check_codegen;
+public module copy_metrics;

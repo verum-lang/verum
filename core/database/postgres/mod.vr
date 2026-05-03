@@ -163,6 +163,7 @@ public mount .async_typed_database.{
 public mount .async_copy.{
     AsyncCopyInWriter, AsyncCopyOutReader, CopyOutEvent, CoeBytes, CoeDone,
     copy_in_async, copy_out_async,
+    copy_in_async_with_token,
 };
 public mount .async_replication.{
     AsyncPgReplicationConnection,
