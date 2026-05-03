@@ -58,29 +58,57 @@ use serde::{Deserialize, Serialize};
 /// not the substructural-logic discipline.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Capability {
- /// Read from a resource — file, db, network endpoint, etc.
-    Read { resource: ResourceTag },
- /// Write to a resource.
-    Write { resource: ResourceTag },
- /// Execute a target — FFI call, syscall, external program.
-    Exec { target: ExecTarget },
- /// Escalate privileges into a higher realm.
-    Escalate { realm: PrivilegeRealm },
- /// Spawn a task in the supervision tree.
-    Spawn { lifetime: TaskLifetime },
- /// Capability with TTL — must be exercised before expiry.
-    TimeBound { until: ExpirationPolicy },
- /// Persistence — durable state operation.
-    Persist { medium: PersistenceMedium },
- /// Network — protocol-typed exposure or reach.
+    /// Read from a resource — file, db, network endpoint, etc.
+    Read {
+        /// Source resource being read.
+        resource: ResourceTag,
+    },
+    /// Write to a resource.
+    Write {
+        /// Sink resource being written.
+        resource: ResourceTag,
+    },
+    /// Execute a target — FFI call, syscall, external program.
+    Exec {
+        /// What is being executed.
+        target: ExecTarget,
+    },
+    /// Escalate privileges into a higher realm.
+    Escalate {
+        /// Privilege boundary being crossed.
+        realm: PrivilegeRealm,
+    },
+    /// Spawn a task in the supervision tree.
+    Spawn {
+        /// Supervision lifetime of the spawned task.
+        lifetime: TaskLifetime,
+    },
+    /// Capability with TTL — must be exercised before expiry.
+    TimeBound {
+        /// Expiry policy after which the capability is void.
+        until: ExpirationPolicy,
+    },
+    /// Persistence — durable state operation.
+    Persist {
+        /// Storage medium that holds the durable state.
+        medium: PersistenceMedium,
+    },
+    /// Network — protocol-typed exposure or reach.
     Network {
+        /// Wire protocol carried over the boundary.
         protocol: NetProtocol,
+        /// Inbound, outbound, or bidirectional traffic.
         direction: NetDirection,
     },
- /// User-defined custom capability. MUST be registered in
- /// `core/architecture/capability_ontology.vr`; the kernel
- /// validates this at audit time.
-    Custom { tag: String, schema: CapabilitySchema },
+    /// User-defined custom capability. MUST be registered in
+    /// `core/architecture/capability_ontology.vr`; the kernel
+    /// validates this at audit time.
+    Custom {
+        /// Capability tag — referenced by name in the ontology registry.
+        tag: String,
+        /// Schema describing the custom capability's surface.
+        schema: CapabilitySchema,
+    },
 }
 
 impl Capability {
@@ -104,77 +132,153 @@ impl Capability {
 /// Resource identifier — what's being read/written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceTag {
- /// Database table or whole connection.
-    Database { name: String },
- /// Filesystem path.
-    File { path_pattern: String },
- /// In-memory state slot.
-    Memory { region: String },
- /// Configuration store.
-    Config { namespace: String },
- /// Logging sink.
+    /// Database table or whole connection.
+    Database {
+        /// Logical database / table identifier.
+        name: String,
+    },
+    /// Filesystem path.
+    File {
+        /// Glob-style path pattern matching the file(s).
+        path_pattern: String,
+    },
+    /// In-memory state slot.
+    Memory {
+        /// Logical memory region identifier.
+        region: String,
+    },
+    /// Configuration store.
+    Config {
+        /// Configuration namespace identifier.
+        namespace: String,
+    },
+    /// Logging sink.
     Logger,
- /// Random source.
+    /// Random source.
     Random,
- /// Custom resource — names it explicitly.
+    /// Custom resource — names it explicitly.
     Custom(String),
 }
 
+/// Target of an `Exec` capability — what the cog can invoke.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ExecTarget {
-    Ffi { library: String, symbol: String },
-    Syscall { number: u32 },
-    Program { path: String },
+    /// Foreign-function-interface call into a dynamic library.
+    Ffi {
+        /// Dynamic library name (e.g. `libsystem.B.dylib`).
+        library: String,
+        /// Symbol name resolved within the library.
+        symbol: String,
+    },
+    /// Direct kernel syscall.
+    Syscall {
+        /// Syscall number for the target platform.
+        number: u32,
+    },
+    /// Spawning an external program.
+    Program {
+        /// Filesystem path to the program executable.
+        path: String,
+    },
+    /// User-defined exec target — referenced by tag in the ontology registry.
     Custom(String),
 }
 
+/// Privilege realm for `Capability::Escalate` — what escalated boundary
+/// is crossed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PrivilegeRealm {
+    /// Administrative privilege.
     Admin,
+    /// Root / superuser privilege.
     Root,
+    /// Audit-only privilege (read-only access to security events).
     Audit,
+    /// User-defined realm — referenced by tag in the ontology registry.
     Custom(String),
 }
 
+/// Supervision lifetime of a spawned task.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TaskLifetime {
- /// Bounded by parent scope (structured concurrency).
+    /// Bounded by parent scope (structured concurrency).
     ScopedToParent,
- /// Detached — runs until explicit shutdown.
+    /// Detached — runs until explicit shutdown.
     Detached,
- /// Bounded by explicit deadline.
-    Deadlined { milliseconds: u64 },
+    /// Bounded by explicit deadline.
+    Deadlined {
+        /// Deadline in milliseconds from spawn.
+        milliseconds: u64,
+    },
 }
 
+/// Expiration policy for `Capability::TimeBound`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ExpirationPolicy {
-    AtUnixTime { seconds: u64 },
-    AfterDuration { milliseconds: u64 },
-    OnEvent { event_tag: String },
+    /// Capability expires at a specific Unix-epoch timestamp.
+    AtUnixTime {
+        /// Expiration time, seconds since the Unix epoch.
+        seconds: u64,
+    },
+    /// Capability expires after a duration from issuance.
+    AfterDuration {
+        /// Lifetime in milliseconds from the issuance moment.
+        milliseconds: u64,
+    },
+    /// Capability expires when a named event fires.
+    OnEvent {
+        /// Event tag observed on the supervision bus.
+        event_tag: String,
+    },
 }
 
+/// Medium that backs a `Capability::Persist`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PersistenceMedium {
-    Disk { path: String },
-    Database { connection_tag: String },
-    DistributedLog { topic: String },
+    /// Local disk path.
+    Disk {
+        /// Filesystem path of the persistent store.
+        path: String,
+    },
+    /// Database connection.
+    Database {
+        /// Connection identifier resolvable in the context registry.
+        connection_tag: String,
+    },
+    /// Distributed log (Kafka/NATS/etc).
+    DistributedLog {
+        /// Topic identifier on the distributed-log cluster.
+        topic: String,
+    },
 }
 
+/// Wire protocol carried by `Capability::Network`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NetProtocol {
+    /// Plain TCP.
     Tcp,
+    /// UDP datagrams.
     Udp,
+    /// Unix-domain socket (host-local).
     Unix,
+    /// TLS-tunnelled TCP.
     Tls,
+    /// QUIC over UDP.
     Quic,
+    /// HTTP/1 or HTTP/2.
     Http,
+    /// gRPC over HTTP/2.
     Grpc,
 }
 
+/// Traffic direction for a `Capability::Network`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NetDirection {
+    /// Inbound only — the cog accepts but does not initiate.
     Inbound,
+    /// Outbound only — the cog initiates but does not accept.
     Outbound,
+    /// Both inbound and outbound traffic on the boundary.
     Bidirectional,
 }
 
@@ -182,11 +286,11 @@ pub enum NetDirection {
 /// registry, referenced by tag thereafter.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CapabilitySchema {
- /// Human-readable description.
+    /// Human-readable description.
     pub description: String,
- /// Whether the capability transfers privilege (escalate-style).
+    /// Whether the capability transfers privilege (escalate-style).
     pub transfers_privilege: bool,
- /// Optional related capabilities (subsumption hint).
+    /// Optional related capabilities (subsumption hint).
     pub subsumed_by: Vec<String>,
 }
 
@@ -203,23 +307,41 @@ pub struct CapabilitySchema {
 /// * Wire encoding + physical layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Boundary {
+    /// Messages entering the boundary from outside the cog.
     pub messages_in: Vec<MessageType>,
+    /// Messages leaving the cog through the boundary.
     pub messages_out: Vec<MessageType>,
+    /// Capabilities that traverse the boundary as values.
     pub capability_handoff: Vec<Capability>,
+    /// Invariants both sides preserve at all times.
     pub invariants: Vec<BoundaryInvariant>,
+    /// Serialisation discipline carrying messages on the wire.
     pub wire_encoding: WireEncoding,
+    /// Physical-layer placement of the boundary (intracrate, IPC, network…).
     pub physical_layer: BoundaryPhysicalLayer,
 }
 
+/// Typed message that crosses a [`Boundary`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MessageType {
- /// Typed structured message.
-    Typed { name: String, schema_hash: String },
- /// Capability handoff message (transfers a capability).
-    CapabilityTransfer { capability_tag: String },
- /// Acknowledgement / control frame.
-    Control { kind: String },
- /// Raw — discouraged; kernel flags via anti-pattern check.
+    /// Typed structured message.
+    Typed {
+        /// Message-type name (typically a record-type identifier).
+        name: String,
+        /// Stable hash over the schema, used for cross-cog version pinning.
+        schema_hash: String,
+    },
+    /// Capability handoff message (transfers a capability).
+    CapabilityTransfer {
+        /// Tag of the capability being handed off.
+        capability_tag: String,
+    },
+    /// Acknowledgement / control frame.
+    Control {
+        /// Control-message kind (`ack`, `ping`, …).
+        kind: String,
+    },
+    /// Raw — discouraged; kernel flags via anti-pattern check.
     Raw,
 }
 
