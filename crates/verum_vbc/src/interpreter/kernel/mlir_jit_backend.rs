@@ -155,6 +155,15 @@ enum KernelKind {
  /// outermost, decompose `i` into multi-axis indices via
  /// `out_shape`, accumulate `b_off += idx[k] * b_stride[k]`.
  BinopMidAxisBroadcast(TensorBinaryOp),
+ /// Bilateral broadcast: NEITHER `a.shape` nor `b.shape` is
+ /// the broadcast output shape — both have size-1 dims that
+ /// expand to match the other's larger dim per axis.  Patterns:
+ /// `[M,1] op [1,N]` → output `[M,N]`,
+ /// `[A,1,C] op [1,B,1]` → output `[A,B,C]`, etc.
+ /// Kernel signature: `(a, b, out, n_total, ndim, *out_shape,
+ /// *a_stride, *b_stride)` — 8 args.  Per-axis stride arrays
+ /// for BOTH operands; `0` indicates broadcast on that axis.
+ BinopBilateralBroadcast(TensorBinaryOp),
  /// Flipped-arg variants — same body shapes as the four
  /// broadcast kernels above, but the arith op reads operands
  /// in the SWAPPED order `b op a` instead of `a op b`.
@@ -587,6 +596,18 @@ impl Backend for MlirJitBackend {
  return None;
  }
 
+ // **Bilateral pre-check** — if neither operand is the
+ // broadcast output (genuine `[M,1] op [1,N]` case), we must
+ // NOT swap because the bilateral kernel has no flipped
+ // variant.  Detect bilateral on the ORIGINAL operand order;
+ // if it applies, skip the swap entirely.
+ let original_bilateral = is_bilateral_broadcast(
+ &a.shape[..a.ndim as usize],
+ &b.shape[..b.ndim as usize],
+ a.numel,
+ b.numel,
+ );
+
  // **Operand swap** — when `b` has MORE elements than `a` (b
  // would broadcast to a's superset shape), swap so the larger
  // operand is `a` and the existing dispatcher (which materialises
@@ -597,7 +618,12 @@ impl Backend for MlirJitBackend {
  // emit the arith op with operands in reversed order — the
  // kernel computes `b op a` (where the names are post-swap) ≡
  // the caller's original `orig_a op orig_b`.
- let (a, b, flipped) = if b.numel > a.numel {
+ //
+ // Skip the swap when bilateral applies on the original pair —
+ // bilateral has no flipped variant, and the kernel reads both
+ // strides from per-operand arrays so it doesn't need a's shape
+ // to be the output anyway.
+ let (a, b, flipped) = if !original_bilateral && b.numel > a.numel {
  (b, a, !op_is_commutative(op))
  } else {
  (a, b, false)
@@ -694,24 +720,100 @@ impl Backend for MlirJitBackend {
  }
  }
 
+ // **Bilateral broadcast detection** — neither a's shape nor
+ // b's shape is the output.  Both operands have size-1 dims
+ // that expand to match the other.  Common patterns:
+ // `[M,1] op [1,N]` → output `[M,N]`,
+ // `[A,1,C] op [1,B,1]` → output `[A,B,C]`.
+ //
+ // Per-axis broadcast rule (after left-pad to common rank):
+ // each axis must be 1 in one operand and >=1 in the other,
+ // OR equal in both.  Output dim = max per axis.
+ //
+ // Pre-condition: not already covered by the four
+ // unilateral patterns above (those handle the case where
+ // one shape IS the output).
+ let mut bilateral_broadcast = false;
+ let mut bilateral_out_shape: [usize; crate::interpreter::tensor::MAX_DIMS] =
+ [0; crate::interpreter::tensor::MAX_DIMS];
+ let mut bilateral_a_padded: [usize; crate::interpreter::tensor::MAX_DIMS] =
+ [1; crate::interpreter::tensor::MAX_DIMS];
+ let mut bilateral_b_padded: [usize; crate::interpreter::tensor::MAX_DIMS] =
+ [1; crate::interpreter::tensor::MAX_DIMS];
+ let mut bilateral_ndim: usize = 0;
+ let mut bilateral_out_numel: usize = 0;
  if !same_shape
  && !scalar_broadcast
  && !suffix_broadcast
  && !prefix_broadcast
  && !mid_axis_broadcast
  {
+ let common_rank = a_shape.len().max(b_shape.len());
+ if common_rank > 0 && common_rank <= crate::interpreter::tensor::MAX_DIMS {
+ let a_pad = common_rank - a_shape.len();
+ let b_pad = common_rank - b_shape.len();
+ for (i, &d) in a_shape.iter().enumerate() {
+ bilateral_a_padded[a_pad + i] = d;
+ }
+ for (i, &d) in b_shape.iter().enumerate() {
+ bilateral_b_padded[b_pad + i] = d;
+ }
+ let mut ok = true;
+ let mut numel: usize = 1;
+ for k in 0..common_rank {
+ let ad = bilateral_a_padded[k];
+ let bd = bilateral_b_padded[k];
+ // Per-axis rule: equal, or one is 1.
+ let out_d = if ad == bd {
+ ad
+ } else if ad == 1 {
+ bd
+ } else if bd == 1 {
+ ad
+ } else {
+ ok = false;
+ break;
+ };
+ bilateral_out_shape[k] = out_d;
+ numel = numel.saturating_mul(out_d);
+ }
+ if ok && numel > a.numel && numel > b.numel {
+ bilateral_broadcast = true;
+ bilateral_ndim = common_rank;
+ bilateral_out_numel = numel;
+ }
+ }
+ }
+
+ if !same_shape
+ && !scalar_broadcast
+ && !suffix_broadcast
+ && !prefix_broadcast
+ && !mid_axis_broadcast
+ && !bilateral_broadcast
+ {
  return None;
  }
 
- // Materialise the output tensor on the host. MLIR JIT'd
- // kernels read/write through caller-supplied pointers; we own
- // the output buffer here.
- let out = TensorHandle::zeros(a_shape, a.dtype)?;
+ // Materialise the output tensor on the host.  For unilateral
+ // patterns out shape == a's shape; for bilateral out shape is
+ // the per-axis max.  MLIR JIT'd kernels read/write through
+ // caller-supplied pointers; we own the output buffer here.
+ let out = if bilateral_broadcast {
+ TensorHandle::zeros(&bilateral_out_shape[..bilateral_ndim], a.dtype)?
+ } else {
+ TensorHandle::zeros(a_shape, a.dtype)?
+ };
  // Same-shape is symmetric so flipping is a no-op there; only
  // the four broadcast kernels have asymmetric `out[i] = a[i] op
  // b[bcast_idx]` shapes that need the *Flipped variant when the
- // dispatcher swapped a non-commutative op.
- let kind = match (scalar_broadcast, suffix_broadcast, prefix_broadcast, mid_axis_broadcast, flipped) {
+ // dispatcher swapped a non-commutative op.  Bilateral broadcast
+ // never enters the swap path (neither operand is the output
+ // shape) so it has no flipped variant.
+ let kind = if bilateral_broadcast {
+ KernelKind::BinopBilateralBroadcast(op)
+ } else {
+ match (scalar_broadcast, suffix_broadcast, prefix_broadcast, mid_axis_broadcast, flipped) {
  (true, _, _, _, false) => KernelKind::BinopScalarBroadcast(op),
  (true, _, _, _, true) => KernelKind::BinopScalarBroadcastFlipped(op),
  (_, true, _, _, false) => KernelKind::BinopSuffixBroadcast(op),
@@ -721,6 +823,7 @@ impl Backend for MlirJitBackend {
  (_, _, _, true, false) => KernelKind::BinopMidAxisBroadcast(op),
  (_, _, _, true, true) => KernelKind::BinopMidAxisBroadcastFlipped(op),
  _ => KernelKind::Binop(op),
+ }
  };
  let holder = self.get_or_compile(kind, a.dtype)?;
 
@@ -760,18 +863,64 @@ impl Backend for MlirJitBackend {
  // `mlirExecutionEngineInvokePacked` expects an array of `*mut ()`
  // where each entry points to the *value* of the argument (so for
  // pointer args we pass &mut ptr_value).
+ // Compute bilateral-broadcast strides if applicable.  Both
+ // a and b need per-axis row-major canonical strides (over the
+ // padded shape), with axes that are size-1 in the operand
+ // (broadcast axes) zeroed.  Output buffer is iterated linearly
+ // by output's canonical strides so we don't pass them.
+ let mut bilateral_a_stride_buf: [i64; crate::interpreter::tensor::MAX_DIMS] = [0; _];
+ let mut bilateral_b_stride_buf: [i64; crate::interpreter::tensor::MAX_DIMS] = [0; _];
+ let mut bilateral_out_shape_i64: [i64; crate::interpreter::tensor::MAX_DIMS] = [0; _];
+ if bilateral_broadcast {
+ // Inner→outer accumulating walk; broadcast axes get stride 0.
+ let mut a_running: i64 = 1;
+ let mut b_running: i64 = 1;
+ for k in (0..bilateral_ndim).rev() {
+ if bilateral_a_padded[k] == 1 {
+ bilateral_a_stride_buf[k] = 0;
+ } else {
+ bilateral_a_stride_buf[k] = a_running;
+ }
+ if bilateral_b_padded[k] == 1 {
+ bilateral_b_stride_buf[k] = 0;
+ } else {
+ bilateral_b_stride_buf[k] = b_running;
+ }
+ a_running *= bilateral_a_padded[k] as i64;
+ b_running *= bilateral_b_padded[k] as i64;
+ bilateral_out_shape_i64[k] = bilateral_out_shape[k] as i64;
+ }
+ }
+
  let a_data = a.data.as_ref()?;
  let b_data = b.data.as_ref()?;
  let out_data = out.data.as_ref()?;
  let mut a_ptr: *const u8 = unsafe { (*a_data.as_ptr()).as_ptr() };
  let mut b_ptr: *const u8 = unsafe { (*b_data.as_ptr()).as_ptr() };
  let mut out_ptr: *mut u8 = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
- let mut n_arg: i64 = n as i64;
+ let mut n_arg: i64 = if bilateral_broadcast {
+ bilateral_out_numel as i64
+ } else {
+ n as i64
+ };
  let mut period_arg: i64 = b.numel as i64;
  let mut inner_arg: i64 = inner_size as i64;
- let mut ndim_arg: i64 = a_shape.len() as i64;
- let mut out_shape_ptr: *const i64 = out_shape_buf.as_ptr();
- let mut b_stride_ptr: *const i64 = b_stride_buf.as_ptr();
+ let mut ndim_arg: i64 = if bilateral_broadcast {
+ bilateral_ndim as i64
+ } else {
+ a_shape.len() as i64
+ };
+ let mut out_shape_ptr: *const i64 = if bilateral_broadcast {
+ bilateral_out_shape_i64.as_ptr()
+ } else {
+ out_shape_buf.as_ptr()
+ };
+ let mut b_stride_ptr: *const i64 = if bilateral_broadcast {
+ bilateral_b_stride_buf.as_ptr()
+ } else {
+ b_stride_buf.as_ptr()
+ };
+ let mut a_stride_ptr: *const i64 = bilateral_a_stride_buf.as_ptr();
  let result = if suffix_broadcast {
  let mut packed: [*mut (); 5] = [
  (&mut a_ptr) as *mut _ as *mut (),
@@ -801,6 +950,18 @@ impl Backend for MlirJitBackend {
  (&mut b_stride_ptr) as *mut _ as *mut (),
  ];
  unsafe { holder.engine.invoke_packed("kernel", &mut packed) }
+ } else if bilateral_broadcast {
+ let mut packed: [*mut (); 8] = [
+ (&mut a_ptr) as *mut _ as *mut (),
+ (&mut b_ptr) as *mut _ as *mut (),
+ (&mut out_ptr) as *mut _ as *mut (),
+ (&mut n_arg) as *mut _ as *mut (),
+ (&mut ndim_arg) as *mut _ as *mut (),
+ (&mut out_shape_ptr) as *mut _ as *mut (),
+ (&mut a_stride_ptr) as *mut _ as *mut (),
+ (&mut b_stride_ptr) as *mut _ as *mut (),
+ ];
+ unsafe { holder.engine.invoke_packed("kernel", &mut packed) }
  } else {
  let mut packed: [*mut (); 4] = [
  (&mut a_ptr) as *mut _ as *mut (),
@@ -818,7 +979,8 @@ impl Backend for MlirJitBackend {
  if result.is_err() {
  tracing::warn!(
  "MLIR-JIT binop invocation failed for op={:?} dtype={:?} \
- same_shape={} scalar_bcast={} suffix_bcast={} prefix_bcast={} mid_axis_bcast={}; \
+ same_shape={} scalar_bcast={} suffix_bcast={} prefix_bcast={} \
+ mid_axis_bcast={} bilateral_bcast={} flipped={}; \
  falling back to CpuBackend",
  op,
  a.dtype,
@@ -826,7 +988,9 @@ impl Backend for MlirJitBackend {
  scalar_broadcast,
  suffix_broadcast,
  prefix_broadcast,
- mid_axis_broadcast
+ mid_axis_broadcast,
+ bilateral_broadcast,
+ flipped
  );
  return None;
  }
@@ -1130,6 +1294,56 @@ fn mlir_elem_type(dtype: DType) -> Option<&'static str> {
 }
 
 /// Resolve the MLIR `arith.*` / `math.*` op spelling for the given
+/// Pre-flight bilateral broadcast detection used by the dispatcher
+/// to decide whether to skip the (a, b) swap.  Bilateral applies
+/// when each operand has at least one size-1 dim that the other
+/// expands, AND the broadcast output shape has more elements than
+/// either operand alone.  For bilateral cases the swap is wrong
+/// (the bilateral kernel has no flipped variant — it reads strides
+/// per-operand symmetrically and preserves the caller's operand
+/// order in the arith op).
+///
+/// Returns `true` only when the strict bilateral pattern holds —
+/// scalar / suffix / prefix / mid-axis broadcasts (where one of
+/// {a, b} IS the output) return `false` and proceed to the swap
+/// path.
+fn is_bilateral_broadcast(
+ a_shape: &[usize],
+ b_shape: &[usize],
+ a_numel: usize,
+ b_numel: usize,
+) -> bool {
+ if a_shape == b_shape {
+ return false;
+ }
+ let common_rank = a_shape.len().max(b_shape.len());
+ if common_rank == 0 || common_rank > crate::interpreter::tensor::MAX_DIMS {
+ return false;
+ }
+ let a_pad = common_rank - a_shape.len();
+ let b_pad = common_rank - b_shape.len();
+ let mut numel: usize = 1;
+ for k in 0..common_rank {
+ let ad = if k < a_pad { 1 } else { a_shape[k - a_pad] };
+ let bd = if k < b_pad { 1 } else { b_shape[k - b_pad] };
+ let out_d = if ad == bd {
+ ad
+ } else if ad == 1 {
+ bd
+ } else if bd == 1 {
+ ad
+ } else {
+ return false;
+ };
+ numel = numel.saturating_mul(out_d);
+ }
+ // Bilateral specifically means BOTH operands strictly less
+ // than output.  When numel == max(a,b) one of them IS the
+ // output shape; that's a unilateral pattern handled by the
+ // four cheaper kernels.
+ numel > a_numel && numel > b_numel
+}
+
 /// True iff `op` is mathematically commutative.  Used by the
 /// broadcast dispatcher to swap argument order when `b.numel >
 /// a.numel`: `a op b == b op a` for commutative ops, so we can
@@ -1546,6 +1760,81 @@ fn build_binop_mid_axis_broadcast_kernel_text(
  %va = llvm.load %ai : !llvm.ptr -> {elem}
  %vb = llvm.load %bi : !llvm.ptr -> {elem}
  %vc = {arith} {lhs}, {rhs} : {elem}
+ %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ llvm.store %vc, %ci : {elem}, !llvm.ptr
+ %i_next = arith.addi %i, %c1 : i64
+ cf.br ^outer(%i_next : i64)
+ ^exit:
+ return
+ }}
+}}
+"#,
+ elem = elem_ty,
+ arith = arith,
+ ))
+}
+
+/// Build the MLIR text for a **bilateral broadcast** binary op:
+/// `out[i] = a[a_off(i)] op b[b_off(i)]` where BOTH offsets
+/// decode `i` into multi-axis indices via `out_shape` and
+/// accumulate per-axis stride contributions.
+///
+/// Signature: `void kernel(*const T a, *const T b, *mut T out,
+///                          i64 n, i64 ndim, i64* out_shape,
+///                          i64* a_stride, i64* b_stride)` — 8 args.
+///
+/// Pre-condition (enforced by the dispatcher): both operands
+/// are non-output (each has at least one size-1 dim that
+/// expands to match the other).  `a_stride[k]` and `b_stride[k]`
+/// are 0 for axes broadcast from that operand, otherwise the
+/// canonical row-major stride of the operand at axis k (over
+/// its left-padded shape).
+///
+/// The decoder is a single-iteration-per-axis loop that walks
+/// inner→outer accumulating BOTH offsets simultaneously — twice
+/// the per-axis cost of mid-axis broadcast (which only decodes
+/// one offset), still O(ndim) per element.
+fn build_binop_bilateral_broadcast_kernel_text(
+ op: TensorBinaryOp,
+ dtype: DType,
+) -> Option<String> {
+ let elem_ty = mlir_elem_type(dtype)?;
+ let arith = binop_arith_op(op, dtype)?;
+ Some(format!(
+ r#"module {{
+ func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64, %ndim: i64, %out_shape: !llvm.ptr, %a_stride: !llvm.ptr, %b_stride: !llvm.ptr) attributes {{ llvm.emit_c_interface }} {{
+ %c0 = arith.constant 0 : i64
+ %c1 = arith.constant 1 : i64
+ cf.br ^outer(%c0 : i64)
+ ^outer(%i: i64):
+ %cond_i = arith.cmpi slt, %i, %n : i64
+ cf.cond_br %cond_i, ^body, ^exit
+ ^body:
+ cf.br ^axis(%i, %c0, %c0, %ndim : i64, i64, i64, i64)
+ ^axis(%rem: i64, %a_off: i64, %b_off: i64, %axis_left: i64):
+ %has_axis = arith.cmpi sgt, %axis_left, %c0 : i64
+ cf.cond_br %has_axis, ^axis_body, ^axis_done(%a_off, %b_off : i64, i64)
+ ^axis_body:
+ %ax = arith.subi %axis_left, %c1 : i64
+ %d_ptr = llvm.getelementptr inbounds %out_shape[%ax] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+ %d = llvm.load %d_ptr : !llvm.ptr -> i64
+ %c = arith.remsi %rem, %d : i64
+ %rem_next = arith.divsi %rem, %d : i64
+ %as_ptr = llvm.getelementptr inbounds %a_stride[%ax] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+ %as = llvm.load %as_ptr : !llvm.ptr -> i64
+ %bs_ptr = llvm.getelementptr inbounds %b_stride[%ax] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+ %bs = llvm.load %bs_ptr : !llvm.ptr -> i64
+ %a_inc = arith.muli %c, %as : i64
+ %b_inc = arith.muli %c, %bs : i64
+ %a_off_next = arith.addi %a_off, %a_inc : i64
+ %b_off_next = arith.addi %b_off, %b_inc : i64
+ cf.br ^axis(%rem_next, %a_off_next, %b_off_next, %ax : i64, i64, i64, i64)
+ ^axis_done(%final_a_off: i64, %final_b_off: i64):
+ %ai = llvm.getelementptr inbounds %a[%final_a_off] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %bi = llvm.getelementptr inbounds %b[%final_b_off] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
+ %va = llvm.load %ai : !llvm.ptr -> {elem}
+ %vb = llvm.load %bi : !llvm.ptr -> {elem}
+ %vc = {arith} %va, %vb : {elem}
  %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  llvm.store %vc, %ci : {elem}, !llvm.ptr
  %i_next = arith.addi %i, %c1 : i64
@@ -2018,6 +2307,9 @@ fn compile_kernel(
  }
  KernelKind::BinopMidAxisBroadcastFlipped(op) => {
  build_binop_mid_axis_broadcast_kernel_text(op, dtype, true)?
+ }
+ KernelKind::BinopBilateralBroadcast(op) => {
+ build_binop_bilateral_broadcast_kernel_text(op, dtype)?
  }
  KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
  KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
