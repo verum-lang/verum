@@ -756,6 +756,14 @@ public type AllocatorLocalHeap is {
     bytes_allocated: UInt64,
 };
 
+/// Public alias — `LocalHeap` is the canonical short name within
+/// the `core.mem.allocator` module. Internal type uses the verbose
+/// `AllocatorLocalHeap` to disambiguate from `core.mem.heap.LocalHeap`
+/// (a higher-level supervisor type with cross-thread free-list).
+/// Both `LocalHeap` symbols coexist; users qualify via the module
+/// path (`core.mem.allocator.LocalHeap` vs `core.mem.heap.LocalHeap`).
+public type LocalHeap is AllocatorLocalHeap;
+
 implement AllocatorLocalHeap {
     /// Create a new thread-local heap.
     public fn new(thread_id: UInt32) -> AllocatorLocalHeap {
