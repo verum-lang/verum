@@ -50,6 +50,7 @@ public type StackFrame is {
 
 implement StackFrame {
     /// Create a new stack frame.
+    @inline(always)
     public fn new(function: Text, file: Text, line: Int, column: Int) -> StackFrame {
         StackFrame {
             function: function,
@@ -137,11 +138,13 @@ public type Backtrace is {
 
 implement Backtrace {
     /// Create an empty backtrace.
+    @inline(always)
     public fn empty() -> Backtrace {
         Backtrace { frames: List.new() }
     }
 
     /// Create a backtrace from a list of frames.
+    @inline(always)
     public fn from_frames(frames: List<StackFrame>) -> Backtrace {
         Backtrace { frames: frames }
     }
@@ -151,6 +154,7 @@ implement Backtrace {
 
     /// Returns a backtrace of the current call stack. The backtrace may be
     /// empty if capture is not supported or is disabled at runtime.
+    @inline(always)
     public fn capture() -> Backtrace {
         // Backtrace capture is provided by the runtime intrinsic.
         // Returns empty backtrace when capture is not available.
@@ -158,16 +162,19 @@ implement Backtrace {
     }
 
     /// Get the frames in this backtrace.
+    @inline(always)
     public fn frames(&self) -> &List<StackFrame> {
         &self.frames
     }
 
     /// Returns true if this backtrace has no frames.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.frames.is_empty()
     }
 
     /// Returns the number of frames in this backtrace.
+    @inline(always)
     public fn len(&self) -> Int {
         self.frames.len()
     }
