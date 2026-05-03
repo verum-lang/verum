@@ -197,7 +197,7 @@ impl KappaTier {
     /// Construct a `KappaTier` from an `Ordinal`, returning `None` if
     /// the ordinal isn't representable in the V2 KappaTier surface
     /// (only `Finite(0)` for Truncated and `Kappa(n)` for KappaN(n)
-    /// are admitted). Use [`Ordinal::normalize`] before this call to
+    /// are admitted). Use `Ordinal::normalize` before this call to
     /// canonicalise inputs.
     pub fn from_ordinal(o: &crate::ordinal::Ordinal) -> Option<Self> {
         let normalised = o.normalize();
@@ -210,7 +210,7 @@ impl KappaTier {
 
     /// Convenience: is this κ-tier regular? Truncated and every
     /// `KappaN(n)` are regular by construction (inaccessibility ⟹
-    /// regularity). Routes through [`Ordinal::is_regular`].
+    /// regularity). Routes through `Ordinal::is_regular`.
     pub fn is_regular(&self) -> bool {
         // Truncated (Finite(0)) is NOT regular per Ordinal convention,
         // but KappaTier::Truncated represents a degenerate "no-κ" state
@@ -249,7 +249,7 @@ impl From<UniverseTier> for KappaTier {
 
 ///  * Ascents involving κ_n for n ≥ 3, OR multi-step ascents
 ///  (target tier strictly more than one level above source)
-///  are admitted via [`BridgeId::DrakeReflectionExtended`].
+///  are admitted via `BridgeId::DrakeReflectionExtended`.
 ///  The structural algorithm beyond κ_2 is preprint-blocked on
 ///  Diakrisis Lemma 131.L4.
 ///

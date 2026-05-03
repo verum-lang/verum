@@ -24,7 +24,7 @@
 //!  3. [`GodelEncoding`] — pairing-function encode/decode for
 //!  `(symbol, arg_list)` AST cells; uses the standard Cantor
 //!  pairing `⟨a, b⟩ = (a + b)(a + b + 1)/2 + b`.
-//!  4. [`encode_term`] / [`decode_term`] — round-trip identification
+//!  4. `encode_term` / `decode_term` — round-trip identification
 //!  between [`crate::CoreTerm`]-shaped AST trees and `u64` Gödel
 //!  numbers (current surface: handles a small symbol alphabet; V1
 //!  promotion to full kernel-CoreTerm round-trip).

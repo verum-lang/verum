@@ -60,7 +60,7 @@ use crate::proof_checker::{Certificate, CheckError, Context, Term, check};
 // Universe-shift transformation
 // =============================================================================
 
-/// Recursively walk a [`Term`] and add `lift` to every
+/// Recursively walk a `Term` and add `lift` to every
 /// `Universe(n)` it contains. Variable indices and term
 /// structure are preserved; only universe levels shift.
 ///

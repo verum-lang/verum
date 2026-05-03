@@ -36,9 +36,9 @@
 //!  [`ProofStepSnapshot`], [`ContextSnapshot`]. Every type derives
 //!  `Debug + Clone + PartialEq + Eq + Serialize + Deserialize` so
 //!  the snapshot round-trips cleanly through JSON.
-//! 2. [`snapshot_proof_state`] — walks a [`TheoremDecl`]'s proof body
-//!  ([`ProofBody::Tactic`] / [`ProofBody::Structured`] /
-//!  [`ProofBody::ByMethod`] / [`ProofBody::Term`]) and produces a
+//! 2. [`snapshot_proof_state`] — walks a `TheoremDecl`'s proof body
+//!  (`ProofBody::Tactic` / `ProofBody::Structured` /
+//!  `ProofBody::ByMethod` / `ProofBody::Term`) and produces a
 //!  snapshot WITHOUT invoking the kernel. `applied_steps` carries
 //!  the literal list of tactic names + their indices; `remaining_goals`
 //!  is the post-pass count assumed if every step closes a goal
@@ -328,7 +328,7 @@ impl ProofState {
 // snapshot_proof_state — the static-analysis hook
 // =============================================================================
 
-/// Walk the AST proof body of a [`TheoremDecl`] and produce a static
+/// Walk the AST proof body of a `TheoremDecl` and produce a static
 /// snapshot of its V0 proof state. Returns `None` for theorems
 /// with no proof body (e.g. axioms or unproven theorems).
 ///
@@ -355,7 +355,7 @@ impl ProofState {
 /// [`ProofStepSnapshot`] per tactic-shaped item. Combinators
 /// (`Seq`, `Try`, `Repeat`, `AllGoals`, `Focus`) flatten to their
 /// inner tactics with a wrapper-comment annotation. Structured
-/// proofs ([`ProofBody::Structured`]) emit one entry per
+/// proofs (`ProofBody::Structured`) emit one entry per
 /// [`ProofStep`].
 pub fn snapshot_proof_state(theorem_decl: &TheoremDecl) -> Option<ProofState> {
     let body = match &theorem_decl.proof {
@@ -409,7 +409,7 @@ fn synthetic_context_from_theorem(theorem_decl: &TheoremDecl) -> ContextSnapshot
     ContextSnapshot::from_hypotheses(hypotheses)
 }
 
-/// Walk a [`ProofBody`] and append one [`ProofStepSnapshot`] per
+/// Walk a `ProofBody` and append one [`ProofStepSnapshot`] per
 /// observed tactic. Index assignment happens in
 /// [`snapshot_proof_state`] after the walk completes.
 fn walk_proof_body(body: &ProofBody, out: &mut Vec<ProofStepSnapshot>) {

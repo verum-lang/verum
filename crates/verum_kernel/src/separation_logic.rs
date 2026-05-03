@@ -56,7 +56,7 @@
 //!  - [`Capability`] — heap permission (Read / Write / Own / None)
 //!  that links separation-logic verification to the three-tier
 //!  reference model.
-//!  - [`from_hoare_triple`] — adapter to
+//!  - `from_hoare_triple` — adapter to
 //!  [`crate::verification_goal::VerificationGoal`] so the unified
 //!  verification surface (pure + stateful) consumes both.
 

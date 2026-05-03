@@ -191,7 +191,7 @@ const CANONICALIZE_ITERATION_BUDGET: u32 = 64;
 ///
 
 /// The audit trail is mutated when a rewrite class can't be applied
-/// without invoking a [`BridgeId`] admit. A decidable run leaves the
+/// without invoking a `BridgeId` admit. A decidable run leaves the
 /// audit trail empty.
 ///
 

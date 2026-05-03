@@ -38,16 +38,34 @@ use verum_ast::literal::{LiteralKind, StringLit};
 /// auto-fix suggestions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArchParseError {
- /// Field name is not in the canonical roster.
-    UnknownField { name: String, suggestion: Option<String> },
- /// Field value has wrong AST shape. e.g. `at_tier = 42` where
- /// `at_tier` expects a `Tier` variant.
-    InvalidValue { field: String, expected: &'static str },
- /// Required field missing in strict mode.
-    MissingRequired { field: &'static str },
- /// Capability variant references unknown ResourceTag/etc.
-    UnknownVariant { kind: &'static str, value: String },
- /// Generic AST mismatch (caller didn't pass a Call expression).
+    /// Field name is not in the canonical roster.
+    UnknownField {
+        /// Offending field name as written in the source.
+        name: String,
+        /// Levenshtein-style spelling suggestion, if any.
+        suggestion: Option<String>,
+    },
+    /// Field value has wrong AST shape. e.g. `at_tier = 42` where
+    /// `at_tier` expects a `Tier` variant.
+    InvalidValue {
+        /// Field whose value is malformed.
+        field: String,
+        /// Expected value shape (free-form description).
+        expected: &'static str,
+    },
+    /// Required field missing in strict mode.
+    MissingRequired {
+        /// Name of the required field that was omitted.
+        field: &'static str,
+    },
+    /// Capability variant references unknown ResourceTag/etc.
+    UnknownVariant {
+        /// Variant family name (`ResourceTag`, `ExecTarget`, …).
+        kind: &'static str,
+        /// Unknown variant identifier as written.
+        value: String,
+    },
+    /// Generic AST mismatch (caller didn't pass a Call expression).
     NotAnArchModuleAttribute,
 }
 

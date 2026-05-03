@@ -42,8 +42,8 @@
 //! the strictly-positive discipline.
 //!
 
-//! This module also hosts [`is_uip_shape`] (UIP-detection for the
-//! axiom registry), [`is_var_named`] and [`is_path_over`] — these
+//! This module also hosts `is_uip_shape` (UIP-detection for the
+//! axiom registry), `is_var_named` and `is_path_over` — these
 //! cross-cut into axiom-registry's UIP rejection (`pub(crate)` so
 //! the AxiomRegistry call site can use them).
 

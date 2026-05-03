@@ -117,13 +117,22 @@ pub enum Mutation {
     /// (used as the trivial "no mutation" probe). Larger lifts
     /// preserve well-typedness for cumulativity-respecting terms
     /// — the canonical universe-stability test.
-    LiftAllUniverses { delta: u32 },
+    LiftAllUniverses {
+        /// Lift increment applied to every `Universe(n)`.
+        delta: u32,
+    },
     /// Lift universes in term ONLY (not claimed_type). Usually
     /// breaks typeability — both kernels MUST reject identically.
-    LiftTermUniversesOnly { delta: u32 },
+    LiftTermUniversesOnly {
+        /// Lift increment applied to term-side universes.
+        delta: u32,
+    },
     /// Lift universes in claimed_type ONLY. Same intent as above
     /// but the asymmetry is on the type side.
-    LiftClaimedTypeUniversesOnly { delta: u32 },
+    LiftClaimedTypeUniversesOnly {
+        /// Lift increment applied to claimed-type universes.
+        delta: u32,
+    },
     /// Replace the entire term with `Universe(0)`, keeping the
     /// claimed type as-is. Almost always rejected — pin that both
     /// kernels reject identically.
@@ -134,7 +143,10 @@ pub enum Mutation {
     /// Replace the entire term with `Var(idx)` (free variable in
     /// an empty context). Both kernels MUST reject as
     /// `UnboundVariable`.
-    ReplaceTermWithFreeVariable { idx: usize },
+    ReplaceTermWithFreeVariable {
+        /// De-Bruijn index of the free variable replacing the term.
+        idx: usize,
+    },
     /// Wrap the term in `App(term, Universe(0))` — applying a
     /// non-function. Both kernels MUST reject identically.
     AppToNonFunction,
@@ -143,7 +155,10 @@ pub enum Mutation {
     /// are ill-typed (the wrapping changes the term's type to
     /// `Π(_:domain). T`). Both kernels MUST reject identically
     /// when ill-typed.
-    WrapTermInExtraLam { domain: Term },
+    WrapTermInExtraLam {
+        /// Domain type for the extra `λ`-binder wrapping the term.
+        domain: Term,
+    },
     /// Swap the entire term with the entire claimed type. Almost
     /// always ill-typed (a type at universe N can't have type T
     /// where T was the original term). Pin agreement.
@@ -599,6 +614,11 @@ pub fn run_generative_campaign(n_iterations: usize, base_seed: u64) -> FuzzCampa
     run_generative_campaign_against(&registry, n_iterations, base_seed)
 }
 
+/// Run a generative-fuzz campaign against an explicit
+/// [`KernelRegistry`].
+///
+/// Same audit-failure contract as the mutation campaign: any
+/// disagreement is a kernel-implementation bug.
 pub fn run_generative_campaign_against(
     registry: &KernelRegistry,
     n_iterations: usize,

@@ -492,8 +492,11 @@ pub fn discharge_at_universe_index(k: u32) -> ConstructiveDischarge {
 ///     all_stable holds).
 #[derive(Debug, Clone)]
 pub struct StabilityVerdict {
+    /// Highest universe-ascent index `k` the walk reached.
     pub max_walked: u32,
+    /// `true` iff the witness pattern was invariant across every walked level.
     pub all_stable: bool,
+    /// First `k` where invariance broke; `None` when `all_stable` holds.
     pub divergence_at: Option<u32>,
     /// Sampled witness pattern from k=1 (the canonical reference);
     /// every subsequent k is compared against this.
@@ -570,10 +573,15 @@ pub fn walk_stability_up_to(max_lift: u32) -> StabilityVerdict {
 /// One stage's discharge verdict + MSFS citation provenance.
 #[derive(Debug, Clone)]
 pub struct StageVerdict {
+    /// Human-readable stage name (`"Base"`, `"Stable"`, …).
     pub stage_name: &'static str,
+    /// Stable diagnostic tag (`"ref_0"`, `"ref_geq_1"`, …).
     pub stage_tag: &'static str,
+    /// MSFS theorem citation tag (`"theorem_9_6"`, …).
     pub citation_tag: &'static str,
+    /// Path inside the MSFS corpus that carries the cited theorem.
     pub corpus_path: &'static str,
+    /// True iff this stage's discharge function returned `true`.
     pub discharges: bool,
 }
 

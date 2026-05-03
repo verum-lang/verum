@@ -91,7 +91,7 @@ pub fn infer_with_inductives(
 
 /// Infer the type of a [`CoreTerm`] under `ctx` and the registered
 /// `axioms`. Use [`infer_with_inductives`] when an
-/// [`InductiveRegistry`] is needed for `K-Inductive` / `K-Elim`
+/// `InductiveRegistry` is needed for `K-Inductive` / `K-Elim`
 /// dispatch; this entry point handles the inductive-free fragment.
 pub fn infer(
     ctx: &Context,
