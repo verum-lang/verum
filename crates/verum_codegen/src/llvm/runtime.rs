@@ -1893,12 +1893,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
             self.emit_verum_float_to_text(module)
         );
         step!(
-            "emit_verum_string_parse_int",
-            self.emit_verum_string_parse_int(module)
+            "emit_verum_text_parse_int",
+            self.emit_verum_text_parse_int(module)
         );
         step!(
-            "emit_verum_string_parse_float",
-            self.emit_verum_string_parse_float(module)
+            "emit_verum_text_parse_float",
+            self.emit_verum_text_parse_float(module)
         );
         step!("fixup_text_len", self.fixup_text_len(module));
         step!("fixup_map_get", self.fixup_map_get(module));
@@ -4900,12 +4900,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_string_parse_int(str: ptr) -> i64
+    /// verum_text_parse_int(str: ptr) -> i64
     ///
 
     /// Parses C string to integer using strtol(str, NULL, 10).
-    fn emit_verum_string_parse_int(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_string_parse_int") {
+    fn emit_verum_text_parse_int(&self, module: &Module<'ctx>) -> Result<()> {
+        if let Some(f) = module.get_function("verum_text_parse_int") {
             if f.count_basic_blocks() > 0 {
                 return Ok(());
             }
@@ -4918,8 +4918,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
         let func = module
-            .get_function("verum_string_parse_int")
-            .unwrap_or_else(|| module.add_function("verum_string_parse_int", fn_type, None));
+            .get_function("verum_text_parse_int")
+            .unwrap_or_else(|| module.add_function("verum_text_parse_int", fn_type, None));
 
         let entry = ctx.append_basic_block(func, "entry");
         let do_parse = ctx.append_basic_block(func, "do_parse");
@@ -4962,12 +4962,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_string_parse_float(str: ptr) -> i64 (f64 bits as i64)
+    /// verum_text_parse_float(str: ptr) -> i64 (f64 bits as i64)
     ///
 
     /// Parses C string to float using strtod, returns f64 bits as i64.
-    fn emit_verum_string_parse_float(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_string_parse_float") {
+    fn emit_verum_text_parse_float(&self, module: &Module<'ctx>) -> Result<()> {
+        if let Some(f) = module.get_function("verum_text_parse_float") {
             if f.count_basic_blocks() > 0 {
                 return Ok(());
             }
@@ -4980,8 +4980,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
         let func = module
-            .get_function("verum_string_parse_float")
-            .unwrap_or_else(|| module.add_function("verum_string_parse_float", fn_type, None));
+            .get_function("verum_text_parse_float")
+            .unwrap_or_else(|| module.add_function("verum_text_parse_float", fn_type, None));
 
         let entry = ctx.append_basic_block(func, "entry");
         let do_parse = ctx.append_basic_block(func, "do_parse");
@@ -13108,6 +13108,353 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .or_internal("call returned void")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
+
+    // --- verum_text_byte_len(text_obj: i64) -> i64 ---
+    // Reads `len` from the 24-byte Text object {ptr, len, cap} at
+    // offset 8.  Mirrors the canonical layout used by
+    // `verum_text_alloc` / `verum_text_get_ptr` / `verum_text_concat`.
+    if module.get_function("verum_text_byte_len").is_none() {
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let func = module
+            .get_function("verum_text_byte_len")
+            .unwrap_or_else(|| module.add_function("verum_text_byte_len", fn_type, None));
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
+        let entry = context.append_basic_block(func, "entry");
+        let builder = context.create_builder();
+        builder.position_at_end(entry);
+        let obj_i64 = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let obj_ptr = builder
+            .build_int_to_ptr(obj_i64, ptr_type, "obj_ptr")
+            .or_llvm_err()?;
+        // SAFETY: GEP into the Text object at offset 8 (len field).
+        let len_p = unsafe {
+            builder
+                .build_gep(i8_type, obj_ptr, &[i64_type.const_int(8, false)], "len_p")
+                .or_llvm_err()?
+        };
+        let len = builder
+            .build_load(i64_type, len_p, "len")
+            .or_llvm_err()?
+            .into_int_value();
+        builder.build_return(Some(&len)).or_llvm_err()?;
+    }
+
+    // --- verum_text_is_empty(text_obj: i64) -> i64 ---
+    // Returns 1 if `len == 0`, 0 otherwise.  Single-load probe.
+    if module.get_function("verum_text_is_empty").is_none() {
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let func = module
+            .get_function("verum_text_is_empty")
+            .unwrap_or_else(|| module.add_function("verum_text_is_empty", fn_type, None));
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
+        let entry = context.append_basic_block(func, "entry");
+        let builder = context.create_builder();
+        builder.position_at_end(entry);
+        let obj_i64 = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let obj_ptr = builder
+            .build_int_to_ptr(obj_i64, ptr_type, "obj_ptr")
+            .or_llvm_err()?;
+        let len_p = unsafe {
+            builder
+                .build_gep(i8_type, obj_ptr, &[i64_type.const_int(8, false)], "len_p")
+                .or_llvm_err()?
+        };
+        let len = builder
+            .build_load(i64_type, len_p, "len")
+            .or_llvm_err()?
+            .into_int_value();
+        let zero = i64_type.const_zero();
+        let is_empty_bool = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, len, zero, "is_empty_bool")
+            .or_llvm_err()?;
+        let is_empty = builder
+            .build_int_z_extend(is_empty_bool, i64_type, "is_empty")
+            .or_llvm_err()?;
+        builder.build_return(Some(&is_empty)).or_llvm_err()?;
+    }
+
+    // --- verum_text_is_utf8(text_obj: i64) -> i64 ---
+    // Validates the UTF-8 byte sequence stored in the Text object.
+    // Returns 1 iff every continuation byte matches the leading-
+    // byte's stated length.  This is a streaming validator —
+    // walks bytes once.
+    //
+    // Algorithm (canonical): for each leading byte b at index i:
+    //   0xxx_xxxx                → 1-byte ASCII, advance 1.
+    //   110x_xxxx 10xx_xxxx      → 2-byte, advance 2.
+    //   1110_xxxx 10xx_xxxx ×2   → 3-byte, advance 3.
+    //   1111_0xxx 10xx_xxxx ×3   → 4-byte, advance 4.
+    //   anything else              → invalid, return 0.
+    //
+    // Continuation bytes must each have the high two bits `10`
+    // (mask 0xC0, expected value 0x80).
+    //
+    // The implementation uses a single outer loop with nested
+    // continuation-byte checks per code-point class.  At each
+    // step we compute the expected length from the leading
+    // byte's high bits and verify that many continuation bytes
+    // exist within `len` AND each carries the `10` high bits.
+    if module.get_function("verum_text_is_utf8").is_none() {
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let func = module
+            .get_function("verum_text_is_utf8")
+            .unwrap_or_else(|| module.add_function("verum_text_is_utf8", fn_type, None));
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
+        let entry = context.append_basic_block(func, "entry");
+        let loop_header = context.append_basic_block(func, "loop_header");
+        let load_lead = context.append_basic_block(func, "load_lead");
+        let cls_ascii = context.append_basic_block(func, "cls_ascii");
+        let cls_2 = context.append_basic_block(func, "cls_2");
+        let cls_3 = context.append_basic_block(func, "cls_3");
+        let cls_4 = context.append_basic_block(func, "cls_4");
+        let cont_check = context.append_basic_block(func, "cont_check");
+        let advance = context.append_basic_block(func, "advance");
+        let ret_ok = context.append_basic_block(func, "ret_ok");
+        let ret_bad = context.append_basic_block(func, "ret_bad");
+
+        let builder = context.create_builder();
+        builder.position_at_end(entry);
+        let obj_i64 = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+        let obj_ptr = builder
+            .build_int_to_ptr(obj_i64, ptr_type, "obj_ptr")
+            .or_llvm_err()?;
+        // ptr at offset 0, len at offset 8.
+        let data_pp = obj_ptr;
+        let data_ptr = builder
+            .build_load(ptr_type, data_pp, "data_ptr")
+            .or_llvm_err()?
+            .into_pointer_value();
+        let len_p = unsafe {
+            builder
+                .build_gep(i8_type, obj_ptr, &[i64_type.const_int(8, false)], "len_p")
+                .or_llvm_err()?
+        };
+        let len = builder
+            .build_load(i64_type, len_p, "len")
+            .or_llvm_err()?
+            .into_int_value();
+        let i_alloca = builder
+            .build_alloca(i64_type, "i")
+            .or_llvm_err()?;
+        builder
+            .build_store(i_alloca, i64_type.const_zero())
+            .or_llvm_err()?;
+        let span_alloca = builder
+            .build_alloca(i64_type, "span")
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(loop_header).or_llvm_err()?;
+
+        // ^loop_header: i < len ? load_lead : ret_ok
+        builder.position_at_end(loop_header);
+        let i_cur = builder
+            .build_load(i64_type, i_alloca, "i_cur")
+            .or_llvm_err()?
+            .into_int_value();
+        let in_range = builder
+            .build_int_compare(verum_llvm::IntPredicate::SLT, i_cur, len, "in_range")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(in_range, load_lead, ret_ok)
+            .or_llvm_err()?;
+
+        // ^load_lead: classify the leading byte by its high bits
+        builder.position_at_end(load_lead);
+        let lead_p = unsafe {
+            builder
+                .build_gep(i8_type, data_ptr, &[i_cur], "lead_p")
+                .or_llvm_err()?
+        };
+        let lead = builder
+            .build_load(i8_type, lead_p, "lead")
+            .or_llvm_err()?
+            .into_int_value();
+        let lead_i64 = builder
+            .build_int_z_extend(lead, i64_type, "lead_i64")
+            .or_llvm_err()?;
+        // Test if (lead & 0x80) == 0 → ASCII branch.
+        let mask_80 = i64_type.const_int(0x80, false);
+        let high1 = builder
+            .build_and(lead_i64, mask_80, "high1")
+            .or_llvm_err()?;
+        let zero = i64_type.const_zero();
+        let is_ascii = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, high1, zero, "is_ascii")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_ascii, cls_ascii, cls_2)
+            .or_llvm_err()?;
+
+        // ^cls_ascii: 1-byte sequence
+        builder.position_at_end(cls_ascii);
+        builder
+            .build_store(span_alloca, i64_type.const_int(1, false))
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(advance).or_llvm_err()?;
+
+        // ^cls_2: test if (lead & 0xE0) == 0xC0
+        builder.position_at_end(cls_2);
+        let mask_e0 = i64_type.const_int(0xE0, false);
+        let high_e = builder
+            .build_and(lead_i64, mask_e0, "high_e")
+            .or_llvm_err()?;
+        let val_c0 = i64_type.const_int(0xC0, false);
+        let is_2 = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, high_e, val_c0, "is_2")
+            .or_llvm_err()?;
+        let cls_2_yes = context.append_basic_block(func, "cls_2_yes");
+        builder
+            .build_conditional_branch(is_2, cls_2_yes, cls_3)
+            .or_llvm_err()?;
+        builder.position_at_end(cls_2_yes);
+        builder
+            .build_store(span_alloca, i64_type.const_int(2, false))
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(cont_check).or_llvm_err()?;
+
+        // ^cls_3: test if (lead & 0xF0) == 0xE0
+        builder.position_at_end(cls_3);
+        let mask_f0 = i64_type.const_int(0xF0, false);
+        let high_f = builder
+            .build_and(lead_i64, mask_f0, "high_f")
+            .or_llvm_err()?;
+        let val_e0 = i64_type.const_int(0xE0, false);
+        let is_3 = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, high_f, val_e0, "is_3")
+            .or_llvm_err()?;
+        let cls_3_yes = context.append_basic_block(func, "cls_3_yes");
+        builder
+            .build_conditional_branch(is_3, cls_3_yes, cls_4)
+            .or_llvm_err()?;
+        builder.position_at_end(cls_3_yes);
+        builder
+            .build_store(span_alloca, i64_type.const_int(3, false))
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(cont_check).or_llvm_err()?;
+
+        // ^cls_4: test if (lead & 0xF8) == 0xF0
+        builder.position_at_end(cls_4);
+        let mask_f8 = i64_type.const_int(0xF8, false);
+        let high_f8 = builder
+            .build_and(lead_i64, mask_f8, "high_f8")
+            .or_llvm_err()?;
+        let val_f0 = i64_type.const_int(0xF0, false);
+        let is_4 = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, high_f8, val_f0, "is_4")
+            .or_llvm_err()?;
+        let cls_4_yes = context.append_basic_block(func, "cls_4_yes");
+        builder
+            .build_conditional_branch(is_4, cls_4_yes, ret_bad)
+            .or_llvm_err()?;
+        builder.position_at_end(cls_4_yes);
+        builder
+            .build_store(span_alloca, i64_type.const_int(4, false))
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(cont_check).or_llvm_err()?;
+
+        // ^cont_check: validate (span - 1) continuation bytes
+        // each have (b & 0xC0) == 0x80.  Use a tight inner loop.
+        builder.position_at_end(cont_check);
+        let span = builder
+            .build_load(i64_type, span_alloca, "span")
+            .or_llvm_err()?
+            .into_int_value();
+        let span_end = builder
+            .build_int_add(i_cur, span, "span_end")
+            .or_llvm_err()?;
+        let too_long = builder
+            .build_int_compare(verum_llvm::IntPredicate::SGT, span_end, len, "too_long")
+            .or_llvm_err()?;
+        let cont_loop = context.append_basic_block(func, "cont_loop");
+        let cont_body = context.append_basic_block(func, "cont_body");
+        builder
+            .build_conditional_branch(too_long, ret_bad, cont_loop)
+            .or_llvm_err()?;
+        let j_alloca = builder
+            .build_alloca(i64_type, "j")
+            .or_llvm_err()?;
+        let one = i64_type.const_int(1, false);
+        let j_init = builder
+            .build_int_add(i_cur, one, "j_init")
+            .or_llvm_err()?;
+        builder.build_store(j_alloca, j_init).or_llvm_err()?;
+        builder.build_unconditional_branch(cont_loop).or_llvm_err()?;
+
+        builder.position_at_end(cont_loop);
+        let j_cur = builder
+            .build_load(i64_type, j_alloca, "j_cur")
+            .or_llvm_err()?
+            .into_int_value();
+        let j_in_range = builder
+            .build_int_compare(verum_llvm::IntPredicate::SLT, j_cur, span_end, "j_in_range")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(j_in_range, cont_body, advance)
+            .or_llvm_err()?;
+
+        builder.position_at_end(cont_body);
+        let cb_p = unsafe {
+            builder
+                .build_gep(i8_type, data_ptr, &[j_cur], "cb_p")
+                .or_llvm_err()?
+        };
+        let cb = builder
+            .build_load(i8_type, cb_p, "cb")
+            .or_llvm_err()?
+            .into_int_value();
+        let cb_i64 = builder
+            .build_int_z_extend(cb, i64_type, "cb_i64")
+            .or_llvm_err()?;
+        let mask_c0 = i64_type.const_int(0xC0, false);
+        let cb_high = builder
+            .build_and(cb_i64, mask_c0, "cb_high")
+            .or_llvm_err()?;
+        let val_80 = i64_type.const_int(0x80, false);
+        let cb_ok = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, cb_high, val_80, "cb_ok")
+            .or_llvm_err()?;
+        let cb_advance = context.append_basic_block(func, "cb_advance");
+        builder
+            .build_conditional_branch(cb_ok, cb_advance, ret_bad)
+            .or_llvm_err()?;
+        builder.position_at_end(cb_advance);
+        let j_next = builder
+            .build_int_add(j_cur, one, "j_next")
+            .or_llvm_err()?;
+        builder.build_store(j_alloca, j_next).or_llvm_err()?;
+        builder.build_unconditional_branch(cont_loop).or_llvm_err()?;
+
+        // ^advance: i += span; jump to ^loop_header.
+        builder.position_at_end(advance);
+        let span2 = builder
+            .build_load(i64_type, span_alloca, "span2")
+            .or_llvm_err()?
+            .into_int_value();
+        let i_next = builder
+            .build_int_add(i_cur, span2, "i_next")
+            .or_llvm_err()?;
+        builder.build_store(i_alloca, i_next).or_llvm_err()?;
+        builder.build_unconditional_branch(loop_header).or_llvm_err()?;
+
+        // ^ret_ok / ^ret_bad
+        builder.position_at_end(ret_ok);
+        builder
+            .build_return(Some(&i64_type.const_int(1, false)))
+            .or_llvm_err()?;
+        builder.position_at_end(ret_bad);
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
+    }
+
     Ok(())
 }
 
