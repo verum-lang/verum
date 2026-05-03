@@ -307,6 +307,10 @@ public type SupervisorSpawnConfig is {
     stack_size: Int,
 };
 
+/// Public alias — short canonical name. The internal type's verbose
+/// `Supervisor` prefix predates the runtime/spawn module split.
+public type SpawnConfig is SupervisorSpawnConfig;
+
 implement SupervisorSpawnConfig {
     /// Create new spawn config with default values
     ///
