@@ -742,6 +742,10 @@ public type Expert<D: meta USize{D > 0}, H: meta USize{H > 0}> is {
 // SsmActivation function type
 public type SsmActivation is GELU | SiLU | ReLU | Tanh | Sigmoid;
 
+/// Public alias — short canonical name; internal type uses
+/// `SsmActivation` to disambiguate from other Activation enums.
+public type Activation is SsmActivation;
+
 implement<D: meta USize{D > 0}, H: meta USize{H > 0}> Expert<D, H> {
     public fn new(activation: SsmActivation) -> Self {
         Expert {
