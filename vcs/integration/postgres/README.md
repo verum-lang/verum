@@ -133,3 +133,7 @@ Test list per `internal/specs/database.md` follow-up:
   BackupStreamEvent (BseTsChunk / BseTsEnd / BseManifestChunk /
   BseManifestEnd / BseFinished). Closes the LAST PG sub-protocol
   without async surface (spec §6.1.7 / §6.1.8)
+- `t21_prepared_session.vr` — sync + async PreparedSession LRU:
+  prepare_cached double-call asserts cache hit; query_cached
+  round-trip; drain_cache_on_close issues Close(S, name) for
+  every cached slot (spec §6.1.4 prepared cache)

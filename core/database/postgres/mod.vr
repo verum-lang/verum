@@ -61,6 +61,8 @@ public module async_copy;
 public module async_replication;
 public module async_base_backup;
 public module typed_row;
+public module pg_stmt_cache;
+public module pg_prepared_session;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -77,6 +79,15 @@ public mount .connection.{
 };
 public mount .typed_row.{
     TypedRow, rows_typed,
+};
+public mount .pg_stmt_cache.{
+    PgStmtCache, PgCacheEntry, PgStmtCacheMetrics,
+    DEFAULT_PG_STMT_CACHE_CAP,
+    fingerprint as pg_stmt_fingerprint,
+};
+public mount .pg_prepared_session.{
+    PgPreparedSession, AsyncPgPreparedSession,
+    PG_INVALID_SQL_STATEMENT_NAME,
 };
 public mount .wire.backend.{NotificationResponse, CopyResponse, CopyFormat, CfText, CfBinary};
 public mount .wire.typed.{

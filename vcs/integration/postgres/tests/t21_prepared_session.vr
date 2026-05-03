@@ -1,0 +1,135 @@
+// =============================================================================
+// t21_prepared_session.vr — sync + async PreparedSession LRU
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.4 (extended-query / prepared cache).
+// =============================================================================
+//
+// V0:
+//   1. Sync: prepare_cached the same SQL twice; assert hit count
+//      bumps + cache.len == 1.
+//   2. Sync: query_cached with typed params returns the right row.
+//   3. drain_cache_on_close issues Close(S, name) for each cached
+//      slot (silent — assertion is just that no error fires).
+//   4. Async: AsyncPgPreparedSession.prepare_cached double-call;
+//      query_cached round-trip.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    PgConnection, PgPreparedStatement, PgPreparedSession,
+    AsyncPgConnection, AsyncPgPreparedStatement, AsyncPgPreparedSession,
+    async_connect,
+};
+mount core.database.postgres.wire.typed.{
+    TypedValue, TvInt4,
+};
+mount core.async.executor.block_on;
+
+fn main() {
+    // -------------------------------------------------------------------------
+    // 1 + 2. Sync session.
+    // -------------------------------------------------------------------------
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app failed".clone(),
+    );
+    let mut session = PgPreparedSession.new();
+
+    let sql = "SELECT $1::int4 + $2::int4 AS s".clone();
+    let stmt_a = expect_ok(
+        session.prepare_cached(&mut conn, &sql),
+        &"prepare_cached A failed".clone(),
+    );
+    expect_eq_int(session.cache_len(), 1, &"cache.len after first prepare".clone());
+
+    let stmt_b = expect_ok(
+        session.prepare_cached(&mut conn, &sql),
+        &"prepare_cached B failed".clone(),
+    );
+    expect_eq_int(session.cache_len(), 1, &"cache.len stays 1 on hit".clone());
+
+    let metrics = session.cache_metrics();
+    expect(
+        metrics.total_hits >= 1,
+        &f"expected ≥1 cache hit, got {metrics.total_hits}",
+    );
+    expect_eq_int(metrics.total_inserts, 1, &"one insert".clone());
+
+    // Use the cached statement.
+    let mut params: List<Maybe<TypedValue>> = List.new();
+    params.push(Some(TvInt4(40)));
+    params.push(Some(TvInt4(2)));
+    let r = expect_ok(
+        session.query_cached(&mut conn, &sql, &params),
+        &"query_cached failed".clone(),
+    );
+    expect_eq_int(r.rows.len() as Int, 1, &"row count".clone());
+
+    // 3. Drain.
+    let closed = session.drain_cache_on_close(&mut conn);
+    expect_eq_int(closed, 1, &"drain closed 1 statement".clone());
+    expect_eq_int(session.cache_len(), 0, &"cache empty after drain".clone());
+
+    let _ = stmt_a;     // suppress unused warnings
+    let _ = stmt_b;
+
+    // -------------------------------------------------------------------------
+    // 4. Async session.
+    // -------------------------------------------------------------------------
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-prepsess".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let aconn = expect_ok(
+            async_connect(&cfg, 8).await,
+            &"async_connect failed".clone(),
+        );
+        let mut asess = AsyncPgPreparedSession.new();
+
+        let asql = "SELECT $1::int8 * $2::int8 AS p".clone();
+        let _ = expect_ok(
+            asess.prepare_cached(&aconn, &asql).await,
+            &"async prepare_cached A failed".clone(),
+        );
+        let _ = expect_ok(
+            asess.prepare_cached(&aconn, &asql).await,
+            &"async prepare_cached B failed".clone(),
+        );
+        let am = asess.cache_metrics();
+        expect(
+            am.total_hits >= 1,
+            &f"async expected ≥1 cache hit, got {am.total_hits}",
+        );
+
+        let mut ap: List<Maybe<TypedValue>> = List.new();
+        ap.push(Some(core.database.postgres.wire.typed.TvInt8(7)));
+        ap.push(Some(core.database.postgres.wire.typed.TvInt8(11)));
+        let ares = expect_ok(
+            asess.query_cached(&aconn, &asql, ap).await,
+            &"async query_cached failed".clone(),
+        );
+        expect_eq_int(ares.rows.len() as Int, 1, &"async row count".clone());
+
+        let drained = asess.drain_cache_on_close(&aconn).await;
+        expect(
+            drained >= 1,
+            &f"async drain closed ≥1 statement, got {drained}",
+        );
+
+        let _ = aconn.close().await;
+
+        pass(&"t21_prepared_session".clone());
+    });
+}
