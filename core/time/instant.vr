@@ -107,6 +107,7 @@ implement Instant {
     /// ```verum
     /// let now = Instant.now();
     /// ```
+    @inline(always)
     public fn now() -> Instant {
         let nanos = monotonic_nanos() as Int;
         Instant { nanos: nanos }
@@ -190,6 +191,7 @@ implement Instant {
     /// The returned value is monotonic but not absolute (no Unix
     /// epoch alignment); use only for ordering and duration
     /// arithmetic, not as a wall-clock timestamp.
+    @inline(always)
     public fn as_nanos(&self) -> Int {
         self.nanos
     }
