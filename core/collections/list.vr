@@ -269,6 +269,7 @@ implement<T> List<T> {
     // =========================================================================
 
     // Get element by index (returns copy of element value).
+    @inline(always)
     public fn get(&self, idx: Int) -> Maybe<T> {
         if idx >= 0 && idx < self.len {
             unsafe { Some(*self.ptr.offset(idx)) }
@@ -278,6 +279,7 @@ implement<T> List<T> {
     }
 
     // Get mutable element by index (returns copy of element value).
+    @inline(always)
     public fn get_mut(&mut self, idx: Int) -> Maybe<T> {
         if idx >= 0 && idx < self.len {
             unsafe { Some(*self.ptr.offset(idx)) }
@@ -287,6 +289,7 @@ implement<T> List<T> {
     }
 
     // Set element at index.
+    @inline(always)
     public fn set(&mut self, idx: Int, value: T) {
         assert(idx >= 0 && idx < self.len, "set index out of bounds");
         unsafe {
@@ -297,21 +300,25 @@ implement<T> List<T> {
     // Get element without bounds check.
     // # Safety
     // Index must be in bounds.
+    @inline(always)
     public unsafe fn get_unchecked(&self, idx: Int) -> &T {
         &*self.ptr.offset(idx)
     }
 
     // Get mutable element without bounds check.
+    @inline(always)
     public unsafe fn get_unchecked_mut(&mut self, idx: Int) -> &mut T {
         &mut *self.ptr.offset(idx)
     }
 
     // First element.
+    @inline(always)
     public fn first(&self) -> Maybe<T> {
         self.get(0)
     }
 
     // Last element.
+    @inline(always)
     public fn last(&self) -> Maybe<T> {
         if self.len > 0 {
             self.get(self.len - 1)
@@ -321,11 +328,13 @@ implement<T> List<T> {
     }
 
     // First element mutable.
+    @inline(always)
     public fn first_mut(&mut self) -> Maybe<T> {
         self.get_mut(0)
     }
 
     // Last element mutable.
+    @inline(always)
     public fn last_mut(&mut self) -> Maybe<T> {
         if self.len > 0 {
             self.get_mut(self.len - 1)
@@ -2673,6 +2682,7 @@ implement<T: Clone> Clone for List<T> {
 implement<T> Index<Int> for List<T> {
     type Output = T;
 
+    @inline(always)
     fn index(&self, idx: Int) -> &T {
         assert(idx >= 0 && idx < self.len, "List index out of bounds");
         unsafe { &*self.ptr.offset(idx) }
@@ -2680,6 +2690,7 @@ implement<T> Index<Int> for List<T> {
 }
 
 implement<T> IndexMut<Int> for List<T> {
+    @inline(always)
     fn index_mut(&mut self, idx: Int) -> &mut T {
         assert(idx >= 0 && idx < self.len, "List index out of bounds");
         unsafe { &mut *self.ptr.offset(idx) }
