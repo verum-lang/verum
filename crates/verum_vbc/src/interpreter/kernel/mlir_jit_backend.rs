@@ -155,6 +155,23 @@ enum KernelKind {
  /// outermost, decompose `i` into multi-axis indices via
  /// `out_shape`, accumulate `b_off += idx[k] * b_stride[k]`.
  BinopMidAxisBroadcast(TensorBinaryOp),
+ /// Flipped-arg variants — same body shapes as the four
+ /// broadcast kernels above, but the arith op reads operands
+ /// in the SWAPPED order `b op a` instead of `a op b`.
+ /// Used by the dispatcher when it auto-swapped `(a, b)` for
+ /// a non-commutative op where `b.numel > a.numel`: from the
+ /// caller's perspective they wanted `orig_a op orig_b`, after
+ /// the swap the kernel sees `(internal_a=orig_b, internal_b=orig_a)`
+ /// and must compute `internal_b[bcast_idx] op internal_a[i]`
+ /// to preserve the original semantics.
+ ///
+ /// For commutative ops these would produce bit-equivalent
+ /// results to the non-flipped variants, so the dispatcher
+ /// only routes here for non-commutative ops (Sub/Div/Mod/Pow).
+ BinopScalarBroadcastFlipped(TensorBinaryOp),
+ BinopSuffixBroadcastFlipped(TensorBinaryOp),
+ BinopPrefixBroadcastFlipped(TensorBinaryOp),
+ BinopMidAxisBroadcastFlipped(TensorBinaryOp),
  Unop(TensorUnaryOp),
  /// Scalar triple-loop matmul; `M`/`K`/`N` are runtime args, the
  /// kernel itself is dtype-only-parametrised (one cached engine
@@ -570,18 +587,20 @@ impl Backend for MlirJitBackend {
  return None;
  }
 
- // **Commutative-op swap** — if `b` has MORE elements than `a`
- // (b would broadcast to a's superset shape), and the op is
- // commutative (Add/Mul/Min/Max), we can rewrite `a op b` as
- // `b op a` and route through the same kernel set.  The output
- // shape becomes b's shape (the broadcast superset) instead of
- // a's.  Non-commutative ops (Sub/Div/Mod/Pow) where b > a
- // would need flipped-arg kernels — that's deferred (return
- // None and let CpuBackend handle).
- let (a, b) = if b.numel > a.numel && op_is_commutative(op) {
- (b, a)
+ // **Operand swap** — when `b` has MORE elements than `a` (b
+ // would broadcast to a's superset shape), swap so the larger
+ // operand is `a` and the existing dispatcher (which materialises
+ // `out` with `a.shape`) just works.  For commutative ops
+ // (Add/Mul/Min/Max) the swap is mathematically transparent.
+ // For non-commutative ops (Sub/Div/Mod/Pow) we set `flipped =
+ // true` and route through the *Flipped variants below, which
+ // emit the arith op with operands in reversed order — the
+ // kernel computes `b op a` (where the names are post-swap) ≡
+ // the caller's original `orig_a op orig_b`.
+ let (a, b, flipped) = if b.numel > a.numel {
+ (b, a, !op_is_commutative(op))
  } else {
- (a, b)
+ (a, b, false)
  };
 
  let a_shape = &a.shape[..a.ndim as usize];
@@ -688,16 +707,20 @@ impl Backend for MlirJitBackend {
  // kernels read/write through caller-supplied pointers; we own
  // the output buffer here.
  let out = TensorHandle::zeros(a_shape, a.dtype)?;
- let kind = if scalar_broadcast {
- KernelKind::BinopScalarBroadcast(op)
- } else if suffix_broadcast {
- KernelKind::BinopSuffixBroadcast(op)
- } else if prefix_broadcast {
- KernelKind::BinopPrefixBroadcast(op)
- } else if mid_axis_broadcast {
- KernelKind::BinopMidAxisBroadcast(op)
- } else {
- KernelKind::Binop(op)
+ // Same-shape is symmetric so flipping is a no-op there; only
+ // the four broadcast kernels have asymmetric `out[i] = a[i] op
+ // b[bcast_idx]` shapes that need the *Flipped variant when the
+ // dispatcher swapped a non-commutative op.
+ let kind = match (scalar_broadcast, suffix_broadcast, prefix_broadcast, mid_axis_broadcast, flipped) {
+ (true, _, _, _, false) => KernelKind::BinopScalarBroadcast(op),
+ (true, _, _, _, true) => KernelKind::BinopScalarBroadcastFlipped(op),
+ (_, true, _, _, false) => KernelKind::BinopSuffixBroadcast(op),
+ (_, true, _, _, true) => KernelKind::BinopSuffixBroadcastFlipped(op),
+ (_, _, true, _, false) => KernelKind::BinopPrefixBroadcast(op),
+ (_, _, true, _, true) => KernelKind::BinopPrefixBroadcastFlipped(op),
+ (_, _, _, true, false) => KernelKind::BinopMidAxisBroadcast(op),
+ (_, _, _, true, true) => KernelKind::BinopMidAxisBroadcastFlipped(op),
+ _ => KernelKind::Binop(op),
  };
  let holder = self.get_or_compile(kind, a.dtype)?;
 
@@ -1283,12 +1306,19 @@ fn build_binop_kernel_text(op: TensorBinaryOp, dtype: DType) -> Option<String> {
 ///
 /// Caller must guarantee `b.numel == 1` (rank-0 scalar or all-1
 /// shape); the kernel itself only ever touches `b[0]`.
+///
+/// `flipped == true` swaps the operand order in the arith op:
+/// `out[i] = b op a[i]` instead of `a[i] op b`.  Used by the
+/// dispatcher when it auto-swapped `(a, b)` for a non-commutative
+/// op where the original `b` was larger than the original `a`.
 fn build_binop_scalar_broadcast_kernel_text(
  op: TensorBinaryOp,
  dtype: DType,
+ flipped: bool,
 ) -> Option<String> {
  let elem_ty = mlir_elem_type(dtype)?;
  let arith = binop_arith_op(op, dtype)?;
+ let (lhs, rhs) = if flipped { ("%vb", "%va") } else { ("%va", "%vb") };
  Some(format!(
  r#"module {{
  func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64) attributes {{ llvm.emit_c_interface }} {{
@@ -1302,7 +1332,7 @@ fn build_binop_scalar_broadcast_kernel_text(
  ^body:
  %ai = llvm.getelementptr inbounds %a[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  %va = llvm.load %ai : !llvm.ptr -> {elem}
- %vc = {arith} %va, %vb : {elem}
+ %vc = {arith} {lhs}, {rhs} : {elem}
  %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  llvm.store %vc, %ci : {elem}, !llvm.ptr
  %i_next = arith.addi %i, %c1 : i64
@@ -1314,6 +1344,8 @@ fn build_binop_scalar_broadcast_kernel_text(
 "#,
  elem = elem_ty,
  arith = arith,
+ lhs = lhs,
+ rhs = rhs,
  ))
 }
 
@@ -1343,9 +1375,11 @@ fn build_binop_scalar_broadcast_kernel_text(
 fn build_binop_suffix_broadcast_kernel_text(
  op: TensorBinaryOp,
  dtype: DType,
+ flipped: bool,
 ) -> Option<String> {
  let elem_ty = mlir_elem_type(dtype)?;
  let arith = binop_arith_op(op, dtype)?;
+ let (lhs, rhs) = if flipped { ("%vb", "%va") } else { ("%va", "%vb") };
  Some(format!(
  r#"module {{
  func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64, %period: i64) attributes {{ llvm.emit_c_interface }} {{
@@ -1361,7 +1395,7 @@ fn build_binop_suffix_broadcast_kernel_text(
  %bi = llvm.getelementptr inbounds %b[%bi_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  %va = llvm.load %ai : !llvm.ptr -> {elem}
  %vb = llvm.load %bi : !llvm.ptr -> {elem}
- %vc = {arith} %va, %vb : {elem}
+ %vc = {arith} {lhs}, {rhs} : {elem}
  %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  llvm.store %vc, %ci : {elem}, !llvm.ptr
  %i_next = arith.addi %i, %c1 : i64
@@ -1373,6 +1407,8 @@ fn build_binop_suffix_broadcast_kernel_text(
 "#,
  elem = elem_ty,
  arith = arith,
+ lhs = lhs,
+ rhs = rhs,
  ))
 }
 
@@ -1398,9 +1434,11 @@ fn build_binop_suffix_broadcast_kernel_text(
 fn build_binop_prefix_broadcast_kernel_text(
  op: TensorBinaryOp,
  dtype: DType,
+ flipped: bool,
 ) -> Option<String> {
  let elem_ty = mlir_elem_type(dtype)?;
  let arith = binop_arith_op(op, dtype)?;
+ let (lhs, rhs) = if flipped { ("%vb", "%va") } else { ("%va", "%vb") };
  Some(format!(
  r#"module {{
  func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64, %inner: i64) attributes {{ llvm.emit_c_interface }} {{
@@ -1416,7 +1454,7 @@ fn build_binop_prefix_broadcast_kernel_text(
  %bi = llvm.getelementptr inbounds %b[%bi_idx] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  %va = llvm.load %ai : !llvm.ptr -> {elem}
  %vb = llvm.load %bi : !llvm.ptr -> {elem}
- %vc = {arith} %va, %vb : {elem}
+ %vc = {arith} {lhs}, {rhs} : {elem}
  %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  llvm.store %vc, %ci : {elem}, !llvm.ptr
  %i_next = arith.addi %i, %c1 : i64
@@ -1428,6 +1466,8 @@ fn build_binop_prefix_broadcast_kernel_text(
 "#,
  elem = elem_ty,
  arith = arith,
+ lhs = lhs,
+ rhs = rhs,
  ))
 }
 
@@ -1470,9 +1510,11 @@ fn build_binop_prefix_broadcast_kernel_text(
 fn build_binop_mid_axis_broadcast_kernel_text(
  op: TensorBinaryOp,
  dtype: DType,
+ flipped: bool,
 ) -> Option<String> {
  let elem_ty = mlir_elem_type(dtype)?;
  let arith = binop_arith_op(op, dtype)?;
+ let (lhs, rhs) = if flipped { ("%vb", "%va") } else { ("%va", "%vb") };
  Some(format!(
  r#"module {{
  func.func @kernel(%a: !llvm.ptr, %b: !llvm.ptr, %out: !llvm.ptr, %n: i64, %ndim: i64, %out_shape: !llvm.ptr, %b_stride: !llvm.ptr) attributes {{ llvm.emit_c_interface }} {{
@@ -1503,7 +1545,7 @@ fn build_binop_mid_axis_broadcast_kernel_text(
  %bi = llvm.getelementptr inbounds %b[%final_b_off] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  %va = llvm.load %ai : !llvm.ptr -> {elem}
  %vb = llvm.load %bi : !llvm.ptr -> {elem}
- %vc = {arith} %va, %vb : {elem}
+ %vc = {arith} {lhs}, {rhs} : {elem}
  %ci = llvm.getelementptr inbounds %out[%i] : (!llvm.ptr, i64) -> !llvm.ptr, {elem}
  llvm.store %vc, %ci : {elem}, !llvm.ptr
  %i_next = arith.addi %i, %c1 : i64
@@ -1954,16 +1996,28 @@ fn compile_kernel(
  let text = match kind {
  KernelKind::Binop(op) => build_binop_kernel_text(op, dtype)?,
  KernelKind::BinopScalarBroadcast(op) => {
- build_binop_scalar_broadcast_kernel_text(op, dtype)?
+ build_binop_scalar_broadcast_kernel_text(op, dtype, false)?
+ }
+ KernelKind::BinopScalarBroadcastFlipped(op) => {
+ build_binop_scalar_broadcast_kernel_text(op, dtype, true)?
  }
  KernelKind::BinopSuffixBroadcast(op) => {
- build_binop_suffix_broadcast_kernel_text(op, dtype)?
+ build_binop_suffix_broadcast_kernel_text(op, dtype, false)?
+ }
+ KernelKind::BinopSuffixBroadcastFlipped(op) => {
+ build_binop_suffix_broadcast_kernel_text(op, dtype, true)?
  }
  KernelKind::BinopPrefixBroadcast(op) => {
- build_binop_prefix_broadcast_kernel_text(op, dtype)?
+ build_binop_prefix_broadcast_kernel_text(op, dtype, false)?
+ }
+ KernelKind::BinopPrefixBroadcastFlipped(op) => {
+ build_binop_prefix_broadcast_kernel_text(op, dtype, true)?
  }
  KernelKind::BinopMidAxisBroadcast(op) => {
- build_binop_mid_axis_broadcast_kernel_text(op, dtype)?
+ build_binop_mid_axis_broadcast_kernel_text(op, dtype, false)?
+ }
+ KernelKind::BinopMidAxisBroadcastFlipped(op) => {
+ build_binop_mid_axis_broadcast_kernel_text(op, dtype, true)?
  }
  KernelKind::Unop(op) => build_unop_kernel_text(op, dtype)?,
  KernelKind::Matmul => build_matmul_kernel_text(dtype)?,
