@@ -1,0 +1,583 @@
+module core.database.sqlite.native.l1_pager.wal_index;
+
+// =============================================================================
+// l1_pager/wal_index.vr — WAL-index (.shm) protocol + data layout (#150)
+// =============================================================================
+// Layer: 1
+// Spec: sqlite.org/walformat.html §3 (WAL-index layout) +
+//       sqlite.org/wal.html (multi-reader/single-writer protocol)
+//
+// SQLite's WAL-index file is the coordination surface that lets
+// multiple readers see a consistent snapshot of the WAL while a
+// single writer appends frames — without taking a per-read disk
+// lock and without each reader walking the entire WAL on startup.
+// Pre-fix: Verum's L1 pager shipped no .shm machinery at all; every
+// reader had to recover the state by walking the WAL frame stream
+// from byte 0 (O(N) per open).
+//
+// Post-fix: this module ships the WAL-index data layout +
+// in-memory protocol surface.  Cross-process coordination via
+// mmap(MAP_SHARED) is deferred to a follow-up — it requires
+// platform primitives (mmap with MAP_SHARED + atomic ops on
+// shared memory + fcntl byte-range locks) that aren't in the
+// Verum stdlib yet.  The in-memory backend models the FULL
+// protocol so single-process callers benefit immediately +
+// the cross-process bridge is a drop-in replacement for the
+// backing storage when the primitives land.
+//
+// SQLite WAL-index on-disk layout (sqlite.org/walformat.html §3):
+//
+//   offset    size     contents
+//   ------    ----     --------
+//        0   48 B     WalIndexHdr (primary copy)
+//       48   48 B     WalIndexHdr (backup copy — atomic-update protocol)
+//       96   40 B     WalCkptInfo (5 reader marks + lock state)
+//      136   var      Hash sections, each 32 KiB:
+//                        4096 × u32  frame numbers   (16 KiB)
+//                        8192 × u16  hash chain heads (16 KiB)
+//
+// Hash function (walformat.html §3.4):
+//
+//     iKey = (iPage * 383) & 0x1FFF       // mod 8192
+//
+// Linear probing on collision; a sentinel 0 marks "no entry".
+// Multiple frames per page → newest frame wins (the index walks the
+// hash chain and picks the maximum frame number ≤ snapshot's
+// `mx_frame`).
+//
+// Reader marks (5 slots, walformat.html §4.4):
+//
+//   slot 0: always 0 — readers using ROLLBACK mode (snapshot of
+//                     just the main DB)
+//   slots 1..4: each holds an `mx_frame` value claimed by ≥1 reader.
+//               Writers must not checkpoint past the minimum claimed
+//               mark.  A reader looking to take a snapshot sets
+//               aReadMark[k] = mx_frame for the smallest k with a
+//               compatible mark.
+//
+// Checkpoint coordination (walformat.html §4.5):
+//
+//   * nBackfill — frames already drained to the main DB.  Bumped by
+//                 the checkpointer; a Restart/Truncate checkpoint
+//                 also resets aReadMark[1..4] to UINT_MAX.
+//   * aLock[8]  — byte-range locks (mapped to fcntl in the on-disk
+//                 backend; modeled as integer counters here for
+//                 the in-memory backend).
+//
+// Architecture: pure data — no I/O, no platform primitives, no
+// dependency on the pager.  Callers (wal_pager / wal_writer /
+// wal_reader) operate on a `WalIndex` value directly; the cross-
+// process bridge layer wraps a single shared `WalIndex` instance
+// in a mutex (for in-process multi-reader) or in a
+// `mmap(MAP_SHARED)` blob (deferred — see top of file).
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// Hash-table tuning constants (walformat.html §3.4)
+// -----------------------------------------------------------------------------
+
+/// Number of frame entries per hash section.  Real SQLite uses 4096
+/// (`HASHTABLE_NPAGE` in `wal.c`) — each section covers 4096 frames
+/// of WAL.  Once the WAL exceeds this, a NEW section is allocated
+/// (rare in practice — most WALs stay well under 4096 frames between
+/// checkpoints).
+public const HASHTABLE_NPAGE: Int = 4096;
+
+/// Hash slot count per section.  2× the frame count so the load
+/// factor stays ≤ 0.5 — keeps linear-probing chains short.
+public const HASHTABLE_NSLOT: Int = 8192;
+
+/// Multiplier for the page-number → hash-slot mapping.  Empirically
+/// chosen by SQLite to spread page numbers across slots; 383 is a
+/// prime that interacts well with typical sequential page-number
+/// allocation.
+public const HASHTABLE_HASH_MUL: Int = 383;
+
+/// Number of reader marks (walformat.html §4.4).  Slot 0 is fixed
+/// at 0 (ROLLBACK-mode snapshot); slots 1..4 hold per-snapshot
+/// `mx_frame` values.
+public const N_READER_MARK: Int = 5;
+
+/// Sentinel for an unclaimed reader mark — UINT_MAX matches SQLite's
+/// `READMARK_NOT_USED` convention.
+public const READMARK_NOT_USED: Int = 4294967295;
+
+// -----------------------------------------------------------------------------
+// WalIndexHdr — the 48-byte primary header (one of two)
+// -----------------------------------------------------------------------------
+
+/// Versioned header that captures every piece of state a reader
+/// needs to interpret the index without walking the WAL frame
+/// stream.  Two copies live on disk so the writer can rotate them
+/// atomically (write copy 2, fsync, write copy 1, fsync — readers
+/// see one of the two consistent snapshots).
+public type WalIndexHdr is {
+    /// Schema version — fixed at 3007000 (SQLite's
+    /// `WALINDEX_HDR_VERSION` since v3.7.0).
+    version: u32,
+    /// Bumped on every salt rotation OR checkpoint reset.  Readers
+    /// detect a stale snapshot by comparing this to their captured
+    /// value at snapshot time.
+    change_count: u32,
+    /// `1` once the writer has fully populated the index.  Readers
+    /// trying to attach to an `is_init=0` index must call recovery.
+    is_init: Bool,
+    /// `false` = little-endian frame checksums (Verum default), `true`
+    /// = big-endian.  Matches the WAL-file `WAL_MAGIC_*` flag.
+    big_end_cksum: Bool,
+    /// Page size in bytes.  Always a power-of-two ≥ 512, or the
+    /// sentinel 65536 (which encodes as `1` in the on-disk u16
+    /// per SQLite §6.2).
+    page_size: Int,
+    /// Highest valid frame number in the WAL.  Readers see frames
+    /// `[1, mx_frame]`; writers append at `mx_frame + 1`.
+    mx_frame: Int,
+    /// Database size in pages at the last commit.  Used to detect
+    /// the truncate-or-grow boundary on snapshot.
+    n_page: u32,
+    /// Rolling-Fossil-checksum state at end of last commit
+    /// (s1, s2 packed into a single struct).  Matches the
+    /// `WalChecksum` carried by `wal_writer::WalWriter.running`.
+    frame_cksum_s1: u32,
+    frame_cksum_s2: u32,
+    /// Active WAL salts (mirror of the WAL-file header's salt1/salt2
+    /// — kept here so readers can verify a frame without re-reading
+    /// the WAL header).
+    salt1: u32,
+    salt2: u32,
+};
+
+/// Default WAL-index version constant matching SQLite v3.7+.
+public const WALINDEX_HDR_VERSION: Int = 3007000;
+
+/// Construct a fresh (uninitialised) WAL-index header.
+pub fn wal_index_hdr_new(page_size: Int) -> WalIndexHdr {
+    WalIndexHdr {
+        version: WALINDEX_HDR_VERSION as u32,
+        change_count: 0 as u32,
+        is_init: false,
+        big_end_cksum: false,
+        page_size: page_size,
+        mx_frame: 0,
+        n_page: 0 as u32,
+        frame_cksum_s1: 0 as u32,
+        frame_cksum_s2: 0 as u32,
+        salt1: 0 as u32,
+        salt2: 0 as u32,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WalCkptInfo — checkpoint coordination block (walformat.html §4.5)
+// -----------------------------------------------------------------------------
+
+/// Per-reader claim on a snapshot of the WAL up to a particular
+/// `mx_frame`.  Slot 0's mark is always 0 (snapshot of just the
+/// main DB, no WAL frames); slots 1..4 hold positive mx_frame
+/// values claimed by readers.  The writer must not checkpoint past
+/// `min(active marks)` lest it invalidate an in-flight reader.
+public type WalReaderMark is {
+    mx_frame: Int,         // READMARK_NOT_USED when slot is free
+    /// Number of in-flight readers holding this mark.  Real SQLite
+    /// implements this via SHARED file locks on the corresponding
+    /// aLock[] byte; the in-memory backend uses a counter directly.
+    refcount: Int,
+};
+
+/// Checkpoint coordination block.  Lives at offset 96 of the .shm
+/// file; the whole struct is 40 bytes on disk (5 marks × 4 bytes
+/// + 8 lock bytes + 12 bytes of counters/padding).
+public type WalCkptInfo is {
+    /// Number of frames already moved to the main DB.  Bumped by the
+    /// checkpointer; readers + writers consult this to know which
+    /// part of the WAL is safely overwriteable.
+    n_backfill: Int,
+    /// Same as n_backfill but bumped at the START of checkpointing —
+    /// lets readers detect an in-progress checkpoint and back off.
+    n_backfill_attempted: Int,
+    /// Reader marks — slot 0 fixed at 0, slots 1..4 dynamic.
+    read_marks: List<WalReaderMark>,
+    /// Writer-mutex byte-range lock state.  In real SQLite this is
+    /// 8 bytes of fcntl byte-range locks at offsets 120..127 of the
+    /// .shm file; the in-memory backend models them as integers:
+    ///   0 = unlocked
+    ///   1 = SHARED held (one or more readers)
+    ///   2 = RESERVED held (writer is preparing to write)
+    ///   3 = EXCLUSIVE held (writer is committing)
+    write_lock: Int,
+    ckpt_lock: Int,
+    recover_lock: Int,
+    read_lock: Int,
+};
+
+pub fn wal_ckpt_info_new() -> WalCkptInfo {
+    let mut marks: List<WalReaderMark> = List.new();
+    // Slot 0: always 0, refcount = 0.
+    marks.push(WalReaderMark { mx_frame: 0, refcount: 0 });
+    // Slots 1..4: unclaimed.
+    let mut i: Int = 1;
+    while i < N_READER_MARK {
+        marks.push(WalReaderMark {
+            mx_frame: READMARK_NOT_USED,
+            refcount: 0,
+        });
+        i = i + 1;
+    }
+    WalCkptInfo {
+        n_backfill: 0,
+        n_backfill_attempted: 0,
+        read_marks: marks,
+        write_lock: 0,
+        ckpt_lock: 0,
+        recover_lock: 0,
+        read_lock: 0,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WalIndexHashSection — one 32 KiB hash table (4096 frames + 8192 slots)
+// -----------------------------------------------------------------------------
+
+/// One section of the WAL-index hash table.  Each section covers
+/// `HASHTABLE_NPAGE` consecutive frames; if the WAL grows past this,
+/// additional sections are allocated.  The (frame_pages, hash_slots)
+/// pair is what mmap-shared memory holds when the WAL-index is
+/// backed by a real .shm file.
+public type WalIndexHashSection is {
+    /// `frame_pages[i]` is the page number of frame `(section_base +
+    /// i + 1)`.  A value of 0 means the slot is unused.
+    frame_pages: List<u32>,
+    /// `hash_slots[k]` is the in-section frame index (1-based) of
+    /// the head of the hash chain for slot `k`.  0 means empty.
+    /// Linear probing on collision.
+    hash_slots: List<u16>,
+    /// Number of valid frame entries in this section.  Equals
+    /// `count(p in frame_pages : p != 0)`.  Cached for O(1) capacity
+    /// queries; rebuilt by `rebuild_hash` after recovery.
+    n_entries: Int,
+};
+
+pub fn hash_section_empty() -> WalIndexHashSection {
+    let mut frame_pages: List<u32> = List.new();
+    let mut hash_slots: List<u16> = List.new();
+    let mut i: Int = 0;
+    while i < HASHTABLE_NPAGE { frame_pages.push(0 as u32); i = i + 1; }
+    let mut j: Int = 0;
+    while j < HASHTABLE_NSLOT { hash_slots.push(0 as u16); j = j + 1; }
+    WalIndexHashSection {
+        frame_pages: frame_pages,
+        hash_slots: hash_slots,
+        n_entries: 0,
+    }
+}
+
+/// Hash function — `(page_no * 383) mod 8192`.  Matches SQLite
+/// `walHash` in wal.c.  Returns the slot index in `[0, HASHTABLE_NSLOT)`.
+pub fn wal_hash_slot(page_no: Int) -> Int {
+    let h = (page_no * HASHTABLE_HASH_MUL) & (HASHTABLE_NSLOT - 1);
+    h
+}
+
+// -----------------------------------------------------------------------------
+// WalIndex — the full in-memory state (= contents of the .shm file)
+// -----------------------------------------------------------------------------
+
+/// In-memory representation of a WAL-index (.shm) file.  Owned by
+/// the pager; readers + writers + the checkpointer all read/mutate
+/// this through the protocol functions below.  The cross-process
+/// backend (deferred) wraps the same struct in mmap-shared memory
+/// + fcntl locks; the API surface is identical so callers don't
+/// need to change when the backend is swapped.
+public type affine WalIndex is {
+    /// Primary header copy.  Updated transactionally — writers update
+    /// the BACKUP first, fsync, then the PRIMARY.  Readers see one
+    /// of the two consistent snapshots.
+    hdr: WalIndexHdr,
+    /// Backup header copy (= primary at all times in the in-memory
+    /// backend; the dual-copy protocol matters only when the .shm
+    /// is mmap-backed and a torn write could corrupt one copy).
+    hdr_backup: WalIndexHdr,
+    ckpt: WalCkptInfo,
+    /// Hash sections — grown lazily.  `sections[k]` covers frames
+    /// `[k * HASHTABLE_NPAGE + 1, (k+1) * HASHTABLE_NPAGE]`.
+    sections: List<WalIndexHashSection>,
+};
+
+pub fn wal_index_new(page_size: Int) -> WalIndex {
+    let h = wal_index_hdr_new(page_size);
+    WalIndex {
+        hdr: clone_hdr(&h),
+        hdr_backup: h,
+        ckpt: wal_ckpt_info_new(),
+        sections: List.new(),
+    }
+}
+
+implement WalIndex {
+    /// True iff the index has been initialised by a writer (vs
+    /// freshly-created).  Readers attaching to `is_init=false`
+    /// must trigger recovery.
+    pub fn is_initialised(&self) -> Bool { self.hdr.is_init }
+
+    /// Total frames represented.
+    pub fn mx_frame(&self) -> Int { self.hdr.mx_frame }
+
+    /// Last-commit DB page count.
+    pub fn n_page(&self) -> Int { self.hdr.n_page as Int }
+
+    /// Frames already drained to the main DB.
+    pub fn n_backfill(&self) -> Int { self.ckpt.n_backfill }
+
+    /// Bytes the index would occupy on disk if serialised right now.
+    /// Useful for capacity diagnostics.
+    pub fn size_bytes(&self) -> Int {
+        // 48 (hdr) + 48 (backup hdr) + 40 (ckpt) + sections × 32 KiB.
+        48 + 48 + 40 + self.sections.len() * (16384 + 16384)
+    }
+
+    /// Lookup the newest frame number for `page_no` that's ≤ the
+    /// snapshot's `mx_frame_clamp` AND > `n_backfill_clamp`.  Returns
+    /// `None` when no such frame exists (caller falls back to the
+    /// main DB read path).  Walks every section's hash chain; cheap
+    /// because chains are short (load factor ≤ 0.5 by construction).
+    pub fn find_frame(
+        &self,
+        page_no: Int,
+        mx_frame_clamp: Int,
+        n_backfill_clamp: Int,
+    ) -> Maybe<Int> {
+        let mut best: Int = -1;
+        let mut s: Int = self.sections.len() - 1;
+        while s >= 0 {
+            let sec = &self.sections[s];
+            let section_base = s * HASHTABLE_NPAGE;
+            let slot = wal_hash_slot(page_no);
+            // Linear probe — walk forward until empty slot.  The
+            // chain length is bounded by the load factor; in practice
+            // < 4 hops for any realistic workload.
+            let mut k: Int = slot;
+            let mut hops: Int = 0;
+            while hops < HASHTABLE_NSLOT {
+                let head = sec.hash_slots[k] as Int;
+                if head == 0 { break; }
+                let candidate_in_section = head - 1;
+                let candidate_page = sec.frame_pages[candidate_in_section] as Int;
+                if candidate_page == page_no {
+                    let candidate_frame = section_base + head;
+                    if candidate_frame > best
+                        && candidate_frame <= mx_frame_clamp
+                        && candidate_frame > n_backfill_clamp {
+                        best = candidate_frame;
+                    }
+                }
+                k = (k + 1) & (HASHTABLE_NSLOT - 1);
+                hops = hops + 1;
+            }
+            s = s - 1;
+        }
+        if best > 0 { Some(best) } else { None }
+    }
+
+    /// Append a (page, frame) pair to the index.  Writers call this
+    /// after appending the frame to the WAL but before bumping the
+    /// header's `mx_frame`.  Allocates a new hash section when the
+    /// frame number crosses a `HASHTABLE_NPAGE` boundary.
+    ///
+    /// Frame numbers are 1-based.  Page numbers must be > 0.
+    pub fn append_frame(&mut self, page_no: Int, frame_no: Int) {
+        if frame_no < 1 || page_no < 1 { return; }
+        let section_idx = (frame_no - 1) / HASHTABLE_NPAGE;
+        // Grow sections lazily.
+        while self.sections.len() <= section_idx {
+            self.sections.push(hash_section_empty());
+        }
+        let in_section_zero_based = (frame_no - 1) % HASHTABLE_NPAGE;
+        let in_section_one_based = in_section_zero_based + 1;
+        let sec = &mut self.sections[section_idx];
+        sec.frame_pages[in_section_zero_based] = page_no as u32;
+        // Insert into hash chain via linear probing.
+        let mut k: Int = wal_hash_slot(page_no);
+        let mut hops: Int = 0;
+        while hops < HASHTABLE_NSLOT {
+            let head = sec.hash_slots[k] as Int;
+            if head == 0 {
+                sec.hash_slots[k] = in_section_one_based as u16;
+                break;
+            }
+            // Slot occupied — linear probe to the next.
+            k = (k + 1) & (HASHTABLE_NSLOT - 1);
+            hops = hops + 1;
+        }
+        sec.n_entries = sec.n_entries + 1;
+    }
+
+    /// Bump the change counter + commit the new header to BOTH
+    /// copies.  Real SQLite writes copy 2 first, fsyncs, then copy
+    /// 1, then fsyncs again — readers detect a torn-update by
+    /// comparing the two copies.  In-memory backend updates both
+    /// atomically.
+    pub fn commit_header(&mut self, mx_frame: Int, n_page: u32, salt1: u32, salt2: u32) {
+        self.hdr.mx_frame = mx_frame;
+        self.hdr.n_page = n_page;
+        self.hdr.salt1 = salt1;
+        self.hdr.salt2 = salt2;
+        self.hdr.is_init = true;
+        let cur: Int = self.hdr.change_count as Int;
+        self.hdr.change_count = ((cur + 1) % 4294967296) as u32;
+        self.hdr_backup = clone_hdr(&self.hdr);
+    }
+
+    /// Reset the index after a Restart/Truncate checkpoint.  Drops
+    /// every hash section + zeroes mx_frame/n_backfill but PRESERVES
+    /// the change_count (incremented) so readers detect the rotation.
+    pub fn reset_after_checkpoint(&mut self, new_salt1: u32, new_salt2: u32) {
+        self.hdr.mx_frame = 0;
+        self.hdr.n_page = 0 as u32;
+        self.hdr.salt1 = new_salt1;
+        self.hdr.salt2 = new_salt2;
+        let cur: Int = self.hdr.change_count as Int;
+        self.hdr.change_count = ((cur + 1) % 4294967296) as u32;
+        self.hdr_backup = clone_hdr(&self.hdr);
+        self.ckpt.n_backfill = 0;
+        self.ckpt.n_backfill_attempted = 0;
+        // Reset reader marks 1..4 to UNUSED; slot 0 stays at 0.
+        let mut i: Int = 1;
+        while i < N_READER_MARK {
+            self.ckpt.read_marks[i] = WalReaderMark {
+                mx_frame: READMARK_NOT_USED,
+                refcount: 0,
+            };
+            i = i + 1;
+        }
+        self.sections = List.new();
+    }
+
+    /// Try to claim a reader mark at the current `mx_frame`.  Returns
+    /// the slot index (1..4) on success; -1 if all slots are claimed
+    /// at incompatible mx_frames.  Slot 0 (always 0) is always
+    /// available for ROLLBACK-mode readers.
+    ///
+    /// Algorithm matches walformat.html §4.4:
+    ///   1. Snapshot current mx_frame.
+    ///   2. Walk slots 1..4.  If a slot's mark equals our snapshot,
+    ///      bump its refcount and return that slot.
+    ///   3. If a slot is UNUSED, claim it (set mark = our mx_frame,
+    ///      refcount = 1) and return.
+    ///   4. Otherwise -1 (caller falls back to slot 0 = full WAL
+    ///      scan, which is always safe but expensive).
+    pub fn try_acquire_reader_mark(&mut self) -> Int {
+        let want = self.hdr.mx_frame;
+        // Walk slots looking for a compatible mark.
+        let mut i: Int = 1;
+        while i < N_READER_MARK {
+            let m = &self.ckpt.read_marks[i];
+            if m.mx_frame == want {
+                self.ckpt.read_marks[i] = WalReaderMark {
+                    mx_frame: want,
+                    refcount: m.refcount + 1,
+                };
+                return i;
+            }
+            i = i + 1;
+        }
+        // No exact match — try to claim a free slot.
+        let mut j: Int = 1;
+        while j < N_READER_MARK {
+            let m = &self.ckpt.read_marks[j];
+            if m.mx_frame == READMARK_NOT_USED {
+                self.ckpt.read_marks[j] = WalReaderMark {
+                    mx_frame: want,
+                    refcount: 1,
+                };
+                return j;
+            }
+            j = j + 1;
+        }
+        -1
+    }
+
+    /// Release a reader mark (called by reader on close).  Decrements
+    /// refcount; when refcount hits 0 the slot becomes UNUSED so
+    /// future readers may claim it at a different mx_frame.
+    pub fn release_reader_mark(&mut self, slot: Int) {
+        if slot < 1 || slot >= N_READER_MARK { return; }
+        let m = &self.ckpt.read_marks[slot];
+        if m.refcount <= 1 {
+            self.ckpt.read_marks[slot] = WalReaderMark {
+                mx_frame: READMARK_NOT_USED,
+                refcount: 0,
+            };
+        } else {
+            self.ckpt.read_marks[slot] = WalReaderMark {
+                mx_frame: m.mx_frame,
+                refcount: m.refcount - 1,
+            };
+        }
+    }
+
+    /// Minimum claimed mark across slots 1..4.  Returns
+    /// `READMARK_NOT_USED` when no slots are claimed.  The
+    /// checkpointer must NOT advance n_backfill past this — doing so
+    /// would invalidate an in-flight reader's snapshot.
+    pub fn min_active_reader_mark(&self) -> Int {
+        let mut min: Int = READMARK_NOT_USED;
+        let mut i: Int = 1;
+        while i < N_READER_MARK {
+            let m = &self.ckpt.read_marks[i];
+            if m.refcount > 0 && m.mx_frame < min {
+                min = m.mx_frame;
+            }
+            i = i + 1;
+        }
+        min
+    }
+
+    /// Bump n_backfill — the checkpointer calls this after draining
+    /// frames `[1, through_frame]` to the main DB.  Bounded by
+    /// `min_active_reader_mark` to avoid invalidating readers.
+    pub fn advance_backfill(&mut self, through_frame: Int) -> Bool {
+        let bound = self.min_active_reader_mark();
+        let safe_max = if bound == READMARK_NOT_USED { through_frame } else { if through_frame < bound { through_frame } else { bound } };
+        if safe_max > self.ckpt.n_backfill {
+            self.ckpt.n_backfill = safe_max;
+            return true;
+        }
+        false
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WalShmBackend — abstraction over the .shm storage substrate
+// -----------------------------------------------------------------------------
+
+/// Discriminator for the .shm storage backend.  In-memory is the
+/// only variant shipped today; the cross-process file-backed variant
+/// (mmap MAP_SHARED + fcntl byte-range locks) will land as `WsbMmap`
+/// once the platform primitives are in stdlib.
+public type WalShmBackend is
+      WsbInMemory(WalIndex);
+    // | WsbMmap(MmapRegion, FdLockTable);   // deferred — see top of file
+
+// -----------------------------------------------------------------------------
+// Internal helpers
+// -----------------------------------------------------------------------------
+
+fn clone_hdr(h: &WalIndexHdr) -> WalIndexHdr {
+    WalIndexHdr {
+        version: h.version,
+        change_count: h.change_count,
+        is_init: h.is_init,
+        big_end_cksum: h.big_end_cksum,
+        page_size: h.page_size,
+        mx_frame: h.mx_frame,
+        n_page: h.n_page,
+        frame_cksum_s1: h.frame_cksum_s1,
+        frame_cksum_s2: h.frame_cksum_s2,
+        salt1: h.salt1,
+        salt2: h.salt2,
+    }
+}

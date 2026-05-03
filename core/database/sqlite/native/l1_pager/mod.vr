@@ -72,6 +72,7 @@ public module wal_writer;
 public module wal_reader;
 public module wal_pager;
 public module wal_actor_bridge;
+public module wal_index;
 public module vfs_injection;
 
 public mount .pager.{
@@ -158,6 +159,15 @@ public mount .wal_writer.{
     wal_writer_create_with_random,
     wal_writer_reset_with_random,
     wal_writer_set_running, wal_writer_running,
+};
+
+public mount .wal_index.{
+    WalIndex, WalIndexHdr, WalCkptInfo, WalReaderMark,
+    WalIndexHashSection, WalShmBackend, WsbInMemory,
+    HASHTABLE_NPAGE, HASHTABLE_NSLOT, HASHTABLE_HASH_MUL,
+    N_READER_MARK, READMARK_NOT_USED, WALINDEX_HDR_VERSION,
+    wal_index_new, wal_index_hdr_new, wal_ckpt_info_new,
+    hash_section_empty, wal_hash_slot,
 };
 
 public mount .wal_reader.{
