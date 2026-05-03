@@ -172,6 +172,12 @@ Test list per `internal/specs/database.md` follow-up:
   5 chunks; copy_in_async_with_token short-circuits subsequent
   writes after token.cancel() + bumps cancellations counter
   (spec §6.1.6 metrics + cancellation)
+- `t28_async_cancel.vr` — server-side CancelRequest from async
+  PG: AsyncPgConnection caches BackendKeyData at connect; spawn
+  a task running `SELECT pg_sleep(10)` on the actor; from a
+  separate task call cancel_running_query() → fresh-socket
+  CancelRequest aborts the query within seconds (spec §6.1.2 +
+  §6.1.8)
 
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags
