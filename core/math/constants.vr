@@ -195,6 +195,11 @@ public type UnitInterval is Float{it >= 0.0 && it <= 1.0};
 // Used for: probabilities (excluding certainties)
 public type MathProbability is Float{it > 0.0 && it < 1.0};
 
+/// Public alias — short canonical name; internal type uses
+/// `MathProbability` to disambiguate from the kernel-arch
+/// `Probability` (capability).
+public type Probability is MathProbability;
+
 // Closed probability: [0, 1]
 // Used for: general probabilities including 0 and 1
 public type ClosedProbability is Float{it >= 0.0 && it <= 1.0};
