@@ -1338,6 +1338,109 @@ implement PgConnection {
         write_all(&mut self.stream, buf)
     }
 
+    /// Set the underlying TCP recv timeout. Used by the async
+    /// replication wrapper so its single actor can alternate
+    /// between reads and pending standby-status writes without
+    /// blocking forever on a quiet wire. `None` restores the
+    /// default (no timeout = block until data).
+    public fn set_recv_timeout_ms(&mut self, timeout_ms: Maybe<Int>)
+        -> Result<(), DbError>
+    {
+        match self.stream.tcp_mut().set_read_timeout(timeout_ms) {
+            Ok(())  => Ok(()),
+            Err(_)  => Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "TIMEOUT_SET".clone(),
+                message: "failed to set TCP recv timeout".clone(),
+                retryable: false,
+            })),
+        }
+    }
+
+    /// Timeout-bounded variant of `read_replication_message`.
+    /// Returns:
+    ///   * `Ok(Some(msg))` — message arrived. Notifications are
+    ///     demuxed inline; the returned message is non-Notification.
+    ///   * `Ok(None)` — TCP read timed out (server is quiet).
+    ///     Caller can issue queued writes and retry.
+    ///   * `Err(_)` — wire failure / protocol violation.
+    ///
+    /// Caller is responsible for `set_recv_timeout_ms(Some(ms))`
+    /// before the first call. The timeout setting persists; reset
+    /// to `None` before returning the connection to a regular
+    /// (non-replication) consumer.
+    public fn try_read_replication_message(&mut self)
+        -> Result<Maybe<BackendMessage>, DbError>
+    {
+        match self.replication_stash.take() {
+            Some(m) => { return Ok(Some(m)); }
+            None    => {}
+        }
+        loop {
+            match try_parse_tagged(self.recv.as_slice()) {
+                Ok(Some(outcome)) => {
+                    let consumed = outcome.bytes_consumed;
+                    drop_front(&mut self.recv, consumed);
+                    let msg = decode_one(outcome.frame, &self.last_formats)?;
+                    match msg {
+                        BmNotification(n) => {
+                            match &self.dispatcher {
+                                Some(d) => { d.dispatch(&n); }
+                                None    => {}
+                            }
+                            self.notifications.push(n);
+                            continue;
+                        }
+                        _ => { return Ok(Some(msg)); }
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    return Err(DbError.Adapter(AdapterSpecific {
+                        adapter: AdPostgres,
+                        code: "BAD_FRAME".clone(),
+                        message: "wire protocol violation".clone(),
+                        retryable: false,
+                    }));
+                }
+            }
+
+            let mut tmp: List<Byte> = List.new();
+            let mut i = 0;
+            while i < 4096 { tmp.push(0 as Byte); i = i + 1; }
+            match self.stream.read(tmp.as_mut_slice()) {
+                Ok(n) => {
+                    if n <= 0 {
+                        return Err(DbError.ConnectionFailed {
+                            source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                            adapter: AdPostgres,
+                        });
+                    }
+                    let mut k = 0;
+                    while k < n {
+                        self.recv.push(tmp[k]);
+                        k = k + 1;
+                    }
+                }
+                Err(e) => {
+                    let kind = e.kind();
+                    match kind {
+                        core.io.protocols.IoErrorKind.WouldBlock
+                            | core.io.protocols.IoErrorKind.TimedOut => {
+                            return Ok(None);
+                        }
+                        _ => {
+                            return Err(DbError.ConnectionFailed {
+                                source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                                adapter: AdPostgres,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Submit a pre-built (Parse?+Bind+Execute) byte triple to the
     /// pipeline queue. Returns a `PipelineHandle` whose `.await()`
     /// yields the per-query `ExtendedQueryResult` once the pump

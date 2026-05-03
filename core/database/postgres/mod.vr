@@ -58,6 +58,7 @@ public module async_pool;
 public module async_transaction;
 public module async_typed_database;
 public module async_copy;
+public module async_replication;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -138,6 +139,15 @@ public mount .async_typed_database.{
 public mount .async_copy.{
     AsyncCopyInWriter, AsyncCopyOutReader, CopyOutEvent, CoeBytes, CoeDone,
     copy_in_async, copy_out_async,
+};
+public mount .async_replication.{
+    AsyncPgReplicationConnection,
+    ReplRequest, RrStartLogical, RrStartPhysical, RrIdentifySystem,
+    RrCreateLogicalSlot, RrDropSlot, RrShutdown,
+    StandbyStatusUpdate,
+    ReplActorEvent, ReaEvent, ReaTerminated, ReaClosed,
+    connect_replication_async,
+    DEFAULT_RECV_TIMEOUT_MS, DEFAULT_MSG_CAPACITY, DEFAULT_STATUS_CAPACITY,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;

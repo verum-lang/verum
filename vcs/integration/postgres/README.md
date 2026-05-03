@@ -117,3 +117,8 @@ Test list per `internal/specs/database.md` follow-up:
 - `t16_prepared.vr` — sync + async prepared statements: PgConnection
   prepare / execute_prepared / close_prepared; AsyncPgConnection
   same flow via actor (spec §6.1.4 extended-query / prepared)
+- `t17_async_replication.vr` — async logical replication V0:
+  AsyncPgReplicationConnection identify_system / create_slot /
+  start_logical / next_event / send_standby_status; verifies the
+  reader actor uses timeout-bounded reads to alternate with
+  pending standby-status writes (spec §6.1.7 / §6.1.8)

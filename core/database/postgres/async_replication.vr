@@ -1,0 +1,508 @@
+// =============================================================================
+// core/database/postgres/async_replication.vr — async replication V0
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (streaming replication),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// Async wrapper over `replication.vr`'s sync `PgReplicationConnection`.
+// CDC consumers (logical-replication / pgoutput) running on the async
+// runtime currently can't get XLogData without dropping into
+// `spawn_blocking` by hand.
+//
+// Architecture — single actor with timeout-bounded reads:
+//
+//   The replication wire is push-based (server streams XLogData
+//   between Sync rounds; client periodically replies with `'r'`
+//   Standby Status Update). One physical connection cannot have
+//   concurrent reads and writes from different threads without
+//   tearing the wire framing, so we keep a single actor that owns
+//   the connection.
+//
+//   The actor alternates:
+//     1. Drain pending standby-status updates from `status_rx`.
+//     2. Call `try_next_message` with a short TCP recv timeout.
+//        On Ok(Some(msg)) push to `msg_tx`; on Ok(None) (timeout)
+//        loop back to step 1. On Err propagate via the message
+//        channel and exit.
+//
+//   The default recv timeout is 1s — small enough that pending
+//   status updates surface within ~1s of arrival even when the
+//   wire is quiet (default `wal_sender_timeout` is 60s, so 1s
+//   leaves plenty of headroom).
+//
+// V0 surface:
+//   * `connect_replication_async(cfg) → AsyncPgReplicationConnection`
+//   * `.start_logical(opts, start_lsn).await`
+//   * `.start_physical(slot, start_lsn, timeline).await`
+//   * `.next_message().await → Option<ReplicationMessage>`
+//   * `.send_standby_status(write, flush, apply, client_time, reply).await`
+//   * `.close().await`
+//
+// Sync replication.vr canonical / unchanged. Pure layered wrapper.
+//
+// OUT of V0:
+//   * Async pgoutput consumer with relation-cache lifecycle
+//     (caller wires that today via decode_pgoutput).
+//   * Async base_backup (separate actor tier — multi-stream).
+//   * Cancellation-token propagation through the actor.
+//   * Per-slot RTT estimator + adaptive heartbeat.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.DatabaseMedium("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.async_replication;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.replication.{
+    PgReplicationConfig, PgReplicationConnection,
+    LogicalReplicationOptions,
+    Lsn, ReplicationMessage,
+    connect_replication as sync_connect_replication,
+};
+mount core.async.channel.{
+    Sender, Receiver, OneshotSender,
+    bounded_channel, oneshot,
+};
+mount core.async.task.{spawn_blocking, JoinHandle};
+
+// =============================================================================
+// Tunables
+// =============================================================================
+
+/// TCP recv timeout for the actor's read loop. Small enough to
+/// surface pending standby-status updates within bounded latency,
+/// big enough that a quiet wire doesn't burn CPU on tight retries.
+public const DEFAULT_RECV_TIMEOUT_MS: Int = 1_000;
+
+/// Capacity of the actor → caller message channel. Bounds buffered
+/// XLogData chunks; backpressures the wire (TCP advertised window
+/// shrinks naturally if caller is slow to drain).
+public const DEFAULT_MSG_CAPACITY: Int = 256;
+
+/// Capacity of the caller → actor status-update channel.
+public const DEFAULT_STATUS_CAPACITY: Int = 16;
+
+// =============================================================================
+// Actor protocol
+// =============================================================================
+
+/// One unit of work the actor runs synchronously between read
+/// attempts. New variants are additive.
+public type ReplRequest is
+      RrStartLogical {
+        opts: LogicalReplicationOptions,
+        start_lsn: Lsn,
+        ack: OneshotSender<Result<(), DbError>>,
+    }
+    | RrStartPhysical {
+        slot: Text,
+        start_lsn: Lsn,
+        timeline: Maybe<Int>,
+        ack: OneshotSender<Result<(), DbError>>,
+    }
+    | RrIdentifySystem {
+        ack: OneshotSender<Result<core.database.postgres.replication.IdentifySystemRow, DbError>>,
+    }
+    | RrCreateLogicalSlot {
+        slot: Text,
+        plugin: Text,
+        temporary: Bool,
+        ack: OneshotSender<Result<(), DbError>>,
+    }
+    | RrDropSlot {
+        slot: Text,
+        wait: Bool,
+        ack: OneshotSender<Result<(), DbError>>,
+    }
+    | RrShutdown {
+        ack: OneshotSender<Result<(), DbError>>,
+    };
+
+/// Standby Status Update payload — written between read attempts.
+public type StandbyStatusUpdate is {
+    write: Lsn,
+    flush: Lsn,
+    apply: Lsn,
+    client_time_us: Int,
+    reply_requested: Bool,
+};
+
+/// Actor → caller message. `Event(msg)` per replication frame;
+/// `Terminated(err)` when the wire dies; `Closed` once `close()`
+/// completes.
+public type ReplActorEvent is
+      ReaEvent(ReplicationMessage)
+    | ReaTerminated(DbError)
+    | ReaClosed;
+
+// =============================================================================
+// Public handle
+// =============================================================================
+
+public type AsyncPgReplicationConnection is {
+    cmd_tx: Sender<ReplRequest>,
+    status_tx: Sender<StandbyStatusUpdate>,
+    msg_rx: Shared<sync.mutex.Mutex<Receiver<ReplActorEvent>>>,
+    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+};
+
+implement AsyncPgReplicationConnection {
+    public fn clone(&self) -> AsyncPgReplicationConnection {
+        AsyncPgReplicationConnection {
+            cmd_tx: self.cmd_tx.clone(),
+            status_tx: self.status_tx.clone(),
+            msg_rx: self.msg_rx.clone(),
+            join: self.join.clone(),
+        }
+    }
+
+    public async fn identify_system(&self)
+        -> Result<core.database.postgres.replication.IdentifySystemRow, DbError>
+    {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(RrIdentifySystem { ack: rs }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("identify_system")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("identify_system reply")),
+        }
+    }
+
+    public async fn create_logical_slot(
+        &self, slot: &Text, plugin: &Text, temporary: Bool,
+    ) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(RrCreateLogicalSlot {
+            slot: slot.clone(),
+            plugin: plugin.clone(),
+            temporary: temporary,
+            ack: rs,
+        }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("create_logical_slot")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("create_logical_slot reply")),
+        }
+    }
+
+    public async fn drop_slot(&self, slot: &Text, wait: Bool) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(RrDropSlot {
+            slot: slot.clone(),
+            wait: wait,
+            ack: rs,
+        }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("drop_slot")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("drop_slot reply")),
+        }
+    }
+
+    /// Issue START_REPLICATION SLOT … LOGICAL. After Ok return the
+    /// actor enters streaming mode; subsequent `next_message`
+    /// awaits push events.
+    public async fn start_logical(
+        &self,
+        opts: LogicalReplicationOptions,
+        start_lsn: Lsn,
+    ) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(RrStartLogical {
+            opts: opts,
+            start_lsn: start_lsn,
+            ack: rs,
+        }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("start_logical")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("start_logical reply")),
+        }
+    }
+
+    public async fn start_physical(
+        &self,
+        slot: &Text,
+        start_lsn: Lsn,
+        timeline: Maybe<Int>,
+    ) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(RrStartPhysical {
+            slot: slot.clone(),
+            start_lsn: start_lsn,
+            timeline: timeline,
+            ack: rs,
+        }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("start_physical")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("start_physical reply")),
+        }
+    }
+
+    /// Pull the next replication event. Returns:
+    ///   * `Ok(Some(ReaEvent(msg)))` — a real ReplicationMessage.
+    ///   * `Ok(Some(ReaTerminated(err)))` — wire died; subsequent
+    ///     calls return None.
+    ///   * `Ok(Some(ReaClosed))` — clean shutdown observed.
+    ///   * `Ok(None)` — channel closed unexpectedly.
+    public async fn next_event(&self) -> Maybe<ReplActorEvent> {
+        let mut g = self.msg_rx.lock().unwrap_or_else(|p| p.into_inner());
+        let fut = g.recv_fut();
+        drop(g);
+        fut.await
+    }
+
+    /// Convenience — returns the next ReplicationMessage or
+    /// terminates on Err. Callers wanting fine-grained Closed /
+    /// Terminated distinction use `next_event` directly.
+    public async fn next_message(&self) -> Result<Maybe<ReplicationMessage>, DbError> {
+        match self.next_event().await {
+            Some(ReaEvent(m))      => Ok(Some(m)),
+            Some(ReaTerminated(e)) => Err(e),
+            Some(ReaClosed)        => Ok(None),
+            None                   => Ok(None),
+        }
+    }
+
+    /// Queue a Standby Status Update. The actor drains the queue
+    /// between read attempts (timeout window default 1s).
+    public async fn send_standby_status(
+        &self,
+        write: Lsn, flush: Lsn, apply: Lsn,
+        client_time_us: Int,
+        reply_requested: Bool,
+    ) -> Result<(), DbError> {
+        match self.status_tx.send_async(StandbyStatusUpdate {
+            write: write, flush: flush, apply: apply,
+            client_time_us: client_time_us,
+            reply_requested: reply_requested,
+        }).await {
+            Ok(())  => Ok(()),
+            Err(_)  => Err(actor_dropped("send_standby_status")),
+        }
+    }
+
+    public async fn close(&self) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.cmd_tx.send_async(RrShutdown { ack: rs }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("close")); }
+        }
+        let _ = rr.await;
+        let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.take() {
+            Some(jh) => { let _ = jh.join().await; }
+            None     => {}
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+/// Open a sync replication connection (offloaded to spawn_blocking
+/// since SCRAM + TLS is sync), then launch the actor.
+public async fn connect_replication_async(
+    cfg: PgReplicationConfig,
+) -> Result<AsyncPgReplicationConnection, DbError> {
+    let cfg_owned = cfg.clone();
+    let conn_jh = spawn_blocking(move || -> Result<PgReplicationConnection, DbError> {
+        sync_connect_replication(&cfg_owned)
+    });
+    let conn = match conn_jh.join().await {
+        Ok(r)  => r?,
+        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+    };
+
+    let (cmd_tx, cmd_rx) = bounded_channel::<ReplRequest>(8);
+    let (status_tx, status_rx) = bounded_channel::<StandbyStatusUpdate>(DEFAULT_STATUS_CAPACITY);
+    let (msg_tx, msg_rx) = bounded_channel::<ReplActorEvent>(DEFAULT_MSG_CAPACITY);
+
+    let join = spawn_blocking(move || -> () {
+        run_actor(conn, cmd_rx, status_rx, msg_tx);
+    });
+
+    Ok(AsyncPgReplicationConnection {
+        cmd_tx: cmd_tx,
+        status_tx: status_tx,
+        msg_rx: Shared.new(sync.mutex.Mutex.new(msg_rx)),
+        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+    })
+}
+
+// =============================================================================
+// Actor body
+// =============================================================================
+
+fn run_actor(
+    mut conn: PgReplicationConnection,
+    mut cmd_rx: Receiver<ReplRequest>,
+    mut status_rx: Receiver<StandbyStatusUpdate>,
+    msg_tx: Sender<ReplActorEvent>,
+) {
+    // Setup phase — process commands until START arrives. The
+    // wire is in regular sync mode (no streaming), so we use
+    // blocking recv on cmd_rx.
+    let mut streaming: Bool = false;
+    while !streaming {
+        let req = match cmd_rx.recv() {
+            Some(r) => r,
+            None    => {
+                let _ = msg_tx.send(ReaClosed);
+                return;
+            }
+        };
+        match req {
+            RrIdentifySystem { ack } => {
+                let _ = ack.send(conn.identify_system());
+            }
+            RrCreateLogicalSlot { slot, plugin, temporary, ack } => {
+                let _ = ack.send(conn.create_logical_slot(&slot, &plugin, temporary));
+            }
+            RrDropSlot { slot, wait, ack } => {
+                let _ = ack.send(conn.drop_slot(&slot, wait));
+            }
+            RrStartLogical { opts, start_lsn, ack } => {
+                let r = conn.start_logical(&opts, start_lsn);
+                match &r {
+                    Ok(()) => { streaming = true; }
+                    _      => {}
+                }
+                let _ = ack.send(r);
+            }
+            RrStartPhysical { slot, start_lsn, timeline, ack } => {
+                let r = conn.start_physical(&slot, start_lsn, timeline);
+                match &r {
+                    Ok(()) => { streaming = true; }
+                    _      => {}
+                }
+                let _ = ack.send(r);
+            }
+            RrShutdown { ack } => {
+                let _ = ack.send(conn.close());
+                let _ = msg_tx.send(ReaClosed);
+                return;
+            }
+        }
+    }
+
+    // Streaming phase — use timeout-bounded reads so we can
+    // alternate with status-update writes on a quiet wire.
+    let _ = conn.set_recv_timeout_ms(Some(DEFAULT_RECV_TIMEOUT_MS));
+
+    loop {
+        // Drain any pending standby-status writes first.
+        loop {
+            match status_rx.try_recv() {
+                Ok(s) => {
+                    let r = conn.send_standby_status(
+                        s.write, s.flush, s.apply,
+                        s.client_time_us, s.reply_requested,
+                    );
+                    match r {
+                        Ok(()) => {}
+                        Err(e) => {
+                            let _ = msg_tx.send(ReaTerminated(e));
+                            return;
+                        }
+                    }
+                }
+                Err(_) => { break; }
+            }
+        }
+
+        // Drain any non-streaming control commands (currently only
+        // shutdown is meaningful mid-stream).
+        match cmd_rx.try_recv() {
+            Ok(req) => {
+                match req {
+                    RrShutdown { ack } => {
+                        let _ = ack.send(conn.close());
+                        let _ = msg_tx.send(ReaClosed);
+                        return;
+                    }
+                    RrStartLogical { ack, .. }
+                    | RrStartPhysical { ack, .. } => {
+                        let _ = ack.send(Err(bad_state("already streaming")));
+                    }
+                    RrIdentifySystem { ack } => {
+                        let _ = ack.send(Err(bad_state("identify_system mid-stream")));
+                    }
+                    RrCreateLogicalSlot { ack, .. }
+                    | RrDropSlot { ack, .. } => {
+                        let _ = ack.send(Err(bad_state("slot ops mid-stream")));
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+
+        // Try to read a frame within the timeout.
+        match conn.try_next_message() {
+            Ok(Some(msg)) => {
+                match msg_tx.send(ReaEvent(msg)) {
+                    Ok(())  => {}
+                    Err(_)  => {
+                        // Caller dropped the receiver — clean up.
+                        let _ = conn.close();
+                        return;
+                    }
+                }
+            }
+            Ok(None) => {
+                // Timeout — loop back to drain queues.
+            }
+            Err(e) => {
+                let _ = msg_tx.send(ReaTerminated(e));
+                return;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "REPL_ACTOR_CLOSED".clone(),
+        message: f"async replication actor unavailable during {what}",
+        retryable: false,
+    })
+}
+
+fn bad_state(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "REPL_BAD_STATE".clone(),
+        message: f"async replication actor: {what}",
+        retryable: false,
+    })
+}
