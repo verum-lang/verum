@@ -1,0 +1,170 @@
+// =============================================================================
+// t18_typed_prepared.vr — binary-format prepared params + TypedRow decode
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.4 (extended-query / typed result).
+// =============================================================================
+//
+// V0 covers:
+//   1. execute_prepared_typed with int4 params + tuple result
+//      decoded via TypedRow for (Int, Int).
+//   2. text + bytea round-trip — assert text length + bytea contents
+//      survive the binary wire.
+//   3. NULL via Maybe<Int> — TypedRow handles TvNull → None.
+//   4. Same flow through async actor.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    PgConnection, PgPreparedStatement, PgTypedQueryResult,
+    AsyncPgConnection, AsyncPgPreparedStatement,
+    async_connect,
+    TypedRow, rows_typed,
+};
+mount core.database.postgres.wire.typed.{
+    TypedValue,
+    TvNull, TvInt2, TvInt4, TvInt8,
+    TvText, TvBytea,
+};
+mount core.async.executor.block_on;
+
+fn main() {
+    // -------------------------------------------------------------------------
+    // 1. Sync — int4 params + (Int, Int) tuple result.
+    // -------------------------------------------------------------------------
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app failed".clone(),
+    );
+    let stmt = expect_ok(
+        conn.prepare(&"SELECT $1::int4 + $2::int4 AS sum, $1::int4 * $2::int4 AS product".clone()),
+        &"prepare failed".clone(),
+    );
+
+    let mut params: List<Maybe<TypedValue>> = List.new();
+    params.push(Some(TvInt4(13)));
+    params.push(Some(TvInt4(7)));
+    let res: PgTypedQueryResult = expect_ok(
+        conn.execute_prepared_typed(&stmt, &params),
+        &"execute_prepared_typed failed".clone(),
+    );
+    expect_eq_int(res.rows.len() as Int, 1, &"row count".clone());
+    let pair: (Int, Int) = expect_ok(
+        TypedRow::from_typed_row(&res.rows[0], &res.row_description),
+        &"TypedRow (Int, Int) decode failed".clone(),
+    );
+    expect_eq_int(pair.0, 20, &"sum".clone());
+    expect_eq_int(pair.1, 91, &"product".clone());
+
+    let _ = conn.close_prepared(&stmt);
+
+    // -------------------------------------------------------------------------
+    // 2. text + bytea round-trip.
+    // -------------------------------------------------------------------------
+    let stmt2 = expect_ok(
+        conn.prepare(&"SELECT $1::text AS t, $2::bytea AS b".clone()),
+        &"prepare 2 failed".clone(),
+    );
+    let payload_str = "hello-binary".clone();
+    let mut payload_bytes: List<Byte> = List.new();
+    payload_bytes.push(0x00 as Byte);
+    payload_bytes.push(0x01 as Byte);
+    payload_bytes.push(0x02 as Byte);
+    payload_bytes.push(0xFE as Byte);
+    payload_bytes.push(0xFF as Byte);
+
+    let mut p2: List<Maybe<TypedValue>> = List.new();
+    p2.push(Some(TvText(payload_str.clone())));
+    p2.push(Some(TvBytea(payload_bytes.clone())));
+    let res2 = expect_ok(
+        conn.execute_prepared_typed(&stmt2, &p2),
+        &"execute_prepared_typed 2 failed".clone(),
+    );
+    expect_eq_int(res2.rows.len() as Int, 1, &"row count 2".clone());
+    let row2 = &res2.rows[0];
+    match &row2[0] {
+        TvText(s) => expect_eq_int(
+            s.len() as Int, payload_str.len() as Int,
+            &"text round-trip length".clone(),
+        ),
+        _ => expect(false, &"col0 not TvText".clone()),
+    }
+    match &row2[1] {
+        TvBytea(b) => expect_eq_int(
+            b.len() as Int, payload_bytes.len() as Int,
+            &"bytea round-trip length".clone(),
+        ),
+        _ => expect(false, &"col1 not TvBytea".clone()),
+    }
+
+    let _ = conn.close_prepared(&stmt2);
+
+    // -------------------------------------------------------------------------
+    // 3. NULL via Maybe<Int>.
+    // -------------------------------------------------------------------------
+    let stmt3 = expect_ok(
+        conn.prepare(&"SELECT NULL::int4 AS v".clone()),
+        &"prepare 3 failed".clone(),
+    );
+    let no_params: List<Maybe<TypedValue>> = List.new();
+    let res3 = expect_ok(
+        conn.execute_prepared_typed(&stmt3, &no_params),
+        &"execute_prepared_typed 3 failed".clone(),
+    );
+    expect_eq_int(res3.rows.len() as Int, 1, &"row count 3".clone());
+    let m: Maybe<Int> = expect_ok(
+        TypedRow::from_typed_row(&res3.rows[0], &res3.row_description),
+        &"Maybe<Int> NULL decode failed".clone(),
+    );
+    expect(
+        match m { None => true, _ => false },
+        &"NULL decoded to None".clone(),
+    );
+    let _ = conn.close_prepared(&stmt3);
+
+    // -------------------------------------------------------------------------
+    // 4. Async — same SUM query.
+    // -------------------------------------------------------------------------
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-typed".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let aconn = expect_ok(
+            async_connect(&cfg, 8).await,
+            &"async_connect failed".clone(),
+        );
+        let astmt = expect_ok(
+            aconn.prepare(&"SELECT $1::int8 + $2::int8 AS sum".clone()).await,
+            &"async prepare failed".clone(),
+        );
+        let mut ap: List<Maybe<TypedValue>> = List.new();
+        ap.push(Some(TvInt8(1_000_000_000_000)));
+        ap.push(Some(TvInt8(2_000_000_000_000)));
+        let ares = expect_ok(
+            aconn.execute_prepared_typed(&astmt, ap).await,
+            &"async execute_prepared_typed failed".clone(),
+        );
+        expect_eq_int(ares.rows.len() as Int, 1, &"async row count".clone());
+        let n: Int = expect_ok(
+            TypedRow::from_typed_row(&ares.rows[0], &ares.row_description),
+            &"async TypedRow Int decode failed".clone(),
+        );
+        expect_eq_int(n, 3_000_000_000_000, &"async int8 sum".clone());
+
+        let _ = aconn.close_prepared(astmt).await;
+        let _ = aconn.close().await;
+
+        pass(&"t18_typed_prepared".clone());
+    });
+}

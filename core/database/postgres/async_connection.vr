@@ -150,6 +150,13 @@ public type PgRequest is
         params: List<Maybe<List<Byte>>>,
         reply: OneshotSender<Result<PgSimpleQueryResult, DbError>>,
     }
+    /// Typed sibling — binary-format params + result columns;
+    /// reply carries decoded TypedValues.
+    | ReqExecutePreparedTyped {
+        stmt: PgPreparedStatement,
+        typed_params: List<Maybe<core.database.postgres.wire.typed.TypedValue>>,
+        reply: OneshotSender<Result<core.database.postgres.connection.PgTypedQueryResult, DbError>>,
+    }
     /// Free the server-side slot for a prepared statement.
     | ReqClosePrepared {
         stmt: PgPreparedStatement,
@@ -313,6 +320,29 @@ implement AsyncPgConnection {
         match rr.await {
             Ok(r)  => r,
             Err(_) => Err(actor_dropped("execute_prepared reply")),
+        }
+    }
+
+    /// Typed sibling of `execute_prepared` — binary-format params
+    /// + result columns. Returns `PgTypedQueryResult` whose rows
+    /// are decoded `List<TypedValue>` per column.
+    public async fn execute_prepared_typed(
+        &self,
+        stmt: &AsyncPgPreparedStatement,
+        typed_params: List<Maybe<core.database.postgres.wire.typed.TypedValue>>,
+    ) -> Result<core.database.postgres.connection.PgTypedQueryResult, DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(ReqExecutePreparedTyped {
+            stmt: stmt.inner.clone(),
+            typed_params: typed_params,
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("execute_prepared_typed")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("execute_prepared_typed reply")),
         }
     }
 
@@ -482,6 +512,10 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
             }
             ReqExecutePrepared { stmt, params, reply } => {
                 let r = conn.execute_prepared(&stmt, &params);
+                let _ = reply.send(r);
+            }
+            ReqExecutePreparedTyped { stmt, typed_params, reply } => {
+                let r = conn.execute_prepared_typed(&stmt, &typed_params);
                 let _ = reply.send(r);
             }
             ReqClosePrepared { stmt, reply } => {
