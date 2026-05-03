@@ -125,3 +125,6 @@ Test list per `internal/specs/database.md` follow-up:
 - `t18_typed_prepared.vr` — binary-format prepared params + result
   decode + TypedRow protocol; sync int4/int8/text/bytea round-trip
   + Maybe<Int> NULL handling + async int8 SUM (spec §6.1.4)
+- `t19_typed_aggr.vr` — typed array + range round-trip: int4[]
+  + text[] bound + decoded back; int4range / tstzrange decoded
+  from server literals (spec §6.1.4 / §6.1.5 aggregate codecs)

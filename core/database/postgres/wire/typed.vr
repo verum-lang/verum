@@ -59,6 +59,9 @@ mount core.database.postgres.wire.codec.{
     PgJsonb, PgRange, PgArrayHeader, PgInet,
     decode_jsonb, encode_jsonb, decode_range, encode_range,
     decode_array, encode_array_1d, decode_inet, encode_inet,
+    PG_RANGE_FLAG_EMPTY, PG_RANGE_FLAG_LB_INC, PG_RANGE_FLAG_UB_INC,
+    PG_RANGE_FLAG_LB_INF, PG_RANGE_FLAG_UB_INF,
+    element_oid_for_array, range_element_oid,
 };
 
 // =============================================================================
@@ -502,6 +505,19 @@ public fn encode_typed(
             TvJsonb(s) => encode_jsonb(buf, arena, s),
             _ => return Err(encode_fault(f"oid jsonb, got {value.type_name()}")),
         }
+    } else if range_element_oid(oid).is_some() {
+        let elem_oid = range_element_oid(oid).unwrap();
+        match value {
+            TvIntRange(r) => encode_int_range(buf, arena, elem_oid, r)?,
+            TvTextRange(r) => encode_text_range(buf, arena, elem_oid, r)?,
+            _ => return Err(encode_fault(f"oid range, got {value.type_name()}")),
+        }
+    } else if element_oid_for_array(oid).is_some() {
+        let elem_oid = element_oid_for_array(oid).unwrap();
+        match value {
+            TvArray(arr) => encode_typed_array(buf, arena, elem_oid, arr)?,
+            _ => return Err(encode_fault(f"oid array, got {value.type_name()}")),
+        }
     } else {
         return Err(encode_fault(f"oid {oid}: no codec dispatch entry"));
     };
@@ -510,6 +526,192 @@ public fn encode_typed(
         return Err(encode_fault(f"oid {oid}: arena exhausted during encode"));
     }
     Ok(())
+}
+
+// =============================================================================
+// Range encoders — typed wrappers over codec.encode_range
+// =============================================================================
+
+/// Encode a typed integer range (`int4range` / `int8range`).
+/// Element-OID-aware: for `int4range` the bounds are 4-byte i32;
+/// for `int8range` they're 8-byte i64. Returns `Bool` shape that
+/// matches every other encoder so the dispatch dropthrough handles
+/// arena-exhaustion uniformly.
+fn encode_int_range(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    elem_oid: Int,
+    r: &TypedIntRange,
+) -> Result<Bool, DbError> {
+    if (r.flags & PG_RANGE_FLAG_EMPTY) != 0 {
+        let ok = encode_range(buf, arena, r.flags, None, None);
+        return Ok(ok);
+    }
+    // Encode each bound into temporary owned bytes so encode_range
+    // can splice them into the wire layout.
+    let lower_bytes: Maybe<List<Byte>> = match r.lower {
+        Some(v) => Some(encode_int_to_bytes(elem_oid, v)?),
+        None    => None,
+    };
+    let upper_bytes: Maybe<List<Byte>> = match r.upper {
+        Some(v) => Some(encode_int_to_bytes(elem_oid, v)?),
+        None    => None,
+    };
+    let lower_ref: Maybe<&[Byte]> = match &lower_bytes {
+        Some(b) => Some(b.as_slice()),
+        None    => None,
+    };
+    let upper_ref: Maybe<&[Byte]> = match &upper_bytes {
+        Some(b) => Some(b.as_slice()),
+        None    => None,
+    };
+    let ok = encode_range(buf, arena, r.flags, lower_ref, upper_ref);
+    Ok(ok)
+}
+
+fn encode_int_to_bytes(elem_oid: Int, v: Int) -> Result<List<Byte>, DbError> {
+    let mut out: List<Byte> = List.new();
+    if elem_oid == PG_TYPE_INT4 {
+        out.push(((v >> 24) & 0xFF) as Byte);
+        out.push(((v >> 16) & 0xFF) as Byte);
+        out.push(((v >> 8)  & 0xFF) as Byte);
+        out.push((v & 0xFF) as Byte);
+        Ok(out)
+    } else if elem_oid == PG_TYPE_INT8 {
+        out.push(((v >> 56) & 0xFF) as Byte);
+        out.push(((v >> 48) & 0xFF) as Byte);
+        out.push(((v >> 40) & 0xFF) as Byte);
+        out.push(((v >> 32) & 0xFF) as Byte);
+        out.push(((v >> 24) & 0xFF) as Byte);
+        out.push(((v >> 16) & 0xFF) as Byte);
+        out.push(((v >> 8)  & 0xFF) as Byte);
+        out.push((v & 0xFF) as Byte);
+        Ok(out)
+    } else {
+        Err(encode_fault(f"int_range: unsupported element oid {elem_oid}"))
+    }
+}
+
+/// Encode a typed text range (`numrange` / `tsrange` / `tstzrange`
+/// / `daterange` — every range whose element wire format is text-
+/// dominated). The element is sent as the canonical PG textual
+/// representation so the server's input parser can lift it back.
+fn encode_text_range(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    _elem_oid: Int,
+    r: &TypedTextRange,
+) -> Result<Bool, DbError> {
+    if (r.flags & PG_RANGE_FLAG_EMPTY) != 0 {
+        let ok = encode_range(buf, arena, r.flags, None, None);
+        return Ok(ok);
+    }
+    let lower_bytes: Maybe<List<Byte>> = match &r.lower {
+        Some(t) => {
+            let raw = t.as_bytes();
+            let mut owned: List<Byte> = List.with_capacity(raw.len() as Int);
+            let mut i: Int = 0;
+            while i < (raw.len() as Int) {
+                owned.push(raw[i]);
+                i = i + 1;
+            }
+            Some(owned)
+        }
+        None => None,
+    };
+    let upper_bytes: Maybe<List<Byte>> = match &r.upper {
+        Some(t) => {
+            let raw = t.as_bytes();
+            let mut owned: List<Byte> = List.with_capacity(raw.len() as Int);
+            let mut i: Int = 0;
+            while i < (raw.len() as Int) {
+                owned.push(raw[i]);
+                i = i + 1;
+            }
+            Some(owned)
+        }
+        None => None,
+    };
+    let lower_ref: Maybe<&[Byte]> = match &lower_bytes {
+        Some(b) => Some(b.as_slice()),
+        None    => None,
+    };
+    let upper_ref: Maybe<&[Byte]> = match &upper_bytes {
+        Some(b) => Some(b.as_slice()),
+        None    => None,
+    };
+    let ok = encode_range(buf, arena, r.flags, lower_ref, upper_ref);
+    Ok(ok)
+}
+
+// =============================================================================
+// Array encoder — recursive over encode_typed
+// =============================================================================
+
+/// Encode a typed 1-D array. Each element is encoded into a
+/// scratch `ArenaWireBuf` via `encode_typed`; the resulting bytes
+/// are collected and handed to `encode_array_1d` along with the
+/// element OID. Multi-dim arrays are out of V0.
+fn encode_typed_array(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    elem_oid: Int,
+    arr: &TypedArray,
+) -> Result<Bool, DbError> {
+    // V0 — multi-dim arrays out of scope.
+    if arr.dimensions.len() as Int > 1 {
+        return Err(encode_fault(
+            f"array: V0 supports 1-D only; got {arr.dimensions.len() as Int} dims"
+        ));
+    }
+    // Element-by-element encode into temp byte buffers.
+    let n = arr.elements.len() as Int;
+    let mut owned_payloads: List<Maybe<List<Byte>>> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        match &arr.elements[i] {
+            None => { owned_payloads.push(None); }
+            Some(v) => {
+                // Snapshot arena, encode element, copy bytes out,
+                // rewind. Same pattern as encode_params_for_bind.
+                let scope = core.database.common.arena.ArenaScope.begin(
+                    arena,
+                    core.database.common.arena.ApQuery,
+                );
+                let mut sub = ArenaWireBuf.with_arena(arena, 32);
+                match encode_typed(elem_oid, v, &mut sub, arena) {
+                    Ok(_) => {
+                        let slice = sub.as_slice();
+                        let mut owned: List<Byte> = List.with_capacity(slice.len);
+                        let mut k: Int = 0;
+                        while k < slice.len {
+                            owned.push(load_byte(slice.ptr + k) as Byte);
+                            k = k + 1;
+                        }
+                        scope.discard(arena);
+                        owned_payloads.push(Some(owned));
+                    }
+                    Err(e) => {
+                        scope.discard(arena);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    // Build the &[Byte] vector encode_array_1d wants.
+    let mut refs: List<Maybe<&[Byte]>> = List.with_capacity(n);
+    let mut j: Int = 0;
+    while j < n {
+        match &owned_payloads[j] {
+            None    => { refs.push(None); }
+            Some(b) => { refs.push(Some(b.as_slice())); }
+        }
+        j = j + 1;
+    }
+    let ok = encode_array_1d(buf, arena, elem_oid, &refs);
+    Ok(ok)
 }
 
 /// Decode a column value according to its declared OID. Used by
@@ -564,9 +766,140 @@ public fn decode_typed(
             Some(canonical) => Ok(TvJsonb(canonical.json_text)),
             None            => Err(decode_fault("jsonb: arena slice stale".clone())),
         }
+    } else if range_element_oid(oid).is_some() {
+        let elem_oid = range_element_oid(oid).unwrap();
+        decode_range_typed(slice, arena, elem_oid)
+    } else if element_oid_for_array(oid).is_some() {
+        let elem_oid = element_oid_for_array(oid).unwrap();
+        decode_array_typed(slice, arena, elem_oid)
     } else {
         Err(decode_fault(f"oid {oid}: no decoder registered"))
     }
+}
+
+// =============================================================================
+// Range decoder — typed wrapper
+// =============================================================================
+
+fn decode_range_typed(
+    slice: &ArenaSlice,
+    arena: &SpindleArena,
+    elem_oid: Int,
+) -> Result<TypedValue, DbError> {
+    let r = decode_range(slice)?;
+    if r.is_empty() {
+        if elem_oid == PG_TYPE_INT4 || elem_oid == PG_TYPE_INT8 {
+            return Ok(TvIntRange(TypedIntRange {
+                flags: r.flags,
+                lower: None,
+                upper: None,
+            }));
+        }
+        return Ok(TvTextRange(TypedTextRange {
+            flags: r.flags,
+            lower: None,
+            upper: None,
+        }));
+    }
+    if elem_oid == PG_TYPE_INT4 || elem_oid == PG_TYPE_INT8 {
+        let lower: Maybe<Int> = match &r.lower {
+            Some(b) => {
+                let v = decode_typed(elem_oid, b, arena)?;
+                Some(int_value_or_err(&v)?)
+            }
+            None => None,
+        };
+        let upper: Maybe<Int> = match &r.upper {
+            Some(b) => {
+                let v = decode_typed(elem_oid, b, arena)?;
+                Some(int_value_or_err(&v)?)
+            }
+            None => None,
+        };
+        return Ok(TvIntRange(TypedIntRange {
+            flags: r.flags,
+            lower: lower,
+            upper: upper,
+        }));
+    }
+    // Text-dominated ranges (numrange / tsrange / tstzrange / daterange).
+    let lower: Maybe<Text> = match &r.lower {
+        Some(b) => {
+            let s = read_arena_slice_to_text(b);
+            Some(s)
+        }
+        None => None,
+    };
+    let upper: Maybe<Text> = match &r.upper {
+        Some(b) => {
+            let s = read_arena_slice_to_text(b);
+            Some(s)
+        }
+        None => None,
+    };
+    Ok(TvTextRange(TypedTextRange {
+        flags: r.flags,
+        lower: lower,
+        upper: upper,
+    }))
+}
+
+fn int_value_or_err(v: &TypedValue) -> Result<Int, DbError> {
+    match v {
+        TvInt2(n) | TvInt4(n) | TvInt8(n) => Ok(*n),
+        _ => Err(decode_fault("range: expected integer element".clone())),
+    }
+}
+
+fn read_arena_slice_to_text(s: &ArenaSlice) -> Text {
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < s.len {
+        let b = (load_byte(s.ptr + i) & 0xFF) as Byte;
+        out.push_byte(b);
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Array decoder — typed wrapper
+// =============================================================================
+
+fn decode_array_typed(
+    slice: &ArenaSlice,
+    arena: &SpindleArena,
+    elem_oid: Int,
+) -> Result<TypedValue, DbError> {
+    let (hdr, elements) = decode_array(slice)?;
+    if hdr.ndim > 1 {
+        return Err(decode_fault(
+            f"array: V0 supports 1-D only; got {hdr.ndim} dims"
+        ));
+    }
+    // Build dimensions list (V0 = 0 or 1 dim).
+    let mut dims: List<Int> = List.new();
+    if hdr.ndim == 1 && hdr.dimensions.len() > 0 {
+        dims.push(hdr.dimensions[0].length);
+    }
+    // Decode each element through encode_typed.
+    let mut decoded: List<Maybe<TypedValue>> = List.with_capacity(elements.len());
+    let mut i: Int = 0;
+    while i < (elements.len() as Int) {
+        match &elements[i] {
+            None    => { decoded.push(None); }
+            Some(s) => {
+                let v = decode_typed(elem_oid, s, arena)?;
+                decoded.push(Some(v));
+            }
+        }
+        i = i + 1;
+    }
+    Ok(TvArray(TypedArray {
+        element_oid: elem_oid,
+        dimensions: dims,
+        elements: decoded,
+    }))
 }
 
 // =============================================================================
