@@ -14,6 +14,7 @@ public module bridge;
 public module statement_cache;
 public module sqlite_schema_parser;
 public module statement_lifecycle;
+public module sql_value;
 
 public mount .schema_cache.{
     ColumnMeta, TableKind, TableMeta, IndexMeta,
@@ -58,5 +59,20 @@ public mount .statement_lifecycle.{
     step_one, reset, finalize,
     column_count, column_name, column_declared_type,
     column_value, column_kind,
+    // Rich SqlValue-based accessors (#158)
+    column_sql_value, column_type, column_type_int,
+    column_int, column_double, column_text, column_text16,
+    column_blob, column_bytes, column_bytes16,
+    bind_sql_value, bind_text16,
     execute_collect,
+};
+
+public mount .sql_value.{
+    SqlValue, VNull, VInt, VReal, VText, VBlob,
+    ColumnType, CtNull, CtInt, CtReal, CtText, CtBlob,
+    sql_value_from_register, register_from_sql_value,
+    value_type, value_to_int, value_to_real, value_to_text,
+    value_to_blob, value_to_text16, value_bytes, value_bytes16,
+    sql_null, sql_int, sql_real, sql_text, sql_blob,
+    sql_text_from_utf16, column_type_code,
 };
