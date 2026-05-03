@@ -114,11 +114,13 @@ const URL_ALPHABET: [Byte; 64] = [
 ];
 
 // Standard RFC 4648 encoding with '+', '/', and '=' padding.
+@inline(always)
 public fn encode(input: &[Byte]) -> Text {
     encode_with(input, &STD_ALPHABET, true)
 }
 
 // URL-safe RFC 4648 §5 encoding with '-', '_', no padding.
+@inline(always)
 public fn encode_url(input: &[Byte]) -> Text {
     encode_with(input, &URL_ALPHABET, false)
 }
@@ -159,11 +161,13 @@ fn encode_with(input: &[Byte], alpha: &[Byte; 64], pad: Bool) -> Text {
 }
 
 // Decode a standard base64 string. Padding is required.
+@inline(always)
 public fn decode(input: &Text) -> Result<List<Byte>, Base64Error> {
     decode_with(input, false)
 }
 
 // Decode a URL-safe base64 string. Padding is optional.
+@inline(always)
 public fn decode_url(input: &Text) -> Result<List<Byte>, Base64Error> {
     decode_with(input, true)
 }
