@@ -73,6 +73,7 @@ public module wal_reader;
 public module wal_pager;
 public module wal_actor_bridge;
 public module wal_index;
+public module wal_page_arena;
 public module vfs_injection;
 
 public mount .pager.{
@@ -168,6 +169,12 @@ public mount .wal_index.{
     N_READER_MARK, READMARK_NOT_USED, WALINDEX_HDR_VERSION,
     wal_index_new, wal_index_hdr_new, wal_ckpt_info_new,
     hash_section_empty, wal_hash_slot,
+};
+
+public mount .wal_page_arena.{
+    PageHandle, PageSlab, PageHandleMap,
+    page_handle_invalid, page_handle_is_valid,
+    page_slab_new, page_handle_map_new,
 };
 
 public mount .wal_reader.{

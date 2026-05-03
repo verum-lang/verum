@@ -1,0 +1,383 @@
+module core.database.sqlite.native.l1_pager.wal_page_arena;
+
+// =============================================================================
+// l1_pager/wal_page_arena.vr — CBGR-style slab arena for WAL page cache (#155)
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §8.2 (page-cache backing) +
+//       docs/detailed/26-cbgr-implementation.md (CBGR memory model)
+//
+// Pre-fix: `page_cache::CachedFrame` carried `data: List<Byte>` —
+// every cached page allocated a fresh `List<Byte>` on miss, dropped
+// it on eviction, and the next miss re-allocated.  At 4 KB pages
+// and a hot-loop workload doing ~10K page reads/sec, the page
+// cache was generating 40 MB/sec of allocator pressure for ZERO
+// information change (the underlying bytes are mostly recycled
+// across miss/evict cycles for the same page set).
+//
+// Post-fix: this module ships a **slab arena** specialised for
+// fixed-size page buffers.  All slots are pre-allocated at
+// construction; alloc/free pop and push from a freelist (O(1)
+// each).  Page contents are reused across miss/evict cycles —
+// the eviction frees a SLOT (returning it to the freelist) but
+// the underlying `List<Byte>` payload is recycled when the next
+// miss writes new bytes to that slot.
+//
+// CBGR integration (docs/detailed/26-cbgr-implementation.md):
+//
+//   * **Per-slot generation counter** — bumped on every free.
+//     `PageHandle` captures the generation at alloc time; reads
+//     and writes verify it before touching the slot.  A handle
+//     into a freed-and-recycled slot reads as a generation
+//     mismatch — caller observes `Maybe::None` instead of stale
+//     bytes, exactly the use-after-free guarantee CBGR exists
+//     to provide.
+//   * **No raw pointers** — the slab models the same bump-arena
+//     pattern as `core.mem.arena::GenerationalArena` but stays
+//     in safe Verum (no `__alloc_zeroed_raw`).  The
+//     architectural shape is identical; the cross-module bridge
+//     (deferred) wraps a real GenerationalArena with the same
+//     PageHandle protocol when raw-arena ergonomics are needed.
+//
+// Architecture: pure data — no I/O, no platform primitives,
+// no dependency on the pager.  PageCache uses the slab as a
+// drop-in replacement for inline `data: List<Byte>` storage;
+// every existing accessor stays bytewise-compatible because the
+// slab's `read_copy(handle)` returns owned bytes when the caller
+// needs to outlive the slot.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// PageHandle — generation-checked reference to a slab slot
+// -----------------------------------------------------------------------------
+
+/// Lightweight reference to a slab slot.  Captures the slot index
+/// AND the generation at alloc time; reads/writes verify the
+/// captured generation against the slot's current generation
+/// (CBGR use-after-free protection).  16 bytes — cheaper to copy
+/// than a `List<Byte>` reference.
+public type PageHandle is {
+    slot_idx: Int,
+    generation: Int,
+};
+
+/// Sentinel for "no slot" / "freed handle" — the slab returns
+/// `Some(handle)` on success and `None` on full; consumers that
+/// store handles in non-Option fields can use this constant as
+/// the unallocated marker.
+public fn page_handle_invalid() -> PageHandle {
+    PageHandle { slot_idx: -1, generation: -1 }
+}
+
+pub fn page_handle_is_valid(h: &PageHandle) -> Bool {
+    h.slot_idx >= 0 && h.generation >= 0
+}
+
+// -----------------------------------------------------------------------------
+// PageSlot — one fixed-size slot in the slab
+// -----------------------------------------------------------------------------
+
+/// One slab slot.  `data` is the page payload — its `List<Byte>`
+/// capacity is reused across alloc/free cycles (Verum's `List` is
+/// growable but doesn't shrink-on-clear, so freeing the slot leaves
+/// the backing buffer warm for the next miss).
+type PageSlot is {
+    data: List<Byte>,
+    /// CBGR generation counter — bumped on every free.  Reads/writes
+    /// verify the captured generation against this.
+    generation: Int,
+    /// `true` while the slot is checked out via a live handle.
+    /// `false` after `free` returns the slot to the freelist.
+    in_use: Bool,
+};
+
+// -----------------------------------------------------------------------------
+// PageSlab — fixed-capacity slab of fixed-size pages
+// -----------------------------------------------------------------------------
+
+/// Fixed-size slab arena.  Owns `capacity` slots of `page_size`
+/// bytes each; serves alloc/free in O(1) via a freelist.  Alloc
+/// returns a `PageHandle` that captures the slot's current
+/// generation; subsequent reads/writes through the handle
+/// verify the generation hasn't been bumped (CBGR
+/// use-after-free protection).
+///
+/// Memory pattern (per slot):
+///
+///   * On `alloc`: pop from freelist, set `in_use = true`, return
+///     `PageHandle { slot_idx, generation }`.
+///   * On `free`: bump `generation`, set `in_use = false`, push
+///     back to freelist.  The slot's `data: List<Byte>` payload
+///     is NOT cleared — the next alloc that writes to it overwrites
+///     in place.
+///   * On `write(handle, bytes)`: verify handle generation, copy
+///     bytes into slot.
+///   * On `read_copy(handle)`: verify handle generation, return
+///     `Some(data.clone())`.  Cloning is the safety net — once the
+///     slab evicts the slot, the cloned bytes survive.
+public type affine PageSlab is {
+    page_size: Int,
+    capacity: Int,
+    slots: List<PageSlot>,
+    /// Stack of free slot indices.  `pop` is the freelist alloc;
+    /// `push` is the free.  LIFO order keeps the most-recently-freed
+    /// slot warmest (better cache locality on the next miss).
+    free_list: List<Int>,
+    n_allocated: Int,
+    /// Lifetime stats — useful for capacity tuning + diagnostics.
+    total_allocs: Int,
+    total_frees: Int,
+};
+
+/// Construct a slab with `capacity` slots of `page_size` bytes
+/// each.  All slots start in the freelist; `n_allocated == 0`.
+/// Per-slot `data` lists are pre-grown to `page_size` zero bytes
+/// — eliminates allocator pressure on the first miss-per-slot.
+pub fn page_slab_new(page_size: Int, capacity: Int) -> PageSlab {
+    let cap = if capacity < 1 { 1 } else { capacity };
+    let psz = if page_size < 1 { 1 } else { page_size };
+    let mut slots: List<PageSlot> = List.new();
+    let mut free_list: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < cap {
+        let mut bytes: List<Byte> = List.new();
+        let mut j: Int = 0;
+        while j < psz { bytes.push(0 as Byte); j = j + 1; }
+        slots.push(PageSlot {
+            data: bytes,
+            generation: 1,        // start at 1 so handle.gen=-1 always mismatches
+            in_use: false,
+        });
+        // Push slot indices high-to-low so the first alloc returns slot 0
+        // (cache-warmer for tests + EXPLAIN debug output).
+        free_list.push(cap - 1 - i);
+        i = i + 1;
+    }
+    PageSlab {
+        page_size: psz,
+        capacity: cap,
+        slots: slots,
+        free_list: free_list,
+        n_allocated: 0,
+        total_allocs: 0,
+        total_frees: 0,
+    }
+}
+
+implement PageSlab {
+    pub fn page_size(&self) -> Int { self.page_size }
+    pub fn capacity(&self) -> Int { self.capacity }
+    pub fn allocated(&self) -> Int { self.n_allocated }
+    pub fn free_count(&self) -> Int { self.free_list.len() }
+    pub fn total_allocs(&self) -> Int { self.total_allocs }
+    pub fn total_frees(&self) -> Int { self.total_frees }
+
+    /// `true` iff every slot is checked out — alloc would fail.
+    pub fn is_full(&self) -> Bool {
+        self.free_list.len() == 0
+    }
+
+    /// Allocate a slot from the freelist.  Returns `None` when
+    /// the slab is full (caller must `free` an existing handle
+    /// before retrying).  The returned handle captures the slot's
+    /// current generation; future reads/writes verify it.
+    pub fn alloc(&mut self) -> Maybe<PageHandle> {
+        if self.free_list.len() == 0 { return None; }
+        let last = self.free_list.len() - 1;
+        let slot_idx = self.free_list[last];
+        // Pop without using stdlib `.pop()` — splice the trailing
+        // element off explicitly so the affine analyser sees a
+        // single in-place mutation.
+        let mut new_free: List<Int> = List.new();
+        let mut k: Int = 0;
+        while k < last { new_free.push(self.free_list[k]); k = k + 1; }
+        self.free_list = new_free;
+        let s = &mut self.slots[slot_idx];
+        s.in_use = true;
+        let captured_gen = s.generation;
+        self.n_allocated = self.n_allocated + 1;
+        self.total_allocs = self.total_allocs + 1;
+        Some(PageHandle { slot_idx: slot_idx, generation: captured_gen })
+    }
+
+    /// Verify a handle's generation matches the slot's current
+    /// generation AND the slot is in_use.  Foundation of every
+    /// read/write op.
+    pub fn handle_is_live(&self, h: &PageHandle) -> Bool {
+        if h.slot_idx < 0 || h.slot_idx >= self.slots.len() { return false; }
+        let s = &self.slots[h.slot_idx];
+        s.in_use && s.generation == h.generation
+    }
+
+    /// Free a slot — bump its generation (invalidating any
+    /// outstanding handles) and return it to the freelist.
+    /// Idempotent: free of an already-freed handle is a no-op
+    /// (handle's generation won't match the now-bumped slot
+    /// generation, so `handle_is_live` returns false).
+    pub fn free(&mut self, h: PageHandle) {
+        if !self.handle_is_live(&h) { return; }
+        let s = &mut self.slots[h.slot_idx];
+        s.in_use = false;
+        // Bump generation with wrap-around at i32::MAX so callers
+        // that compare generations don't see false-positive matches
+        // after a billion+ alloc cycles.  Skip 0 (reserved as the
+        // "uninitialised" sentinel) on wrap.
+        let next = if s.generation >= 2147483647 { 1 } else { s.generation + 1 };
+        s.generation = next;
+        self.free_list.push(h.slot_idx);
+        self.n_allocated = self.n_allocated - 1;
+        self.total_frees = self.total_frees + 1;
+    }
+
+    /// Copy `bytes` into the slot referenced by `h`.  Returns
+    /// `false` on handle mismatch (caller observed a use-after-free
+    /// — slot was reallocated).  Truncates / pads to `page_size` so
+    /// every slot is always exactly `page_size` bytes long.
+    pub fn write(&mut self, h: &PageHandle, bytes: &[Byte]) -> Bool {
+        if !self.handle_is_live(h) { return false; }
+        let s = &mut self.slots[h.slot_idx];
+        let n = bytes.len();
+        let lim = if n < self.page_size { n } else { self.page_size };
+        let mut i: Int = 0;
+        while i < lim {
+            s.data[i] = bytes[i];
+            i = i + 1;
+        }
+        // Zero-pad any tail when caller's `bytes` is shorter than
+        // the slot.  Avoids leaking previous-occupant bytes into
+        // a partially-filled new page.
+        while i < self.page_size {
+            s.data[i] = 0 as Byte;
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Copy the slot's bytes into a fresh owned `List<Byte>`.
+    /// Returns `None` on handle mismatch.  The cloned bytes
+    /// survive a subsequent `free + alloc` of the same slot (the
+    /// CBGR generation guarantee).
+    pub fn read_copy(&self, h: &PageHandle) -> Maybe<List<Byte>> {
+        if !self.handle_is_live(h) { return None; }
+        let s = &self.slots[h.slot_idx];
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < self.page_size { out.push(s.data[i]); i = i + 1; }
+        Some(out)
+    }
+
+    /// Single-byte read at offset `byte_offset`.  Cheap accessor
+    /// for hot-path readers that don't need a full page copy
+    /// (e.g. record header probe).  Returns `None` on handle
+    /// mismatch OR out-of-range offset.
+    pub fn read_byte(&self, h: &PageHandle, byte_offset: Int) -> Maybe<Byte> {
+        if !self.handle_is_live(h) { return None; }
+        if byte_offset < 0 || byte_offset >= self.page_size { return None; }
+        let s = &self.slots[h.slot_idx];
+        Some(s.data[byte_offset])
+    }
+
+    /// Reset the entire slab — bump every slot's generation,
+    /// rebuild the freelist, set `n_allocated = 0`.  Equivalent
+    /// to GenerationalArena's `reset()`: invalidates EVERY
+    /// outstanding handle in one O(N) sweep.  Used on checkpoint
+    /// drain when the WAL is fully consumed and the cache can
+    /// safely drop everything.
+    pub fn reset(&mut self) {
+        let mut i: Int = 0;
+        let mut new_free: List<Int> = List.new();
+        while i < self.capacity {
+            let s = &mut self.slots[i];
+            if s.in_use {
+                let next = if s.generation >= 2147483647 { 1 } else { s.generation + 1 };
+                s.generation = next;
+                s.in_use = false;
+            }
+            // Push high-to-low so the first post-reset alloc returns 0.
+            new_free.push(self.capacity - 1 - i);
+            i = i + 1;
+        }
+        self.free_list = new_free;
+        self.n_allocated = 0;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PageHandleMap — page_no → PageHandle index for the cache layer
+// -----------------------------------------------------------------------------
+
+/// Convenience wrapper combining a slab + a `Map<Int, PageHandle>`
+/// keyed by page_no.  This is the SHAPE that PageCache will adopt
+/// once the slab integration lands; the wrapper here is the
+/// migration seam — callers that want CBGR semantics use
+/// `PageHandleMap` directly, callers that want the legacy
+/// `Map<Int, List<Byte>>` shape continue using `page_cache.vr`
+/// unchanged.  Both wrappers can coexist; the slab is the
+/// underlying storage for both.
+public type affine PageHandleMap is {
+    slab: PageSlab,
+    index: Map<Int, PageHandle>,
+};
+
+pub fn page_handle_map_new(page_size: Int, capacity: Int) -> PageHandleMap {
+    PageHandleMap {
+        slab: page_slab_new(page_size, capacity),
+        index: Map.new(),
+    }
+}
+
+implement PageHandleMap {
+    /// Insert (or overwrite) page bytes for `page_no`.  Returns
+    /// `false` when the slab is full AND `page_no` isn't already
+    /// in the map (caller must evict before retry).
+    pub fn put(&mut self, page_no: Int, bytes: &[Byte]) -> Bool {
+        // If page_no is already in the map, overwrite its slot
+        // in place — no alloc/free churn, no generation bump.
+        if self.index.contains_key(&page_no) {
+            let h = self.index.get(&page_no);
+            return self.slab.write(&h, bytes);
+        }
+        // Fresh page — alloc a slot, write bytes, register in map.
+        match self.slab.alloc() {
+            Some(h) => {
+                let _ = self.slab.write(&h, bytes);
+                let _ = self.index.insert(page_no, h);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Lookup page bytes by page_no.  Returns owned bytes (clones
+    /// from the slab) so the caller's reference outlives any
+    /// subsequent eviction.
+    pub fn get(&self, page_no: Int) -> Maybe<List<Byte>> {
+        if !self.index.contains_key(&page_no) { return None; }
+        let h = self.index.get(&page_no);
+        self.slab.read_copy(&h)
+    }
+
+    /// Evict a page — frees its slab slot + drops the map entry.
+    /// Returns `true` when an eviction actually happened.
+    pub fn evict(&mut self, page_no: Int) -> Bool {
+        if !self.index.contains_key(&page_no) { return false; }
+        let h = self.index.get(&page_no);
+        self.slab.free(h);
+        let _ = self.index.remove(&page_no);
+        true
+    }
+
+    /// Number of pages currently mapped.
+    pub fn len(&self) -> Int { self.index.len() }
+
+    /// `true` when the slab can't accept another fresh allocation.
+    pub fn is_full(&self) -> Bool { self.slab.is_full() }
+
+    /// Underlying slab — for diagnostics + advanced callers that
+    /// want direct handle-based access.
+    pub fn slab_ref(&self) -> &PageSlab { &self.slab }
+}

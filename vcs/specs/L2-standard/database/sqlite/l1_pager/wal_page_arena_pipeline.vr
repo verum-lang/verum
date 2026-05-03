@@ -1,0 +1,292 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l1_pager, page_cache, cbgr, arena, slab, generation
+// @timeout: 15000
+// @description: CBGR-style page slab arena (#155) — exercises slot
+//               alloc/free/freelist + handle generation invariants
+//               (use-after-free protection) + write/read_copy
+//               round-trip + page_no→handle map convenience layer.
+//
+// Spec: docs/detailed/26-cbgr-implementation.md (CBGR memory model) +
+//       sqlite-native.md §8.2 (page-cache backing)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l1_pager.{
+    PageHandle, PageSlab, PageHandleMap,
+    page_handle_invalid, page_handle_is_valid,
+    page_slab_new, page_handle_map_new,
+};
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn make_page(byte: Byte, page_size: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < page_size { out.push(byte); i = i + 1; }
+    out
+}
+
+fn unwrap_handle(m: Maybe<PageHandle>) -> PageHandle {
+    match m {
+        Some(h) => h,
+        None    => panic("expected Some(PageHandle), got None"),
+    }
+}
+
+fn unwrap_bytes(m: Maybe<List<Byte>>) -> List<Byte> {
+    match m {
+        Some(b) => b,
+        None    => panic("expected Some(bytes), got None"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 1. Fresh slab — capacity, freelist, occupancy
+// -----------------------------------------------------------------------------
+
+fn fresh_slab_invariants() {
+    let s = page_slab_new(4096, 8);
+    assert_eq(s.page_size(), 4096);
+    assert_eq(s.capacity(), 8);
+    assert_eq(s.allocated(), 0);
+    assert_eq(s.free_count(), 8);
+    assert(!s.is_full());
+}
+
+// -----------------------------------------------------------------------------
+// 2. Sentinel handle: invalid by construction
+// -----------------------------------------------------------------------------
+
+fn invalid_handle_sentinel() {
+    let h = page_handle_invalid();
+    assert(!page_handle_is_valid(&h));
+}
+
+// -----------------------------------------------------------------------------
+// 3. Alloc returns a live handle
+// -----------------------------------------------------------------------------
+
+fn alloc_returns_live_handle() {
+    let mut s = page_slab_new(64, 4);
+    let h = unwrap_handle(s.alloc());
+    assert(page_handle_is_valid(&h));
+    assert(s.handle_is_live(&h));
+    assert_eq(s.allocated(), 1);
+    assert_eq(s.free_count(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// 4. write + read_copy round-trip
+// -----------------------------------------------------------------------------
+
+fn write_read_round_trip() {
+    let mut s = page_slab_new(8, 2);
+    let h = unwrap_handle(s.alloc());
+    let payload = make_page(0xAA as Byte, 8);
+    let ok = s.write(&h, payload.as_slice());
+    assert(ok);
+    let bytes = unwrap_bytes(s.read_copy(&h));
+    assert_eq(bytes.len(), 8);
+    assert_eq(bytes[0], 0xAA as Byte);
+    assert_eq(bytes[7], 0xAA as Byte);
+}
+
+// -----------------------------------------------------------------------------
+// 5. CBGR use-after-free: freed handle reads as None
+// -----------------------------------------------------------------------------
+
+fn use_after_free_returns_none() {
+    let mut s = page_slab_new(8, 2);
+    let h = unwrap_handle(s.alloc());
+    let _ = s.write(&h, make_page(0x55 as Byte, 8).as_slice());
+    s.free(h.clone());
+    // Handle now stale — generation bumped on the slot.
+    assert(!s.handle_is_live(&h));
+    let r = s.read_copy(&h);
+    match r {
+        None => {},
+        _    => panic("freed handle should read as None"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 6. Recycled slot: new alloc → handle gen distinct from old
+// -----------------------------------------------------------------------------
+
+fn recycled_slot_distinct_generation() {
+    let mut s = page_slab_new(8, 1);
+    let h1 = unwrap_handle(s.alloc());
+    s.free(h1.clone());
+    let h2 = unwrap_handle(s.alloc());
+    // Same slot, different generation.
+    assert_eq(h1.slot_idx, h2.slot_idx);
+    assert(h1.generation != h2.generation);
+    // h1 reads as None; h2 reads as the freshly-allocated bytes.
+    let r1 = s.read_copy(&h1);
+    match r1 {
+        None => {},
+        _    => panic("stale handle should fail"),
+    }
+    let r2 = s.read_copy(&h2);
+    match r2 {
+        Some(_) => {},
+        _       => panic("fresh handle should succeed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 7. Slab full: alloc returns None
+// -----------------------------------------------------------------------------
+
+fn full_slab_alloc_fails() {
+    let mut s = page_slab_new(8, 2);
+    let _h0 = unwrap_handle(s.alloc());
+    let _h1 = unwrap_handle(s.alloc());
+    assert(s.is_full());
+    let r = s.alloc();
+    match r {
+        None => {},
+        _    => panic("full slab should reject alloc"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 8. reset() invalidates EVERY outstanding handle
+// -----------------------------------------------------------------------------
+
+fn reset_invalidates_all() {
+    let mut s = page_slab_new(8, 4);
+    let h0 = unwrap_handle(s.alloc());
+    let h1 = unwrap_handle(s.alloc());
+    let h2 = unwrap_handle(s.alloc());
+    s.reset();
+    assert(!s.handle_is_live(&h0));
+    assert(!s.handle_is_live(&h1));
+    assert(!s.handle_is_live(&h2));
+    assert_eq(s.allocated(), 0);
+    assert_eq(s.free_count(), 4);
+}
+
+// -----------------------------------------------------------------------------
+// 9. write truncates / pads to page_size
+// -----------------------------------------------------------------------------
+
+fn write_truncates_and_pads() {
+    let mut s = page_slab_new(8, 1);
+    let h = unwrap_handle(s.alloc());
+    // Short write: 3 bytes — slot must be padded to 8.
+    let mut short: List<Byte> = List.new();
+    short.push(1 as Byte); short.push(2 as Byte); short.push(3 as Byte);
+    let _ = s.write(&h, short.as_slice());
+    let bytes = unwrap_bytes(s.read_copy(&h));
+    assert_eq(bytes.len(), 8);
+    assert_eq(bytes[0], 1 as Byte);
+    assert_eq(bytes[3], 0 as Byte);  // padded
+    assert_eq(bytes[7], 0 as Byte);  // padded
+}
+
+// -----------------------------------------------------------------------------
+// 10. read_byte: cheap single-byte accessor
+// -----------------------------------------------------------------------------
+
+fn read_byte_accessor() {
+    let mut s = page_slab_new(16, 1);
+    let h = unwrap_handle(s.alloc());
+    let _ = s.write(&h, make_page(0x77 as Byte, 16).as_slice());
+    match s.read_byte(&h, 0) {
+        Some(b) => assert_eq(b, 0x77 as Byte),
+        None    => panic("read_byte should succeed"),
+    }
+    match s.read_byte(&h, 100) {
+        None => {},  // out of range
+        _    => panic("read_byte past page_size should be None"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 11. PageHandleMap: put + get round-trip
+// -----------------------------------------------------------------------------
+
+fn handle_map_put_get() {
+    let mut m = page_handle_map_new(8, 4);
+    let p = make_page(0x42 as Byte, 8);
+    let ok = m.put(7, p.as_slice());
+    assert(ok);
+    assert_eq(m.len(), 1);
+    let bytes = unwrap_bytes(m.get(7));
+    assert_eq(bytes[0], 0x42 as Byte);
+}
+
+// -----------------------------------------------------------------------------
+// 12. PageHandleMap: re-put overwrites in place (no slot churn)
+// -----------------------------------------------------------------------------
+
+fn handle_map_overwrite_in_place() {
+    let mut m = page_handle_map_new(8, 4);
+    let _ = m.put(7, make_page(0x11 as Byte, 8).as_slice());
+    let pre_alloc_count = m.slab_ref().total_allocs();
+    let _ = m.put(7, make_page(0x22 as Byte, 8).as_slice());
+    let post_alloc_count = m.slab_ref().total_allocs();
+    // No new slab alloc — overwrite reuses the existing slot.
+    assert_eq(pre_alloc_count, post_alloc_count);
+    let bytes = unwrap_bytes(m.get(7));
+    assert_eq(bytes[0], 0x22 as Byte);
+}
+
+// -----------------------------------------------------------------------------
+// 13. PageHandleMap: evict frees the slot
+// -----------------------------------------------------------------------------
+
+fn handle_map_evict_frees_slot() {
+    let mut m = page_handle_map_new(8, 2);
+    let _ = m.put(1, make_page(0x01 as Byte, 8).as_slice());
+    let _ = m.put(2, make_page(0x02 as Byte, 8).as_slice());
+    assert(m.is_full());
+    let did_evict = m.evict(1);
+    assert(did_evict);
+    assert(!m.is_full());
+    // Page 1 gone, page 2 still here.
+    match m.get(1) {
+        None => {},
+        _    => panic("evicted page should not be findable"),
+    }
+    let bytes = unwrap_bytes(m.get(2));
+    assert_eq(bytes[0], 0x02 as Byte);
+}
+
+// -----------------------------------------------------------------------------
+// 14. Lifetime stats: total_allocs / total_frees
+// -----------------------------------------------------------------------------
+
+fn lifetime_stats() {
+    let mut s = page_slab_new(8, 4);
+    assert_eq(s.total_allocs(), 0);
+    let h0 = unwrap_handle(s.alloc());
+    let h1 = unwrap_handle(s.alloc());
+    s.free(h0);
+    let _ = h1;
+    assert_eq(s.total_allocs(), 2);
+    assert_eq(s.total_frees(), 1);
+}
+
+fn main() {
+    fresh_slab_invariants();
+    invalid_handle_sentinel();
+    alloc_returns_live_handle();
+    write_read_round_trip();
+    use_after_free_returns_none();
+    recycled_slot_distinct_generation();
+    full_slab_alloc_fails();
+    reset_invalidates_all();
+    write_truncates_and_pads();
+    read_byte_accessor();
+    handle_map_put_get();
+    handle_map_overwrite_in_place();
+    handle_map_evict_frees_slot();
+    lifetime_stats();
+}
