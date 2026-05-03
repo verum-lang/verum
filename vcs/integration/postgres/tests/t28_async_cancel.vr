@@ -1,0 +1,100 @@
+// =============================================================================
+// t28_async_cancel.vr — server-side CancelRequest from async PG
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.2 (CancelRequest), §6.1.8 (async).
+// =============================================================================
+//
+// V0:
+//   1. AsyncPgConnection.connect → assert backend_key() is Some
+//      (server populated BackendKeyData during handshake).
+//   2. Spawn a task running `SELECT pg_sleep(10)` on the actor —
+//      this would otherwise block ~10s server-side.
+//   3. From a separate task, call cancel_running_query() — opens
+//      a fresh socket and issues CancelRequest.
+//   4. Assert the awaited query returns within ~2s with an error
+//      (PG ERROR 57014 "canceling statement due to user request").
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    AsyncPgConnection,
+    async_connect,
+};
+mount core.async.executor.block_on;
+mount core.async.task.{spawn, sleep};
+mount core.time.Duration;
+
+fn main() {
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-async-cancel".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let conn = expect_ok(
+            async_connect(&cfg, 8).await,
+            &"async_connect failed".clone(),
+        );
+
+        // Sanity — handshake populated BackendKeyData.
+        expect(
+            conn.backend_key().is_some(),
+            &"backend_key absent — handshake didn't populate".clone(),
+        );
+
+        // Launch a long-running query in the background.
+        let query_conn = conn.clone();
+        let started = core.time.SystemClock.now();
+        let query_handle = spawn(async move {
+            query_conn.simple_query(&"SELECT pg_sleep(10)".clone()).await
+        });
+
+        // Give the actor a moment to dispatch the query so the
+        // cancel races against an actually-running statement.
+        sleep(Duration.from_millis(200)).await;
+
+        // Cancel from the cloned handle on this task.
+        let cancel_r = conn.cancel_running_query().await;
+        expect_ok(cancel_r, &"cancel_running_query failed".clone());
+
+        // The pg_sleep(10) should fail with PG SQLSTATE 57014
+        // within seconds (server processes CancelRequest fast).
+        let result = match query_handle.join().await {
+            Ok(r)  => r,
+            Err(_) => {
+                expect(false, &"query task join failed".clone());
+                return;
+            }
+        };
+
+        // Must be Err — successful return means cancel didn't take
+        // effect.
+        match result {
+            Ok(_) => {
+                expect(false, &"pg_sleep(10) returned Ok — cancel was no-op".clone());
+            }
+            Err(_) => {
+                // Expected — server cancelled with SQLSTATE 57014.
+            }
+        }
+
+        let elapsed_ms = started.elapsed().as_milliseconds();
+        expect(
+            elapsed_ms < 5_000,
+            &f"cancel took {elapsed_ms}ms — should be < 5s",
+        );
+
+        let _ = conn.close().await;
+
+        pass(&"t28_async_cancel".clone());
+    });
+}

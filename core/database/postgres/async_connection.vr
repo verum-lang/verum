@@ -188,6 +188,16 @@ public type AsyncPgConnection is {
     /// await the actor's clean shutdown after dispatching
     /// `ReqShutdown`.
     join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    /// Cached server endpoint for issuing CancelRequest from a
+    /// fresh socket without round-tripping through the busy
+    /// actor. Captured once at connect time.
+    cancel_host: Text,
+    cancel_port: Int,
+    /// (process_id, secret_key) from the server's BackendKeyData
+    /// frame during handshake. `None` if the server didn't send
+    /// it — cancel_running_query will refuse with an explicit
+    /// error.
+    backend_key: Maybe<(Int, Int)>,
 };
 
 /// Async wrapper over the sync `PgPreparedStatement`. Holds the
@@ -212,6 +222,64 @@ implement AsyncPgConnection {
         AsyncPgConnection {
             tx: self.tx.clone(),
             join: self.join.clone(),
+            cancel_host: self.cancel_host.clone(),
+            cancel_port: self.cancel_port,
+            backend_key: self.backend_key.clone(),
+        }
+    }
+
+    /// Cached BackendKeyData (process_id, secret_key) the server
+    /// sent during handshake. Required input to CancelRequest.
+    public fn backend_key(&self) -> Maybe<(Int, Int)> {
+        self.backend_key.clone()
+    }
+
+    /// Issue a CancelRequest packet to the server asking it to
+    /// abort the current query on this connection. Opens a
+    /// FRESH TCP socket (CancelRequest spec — must NOT reuse
+    /// the busy session socket); fires from a spawn_blocking
+    /// task so it never round-trips through the actor.
+    ///
+    /// Best-effort — server may have already finished the query
+    /// (returns Ok in that case; the cancel was a no-op).
+    /// Returns an error if BackendKeyData wasn't captured during
+    /// handshake.
+    public async fn cancel_running_query(&self) -> Result<(), DbError> {
+        self.cancel_running_query_with_local_bind(None).await
+    }
+
+    /// Sibling that pre-binds the cancel socket's source IP via
+    /// `TcpStream.connect_from`. Required by spec §8.13.10 in
+    /// hostile-network deployments where the server's pg_hba
+    /// drops connections from any source other than the
+    /// originally-trusted IP.
+    public async fn cancel_running_query_with_local_bind(
+        &self,
+        bind_local: Maybe<core.net.tcp.SocketAddr>,
+    ) -> Result<(), DbError> {
+        let key = match self.backend_key {
+            Some(k) => k,
+            None => {
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdPostgres,
+                    code: "CANCEL_NO_KEY".clone(),
+                    message: "BackendKeyData not captured during handshake — cancel impossible".clone(),
+                    retryable: false,
+                }));
+            }
+        };
+        let host = self.cancel_host.clone();
+        let port = self.cancel_port;
+        let pid = key.0;
+        let secret = key.1;
+        let jh = spawn_blocking(move || -> Result<(), DbError> {
+            core.database.postgres.connection.cancel_running_query_at(
+                &host, port, pid, secret, bind_local,
+            )
+        });
+        match jh.join().await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("cancel: blocking-pool join")),
         }
     }
 
@@ -412,6 +480,13 @@ public async fn connect(
         Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
     };
 
+    // Snapshot connect endpoint + BackendKeyData BEFORE handing
+    // the conn to the actor — once the actor owns it, we can no
+    // longer read from the sync handle.
+    let cancel_host = cfg.host.clone();
+    let cancel_port = cfg.port;
+    let backend_key = conn.backend_key();
+
     let cap = if mailbox_capacity < 1 { 1 } else { mailbox_capacity };
     let (tx, rx) = bounded_channel::<PgRequest>(cap);
 
@@ -422,6 +497,9 @@ public async fn connect(
     Ok(AsyncPgConnection {
         tx: tx,
         join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        cancel_host: cancel_host,
+        cancel_port: cancel_port,
+        backend_key: backend_key,
     })
 }
 
