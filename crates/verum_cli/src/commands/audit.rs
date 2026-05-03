@@ -2468,14 +2468,22 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
         "admitted_count": admitted,
         "rules": rules
             .iter()
-            .map(|r| serde_json::json!({
-                "name": r.name,
-                "lemma_symbol": r.lemma_symbol,
-                "file_path": r.file_path.to_string_lossy(),
-                "status": r.status.tag(),
-                "description": r.description,
-                "iou_citation": r.status.iou().unwrap_or(""),
-            }))
+            .map(|r| {
+                let (fw_lemma_path, fw_framework, fw_citation) =
+                    r.status.framework_citation().map(|(l, f, c)| (l, f, c)).unwrap_or(("", "", ""));
+                serde_json::json!({
+                    "name": r.name,
+                    "lemma_symbol": r.lemma_symbol,
+                    "file_path": r.file_path.to_string_lossy(),
+                    "status": r.status.tag(),
+                    "description": r.description,
+                    "iou_citation": r.status.iou().unwrap_or(""),
+                    // DischargedByFramework triple — empty when N/A
+                    "framework_lemma_path": fw_lemma_path,
+                    "framework": fw_framework,
+                    "framework_citation": fw_citation,
+                })
+            })
             .collect::<Vec<_>>(),
         "issues": issues
             .iter()
@@ -2519,6 +2527,7 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
             for r in &rules {
                 let status_glyph = match &r.status {
                     DischargeStatus::Discharged => "✓",
+                    DischargeStatus::DischargedByFramework { .. } => "▣",
                     DischargeStatus::AdmittedWithIou { .. } => "○",
                     DischargeStatus::NotYetAttested => "·",
                 };
@@ -2723,6 +2732,9 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
             .map(|p| {
                 let (status_tag, iou) = match &p.status {
                     AttestationStatus::Discharged => ("discharged", String::new()),
+                    AttestationStatus::DischargedByFramework { citation, .. } => {
+                        ("discharged_by_framework", citation.clone())
+                    }
                     AttestationStatus::AdmittedWithIou { iou } => {
                         ("admitted_with_iou", iou.clone())
                     }
@@ -2772,6 +2784,10 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
             for p in &passes {
                 let (glyph, suffix) = match &p.status {
                     AttestationStatus::Discharged => ("✓".to_string(), String::new()),
+                    AttestationStatus::DischargedByFramework { framework, citation, .. } => (
+                        "▣".to_string(),
+                        format!("  via {}: {}", framework, citation),
+                    ),
                     AttestationStatus::AdmittedWithIou { iou } => {
                         ("○".to_string(), format!("  IOU: {}", iou))
                     }
