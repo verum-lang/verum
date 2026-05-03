@@ -190,6 +190,11 @@ public type HeapPageHeader is {
     _pad2: [UInt64; 2],
 };
 
+/// Public alias — short canonical name; internal type uses the
+/// verbose `HeapPageHeader` to disambiguate from `AllocPageHeader`
+/// in core.mem.allocator (different layout, different purpose).
+public type PageHeader is HeapPageHeader;
+
 implement HeapPageHeader {
     /// Initialize a page header for a given size class
     public fn init(
