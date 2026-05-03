@@ -28,10 +28,44 @@ use verum_ast::{
     decl::*,
     ty::{GenericParam, Path, PathSegment, WhereClause, WherePredicate, WherePredicateKind},
 };
+use verum_ast::visitor::{Visitor, walk_expr, walk_stmt};
+use verum_ast::{Block, Stmt};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_lexer::{Token, TokenKind};
 
 use crate::error::{ErrorCode, ParseError, ParseErrorKind};
+
+/// Visitor that flips a flag on the first `expr.await` site it sees.
+/// Reuses the canonical AST walker so every expression form (match
+/// arms, async-block bodies, for-await iter, ...) is covered without
+/// the synthesiser growing a private hand-rolled walk.
+struct AwaitFinder {
+    found: bool,
+}
+
+impl Visitor for AwaitFinder {
+    fn visit_expr(&mut self, expr: &Expr) {
+        if self.found {
+            return;
+        }
+        if matches!(expr.kind, ExprKind::Await(_)) {
+            self.found = true;
+            return;
+        }
+        walk_expr(self, expr);
+    }
+}
+
+/// True iff any `.await` site is reachable from `stmt`. The script-mode
+/// wrapper consults this to decide whether to mark the synthesised
+/// `__verum_script_main` as `async fn` — the architectural fix for the
+/// "`.await` outside async context" gap that previously rejected every
+/// top-level async script.
+fn stmt_contains_await(stmt: &Stmt) -> bool {
+    let mut finder = AwaitFinder { found: false };
+    walk_stmt(&mut finder, stmt);
+    finder.found
+}
 use crate::parser::{ParseResult, RecursiveParser};
 
 // ============================================================================
@@ -221,6 +255,15 @@ impl<'a> RecursiveParser<'a> {
         let last_span = stmts.last().map(|s| s.span()).unwrap_or(first_stmt_span);
         let span = Span::new(first_stmt_span.start, last_span.end, self.file_id);
 
+        // Auto-async: the wrapper inherits async-ness from the body. A script
+        // that uses `task.await` at top level used to fail with
+        // "`.await` outside async context" because the wrapper was
+        // unconditionally `is_async: false`. Walking the collected
+        // statements once with the AST Visitor and lifting `is_async`
+        // when any await-site appears keeps the synthesis purely
+        // structural — no user-facing annotation required.
+        let needs_async = stmts.iter().any(|s| stmt_contains_await(s));
+
         // Tail-expression lift: if the final collected statement is an
         // unsemicoloned expression-stmt, move its expression into the
         // block's `expr` slot so the wrapper returns its value.
@@ -246,7 +289,7 @@ impl<'a> RecursiveParser<'a> {
         };
         let func = FunctionDecl {
             visibility: Visibility::Private,
-            is_async: false,
+            is_async: needs_async,
             is_meta: false,
             stage_level: 0,
             is_pure: false,
