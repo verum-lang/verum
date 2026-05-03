@@ -1,0 +1,180 @@
+// =============================================================================
+// t19_typed_aggr.vr — typed array + range binary round-trip
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.4 (typed wire), §6.1.5 (codecs).
+// =============================================================================
+//
+// Verifies that the typed wire correctly handles aggregate types
+// over the binary protocol:
+//
+//   1. int4[] round-trip — INSERT a List<TypedValue>(int4[1, 2, 3])
+//      via prepared statement; SELECT it back; assert decoded shape.
+//   2. text[] round-trip — same with strings.
+//   3. int4range — SELECT '[5, 10)'::int4range and decode.
+//   4. tstzrange — SELECT '[2026-01-01, 2026-12-31)'::tstzrange and
+//      decode.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgPreparedStatement, PgTypedQueryResult,
+};
+mount core.database.postgres.wire.typed.{
+    TypedValue,
+    TvNull, TvInt4, TvText, TvArray, TvIntRange, TvTextRange,
+    TypedArray, TypedIntRange, TypedTextRange,
+};
+mount core.database.postgres.wire.codec.{
+    PG_TYPE_INT4, PG_TYPE_TEXT,
+};
+
+fn main() {
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 1. int4[] round-trip via SELECT $1::int4[].
+    //    Build a TypedArray of [11, 22, 33] and bind it.
+    // -------------------------------------------------------------------------
+    let stmt_arr_i4 = expect_ok(
+        conn.prepare(&"SELECT $1::int4[] AS arr".clone()),
+        &"prepare int4[] failed".clone(),
+    );
+
+    let mut elements: List<Maybe<TypedValue>> = List.new();
+    elements.push(Some(TvInt4(11)));
+    elements.push(Some(TvInt4(22)));
+    elements.push(Some(TvInt4(33)));
+    let mut dims: List<Int> = List.new();
+    dims.push(3);
+    let arr = TypedArray {
+        element_oid: PG_TYPE_INT4,
+        dimensions: dims,
+        elements: elements,
+    };
+
+    let mut params: List<Maybe<TypedValue>> = List.new();
+    params.push(Some(TvArray(arr)));
+    let r1 = expect_ok(
+        conn.execute_prepared_typed(&stmt_arr_i4, &params),
+        &"execute_prepared_typed int4[] failed".clone(),
+    );
+    expect_eq_int(r1.rows.len() as Int, 1, &"int4[] row count".clone());
+    match &r1.rows[0][0] {
+        TvArray(decoded) => {
+            expect_eq_int(decoded.elements.len() as Int, 3,
+                &"int4[] element count".clone());
+            // Spot-check first element.
+            match &decoded.elements[0] {
+                Some(TvInt4(n)) => expect_eq_int(*n, 11, &"int4[][0] value".clone()),
+                _ => expect(false, &"int4[][0] not TvInt4(11)".clone()),
+            }
+            match &decoded.elements[2] {
+                Some(TvInt4(n)) => expect_eq_int(*n, 33, &"int4[][2] value".clone()),
+                _ => expect(false, &"int4[][2] not TvInt4(33)".clone()),
+            }
+        }
+        _ => expect(false, &"col not TvArray".clone()),
+    }
+    let _ = conn.close_prepared(&stmt_arr_i4);
+
+    // -------------------------------------------------------------------------
+    // 2. text[] round-trip.
+    // -------------------------------------------------------------------------
+    let stmt_arr_t = expect_ok(
+        conn.prepare(&"SELECT $1::text[] AS arr".clone()),
+        &"prepare text[] failed".clone(),
+    );
+
+    let mut t_elements: List<Maybe<TypedValue>> = List.new();
+    t_elements.push(Some(TvText("alpha".clone())));
+    t_elements.push(Some(TvText("beta".clone())));
+    let mut t_dims: List<Int> = List.new();
+    t_dims.push(2);
+    let t_arr = TypedArray {
+        element_oid: PG_TYPE_TEXT,
+        dimensions: t_dims,
+        elements: t_elements,
+    };
+
+    let mut t_params: List<Maybe<TypedValue>> = List.new();
+    t_params.push(Some(TvArray(t_arr)));
+    let r2 = expect_ok(
+        conn.execute_prepared_typed(&stmt_arr_t, &t_params),
+        &"execute_prepared_typed text[] failed".clone(),
+    );
+    expect_eq_int(r2.rows.len() as Int, 1, &"text[] row count".clone());
+    match &r2.rows[0][0] {
+        TvArray(decoded) => {
+            expect_eq_int(decoded.elements.len() as Int, 2,
+                &"text[] element count".clone());
+            match &decoded.elements[0] {
+                Some(TvText(s)) => expect_eq_int(s.len() as Int, 5,
+                    &"text[][0] length".clone()),
+                _ => expect(false, &"text[][0] not TvText".clone()),
+            }
+        }
+        _ => expect(false, &"col not TvArray".clone()),
+    }
+    let _ = conn.close_prepared(&stmt_arr_t);
+
+    // -------------------------------------------------------------------------
+    // 3. int4range — server-side literal, decode via binary.
+    // -------------------------------------------------------------------------
+    let stmt_r4 = expect_ok(
+        conn.prepare(&"SELECT '[5,10)'::int4range AS r".clone()),
+        &"prepare int4range failed".clone(),
+    );
+    let no_p: List<Maybe<TypedValue>> = List.new();
+    let r3 = expect_ok(
+        conn.execute_prepared_typed(&stmt_r4, &no_p),
+        &"execute_prepared_typed int4range failed".clone(),
+    );
+    expect_eq_int(r3.rows.len() as Int, 1, &"int4range row count".clone());
+    match &r3.rows[0][0] {
+        TvIntRange(rng) => {
+            match rng.lower {
+                Some(n) => expect_eq_int(n, 5, &"int4range.lower".clone()),
+                None    => expect(false, &"int4range.lower missing".clone()),
+            }
+            match rng.upper {
+                Some(n) => expect_eq_int(n, 10, &"int4range.upper".clone()),
+                None    => expect(false, &"int4range.upper missing".clone()),
+            }
+        }
+        _ => expect(false, &"col not TvIntRange".clone()),
+    }
+    let _ = conn.close_prepared(&stmt_r4);
+
+    // -------------------------------------------------------------------------
+    // 4. tstzrange — text-form decode.
+    // -------------------------------------------------------------------------
+    let stmt_rtz = expect_ok(
+        conn.prepare(&
+            "SELECT '[2026-01-01 00:00+00, 2026-12-31 00:00+00)'::tstzrange AS r".clone()
+        ),
+        &"prepare tstzrange failed".clone(),
+    );
+    let r4 = expect_ok(
+        conn.execute_prepared_typed(&stmt_rtz, &no_p),
+        &"execute_prepared_typed tstzrange failed".clone(),
+    );
+    expect_eq_int(r4.rows.len() as Int, 1, &"tstzrange row count".clone());
+    match &r4.rows[0][0] {
+        TvTextRange(rng) => {
+            expect(
+                rng.lower.is_some() && rng.upper.is_some(),
+                &"tstzrange bounds present".clone(),
+            );
+        }
+        _ => expect(false, &"col not TvTextRange".clone()),
+    }
+    let _ = conn.close_prepared(&stmt_rtz);
+
+    pass(&"t19_typed_aggr".clone());
+}

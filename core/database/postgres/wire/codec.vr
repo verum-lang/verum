@@ -152,6 +152,62 @@ public fn array_oid_for_element(oid: Int) -> Int {
     else { -1 }
 }
 
+/// Reverse of `array_oid_for_element` — given an array OID,
+/// return the OID of its element type. `None` if the OID is not
+/// a known array OID.
+public fn element_oid_for_array(array_oid: Int) -> Maybe<Int> {
+    if      array_oid == 1000 { Some(PG_TYPE_BOOL) }
+    else if array_oid == 1001 { Some(PG_TYPE_BYTEA) }
+    else if array_oid == 1002 { Some(PG_TYPE_CHAR) }
+    else if array_oid == 1003 { Some(PG_TYPE_NAME) }
+    else if array_oid == 1016 { Some(PG_TYPE_INT8) }
+    else if array_oid == 1005 { Some(PG_TYPE_INT2) }
+    else if array_oid == 1007 { Some(PG_TYPE_INT4) }
+    else if array_oid == 1009 { Some(PG_TYPE_TEXT) }
+    else if array_oid == 1028 { Some(PG_TYPE_OID) }
+    else if array_oid == 199  { Some(PG_TYPE_JSON) }
+    else if array_oid == 1021 { Some(PG_TYPE_FLOAT4) }
+    else if array_oid == 1022 { Some(PG_TYPE_FLOAT8) }
+    else if array_oid == 1014 { Some(PG_TYPE_BPCHAR) }
+    else if array_oid == 1015 { Some(PG_TYPE_VARCHAR) }
+    else if array_oid == 1182 { Some(PG_TYPE_DATE) }
+    else if array_oid == 1183 { Some(PG_TYPE_TIME) }
+    else if array_oid == 1115 { Some(PG_TYPE_TIMESTAMP) }
+    else if array_oid == 1185 { Some(PG_TYPE_TIMESTAMPTZ) }
+    else if array_oid == 1187 { Some(PG_TYPE_INTERVAL) }
+    else if array_oid == 1231 { Some(PG_TYPE_NUMERIC) }
+    else if array_oid == 2951 { Some(PG_TYPE_UUID) }
+    else if array_oid == 3807 { Some(PG_TYPE_JSONB) }
+    else if array_oid == 3643 { Some(PG_TYPE_TSVECTOR) }
+    else if array_oid == 1041 { Some(PG_TYPE_INET) }
+    else if array_oid == 651  { Some(PG_TYPE_CIDR) }
+    else if array_oid == 3905 { Some(PG_TYPE_INT4RANGE) }
+    else if array_oid == 3907 { Some(PG_TYPE_NUMRANGE) }
+    else if array_oid == 3909 { Some(PG_TYPE_TSRANGE) }
+    else if array_oid == 3911 { Some(PG_TYPE_TSTZRANGE) }
+    else if array_oid == 3927 { Some(PG_TYPE_INT8RANGE) }
+    else if array_oid == 3913 { Some(PG_TYPE_DATERANGE) }
+    else { None }
+}
+
+/// Returns the element OID for a range type, or `None` if the
+/// OID is not a known range. PG range types:
+///   int4range  → int4    (3904 → 23)
+///   int8range  → int8    (3926 → 20)
+///   numrange   → numeric (3906 → 1700)
+///   tsrange    → timestamp  (3908 → 1114)
+///   tstzrange  → timestamptz (3910 → 1184)
+///   daterange  → date    (3912 → 1082)
+public fn range_element_oid(range_oid: Int) -> Maybe<Int> {
+    if      range_oid == PG_TYPE_INT4RANGE  { Some(PG_TYPE_INT4) }
+    else if range_oid == PG_TYPE_INT8RANGE  { Some(PG_TYPE_INT8) }
+    else if range_oid == PG_TYPE_NUMRANGE   { Some(PG_TYPE_NUMERIC) }
+    else if range_oid == PG_TYPE_TSRANGE    { Some(PG_TYPE_TIMESTAMP) }
+    else if range_oid == PG_TYPE_TSTZRANGE  { Some(PG_TYPE_TIMESTAMPTZ) }
+    else if range_oid == PG_TYPE_DATERANGE  { Some(PG_TYPE_DATE) }
+    else { None }
+}
+
 /// Returns true if the given OID has a binary codec implementation
 /// in this module. Used by sql# at compile time to reject unsupported
 /// types with a precise error instead of letting them through to a
