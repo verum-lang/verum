@@ -51,10 +51,13 @@ use serde::{Deserialize, Serialize};
 pub mod apply_graph;
 pub mod coq;
 pub mod corpus_export;
+pub mod discharge_status;
 pub mod expr_translate;
 pub mod kernel_v0_manifest;
 pub mod lean;
 pub mod proof_body_translate;
+
+pub use discharge_status::DischargeStatus;
 
 #[cfg(test)]
 mod tests;

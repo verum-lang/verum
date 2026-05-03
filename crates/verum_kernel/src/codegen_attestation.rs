@@ -51,6 +51,26 @@
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
+// AttestationStatus — alias for the canonical DischargeStatus
+// =============================================================================
+//
+// Pre-unification this module shipped its own `AttestationStatus`
+// enum with three states. Both this manifest and
+// `crate::soundness::kernel_v0_manifest` now share the canonical
+// [`crate::soundness::DischargeStatus`] type — single source of
+// truth for soundness-discharge bookkeeping. `AttestationStatus`
+// remains as a type alias for source-level compatibility with the
+// codegen-attestation API surface; new code should reference
+// `DischargeStatus` directly.
+
+use crate::soundness::DischargeStatus;
+
+/// Type alias — the canonical [`DischargeStatus`] enum. Codegen
+/// attestation, kernel_v0 manifest, and any future
+/// soundness-bookkeeping consumer use the same type.
+pub type AttestationStatus = DischargeStatus;
+
+// =============================================================================
 // CodegenPassId — the canonical roster of codegen passes
 // =============================================================================
 
@@ -126,86 +146,6 @@ impl CodegenPassId {
 }
 
 impl std::fmt::Display for CodegenPassId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.display_name())
-    }
-}
-
-// =============================================================================
-// AttestationStatus — discharge classification (mirrors LemmaStatus pattern)
-// =============================================================================
-
-/// Discharge status for one codegen pass's preservation attestation.
-///
-
-/// Mirrors the kernel-soundness IOU pattern from
-/// [`crate::soundness::kernel_v0_manifest::KernelV0Status`] but adds
-/// the explicit `NotYetAttested` step for the pre-attestation period.
-/// The CompCert-parity goal is that every pass eventually moves from
-/// `NotYetAttested` → `Admitted_with_IOU` → `Discharged`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AttestationStatus {
-    /// Pass carries a kernel-discharged simulation proof — no IOU.
-    /// The associated `proof_obligation` field on
-    /// [`PassAttestation`] becomes the citation for the discharged
-    /// proof.
-    Discharged,
-    /// Pass is admitted with a structural-property IOU (the
-    /// associated [`PassAttestation::proof_obligation`] names the
-    /// missing structural lemma). This is the CompCert
-    /// `Lemma <pass>_preserves_semantics. Admitted.` shape — honest
-    /// about the gap.
-    AdmittedWithIou {
-        /// Concrete IOU naming the missing structural lemma.
-        /// Preserved verbatim into audit reports.
-        iou: String,
-    },
-    /// Pass has not yet been attested at all — neither a discharge
-    /// nor a structured admit. This is the pre-#162 surface:
-    /// "trusted by code-review only". Each entry carries a
-    /// description of what would discharge it (the
-    /// `proof_obligation` field on the parent [`PassAttestation`]).
-    NotYetAttested,
-}
-
-impl AttestationStatus {
-    /// Stable diagnostic tag — matches the serde representation
-    /// modulo the IOU payload.
-    pub fn tag(&self) -> &'static str {
-        match self {
-            AttestationStatus::Discharged => "discharged",
-            AttestationStatus::AdmittedWithIou { .. } => "admitted_with_iou",
-            AttestationStatus::NotYetAttested => "not_yet_attested",
-        }
-    }
-
-    /// Human-readable display name.
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            AttestationStatus::Discharged => "Discharged",
-            AttestationStatus::AdmittedWithIou { .. } => "Admitted with IOU",
-            AttestationStatus::NotYetAttested => "Not yet attested",
-        }
-    }
-
-    /// True iff the pass carries a kernel-discharged proof.
-    pub fn is_discharged(&self) -> bool {
-        matches!(self, AttestationStatus::Discharged)
-    }
-
-    /// True iff the pass carries a structural-IOU admit.
-    pub fn is_admitted(&self) -> bool {
-        matches!(self, AttestationStatus::AdmittedWithIou { .. })
-    }
-
-    /// True iff the pass has not been attested at all.
-    pub fn is_pending(&self) -> bool {
-        matches!(self, AttestationStatus::NotYetAttested)
-    }
-}
-
-impl std::fmt::Display for AttestationStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.display_name())
     }
