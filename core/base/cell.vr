@@ -43,16 +43,19 @@ public type Cell<T> is { value: T };
 
 implement<T: Clone> Cell<T> {
     /// Create a new Cell with the given value.
+    @inline(always)
     public fn new(value: T) -> Cell<T> {
         Cell { value: value }
     }
 
     /// Get a copy of the contained value.
+    @inline(always)
     public fn get(&self) -> T {
         self.value.clone()
     }
 
     /// Set the contained value.
+    @inline(always)
     public fn set(&self, value: T) {
         // In typecheck mode, we model this as replacing the value.
         // At runtime, this uses interior mutability to bypass &self.
@@ -60,6 +63,7 @@ implement<T: Clone> Cell<T> {
     }
 
     /// Replace the contained value and return the old one.
+    @inline(always)
     public fn replace(&self, value: T) -> T {
         let old = self.get();
         self.set(value);
@@ -67,11 +71,13 @@ implement<T: Clone> Cell<T> {
     }
 
     /// Take the value, leaving Default.default() in its place.
+    @inline(always)
     public fn take(&self) -> T where T: Default {
         self.replace(T.default())
     }
 
     /// Update the cell's value using a function.
+    @inline(always)
     public fn update(&self, f: fn(T) -> T) {
         let old = self.get();
         self.set(f(old));
@@ -79,24 +85,28 @@ implement<T: Clone> Cell<T> {
 }
 
 implement<T: Clone + Eq> Eq for Cell<T> {
+    @inline(always)
     fn eq(&self, other: &Cell<T>) -> Bool {
         self.get() == other.get()
     }
 }
 
 implement<T: Clone + Ord> Ord for Cell<T> {
+    @inline(always)
     fn cmp(&self, other: &Cell<T>) -> Ordering {
         self.get().cmp(&other.get())
     }
 }
 
 implement<T: Clone> Clone for Cell<T> {
+    @inline(always)
     fn clone(&self) -> Cell<T> {
         Cell.new(self.get())
     }
 }
 
 implement<T: Clone + Default> Default for Cell<T> {
+    @inline(always)
     fn default() -> Cell<T> {
         Cell.new(T.default())
     }
