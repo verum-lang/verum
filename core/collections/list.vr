@@ -253,6 +253,7 @@ implement<T> List<T> {
     // Get raw pointer to data.
     // # Safety
     // The returned pointer is valid only while the List is not mutated.
+    @inline(always)
     public fn as_ptr(&self) -> &unsafe T {
         self.ptr
     }
@@ -261,6 +262,7 @@ implement<T> List<T> {
     // # Safety
     // The returned pointer is valid only while no other references exist.
     // Takes &mut self to ensure exclusive access to the list.
+    @inline(always)
     public fn as_mut_ptr(&mut self) -> &unsafe T {
         self.ptr
     }
