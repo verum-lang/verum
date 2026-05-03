@@ -45,10 +45,15 @@ pub type VfsInjection is
       ViMemory                     // MemDbVfs — Phase 1 default
     | ViPosixFile(path: Text, flags: OpenFlags)
                                     // Production file-backed (POSIX)
-    | ViDstWrapped(inner: Text);    // DST fault-injection wrapper
-                                    // (`inner` names the inner VFS
-                                    // by tag — keeps the wrapper
-                                    // architecturally visible)
+    | ViDstWrapped(seed: Int64, total_ops: Int);
+                                    // DST fault-injection wrapper.  Inner
+                                    // backend is in-memory (DST is for
+                                    // crash-recovery testing, not file
+                                    // I/O perf).  `(seed, total_ops)`
+                                    // deterministically derives the
+                                    // FaultSchedule via
+                                    // `dst::fault::generate_schedule`.
+                                    // Closes #154.
 
 /// Open a pager with the named VFS.  Returns the same `Pager` shape
 /// as the legacy `pager_open_*` functions; `WalPager` callers wrap
@@ -63,14 +68,20 @@ pub fn pager_open_with_vfs(
             let cfg = pager_config_default();
             pager_open_file_with_config(&path, page_size, flags, cfg)
         }
-        ViDstWrapped(inner_tag) => {
-            // Foundation: the wrapper's I/O interception lives in
-            // `vcs/dst/`; here we just reject construction so callers
-            // know to wire the DST harness via a follow-up.
-            let _ = inner_tag;
+        ViDstWrapped(_seed, _total_ops) => {
+            // The DST wrapper exposes a different API surface
+            // (`DstWrappedPager` not `Pager`) because the wrapping
+            // happens at the Pager-method level, not at the
+            // VFS-byte level.  Callers wanting fault injection
+            // must construct via `dst_wrapped_pager_open(seed,
+            // total_ops, page_size)` directly — this `Result<Pager,
+            // _>` entry point can't carry the wrapped type without
+            // a sum-type return signature that breaks every
+            // existing caller.  See #154 + dst_wrapped_pager.vr
+            // top-of-file for the architectural rationale.
             Err(PagerError {
                 kind: IoError,
-                message: "ViDstWrapped: DST harness wiring tracked under #137 follow-up",
+                message: "ViDstWrapped: use dst_wrapped_pager_open(seed, total_ops, page_size) — wrapper exposes DstWrappedPager (not Pager) since interception is per-method",
             })
         }
     }

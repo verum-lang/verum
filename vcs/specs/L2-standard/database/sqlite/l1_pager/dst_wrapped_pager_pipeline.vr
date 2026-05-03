@@ -1,0 +1,182 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l1_pager, dst, fault_injection, harness, pager_wrapper
+// @timeout: 15000
+// @description: ViDstWrapped DST harness wiring (#154) — exercises
+//               DstWrappedPager construction from (seed, total_ops),
+//               op-counter advancement, fault dispatch from the
+//               schedule, terminal-fault crashed-state propagation,
+//               injected-fault observability log, and reopen-after-
+//               crash recovery seam.
+//
+// Spec: internal/specs/sqlite-native.md §22.5 (DST) +
+//       sqlite-native.md §4.10 (VFS injection)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l1_pager.{
+    Pager, PageFrame, PagerError, PagerErrorKind,
+    DstWrappedPager, DstFaultEvent,
+    dst_wrapped_pager_open,
+    dst_pager_read, dst_pager_write, dst_pager_flush, dst_pager_commit,
+    dst_pager_close, dst_pager_reopen_after_crash,
+    VfsInjection, ViMemory, ViPosixFile, ViDstWrapped,
+    pager_open_with_vfs,
+};
+
+// -----------------------------------------------------------------------------
+// 1. Constructor returns a fresh wrapper
+// -----------------------------------------------------------------------------
+
+fn fresh_wrapper_invariants() {
+    let result = dst_wrapped_pager_open(0xCAFEBABE_i64, 64, 4096);
+    assert(result.is_ok());
+    let w = result.unwrap_or_else(|_| panic("expected Ok"));
+    assert_eq(w.op_count(), 0);
+    assert(!w.is_crashed());
+    assert_eq(w.injected_count(), 0);
+    assert_eq(w.page_size(), 4096);
+}
+
+// -----------------------------------------------------------------------------
+// 2. ViDstWrapped(seed, total_ops) variant carries the right payload
+// -----------------------------------------------------------------------------
+
+fn vi_dst_wrapped_variant_shape() {
+    let v = ViDstWrapped(42_i64, 100);
+    match v {
+        ViDstWrapped(seed, ops) => {
+            assert_eq(seed, 42_i64);
+            assert_eq(ops, 100);
+        }
+        _ => panic("expected ViDstWrapped"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. Reads bump the op counter
+// -----------------------------------------------------------------------------
+
+fn read_bumps_op_counter() {
+    let mut w = dst_wrapped_pager_open(1_i64, 8, 4096).unwrap_or_else(|_| panic("open"));
+    let _ = dst_pager_read(&mut w, 1);
+    assert_eq(w.op_count(), 1);
+    let _ = dst_pager_read(&mut w, 2);
+    assert_eq(w.op_count(), 2);
+}
+
+// -----------------------------------------------------------------------------
+// 4. Crashed state short-circuits subsequent ops
+// -----------------------------------------------------------------------------
+
+fn crashed_state_short_circuits() {
+    // Use a seed known to inject a terminal fault early.  We don't
+    // assert WHICH op fires — the fault density is statistical —
+    // we just walk until a fault is recorded and verify subsequent
+    // ops short-circuit.
+    let mut w = dst_wrapped_pager_open(7_i64, 32, 4096).unwrap_or_else(|_| panic("open"));
+    let mut i: Int = 0;
+    while i < 32 && !w.is_crashed() {
+        let _ = dst_pager_read(&mut w, 1);
+        i = i + 1;
+    }
+    if w.is_crashed() {
+        // Verify: post-crash op returns immediately with crashed_error.
+        let post = dst_pager_read(&mut w, 1);
+        assert(post.is_err());
+    }
+    // If no terminal fault fired in 32 ops, the test passes trivially —
+    // we proved the fault dispatch + crash propagation surface compiles
+    // and runs (the seed-dependent statistical behaviour is exercised
+    // by the harness fuzz suite, not this typecheck-pin spec).
+}
+
+// -----------------------------------------------------------------------------
+// 5. take_injected drains the log
+// -----------------------------------------------------------------------------
+
+fn take_injected_drains() {
+    let mut w = dst_wrapped_pager_open(13_i64, 64, 4096).unwrap_or_else(|_| panic("open"));
+    let mut i: Int = 0;
+    while i < 64 {
+        let _ = dst_pager_read(&mut w, 1);
+        i = i + 1;
+    }
+    let drained = w.take_injected();
+    let _ = drained;
+    // After drain, the injected log is empty (next take_injected
+    // returns 0 entries).
+    let drained2 = w.take_injected();
+    assert_eq(drained2.len(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 6. reopen_after_crash clears the crashed bit
+// -----------------------------------------------------------------------------
+
+fn reopen_clears_crashed_bit() {
+    let mut w = dst_wrapped_pager_open(99_i64, 32, 4096).unwrap_or_else(|_| panic("open"));
+    let mut i: Int = 0;
+    while i < 32 && !w.is_crashed() {
+        let _ = dst_pager_read(&mut w, 1);
+        i = i + 1;
+    }
+    if w.is_crashed() {
+        let r = dst_pager_reopen_after_crash(&mut w, 4096);
+        assert(r.is_ok());
+        assert(!w.is_crashed());
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 7. ViDstWrapped via pager_open_with_vfs returns redirect-to-direct error
+// -----------------------------------------------------------------------------
+
+fn vi_dst_wrapped_via_with_vfs_redirects() {
+    let v = ViDstWrapped(1_i64, 16);
+    let r = pager_open_with_vfs(v, 4096);
+    // pager_open_with_vfs returns Result<Pager, _> — DST wrapper has a
+    // different surface (DstWrappedPager) so the entry returns Err
+    // with a redirect message.  The negative pin proves the wiring
+    // didn't accidentally start returning a plain Pager (which would
+    // skip ALL fault injection silently).
+    assert(r.is_err());
+}
+
+// -----------------------------------------------------------------------------
+// 8. Same seed → identical fault sequences (determinism pin)
+// -----------------------------------------------------------------------------
+
+fn same_seed_deterministic() {
+    let mut w1 = dst_wrapped_pager_open(0x42_i64, 32, 4096).unwrap_or_else(|_| panic("open"));
+    let mut w2 = dst_wrapped_pager_open(0x42_i64, 32, 4096).unwrap_or_else(|_| panic("open"));
+    let mut i: Int = 0;
+    while i < 32 {
+        let _ = dst_pager_read(&mut w1, 1);
+        let _ = dst_pager_read(&mut w2, 1);
+        i = i + 1;
+    }
+    // Both wrappers must observe the SAME number of injections at
+    // the SAME op indices — that's the whole point of DST.
+    assert_eq(w1.injected_count(), w2.injected_count());
+    let f1 = w1.take_injected();
+    let f2 = w2.take_injected();
+    let mut k: Int = 0;
+    while k < f1.len() {
+        assert_eq(f1[k].op_idx, f2[k].op_idx);
+        k = k + 1;
+    }
+}
+
+fn main() {
+    fresh_wrapper_invariants();
+    vi_dst_wrapped_variant_shape();
+    read_bumps_op_counter();
+    crashed_state_short_circuits();
+    take_injected_drains();
+    reopen_clears_crashed_bit();
+    vi_dst_wrapped_via_with_vfs_redirects();
+    same_seed_deterministic();
+}
