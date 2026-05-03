@@ -353,7 +353,7 @@ fn main() {
         Transaction { from: "Alice", to: "Bob", amount: 100 },
         Transaction { from: "Bob", to: "Carol", amount: 50 }
     ];
-    assert(sum_transactions(txs) == 150);
+    assert(sum_transactions(txs.clone()) == 150);
     assert(sum_from(txs, "Alice") == 100);
 
     // Options
