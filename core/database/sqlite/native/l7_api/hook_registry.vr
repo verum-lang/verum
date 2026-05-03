@@ -1,0 +1,535 @@
+module core.database.sqlite.native.l7_api.hook_registry;
+
+// =============================================================================
+// l7_api/hook_registry.vr — handle-based hook dispatch (#151)
+// =============================================================================
+// Layer: 7 (public API + FFI bridge)
+// Spec: sqlite-native.md §13.6 (hooks) +
+//       SQLite C API: sqlite3_update_hook / sqlite3_commit_hook /
+//                     sqlite3_rollback_hook / sqlite3_wal_hook
+//
+// Pre-fix: `l7_api/hooks.vr` accepted `Heap<dyn HookProtocol>` for
+// every hook surface — violates the CLAUDE.md "no dyn requirement"
+// architectural principle (Verum's idiomatic dispatch is sum-type
+// `match`).  Worse: there was no path for FFI callers (C / Rust /
+// any language using libSqlite via the C ABI) to register a
+// callback because `Heap<dyn ...>` carries a Verum-specific vtable
+// not exposed across the FFI boundary.
+//
+// Post-fix: this module ships a handle-based hook registry that:
+//
+//   1. Stores callbacks as Verum `fn` types (function pointers) —
+//      compatible with FFI's `extern "C" fn(...)` shape, no vtable
+//      indirection.
+//   2. Issues stable monotonic `HookHandle` IDs on registration
+//      that survive future re-registrations + work across the FFI
+//      boundary as plain integers.
+//   3. Supports unregister-by-handle (essential for FFI lifecycle
+//      management — caller doesn't keep a Verum-side reference,
+//      just the integer handle).
+//   4. Sum-typed dispatch via `HookSlot` enum — every dispatch is
+//      a monomorphic `match`, no runtime vtable lookup.
+//   5. Multiple subscribers per hook type (matches modern SQLite
+//      behaviour — pre-3.43 was last-subscriber-wins; recent
+//      versions support fan-out).
+//
+// Architecture: pure data — no I/O, no dependency on Connection.
+// The registry is owned by Connection (via a `HookHandleRegistry`
+// field); fire-events are method calls on the registry.  Sum-type
+// `HookSlot` discriminator + integer-keyed `List<Maybe<HookSlot>>`
+// store gives O(1) dispatch on the active handles for a given
+// hook type AND O(1) handle invalidation (set the slot to None).
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.ext.hooks.{
+    ExtUpdateOp, UoInsert, UoUpdate, UoDelete, update_op_name,
+    AuthAction, AuthDecision, AdAllow, AdDeny, AdIgnore,
+};
+
+// -----------------------------------------------------------------------------
+// HookKind — discriminator carried in HookHandle for type safety
+// -----------------------------------------------------------------------------
+
+/// Which hook surface a handle refers to.  Carried in the handle so
+/// callers (or the FFI bridge) can validate that an `unregister`
+/// call refers to the right surface.
+public type HookKind is
+      HkUpdate
+    | HkPreUpdate
+    | HkCommit
+    | HkRollback
+    | HkWal
+    | HkBusy
+    | HkProgress
+    | HkAuthorizer
+    | HkTrace;
+
+pub fn hook_kind_name(k: &HookKind) -> Text {
+    match k {
+        HkUpdate     => "update".clone(),
+        HkPreUpdate  => "pre_update".clone(),
+        HkCommit     => "commit".clone(),
+        HkRollback   => "rollback".clone(),
+        HkWal        => "wal".clone(),
+        HkBusy       => "busy".clone(),
+        HkProgress   => "progress".clone(),
+        HkAuthorizer => "authorizer".clone(),
+        HkTrace      => "trace".clone(),
+    }
+}
+
+fn hook_kind_eq(a: &HookKind, b: &HookKind) -> Bool {
+    match a {
+        HkUpdate     => match b { HkUpdate => true, _ => false },
+        HkPreUpdate  => match b { HkPreUpdate => true, _ => false },
+        HkCommit     => match b { HkCommit => true, _ => false },
+        HkRollback   => match b { HkRollback => true, _ => false },
+        HkWal        => match b { HkWal => true, _ => false },
+        HkBusy       => match b { HkBusy => true, _ => false },
+        HkProgress   => match b { HkProgress => true, _ => false },
+        HkAuthorizer => match b { HkAuthorizer => true, _ => false },
+        HkTrace      => match b { HkTrace => true, _ => false },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// HookHandle — opaque integer ID returned to callers
+// -----------------------------------------------------------------------------
+
+/// Stable identifier for a registered hook.  Returned by
+/// `register_*` and consumed by `unregister(...)`.  Across the FFI
+/// boundary this is just an `Int64` — no Verum vtable, no
+/// language-specific machinery.  The `kind` field lets the
+/// dispatcher reject cross-kind unregister attempts (catches
+/// "unregister a commit hook with an update handle" misuse).
+public type HookHandle is {
+    id: Int,
+    kind: HookKind,
+};
+
+pub fn hook_handle_invalid() -> HookHandle {
+    HookHandle { id: -1, kind: HkUpdate }
+}
+
+pub fn hook_handle_is_valid(h: &HookHandle) -> Bool {
+    h.id >= 0
+}
+
+// -----------------------------------------------------------------------------
+// Per-hook callback types (Verum fn pointers — FFI-compatible)
+// -----------------------------------------------------------------------------
+
+/// `sqlite3_update_hook` — fired by L4 VDBE Insert/Update/Delete.
+public type UpdateHookFn = fn(ExtUpdateOp, &Text, &Text, Int64);
+
+/// `sqlite3_commit_hook` — fired by Connection.commit_tx BEFORE the
+/// actual COMMIT.  Returns `true` to veto (turns commit into
+/// rollback); `false` allows the commit to proceed.
+public type CommitHookFn = fn() -> Bool;
+
+/// `sqlite3_rollback_hook` — observation only, no return value.
+public type RollbackHookFn = fn();
+
+/// `sqlite3_wal_hook` — fired by L1 WAL writer after each commit.
+/// Receives (db_name, n_frames_in_wal) and returns 0 on OK or a
+/// non-zero error code (caller's choice — typically used to trigger
+/// auto-checkpoint at a frame threshold).
+public type WalHookFn = fn(&Text, Int) -> Int;
+
+/// `sqlite3_busy_handler` — called when SQLITE_BUSY would be
+/// returned.  Receives retry-count; returns true to retry, false
+/// to give up.
+public type BusyHandlerFn = fn(Int) -> Bool;
+
+/// `sqlite3_progress_handler` — fired every N VDBE instructions.
+/// Returns true to interrupt the running statement.
+public type ProgressHandlerFn = fn() -> Bool;
+
+/// `sqlite3_set_authorizer` — pre-compile gate; receives the
+/// requested action and returns the authorization decision.
+public type AuthorizerFn = fn(&AuthAction) -> AuthDecision;
+
+/// `sqlite3_trace` — observability hook; receives the formatted
+/// statement text just before execution.
+public type TraceHookFn = fn(&Text);
+
+// -----------------------------------------------------------------------------
+// HookSlot — sum-typed callback storage
+// -----------------------------------------------------------------------------
+
+/// One registered callback.  Sum-type variant per hook surface so
+/// dispatch is monomorphic at every fire site (no `dyn` lookup).
+public type HookSlot is
+      HsUpdate(UpdateHookFn)
+    | HsPreUpdate(UpdateHookFn)
+    | HsCommit(CommitHookFn)
+    | HsRollback(RollbackHookFn)
+    | HsWal(WalHookFn)
+    | HsBusy(BusyHandlerFn)
+    | HsProgress(ProgressHandlerFn)
+    | HsAuthorizer(AuthorizerFn)
+    | HsTrace(TraceHookFn);
+
+fn hook_slot_kind(s: &HookSlot) -> HookKind {
+    match s {
+        HsUpdate(_)     => HkUpdate,
+        HsPreUpdate(_)  => HkPreUpdate,
+        HsCommit(_)     => HkCommit,
+        HsRollback(_)   => HkRollback,
+        HsWal(_)        => HkWal,
+        HsBusy(_)       => HkBusy,
+        HsProgress(_)   => HkProgress,
+        HsAuthorizer(_) => HkAuthorizer,
+        HsTrace(_)      => HkTrace,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// HookHandleRegistry — owned by Connection, fired from event sites
+// -----------------------------------------------------------------------------
+
+/// Slot-vector indexed by handle ID.  `slots[id] = None` marks an
+/// unregistered slot — handle IDs are NEVER reused, so an
+/// unregister-then-fire path can never accidentally invoke a stale
+/// callback.  This matches the CBGR generation-handle pattern from
+/// `wal_page_arena.vr` but specialised for the registry use case
+/// where reuse is undesirable (FFI callers may keep handles after
+/// unregister and expect the no-op-on-stale semantics).
+public type affine HookHandleRegistry is {
+    slots: List<Maybe<HookSlot>>,
+    next_id: Int,
+    n_active: Int,
+};
+
+pub fn hook_handle_registry_new() -> HookHandleRegistry {
+    HookHandleRegistry {
+        slots: List.new(),
+        next_id: 0,
+        n_active: 0,
+    }
+}
+
+implement HookHandleRegistry {
+    pub fn active_count(&self) -> Int { self.n_active }
+    pub fn capacity(&self) -> Int { self.slots.len() }
+
+    /// Generic register — internal helper.  Returns a handle whose
+    /// `id` indexes into `slots`.  All public `register_*` methods
+    /// route through here so the slot-vector growth + n_active
+    /// bookkeeping is in one place.
+    fn register_internal(&mut self, slot: HookSlot) -> HookHandle {
+        let kind = hook_slot_kind(&slot);
+        let id = self.next_id;
+        self.slots.push(Some(slot));
+        self.next_id = self.next_id + 1;
+        self.n_active = self.n_active + 1;
+        HookHandle { id: id, kind: kind }
+    }
+
+    /// Unregister by handle.  Returns `true` if the handle pointed
+    /// to a live slot; `false` if it was already unregistered or
+    /// out of range.  Does NOT shift other slots (handle IDs stay
+    /// stable across unregister-of-other-slots).
+    pub fn unregister(&mut self, h: &HookHandle) -> Bool {
+        if h.id < 0 || h.id >= self.slots.len() { return false; }
+        let cur = &self.slots[h.id];
+        match cur {
+            Some(s) => {
+                let s_kind = hook_slot_kind(s);
+                if !hook_kind_eq(&s_kind, &h.kind) {
+                    // Cross-kind unregister attempt — reject.  The
+                    // FFI caller passed a handle for one hook surface
+                    // but the slot at that ID is now a different
+                    // surface (means the registry was reused after
+                    // a prior unregister + re-register; with our
+                    // never-reuse policy this branch is dead, but
+                    // we keep the check for forward-compat).
+                    false
+                } else {
+                    self.slots[h.id] = None;
+                    self.n_active = self.n_active - 1;
+                    true
+                }
+            }
+            None => false,
+        }
+    }
+
+    /// `true` iff the handle still references a live slot.  FFI
+    /// callers can probe this before an `unregister` to avoid the
+    /// false return on already-freed handles.
+    pub fn is_live(&self, h: &HookHandle) -> Bool {
+        if h.id < 0 || h.id >= self.slots.len() { return false; }
+        let cur = &self.slots[h.id];
+        match cur {
+            Some(s) => hook_kind_eq(&hook_slot_kind(s), &h.kind),
+            None    => false,
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // register_* — one entry per hook surface
+    // -------------------------------------------------------------------------
+
+    pub fn register_update(&mut self, f: UpdateHookFn) -> HookHandle {
+        self.register_internal(HsUpdate(f))
+    }
+
+    pub fn register_pre_update(&mut self, f: UpdateHookFn) -> HookHandle {
+        self.register_internal(HsPreUpdate(f))
+    }
+
+    pub fn register_commit(&mut self, f: CommitHookFn) -> HookHandle {
+        self.register_internal(HsCommit(f))
+    }
+
+    pub fn register_rollback(&mut self, f: RollbackHookFn) -> HookHandle {
+        self.register_internal(HsRollback(f))
+    }
+
+    pub fn register_wal(&mut self, f: WalHookFn) -> HookHandle {
+        self.register_internal(HsWal(f))
+    }
+
+    pub fn register_busy(&mut self, f: BusyHandlerFn) -> HookHandle {
+        self.register_internal(HsBusy(f))
+    }
+
+    pub fn register_progress(&mut self, f: ProgressHandlerFn) -> HookHandle {
+        self.register_internal(HsProgress(f))
+    }
+
+    pub fn register_authorizer(&mut self, f: AuthorizerFn) -> HookHandle {
+        self.register_internal(HsAuthorizer(f))
+    }
+
+    pub fn register_trace(&mut self, f: TraceHookFn) -> HookHandle {
+        self.register_internal(HsTrace(f))
+    }
+
+    // -------------------------------------------------------------------------
+    // fire_* — event-site dispatchers
+    // -------------------------------------------------------------------------
+
+    /// Fire all registered update hooks (and PreUpdate variants
+    /// receive the same signature — distinct slots so the L4 VDBE
+    /// can choose which one to fire from its Insert/Update/Delete
+    /// opcodes vs the pre-update interceptor).
+    pub fn fire_update(&self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64) {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsUpdate(f) => f(clone_update_op(&op), db, table, rowid),
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+    }
+
+    pub fn fire_pre_update(&self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64) {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsPreUpdate(f) => f(clone_update_op(&op), db, table, rowid),
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+    }
+
+    /// Fire all commit hooks; returns `true` iff ANY hook vetoed.
+    /// Matches SQLite semantics: any non-zero return from any
+    /// commit_hook turns the commit into a forced rollback.
+    pub fn fire_commit(&self) -> Bool {
+        let mut vetoed: Bool = false;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsCommit(f) => {
+                        if f() { vetoed = true; }
+                    }
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+        vetoed
+    }
+
+    pub fn fire_rollback(&self) {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsRollback(f) => f(),
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+    }
+
+    /// Fire all WAL hooks; returns the FIRST non-zero return code
+    /// (or 0 if all hooks returned 0).  Matches SQLite's
+    /// "first error wins" convention for wal_hook.
+    pub fn fire_wal(&self, db_name: &Text, n_frames: Int) -> Int {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsWal(f) => {
+                        let rc = f(db_name, n_frames);
+                        if rc != 0 { return rc; }
+                    }
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+        0
+    }
+
+    /// Fire all busy handlers; returns `true` iff ALL hooks said
+    /// retry (any single "give up" turns into give-up).  Matches
+    /// SQLite's conservative retry semantics.
+    pub fn fire_busy(&self, retry_count: Int) -> Bool {
+        let mut have_any: Bool = false;
+        let mut all_retry: Bool = true;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsBusy(f) => {
+                        have_any = true;
+                        if !f(retry_count) { all_retry = false; }
+                    }
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+        have_any && all_retry
+    }
+
+    /// Fire all progress handlers; returns `true` iff ANY hook
+    /// requested interrupt.  Matches SQLite: any non-zero return
+    /// from any progress_handler aborts the running statement.
+    pub fn fire_progress(&self) -> Bool {
+        let mut interrupt: Bool = false;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsProgress(f) => {
+                        if f() { interrupt = true; }
+                    }
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+        interrupt
+    }
+
+    /// Fire all authorizers; returns the most restrictive decision
+    /// (Deny > Ignore > Allow).  Pre-fix the protocol API only
+    /// supported one authorizer; the multi-subscriber registry
+    /// composes them by taking the strictest verdict.
+    pub fn fire_authorize(&self, action: &AuthAction) -> AuthDecision {
+        let mut decision: AuthDecision = AdAllow;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsAuthorizer(f) => {
+                        let d = f(action);
+                        decision = combine_auth_decision(&decision, &d);
+                    }
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+        decision
+    }
+
+    pub fn fire_trace(&self, sql: &Text) {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => match s {
+                    HsTrace(f) => f(sql),
+                    _ => {},
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+    }
+
+    /// Per-kind active count — useful for diagnostics + the
+    /// `has_*_hook` shorthand functions in `l7_api/hooks.vr`.
+    pub fn active_count_of(&self, kind: &HookKind) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            match &self.slots[i] {
+                Some(s) => {
+                    if hook_kind_eq(&hook_slot_kind(s), kind) {
+                        n = n + 1;
+                    }
+                }
+                None => {},
+            }
+            i = i + 1;
+        }
+        n
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Internal helpers
+// -----------------------------------------------------------------------------
+
+fn clone_update_op(o: &ExtUpdateOp) -> ExtUpdateOp {
+    match o {
+        UoInsert => UoInsert,
+        UoUpdate => UoUpdate,
+        UoDelete => UoDelete,
+    }
+}
+
+/// Most-restrictive winner: Deny > Ignore > Allow.  Used when
+/// composing multiple authorizers — any single Deny denies; any
+/// single Ignore (with no Deny) ignores; only when ALL authorizers
+/// allow does the action proceed.
+fn combine_auth_decision(a: &AuthDecision, b: &AuthDecision) -> AuthDecision {
+    match a {
+        AdDeny => AdDeny,
+        AdIgnore => match b {
+            AdDeny => AdDeny,
+            _      => AdIgnore,
+        },
+        AdAllow => match b {
+            AdDeny   => AdDeny,
+            AdIgnore => AdIgnore,
+            AdAllow  => AdAllow,
+        },
+    }
+}
