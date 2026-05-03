@@ -106,7 +106,7 @@ impl GracefulFallback {
             static LLVM_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
             LLVM_INIT.call_once(|| {
-                use inkwell::targets::{InitializationConfig, Target};
+                use verum_llvm::targets::{InitializationConfig, Target};
                 Target::initialize_native(&InitializationConfig::default())
                     .map(|_| LLVM_AVAILABLE.store(true, Ordering::Relaxed))
                     .ok();
@@ -137,8 +137,8 @@ impl GracefulFallback {
             static JIT_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
             JIT_CHECK.call_once(|| {
-                use inkwell::OptimizationLevel;
-                use inkwell::context::Context;
+                use verum_llvm::OptimizationLevel;
+                use verum_llvm::context::Context;
 
                 let context = Context::create();
                 let module = context.create_module("jit_check");

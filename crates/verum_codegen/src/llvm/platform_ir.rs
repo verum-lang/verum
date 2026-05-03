@@ -3089,6 +3089,18 @@ impl<'ctx> PlatformIR<'ctx> {
                 "verum_chan_len",
                 i64_type.fn_type(&[i64_type.into()], false),
             ),
+            (
+                "verum_chan_is_closed",
+                i64_type.fn_type(&[i64_type.into()], false),
+            ),
+            (
+                "verum_chan_is_empty",
+                i64_type.fn_type(&[i64_type.into()], false),
+            ),
+            (
+                "verum_chan_is_full",
+                i64_type.fn_type(&[i64_type.into()], false),
+            ),
         ];
         for (name, fn_type) in decls {
             if module.get_function(name).is_none() {
@@ -7762,6 +7774,9 @@ impl<'ctx> PlatformIR<'ctx> {
         self.emit_chan_try_recv(module)?;
         self.emit_chan_close(module)?;
         self.emit_chan_len(module)?;
+        self.emit_chan_is_closed(module)?;
+        self.emit_chan_is_empty(module)?;
+        self.emit_chan_is_full(module)?;
         Ok(())
     }
 
@@ -8781,6 +8796,211 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_call(mutex_unlock, &[mtx_p.into()], "")
             .or_llvm_err()?;
         builder.build_return(Some(&len)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_chan_is_closed(chan: i64) -> i64
+    /// Returns 1 if the channel has been closed, 0 otherwise.
+    /// Reads the closed flag at offset 48 under the mutex —
+    /// matches the lock discipline of `emit_chan_len` so a
+    /// reader observing this flag has the same memory-ordering
+    /// guarantees as a reader observing `len`.
+    fn emit_chan_is_closed(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let i8_type = ctx.i8_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let func = self.get_or_declare_fn(
+            module,
+            "verum_chan_is_closed",
+            i64_type.fn_type(&[i64_type.into()], false),
+        );
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let mutex_lock = module
+            .get_function("verum_mutex_lock")
+            .or_missing_fn("verum_mutex_lock")?;
+        let mutex_unlock = module
+            .get_function("verum_mutex_unlock")
+            .or_missing_fn("verum_mutex_unlock")?;
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let chan_i64 = func
+            .get_first_param()
+            .or_internal("missing first param")?
+            .into_int_value();
+        let hdr = builder
+            .build_int_to_ptr(chan_i64, ptr_type, "hdr")
+            .or_llvm_err()?;
+
+        let mtx_p = hdr;
+        // SAFETY: GEP into the channel header at offset 48 (closed flag)
+        let closed_p = unsafe {
+            builder
+                .build_gep(i8_type, hdr, &[i64_type.const_int(48, false)], "closed_p")
+                .or_llvm_err()?
+        };
+
+        builder
+            .build_call(mutex_lock, &[mtx_p.into()], "")
+            .or_llvm_err()?;
+        let closed = builder
+            .build_load(i64_type, closed_p, "closed")
+            .or_llvm_err()?
+            .into_int_value();
+        builder
+            .build_call(mutex_unlock, &[mtx_p.into()], "")
+            .or_llvm_err()?;
+        builder.build_return(Some(&closed)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_chan_is_empty(chan: i64) -> i64
+    /// Returns 1 if `len == 0`, 0 otherwise.  Snapshot semantics:
+    /// the answer was correct at the moment of the load; concurrent
+    /// senders may push immediately after.
+    fn emit_chan_is_empty(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let i8_type = ctx.i8_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let func = self.get_or_declare_fn(
+            module,
+            "verum_chan_is_empty",
+            i64_type.fn_type(&[i64_type.into()], false),
+        );
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let mutex_lock = module
+            .get_function("verum_mutex_lock")
+            .or_missing_fn("verum_mutex_lock")?;
+        let mutex_unlock = module
+            .get_function("verum_mutex_unlock")
+            .or_missing_fn("verum_mutex_unlock")?;
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let chan_i64 = func
+            .get_first_param()
+            .or_internal("missing first param")?
+            .into_int_value();
+        let hdr = builder
+            .build_int_to_ptr(chan_i64, ptr_type, "hdr")
+            .or_llvm_err()?;
+
+        let mtx_p = hdr;
+        // SAFETY: GEP into the channel header at offset 24 (current length)
+        let len_p = unsafe {
+            builder
+                .build_gep(i8_type, hdr, &[i64_type.const_int(24, false)], "len_p")
+                .or_llvm_err()?
+        };
+
+        builder
+            .build_call(mutex_lock, &[mtx_p.into()], "")
+            .or_llvm_err()?;
+        let len = builder
+            .build_load(i64_type, len_p, "len")
+            .or_llvm_err()?
+            .into_int_value();
+        builder
+            .build_call(mutex_unlock, &[mtx_p.into()], "")
+            .or_llvm_err()?;
+        // is_empty = (len == 0) ? 1 : 0
+        let zero = i64_type.const_int(0, false);
+        let is_empty_bool = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, len, zero, "is_empty_bool")
+            .or_llvm_err()?;
+        let is_empty = builder
+            .build_int_z_extend(is_empty_bool, i64_type, "is_empty")
+            .or_llvm_err()?;
+        builder.build_return(Some(&is_empty)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_chan_is_full(chan: i64) -> i64
+    /// Returns 1 if `len >= capacity`, 0 otherwise.  Same snapshot
+    /// semantics as `is_empty`: the answer was correct at the
+    /// moment of the read; concurrent receivers may pop after.
+    fn emit_chan_is_full(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let i8_type = ctx.i8_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let func = self.get_or_declare_fn(
+            module,
+            "verum_chan_is_full",
+            i64_type.fn_type(&[i64_type.into()], false),
+        );
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let mutex_lock = module
+            .get_function("verum_mutex_lock")
+            .or_missing_fn("verum_mutex_lock")?;
+        let mutex_unlock = module
+            .get_function("verum_mutex_unlock")
+            .or_missing_fn("verum_mutex_unlock")?;
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let chan_i64 = func
+            .get_first_param()
+            .or_internal("missing first param")?
+            .into_int_value();
+        let hdr = builder
+            .build_int_to_ptr(chan_i64, ptr_type, "hdr")
+            .or_llvm_err()?;
+
+        let mtx_p = hdr;
+        // SAFETY: GEP into the channel header at offset 16 (capacity)
+        let cap_p = unsafe {
+            builder
+                .build_gep(i8_type, hdr, &[i64_type.const_int(16, false)], "cap_p")
+                .or_llvm_err()?
+        };
+        // SAFETY: GEP into the channel header at offset 24 (current length)
+        let len_p = unsafe {
+            builder
+                .build_gep(i8_type, hdr, &[i64_type.const_int(24, false)], "len_p")
+                .or_llvm_err()?
+        };
+
+        builder
+            .build_call(mutex_lock, &[mtx_p.into()], "")
+            .or_llvm_err()?;
+        let cap = builder
+            .build_load(i64_type, cap_p, "cap")
+            .or_llvm_err()?
+            .into_int_value();
+        let len = builder
+            .build_load(i64_type, len_p, "len")
+            .or_llvm_err()?
+            .into_int_value();
+        builder
+            .build_call(mutex_unlock, &[mtx_p.into()], "")
+            .or_llvm_err()?;
+        // is_full = (len >= cap) ? 1 : 0 — signed compare since
+        // both fields are stored as i64 across the codebase.
+        let is_full_bool = builder
+            .build_int_compare(verum_llvm::IntPredicate::SGE, len, cap, "is_full_bool")
+            .or_llvm_err()?;
+        let is_full = builder
+            .build_int_z_extend(is_full_bool, i64_type, "is_full")
+            .or_llvm_err()?;
+        builder.build_return(Some(&is_full)).or_llvm_err()?;
         Ok(())
     }
 
