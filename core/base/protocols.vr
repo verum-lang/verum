@@ -30,6 +30,7 @@ public type PartialEq is protocol {
     fn eq(&self, other: &Self) -> Bool;
 
     /// Test inequality (default implementation).
+    @inline(always)
     fn ne(&self, other: &Self) -> Bool {
         !self.eq(other)
     }
@@ -54,36 +55,43 @@ public type Ord is protocol extends Eq {
     fn cmp(&self, other: &Self) -> Ordering;
 
     /// Less than.
+    @inline(always)
     fn lt(&self, other: &Self) -> Bool {
         self.cmp(other) is Less
     }
 
     /// Less than || equal.
+    @inline(always)
     fn le(&self, other: &Self) -> Bool {
         !(self.cmp(other) is Greater)
     }
 
     /// Greater than.
+    @inline(always)
     fn gt(&self, other: &Self) -> Bool {
         self.cmp(other) is Greater
     }
 
     /// Greater than || equal.
+    @inline(always)
     fn ge(&self, other: &Self) -> Bool {
         !(self.cmp(other) is Less)
     }
 
     /// Returns the maximum of self && other.
+    @inline(always)
     fn max(self, other: Self) -> Self {
         if self.ge(&other) { self } else { other }
     }
 
     /// Returns the minimum of self && other.
+    @inline(always)
     fn min(self, other: Self) -> Self {
         if self.le(&other) { self } else { other }
     }
 
     /// Clamp value between min && max bounds.
+    @inline(always)
     fn clamp(self, min_val: Self, max_val: Self) -> Self {
         assert(min_val.le(&max_val), "min must be <= max");
         if self.lt(&min_val) { min_val }
