@@ -1,0 +1,98 @@
+// =============================================================================
+// t17_async_cancel.vr — server-side KILL QUERY from async MySQL
+// =============================================================================
+// Spec: internal/specs/database.md §6.3.6 (async surface),
+//       §6.3.9 (KILL QUERY server-side cancellation).
+// =============================================================================
+//
+// V0 mirrors PG's t28_async_cancel.vr:
+//   1. AsyncMysqlConnection.connect → assert connection_id() != 0
+//      (server populated thread id during initial handshake).
+//   2. Spawn a task running `SELECT SLEEP(10)` on the actor.
+//   3. From a separate task, call cancel_running_query() — opens
+//      a fresh side connection and issues KILL QUERY <id>.
+//   4. Awaited query returns an error (ER_QUERY_INTERRUPTED 1317)
+//      within ~5s instead of the full 10s sleep.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.mysql.{
+    MysqlConfig, MtmDisable,
+    AsyncMysqlConnection,
+    async_mysql_connect,
+};
+mount core.async.executor.block_on;
+mount core.async.task.{spawn, sleep};
+mount core.time.Duration;
+
+fn main() {
+    block_on(async move {
+        let cfg = MysqlConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            character_set: 255,
+            tls_mode: MtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let conn = expect_ok(
+            async_mysql_connect(&cfg, 8).await,
+            &"async_mysql_connect failed".clone(),
+        );
+
+        // Sanity — handshake populated connection_id.
+        expect(
+            conn.connection_id() != 0,
+            &"connection_id absent — handshake didn't populate".clone(),
+        );
+
+        // Launch a long-running query in the background.
+        let query_conn = conn.clone();
+        let started = core.time.SystemClock.now();
+        let query_handle = spawn(async move {
+            query_conn.simple_query(&"SELECT SLEEP(10)".clone()).await
+        });
+
+        // Give the actor a moment to dispatch.
+        sleep(Duration.from_millis(200)).await;
+
+        // Cancel via KILL QUERY from a fresh side connection.
+        expect_ok(
+            conn.cancel_running_query().await,
+            &"cancel_running_query failed".clone(),
+        );
+
+        // pg_sleep counterpart should fail with ER_QUERY_INTERRUPTED.
+        let result = match query_handle.join().await {
+            Ok(r)  => r,
+            Err(_) => {
+                expect(false, &"query task join failed".clone());
+                return;
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                expect(false, &"SELECT SLEEP(10) returned Ok — KILL was no-op".clone());
+            }
+            Err(_) => {
+                // Expected — server returned ER_QUERY_INTERRUPTED 1317.
+            }
+        }
+
+        let elapsed_ms = started.elapsed().as_milliseconds();
+        expect(
+            elapsed_ms < 5_000,
+            &f"KILL took {elapsed_ms}ms — should be < 5s",
+        );
+
+        let _ = conn.close().await;
+
+        pass(&"t17_async_cancel".clone());
+    });
+}

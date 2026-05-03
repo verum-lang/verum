@@ -64,6 +64,7 @@ plugin Spindle accepts in the safe path).
 | `t14_binlog_enum_set.vr` | TABLE_MAP optional metadata (binlog_row_metadata=FULL) + ENUM/SET decoders: ENUM('small','medium','large') decoded as RvText("small"); SET('alpha','beta','gamma','delta') with bits {alpha,gamma} decoded as RvText("alpha,gamma"); column_names + enum_values + set_values populated on TableMapEvent (spec §6.3.7.1) |
 | `t15_multi_query.vr` | sync + async multi-statement COM_QUERY: INSERT + SELECT LAST_INSERT_ID() + UPDATE in one round-trip; 3 result-sets in declaration order with correct affected_rows / last_insert_id / row count (spec §6.3.3 multi-statement) |
 | `t16_binlog_geometry.vr` | WKB → GeoJSON decoder: ST_GeomFromText('POINT(1 2)') decoded as `{"type":"Point","coordinates":[…]}` JSON text via binlog ROW event; SRID surfaced via GeoJSON `crs` member when non-zero (spec §6.3.7 GEOMETRY decode) |
+| `t17_async_cancel.vr` | server-side KILL QUERY from async MySQL: AsyncMysqlConnection caches connection_id at connect; spawn `SELECT SLEEP(10)` on the actor; from a separate task call cancel_running_query() → fresh side conn issues `KILL QUERY <id>` → query aborts within seconds with ER_QUERY_INTERRUPTED (spec §6.3.6 + §6.3.9) |
 
 ## Adding tests
 
