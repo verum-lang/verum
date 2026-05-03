@@ -78,6 +78,7 @@ const WRITE_LOCKED: Int = -1;
 
 implement<T> RwLock<T> {
     // Create new unlocked RwLock.
+    @inline(always)
     public fn new(data: T) -> RwLock<T> {
         RwLock {
             state: AtomicInt.new(0),

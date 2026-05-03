@@ -51,6 +51,7 @@ public type Semaphore is {
 
 implement Semaphore {
     // Create semaphore with initial number of permits.
+    @inline(always)
     public fn new(permits: Int) -> Semaphore {
         assert(permits >= 0, "Semaphore permits must be non-negative");
         Semaphore {
@@ -61,6 +62,7 @@ implement Semaphore {
     }
 
     // Create binary semaphore (mutex-like).
+    @inline(always)
     public fn binary() -> Semaphore {
         Semaphore.new(1)
     }

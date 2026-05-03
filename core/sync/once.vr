@@ -83,6 +83,7 @@ public type Once is {
 
 implement Once {
     // Create new Once that hasn't been called.
+    @inline(always)
     public fn new() -> Once {
         Once { state: AtomicInt.new(INCOMPLETE) }
     }
@@ -90,6 +91,12 @@ implement Once {
     // Run function if not yet called.
     // Blocks if another thread is currently running the function.
     // Returns Ok if function completed, Err if it panicked.
+    //
+    // The fast path (already initialised) is the common case in
+    // hot loops — `@inline(always)` keeps the discriminant load
+    // and short-circuit at the call site so callers don't pay
+    // for a function call when the slot is already populated.
+    @inline(always)
     public fn call_once<F: fn()>(&self, f: F) {
         // Fast path: already complete
         if self.is_completed() {
@@ -277,6 +284,7 @@ implement Once {
     }
 
     // Check if initialization is complete.
+    @inline(always)
     public fn is_completed(&self) -> Bool {
         self.state.load(MemoryOrdering.Acquire) == COMPLETE
     }
