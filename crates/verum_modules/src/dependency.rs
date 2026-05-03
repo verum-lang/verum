@@ -214,6 +214,71 @@ impl DependencyGraph {
         visited
     }
 
+    /// Compute the set of modules reachable from a set of roots,
+    /// inclusive of the roots themselves.
+    ///
+    /// This is the foundation for lazy/filtered compilation: given
+    /// the modules a script actually mounts, return the transitive
+    /// closure that the typecheck and monomorphize passes need to
+    /// process. Modules outside this set can be skipped entirely
+    /// (parse-only) without affecting the script's semantics, since
+    /// dependency edges flow from dependent → dependency.
+    ///
+    /// Roots that are not present in the graph are silently skipped
+    /// (the caller may pass speculative `core.prelude` etc. that
+    /// haven't been resolved yet). The returned set is empty only
+    /// when no root is in the graph.
+    ///
+    /// Cost: O(V + E) over the reachable subgraph (depth-first walk
+    /// with a visited set).
+    pub fn reachable_from(&self, roots: &[ModuleId]) -> Set<ModuleId> {
+        let mut visited = Set::new();
+        let mut stack: Vec<ModuleId> = Vec::with_capacity(roots.len());
+        for root in roots {
+            if self.id_to_node.contains_key(root) && !visited.contains(root) {
+                stack.push(*root);
+                visited.insert(*root);
+            }
+        }
+        while let Some(current) = stack.pop() {
+            for dep in self.dependencies_of(current) {
+                if !visited.contains(&dep) {
+                    visited.insert(dep);
+                    stack.push(dep);
+                }
+            }
+        }
+        visited
+    }
+
+    /// Filter `independent_groups()` to the subgraph reachable from
+    /// the given roots. Preserves the level-based ordering so the
+    /// caller can still process levels in parallel.
+    ///
+    /// Returns: `groups` vector identical in structure to
+    /// `independent_groups()` but with each level filtered to only
+    /// those modules in the reachability closure of `roots`.
+    /// Empty levels are dropped to keep the output dense.
+    pub fn independent_groups_reachable_from(
+        &self,
+        roots: &[ModuleId],
+    ) -> List<List<ModuleId>> {
+        let reachable = self.reachable_from(roots);
+        let all_groups = self.independent_groups();
+        let mut filtered: List<List<ModuleId>> = List::new();
+        for group in &all_groups {
+            let kept: List<ModuleId> = group
+                .iter()
+                .copied()
+                .filter(|id| reachable.contains(id))
+                .collect();
+            if !kept.is_empty() {
+                filtered.push(kept);
+            }
+        }
+        filtered
+    }
+
     /// Get modules that depend on this module.
     pub fn dependents_of(&self, id: ModuleId) -> List<ModuleId> {
         let mut dependents = List::new();
@@ -1246,5 +1311,146 @@ mod incremental_tests {
         assert_eq!(degrees[&a], 2); // a has 2 dependencies
         assert_eq!(degrees[&b], 0); // b has 0 dependencies
         assert_eq!(degrees[&c], 0); // c has 0 dependencies
+    }
+
+    #[test]
+    fn test_reachable_from_diamond() {
+        // Diamond + bystander:
+        //  A
+        //  / \
+        // B   C
+        //  \ /
+        //   D       E (bystander, unrelated)
+        // Roots: [A] should yield {A, B, C, D}, NOT E.
+        let mut graph = DependencyGraph::new();
+        let a = ModuleId::new(1);
+        let b = ModuleId::new(2);
+        let c = ModuleId::new(3);
+        let d = ModuleId::new(4);
+        let e = ModuleId::new(5);
+        graph.add_module(a, ModulePath::from_str("a"));
+        graph.add_module(b, ModulePath::from_str("b"));
+        graph.add_module(c, ModulePath::from_str("c"));
+        graph.add_module(d, ModulePath::from_str("d"));
+        graph.add_module(e, ModulePath::from_str("e"));
+        graph.add_dependency(a, b).unwrap();
+        graph.add_dependency(a, c).unwrap();
+        graph.add_dependency(b, d).unwrap();
+        graph.add_dependency(c, d).unwrap();
+
+        let reachable = graph.reachable_from(&[a]);
+        assert!(reachable.contains(&a));
+        assert!(reachable.contains(&b));
+        assert!(reachable.contains(&c));
+        assert!(reachable.contains(&d));
+        assert!(!reachable.contains(&e), "bystander e must be excluded");
+        assert_eq!(reachable.len(), 4);
+    }
+
+    #[test]
+    fn test_reachable_from_multiple_roots() {
+        // Two disjoint chains plus a third unrelated chain:
+        //  A → B → C   D → E   F → G
+        // Roots: [A, D] should yield {A, B, C, D, E}; F, G excluded.
+        let mut graph = DependencyGraph::new();
+        let a = ModuleId::new(1);
+        let b = ModuleId::new(2);
+        let c = ModuleId::new(3);
+        let d = ModuleId::new(4);
+        let e = ModuleId::new(5);
+        let f = ModuleId::new(6);
+        let g = ModuleId::new(7);
+        for (id, name) in [
+            (a, "a"),
+            (b, "b"),
+            (c, "c"),
+            (d, "d"),
+            (e, "e"),
+            (f, "f"),
+            (g, "g"),
+        ] {
+            graph.add_module(id, ModulePath::from_str(name));
+        }
+        graph.add_dependency(a, b).unwrap();
+        graph.add_dependency(b, c).unwrap();
+        graph.add_dependency(d, e).unwrap();
+        graph.add_dependency(f, g).unwrap();
+
+        let reachable = graph.reachable_from(&[a, d]);
+        assert_eq!(reachable.len(), 5);
+        assert!(reachable.contains(&a));
+        assert!(reachable.contains(&b));
+        assert!(reachable.contains(&c));
+        assert!(reachable.contains(&d));
+        assert!(reachable.contains(&e));
+        assert!(!reachable.contains(&f));
+        assert!(!reachable.contains(&g));
+    }
+
+    #[test]
+    fn test_reachable_from_unknown_root_silent() {
+        // A root not in the graph is silently skipped — useful for the
+        // pipeline path where speculative roots like `core.prelude` may
+        // be passed before the prelude module is actually resolved.
+        let mut graph = DependencyGraph::new();
+        let a = ModuleId::new(1);
+        graph.add_module(a, ModulePath::from_str("a"));
+        let phantom = ModuleId::new(999);
+
+        let reachable = graph.reachable_from(&[a, phantom]);
+        assert_eq!(reachable.len(), 1);
+        assert!(reachable.contains(&a));
+
+        // No real root present — returns empty.
+        let empty = graph.reachable_from(&[phantom]);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_independent_groups_reachable_from() {
+        // Diamond + bystander chain:
+        //  A             E
+        //  / \           ↓
+        // B   C          F
+        //  \ /
+        //   D
+        // independent_groups() → [[D, F], [B, C, E], [A]]
+        // independent_groups_reachable_from(&[A]) → [[D], [B, C], [A]]
+        // (E and F dropped; level structure preserved)
+        let mut graph = DependencyGraph::new();
+        let a = ModuleId::new(1);
+        let b = ModuleId::new(2);
+        let c = ModuleId::new(3);
+        let d = ModuleId::new(4);
+        let e = ModuleId::new(5);
+        let f = ModuleId::new(6);
+        for (id, name) in [
+            (a, "a"),
+            (b, "b"),
+            (c, "c"),
+            (d, "d"),
+            (e, "e"),
+            (f, "f"),
+        ] {
+            graph.add_module(id, ModulePath::from_str(name));
+        }
+        graph.add_dependency(a, b).unwrap();
+        graph.add_dependency(a, c).unwrap();
+        graph.add_dependency(b, d).unwrap();
+        graph.add_dependency(c, d).unwrap();
+        graph.add_dependency(e, f).unwrap();
+
+        let groups = graph.independent_groups_reachable_from(&[a]);
+        assert_eq!(groups.len(), 3);
+        // Level 0 keeps only D
+        assert_eq!(groups[0].len(), 1);
+        assert!(groups[0].contains(&d));
+        // Level 1 keeps B and C (E dropped)
+        assert_eq!(groups[1].len(), 2);
+        assert!(groups[1].contains(&b));
+        assert!(groups[1].contains(&c));
+        assert!(!groups[1].contains(&e));
+        // Level 2 keeps only A
+        assert!(groups[2].contains(&a));
     }
 }
