@@ -357,34 +357,45 @@ pub enum BoundaryInvariant {
     AuthenticatedFirst,
  /// Backpressure honoured — no unbounded queues.
     BackpressureHonoured,
- /// Custom named invariant — refinement predicate referenced
- /// by name; resolved at audit time.
-    Custom { name: String },
+    /// Custom named invariant — refinement predicate referenced
+    /// by name; resolved at audit time.
+    Custom {
+        /// Refinement-predicate name resolved at audit time.
+        name: String,
+    },
 }
 
+/// Wire-level serialisation discipline used on a [`Boundary`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WireEncoding {
- /// Verum-native serialisation (canonical).
+    /// Verum-native serialisation (canonical).
     VerumNative,
- /// Protocol Buffers schema.
-    ProtoBuf { schema_path: String },
- /// JSON with schema reference.
-    Json { schema_url: String },
- /// MessagePack.
+    /// Protocol Buffers schema.
+    ProtoBuf {
+        /// Path to the `.proto` schema file.
+        schema_path: String,
+    },
+    /// JSON with schema reference.
+    Json {
+        /// URL pointing to the JSON Schema document.
+        schema_url: String,
+    },
+    /// MessagePack.
     MsgPack,
- /// Raw bytes — flagged as anti-pattern unless explicitly justified.
+    /// Raw bytes — flagged as anti-pattern unless explicitly justified.
     RawBytes,
 }
 
+/// Physical placement of a [`Boundary`] in the deployment topology.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BoundaryPhysicalLayer {
- /// Same process, same crate.
+    /// Same process, same crate.
     Intracrate,
- /// Same process, cross-crate.
+    /// Same process, cross-crate.
     Intracess,
- /// Cross-process IPC.
+    /// Cross-process IPC.
     Ipc,
- /// Network boundary (any protocol).
+    /// Network boundary (any protocol).
     Network,
 }
 
@@ -402,18 +413,24 @@ pub enum Lifecycle {
     /// `[Г]` Hypothesis — speculation; no implementation.  CVE
     /// configuration: К partial (formulation only), В absent, И
     /// absent.  Must carry an explicit "plan to mature" — see CVE
-    /// §3.5 boundary [Г]/[И]: a hypothesis without a maturation
-    /// plan degrades to [И] Interpretation (defective).
-    Hypothesis { confidence: ConfidenceLevel },
+    /// §3.5 boundary `[Г]`/`[И]`: a hypothesis without a maturation
+    /// plan degrades to `[И]` Interpretation (defective).
+    Hypothesis {
+        /// Confidence level the author assigns to the hypothesis.
+        confidence: ConfidenceLevel,
+    },
     /// `[Plan]` ATS-V legacy variant — "committed but not yet
     /// implemented" (TODO with target completion date).  Distinct
-    /// from CVE [П]Postulate.  Retained for backward compatibility
+    /// from CVE `[П]` Postulate.  Retained for backward compatibility
     /// with existing `@arch_module(lifecycle = Lifecycle.Plan(..))`
     /// declarations.  New code SHOULD prefer:
     ///   - `Hypothesis` for not-yet-formalised intent
     ///   - `Postulate` for accepted-without-proof assumptions
     ///   - `Conditional` for "proven under explicit conditions"
-    Plan { target_completion: String },
+    Plan {
+        /// ISO-format target date (or free-form text) for completion.
+        target_completion: String,
+    },
     /// `[П]` Postulate — base architectural assumption accepted
     /// without proof at this layer (CVE §3.5).  CVE configuration:
     /// К accepted, В absent, И accepted.  The kernel-discharge
@@ -433,44 +450,62 @@ pub enum Lifecycle {
     Definition,
     /// `[С]` Conditional — proven under explicit assumptions.
     /// CVE configuration: К ∧ В ∧ И *relative to the listed
-    /// conditions*.  Reading-as-[Т] in the context where the
+    /// conditions*.  Reading-as-`[Т]` in the context where the
     /// conditions hold; outside that context, marked
     /// non-applicable without losing strength in the original.
-    Conditional { conditions: Vec<String> },
+    Conditional {
+        /// Explicit assumptions under which the proof discharges.
+        conditions: Vec<String>,
+    },
     /// `[Т]` Theorem — fully proven, load-bearing.  CVE
     /// configuration: КВИ⁺ (full triple closure).  Mature
     /// artifact at the highest class.
-    Theorem { since: String },
+    Theorem {
+        /// Version at which the theorem reached `[Т]` (load-bearing).
+        since: String,
+    },
     /// `[И]` Interpretation — KVI-violator; CVE §3.5 transitional
     /// status.  All three CVE axes absent AND no plan to mature.
     /// Permitted ONLY in transitional corpus revisions; mature
     /// corpus must contain ZERO Interpretation entries (each
-    /// transformed to [Т]/[С] via proof, downgraded to [Г] with
+    /// transformed to `[Т]`/`[С]` via proof, downgraded to `[Г]` with
     /// a maturation plan, or removed).  Annotating a cog as
     /// Interpretation in strict mode is a defect (AP candidate).
-    Interpretation { reason: String },
+    Interpretation {
+        /// Why the artefact was admitted as `[И]`-status.
+        reason: String,
+    },
     /// `[✗]` Retracted — previously declared but withdrawn /
     /// refuted.  Removed from active corpus but record preserved
     /// in audit chronicle as negative example.  CVE §3.5.
     Retracted {
+        /// Free-form explanation of the retraction.
         reason: String,
+        /// Identifier of the replacement artefact, if any.
         replacement: Option<String>,
     },
     /// `[O]` Obsolete — deprecated, scheduled for removal.  Less
     /// strict than Retracted: the artifact still functions but is
     /// expected to be replaced.  Legacy ATS-V variant; new code
     /// SHOULD use `Retracted` for explicit withdrawals and
-    /// `Definition` for the [О] CVE status.
+    /// `Definition` for the `[О]` CVE status.
     Obsolete {
+        /// Reason the artefact is being phased out.
         deprecation_reason: String,
+        /// Identifier of the replacement artefact, if any.
         replacement: Option<String>,
     },
 }
 
+/// Confidence the author assigns to a `[Г]` Hypothesis. Used by audit
+/// reports to prioritise hypothesis maturation work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ConfidenceLevel {
+    /// Speculative — exploratory, low evidence.
     Low,
+    /// Working hypothesis — partial evidence, planned next-step work.
     Medium,
+    /// Strong hypothesis — clear path to maturation, mostly evidence.
     High,
 }
 
@@ -530,7 +565,7 @@ impl Lifecycle {
     }
 
     /// True iff the lifecycle is one CVE §6.7 forbids in mature
-    /// corpus: [И] Interpretation without a maturation plan.
+    /// corpus: `[И]` Interpretation without a maturation plan.
     /// Used by future anti-pattern check
     /// `InterpretationInMatureCorpus`.
     pub fn is_mature_corpus_forbidden(&self) -> bool {
@@ -548,27 +583,30 @@ impl Lifecycle {
 /// `FoundationDrift` anti-pattern (ATS-V-AP-005).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Foundation {
- /// ZFC + 2 strongly-inaccessibles (the canonical baseline).
+    /// ZFC + 2 strongly-inaccessibles (the canonical baseline).
     ZfcTwoInacc,
- /// Homotopy Type Theory (Univalent Foundations).
+    /// Homotopy Type Theory (Univalent Foundations).
     Hott,
- /// Cubical HoTT.
+    /// Cubical HoTT.
     Cubical,
- /// Calculus of Inductive Constructions.
+    /// Calculus of Inductive Constructions.
     Cic,
- /// Martin-Löf Type Theory.
+    /// Martin-Löf Type Theory.
     Mltt,
- /// Effective topos.
+    /// Effective topos.
     Eff,
- /// User-defined custom foundation — must cite via
- /// `@framework(corpus, ...)`.
+    /// User-defined custom foundation — must cite via
+    /// `@framework(corpus, ...)`.
     Custom {
+        /// Human-readable foundation name.
         name: String,
+        /// Framework-corpus identifier carrying the foundation's axioms.
         framework_corpus: String,
     },
 }
 
 impl Foundation {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             Foundation::ZfcTwoInacc => "zfc_two_inacc",
@@ -604,19 +642,23 @@ impl Foundation {
 /// Execution tier. Per spec §4.7.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tier {
- /// Tier 0: VBC interpreter — fast startup, ~100ns CBGR check.
+    /// Tier 0: VBC interpreter — fast startup, ~100ns CBGR check.
     Interp,
- /// Tier 1: AOT via LLVM — 85-95% native speed.
+    /// Tier 1: AOT via LLVM — 85-95% native speed.
     Aot,
- /// Tier 2: GPU compilation via MLIR.
+    /// Tier 2: GPU compilation via MLIR.
     Gpu,
- /// Type-checking only (no codegen).
+    /// Type-checking only (no codegen).
     Check,
- /// Multi-tier: cog runs on any of the listed tiers.
-    MultiTier { allowed: Vec<Tier> },
+    /// Multi-tier: cog runs on any of the listed tiers.
+    MultiTier {
+        /// Tiers the cog can run on (no ordering implied).
+        allowed: Vec<Tier>,
+    },
 }
 
 impl Tier {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             Tier::Interp => "interp",
@@ -664,6 +706,7 @@ pub enum MsfsStratum {
 }
 
 impl MsfsStratum {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             MsfsStratum::LFnd => "l_fnd",
@@ -728,18 +771,28 @@ impl CveClosure {
 /// system (per spec §17.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VerifyStrategy {
+    /// `@verify(runtime)` — runtime assertions only, no SMT.
     Runtime,
+    /// `@verify(static)` — light-weight static analysis.
     Static,
+    /// `@verify(fast)` — single-solver SMT with tight timeout.
     Fast,
+    /// `@verify(formal)` — single-solver SMT, default budget.
     Formal,
+    /// `@verify(proof)` — proof-term construction (kernel-checked).
     Proof,
+    /// `@verify(thorough)` — portfolio SMT (Z3 + CVC5 in parallel).
     Thorough,
+    /// `@verify(reliable)` — portfolio with first-wins consensus.
     Reliable,
+    /// `@verify(certified)` — portfolio with cross-validated agreement.
     Certified,
+    /// `@verify(synthesize)` — SyGuS / synthesis surface.
     Synthesize,
 }
 
 impl VerifyStrategy {
+    /// Stable diagnostic tag used in audit JSON + ATS-V error codes.
     pub fn tag(&self) -> &'static str {
         match self {
             VerifyStrategy::Runtime => "runtime",
