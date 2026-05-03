@@ -147,6 +147,7 @@ public mount runtime.time.{
 // --- From runtime/async_ops ---
 public mount runtime.async_ops.{
     RawJoinHandleOpaque,
+    JoinHandleOpaque,
     RawExecutorHandle,
     RawFutureHandle,
     RawSupervisorHandleOpaque,
