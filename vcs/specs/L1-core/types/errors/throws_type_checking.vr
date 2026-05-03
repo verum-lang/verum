@@ -42,7 +42,7 @@ fn parse_integer(input: &Text) throws(ParseError) -> Int {
         Some(n) => n,
         None => throw ParseError.SyntaxError {
             line: 1,
-            message: format("Invalid integer: {}", input)
+            message: f"Invalid integer: {input}"
         }
     }
 }
@@ -150,7 +150,7 @@ implement From<SpecificError> for BaseError {
     fn from(e: SpecificError) -> BaseError {
         match e {
             SpecificError.Specific1(msg) => msg,
-            SpecificError.Specific2(code) => format("Error code: {}", code)
+            SpecificError.Specific2(code) => f"Error code: {code}"
         }
     }
 }
