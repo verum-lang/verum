@@ -139,6 +139,18 @@ public type ColumnMeta is {
     metadata: Int,
     /// True if the column allows NULL (from TABLE_MAP.null_bitmap).
     nullable: Bool,
+    /// True if the column is unsigned (from TM_META_SIGNEDNESS;
+    /// only meaningful for numeric types). Defaults to `false`
+    /// when the server doesn't ship signedness metadata
+    /// (`binlog_row_metadata` < FULL).
+    unsigned: Bool,
+    /// String value table — populated from TM_META_ENUM_STR_VALUE
+    /// for ENUM columns OR TM_META_SET_STR_VALUE for SET columns.
+    /// Empty when the optional metadata isn't shipped (decoders
+    /// fall back to raw int / bitmap). Index 0 corresponds to
+    /// the first non-empty ENUM value (MySQL ENUM is 1-based on
+    /// the wire — `idx == 0` means "empty / invalid").
+    string_values: List<Text>,
 };
 
 public type TableMapEvent is {
@@ -147,7 +159,40 @@ public type TableMapEvent is {
     schema: Text,
     name: Text,
     columns: List<ColumnMeta>,
+    /// Optional metadata (MySQL 8.0+ with `binlog_row_metadata=FULL`).
+    /// Empty when the server isn't shipping the optional block.
+    /// Position-aligned with `columns`.
+    column_names: List<Text>,
+    /// `signedness[i] == true` → column i is signed (only set
+    /// for numeric columns; non-numeric positions are `false`
+    /// by default — caller checks `column_type` to decide).
+    signedness: List<Bool>,
+    /// String-value tables for ENUM columns. The outer list is
+    /// position-aligned with `columns`; non-ENUM positions hold
+    /// an empty inner list.
+    enum_values: List<List<Text>>,
+    /// String-value tables for SET columns. Same alignment as
+    /// `enum_values`.
+    set_values: List<List<Text>>,
 };
+
+// =============================================================================
+// Optional metadata field tags (MySQL 8.0+ binlog_row_metadata=FULL)
+// =============================================================================
+// Source: src/sql/log_event.cc Table_map_log_event::Optional_metadata_fields.
+
+public const TM_META_SIGNEDNESS:                Int = 1;
+public const TM_META_DEFAULT_CHARSET:           Int = 2;
+public const TM_META_COLUMN_CHARSET:            Int = 3;
+public const TM_META_COLUMN_NAME:               Int = 4;
+public const TM_META_SET_STR_VALUE:             Int = 5;
+public const TM_META_ENUM_STR_VALUE:            Int = 6;
+public const TM_META_GEOMETRY_TYPE:             Int = 7;
+public const TM_META_SIMPLE_PRIMARY_KEY:        Int = 8;
+public const TM_META_PRIMARY_KEY_WITH_PREFIX:   Int = 9;
+public const TM_META_ENUM_AND_SET_DEFAULT_CHARSET: Int = 10;
+public const TM_META_ENUM_AND_SET_COLUMN_CHARSET:  Int = 11;
+public const TM_META_COLUMN_VISIBILITY:         Int = 12;
 
 public fn decode_table_map_body(buf: &[Byte]) -> Result<TableMapEvent, DbError> {
     // Post-header is included in the event body for V2 — first 8
@@ -228,8 +273,67 @@ public fn decode_table_map_body(buf: &[Byte]) -> Result<TableMapEvent, DbError> 
             column_type: ct,
             metadata: meta,
             nullable: nullable,
+            unsigned: false,
+            string_values: List.new(),
         });
         k = k + 1;
+    }
+
+    // Optional metadata block — present when the server runs with
+    // `binlog_row_metadata=FULL` (MySQL 8.0+). Block lives at the
+    // remainder of `buf` after `null_bitmap`. Each field:
+    //   type:u8 + length:lenenc + data[length]
+    let bm_end: Int = off + bitmap_bytes;
+    let mut column_names: List<Text> = empty_text_list(col_count);
+    let mut signedness: List<Bool> = empty_bool_list(col_count);
+    let mut enum_values: List<List<Text>> = empty_string_table(col_count);
+    let mut set_values: List<List<Text>> = empty_string_table(col_count);
+
+    let mut opt_off: Int = bm_end;
+    while opt_off < (buf.len() as Int) {
+        let tag = match read_u8(buf, opt_off) { Ok(v) => v, Err(_) => break };
+        opt_off = opt_off + 1;
+        let (data_len, _, dlen_n) = match decode_lei(buf, opt_off) {
+            Ok(t)  => t,
+            Err(_) => break,
+        };
+        opt_off = opt_off + dlen_n;
+        let data = match read_bytes(buf, opt_off, data_len) {
+            Ok(b)  => b,
+            Err(_) => break,
+        };
+        opt_off = opt_off + data_len;
+
+        if tag == TM_META_SIGNEDNESS {
+            // Bitmap of signed-vs-unsigned for numeric columns
+            // ONLY (other column positions are skipped). Bit
+            // ordering is MSB-first per byte.
+            apply_signedness_bitmap(&data, &columns, &mut signedness);
+        } else if tag == TM_META_COLUMN_NAME {
+            // Sequence of (name_len:lenenc, name:bytes) per column.
+            column_names = parse_column_names(&data, col_count);
+        } else if tag == TM_META_ENUM_STR_VALUE {
+            enum_values = parse_str_value_table(&data, &columns, COL_TYPE_ENUM);
+        } else if tag == TM_META_SET_STR_VALUE {
+            set_values = parse_str_value_table(&data, &columns, COL_TYPE_SET);
+        }
+        // Other tags (DEFAULT_CHARSET / COLUMN_CHARSET / GEOMETRY_TYPE /
+        // SIMPLE_PRIMARY_KEY / etc) silently skipped — forward
+        // compatibility with future tags.
+    }
+
+    // Fold optional metadata into per-column ColumnMeta so the
+    // value decoder can dispatch ENUM/SET via column_meta alone.
+    let mut col_idx: Int = 0;
+    while col_idx < (columns.len() as Int) {
+        columns[col_idx].unsigned = signedness[col_idx];
+        let ct = columns[col_idx].column_type;
+        if ct == COL_TYPE_ENUM {
+            columns[col_idx].string_values = enum_values[col_idx].clone();
+        } else if ct == COL_TYPE_SET {
+            columns[col_idx].string_values = set_values[col_idx].clone();
+        }
+        col_idx = col_idx + 1;
     }
 
     Ok(TableMapEvent {
@@ -238,7 +342,144 @@ public fn decode_table_map_body(buf: &[Byte]) -> Result<TableMapEvent, DbError> 
         schema: bytes_to_text(&schema_bytes),
         name: bytes_to_text(&name_bytes),
         columns: columns,
+        column_names: column_names,
+        signedness: signedness,
+        enum_values: enum_values,
+        set_values: set_values,
     })
+}
+
+// =============================================================================
+// Optional metadata helpers
+// =============================================================================
+
+fn empty_text_list(n: Int) -> List<Text> {
+    let mut out: List<Text> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n { out.push("".clone()); i = i + 1; }
+    out
+}
+
+fn empty_bool_list(n: Int) -> List<Bool> {
+    let mut out: List<Bool> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n { out.push(false); i = i + 1; }
+    out
+}
+
+fn empty_string_table(n: Int) -> List<List<Text>> {
+    let mut out: List<List<Text>> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n { out.push(List.new()); i = i + 1; }
+    out
+}
+
+/// SIGNEDNESS bitmap — one bit per NUMERIC column (TINY / SHORT /
+/// INT24 / LONG / LONGLONG / NEWDECIMAL / FLOAT / DOUBLE).
+/// Bit ordering: MSB-first per byte. Per the MySQL source, the
+/// bitmap covers numeric columns ONLY — non-numeric positions
+/// are skipped in the bit walk.
+fn apply_signedness_bitmap(
+    data: &List<Byte>,
+    columns: &List<ColumnMeta>,
+    signedness: &mut List<Bool>,
+) {
+    let mut bit_idx: Int = 0;
+    let mut col: Int = 0;
+    let n = columns.len() as Int;
+    while col < n {
+        if is_numeric_column_type(columns[col].column_type) {
+            let byte_idx = bit_idx >> 3;
+            let bit_in_byte = 7 - (bit_idx & 0x7);
+            if byte_idx < (data.len() as Int) {
+                let b = (data[byte_idx] as Int) & 0xFF;
+                let signed = (b & (1 << bit_in_byte)) == 0;
+                signedness[col] = !signed;     // bit set = unsigned
+            }
+            bit_idx = bit_idx + 1;
+        }
+        col = col + 1;
+    }
+}
+
+fn is_numeric_column_type(t: Int) -> Bool {
+    t == COL_TYPE_TINY || t == COL_TYPE_SHORT || t == COL_TYPE_LONG
+        || t == COL_TYPE_LONGLONG || t == COL_TYPE_INT24
+        || t == COL_TYPE_FLOAT || t == COL_TYPE_DOUBLE
+        || t == COL_TYPE_NEWDECIMAL
+}
+
+/// COLUMN_NAME — array of [name_length:lenenc, name:bytes].
+/// Position-aligned with the column list.
+fn parse_column_names(data: &List<Byte>, col_count: Int) -> List<Text> {
+    let mut out: List<Text> = List.with_capacity(col_count);
+    let mut off: Int = 0;
+    let n = data.len() as Int;
+    let mut i: Int = 0;
+    while i < col_count {
+        if off >= n {
+            out.push("".clone());
+        } else {
+            let (len, _, lei_n) = match decode_lei(data.as_slice(), off) {
+                Ok(t)  => t,
+                Err(_) => { out.push("".clone()); i = i + 1; continue; }
+            };
+            off = off + lei_n;
+            let bytes = match read_bytes(data.as_slice(), off, len) {
+                Ok(b)  => b,
+                Err(_) => { out.push("".clone()); i = i + 1; continue; }
+            };
+            off = off + len;
+            out.push(bytes_to_text(&bytes));
+        }
+        i = i + 1;
+    }
+    out
+}
+
+/// ENUM_STR_VALUE / SET_STR_VALUE — for each column whose type
+/// matches `target_type`, a sequence
+///   count:lenenc + (value_length:lenenc, value:bytes) × count
+/// The outer position is implicit — only columns of `target_type`
+/// consume entries from `data`. Non-matching positions get an
+/// empty inner list.
+fn parse_str_value_table(
+    data: &List<Byte>,
+    columns: &List<ColumnMeta>,
+    target_type: Int,
+) -> List<List<Text>> {
+    let mut out: List<List<Text>> = empty_string_table(columns.len() as Int);
+    let mut off: Int = 0;
+    let n = data.len() as Int;
+    let mut col: Int = 0;
+    while col < (columns.len() as Int) {
+        if columns[col].column_type == target_type && off < n {
+            let (count, _, lei_n) = match decode_lei(data.as_slice(), off) {
+                Ok(t)  => t,
+                Err(_) => break,
+            };
+            off = off + lei_n;
+            let mut values: List<Text> = List.with_capacity(count);
+            let mut i: Int = 0;
+            while i < count && off < n {
+                let (vlen, _, vlen_n) = match decode_lei(data.as_slice(), off) {
+                    Ok(t)  => t,
+                    Err(_) => break,
+                };
+                off = off + vlen_n;
+                let vbytes = match read_bytes(data.as_slice(), off, vlen) {
+                    Ok(b)  => b,
+                    Err(_) => break,
+                };
+                off = off + vlen;
+                values.push(bytes_to_text(&vbytes));
+                i = i + 1;
+            }
+            out[col] = values;
+        }
+        col = col + 1;
+    }
+    out
 }
 
 /// Per-column metadata layout per MySQL src/sql/log_event_server.cc
@@ -697,16 +938,72 @@ fn decode_value_for_type(
         return Ok((RvNull, 0));
     }
 
-    // Catch-all: BIT / ENUM / SET / GEOMETRY / DECIMAL — surface
-    // raw bytes the consumer can dispatch on. We don't know the
-    // length without a deeper parser; conservatively read 1 byte
-    // length + bytes (matches BIT / SET in the common case).
+    if t == COL_TYPE_ENUM {
+        // metadata: low byte holds element-byte-width (1 or 2).
+        // Wire: 1 or 2 byte LE index, 1-based; 0 = empty/invalid.
+        let width = if (meta.metadata & 0xFF) == 2 { 2 } else { 1 };
+        let idx = if width == 2 {
+            match read_u16_le(buf, off) { Ok(v) => v, Err(_) => 0 }
+        } else {
+            match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 }
+        };
+        // Look up via enum_values (1-based — idx 1 is first
+        // declared value). Fall back to RvInt(idx) when the
+        // server hasn't shipped optional metadata.
+        if idx > 0 && (idx as Int) <= (meta.string_values.len() as Int) {
+            return Ok((RvText(meta.string_values[idx - 1].clone()), width));
+        }
+        return Ok((RvInt(idx), width));
+    }
+
+    if t == COL_TYPE_SET {
+        // metadata: low byte holds bitmap-byte-width (1..8).
+        let width = meta.metadata & 0xFF;
+        let actual_width = if width >= 1 && width <= 8 { width } else { 1 };
+        // Read the bitmap as little-endian bytes → Int.
+        let mut bm: Int = 0;
+        let mut k: Int = 0;
+        while k < actual_width {
+            let b = match read_u8(buf, off + k) { Ok(v) => v, Err(_) => 0 };
+            bm = bm | (b << (k * 8));
+            k = k + 1;
+        }
+        // Decode bits → comma-separated values from string_values.
+        if (meta.string_values.len() as Int) > 0 {
+            let mut parts: List<Text> = List.new();
+            let mut bit: Int = 0;
+            while bit < (meta.string_values.len() as Int) {
+                if (bm & (1 << bit)) != 0 {
+                    parts.push(meta.string_values[bit].clone());
+                }
+                bit = bit + 1;
+            }
+            return Ok((RvText(join_with_comma(&parts)), actual_width));
+        }
+        // No optional metadata — surface the raw bitmap.
+        return Ok((RvInt(bm), actual_width));
+    }
+
+    // Catch-all: BIT / GEOMETRY / DECIMAL fringes — surface raw
+    // bytes the consumer can dispatch on. Conservative 1-byte
+    // length read (matches BIT in the common case).
     let len_guess = match read_u8(buf, off) { Ok(v) => v, Err(_) => 0 };
     let bytes = match read_bytes(buf, off + 1, len_guess) {
         Ok(b)  => b,
         Err(_) => { return Err(bad_rows("unknown-type fallback")); }
     };
     Ok((RvRaw(bytes), 1 + len_guess))
+}
+
+fn join_with_comma(parts: &List<Text>) -> Text {
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < (parts.len() as Int) {
+        if i > 0 { out.push_str(","); }
+        out.push_str(&parts[i]);
+        i = i + 1;
+    }
+    out
 }
 
 // =============================================================================
