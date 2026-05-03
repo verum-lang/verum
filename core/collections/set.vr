@@ -95,6 +95,7 @@ implement<T: Hash + Eq> Set<T> {
     }
 
     // Check if set contains value.
+    @inline(always)
     public fn contains(&self, value: T) -> Bool {
         self.inner.contains_key(value)
     }
