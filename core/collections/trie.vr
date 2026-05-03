@@ -257,3 +257,14 @@ fn collect_entries<V: Clone>(
         }
     }
 }
+
+// =============================================================================
+// Length protocol — enables free-function `len(trie)` dispatch
+// =============================================================================
+
+implement<V> Length for Trie<V> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.size
+    }
+}

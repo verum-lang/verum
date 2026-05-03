@@ -196,3 +196,14 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
         self.evicted = self.evicted + 1_u64;
     }
 }
+
+// =============================================================================
+// Length protocol — enables free-function `len(cache)` dispatch
+// =============================================================================
+
+implement<K: Hash + Eq, V> Length for LruCache<K, V> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.store.len()
+    }
+}

@@ -1043,3 +1043,14 @@ public fn list_heap_sort<T: Ord>(list: &mut List<T>) {
 public fn heap_sort<T: Ord>(list: &mut List<T>) {
     list_heap_sort(list);
 }
+
+// =============================================================================
+// Length protocol — enables free-function `len(heap)` dispatch
+// =============================================================================
+
+implement<T: Ord> Length for BinaryHeap<T> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.data.len()
+    }
+}

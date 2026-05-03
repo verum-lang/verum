@@ -3274,6 +3274,24 @@ implement<T: Ord> From<List<T>> for BTreeSet<T> {
 }
 
 // =============================================================================
+// Length protocol — enables free-function `len(map)` / `len(set)` dispatch
+// =============================================================================
+
+implement<K: Ord, V> Length for BTreeMap<K, V> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.len
+    }
+}
+
+implement<T: Ord> Length for BTreeSet<T> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.inner.len()
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 

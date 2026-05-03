@@ -228,3 +228,21 @@ implement<T: Hash + Eq> UnionFind<T> {
     public fn component_count(&self) -> Int { self.components }
     public fn len(&self) -> Int { self.parent.len() }
 }
+
+// =============================================================================
+// Length protocol — enables free-function `len(uf)` dispatch
+// =============================================================================
+
+implement Length for UnionFindInt {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.parent.len()
+    }
+}
+
+implement<T: Hash + Eq> Length for UnionFind<T> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.parent.len()
+    }
+}
