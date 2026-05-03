@@ -75,6 +75,13 @@ thread_local! {
     /// Global call depth counter — catches infinite recursion that per-TypeChecker
     /// guards miss (e.g., recursion through protocol dispatch or unification).
     static GLOBAL_CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
+    /// Per-call depth counter for the Deref-coercion retry in method
+    /// dispatch (#112). Caps at 4 hops — matches the existing
+    /// `Heap<Shared<Mutex<T>>>` hint-walk depth and prevents infinite
+    /// recursion through pathological `Deref::Target` cycles. Each
+    /// retry increments on entry and decrements via RAII guard on exit
+    /// so partial failures don't poison subsequent dispatches.
+    static DEREF_COERCION_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 /// RAII guard for global call depth tracking.
@@ -48767,6 +48774,64 @@ impl TypeChecker {
             // registered in single-file check mode.
             if self.stdlib_single_file_mode {
                 return Ok(InferResult::new(Type::Unknown));
+            }
+
+            // #112 Deref-coercion retry: if the receiver implements
+            // `Deref<Target = T>` (e.g. `PathBuf` -> `Path`,
+            // `Heap<T>` -> `T`, `MutexGuard<T>` -> `T`), try
+            // resolving the method against `T` BEFORE falling
+            // through to the diagnostic hint path. This closes the
+            // ergonomic gap where `path_buf.join_str(...)` failed
+            // because the method lived on `Path`, not `PathBuf` —
+            // callers had to write `path_buf.as_path().join_str(...)`.
+            // We walk the chain up to 4 hops (matches the legacy
+            // hint-walk depth) and short-circuit on the first
+            // hop whose method dispatch succeeds. Cycle protection
+            // via `DEREF_COERCION_DEPTH` thread-local; recursive
+            // dispatches fall straight through without re-entering
+            // the retry loop.
+            let already_in_retry =
+                DEREF_COERCION_DEPTH.with(|d| d.get() > 0);
+            if !already_in_retry {
+                let mut target_ty_opt = {
+                    let checker = self.protocol_checker.read();
+                    checker
+                        .try_find_associated_type(&recv_ty, &Text::from("Target"))
+                };
+                let mut hop = 0usize;
+                while let Some(target) = target_ty_opt.take() {
+                    if hop >= 4 {
+                        break;
+                    }
+                    let normalised = self.normalize_type(self.unwrap_reference_type(&target));
+                    // Increment the guard, retry dispatch with the
+                    // unwrapped type as `precomputed_recv_ty`,
+                    // decrement on the way out regardless of result.
+                    DEREF_COERCION_DEPTH.with(|d| d.set(d.get() + 1));
+                    let retry = self.infer_method_call_inner_impl(
+                        receiver,
+                        method,
+                        type_args,
+                        args,
+                        span,
+                        Some(normalised.clone()),
+                        skip_static_lookup,
+                    );
+                    DEREF_COERCION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+                    match retry {
+                        Ok(result) => return Ok(result),
+                        Err(TypeError::MethodNotFound { .. }) => {
+                            // Keep walking — maybe a later hop has the method.
+                        }
+                        Err(other) => return Err(other),
+                    }
+                    let next = {
+                        let checker = self.protocol_checker.read();
+                        checker.try_find_associated_type(&normalised, &Text::from("Target"))
+                    };
+                    target_ty_opt = next;
+                    hop += 1;
+                }
             }
 
             // Smart-pointer auto-deref hint: if the receiver is a
