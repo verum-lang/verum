@@ -715,6 +715,68 @@ fn matmul_f32_batched_broadcast_a_2d_equivalent() {
 }
 
 #[test]
+fn matmul_f32_4d_higher_rank_batched_equivalent() {
+ // `[B1,B2,M,K] @ [B1,B2,K,N]` — multi-head attention pattern.
+ // Dispatcher flattens leading dims: [B1*B2, M, K] @ [B1*B2,
+ // K, N] runs through the same batch_matmul kernel; output
+ // reshapes back to [B1,B2,M,N].
+ let mut state: u64 = 0xFEED_BA20;
+ let jit = MlirJitBackend::new();
+ let b1 = 2_usize;
+ let b2 = 3_usize;
+ let m = 4_usize;
+ let k = 2_usize;
+ let n = 5_usize;
+ let total_batch = b1 * b2;
+ let a = make_f32_tensor(&[b1, b2, m, k], &mut state, -1.0, 1.0);
+ let b = make_f32_tensor(&[b1, b2, k, n], &mut state, -1.0, 1.0);
+ let r = jit
+ .matmul(&a, &b)
+ .expect("4-D batched matmul missing for [B1,B2,M,K] @ [B1,B2,K,N]");
+ assert_eq!(r.numel, total_batch * m * n);
+ // Output shape must be [B1, B2, M, N].
+ assert_eq!(r.ndim, 4);
+ assert_eq!(r.shape[0], b1);
+ assert_eq!(r.shape[1], b2);
+ assert_eq!(r.shape[2], m);
+ assert_eq!(r.shape[3], n);
+ let av = read_f32(&a, total_batch * m * k);
+ let bv = read_f32(&b, total_batch * k * n);
+ let mut expected = vec![0.0_f32; total_batch * m * n];
+ for batch in 0..total_batch {
+ for mi in 0..m {
+ for ni in 0..n {
+ let mut acc = 0.0_f32;
+ for ki in 0..k {
+ acc += av[batch * m * k + mi * k + ki]
+ * bv[batch * k * n + ki * n + ni];
+ }
+ expected[batch * m * n + mi * n + ni] = acc;
+ }
+ }
+ }
+ assert_f32_close(
+ &read_f32(&r, total_batch * m * n),
+ &expected,
+ "4-D batched matmul flatten-then-batch",
+ );
+}
+
+#[test]
+fn matmul_4d_mismatched_lead_falls_through() {
+ // `[B1,B2_a,M,K] @ [B1,B2_b,K,N]` with B2_a != B2_b — leading
+ // dims must match exactly today (per-axis broadcast in
+ // leading dims is deferred).
+ let mut state: u64 = 0xFEED_BA21;
+ let jit = MlirJitBackend::new();
+ let a = make_f32_tensor(&[2, 3, 4, 2], &mut state, -1.0, 1.0);
+ let b = make_f32_tensor(&[2, 4, 2, 5], &mut state, -1.0, 1.0);
+ // B2_a=3 ≠ B2_b=4 — must fall through.
+ let r = jit.matmul(&a, &b);
+ assert!(r.is_none(), "mismatched leading dim must fall through");
+}
+
+#[test]
 fn matmul_3d_mismatched_batch_falls_through() {
  // Different batch dims should fall through (no broadcasting
  // in batch matmul yet — that's a future step).

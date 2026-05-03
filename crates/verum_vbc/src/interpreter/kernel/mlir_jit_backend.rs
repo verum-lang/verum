@@ -1188,6 +1188,124 @@ impl Backend for MlirJitBackend {
  if !is_float_dtype(a.dtype) {
  return None;
  }
+ // **Higher-rank flatten-then-batch** — `[B1,…,Bk,M,K] @
+ // `[B1,…,Bk,K,N]` (or broadcast variants) flattens leading
+ // dims into a single batch axis, runs batch_matmul, then
+ // returns the output reshaped to the original leading dims.
+ // The flatten is a pure descriptor change (memref strides) —
+ // no data copy.
+ //
+ // Pre-condition: leading dims match exactly (no per-axis
+ // broadcasting in leading dims yet — that would need
+ // multi-axis stride zeros, deferred).  The trailing two dims
+ // are the matmul (M,K) × (K,N).
+ let a_lead = if a.ndim >= 3 { a.ndim as usize - 2 } else { 0 };
+ let b_lead = if b.ndim >= 3 { b.ndim as usize - 2 } else { 0 };
+ let common_lead = a_lead.max(b_lead);
+ let higher_rank_match = (a.ndim as usize) >= 3 && (b.ndim as usize) >= 3
+ && a_lead == b_lead
+ && a.ndim == b.ndim
+ && a.ndim as usize >= 4
+ && {
+ // Verify all leading dims match between the two operands.
+ let mut ok = true;
+ for k in 0..a_lead {
+ if a.shape[k] != b.shape[k] {
+ ok = false;
+ break;
+ }
+ }
+ ok
+ };
+ if higher_rank_match {
+ // Compute total batch size = ∏(leading dims).  Output
+ // tensor materialises with the original leading dims +
+ // [M, N].
+ let mut total_batch: usize = 1;
+ for k in 0..a_lead {
+ total_batch = total_batch.saturating_mul(a.shape[k]);
+ }
+ let m = a.shape[a_lead];
+ let k_a = a.shape[a_lead + 1];
+ let k_b = b.shape[b_lead];
+ let n = b.shape[b_lead + 1];
+ if k_a != k_b || total_batch == 0 || m == 0 || n == 0 {
+ // Empty / mismatched → fall through.  The 0-element
+ // case can't reach the kernel safely.
+ if k_a == k_b && (m == 0 || n == 0 || total_batch == 0) {
+ // Materialise empty output with the original leading
+ // shape + [m, n].
+ let mut out_shape: [usize; crate::interpreter::tensor::MAX_DIMS] = [0; _];
+ for k in 0..a_lead {
+ out_shape[k] = a.shape[k];
+ }
+ out_shape[a_lead] = m;
+ out_shape[a_lead + 1] = n;
+ return Some(TensorHandle::zeros(&out_shape[..a_lead + 2], a.dtype)?);
+ }
+ return None;
+ }
+ // Output shape: original leading dims + [m, n].
+ let mut out_shape_buf: [usize; crate::interpreter::tensor::MAX_DIMS] = [0; _];
+ for k in 0..a_lead {
+ out_shape_buf[k] = a.shape[k];
+ }
+ out_shape_buf[a_lead] = m;
+ out_shape_buf[a_lead + 1] = n;
+ let out = TensorHandle::zeros(&out_shape_buf[..a_lead + 2], a.dtype)?;
+ let holder = self.get_or_compile(KernelKind::BatchMatmul, a.dtype)?;
+ let a_data = a.data.as_ref()?;
+ let b_data = b.data.as_ref()?;
+ let out_data = out.data.as_ref()?;
+ let a_raw = unsafe { (*a_data.as_ptr()).as_ptr() } as *mut u8;
+ let b_raw = unsafe { (*b_data.as_ptr()).as_ptr() } as *mut u8;
+ let out_raw = unsafe { (*out_data.as_ptr()).as_mut_ptr() };
+ // 3-D descriptors over the flattened-batch view: leading
+ // dims collapse into batch axis with stride = m*k_a (or
+ // k_b*n, m*n) — exactly the contiguous row-major stride
+ // because the original tensor IS row-major contiguous.
+ let mut a_desc = MemrefDescriptor3D {
+ base: a_raw,
+ aligned: a_raw,
+ offset: 0,
+ sizes: [total_batch as i64, m as i64, k_a as i64],
+ strides: [(m * k_a) as i64, k_a as i64, 1],
+ };
+ let mut b_desc = MemrefDescriptor3D {
+ base: b_raw,
+ aligned: b_raw,
+ offset: 0,
+ sizes: [total_batch as i64, k_b as i64, n as i64],
+ strides: [(k_b * n) as i64, n as i64, 1],
+ };
+ let mut out_desc = MemrefDescriptor3D {
+ base: out_raw,
+ aligned: out_raw,
+ offset: 0,
+ sizes: [total_batch as i64, m as i64, n as i64],
+ strides: [(m * n) as i64, n as i64, 1],
+ };
+ let mut a_desc_ptr: *mut MemrefDescriptor3D = &mut a_desc;
+ let mut b_desc_ptr: *mut MemrefDescriptor3D = &mut b_desc;
+ let mut out_desc_ptr: *mut MemrefDescriptor3D = &mut out_desc;
+ let mut packed: [*mut (); 3] = [
+ (&mut a_desc_ptr) as *mut _ as *mut (),
+ (&mut b_desc_ptr) as *mut _ as *mut (),
+ (&mut out_desc_ptr) as *mut _ as *mut (),
+ ];
+ let result = unsafe { holder.engine.invoke_packed("kernel", &mut packed) };
+ if result.is_err() {
+ tracing::warn!(
+ "MLIR-JIT higher-rank batch_matmul invocation failed for dtype={:?} ndim={}; falling back",
+ a.dtype,
+ a.ndim
+ );
+ return None;
+ }
+ let _ = common_lead;
+ return Some(out);
+ }
+
  // **Batched matmul family** — covers three patterns via the
  // same `linalg.batch_matmul` kernel, with stride-0 broadcast
  // for the 2-D operand cases:
