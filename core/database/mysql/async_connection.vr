@@ -92,9 +92,27 @@ public type MysqlRequest is
         name: Text,
         reply: OneshotSender<Result<(), DbError>>,
     }
+    /// Open a streaming LOAD DATA LOCAL INFILE session. Actor
+    /// takes over the wire, acks via `ack`, then drives a sub-loop
+    /// reading from `chunk_rx` until Done/Cancel — same pattern
+    /// as PG's ReqCopyInOpen.
+    | MyReqLoadDataLocalOpen {
+        sql: Text,
+        chunk_rx: Receiver<LoadDataChunk>,
+        ack: OneshotSender<Result<(), DbError>>,
+    }
     | MyReqShutdown {
         reply: OneshotSender<Result<(), DbError>>,
     };
+
+/// Per-chunk write event the LOAD-DATA sub-loop pulls from its
+/// dedicated channel. `LdcDone` carries a oneshot the writer's
+/// `finish()` future awaits — replies with the OK packet's
+/// affected_rows count.
+public type LoadDataChunk is
+      LdcBytes(List<Byte>)
+    | LdcDone(OneshotSender<Result<Int, DbError>>)
+    | LdcCancel { reason: Text, reply: OneshotSender<Result<(), DbError>> };
 
 // =============================================================================
 // Public handle
@@ -273,10 +291,65 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
                 };
                 let _ = reply.send(r);
             }
+            MyReqLoadDataLocalOpen { sql, chunk_rx, ack } => {
+                run_load_data_subloop(&mut conn, &sql, chunk_rx, ack);
+            }
             MyReqShutdown { reply } => {
                 let r = conn.close();
                 let _ = reply.send(r);
                 break;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// LOAD DATA LOCAL INFILE sub-loop
+// =============================================================================
+
+fn run_load_data_subloop(
+    conn: &mut MysqlConnection,
+    sql: &Text,
+    mut chunk_rx: Receiver<LoadDataChunk>,
+    ack: OneshotSender<Result<(), DbError>>,
+) {
+    match conn.start_load_data_local_session(sql) {
+        Ok(())  => { let _ = ack.send(Ok(())); }
+        Err(e)  => {
+            let _ = ack.send(Err(e));
+            return;
+        }
+    }
+
+    loop {
+        let chunk = match chunk_rx.recv() {
+            Some(c) => c,
+            None    => {
+                // Writer dropped without explicit Done/Cancel —
+                // best-effort cancel on the wire.
+                let _ = conn.cancel_load_data_local_session(&"writer dropped".clone());
+                return;
+            }
+        };
+        match chunk {
+            LdcBytes(b) => {
+                match conn.write_load_data_chunk(b.as_slice()) {
+                    Ok(())  => {}
+                    Err(_)  => {
+                        let _ = conn.cancel_load_data_local_session(&"write failed".clone());
+                        return;
+                    }
+                }
+            }
+            LdcDone(reply) => {
+                let r = conn.finish_load_data_local_session();
+                let _ = reply.send(r);
+                return;
+            }
+            LdcCancel { reason, reply } => {
+                let r = conn.cancel_load_data_local_session(&reason);
+                let _ = reply.send(r);
+                return;
             }
         }
     }

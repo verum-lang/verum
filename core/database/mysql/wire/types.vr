@@ -72,7 +72,8 @@ public const SPINDLE_CLIENT_FLAGS: Int =
     | CAP_TRANSACTIONS
     | CAP_LONG_FLAG
     | CAP_DEPRECATE_EOF
-    | CAP_MULTI_RESULTS;
+    | CAP_MULTI_RESULTS
+    | CAP_LOCAL_FILES;
 
 // -----------------------------------------------------------------------------
 // Status flags (in EOF / OK packets).
