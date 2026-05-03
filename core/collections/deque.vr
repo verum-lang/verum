@@ -233,6 +233,7 @@ implement<T> Deque<T> {
 
     // Get front element by value copy.
     // Returns Maybe<T> (value copy) for AOT compatibility.
+    @inline(always)
     public fn front(&self) -> Maybe<T> {
         if self.len == 0 {
             None
@@ -242,6 +243,7 @@ implement<T> Deque<T> {
     }
 
     // Get mutable reference to front element.
+    @inline(always)
     public fn front_mut(&mut self) -> Maybe<&mut T> {
         if self.len == 0 {
             None
@@ -252,6 +254,7 @@ implement<T> Deque<T> {
 
     // Get back element by value copy.
     // Returns Maybe<T> (value copy) for AOT compatibility.
+    @inline(always)
     public fn back(&self) -> Maybe<T> {
         if self.len == 0 {
             None
@@ -262,6 +265,7 @@ implement<T> Deque<T> {
     }
 
     // Get mutable reference to back element.
+    @inline(always)
     public fn back_mut(&mut self) -> Maybe<&mut T> {
         if self.len == 0 {
             None
@@ -273,6 +277,7 @@ implement<T> Deque<T> {
 
     // Get element by logical index (value copy).
     // Returns Maybe<T> (value copy) for AOT compatibility.
+    @inline(always)
     public fn get(&self, idx: Int) -> Maybe<T> {
         if idx < 0 || idx >= self.len {
             None
@@ -283,6 +288,7 @@ implement<T> Deque<T> {
     }
 
     // Get mutable element by logical index.
+    @inline(always)
     public fn get_mut(&mut self, idx: Int) -> Maybe<&mut T> {
         if idx < 0 || idx >= self.len {
             None

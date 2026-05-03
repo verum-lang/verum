@@ -56,16 +56,19 @@ implement<T> [T] {
     // =========================================================================
 
     /// Length of the slice.
+    @inline(always)
     fn len(&self) -> Int {
         slice_len(self) as Int
     }
 
     /// Check if slice is empty.
+    @inline(always)
     fn is_empty(&self) -> Bool {
         self.len() == 0
     }
 
     /// Get raw pointer to first element.
+    @inline(always)
     fn as_ptr(&self) -> &unsafe T {
         slice_as_ptr(self)
     }
@@ -75,6 +78,7 @@ implement<T> [T] {
     // =========================================================================
 
     /// Get element by index.
+    @inline(always)
     fn get(&self, idx: Int) -> Maybe<&T> {
         if idx >= 0 && idx < self.len() {
             Some(&self[idx])
@@ -86,16 +90,19 @@ implement<T> [T] {
     /// Get element by index without bounds checking.
     /// # Safety
     /// Index must be in bounds.
+    @inline(always)
     unsafe fn get_unchecked(&self, idx: Int) -> &T {
         slice_get_unchecked(self, idx as USize)
     }
 
     /// Get first element.
+    @inline(always)
     fn first(&self) -> Maybe<&T> {
         if self.is_empty() { None } else { Some(&self[0]) }
     }
 
     /// Get last element.
+    @inline(always)
     fn last(&self) -> Maybe<&T> {
         if self.is_empty() { None } else { Some(&self[self.len() - 1]) }
     }

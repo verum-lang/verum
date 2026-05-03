@@ -199,21 +199,25 @@ public type Iterator is protocol {
     // =========================================================================
 
     /// Map each element with a function.
+    @inline(always)
     fn map<B, F: fn(Self.Item) -> B>(self, f: F) -> MappedIter<Self, F> {
         MappedIter { iter: self, f: f }
     }
 
     /// Filter elements by predicate.
+    @inline(always)
     fn filter<P: fn(&Self.Item) -> Bool>(self, predicate: P) -> FilterIter<Self, P> {
         FilterIter { iter: self, predicate: predicate }
     }
 
     /// Filter && map in one step.
+    @inline(always)
     fn filter_map<B, F: fn(Self.Item) -> Maybe<B>>(self, f: F) -> FilterMapIter<Self, F> {
         FilterMapIter { iter: self, f: f }
     }
 
     /// Flatten nested iterators.
+    @inline(always)
     fn flat_map<U: Iterator, F: fn(Self.Item) -> U>(self, f: F) -> FlatMapIter<Self, U, F> {
         FlatMapIter {
             iter: self,
@@ -223,47 +227,56 @@ public type Iterator is protocol {
     }
 
     /// Flatten an iterator of iterators into a single iterator.
+    @inline(always)
     fn flatten<U: Iterator>(self) -> FlattenIter<Self, U>
     where Self.Item: IntoIterator<IntoIter = U> {
         FlattenIter { outer: self, inner: None }
     }
 
     /// Take first n elements.
+    @inline(always)
     fn take(self, n: Int) -> TakeIter<Self> {
         TakeIter { iter: self, remaining: n }
     }
 
     /// Skip first n elements.
+    @inline(always)
     fn skip(self, n: Int) -> SkipIter<Self> {
         SkipIter { iter: self, remaining: n }
     }
 
     /// Take elements while predicate is true.
+    @inline(always)
     fn take_while<P: fn(&Self.Item) -> Bool>(self, predicate: P) -> TakeWhileIter<Self, P> {
         TakeWhileIter { iter: self, predicate: predicate, done: false }
     }
 
     /// Skip elements while predicate is true.
+    @inline(always)
     fn skip_while<P: fn(&Self.Item) -> Bool>(self, predicate: P) -> SkipWhileIter<Self, P> {
         SkipWhileIter { iter: self, predicate: predicate, done: false }
     }
 
     /// Chain with another iterator.
+    @inline(always)
     fn chain<U: Iterator<Item = Self.Item>>(self, other: U) -> ChainIter<Self, U> {
         ChainIter { first: Some(self), second: other }
     }
 
     /// Zip with another iterator.
+    @inline(always)
     fn zip<U: Iterator>(self, other: U) -> ZipIter<Self, U> {
         ZipIter { a: self, b: other }
     }
 
     /// Add index to each element.
+    @inline(always)
     fn enumerate(self) -> EnumerateIter<Self> {
         EnumerateIter { iter: self, index: 0 }
     }
 
     /// Allow peeking at next element.
+    @inline(always)
     fn peekable(self) -> PeekableIter<Self> {
         PeekableIter { iter: self, peeked: None }
     }
@@ -275,6 +288,7 @@ public type Iterator is protocol {
     }
 
     /// Interleave with another iterator.
+    @inline(always)
     fn interleave<U: Iterator<Item = Self.Item>>(self, other: U) -> InterleaveIter<Self, U> {
         InterleaveIter { a: self, b: other, turn_a: true }
     }
@@ -291,6 +305,7 @@ public type Iterator is protocol {
     }
 
     /// Fuse the iterator (returns None forever after first None).
+    @inline(always)
     fn fuse(self) -> FuseIter<Self> {
         FuseIter { iter: Some(self) }
     }
