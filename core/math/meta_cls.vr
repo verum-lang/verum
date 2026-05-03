@@ -27,6 +27,11 @@
 // (Stabilisation, 3 conjuncts).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.meta_cls;
 
 mount core.math.frameworks.msfs.key_symbols.{InfinityNCat};

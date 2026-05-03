@@ -6,6 +6,11 @@
 // Spec: docs/detailed/16-context-system.md Section 2
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module provider;
 
 mount super.scope.Scope;

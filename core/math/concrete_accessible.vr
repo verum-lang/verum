@@ -46,6 +46,11 @@
 //  (accessibility theorems).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.concrete_accessible;
 
 mount core.math.accessible.{

@@ -108,6 +108,11 @@
 // Spec: docs/detailed/26-cbgr-implementation.md Section 4 (Arena Integration)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module arena;
 
 mount super.header.{AllocationHeader, HEADER_SIZE, FLAG_ARENA};

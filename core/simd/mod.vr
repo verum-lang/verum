@@ -45,6 +45,11 @@
 
 // GPU compute types and kernel API (CUDA, ROCm, Metal, Vulkan)
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.simd;
 public module gpu;
 // High-level byte-scan primitives built on portable SIMD —

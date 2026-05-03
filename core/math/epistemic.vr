@@ -30,6 +30,11 @@
 //  - core/math/kan_extension.vr (InfLeftKanExtension, InfRightKanExtension)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.epistemic;
 
 mount core.math.infinity_topos.{

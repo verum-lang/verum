@@ -441,40 +441,55 @@ pub fn check_dependency_cycle(
     None
 }
 
-/// Helper: cycle detection in the composition graph (DFS-based).
+/// Helper: cycle detection in the composition graph.  Returns true
+/// iff `cog_name` is itself a member of a strongly-connected
+/// component of size > 1 OR has a self-loop.  Pure reachability to
+/// some cyclic component (without `cog_name` participating) does
+/// NOT trigger — the spec asks "does the cog belong to a cycle?",
+/// not "does the cog see a cycle anywhere downstream?".
 fn has_cycle_involving(cog_name: &str, edges: &[(String, Vec<String>)]) -> bool {
     use std::collections::{HashMap, HashSet};
     let graph: HashMap<&str, &[String]> = edges
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_slice()))
         .collect();
-    let mut visiting: HashSet<&str> = HashSet::new();
+    // Walk every direct successor of `cog_name` and check whether
+    // `cog_name` is reachable from it.  If any successor reaches
+    // back to `cog_name`, there's a cycle through `cog_name`.
+    let starts: &[String] = match graph.get(cog_name) {
+        Some(s) => s,
+        None => return false,
+    };
+    for start in starts {
+        if reachable_from(start.as_str(), cog_name, &graph) {
+            return true;
+        }
+    }
+    false
+}
+
+fn reachable_from<'a>(
+    start: &'a str,
+    target: &'a str,
+    graph: &std::collections::HashMap<&'a str, &'a [String]>,
+) -> bool {
+    use std::collections::HashSet;
     let mut visited: HashSet<&str> = HashSet::new();
-    fn dfs<'a>(
-        node: &'a str,
-        graph: &HashMap<&'a str, &'a [String]>,
-        visiting: &mut std::collections::HashSet<&'a str>,
-        visited: &mut std::collections::HashSet<&'a str>,
-    ) -> bool {
-        if visiting.contains(node) {
-            return true; // cycle found
+    let mut stack: Vec<&str> = vec![start];
+    while let Some(node) = stack.pop() {
+        if node == target {
+            return true;
         }
-        if visited.contains(node) {
-            return false;
+        if !visited.insert(node) {
+            continue;
         }
-        visiting.insert(node);
         if let Some(neighbours) = graph.get(node) {
             for n in *neighbours {
-                if dfs(n.as_str(), graph, visiting, visited) {
-                    return true;
-                }
+                stack.push(n.as_str());
             }
         }
-        visiting.remove(node);
-        visited.insert(node);
-        false
     }
-    dfs(cog_name, &graph, &mut visiting, &mut visited)
+    false
 }
 
 /// ATS-V-AP-004 — TierMixing.

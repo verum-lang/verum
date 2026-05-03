@@ -17,6 +17,11 @@
 // - Histogram → "histogram" with _bucket{le="..."}, _sum, _count series
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.metrics.prometheus;
 
 mount core.*;

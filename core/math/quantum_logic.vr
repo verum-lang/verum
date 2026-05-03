@@ -48,6 +48,11 @@
 // Dependencies: core.math.{algebra, linalg, category}, core.math.epistemic
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.quantum_logic;
 
 mount core.math.algebra.{

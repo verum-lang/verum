@@ -57,6 +57,11 @@
 //  - core/math/kan_extension.vr (coend as a Kan extension)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.day_convolution;
 
 mount core.math.category.{

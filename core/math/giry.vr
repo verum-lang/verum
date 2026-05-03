@@ -30,6 +30,11 @@
 // Formal obligations discharged via @verify(formal) and `proof by auto`.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.giry;
 
 mount core.math.category.{Functor, Monad, KleisliCategory};

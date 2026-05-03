@@ -33,6 +33,10 @@
 // Spec: docs/architecture/math-spec.md Section 1.1
 // =============================================================================
 
+// TODO(ats-v): @arch_module declaration deferred — line 368
+// re-exports `super.elementary.trunc`, creating a real
+// elementary ↔ ieee754 cycle.  Adopting @arch_module here surfaces
+// AP-003 DependencyCycle until the architectural cycle is broken.
 module core.math.ieee754;
 
 mount super.constants.{INFINITY, NEG_INFINITY, MAX_FLOAT};

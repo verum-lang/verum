@@ -47,6 +47,11 @@
 // Spec: docs/architecture/observability.md (TODO)
 // =============================================================================
 
+// TODO(ats-v): @arch_module declaration deferred — `super.cap_audit_ring`
+// mount + cap_audit_ring's reciprocal `super.cap_audit` mount creates a
+// real cap_audit ↔ cap_audit_ring cycle.  Adopting @arch_module here
+// surfaces AP-003 DependencyCycle until the architectural cycle is
+// broken (likely via a shared `cap_audit_event` module both can mount).
 module core.mem.cap_audit;
 
 mount super.capability.{

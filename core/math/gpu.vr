@@ -80,6 +80,11 @@
 // Spec: docs/architecture/math-spec.md#part-vi-gpu-compute
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.gpu;
 
 mount core.types.{USize, U8, U16, U32, U64, Int, Float, F64, Bool, Text};

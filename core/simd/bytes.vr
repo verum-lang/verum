@@ -50,6 +50,11 @@
 
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.simd.bytes;
 mount core.*;
 mount core.simd.mod.{Vec, Mask, Vec16b, Vec32b, Vec64b};

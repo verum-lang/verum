@@ -32,6 +32,11 @@
 //  - grammar/verum.ebnf §tactic_decl, §tactic_expr
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.tactics;
 
 mount core.math.category.{Category, Functor, NatTrans, Monad};
