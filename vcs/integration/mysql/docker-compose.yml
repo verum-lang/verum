@@ -45,6 +45,7 @@ services:
         --gtid-mode=ON
         --enforce-gtid-consistency=ON
         --binlog-checksum=NONE
+        --local-infile=ON
     tmpfs:
       - /var/lib/mysql:rw,size=512m
     healthcheck:

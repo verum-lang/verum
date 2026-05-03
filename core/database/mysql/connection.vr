@@ -730,6 +730,179 @@ implement MysqlConnection {
         let pkt = recv_packet(self)?;
         Ok(pkt.into_payload())
     }
+
+    // -------------------------------------------------------------------------
+    // LOAD DATA LOCAL INFILE — session-style sync surface
+    // -------------------------------------------------------------------------
+    //
+    // Wire flow (per MySQL src/sql/sql_load.cc):
+    //   1. Client sends COM_QUERY with the
+    //      `LOAD DATA LOCAL INFILE 'name' INTO TABLE …` text.
+    //   2. Server replies with a `0xFB`-prefixed Local Infile
+    //      Request packet (the rest of the payload is the
+    //      requested filename — purely informational; the
+    //      caller already knows what they sent).
+    //   3. Client streams data packets — each packet body is
+    //      raw file bytes (TSV / CSV per the server's expected
+    //      format).
+    //   4. Empty packet (length 0) terminates the stream.
+    //   5. Server replies with OK (with affected_rows) or ERR.
+    //
+    // The async wrapper (`async_load_data.vr`) drives this from
+    // a sub-loop, taking chunks via mpsc channel.
+
+    /// Send the COM_QUERY containing the LOAD DATA LOCAL INFILE
+    /// statement and wait for the server's Local Infile Request
+    /// packet. After this returns Ok, the connection is mid-
+    /// transfer: subsequent `write_load_data_chunk` writes feed
+    /// the server, and either `finish_load_data_local_session`
+    /// or `cancel_load_data_local_session` terminates.
+    public fn start_load_data_local_session(&mut self, sql: &Text)
+        -> Result<(), DbError>
+    {
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "start_load_data_local_session requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = McsBusy;
+        self.sequence = 0;
+        let payload = com_query(sql);
+        send_packet(self, payload.as_slice())?;
+
+        // First reply must be a Local Infile Request (0xFB prefix).
+        // Any other classification = the server didn't honour our
+        // request — typically ER_NOT_ALLOWED_COMMAND when LOCAL
+        // INFILE is disabled server-side.
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        let kind = classify(body.as_slice(), self.capabilities);
+        match kind {
+            SkLocalInfile => Ok(()),
+            SkError => {
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("LOAD_DATA ERR")); }
+                };
+                self.state = McsReady;
+                Err(dberr_from_mysql(err))
+            }
+            SkOk => {
+                // Server returned OK without asking for data —
+                // means LOCAL was rewritten to non-LOCAL or the
+                // statement was a no-op. Bookkeeping says we
+                // didn't enter the data-streaming substate, so
+                // return to Ready.
+                self.state = McsReady;
+                Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdMysql,
+                    code: "LOAD_DATA_NO_REQUEST".clone(),
+                    message: "server returned OK without Local Infile Request".clone(),
+                    retryable: false,
+                }))
+            }
+            _ => Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "LOAD_DATA_BAD_STATE".clone(),
+                message: "unexpected packet kind awaiting Local Infile Request".clone(),
+                retryable: false,
+            })),
+        }
+    }
+
+    /// Send one data packet mid-transfer. `start_load_data_local_session`
+    /// must have returned Ok first. Empty `bytes` would terminate
+    /// the stream — callers should use `finish_load_data_local_session`
+    /// to close cleanly instead.
+    public fn write_load_data_chunk(&mut self, bytes: &[Byte])
+        -> Result<(), DbError>
+    {
+        send_packet(self, bytes)
+    }
+
+    /// Send the empty terminator packet, read OK, return
+    /// affected_rows from the OK packet. ERR surfaces as DbError
+    /// after the wire is drained back to Ready.
+    public fn finish_load_data_local_session(&mut self) -> Result<Int, DbError> {
+        // Empty packet terminates the stream.
+        let empty: List<Byte> = List.new();
+        send_packet(self, empty.as_slice())?;
+
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        let kind = classify(body.as_slice(), self.capabilities);
+        match kind {
+            SkOk => {
+                let ok = match parse_ok(body.as_slice(), self.capabilities) {
+                    Ok(p)  => p,
+                    Err(_) => { return Err(bad_decode("LOAD_DATA OK")); }
+                };
+                self.state = McsReady;
+                Ok(ok.affected_rows)
+            }
+            SkError => {
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("LOAD_DATA finish ERR")); }
+                };
+                self.state = McsReady;
+                Err(dberr_from_mysql(err))
+            }
+            _ => {
+                self.state = McsFailed;
+                Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdMysql,
+                    code: "LOAD_DATA_BAD_REPLY".clone(),
+                    message: "unexpected packet kind after empty terminator".clone(),
+                    retryable: false,
+                }))
+            }
+        }
+    }
+
+    /// Abort an in-progress LOAD DATA. MySQL has no in-band
+    /// "cancel" — sending the empty terminator will cause the
+    /// server to apply whatever data was already written, but
+    /// since the streamed bytes were truncated relative to what
+    /// the SQL statement implied, the server typically reports
+    /// an ERR (no-rows / partial-row). We surface that ERR.
+    /// `reason` is logged in the error message but never sent
+    /// over the wire (no slot for a reason in the protocol).
+    public fn cancel_load_data_local_session(&mut self, reason: &Text)
+        -> Result<(), DbError>
+    {
+        // Empty terminator + drain whatever the server returns.
+        let empty: List<Byte> = List.new();
+        let _ = send_packet(self, empty.as_slice());
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        let kind = classify(body.as_slice(), self.capabilities);
+        self.state = McsReady;
+        match kind {
+            SkOk    => Ok(()),
+            SkError => {
+                // Annotate the underlying server error with the
+                // caller-supplied reason so logs see both sides.
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("LOAD_DATA cancel ERR")); }
+                };
+                let mut underlying = dberr_from_mysql(err);
+                let _ = reason;
+                Err(underlying)
+            }
+            _ => Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "LOAD_DATA_CANCEL_BAD_REPLY".clone(),
+                message: f"unexpected packet kind after cancel ({reason})",
+                retryable: false,
+            })),
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------

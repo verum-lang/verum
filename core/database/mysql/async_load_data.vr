@@ -1,0 +1,173 @@
+// =============================================================================
+// core/database/mysql/async_load_data.vr — async LOAD DATA LOCAL INFILE V0
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.6 (async surface),
+//       §6.3.8 (LOAD DATA LOCAL INFILE).
+// =============================================================================
+//
+// Mirror of `core/database/postgres/async_copy.vr` (CopyIn) for
+// MySQL. PG ships streaming COPY FROM via async actor sub-loop;
+// MySQL has the equivalent in COM_QUERY + Local Infile Request +
+// data packets.
+//
+// Wire flow (per MySQL src/sql/sql_load.cc):
+//   1. Client sends COM_QUERY with the
+//      `LOAD DATA LOCAL INFILE 'name' INTO TABLE …` text.
+//   2. Server replies with a `0xFB`-prefixed Local Infile
+//      Request packet.
+//   3. Client streams data packets — each packet body is raw
+//      file bytes (TSV / CSV per the server's expected format).
+//   4. Empty packet (length 0) terminates the stream.
+//   5. Server replies with OK (with affected_rows) or ERR.
+//
+// Architecture — sub-actor takeover (same pattern as PG async
+// COPY): when the actor processes ReqLoadDataLocalOpen it acks
+// the caller, then ENTERS A SUB-LOOP reading from a per-session
+// chunk channel until the writer signals Done or Cancel. While
+// in the sub-loop the main mailbox is paused — fine, the wire's
+// busy.
+//
+// V0 surface:
+//   * load_data_local_async(conn, sql, chunk_capacity)
+//       → AsyncMysqlInfileWriter
+//   * AsyncMysqlInfileWriter (affine):
+//       .write(bytes).await  → Result<(), DbError>
+//       .finish().await      → Result<affected_rows, DbError>
+//       .cancel(reason).await → Result<(), DbError>
+//
+// Sync wire path (`load_data_local_session_*` family on
+// MysqlConnection) canonical / unchanged. Pure layered wrapper.
+//
+// OUT of V0:
+//   * Per-chunk MAX_RATE shaping.
+//   * Built-in CSV / TSV row formatter (caller pre-formats the
+//     bytes to match the server's expected delimiter).
+//   * COM_QUERY_FIELDS for explicit column list.
+//   * Binary-format LOAD DATA LOCAL INFILE.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.DatabaseMedium("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.async_load_data;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.async_connection.{
+    AsyncMysqlConnection, MysqlRequest, MyReqLoadDataLocalOpen,
+    LoadDataChunk, LdcBytes, LdcDone, LdcCancel,
+};
+mount core.async.channel.{
+    Sender, Receiver, OneshotSender,
+    bounded_channel, oneshot,
+};
+
+// =============================================================================
+// Caller-side handle
+// =============================================================================
+
+/// Affine writer for LOAD DATA LOCAL INFILE. Send bytes via
+/// `write`; finish with `finish` to commit (returns server-
+/// reported affected_rows) or abort with `cancel`. Drop without
+/// either sends a best-effort cancel from the actor side once
+/// the chunk channel closes.
+public type affine AsyncMysqlInfileWriter is {
+    chunk_tx: Sender<LoadDataChunk>,
+};
+
+implement AsyncMysqlInfileWriter {
+    public async fn write(&self, bytes: List<Byte>) -> Result<(), DbError> {
+        match self.chunk_tx.send_async(LdcBytes(bytes)).await {
+            Ok(())  => Ok(()),
+            Err(_)  => Err(actor_dropped("load_data.write")),
+        }
+    }
+
+    public async fn finish(self) -> Result<Int, DbError> {
+        let (rs, rr) = oneshot();
+        match self.chunk_tx.send_async(LdcDone(rs)).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("load_data.finish send")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("load_data.finish reply")),
+        }
+    }
+
+    public async fn cancel(self, reason: &Text) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.chunk_tx.send_async(LdcCancel {
+            reason: reason.clone(),
+            reply: rs,
+        }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("load_data.cancel send")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("load_data.cancel reply")),
+        }
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+/// Open a streaming LOAD DATA LOCAL INFILE session. The actor
+/// issues `sql` (typically of the form
+/// `LOAD DATA LOCAL INFILE 'whatever' INTO TABLE … FIELDS …`)
+/// and drives the wire to the Local Infile Request before this
+/// returns Ok; the writer is then ready to `write` chunks.
+///
+/// `chunk_capacity` bounds in-flight chunks (back-pressures the
+/// caller via `write`'s send_async future). 4 chunks × ~64 KB
+/// each ≈ 256 KB upper bound on in-flight memory per active
+/// LOAD DATA.
+public async fn load_data_local_async(
+    conn: &AsyncMysqlConnection,
+    sql: &Text,
+    chunk_capacity: Int,
+) -> Result<AsyncMysqlInfileWriter, DbError> {
+    let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
+    let (chunk_tx, chunk_rx) = bounded_channel::<LoadDataChunk>(cap);
+    let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
+
+    match conn.tx_ref().send_async(MyReqLoadDataLocalOpen {
+        sql: sql.clone(),
+        chunk_rx: chunk_rx,
+        ack: open_tx,
+    }).await {
+        Ok(())  => {}
+        Err(_)  => { return Err(actor_dropped("load_data_local_async send")); }
+    }
+    match open_rx.await {
+        Ok(Ok(()))  => {}
+        Ok(Err(e))  => { return Err(e); }
+        Err(_)      => { return Err(actor_dropped("load_data_local_async ack")); }
+    }
+    Ok(AsyncMysqlInfileWriter { chunk_tx: chunk_tx })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "ACTOR_CLOSED".clone(),
+        message: f"async MySQL actor unavailable during {what}",
+        retryable: false,
+    })
+}
