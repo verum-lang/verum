@@ -30,6 +30,11 @@
 // Spec: docs/detailed/05-syntax-grammar.md
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.intrinsics.memory;
 
 mount core.intrinsics.type_info.{size_of};
@@ -282,12 +287,19 @@ public fn maybe_uninit_is_init<T>(val: &T) -> Bool { @intrinsic("maybe_uninit_is
 // =============================================================================
 // SECTION 6: Volatile Operations
 // =============================================================================
-
-/// Volatile load (not optimized away, for memory-mapped I/O)
-public fn volatile_load<T>(ptr: *const T) -> T { @intrinsic("volatile_load", ptr) }
-
-/// Volatile store (not optimized away, for memory-mapped I/O)
-public fn volatile_store<T>(ptr: *mut T, val: T) { @intrinsic("volatile_store", ptr, val) }
+//
+// `volatile_load` and `volatile_store` are declared in
+// `core/intrinsics/lowlevel/mmio.vr` with the canonical
+// `*volatile T` / `*volatile mut T` pointer kind so the type
+// checker can enforce MMIO discipline at the call site.  The
+// previous `*const T` / `*mut T` declarations here were stale
+// duplicates that overrode the volatile-typed ones during name
+// resolution and rejected legitimate MMIO call sites.
+//
+// `volatile_copy` and `volatile_set` keep the `*const`/`*mut`
+// signatures because they're memory-block primitives whose
+// arguments are typically generic byte buffers, not single-
+// register volatile slots.
 
 /// Volatile copy memory
 public fn volatile_copy<T>(src: *const T, dst: *mut T, count: USize) {
