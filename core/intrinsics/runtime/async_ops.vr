@@ -21,6 +21,11 @@ module core.intrinsics.runtime.async_ops;
 /// Opaque handle for async join results (actual type: async.task.JoinHandle<T>)
 public type RawJoinHandleOpaque is (*const Byte);
 
+/// Public alias — short canonical name; conformance tests expect
+/// `JoinHandleOpaque` from the canonical re-export through
+/// `core.intrinsics`.
+public type JoinHandleOpaque is RawJoinHandleOpaque;
+
 /// Opaque handle for executors (actual type: implements async.Executor protocol)
 public type RawExecutorHandle is (*const Byte);
 
@@ -44,6 +49,9 @@ public type RawCircuitBreakerOpaque is (*const Byte);
 
 /// Opaque handle for allocator
 public type RawAllocHandle is (*const Byte);
+
+/// Public alias — short canonical name.
+public type AllocHandle is RawAllocHandle;
 
 /// Opaque handle for I/O driver
 public type RawIODriverHandle is (*const Byte);
