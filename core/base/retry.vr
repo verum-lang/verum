@@ -1,0 +1,218 @@
+// =============================================================================
+// retry.vr - Retry-with-backoff combinators for Result<T, E>
+// =============================================================================
+// Layer: 1 (Foundation utility — depends on core.base.result + core.intrinsics)
+//
+// Architectural rationale: separating these helpers from the Result type
+// itself keeps `core/base/result.vr` foundation-clean (no `mount
+// core.intrinsics` dependency).  The retry helpers genuinely need
+// runtime primitives (sleep_ms, random_float), so they live in their
+// own module that mounts both `core.base.result` (for the Result type)
+// and `core.intrinsics` (for the runtime primitives).
+//
+// Pre-extraction this code lived inline in `core/base/result.vr` and
+// created an architectural cycle:
+//   core.base.result → core.intrinsics → core.intrinsics.control →
+//   core.base.result
+// surfaced by ATS-V-AP-003 DependencyCycle on the cross-cog walker.
+// Extracting unblocks @arch_module on `core.base.result` while
+// preserving identical retry semantics for callers (call site:
+// `retry_with_strategy(op, config)` instead of `Result.retry_with_strategy(...)`).
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.base.retry;
+
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.intrinsics.{sleep_ms, random_float};
+
+// =============================================================================
+// Backoff Strategy
+// =============================================================================
+
+/// Strategy for calculating delay between retry attempts.
+public type RetryBackoff is
+    /// No delay between retries.
+    | None
+    /// Constant delay between retries.
+    | Linear { delay_ms: Int }
+    /// Exponential backoff: delay doubles each attempt.
+    | Exponential { initial_ms: Int, max_ms: Int, multiplier: Float }
+    /// Exponential with random jitter to prevent thundering herd.
+    | ExponentialJitter { initial_ms: Int, max_ms: Int, multiplier: Float, jitter_factor: Float };
+
+implement RetryBackoff {
+    /// Calculate delay for the given attempt number (0-indexed).
+    public fn delay_for_attempt(&self, attempt: Int) -> Int {
+        match self {
+            None => 0,
+            Linear { delay_ms } => *delay_ms,
+            Exponential { initial_ms, max_ms, multiplier } => {
+                let delay = (*initial_ms as Float) * multiplier.pow(attempt as Float);
+                delay.min(*max_ms as Float).round() as Int
+            }
+            ExponentialJitter { initial_ms, max_ms, multiplier, jitter_factor } => {
+                let base_delay = (*initial_ms as Float) * multiplier.pow(attempt as Float);
+                let jitter = base_delay * jitter_factor * random_float();
+                let delay = base_delay + jitter;
+                delay.min(*max_ms as Float).round() as Int
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Retry Configuration
+// =============================================================================
+
+/// Configuration for retry behavior.
+public type RetryOptions<E> is {
+    /// Maximum number of attempts (including initial attempt).
+    max_attempts: Int,
+    /// Backoff strategy between attempts.
+    strategy: RetryBackoff,
+    /// Predicate to determine if error is retryable.
+    should_retry: fn(&E) -> Bool,
+};
+
+implement<E> RetryOptions<E> {
+    /// Create a simple config with max attempts and no delay.
+    public fn simple(max_attempts: Int) -> RetryOptions<E> {
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.None,
+            should_retry: |_| true,
+        }
+    }
+
+    /// Replace the should-retry predicate.
+    public fn with_should_retry(self, predicate: fn(&E) -> Bool) -> RetryOptions<E> {
+        RetryOptions {
+            max_attempts: self.max_attempts,
+            strategy: self.strategy,
+            should_retry: predicate,
+        }
+    }
+}
+
+// =============================================================================
+// Retry Combinators (free functions over Result)
+// =============================================================================
+
+/// Retry an operation with a custom retry configuration.
+public fn retry_with_strategy<T, E: Clone, F: fn() -> Result<T, E>>(
+    operation: F,
+    config: RetryOptions<E>,
+) -> Result<T, E> {
+    assert(
+        config.max_attempts >= 1,
+        "retry_with_strategy: max_attempts must be >= 1",
+    );
+
+    let mut attempt = 0;
+    let mut last_error: Maybe<E> = None;
+
+    while attempt < config.max_attempts {
+        match operation() {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                if attempt + 1 >= config.max_attempts {
+                    return Err(e);
+                }
+                if !(config.should_retry)(&e) {
+                    return Err(e);
+                }
+                last_error = Some(e.clone());
+                let delay = config.strategy.delay_for_attempt(attempt);
+                sleep_ms(delay);
+                attempt = attempt + 1;
+            }
+        }
+    }
+
+    // Provably dead given `max_attempts >= 1` (asserted above).
+    match last_error {
+        Some(e) => Err(e),
+        None => panic("retry: invariant violation — loop exited without returning"),
+    }
+}
+
+/// Retry an operation with exponential backoff.
+public fn retry<T, E: Clone, F: fn() -> Result<T, E>>(
+    max_attempts: Int,
+    initial_delay_ms: Int,
+    max_delay_ms: Int,
+    operation: F,
+) -> Result<T, E> {
+    retry_with_strategy(
+        operation,
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.Exponential {
+                initial_ms: initial_delay_ms,
+                max_ms: max_delay_ms,
+                multiplier: 2.0,
+            },
+            should_retry: |_| true,
+        }
+    )
+}
+
+/// Retry with linear backoff.
+public fn retry_linear<T, E: Clone, F: fn() -> Result<T, E>>(
+    max_attempts: Int,
+    delay_ms: Int,
+    operation: F,
+) -> Result<T, E> {
+    retry_with_strategy(
+        operation,
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.Linear { delay_ms: delay_ms },
+            should_retry: |_| true,
+        }
+    )
+}
+
+/// Retry with no delay between attempts.
+public fn retry_immediate<T, E: Clone, F: fn() -> Result<T, E>>(
+    max_attempts: Int,
+    operation: F,
+) -> Result<T, E> {
+    retry_with_strategy(
+        operation,
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.None,
+            should_retry: |_| true,
+        }
+    )
+}
+
+/// Retry with jittered exponential backoff.
+/// Adds random jitter to prevent thundering herd.
+public fn retry_jittered<T, E: Clone, F: fn() -> Result<T, E>>(
+    max_attempts: Int,
+    initial_delay_ms: Int,
+    max_delay_ms: Int,
+    operation: F,
+) -> Result<T, E> {
+    retry_with_strategy(
+        operation,
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.ExponentialJitter {
+                initial_ms: initial_delay_ms,
+                max_ms: max_delay_ms,
+                multiplier: 2.0,
+                jitter_factor: 0.1,
+            },
+            should_retry: |_| true,
+        }
+    )
+}
