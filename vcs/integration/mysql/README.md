@@ -63,6 +63,7 @@ plugin Spindle accepts in the safe path).
 | `t13_async_load_data.vr` | async LOAD DATA LOCAL INFILE: stream 1000 TSV rows in 10 chunks of 100 via AsyncMysqlInfileWriter; assert affected_rows == 1000 + verify persistence via COUNT(*) (spec §6.3.6 + §6.3.8) |
 | `t14_binlog_enum_set.vr` | TABLE_MAP optional metadata (binlog_row_metadata=FULL) + ENUM/SET decoders: ENUM('small','medium','large') decoded as RvText("small"); SET('alpha','beta','gamma','delta') with bits {alpha,gamma} decoded as RvText("alpha,gamma"); column_names + enum_values + set_values populated on TableMapEvent (spec §6.3.7.1) |
 | `t15_multi_query.vr` | sync + async multi-statement COM_QUERY: INSERT + SELECT LAST_INSERT_ID() + UPDATE in one round-trip; 3 result-sets in declaration order with correct affected_rows / last_insert_id / row count (spec §6.3.3 multi-statement) |
+| `t16_binlog_geometry.vr` | WKB → GeoJSON decoder: ST_GeomFromText('POINT(1 2)') decoded as `{"type":"Point","coordinates":[…]}` JSON text via binlog ROW event; SRID surfaced via GeoJSON `crs` member when non-zero (spec §6.3.7 GEOMETRY decode) |
 
 ## Adding tests
 
