@@ -59479,6 +59479,11 @@ impl TypeChecker {
 
         // CRITICAL: If no explicit type parameters on implement, extract them from the target type
         // This handles: implement Either<L, R> { ... } where L, R are inferred from the type
+        // Also: shadow stdlib type bindings (e.g. `I` -> `Interval`) by saving the prior binding
+        // and restoring it after the impl block. Without this, an impl like
+        // `implement Iterator for MapIterator<I, F>` would resolve `I` to whatever stdlib
+        // type happens to be aliased to that name, defeating the whole impl.
+        let mut shadowed_type_bindings: Vec<(Text, Option<Type>)> = Vec::new();
         if impl_decl.generics.is_empty() {
             let target_type = match &impl_decl.kind {
                 ImplKind::Inherent(for_type) => Some(for_type),
@@ -59500,12 +59505,19 @@ impl TypeChecker {
                                         .next()
                                         .map(|c| c.is_uppercase())
                                         .unwrap_or(false)
-                                        && self.ctx.lookup_type(name).is_none()
                                     {
-                                        let type_var = Type::Var(TypeVar::fresh());
                                         let name_text: Text = name.into();
+                                        let prior = self.ctx.lookup_type(name).cloned();
+                                        // If the prior binding is already a Type::Var
+                                        // (i.e. another impl-level type-param in scope),
+                                        // skip — that one is still valid.
+                                        if matches!(prior, Some(Type::Var(_))) {
+                                            continue;
+                                        }
+                                        let type_var = Type::Var(TypeVar::fresh());
                                         self.ctx.define_type(name_text.clone(), type_var);
-                                        type_param_names.push(name_text);
+                                        type_param_names.push(name_text.clone());
+                                        shadowed_type_bindings.push((name_text, prior));
                                     }
                                 }
                             }
@@ -59541,6 +59553,18 @@ impl TypeChecker {
                             // CRITICAL: Also store for ProtocolImpl.where_clauses
                             // Convert the constrained type to Type
                             let constrained_ty = self.ast_to_type(ty)?;
+
+                            // CRITICAL: Register the protocol bounds on the TypeVar so
+                            // method dispatch inside method bodies of this impl can find
+                            // protocol methods through `I: Iterator` style where-clauses.
+                            // Without this, `self.iter.next()` fails with "no method named
+                            // `next` found for type `I`" because the bound-first dispatch
+                            // in `infer_method_call_inner_impl` calls `get_type_var_bounds`
+                            // which returns empty.
+                            if let Type::Var(tv) = &constrained_ty {
+                                self.register_type_var_bounds(*tv, protocol_bounds.clone());
+                            }
+
                             impl_where_clauses.push(crate::protocol::WhereClause {
                                 ty: constrained_ty.clone(),
                                 bounds: protocol_bounds,
@@ -59923,6 +59947,16 @@ impl TypeChecker {
         // Clean up type parameters from the type context
         for param_name in type_param_names {
             self.ctx.remove_type(&param_name);
+        }
+
+        // Restore any stdlib type bindings we shadowed when extracting implicit
+        // type-params from the for_type (e.g. `I` was a fresh type-var here but
+        // points at `Interval` in the outer scope). Without this restore the
+        // outer scope would lose its binding once we exited.
+        for (name, prior) in shadowed_type_bindings {
+            if let Some(prior_ty) = prior {
+                self.ctx.define_type(name, prior_ty);
+            }
         }
 
         Ok(())
