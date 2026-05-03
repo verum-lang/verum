@@ -75,6 +75,13 @@ use crate::zfc_self_recognition::{KernelRuleId, kernel_meta_soundness_holds, req
 /// MSFS results the reflection tower rests on.  Each variant
 /// carries a `corpus_path()` pointing at the machine-verified
 /// `.vr` file in the MSFS corpus where the theorem is proved.
+///
+/// **Naming convention.** Variants encoding MSFS theorem numbers
+/// (e.g. `MsfsTheorem_9_6_MetaStabilisation`) use underscores to
+/// preserve the published theorem index (9.6, 8.2, 5.1). The
+/// `non_camel_case_types` allow is intentional — the canonical
+/// citation form trumps Rust style here.
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MsfsCitation {
     /// Per-rule footprint enumeration in

@@ -12149,14 +12149,7 @@ fn infer_capabilities_from_mounts(mounts: &[String]) -> Vec<verum_kernel::arch::
 
 /// Stable lifecycle tag for the JSON output.
 fn lifecycle_tag(shape: &verum_kernel::arch::Shape) -> &'static str {
-    use verum_kernel::arch::Lifecycle;
-    match shape.lifecycle {
-        Lifecycle::Hypothesis { .. } => "hypothesis",
-        Lifecycle::Plan { .. } => "plan",
-        Lifecycle::Conditional { .. } => "conditional",
-        Lifecycle::Theorem { .. } => "theorem",
-        Lifecycle::Obsolete { .. } => "obsolete",
-    }
+    shape.lifecycle.tag()
 }
 
 /// Compute the parent module namespace for a cog name.

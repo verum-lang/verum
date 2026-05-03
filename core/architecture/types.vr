@@ -149,15 +149,32 @@ public type ConfidenceLevel is
     | Medium
     | High;
 
-/// Lifecycle stage per spec §4.5.  Transitions form a poset:
-/// `Theorem > Conditional > Plan > Hypothesis > Obsolete`.
-/// `LifecycleRegression` (ATS-V-AP-009) flags cogs citing
-/// strictly-lower-rank cited cogs.
+/// Lifecycle stage per spec §4.5 — CVE 7-symbol taxonomy
+/// (`internal/holon/internal/cve/docs/cve-architecture.md` §3.5).
+///
+/// Rank poset (used by AP-009 LifecycleRegression):
+///   Theorem > {Definition, Conditional} > Postulate > Plan
+///     > Hypothesis > Interpretation > {Retracted, Obsolete}
+///
+/// CVE-glyph mapping:
+///   Hypothesis     = [Г]   speculative
+///   Plan           = (ATS-V legacy, no CVE glyph)
+///   Postulate      = [П]   base assumption (kernel-discharge)
+///   Definition     = [О]   by-fiat boundary
+///   Conditional    = [С]   proven under conditions
+///   Theorem        = [Т]   КВИ⁺ full closure
+///   Interpretation = [И]   KVI-violator (transitional)
+///   Retracted      = [✗]   withdrawn
+///   Obsolete       = [O]   deprecated (legacy)
 public type Lifecycle is
     | Hypothesis(ConfidenceLevel)
     | Plan(Text)
+    | Postulate(Text)
+    | Definition
     | Conditional(List<Text>)
     | Theorem(Text)
+    | Interpretation(Text)
+    | Retracted(Text, Maybe<Text>)
     | Obsolete(Text, Maybe<Text>);
 
 // =============================================================================

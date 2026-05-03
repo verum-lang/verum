@@ -277,15 +277,68 @@ pub enum BoundaryPhysicalLayer {
 /// `LifecycleRegression` anti-pattern (ATS-V-AP-009).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Lifecycle {
- /// Hypothesis — speculation; no implementation.
+    /// `[Г]` Hypothesis — speculation; no implementation.  CVE
+    /// configuration: К partial (formulation only), В absent, И
+    /// absent.  Must carry an explicit "plan to mature" — see CVE
+    /// §3.5 boundary [Г]/[И]: a hypothesis without a maturation
+    /// plan degrades to [И] Interpretation (defective).
     Hypothesis { confidence: ConfidenceLevel },
- /// Plan — committed but not yet implemented.
+    /// `[Plan]` ATS-V legacy variant — "committed but not yet
+    /// implemented" (TODO with target completion date).  Distinct
+    /// from CVE [П]Postulate.  Retained for backward compatibility
+    /// with existing `@arch_module(lifecycle = Lifecycle.Plan(..))`
+    /// declarations.  New code SHOULD prefer:
+    ///   - `Hypothesis` for not-yet-formalised intent
+    ///   - `Postulate` for accepted-without-proof assumptions
+    ///   - `Conditional` for "proven under explicit conditions"
     Plan { target_completion: String },
- /// Conditional — proven under explicit assumptions.
+    /// `[П]` Postulate — base architectural assumption accepted
+    /// without proof at this layer (CVE §3.5).  CVE configuration:
+    /// К accepted, В absent, И accepted.  The kernel-discharge
+    /// axioms in `core/proof/kernel_bridge.vr` are canonical
+    /// examples — admitted-with-citation against an external
+    /// trusted base.
+    Postulate {
+        /// Citation justifying acceptance — typically a
+        /// `@framework(corpus, "...")` reference.
+        citation: String,
+    },
+    /// `[О]` Definition — postulated by fiat, not proven.  CVE
+    /// §3.5 configuration: К present (the definition itself), В
+    /// trivial (definitions are not theorems), И present.  Used
+    /// for foundational types / capability-ontology entries that
+    /// set boundaries rather than discharge them.
+    Definition,
+    /// `[С]` Conditional — proven under explicit assumptions.
+    /// CVE configuration: К ∧ В ∧ И *relative to the listed
+    /// conditions*.  Reading-as-[Т] in the context where the
+    /// conditions hold; outside that context, marked
+    /// non-applicable without losing strength in the original.
     Conditional { conditions: Vec<String> },
- /// Theorem — fully proven, load-bearing.
+    /// `[Т]` Theorem — fully proven, load-bearing.  CVE
+    /// configuration: КВИ⁺ (full triple closure).  Mature
+    /// artifact at the highest class.
     Theorem { since: String },
- /// Obsolete — deprecated, scheduled for removal.
+    /// `[И]` Interpretation — KVI-violator; CVE §3.5 transitional
+    /// status.  All three CVE axes absent AND no plan to mature.
+    /// Permitted ONLY in transitional corpus revisions; mature
+    /// corpus must contain ZERO Interpretation entries (each
+    /// transformed to [Т]/[С] via proof, downgraded to [Г] with
+    /// a maturation plan, or removed).  Annotating a cog as
+    /// Interpretation in strict mode is a defect (AP candidate).
+    Interpretation { reason: String },
+    /// `[✗]` Retracted — previously declared but withdrawn /
+    /// refuted.  Removed from active corpus but record preserved
+    /// in audit chronicle as negative example.  CVE §3.5.
+    Retracted {
+        reason: String,
+        replacement: Option<String>,
+    },
+    /// `[O]` Obsolete — deprecated, scheduled for removal.  Less
+    /// strict than Retracted: the artifact still functions but is
+    /// expected to be replaced.  Legacy ATS-V variant; new code
+    /// SHOULD use `Retracted` for explicit withdrawals and
+    /// `Definition` for the [О] CVE status.
     Obsolete {
         deprecation_reason: String,
         replacement: Option<String>,
@@ -300,29 +353,66 @@ pub enum ConfidenceLevel {
 }
 
 impl Lifecycle {
- /// Stable diagnostic tag.
+    /// Stable diagnostic tag — single-token form used in audit
+    /// JSON, anti-pattern messages, and the dual-audience surface
+    /// per ATS-V §32.4.  Tags align with the CVE 7-symbol canonical
+    /// taxonomy (CVE §3.5).
     pub fn tag(&self) -> &'static str {
         match self {
             Lifecycle::Hypothesis { .. } => "hypothesis",
             Lifecycle::Plan { .. } => "plan",
+            Lifecycle::Postulate { .. } => "postulate",
+            Lifecycle::Definition => "definition",
             Lifecycle::Conditional { .. } => "conditional",
             Lifecycle::Theorem { .. } => "theorem",
+            Lifecycle::Interpretation { .. } => "interpretation",
+            Lifecycle::Retracted { .. } => "retracted",
             Lifecycle::Obsolete { .. } => "obsolete",
         }
     }
 
- /// Lifecycle ordering: `[Т] > [С] > [П] > [Г]`; `[О]` is below
- /// everything (deprecation downstream). Used by
- /// `LifecycleRegression` anti-pattern check (citing must go
- /// from `>=` to `<=` only).
+    /// CVE §3.5 single-character status code — for compact
+    /// rendering in cross-format outputs and stable error codes.
+    pub fn cve_glyph(&self) -> &'static str {
+        match self {
+            Lifecycle::Hypothesis { .. } => "Г",
+            Lifecycle::Plan { .. } => "Plan",   // ATS-V legacy — no CVE glyph
+            Lifecycle::Postulate { .. } => "П",
+            Lifecycle::Definition => "О",
+            Lifecycle::Conditional { .. } => "С",
+            Lifecycle::Theorem { .. } => "Т",
+            Lifecycle::Interpretation { .. } => "И",
+            Lifecycle::Retracted { .. } => "✗",
+            Lifecycle::Obsolete { .. } => "O", // legacy — distinct from [О]
+        }
+    }
+
+    /// Lifecycle ordering for `LifecycleRegression` (AP-009).
+    /// `[Т] > [О] = [С] > [П] > [Г] > [И] > [✗] > Obsolete`.
+    /// CVE §3.5 + §3.1: definitions / conditionals / postulates
+    /// rank above hypotheses (mature artifacts cite mature
+    /// artifacts); interpretations and retractions rank LOWEST
+    /// (a Theorem citing an Interpretation is a defect).
     pub fn rank(&self) -> u8 {
         match self {
             Lifecycle::Obsolete { .. } => 0,
-            Lifecycle::Hypothesis { .. } => 1,
-            Lifecycle::Plan { .. } => 2,
-            Lifecycle::Conditional { .. } => 3,
-            Lifecycle::Theorem { .. } => 4,
+            Lifecycle::Retracted { .. } => 0,
+            Lifecycle::Interpretation { .. } => 1,
+            Lifecycle::Hypothesis { .. } => 2,
+            Lifecycle::Plan { .. } => 3, // committed > hypothesis
+            Lifecycle::Postulate { .. } => 4, // load-bearing assumption
+            Lifecycle::Definition => 5,
+            Lifecycle::Conditional { .. } => 5,
+            Lifecycle::Theorem { .. } => 6,
         }
+    }
+
+    /// True iff the lifecycle is one CVE §6.7 forbids in mature
+    /// corpus: [И] Interpretation without a maturation plan.
+    /// Used by future anti-pattern check
+    /// `InterpretationInMatureCorpus`.
+    pub fn is_mature_corpus_forbidden(&self) -> bool {
+        matches!(self, Lifecycle::Interpretation { .. })
     }
 }
 

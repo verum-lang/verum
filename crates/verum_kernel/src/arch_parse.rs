@@ -638,11 +638,22 @@ fn parse_lifecycle(expr: &Expr) -> Result<Lifecycle, ArchParseError> {
             ("Plan", Some(a)) => Lifecycle::Plan {
                 target_completion: parse_path_string(a, "target_completion")?,
             },
+            ("Postulate", Some(a)) => Lifecycle::Postulate {
+                citation: parse_path_string(a, "citation")?,
+            },
+            ("Definition", _) => Lifecycle::Definition,
             ("Hypothesis", _) => Lifecycle::Hypothesis {
                 confidence: ConfidenceLevel::Medium,
             },
             ("Conditional", _) => Lifecycle::Conditional {
                 conditions: vec![],
+            },
+            ("Interpretation", Some(a)) => Lifecycle::Interpretation {
+                reason: parse_path_string(a, "reason")?,
+            },
+            ("Retracted", Some(a)) => Lifecycle::Retracted {
+                reason: parse_path_string(a, "reason")?,
+                replacement: None,
             },
             ("Obsolete", Some(a)) => Lifecycle::Obsolete {
                 deprecation_reason: parse_path_string(a, "reason")?,
@@ -665,11 +676,22 @@ fn parse_lifecycle(expr: &Expr) -> Result<Lifecycle, ArchParseError> {
         "Plan" => Lifecycle::Plan {
             target_completion: "unspecified".to_string(),
         },
+        "Postulate" => Lifecycle::Postulate {
+            citation: "unspecified".to_string(),
+        },
+        "Definition" => Lifecycle::Definition,
         "Hypothesis" => Lifecycle::Hypothesis {
             confidence: ConfidenceLevel::Medium,
         },
         "Conditional" => Lifecycle::Conditional {
             conditions: vec![],
+        },
+        "Interpretation" => Lifecycle::Interpretation {
+            reason: "unspecified".to_string(),
+        },
+        "Retracted" => Lifecycle::Retracted {
+            reason: "unspecified".to_string(),
+            replacement: None,
         },
         "Obsolete" => Lifecycle::Obsolete {
             deprecation_reason: "unspecified".to_string(),

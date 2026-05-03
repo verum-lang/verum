@@ -59,7 +59,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::proof_checker::Term;
-use crate::tactic_elaborator::{ElabContext, ElabError, expr_to_term, proposition_to_term};
+use crate::tactic_elaborator::{ElabContext, ElabError, proposition_to_term};
 
 // =============================================================================
 // VerificationGoal
