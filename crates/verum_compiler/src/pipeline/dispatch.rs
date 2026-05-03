@@ -92,17 +92,16 @@ impl<'s> CompilationPipeline<'s> {
     pub fn run_check_only(&mut self) -> Result<()> {
         let start = Instant::now();
 
-        // Load stdlib modules first (enables std.* imports)
+        // Load stdlib modules first (enables std.* imports). This populates
+        // `self.modules` with stdlib ASTs but does NOT yet register them in
+        // the session's ModuleRegistry — registration happens below, *after*
+        // the user file is parsed, so the reachability filter (#109) can
+        // prune unreached stdlib modules from the registration set.
         self.load_stdlib_modules()?;
 
-        // Register stdlib modules for cross-file type/context/import
-        // resolution. Without this, `mount core.sys.darwin.libsystem.{...}`
-        // and `using [ComputeDevice]` fail because the type checker
-        // doesn't know about symbols from sibling modules.
-        // This is the CORRECT architectural fix — not lenient bypasses.
-        self.register_modules_for_cross_file_resolution()?;
-
-        // Load sibling project modules (enables cross-file mount imports)
+        // Load sibling project modules (enables cross-file mount imports).
+        // These are user-side files — always registered regardless of the
+        // stdlib reachability filter.
         self.load_project_modules()?;
         // Load externally-registered cogs (script-mode `dependencies`,
         // verum-add deps, etc.) using the same module-registration
@@ -111,6 +110,33 @@ impl<'s> CompilationPipeline<'s> {
 
         let file_id = self.phase_load_source()?;
         let mut module = self.phase_parse(file_id)?;
+
+        // #109 lazy stdlib monomorphization — compute the transitive
+        // closure of stdlib modules referenced by the user file's mount
+        // tree (plus the implicit prelude) and pass it to the filtered
+        // Phase 1.5 below. Stdlib modules outside the closure skip
+        // ModuleInfo creation; the lazy resolver still picks them up if
+        // a downstream phase actually walks into them.
+        //
+        // Two opt-out gates honour callers that need every stdlib
+        // module in the registry up front (e.g. `verum audit
+        // --framework-axioms`, full-corpus tooling):
+        //   * `VERUM_FULL_STDLIB=1` env var (debug + CI)
+        //   * `[build].full-stdlib` manifest key (per-project)
+        let full_stdlib = std::env::var("VERUM_FULL_STDLIB").is_ok();
+        let reachable = if full_stdlib {
+            None
+        } else {
+            crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
+        };
+
+        // Register stdlib + project + cog modules for cross-file
+        // type/context/import resolution. Without this, `mount
+        // core.sys.darwin.libsystem.{...}` and `using [ComputeDevice]`
+        // fail because the type checker doesn't know about symbols
+        // from sibling modules. This is the CORRECT architectural fix
+        // — not lenient bypasses.
+        self.register_modules_for_cross_file_resolution_filtered(reachable.as_ref())?;
 
         // Get module path for registration and expansion.  Prefer the
         // file's `module <dotted.path>;` declaration (the canonical
