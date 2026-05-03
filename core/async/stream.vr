@@ -677,6 +677,7 @@ implement<S: Stream> Future for StreamNext<S> {
 /// ```verum
 /// let stream = iter([1, 2, 3].into_iter());
 /// ```
+@inline(always)
 public fn iter<I: Iterator>(iterator: I) -> StreamIter<I> {
     StreamIter { iter: iterator }
 }
@@ -706,6 +707,7 @@ implement<I: Iterator> Stream for StreamIter<I> {
 /// let stream = stream_once(42);
 /// // Yields: 42
 /// ```
+@inline(always)
 public fn stream_once<T>(value: T) -> StreamOnce<T> {
     StreamOnce { value: Some(value) }
 }
@@ -736,6 +738,7 @@ implement<T> Stream for StreamOnce<T> {
 /// let stream = once_future(async { 42 });
 /// // Yields: 42 (after future completes)
 /// ```
+@inline(always)
 public fn once_future<Fut: Future>(future: Fut) -> OnceFuture<Fut> {
     OnceFuture { future: Some(future) }
 }
@@ -772,6 +775,7 @@ implement<Fut: Future> Stream for OnceFuture<Fut> {
 /// let stream: StreamEmpty<Int> = stream_empty();
 /// // Yields nothing
 /// ```
+@inline(always)
 public fn stream_empty<T>() -> StreamEmpty<T> {
     StreamEmpty
 }
@@ -799,6 +803,7 @@ implement<T> Stream for StreamEmpty<T> {
 /// let stream = stream_repeat(1).take(3);
 /// // Yields: 1, 1, 1
 /// ```
+@inline(always)
 public fn stream_repeat<T: Clone>(value: T) -> StreamRepeat<T> {
     StreamRepeat { value }
 }
@@ -828,6 +833,7 @@ implement<T: Clone> Stream for StreamRepeat<T> {
 /// let stream = stream_repeat_n(42, 3);
 /// // Yields: 42, 42, 42
 /// ```
+@inline(always)
 public fn stream_repeat_n<T: Clone>(value: T, n: Int) -> StreamRepeatN<T> {
     StreamRepeatN { value: Some(value), remaining: n }
 }
@@ -873,6 +879,7 @@ implement<T: Clone> Stream for StreamRepeatN<T> {
 /// });
 /// // Yields: 1, 2, 3
 /// ```
+@inline(always)
 public fn stream_from_fn<T, F: fn() -> Maybe<T>>(f: F) -> StreamFromFn<F> {
     StreamFromFn { f }
 }
@@ -900,6 +907,7 @@ implement<T, F: fn() -> Maybe<T>> Stream for StreamFromFn<F> {
 ///  Poll.Ready(Some(42))
 /// });
 /// ```
+@inline(always)
 public fn stream_poll_fn<T, F: fn(&mut Context) -> Poll<Maybe<T>>>(f: F) -> StreamPollFn<F> {
     StreamPollFn { f }
 }
