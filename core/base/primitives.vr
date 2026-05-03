@@ -89,51 +89,61 @@ implement Int {
     }
 
     /// Absolute value.
+    @inline(always)
     public fn abs(self) -> Int {
         abs_signed(self)
     }
 
     /// Signum: -1, 0, or 1.
+    @inline(always)
     public fn signum(self) -> Int {
         signum(self)
     }
 
     /// Check if positive (> 0).
+    @inline(always)
     public fn is_positive(self) -> Bool {
         self > 0
     }
 
     /// Check if negative (< 0).
+    @inline(always)
     public fn is_negative(self) -> Bool {
         self < 0
     }
 
     /// Check if zero.
+    @inline(always)
     public fn is_zero(self) -> Bool {
         self == 0
     }
 
     /// Convert to floating point.
+    @inline(always)
     public fn to_float(self) -> Float {
         int_to_float(self)
     }
 
     /// Minimum of two values.
+    @inline(always)
     public fn min(self, other: Int) -> Int {
         intrinsic_min(self, other)
     }
 
     /// Maximum of two values.
+    @inline(always)
     public fn max(self, other: Int) -> Int {
         intrinsic_max(self, other)
     }
 
     /// Clamp between min and max (inclusive).
+    @inline(always)
     public fn clamp(self, min_val: Int, max_val: Int) -> Int {
         intrinsic_clamp(self, min_val, max_val)
     }
 
     /// Check if in range [start, end).
+    @inline(always)
     public fn in_range(self, start: Int, end: Int) -> Bool {
         self >= start && self < end
     }
@@ -155,52 +165,62 @@ implement Int {
     }
 
     /// Checked addition (returns None on overflow).
+    @inline(always)
     public fn checked_add(self, rhs: Int) -> Maybe<Int> {
         checked_add(self, rhs)
     }
 
     /// Checked subtraction.
+    @inline(always)
     public fn checked_sub(self, rhs: Int) -> Maybe<Int> {
         checked_sub(self, rhs)
     }
 
     /// Checked multiplication.
+    @inline(always)
     public fn checked_mul(self, rhs: Int) -> Maybe<Int> {
         checked_mul(self, rhs)
     }
 
     /// Checked division (returns None on division by zero).
+    @inline(always)
     public fn checked_div(self, rhs: Int) -> Maybe<Int> {
         if rhs == 0 { None }
         else { Some(self / rhs) }
     }
 
     /// Wrapping addition (wraps on overflow).
+    @inline(always)
     public fn wrapping_add(self, rhs: Int) -> Int {
         wrapping_add(self, rhs)
     }
 
     /// Wrapping subtraction.
+    @inline(always)
     public fn wrapping_sub(self, rhs: Int) -> Int {
         wrapping_sub(self, rhs)
     }
 
     /// Wrapping multiplication.
+    @inline(always)
     public fn wrapping_mul(self, rhs: Int) -> Int {
         wrapping_mul(self, rhs)
     }
 
     /// Saturating addition (saturates at bounds instead of overflow).
+    @inline(always)
     public fn saturating_add(self, rhs: Int) -> Int {
         saturating_add(self, rhs)
     }
 
     /// Saturating subtraction.
+    @inline(always)
     public fn saturating_sub(self, rhs: Int) -> Int {
         saturating_sub(self, rhs)
     }
 
     /// Saturating multiplication.
+    @inline(always)
     public fn saturating_mul(self, rhs: Int) -> Int {
         saturating_mul(self, rhs)
     }
@@ -257,51 +277,61 @@ implement Int {
     }
 
     /// Count leading zeros.
+    @inline(always)
     public fn leading_zeros(self) -> Int {
         clz(self)
     }
 
     /// Count trailing zeros.
+    @inline(always)
     public fn trailing_zeros(self) -> Int {
         ctz(self)
     }
 
     /// Count ones (popcount).
+    @inline(always)
     public fn count_ones(self) -> Int {
         popcnt(self)
     }
 
     /// Count zeros.
+    @inline(always)
     public fn count_zeros(self) -> Int {
         64 - self.count_ones()
     }
 
     /// Swap bytes.
+    @inline(always)
     public fn swap_bytes(self) -> Int {
         bswap(self)
     }
 
     /// Reverse bits.
+    @inline(always)
     public fn reverse_bits(self) -> Int {
         bitreverse(self)
     }
 
     /// Rotate left.
+    @inline(always)
     public fn rotate_left(self, n: Int) -> Int {
         rotl(self, n)
     }
 
     /// Rotate right.
+    @inline(always)
     public fn rotate_right(self, n: Int) -> Int {
         rotr(self, n)
     }
 
     /// Convert to bytes (little-endian).
+    @inline(always)
     public fn to_le_bytes(self) -> [Byte; 8] {
         to_le_bytes_8(self)
     }
 
     /// Convert to bytes (big-endian).
+    @inline(always)
     public fn to_be_bytes(self) -> [Byte; 8] {
         to_be_bytes_8(self)
     }
@@ -638,12 +668,14 @@ fn format_radix_signed(n: Int, radix: Int) -> Text {
 
 // Int protocol implementations
 implement Eq for Int {
+    @inline(always)
     public fn eq(&self, other: &Int) -> Bool {
         eq(*self, *other)
     }
 }
 
 implement Ord for Int {
+    @inline(always)
     public fn cmp(&self, other: &Int) -> Ordering {
         if *self < *other { Less }
         else if *self > *other { Greater }
@@ -652,18 +684,21 @@ implement Ord for Int {
 }
 
 implement Hash for Int {
+    @inline(always)
     public fn hash(&self, hasher: &mut Hasher) {
         hasher.write_int(*self);
     }
 }
 
 implement Clone for Int {
+    @inline(always)
     public fn clone(&self) -> Int { *self }
 }
 
 implement Copy for Int {}
 
 implement Default for Int {
+    @inline(always)
     public fn default() -> Int { 0 }
 }
 
@@ -680,72 +715,88 @@ implement Display for Int {
 }
 
 implement Zero for Int {
+    @inline(always)
     public fn zero() -> Int { 0 }
+    @inline(always)
     public fn is_zero(&self) -> Bool { *self == 0 }
 }
 
 implement One for Int {
+    @inline(always)
     public fn one() -> Int { 1 }
+    @inline(always)
     public fn is_one(&self) -> Bool { *self == 1 }
 }
 
 implement Add for Int {
     type Output = Int;
+    @inline(always)
     public fn add(self, rhs: Int) -> Int { add(self, rhs) }
 }
 
 implement Sub for Int {
     type Output = Int;
+    @inline(always)
     public fn sub(self, rhs: Int) -> Int { sub(self, rhs) }
 }
 
 implement Mul for Int {
     type Output = Int;
+    @inline(always)
     public fn mul(self, rhs: Int) -> Int { mul(self, rhs) }
 }
 
 implement Div for Int {
     type Output = Int;
+    @inline(always)
     public fn div(self, rhs: Int) -> Int { div(self, rhs) }
 }
 
 implement Rem for Int {
     type Output = Int;
+    @inline(always)
     public fn rem(self, rhs: Int) -> Int { rem(self, rhs) }
 }
 
 implement Neg for Int {
     type Output = Int;
+    @inline(always)
     public fn neg(self) -> Int { neg(self) }
 }
 
 implement BitAnd for Int {
     type Output = Int;
+    @inline(always)
     public fn bitand(self, rhs: Int) -> Int { bitand(self, rhs) }
 }
 
 implement BitOr for Int {
     type Output = Int;
+    @inline(always)
     public fn bitor(self, rhs: Int) -> Int { bitor(self, rhs) }
 }
 
 implement BitXor for Int {
     type Output = Int;
+    @inline(always)
     public fn bitxor(self, rhs: Int) -> Int { bitxor(self, rhs) }
 }
 
 implement Not for Int {
     type Output = Int;
+    @inline(always)
     public fn not(self) -> Int { bitnot(self) }
 }
 
 implement Shl for Int {
     type Output = Int;
+    @inline(always)
     public fn shl(self, rhs: Int) -> Int { shl(self, rhs as UInt32) }
 }
 
 implement Shr for Int {
     type Output = Int;
+    @inline(always)
     public fn shr(self, rhs: Int) -> Int { shr(self, rhs as UInt32) }
 }
 
@@ -825,16 +876,19 @@ implement Float {
     }
 
     /// Check if NaN.
+    @inline(always)
     public fn is_nan(self) -> Bool {
         self != self
     }
 
     /// Check if infinite.
+    @inline(always)
     public fn is_infinite(self) -> Bool {
         self == Float.infinity() || self == Float.neg_infinity()
     }
 
     /// Check if finite (not NaN and !infinite).
+    @inline(always)
     public fn is_finite(self) -> Bool {
         !self.is_nan() && !self.is_infinite()
     }
@@ -848,6 +902,7 @@ implement Float {
     /// Returns `false` for `+0.0`, `-0.0`, and `NaN`. Use
     /// [`is_sign_positive`] for sign-bit semantics that
     /// distinguish `+0.0` from `-0.0`.
+    @inline(always)
     public fn is_positive(self) -> Bool {
         self > 0.0
     }
@@ -856,6 +911,7 @@ implement Float {
     /// Returns `false` for `+0.0`, `-0.0`, and `NaN`. Use
     /// [`is_sign_negative`] for sign-bit semantics that
     /// distinguish `+0.0` from `-0.0`.
+    @inline(always)
     public fn is_negative(self) -> Bool {
         self < 0.0
     }
@@ -872,6 +928,7 @@ implement Float {
     }
 
     /// Check if zero (positive || negative).
+    @inline(always)
     public fn is_zero(self) -> Bool {
         self == 0.0 || self == -0.0
     }
@@ -909,16 +966,19 @@ implement Float {
     }
 
     /// Convert to integer (truncates toward zero).
+    @inline(always)
     public fn to_int(self) -> Int {
         float_to_int(self)
     }
 
     /// Square root.
+    @inline(always)
     public fn sqrt(self) -> Float {
         sqrt(self)
     }
 
     /// Cube root.
+    @inline(always)
     public fn cbrt(self) -> Float {
         cbrt(self)
     }
@@ -1222,6 +1282,7 @@ implement Float {
 
 // Float protocol implementations
 implement Eq for Float {
+    @inline(always)
     public fn eq(&self, other: &Float) -> Bool {
         // Note: NaN != NaN by IEEE 754
         eq(*self, *other)
@@ -1229,6 +1290,7 @@ implement Eq for Float {
 }
 
 implement PartialOrd for Float {
+    @inline(always)
     public fn partial_cmp(&self, other: &Float) -> Maybe<Ordering> {
         if self.is_nan() || other.is_nan() {
             None
@@ -1243,12 +1305,14 @@ implement PartialOrd for Float {
 }
 
 implement Clone for Float {
+    @inline(always)
     public fn clone(&self) -> Float { *self }
 }
 
 implement Copy for Float {}
 
 implement Default for Float {
+    @inline(always)
     public fn default() -> Float { 0.0 }
 }
 
@@ -1265,46 +1329,57 @@ implement Display for Float {
 }
 
 implement Zero for Float {
+    @inline(always)
     public fn zero() -> Float { 0.0 }
+    @inline(always)
     public fn is_zero(&self) -> Bool { *self == 0.0 }
 }
 
 implement One for Float {
+    @inline(always)
     public fn one() -> Float { 1.0 }
+    @inline(always)
     public fn is_one(&self) -> Bool { *self == 1.0 }
 }
 
 implement Add for Float {
     type Output = Float;
+    @inline(always)
     public fn add(self, rhs: Float) -> Float { add(self, rhs) }
 }
 
 implement Sub for Float {
     type Output = Float;
+    @inline(always)
     public fn sub(self, rhs: Float) -> Float { sub(self, rhs) }
 }
 
 implement Mul for Float {
     type Output = Float;
+    @inline(always)
     public fn mul(self, rhs: Float) -> Float { mul(self, rhs) }
 }
 
 implement Div for Float {
     type Output = Float;
+    @inline(always)
     public fn div(self, rhs: Float) -> Float { div(self, rhs) }
 }
 
 implement Rem for Float {
     type Output = Float;
+    @inline(always)
     public fn rem(self, rhs: Float) -> Float { rem(self, rhs) }
 }
 
 implement Neg for Float {
     type Output = Float;
+    @inline(always)
     public fn neg(self) -> Float { neg(self) }
 }
 
 implement From<Float32> for Float {
+    @inline(always)
     public fn from(val: Float32) -> Float { val as Float }
 }
 
@@ -1340,12 +1415,14 @@ implement Bool {
 }
 
 implement Eq for Bool {
+    @inline(always)
     public fn eq(&self, other: &Bool) -> Bool {
         eq(*self, *other)
     }
 }
 
 implement Ord for Bool {
+    @inline(always)
     public fn cmp(&self, other: &Bool) -> Ordering {
         // false < true
         match (*self, *other) {
@@ -1358,18 +1435,21 @@ implement Ord for Bool {
 }
 
 implement Hash for Bool {
+    @inline(always)
     public fn hash(&self, hasher: &mut Hasher) {
         hasher.write_byte(if *self { 1 } else { 0 });
     }
 }
 
 implement Clone for Bool {
+    @inline(always)
     public fn clone(&self) -> Bool { *self }
 }
 
 implement Copy for Bool {}
 
 implement Default for Bool {
+    @inline(always)
     public fn default() -> Bool { false }
 }
 
@@ -1387,21 +1467,25 @@ implement Display for Bool {
 
 implement Not for Bool {
     type Output = Bool;
+    @inline(always)
     public fn not(self) -> Bool { if self { false } else { true } }
 }
 
 implement BitAnd for Bool {
     type Output = Bool;
+    @inline(always)
     public fn bitand(self, rhs: Bool) -> Bool { self && rhs }
 }
 
 implement BitOr for Bool {
     type Output = Bool;
+    @inline(always)
     public fn bitor(self, rhs: Bool) -> Bool { self || rhs }
 }
 
 implement BitXor for Bool {
     type Output = Bool;
+    @inline(always)
     public fn bitxor(self, rhs: Bool) -> Bool { self.xor(rhs) }
 }
 
@@ -1500,12 +1584,14 @@ implement Byte {
 }
 
 implement Eq for Byte {
+    @inline(always)
     public fn eq(&self, other: &Byte) -> Bool {
         eq(*self, *other)
     }
 }
 
 implement Ord for Byte {
+    @inline(always)
     public fn cmp(&self, other: &Byte) -> Ordering {
         if *self < *other { Less }
         else if *self > *other { Greater }
@@ -1514,18 +1600,21 @@ implement Ord for Byte {
 }
 
 implement Hash for Byte {
+    @inline(always)
     public fn hash(&self, hasher: &mut Hasher) {
         hasher.write_byte(*self);
     }
 }
 
 implement Clone for Byte {
+    @inline(always)
     public fn clone(&self) -> Byte { *self }
 }
 
 implement Copy for Byte {}
 
 implement Default for Byte {
+    @inline(always)
     public fn default() -> Byte { 0 }
 }
 
@@ -1662,30 +1751,35 @@ implement Char {
 }
 
 implement Eq for Char {
+    @inline(always)
     public fn eq(&self, other: &Char) -> Bool {
         (*self as Int) == (*other as Int)
     }
 }
 
 implement Ord for Char {
+    @inline(always)
     public fn cmp(&self, other: &Char) -> Ordering {
         (*self as Int).cmp(&(*other as Int))
     }
 }
 
 implement Hash for Char {
+    @inline(always)
     public fn hash(&self, hasher: &mut Hasher) {
         hasher.write_int(*self as Int);
     }
 }
 
 implement Clone for Char {
+    @inline(always)
     public fn clone(&self) -> Char { *self }
 }
 
 implement Copy for Char {}
 
 implement Default for Char {
+    @inline(always)
     public fn default() -> Char { '\0' }
 }
 
