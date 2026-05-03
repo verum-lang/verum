@@ -1389,26 +1389,31 @@ implement From<Float32> for Float {
 
 implement Bool {
     /// Logical AND (eager evaluation).
+    @inline(always)
     public fn and_then(self, other: Bool) -> Bool {
         if self { other } else { false }
     }
 
     /// Logical OR (eager evaluation).
+    @inline(always)
     public fn or_else(self, other: Bool) -> Bool {
         if self { true } else { other }
     }
 
     /// Logical XOR.
+    @inline(always)
     public fn xor(self, other: Bool) -> Bool {
         (self || other) && !(self && other)
     }
 
     /// Convert to Int (0 || 1).
+    @inline(always)
     public fn to_int(self) -> Int {
         if self { 1 } else { 0 }
     }
 
     /// Select between two values based on condition.
+    @inline(always)
     public fn select<T>(self, if_true: T, if_false: T) -> T {
         if self { if_true } else { if_false }
     }

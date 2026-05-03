@@ -104,6 +104,7 @@ implement Barrier {
     /// ```verum
     /// let barrier = Barrier.new(4); // Requires 4 threads
     /// ```
+    @inline(always)
     public fn new(n: Int) -> Barrier {
         assert(n > 0, "Barrier requires at least 1 thread");
 

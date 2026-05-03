@@ -102,6 +102,7 @@ public type Condvar is {
 
 implement Condvar {
     /// Create a new condition variable.
+    @inline(always)
     public fn new() -> Condvar {
         Condvar {
             waiters: AtomicInt.new(0),
@@ -235,12 +236,14 @@ implement Condvar {
     }
 
     /// Get the number of threads currently waiting.
+    @inline(always)
     public fn waiter_count(&self) -> Int {
         self.waiters.load(MemoryOrdering.Relaxed)
     }
 }
 
 implement Default for Condvar {
+    @inline(always)
     fn default() -> Condvar {
         Condvar.new()
     }
