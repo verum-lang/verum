@@ -43,10 +43,11 @@ mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
 };
 mount core.database.postgres.wire.typed.{
-    TypedValue,
+    TypedValue, TypedComposite,
     TvNull, TvBool, TvInt2, TvInt4, TvInt8,
     TvFloat4, TvFloat8, TvText, TvBytea, TvUuid, TvOid,
     TvJson, TvJsonb, TvDate, TvTime, TvTimestamp, TvTimestamptz,
+    TvComposite,
 };
 mount core.database.postgres.wire.backend.RowDescription;
 
@@ -135,6 +136,19 @@ implement TypedRow for List<Byte> {
         match &row[0] {
             TvBytea(b) | TvUuid(b) => Ok(b.clone()),
             other => Err(typed_row_error(0, "List<Byte>", other)),
+        }
+    }
+}
+
+implement TypedRow for TypedComposite {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        _desc: &Maybe<RowDescription>,
+    ) -> Result<TypedComposite, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            TvComposite(c) => Ok(c.clone()),
+            other => Err(typed_row_error(0, "TypedComposite", other)),
         }
     }
 }
