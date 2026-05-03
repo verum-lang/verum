@@ -181,9 +181,11 @@ implement Snowflake {
     }
 
     /// Worker ID bound to this generator.
+    @inline(always)
     public fn worker_id(&self) -> UInt64 { self.worker_id }
 
     /// Epoch used by this generator (unix ms).
+    @inline(always)
     public fn epoch_ms(&self) -> UInt64 { self.epoch_ms }
 }
 
