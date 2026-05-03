@@ -38,36 +38,43 @@ implement Ipv4Addr {
     /// ```verum
     /// let addr = Ipv4Addr.new(192, 168, 1, 1);
     /// ```
+    @inline(always)
     public fn new(a: Byte, b: Byte, c: Byte, d: Byte) -> Ipv4Addr {
         Ipv4Addr { octets: (a, b, c, d) }
     }
 
     /// Create the localhost address (127.0.0.1).
+    @inline(always)
     public fn localhost() -> Ipv4Addr {
         Ipv4Addr.new(127, 0, 0, 1)
     }
 
     /// Create the unspecified address (0.0.0.0).
+    @inline(always)
     public fn unspecified() -> Ipv4Addr {
         Ipv4Addr.new(0, 0, 0, 0)
     }
 
     /// Create the broadcast address (255.255.255.255).
+    @inline(always)
     public fn broadcast() -> Ipv4Addr {
         Ipv4Addr.new(255, 255, 255, 255)
     }
 
     /// Get the four octets of this address.
+    @inline(always)
     public fn octets(&self) -> (Byte, Byte, Byte, Byte) {
         self.octets
     }
 
     /// Check if this is the localhost address.
+    @inline(always)
     public fn is_loopback(&self) -> Bool {
         self.octets.0 == 127
     }
 
     /// Check if this is the unspecified address.
+    @inline(always)
     public fn is_unspecified(&self) -> Bool {
         self.octets == (0, 0, 0, 0)
     }
@@ -231,6 +238,7 @@ public type Ipv6Addr is {
 
 implement Ipv6Addr {
     /// Create a new IPv6 address from eight 16-bit segments.
+    @inline(always)
     public fn new(
         a: Int, b: Int, c: Int, d: Int,
         e: Int, f: Int, g: Int, h: Int
@@ -239,16 +247,19 @@ implement Ipv6Addr {
     }
 
     /// Create the localhost address (.1).
+    @inline(always)
     public fn localhost() -> Ipv6Addr {
         Ipv6Addr.new(0, 0, 0, 0, 0, 0, 0, 1)
     }
 
     /// Create the unspecified address (.).
+    @inline(always)
     public fn unspecified() -> Ipv6Addr {
         Ipv6Addr.new(0, 0, 0, 0, 0, 0, 0, 0)
     }
 
     /// Get the eight 16-bit segments.
+    @inline(always)
     public fn segments(&self) -> (Int, Int, Int, Int, Int, Int, Int, Int) {
         self.segments
     }
@@ -462,11 +473,13 @@ public type IpAddr is
 
 implement IpAddr {
     /// Create an IPv4 address.
+    @inline(always)
     public fn v4(a: Byte, b: Byte, c: Byte, d: Byte) -> IpAddr {
         V4(Ipv4Addr.new(a, b, c, d))
     }
 
     /// Create an IPv6 address.
+    @inline(always)
     public fn v6(
         a: Int, b: Int, c: Int, d: Int,
         e: Int, f: Int, g: Int, h: Int
@@ -475,6 +488,7 @@ implement IpAddr {
     }
 
     /// Check if this is IPv4.
+    @inline(always)
     public fn is_ipv4(&self) -> Bool {
         match *self {
             V4(_) => true,
@@ -483,6 +497,7 @@ implement IpAddr {
     }
 
     /// Check if this is IPv6.
+    @inline(always)
     public fn is_ipv6(&self) -> Bool {
         !self.is_ipv4()
     }
