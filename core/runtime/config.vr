@@ -87,6 +87,11 @@ public type RuntimeInitError is
     /// Already initialized
     | AlreadyInitialized;
 
+/// Public alias — short canonical name; internal type uses
+/// the verbose `RuntimeInitError` to disambiguate from other
+/// init errors in unrelated modules.
+public type InitError is RuntimeInitError;
+
 implement RuntimeInitError {
     public fn message(&self) -> Text {
         match self {
