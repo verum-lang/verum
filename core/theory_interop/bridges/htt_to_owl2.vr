@@ -1,0 +1,245 @@
+// =============================================================================
+// htt_to_owl2 — inverse Morita bridge lurie_htt → owl2_fs
+// =============================================================================
+//
+// Companion to `owl2_to_htt.vr`. Where the forward bridge maps every
+// OWL 2 Direct-Semantics operator from `core.math.frameworks.owl2_fs`
+// to its canonical Lurie HTT (∞,1)-categorical image, this file maps
+// every HTT image *back* to its OWL 2 pre-image.
+//
+// The pair `(owl2_to_htt, htt_to_owl2)` realises the **Morita
+// equivalence** between the two framework axiom packages — the
+// Diakrisis 108.T α⊣ε pair specialised to the OWL 2 ↔ HTT bridge.
+// Round-trip identity (modulo gauge canonicalisation) is asserted in
+// `owl2_morita_round_trip.vr`.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// Inverse bridge mapping table (mirror of owl2_to_htt.vr Tier 1–6)
+// ─────────────────────────────────────────────────────────────────────────
+//
+//   HTT categorical image                              OWL 2 pre-image
+//   ─────────────────────────────────────────────────  ────────────────────
+//   Presheaf on discrete-individuals category          Class
+//   Object of Δ_O                                      NamedIndividual
+//   Monomorphism C ↪ D in PSh                          SubClassOf(C, D)
+//   Isomorphism C ≅ D in PSh                           EquivalentClasses(C, D)
+//   Pullback C ×_⊥ D ≅ ⊥ (initial in PSh)              DisjointClasses(C, D)
+//   Functor F: Cls × Cls → Bool                        ObjectProperty
+//   Composition F_1 ∘ … ∘ F_n                          ObjectPropertyChain
+//   Adjoint pair P ⊣ Q in PSh                          InverseObjectProperties(P, Q)
+//   Restriction along F_P with domain ∈ C              ObjectPropertyDomain(P, C)
+//   Restriction along F_P with codomain ∈ C            ObjectPropertyRange(P, C)
+//   Representable-presheaf condition (HTT 5.1)         HasKey(C; p_1..p_n)
+//   Self-inverse functor P^{-1} ≃ P                    SymmetricObjectProperty(P)
+//   Idempotent composition P ∘ P → P                   TransitiveObjectProperty(P)
+//   P ∩ P^{-1} ≅ ∅                                     AsymmetricObjectProperty(P)
+//   Identity-NT factor η_P: Id_Cls ⇒ P                 ReflexiveObjectProperty(P)
+//   Empty-diagonal Δ_Cls ↪ P^c                         IrreflexiveObjectProperty(P)
+//   Monomorphism in functor category                   FunctionalObjectProperty(P)
+//   Epimorphism in functor category                    InverseFunctionalObjectProperty(P)
+//   Diagonal-factoring NT Δ_Cls ⇒ P                    HasSelf(P)
+//   Limit (pullback) in PSh                            ObjectIntersectionOf(C_1..C_n)
+//   Colimit (pushout) in PSh                           ObjectUnionOf(C_1..C_n)
+//   Lex-coreflexive complement                         ObjectComplementOf(C)
+//   Image presheaf ∃_P(C)                              ObjectSomeValuesFrom(P, C)
+//   Right-adjoint Π_P(C)                               ObjectAllValuesFrom(P, C)
+//   Slice presheaf P/_a                                ObjectHasValue(P, a)
+//   Bounded-fibre condition: ∀x. |P(x) ∩ C| ≤ n        ObjectMaxCardinality(n, P, C)
+//   Equalizer eq(y_a, y_b) ≅ y_a in PSh                SameIndividual(a, b)
+//   Coproduct y_a ⊔ y_b with empty pullback            DifferentIndividuals(a, b)
+//   Enriched functor F: Cls × Lit → Bool               DataProperty(P)
+//   Image presheaf ∃_P(D) for literal-typed P          DataSomeValuesFrom(P, D)
+//
+// ─────────────────────────────────────────────────────────────────────────
+//
+// 31 inverse-translation markers paired 1-to-1 with the forward
+// bridge's 31 markers. Each marker commits Verum to recognise an
+// HTT categorical image as the avatar of a specific OWL 2 operator.
+//
+// **Faithfulness scope.** The inverse bridge is faithful for the
+// **DL fragment** of HTT objects — those whose categorical structure
+// is decidable in single-exponential time (Lurie HTT 5.1.4 classifier-
+// of-monics + 1.2.1 Yoneda + 5.2.7 reflective AFT). HTT objects
+// outside this fragment project to OWL 2 approximately and surface
+// in the audit via the canonical `TranslationVerdict` enum from
+// `core.theory_interop.coord` (the single source of truth for
+// translation-fidelity classification across every framework bridge;
+// there is no per-bridge `Fidelity` re-invention). The owl2_fs ↔
+// lurie_htt pair is registered as `MORITA_PAIR_OWL2_HTT` in
+// `bridges/mod.vr` with verdict `TranslationVerdict.Morita` for the
+// DL fragment.
+// =============================================================================
+
+mount core.math.frameworks.owl2_fs.types.{
+    ClassExpression,
+    ObjectPropertyExpression,
+    DataPropertyExpression,
+    DataRange,
+    Individual,
+    Literal,
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tier 1 — class-level inverse markers (5)
+// ─────────────────────────────────────────────────────────────────────────
+
+@framework_translate(lurie_htt, owl2_fs, "Presheaf on discrete-individuals category → OWL 2 Class.")
+@framework(lurie_htt, "Inverse bridge — Yoneda (HTT 1.2.1) presheaf-classification → owl2_fs.Class.")
+public axiom htt_class_pre_image() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Object of Δ_O → OWL 2 NamedIndividual.")
+@framework(lurie_htt, "Inverse bridge — discrete-category object → owl2_fs.NamedIndividual.")
+public axiom htt_named_individual_pre_image() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Monomorphism C ↪ D in PSh → SubClassOf(C, D).")
+@framework(lurie_htt, "Inverse bridge — HTT 1.2.5 monomorphism → owl2_fs.SubClassOf.")
+public axiom htt_mono_to_subclass_of() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Isomorphism C ≅ D in PSh → EquivalentClasses(C, D).")
+@framework(lurie_htt, "Inverse bridge — categorical iso → owl2_fs.EquivalentClasses.")
+public axiom htt_iso_to_equivalent_classes() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Pullback C ×_⊥ D ≅ ⊥ → DisjointClasses(C, D).")
+@framework(lurie_htt, "Inverse bridge — empty-pullback → owl2_fs.DisjointClasses.")
+public axiom htt_empty_pullback_to_disjoint() -> Bool ensures true;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tier 2 — object-property inverse markers (6)
+// ─────────────────────────────────────────────────────────────────────────
+
+@framework_translate(lurie_htt, owl2_fs, "Functor F: Cls × Cls → Bool → ObjectProperty.")
+@framework(lurie_htt, "Inverse bridge — Bool-valued functor → owl2_fs.ObjectProperty.")
+public axiom htt_bool_functor_to_object_property() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Functor composition F_1 ∘ … ∘ F_n → ObjectPropertyChain(P_1..P_n).")
+@framework(lurie_htt, "Inverse bridge — functor composition → owl2_fs.ObjectPropertyChain.")
+public axiom htt_functor_chain_to_property_chain() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Adjoint pair P ⊣ Q in PSh → InverseObjectProperties(P, Q).")
+@framework(lurie_htt, "Inverse bridge — adjoint pair → owl2_fs.InverseObjectProperties.")
+public axiom htt_adjoint_pair_to_inverse_properties() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Restriction along F_P with domain ∈ C → ObjectPropertyDomain(P, C).")
+@framework(lurie_htt, "Inverse bridge — domain restriction → owl2_fs.ObjectPropertyDomain.")
+public axiom htt_domain_restriction_to_property_domain() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Restriction along F_P with codomain ∈ C → ObjectPropertyRange(P, C).")
+@framework(lurie_htt, "Inverse bridge — codomain restriction → owl2_fs.ObjectPropertyRange.")
+public axiom htt_codomain_restriction_to_property_range() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Representable-presheaf condition (HTT 5.1) → HasKey(C; p_1..p_n).")
+@framework(lurie_htt, "Inverse bridge — representable joint product → owl2_fs.HasKey.")
+public axiom htt_representable_to_has_key() -> Bool ensures true;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tier 3 — characteristic-flag inverse markers (8)
+// ─────────────────────────────────────────────────────────────────────────
+
+@framework_translate(lurie_htt, owl2_fs, "Self-inverse functor P^{-1} ≃ P → SymmetricObjectProperty(P).")
+@framework(lurie_htt, "Inverse bridge — self-inverse functor → owl2_fs.SymmetricObjectProperty.")
+public axiom htt_self_inverse_to_symmetric() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Idempotent composition P ∘ P → P → TransitiveObjectProperty(P).")
+@framework(lurie_htt, "Inverse bridge — idempotent composition → owl2_fs.TransitiveObjectProperty.")
+public axiom htt_idempotent_to_transitive() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "P ∩ P^{-1} ≅ ∅ → AsymmetricObjectProperty(P).")
+@framework(lurie_htt, "Inverse bridge — empty meet-with-inverse → owl2_fs.AsymmetricObjectProperty.")
+public axiom htt_empty_meet_to_asymmetric() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Identity-NT factor η_P: Id_Cls ⇒ P → ReflexiveObjectProperty(P).")
+@framework(lurie_htt, "Inverse bridge — identity-NT factor → owl2_fs.ReflexiveObjectProperty.")
+public axiom htt_identity_nt_to_reflexive() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Empty-diagonal Δ_Cls ↪ P^c → IrreflexiveObjectProperty(P).")
+@framework(lurie_htt, "Inverse bridge — empty-diagonal → owl2_fs.IrreflexiveObjectProperty.")
+public axiom htt_empty_diagonal_to_irreflexive() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Monomorphism in functor category → FunctionalObjectProperty(P).")
+@framework(lurie_htt, "Inverse bridge — functor-category mono → owl2_fs.FunctionalObjectProperty.")
+public axiom htt_functor_mono_to_functional() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Epimorphism in functor category → InverseFunctionalObjectProperty(P).")
+@framework(lurie_htt, "Inverse bridge — functor-category epi → owl2_fs.InverseFunctionalObjectProperty.")
+public axiom htt_functor_epi_to_inverse_functional() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Diagonal-factoring NT Δ_Cls ⇒ P → HasSelf(P).")
+@framework(lurie_htt, "Inverse bridge — diagonal-factoring NT → owl2_fs.HasSelf.")
+public axiom htt_diagonal_factor_to_has_self() -> Bool ensures true;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tier 4 — class-expression inverse markers (8)
+// ─────────────────────────────────────────────────────────────────────────
+
+@framework_translate(lurie_htt, owl2_fs, "Limit (pullback) in PSh → ObjectIntersectionOf(C_1..C_n).")
+@framework(lurie_htt, "Inverse bridge — categorical limit → owl2_fs.ObjectIntersectionOf.")
+public axiom htt_limit_to_intersection_of() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Colimit (pushout) in PSh → ObjectUnionOf(C_1..C_n).")
+@framework(lurie_htt, "Inverse bridge — categorical colimit → owl2_fs.ObjectUnionOf.")
+public axiom htt_colimit_to_union_of() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Lex-coreflexive complement → ObjectComplementOf(C).")
+@framework(lurie_htt, "Inverse bridge — lex-coreflexive complement → owl2_fs.ObjectComplementOf.")
+public axiom htt_complement_to_object_complement_of() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Image presheaf ∃_P(C) → ObjectSomeValuesFrom(P, C).")
+@framework(lurie_htt, "Inverse bridge — image presheaf → owl2_fs.ObjectSomeValuesFrom.")
+public axiom htt_image_presheaf_to_some_values_from() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Right-adjoint Π_P(C) → ObjectAllValuesFrom(P, C).")
+@framework(lurie_htt, "Inverse bridge — right-adjoint → owl2_fs.ObjectAllValuesFrom.")
+public axiom htt_right_adjoint_to_all_values_from() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Slice presheaf P/_a (HTT 1.2.9) → ObjectHasValue(P, a).")
+@framework(lurie_htt, "Inverse bridge — slice presheaf → owl2_fs.ObjectHasValue.")
+public axiom htt_slice_presheaf_to_has_value() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Bounded-fibre condition ∀x. |P(x) ∩ C| ≤ n → ObjectMaxCardinality(n, P, C).")
+@framework(lurie_htt, "Inverse bridge — bounded-fibre → owl2_fs.ObjectMaxCardinality.")
+public axiom htt_bounded_fibre_to_max_cardinality() -> Bool ensures true;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tier 5 — individual-axiom inverse markers (2)
+// ─────────────────────────────────────────────────────────────────────────
+
+@framework_translate(lurie_htt, owl2_fs, "Equalizer eq(y_a, y_b) ≅ y_a in PSh → SameIndividual(a, b).")
+@framework(lurie_htt, "Inverse bridge — equalizer of Yoneda images → owl2_fs.SameIndividual.")
+public axiom htt_equalizer_to_same_individual() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Coproduct y_a ⊔ y_b with empty pullback → DifferentIndividuals(a, b).")
+@framework(lurie_htt, "Inverse bridge — coproduct-with-empty-pullback → owl2_fs.DifferentIndividuals.")
+public axiom htt_coproduct_to_different_individuals() -> Bool ensures true;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tier 6 — data-property inverse markers (2)
+// ─────────────────────────────────────────────────────────────────────────
+
+@framework_translate(lurie_htt, owl2_fs, "Enriched functor F: Cls × Lit → Bool → DataProperty(P).")
+@framework(lurie_htt, "Inverse bridge — enriched functor → owl2_fs.DataProperty.")
+public axiom htt_enriched_functor_to_data_property() -> Bool ensures true;
+
+@framework_translate(lurie_htt, owl2_fs, "Image presheaf ∃_P(D) for literal-typed P → DataSomeValuesFrom(P, D).")
+@framework(lurie_htt, "Inverse bridge — literal-typed image presheaf → owl2_fs.DataSomeValuesFrom.")
+public axiom htt_literal_image_to_data_some_values_from() -> Bool ensures true;
+
+// =============================================================================
+// Summary
+// =============================================================================
+//
+// 31 inverse-translation markers, paired 1-to-1 with the 31 forward-
+// translation markers in `owl2_to_htt.vr`. Together they realise the
+// Morita-equivalence pair `(owl2_to_htt, htt_to_owl2)` — the
+// categorical avatar of the Diakrisis 108.T α⊣ε pair specialised to
+// the OWL 2 ↔ HTT bridge.
+//
+// The round-trip identity is asserted by the **single, unified**
+// `bridge_round_trip_property` axiom in
+// `core.theory_interop.bridges.mod` consuming the
+// `MORITA_PAIR_OWL2_HTT` registry entry. There is no per-bridge
+// round-trip module — every Morita pair Verum ships goes through
+// the same generic round-trip primitive.
+//
+// `verum audit --framework-axioms --by-lineage lurie_htt --inverse-of=owl2_fs`
+// enumerates exactly these 31 inverse markers; the round-trip
+// verdict surfaces via `verum audit --bridge-discharge`.

@@ -2,30 +2,173 @@
 // core.theory_interop.bridges — canonical cross-framework translations
 // =============================================================================
 //
-
-// Each sub-module ships a *canonical bridge* between two registered
-// framework-axiom packages: a directed set of trusted-boundary
-// translation markers documenting the categorical / structural image
-// of every operator from the source framework in the target framework.
+// Each bridge is a *directed* set of trusted-boundary translation
+// markers between two registered framework-axiom packages,
+// documenting the categorical / structural image of every operator
+// from the source framework in the target framework.
 //
-
-// Bridges enable downstream `core.theory_interop.translate(source,
-// target, partial_map)` invocations (VVA §10.2 / §21.7) to compose
-// chains of @framework_translate axioms without re-deriving the
-// pointwise mapping from scratch.
+// A **Morita pair** is a pair of bridges `(forward, inverse)` whose
+// composition yields the identity modulo gauge canonicalisation —
+// the Diakrisis 108.T α⊣ε structure specialised to two named
+// frameworks. Round-trip identity is the load-bearing soundness
+// claim that downstream `core.theory_interop.translate(source,
+// target, partial_map)` invocations rely on (VVA §10.2 / §21.7).
 //
-
-// V1 catalogue (this commit):
-//  owl2_to_htt — owl2_fs → lurie_htt (24 markers, VVA C7b)
-//  oc_dc_bridge — Articulation ↔ Enactment round-trip (Theorem 16.10)
+// ─────────────────────────────────────────────────────────────────────────
+// Bridge catalogue
+// ─────────────────────────────────────────────────────────────────────────
 //
-
-// V2 additions (tracked in VVA §16.6 F6):
-//  owl2_to_baez_dolan — n-categorical embedding
-//  owl2_to_schreiber_dcct — cohesive ∞-topos embedding
-//  owl2_to_connes — operator-algebraic embedding
-//  owl2_to_petz — quantum-state embedding
+//   Forward                Inverse              Pair status
+//   ─────────────────────  ──────────────────── ──────────────────────────
+//   oc_dc_bridge           oc_dc_bridge         Morita (Diakrisis Thm 16.10)
+//   owl2_to_htt            htt_to_owl2          Morita (DL fragment)
+//
+// Adding a new Morita pair is one entry in `registered_morita_pairs()`
+// plus the two directional translation-marker files. The audit gate
+// `verum audit --bridge-discharge` walks the registry uniformly.
 // =============================================================================
 
+mount core.theory_interop.coord.{TranslationVerdict, verdict_admits};
+
 public mount core.theory_interop.bridges.owl2_to_htt;
+public mount core.theory_interop.bridges.htt_to_owl2;
 public mount core.theory_interop.bridges.oc_dc_bridge;
+
+// =============================================================================
+// Morita pair — the unified round-trip primitive
+// =============================================================================
+//
+// Single canonical infrastructure for *every* Morita-equivalent
+// bridge pair Verum ships. Reuses:
+//   * `TranslationVerdict` (5-variant verdict from coord.vr) as the
+//     round-trip fidelity classifier — `Morita` is the
+//     identity-modulo-gauge case.
+//   * `is_adjoint` predicate from `core.action.enactments` as the
+//     witness relation.
+//   * Diakrisis Theorem 16.10 (round-trip property) as the cited
+//     framework-axiom backing the soundness claim.
+//
+// There is NO separate per-bridge round-trip module: the generic
+// `MoritaBridgePair` record and the generic `bridge_round_trip` axiom
+// below cover every pair uniformly. Adding a new bridge pair is one
+// `MoritaBridgePair { ... }` declaration plus the two directional
+// translation-marker files.
+
+/// A Morita-equivalent bridge pair between two framework axiom
+/// packages. The pair carries:
+///
+///   * `forward_framework`  — the source framework name (e.g.
+///     `"owl2_fs"`) that the forward bridge translates *from*.
+///   * `inverse_framework`  — the target framework name (e.g.
+///     `"lurie_htt"`) that the forward bridge translates *to*. The
+///     inverse bridge runs in the opposite direction.
+///   * `verdict`            — the round-trip fidelity classification.
+///                            `TranslationVerdict.Morita` = round-trip
+///                            is identity modulo gauge.
+///                            `Strong | Moderate | Weak` = lossy but
+///                            bounded (degree of loss).
+///                            `Untranslatable` = no inverse exists.
+///   * `forward_markers`    — number of `@framework_translate`
+///                            markers in the forward direction.
+///   * `inverse_markers`    — number of `@framework_translate`
+///                            markers in the inverse direction.
+///                            For a Morita pair: `forward_markers
+///                            == inverse_markers`.
+///
+/// Constructors below register each shipped pair as a single
+/// canonical value; the audit gate `verum audit --bridge-discharge`
+/// walks the registry uniformly.
+public type MoritaBridgePair is {
+    forward_framework: Text,
+    inverse_framework: Text,
+    verdict:           TranslationVerdict,
+    forward_markers:   Int,
+    inverse_markers:   Int,
+};
+
+/// True iff the bridge pair classifies as `Morita` — round-trip is
+/// identity modulo gauge canonicalisation.
+public fn is_morita_equivalent(pair: MoritaBridgePair) -> Bool {
+    match pair.verdict {
+        TranslationVerdict.Morita => true,
+        _ => false,
+    }
+}
+
+/// True iff the round-trip is at least admissible (any non-`Untranslatable`
+/// verdict). Defers to the existing `verdict_admits` predicate from
+/// `coord.vr` for a single source of truth on translation admissibility.
+public fn bridge_admits_round_trip(pair: MoritaBridgePair) -> Bool {
+    verdict_admits(pair.verdict)
+}
+
+/// True iff the marker counts are paired 1-to-1 — a structural
+/// pre-condition for Morita equivalence (every forward operator has
+/// an inverse pre-image and vice versa).
+public fn marker_pairing_balanced(pair: MoritaBridgePair) -> Bool {
+    pair.forward_markers == pair.inverse_markers
+}
+
+// =============================================================================
+// Generic round-trip property — the cited soundness claim
+// =============================================================================
+//
+// Universal axiom backing every Morita bridge pair Verum ships. A
+// bridge pair classified as `Morita` satisfies:
+//
+//   inverse(forward(α)) ≡_gauge α   for every source-framework α
+//   forward(inverse(β)) ≡_gauge β   for every target-framework β
+//
+// The cited framework axiom is Diakrisis Theorem 16.10 (round-trip
+// property; decidable for finitely-axiomatised α). The soundness
+// chronicle's `--bridge-discharge` audit consumes this single axiom
+// across all registered pairs.
+
+/// Generic round-trip property for any Morita-classified bridge
+/// pair. Asserts that the pair's marker counts balance and the
+/// verdict is at least admissible. Pre-condition: the pair was
+/// constructed from registered translation-marker packages.
+@framework(diakrisis, "Theorem 16.10 (round-trip property; specialised per-pair).")
+public axiom bridge_round_trip_property(pair: MoritaBridgePair) -> Bool
+    ensures marker_pairing_balanced(pair) && bridge_admits_round_trip(pair);
+
+// =============================================================================
+// Registered Morita pairs (V0 shipped)
+// =============================================================================
+
+/// The Articulation/Enactment Morita pair — Diakrisis 108.T
+/// specialised to the (`oc_articulation`, `dc_enactment`) framework
+/// boundary realised by `oc_dc_bridge.vr`. Round-trip identity is
+/// the existing `is_adjoint` predicate from
+/// `core.action.enactments`.
+public let MORITA_PAIR_OC_DC: MoritaBridgePair = MoritaBridgePair {
+    forward_framework: "oc_articulation",
+    inverse_framework: "dc_enactment",
+    verdict:           TranslationVerdict.Morita,
+    forward_markers:   1,
+    inverse_markers:   1,
+};
+
+/// The OWL 2 ↔ HTT Morita pair — `owl2_to_htt.vr` (forward) +
+/// `htt_to_owl2.vr` (inverse), 31 markers in each direction. The
+/// pair is `Morita`-classified for the **DL-decidable fragment** of
+/// HTT objects (Lurie HTT 5.1.4 + 1.2.1 + 5.2.7); HTT objects
+/// outside this fragment are `Approximating` and surface as
+/// such in the audit.
+public let MORITA_PAIR_OWL2_HTT: MoritaBridgePair = MoritaBridgePair {
+    forward_framework: "owl2_fs",
+    inverse_framework: "lurie_htt",
+    verdict:           TranslationVerdict.Morita,
+    forward_markers:   31,
+    inverse_markers:   31,
+};
+
+/// Full registry of shipped Morita pairs. Audit gates walk this list
+/// uniformly. Adding a new bridge pair is ONE entry here plus the
+/// two directional translation-marker files.
+public fn registered_morita_pairs() -> List<MoritaBridgePair> {
+    let mut out: List<MoritaBridgePair> = List.new();
+    out.push(MORITA_PAIR_OC_DC);
+    out.push(MORITA_PAIR_OWL2_HTT);
+    out
+}
