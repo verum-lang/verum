@@ -210,13 +210,18 @@ implement Graph for SimpleGraph<N, E>  {
     }
 
     fn edges(&self, from: &N) -> List<E> {
-        self.adjacency.get(from)
+        // Use get_optional for the Maybe<List<(N, E)>> shape so the
+        // .map(|edges| edges.iter()...) chain binds `edges` to the
+        // wrapped List, not to a tuple destructured from List
+        // iteration. `Map.get(K) -> V` returns the value directly; the
+        // Maybe<V>-returning variant is `get_optional`.
+        self.adjacency.get_optional(from)
             .map(|edges| edges.iter().map(|(_, e)| e.clone()).collect())
             .unwrap_or_else(List.new)
     }
 
     fn neighbors(&self, node: &N) -> List<N> {
-        self.adjacency.get(node)
+        self.adjacency.get_optional(node)
             .map(|edges| edges.iter().map(|(n, _)| n.clone()).collect())
             .unwrap_or_else(List.new)
     }
