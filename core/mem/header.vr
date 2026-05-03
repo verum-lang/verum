@@ -183,6 +183,10 @@ public type MemValidationError is
     | GenerationMismatch { expected: UInt32, actual: UInt32 }
     | EpochMismatch { expected: UInt16, actual: UInt16 };
 
+/// Public alias — short canonical name; internal call sites continue
+/// using `MemValidationError`.
+public type ValidationError is MemValidationError;
+
 implement MemValidationError {
     public fn generation_mismatch(expected: UInt32, actual: UInt32) -> MemValidationError {
         MemValidationError.GenerationMismatch { expected: expected, actual: actual }
