@@ -114,16 +114,19 @@ implement Future for Sleep {
 }
 
 /// Create a future that completes after the given duration.
+@inline(always)
 public fn sleep(duration: Duration) -> Sleep {
     Sleep.new(duration)
 }
 
 /// Create a future that completes after the given milliseconds.
+@inline(always)
 public fn sleep_ms(ms: Int) -> Sleep {
     Sleep.new(Duration.from_millis(ms))
 }
 
 /// Create a future that completes after the given seconds.
+@inline(always)
 public fn sleep_secs(secs: Int) -> Sleep {
     Sleep.new(Duration.from_secs(secs))
 }
@@ -177,6 +180,7 @@ implement Future for SleepUntil {
 }
 
 /// Create a future that completes at the given absolute instant.
+@inline(always)
 public fn sleep_until(deadline: Instant) -> SleepUntil {
     SleepUntil.new(deadline)
 }
@@ -259,6 +263,7 @@ implement TimerInterval {
     }
 
     /// Get the period of this interval.
+    @inline(always)
     public fn period(&self) -> Duration {
         self.period
     }
@@ -320,6 +325,7 @@ implement<F: Future> Future for Delay<F> {
 }
 
 /// Create a future that starts after a delay.
+@inline(always)
 public fn delay<F: Future>(duration: Duration, future: F) -> Delay<F> {
     Delay.new(duration, future)
 }
@@ -411,11 +417,13 @@ implement<F: Future> Future for Timeout<F> {
 }
 
 /// Wrap a future with a timeout duration.
+@inline(always)
 public fn timeout<F: Future>(duration: Duration, future: F) -> Timeout<F> {
     Timeout.new(duration, future)
 }
 
 /// Wrap a future with a timeout in milliseconds.
+@inline(always)
 public fn timeout_ms<F: Future>(ms: Int, future: F) -> Timeout<F> {
     Timeout.new(Duration.from_millis(ms), future)
 }
