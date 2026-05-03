@@ -192,6 +192,16 @@ public mount .protocols.{
     ShrAssign,
 };
 
+// Length protocol + UFCS-style free functions for refinement contracts.
+// Lets `len(arr)` / `is_empty(arr)` resolve via protocol dispatch
+// instead of colliding with `core.database.sqlite.native.*::len`
+// free overloads.
+public mount .protocols.{
+    Length,
+    len,
+    is_empty,
+};
+
 // From memory
 public mount .memory.{
     Heap,

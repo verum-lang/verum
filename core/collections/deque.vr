@@ -2126,3 +2126,14 @@ implement Int {
         n + 1
     }
 }
+
+// =============================================================================
+// Length protocol — enables free-function `len(deque)` dispatch
+// =============================================================================
+
+implement<T> Length for Deque<T> {
+    @inline(always)
+    fn len(&self) -> Int {
+        self.len
+    }
+}
