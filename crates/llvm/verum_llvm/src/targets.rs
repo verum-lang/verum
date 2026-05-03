@@ -388,6 +388,131 @@ impl Target {
         }
     }
 
+    /// PowerPC target backend initializer (32-bit + 64-bit, big- and
+    /// little-endian).  Cross-compile targets: `powerpc-unknown-linux-gnu`,
+    /// `powerpc64-unknown-linux-gnu`, `powerpc64le-unknown-linux-gnu`.
+    #[cfg(feature = "target-powerpc")]
+    pub fn initialize_powerpc(config: &InitializationConfig) {
+        use verum_llvm_sys::target::{
+            LLVMInitializePowerPCAsmParser, LLVMInitializePowerPCAsmPrinter,
+            LLVMInitializePowerPCDisassembler, LLVMInitializePowerPCTarget,
+            LLVMInitializePowerPCTargetInfo, LLVMInitializePowerPCTargetMC,
+        };
+
+        if config.base {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializePowerPCTarget() };
+        }
+
+        if config.info {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializePowerPCTargetInfo() };
+        }
+
+        if config.asm_printer {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializePowerPCAsmPrinter() };
+        }
+
+        if config.asm_parser {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializePowerPCAsmParser() };
+        }
+
+        if config.disassembler {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializePowerPCDisassembler() };
+        }
+
+        if config.machine_code {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializePowerPCTargetMC() };
+        }
+    }
+
+    /// SystemZ (z/Architecture) target backend initializer.  Cross-compile
+    /// target: `s390x-unknown-linux-gnu` (IBM mainframe Linux).
+    #[cfg(feature = "target-systemz")]
+    pub fn initialize_systemz(config: &InitializationConfig) {
+        use verum_llvm_sys::target::{
+            LLVMInitializeSystemZAsmParser, LLVMInitializeSystemZAsmPrinter,
+            LLVMInitializeSystemZDisassembler, LLVMInitializeSystemZTarget,
+            LLVMInitializeSystemZTargetInfo, LLVMInitializeSystemZTargetMC,
+        };
+
+        if config.base {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeSystemZTarget() };
+        }
+
+        if config.info {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeSystemZTargetInfo() };
+        }
+
+        if config.asm_printer {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeSystemZAsmPrinter() };
+        }
+
+        if config.asm_parser {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeSystemZAsmParser() };
+        }
+
+        if config.disassembler {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeSystemZDisassembler() };
+        }
+
+        if config.machine_code {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeSystemZTargetMC() };
+        }
+    }
+
+    /// BPF (Berkeley Packet Filter) target backend initializer.  Cross-
+    /// compile targets: `bpfel-unknown-none`, `bpfeb-unknown-none` (eBPF
+    /// for kernel hooks / XDP / perf-event programs).
+    #[cfg(feature = "target-bpf")]
+    pub fn initialize_bpf(config: &InitializationConfig) {
+        use verum_llvm_sys::target::{
+            LLVMInitializeBPFAsmParser, LLVMInitializeBPFAsmPrinter,
+            LLVMInitializeBPFDisassembler, LLVMInitializeBPFTarget,
+            LLVMInitializeBPFTargetInfo, LLVMInitializeBPFTargetMC,
+        };
+
+        if config.base {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeBPFTarget() };
+        }
+
+        if config.info {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeBPFTargetInfo() };
+        }
+
+        if config.asm_printer {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeBPFAsmPrinter() };
+        }
+
+        if config.asm_parser {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeBPFAsmParser() };
+        }
+
+        if config.disassembler {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeBPFDisassembler() };
+        }
+
+        if config.machine_code {
+            let _guard = TARGET_LOCK.write().unwrap_or_else(|e| e.into_inner());
+            unsafe { LLVMInitializeBPFTargetMC() };
+        }
+    }
+
     pub fn initialize_native(config: &InitializationConfig) -> Result<(), String> {
         use verum_llvm_sys::target::{
             LLVM_InitializeNativeAsmParser, LLVM_InitializeNativeAsmPrinter,
@@ -1117,5 +1242,56 @@ impl Drop for TargetMachineOptions {
         if let Some(inner) = self.0 {
             unsafe { LLVMDisposeTargetMachineOptions(inner) };
         }
+    }
+}
+
+// =============================================================================
+// Cross-compile target initializer smoke tests (#97)
+// =============================================================================
+//
+// Each test asserts the per-arch initializer wires up without
+// panicking — the test is "the FFI symbols resolve and the LLVM
+// global state accepts the registration".  Runs on the host CPU
+// regardless of cross-target since these are LLVM init calls only,
+// not target-machine creation.
+
+#[cfg(test)]
+mod target_initializer_tests {
+    use super::{InitializationConfig, Target};
+
+    #[cfg(feature = "target-aarch64")]
+    #[test]
+    fn aarch64_initializer_resolves() {
+        Target::initialize_aarch64(&InitializationConfig::default());
+    }
+
+    #[cfg(feature = "target-arm")]
+    #[test]
+    fn arm_initializer_resolves() {
+        Target::initialize_arm(&InitializationConfig::default());
+    }
+
+    #[cfg(feature = "target-riscv")]
+    #[test]
+    fn riscv_initializer_resolves() {
+        Target::initialize_riscv(&InitializationConfig::default());
+    }
+
+    #[cfg(feature = "target-powerpc")]
+    #[test]
+    fn powerpc_initializer_resolves() {
+        Target::initialize_powerpc(&InitializationConfig::default());
+    }
+
+    #[cfg(feature = "target-systemz")]
+    #[test]
+    fn systemz_initializer_resolves() {
+        Target::initialize_systemz(&InitializationConfig::default());
+    }
+
+    #[cfg(feature = "target-bpf")]
+    #[test]
+    fn bpf_initializer_resolves() {
+        Target::initialize_bpf(&InitializationConfig::default());
     }
 }

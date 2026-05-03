@@ -17,7 +17,24 @@ target-aarch64 = ["verum_llvm_sys/target-aarch64"]
 target-arm = ["verum_llvm_sys/target-arm"]
 target-riscv = ["verum_llvm_sys/target-riscv"]
 target-wasm = ["verum_llvm_sys/target-wasm"]
-target-all = ["verum_llvm_sys/targets-all"]
+target-powerpc = ["verum_llvm_sys/target-powerpc"]
+target-systemz = ["verum_llvm_sys/target-systemz"]
+target-bpf = ["verum_llvm_sys/target-bpf"]
+# `target-all` activates LLVM's "all backends" path AND every per-arch
+# cfg gate so callers using the umbrella feature get the dedicated
+# `Target::initialize_<arch>` entry points without needing to spell
+# them individually.
+target-all = [
+    "verum_llvm_sys/targets-all",
+    "target-x86",
+    "target-aarch64",
+    "target-arm",
+    "target-riscv",
+    "target-wasm",
+    "target-powerpc",
+    "target-systemz",
+    "target-bpf",
+]
 
 # LTO support
 lto = []

@@ -29,6 +29,9 @@ target-aarch64 = []
 target-arm = []
 target-riscv = []
 target-wasm = []
+target-powerpc = []
+target-systemz = []
+target-bpf = []
 
 # Optional features
 orc2 = []        # OrcV2 JIT API
