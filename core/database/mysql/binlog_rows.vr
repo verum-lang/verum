@@ -659,8 +659,6 @@ fn decode_value_for_type(
         return Ok((RvDateTime { packed: packed, fractional_us: frac }, 5 + frac_bytes));
     }
 
-    // Types V0 doesn't decode — surface raw bytes so the consumer
-    // can dispatch its own decoder.
     if t == COL_TYPE_NEWDECIMAL {
         // metadata = (precision << 8) | scale
         let precision = (meta.metadata >> 8) & 0xFF;
@@ -670,7 +668,8 @@ fn decode_value_for_type(
             Ok(b)  => b,
             Err(_) => { return Err(bad_rows("NEWDECIMAL truncated")); }
         };
-        return Ok((RvRaw(bytes), len));
+        let text = decode_newdecimal_to_text(bytes.as_slice(), precision, scale);
+        return Ok((RvText(text), len));
     }
     if t == COL_TYPE_JSON {
         let prefix = if meta.metadata > 0 && meta.metadata <= 4 { meta.metadata } else { 4 };
@@ -779,6 +778,177 @@ fn newdecimal_byte_length(precision: Int, scale: Int) -> Int {
     };
     intg_full * 4 + partial_bytes_for(intg_frac)
         + frac_full * 4 + partial_bytes_for(frac_frac)
+}
+
+/// Decode MySQL's packed-decimal binlog format into a canonical
+/// numeric Text ("-1234.5678" / "0" / "12345.6789").
+///
+/// Wire layout per MySQL src/strings/decimal.c:
+///   * Integer part split into:
+///       leading partial group of `intg_frac` digits (1-2 / 3-4 /
+///         5-6 / 7-8 → 1/2/3/4 byte BE).
+///       `intg_full` full groups of 9 digits each = 4 bytes BE.
+///   * Fractional part split into:
+///       `frac_full` full groups (4 bytes each).
+///       trailing partial group of `frac_frac` digits.
+///   * Sign carried in MSB of first byte: bit set = positive.
+///     Negative values have every byte XORed with 0xFF after the
+///     sign bit is masked off; positive only the first byte's
+///     sign bit is XORed.
+///
+/// We XOR-flip every byte if negative; reset the sign bit; then
+/// each group is read as a big-endian integer + zero-padded to
+/// the group's digit count. Result text is built left-to-right
+/// integer→fractional with a single `'.'` separator.
+fn decode_newdecimal_to_text(buf: &[Byte], precision: Int, scale: Int) -> Text {
+    if (buf.len() as Int) == 0 { return "0".clone(); }
+
+    let intg = precision - scale;
+    let intg_full = intg / 9;
+    let intg_frac = intg - intg_full * 9;
+    let frac_full = scale / 9;
+    let frac_frac = scale - frac_full * 9;
+    let pbytes_for = |digits: Int| -> Int {
+        if digits == 0 { 0 }
+        else if digits == 1 || digits == 2 { 1 }
+        else if digits == 3 || digits == 4 { 2 }
+        else if digits == 5 || digits == 6 { 3 }
+        else { 4 }
+    };
+
+    // Sign is the MSB of the first byte. Set bit = positive.
+    let first = (buf[0] as Int) & 0xFF;
+    let positive = (first & 0x80) != 0;
+
+    // Build a working copy with the sign bit unmasked; XOR every
+    // byte with 0xFF for negatives.
+    let n = buf.len() as Int;
+    let mut work: List<Int> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let raw = (buf[i] as Int) & 0xFF;
+        let inv = if positive {
+            if i == 0 { raw ^ 0x80 } else { raw }
+        } else {
+            (raw ^ 0xFF) & 0xFF
+        };
+        work.push(inv);
+        i = i + 1;
+    }
+
+    let mut out = "".clone();
+    if !positive { out.push_str("-"); }
+
+    // Integer part — leading partial group + intg_full × 9 digits.
+    let mut off: Int = 0;
+    let mut emitted_any: Bool = false;
+
+    let leading_bytes = pbytes_for(intg_frac);
+    if leading_bytes > 0 {
+        let mut v: Int = 0;
+        let mut k: Int = 0;
+        while k < leading_bytes {
+            v = (v << 8) | work[off + k];
+            k = k + 1;
+        }
+        off = off + leading_bytes;
+        // Emit without leading zeros.
+        let s = format_int_no_leading_zeros(v);
+        if (s.len() as Int) > 0 {
+            out.push_str(&s);
+            emitted_any = true;
+        }
+    }
+
+    let mut g: Int = 0;
+    while g < intg_full {
+        let mut v: Int = 0;
+        let mut k: Int = 0;
+        while k < 4 {
+            v = (v << 8) | work[off + k];
+            k = k + 1;
+        }
+        off = off + 4;
+        // First non-zero leading group skips leading zeros; later
+        // groups always pad to 9 digits.
+        if !emitted_any {
+            let s = format_int_no_leading_zeros(v);
+            if (s.len() as Int) > 0 {
+                out.push_str(&s);
+                emitted_any = true;
+            }
+        } else {
+            out.push_str(&format_int_zero_padded(v, 9));
+        }
+        g = g + 1;
+    }
+
+    if !emitted_any {
+        out.push_str("0");
+    }
+
+    // Fractional part — frac_full × 9 digits + trailing partial
+    // group of frac_frac digits.
+    if scale > 0 {
+        out.push_str(".");
+        let mut h: Int = 0;
+        while h < frac_full {
+            let mut v: Int = 0;
+            let mut k: Int = 0;
+            while k < 4 {
+                v = (v << 8) | work[off + k];
+                k = k + 1;
+            }
+            off = off + 4;
+            out.push_str(&format_int_zero_padded(v, 9));
+            h = h + 1;
+        }
+        let trailing_bytes = pbytes_for(frac_frac);
+        if trailing_bytes > 0 {
+            let mut v: Int = 0;
+            let mut k: Int = 0;
+            while k < trailing_bytes {
+                v = (v << 8) | work[off + k];
+                k = k + 1;
+            }
+            off = off + trailing_bytes;
+            out.push_str(&format_int_zero_padded(v, frac_frac));
+        }
+    }
+
+    let _ = off;
+    out
+}
+
+fn format_int_zero_padded(v: Int, width: Int) -> Text {
+    let mut s = "".clone();
+    let raw = format_int_no_leading_zeros(v);
+    let cur = raw.len() as Int;
+    let mut pad = width - cur;
+    while pad > 0 {
+        s.push_str("0");
+        pad = pad - 1;
+    }
+    s.push_str(&raw);
+    s
+}
+
+fn format_int_no_leading_zeros(v: Int) -> Text {
+    if v == 0 { return "".clone(); }
+    let mut buf: List<Byte> = List.new();
+    let mut n = v;
+    let chars = "0123456789".as_bytes();
+    while n > 0 {
+        buf.push(chars[(n % 10) as Int]);
+        n = n / 10;
+    }
+    let mut out = "".clone();
+    let mut i = (buf.len() as Int) - 1;
+    while i >= 0 {
+        out.push_byte(buf[i]);
+        i = i - 1;
+    }
+    out
 }
 
 fn bitmap_bit(buf: &[Byte], idx: Int) -> Bool {

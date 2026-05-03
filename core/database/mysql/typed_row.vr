@@ -1,0 +1,260 @@
+// =============================================================================
+// core/database/mysql/typed_row.vr — MysqlTypedRow protocol over RowValue
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.7 (binlog row decode / typed lift).
+// =============================================================================
+//
+// Mirror of `core/database/postgres/typed_row.vr` for the MySQL
+// `RowValue` ADT (binlog ROW decoder output). After
+// `decode_with_table_map(rev, tm)` returns `DecodedRows`, callers
+// often want to lift each `DecodedRow.columns: List<RowValue>` into
+// a typed Verum value: a single scalar (e.g. `Int`, `Text`),
+// a tuple `(Int, Text, Float)`, or a user-defined struct.
+//
+// `MysqlTypedRow` is the protocol that bridges that gap. Symmetric
+// to PG's TypedRow — same scalar / Maybe / tuple shape — with the
+// only difference being the underlying value-variant set
+// (RowValue vs TypedValue).
+//
+// V0 implementations:
+//   * Scalars — `Int`, `Float`, `Text`, `Bool`, `List<Byte>`,
+//     plus `Maybe<T>` for nullable columns.
+//   * Tuples — `(T1,)`, `(T1, T2)`, `(T1, T2, T3)`, `(T1..T4)`.
+//
+// User-defined structs are out of V0 — they need either a derive
+// macro or hand-written impls. V1 will ship `@derive(MysqlTypedRow)`.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.typed_row;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.binlog_rows.{
+    RowValue, DecodedRow,
+    RvNull, RvInt, RvUInt, RvFloat, RvText, RvBytes,
+    RvDateTime, RvDate, RvTime, RvRaw,
+};
+
+// =============================================================================
+// Protocol
+// =============================================================================
+
+/// Lift one row of `RowValue`s into a typed Verum value. MUST
+/// validate column count + per-column variant. Mismatches surface
+/// as `DbError.Adapter("MYSQL_TYPED_ROW_DECODE", …)` with the
+/// failing column index + expected/actual variant.
+public type MysqlTypedRow is protocol {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<Self, DbError>;
+};
+
+// =============================================================================
+// Scalar implementations
+// =============================================================================
+
+implement MysqlTypedRow for Int {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<Int, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            RvInt(n) | RvUInt(n) => Ok(*n),
+            other => Err(typed_row_error(0, "Int", other)),
+        }
+    }
+}
+
+implement MysqlTypedRow for Float {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<Float, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            RvFloat(f) => Ok(*f),
+            // MySQL DECIMAL surfaces as RvText (canonical decimal)
+            // — caller wanting Float should use a higher-level
+            // parse step, not this protocol.
+            other => Err(typed_row_error(0, "Float", other)),
+        }
+    }
+}
+
+implement MysqlTypedRow for Text {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<Text, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            RvText(s) => Ok(s.clone()),
+            other => Err(typed_row_error(0, "Text", other)),
+        }
+    }
+}
+
+implement MysqlTypedRow for Bool {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<Bool, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            // MySQL BOOL == TINYINT(1); arrives as RvInt.
+            RvInt(n) | RvUInt(n) => Ok(*n != 0),
+            other => Err(typed_row_error(0, "Bool", other)),
+        }
+    }
+}
+
+implement MysqlTypedRow for List<Byte> {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<List<Byte>, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            RvBytes(b) | RvRaw(b) => Ok(b.clone()),
+            other => Err(typed_row_error(0, "List<Byte>", other)),
+        }
+    }
+}
+
+// =============================================================================
+// Maybe<T> — nullable single-column row
+// =============================================================================
+
+implement<T: MysqlTypedRow> MysqlTypedRow for Maybe<T> {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<Maybe<T>, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            RvNull => Ok(None),
+            _ => {
+                let v = T::from_mysql_row(row)?;
+                Ok(Some(v))
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Tuple implementations — (T1,) / (T1, T2) / (T1, T2, T3) / (T1..T4)
+// =============================================================================
+
+fn slice_one(row: &List<RowValue>, idx: Int) -> List<RowValue> {
+    let mut out: List<RowValue> = List.with_capacity(1);
+    out.push(row[idx].clone());
+    out
+}
+
+implement<A: MysqlTypedRow> MysqlTypedRow for (A,) {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<(A,), DbError> {
+        expect_arity(row, 1)?;
+        let a = A::from_mysql_row(&slice_one(row, 0))?;
+        Ok((a,))
+    }
+}
+
+implement<A: MysqlTypedRow, B: MysqlTypedRow> MysqlTypedRow for (A, B) {
+    fn from_mysql_row(row: &List<RowValue>) -> Result<(A, B), DbError> {
+        expect_arity(row, 2)?;
+        let a = A::from_mysql_row(&slice_one(row, 0))?;
+        let b = B::from_mysql_row(&slice_one(row, 1))?;
+        Ok((a, b))
+    }
+}
+
+implement<A: MysqlTypedRow, B: MysqlTypedRow, C: MysqlTypedRow>
+    MysqlTypedRow for (A, B, C)
+{
+    fn from_mysql_row(row: &List<RowValue>) -> Result<(A, B, C), DbError> {
+        expect_arity(row, 3)?;
+        let a = A::from_mysql_row(&slice_one(row, 0))?;
+        let b = B::from_mysql_row(&slice_one(row, 1))?;
+        let c = C::from_mysql_row(&slice_one(row, 2))?;
+        Ok((a, b, c))
+    }
+}
+
+implement<A: MysqlTypedRow, B: MysqlTypedRow, C: MysqlTypedRow, D: MysqlTypedRow>
+    MysqlTypedRow for (A, B, C, D)
+{
+    fn from_mysql_row(row: &List<RowValue>) -> Result<(A, B, C, D), DbError> {
+        expect_arity(row, 4)?;
+        let a = A::from_mysql_row(&slice_one(row, 0))?;
+        let b = B::from_mysql_row(&slice_one(row, 1))?;
+        let c = C::from_mysql_row(&slice_one(row, 2))?;
+        let d = D::from_mysql_row(&slice_one(row, 3))?;
+        Ok((a, b, c, d))
+    }
+}
+
+// =============================================================================
+// Convenience — decode every DecodedRow through MysqlTypedRow
+// =============================================================================
+
+/// Lift every row in a `List<DecodedRow>` through the
+/// `MysqlTypedRow` protocol. Errors short-circuit on the first
+/// failing row, with the surrounding error message naming the
+/// row index.
+public fn rows_typed_my<R: MysqlTypedRow>(
+    rows: &List<DecodedRow>,
+) -> Result<List<R>, DbError> {
+    let mut out: List<R> = List.with_capacity(rows.len());
+    let mut i: Int = 0;
+    while i < (rows.len() as Int) {
+        let r = R::from_mysql_row(&rows[i].columns);
+        match r {
+            Ok(v)  => { out.push(v); }
+            Err(e) => {
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdMysql,
+                    code: "MYSQL_TYPED_ROW_DECODE".clone(),
+                    message: f"row {i}: {e}",
+                    retryable: false,
+                }));
+            }
+        }
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn expect_arity(row: &List<RowValue>, want: Int) -> Result<(), DbError> {
+    let got = row.len() as Int;
+    if got != want {
+        return Err(DbError.Adapter(AdapterSpecific {
+            adapter: AdMysql,
+            code: "MYSQL_TYPED_ROW_ARITY".clone(),
+            message: f"MysqlTypedRow: expected {want} columns, got {got}",
+            retryable: false,
+        }));
+    }
+    Ok(())
+}
+
+fn typed_row_error(col: Int, want: &str, got: &RowValue) -> DbError {
+    let got_name = row_value_name(got);
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "MYSQL_TYPED_ROW_DECODE".clone(),
+        message: f"MysqlTypedRow: column {col}: expected {want}, got {got_name}",
+        retryable: false,
+    })
+}
+
+fn row_value_name(v: &RowValue) -> Text {
+    match v {
+        RvNull          => "Null".clone(),
+        RvInt(_)        => "Int".clone(),
+        RvUInt(_)       => "UInt".clone(),
+        RvFloat(_)      => "Float".clone(),
+        RvText(_)       => "Text".clone(),
+        RvBytes(_)      => "Bytes".clone(),
+        RvDateTime { .. } => "DateTime".clone(),
+        RvDate { .. }   => "Date".clone(),
+        RvTime { .. }   => "Time".clone(),
+        RvRaw(_)        => "Raw".clone(),
+    }
+}
