@@ -62,6 +62,7 @@ public module async_replication;
 public module async_base_backup;
 public module async_pgoutput;
 public module async_pgoutput_buffered;
+public module async_pgoutput_typed;
 public module typed_row;
 public module pg_stmt_cache;
 public module pg_prepared_session;
@@ -190,6 +191,15 @@ public mount .async_pgoutput_buffered.{
     BcRegular, BcStreamedTx, BcStreamedAbort, BcTerminated, BcClosed,
     buffered, buffered_with_cap,
     DEFAULT_TX_ROW_CAP,
+};
+public mount .async_pgoutput_typed.{
+    TupleValue, TvLifted, TvNullField, TvUnchangedToastField,
+    TypedPgoutputChange, TypedOldTuple, ToKey, ToOld,
+    TpcBegin, TpcCommit, TpcRelationOnly,
+    TpcInsert, TpcUpdate, TpcDelete,
+    TpcStreamStart, TpcStreamStop, TpcStreamCommit, TpcStreamAbort,
+    TpcRaw, TpcTerminated, TpcClosed,
+    typed_tuple, lift_change,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
