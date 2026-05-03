@@ -1,0 +1,185 @@
+// =============================================================================
+// t24_async_pgoutput_buffered.vr — buffered streamed-tx consumer V0
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.7 (logical replication, streaming-tx),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// V0 covers the BcRegular pass-through path end-to-end: when no
+// streaming-tx events arrive, the buffered consumer behaves
+// identically to AsyncPgoutputConsumer. Asserts:
+//
+//   1. Side-channel INSERT 3 rows on a small table.
+//   2. AsyncPgoutputBufferedConsumer.next_buffered drains
+//      BcRegular(CdcRelationOnly) + ≥3 BcRegular(CdcInsert).
+//   3. Verify the inner change carries the relation context
+//      attached (matches AsyncPgoutputConsumer's behaviour).
+//
+// The full streamed-tx path (BcStreamedTx / BcStreamedAbort)
+// requires `logical_decoding_work_mem` lower than the test tx
+// size — fixture infrastructure deferred to V1. The state
+// machine is unit-test-able via synthetic events; this
+// integration test verifies the BcRegular path is correct.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable, PgConnection, connect as pg_connect,
+    PgReplicationConfig, PgReplicationConnection,
+    LogicalReplicationOptions,
+    Lsn,
+    AsyncPgReplicationConnection,
+    connect_replication_async,
+    AsyncPgoutputConsumer, PgoutputChange,
+    CdcBegin, CdcCommit, CdcRelationOnly,
+    CdcInsert, CdcUpdate, CdcDelete,
+    CdcRaw, CdcTerminated, CdcClosed,
+    start_logical_pgoutput,
+    AsyncPgoutputBufferedConsumer, BufferedChange,
+    BcRegular, BcStreamedTx, BcStreamedAbort,
+    BcTerminated, BcClosed,
+    buffered,
+};
+mount core.async.executor.block_on;
+
+fn admin_replication_config() -> PgReplicationConfig {
+    PgReplicationConfig.logical(PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-async-pgo-buf".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    })
+}
+
+fn ensure_publication() {
+    let mut admin = expect_ok(
+        pg_connect(&PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: ADMIN_USER.clone(),
+            password: ADMIN_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-async-pgo-buf-setup".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        }),
+        &"admin connect for publication setup failed".clone(),
+    );
+    let _ = admin.simple_query(&"DROP PUBLICATION IF EXISTS spindle_test_pub".clone());
+    expect_ok(
+        admin.simple_query(&"CREATE PUBLICATION spindle_test_pub FOR ALL TABLES".clone()),
+        &"CREATE PUBLICATION failed".clone(),
+    );
+}
+
+fn write_rows() {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS async_pgo_buf_smoke (id integer PRIMARY KEY, payload text NOT NULL)"
+            .clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM async_pgo_buf_smoke".clone());
+    expect_ok(
+        side.simple_query(
+            &"INSERT INTO async_pgo_buf_smoke (id, payload) VALUES \
+              (1, 'x'), (2, 'y'), (3, 'z')".clone()
+        ),
+        &"side-channel INSERT 3 rows failed".clone(),
+    );
+}
+
+fn main() {
+    ensure_publication();
+
+    block_on(async move {
+        let cfg = admin_replication_config();
+        let repl = expect_ok(
+            connect_replication_async(cfg).await,
+            &"connect_replication_async failed".clone(),
+        );
+
+        let slot = "spindle_async_pgo_buf_slot".clone();
+        let _ = repl.drop_slot(&slot, false).await;
+        expect_ok(
+            repl.create_logical_slot(&slot, &"pgoutput".clone(), true).await,
+            &"create_logical_slot failed".clone(),
+        );
+
+        let opts = LogicalReplicationOptions.pgoutput(slot.clone())
+            .with_option("proto_version".clone(), "1".clone())     // proto 1 → no streaming
+            .with_option("publication_names".clone(), "spindle_test_pub".clone());
+
+        let raw = expect_ok(
+            start_logical_pgoutput(repl, opts, Lsn.zero()).await,
+            &"start_logical_pgoutput failed".clone(),
+        );
+
+        let consumer = buffered(raw);
+        write_rows();
+
+        let mut saw_relation: Bool = false;
+        let mut insert_count: Int = 0;
+        let mut iters: Int = 0;
+        while iters < 50 {
+            match consumer.next_buffered().await {
+                None => { break; }
+                Some(BcRegular(change)) => {
+                    match change {
+                        CdcRelationOnly(rel) => {
+                            if &rel.name == &"async_pgo_buf_smoke".clone() {
+                                saw_relation = true;
+                            }
+                        }
+                        CdcInsert { relation, .. } => {
+                            if &relation.name == &"async_pgo_buf_smoke".clone() {
+                                insert_count = insert_count + 1;
+                            }
+                        }
+                        CdcBegin(_) | CdcCommit(_) | CdcUpdate { .. }
+                        | CdcDelete { .. } | CdcRaw(_) => {}
+                        // Streaming variants shouldn't arrive at proto v1.
+                        _ => {}
+                    }
+                    if insert_count >= 3 { break; }
+                }
+                // Buffered streaming events shouldn't appear at proto v1.
+                Some(BcStreamedTx { .. }) => {
+                    expect(false, &"unexpected BcStreamedTx at proto v1".clone());
+                }
+                Some(BcStreamedAbort { .. }) => {
+                    expect(false, &"unexpected BcStreamedAbort at proto v1".clone());
+                }
+                Some(BcTerminated(e)) => {
+                    expect(false, &f"buffered consumer terminated: {e}");
+                }
+                Some(BcClosed) => { break; }
+            }
+            iters = iters + 1;
+        }
+
+        expect(
+            saw_relation,
+            &"buffered consumer did not surface BcRegular(CdcRelationOnly)".clone(),
+        );
+        expect(
+            insert_count >= 3,
+            &f"expected ≥3 BcRegular(CdcInsert), got {insert_count}",
+        );
+
+        let _ = consumer.close().await;
+
+        pass(&"t24_async_pgoutput_buffered".clone());
+    });
+}

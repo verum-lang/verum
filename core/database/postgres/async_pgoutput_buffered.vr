@@ -1,0 +1,398 @@
+// =============================================================================
+// core/database/postgres/async_pgoutput_buffered.vr — streamed-tx grouping V0
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (logical replication / pgoutput
+//       streaming-tx), §6.1.8 (async surface).
+// =============================================================================
+//
+// AsyncPgoutputConsumer surfaces CdcStreamStart/Stop/Commit/Abort
+// as raw events. Production CDC consumers want atomic-tx semantics
+// even when server streams large transactions piecemeal — receive
+// a single "transaction applied" event with all changes attached,
+// OR a "transaction aborted" event when partial state should be
+// discarded.
+//
+// PG ≥ 14 with proto_version ≥ 2 streams transactions exceeding
+// `logical_decoding_work_mem`:
+//
+//   StreamStart { xid, first_segment }
+//     — begin or resume xid's segment.
+//   <DML events>
+//     — append to xid.
+//   StreamStop
+//     — segment ends; xid may resume in a later segment.
+//   StreamCommit { xid, commit_lsn, end_lsn, … }
+//     — final commit; the assembled tx is now atomically applied.
+//   StreamAbort { xid, subtxn_xid }
+//     — drop the xid's buffered changes.
+//
+// Concurrent transactions can interleave segments, so the buffer
+// MUST be per-xid (HashMap<xid, BufferedTx>).
+//
+// V0 surface:
+//   * AsyncPgoutputBufferedConsumer wraps AsyncPgoutputConsumer.
+//   * .next_buffered().await → Maybe<BufferedChange>:
+//       BcRegular(PgoutputChange)         — non-streamed pass-through
+//       BcStreamedTx { xid, commit,
+//                      changes: List<PgoutputChange> }
+//       BcStreamedAbort { xid, subtxn_xid }
+//       BcTerminated(DbError) / BcClosed
+//   * Bounded per-tx row cap (default 100_000) — prevents memory
+//     blow-up; on overflow surface BcTerminated.
+//
+// Sync wire / async_pgoutput.vr canonical / unchanged.
+//
+// OUT of V0:
+//   * Per-tx byte-size cap.
+//   * Spill-to-disk for very-long transactions.
+//   * Per-xid metrics snapshots.
+//   * StreamPrepare / StreamCommitPrepared (proto v3+ two-phase).
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.DatabaseMedium("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.async_pgoutput_buffered;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.async_pgoutput.{
+    AsyncPgoutputConsumer, PgoutputChange,
+    CdcBegin, CdcCommit, CdcRelationOnly,
+    CdcInsert, CdcUpdate, CdcDelete,
+    CdcStreamStart, CdcStreamStop, CdcStreamCommit, CdcStreamAbort,
+    CdcRaw, CdcTerminated, CdcClosed,
+};
+mount core.database.postgres.pgoutput.{
+    StreamStartMessage, StreamCommitMessage, StreamAbortMessage,
+    PgoMessage,
+};
+
+// =============================================================================
+// Tunables
+// =============================================================================
+
+/// Per-xid row cap. Streaming a transaction that exceeds this is
+/// a memory liability (V0 buffers in RAM). Surfaces BcTerminated
+/// when hit so the consumer notices instead of silently OOMing.
+public const DEFAULT_TX_ROW_CAP: Int = 100_000;
+
+// =============================================================================
+// Output ADT
+// =============================================================================
+
+public type BufferedChange is
+      BcRegular(PgoutputChange)
+    | BcStreamedTx {
+        xid: Int,
+        commit: StreamCommitMessage,
+        /// Every Insert/Update/Delete (and any inline non-stream
+        /// events) collected between StreamStart and StreamCommit.
+        /// Order matches the wire — replay applies them in this
+        /// sequence.
+        changes: List<PgoutputChange>,
+    }
+    | BcStreamedAbort {
+        xid: Int,
+        subtxn_xid: Int,
+    }
+    | BcTerminated(DbError)
+    | BcClosed;
+
+// =============================================================================
+// Buffered consumer
+// =============================================================================
+
+/// Per-xid in-progress transaction state. Lives in the
+/// `buffers` map keyed by `xid`.
+type BufferedTx is {
+    changes: List<PgoutputChange>,
+};
+
+public type AsyncPgoutputBufferedConsumer is {
+    inner: AsyncPgoutputConsumer,
+    /// Per-xid buffers. V0 uses a List<(Int, BufferedTx)> rather
+    /// than a Map because xids in a streaming session are bounded
+    /// (typically O(1) concurrent — most workloads stream one
+    /// long tx at a time). Linear scan is fine.
+    buffers: Shared<sync.mutex.Mutex<List<(Int, BufferedTx)>>>,
+    /// xid currently being filled (between StreamStart and
+    /// StreamStop). `None` outside a segment.
+    current_xid: Shared<sync.mutex.Mutex<Maybe<Int>>>,
+    row_cap: Int,
+};
+
+implement AsyncPgoutputBufferedConsumer {
+    public fn clone(&self) -> AsyncPgoutputBufferedConsumer {
+        AsyncPgoutputBufferedConsumer {
+            inner: self.inner.clone(),
+            buffers: self.buffers.clone(),
+            current_xid: self.current_xid.clone(),
+            row_cap: self.row_cap,
+        }
+    }
+
+    public fn inner_ref(&self) -> &AsyncPgoutputConsumer {
+        &self.inner
+    }
+
+    /// Pull the next BufferedChange — drives the underlying
+    /// AsyncPgoutputConsumer + maintains the per-xid buffer state
+    /// machine. Returns None only when the underlying stream
+    /// closes cleanly.
+    public async fn next_buffered(&self) -> Maybe<BufferedChange> {
+        loop {
+            let raw = self.inner.next_change().await;
+            match raw {
+                None              => { return None; }
+                Some(CdcTerminated(e)) => {
+                    return Some(BcTerminated(e));
+                }
+                Some(CdcClosed)        => {
+                    return Some(BcClosed);
+                }
+                Some(CdcStreamStart(s)) => {
+                    self.handle_stream_start(&s);
+                    // Don't surface the StreamStart itself —
+                    // streaming-tx semantics absorb it.
+                }
+                Some(CdcStreamStop) => {
+                    self.handle_stream_stop();
+                    // Same — segment boundary, not a delivered
+                    // event.
+                }
+                Some(CdcStreamCommit(c)) => {
+                    let assembled = self.handle_stream_commit(&c);
+                    return Some(assembled);
+                }
+                Some(CdcStreamAbort(a)) => {
+                    self.handle_stream_abort(&a);
+                    return Some(BcStreamedAbort {
+                        xid: a.xid,
+                        subtxn_xid: a.subtxn_xid,
+                    });
+                }
+                Some(other) => {
+                    // Insert/Update/Delete: append to current xid
+                    // if streaming, otherwise pass through.
+                    let cur = self.read_current_xid();
+                    match cur {
+                        Some(xid) => {
+                            if self.is_dml(&other) {
+                                let cap_hit = self.append_to_xid(xid, other);
+                                if cap_hit {
+                                    return Some(BcTerminated(
+                                        DbError.Adapter(AdapterSpecific {
+                                            adapter: AdPostgres,
+                                            code: "PGOUTPUT_TX_BUFFER_OVERFLOW".clone(),
+                                            message: f"streamed tx xid={xid} exceeded row cap {self.row_cap}",
+                                            retryable: false,
+                                        })
+                                    ));
+                                }
+                                // Don't deliver — buffered until
+                                // commit.
+                            } else {
+                                // Non-DML inside a streaming
+                                // segment (e.g. RelationOnly) —
+                                // pass through to the consumer
+                                // for schema awareness.
+                                return Some(BcRegular(other));
+                            }
+                        }
+                        None => {
+                            return Some(BcRegular(other));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn close(&self) -> Result<(), DbError> {
+        self.inner.close().await
+    }
+
+    // -------------------------------------------------------------------------
+    // State-machine internals
+    // -------------------------------------------------------------------------
+
+    fn handle_stream_start(&self, s: &StreamStartMessage) {
+        // Open buffer if first segment OR not yet present.
+        let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
+        if s.first_segment {
+            // Replace any stale entry (shouldn't happen but
+            // defensive).
+            let mut i: Int = 0;
+            let mut found: Bool = false;
+            while i < (bufs.len() as Int) {
+                if bufs[i].0 == s.xid {
+                    bufs[i] = (s.xid, BufferedTx { changes: List.new() });
+                    found = true;
+                    break;
+                }
+                i = i + 1;
+            }
+            if !found {
+                bufs.push((s.xid, BufferedTx { changes: List.new() }));
+            }
+        } else {
+            // Resume — buffer must already exist; if not, create
+            // empty (server bug or we missed first segment).
+            let mut found: Bool = false;
+            let mut i: Int = 0;
+            while i < (bufs.len() as Int) {
+                if bufs[i].0 == s.xid { found = true; break; }
+                i = i + 1;
+            }
+            if !found {
+                bufs.push((s.xid, BufferedTx { changes: List.new() }));
+            }
+        }
+        drop(bufs);
+
+        // Mark this xid as the active one.
+        let mut cur = self.current_xid.lock().unwrap_or_else(|p| p.into_inner());
+        *cur = Some(s.xid);
+    }
+
+    fn handle_stream_stop(&self) {
+        // Segment boundary — clear current xid, keep buffer.
+        let mut cur = self.current_xid.lock().unwrap_or_else(|p| p.into_inner());
+        *cur = None;
+    }
+
+    fn handle_stream_commit(&self, c: &StreamCommitMessage) -> BufferedChange {
+        let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
+        let mut idx: Int = -1;
+        let mut i: Int = 0;
+        while i < (bufs.len() as Int) {
+            if bufs[i].0 == c.xid { idx = i; break; }
+            i = i + 1;
+        }
+        if idx < 0 {
+            // No buffer — surface as empty tx (server may have
+            // abort'd then re-streamed; defensive shape).
+            return BcStreamedTx {
+                xid: c.xid,
+                commit: c.clone(),
+                changes: List.new(),
+            };
+        }
+        let popped = bufs[idx].1.changes.clone();
+        // Remove the entry.
+        let mut new_bufs: List<(Int, BufferedTx)> =
+            List.with_capacity((bufs.len() as Int) - 1);
+        let mut k: Int = 0;
+        while k < (bufs.len() as Int) {
+            if k != idx {
+                new_bufs.push((bufs[k].0, BufferedTx {
+                    changes: bufs[k].1.changes.clone(),
+                }));
+            }
+            k = k + 1;
+        }
+        *bufs = new_bufs;
+        drop(bufs);
+        BcStreamedTx {
+            xid: c.xid,
+            commit: c.clone(),
+            changes: popped,
+        }
+    }
+
+    fn handle_stream_abort(&self, a: &StreamAbortMessage) {
+        let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
+        let mut idx: Int = -1;
+        let mut i: Int = 0;
+        while i < (bufs.len() as Int) {
+            if bufs[i].0 == a.xid { idx = i; break; }
+            i = i + 1;
+        }
+        if idx >= 0 {
+            let mut new_bufs: List<(Int, BufferedTx)> =
+                List.with_capacity((bufs.len() as Int) - 1);
+            let mut k: Int = 0;
+            while k < (bufs.len() as Int) {
+                if k != idx {
+                    new_bufs.push((bufs[k].0, BufferedTx {
+                        changes: bufs[k].1.changes.clone(),
+                    }));
+                }
+                k = k + 1;
+            }
+            *bufs = new_bufs;
+        }
+        drop(bufs);
+        // Clear current_xid if it matched.
+        let mut cur = self.current_xid.lock().unwrap_or_else(|p| p.into_inner());
+        match *cur {
+            Some(xid) if xid == a.xid => { *cur = None; }
+            _ => {}
+        }
+    }
+
+    /// Returns `true` if the cap was hit (caller should surface
+    /// BcTerminated).
+    fn append_to_xid(&self, xid: Int, change: PgoutputChange) -> Bool {
+        let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
+        let mut i: Int = 0;
+        while i < (bufs.len() as Int) {
+            if bufs[i].0 == xid {
+                if (bufs[i].1.changes.len() as Int) >= self.row_cap {
+                    return true;
+                }
+                bufs[i].1.changes.push(change);
+                return false;
+            }
+            i = i + 1;
+        }
+        // No buffer — defensive create.
+        let mut new_buf = BufferedTx { changes: List.new() };
+        new_buf.changes.push(change);
+        bufs.push((xid, new_buf));
+        false
+    }
+
+    fn read_current_xid(&self) -> Maybe<Int> {
+        let g = self.current_xid.lock().unwrap_or_else(|p| p.into_inner());
+        g.clone()
+    }
+
+    fn is_dml(&self, c: &PgoutputChange) -> Bool {
+        match c {
+            CdcInsert { .. } | CdcUpdate { .. } | CdcDelete { .. } => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+public fn buffered(inner: AsyncPgoutputConsumer) -> AsyncPgoutputBufferedConsumer {
+    buffered_with_cap(inner, DEFAULT_TX_ROW_CAP)
+}
+
+public fn buffered_with_cap(
+    inner: AsyncPgoutputConsumer,
+    row_cap: Int,
+) -> AsyncPgoutputBufferedConsumer {
+    let cap = if row_cap < 1 { 1 } else { row_cap };
+    AsyncPgoutputBufferedConsumer {
+        inner: inner,
+        buffers: Shared.new(sync.mutex.Mutex.new(List.new())),
+        current_xid: Shared.new(sync.mutex.Mutex.new(None)),
+        row_cap: cap,
+    }
+}
