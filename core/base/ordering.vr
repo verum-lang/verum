@@ -17,6 +17,7 @@ public type Ordering is Less | Equal | Greater;
 
 implement Ordering {
     /// Returns true if the ordering is Less.
+    @inline(always)
     public fn is_less(&self) -> Bool {
         match self {
             Less => true,
@@ -25,6 +26,7 @@ implement Ordering {
     }
 
     /// Returns true if the ordering is Equal.
+    @inline(always)
     public fn is_equal(&self) -> Bool {
         match self {
             Equal => true,
@@ -33,6 +35,7 @@ implement Ordering {
     }
 
     /// Returns true if the ordering is Greater.
+    @inline(always)
     public fn is_greater(&self) -> Bool {
         match self {
             Greater => true,
@@ -41,6 +44,7 @@ implement Ordering {
     }
 
     /// Returns true if the ordering is Less or Equal.
+    @inline(always)
     public fn is_le(&self) -> Bool {
         match self {
             Less => true,
@@ -50,6 +54,7 @@ implement Ordering {
     }
 
     /// Returns true if the ordering is Greater or Equal.
+    @inline(always)
     public fn is_ge(&self) -> Bool {
         match self {
             Less => false,
@@ -59,6 +64,7 @@ implement Ordering {
     }
 
     /// Reverses the ordering: Less becomes Greater and vice versa.
+    @inline(always)
     public fn reverse(self) -> Ordering {
         match self {
             Less => Greater,
@@ -69,6 +75,7 @@ implement Ordering {
 
     /// Chains two orderings: returns `other` if self is Equal, otherwise returns self.
     /// Useful for lexicographic comparison of multiple fields.
+    @inline(always)
     public fn then(self, other: Ordering) -> Ordering {
         match self {
             Equal => other,
@@ -77,6 +84,7 @@ implement Ordering {
     }
 
     /// Chains with a lazily computed ordering.
+    @inline(always)
     public fn then_with<F: fn() -> Ordering>(self, f: F) -> Ordering {
         match self {
             Equal => f(),
@@ -85,6 +93,7 @@ implement Ordering {
     }
 
     /// Converts to an integer: -1 for Less, 0 for Equal, 1 for Greater.
+    @inline(always)
     public fn to_int(self) -> Int {
         match self {
             Less => -1,
@@ -95,6 +104,7 @@ implement Ordering {
 
     /// Creates an Ordering from an integer comparison result.
     /// Negative -> Less, Zero -> Equal, Positive -> Greater.
+    @inline(always)
     public fn from_int(n: Int) -> Ordering {
         if n < 0 { Less }
         else if n > 0 { Greater }
@@ -107,6 +117,7 @@ implement Ordering {
 // =============================================================================
 
 implement Eq for Ordering {
+    @inline(always)
     fn eq(&self, other: &Ordering) -> Bool {
         match (self, other) {
             (Less, Less) => true,
@@ -122,6 +133,7 @@ implement Eq for Ordering {
 // =============================================================================
 
 implement Clone for Ordering {
+    @inline(always)
     fn clone(&self) -> Ordering {
         match self {
             Less => Less,
@@ -142,6 +154,7 @@ implement Copy for Ordering {}
 // =============================================================================
 
 implement Default for Ordering {
+    @inline(always)
     fn default() -> Ordering {
         Equal
     }
