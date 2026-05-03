@@ -175,11 +175,13 @@ implement Semaphore {
     }
 
     // Get current available permits.
+    @inline(always)
     public fn available_permits(&self) -> Int {
         self.permits.load(MemoryOrdering.Relaxed).max(0)
     }
 
     // Get total capacity (max permits).
+    @inline(always)
     public fn max_permits(&self) -> Int {
         self.max_permits.load(MemoryOrdering.Relaxed)
     }
