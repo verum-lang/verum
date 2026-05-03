@@ -32,7 +32,7 @@
 //! Removing a pattern requires deprecation cycle ≥ 2 minor
 //! versions — codes never get re-used (per spec §29.5 versioning).
 
-use crate::arch::{Capability, Foundation, Lifecycle, MsfsStratum, Shape, Tier};
+use crate::arch::{Capability, Foundation, Lifecycle, Shape, Tier};
 
 // =============================================================================
 // AntiPatternCode — stable RFC code
@@ -448,7 +448,7 @@ pub fn check_dependency_cycle(
 /// NOT trigger — the spec asks "does the cog belong to a cycle?",
 /// not "does the cog see a cycle anywhere downstream?".
 fn has_cycle_involving(cog_name: &str, edges: &[(String, Vec<String>)]) -> bool {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     let graph: HashMap<&str, &[String]> = edges
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_slice()))
