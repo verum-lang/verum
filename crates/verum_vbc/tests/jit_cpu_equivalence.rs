@@ -676,6 +676,146 @@ fn binop_f32_prefix_broadcast_3d_per_batch_equivalent() {
  );
 }
 
+// ============================================================================
+// Шаг 5e+3 — generic mid-axis broadcast (NumPy-compatible)
+// ============================================================================
+
+#[test]
+fn binop_f32_mid_axis_broadcast_3d_equivalent() {
+ // `[M,N,K] op [M,1,K]` — middle axis broadcast.  Neither
+ // suffix nor prefix; b's effective shape is `[M,1,K]` which
+ // doesn't match either pattern.  This routes through
+ // BinopMidAxisBroadcast.
+ let mut state: u64 = 0xFEED_5E70;
+ let jit = MlirJitBackend::new();
+ let m = 3_usize;
+ let n = 4_usize;
+ let k = 5_usize;
+ let a = make_f32_tensor(&[m, n, k], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[m, 1, k], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Mul)
+ .expect("JIT mid-axis broadcast missing for [M,N,K] op [M,1,K] Mul");
+ let total = m * n * k;
+ let av = read_f32(&a, total);
+ let bv = read_f32(&b, m * k);
+ let mut expected = vec![0.0_f32; total];
+ for i in 0..total {
+ let mi = i / (n * k);
+ let ni = (i / k) % n; // unused — broadcast over n
+ let ki = i % k;
+ let _ = ni;
+ let b_off = mi * k + ki;
+ expected[i] = av[i] * bv[b_off];
+ }
+ assert_f32_close(
+ &read_f32(&r, total),
+ &expected,
+ "binop F32 [M,N,K] op [M,1,K] Mul",
+ );
+}
+
+#[test]
+fn binop_f32_mid_axis_broadcast_2d_left_equivalent() {
+ // `[M,N] op [1,N]` — leading-1 broadcast.  Effective b shape
+ // after stripping trailing 1s is `[1,N]` (first dim is 1, so
+ // mid-axis applies).  This is also equivalent to suffix
+ // `[M,N] op [N]` semantically, but b's rank-2 shape sends it
+ // through the mid-axis path because `b_eff_len = 2` is not
+ // less than `a_shape.len() = 2` for prefix detection, and
+ // `[1,N] != a_shape.suffix([1,N].len())` because a_shape's
+ // last 2 = `[M,N] != [1,N]` (when M != 1).
+ let mut state: u64 = 0xFEED_5E71;
+ let jit = MlirJitBackend::new();
+ let m = 4_usize;
+ let n = 6_usize;
+ let a = make_f32_tensor(&[m, n], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[1, n], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Add)
+ .expect("JIT mid-axis broadcast missing for [M,N] op [1,N] Add");
+ let av = read_f32(&a, m * n);
+ let bv = read_f32(&b, n);
+ let mut expected = vec![0.0_f32; m * n];
+ for i in 0..(m * n) {
+ expected[i] = av[i] + bv[i % n];
+ }
+ assert_f32_close(
+ &read_f32(&r, m * n),
+ &expected,
+ "binop F32 [M,N] op [1,N] Add",
+ );
+}
+
+#[test]
+fn binop_f32_mid_axis_broadcast_left_padded_equivalent() {
+ // `[M,N,K] op [N,K]` — b has fewer dims; left-pad with 1.
+ // After padding b_padded = [1,N,K], which matches mid-axis
+ // criteria (only first axis broadcasts).  This is equivalent
+ // to the suffix path semantically; the dispatcher should
+ // route it through suffix (which is checked BEFORE mid-axis).
+ // So this test verifies the suffix path correctly handles
+ // `[M,N,K] op [N,K]` and DOESN'T accidentally fall through
+ // to mid-axis.  Mostly a regression pin.
+ let mut state: u64 = 0xFEED_5E72;
+ let jit = MlirJitBackend::new();
+ let m = 2_usize;
+ let n = 3_usize;
+ let k = 4_usize;
+ let a = make_f32_tensor(&[m, n, k], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[n, k], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Sub)
+ .expect("JIT broadcast missing for [M,N,K] op [N,K] Sub");
+ let total = m * n * k;
+ let av = read_f32(&a, total);
+ let bv = read_f32(&b, n * k);
+ let mut expected = vec![0.0_f32; total];
+ for i in 0..total {
+ expected[i] = av[i] - bv[i % (n * k)];
+ }
+ assert_f32_close(
+ &read_f32(&r, total),
+ &expected,
+ "binop F32 [M,N,K] op [N,K] Sub (should suffix-route)",
+ );
+}
+
+#[test]
+fn binop_f32_mid_axis_broadcast_4d_two_axes_equivalent() {
+ // `[B,C,H,W] op [B,1,H,1]` — two interior broadcast axes.
+ // Tests that the multi-axis decoder correctly handles
+ // multiple axes with stride=0 simultaneously.
+ let mut state: u64 = 0xFEED_5E73;
+ let jit = MlirJitBackend::new();
+ let b_dim = 2_usize;
+ let c = 3_usize;
+ let h = 4_usize;
+ let w = 5_usize;
+ let total = b_dim * c * h * w;
+ let a = make_f32_tensor(&[b_dim, c, h, w], &mut state, 0.5, 4.0);
+ let b = make_f32_tensor(&[b_dim, 1, h, 1], &mut state, 0.5, 4.0);
+ let r = jit
+ .binop(&a, &b, TensorBinaryOp::Mul)
+ .expect("JIT mid-axis broadcast missing for [B,C,H,W] op [B,1,H,1] Mul");
+ let av = read_f32(&a, total);
+ let bv = read_f32(&b, b_dim * h);
+ let mut expected = vec![0.0_f32; total];
+ for i in 0..total {
+ let bi = i / (c * h * w);
+ // ci unused (broadcast)
+ let hi = (i / w) % h;
+ // wi unused (broadcast)
+ let b_off = bi * h + hi;
+ expected[i] = av[i] * bv[b_off];
+ }
+ assert_f32_close(
+ &read_f32(&r, total),
+ &expected,
+ "binop F32 [B,C,H,W] op [B,1,H,1] Mul",
+ );
+}
+
 #[test]
 fn binop_f32_prefix_broadcast_3d_per_batch_row_equivalent() {
  // `[B,M,N] op [B,M]` — per-(batch,row) gain; broadcast over
