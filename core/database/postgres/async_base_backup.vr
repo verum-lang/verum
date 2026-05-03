@@ -1,0 +1,279 @@
+// =============================================================================
+// core/database/postgres/async_base_backup.vr — async BASE_BACKUP V0
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (replication / BASE_BACKUP),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// Async wrapper over `base_backup.vr`'s sync `BaseBackupSession`.
+// Closes the LAST PG sub-protocol without async surface — completes
+// the async stack alongside async_replication + async_copy.
+//
+// Architecture — one-shot push-based actor:
+//
+//   The sync session has a finite-state-machine surface
+//   (next_tablespace_data → manifest_bytes → finish). For async
+//   consumers we don't need fine-grained per-call dispatch — once
+//   the backup starts, the natural API is "drain events until
+//   you see Finished or Failed."
+//
+//   The actor:
+//     1. Pre-start: opens PgReplicationConnection (physical mode)
+//        + issues BASE_BACKUP via base_backup::start (sync). Both
+//        run inside spawn_blocking; the await on the join handle
+//        yields to the executor while connect + handshake + the
+//        BASE_BACKUP command + tablespace-metadata read all run.
+//     2. Once tablespace metadata is in hand, returns the
+//        AsyncBaseBackupSession handle to the caller (synchronous-
+//        looking access to tablespaces() — the metadata is
+//        already eagerly read).
+//     3. A second spawn_blocking task drains the session:
+//          for each tablespace: next_tablespace_data → push
+//            BseTsChunk events; on None push BseTsEnd.
+//          drain manifest_bytes → push BseManifestChunk; push
+//            BseManifestEnd.
+//          finish() → push BseFinished or BseFailed.
+//     4. Caller awaits next_event().await → Maybe<BackupStreamEvent>.
+//
+// V0 surface:
+//   * connect_and_start_async(cfg, opts) →
+//       Future<Result<AsyncBaseBackupSession, …>>
+//   * .tablespaces() → &List<BackupTablespace>
+//   * .next_event().await → Maybe<BackupStreamEvent>
+//   * .close().await — joins drain task; idempotent
+//
+// Sync base_backup.vr canonical / unchanged. Pure layered wrapper.
+//
+// OUT of V0:
+//   * TARGET 'server:path' upload coordination (server-side
+//     delivery — different wire shape).
+//   * PROGRESS reporting (server emits in CommandComplete tag;
+//     V1 surfaces via a side metadata channel).
+//   * MAX_RATE consumer-side throttle (server already throttles
+//     when MAX_RATE option is set; consumer-side back-pressure
+//     happens naturally via channel capacity).
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.DatabaseMedium("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.async_base_backup;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.replication.{
+    PgReplicationConfig, PgReplicationConnection,
+    connect_replication as sync_connect_replication,
+};
+mount core.database.postgres.base_backup.{
+    BaseBackupOptions, BaseBackupSession, BackupTablespace,
+    start as sync_base_backup_start,
+};
+mount core.async.channel.{
+    Sender, Receiver, OneshotSender,
+    bounded_channel, oneshot,
+};
+mount core.async.task.{spawn_blocking, JoinHandle};
+
+// =============================================================================
+// Tunables
+// =============================================================================
+
+/// Capacity of the actor → caller event channel. Bounds buffered
+/// chunk payloads; back-pressures the wire (TCP advertised window
+/// shrinks when caller is slow to drain). 64 chunks × ~64 KB each
+/// ≈ 4 MB upper bound on in-flight memory per backup.
+public const DEFAULT_EVENT_CAPACITY: Int = 64;
+
+// =============================================================================
+// Stream events
+// =============================================================================
+
+public type BackupStreamEvent is
+      BseTsChunk { ts_idx: Int, bytes: List<Byte> }
+    | BseTsEnd { ts_idx: Int }
+    | BseManifestChunk { bytes: List<Byte> }
+    | BseManifestEnd
+    | BseFinished
+    | BseFailed(DbError);
+
+// =============================================================================
+// Public handle
+// =============================================================================
+
+public type AsyncBaseBackupSession is {
+    /// Eagerly-read tablespace metadata. Available before the
+    /// caller drains the chunk stream — useful for sizing a
+    /// receive buffer or reserving disk per tablespace.
+    tablespaces: List<BackupTablespace>,
+    event_rx: Shared<sync.mutex.Mutex<Receiver<BackupStreamEvent>>>,
+    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+};
+
+implement AsyncBaseBackupSession {
+    public fn clone(&self) -> AsyncBaseBackupSession {
+        AsyncBaseBackupSession {
+            tablespaces: self.tablespaces.clone(),
+            event_rx: self.event_rx.clone(),
+            join: self.join.clone(),
+        }
+    }
+
+    public fn tablespaces(&self) -> &List<BackupTablespace> {
+        &self.tablespaces
+    }
+
+    /// Pull the next backup-stream event. After observing
+    /// BseFinished or BseFailed (or `None` when the channel is
+    /// drained) subsequent calls keep returning `None`.
+    public async fn next_event(&self) -> Maybe<BackupStreamEvent> {
+        let mut g = self.event_rx.lock().unwrap_or_else(|p| p.into_inner());
+        let fut = g.recv_fut();
+        drop(g);
+        fut.await
+    }
+
+    /// Drain remaining events (best-effort) and join the actor
+    /// task. Idempotent — safe to call after the stream has
+    /// already terminated.
+    public async fn close(&self) -> Result<(), DbError> {
+        // Best-effort drain — pulls any remaining events into the
+        // ether so the actor can exit cleanly when the channel
+        // closes on the receiver side.
+        loop {
+            match self.next_event().await {
+                Some(BseFinished) | Some(BseFailed(_)) => { break; }
+                Some(_) => { /* keep draining */ }
+                None    => { break; }
+            }
+        }
+        let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.take() {
+            Some(jh) => { let _ = jh.join().await; }
+            None     => {}
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Constructor — connect + issue + start drain
+// =============================================================================
+
+/// Connect a fresh physical-replication connection, issue
+/// BASE_BACKUP with `opts`, eagerly read tablespace metadata,
+/// then launch the drain actor. Returns once metadata is available;
+/// caller drains chunks via `next_event` thereafter.
+public async fn connect_and_start_async(
+    cfg: PgReplicationConfig,
+    opts: BaseBackupOptions,
+) -> Result<AsyncBaseBackupSession, DbError> {
+    // Phase 1 — sync connect + sync start (offloaded to blocking pool).
+    let cfg_owned = cfg.clone();
+    let opts_owned = opts.clone();
+    let init_jh = spawn_blocking(move || -> Result<BaseBackupSession, DbError> {
+        let conn = sync_connect_replication(&cfg_owned)?;
+        sync_base_backup_start(conn, &opts_owned)
+    });
+    let session = match init_jh.join().await {
+        Ok(r)  => r?,
+        Err(_) => { return Err(actor_dropped("init: blocking-pool join")); }
+    };
+
+    let tablespaces = session.tablespaces().clone();
+
+    // Phase 2 — launch drain actor.
+    let (event_tx, event_rx) = bounded_channel::<BackupStreamEvent>(DEFAULT_EVENT_CAPACITY);
+
+    let join = spawn_blocking(move || -> () {
+        run_drain(session, event_tx);
+    });
+
+    Ok(AsyncBaseBackupSession {
+        tablespaces: tablespaces,
+        event_rx: Shared.new(sync.mutex.Mutex.new(event_rx)),
+        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+    })
+}
+
+// =============================================================================
+// Drain loop
+// =============================================================================
+
+fn run_drain(
+    mut session: BaseBackupSession,
+    event_tx: Sender<BackupStreamEvent>,
+) {
+    // Phase A — drain every tablespace.
+    let n_ts = session.tablespaces().len() as Int;
+    let mut ts_idx: Int = 0;
+    while ts_idx < n_ts {
+        loop {
+            match session.next_tablespace_data() {
+                Ok(Some(bytes)) => {
+                    match event_tx.send(BseTsChunk { ts_idx: ts_idx, bytes: bytes }) {
+                        Ok(())  => {}
+                        Err(_)  => { return; }    // receiver dropped
+                    }
+                }
+                Ok(None) => {
+                    let _ = event_tx.send(BseTsEnd { ts_idx: ts_idx });
+                    break;
+                }
+                Err(e) => {
+                    let _ = event_tx.send(BseFailed(e));
+                    return;
+                }
+            }
+        }
+        ts_idx = ts_idx + 1;
+    }
+
+    // Phase B — drain the manifest stream (no-op if MANIFEST 'no').
+    loop {
+        match session.manifest_bytes() {
+            Ok(Some(bytes)) => {
+                match event_tx.send(BseManifestChunk { bytes: bytes }) {
+                    Ok(())  => {}
+                    Err(_)  => { return; }
+                }
+            }
+            Ok(None) => {
+                let _ = event_tx.send(BseManifestEnd);
+                break;
+            }
+            Err(e) => {
+                let _ = event_tx.send(BseFailed(e));
+                return;
+            }
+        }
+    }
+
+    // Phase C — finalise (drain to RFQ, consume session).
+    match session.finish() {
+        Ok(())  => { let _ = event_tx.send(BseFinished); }
+        Err(e)  => { let _ = event_tx.send(BseFailed(e)); }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "BB_ACTOR_CLOSED".clone(),
+        message: f"async base_backup actor unavailable during {what}",
+        retryable: false,
+    })
+}

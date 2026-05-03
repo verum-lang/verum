@@ -128,3 +128,8 @@ Test list per `internal/specs/database.md` follow-up:
 - `t19_typed_aggr.vr` — typed array + range round-trip: int4[]
   + text[] bound + decoded back; int4range / tstzrange decoded
   from server literals (spec §6.1.4 / §6.1.5 aggregate codecs)
+- `t20_async_base_backup.vr` — async BASE_BACKUP V0:
+  connect_and_start_async + tablespaces() pre-flight + drain
+  BackupStreamEvent (BseTsChunk / BseTsEnd / BseManifestChunk /
+  BseManifestEnd / BseFinished). Closes the LAST PG sub-protocol
+  without async surface (spec §6.1.7 / §6.1.8)
