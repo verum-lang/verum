@@ -37,6 +37,13 @@
 // Cross-adapter portable code is the unusual case, not the default.
 // =============================================================================
 
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.common;
 
 public module error;
