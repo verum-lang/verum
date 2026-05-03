@@ -60,6 +60,10 @@ mount core.database.postgres.wire.frontend.{
     parse, describe_statement, sync, close_statement,
 };
 mount core.database.postgres.extended.{build_bind_execute};
+mount core.database.postgres.wire.typed.{
+    TypedValue, encode_params_for_bind, decode_typed_from_bytes,
+    TvNull,
+};
 mount core.database.postgres.wire.backend.{
     BackendMessage,
     BmAuth, BmParameterStatus, BmBackendKeyData, BmReadyForQuery,
@@ -1107,6 +1111,149 @@ implement PgConnection {
         }
     }
 
+    /// Typed sibling of `execute_prepared` — uses the binary wire
+    /// format for both params and results. Spec: §6.1.4.
+    ///
+    /// `typed_params` is one entry per `$N` placeholder. `None`
+    /// for SQL NULL; `Some(typed_value)` for a typed value whose
+    /// variant matches the prepared statement's declared OID
+    /// (mismatch surfaces as `EncodeFailed`).
+    ///
+    /// Result rows arrive as `List<TypedValue>` per row — each
+    /// column decoded via the OID-dispatched binary decoder
+    /// (spec §6.1.4 / §6.1.5).
+    ///
+    /// Performance — prepared + binary is the canonical
+    /// production path. Server-side: no text→typed parse on every
+    /// execute (planner reuses parsed plan; encoder takes raw
+    /// in-memory representation). Client-side: no text encode +
+    /// no text decode (both sides skip the str ↔ value
+    /// conversion).
+    public fn execute_prepared_typed(
+        &mut self,
+        stmt: &PgPreparedStatement,
+        typed_params: &List<Maybe<TypedValue>>,
+    ) -> Result<PgTypedQueryResult, DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "execute_prepared_typed requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+
+        // Encode every param via the OID-dispatched binary encoder.
+        let oids: List<Int> = stmt.param_oids.clone();
+        let encoded = encode_params_for_bind(
+            oids.as_slice(),
+            typed_params,
+            &mut self.arena,
+        )?;
+
+        // All-binary param_formats, all-binary result_formats.
+        let param_formats: List<Int> = vec_repeat_int(1, oids.len() as Int);
+        let result_formats: List<Int> = match &stmt.row_description {
+            Some(rd) => vec_repeat_int(1, rd.columns.len() as Int),
+            None     => List.new(),
+        };
+        let portal = "".clone();
+
+        let payload = build_bind_execute(
+            &stmt.name,
+            param_formats.as_slice(),
+            &encoded,
+            result_formats.as_slice(),
+            &portal,
+            0,                            // unlimited rows
+        );
+
+        self.state = PcsBusy;
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        // Update last_formats so the heap parse_data_row understands
+        // the binary column wire format.
+        match &stmt.row_description {
+            Some(rd) => {
+                self.last_formats = result_formats.clone();
+                let _ = rd;
+            }
+            None => {}
+        }
+
+        // Build the column-OID vector from the prepared statement
+        // for typed decode dispatch.
+        let column_oids: List<Int> = match &stmt.row_description {
+            Some(rd) => {
+                let mut oids: List<Int> = List.with_capacity(rd.columns.len());
+                let mut i: Int = 0;
+                while i < (rd.columns.len() as Int) {
+                    oids.push(rd.columns[i].type_oid);
+                    i = i + 1;
+                }
+                oids
+            }
+            None => List.new(),
+        };
+
+        let mut rows: List<List<TypedValue>> = List.new();
+        let mut command_tag: Text = "".clone();
+        let mut diagnostic: Maybe<Diagnostic> = None;
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmBindComplete => {}
+                BmRowDescription(rd) => {
+                    self.last_formats = collect_formats(&rd);
+                }
+                BmDataRow(dr) => {
+                    let mut typed_row: List<TypedValue> = List.with_capacity(dr.values.len());
+                    let mut i: Int = 0;
+                    while i < (dr.values.len() as Int) {
+                        let oid = if i < (column_oids.len() as Int) {
+                            column_oids[i]
+                        } else { 0 };
+                        match &dr.values[i] {
+                            WvNull => { typed_row.push(TvNull); }
+                            WvPresent { bytes, .. } => {
+                                match decode_typed_from_bytes(oid, bytes.as_slice(), &mut self.arena) {
+                                    Ok(v)  => typed_row.push(v),
+                                    Err(e) => { return Err(e); }
+                                }
+                            }
+                        }
+                        i = i + 1;
+                    }
+                    rows.push(typed_row);
+                }
+                BmCommandComplete(cc) => { command_tag = cc.tag; }
+                BmEmptyQueryResponse => {
+                    if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
+                }
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None => Ok(PgTypedQueryResult {
+                command_tag: command_tag,
+                row_description: stmt.row_description.clone(),
+                rows: rows,
+            }),
+        }
+    }
+
     /// Send Close(S, name) + Sync — frees the server-side
     /// statement slot. Caller must NOT use the statement after.
     public fn close_prepared(&mut self, stmt: &PgPreparedStatement)
@@ -1801,6 +1948,27 @@ public type PgSimpleQueryResult is {
     row_description: Maybe<RowDescription>,
     rows: List<List<WireValue>>,
 };
+
+/// Result shape for `execute_prepared_typed` — every column
+/// arrives as a `TypedValue` decoded from the binary wire format.
+/// `command_tag` is e.g. "SELECT 1" / "INSERT 0 1"; `rows` is one
+/// `List<TypedValue>` per result row, position-aligned with
+/// `row_description.columns`.
+public type PgTypedQueryResult is {
+    command_tag: Text,
+    row_description: Maybe<RowDescription>,
+    rows: List<List<TypedValue>>,
+};
+
+fn vec_repeat_int(value: Int, n: Int) -> List<Int> {
+    let mut out: List<Int> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        out.push(value);
+        i = i + 1;
+    }
+    out
+}
 
 /// Server-side prepared statement — handle returned by
 /// `PgConnection.prepare`. The `name` is allocated by Spindle

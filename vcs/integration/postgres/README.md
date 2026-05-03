@@ -122,3 +122,6 @@ Test list per `internal/specs/database.md` follow-up:
   start_logical / next_event / send_standby_status; verifies the
   reader actor uses timeout-bounded reads to alternate with
   pending standby-status writes (spec §6.1.7 / §6.1.8)
+- `t18_typed_prepared.vr` — binary-format prepared params + result
+  decode + TypedRow protocol; sync int4/int8/text/bytea round-trip
+  + Maybe<Int> NULL handling + async int8 SUM (spec §6.1.4)

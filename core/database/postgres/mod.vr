@@ -59,6 +59,7 @@ public module async_transaction;
 public module async_typed_database;
 public module async_copy;
 public module async_replication;
+public module typed_row;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -68,10 +69,13 @@ public mount .config.{
 public mount .connection.{
     PgConnection, PgConnState, SimpleQueryResult,
     PgSimpleQueryResult, PgSimpleQueryArenaResult,
-    PgPreparedStatement,
+    PgPreparedStatement, PgTypedQueryResult,
     PcsConnecting, PcsAuthenticating, PcsReady, PcsBusy, PcsClosed, PcsFailed,
     connect,
     cancel_running_query_at,
+};
+public mount .typed_row.{
+    TypedRow, rows_typed,
 };
 public mount .wire.backend.{NotificationResponse, CopyResponse, CopyFormat, CfText, CfBinary};
 public mount .wire.typed.{

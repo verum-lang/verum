@@ -1,0 +1,283 @@
+// =============================================================================
+// core/database/postgres/typed_row.vr — TypedRow protocol + scalar decoders
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.4 (extended-query / typed result).
+// =============================================================================
+//
+// `execute_prepared_typed` returns `PgTypedQueryResult` whose rows
+// are `List<TypedValue>` — position-aligned with the prepared
+// statement's `row_description`. For type-safe end-to-end consumers
+// the next step is to lift each `List<TypedValue>` into a typed
+// Verum value: a single scalar (e.g. `Int`, `Text`), a tuple
+// `(Int, Text, Float)`, or a user-defined struct.
+//
+// `TypedRow` is the protocol that bridges that gap. Implementations
+// take a row + the row description and return a typed value (or a
+// decode error explaining what didn't match).
+//
+// V0 implementations cover:
+//   * Scalar shapes — `Int`, `Float`, `Text`, `Bool`, `List<Byte>`,
+//     plus `Maybe<T>` for nullable single-column rows.
+//   * Tuple shapes — `(T1,)`, `(T1, T2)`, `(T1, T2, T3)`,
+//     `(T1, T2, T3, T4)`. Each element implements TypedRow itself
+//     (recursive composition).
+//
+// User-defined structs are out of V0 — they need either a derive
+// macro or hand-written impls. V1 will ship `@derive(TypedRow)`.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.typed_row;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.wire.typed.{
+    TypedValue,
+    TvNull, TvBool, TvInt2, TvInt4, TvInt8,
+    TvFloat4, TvFloat8, TvText, TvBytea, TvUuid, TvOid,
+    TvJson, TvJsonb, TvDate, TvTime, TvTimestamp, TvTimestamptz,
+};
+mount core.database.postgres.wire.backend.RowDescription;
+
+// =============================================================================
+// Protocol
+// =============================================================================
+
+/// Lift one row of `TypedValue`s into a typed Verum value.
+///
+/// `from_typed_row` MUST validate that:
+///   * The row has the expected column count.
+///   * Each column's variant matches the expected scalar type.
+///
+/// Mismatches surface as `DbError.Adapter("TYPED_ROW_DECODE", …)`
+/// so the caller learns which column failed and how.
+public type TypedRow is protocol {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        desc: &Maybe<RowDescription>,
+    ) -> Result<Self, DbError>;
+};
+
+// =============================================================================
+// Scalar implementations
+// =============================================================================
+
+implement TypedRow for Int {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        _desc: &Maybe<RowDescription>,
+    ) -> Result<Int, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            TvInt2(n) | TvInt4(n) | TvInt8(n) => Ok(*n),
+            TvOid(n)                          => Ok(*n),
+            other => Err(typed_row_error(0, "Int", other)),
+        }
+    }
+}
+
+implement TypedRow for Float {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        _desc: &Maybe<RowDescription>,
+    ) -> Result<Float, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            TvFloat4(f) | TvFloat8(f) => Ok(*f),
+            other => Err(typed_row_error(0, "Float", other)),
+        }
+    }
+}
+
+implement TypedRow for Text {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        _desc: &Maybe<RowDescription>,
+    ) -> Result<Text, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            TvText(s) | TvJson(s) | TvJsonb(s) => Ok(s.clone()),
+            other => Err(typed_row_error(0, "Text", other)),
+        }
+    }
+}
+
+implement TypedRow for Bool {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        _desc: &Maybe<RowDescription>,
+    ) -> Result<Bool, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            TvBool(b) => Ok(*b),
+            other => Err(typed_row_error(0, "Bool", other)),
+        }
+    }
+}
+
+implement TypedRow for List<Byte> {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        _desc: &Maybe<RowDescription>,
+    ) -> Result<List<Byte>, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            TvBytea(b) | TvUuid(b) => Ok(b.clone()),
+            other => Err(typed_row_error(0, "List<Byte>", other)),
+        }
+    }
+}
+
+// =============================================================================
+// Maybe<T> — nullable single-column row
+// =============================================================================
+
+implement<T: TypedRow> TypedRow for Maybe<T> {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        desc: &Maybe<RowDescription>,
+    ) -> Result<Maybe<T>, DbError> {
+        expect_arity(row, 1)?;
+        match &row[0] {
+            TvNull => Ok(None),
+            _ => {
+                let v = T::from_typed_row(row, desc)?;
+                Ok(Some(v))
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Tuple implementations — (T1,) / (T1, T2) / (T1, T2, T3) / (T1..T4)
+// =============================================================================
+//
+// Each element decoder gets a 1-element sub-slice of the row so it
+// can reuse the scalar TypedRow impl. `slice_one(row, idx)` builds
+// a List with the single value at position `idx`.
+
+fn slice_one(row: &List<TypedValue>, idx: Int) -> List<TypedValue> {
+    let mut out: List<TypedValue> = List.with_capacity(1);
+    out.push(row[idx].clone());
+    out
+}
+
+implement<A: TypedRow> TypedRow for (A,) {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        desc: &Maybe<RowDescription>,
+    ) -> Result<(A,), DbError> {
+        expect_arity(row, 1)?;
+        let a = A::from_typed_row(&slice_one(row, 0), desc)?;
+        Ok((a,))
+    }
+}
+
+implement<A: TypedRow, B: TypedRow> TypedRow for (A, B) {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        desc: &Maybe<RowDescription>,
+    ) -> Result<(A, B), DbError> {
+        expect_arity(row, 2)?;
+        let a = A::from_typed_row(&slice_one(row, 0), desc)?;
+        let b = B::from_typed_row(&slice_one(row, 1), desc)?;
+        Ok((a, b))
+    }
+}
+
+implement<A: TypedRow, B: TypedRow, C: TypedRow> TypedRow for (A, B, C) {
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        desc: &Maybe<RowDescription>,
+    ) -> Result<(A, B, C), DbError> {
+        expect_arity(row, 3)?;
+        let a = A::from_typed_row(&slice_one(row, 0), desc)?;
+        let b = B::from_typed_row(&slice_one(row, 1), desc)?;
+        let c = C::from_typed_row(&slice_one(row, 2), desc)?;
+        Ok((a, b, c))
+    }
+}
+
+implement<A: TypedRow, B: TypedRow, C: TypedRow, D: TypedRow>
+    TypedRow for (A, B, C, D)
+{
+    fn from_typed_row(
+        row: &List<TypedValue>,
+        desc: &Maybe<RowDescription>,
+    ) -> Result<(A, B, C, D), DbError> {
+        expect_arity(row, 4)?;
+        let a = A::from_typed_row(&slice_one(row, 0), desc)?;
+        let b = B::from_typed_row(&slice_one(row, 1), desc)?;
+        let c = C::from_typed_row(&slice_one(row, 2), desc)?;
+        let d = D::from_typed_row(&slice_one(row, 3), desc)?;
+        Ok((a, b, c, d))
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn expect_arity(row: &List<TypedValue>, want: Int) -> Result<(), DbError> {
+    let got = row.len() as Int;
+    if got != want {
+        return Err(DbError.Adapter(AdapterSpecific {
+            adapter: AdPostgres,
+            code: "TYPED_ROW_ARITY".clone(),
+            message: f"TypedRow: expected {want} columns, got {got}",
+            retryable: false,
+        }));
+    }
+    Ok(())
+}
+
+fn typed_row_error(col: Int, want: &str, got: &TypedValue) -> DbError {
+    let got_name = got.type_name();
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "TYPED_ROW_DECODE".clone(),
+        message: f"TypedRow: column {col}: expected {want}, got {got_name}",
+        retryable: false,
+    })
+}
+
+// =============================================================================
+// Convenience — decode every row in a PgTypedQueryResult
+// =============================================================================
+
+/// Lift every row of a `PgTypedQueryResult` through the `TypedRow`
+/// protocol. Errors short-circuit on the first row that fails to
+/// decode (the surrounding error message names the row index).
+public fn rows_typed<R: TypedRow>(
+    result: &core.database.postgres.connection.PgTypedQueryResult,
+) -> Result<List<R>, DbError> {
+    let mut out: List<R> = List.with_capacity(result.rows.len());
+    let mut i: Int = 0;
+    while i < (result.rows.len() as Int) {
+        let r = R::from_typed_row(&result.rows[i], &result.row_description);
+        match r {
+            Ok(v)  => { out.push(v); }
+            Err(e) => {
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdPostgres,
+                    code: "TYPED_ROW_DECODE".clone(),
+                    message: f"row {i}: {e}",
+                    retryable: false,
+                }));
+            }
+        }
+        i = i + 1;
+    }
+    Ok(out)
+}
