@@ -1,0 +1,132 @@
+// =============================================================================
+// t20_async_base_backup.vr — async BASE_BACKUP V0
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.7 (replication / BASE_BACKUP),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// Mirror of t14_physical_replication.vr through the async actor:
+//
+//   1. connect_and_start_async with admin role + opts (fast,
+//      manifest=BbmYes, no WAL).
+//   2. Inspect tablespaces() metadata before draining.
+//   3. Drain BackupStreamEvent: collect tablespace chunk counts +
+//      manifest chunk count; assert at least one tablespace had
+//      data + at least one manifest chunk arrived + BseFinished
+//      observed.
+//   4. close().await.
+//
+// Wall-clock cap is generous because BASE_BACKUP transfers cluster
+// state (~10s of MB even on a tiny cluster).
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    PgReplicationConfig,
+    BaseBackupOptions, BbmYes,
+    AsyncBaseBackupSession, BackupStreamEvent,
+    BseTsChunk, BseTsEnd, BseManifestChunk, BseManifestEnd,
+    BseFinished, BseFailed,
+    connect_and_start_async,
+};
+mount core.async.executor.block_on;
+
+fn admin_replication_config() -> PgReplicationConfig {
+    PgReplicationConfig.physical(PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-async-bb".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    })
+}
+
+fn main() {
+    block_on(async move {
+        let opts = BaseBackupOptions.default()
+            .with_fast(true)
+            .with_label("spindle-itest-async-bb".clone())
+            .with_include_wal(false)
+            .with_manifest(BbmYes);
+
+        let session = expect_ok(
+            connect_and_start_async(admin_replication_config(), opts).await,
+            &"connect_and_start_async failed".clone(),
+        );
+
+        // Pre-flight metadata available immediately.
+        let n_ts = session.tablespaces().len() as Int;
+        expect(
+            n_ts >= 1,
+            &"async BASE_BACKUP returned zero tablespaces".clone(),
+        );
+
+        // Drain the stream.
+        let mut ts_chunk_count: Int = 0;
+        let mut ts_end_count: Int = 0;
+        let mut manifest_chunk_count: Int = 0;
+        let mut saw_manifest_end: Bool = false;
+        let mut saw_finished: Bool = false;
+        let mut iters: Int = 0;
+        let max_iters: Int = 10_000;     // safety cap
+
+        loop {
+            iters = iters + 1;
+            if iters > max_iters {
+                expect(false, &f"async BASE_BACKUP did not terminate within {max_iters} events");
+            }
+            match session.next_event().await {
+                Some(BseTsChunk { ts_idx, bytes }) => {
+                    let _ = ts_idx;
+                    let _ = bytes;
+                    ts_chunk_count = ts_chunk_count + 1;
+                }
+                Some(BseTsEnd { ts_idx }) => {
+                    let _ = ts_idx;
+                    ts_end_count = ts_end_count + 1;
+                }
+                Some(BseManifestChunk { bytes }) => {
+                    let _ = bytes;
+                    manifest_chunk_count = manifest_chunk_count + 1;
+                }
+                Some(BseManifestEnd) => { saw_manifest_end = true; }
+                Some(BseFinished) => {
+                    saw_finished = true;
+                    break;
+                }
+                Some(BseFailed(e)) => {
+                    expect(false, &f"async BASE_BACKUP failed: {e}");
+                }
+                None => { break; }
+            }
+        }
+
+        expect(
+            ts_end_count == n_ts,
+            &f"expected ts_end_count={n_ts} (one per tablespace), got {ts_end_count}",
+        );
+        expect(
+            ts_chunk_count > 0,
+            &"async BASE_BACKUP yielded no tablespace data chunks".clone(),
+        );
+        expect(
+            saw_manifest_end,
+            &"async BASE_BACKUP did not signal BseManifestEnd".clone(),
+        );
+        expect(
+            saw_finished,
+            &"async BASE_BACKUP did not reach BseFinished".clone(),
+        );
+
+        let _ = session.close().await;
+
+        pass(&"t20_async_base_backup".clone());
+    });
+}

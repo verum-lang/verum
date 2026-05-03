@@ -59,6 +59,7 @@ public module async_transaction;
 public module async_typed_database;
 public module async_copy;
 public module async_replication;
+public module async_base_backup;
 public module typed_row;
 
 // Re-exports — keep the user-facing surface compact.
@@ -152,6 +153,12 @@ public mount .async_replication.{
     ReplActorEvent, ReaEvent, ReaTerminated, ReaClosed,
     connect_replication_async,
     DEFAULT_RECV_TIMEOUT_MS, DEFAULT_MSG_CAPACITY, DEFAULT_STATUS_CAPACITY,
+};
+public mount .async_base_backup.{
+    AsyncBaseBackupSession, BackupStreamEvent,
+    BseTsChunk, BseTsEnd, BseManifestChunk, BseManifestEnd,
+    BseFinished, BseFailed,
+    connect_and_start_async,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
