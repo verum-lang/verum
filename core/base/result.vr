@@ -247,6 +247,7 @@ implement<T, E> Result<T, E> {
     // =========================================================================
 
     /// Get reference to the result.
+    @inline(always)
     public fn as_ref(&self) -> Result<&T, &E> {
         match self {
             Ok(ref v) => Ok(v),
@@ -255,6 +256,7 @@ implement<T, E> Result<T, E> {
     }
 
     /// Get mutable reference.
+    @inline(always)
     public fn as_mut(&mut self) -> Result<&mut T, &mut E> {
         match self {
             Ok(ref mut v) => Ok(v),

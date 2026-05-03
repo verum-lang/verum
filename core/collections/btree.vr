@@ -120,11 +120,13 @@ implement<K: Ord, V> BTreeMap<K, V> {
     }
 
     /// Returns the number of elements in the map.
+    @inline(always)
     public fn len(&self) -> Int {
         self.len
     }
 
     /// Returns true if the map contains no elements.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.len == 0
     }

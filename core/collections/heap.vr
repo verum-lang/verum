@@ -74,21 +74,25 @@ implement<T: Ord> BinaryHeap<T> {
     }
 
     // Number of elements.
+    @inline(always)
     public fn len(&self) -> Int {
         self.data.len()
     }
 
     // Check if empty.
+    @inline(always)
     public fn is_empty(&self) -> Bool {
         self.data.is_empty()
     }
 
     // Current capacity.
+    @inline(always)
     public fn capacity(&self) -> Int {
         self.data.capacity()
     }
 
     // Get reference to maximum element.
+    @inline(always)
     public fn peek(&self) -> Maybe<&T> {
         self.data.first()
     }
