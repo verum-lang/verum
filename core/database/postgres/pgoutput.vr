@@ -73,6 +73,14 @@ public type PgoMessage is
     | PgoInsert(InsertMessage)
     | PgoUpdate(UpdateMessage)
     | PgoDelete(DeleteMessage)
+    /// Streaming-transaction messages — proto_version 2+ (PG ≥ 14).
+    /// Emitted for transactions exceeding `logical_decoding_work_mem`.
+    /// CDC consumers MUST handle these or they silently drop large
+    /// transactions into PgoUnknown — losing data.
+    | PgoStreamStart(StreamStartMessage)
+    | PgoStreamStop
+    | PgoStreamCommit(StreamCommitMessage)
+    | PgoStreamAbort(StreamAbortMessage)
     | PgoUnknown { tag: Byte, payload: List<Byte> };
 
 public type BeginMessage is {
@@ -143,6 +151,47 @@ public type DeleteMessage is {
 public type OldTupleVariant is OtvKey(TupleData) | OtvOld(TupleData);
 public type OldTupleKind    is OtkKey | OtkOld;
 
+// =============================================================================
+// Streaming-transaction message bodies (proto_version 2+)
+// =============================================================================
+
+public type StreamStartMessage is {
+    /// Top-level transaction id of the streamed tx.
+    xid: Int,
+    /// 1 = first segment of this tx, 0 = continuation segment.
+    /// Consumers use this to either start a new buffer for the
+    /// xid (first_segment == 1) or append to an existing one.
+    first_segment: Bool,
+};
+
+public type StreamCommitMessage is {
+    /// Top-level transaction id.
+    xid: Int,
+    /// Reserved bit field — always 0 in proto v2; defined for
+    /// future flag bits. Kept verbatim so downstream code can
+    /// gate on new flags without re-decoding.
+    flags: Int,
+    /// LSN of the COMMIT record itself.
+    commit_lsn: Lsn,
+    /// LSN immediately after the transaction's last WAL record.
+    end_lsn: Lsn,
+    /// Microseconds since 2000-01-01 UTC.
+    commit_timestamp_us: Int,
+};
+
+public type StreamAbortMessage is {
+    /// Top-level transaction id.
+    xid: Int,
+    /// Subtransaction xid that aborted (== xid for top-level
+    /// abort; nested savepoint xid for partial abort).
+    subtxn_xid: Int,
+    /// proto_version 4+ adds abort_lsn + abort_timestamp.
+    /// V0 always emits None for these — caller connecting at v4
+    /// should re-parse via decode_stream_abort_v4 (TODO).
+    abort_lsn: Maybe<Lsn>,
+    abort_timestamp_us: Maybe<Int>,
+};
+
 public type TupleData is {
     columns: List<TupleColumn>,
 };
@@ -184,6 +233,11 @@ public fn decode_pgoutput(payload: List<Byte>) -> Result<PgoMessage, DbError> {
     if t == ('I' as Int) { return decode_insert(&mut r); }
     if t == ('U' as Int) { return decode_update(&mut r); }
     if t == ('D' as Int) { return decode_delete(&mut r); }
+    // Streaming-transaction (proto_version 2+).
+    if t == ('S' as Int) { return decode_stream_start(&mut r); }
+    if t == ('E' as Int) { return Ok(PgoStreamStop); }
+    if t == ('c' as Int) { return decode_stream_commit(&mut r); }
+    if t == ('A' as Int) { return decode_stream_abort(&mut r); }
 
     // Drain rest as opaque bytes for downstream dispatch.
     let rest = r.remaining_bytes();
@@ -218,6 +272,69 @@ fn decode_commit(r: &mut WireReader) -> Result<PgoMessage, DbError> {
         commit_lsn: commit_lsn,
         end_lsn: end_lsn,
         commit_timestamp_us: ts,
+    }))
+}
+
+// =============================================================================
+// Streaming-transaction decoders (proto_version 2+)
+// =============================================================================
+
+fn decode_stream_start(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let xid = match r.read_u32_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("StreamStart.xid truncated")); }
+    };
+    let first_seg = read_u8(r, "StreamStart.first_segment")?;
+    Ok(PgoStreamStart(StreamStartMessage {
+        xid: xid,
+        first_segment: first_seg != 0,
+    }))
+}
+
+fn decode_stream_commit(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let xid = match r.read_u32_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("StreamCommit.xid truncated")); }
+    };
+    let flags = read_u8(r, "StreamCommit.flags")?;
+    let commit_lsn = read_lsn(r, "StreamCommit.commit_lsn")?;
+    let end_lsn = read_lsn(r, "StreamCommit.end_lsn")?;
+    let ts = read_i64(r, "StreamCommit.commit_timestamp")?;
+    Ok(PgoStreamCommit(StreamCommitMessage {
+        xid: xid,
+        flags: flags,
+        commit_lsn: commit_lsn,
+        end_lsn: end_lsn,
+        commit_timestamp_us: ts,
+    }))
+}
+
+fn decode_stream_abort(r: &mut WireReader) -> Result<PgoMessage, DbError> {
+    let xid = match r.read_u32_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("StreamAbort.xid truncated")); }
+    };
+    let subtxn_xid = match r.read_u32_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(decode_err("StreamAbort.subtxn_xid truncated")); }
+    };
+    // proto_version 4+ adds abort_lsn (i64) + abort_timestamp (i64).
+    // V0 detects this opportunistically — if the wire still has
+    // ≥ 16 bytes after the two xids, parse them; otherwise leave
+    // None (proto v2 / v3).
+    let abort_lsn: Maybe<Lsn> = match r.read_i64_be() {
+        Ok(v)  => Some(Lsn.from_int(v)),
+        Err(_) => None,
+    };
+    let abort_ts: Maybe<Int> = match r.read_i64_be() {
+        Ok(v)  => Some(v),
+        Err(_) => None,
+    };
+    Ok(PgoStreamAbort(StreamAbortMessage {
+        xid: xid,
+        subtxn_xid: subtxn_xid,
+        abort_lsn: abort_lsn,
+        abort_timestamp_us: abort_ts,
     }))
 }
 

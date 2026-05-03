@@ -116,8 +116,10 @@ public mount .replication.{
 public mount .pgoutput.{
     PgoMessage, PgoBegin, PgoCommit, PgoRelation, PgoInsert,
     PgoUpdate, PgoDelete, PgoUnknown,
+    PgoStreamStart, PgoStreamStop, PgoStreamCommit, PgoStreamAbort,
     BeginMessage, CommitMessage, RelationMessage, RelationColumn,
     InsertMessage, UpdateMessage, DeleteMessage,
+    StreamStartMessage, StreamCommitMessage, StreamAbortMessage,
     OldTupleVariant, OtvKey, OtvOld,
     OldTupleKind, OtkKey, OtkOld,
     TupleData, TupleColumn, TcNull, TcUnchangedToast, TcText, TcBinary,
