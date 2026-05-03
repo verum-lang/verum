@@ -8,12 +8,12 @@
 module interrupt_handler_test;
 
 mount core.sys.interrupt.{ExceptionFrame};
-mount core.sys.mmio.{Register, AccessMode, WriteOneToClear, ReadWrite};
+mount core.sys.mmio.{MmioRegister, AccessMode, WriteOneToClear, ReadWrite};
 
 // Mock timer registers for testing
 const TIMER_BASE: USize = 0x4000_0000 as USize;
-const TIMER_STATUS: Register<UInt32, WriteOneToClear> = Register.at(TIMER_BASE);
-const TIMER_COUNT: Register<UInt32, ReadWrite> = Register.at(TIMER_BASE + (4 as USize));
+const TIMER_STATUS: MmioRegister<UInt32, WriteOneToClear> = MmioRegister.at(TIMER_BASE);
+const TIMER_COUNT: MmioRegister<UInt32, ReadWrite> = MmioRegister.at(TIMER_BASE + (4 as USize));
 
 const TIMER_PENDING: UInt32 = 1_u32 << 0_u32;
 const TIMER_OVERFLOW: UInt32 = 1_u32 << 1_u32;
