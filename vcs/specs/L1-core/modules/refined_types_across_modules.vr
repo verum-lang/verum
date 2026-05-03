@@ -59,8 +59,9 @@ module validation {
         // Function return preserves refinement
         let absolute = abs(-10);  // absolute: Int{>= 0}
 
-        // Refinement checked at function boundaries
-        let root = sqrt(16.0)?;  // OK: 16.0 >= 0
+        // Refinement checked at function boundaries — sqrt returns Float{>=0},
+        // not Result, so no `?` operator needed (refinement validates the input).
+        let root = sqrt(16.0);  // OK: 16.0 >= 0
 
         // Division requires non-zero denominator
         let result = divide(10.0, 2.0);  // OK: 2.0 != 0.0
