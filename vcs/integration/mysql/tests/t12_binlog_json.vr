@@ -1,0 +1,202 @@
+// =============================================================================
+// t12_binlog_json.vr — MySQL binary JSON decoder via binlog ROW event
+// =============================================================================
+// Spec: internal/specs/database.md §6.3.7 (binlog row decode / JSON).
+// =============================================================================
+//
+// V0:
+//   * INSERT a row with a JSON column carrying an object that
+//     mixes scalars, an array, a nested object, true/false/null
+//     literals, and a small + large integer.
+//   * Open binlog stream from earliest GTID.
+//   * Drain WRITE_ROWS_V2 → decode_with_table_map.
+//   * Read column[1] as RvText (binary-JSON decoded → canonical
+//     stringified form).
+//   * Assert the canonical text contains every expected key /
+//     value (substring checks — exact byte order can vary
+//     because Map<Text, _> preserves insertion order from the
+//     binary layout).
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    connect_app,
+};
+mount core.database.mysql.{
+    MysqlConfig, MtmDisable,
+    BinlogConfig, BinlogStream,
+    BinlogEvent, BeFormatDescription, BeQuery, BeXid, BeRotate,
+    BeGtid, BeHeartbeat, BeOther,
+    BeTableMap, BeWriteRows,
+    TableMapEvent, TableMapCache, RowsEvent,
+    RowValue, RvText, RvNull,
+    DecodedRows, DrSimple, DrPairs,
+    decode_with_table_map,
+    connect_binlog,
+};
+
+const SERVER_ID: Int = 16777220;
+
+fn admin_mysql_cfg() -> MysqlConfig {
+    MysqlConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        character_set: 255,
+        tls_mode: MtmDisable,
+        connect_timeout_ms: 10_000,
+    }
+}
+
+fn write_json_row_on_side_channel() {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS binlog_json_smoke ( \
+            id INT PRIMARY KEY, \
+            payload JSON NOT NULL \
+          ) ENGINE=InnoDB".clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM binlog_json_smoke".clone());
+    // Mix of scalar / array / nested object / literals.
+    let _ = expect_ok(
+        side.simple_query(&
+            "INSERT INTO binlog_json_smoke (id, payload) VALUES (\
+              42, \
+              JSON_OBJECT('name', 'spindle', \
+                          'count', 7, \
+                          'enabled', TRUE, \
+                          'big', 100000, \
+                          'tags', JSON_ARRAY('a','b','c'), \
+                          'meta', JSON_OBJECT('null_val', NULL, 'flag', FALSE)) \
+            )".clone()
+        ),
+        &"side-channel JSON INSERT failed".clone(),
+    );
+}
+
+fn text_contains(haystack: &Text, needle: &str) -> Bool {
+    let h = haystack.as_bytes();
+    let n_text = needle.as_bytes();
+    let hlen = h.len() as Int;
+    let nlen = n_text.len() as Int;
+    if nlen == 0 { return true; }
+    if nlen > hlen { return false; }
+    let mut i: Int = 0;
+    while i <= hlen - nlen {
+        let mut match_ok: Bool = true;
+        let mut k: Int = 0;
+        while k < nlen {
+            if h[i + k] != n_text[k] { match_ok = false; break; }
+            k = k + 1;
+        }
+        if match_ok { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn main() {
+    write_json_row_on_side_channel();
+
+    let bcfg = BinlogConfig.from_gtid(SERVER_ID, "".clone());
+    let mut stream = expect_ok(
+        connect_binlog(&admin_mysql_cfg(), bcfg),
+        &"connect_binlog failed".clone(),
+    );
+
+    let mut cache = TableMapCache.new();
+    let mut decoded_json: Maybe<Text> = None;
+    let mut i: Int = 0;
+    while i < 200 {
+        let r = expect_ok(
+            stream.next_event(),
+            &f"next_event #{i} failed",
+        );
+        match r {
+            Some(ev) => {
+                match ev {
+                    BeTableMap { body: tm, .. } => { cache.record(tm); }
+                    BeWriteRows { body: rev, .. } => {
+                        match cache.lookup(rev.table_id) {
+                            Some(tm) => {
+                                if &tm.name == &"binlog_json_smoke".clone() {
+                                    let dr = expect_ok(
+                                        decode_with_table_map(&rev, tm),
+                                        &"decode_with_table_map failed".clone(),
+                                    );
+                                    match dr {
+                                        DrSimple(rows) => {
+                                            if rows.len() > 0 {
+                                                let row = &rows[0];
+                                                if row.columns.len() >= 2 {
+                                                    match &row.columns[1] {
+                                                        RvText(s) => {
+                                                            decoded_json = Some(s.clone());
+                                                        }
+                                                        _ => {
+                                                            expect(false,
+                                                                &"col[1] not RvText (JSON decode failed)".clone());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        DrPairs(_) => {}
+                                    }
+                                }
+                            }
+                            None => {}
+                        }
+                    }
+                    BeFormatDescription { .. } | BeQuery { .. } | BeXid { .. }
+                    | BeGtid { .. } | BeRotate { .. } | BeHeartbeat { .. }
+                    | BeOther { .. } => {}
+                }
+                if decoded_json.is_some() { break; }
+            }
+            None => { break; }
+        }
+        i = i + 1;
+    }
+
+    let json_text = expect_ok(
+        decoded_json.ok_or(core.database.common.error.DbError.Adapter(
+            core.database.common.error.AdapterSpecific {
+                adapter: core.database.common.error.AdMysql,
+                code: "TEST".clone(),
+                message: "no JSON row decoded from binlog".clone(),
+                retryable: false,
+            }
+        )),
+        &"JSON decoded text".clone(),
+    );
+
+    // Substring checks — JSON object key order isn't guaranteed
+    // across the binary→text round-trip but every expected token
+    // must be present.
+    expect(text_contains(&json_text, "\"name\""),     &"JSON has key \"name\"".clone());
+    expect(text_contains(&json_text, "\"spindle\""),  &"JSON has value \"spindle\"".clone());
+    expect(text_contains(&json_text, "\"count\""),    &"JSON has key \"count\"".clone());
+    expect(text_contains(&json_text, ":7"),           &"JSON has value 7".clone());
+    expect(text_contains(&json_text, "\"enabled\""),  &"JSON has key \"enabled\"".clone());
+    expect(text_contains(&json_text, "true"),         &"JSON has true".clone());
+    expect(text_contains(&json_text, "\"big\""),      &"JSON has key \"big\"".clone());
+    expect(text_contains(&json_text, ":100000"),      &"JSON has value 100000".clone());
+    expect(text_contains(&json_text, "\"tags\""),     &"JSON has key \"tags\"".clone());
+    expect(text_contains(&json_text, "\"a\""),        &"JSON has \"a\" in array".clone());
+    expect(text_contains(&json_text, "\"meta\""),     &"JSON has key \"meta\"".clone());
+    expect(text_contains(&json_text, "\"null_val\""), &"JSON has key \"null_val\"".clone());
+    expect(text_contains(&json_text, "null"),         &"JSON has null literal".clone());
+    expect(text_contains(&json_text, "\"flag\""),     &"JSON has key \"flag\"".clone());
+    expect(text_contains(&json_text, "false"),        &"JSON has false literal".clone());
+
+    let _ = stream.close();
+
+    pass(&"t12_binlog_json".clone());
+}

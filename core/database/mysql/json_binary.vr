@@ -1,0 +1,432 @@
+// =============================================================================
+// core/database/mysql/json_binary.vr — MySQL binary-JSON decoder
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.7 (binlog row decode / JSON).
+// Refs:
+//   * MySQL src/sql/json_binary.h + json_binary.cc.
+//   * MariaDB knowledge base "JSON Binary Format" — same wire.
+// =============================================================================
+//
+// MySQL stores JSON columns in a packed binary format (not raw
+// text). The binlog ROW events surface them as opaque bytes; this
+// module decodes those bytes into `core.encoding.json.JsonValue`.
+//
+// Wire format (per MySQL src/sql/json_binary.cc):
+//
+//   First byte = type:
+//     0x00 small_object / 0x01 large_object
+//     0x02 small_array  / 0x03 large_array
+//     0x04 literal — 1 trailing byte: 0x00 null / 0x01 true / 0x02 false
+//     0x05 int16    — 2 bytes signed LE
+//     0x06 uint16   — 2 bytes LE
+//     0x07 int32    — 4 bytes signed LE
+//     0x08 uint32   — 4 bytes LE
+//     0x09 int64    — 8 bytes signed LE
+//     0x0a uint64   — 8 bytes LE  (truncated to Int on 64-bit
+//                    Verum — same as JsonInt)
+//     0x0b double   — 8 bytes IEEE LE
+//     0x0c utf8mb4  — lenenc length + bytes
+//     0x0d opaque   — 1-byte sub-type + lenenc length + bytes
+//
+//   Container layout (offsets relative to start of container's
+//   payload, NOT the document):
+//     small variant uses u16 count + u16 size + u16 offsets;
+//     large variant uses u32 count + u32 size + u32 offsets.
+//   Object: count + size + N×key-entry { offset, length } +
+//     N×value-entry { type:u8, value-or-offset } + key bytes +
+//     value bytes (for non-inline).
+//   Array: same but no key-entry table.
+//
+// Inline policy — value-entry stores the value DIRECTLY when the
+// type is small enough to fit in the offset slot:
+//   * literal / int16 / uint16: ALWAYS inline (≤ 2 bytes fit
+//     either in the small-variant 2-byte slot or the large-variant
+//     4-byte slot).
+//   * int32 / uint32: inline ONLY in large containers (4-byte slot).
+//   * everything else: stored at offset, value-entry holds the
+//     u16/u32 offset.
+//
+// V0 OUT of scope:
+//   * jsonpath operators (separate module).
+//   * Non-utf8 string variants (rare; opaque sub-type 0x0F = char).
+//   * Opaque sub-type registry beyond raw bytes (caller decodes
+//     newdecimal etc. via existing helpers).
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.json_binary;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.{List, Map};
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.encoding.json.{
+    JsonValue,
+    JsonNull, JsonBool, JsonInt, JsonFloat, JsonString, JsonArray, JsonObject,
+};
+
+// =============================================================================
+// Type bytes
+// =============================================================================
+
+public const JT_SMALL_OBJECT: Int = 0x00;
+public const JT_LARGE_OBJECT: Int = 0x01;
+public const JT_SMALL_ARRAY:  Int = 0x02;
+public const JT_LARGE_ARRAY:  Int = 0x03;
+public const JT_LITERAL:      Int = 0x04;
+public const JT_INT16:        Int = 0x05;
+public const JT_UINT16:       Int = 0x06;
+public const JT_INT32:        Int = 0x07;
+public const JT_UINT32:       Int = 0x08;
+public const JT_INT64:        Int = 0x09;
+public const JT_UINT64:       Int = 0x0A;
+public const JT_DOUBLE:       Int = 0x0B;
+public const JT_UTF8_STRING:  Int = 0x0C;
+public const JT_OPAQUE:       Int = 0x0D;
+
+const LIT_NULL:  Int = 0x00;
+const LIT_TRUE:  Int = 0x01;
+const LIT_FALSE: Int = 0x02;
+
+// =============================================================================
+// Public entry
+// =============================================================================
+
+/// Decode a MySQL binary-JSON document into JsonValue. The first
+/// byte carries the document type; the rest is the payload.
+public fn decode_json_binary(bytes: List<Byte>) -> Result<JsonValue, DbError> {
+    if bytes.len() == 0 {
+        return Err(bad_json("empty payload"));
+    }
+    let typ = (bytes[0] as Int) & 0xFF;
+    decode_value(typ, bytes.as_slice(), 1)
+}
+
+// =============================================================================
+// Top-level value dispatch
+// =============================================================================
+
+/// Decode a value of type `typ` whose payload starts at `off`
+/// inside `buf`. The "container" decoders (object/array) compute
+/// offsets relative to the START of the container's payload, so
+/// they pass a sub-slice positioned at the container's first
+/// header byte and `off=0`.
+fn decode_value(typ: Int, buf: &[Byte], off: Int) -> Result<JsonValue, DbError> {
+    if typ == JT_LITERAL {
+        let b = read_u8(buf, off, "literal")?;
+        if b == LIT_NULL  { return Ok(JsonNull); }
+        if b == LIT_TRUE  { return Ok(JsonBool(true)); }
+        if b == LIT_FALSE { return Ok(JsonBool(false)); }
+        return Err(bad_json("literal: unknown sentinel"));
+    }
+    if typ == JT_INT16 {
+        let v = read_u16_le(buf, off, "int16")?;
+        let signed = if (v & 0x8000) != 0 { v | (-1 ^ 0xFFFF) } else { v };
+        return Ok(JsonInt(signed));
+    }
+    if typ == JT_UINT16 {
+        let v = read_u16_le(buf, off, "uint16")?;
+        return Ok(JsonInt(v));
+    }
+    if typ == JT_INT32 {
+        let v = read_u32_le(buf, off, "int32")?;
+        let signed = if (v & 0x80000000) != 0 { v | (-1 ^ 0xFFFFFFFF) } else { v };
+        return Ok(JsonInt(signed));
+    }
+    if typ == JT_UINT32 {
+        let v = read_u32_le(buf, off, "uint32")?;
+        return Ok(JsonInt(v));
+    }
+    if typ == JT_INT64 {
+        let v = read_u64_le(buf, off, "int64")?;
+        return Ok(JsonInt(v));
+    }
+    if typ == JT_UINT64 {
+        // Verum Int is signed 64-bit; uint64 with high bit set
+        // wraps. Document this loss in the JsonInt-as-Int
+        // semantics; downstream wanting full uint64 needs
+        // `JsonValue.JsonString(decimal_form)` upgrade in V1.
+        let v = read_u64_le(buf, off, "uint64")?;
+        return Ok(JsonInt(v));
+    }
+    if typ == JT_DOUBLE {
+        let bits = read_u64_le(buf, off, "double")?;
+        return Ok(JsonFloat(bits_to_f64(bits)));
+    }
+    if typ == JT_UTF8_STRING {
+        let (len, hdr) = read_lenenc(buf, off, "utf8.length")?;
+        let bytes = read_bytes(buf, off + hdr, len, "utf8.bytes")?;
+        let s = bytes_to_text(&bytes);
+        return Ok(JsonString(s));
+    }
+    if typ == JT_OPAQUE {
+        // Opaque: 1-byte sub-type + lenenc length + bytes. V0
+        // surfaces as a JsonString with hex-encoded payload so
+        // callers can dispatch without losing information.
+        let _sub = read_u8(buf, off, "opaque.subtype")?;
+        let (len, hdr) = read_lenenc(buf, off + 1, "opaque.length")?;
+        let bytes = read_bytes(buf, off + 1 + hdr, len, "opaque.bytes")?;
+        return Ok(JsonString(hex_encode(&bytes)));
+    }
+    if typ == JT_SMALL_OBJECT { return decode_object(buf, off, false); }
+    if typ == JT_LARGE_OBJECT { return decode_object(buf, off, true); }
+    if typ == JT_SMALL_ARRAY  { return decode_array(buf, off, false); }
+    if typ == JT_LARGE_ARRAY  { return decode_array(buf, off, true); }
+    Err(bad_json("unknown JSON type byte"))
+}
+
+// =============================================================================
+// Object decoder
+// =============================================================================
+
+fn decode_object(buf: &[Byte], base: Int, large: Bool) -> Result<JsonValue, DbError> {
+    let (count, count_n) = read_size(buf, base, large, "object.count")?;
+    let (size, size_n) = read_size(buf, base + count_n, large, "object.size")?;
+    let _ = size;
+    let header_unit = if large { 4 } else { 2 };
+    // Position of the first key-entry.
+    let key_entries_off: Int = base + count_n + size_n;
+    // Each key-entry: { key_offset:u16/u32, key_length:u16 }.
+    // key_length is ALWAYS u16 regardless of container size.
+    let key_entry_size = header_unit + 2;
+    let value_entries_off = key_entries_off + count * key_entry_size;
+    // Each value-entry: { type:u8, value-or-offset:u16/u32 }.
+    let value_entry_size = 1 + header_unit;
+
+    let mut obj: Map<Text, JsonValue> = Map.new();
+    let mut i: Int = 0;
+    while i < count {
+        // Decode the i-th key.
+        let ke_off = key_entries_off + i * key_entry_size;
+        let (key_offset_in_container, _) = read_size(buf, ke_off, large, "key.offset")?;
+        let key_length = read_u16_le(buf, ke_off + header_unit, "key.length")?;
+        let key_bytes = read_bytes(
+            buf, base + key_offset_in_container, key_length, "key.bytes",
+        )?;
+        let key_text = bytes_to_text(&key_bytes);
+
+        // Decode the i-th value.
+        let ve_off = value_entries_off + i * value_entry_size;
+        let val_type = read_u8(buf, ve_off, "value.type")?;
+        let value = decode_value_entry(buf, base, large, val_type, ve_off + 1)?;
+
+        obj.insert(key_text, value);
+        i = i + 1;
+    }
+    Ok(JsonObject(obj))
+}
+
+// =============================================================================
+// Array decoder
+// =============================================================================
+
+fn decode_array(buf: &[Byte], base: Int, large: Bool) -> Result<JsonValue, DbError> {
+    let (count, count_n) = read_size(buf, base, large, "array.count")?;
+    let (size, size_n) = read_size(buf, base + count_n, large, "array.size")?;
+    let _ = size;
+    let header_unit = if large { 4 } else { 2 };
+    let value_entries_off = base + count_n + size_n;
+    let value_entry_size = 1 + header_unit;
+
+    let mut arr: List<JsonValue> = List.with_capacity(count);
+    let mut i: Int = 0;
+    while i < count {
+        let ve_off = value_entries_off + i * value_entry_size;
+        let val_type = read_u8(buf, ve_off, "array.elem.type")?;
+        let value = decode_value_entry(buf, base, large, val_type, ve_off + 1)?;
+        arr.push(value);
+        i = i + 1;
+    }
+    Ok(JsonArray(arr))
+}
+
+// =============================================================================
+// Per-element value-entry resolver
+// =============================================================================
+
+/// `slot_off` points at the type-byte's value-or-offset slot
+/// (immediately after the 1-byte type tag in the value-entry).
+/// Inline-able types decode directly from the slot bytes; other
+/// types interpret the slot as an offset (relative to
+/// container's `base`) and recurse into decode_value at that
+/// offset.
+fn decode_value_entry(
+    buf: &[Byte],
+    base: Int,
+    large: Bool,
+    val_type: Int,
+    slot_off: Int,
+) -> Result<JsonValue, DbError> {
+    if val_type == JT_LITERAL {
+        let b = read_u8(buf, slot_off, "inline.literal")?;
+        if b == LIT_NULL  { return Ok(JsonNull); }
+        if b == LIT_TRUE  { return Ok(JsonBool(true)); }
+        if b == LIT_FALSE { return Ok(JsonBool(false)); }
+        return Err(bad_json("inline literal: unknown sentinel"));
+    }
+    if val_type == JT_INT16 {
+        let v = read_u16_le(buf, slot_off, "inline.int16")?;
+        let signed = if (v & 0x8000) != 0 { v | (-1 ^ 0xFFFF) } else { v };
+        return Ok(JsonInt(signed));
+    }
+    if val_type == JT_UINT16 {
+        let v = read_u16_le(buf, slot_off, "inline.uint16")?;
+        return Ok(JsonInt(v));
+    }
+    // int32/uint32 are inlined ONLY in large containers (4-byte
+    // slots). In small containers they're stored at offset.
+    if large && val_type == JT_INT32 {
+        let v = read_u32_le(buf, slot_off, "inline.int32")?;
+        let signed = if (v & 0x80000000) != 0 { v | (-1 ^ 0xFFFFFFFF) } else { v };
+        return Ok(JsonInt(signed));
+    }
+    if large && val_type == JT_UINT32 {
+        let v = read_u32_le(buf, slot_off, "inline.uint32")?;
+        return Ok(JsonInt(v));
+    }
+    // Non-inline: slot holds an offset (relative to container
+    // base) where the value's payload begins. Recurse.
+    let (val_off_in_container, _) = read_size(buf, slot_off, large, "value.offset")?;
+    decode_value(val_type, buf, base + val_off_in_container)
+}
+
+// =============================================================================
+// Read primitives
+// =============================================================================
+
+fn read_size(buf: &[Byte], off: Int, large: Bool, what: &str) -> Result<(Int, Int), DbError> {
+    if large {
+        let v = read_u32_le(buf, off, what)?;
+        Ok((v, 4))
+    } else {
+        let v = read_u16_le(buf, off, what)?;
+        Ok((v, 2))
+    }
+}
+
+fn read_u8(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
+    if (buf.len() as Int) <= off {
+        return Err(bad_json(&f"{what}: u8 truncated"));
+    }
+    Ok((buf[off] as Int) & 0xFF)
+}
+
+fn read_u16_le(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
+    if (buf.len() as Int) < off + 2 {
+        return Err(bad_json(&f"{what}: u16 truncated"));
+    }
+    Ok(((buf[off] as Int) & 0xFF) | (((buf[off + 1] as Int) & 0xFF) << 8))
+}
+
+fn read_u32_le(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
+    if (buf.len() as Int) < off + 4 {
+        return Err(bad_json(&f"{what}: u32 truncated"));
+    }
+    let mut v: Int = 0;
+    let mut k: Int = 0;
+    while k < 4 {
+        v = v | (((buf[off + k] as Int) & 0xFF) << (k * 8));
+        k = k + 1;
+    }
+    Ok(v)
+}
+
+fn read_u64_le(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
+    if (buf.len() as Int) < off + 8 {
+        return Err(bad_json(&f"{what}: u64 truncated"));
+    }
+    let mut v: Int = 0;
+    let mut k: Int = 0;
+    while k < 8 {
+        v = v | (((buf[off + k] as Int) & 0xFF) << (k * 8));
+        k = k + 1;
+    }
+    Ok(v)
+}
+
+fn read_bytes(buf: &[Byte], off: Int, n: Int, what: &str) -> Result<List<Byte>, DbError> {
+    if (buf.len() as Int) < off + n {
+        return Err(bad_json(&f"{what}: bytes truncated (want {n} from {off})"));
+    }
+    let mut out: List<Byte> = List.with_capacity(n);
+    let mut k: Int = 0;
+    while k < n {
+        out.push(buf[off + k]);
+        k = k + 1;
+    }
+    Ok(out)
+}
+
+/// MySQL lenenc — variable-width length prefix:
+///   first byte < 0xFB: length = first byte, hdr = 1
+///   first byte == 0xFC: length = next u16 LE,    hdr = 3
+///   first byte == 0xFD: length = next u24 LE,    hdr = 4
+///   first byte == 0xFE: length = next u64 LE,    hdr = 9
+fn read_lenenc(buf: &[Byte], off: Int, what: &str) -> Result<(Int, Int), DbError> {
+    let first = read_u8(buf, off, what)?;
+    if first < 0xFB { return Ok((first, 1)); }
+    if first == 0xFC {
+        let v = read_u16_le(buf, off + 1, what)?;
+        return Ok((v, 3));
+    }
+    if first == 0xFD {
+        if (buf.len() as Int) < off + 4 {
+            return Err(bad_json(&f"{what}: u24 truncated"));
+        }
+        let v = ((buf[off + 1] as Int) & 0xFF)
+              | (((buf[off + 2] as Int) & 0xFF) << 8)
+              | (((buf[off + 3] as Int) & 0xFF) << 16);
+        return Ok((v, 4));
+    }
+    if first == 0xFE {
+        let v = read_u64_le(buf, off + 1, what)?;
+        return Ok((v, 9));
+    }
+    Err(bad_json(&f"{what}: invalid lenenc prefix"))
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn bytes_to_text(b: &List<Byte>) -> Text {
+    match Text.from_utf8(b.as_slice()) {
+        Ok(s)  => s,
+        Err(_) => "".clone(),
+    }
+}
+
+fn hex_encode(b: &List<Byte>) -> Text {
+    let chars = "0123456789abcdef".as_bytes();
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < (b.len() as Int) {
+        let v = (b[i] as Int) & 0xFF;
+        out.push_byte(chars[(v >> 4) & 0xF]);
+        out.push_byte(chars[v & 0xF]);
+        i = i + 1;
+    }
+    out
+}
+
+fn bits_to_f64(bits: Int) -> Float {
+    core.intrinsics.float.f64_from_bits(bits)
+}
+
+fn bad_json(what: &Text) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "BINLOG_JSON".clone(),
+        message: f"binary JSON decode error: {what}",
+        retryable: false,
+    })
+}
