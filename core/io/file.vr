@@ -131,6 +131,7 @@ public type OpenOptions is {
 
 implement OpenOptions {
     // Create default options.
+    @inline(always)
     public fn new() -> OpenOptions {
         OpenOptions {
             read: false,
@@ -143,36 +144,42 @@ implement OpenOptions {
     }
 
     // Enable reading.
+    @inline(always)
     public fn read(&mut self, read: Bool) -> &mut OpenOptions {
         self.read = read;
         self
     }
 
     // Enable writing.
+    @inline(always)
     public fn write(&mut self, write: Bool) -> &mut OpenOptions {
         self.write = write;
         self
     }
 
     // Enable append mode.
+    @inline(always)
     public fn append(&mut self, append: Bool) -> &mut OpenOptions {
         self.append = append;
         self
     }
 
     // Enable truncation.
+    @inline(always)
     public fn truncate(&mut self, truncate: Bool) -> &mut OpenOptions {
         self.truncate = truncate;
         self
     }
 
     // Enable creation.
+    @inline(always)
     public fn create(&mut self, create: Bool) -> &mut OpenOptions {
         self.create = create;
         self
     }
 
     // Enable create new (fail if exists).
+    @inline(always)
     public fn create_new(&mut self, create_new: Bool) -> &mut OpenOptions {
         self.create_new = create_new;
         self
@@ -287,6 +294,7 @@ implement File {
     }
 
     // Get file descriptor (for advanced use).
+    @inline(always)
     public fn as_raw_fd(&self) -> Int {
         self.fd
     }
@@ -585,16 +593,19 @@ implement AsyncFile {
     }
 
     /// Get reference to inner File.
+    @inline(always)
     public fn get_ref(&self) -> &File {
         &self.inner
     }
 
     /// Get mutable reference to inner File.
+    @inline(always)
     public fn get_mut(&mut self) -> &mut File {
         &mut self.inner
     }
 
     /// Consume && return inner File.
+    @inline(always)
     public fn into_inner(self) -> File {
         self.inner
     }
