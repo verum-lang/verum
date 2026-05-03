@@ -141,6 +141,7 @@ implement Eq for VarintError {
 /// Return the exact number of bytes the SQLite varint form of `value` will
 /// occupy. Branchless-friendly — O(1), no allocations, useful for precomputing
 /// a buffer size before calling `sqlite_encode_into`.
+@inline(always)
 public fn sqlite_encoded_len(value: Int64) -> Int {
     // Treat the value as 64 unsigned bits for length classification.
     let u: UInt64 = value as UInt64;
@@ -302,6 +303,7 @@ public const QUIC_VARINT_MAX: UInt64 = 0x3FFFFFFFFFFFFFFF_u64;  // 2^62 - 1
 
 /// Return the number of bytes the shortest QUIC varint form of `value`
 /// will occupy (1, 2, 4, or 8). Branchless-friendly, O(1).
+@inline(always)
 public fn quic_encoded_len(value: UInt64) -> Int {
     if value < 64_u64 { return 1; }
     if value < 16384_u64 { return 2; }
