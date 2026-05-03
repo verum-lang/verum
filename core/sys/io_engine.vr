@@ -461,6 +461,11 @@ public type EngineIoError is
     | Other(Text)
     ;
 
+/// Public alias — short canonical name. Distinct from
+/// `core.io.protocols::IoError` (which is an interface trait);
+/// this concrete enum is the io-engine-side error variant.
+public type IoError is EngineIoError;
+
 implement Display for EngineIoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
