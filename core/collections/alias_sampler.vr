@@ -55,8 +55,7 @@ module core.collections.alias_sampler;
 
 mount core.*;
 mount core.collections.List;
-mount core.sys.common.{random_bytes};
-fn sys_random_bytes(buf: &mut [Byte]) -> Result<(), core.sys.common.OSError> { random_bytes(buf) }
+mount core.sys.common.random_bytes as sys_random_bytes;
 
 // CSPRNG-backed entropy fill. The historical `core.base.random.fill`
 // import resolved to nothing → both helpers below silently produced

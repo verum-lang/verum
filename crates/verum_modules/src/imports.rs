@@ -423,8 +423,12 @@ impl ImportResolver {
         span: Span,
     ) -> ModuleResult<ResolvedImport> {
         match &tree.kind {
-            MountTreeKind::Path(path) => self.resolve_simple_import(
+            MountTreeKind::Path(path) => self.resolve_simple_import_aliased(
                 path,
+                match &tree.alias {
+                    Maybe::Some(a) => Some(a),
+                    Maybe::None => None,
+                },
                 importing_module,
                 module_exports,
                 module_paths,
@@ -469,6 +473,34 @@ impl ImportResolver {
     fn resolve_simple_import(
         &self,
         path: &Path,
+        importing_module: ModuleId,
+        module_exports: &Map<ModuleId, ExportTable>,
+        module_paths: &Map<ModuleId, ModulePath>,
+        span: Span,
+    ) -> ModuleResult<ResolvedImport> {
+        self.resolve_simple_import_aliased(
+            path,
+            None,
+            importing_module,
+            module_exports,
+            module_paths,
+            span,
+        )
+    }
+
+    /// Aliased variant: takes the optional `mount X.Y as Z` alias and
+    /// registers the imported item under `Z` in the importing module's
+    /// symbol table. Without the alias hop, `mount X.Y as Z`
+    /// silently fell through to registering `Y` (not `Z`), so
+    /// downstream codegen-time call resolution failed with
+    /// `undefined function: Z`. Closes #120 — discovered during the
+    /// strict-codegen audit (commit 1f537e3f) which fixed the
+    /// security-critical `sys_random_bytes` alias-mount sites by
+    /// hand; this commit unblocks reverting those workarounds.
+    fn resolve_simple_import_aliased(
+        &self,
+        path: &Path,
+        alias: Option<&verum_ast::Ident>,
         importing_module: ModuleId,
         module_exports: &Map<ModuleId, ExportTable>,
         module_paths: &Map<ModuleId, ModulePath>,
@@ -582,12 +614,31 @@ impl ImportResolver {
             });
         }
 
-        let imported_item = ImportedItem::direct(
-            item_name_text.clone(),
-            target_module,
-            exported_item.kind,
-            span,
-        );
+        // #120 — honour `mount X.Y as Z` alias by registering under
+        // the alias name (Z) in the importing module's symbol table.
+        // Pre-fix `simple_import` registered under the original name
+        // (Y), so downstream codegen looked up `Z` and failed with
+        // `undefined function: Z`.
+        let final_name = match alias {
+            Some(a) => a.name.clone(),
+            None => item_name_text.clone(),
+        };
+        let imported_item = if final_name == *item_name_text {
+            ImportedItem::direct(
+                final_name,
+                target_module,
+                exported_item.kind,
+                span,
+            )
+        } else {
+            ImportedItem::new(
+                final_name,
+                item_name_text.clone(),
+                target_module,
+                exported_item.kind,
+                span,
+            )
+        };
 
         Ok(ResolvedImport::single(
             module_path,
