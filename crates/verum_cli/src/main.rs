@@ -2717,13 +2717,65 @@ fn main_inner() {
  // imports (e.g., 400+ intrinsics) require a larger stack than the default.
     const STACK_SIZE: usize = 256 * 1024 * 1024; // 256MB - needed for deep type checking with full stdlib
 
-    let result = std::thread::Builder::new()
+    let spawned = match std::thread::Builder::new()
         .name("verum-main".into())
         .stack_size(STACK_SIZE)
         .spawn(move || run_command(cli))
-        .expect("Failed to spawn main thread")
-        .join()
-        .expect("Main thread panicked");
+    {
+        Ok(handle) => handle,
+        Err(e) => {
+            // #113 — graceful spawn failure. Pre-fix this panicked
+            // with `expect("Failed to spawn main thread")`, which the
+            // crash reporter would intercept and emit as an internal
+            // crash report. That misleads the user: failure to spawn
+            // a worker thread is an OS resource issue (typically
+            // EAGAIN under thread / address-space exhaustion), not a
+            // compiler bug. Surface it as a typed CLI error and
+            // exit with the conventional `74 EX_IOERR` code so CI
+            // wrappers can distinguish "OS refused us a thread"
+            // from "compilation failed".
+            ui::error(&format!(
+                "failed to spawn compiler worker thread: {}\n\
+                 hint: this is usually OS thread / address-space exhaustion, \
+                 not a verum bug. retry with fewer concurrent processes, or \
+                 check `ulimit -u` / process count.",
+                e
+            ));
+            process::exit(74);
+        }
+    };
+    let result = match spawned.join() {
+        Ok(r) => r,
+        Err(panic_payload) => {
+            // The worker thread panicked. The crash reporter
+            // installed at the top of `main()` already wrote a
+            // structured report to ~/.verum/crashes/; the panic hook
+            // also printed a backtrace. Render a clear summary here
+            // and exit with `70 EX_SOFTWARE` so wrappers can
+            // distinguish internal-crash from compilation-failure
+            // (which exits with 1) and from OS errors (74 above).
+            //
+            // We deliberately don't `resume_unwind` — that would
+            // hand the panic back to the runtime and re-trigger the
+            // crash hook output, doubling the user's noise.
+            let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "<non-string panic payload>".to_string()
+            };
+            ui::error(&format!(
+                "internal compiler error (worker thread panicked): {}\n\
+                 a structured crash report has been written to \
+                 `~/.verum/crashes/`. please file a bug at \
+                 https://github.com/verum-lang/verum/issues with that \
+                 report attached.",
+                msg
+            ));
+            process::exit(70);
+        }
+    };
 
     match result {
         Ok(()) => {}
