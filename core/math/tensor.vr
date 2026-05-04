@@ -967,15 +967,37 @@ public fn sum_squared_error_axis<T: Numeric>(
     @vbc(TENSOR_REDUCE, square_diff(pred, target).data, ReduceOp.Sum, axis)
 }
 
-// Smooth L1 loss / Huber loss: quadratic for small errors, linear for large.
-// Used in object-detection regression. For `|d| <= delta`: `0.5 * d^2`,
-// else: `delta * (|d| - 0.5 * delta)` where `d = pred - target`.
+// Smooth L1 loss / Huber loss: quadratic for small errors, slope-bounded
+// for large. Used in object-detection regression. For `|d| <= delta`:
+// `0.5 * d^2`, else: `delta * (|d| - 0.5 * delta)` where `d = pred - target`.
 //
-// **Disabled pending #74 parser-quirk fix** — the `(0.5 as Float) as T`
-// chained-cast form needed for generic-T scalar arithmetic confuses
-// the recursive-descent parser when the result is multiplied by another
-// generic-T scalar. Tracked as a separate parser issue. The MSE / SSE
-// loss families above cover the common regression-loss surface.
+// #74 Tier B — composes `sub` + `tensor_abs` + `square` + `where_tensor`
+// + `mean`. Note: the original implementation used `let linear = ...` for
+// the slope-bounded branch, which clashed with Verum's `linear` reserved
+// keyword (see `verum_lexer/src/token.rs`). Renamed to `slope_branch`.
+public fn huber_loss<T: Numeric>(
+    pred: &DynTensor<T>,
+    target: &DynTensor<T>,
+    delta: T,
+) -> T {
+    let d = sub(pred, target);
+    let abs_d = tensor_abs(&d);
+    let half_t: T = (0.5 as Float) as T;
+    let sq = square(&d);
+    let quad_branch = mul_scalar(&sq, half_t);
+    let scaled = mul_scalar(&abs_d, delta);
+    let half_field = full_like(&abs_d, half_t);
+    let half_delta_field = mul_scalar(&half_field, delta);
+    let slope_branch = sub(&scaled, &half_delta_field);
+    let mask = le(&abs_d, &full_like(&abs_d, delta));
+    mean(&where_tensor(&mask, &quad_branch, &slope_branch))
+}
+
+// Smooth-L1 loss with delta=1.
+// #74 Tier B — convenience wrapper for the canonical detection-paper choice.
+public fn smooth_l1_loss<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    huber_loss(pred, target, 1 as T)
+}
 
 // Cosine-similarity loss: `1 - cosine_similarity(a, b)`.
 // #74 Tier B — drives embeddings to alignment when used as a loss.
