@@ -829,6 +829,212 @@ public fn silu<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
     @vbc(TENSOR_UNOP, x.data, UnaryOp.Silu)
 }
 
+// Softplus: log(1 + e^x).  Smooth approximation of ReLU.
+// #74 Tier B — Verum-language composition over `tensor_exp` /
+// `add_scalar` / `tensor_log`.  Numerically stable for moderate
+// magnitudes; for very large `x` callers may prefer the
+// max(x, 0) + log1p(exp(-|x|)) form (a future intrinsic).
+public fn softplus<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let exp_x = tensor_exp(x);
+    let one_plus = add_scalar(&exp_x, 1 as T);
+    tensor_log(&one_plus)
+}
+
+// Mish activation: x * tanh(softplus(x)).
+// #74 Tier B — Verum-language composition over `softplus` +
+// `tensor_tanh` + `mul`. Mish is smooth, non-monotonic, and has
+// outperformed ReLU/Swish on several SOTA classifiers
+// (Misra 2019).
+public fn mish<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let sp = softplus(x);
+    let t = tensor_tanh(&sp);
+    mul(x, &t)
+}
+
+// Generalised Swish / scaled SiLU: x * sigmoid(beta * x).
+// #74 Tier B — beta-parameterised generalisation of `silu`. When
+// `beta == 1`, equivalent to `silu`. Larger `beta` makes the
+// activation closer to ReLU; smaller `beta` makes it closer to
+// the identity. Composes `mul_scalar` + `sigmoid` + `mul`.
+public fn swish<T: Numeric>(x: &DynTensor<T>, beta: T) -> DynTensor<T> {
+    let scaled = mul_scalar(x, beta);
+    let s = sigmoid(&scaled);
+    mul(x, &s)
+}
+
+// Hardtanh: clamp(x, min_val, max_val). Linear inside the range,
+// saturated outside. Default range [-1, 1] matches PyTorch /
+// JAX convention.
+// #74 Tier B — Verum-language composition over the existing
+// `tensor_clamp` primitive (already a thin wrapper). Provided as
+// a named alias so call sites read intentionally.
+public fn hardtanh<T: Numeric>(x: &DynTensor<T>, min_val: T, max_val: T) -> DynTensor<T> {
+    tensor_clamp(x, min_val, max_val)
+}
+
+// Squared difference: `(a - b)^2`.
+// #74 Tier B — building block for MSE-style losses. Composes
+// `sub` + `mul`. Tensor shapes must broadcast.
+public fn square_diff<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    let d = sub(a, b);
+    mul(&d, &d)
+}
+
+// Mean squared error: `mean((pred - target)^2)`.
+// #74 Tier B — canonical regression loss. Composes
+// `square_diff` + `mean`. The output is a scalar of type `T`.
+public fn mean_squared_error<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    mean(&square_diff(pred, target))
+}
+
+// Mean absolute error: `mean(|pred - target|)`.
+// #74 Tier B — robust regression loss (less sensitive to outliers
+// than MSE). Composes `sub` + `tensor_abs` + `mean`.
+public fn mean_absolute_error<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    let d = sub(pred, target);
+    mean(&tensor_abs(&d))
+}
+
+// Binary cross-entropy loss: `-mean(y*log(p) + (1-y)*log(1-p))`.
+// #74 Tier B — canonical binary classification loss. Composes
+// `tensor_log` + `mul` + `add` + `rsub_scalar` + `mean`.  Caller
+// is responsible for ensuring `pred ∈ (0, 1)` (typically by
+// passing a sigmoid output); log(0) → −∞ otherwise.
+public fn binary_cross_entropy<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    let log_p = tensor_log(pred);
+    let one_minus_p = rsub_scalar(1 as T, pred);
+    let log_one_minus_p = tensor_log(&one_minus_p);
+    let one_minus_y = rsub_scalar(1 as T, target);
+    let term1 = mul(target, &log_p);
+    let term2 = mul(&one_minus_y, &log_one_minus_p);
+    let total = add(&term1, &term2);
+    let m: T = mean(&total);
+    -m
+}
+
+// Negative log-likelihood loss: `-mean(log(pred) * target)`.
+// #74 Tier B — multi-class classification loss when `pred` is
+// already log-probabilities (e.g. output of `log_softmax`). For
+// raw logits, prefer `cross_entropy` below which fuses log_softmax
+// + nll into one numerically stable pass.
+public fn nll_loss<T: Numeric>(log_pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    let weighted = mul(log_pred, target);
+    let m: T = mean(&weighted);
+    -m
+}
+
+// Cross-entropy loss for one-hot targets: `-mean(target * log_softmax(logits))`.
+// #74 Tier B — fuses `log_softmax` + `nll_loss` for numerical
+// stability. `axis` selects the class dimension (typically -1
+// for [batch, classes] tensors).
+public fn cross_entropy<T: Numeric>(logits: &DynTensor<T>, target: &DynTensor<T>, axis: ISize) -> T {
+    let log_p = log_softmax(logits, axis);
+    nll_loss(&log_p, target)
+}
+
+// Kullback–Leibler divergence: `sum(p * (log(p) - log(q)))`.
+// #74 Tier B — non-symmetric measure of how `q` diverges from `p`.
+// Composes `tensor_log` + `sub` + `mul` + `sum`. Both inputs must
+// be non-negative; for KL of distributions to be well-defined,
+// callers should pre-normalise to sum to 1.
+public fn kl_divergence<T: Numeric>(p: &DynTensor<T>, q: &DynTensor<T>) -> T {
+    let log_p = tensor_log(p);
+    let log_q = tensor_log(q);
+    let diff = sub(&log_p, &log_q);
+    let weighted = mul(p, &diff);
+    sum(&weighted)
+}
+
+// Hinge loss: `mean(max(0, 1 - pred*target))`. SVM-style loss
+// where `target ∈ {-1, +1}`.
+// #74 Tier B — composes `mul` + `rsub_scalar` + `relu` + `mean`.
+// `relu(x) = max(0, x)` gives the desired non-negative clipping.
+public fn hinge_loss<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    let prod = mul(pred, target);
+    let margin = rsub_scalar(1 as T, &prod);
+    mean(&relu(&margin))
+}
+
+// Sum of squared residuals along axis: `sum_axis((pred - target)^2)`.
+// #74 Tier B — per-sample squared loss when `axis` is the
+// feature axis. Useful for batched regression losses where the
+// outer mean is taken at the call site.
+public fn sum_squared_error_axis<T: Numeric>(
+    pred: &DynTensor<T>,
+    target: &DynTensor<T>,
+    axis: ISize,
+) -> DynTensor<T> {
+    @vbc(TENSOR_REDUCE, square_diff(pred, target).data, ReduceOp.Sum, axis)
+}
+
+// Weighted mean: `sum(x * weights) / sum(weights)`.
+// #74 Tier B — composes `mul` + `sum` + scalar division.
+// `weights` must broadcast with `x`. The denominator is the
+// scalar sum of weights, so passing `full_like(x, 1.0)` recovers
+// the unweighted `mean`.
+public fn weighted_mean<T: Numeric>(x: &DynTensor<T>, weights: &DynTensor<T>) -> T {
+    let weighted = mul(x, weights);
+    sum(&weighted) / sum(weights)
+}
+
+// Geometric mean: `prod(x)^(1/n)`.
+// #74 Tier B — composes `prod` + scalar exponentiation. All
+// elements must be non-negative; negative inputs trigger NaN
+// when the root is non-integer.
+public fn geometric_mean<T: Numeric>(x: &DynTensor<T>) -> T {
+    let p: Float = prod(x) as Float;
+    let n: Float = x.numel() as Float;
+    pow(p, 1.0 / n) as T
+}
+
+// Harmonic mean: `n / sum(1/x_i)`.
+// #74 Tier B — for positive inputs only. Composes `rsub_scalar`'s
+// inverse (`div`) over a `full_like(_, 1)` reciprocal trick:
+// `1 / x` equals `div(full_like(x, 1), x)` element-wise.
+public fn harmonic_mean<T: Numeric>(x: &DynTensor<T>) -> T {
+    let recip = div(&full_like(x, 1 as T), x);
+    let n: T = x.numel() as T;
+    n / sum(&recip)
+}
+
+// Softmin along axis: `softmax(-x, axis)`.
+// #74 Tier B — produces a probability distribution that
+// concentrates on the *smallest* values, opposite of softmax.
+// Composes `neg` + `softmax`.
+public fn softmin<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    softmax(&neg(x), axis)
+}
+
+// Logsumexp along axis: `log(sum(exp(x), axis))`.
+// #74 Tier B — building block for log-domain probability
+// math. Composes `tensor_exp` + `sum_axis` + `tensor_log`. Note
+// the naïve implementation overflows for large `x`; a future
+// numerically-stable variant should subtract `max_axis` before
+// the exp.
+public fn logsumexp<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    let e = tensor_exp(x);
+    let s: DynTensor<T> = @vbc(TENSOR_REDUCE, e.data, ReduceOp.Sum, axis);
+    tensor_log(&s)
+}
+
+// Element-wise reciprocal: `1 / x`.
+// #74 Tier B — convenience over `div(full_like(x, 1), x)`. Caller
+// must ensure no zeros (otherwise the result has +Inf entries).
+public fn reciprocal<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    div(&full_like(x, 1 as T), x)
+}
+
+// Element-wise reciprocal-square-root: `1 / sqrt(x)`.
+// #74 Tier B — common in attention scaling; composes
+// `tensor_sqrt` + `reciprocal`. Already exists as a primitive
+// (`rsqrt` line 739), but provide a Verum-language reference impl
+// so callers in environments without the primitive (older VBC,
+// minimal builds) still resolve. The primitive will shadow this
+// when present.
+public fn rsqrt_lang<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    reciprocal(&tensor_sqrt(x))
+}
+
 // Softmax along axis
 public fn softmax<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
     @vbc(TENSOR_SOFTMAX, x.data, axis)
@@ -959,6 +1165,105 @@ public fn variance_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<
 // `variance_axis(...)`.
 public fn std_dev_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
     tensor_sqrt(&variance_axis(x, axis))
+}
+
+// Root-mean-square (RMS): sqrt(mean(x^2)).
+// #74 Tier B — common signal-processing aggregate. Composes
+// `square` + `mean` + `sqrt`.
+public fn rms<T: Numeric>(x: &DynTensor<T>) -> T {
+    let m: Float = mean(&square(x)) as Float;
+    sqrt(m) as T
+}
+
+// L1 normalisation: x / sum(|x|).
+// #74 Tier B — divides each element by the L1 norm so the result
+// sums to 1. Composes `tensor_abs` + `sum` + `div_scalar`. For
+// the matrix / batched form callers should slice + apply per-row.
+public fn l1_normalize<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let total = sum(&tensor_abs(x));
+    div_scalar(x, total)
+}
+
+// L2 normalisation: x / sqrt(sum(x^2)).
+// #74 Tier B — divides each element by the L2 norm so the result
+// has unit Euclidean length. Composes `square` + `sum` + `sqrt` +
+// `div_scalar`. For the matrix / batched form callers should slice
+// + apply per-row.
+public fn l2_normalize<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let sq_sum: Float = sum(&square(x)) as Float;
+    let n: T = sqrt(sq_sum) as T;
+    div_scalar(x, n)
+}
+
+// Z-score standardisation: (x - mean) / std_dev.
+// #74 Tier B — produces a tensor with zero mean and unit
+// variance. Composes `mean` + `std_dev` + `sub_scalar` +
+// `div_scalar`. Batched versions can wrap `mean_axis` /
+// `std_dev_axis` similarly.
+public fn standardize<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let mu = mean(x);
+    let sigma = std_dev(x);
+    div_scalar(&sub_scalar(x, mu), sigma)
+}
+
+// Min-max normalisation: (x - min) / (max - min).
+// #74 Tier B — rescales values to [0, 1]. Composes `tensor_min` +
+// `tensor_max` + `sub_scalar` + `div_scalar`. Returns the input
+// unchanged when min == max (constant tensor) — caller must
+// pre-check for that pathological case if it matters.
+public fn min_max_normalize<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let lo = tensor_min(x);
+    let hi = tensor_max(x);
+    let range = hi - lo;
+    div_scalar(&sub_scalar(x, lo), range)
+}
+
+// Sum-squared error: `sum((pred - target)^2)`.
+// #74 Tier B — un-averaged version of MSE; useful when the
+// caller wants per-batch totals before its own averaging.
+public fn sum_squared_error<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    sum(&square_diff(pred, target))
+}
+
+// Root mean squared error: `sqrt(mean((pred - target)^2))`.
+// #74 Tier B — same units as the inputs, unlike raw MSE.
+public fn rmse<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    let m: Float = mean_squared_error(pred, target) as Float;
+    sqrt(m) as T
+}
+
+// Cosine similarity between two 1-D tensors: dot(a, b) / (||a||_2 * ||b||_2).
+// #74 Tier B — composes `tensor_dot` + `square` + `sum` + `sqrt`.
+// Both inputs must be 1-D; the output is a scalar in [-1, 1].
+public fn cosine_similarity<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> T {
+    assert(a.rank() == 1 && b.rank() == 1, "cosine_similarity requires 1-D tensors");
+    assert(a.dim(0) == b.dim(0), "cosine_similarity: lengths must match");
+    let dot_ab = tensor_dot(a, b);
+    let norm_a: Float = sum(&square(a)) as Float;
+    let norm_b: Float = sum(&square(b)) as Float;
+    let denom: T = (sqrt(norm_a) * sqrt(norm_b)) as T;
+    dot_ab / denom
+}
+
+// Euclidean distance between two tensors: sqrt(sum((a - b)^2)).
+// #74 Tier B — composes `square_diff` + `sum` + `sqrt`.
+public fn euclidean_distance<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> T {
+    let s: Float = sum(&square_diff(a, b)) as Float;
+    sqrt(s) as T
+}
+
+// Manhattan (L1) distance: sum(|a - b|).
+// #74 Tier B — composes `sub` + `tensor_abs` + `sum`.
+public fn manhattan_distance<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> T {
+    let d = sub(a, b);
+    sum(&tensor_abs(&d))
+}
+
+// Chebyshev (L∞) distance: max(|a - b|).
+// #74 Tier B — composes `sub` + `tensor_abs` + `tensor_max`.
+public fn chebyshev_distance<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> T {
+    let d = sub(a, b);
+    tensor_max(&tensor_abs(&d))
 }
 
 // Comparison operations

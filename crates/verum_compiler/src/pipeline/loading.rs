@@ -357,8 +357,22 @@ impl<'s> CompilationPipeline<'s> {
             file_data.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
 
             // Phase 2: Parse modules (must be sequential due to shared parser state)
+            //
+            // #111 progress events — emit a tracing::info! at every 10%
+            // boundary AND at the start so the user sees motion instead
+            // of ~80s of silence on a cold cache. The progress log
+            // honours the existing `--verbose` / `RUST_LOG=info` flags;
+            // quiet mode never sees it. The first / last events are
+            // emitted unconditionally so callers always see entry +
+            // exit, regardless of the file count.
+            let total = file_data.len();
+            let progress_step = total.div_ceil(10).max(1);
+            info!(
+                "Parsing stdlib: starting [0/{}]",
+                total
+            );
             let mut entries = Vec::with_capacity(file_data.len());
-            for (module_path_str, source_text, file_path) in &file_data {
+            for (idx, (module_path_str, source_text, file_path)) in file_data.iter().enumerate() {
                 match self.parse_stdlib_module(
                     module_path_str,
                     &Text::from(source_text.clone()),
@@ -378,6 +392,15 @@ impl<'s> CompilationPipeline<'s> {
                             e
                         );
                     }
+                }
+                let parsed = idx + 1;
+                if parsed == total || parsed.is_multiple_of(progress_step) {
+                    info!(
+                        "Parsing stdlib: [{}/{}] {}",
+                        parsed,
+                        total,
+                        module_path_str.as_str()
+                    );
                 }
             }
 
