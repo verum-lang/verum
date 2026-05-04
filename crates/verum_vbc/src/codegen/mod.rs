@@ -3504,6 +3504,113 @@ impl VbcCodegen {
         report
     }
 
+    /// Register an archive-sourced `TypeDescriptor` into the codegen
+    /// type registry without going through the AST walker.  T2 of
+    /// the single-path archive-driven epic — paired with
+    /// `archive_ctx_loader::populate_ctx_from_archive`, this skips
+    /// `collect_non_protocol_declarations` for stdlib types entirely.
+    ///
+    /// `simple_name` is the type's display name (e.g. `Maybe`,
+    /// `ConnectionError`) — used to seed `type_name_to_id` and
+    /// `type_field_layouts` so downstream lookups
+    /// (`compile_path` → `lookup_type` → `compile_field_access`
+    /// → `field_type_name`) resolve through the archive descriptor.
+    /// First-wins on `simple_name` collision.
+    ///
+    /// The descriptor's archive-side `TypeId` is preserved; archive
+    /// builds use a global ID space already disjoint from the
+    /// codegen's user-side `next_type_id` counter, which is bumped
+    /// past every observed archive id so subsequent
+    /// `alloc_user_type_id` calls don't collide.
+    pub fn register_archive_type(
+        &mut self,
+        ty: crate::types::TypeDescriptor,
+        simple_name: String,
+    ) {
+        // Bump next_type_id past this archive id so future user-type
+        // allocations stay disjoint.
+        let id_val = ty.id.0;
+        if id_val >= self.next_type_id {
+            self.next_type_id = id_val.saturating_add(1);
+        }
+        // First-wins on type-name lookup.
+        if !self.type_name_to_id.contains_key(&simple_name) {
+            self.type_name_to_id.insert(simple_name.clone(), ty.id);
+        }
+        // Field layout cache for `field_type_name` consumers.  Uses
+        // the descriptor's structured field list (records) and
+        // each variant's payload field list (record-style variants).
+        // For tuple variants the synthetic `f0`/`f1`/... names match
+        // codegen's positional-field convention.
+        if !ty.fields.is_empty() {
+            let names: Vec<String> = ty
+                .fields
+                .iter()
+                .map(|f| {
+                    self.ctx
+                        .strings
+                        .get(f.name.0 as usize)
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect();
+            // Archive-sourced field names live in archive's string
+            // pool, not in codegen's. Pull them through the
+            // descriptor → simple-name map keyed by simple type name.
+            self.type_field_layouts.entry(simple_name).or_insert(names);
+        }
+        self.push_type_dedupe(ty);
+    }
+
+    /// Pre-populate the codegen registry from an embedded
+    /// `VbcArchive`.  Walks every archived module's type table and
+    /// registers each `TypeDescriptor` via
+    /// [`register_archive_type`](Self::register_archive_type).
+    ///
+    /// Pairs with `archive_ctx_loader::populate_ctx_from_archive` —
+    /// that one handles function info, this one handles types.
+    /// Together they replace the slow source-driven `imported_modules`
+    /// collection that walks 2400+ stdlib `.vr` files.
+    ///
+    /// Returns the number of type descriptors registered.  Best-
+    /// effort: per-module decode failures are silently skipped with
+    /// a `tracing::warn!` so a corrupt archive entry doesn't poison
+    /// the entire stdlib load.
+    pub fn populate_types_from_archive(
+        &mut self,
+        archive: &crate::archive::VbcArchive,
+    ) -> usize {
+        let mut registered: usize = 0;
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "vbc_codegen::populate_types",
+                        "skip module {}: decode failed ({:?})",
+                        entry.name, e
+                    );
+                    continue;
+                }
+            };
+            for ty in &module.types {
+                let simple_name = match module.strings.get(ty.name) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                // Each archive-sourced descriptor needs its
+                // string-table-relative field names rewritten to
+                // codegen's string pool too — the descriptor itself
+                // is moved into self.types as-is (the linker pass
+                // remaps StringIds at finalize time, mirroring the
+                // existing source-driven flow).
+                self.register_archive_type(ty.clone(), simple_name);
+                registered += 1;
+            }
+        }
+        registered
+    }
+
     /// Push a `TypeDescriptor` into `self.types`, skipping when an
     /// existing descriptor already claims the same `TypeId`.
     ///
@@ -4562,7 +4669,7 @@ impl VbcCodegen {
     /// modules. That refactor touches standalone-codegen call sites
     /// (REPL, `meta::vbc_executor`, bench harnesses) that drive
     /// `VbcCodegen::compile_module` without a pipeline-assembled stdlib.
-    fn register_builtin_variants(&mut self) {
+    pub fn register_builtin_variants(&mut self) {
         // Register a fixed set of stdlib variant constructors so that user
         // code like `Maybe.Some(42)`, `Result.Ok(x)`, `Ordering.Less` compiles
         // correctly even when the stdlib definition isn't in the auto-included
@@ -4638,7 +4745,7 @@ impl VbcCodegen {
 
     /// Registers runtime I/O and networking functions as builtins.
     /// These emit Call instructions that the LLVM lowering intercepts.
-    fn register_runtime_io_functions(&mut self) {
+    pub fn register_runtime_io_functions(&mut self) {
         use crate::codegen::context::FunctionInfo;
         // (name, param_count)
         let functions: &[(&str, usize)] = &[
@@ -10715,6 +10822,14 @@ impl VbcCodegen {
     /// Returns codegen statistics.
     pub fn stats(&self) -> &CodegenStats {
         &self.ctx.stats
+    }
+
+    /// Mutable access to the inner codegen context.  Used by
+    /// archive-driven pre-population (T2) so external loaders can
+    /// register `FunctionInfo` entries directly without going
+    /// through the AST walker.
+    pub fn ctx_mut(&mut self) -> &mut CodegenContext {
+        &mut self.ctx
     }
 
     /// Returns the current configuration.
