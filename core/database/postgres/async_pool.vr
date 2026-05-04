@@ -59,6 +59,17 @@ public type AsyncPoolConfig is {
     /// per connection; raises pipeline ceiling without raising
     /// connection count.
     mailbox_capacity: Int,
+    /// SQL strings to prepare on every freshly-opened connection.
+    /// Each string is passed through `conn.prepare(sql).await`;
+    /// the actor's stmt cache (default cap 128) absorbs the
+    /// resulting handle, so subsequent `prepare(same sql)` calls
+    /// from any caller hit the cache and skip the wire round-
+    /// trip + server-side slot allocation.
+    ///
+    /// Empty list (default) → no warmup. Errors during warmup
+    /// fail the connection-open path; the slot reservation is
+    /// rolled back so the pool stays consistent.
+    prepare_on_open: List<Text>,
 };
 
 implement AsyncPoolConfig {
@@ -67,6 +78,7 @@ implement AsyncPoolConfig {
             min_size: 2,
             max_size: 16,
             mailbox_capacity: 64,
+            prepare_on_open: List.new(),
         }
     }
 
@@ -78,6 +90,22 @@ implement AsyncPoolConfig {
 
     public fn with_mailbox_capacity(mut self, c: Int) -> AsyncPoolConfig {
         self.mailbox_capacity = c;
+        self
+    }
+
+    /// Replace the warmup SQL list. Each entry is sent through
+    /// `conn.prepare(sql).await` on every freshly-opened
+    /// connection; the actor cache makes subsequent prepares
+    /// of the same SQL free.
+    public fn with_prepare_on_open(mut self, sql_list: List<Text>) -> AsyncPoolConfig {
+        self.prepare_on_open = sql_list;
+        self
+    }
+
+    /// Append a single SQL string to the warmup list. Convenient
+    /// for chained-builder construction.
+    public fn add_warmup_sql(mut self, sql: Text) -> AsyncPoolConfig {
+        self.prepare_on_open.push(sql);
         self
     }
 }
@@ -109,12 +137,12 @@ implement AsyncPgPool {
         pool_cfg: AsyncPoolConfig,
     ) -> Result<AsyncPgPool, DbError> {
         let max = if pool_cfg.max_size < 1 { 1 } else { pool_cfg.max_size };
-        let (tx, rx) = bounded_channel::<AsyncPgConnection>(max);
+        let (tx, rx) = bounded_channel<AsyncPgConnection>(max);
 
         let mut opened: Int = 0;
         let mut i: Int = 0;
         while i < pool_cfg.min_size {
-            let h = async_connect(&config, pool_cfg.mailbox_capacity).await?;
+            let h = open_and_warm(&config, &pool_cfg).await?;
             match tx.send_async(h).await {
                 Ok(())  => { opened = opened + 1; }
                 Err(_)  => {
@@ -156,8 +184,8 @@ implement AsyncPgPool {
         // Try to grow lazily.
         let cur = self.current.fetch_add(1, MemoryOrdering.AcqRel);
         if cur < self.pool_cfg.max_size {
-            // We reserved a slot — open a fresh one.
-            match async_connect(&self.config, self.pool_cfg.mailbox_capacity).await {
+            // We reserved a slot — open + warm a fresh one.
+            match open_and_warm(&self.config, &self.pool_cfg).await {
                 Ok(h) => {
                     return Ok(AsyncPgPoolGuard {
                         handle: Some(h),
@@ -259,4 +287,32 @@ fn pool_err(what: &str) -> DbError {
         message: f"async pool error: {what}",
         retryable: false,
     })
+}
+
+/// Open a fresh `AsyncPgConnection` and run the warmup hot-list
+/// against it. The warmup primes the actor's stmt cache so
+/// subsequent caller `prepare(same sql)` calls hit cache.
+///
+/// Errors during warmup propagate — the pool caller bears the
+/// failure (slot reservation roll-back happens at the call
+/// site). That keeps the pool consistent: a connection in the
+/// available channel is always one that completed warmup.
+async fn open_and_warm(
+    config: &PgConfig,
+    pool_cfg: &AsyncPoolConfig,
+) -> Result<AsyncPgConnection, DbError> {
+    let h = async_connect(config, pool_cfg.mailbox_capacity).await?;
+    let mut i: Int = 0;
+    while i < (pool_cfg.prepare_on_open.len() as Int) {
+        match h.prepare(&pool_cfg.prepare_on_open[i]).await {
+            Ok(_)  => {}
+            Err(e) => {
+                // Best-effort tear-down — the actor cleanup runs
+                // on its own when every Sender drops.
+                return Err(e);
+            }
+        }
+        i = i + 1;
+    }
+    Ok(h)
 }
