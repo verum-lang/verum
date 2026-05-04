@@ -4,7 +4,7 @@ module core.database.sqlite.native.date_modifier_grammar.modifier;
 
 mount base.{Bool, Text, Int64};
 
-public type Unit is
+public type DateUnit is
     | UDays
     | UHours
     | UMinutes
@@ -13,7 +13,7 @@ public type Unit is
     | UYears
     ;
 
-public fn unit_name(u: &Unit) -> Text {
+public fn unit_name(u: &DateUnit) -> Text {
     match u {
         UDays    => "days".clone(),
         UHours   => "hours".clone(),
@@ -24,7 +24,7 @@ public fn unit_name(u: &Unit) -> Text {
     }
 }
 
-public fn is_variable_length(u: &Unit) -> Bool {
+public fn is_variable_length(u: &DateUnit) -> Bool {
     // months and years are not fixed-duration (28–31 days / 365–366 days).
     match u {
         UMonths => true,
@@ -34,7 +34,7 @@ public fn is_variable_length(u: &Unit) -> Bool {
 }
 
 public type Modifier is
-    | MdOffset { amount: Int64, unit: Unit }        // '+N DAYS' / '-5 MINUTES'
+    | MdOffset { amount: Int64, unit: DateUnit }        // '+N DAYS' / '-5 MINUTES'
     | MdReplaceDate(Text)                           // 'YYYY-MM-DD'
     | MdReplaceTime(Text)                           // 'HH:MM:SS'
     | MdStartOfMonth
