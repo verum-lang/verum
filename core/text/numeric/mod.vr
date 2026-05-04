@@ -33,6 +33,7 @@ public module decimal;
 public module bigint;
 public module bigdecimal;
 public module rational;
+public module modular;
 
 public mount .decimal.{
     Decimal, DecimalError,
@@ -53,4 +54,10 @@ public mount .bigdecimal.{
 public mount .rational.{
     Rational, RationalError,
     parse_rational,
+};
+public mount .modular.{
+    ModularError,
+    gcd, lcm, ext_gcd,
+    mod_pow, mod_inverse,
+    is_probable_prime,
 };
