@@ -23,96 +23,37 @@ use crate::parser::{ParseResult, RecursiveParser};
 /// — users who accidentally shadow one of these (e.g. naming a
 /// parameter `mount` or `type`) get a dedicated diagnostic instead
 /// of a generic "expected pattern" error.
+/// Whether a token kind would be valid as the start of an identifier
+/// pattern but is actually a reserved Verum keyword. Driven by the
+/// canonical lexer-side `is_keyword_like` list so adding a new keyword
+/// to the language never silently degrades pattern-position diagnostics
+/// to the generic "expected pattern" fallback at the bottom of
+/// `parse_pattern_inner`.
+///
+/// Excludes the variant-name keywords (`Some`, `None`, `Ok`, `Err`,
+/// `True`, `False`) and the fundamental binders / constructors (`Self`,
+/// `self`) — those ARE legal in pattern position and have dedicated
+/// upstream arms before the keyword check.
 fn is_reserved_keyword_token(kind: &TokenKind) -> bool {
-    matches!(
+    if !kind.is_keyword_like() {
+        return false;
+    }
+    !matches!(
         kind,
-        TokenKind::Let
-            | TokenKind::Fn
-            | TokenKind::Is
-            | TokenKind::Type
-            | TokenKind::Match
-            | TokenKind::Mount
-            | TokenKind::Link
-            | TokenKind::Where
-            | TokenKind::If
-            | TokenKind::Else
-            | TokenKind::While
-            | TokenKind::For
-            | TokenKind::Loop
-            | TokenKind::Break
-            | TokenKind::Continue
-            | TokenKind::Return
-            | TokenKind::Yield
-            | TokenKind::Mut
-            | TokenKind::Const
-            | TokenKind::Volatile
-            | TokenKind::Static
-            | TokenKind::Pure
-            | TokenKind::Meta
-            | TokenKind::Stage
-            | TokenKind::Lift
-            | TokenKind::Implement
-            | TokenKind::Protocol
-            | TokenKind::Extends
-            | TokenKind::Module
-            | TokenKind::Async
-            | TokenKind::Await
-            | TokenKind::Spawn
-            | TokenKind::Select
-            | TokenKind::Nursery
-            | TokenKind::Unsafe
-            | TokenKind::Ref
-            | TokenKind::Move
-            | TokenKind::As
-            | TokenKind::In
-            | TokenKind::Public
+        TokenKind::Some
+            | TokenKind::None
+            | TokenKind::Ok
+            | TokenKind::Err
+            | TokenKind::True
+            | TokenKind::False
+            | TokenKind::SelfValue
+            | TokenKind::SelfType
+            | TokenKind::Result
     )
 }
 
-fn reserved_keyword_name(kind: &TokenKind) -> &'static str {
-    match kind {
-        TokenKind::Let => "let",
-        TokenKind::Fn => "fn",
-        TokenKind::Is => "is",
-        TokenKind::Type => "type",
-        TokenKind::Match => "match",
-        TokenKind::Mount => "mount",
-        TokenKind::Link => "link",
-        TokenKind::Where => "where",
-        TokenKind::If => "if",
-        TokenKind::Else => "else",
-        TokenKind::While => "while",
-        TokenKind::For => "for",
-        TokenKind::Loop => "loop",
-        TokenKind::Break => "break",
-        TokenKind::Continue => "continue",
-        TokenKind::Return => "return",
-        TokenKind::Yield => "yield",
-        TokenKind::Mut => "mut",
-        TokenKind::Const => "const",
-        TokenKind::Volatile => "volatile",
-        TokenKind::Static => "static",
-        TokenKind::Pure => "pure",
-        TokenKind::Meta => "meta",
-        TokenKind::Stage => "stage",
-        TokenKind::Lift => "lift",
-        TokenKind::Implement => "implement",
-        TokenKind::Protocol => "protocol",
-        TokenKind::Extends => "extends",
-        TokenKind::Module => "module",
-        TokenKind::Async => "async",
-        TokenKind::Await => "await",
-        TokenKind::Spawn => "spawn",
-        TokenKind::Select => "select",
-        TokenKind::Nursery => "nursery",
-        TokenKind::Unsafe => "unsafe",
-        TokenKind::Ref => "ref",
-        TokenKind::Move => "move",
-        TokenKind::As => "as",
-        TokenKind::In => "in",
-        TokenKind::Public => "public",
-        _ => "<reserved>",
-    }
+fn reserved_keyword_name(kind: &TokenKind) -> String {
+    kind.to_ident_string().as_str().to_string()
 }
 
 impl<'a> RecursiveParser<'a> {
