@@ -1,0 +1,230 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: money, currency, decimal, financial
+// @timeout: 30000
+//
+// Type-check exercise for `core.money` — the currency-aware
+// monetary value module built on the V0 numeric quartet.  Validates
+// constructors / predicates / arithmetic / split / comparison /
+// render / cross-currency rejection.
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount collections.List;
+mount core.text.numeric.{
+    BigInt, BigDecimal, RoundingMode, HalfEven, HalfUp,
+};
+mount core.money.{
+    Currency, Money, MoneyError,
+    usd, eur, jpy, bhd,
+};
+
+fn check_constructors() -> Result<Bool, MoneyError> {
+    // Build via from_minor_units (always succeeds).
+    let m = Money.from_minor_units(BigInt.from_int(1234), usd());  // 12.34 USD
+    assert(!m.is_zero());
+    assert(m.amount.scale == 2);
+
+    // Build via from_amount with matching scale.
+    let amt = match BigDecimal.from_parts(BigInt.from_int(5000), 2) {
+        Ok(v)  => v,
+        Err(_) => BigDecimal.zero(),
+    };
+    let m2 = Money.from_amount(amt, usd())?;
+    let _ = m2;
+
+    // Wrong scale → ScaleMismatch.
+    let bad_amt = match BigDecimal.from_parts(BigInt.one(), 4) {
+        Ok(v)  => v,
+        Err(_) => BigDecimal.zero(),
+    };
+    let mismatch = match Money.from_amount(bad_amt, usd()) {
+        Err(MoneyError.ScaleMismatch { expected: 2, actual: 4 }) => true,
+        _ => false,
+    };
+    assert(mismatch);
+
+    // Zero in any currency.
+    let z_jpy = Money.zero(jpy());
+    assert(z_jpy.is_zero());
+    assert(z_jpy.amount.scale == 0);
+
+    let z_bhd = Money.zero(bhd());
+    assert(z_bhd.amount.scale == 3);
+
+    Ok(true)
+}
+
+fn check_predicates() {
+    let pos = Money.from_minor_units(BigInt.from_int(100), usd());
+    let neg = Money.from_minor_units(BigInt.from_int(-50), usd());
+    let zero = Money.zero(usd());
+
+    assert(pos.is_positive());
+    assert(neg.is_negative());
+    assert(zero.is_zero());
+
+    let abs_neg = neg.abs();
+    assert(abs_neg.is_positive());
+
+    let neg2 = pos.neg();
+    assert(neg2.is_negative());
+}
+
+fn check_arith_same_currency() -> Result<Bool, MoneyError> {
+    let a = Money.from_minor_units(BigInt.from_int(1000), usd());  // $10.00
+    let b = Money.from_minor_units(BigInt.from_int(250), usd());   // $2.50
+
+    let sum = a.add(&b)?;
+    let expected_sum = Money.from_minor_units(BigInt.from_int(1250), usd());
+    assert(sum.eq(&expected_sum)?);
+
+    let diff = a.sub(&b)?;
+    let expected_diff = Money.from_minor_units(BigInt.from_int(750), usd());
+    assert(diff.eq(&expected_diff)?);
+
+    Ok(true)
+}
+
+fn check_arith_cross_currency_rejected() {
+    let usd_val = Money.from_minor_units(BigInt.from_int(100), usd());
+    let eur_val = Money.from_minor_units(BigInt.from_int(100), eur());
+
+    let bad_add = match usd_val.add(&eur_val) {
+        Err(MoneyError.CurrencyMismatch { left: _, right: _ }) => true,
+        _ => false,
+    };
+    assert(bad_add);
+
+    let bad_compare = match usd_val.compare(&eur_val) {
+        Err(MoneyError.CurrencyMismatch { left: _, right: _ }) => true,
+        _ => false,
+    };
+    assert(bad_compare);
+}
+
+fn check_mul_div_scalar() -> Result<Bool, MoneyError> {
+    // $100.00 × 0.05 (5% tax) = $5.00 (HalfEven).
+    let amt = Money.from_minor_units(BigInt.from_int(10000), usd());
+    let tax_rate = match BigDecimal.from_parts(BigInt.from_int(5), 2) {
+        Ok(v)  => v,
+        Err(_) => BigDecimal.zero(),
+    };
+    let tax = amt.mul_scalar(&tax_rate, HalfEven)?;
+    let expected_tax = Money.from_minor_units(BigInt.from_int(500), usd());
+    assert(tax.eq(&expected_tax)?);
+
+    // $100.00 / 3 with HalfEven at 2-cent scale ⇒ $33.33 (5/3 = 33.33...
+    // round_digit=3 ⇒ down).
+    let three = BigDecimal.from_int(3);
+    let third = amt.div_scalar(&three, HalfEven)?;
+    let expected_third = Money.from_minor_units(BigInt.from_int(3333), usd());
+    assert(third.eq(&expected_third)?);
+
+    // div by zero rejected.
+    let zero_bd = BigDecimal.zero();
+    let bad = match amt.div_scalar(&zero_bd, HalfEven) {
+        Err(MoneyError.DivByZero) => true,
+        _ => false,
+    };
+    assert(bad);
+
+    Ok(true)
+}
+
+fn check_split_fair_remainder() -> Result<Bool, MoneyError> {
+    // $1.00 split 3 ways → [$0.34, $0.33, $0.33] (first piece bumps).
+    let dollar = Money.from_minor_units(BigInt.from_int(100), usd());
+    let pieces = dollar.split(3)?;
+    assert((pieces.len() as Int) == 3);
+
+    let p0 = &pieces[0];
+    let p1 = &pieces[1];
+    let p2 = &pieces[2];
+    let p_34 = Money.from_minor_units(BigInt.from_int(34), usd());
+    let p_33 = Money.from_minor_units(BigInt.from_int(33), usd());
+
+    assert(p0.eq(&p_34)?);
+    assert(p1.eq(&p_33)?);
+    assert(p2.eq(&p_33)?);
+
+    // Sum of split pieces == original.
+    let s1 = p0.add(p1)?;
+    let s2 = s1.add(p2)?;
+    assert(s2.eq(&dollar)?);
+
+    // Negative split: -$1.00 split 3 ways → [-$0.34, -$0.33, -$0.33]
+    // (magnitude bump on first piece, away from zero).
+    let neg_dollar = Money.from_minor_units(BigInt.from_int(-100), usd());
+    let neg_pieces = neg_dollar.split(3)?;
+    let np_neg34 = Money.from_minor_units(BigInt.from_int(-34), usd());
+    let np_neg33 = Money.from_minor_units(BigInt.from_int(-33), usd());
+    assert((&neg_pieces[0]).eq(&np_neg34)?);
+    assert((&neg_pieces[1]).eq(&np_neg33)?);
+    assert((&neg_pieces[2]).eq(&np_neg33)?);
+
+    // Invalid split: n=0 → InvalidSplit.
+    let bad = match dollar.split(0) {
+        Err(MoneyError.InvalidSplit { reason: _ }) => true,
+        _ => false,
+    };
+    assert(bad);
+
+    Ok(true)
+}
+
+fn check_compare() -> Result<Bool, MoneyError> {
+    let a = Money.from_minor_units(BigInt.from_int(500), usd());
+    let b = Money.from_minor_units(BigInt.from_int(1000), usd());
+    let c = Money.from_minor_units(BigInt.from_int(500), usd());
+
+    assert(matches_less(a.compare(&b)?));
+    assert(matches_equal(a.compare(&c)?));
+    assert(matches_greater(b.compare(&a)?));
+
+    assert(a.lt(&b)?);
+    assert(b.gt(&a)?);
+    assert(a.eq(&c)?);
+
+    Ok(true)
+}
+
+fn matches_equal(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
+fn matches_less(o: Ordering)  -> Bool { match o { Less => true,  _ => false } }
+fn matches_greater(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
+
+fn check_render() {
+    let usd_val = Money.from_minor_units(BigInt.from_int(1234), usd());
+    assert(usd_val.to_text() == "12.34 USD");
+
+    let jpy_val = Money.from_minor_units(BigInt.from_int(100), jpy());
+    assert(jpy_val.to_text() == "100 JPY");
+
+    let bhd_val = Money.from_minor_units(BigInt.from_int(1235), bhd());
+    assert(bhd_val.to_text() == "1.235 BHD");
+
+    let neg = Money.from_minor_units(BigInt.from_int(-50), eur());
+    assert(neg.to_text() == "-0.50 EUR");
+}
+
+fn check_currency_predefined() {
+    assert(usd().code == "USD");
+    assert(usd().minor_units == 2);
+
+    assert(jpy().minor_units == 0);
+    assert(bhd().minor_units == 3);
+}
+
+fn main() {
+    let _ = check_constructors();
+    check_predicates();
+    let _ = check_arith_same_currency();
+    check_arith_cross_currency_rejected();
+    let _ = check_mul_div_scalar();
+    let _ = check_split_fair_remainder();
+    let _ = check_compare();
+    check_render();
+    check_currency_predefined();
+}

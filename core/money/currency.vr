@@ -1,0 +1,92 @@
+// =============================================================================
+// core/money/currency.vr — ISO 4217 currency descriptors (V0)
+// =============================================================================
+// Layer: 2 (Money)
+// =============================================================================
+//
+// `Currency` carries the ISO 4217 code + minor-unit precision (the
+// number of decimal places that count as the currency's smallest
+// transactable subunit).  `Money` (in `money.vr`) pairs an amount
+// with a currency to enforce currency-correct arithmetic.
+//
+// V0 ships a curated set of common currencies as `const` values.
+// V1 will add a runtime `Currency.from_iso_code(text)` lookup
+// driven by a generated table covering all 180-ish ISO codes.
+//
+// Minor-unit conventions (see ISO 4217 List One):
+//   * 0 minor units: JPY, KRW, VND, CLP, ISK, ...
+//   * 2 minor units: USD, EUR, GBP, CAD, AUD, CNY, ...  (most common)
+//   * 3 minor units: BHD, KWD, OMR, JOD, TND, IQD, LYD
+//   * 4 minor units: CLF, UYW
+// =============================================================================
+
+module core.money.currency;
+
+mount core.*;
+mount base.{Text, Bool};
+
+// =============================================================================
+// Type
+// =============================================================================
+
+/// One currency descriptor — ISO 4217 code + minor-unit precision.
+/// Cheap to clone (Text is reference-counted under the hood).
+public type Currency is {
+    /// ISO 4217 alphabetic code: "USD", "EUR", "JPY", "BHD", ...
+    code: Text,
+    /// Number of decimal digits in the minor unit (USD cents = 2;
+    /// JPY yen = 0; BHD fils = 3).  Matches the value Money uses
+    /// for its internal `BigDecimal.scale`.
+    minor_units: Int,
+};
+
+implement Currency {
+    /// Construct a custom currency descriptor.  Useful for testing
+    /// or for currencies not in the predefined `usd`/`eur`/... set.
+    /// Caller is responsible for ISO code validity.
+    public fn new(code: Text, minor_units: Int) -> Currency {
+        Currency { code: code, minor_units: minor_units }
+    }
+
+    /// Two currencies compare equal iff their ISO codes match.
+    /// Minor-unit precision is conventionally fixed by the ISO code
+    /// so a code-only comparison is sufficient at this layer.
+    public fn eq(&self, other: &Currency) -> Bool {
+        self.code == other.code
+    }
+}
+
+// =============================================================================
+// Predefined currencies — V0 covers the most common 20 worldwide
+// =============================================================================
+
+// 0-minor-unit currencies (no fractional subdivision).
+public fn jpy() -> Currency { Currency { code: "JPY".clone(), minor_units: 0 } }
+public fn krw() -> Currency { Currency { code: "KRW".clone(), minor_units: 0 } }
+public fn vnd() -> Currency { Currency { code: "VND".clone(), minor_units: 0 } }
+public fn clp() -> Currency { Currency { code: "CLP".clone(), minor_units: 0 } }
+public fn isk() -> Currency { Currency { code: "ISK".clone(), minor_units: 0 } }
+
+// 2-minor-unit currencies (the global default).
+public fn usd() -> Currency { Currency { code: "USD".clone(), minor_units: 2 } }
+public fn eur() -> Currency { Currency { code: "EUR".clone(), minor_units: 2 } }
+public fn gbp() -> Currency { Currency { code: "GBP".clone(), minor_units: 2 } }
+public fn cad() -> Currency { Currency { code: "CAD".clone(), minor_units: 2 } }
+public fn aud() -> Currency { Currency { code: "AUD".clone(), minor_units: 2 } }
+public fn nzd() -> Currency { Currency { code: "NZD".clone(), minor_units: 2 } }
+public fn chf() -> Currency { Currency { code: "CHF".clone(), minor_units: 2 } }
+public fn cny() -> Currency { Currency { code: "CNY".clone(), minor_units: 2 } }
+public fn inr() -> Currency { Currency { code: "INR".clone(), minor_units: 2 } }
+public fn brl() -> Currency { Currency { code: "BRL".clone(), minor_units: 2 } }
+public fn mxn() -> Currency { Currency { code: "MXN".clone(), minor_units: 2 } }
+public fn zar() -> Currency { Currency { code: "ZAR".clone(), minor_units: 2 } }
+public fn sek() -> Currency { Currency { code: "SEK".clone(), minor_units: 2 } }
+public fn nok() -> Currency { Currency { code: "NOK".clone(), minor_units: 2 } }
+public fn dkk() -> Currency { Currency { code: "DKK".clone(), minor_units: 2 } }
+
+// 3-minor-unit currencies (Gulf Cooperation Council fils).
+public fn bhd() -> Currency { Currency { code: "BHD".clone(), minor_units: 3 } }
+public fn kwd() -> Currency { Currency { code: "KWD".clone(), minor_units: 3 } }
+public fn omr() -> Currency { Currency { code: "OMR".clone(), minor_units: 3 } }
+public fn jod() -> Currency { Currency { code: "JOD".clone(), minor_units: 3 } }
+public fn tnd() -> Currency { Currency { code: "TND".clone(), minor_units: 3 } }
