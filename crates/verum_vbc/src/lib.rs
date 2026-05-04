@@ -65,6 +65,7 @@
 
 pub mod archive;
 pub mod cfg_key;
+pub mod linker;
 pub mod dtype;
 pub mod error;
 pub mod format;
