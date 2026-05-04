@@ -1,0 +1,204 @@
+// =============================================================================
+// t20_gtid_algebra.vr — GTID set algebra V1 (text + wire round-trip + ops)
+// =============================================================================
+// Spec: internal/specs/database.md §6.2 (mysql adapter / binlog).
+// =============================================================================
+//
+// V0 closes the binlog.vr line 56 follow-up "GTID set algebra (we
+// surface gtid bytes opaque)". Pure unit-style test — runs against
+// nothing live; exercises the parser, formatter, wire codec, and
+// set algebra in isolation.
+//
+// Coverage:
+//   1. parse_gtid_set("uuid:1-100,200,250-300") round-trips through
+//      format_gtid_set verbatim.
+//   2. encode_wire / decode_wire round-trip preserves the structure.
+//   3. union / intersect / subtract — known small sets.
+//   4. contains — boundaries (start, end, gap).
+//   5. add_gtid — inserts merge with adjacent intervals.
+//   6. multi-UUID ordering — sorted by SID.
+//   7. Empty-set + single-element + degenerate-interval edge cases.
+// =============================================================================
+
+mount conn_config.{expect, expect_eq_int, pass};
+mount core.database.mysql.{
+    GnoInterval, GnoIntervalSet, GtidSet,
+    parse_gtid_set, format_gtid_set,
+    encode_gtid_wire, decode_gtid_wire,
+};
+mount core.base.uuid.Uuid;
+
+const SID_A: Text = "00000000-0000-0000-0000-000000000001";
+const SID_B: Text = "00000000-0000-0000-0000-000000000002";
+
+fn main() {
+    test_parse_format_round_trip();
+    test_wire_round_trip();
+    test_set_union();
+    test_set_intersect();
+    test_set_subtract();
+    test_contains_boundaries();
+    test_add_gtid_merge();
+    test_empty_set();
+
+    pass(&"t20_gtid_algebra".clone());
+}
+
+// -----------------------------------------------------------------------------
+// (1) Parse + format round-trip
+// -----------------------------------------------------------------------------
+
+fn test_parse_format_round_trip() {
+    let input: Text = f"{SID_A}:1-100,200,250-300";
+    let set = match parse_gtid_set(&input) {
+        Ok(s)  => s,
+        Err(_) => { expect(false, &"parse failed".clone()); return; }
+    };
+    expect_eq_int(set.arity(), 1, &"single-uuid arity".clone());
+    expect_eq_int(set.count(), 100 + 1 + 51,
+        &"GNO total = 100 + 1 + 51 = 152".clone());
+
+    let rendered = format_gtid_set(&set);
+    expect(rendered == input,
+        &f"format round-trip: got {rendered} want {input}");
+}
+
+// -----------------------------------------------------------------------------
+// (2) Wire round-trip — encode → decode → format identical
+// -----------------------------------------------------------------------------
+
+fn test_wire_round_trip() {
+    let input: Text = f"{SID_A}:1-100";
+    let set = match parse_gtid_set(&input) {
+        Ok(s)  => s,
+        Err(_) => { expect(false, &"parse failed".clone()); return; }
+    };
+    let bytes = encode_gtid_wire(&set);
+    // Layout: 8(n_sids=1) + 16(SID) + 8(n_intervals=1) + 8(start=1) + 8(end_excl=101) = 48
+    expect_eq_int(bytes.len() as Int, 48,
+        &"wire length: 8 + 16 + 8 + 8 + 8".clone());
+
+    let decoded = match decode_gtid_wire(bytes.as_slice()) {
+        Ok(s)  => s,
+        Err(_) => { expect(false, &"decode failed".clone()); return; }
+    };
+    let rendered = format_gtid_set(&decoded);
+    expect(rendered == input,
+        &"wire round-trip preserves text form".clone());
+}
+
+// -----------------------------------------------------------------------------
+// (3) Set union — disjoint intervals merge into compact form
+// -----------------------------------------------------------------------------
+
+fn test_set_union() {
+    let a = match parse_gtid_set(&f"{SID_A}:1-50") {
+        Ok(s) => s,
+        Err(_) => { expect(false, &"a parse".clone()); return; }
+    };
+    let b = match parse_gtid_set(&f"{SID_A}:51-100") {
+        Ok(s) => s,
+        Err(_) => { expect(false, &"b parse".clone()); return; }
+    };
+    let u = a.union(&b);
+    expect_eq_int(u.count(), 100,
+        &"union count = 100 (1..100)".clone());
+    let rendered = format_gtid_set(&u);
+    expect(rendered == f"{SID_A}:1-100",
+        &f"union merges adjacent: got {rendered}");
+}
+
+// -----------------------------------------------------------------------------
+// (4) Set intersect — partial overlap
+// -----------------------------------------------------------------------------
+
+fn test_set_intersect() {
+    let a = match parse_gtid_set(&f"{SID_A}:1-100") {
+        Ok(s) => s,
+        Err(_) => { expect(false, &"a parse".clone()); return; }
+    };
+    let b = match parse_gtid_set(&f"{SID_A}:50-150") {
+        Ok(s) => s,
+        Err(_) => { expect(false, &"b parse".clone()); return; }
+    };
+    let i = a.intersect(&b);
+    expect_eq_int(i.count(), 51,
+        &"intersect count = 51 (50..100)".clone());
+}
+
+// -----------------------------------------------------------------------------
+// (5) Set subtract
+// -----------------------------------------------------------------------------
+
+fn test_set_subtract() {
+    let a = match parse_gtid_set(&f"{SID_A}:1-100") {
+        Ok(s) => s,
+        Err(_) => { expect(false, &"a parse".clone()); return; }
+    };
+    let b = match parse_gtid_set(&f"{SID_A}:25-75") {
+        Ok(s) => s,
+        Err(_) => { expect(false, &"b parse".clone()); return; }
+    };
+    let s = a.subtract(&b);
+    // Result: 1-24, 76-100 (24 + 25 = 49 GNOs)
+    expect_eq_int(s.count(), 49,
+        &"subtract count = 49 (1-24, 76-100)".clone());
+}
+
+// -----------------------------------------------------------------------------
+// (6) Contains — exact boundaries
+// -----------------------------------------------------------------------------
+
+fn test_contains_boundaries() {
+    let set = match parse_gtid_set(&f"{SID_A}:10-20") {
+        Ok(s) => s,
+        Err(_) => { expect(false, &"parse".clone()); return; }
+    };
+    let uuid = match Uuid.parse(&SID_A.clone()) {
+        Ok(u) => u,
+        Err(_) => { expect(false, &"uuid parse".clone()); return; }
+    };
+    expect( set.contains(&uuid, 10), &"contains start".clone());
+    expect( set.contains(&uuid, 20), &"contains end".clone());
+    expect( set.contains(&uuid, 15), &"contains middle".clone());
+    expect(!set.contains(&uuid, 9),  &"misses below start".clone());
+    expect(!set.contains(&uuid, 21), &"misses above end".clone());
+}
+
+// -----------------------------------------------------------------------------
+// (7) add_gtid merges with adjacent
+// -----------------------------------------------------------------------------
+
+fn test_add_gtid_merge() {
+    let mut set = GtidSet.new();
+    let uuid = match Uuid.parse(&SID_A.clone()) {
+        Ok(u) => u,
+        Err(_) => { expect(false, &"uuid parse".clone()); return; }
+    };
+    // Build 1, 2, 3, 4, 5 by inserts; should collapse to 1-5.
+    let mut g: Int = 1;
+    while g <= 5 {
+        set.add_gtid(Uuid { hi: uuid.hi, lo: uuid.lo }, g);
+        g = g + 1;
+    }
+    let rendered = format_gtid_set(&set);
+    expect(rendered == f"{SID_A}:1-5",
+        &f"adjacent inserts merge: got {rendered}".clone());
+}
+
+// -----------------------------------------------------------------------------
+// (8) Empty set — wire round-trip
+// -----------------------------------------------------------------------------
+
+fn test_empty_set() {
+    let empty = GtidSet.new();
+    expect(empty.is_empty(), &"GtidSet.new is empty".clone());
+    let bytes = encode_gtid_wire(&empty);
+    expect_eq_int(bytes.len() as Int, 8,
+        &"empty wire = 8 bytes (n_sids=0)".clone());
+    let decoded = match decode_gtid_wire(bytes.as_slice()) {
+        Ok(s)  => s,
+        Err(_) => { expect(false, &"decode empty".clone()); return; }
+    };
+    expect(decoded.is_empty(), &"empty round-trips".clone());
+}

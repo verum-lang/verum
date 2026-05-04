@@ -1,0 +1,768 @@
+// =============================================================================
+// core/database/mysql/gtid.vr — GTID set algebra V1
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.2 (mysql adapter / binlog).
+// =============================================================================
+//
+// Closes the V1 follow-up declared in `binlog.vr` line 56:
+// "GTID set algebra (we surface gtid bytes opaque)". Pre-fix the
+// `BfGtidSet { gtid_set: Text }` variant of BinlogStartFrom passed
+// `gtid_set.as_bytes()` directly into the COM_BINLOG_DUMP_GTID
+// payload — but the wire field is BINARY (8-byte counts + 16-byte
+// SIDs + 8-byte gno endpoints), not the textual form the user
+// reads off `SHOW MASTER STATUS`. So the API was effectively
+// dead-end for any realistic GTID set.
+//
+// This module brings:
+//
+//   * `GtidSet` — ordered map (Uuid → GnoIntervalSet), in
+//     canonical normalized form (intervals sorted + non-
+//     overlapping + maximally merged).
+//   * Text round-trip — `parse(&Text) → Result<GtidSet, ...>` /
+//     `format(&self) → Text` — round-trips the
+//     `uuid:1-100,200,250-300` format MySQL prints + accepts.
+//   * Wire round-trip — `encode_wire(&self) → List<Byte>` /
+//     `decode_wire(&[Byte]) → Result<...>` — for
+//     COM_BINLOG_DUMP_GTID payload + ET_PREVIOUS_GTIDS event.
+//   * Set algebra — `union`, `intersect`, `subtract`, `contains`,
+//     `add_gtid` (single (uuid, gno) pair), `is_empty`, `arity`.
+//   * Convenience — `from_event(&GtidEventBody) → (Uuid, Int)`
+//     for the streaming-CDC use case.
+//
+// Wire format (per MySQL Replication Protocol — Encoded GTID Sets):
+//
+//   gtid_data := n_sids:u8[8]
+//             || (sid:u8[16]
+//                || n_intervals:u8[8]
+//                || (start:u8[8] || end_exclusive:u8[8])^n_intervals)^n_sids
+//
+// Note `end_exclusive` — MySQL stores intervals as half-open
+// `[start, end)`. We keep them inclusive `[start, end]` in-memory
+// for clarity (matches the textual form `1-100`); encode/decode
+// translate. The MySQL invariant `end > start` (no empty
+// intervals) is preserved; we additionally enforce non-overlap
+// + canonical sort on insert.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.gtid;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.uuid.{Uuid, UuidError};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterSpecific, AdMysql,
+};
+mount core.database.mysql.wire.frame.{
+    put_u8, put_u64_le, put_bytes,
+};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Half-open interval in MEMORY rendered inclusive. `end >= start`
+/// always; an empty interval is illegal.
+public type GnoInterval is {
+    start: Int,
+    end: Int,
+};
+
+implement GnoInterval {
+    public fn new(start: Int, end: Int) -> GnoInterval {
+        GnoInterval { start: start, end: end }
+    }
+
+    public fn singleton(gno: Int) -> GnoInterval {
+        GnoInterval { start: gno, end: gno }
+    }
+
+    public fn contains(&self, gno: Int) -> Bool {
+        gno >= self.start && gno <= self.end
+    }
+
+    public fn count(&self) -> Int {
+        self.end - self.start + 1
+    }
+}
+
+/// Sorted, non-overlapping interval list per SID.
+public type GnoIntervalSet is {
+    intervals: List<GnoInterval>,
+};
+
+implement GnoIntervalSet {
+    public fn new() -> GnoIntervalSet {
+        GnoIntervalSet { intervals: List.new() }
+    }
+
+    public fn is_empty(&self) -> Bool {
+        (self.intervals.len() as Int) == 0
+    }
+
+    public fn arity(&self) -> Int {
+        self.intervals.len() as Int
+    }
+
+    /// Total GNO count across all intervals.
+    public fn count(&self) -> Int {
+        let mut acc: Int = 0;
+        let mut i: Int = 0;
+        while i < (self.intervals.len() as Int) {
+            acc = acc + self.intervals[i].count();
+            i = i + 1;
+        }
+        acc
+    }
+
+    /// O(log N + merge cost) membership.
+    public fn contains(&self, gno: Int) -> Bool {
+        let n = self.intervals.len() as Int;
+        if n == 0 { return false; }
+        // Binary-search for the rightmost interval with start <= gno.
+        let mut lo: Int = 0;
+        let mut hi: Int = n;
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if self.intervals[mid].start <= gno { lo = mid + 1; }
+            else                                { hi = mid; }
+        }
+        if lo == 0 { return false; }
+        self.intervals[lo - 1].contains(gno)
+    }
+
+    /// Insert `iv` and merge against neighbours so the canonical
+    /// form is preserved. O(N) — acceptable since GTID sets in
+    /// production rarely exceed dozens of intervals.
+    public fn add(&mut self, iv: GnoInterval) {
+        if iv.end < iv.start { return; }
+        let mut new_iv = iv;
+        let mut out: List<GnoInterval> = List.new();
+        let mut i: Int = 0;
+        let n = self.intervals.len() as Int;
+        // Copy intervals strictly before new_iv (no overlap, no
+        // adjacency) into out.
+        while i < n && self.intervals[i].end + 1 < new_iv.start {
+            out.push(GnoInterval {
+                start: self.intervals[i].start,
+                end: self.intervals[i].end,
+            });
+            i = i + 1;
+        }
+        // Merge overlapping / adjacent intervals into new_iv.
+        while i < n && self.intervals[i].start <= new_iv.end + 1 {
+            if self.intervals[i].start < new_iv.start {
+                new_iv.start = self.intervals[i].start;
+            }
+            if self.intervals[i].end > new_iv.end {
+                new_iv.end = self.intervals[i].end;
+            }
+            i = i + 1;
+        }
+        out.push(new_iv);
+        // Copy intervals strictly after.
+        while i < n {
+            out.push(GnoInterval {
+                start: self.intervals[i].start,
+                end: self.intervals[i].end,
+            });
+            i = i + 1;
+        }
+        self.intervals = out;
+    }
+
+    public fn clone(&self) -> GnoIntervalSet {
+        let mut out: List<GnoInterval> = List.with_capacity(self.intervals.len());
+        let mut i: Int = 0;
+        while i < (self.intervals.len() as Int) {
+            out.push(GnoInterval {
+                start: self.intervals[i].start,
+                end: self.intervals[i].end,
+            });
+            i = i + 1;
+        }
+        GnoIntervalSet { intervals: out }
+    }
+}
+
+/// One GTID set entry — canonical SID order.
+type GtidEntry is {
+    uuid: Uuid,
+    intervals: GnoIntervalSet,
+};
+
+/// Set of (UUID, gno-interval-set) pairs, sorted by UUID hi/lo.
+public type GtidSet is {
+    entries: List<GtidEntry>,
+};
+
+implement GtidSet {
+    public fn new() -> GtidSet {
+        GtidSet { entries: List.new() }
+    }
+
+    public fn is_empty(&self) -> Bool {
+        (self.entries.len() as Int) == 0
+    }
+
+    /// Number of distinct UUIDs in the set.
+    public fn arity(&self) -> Int {
+        self.entries.len() as Int
+    }
+
+    /// Total GNO count across all SIDs.
+    public fn count(&self) -> Int {
+        let mut acc: Int = 0;
+        let mut i: Int = 0;
+        while i < (self.entries.len() as Int) {
+            acc = acc + self.entries[i].intervals.count();
+            i = i + 1;
+        }
+        acc
+    }
+
+    public fn contains(&self, uuid: &Uuid, gno: Int) -> Bool {
+        match find_entry(self, uuid) {
+            Some(idx) => self.entries[idx].intervals.contains(gno),
+            None      => false,
+        }
+    }
+
+    /// Insert (uuid, gno) pair. O(arity + interval-count-per-uuid).
+    public fn add_gtid(&mut self, uuid: Uuid, gno: Int) {
+        self.add_interval(uuid, GnoInterval.singleton(gno));
+    }
+
+    public fn add_interval(&mut self, uuid: Uuid, iv: GnoInterval) {
+        match find_entry(self, &uuid) {
+            Some(idx) => {
+                self.entries[idx].intervals.add(iv);
+            }
+            None => {
+                let mut s = GnoIntervalSet.new();
+                s.add(iv);
+                let pos = insert_position(self, &uuid);
+                self.entries.insert(pos as Size, GtidEntry {
+                    uuid: uuid,
+                    intervals: s,
+                });
+            }
+        }
+    }
+
+    /// Set union — `self ∪ other`. Returns a fresh set.
+    public fn union(&self, other: &GtidSet) -> GtidSet {
+        let mut out = self.clone();
+        let mut i: Int = 0;
+        while i < (other.entries.len() as Int) {
+            let e = &other.entries[i];
+            let mut j: Int = 0;
+            while j < (e.intervals.intervals.len() as Int) {
+                out.add_interval(
+                    Uuid { hi: e.uuid.hi, lo: e.uuid.lo },
+                    GnoInterval {
+                        start: e.intervals.intervals[j].start,
+                        end:   e.intervals.intervals[j].end,
+                    },
+                );
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Set intersection — `self ∩ other`. Returns a fresh set.
+    public fn intersect(&self, other: &GtidSet) -> GtidSet {
+        let mut out = GtidSet.new();
+        let mut i: Int = 0;
+        while i < (self.entries.len() as Int) {
+            let mine = &self.entries[i];
+            match find_entry(other, &mine.uuid) {
+                Some(j) => {
+                    let theirs = &other.entries[j].intervals;
+                    let common = intersect_intervals(&mine.intervals, theirs);
+                    if !common.is_empty() {
+                        out.entries.push(GtidEntry {
+                            uuid: Uuid { hi: mine.uuid.hi, lo: mine.uuid.lo },
+                            intervals: common,
+                        });
+                    }
+                }
+                None => {}
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Set difference — `self \ other`. Returns a fresh set.
+    public fn subtract(&self, other: &GtidSet) -> GtidSet {
+        let mut out = GtidSet.new();
+        let mut i: Int = 0;
+        while i < (self.entries.len() as Int) {
+            let mine = &self.entries[i];
+            let result = match find_entry(other, &mine.uuid) {
+                Some(j) => subtract_intervals(&mine.intervals, &other.entries[j].intervals),
+                None    => mine.intervals.clone(),
+            };
+            if !result.is_empty() {
+                out.entries.push(GtidEntry {
+                    uuid: Uuid { hi: mine.uuid.hi, lo: mine.uuid.lo },
+                    intervals: result,
+                });
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    public fn clone(&self) -> GtidSet {
+        let mut out: List<GtidEntry> = List.with_capacity(self.entries.len());
+        let mut i: Int = 0;
+        while i < (self.entries.len() as Int) {
+            out.push(GtidEntry {
+                uuid: Uuid {
+                    hi: self.entries[i].uuid.hi,
+                    lo: self.entries[i].uuid.lo,
+                },
+                intervals: self.entries[i].intervals.clone(),
+            });
+            i = i + 1;
+        }
+        GtidSet { entries: out }
+    }
+}
+
+// =============================================================================
+// Text round-trip
+// =============================================================================
+
+/// Render the canonical MySQL textual form:
+///
+///   `<uuid>:<i1.start>-<i1.end>,<i2.start>[-<i2.end>],...,<uuid>:...`
+///
+/// Single-element intervals collapse to `start` (matching MySQL's
+/// own renderer). UUIDs separated by ',' — no whitespace.
+public fn format_gtid_set(set: &GtidSet) -> Text {
+    let mut out: Text = "".clone();
+    let mut i: Int = 0;
+    while i < (set.entries.len() as Int) {
+        if i > 0 {
+            out.push_str(&",".clone());
+        }
+        let e = &set.entries[i];
+        out.push_str(&e.uuid.to_text());
+        let mut j: Int = 0;
+        while j < (e.intervals.intervals.len() as Int) {
+            let iv = &e.intervals.intervals[j];
+            out.push_str(&":".clone());
+            out.push_str(&int_to_text(iv.start));
+            if iv.end != iv.start {
+                out.push_str(&"-".clone());
+                out.push_str(&int_to_text(iv.end));
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+/// Parse the textual form. Whitespace ignored; UUIDs lowercase-or-
+/// uppercase OK.
+///
+/// Errors:
+///   * `GTID_PARSE_BAD_UUID` — UUID portion didn't validate.
+///   * `GTID_PARSE_BAD_INTERVAL` — interval portion didn't parse.
+///   * `GTID_PARSE_EMPTY_INTERVAL` — `end < start`.
+///   * `GTID_PARSE_MISSING_COLON` — no `:` between UUID + interval.
+public fn parse_gtid_set(s: &Text) -> Result<GtidSet, DbError> {
+    let bytes = s.as_bytes();
+    let mut out = GtidSet.new();
+    let mut i: Int = 0;
+    let n = bytes.len() as Int;
+    while i < n {
+        i = skip_ws(bytes, i);
+        if i >= n { break; }
+        // Each entry begins with a 36-char UUID.
+        if i + 36 > n {
+            return Err(gtid_error(
+                "GTID_PARSE_BAD_UUID".clone(),
+                f"truncated UUID at byte {i}",
+            ));
+        }
+        let uuid_text = sub_text(s, i, i + 36);
+        let uuid = match Uuid.parse(&uuid_text) {
+            Ok(u)  => u,
+            Err(e) => {
+                return Err(gtid_error(
+                    "GTID_PARSE_BAD_UUID".clone(),
+                    f"bad UUID at byte {i}: {e.message}",
+                ));
+            }
+        };
+        i = i + 36;
+        i = skip_ws(bytes, i);
+        // After the UUID, one or more `:start[-end]` segments,
+        // separated by ','. Followed (optionally) by `,` to start
+        // a new entry, or end-of-input.
+        let mut saw_colon = false;
+        let mut intervals = GnoIntervalSet.new();
+        while i < n {
+            if (bytes[i] as Int) == (':' as Int) {
+                saw_colon = true;
+                i = i + 1;
+                let (iv, next_i) = parse_interval(bytes, i)?;
+                intervals.add(iv);
+                i = next_i;
+                continue;
+            }
+            if (bytes[i] as Int) == (',' as Int) {
+                // Lookahead: if the next non-ws char is a UUID
+                // (hex digit or '-'), this comma is an entry
+                // separator — break out of the inner loop.
+                let nxt = skip_ws(bytes, i + 1);
+                if nxt + 36 <= n && byte_is_uuid_start(bytes[nxt]) {
+                    i = i + 1;
+                    break;
+                }
+                // Otherwise the comma separates intervals within
+                // the current UUID; consume + parse another.
+                i = i + 1;
+                i = skip_ws(bytes, i);
+                let (iv, next_i) = parse_interval(bytes, i)?;
+                intervals.add(iv);
+                i = next_i;
+                continue;
+            }
+            if is_ws(bytes[i]) {
+                i = i + 1;
+                continue;
+            }
+            // Unexpected byte — stop here.
+            break;
+        }
+        if !saw_colon {
+            return Err(gtid_error(
+                "GTID_PARSE_MISSING_COLON".clone(),
+                f"UUID at byte {i} not followed by ':interval'",
+            ));
+        }
+        // Place the entry in canonical position.
+        let pos = insert_position(&out, &uuid);
+        out.entries.insert(pos as Size, GtidEntry {
+            uuid: uuid,
+            intervals: intervals,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_interval(bytes: &[Byte], start_off: Int) -> Result<(GnoInterval, Int), DbError> {
+    let n = bytes.len() as Int;
+    let mut i = start_off;
+    i = skip_ws(bytes, i);
+    let start_t = i;
+    while i < n && byte_is_digit(bytes[i]) { i = i + 1; }
+    if i == start_t {
+        return Err(gtid_error(
+            "GTID_PARSE_BAD_INTERVAL".clone(),
+            f"missing GNO start at byte {start_t}",
+        ));
+    }
+    let start_v = parse_int_bytes(bytes, start_t, i)?;
+    let mut end_v = start_v;
+    let after_start = i;
+    if i < n && (bytes[i] as Int) == ('-' as Int) {
+        i = i + 1;
+        let end_t = i;
+        while i < n && byte_is_digit(bytes[i]) { i = i + 1; }
+        if i == end_t {
+            return Err(gtid_error(
+                "GTID_PARSE_BAD_INTERVAL".clone(),
+                f"missing GNO end after '-' at byte {after_start}",
+            ));
+        }
+        end_v = parse_int_bytes(bytes, end_t, i)?;
+    }
+    if end_v < start_v {
+        return Err(gtid_error(
+            "GTID_PARSE_EMPTY_INTERVAL".clone(),
+            f"end {end_v} < start {start_v}",
+        ));
+    }
+    Ok((GnoInterval { start: start_v, end: end_v }, i))
+}
+
+// =============================================================================
+// Wire round-trip — COM_BINLOG_DUMP_GTID payload + ET_PREVIOUS_GTIDS
+// =============================================================================
+
+/// Encode to the binary form expected by COM_BINLOG_DUMP_GTID's
+/// `gtid_data` field. Layout (LE u64 throughout):
+///
+///   n_sids
+///   (sid[16] || n_intervals || (start || end_exclusive)^n_intervals)^n_sids
+///
+/// Rejects empty entries (would violate the wire's "n_intervals > 0
+/// per SID" implicit invariant) — doing so is a no-op since
+/// `add_interval` preserves non-emptiness.
+public fn encode_wire(set: &GtidSet) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u64_le(&mut out, set.entries.len() as Int);
+    let mut i: Int = 0;
+    while i < (set.entries.len() as Int) {
+        let e = &set.entries[i];
+        let sid_bytes = e.uuid.to_bytes();
+        let mut k: Int = 0;
+        while k < 16 {
+            put_u8(&mut out, sid_bytes[k] as Int);
+            k = k + 1;
+        }
+        put_u64_le(&mut out, e.intervals.intervals.len() as Int);
+        let mut j: Int = 0;
+        while j < (e.intervals.intervals.len() as Int) {
+            let iv = &e.intervals.intervals[j];
+            put_u64_le(&mut out, iv.start);
+            // Wire stores the END as exclusive (end + 1).
+            put_u64_le(&mut out, iv.end + 1);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+/// Decode the binary form. Returns `GTID_DECODE_TRUNCATED` if the
+/// buffer ends mid-entry.
+public fn decode_wire(buf: &[Byte]) -> Result<GtidSet, DbError> {
+    let mut off: Int = 0;
+    let n_sids = read_u64_le(buf, off)?;
+    off = off + 8;
+    let mut out = GtidSet.new();
+    let mut i: Int = 0;
+    while i < n_sids {
+        if off + 16 > (buf.len() as Int) {
+            return Err(gtid_error(
+                "GTID_DECODE_TRUNCATED".clone(),
+                f"truncated SID at offset {off}",
+            ));
+        }
+        let mut sid_buf: [Byte; 16] = [0_u8; 16];
+        let mut k: Int = 0;
+        while k < 16 {
+            sid_buf[k] = buf[off + k];
+            k = k + 1;
+        }
+        off = off + 16;
+        let uuid = Uuid.from_bytes(&sid_buf);
+        let n_intervals = read_u64_le(buf, off)?;
+        off = off + 8;
+        let mut intervals = GnoIntervalSet.new();
+        let mut j: Int = 0;
+        while j < n_intervals {
+            let s = read_u64_le(buf, off)?;
+            off = off + 8;
+            let e_excl = read_u64_le(buf, off)?;
+            off = off + 8;
+            if e_excl <= s {
+                return Err(gtid_error(
+                    "GTID_DECODE_BAD_INTERVAL".clone(),
+                    f"end_exclusive {e_excl} <= start {s}",
+                ));
+            }
+            // The wire is canonical — intervals are already
+            // sorted + non-overlapping by server contract — so
+            // the merge cost in `add` collapses to push-at-end.
+            intervals.add(GnoInterval { start: s, end: e_excl - 1 });
+            j = j + 1;
+        }
+        let pos = insert_position(&out, &uuid);
+        out.entries.insert(pos as Size, GtidEntry {
+            uuid: uuid,
+            intervals: intervals,
+        });
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+fn read_u64_le(buf: &[Byte], off: Int) -> Result<Int, DbError> {
+    if off + 8 > (buf.len() as Int) {
+        return Err(gtid_error(
+            "GTID_DECODE_TRUNCATED".clone(),
+            f"truncated u64 at offset {off}",
+        ));
+    }
+    let mut v: Int = 0;
+    let mut k: Int = 0;
+    while k < 8 {
+        v = v | ((buf[off + k] as Int) << (k * 8));
+        k = k + 1;
+    }
+    Ok(v)
+}
+
+// =============================================================================
+// Internal — entry lookup + position ordering
+// =============================================================================
+
+/// O(log N) — `entries` sorted by (uuid.hi, uuid.lo).
+fn find_entry(set: &GtidSet, uuid: &Uuid) -> Maybe<Int> {
+    let mut lo: Int = 0;
+    let mut hi: Int = set.entries.len() as Int;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        let cmp = compare_uuid(&set.entries[mid].uuid, uuid);
+        if cmp == 0 { return Some(mid); }
+        if cmp < 0 { lo = mid + 1; } else { hi = mid; }
+    }
+    None
+}
+
+fn insert_position(set: &GtidSet, uuid: &Uuid) -> Int {
+    let mut lo: Int = 0;
+    let mut hi: Int = set.entries.len() as Int;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if compare_uuid(&set.entries[mid].uuid, uuid) < 0 { lo = mid + 1; }
+        else                                              { hi = mid; }
+    }
+    lo
+}
+
+fn compare_uuid(a: &Uuid, b: &Uuid) -> Int {
+    if a.hi < b.hi { return -1; }
+    if a.hi > b.hi { return 1; }
+    if a.lo < b.lo { return -1; }
+    if a.lo > b.lo { return 1; }
+    0
+}
+
+// =============================================================================
+// Internal — interval-set algebra (used by intersect / subtract)
+// =============================================================================
+
+fn intersect_intervals(a: &GnoIntervalSet, b: &GnoIntervalSet) -> GnoIntervalSet {
+    let mut out = GnoIntervalSet.new();
+    let mut i: Int = 0;
+    let mut j: Int = 0;
+    let na = a.intervals.len() as Int;
+    let nb = b.intervals.len() as Int;
+    while i < na && j < nb {
+        let ai = &a.intervals[i];
+        let bj = &b.intervals[j];
+        let lo = if ai.start > bj.start { ai.start } else { bj.start };
+        let hi = if ai.end   < bj.end   { ai.end   } else { bj.end   };
+        if lo <= hi {
+            out.intervals.push(GnoInterval { start: lo, end: hi });
+        }
+        if ai.end < bj.end { i = i + 1; } else { j = j + 1; }
+    }
+    out
+}
+
+fn subtract_intervals(a: &GnoIntervalSet, b: &GnoIntervalSet) -> GnoIntervalSet {
+    let mut out = GnoIntervalSet.new();
+    let mut i: Int = 0;
+    while i < (a.intervals.len() as Int) {
+        let mut cursor = a.intervals[i].start;
+        let end = a.intervals[i].end;
+        let mut j: Int = 0;
+        while j < (b.intervals.len() as Int) && cursor <= end {
+            let bj = &b.intervals[j];
+            if bj.end < cursor       { j = j + 1; continue; }
+            if bj.start > end        { break; }
+            if bj.start > cursor {
+                out.intervals.push(GnoInterval {
+                    start: cursor,
+                    end:   bj.start - 1,
+                });
+            }
+            if bj.end + 1 > cursor { cursor = bj.end + 1; }
+            j = j + 1;
+        }
+        if cursor <= end {
+            out.intervals.push(GnoInterval { start: cursor, end: end });
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Helpers — text/byte parsing + error wrap
+// =============================================================================
+
+fn sub_text(s: &Text, start: Int, end: Int) -> Text {
+    let bytes = s.as_bytes();
+    let mut out: List<Byte> = List.new();
+    let mut i = start;
+    while i < end && i < (bytes.len() as Int) {
+        out.push(bytes[i]);
+        i = i + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+fn skip_ws(bytes: &[Byte], i: Int) -> Int {
+    let mut k = i;
+    while k < (bytes.len() as Int) && is_ws(bytes[k]) { k = k + 1; }
+    k
+}
+
+fn is_ws(b: Byte) -> Bool {
+    let v = b as Int;
+    v == 0x20 || v == 0x09 || v == 0x0A || v == 0x0D
+}
+
+fn byte_is_digit(b: Byte) -> Bool {
+    let v = b as Int;
+    v >= ('0' as Int) && v <= ('9' as Int)
+}
+
+fn byte_is_uuid_start(b: Byte) -> Bool {
+    let v = b as Int;
+    (v >= ('0' as Int) && v <= ('9' as Int))
+        || (v >= ('a' as Int) && v <= ('f' as Int))
+        || (v >= ('A' as Int) && v <= ('F' as Int))
+}
+
+fn parse_int_bytes(bytes: &[Byte], start: Int, end: Int) -> Result<Int, DbError> {
+    let mut acc: Int = 0;
+    let mut i = start;
+    while i < end {
+        let v = bytes[i] as Int;
+        if v < ('0' as Int) || v > ('9' as Int) {
+            return Err(gtid_error(
+                "GTID_PARSE_BAD_INTERVAL".clone(),
+                f"non-digit at byte {i}",
+            ));
+        }
+        acc = acc * 10 + (v - ('0' as Int));
+        i = i + 1;
+    }
+    Ok(acc)
+}
+
+fn int_to_text(n: Int) -> Text {
+    f"{n}"
+}
+
+fn gtid_error(code: Text, message: Text) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: code,
+        message: message,
+        retryable: false,
+    })
+}
