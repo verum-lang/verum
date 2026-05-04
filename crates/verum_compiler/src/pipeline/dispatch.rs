@@ -61,6 +61,13 @@ impl<'s> CompilationPipeline<'s> {
         // Phase 2: Parsing
         let module = self.phase_parse(file_id)?;
 
+        // Lazy-stdlib prune (#281): match the AOT and interpreter paths
+        // by dropping stdlib modules outside the user's mount tree before
+        // type-checking and downstream phases. Honours `VERUM_FULL_STDLIB=1`.
+        if std::env::var("VERUM_FULL_STDLIB").is_err() {
+            self.clear_non_compilable_stdlib_modules(Some(&module));
+        }
+
         // Phase 3: Type checking
         self.phase_type_check(&module)?;
 
@@ -290,6 +297,20 @@ impl<'s> CompilationPipeline<'s> {
 
         let file_id = self.phase_load_source()?;
         let module = self.phase_parse(file_id)?;
+
+        // Lazy-stdlib prune (#281, parity with run_native_compilation):
+        // drop stdlib modules outside the user's mount tree + the
+        // ALWAYS_INCLUDE runtime-stub list before downstream phases
+        // monomorphize them. Without this, `verum run script.vr`
+        // walks every loaded stdlib AST through type-check + codegen +
+        // monomorphization and each cold script run pays the full
+        // ~83 K-function cost — even for a `--help` print. The AOT
+        // path already does this; the interpreter path simply forgot to.
+        // Honours the same `VERUM_FULL_STDLIB=1` opt-out used elsewhere
+        // (full-corpus tooling: `verum audit --framework-axioms` etc.).
+        if std::env::var("VERUM_FULL_STDLIB").is_err() {
+            self.clear_non_compilable_stdlib_modules(Some(&module));
+        }
 
         // Safety-feature gates (unsafe, @ffi, etc.) ALWAYS run —
         // independent of verify_mode. Without this, `--verify runtime`

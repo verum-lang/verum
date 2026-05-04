@@ -798,13 +798,28 @@ pub(in super::super) fn handle_ffi_extended(
             // Object/Pointer Value (heap-allocated struct) or — for
             // some single-field receivers — as the inline payload
             // itself. Treat both: if it's a pointer Value, take the
-            // raw address; otherwise read as i64 (already the
-            // address, e.g. when the field-of-self pattern was
-            // pre-stabilised through an integer slot).
+            // raw address; if it's an int, use it directly (already
+            // the address, e.g. when the field-of-self pattern was
+            // pre-stabilised through an integer slot). Anything else
+            // — None, Unit, Bool, Float, Object — is a codegen error
+            // upstream; surface a typed runtime error instead of
+            // tripping `as_i64`'s `debug_assert!(is_int())` and crashing
+            // the entire process. Fundamental fix for the
+            // build-paper.vr `--help` panic ("Expected int, got None"):
+            // a struct receiver was reaching this opcode unset, and
+            // the panic prevented the script from running at all.
             let obj_ptr: *mut u8 = if obj_val.is_ptr() {
                 obj_val.as_ptr()
-            } else {
+            } else if obj_val.is_int() {
                 obj_val.as_i64() as *mut u8
+            } else {
+                return Err(InterpreterError::InvalidOperand {
+                    message: format!(
+                        "StructFieldAddr: receiver register r{} holds {:?}, expected Pointer or Int (struct receiver address)",
+                        obj_reg.0,
+                        obj_val.tag()
+                    ),
+                });
             };
             if obj_ptr.is_null() {
                 return Err(InterpreterError::NullPointer);

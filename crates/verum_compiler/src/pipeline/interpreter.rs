@@ -237,8 +237,33 @@ impl<'s> CompilationPipeline<'s> {
         // typecheck + verify + codegen entirely.
         self.session.record_compiled_vbc(vbc_module.clone());
 
-        // Step 2: Create VBC interpreter
+        // Step 2: Create VBC interpreter with runtime config from [runtime]
         let mut interpreter = VbcInterpreter::new(vbc_module);
+        {
+            let rt = &self.session.language_features().runtime;
+            interpreter.state.config.async_scheduler = rt.async_scheduler.as_str().to_string();
+            interpreter.state.config.async_worker_threads = rt.async_worker_threads;
+            interpreter.state.config.futures_enabled = rt.futures;
+            interpreter.state.config.nurseries_enabled = rt.nurseries;
+            interpreter.state.config.task_stack_size = rt.task_stack_size;
+            interpreter.state.config.heap_policy = rt.heap_policy.as_str().to_string();
+        }
+        // Production parity with `phase_interpret` (the no-args path):
+        // disable the InterpreterConfig wall-clock + instruction-count
+        // budgets so `verum run script.vr ARGS` doesn't kill long-running
+        // services after 30 s the way the no-args entry point already
+        // doesn't. The default `timeout_ms = 30_000` /
+        // `max_instructions = 100_000_000` are *test-runner* safety nets;
+        // both production interpret entries opt out by setting them to
+        // 0 (= "no deadline" — see
+        // `crates/verum_vbc/.../dispatch_table/mod.rs`). Without this
+        // override the args path inherited the 30 s wall-clock and
+        // tripped at the first 256-instruction sample whenever any pre-
+        // execution work (codegen, monomorphization, global ctors)
+        // pushed the runtime past that boundary — even though main()
+        // itself was about to do almost no work.
+        interpreter.state.config.timeout_ms = 0;
+        interpreter.state.config.max_instructions = 0;
         // Script-mode permission policy (see `run_compiled_vbc` for
         // the full rationale).
         if let Some(policy) = self.session.take_script_permission_policy() {
