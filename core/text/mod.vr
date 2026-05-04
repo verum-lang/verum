@@ -84,6 +84,11 @@ public mount .format.dbg;
 // direct file mount only.
 public mount .builder.TextBuilder;
 
+// Numeric text representations — Decimal (fixed precision i64
+// coefficient, scale 0..=18) for financial / monetary / PG NUMERIC
+// use cases where binary float is unsuitable.
+public module numeric;
+
 // =============================================================================
 // Prelude exports (commonly used items)
 // =============================================================================

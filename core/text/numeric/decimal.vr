@@ -1,0 +1,596 @@
+// =============================================================================
+// core/text/numeric/decimal.vr — fixed-precision decimal arithmetic (V0)
+// =============================================================================
+// Layer: 1 (Text — numeric subtree)
+// =============================================================================
+//
+// `Decimal` is a foundational fixed-precision arithmetic type for use
+// cases where binary float (Float = f64) is unsuitable: financial
+// calculations, monetary amounts, scientific instrument readings,
+// PG NUMERIC parameter binding, etc.  The value is represented as
+// `coefficient × 10^(-scale)`:
+//
+//   * `coefficient: Int` — signed 64-bit integer (Verum `Int` is i64).
+//     V0 caps significant digits at ~18 (i64 range).  V1 follow-up
+//     swaps to a BigInt coefficient for arbitrary precision.
+//
+//   * `scale: Int` — number of decimal digits after the point.
+//     V0 range: [0, 18].  Scales > 18 are rejected at construction
+//     because they cannot be normalised back into an i64 coefficient
+//     without precision loss.
+//
+// Sign is embedded in the coefficient (negative coefficient ⇒
+// negative value).  Zero has scale 0 by convention.
+//
+// V0 arithmetic surface:
+//
+//   * `add`, `sub`            — scale-aligning sum / difference, with
+//                               overflow detection.
+//   * `mul`                   — coefficient product + scale sum, with
+//                               overflow detection (i128 intermediate).
+//   * `neg`                   — sign flip.
+//   * `abs`                   — magnitude.
+//
+// V0 OUT-of-scope (V1 follow-ups):
+//
+//   * Division (needs a precision-spec to control truncation).
+//   * Square-root, transcendentals (need extended precision).
+//   * BigInt coefficient.
+//   * Banker's-rounding helpers.
+//
+// Comparison + ordering surface is complete via `compare`.
+// Parse / render are byte-exact relative to the canonical decimal
+// text format (no scientific notation; trailing-zero preservation
+// driven by the parsed scale).
+// =============================================================================
+
+module core.text.numeric.decimal;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount collections.List;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Maximum fractional scale supported by the V0 i64-coefficient
+/// representation.  Beyond 18 decimal digits the coefficient
+/// magnitude exceeds i64 capacity for any non-zero leading digit.
+public const MAX_SCALE: Int = 18;
+
+/// Pre-computed `10^k` for `k ∈ [0, 18]`.  Indexed table avoids a
+/// loop on every scale-alignment operation.  The 19th entry
+/// (10^18 = 1_000_000_000_000_000_000) is the largest power of ten
+/// representable as a positive i64.
+const POW10: [Int; 19] = [
+    1,
+    10,
+    100,
+    1000,
+    10000,
+    100000,
+    1000000,
+    10000000,
+    100000000,
+    1000000000,
+    10000000000,
+    100000000000,
+    1000000000000,
+    10000000000000,
+    100000000000000,
+    1000000000000000,
+    10000000000000000,
+    100000000000000000,
+    1000000000000000000,
+];
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Fixed-precision decimal value.  Invariants enforced at every
+/// constructor / arithmetic boundary:
+///   * `0 <= scale <= MAX_SCALE`.
+///   * `coefficient` fits in i64 (Verum `Int`).
+public type Decimal is {
+    /// Signed coefficient.  Sign of the represented value matches
+    /// the sign of `coefficient`.
+    coefficient: Int,
+    /// Number of decimal digits after the point (0 ≤ scale ≤ 18).
+    scale: Int,
+};
+
+/// Errors surfaced by the Decimal API.
+public type DecimalError is
+      ParseEmpty
+    | ParseInvalidChar { byte_offset: Int, byte: Int }
+    | ParseInvalidShape { reason: Text }
+    | ScaleOutOfRange  { scale: Int }
+    | Overflow         { op: Text };
+
+// =============================================================================
+// Constructors
+// =============================================================================
+
+implement Decimal {
+    /// The decimal value `0`.  Canonical form: coefficient=0, scale=0.
+    public fn zero() -> Decimal {
+        Decimal { coefficient: 0, scale: 0 }
+    }
+
+    /// The decimal value `1`.  Canonical form: coefficient=1, scale=0.
+    public fn one() -> Decimal {
+        Decimal { coefficient: 1, scale: 0 }
+    }
+
+    /// Build a Decimal from a plain integer.  Always produces
+    /// `(coefficient = n, scale = 0)`.  Cannot fail (Verum `Int`
+    /// fits the coefficient by construction).
+    public fn from_int(n: Int) -> Decimal {
+        Decimal { coefficient: n, scale: 0 }
+    }
+
+    /// Build a Decimal from explicit `(coefficient, scale)` parts.
+    /// Validates `scale ∈ [0, MAX_SCALE]`.  Coefficient is always
+    /// in-range (Int = i64).
+    public fn from_parts(coefficient: Int, scale: Int) -> Result<Decimal, DecimalError> {
+        if scale < 0 || scale > MAX_SCALE {
+            return Err(DecimalError.ScaleOutOfRange { scale: scale });
+        }
+        Ok(Decimal { coefficient: coefficient, scale: scale })
+    }
+
+    // -------------------------------------------------------------------------
+    // Predicates
+    // -------------------------------------------------------------------------
+
+    public fn is_zero(&self) -> Bool { self.coefficient == 0 }
+
+    public fn is_negative(&self) -> Bool { self.coefficient < 0 }
+
+    public fn is_positive(&self) -> Bool { self.coefficient > 0 }
+
+    /// Magnitude of the value (always non-negative).
+    public fn abs(&self) -> Decimal {
+        let c = if self.coefficient < 0 { -self.coefficient } else { self.coefficient };
+        Decimal { coefficient: c, scale: self.scale }
+    }
+
+    /// Sign-flip.  `neg(0)` is canonical zero.
+    public fn neg(&self) -> Decimal {
+        Decimal { coefficient: -self.coefficient, scale: self.scale }
+    }
+
+    // -------------------------------------------------------------------------
+    // Arithmetic
+    // -------------------------------------------------------------------------
+
+    /// Sum `self + other`.  Aligns the smaller-scale operand by
+    /// multiplying its coefficient by 10^(scale_diff), then adds.
+    /// Returns Overflow if either the alignment multiplication or
+    /// the final addition exceeds i64 range.
+    public fn add(&self, other: &Decimal) -> Result<Decimal, DecimalError> {
+        let (a_coef, b_coef, scale) = match align_scales(self, other) {
+            Ok(t)  => t,
+            Err(e) => return Err(e),
+        };
+        let sum = match checked_add(a_coef, b_coef) {
+            Some(v) => v,
+            None    => return Err(DecimalError.Overflow { op: "add".clone() }),
+        };
+        Ok(Decimal { coefficient: sum, scale: scale })
+    }
+
+    /// Difference `self - other`.  Same scale-alignment + overflow
+    /// discipline as `add`.
+    public fn sub(&self, other: &Decimal) -> Result<Decimal, DecimalError> {
+        let (a_coef, b_coef, scale) = match align_scales(self, other) {
+            Ok(t)  => t,
+            Err(e) => return Err(e),
+        };
+        let diff = match checked_sub(a_coef, b_coef) {
+            Some(v) => v,
+            None    => return Err(DecimalError.Overflow { op: "sub".clone() }),
+        };
+        Ok(Decimal { coefficient: diff, scale: scale })
+    }
+
+    /// Product `self * other`.  Coefficient is the product of
+    /// individual coefficients; scale is the SUM of individual
+    /// scales (i.e. precision is preserved exactly — no rounding).
+    /// Returns Overflow if the i64 coefficient or the resulting
+    /// scale escapes its valid range.
+    public fn mul(&self, other: &Decimal) -> Result<Decimal, DecimalError> {
+        let scale = self.scale + other.scale;
+        if scale > MAX_SCALE {
+            return Err(DecimalError.ScaleOutOfRange { scale: scale });
+        }
+        let prod = match checked_mul(self.coefficient, other.coefficient) {
+            Some(v) => v,
+            None    => return Err(DecimalError.Overflow { op: "mul".clone() }),
+        };
+        Ok(Decimal { coefficient: prod, scale: scale })
+    }
+
+    // -------------------------------------------------------------------------
+    // Comparison
+    // -------------------------------------------------------------------------
+
+    /// Three-way comparison.  Aligns scales (using saturating
+    /// alignment when the smaller-scale side would overflow during
+    /// alignment — saturation produces a well-defined Less/Greater
+    /// without panicking).
+    public fn compare(&self, other: &Decimal) -> Ordering {
+        // Sign-based fast path: differing signs always order
+        // unambiguously, no alignment math required.
+        if self.coefficient == 0 && other.coefficient == 0 { return Equal; }
+        if self.coefficient >= 0 && other.coefficient < 0 { return Greater; }
+        if self.coefficient < 0  && other.coefficient >= 0 { return Less; }
+
+        // Same-sign comparison: align scales and compare aligned
+        // coefficients.  If alignment overflows, the side that
+        // would have been multiplied is the larger-magnitude side
+        // (positive case) or the smaller-magnitude side (negative).
+        match align_scales(self, other) {
+            Ok((a, b, _)) => {
+                if a < b { Less } else if a > b { Greater } else { Equal }
+            }
+            Err(_) => {
+                // Alignment overflow: fall back to comparing
+                // magnitudes after string-render (slow path, but
+                // correct for the rare case where two near-i64-MAX
+                // operands at differing scales need ordering).
+                let st = self.to_text();
+                let ot = other.to_text();
+                if st == ot {
+                    Equal
+                } else if st < ot {
+                    Less
+                } else {
+                    Greater
+                }
+            }
+        }
+    }
+
+    public fn eq(&self, other: &Decimal) -> Bool { matches_equal(self.compare(other)) }
+    public fn lt(&self, other: &Decimal) -> Bool { matches_less(self.compare(other))  }
+    public fn gt(&self, other: &Decimal) -> Bool { matches_greater(self.compare(other)) }
+    public fn le(&self, other: &Decimal) -> Bool { !matches_greater(self.compare(other)) }
+    public fn ge(&self, other: &Decimal) -> Bool { !matches_less(self.compare(other))    }
+
+    // -------------------------------------------------------------------------
+    // Render
+    // -------------------------------------------------------------------------
+
+    /// Render as decimal text.  Format:
+    ///   * sign prefix if negative
+    ///   * integer digits (≥ 1 digit, no leading zeros except "0")
+    ///   * if scale > 0: `'.'` followed by exactly `scale` fractional digits
+    ///
+    /// Examples:  Decimal{c=12345, s=2}        → "123.45"
+    ///            Decimal{c=-7, s=3}            → "-0.007"
+    ///            Decimal{c=0, s=0}             → "0"
+    ///            Decimal{c=0, s=4}             → "0.0000"
+    public fn to_text(&self) -> Text {
+        if self.coefficient == 0 {
+            if self.scale <= 0 { return "0".clone(); }
+            let mut s = "0.".clone();
+            let mut k = 0;
+            while k < self.scale {
+                s = s + "0";
+                k = k + 1;
+            }
+            return s;
+        }
+
+        let neg = self.coefficient < 0;
+        let abs_coef = if neg { -self.coefficient } else { self.coefficient };
+        let digits = digits_of(abs_coef);
+        let digit_count = digits.len() as Int;
+
+        let mut out: Text = if neg { "-".clone() } else { "".clone() };
+
+        if self.scale == 0 {
+            out = out + Text.from_bytes(&digits).unwrap_or("".clone());
+            return out;
+        }
+
+        if self.scale >= digit_count {
+            // Pure-fractional value — emit "0.000…<digits>" with
+            // (scale - digit_count) leading zeros after the dot.
+            out = out + "0.";
+            let mut pad = self.scale - digit_count;
+            while pad > 0 {
+                out = out + "0";
+                pad = pad - 1;
+            }
+            out = out + Text.from_bytes(&digits).unwrap_or("".clone());
+            return out;
+        }
+
+        // Mixed integer + fractional: split `digits` at index
+        // `digit_count - scale`.
+        let split = digit_count - self.scale;
+        let int_part = bytes_subslice(&digits, 0, split);
+        let frac_part = bytes_subslice(&digits, split, digit_count);
+        out = out + Text.from_bytes(&int_part).unwrap_or("".clone());
+        out = out + ".";
+        out = out + Text.from_bytes(&frac_part).unwrap_or("".clone());
+        out
+    }
+}
+
+// =============================================================================
+// Parsing
+// =============================================================================
+
+/// Parse a decimal text representation into a `Decimal`.  Accepts:
+///   * Optional leading whitespace (' ', '\t', '\n', '\r').
+///   * Optional sign (+ / -).
+///   * Integer digits (≥ 0).
+///   * Optional `'.'` followed by fractional digits (≥ 0).
+///   * No scientific notation in V0 (rejected with ParseInvalidChar
+///     on 'e' or 'E').  V1 follow-up.
+///
+/// Errors:
+///   * `ParseEmpty`         — empty input or only whitespace + sign.
+///   * `ParseInvalidChar`   — non-digit character at `byte_offset`.
+///   * `ParseInvalidShape`  — multiple decimal points, lone sign,
+///                            etc.
+///   * `ScaleOutOfRange`    — fractional digits exceed MAX_SCALE.
+///   * `Overflow`           — coefficient would exceed i64 range.
+public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
+    let bytes = text.as_bytes();
+    let n = bytes.len() as Int;
+    let mut i: Int = 0;
+
+    // Skip leading whitespace.
+    while i < n {
+        let b = bytes[i] as Int;
+        if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+            i = i + 1;
+        } else {
+            break;
+        }
+    }
+
+    if i >= n { return Err(DecimalError.ParseEmpty); }
+
+    // Optional sign.
+    let mut neg = false;
+    let first = bytes[i] as Int;
+    if first == ('+' as Int) {
+        i = i + 1;
+    } else if first == ('-' as Int) {
+        neg = true;
+        i = i + 1;
+    }
+
+    if i >= n {
+        return Err(DecimalError.ParseInvalidShape {
+            reason: "lone sign with no digits".clone(),
+        });
+    }
+
+    // Accumulate coefficient (magnitude only; sign applied at end).
+    let mut coef: Int = 0;
+    let mut digit_count: Int = 0;
+    let mut frac_count: Int = 0;
+    let mut saw_dot = false;
+    let mut saw_digit = false;
+
+    while i < n {
+        let b = bytes[i] as Int;
+        if b >= ('0' as Int) && b <= ('9' as Int) {
+            // Detect overflow before adding the new digit.  i64
+            // bound check: coef * 10 + d > i64::MAX ⇒ overflow.
+            let d = b - ('0' as Int);
+            let c10 = match checked_mul(coef, 10) {
+                Some(v) => v,
+                None    => return Err(DecimalError.Overflow { op: "parse".clone() }),
+            };
+            let cnext = match checked_add(c10, d) {
+                Some(v) => v,
+                None    => return Err(DecimalError.Overflow { op: "parse".clone() }),
+            };
+            coef = cnext;
+            digit_count = digit_count + 1;
+            if saw_dot { frac_count = frac_count + 1; }
+            saw_digit = true;
+            i = i + 1;
+        } else if b == ('.' as Int) {
+            if saw_dot {
+                return Err(DecimalError.ParseInvalidShape {
+                    reason: "multiple decimal points".clone(),
+                });
+            }
+            saw_dot = true;
+            i = i + 1;
+        } else if b == ('e' as Int) || b == ('E' as Int) {
+            // V0 rejects scientific notation explicitly.
+            return Err(DecimalError.ParseInvalidShape {
+                reason: "scientific notation (e/E) not supported in V0".clone(),
+            });
+        } else if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+            // Trailing whitespace OK; non-whitespace after digits is invalid.
+            // Skip remaining whitespace.
+            i = i + 1;
+            while i < n {
+                let bb = bytes[i] as Int;
+                if bb == 0x20 || bb == 0x09 || bb == 0x0A || bb == 0x0D {
+                    i = i + 1;
+                } else {
+                    return Err(DecimalError.ParseInvalidChar {
+                        byte_offset: i, byte: bb,
+                    });
+                }
+            }
+            break;
+        } else {
+            return Err(DecimalError.ParseInvalidChar {
+                byte_offset: i, byte: b,
+            });
+        }
+    }
+
+    if !saw_digit {
+        return Err(DecimalError.ParseInvalidShape {
+            reason: "no digits".clone(),
+        });
+    }
+    if frac_count > MAX_SCALE {
+        return Err(DecimalError.ScaleOutOfRange { scale: frac_count });
+    }
+
+    let signed = if neg { -coef } else { coef };
+    Ok(Decimal { coefficient: signed, scale: frac_count })
+}
+
+// =============================================================================
+// Internal helpers — arithmetic
+// =============================================================================
+
+/// Align two decimals to a common scale (the larger of the two).
+/// Returns `(a_coef_aligned, b_coef_aligned, common_scale)` or
+/// Overflow if the alignment multiplication exceeds i64 range.
+fn align_scales(a: &Decimal, b: &Decimal) -> Result<(Int, Int, Int), DecimalError> {
+    if a.scale == b.scale {
+        return Ok((a.coefficient, b.coefficient, a.scale));
+    }
+    if a.scale < b.scale {
+        let diff = b.scale - a.scale;
+        let mult = pow10(diff);
+        let scaled = match checked_mul(a.coefficient, mult) {
+            Some(v) => v,
+            None    => return Err(DecimalError.Overflow { op: "align".clone() }),
+        };
+        Ok((scaled, b.coefficient, b.scale))
+    } else {
+        let diff = a.scale - b.scale;
+        let mult = pow10(diff);
+        let scaled = match checked_mul(b.coefficient, mult) {
+            Some(v) => v,
+            None    => return Err(DecimalError.Overflow { op: "align".clone() }),
+        };
+        Ok((a.coefficient, scaled, a.scale))
+    }
+}
+
+/// `10^k` lookup.  Caller must ensure `0 ≤ k ≤ MAX_SCALE`.
+fn pow10(k: Int) -> Int {
+    if k < 0 || k > MAX_SCALE { return 1; }
+    POW10[k]
+}
+
+/// Checked i64 add.  Returns None on overflow.
+///
+/// Verum lacks built-in checked_add primitives at the language level
+/// (V0 follow-up); detect overflow via the standard sign-based
+/// formula: `a + b` overflows iff signs of operands match AND sign
+/// of result differs from operand sign.
+fn checked_add(a: Int, b: Int) -> Maybe<Int> {
+    let r = a + b;
+    if (a >= 0) == (b >= 0) && (r >= 0) != (a >= 0) {
+        None
+    } else {
+        Some(r)
+    }
+}
+
+/// Checked i64 sub.  Returns None on overflow.
+fn checked_sub(a: Int, b: Int) -> Maybe<Int> {
+    let r = a - b;
+    // Overflow iff sign of (a - b) differs from sign of a AND
+    // signs of a and b differ.  E.g., a positive minus a negative
+    // produces a positive — overflow → negative.
+    if (a >= 0) != (b >= 0) && (r >= 0) != (a >= 0) {
+        None
+    } else {
+        Some(r)
+    }
+}
+
+/// Checked i64 mul.  Returns None on overflow.  Uses the absolute-
+/// value-bound approach: |a * b| ≤ i64::MAX ⟹ |a| ≤ i64::MAX / |b|.
+fn checked_mul(a: Int, b: Int) -> Maybe<Int> {
+    if a == 0 || b == 0 { return Some(0); }
+    // Special-case i64::MIN: -i64::MIN overflows.  Verum Int =
+    // i64; the magic constant is 2^63 = 9223372036854775808 which
+    // is one greater than i64::MAX.  Take any operand at MIN and
+    // any non-{0,1,-1} other ⇒ overflow.
+    let i64_min: Int = -9223372036854775807 - 1;  // i64::MIN
+    if a == i64_min {
+        if b == 0 { return Some(0); }
+        if b == 1 { return Some(a); }
+        return None;
+    }
+    if b == i64_min {
+        if a == 0 { return Some(0); }
+        if a == 1 { return Some(b); }
+        return None;
+    }
+    let abs_a = if a < 0 { -a } else { a };
+    let abs_b = if b < 0 { -b } else { b };
+    let i64_max: Int = 9223372036854775807;
+    if abs_a > i64_max / abs_b {
+        None
+    } else {
+        Some(a * b)
+    }
+}
+
+// =============================================================================
+// Internal helpers — text conversion
+// =============================================================================
+
+fn matches_equal(o: Ordering) -> Bool {
+    match o { Equal => true, _ => false }
+}
+
+fn matches_less(o: Ordering) -> Bool {
+    match o { Less => true, _ => false }
+}
+
+fn matches_greater(o: Ordering) -> Bool {
+    match o { Greater => true, _ => false }
+}
+
+/// Render an unsigned magnitude as decimal-digit bytes (most
+/// significant first).  Caller must pass `n >= 0` (usually by
+/// pre-extracting `abs(coefficient)`).  `n == 0` returns `[b'0']`.
+fn digits_of(n: Int) -> List<Byte> {
+    if n == 0 {
+        let mut zero: List<Byte> = List.new();
+        zero.push(('0' as Int) as Byte);
+        return zero;
+    }
+    let mut buf: List<Byte> = List.new();
+    let mut v = n;
+    while v > 0 {
+        let d = v % 10;
+        buf.push(((d + ('0' as Int)) as Byte));
+        v = v / 10;
+    }
+    // Reverse into MS-first order.
+    let mut out: List<Byte> = List.with_capacity(buf.len());
+    let mut i: Int = (buf.len() as Int) - 1;
+    while i >= 0 {
+        out.push(buf[i]);
+        i = i - 1;
+    }
+    out
+}
+
+/// Borrowed sub-slice [start, end) of a List<Byte>.
+fn bytes_subslice(src: &List<Byte>, start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(end - start);
+    let mut i = start;
+    while i < end && i < (src.len() as Int) {
+        out.push(src[i]);
+        i = i + 1;
+    }
+    out
+}

@@ -1,0 +1,28 @@
+// =============================================================================
+// core/text/numeric/mod.vr — numeric text representations
+// =============================================================================
+// Layer: 1 (Text — numeric subtree)
+// =============================================================================
+//
+// Houses fixed/arbitrary-precision numeric types whose primary mode
+// of construction + display is via decimal text.  V0 ships:
+//
+//   * `decimal` — Decimal { coefficient: Int, scale: Int } with
+//     scale-aligning add/sub/mul, parse, render, comparison.
+//
+// Future modules (V1+):
+//   * `bigint`  — arbitrary-precision integer (unblocks Decimal V1
+//     with > 18 significant digits).
+//   * `rational` — exact-rational arithmetic.
+//
+// =============================================================================
+
+module core.text.numeric;
+
+public module decimal;
+
+public mount .decimal.{
+    Decimal, DecimalError,
+    MAX_SCALE,
+    parse_decimal,
+};

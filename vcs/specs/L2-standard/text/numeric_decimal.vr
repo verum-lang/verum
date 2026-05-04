@@ -1,0 +1,185 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: text, numeric, decimal, arithmetic
+// @timeout: 30000
+//
+// Type-check exercise for `core.text.numeric.decimal` — the
+// foundational fixed-precision Decimal arithmetic library.  Covers:
+//
+//   * Constructors: `Decimal.zero`, `Decimal.one`, `Decimal.from_int`,
+//     `Decimal.from_parts`.
+//   * Predicates: is_zero / is_negative / is_positive / abs / neg.
+//   * Arithmetic: add / sub / mul (V0 surface; div is V1 follow-up).
+//   * Comparison: compare + eq/lt/gt/le/ge sugar.
+//   * Render: to_text.
+//   * Parse: parse_decimal.
+//   * Constants: MAX_SCALE.
+//   * Errors: every variant of DecimalError surface.
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount core.text.numeric.{Decimal, DecimalError, MAX_SCALE, parse_decimal};
+
+fn check_constructors() {
+    let z = Decimal.zero();
+    assert(z.is_zero());
+
+    let o = Decimal.one();
+    assert(!o.is_zero());
+    assert(o.is_positive());
+
+    let n = Decimal.from_int(42);
+    assert(!n.is_zero());
+
+    let p = match Decimal.from_parts(12345, 2) {
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    let _ = p;
+
+    // ScaleOutOfRange surfaces for scale > MAX_SCALE.
+    let oversized = match Decimal.from_parts(1, MAX_SCALE + 1) {
+        Ok(_)  => false,
+        Err(DecimalError.ScaleOutOfRange { scale: _ }) => true,
+        Err(_) => false,
+    };
+    assert(oversized);
+}
+
+fn check_predicates() {
+    let pos = Decimal.from_int(5);
+    let neg = Decimal.from_int(-3);
+    let zero = Decimal.zero();
+
+    assert(pos.is_positive());
+    assert(neg.is_negative());
+    assert(zero.is_zero());
+    assert(!pos.is_negative());
+    assert(!neg.is_positive());
+
+    let abs = neg.abs();
+    assert(abs.is_positive());
+
+    let neg2 = pos.neg();
+    assert(neg2.is_negative());
+}
+
+fn check_arith() -> Result<Bool, DecimalError> {
+    let a = Decimal.from_int(100);
+    let b = Decimal.from_int(50);
+    let sum = a.add(&b)?;
+    assert(sum.eq(&Decimal.from_int(150)));
+
+    let diff = a.sub(&b)?;
+    assert(diff.eq(&Decimal.from_int(50)));
+
+    let prod = a.mul(&b)?;
+    assert(prod.eq(&Decimal.from_int(5000)));
+
+    // Scale-aligning add.
+    let p1 = match Decimal.from_parts(123, 1) {  // 12.3
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    let p2 = match Decimal.from_parts(7, 0) {    // 7
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    let aligned_sum = p1.add(&p2)?;
+    // 12.3 + 7 = 19.3 ⇒ coefficient=193, scale=1
+    let expected = match Decimal.from_parts(193, 1) {
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    assert(aligned_sum.eq(&expected));
+    Ok(true)
+}
+
+fn check_compare() {
+    let a = Decimal.from_int(5);
+    let b = Decimal.from_int(10);
+    let c = Decimal.from_int(5);
+
+    assert(matches_less(a.compare(&b)));
+    assert(matches_equal(a.compare(&c)));
+    assert(matches_greater(b.compare(&a)));
+
+    assert(a.lt(&b));
+    assert(b.gt(&a));
+    assert(a.eq(&c));
+    assert(a.le(&c));
+    assert(c.ge(&a));
+}
+
+fn matches_equal(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
+fn matches_less(o: Ordering)  -> Bool { match o { Less => true,  _ => false } }
+fn matches_greater(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
+
+fn check_render() {
+    let d = match Decimal.from_parts(12345, 2) {
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    assert(d.to_text() == "123.45");
+
+    let neg = Decimal.from_int(-42);
+    assert(neg.to_text() == "-42");
+
+    let zero = Decimal.zero();
+    assert(zero.to_text() == "0");
+
+    let zero_with_scale = match Decimal.from_parts(0, 4) {
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    assert(zero_with_scale.to_text() == "0.0000");
+
+    let pure_frac = match Decimal.from_parts(-7, 3) {
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    assert(pure_frac.to_text() == "-0.007");
+}
+
+fn check_parse() -> Result<Bool, DecimalError> {
+    let a = parse_decimal(&"123.45".clone())?;
+    assert(a.coefficient == 12345 && a.scale == 2);
+
+    let b = parse_decimal(&"-0.007".clone())?;
+    assert(b.coefficient == -7 && b.scale == 3);
+
+    let c = parse_decimal(&"42".clone())?;
+    assert(c.coefficient == 42 && c.scale == 0);
+
+    // Empty input ⇒ ParseEmpty.
+    let empty = match parse_decimal(&"".clone()) {
+        Err(DecimalError.ParseEmpty) => true,
+        _ => false,
+    };
+    assert(empty);
+
+    // Scientific notation rejected in V0.
+    let sci = match parse_decimal(&"1.5e3".clone()) {
+        Err(DecimalError.ParseInvalidShape { reason: _ }) => true,
+        _ => false,
+    };
+    assert(sci);
+
+    Ok(true)
+}
+
+fn check_constants() {
+    assert(MAX_SCALE == 18);
+}
+
+fn main() {
+    check_constructors();
+    check_predicates();
+    let _ = check_arith();
+    check_compare();
+    check_render();
+    let _ = check_parse();
+    check_constants();
+}
