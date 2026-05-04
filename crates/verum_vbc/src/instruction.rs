@@ -609,8 +609,12 @@ pub enum Opcode {
     NurseryConfig = 0xAC,
     /// Get nursery error (if any task failed).
     NurseryError = 0xAD,
-    /// Reserved async.
-    AsyncAE = 0xAE,
+    /// Cooperative yield-point at `.await` site (T-DEFER-ASYNC-FN-SM V0).
+    /// Pumps one ready sibling task off the FIFO end of the
+    /// task queue without suspending the current task. Lets
+    /// async fns interleave with siblings even before full
+    /// state-machine lowering ships.
+    AsyncYield = 0xAE,
     /// Reserved async.
     AsyncAF = 0xAF,
 
@@ -9400,6 +9404,8 @@ impl Opcode {
             Opcode::NurseryCancel => "NURSERY_CANCEL",
             Opcode::NurseryConfig => "NURSERY_CONFIG",
             Opcode::NurseryError => "NURSERY_ERROR",
+            Opcode::AsyncYield => "ASYNC_YIELD",
+            Opcode::AsyncAF => "ASYNC_AF",
             // Context + Meta (0xB0-0xBF)
             Opcode::CtxGet => "CTX_GET",
             Opcode::CtxProvide => "CTX_PROVIDE",
@@ -10270,6 +10276,15 @@ pub enum Instruction {
         /// Value register to yield.
         value: Reg,
     },
+    /// Cooperative yield at `.await` site (T-DEFER-ASYNC-FN-SM V0).
+    ///
+    /// Pumps one ready sibling task off the FIFO end of the
+    /// task queue (via `pump_one_ready_task` from VBC-COOP-SCHED-1)
+    /// before continuing execution. Lets async fns interleave
+    /// with siblings even though the body still runs to
+    /// completion synchronously (full state-machine lowering is
+    /// V2). No-operand opcode.
+    AsyncYield,
     /// Select on multiple futures.
     Select {
         /// Destination register for completed future index.

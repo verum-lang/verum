@@ -89,6 +89,41 @@ pub(in super::super) fn handle_spawn(
     Ok(DispatchResult::Continue)
 }
 
+/// AsyncYield (0xAE) — cooperative yield-point at `.await`
+/// (T-DEFER-ASYNC-FN-SM V0).
+///
+/// Pumps one ready sibling task off the FIFO end of the task
+/// queue (via the existing `pump_one_ready_task` machinery from
+/// VBC-COOP-SCHED-1) before continuing execution. Bounded by
+/// `MAX_COOP_PUMP_DEPTH` to prevent stack overflow under
+/// pathological many-task graphs (deep `.await` chains pumping
+/// other tasks that themselves `.await` etc.).
+///
+/// **Semantics**: this is NOT a true coroutine suspend. The
+/// current task does NOT yield its OS-thread slot — it pumps
+/// ONE sibling end-to-end via `execute_pending_task`, then
+/// resumes the dispatch loop. This is the cooperative-
+/// scheduling equivalent of "give someone else a turn between
+/// awaits" rather than "park yourself until ready". Full
+/// state-machine lowering (V2) will give true suspend; this V0
+/// closes the starvation gap that blocked async-fn use today.
+///
+/// No-operand opcode — pure side-effect on the scheduler.
+pub(in super::super) fn handle_async_yield(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    use super::net_runtime::{pump_one_ready_task, MAX_COOP_PUMP_DEPTH};
+    if state.coop_pump_depth < MAX_COOP_PUMP_DEPTH {
+        state.coop_pump_depth += 1;
+        let _ = pump_one_ready_task(state);
+        state.coop_pump_depth -= 1;
+    }
+    // At-cap → degenerate to no-op. Correctness preserved; the
+    // current task continues without pumping a sibling. Same
+    // degradation strategy as `io_wait_readable_coop`.
+    Ok(DispatchResult::Continue)
+}
+
 /// Await (0xA1) - Await an async task.
 pub(in super::super) fn handle_await(
     state: &mut InterpreterState,
@@ -640,4 +675,77 @@ pub(in super::super) fn handle_nursery_error(
     }
 
     Ok(DispatchResult::Continue)
+}
+
+// ============================================================================
+// T-DEFER-ASYNC-FN-SM V0 — handle_async_yield tests
+// ============================================================================
+
+#[cfg(test)]
+mod async_yield_tests {
+    use super::*;
+    use crate::FunctionId;
+    use crate::interpreter::state::{InterpreterState, TaskStatus};
+    use crate::module::VbcModule;
+    use std::sync::Arc;
+
+    /// Empty task queue → `handle_async_yield` is a no-op,
+    /// `coop_pump_depth` stays 0, returns Continue.
+    #[test]
+    fn yield_with_empty_queue_is_noop() {
+        let module = Arc::new(VbcModule::new("yield_test".to_string()));
+        let mut state = InterpreterState::new(module);
+        assert_eq!(state.coop_pump_depth, 0);
+        assert!(state.tasks.is_empty());
+
+        let r = handle_async_yield(&mut state).expect("yield ok");
+        assert!(matches!(r, DispatchResult::Continue));
+        assert_eq!(state.coop_pump_depth, 0);
+    }
+
+    /// One pending sibling task → `handle_async_yield` pumps it
+    /// (status flips from Pending to Failed since FunctionId(0)
+    /// doesn't exist in the empty module). Pump-depth back to 0
+    /// after.
+    #[test]
+    fn yield_pumps_one_pending_sibling() {
+        let module = Arc::new(VbcModule::new("yield_pump_test".to_string()));
+        let mut state = InterpreterState::new(module);
+        let task_id = state.tasks.spawn(FunctionId(0));
+        assert!(state.tasks.has_pending());
+        let pre_status = state.tasks.get(task_id).map(|t| t.status);
+        assert_eq!(pre_status, Some(TaskStatus::Pending));
+
+        let r = handle_async_yield(&mut state).expect("yield ok");
+        assert!(matches!(r, DispatchResult::Continue));
+
+        let post_status = state.tasks.get(task_id).map(|t| t.status);
+        assert!(
+            !matches!(post_status, Some(TaskStatus::Pending)),
+            "task should have been pumped (got {post_status:?})",
+        );
+        assert_eq!(state.coop_pump_depth, 0);
+    }
+
+    /// At-cap pump depth → `handle_async_yield` degenerates to
+    /// no-op (preserves correctness, prevents stack overflow under
+    /// pathological many-task `.await` chains). Sibling stays
+    /// pending.
+    #[test]
+    fn yield_at_max_depth_is_noop() {
+        use crate::interpreter::dispatch_table::handlers::net_runtime::MAX_COOP_PUMP_DEPTH;
+
+        let module = Arc::new(VbcModule::new("yield_cap_test".to_string()));
+        let mut state = InterpreterState::new(module);
+        let task_id = state.tasks.spawn(FunctionId(0));
+        state.coop_pump_depth = MAX_COOP_PUMP_DEPTH;
+
+        let r = handle_async_yield(&mut state).expect("yield ok");
+        assert!(matches!(r, DispatchResult::Continue));
+
+        // Cap unchanged; sibling still pending (no pump happened).
+        assert_eq!(state.coop_pump_depth, MAX_COOP_PUMP_DEPTH);
+        let status = state.tasks.get(task_id).map(|t| t.status);
+        assert_eq!(status, Some(TaskStatus::Pending));
+    }
 }

@@ -124,7 +124,8 @@ use handlers::method_dispatch::handle_call_method;
 
 // Async + Nursery operations
 use handlers::async_nursery::{
-    handle_async_next, handle_await, handle_future_get, handle_future_ready, handle_join,
+    handle_async_next, handle_async_yield, handle_await, handle_future_get,
+    handle_future_ready, handle_join,
     handle_nursery_await, handle_nursery_cancel, handle_nursery_config, handle_nursery_error,
     handle_nursery_init, handle_nursery_spawn, handle_select, handle_spawn,
 };
@@ -421,7 +422,8 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0xAB] = handle_nursery_cancel; // NurseryCancel = 0xAB
     table[0xAC] = handle_nursery_config; // NurseryConfig = 0xAC
     table[0xAD] = handle_nursery_error; // NurseryError = 0xAD
-    // 0xAE-0xAF: Reserved async
+    table[0xAE] = handle_async_yield; // AsyncYield = 0xAE (T-DEFER-ASYNC-FN-SM V0)
+    // 0xAF: Reserved async
 
     // ========================================================================
     // Context + Meta (0xB0-0xBF) - matches instruction.rs

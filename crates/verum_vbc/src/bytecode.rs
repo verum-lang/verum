@@ -611,6 +611,10 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*value, output);
         }
 
+        Instruction::AsyncYield => {
+            output.push(Opcode::AsyncYield.to_byte());
+        }
+
         Instruction::Select {
             dst,
             futures,
@@ -3700,6 +3704,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let value = decode_reg(data, offset)?;
             Ok(Instruction::Yield { value })
         }
+
+        Opcode::AsyncYield => Ok(Instruction::AsyncYield),
 
         Opcode::Select => {
             let dst = decode_reg(data, offset)?;
