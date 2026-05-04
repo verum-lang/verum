@@ -25,6 +25,12 @@ pub mod clean;
 /// through the CLI surface to produce a `.vbca` artefact for a
 /// single cog directory ready for registry distribution.
 pub mod cog_precompile;
+/// `verum cog reproduce` — Phase 15 of the precompiled-stdlib
+/// archive epic. Verifies that a registry-distributed `.vbca`
+/// matches the byte-identical output of locally precompiling the
+/// advertised source.  Detects registry tampering and codegen
+/// reproducibility regressions.
+pub mod cog_reproduce;
 /// `verum cog-registry` subcommand — interact with the cog
 /// distribution registry: publish / lookup / search / verify /
 /// multi-mirror consensus check.
