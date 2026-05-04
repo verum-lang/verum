@@ -23,7 +23,7 @@ mount core.async.broadcast.{
 
 // Basic constructor + clone
 fn test_construct() {
-    let (tx, rx) = broadcast_channel::<Int>(16);
+    let (tx, rx) = broadcast_channel<Int>(16);
     let _tx2 = tx.clone();
     let _rx2 = tx.subscribe();
     let _rcnt: Int = tx.receiver_count();
@@ -35,21 +35,21 @@ fn test_construct() {
 
 // Lag policy construction
 fn test_lag_policies() {
-    let (_tx1, _rx1) = broadcast_channel_with::<Int>(8, LagPolicy.LagTolerant);
-    let (_tx2, _rx2) = broadcast_channel_with::<Int>(8, LagPolicy.DropOldest);
-    let (_tx3, _rx3) = broadcast_channel_with::<Int>(8, LagPolicy.DropSlowReceiver);
+    let (_tx1, _rx1) = broadcast_channel_with<Int>(8, LagPolicy.LagTolerant);
+    let (_tx2, _rx2) = broadcast_channel_with<Int>(8, LagPolicy.DropOldest);
+    let (_tx3, _rx3) = broadcast_channel_with<Int>(8, LagPolicy.DropSlowReceiver);
 }
 
 // Send (sync) returns Ok(receiver_count) or Err(SendError).
 fn test_send_shape() {
-    let (tx, _rx) = broadcast_channel::<Int>(4);
+    let (tx, _rx) = broadcast_channel<Int>(4);
     let r = tx.send(42);
     let _: Result<Int, SendError<Int>> = r;
 }
 
 // try_recv returns a TryRecvResult variant.
 fn test_try_recv_shape() {
-    let (_tx, rx) = broadcast_channel::<Int>(4);
+    let (_tx, rx) = broadcast_channel<Int>(4);
     match rx.try_recv() {
         TryRecvResult.Value(_) => (),
         TryRecvResult.Empty => (),
@@ -60,13 +60,13 @@ fn test_try_recv_shape() {
 
 // recv() returns an awaitable Future<Result<T, BroadcastRecvError>>.
 async fn test_recv_future() -> Result<Int, BroadcastRecvError> {
-    let (_tx, rx) = broadcast_channel::<Int>(4);
+    let (_tx, rx) = broadcast_channel<Int>(4);
     rx.recv().await
 }
 
 // Receiver is also a Future (by direct .await).
 async fn test_receiver_is_future() -> Result<Int, BroadcastRecvError> {
-    let (_tx, mut rx) = broadcast_channel::<Int>(4);
+    let (_tx, mut rx) = broadcast_channel<Int>(4);
     // Note: direct .await on receiver also works (Future impl).
     let _ = &mut rx;
     rx.recv().await
@@ -74,7 +74,7 @@ async fn test_receiver_is_future() -> Result<Int, BroadcastRecvError> {
 
 // Closing wakes all receivers.
 fn test_close() {
-    let (tx, _rx) = broadcast_channel::<Int>(4);
+    let (tx, _rx) = broadcast_channel<Int>(4);
     tx.close();
     assert(tx.is_closed(), "closed after close()");
 }

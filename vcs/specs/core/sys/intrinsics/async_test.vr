@@ -310,8 +310,8 @@ fn test_handle_type_safety() {
     // Different handle types should not be interchangeable at compile time
     // The following would be compile errors:
     //
-    // let executor: ExecutorHandle = FutureHandle(null_ptr::<Byte>());  // ERROR
-    // let future: FutureHandle = JoinHandleOpaque(null_ptr::<Byte>()); // ERROR
+    // let executor: ExecutorHandle = FutureHandle(null_ptr<Byte>());  // ERROR
+    // let future: FutureHandle = JoinHandleOpaque(null_ptr<Byte>()); // ERROR
     //
     // This type safety prevents accidentally passing the wrong handle type
     // to intrinsic functions, which could cause undefined behavior.

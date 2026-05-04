@@ -22,14 +22,14 @@ async fn typecheck_send_async() -> Result<(), SendError<Int>> {
 
 // Receiver.recv_fut — explicit RecvFut
 async fn typecheck_recv_fut() -> Maybe<Int> {
-    let (_tx, mut rx) = unbounded_channel::<Int>();
+    let (_tx, mut rx) = unbounded_channel<Int>();
     let _rf: RecvFut<Int> = rx.recv_fut();
     rx.recv_fut().await
 }
 
 // ChannelClosed — sender side awaits receiver drop
 async fn typecheck_closed_future() {
-    let (tx, _rx) = bounded::<Int>(8);
+    let (tx, _rx) = bounded<Int>(8);
     let _cf: ChannelClosed<Int> = tx.closed();
     tx.closed().await;
 }
@@ -44,7 +44,7 @@ fn typecheck_cancellable_error() {
 // registers waker, returns Pending. Receiver.recv pops → waker-list drained
 // → re-poll succeeds.
 fn test_bounded_api_shape() {
-    let (tx, rx) = bounded::<Text>(2);
+    let (tx, rx) = bounded<Text>(2);
     let _ = tx;
     let _ = rx;
 }
