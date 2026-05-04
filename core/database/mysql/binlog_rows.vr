@@ -62,11 +62,23 @@
 //   NEWDECIMAL / JSON (surfaced as raw bytes; downstream decodes)
 //   NULL (always NULL — metadata trick)
 //
+// V1 surface (this commit + earlier):
+//   * GEOMETRY (0xFF), ENUM (0xF7), SET (0xF8) decoders shipped
+//     in earlier work.
+//   * PARTIAL_UPDATE_ROWS_EVENT (8.0+ JSON partial diffs):
+//     `RkPartialUpdate` variant + `decode_json_diff(buf) ->
+//     List<JsonDiff>` helper. `decode_with_table_map` recognises
+//     the variant and emits BEFORE+AFTER pairs (consumer
+//     applies `decode_json_diff` to the AFTER tuple's JSON-column
+//     raw bytes when the master had `binlog_row_value_options
+//     = PARTIAL_JSON`).
+//   * Checksum-included payload trim shipped in CRC32 commit.
+//
 // OUT of V0:
-//   * GEOMETRY (0xFF), ENUM (0xF7), SET (0xF8) — surface as raw.
-//   * PARTIAL_UPDATE_ROWS_EVENT (8.0+ JSON partial diffs).
-//   * Checksum-included payload trim (V0 forces checksum=NONE).
 //   * Per-table INVISIBLE column flag handling.
+//   * Auto-dispatch of partial-vs-full per JSON column based on
+//     the per-row partial-bits header (V0 surfaces raw bytes;
+//     consumer dispatches via `decode_json_diff` themselves).
 // =============================================================================
 
 @arch_module(
@@ -522,7 +534,133 @@ fn parse_column_metadata(col_type: Int, buf: &[Byte], off: Int) -> (Int, Int) {
 // ROWS events
 // =============================================================================
 
-public type RowEventKind is RkWrite | RkUpdate | RkDelete;
+public type RowEventKind is RkWrite | RkUpdate | RkDelete | RkPartialUpdate;
+
+// =============================================================================
+// JSON partial diffs — PARTIAL_UPDATE_ROWS_EVENT (0x29) payload
+// =============================================================================
+//
+// MySQL 8.0+ with `binlog_row_value_options=PARTIAL_JSON` may emit
+// JSON column updates as DIFF sequences instead of full new
+// values. The diff is a list of (path, op, value) tuples that the
+// consumer applies to the OLD JSON to derive the NEW JSON.
+// (P-PROD-MYSQL-PARTIAL-UPDATE-ROWS-V0)
+//
+// Per `sql/json_diff.cc`:
+//
+//   diff_count: lenenc int
+//   for each diff:
+//     path: lenenc string (JSON path expression, e.g. "$.author")
+//     operation: u8 (0 = Replace, 1 = Insert, 2 = Remove)
+//     if operation != Remove:
+//       new_value: lenenc string (JSON-binary encoded inner)
+//
+// V0 surface — `decode_json_diff` returns a structured List<JsonDiff>.
+// Application of the diff to a base JsonValue is the consumer's
+// responsibility (V0 doesn't ship a JSON-path-aware applier; that's
+// a separate decoder layer that needs `core.encoding.json.JsonValue`
+// + path traversal).
+
+public type JsonDiffOp is JdoReplace | JdoInsert | JdoRemove;
+
+public type JsonDiff is {
+    /// JSON path expression (e.g. `"$.author"`, `"$[0].title"`).
+    /// Caller-side applier walks this against the old value.
+    path: Text,
+    op: JsonDiffOp,
+    /// Replace / Insert payload — JSON-binary-encoded bytes
+    /// suitable for `core.database.mysql.json_binary.decode_json_binary`.
+    /// `Maybe.None` for Remove.
+    value: Maybe<List<Byte>>,
+};
+
+/// Decode a JSON-diff sequence from a contiguous byte slice.
+/// Caller is responsible for isolating the slice (typically the
+/// per-column AFTER-image bytes for a JSON column flagged as
+/// partial in PARTIAL_UPDATE_ROWS_EVENT). Format per
+/// `sql/json_diff.cc`:
+///
+///   * `diff_count` lenenc int
+///   * For each diff:
+///     - `path` lenenc string
+///     - `op` u8 (0 = Replace, 1 = Insert, 2 = Remove)
+///     - Non-Remove: `new_value` lenenc string (JSON-binary)
+///
+/// Errors surface as `DbError.Adapter("BINLOG_JSON_DIFF_*", …)`.
+public fn decode_json_diff(buf: &[Byte]) -> Result<List<JsonDiff>, DbError> {
+    let mut off: Int = 0;
+    let (diff_count, _, lei_n) = match decode_lei(buf, off) {
+        Ok(t)  => t,
+        Err(_) => { return Err(bad_diff("diff_count")); }
+    };
+    off = off + lei_n;
+
+    let mut out: List<JsonDiff> = List.with_capacity(diff_count);
+    let mut i: Int = 0;
+    while i < diff_count {
+        // path: lenenc string
+        let (path_len, _, p_lei_n) = match decode_lei(buf, off) {
+            Ok(t)  => t,
+            Err(_) => { return Err(bad_diff("path_len")); }
+        };
+        off = off + p_lei_n;
+        let path_bytes = match read_bytes(buf, off, path_len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_diff("path_bytes")); }
+        };
+        off = off + path_len;
+        let path_text = match Text.from_bytes(&path_bytes) {
+            Some(t) => t,
+            None    => { return Err(bad_diff("path utf-8")); }
+        };
+
+        // op: u8
+        let op_byte = match read_u8(buf, off) {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_diff("op_byte")); }
+        };
+        off = off + 1;
+        let op = match op_byte {
+            0 => JdoReplace,
+            1 => JdoInsert,
+            2 => JdoRemove,
+            other => {
+                return Err(bad_diff(&f"unknown op {other}".clone()));
+            }
+        };
+
+        // value (only for non-Remove)
+        let value = match op {
+            JdoRemove => None,
+            _ => {
+                let (val_len, _, v_lei_n) = match decode_lei(buf, off) {
+                    Ok(t)  => t,
+                    Err(_) => { return Err(bad_diff("value_len")); }
+                };
+                off = off + v_lei_n;
+                let val_bytes = match read_bytes(buf, off, val_len) {
+                    Ok(b)  => b,
+                    Err(_) => { return Err(bad_diff("value_bytes")); }
+                };
+                off = off + val_len;
+                Some(val_bytes)
+            }
+        };
+
+        out.push(JsonDiff { path: path_text, op: op, value: value });
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+fn bad_diff(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "BINLOG_JSON_DIFF".clone(),
+        message: f"PARTIAL_UPDATE_ROWS json-diff decode error: {what}",
+        retryable: false,
+    })
+}
 
 public type RowsEvent is {
     table_id: Int,
@@ -575,7 +713,12 @@ public fn decode_rows_event_body(buf: &[Byte], kind: RowEventKind)
     off = off + bitmap_bytes;
 
     let cols_after = match kind {
-        RkUpdate => {
+        // Both UPDATE_ROWS_V2 and PARTIAL_UPDATE_ROWS carry the
+        // AFTER bitmap (PARTIAL_UPDATE shares the standard prefix
+        // with UPDATE_ROWS_V2; the partial-vs-full distinction
+        // shows up later in the rows_payload, not in the bitmap
+        // shape).
+        RkUpdate | RkPartialUpdate => {
             let cb = match read_bytes(buf, off, bitmap_bytes) {
                 Ok(b)  => b,
                 Err(_) => { return Err(bad_rows("ROWS.cols_present_after")); }
@@ -657,7 +800,16 @@ public fn decode_with_table_map(rev: &RowsEvent, tm: &TableMapEvent)
     let n = buf.len() as Int;
 
     match rev.kind {
-        RkUpdate => {
+        // Both UPDATE_ROWS_V2 and PARTIAL_UPDATE_ROWS deliver
+        // BEFORE+AFTER tuple pairs. For PARTIAL_UPDATE the AFTER
+        // tuple's JSON columns may be encoded as a JSON DIFF
+        // instead of a full JSON binary value — `decode_one_tuple`
+        // surfaces them as `RvRaw` bytes; the consumer applies
+        // `decode_json_diff(raw)` to lift the diff sequence. V1
+        // would peek the partial-bits header and dispatch
+        // automatically; V0 surfaces the raw bytes and leaves
+        // application to the caller's TABLE_MAP-aware sink.
+        RkUpdate | RkPartialUpdate => {
             let mut pairs: List<(DecodedRow, DecodedRow)> = List.new();
             while off < n {
                 let (before, advance_b) = decode_one_tuple(

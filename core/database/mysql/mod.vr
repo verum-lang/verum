@@ -159,10 +159,13 @@ public mount .binlog.{
     ET_QUERY, ET_XID, ET_ROTATE, ET_FORMAT_DESCRIPTION,
     ET_GTID, ET_ANONYMOUS_GTID, ET_HEARTBEAT,
     ET_TABLE_MAP, ET_WRITE_ROWS_V2, ET_UPDATE_ROWS_V2, ET_DELETE_ROWS_V2,
+    ET_PARTIAL_UPDATE_ROWS_V2,
 };
 public mount .binlog_rows.{
     TableMapEvent, ColumnMeta, TableMapCache,
-    RowEventKind, RkWrite, RkUpdate, RkDelete,
+    RowEventKind, RkWrite, RkUpdate, RkDelete, RkPartialUpdate,
+    JsonDiff, JsonDiffOp, JdoReplace, JdoInsert, JdoRemove,
+    decode_json_diff,
     RowsEvent, RowValue,
     RvNull, RvInt, RvUInt, RvFloat, RvText, RvBytes,
     RvDateTime, RvDate, RvTime, RvRaw,

@@ -122,6 +122,13 @@ public const ET_TABLE_MAP:               Int = 0x13;
 public const ET_WRITE_ROWS_V2:           Int = 0x1E;
 public const ET_UPDATE_ROWS_V2:          Int = 0x1F;
 public const ET_DELETE_ROWS_V2:          Int = 0x20;
+/// PARTIAL_UPDATE_ROWS_EVENT (MySQL 8.0+ with
+/// `binlog_row_value_options=PARTIAL_JSON`). Same wire prefix
+/// as ET_UPDATE_ROWS_V2; the AFTER tuple's JSON columns may
+/// be DIFFs instead of full values. Decoded via
+/// `binlog_rows::decode_rows_event_body(buf, RkPartialUpdate)`;
+/// JSON-diff sequence parsed via `binlog_rows::decode_json_diff`.
+public const ET_PARTIAL_UPDATE_ROWS_V2:  Int = 0x29;
 public const ET_GTID:                    Int = 0x21;
 public const ET_ANONYMOUS_GTID:          Int = 0x22;
 public const ET_PREVIOUS_GTIDS:          Int = 0x23;
@@ -689,6 +696,17 @@ fn decode_event_body(header: &BinlogEventHeader, body: List<Byte>) -> Result<Bin
             core.database.mysql.binlog_rows.RkDelete,
         )?;
         return Ok(BeDeleteRows { header: header.clone(), body: rs });
+    }
+    if t == ET_PARTIAL_UPDATE_ROWS_V2 {
+        // Same wire prefix as UPDATE_ROWS_V2 — `RkPartialUpdate`
+        // tells `decode_with_table_map` to emit BEFORE+AFTER
+        // pairs and signals downstream that JSON columns in the
+        // AFTER tuple may be DIFFs (apply via `decode_json_diff`).
+        let rs = core.database.mysql.binlog_rows.decode_rows_event_body(
+            body.as_slice(),
+            core.database.mysql.binlog_rows.RkPartialUpdate,
+        )?;
+        return Ok(BeUpdateRows { header: header.clone(), body: rs });
     }
     Ok(BeOther { header: header.clone(), payload: body })
 }
