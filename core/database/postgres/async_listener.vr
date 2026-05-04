@@ -169,7 +169,7 @@ implement AsyncPgListener {
         capacity: Int,
     ) -> Result<Receiver<Notification>, DbError> {
         let cap = if capacity < 1 { DEFAULT_SUBSCRIBER_CAPACITY } else { capacity };
-        let (tx, rx) = bounded_channel::<Notification>(cap);
+        let (tx, rx) = bounded_channel<Notification>(cap);
         match self.cmd_tx.send_async(LcSubscribe {
             channel: channel.clone(),
             tx: tx,
@@ -217,7 +217,7 @@ public async fn connect_listener_async(
     // control commands between wire reads.
     let _ = conn.set_recv_timeout_ms(Some(DEFAULT_RECV_TIMEOUT_MS));
 
-    let (cmd_tx, cmd_rx) = bounded_channel::<ListenerCommand>(16);
+    let (cmd_tx, cmd_rx) = bounded_channel<ListenerCommand>(16);
 
     let join = spawn_blocking(move || -> () {
         run_actor(conn, cmd_rx);

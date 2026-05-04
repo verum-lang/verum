@@ -175,8 +175,8 @@ public async fn connect_binlog_async(
         Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
     };
 
-    let (cmd_tx, cmd_rx) = bounded_channel::<BinlogActorCommand>(4);
-    let (event_tx, event_rx) = bounded_channel::<MysqlBinlogActorEvent>(DEFAULT_EVENT_CAPACITY);
+    let (cmd_tx, cmd_rx) = bounded_channel<BinlogActorCommand>(4);
+    let (event_tx, event_rx) = bounded_channel<MysqlBinlogActorEvent>(DEFAULT_EVENT_CAPACITY);
 
     let join = spawn_blocking(move || -> () {
         run_actor(stream, cmd_rx, event_tx);

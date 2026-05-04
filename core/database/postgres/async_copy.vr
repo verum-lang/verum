@@ -252,7 +252,7 @@ public async fn copy_in_async_with_token(
     token: Maybe<core.async.cancellation.CancellationToken>,
 ) -> Result<AsyncCopyInWriter, DbError> {
     let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
-    let (chunk_tx, chunk_rx) = bounded_channel::<CopyInChunk>(cap);
+    let (chunk_tx, chunk_rx) = bounded_channel<CopyInChunk>(cap);
     let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
 
     match conn.tx_ref().send_async(ReqCopyInOpen {
@@ -284,7 +284,7 @@ public async fn copy_out_async(
     chunk_capacity: Int,
 ) -> Result<AsyncCopyOutReader, DbError> {
     let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
-    let (chunk_tx, chunk_rx) = bounded_channel::<CopyOutEvent>(cap);
+    let (chunk_tx, chunk_rx) = bounded_channel<CopyOutEvent>(cap);
     let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
 
     match conn.tx_ref().send_async(ReqCopyOutOpen {
