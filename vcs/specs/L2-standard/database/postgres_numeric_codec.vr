@@ -1,10 +1,10 @@
 // @test: typecheck-pass
 // @level: L2
 // @tier: 0
-// @tags: database, postgres, spindle, codec, numeric
+// @tags: database, postgres, spindle, codec, numeric, tsvector
 // @timeout: 30000
 //
-// Type-check exercise for the PG NUMERIC binary codec.
+// Type-check exercise for the PG NUMERIC + tsvector binary codecs.
 // Validates that:
 //
 //   * `decode_numeric(&ArenaSlice) -> Result<PgNumeric, DbError>` is
@@ -15,6 +15,10 @@
 //   * `encode_numeric_from_int(buf, arena, i64) -> Bool` is callable.
 //   * `PG_NUMERIC_{POS,NEG,NAN,PINF,NINF}` constants visible.
 //   * `supports_binary(PG_TYPE_NUMERIC)` returns true.
+//   * `decode_tsvector(&ArenaSlice) -> Result<PgTsVector, DbError>` is
+//     callable; `PgTsLexeme` + `PgTsPosition` shapes line up.
+//   * `PG_TS_WEIGHT_{D,C,B,A}` constants visible.
+//   * `supports_binary(PG_TYPE_TSVECTOR)` returns true.
 
 mount core.*;
 mount collections.List;
@@ -26,9 +30,12 @@ mount core.database.postgres.wire.codec.{
     decode_numeric,
     encode_numeric_from_int,
     supports_binary,
-    PG_TYPE_NUMERIC,
+    PG_TYPE_NUMERIC, PG_TYPE_TSVECTOR,
     PG_NUMERIC_POS, PG_NUMERIC_NEG,
     PG_NUMERIC_NAN, PG_NUMERIC_PINF, PG_NUMERIC_NINF,
+    PgTsVector, PgTsLexeme, PgTsPosition,
+    decode_tsvector,
+    PG_TS_WEIGHT_D, PG_TS_WEIGHT_C, PG_TS_WEIGHT_B, PG_TS_WEIGHT_A,
 };
 
 fn check_decode_signature(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
@@ -51,6 +58,18 @@ fn check_encode(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, value: Int) ->
     encode_numeric_from_int(buf, arena, value)
 }
 
+fn check_decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {
+    decode_tsvector(slice)
+}
+
+fn check_lexeme_shape(lex: &PgTsLexeme) -> Int {
+    lex.positions.len()
+}
+
+fn check_position_shape(p: &PgTsPosition) -> Int {
+    p.position + p.weight
+}
+
 fn check_constants() {
     assert(PG_NUMERIC_POS  == 0x0000);
     assert(PG_NUMERIC_NEG  == 0x4000);
@@ -58,6 +77,12 @@ fn check_constants() {
     assert(PG_NUMERIC_PINF == 0xD000);
     assert(PG_NUMERIC_NINF == 0xF000);
     assert(supports_binary(PG_TYPE_NUMERIC));
+
+    assert(PG_TS_WEIGHT_D == 0);
+    assert(PG_TS_WEIGHT_C == 1);
+    assert(PG_TS_WEIGHT_B == 2);
+    assert(PG_TS_WEIGHT_A == 3);
+    assert(supports_binary(PG_TYPE_TSVECTOR));
 }
 
 fn main() {

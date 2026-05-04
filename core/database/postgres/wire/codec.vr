@@ -248,7 +248,8 @@ public fn supports_binary(oid: Int) -> Bool {
     else if oid == PG_TYPE_INET        { true }
     else if oid == PG_TYPE_CIDR        { true }
     else if oid == PG_TYPE_NUMERIC     { true }
-    // tsvector and composite remain on the deferred list.
+    else if oid == PG_TYPE_TSVECTOR    { true }
+    // composite remains on the deferred list.
     else { false }
 }
 
@@ -992,6 +993,133 @@ fn slice_i16_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
     // Sign-extend from 16 bits.
     if raw >= 0x8000 { Ok(raw - 0x10000) } else { Ok(raw) }
 }
+
+// -----------------------------------------------------------------------------
+// tsvector (PG_TYPE_TSVECTOR, oid 3614) — full-text-search lexeme array
+// -----------------------------------------------------------------------------
+//
+// Wire layout (src/backend/utils/adt/tsvector.c, function tsvectorsend):
+//
+//   nlex     i32   number of lexemes
+//   per lexeme:
+//     lexeme  cstr  NUL-terminated UTF-8 token
+//     npos    i16   number of position pointers
+//     per position:
+//       packed  i16   high 14 bits = byte position in the original
+//                     document (1..16383, 0 = "no position"); low 2
+//                     bits = weight (0=D, 1=C, 2=B, 3=A)
+//
+// V0 ships DECODE only — read the structured form for downstream
+// query / scoring. Encode is V1 (most callers don't construct
+// tsvector values directly; they ship a Text and let PG run
+// `to_tsvector` server-side).
+
+public const PG_TS_WEIGHT_D: Int = 0;
+public const PG_TS_WEIGHT_C: Int = 1;
+public const PG_TS_WEIGHT_B: Int = 2;
+public const PG_TS_WEIGHT_A: Int = 3;
+
+/// One position pointer inside a tsvector lexeme — decoded from the
+/// 16-bit packed wire form into its position + weight components.
+public type PgTsPosition is {
+    /// Byte position within the original document (1..16383).  `0`
+    /// means "no position" (lexeme without a position pointer).
+    position: Int,
+    /// Lexeme weight: PG_TS_WEIGHT_{D,C,B,A}.
+    weight: Int,
+};
+
+/// One lexeme inside a tsvector value — the token text plus its
+/// list of position pointers (may be empty).
+public type PgTsLexeme is {
+    /// Arena-borrowed UTF-8 token bytes (no NUL terminator).
+    text: ArenaSlice,
+    /// Position pointers; empty for stripped tsvectors.
+    positions: List<PgTsPosition>,
+};
+
+/// Decoded tsvector value as a list of lexemes.  Lexemes are emitted
+/// in the same order PG sent them — typically lexicographically
+/// sorted (PG normalises before sending).
+public type PgTsVector is {
+    lexemes: List<PgTsLexeme>,
+};
+
+/// Decode a tsvector binary payload from an arena-borrowed slice.
+/// Validates header consistency (nlex non-negative, every lexeme has
+/// a NUL terminator within the slice, position counts match payload
+/// size) and surfaces malformed payloads as structured `DbError`.
+public fn decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {
+    if slice.len < 4 {
+        return Err(decode_fault("tsvector: short header (need 4 bytes)".clone()));
+    }
+    let nlex = slice_i32_be(slice, 0)?;
+    if nlex < 0 {
+        return Err(decode_fault(f"tsvector: negative nlex {nlex}"));
+    }
+
+    let mut off: Int = 4;
+    let mut lexemes: List<PgTsLexeme> = List.new();
+    let mut i: Int = 0;
+    while i < nlex {
+        // Locate the NUL terminator for this lexeme.
+        let mut nul_off: Int = off;
+        let mut found: Bool = false;
+        while nul_off < slice.len {
+            match slice_byte(slice, nul_off) {
+                Some(b) => {
+                    if b == 0 { found = true; break; }
+                    nul_off = nul_off + 1;
+                }
+                None => break,
+            }
+        }
+        if !found {
+            return Err(decode_fault(f"tsvector: lexeme {i} missing NUL terminator"));
+        }
+        let text_len = nul_off - off;
+        let text = subslice(slice, off, text_len)?;
+
+        // npos at nul_off + 1.
+        let npos_off = nul_off + 1;
+        if npos_off + 2 > slice.len {
+            return Err(decode_fault(f"tsvector: lexeme {i} missing npos field"));
+        }
+        let npos = slice_u16_be(slice, npos_off)?;
+
+        // Each position is 2 bytes.
+        let positions_off = npos_off + 2;
+        let positions_size = npos * 2;
+        if positions_off + positions_size > slice.len {
+            return Err(decode_fault(
+                f"tsvector: lexeme {i} truncated positions (need {positions_size}b)"
+            ));
+        }
+
+        let mut positions: List<PgTsPosition> = List.new();
+        let mut p: Int = 0;
+        while p < npos {
+            let packed = slice_u16_be(slice, positions_off + p * 2)?;
+            // High 14 bits = position; low 2 bits = weight.
+            let pos = packed >> 2;
+            let weight = packed & 0x3;
+            positions.push(PgTsPosition { position: pos, weight: weight });
+            p = p + 1;
+        }
+
+        lexemes.push(PgTsLexeme { text: text, positions: positions });
+        off = positions_off + positions_size;
+        i = i + 1;
+    }
+
+    Ok(PgTsVector { lexemes: lexemes })
+}
+
+/// Read a 32-bit big-endian SIGNED integer at `off`. Same semantics
+/// as `slice_i32_be` in Postgres wire helpers; reuses `slice_i32_be`
+/// from the section above (this is a forward-declared usage marker —
+/// the actual implementation already exists).
+//   (slice_i32_be is defined in the slice helpers section earlier.)
 
 /// Encode an i64 value as a NUMERIC binary payload. Builds the
 /// minimal base-10000 digit representation, computes weight + dscale
