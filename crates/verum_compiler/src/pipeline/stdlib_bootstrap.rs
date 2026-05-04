@@ -511,14 +511,38 @@ impl<'s> CompilationPipeline<'s> {
 
         let mut ast_modules = Vec::new();
 
+        // Lenient parsing: emit a warning per file that fails to
+        // parse and continue with the remainder. The strict path
+        // failed the entire `precompile-stdlib` run when *any*
+        // mid-stdlib `.vr` file had a syntax error — even though the
+        // existing `Phase0CoreCompiler` is already lenient on the
+        // same files. Production precompile must tolerate transient
+        // stdlib hygiene issues so the archive can be refreshed
+        // independently from per-module fixes.
+        //
+        // The classifier (`stdlib_classifier::classify_stdlib`)
+        // surfaces the same parse errors as a separate audit gate;
+        // CI can fail on that gate without blocking precompile
+        // refreshes.
+        let mut parse_errors: Vec<String> = Vec::new();
         for (path, source) in &sources {
             let mut parser = verum_fast_parser::Parser::new(&source.content);
             match parser.parse_module() {
                 Ok(ast_module) => ast_modules.push((path.clone(), ast_module)),
                 Err(e) => {
-                    return Err(anyhow::anyhow!("Parse error in {}: {:?}", source.path, e));
+                    let msg = format!("{}: {:?}", source.path, e);
+                    tracing::warn!(target: "stdlib_bootstrap", "lenient SKIP {msg}");
+                    parse_errors.push(msg);
                 }
             }
+        }
+        if !parse_errors.is_empty() {
+            tracing::warn!(
+                target: "stdlib_bootstrap",
+                "{} stdlib module(s) failed to parse and were skipped — \
+                 see `verum audit --stdlib-layers` for the full list",
+                parse_errors.len()
+            );
         }
 
         Ok(ast_modules)

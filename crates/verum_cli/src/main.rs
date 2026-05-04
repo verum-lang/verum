@@ -1978,8 +1978,18 @@ enum Commands {
     #[clap(subcommand)]
     Workspace(WorkspaceCommands),
 
- // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
- // Use `verum info` with --stdlib flag for stdlib information if needed.
+ /// Stdlib precompile / inspection commands.
+ ///
+ /// `verum stdlib precompile` runs the precompiled-stdlib epic
+ /// pipeline (Phase 4): parses every `core/*.vr` file, runs the
+ /// stdlib-bootstrap codegen, and writes a serialised `.vbca`
+ /// archive that the compiler binary embeds at build time
+ /// (Phase 5). Subsequent script invocations deserialise the
+ /// archive in <50 ms instead of re-running stdlib codegen.
+    Stdlib {
+        #[clap(subcommand)]
+        sub: StdlibSub,
+    },
  /// Generate shell completion scripts for bash, zsh, fish, or PowerShell.
  ///
 
@@ -2604,6 +2614,38 @@ enum PlaybookConvertCommands {
  /// Output .vrbook file (defaults to same name with .vrbook extension)
         #[clap(short, long, value_name = "OUTPUT")]
         output: Option<Text>,
+    },
+}
+
+#[derive(Subcommand)]
+enum StdlibSub {
+    /// Precompile `core/` to a `.vbca` archive embedded into the
+    /// compiler binary at build time (Phase 4 of the precompiled-
+    /// stdlib epic). Default output path is
+    /// `target/precompiled-stdlib/runtime.vbca`. Stdlib path defaults
+    /// to the current workspace's `core/` directory; pass
+    /// `--stdlib-path` to override.
+    Precompile {
+        /// Override `core/` path. Defaults to the workspace's
+        /// `core/` directory (auto-detected by walking up from cwd).
+        #[clap(long, value_name = "DIR")]
+        stdlib_path: Option<std::path::PathBuf>,
+
+        /// Output `.vbca` path. Defaults to
+        /// `<workspace>/target/precompiled-stdlib/runtime.vbca`.
+        #[clap(long, short = 'o', value_name = "FILE")]
+        out: Option<std::path::PathBuf>,
+
+        /// Target triple to compile for. `None` = host triple.
+        /// Phase 4b will read this and emit per-target variants for
+        /// cfg-conditional functions; today the value is recorded
+        /// but selection is host-only.
+        #[clap(long, value_name = "TRIPLE")]
+        target: Option<String>,
+
+        /// Verbose progress output.
+        #[clap(long)]
+        verbose: bool,
     },
 }
 
@@ -4311,6 +4353,15 @@ fn run_command(cli: Cli) -> Result<()> {
             WorkspaceCommands::Add { path } => commands::workspace::add(path),
             WorkspaceCommands::Remove { name } => commands::workspace::remove(name),
             WorkspaceCommands::Exec { command } => commands::workspace::exec(command),
+        },
+
+        Commands::Stdlib { sub } => match sub {
+            StdlibSub::Precompile {
+                stdlib_path,
+                out,
+                target,
+                verbose,
+            } => commands::stdlib_precompile::run(stdlib_path, out, target, verbose),
         },
 
         Commands::SmtInfo { json } => {
