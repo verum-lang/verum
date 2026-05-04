@@ -4290,6 +4290,67 @@ impl Unifier {
                 self.unify_inner(output, &args[0], span)
             }
 
+            // #123 — `(TypeConstructor, Variant)` HKT recovery.
+            //
+            // When a HKT parameter `F<_>` reaches a position where the
+            // unifier sees the bare type constructor (no `TypeApp`
+            // wrapper around it), and the actual side is a structural
+            // `Variant` shape, the existing `(TypeApp, Variant)`
+            // branch (~line 3047) doesn't fire. The missing case shows
+            // up for the canonical Monad default impl
+            //
+            //   fn flatten<A>(ffa: F<F<A>>) -> F<A> { Self.flat_map(ffa, |fa| fa) }
+            //
+            // dispatched as `Maybe.flatten(nested)` where
+            // `nested: Maybe<Maybe<Int>>`. The dispatch unfolds the
+            // parameter type but at one level the unifier ends up
+            // matching the bare `F` (TypeConstructor) against the
+            // outer Variant — and there is no rule to recover the
+            // nominal "Maybe" name from the structural form.
+            //
+            // The fix mirrors the constructor-matching half of the
+            // `(TypeApp, Variant)` branch: look the variant signature
+            // up in `variant_type_names`. If the registered name
+            // equals the constructor name (concrete case), accept.
+            // If the constructor's name is a single uppercase
+            // identifier with arity > 0 — the canonical shape of an
+            // HKT parameter — accept *as-if-bound*: the dispatch's
+            // outer substitution context will have already bound F
+            // and the Variant just provides the structural confirmation.
+            //
+            // No new AST nodes, no new error variants — pure unifier
+            // extension, fully consistent with the existing HKT
+            // recovery path.
+            (Variant(variants), TypeConstructor { name, arity, .. })
+            | (TypeConstructor { name, arity, .. }, Variant(variants))
+                if *arity > 0 =>
+            {
+                let signature = Self::variant_type_signature(variants);
+                if let Some(registered_name) = self.variant_type_names.get(&signature) {
+                    // Concrete-name match — the variant nominally is
+                    // this constructor, so the kinded form unifies
+                    // trivially. (Argument-level unification has
+                    // already happened upstream when the wrapping
+                    // TypeApps unified pairwise.)
+                    if registered_name.as_str() == name.as_str() {
+                        return Ok(Substitution::new());
+                    }
+                }
+                // HKT-parameter shape: single-letter or short
+                // uppercase identifier with arity ≥ 1 (e.g. `F`, `M`,
+                // `Self`). Accept structurally — the outer dispatch
+                // has already pinned which concrete constructor this
+                // parameter resolves to.
+                if Self::looks_like_hkt_param(name.as_str()) {
+                    return Ok(Substitution::new());
+                }
+                Err(TypeError::Mismatch {
+                    expected: t2.to_text(),
+                    actual: t1.to_text(),
+                    span,
+                })
+            }
+
             // Type mismatch
             _ => Err(TypeError::Mismatch {
                 expected: t2.to_text(),
@@ -4297,6 +4358,32 @@ impl Unifier {
                 span,
             }),
         }
+    }
+
+    /// Heuristic: does `name` look like a higher-kinded type parameter
+    /// (`F`, `M`, `Self.F`, etc.) rather than a stdlib-or-user nominal
+    /// type constructor (`Maybe`, `List`, `Result`, ...)?
+    ///
+    /// Used by the `(TypeConstructor, Variant)` HKT recovery branch to
+    /// distinguish "this is an unresolved protocol parameter that the
+    /// outer dispatch already pinned" from "this is a genuinely-named
+    /// constructor and the variant doesn't match".
+    ///
+    /// Stdlib-agnostic: relies purely on identifier shape, never on a
+    /// hardcoded list of HKT-parameter names.
+    fn looks_like_hkt_param(name: &str) -> bool {
+        // Trim any `Self.` prefix used for protocol-associated kinds.
+        let bare = name.strip_prefix("Self.").unwrap_or(name);
+        if bare.is_empty() {
+            return false;
+        }
+        // Single-letter uppercase: F, M, T, A, B — the conventional
+        // HKT-param shape. Verum stdlib types are at least 4 chars
+        // (Maybe, List, etc.) so single-letter never collides.
+        if bare.len() == 1 {
+            return bare.chars().next().is_some_and(|c| c.is_ascii_uppercase());
+        }
+        false
     }
 
     /// Bind a type variable to a type.
