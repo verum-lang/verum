@@ -27,9 +27,10 @@ mount core.database.common.types.{ArenaSlice, ArenaWireBuf};
 mount core.database.common.arena.SpindleArena;
 mount core.database.postgres.wire.codec.{
     PgNumeric,
-    decode_numeric,
+    decode_numeric, decode_numeric_to_bigdecimal,
     encode_numeric_from_int,
-    encode_numeric_from_decimal, encode_numeric_from_text,
+    encode_numeric_from_decimal, encode_numeric_from_bigdecimal,
+    encode_numeric_from_text,
     supports_binary,
     PG_TYPE_NUMERIC, PG_TYPE_TSVECTOR, PG_TYPE_RECORD,
     PG_NUMERIC_POS, PG_NUMERIC_NEG,
@@ -40,7 +41,7 @@ mount core.database.postgres.wire.codec.{
     PgComposite, PgCompositeField,
     decode_composite, encode_composite,
 };
-mount core.text.numeric.Decimal;
+mount core.text.numeric.{Decimal, BigDecimal};
 
 fn check_decode_signature(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
     decode_numeric(slice)
@@ -68,6 +69,14 @@ fn check_encode_decimal(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, d: &De
 
 fn check_encode_text(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, t: &Text) -> Bool {
     encode_numeric_from_text(buf, arena, t)
+}
+
+fn check_encode_bigdecimal(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, bd: &BigDecimal) -> Bool {
+    encode_numeric_from_bigdecimal(buf, arena, bd)
+}
+
+fn check_decode_to_bigdecimal(slice: &ArenaSlice) -> Result<BigDecimal, DbError> {
+    decode_numeric_to_bigdecimal(slice)
 }
 
 fn check_decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {

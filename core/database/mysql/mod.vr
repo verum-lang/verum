@@ -227,5 +227,7 @@ public mount .wkb_decoder.{
 public mount .decimal_codec.{
     mysql_decimal_byte_length,
     decode_mysql_decimal,
+    decode_mysql_decimal_to_bigdecimal,
     encode_mysql_decimal,
+    encode_mysql_decimal_from_bigdecimal,
 };

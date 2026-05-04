@@ -60,7 +60,10 @@ mount core.encoding.jsonb.{
     JsonbValue, JsonbError, JSONB_VERSION_1,
     JbeEmpty, JbeUnsupportedVersion, JbeBadUtf8,
 };
-mount core.text.numeric.{Decimal, DecimalError, parse_decimal};
+mount core.text.numeric.{
+    Decimal, DecimalError, parse_decimal,
+    BigDecimal, BigDecimalError, parse_bigdecimal,
+};
 
 // -----------------------------------------------------------------------------
 // Canonical Postgres OID table (per src/include/catalog/pg_type.dat).
@@ -1185,36 +1188,10 @@ public fn encode_numeric_from_int(buf: &mut ArenaWireBuf, arena: &mut SpindleAre
 /// Encode an arbitrary fixed-precision `Decimal` value as PG NUMERIC
 /// binary.  V1 of the V0 follow-up declared in the codec header —
 /// closes the long-standing "non-integer NUMERIC params route through
-/// FmtText" boundary, now that `core.text.numeric.decimal` exists.
-///
-/// Algorithm:
-///   1. Get sign + abs(coefficient).  Special-case zero ⇒ ndigits=0,
-///      weight=0, dscale=Decimal.scale (preserves the user's declared
-///      precision in the wire form).
-///   2. Render abs(coefficient) as decimal digits.  The implicit
-///      decimal point sits at position `len - scale` from the left.
-///   3. Split digits into integer (left of point) and fractional
-///      (right of point) halves.  Pure-fractional values (scale ≥ len)
-///      have an empty integer half + leading-zero-padded fraction.
-///   4. Build base-10000 chunks:
-///        * Integer half: pad LEFT to multiple-of-4 length, group
-///          into 4-char chunks left-to-right (MS-first).
-///        * Fractional half: pad RIGHT to multiple-of-4 length, group
-///          into 4-char chunks left-to-right (MS-first relative to
-///          fractional position).
-///   5. Compute initial weight = (integer_chunk_count - 1).  For
-///      pure-fractional values weight starts at -1 and decrements
-///      for each leading zero chunk in the fractional half.
-///   6. Strip leading zero chunks from the front (each strip
-///      reduces ndigits but preserves weight — they're at higher
-///      magnitude than the actual MS digit).  Wait, that's NOT
-///      right either: stripping a leading zero CHUNK shifts the MS
-///      position DOWN, so weight DECREASES.  See PG numeric.c
-///      `strip_var` for the canonical handling.
-///   7. Strip trailing zero chunks from the back (no weight change;
-///      they sit at the least-significant end).
-///   8. Write the wire form: 8-byte header (ndigits, weight, sign,
-///      dscale) followed by ndigits × u16 digits.
+/// FmtText" boundary.  Composes through the shared
+/// `encode_numeric_from_parts` so the wire-format implementation
+/// stays in one place (single source of truth for both Decimal and
+/// BigDecimal callers).
 ///
 /// Returns false on arena exhaustion.  Coefficient overflow can't
 /// occur here — the Decimal already fit in i64.
@@ -1224,12 +1201,91 @@ public fn encode_numeric_from_decimal(
     value: &Decimal,
 ) -> Bool {
     let abs_d = value.abs();
-    let sign_code = if value.is_negative() { PG_NUMERIC_NEG } else { PG_NUMERIC_POS };
-    let dscale = value.scale;
+    let is_zero_val = abs_d.coefficient == 0;
+    let digits_text = if is_zero_val {
+        "0".clone()
+    } else {
+        decimal_magnitude_text(abs_d.coefficient)
+    };
+    encode_numeric_from_parts(buf, arena, value.is_negative(), &digits_text, value.scale, is_zero_val)
+}
+
+/// Encode an arbitrary-precision `BigDecimal` value as PG NUMERIC
+/// binary.  Removes the i64 coefficient cap from
+/// `encode_numeric_from_decimal` — supports the full PG NUMERIC
+/// range (up to ~131072 digits before the decimal point per PG's
+/// own documented bound).  Composes through the shared
+/// `encode_numeric_from_parts` (single source of truth).
+public fn encode_numeric_from_bigdecimal(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    value: &BigDecimal,
+) -> Bool {
+    let is_zero_val = value.is_zero();
+    let digits_text = if is_zero_val {
+        "0".clone()
+    } else {
+        value.coefficient.abs().to_text()
+    };
+    encode_numeric_from_parts(buf, arena, value.is_negative(), &digits_text, value.scale, is_zero_val)
+}
+
+/// Decode a NUMERIC binary payload into an arbitrary-precision
+/// `BigDecimal` value.  Composes the existing wire-form decoder
+/// (`decode_numeric` → `PgNumeric.to_text` → `parse_bigdecimal`).
+/// Single source of truth: a fix to either the wire decoder or
+/// `to_text` reaches this path automatically.
+///
+/// Errors:
+///   * Returns the underlying `decode_numeric` failure verbatim
+///     for malformed wire payloads.
+///   * Returns a synthetic decode fault if `parse_bigdecimal`
+///     fails to round-trip the canonical text (defensive — should
+///     never fire for well-formed PgNumeric values).
+public fn decode_numeric_to_bigdecimal(slice: &ArenaSlice) -> Result<BigDecimal, DbError> {
+    let n = decode_numeric(slice)?;
+    if n.is_nan() || n.is_pos_inf() || n.is_neg_inf() {
+        return Err(decode_fault("numeric: NaN/±Infinity not representable as BigDecimal".clone()));
+    }
+    let text = n.to_text();
+    match parse_bigdecimal(&text) {
+        Ok(bd) => Ok(bd),
+        Err(_) => Err(decode_fault(
+            f"numeric: failed to parse canonical text '{text}' as BigDecimal (defensive)"
+        )),
+    }
+}
+
+/// Shared NUMERIC wire-form encoder driven by `(sign, digits_text,
+/// dscale)`.  Both `encode_numeric_from_decimal` (i64 coefficient)
+/// and `encode_numeric_from_bigdecimal` (BigInt coefficient)
+/// converge here — the only difference upstream is HOW the
+/// magnitude digit text is rendered.
+///
+/// Algorithm:
+///   1. Special-case zero.  Canonicalise to (ndigits=0, weight=0,
+///      sign=POS, dscale=user_scale).
+///   2. Position the implicit decimal point at `len - dscale`.
+///   3. Build integer chunks (LEFT-pad to multiple-of-4) and
+///      fractional chunks (RIGHT-pad to multiple-of-4).
+///   4. Concatenate; compute initial weight from integer chunk
+///      count.
+///   5. Strip leading zero chunks (weight -= 1 each) + trailing
+///      zero chunks (no weight change) to canonical form.
+///   6. Emit 8-byte header + ndigits × u16 digits.
+fn encode_numeric_from_parts(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    is_negative: Bool,
+    digits_text: &Text,
+    dscale: Int,
+    is_zero_val: Bool,
+) -> Bool {
+    let sign_code = if is_negative { PG_NUMERIC_NEG } else { PG_NUMERIC_POS };
 
     // Special-case zero.  PG canonicalises 0 with the declared scale:
     // ndigits=0, weight=0, sign=POS, dscale=user_scale.
-    if abs_d.coefficient == 0 {
+    if is_zero_val {
         if !buf.put_u16_be(arena, 0)              { return false; }
         if !buf.put_u16_be(arena, 0)              { return false; }
         if !buf.put_u16_be(arena, PG_NUMERIC_POS) { return false; }
@@ -1237,8 +1293,6 @@ public fn encode_numeric_from_decimal(
         return true;
     }
 
-    // Render the magnitude as decimal-digit bytes (MS first).
-    let digits_text = decimal_magnitude_text(abs_d.coefficient);
     let digits_bytes = digits_text.as_bytes();
     let total_len = digits_bytes.len() as Int;
 
@@ -1372,22 +1426,24 @@ public fn encode_numeric_from_decimal(
 }
 
 /// Encode a decimal text representation as PG NUMERIC binary.
-/// Convenience wrapper: parses `text` via `parse_decimal` then
-/// dispatches to `encode_numeric_from_decimal`.  Returns false on
-/// parse failure or arena exhaustion.
+/// Convenience wrapper: parses `text` via `parse_bigdecimal` then
+/// dispatches to `encode_numeric_from_bigdecimal`.  Routes through
+/// BigDecimal (not Decimal) so text inputs with > 18 significant
+/// digits encode correctly — closes the i64-cap V0 boundary on
+/// the text-encode path.
 ///
-/// Closes the V0 boundary noted in `encode_numeric_from_int` —
-/// non-integer NUMERIC parameter binding no longer needs to fall
-/// back to PG's text format (FmtText).  Callers can now bind
-/// arbitrary decimal literals directly through the binary wire
-/// codec for the full performance win.
+/// Returns false on parse failure or arena exhaustion.
+///
+/// Callers with already-Int-bounded values should use
+/// `encode_numeric_from_int` directly for the zero-allocation
+/// fast path.
 public fn encode_numeric_from_text(
     buf: &mut ArenaWireBuf,
     arena: &mut SpindleArena,
     text: &Text,
 ) -> Bool {
-    match parse_decimal(text) {
-        Ok(d)  => encode_numeric_from_decimal(buf, arena, &d),
+    match parse_bigdecimal(text) {
+        Ok(bd) => encode_numeric_from_bigdecimal(buf, arena, &bd),
         Err(_) => false,
     }
 }
