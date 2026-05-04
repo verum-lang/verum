@@ -47,10 +47,10 @@ public fn query_plan_tree_new() -> QueryPlanTree {
 implement QueryPlanTree {
     public fn len(&self) -> Int { self.rows.len() }
 
-    pub fn add(&mut self, r: QueryPlanRow) { self.rows.push(r); }
+    public fn add(&mut self, r: QueryPlanRow) { self.rows.push(r); }
 
     /// Children rows of `parent_id`, in insertion order.
-    pub fn children_of(&self, parent_id: Int) -> List<QueryPlanRow> {
+    public fn children_of(&self, parent_id: Int) -> List<QueryPlanRow> {
         let mut out: List<QueryPlanRow> = List.new();
         let mut i: Int = 0;
         while i < self.rows.len() {
@@ -67,7 +67,7 @@ implement QueryPlanTree {
     }
 
     /// Depth of a node by walking parents back to 0.
-    pub fn depth_of(&self, id: Int) -> Int {
+    public fn depth_of(&self, id: Int) -> Int {
         let mut depth: Int = 0;
         let mut current = id;
         while current != 0 {
@@ -83,7 +83,7 @@ implement QueryPlanTree {
         depth
     }
 
-    pub fn find_by_id(&self, id: Int) -> Maybe<QueryPlanRow> {
+    public fn find_by_id(&self, id: Int) -> Maybe<QueryPlanRow> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].id == id {
@@ -98,7 +98,7 @@ implement QueryPlanTree {
         None
     }
 
-    pub fn root_count(&self) -> Int {
+    public fn root_count(&self) -> Int {
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < self.rows.len() {

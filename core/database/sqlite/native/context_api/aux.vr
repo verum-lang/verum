@@ -35,7 +35,7 @@ public fn new_registry() -> AuxRegistry {
 implement AuxRegistry {
     /// Returns previous handle at this index (0 if fresh) — mirrors
     /// sqlite3_set_auxdata's xDelete semantics (caller frees).
-    pub fn set(&mut self, arg_index: Int, handle: Int64) -> Int64 {
+    public fn set(&mut self, arg_index: Int, handle: Int64) -> Int64 {
         let mut i: Int = 0;
         while i < self.slots.len() {
             if self.slots.get(i).arg_index == arg_index {
@@ -49,7 +49,7 @@ implement AuxRegistry {
         0 as Int64
     }
 
-    pub fn get(&self, arg_index: Int) -> Int64 {
+    public fn get(&self, arg_index: Int) -> Int64 {
         let mut i: Int = 0;
         while i < self.slots.len() {
             if self.slots.get(i).arg_index == arg_index {
@@ -60,9 +60,9 @@ implement AuxRegistry {
         0 as Int64
     }
 
-    pub fn clear(&mut self) {
+    public fn clear(&mut self) {
         self.slots = List.new();
     }
 
-    pub fn len(&self) -> Int { self.slots.len() }
+    public fn len(&self) -> Int { self.slots.len() }
 }

@@ -102,7 +102,7 @@ implement PgTxOpts {
     }
 
     /// Render to the SQL fragment that follows `BEGIN`.
-    pub fn render_sql(&self) -> Text {
+    public fn render_sql(&self) -> Text {
         let mut out: Text = Text.new();
         match self.isolation {
             PgTkReadCommitted   => { out.push_str(" ISOLATION LEVEL READ COMMITTED"); }
@@ -161,7 +161,7 @@ public fn begin_tx(conn: &mut PgConnection) -> Result<PgTransaction, DbError> {
 }
 
 /// Begin a transaction with explicit opts.
-pub fn begin_tx_with(
+public fn begin_tx_with(
     conn: &mut PgConnection,
     opts: PgTxOpts,
 ) -> Result<PgTransaction, DbError> {
@@ -174,21 +174,21 @@ pub fn begin_tx_with(
 }
 
 /// Convenience builders matching the SQLite native shape.
-pub fn begin_tx_read_committed(conn: &mut PgConnection)
+public fn begin_tx_read_committed(conn: &mut PgConnection)
     -> Result<PgTransaction, DbError>
 {
     begin_tx_with(conn, pg_tx_opts_default()
         .with_isolation(PgTkReadCommitted))
 }
 
-pub fn begin_tx_serializable(conn: &mut PgConnection)
+public fn begin_tx_serializable(conn: &mut PgConnection)
     -> Result<PgTransaction, DbError>
 {
     begin_tx_with(conn, pg_tx_opts_default()
         .with_isolation(PgTkSerializable))
 }
 
-pub fn begin_tx_read_only(conn: &mut PgConnection)
+public fn begin_tx_read_only(conn: &mut PgConnection)
     -> Result<PgTransaction, DbError>
 {
     begin_tx_with(conn, pg_tx_opts_default()
@@ -199,7 +199,7 @@ pub fn begin_tx_read_only(conn: &mut PgConnection)
 /// connection's tx_status is not `TxInTransaction` — surfaces
 /// `DbMisuse` so the user notices the lifecycle mistake instead of
 /// silently emitting a "no transaction in progress" notice.
-pub fn commit_tx(
+public fn commit_tx(
     conn: &mut PgConnection,
     tx: PgTransaction,
 ) -> Result<(), DbError> {
@@ -236,7 +236,7 @@ pub fn commit_tx(
 /// `TxFailedTransaction` (Postgres requires ROLLBACK after error) and
 /// of `TxIdle` (caller may rollback a tx the server-side already
 /// auto-rolled).
-pub fn rollback_tx(
+public fn rollback_tx(
     conn: &mut PgConnection,
     tx: PgTransaction,
 ) -> Result<(), DbError> {
@@ -258,7 +258,7 @@ pub fn rollback_tx(
 /// Push a SAVEPOINT. The name is interpolated into the SQL string
 /// — the caller is responsible for ensuring it's a valid identifier
 /// (use `core.text.is_sql_identifier` if you're echoing user input).
-pub fn savepoint(conn: &mut PgConnection, name: &Text) -> Result<(), DbError> {
+public fn savepoint(conn: &mut PgConnection, name: &Text) -> Result<(), DbError> {
     let mut sql: Text = "SAVEPOINT ".clone();
     sql.push_str(name);
     match conn.execute(&sql) {
@@ -268,7 +268,7 @@ pub fn savepoint(conn: &mut PgConnection, name: &Text) -> Result<(), DbError> {
 }
 
 /// Release a savepoint (commits its work into the surrounding tx).
-pub fn release_savepoint(conn: &mut PgConnection, name: &Text)
+public fn release_savepoint(conn: &mut PgConnection, name: &Text)
     -> Result<(), DbError>
 {
     let mut sql: Text = "RELEASE SAVEPOINT ".clone();
@@ -280,7 +280,7 @@ pub fn release_savepoint(conn: &mut PgConnection, name: &Text)
 }
 
 /// Rollback to a savepoint (discards work since the savepoint).
-pub fn rollback_to_savepoint(conn: &mut PgConnection, name: &Text)
+public fn rollback_to_savepoint(conn: &mut PgConnection, name: &Text)
     -> Result<(), DbError>
 {
     let mut sql: Text = "ROLLBACK TO SAVEPOINT ".clone();
@@ -300,7 +300,7 @@ pub fn rollback_to_savepoint(conn: &mut PgConnection, name: &Text)
 /// recommended entry point for almost all transactional code — the
 /// affine PgTransaction value is created and consumed internally so
 /// the caller never has to thread it.
-pub fn with_transaction<R>(
+public fn with_transaction<R>(
     conn: &mut PgConnection,
     body: fn(&mut PgConnection) -> Result<R, DbError>,
 ) -> Result<R, DbError> {
@@ -324,7 +324,7 @@ pub fn with_transaction<R>(
 /// SERIALIZABLE-mode variant. Used with the `run_with_retry` helper
 /// from `core.database.common.retry_run` to handle the
 /// `40001 serialization_failure` retry pattern transparently.
-pub fn with_transaction_serializable<R>(
+public fn with_transaction_serializable<R>(
     conn: &mut PgConnection,
     body: fn(&mut PgConnection) -> Result<R, DbError>,
 ) -> Result<R, DbError> {

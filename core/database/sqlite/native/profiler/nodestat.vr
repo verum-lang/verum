@@ -90,7 +90,7 @@ public fn nodestat_table_new() -> NodeStatTable { NodeStatTable { entries: List.
 implement NodeStatTable {
     public fn len(&self) -> Int { self.entries.len() }
 
-    pub fn register(&mut self, node_id: Int, kind: Text, estimated_rows: Int64) {
+    public fn register(&mut self, node_id: Int, kind: Text, estimated_rows: Int64) {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].node_id == node_id { return; }
@@ -99,7 +99,7 @@ implement NodeStatTable {
         self.entries.push(nodestat_new(node_id, kind, estimated_rows));
     }
 
-    pub fn record_row(&mut self, node_id: Int, when_ns: Int64) {
+    public fn record_row(&mut self, node_id: Int, when_ns: Int64) {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].node_id == node_id {
@@ -110,7 +110,7 @@ implement NodeStatTable {
         }
     }
 
-    pub fn add_time(&mut self, node_id: Int, ns: Int64) {
+    public fn add_time(&mut self, node_id: Int, ns: Int64) {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].node_id == node_id {
@@ -121,7 +121,7 @@ implement NodeStatTable {
         }
     }
 
-    pub fn lookup(&self, node_id: Int) -> Maybe<NodeStat> {
+    public fn lookup(&self, node_id: Int) -> Maybe<NodeStat> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].node_id == node_id {

@@ -44,7 +44,7 @@ implement BoundingBox {
 
     /// Volume = product over dimensions of (max - min). Used by the
     /// split heuristic to pick the box whose enlargement is smallest.
-    pub fn area(&self) -> Float64 {
+    public fn area(&self) -> Float64 {
         if self.min.len() == 0 { return 0.0 as Float64; }
         let mut acc: Float64 = 1.0 as Float64;
         let mut i: Int = 0;
@@ -57,7 +57,7 @@ implement BoundingBox {
     }
 
     /// True iff `point` lies inside this box (closed on min, closed on max).
-    pub fn contains_point(&self, point: &List<Float64>) -> Bool {
+    public fn contains_point(&self, point: &List<Float64>) -> Bool {
         if point.len() != self.min.len() { return false; }
         let mut i: Int = 0;
         while i < self.min.len() {
@@ -68,7 +68,7 @@ implement BoundingBox {
     }
 
     /// True iff `other` overlaps `self`.
-    pub fn intersects(&self, other: &BoundingBox) -> Bool {
+    public fn intersects(&self, other: &BoundingBox) -> Bool {
         if self.min.len() != other.min.len() { return false; }
         let mut i: Int = 0;
         while i < self.min.len() {
@@ -80,7 +80,7 @@ implement BoundingBox {
     }
 
     /// True iff `other` is fully inside `self`.
-    pub fn covers(&self, other: &BoundingBox) -> Bool {
+    public fn covers(&self, other: &BoundingBox) -> Bool {
         if self.min.len() != other.min.len() { return false; }
         let mut i: Int = 0;
         while i < self.min.len() {
@@ -92,7 +92,7 @@ implement BoundingBox {
     }
 
     /// Smallest box that contains both `self` and `other`.
-    pub fn enlarged_to(&self, other: &BoundingBox) -> BoundingBox {
+    public fn enlarged_to(&self, other: &BoundingBox) -> BoundingBox {
         let mut new_min: List<Float64> = List.new();
         let mut new_max: List<Float64> = List.new();
         let mut i: Int = 0;
@@ -106,7 +106,7 @@ implement BoundingBox {
 
     /// Cost of growing `self` to contain `other` — drives node-pick
     /// during insertion.
-    pub fn enlargement(&self, other: &BoundingBox) -> Float64 {
+    public fn enlargement(&self, other: &BoundingBox) -> Float64 {
         self.enlarged_to(other).area() - self.area()
     }
 }

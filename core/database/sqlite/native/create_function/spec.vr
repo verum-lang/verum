@@ -42,10 +42,10 @@ public fn new_spec(name: Text, n_arg: Int) -> FunctionSpec {
 }
 
 implement FunctionSpec {
-    pub fn with_encoding(&mut self, enc: Int) { self.encoding = enc; }
-    pub fn with_flags(&mut self, f: FnFlags) { self.flags = f; }
-    pub fn is_variadic(&self) -> Bool { self.n_arg < 0 }
-    pub fn is_pure(&self) -> Bool {
+    public fn with_encoding(&mut self, enc: Int) { self.encoding = enc; }
+    public fn with_flags(&mut self, f: FnFlags) { self.flags = f; }
+    public fn is_variadic(&self) -> Bool { self.n_arg < 0 }
+    public fn is_pure(&self) -> Bool {
         self.flags.deterministic && self.flags.innocuous
     }
 }

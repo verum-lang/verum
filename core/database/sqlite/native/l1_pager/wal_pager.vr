@@ -52,7 +52,7 @@ mount core.database.sqlite.native.l1_pager.wal_reader.{
 // CheckpointMode (re-export of actor-side type for clarity)
 // -----------------------------------------------------------------------------
 
-pub type CheckpointMode is
+public type CheckpointMode is
       Passive
     | Full
     | Restart
@@ -62,7 +62,7 @@ pub type CheckpointMode is
 // WalPager — base Pager + WAL writer combined
 // -----------------------------------------------------------------------------
 
-pub type affine WalPager is {
+public type affine WalPager is {
     base: Pager,
     wal: WalWriter,
     /// Frames buffered in memory but not yet appended to the WAL.
@@ -74,7 +74,7 @@ pub type affine WalPager is {
     frames_since_checkpoint: Int,
 };
 
-pub fn wal_pager_new(base: Pager, wal: WalWriter) -> WalPager {
+public fn wal_pager_new(base: Pager, wal: WalWriter) -> WalPager {
     WalPager {
         base: base,
         wal: wal,
@@ -84,17 +84,17 @@ pub fn wal_pager_new(base: Pager, wal: WalWriter) -> WalPager {
 }
 
 implement WalPager {
-    pub fn page_size(&self) -> Int { self.wal.page_size() }
-    pub fn mx_frame(&self) -> Int { self.wal.mx_frame() }
-    pub fn n_backfill(&self) -> Int { self.wal.n_backfill() }
-    pub fn frames_since_last_checkpoint(&self) -> Int {
+    public fn page_size(&self) -> Int { self.wal.page_size() }
+    public fn mx_frame(&self) -> Int { self.wal.mx_frame() }
+    public fn n_backfill(&self) -> Int { self.wal.n_backfill() }
+    public fn frames_since_last_checkpoint(&self) -> Int {
         self.frames_since_checkpoint
     }
-    pub fn pending_write_count(&self) -> Int { self.pending_writes.keys().len() }
+    public fn pending_write_count(&self) -> Int { self.pending_writes.keys().len() }
 
     /// Snapshot the WAL state for a consistent reader.  Cheap
     /// (clones the small frame_index map).
-    pub fn take_reader_snapshot(&self) -> WalReaderSnapshot {
+    public fn take_reader_snapshot(&self) -> WalReaderSnapshot {
         snapshot_wal(self.wal.state())
     }
 }
@@ -106,7 +106,7 @@ implement WalPager {
 /// Read page `page_no` honouring the WAL frame index.  If the page
 /// has a WAL version newer than `n_backfill`, return the WAL frame's
 /// payload; otherwise fall through to the base pager (main DB file).
-pub fn wal_pager_read(
+public fn wal_pager_read(
     p: &mut WalPager,
     page_no: Int,
 ) -> Result<PageFrame, PagerError> {
@@ -142,7 +142,7 @@ pub fn wal_pager_read(
 /// `WalReaderSnapshot` instead of the live state.  Multiple
 /// readers can hold snapshots concurrently as long as the writer
 /// stays single-threaded (the standard SQLite WAL contract).
-pub fn wal_pager_read_snapshot(
+public fn wal_pager_read_snapshot(
     p: &mut WalPager,
     snap: &WalReaderSnapshot,
     page_no: Int,
@@ -169,7 +169,7 @@ pub fn wal_pager_read_snapshot(
 /// Buffer a page write in memory.  The frame is NOT yet on disk —
 /// it lands in the WAL when `wal_pager_commit` runs.  Last write
 /// to a given page wins within a transaction.
-pub fn wal_pager_write(
+public fn wal_pager_write(
     p: &mut WalPager,
     frame: &PageFrame,
 ) -> Result<(), PagerError> {
@@ -195,7 +195,7 @@ pub fn wal_pager_write(
 /// On any error the caller is responsible for rollback: drop the
 /// WalPager (affine!) and re-open from disk.  Recovery will
 /// silently truncate the incomplete frame trailer (per §8.2).
-pub fn wal_pager_commit(
+public fn wal_pager_commit(
     p: &mut WalPager,
     sync_flags: SyncFlags,
 ) -> Result<Int, PagerError> {
@@ -258,7 +258,7 @@ pub fn wal_pager_commit(
 // Checkpoint — drain WAL frames to main DB
 // -----------------------------------------------------------------------------
 
-pub type CheckpointResult is {
+public type CheckpointResult is {
     frames_drained: Int,
     wal_reset: Bool,
     bytes_truncated: Int,
@@ -270,7 +270,7 @@ pub type CheckpointResult is {
 ///
 /// `Passive` returns `frames_drained = 0` if any pending in-txn
 /// write exists (writer-conflict signal — Passive yields).
-pub fn wal_pager_checkpoint(
+public fn wal_pager_checkpoint(
     p: &mut WalPager,
     mode: CheckpointMode,
     new_salt1: u32,
@@ -368,7 +368,7 @@ pub fn wal_pager_checkpoint(
 /// Idempotent — safe to call multiple times (later calls find an
 /// already-populated frame_index and re-validate).  Returns the
 /// recovery report for diagnostics.
-pub fn wal_pager_recover(p: &mut WalPager) -> Result<RecoveryReport, PagerError> {
+public fn wal_pager_recover(p: &mut WalPager) -> Result<RecoveryReport, PagerError> {
     recover_state(&mut p.wal)
 }
 

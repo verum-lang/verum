@@ -164,7 +164,7 @@ public const PEM_MAX_INPUT_BYTES: Int = 64 * 1024 * 1024;
 /// short ASCII strings; 256 bytes is two orders of magnitude above
 /// every published label. A multi-MB "label" is a parser-confusion
 /// attempt.
-pub const PEM_MAX_LABEL_BYTES: Int = 256;
+public const PEM_MAX_LABEL_BYTES: Int = 256;
 
 // =============================================================================
 // Encode

@@ -103,17 +103,17 @@ public fn run_result(end_label: Text, status: RunStatus) -> RunResult {
 }
 
 implement RunResult {
-    pub fn with_rows(mut self, rows: List<DifferentialResultRow>) -> RunResult {
+    public fn with_rows(mut self, rows: List<DifferentialResultRow>) -> RunResult {
         self.rows = rows;
         self
     }
 
-    pub fn with_effects(mut self, effects: SideEffect) -> RunResult {
+    public fn with_effects(mut self, effects: SideEffect) -> RunResult {
         self.effects = effects;
         self
     }
 
-    pub fn with_elapsed(mut self, ns: Int64) -> RunResult {
+    public fn with_elapsed(mut self, ns: Int64) -> RunResult {
         self.elapsed_ns = ns;
         self
     }

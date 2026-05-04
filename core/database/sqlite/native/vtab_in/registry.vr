@@ -35,7 +35,7 @@ public fn new_registry() -> VtabInRegistry {
 }
 
 implement VtabInRegistry {
-    pub fn register(&mut self, s: ConstraintInState) {
+    public fn register(&mut self, s: ConstraintInState) {
         self.states.push(s);
     }
 
@@ -50,7 +50,7 @@ implement VtabInRegistry {
 
     /// Returns 0 / 1 per the sqlite3_vtab_in contract. Query-mode
     /// returns eligibility; Commit / Revert flip the handled flag.
-    pub fn sqlite3_vtab_in(&mut self, index: Int, mode: &RequestMode) -> Int {
+    public fn sqlite3_vtab_in(&mut self, index: Int, mode: &RequestMode) -> Int {
         let idx = self.find(index);
         if idx < 0 { return 0; }
         match mode {
@@ -72,7 +72,7 @@ implement VtabInRegistry {
         }
     }
 
-    pub fn any_handled(&self) -> Bool {
+    public fn any_handled(&self) -> Bool {
         let mut i: Int = 0;
         while i < self.states.len() {
             if self.states.get(i).handled { return true; }

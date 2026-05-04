@@ -47,7 +47,7 @@ implement BlobEngine {
 
     /// Open a handle. The caller has already resolved the column to a
     /// BLOB and passed in `byte_size`. Returns the handle's stable id.
-    pub fn open(
+    public fn open(
         &mut self,
         schema_name: Text,
         table_name: Text,
@@ -66,7 +66,7 @@ implement BlobEngine {
 
     /// Validate a read of `length` bytes starting at `offset`. Returns
     /// `Ok(())` if the read may proceed, else the appropriate error.
-    pub fn validate_read(&self, handle_id: Int64, offset: Int, length: Int) -> Result<(), BlobError> {
+    public fn validate_read(&self, handle_id: Int64, offset: Int, length: Int) -> Result<(), BlobError> {
         match self.find(handle_id) {
             Some(idx) => {
                 let h = &self.handles[idx];
@@ -81,7 +81,7 @@ implement BlobEngine {
     }
 
     /// Validate a write at (offset, length). Same as read + must be RW.
-    pub fn validate_write(&self, handle_id: Int64, offset: Int, length: Int) -> Result<(), BlobError> {
+    public fn validate_write(&self, handle_id: Int64, offset: Int, length: Int) -> Result<(), BlobError> {
         match self.find(handle_id) {
             Some(idx) => {
                 let h = &self.handles[idx];
@@ -97,7 +97,7 @@ implement BlobEngine {
     }
 
     /// Reopen against a different rowid.
-    pub fn reopen(&mut self, handle_id: Int64, new_rowid: Int64, new_byte_size: Int) -> Result<(), BlobError> {
+    public fn reopen(&mut self, handle_id: Int64, new_rowid: Int64, new_byte_size: Int) -> Result<(), BlobError> {
         match self.find(handle_id) {
             Some(idx) => {
                 self.handles[idx].reopen(new_rowid, new_byte_size);
@@ -107,7 +107,7 @@ implement BlobEngine {
         }
     }
 
-    pub fn close(&mut self, handle_id: Int64) -> Bool {
+    public fn close(&mut self, handle_id: Int64) -> Bool {
         match self.find(handle_id) {
             Some(idx) => {
                 self.handles[idx].close();
@@ -117,7 +117,7 @@ implement BlobEngine {
         }
     }
 
-    pub fn lookup_size(&self, handle_id: Int64) -> Maybe<Int> {
+    public fn lookup_size(&self, handle_id: Int64) -> Maybe<Int> {
         match self.find(handle_id) {
             Some(idx) => Some(self.handles[idx].byte_size),
             None      => None,

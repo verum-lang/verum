@@ -30,14 +30,14 @@ public fn new_engine() -> ReleaseEngine {
 }
 
 implement ReleaseEngine {
-    pub fn set_reclaimable(&mut self, bytes: Int64) {
+    public fn set_reclaimable(&mut self, bytes: Int64) {
         self.reclaimable_bytes = bytes;
     }
 
     /// Classical sqlite3_release_memory contract: returns the number
     /// of bytes actually released (≤ request.target_bytes and
     /// ≤ reclaimable_bytes).
-    pub fn sqlite3_release_memory(&mut self, req: &SizeRequest) -> Int {
+    public fn sqlite3_release_memory(&mut self, req: &SizeRequest) -> Int {
         self.calls = self.calls + 1_i64;
         if is_noop(req) { return 0; }
         let target = req.target_bytes;

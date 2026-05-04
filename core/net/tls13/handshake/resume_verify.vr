@@ -149,7 +149,7 @@ public type ResumedSession is {
 /// second sliding window for anti-replay guidance; production
 /// deployments often tighten to ±2 seconds. Configurable per call
 /// via `verify_offered_psks`'s freshness_window arg.
-pub const DEFAULT_FRESHNESS_WINDOW_MS: UInt64 = 10_000_u64;
+public const DEFAULT_FRESHNESS_WINDOW_MS: UInt64 = 10_000_u64;
 
 fn check_freshness(
     plaintext: &ServerTicketPlaintext,
@@ -200,7 +200,7 @@ fn check_freshness(
 /// (post-intersection with our local preferences). The resumed
 /// session MUST use the same suite the ticket was issued with;
 /// CipherSuiteMismatch otherwise.
-pub fn verify_offered_psks(
+public fn verify_offered_psks(
     stek: &SessionTicketKey,
     offered: &OfferedPsks,
     negotiated_suite: CipherSuite,

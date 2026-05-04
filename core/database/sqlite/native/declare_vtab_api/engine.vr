@@ -47,7 +47,7 @@ public fn outcome_is_ok(o: &DeclareOutcome) -> Bool {
 }
 
 implement DeclareVtabEngine {
-    pub fn sqlite3_declare_vtab(&mut self, vtab_name: Text, sql: Text, tag: Int64) -> DeclareOutcome {
+    public fn sqlite3_declare_vtab(&mut self, vtab_name: Text, sql: Text, tag: Int64) -> DeclareOutcome {
         let decl = new_declaration(sql, tag);
         if !looks_like_create_table(&decl) {
             self.rejected = self.rejected + 1_i64;
@@ -58,7 +58,7 @@ implement DeclareVtabEngine {
         DoAccepted
     }
 
-    pub fn find_declaration(&self, vtab_name: &Text) -> Maybe<Int> {
+    public fn find_declaration(&self, vtab_name: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.declarations.len() {
             if self.declarations.get(i).vtab_name == *vtab_name {
@@ -69,5 +69,5 @@ implement DeclareVtabEngine {
         Maybe.None
     }
 
-    pub fn len(&self) -> Int { self.declarations.len() }
+    public fn len(&self) -> Int { self.declarations.len() }
 }

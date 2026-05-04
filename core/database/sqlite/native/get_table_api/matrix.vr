@@ -38,27 +38,27 @@ public fn new_matrix(header: List<Text>) -> ResultMatrix {
 }
 
 implement ResultMatrix {
-    pub fn n_column(&self) -> Int { self.header.len() }
-    pub fn n_row(&self) -> Int { self.rows.len() }
+    public fn n_column(&self) -> Int { self.header.len() }
+    public fn n_row(&self) -> Int { self.rows.len() }
 
     /// Total number of Text cells in the flattened SQLite layout =
     /// (nRow + 1) * nColumn.
-    pub fn total_cells(&self) -> Int {
+    public fn total_cells(&self) -> Int {
         if self.header.len() == 0 { return 0; }
         (self.rows.len() + 1) * self.header.len()
     }
 
-    pub fn push_row(&mut self, row: List<Text>) -> Bool {
+    public fn push_row(&mut self, row: List<Text>) -> Bool {
         if row.len() != self.header.len() { return false; }
         self.rows.push(row);
         true
     }
 
-    pub fn free(&mut self) {
+    public fn free(&mut self) {
         self.freed = true;
         self.header = List.new();
         self.rows = List.new();
     }
 
-    pub fn is_live(&self) -> Bool { !self.freed }
+    public fn is_live(&self) -> Bool { !self.freed }
 }

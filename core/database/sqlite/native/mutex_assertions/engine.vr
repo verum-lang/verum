@@ -29,7 +29,7 @@ public fn new_engine(mode: BuildMode) -> MutexAssertEngine {
 }
 
 implement MutexAssertEngine {
-    pub fn acquire(&mut self, mutex_id: Int64, owner: Int64) -> Bool {
+    public fn acquire(&mut self, mutex_id: Int64, owner: Int64) -> Bool {
         let mut i: Int = 0;
         while i < self.held.len() {
             if self.held.get(i).id == mutex_id {
@@ -43,7 +43,7 @@ implement MutexAssertEngine {
         true
     }
 
-    pub fn release(&mut self, mutex_id: Int64) -> Bool {
+    public fn release(&mut self, mutex_id: Int64) -> Bool {
         let mut i: Int = 0;
         while i < self.held.len() {
             if self.held.get(i).id == mutex_id {
@@ -57,7 +57,7 @@ implement MutexAssertEngine {
 
     /// sqlite3_mutex_held: 1 if the mutex is currently held (debug) or
     /// always 1 (release). On debug + unknown mutex, returns 1 (safe).
-    pub fn sqlite3_mutex_held(&self, mutex_id: Int64) -> Int {
+    public fn sqlite3_mutex_held(&self, mutex_id: Int64) -> Int {
         if always_true_in_release(&self.mode) { return 1; }
         let mut i: Int = 0;
         while i < self.held.len() {
@@ -69,7 +69,7 @@ implement MutexAssertEngine {
         1
     }
 
-    pub fn sqlite3_mutex_notheld(&self, mutex_id: Int64) -> Int {
+    public fn sqlite3_mutex_notheld(&self, mutex_id: Int64) -> Int {
         if always_true_in_release(&self.mode) { return 1; }
         let held = self.sqlite3_mutex_held(mutex_id);
         if held == 1 { 0 } else { 1 }

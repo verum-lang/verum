@@ -56,11 +56,11 @@ public fn bindset_new(parameter_count: Int) -> BindSet {
 implement BindSet {
     public fn parameter_count(&self) -> Int { self.slots.len() }
 
-    pub fn note_step_started(&mut self) { self.step_in_progress = true; }
-    pub fn note_step_finished(&mut self) { self.step_in_progress = false; }
+    public fn note_step_started(&mut self) { self.step_in_progress = true; }
+    public fn note_step_finished(&mut self) { self.step_in_progress = false; }
 
     /// `idx` is 1-based.
-    pub fn bind(&mut self, idx: Int, value: TypedParam) -> Result<(), BindError> {
+    public fn bind(&mut self, idx: Int, value: TypedParam) -> Result<(), BindError> {
         if self.step_in_progress { return Err(BeStmtBusy); }
         if idx < 1 || idx > self.slots.len() { return Err(BeRange(idx)); }
         let size = param_byte_size(&value);
@@ -69,13 +69,13 @@ implement BindSet {
         Ok(())
     }
 
-    pub fn lookup(&self, idx: Int) -> Maybe<TypedParam> {
+    public fn lookup(&self, idx: Int) -> Maybe<TypedParam> {
         if idx < 1 || idx > self.slots.len() { return None; }
         Some(clone_param(&self.slots[idx - 1]))
     }
 
     /// sqlite3_clear_bindings — set every slot to NULL.
-    pub fn clear(&mut self) {
+    public fn clear(&mut self) {
         let mut i: Int = 0;
         while i < self.slots.len() {
             self.slots[i] = TpNull;
@@ -84,7 +84,7 @@ implement BindSet {
     }
 
     /// Count slots that are currently non-NULL.
-    pub fn populated_count(&self) -> Int {
+    public fn populated_count(&self) -> Int {
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < self.slots.len() {
@@ -96,7 +96,7 @@ implement BindSet {
 
     /// Returns true iff ALL slots are non-NULL — useful guard before
     /// the first sqlite3_step.
-    pub fn fully_bound(&self) -> Bool {
+    public fn fully_bound(&self) -> Bool {
         let mut i: Int = 0;
         while i < self.slots.len() {
             if is_null_param(&self.slots[i]) { return false; }
@@ -108,5 +108,5 @@ implement BindSet {
     /// sqlite3_reset — bindings are PRESERVED; only execution state is
     /// cleared. We model this as a no-op for the BindSet (caller flips
     /// step_in_progress on the surrounding PreparedStatement).
-    pub fn reset(&mut self) { self.step_in_progress = false; }
+    public fn reset(&mut self) { self.step_in_progress = false; }
 }

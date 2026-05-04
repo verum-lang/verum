@@ -55,21 +55,21 @@ public fn blob_handle(
 implement BlobHandle {
     public fn is_open(&self) -> Bool { !self.closed }
 
-    pub fn close(&mut self) { self.closed = true; }
+    public fn close(&mut self) { self.closed = true; }
 
     /// True iff the requested (offset, length) lies entirely within the BLOB.
-    pub fn in_bounds(&self, offset: Int, length: Int) -> Bool {
+    public fn in_bounds(&self, offset: Int, length: Int) -> Bool {
         if offset < 0 || length < 0 { return false; }
         offset + length <= self.byte_size
     }
 
     /// Reopen against a different rowid — leaves table/column intact.
     /// SQLite's sqlite3_blob_reopen.
-    pub fn reopen(&mut self, new_rowid: Int64, new_byte_size: Int) {
+    public fn reopen(&mut self, new_rowid: Int64, new_byte_size: Int) {
         self.rowid = new_rowid;
         self.byte_size = new_byte_size;
         self.closed = false;
     }
 
-    pub fn permits_write(&self) -> Bool { permits_write(&self.mode) }
+    public fn permits_write(&self) -> Bool { permits_write(&self.mode) }
 }

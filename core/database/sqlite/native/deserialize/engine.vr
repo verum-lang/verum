@@ -39,7 +39,7 @@ implement SerializeEngine {
     /// Serialise from a `(page_no, page_bytes)` source. Pages must be
     /// fed in 1-based ascending order; missing pages produce zeroed
     /// blocks.
-    pub fn serialize(&self, pages: List<List<Byte>>) -> DbImage {
+    public fn serialize(&self, pages: List<List<Byte>>) -> DbImage {
         let mut bytes: List<Byte> = List.new();
         let mut p: Int = 0;
         while p < pages.len() {
@@ -84,7 +84,7 @@ public type DeserializeEngine is { unit: Bool }
 public fn deserialize_engine() -> DeserializeEngine { DeserializeEngine { unit: true } }
 
 implement DeserializeEngine {
-    pub fn deserialize(&self, image: &DbImage, flags: &FlagSet) -> DeserialiseAction {
+    public fn deserialize(&self, image: &DbImage, flags: &FlagSet) -> DeserialiseAction {
         if image.is_empty() { return DaReject("empty image".clone()); }
         if image.page_size == 0 { return DaReject("page size = 0".clone()); }
         if flags.has(&DfReadOnly) { return DaMountReadOnly; }

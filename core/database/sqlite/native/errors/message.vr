@@ -45,13 +45,13 @@ public fn new_message(code: ExtendedCode, text: Text) -> SqlErrorMessage {
 }
 
 implement SqlErrorMessage {
-    pub fn with_offset(&mut self, offset: Int) {
+    public fn with_offset(&mut self, offset: Int) {
         self.offset = offset;
     }
-    pub fn with_system_errno(&mut self, errno: Int) {
+    public fn with_system_errno(&mut self, errno: Int) {
         self.system_errno = errno;
     }
-    pub fn is_success(&self) -> Bool {
+    public fn is_success(&self) -> Bool {
         extended_is_success(&self.code)
     }
 }

@@ -76,7 +76,7 @@ implement CopyInBuilder {
 
     /// Render the SQL — `COPY t (c1, c2) FROM STDIN`. Internal use
     /// by `run`; exposed for tracing / dry-run.
-    pub fn render_sql(&self) -> Text {
+    public fn render_sql(&self) -> Text {
         let mut sql: Text = "COPY ".clone();
         sql.push_str(&self.table);
         if self.columns.len() > 0 {
@@ -97,7 +97,7 @@ implement CopyInBuilder {
     /// formatted row strings (newline-terminated; tab-separated for
     /// the default text format). Returns the server-reported COPY
     /// row count from the trailing CommandComplete.
-    pub fn run(&self, conn: &mut PgConnection, rows: &List<Text>)
+    public fn run(&self, conn: &mut PgConnection, rows: &List<Text>)
         -> Result<Int, DbError>
     {
         run_copy_in_text(conn, &self.render_sql(), rows)
@@ -106,7 +106,7 @@ implement CopyInBuilder {
     /// Drive a COPY FROM where each row is *raw bytes* the caller
     /// has already formatted (e.g. for binary-mode COPY). The
     /// caller is responsible for the wire-format invariant.
-    pub fn run_bytes(&self, conn: &mut PgConnection, rows: &List<List<Byte>>)
+    public fn run_bytes(&self, conn: &mut PgConnection, rows: &List<List<Byte>>)
         -> Result<Int, DbError>
     {
         run_copy_in_bytes(conn, &self.render_sql(), rows)
@@ -132,7 +132,7 @@ implement CopyOutBuilder {
         self
     }
 
-    pub fn render_sql(&self) -> Text {
+    public fn render_sql(&self) -> Text {
         let mut sql: Text = "COPY ".clone();
         sql.push_str(&self.table);
         if self.columns.len() > 0 {
@@ -154,7 +154,7 @@ implement CopyOutBuilder {
     /// mode that's typically one row, but the protocol allows
     /// arbitrary chunking and the caller should treat the
     /// concatenation as the canonical body.
-    pub fn run(&self, conn: &mut PgConnection) -> Result<List<List<Byte>>, DbError> {
+    public fn run(&self, conn: &mut PgConnection) -> Result<List<List<Byte>>, DbError> {
         run_copy_out(conn, &self.render_sql())
     }
 }

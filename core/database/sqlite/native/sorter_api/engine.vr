@@ -51,7 +51,7 @@ public fn new_engine(spill_threshold_bytes: Int64) -> SorterEngine {
 }
 
 implement SorterEngine {
-    pub fn accept_row(&mut self, row_bytes: Int64) -> Bool {
+    public fn accept_row(&mut self, row_bytes: Int64) -> Bool {
         match &self.state {
             SsIngest => {}
             SsSpilling(_) => {}
@@ -83,11 +83,11 @@ implement SorterEngine {
         self.state = SsIngest;
     }
 
-    pub fn finalize(&mut self) {
+    public fn finalize(&mut self) {
         self.state = SsMerging;
     }
 
-    pub fn emit_row(&mut self) -> Bool {
+    public fn emit_row(&mut self) -> Bool {
         match &self.state {
             SsMerging => {
                 self.stats.rows_emitted = self.stats.rows_emitted + 1_i64;
@@ -100,6 +100,6 @@ implement SorterEngine {
         }
     }
 
-    pub fn pma_count(&self) -> Int { self.runs.len() }
-    pub fn is_pure_memory(&self) -> Bool { self.runs.len() == 0 }
+    public fn pma_count(&self) -> Int { self.runs.len() }
+    public fn is_pure_memory(&self) -> Bool { self.runs.len() == 0 }
 }

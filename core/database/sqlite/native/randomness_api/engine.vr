@@ -38,7 +38,7 @@ implement RandomnessEngine {
     /// Drive one request. Returns the actual byte-count that will be
     /// produced / consumed (0 for noop, size for fill, reseed-len for
     /// reseed).
-    pub fn drive(&mut self, req: &RandomnessRequest) -> Int {
+    public fn drive(&mut self, req: &RandomnessRequest) -> Int {
         match req {
             RrFill(n) => {
                 self.bytes_generated = self.bytes_generated + (*n as Int64);

@@ -52,10 +52,10 @@ public fn table_info_row(
 }
 
 implement TableInfoRow {
-    pub fn is_pk_column(&self) -> Bool { self.pk_position > 0 }
+    public fn is_pk_column(&self) -> Bool { self.pk_position > 0 }
 
     /// SQLite renders not_null as 0/1 in INTEGER form.
-    pub fn not_null_int(&self) -> Int { if self.not_null { 1 } else { 0 } }
+    public fn not_null_int(&self) -> Int { if self.not_null { 1 } else { 0 } }
 }
 
 // -----------------------------------------------------------------------------
@@ -71,9 +71,9 @@ public fn table_info_set(table: Text) -> TableInfoSet {
 implement TableInfoSet {
     public fn len(&self) -> Int { self.rows.len() }
 
-    pub fn add(&mut self, r: TableInfoRow) { self.rows.push(r); }
+    public fn add(&mut self, r: TableInfoRow) { self.rows.push(r); }
 
-    pub fn primary_key_columns(&self) -> List<Int> {
+    public fn primary_key_columns(&self) -> List<Int> {
         // Sort by pk_position ascending; we collect, caller sorts if needed.
         let mut out: List<Int> = List.new();
         let mut i: Int = 0;
@@ -84,7 +84,7 @@ implement TableInfoSet {
         out
     }
 
-    pub fn lookup(&self, name: &Text) -> Maybe<TableInfoRow> {
+    public fn lookup(&self, name: &Text) -> Maybe<TableInfoRow> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].name == *name {

@@ -87,14 +87,14 @@ public fn dbstat_row(
 
 implement DbStatRow {
     /// Fraction of the page that's payload.
-    pub fn fill_ratio(&self) -> Float64 {
+    public fn fill_ratio(&self) -> Float64 {
         if self.pgsize == 0 { return 0.0 as Float64; }
         (self.payload as Float64) / (self.pgsize as Float64)
     }
 
     /// Bytes of overhead (page-header + cell-pointer array) =
     /// pgsize - payload - unused.
-    pub fn overhead(&self) -> Int {
+    public fn overhead(&self) -> Int {
         let used = self.payload + self.unused;
         if used > self.pgsize { 0 } else { self.pgsize - used }
     }
@@ -111,11 +111,11 @@ public fn dbstat_table_new() -> DbStatTable { DbStatTable { rows: List.new() } }
 implement DbStatTable {
     public fn len(&self) -> Int { self.rows.len() }
 
-    pub fn add(&mut self, r: DbStatRow) { self.rows.push(r); }
+    public fn add(&mut self, r: DbStatRow) { self.rows.push(r); }
 
     /// Total bytes of payload across every page — used by integrity
     /// checks to compute live data ratio.
-    pub fn total_payload(&self) -> Int64 {
+    public fn total_payload(&self) -> Int64 {
         let mut sum: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < self.rows.len() {
@@ -125,7 +125,7 @@ implement DbStatTable {
         sum
     }
 
-    pub fn total_unused(&self) -> Int64 {
+    public fn total_unused(&self) -> Int64 {
         let mut sum: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < self.rows.len() {
@@ -135,7 +135,7 @@ implement DbStatTable {
         sum
     }
 
-    pub fn page_count_for_kind(&self, want: &PageType) -> Int {
+    public fn page_count_for_kind(&self, want: &PageType) -> Int {
         let want_text = page_type_text(want);
         let mut n: Int = 0;
         let mut i: Int = 0;

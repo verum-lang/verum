@@ -235,7 +235,7 @@ implement ChannelSink {
         self.notify.notify_all();
     }
 
-    pub fn channel(&self) -> Text { self.channel.clone() }
+    public fn channel(&self) -> Text { self.channel.clone() }
 }
 
 // -----------------------------------------------------------------------------

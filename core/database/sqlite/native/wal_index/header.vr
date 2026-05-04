@@ -68,17 +68,17 @@ public fn header_default(page_size: Int) -> WalIndexHeader {
 }
 
 implement WalIndexHeader {
-    pub fn bump_change_counter(&mut self) {
+    public fn bump_change_counter(&mut self) {
         self.change_counter = self.change_counter + 1;
     }
 
-    pub fn note_committed_frame(&mut self, frame_idx: Int, db_size_after: Int) {
+    public fn note_committed_frame(&mut self, frame_idx: Int, db_size_after: Int) {
         if frame_idx > self.mx_frame { self.mx_frame = frame_idx; }
         if db_size_after > 0 { self.n_page = db_size_after; }
     }
 
     /// True iff the header has the layout-version we recognise.
-    pub fn is_version_supported(&self) -> Bool { self.version == 3007000 }
+    public fn is_version_supported(&self) -> Bool { self.version == 3007000 }
 }
 
 // -----------------------------------------------------------------------------

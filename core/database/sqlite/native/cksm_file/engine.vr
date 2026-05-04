@@ -37,19 +37,19 @@ public fn new_engine() -> CksmEngine {
 }
 
 implement CksmEngine {
-    pub fn set_reserve_bytes(&mut self, n: Int) -> Bool {
+    public fn set_reserve_bytes(&mut self, n: Int) -> Bool {
         if n < 0 || n > 255 { return false; }
         self.reserve_bytes = n;
         true
     }
 
-    pub fn checksumming_enabled(&self) -> Bool {
+    public fn checksumming_enabled(&self) -> Bool {
         self.reserve_bytes >= 8
     }
 
     /// Drive a verify pass. Returns the sqlite3 result code:
     /// SQLITE_OK (0) on success, SQLITE_CORRUPT (11) on mismatch.
-    pub fn sqlite3_file_control_cksm_file(
+    public fn sqlite3_file_control_cksm_file(
         &mut self,
         total_pages: Int64,
         corrupt_pages: List<Int64>,

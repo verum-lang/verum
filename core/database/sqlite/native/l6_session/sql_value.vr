@@ -106,7 +106,7 @@ public fn column_type_code(t: &ColumnType) -> Int {
 /// Lift a Register into a SqlValue.  Cloning Text/Blob payloads is
 /// necessary because the SqlValue outlives the register (which lives
 /// in the per-step VdbeState and is overwritten on the next step).
-pub fn sql_value_from_register(r: &Register) -> SqlValue {
+public fn sql_value_from_register(r: &Register) -> SqlValue {
     match r {
         RNull        => VNull,
         RInt(i)      => VInt(i),
@@ -119,7 +119,7 @@ pub fn sql_value_from_register(r: &Register) -> SqlValue {
 
 /// Lower a SqlValue into a Register — used by the bind path so
 /// callers can hand a SqlValue straight to `bind_value`.
-pub fn register_from_sql_value(v: &SqlValue) -> Register {
+public fn register_from_sql_value(v: &SqlValue) -> Register {
     match v {
         VNull        => RNull,
         VInt(i)      => RInt(i),
@@ -134,7 +134,7 @@ pub fn register_from_sql_value(v: &SqlValue) -> Register {
 // -----------------------------------------------------------------------------
 
 /// `value_type(v)` — equivalent to `sqlite3_column_type(stmt, n)`.
-pub fn value_type(v: &SqlValue) -> ColumnType {
+public fn value_type(v: &SqlValue) -> ColumnType {
     match v {
         VNull    => CtNull,
         VInt(_)  => CtInt,
@@ -150,7 +150,7 @@ pub fn value_type(v: &SqlValue) -> ColumnType {
 
 /// Coerce to Int64 per SQLite §17.5.  Total — never panics, never
 /// returns Result; parse failures yield 0.
-pub fn value_to_int(v: &SqlValue) -> Int64 {
+public fn value_to_int(v: &SqlValue) -> Int64 {
     match v {
         VNull    => 0_i64,
         VInt(i)  => i,
@@ -161,7 +161,7 @@ pub fn value_to_int(v: &SqlValue) -> Int64 {
 }
 
 /// Coerce to Float64 per SQLite §17.5.  Same totality contract.
-pub fn value_to_real(v: &SqlValue) -> Float64 {
+public fn value_to_real(v: &SqlValue) -> Float64 {
     match v {
         VNull    => 0.0,
         VInt(i)  => i as Float64,
@@ -174,7 +174,7 @@ pub fn value_to_real(v: &SqlValue) -> Float64 {
 /// Coerce to Text per SQLite §17.5.  NULL → "" (C API returns NULL
 /// pointer; we return the empty Text — equivalent observable for
 /// Verum callers since there's no null-Text distinction).
-pub fn value_to_text(v: &SqlValue) -> Text {
+public fn value_to_text(v: &SqlValue) -> Text {
     match v {
         VNull    => "".clone(),
         VInt(i)  => int64_to_text(i),
@@ -186,7 +186,7 @@ pub fn value_to_text(v: &SqlValue) -> Text {
 
 /// Coerce to Blob per SQLite §17.5.  TEXT → UTF-8 bytes (the
 /// canonical mapping); INT/REAL/NULL → empty.
-pub fn value_to_blob(v: &SqlValue) -> List<Byte> {
+public fn value_to_blob(v: &SqlValue) -> List<Byte> {
     match v {
         VNull    => List.new(),
         VInt(_)  => List.new(),
@@ -199,7 +199,7 @@ pub fn value_to_blob(v: &SqlValue) -> List<Byte> {
 /// `value_bytes(v)` — `sqlite3_column_bytes`.  Returns the byte
 /// length of the value's storage representation (TEXT → UTF-8 byte
 /// count; BLOB → blob length; INT/REAL/NULL → 0).
-pub fn value_bytes(v: &SqlValue) -> Int {
+public fn value_bytes(v: &SqlValue) -> Int {
     match v {
         VNull    => 0,
         VInt(_)  => 0,
@@ -215,14 +215,14 @@ pub fn value_bytes(v: &SqlValue) -> Int {
 /// (Verum's stdlib `encode_utf16` returns `List<Int>` of the same
 /// shape).  Surrogate pairs are emitted naturally for code points
 /// > U+FFFF.
-pub fn value_to_text16(v: &SqlValue) -> List<Int> {
+public fn value_to_text16(v: &SqlValue) -> List<Int> {
     let t = value_to_text(v);
     t.encode_utf16()
 }
 
 /// `value_bytes16(v)` — `sqlite3_column_bytes16`.  Number of BYTES
 /// the UTF-16 encoding occupies (= 2 × number of code units).
-pub fn value_bytes16(v: &SqlValue) -> Int {
+public fn value_bytes16(v: &SqlValue) -> Int {
     let units = value_to_text16(v);
     units.len() * 2
 }
@@ -232,16 +232,16 @@ pub fn value_bytes16(v: &SqlValue) -> Int {
 // without going through Register
 // -----------------------------------------------------------------------------
 
-pub fn sql_null() -> SqlValue { VNull }
-pub fn sql_int(i: Int64) -> SqlValue { VInt(i) }
-pub fn sql_real(x: Float64) -> SqlValue { VReal(x) }
-pub fn sql_text(t: Text) -> SqlValue { VText(t) }
-pub fn sql_blob(b: List<Byte>) -> SqlValue { VBlob(b) }
+public fn sql_null() -> SqlValue { VNull }
+public fn sql_int(i: Int64) -> SqlValue { VInt(i) }
+public fn sql_real(x: Float64) -> SqlValue { VReal(x) }
+public fn sql_text(t: Text) -> SqlValue { VText(t) }
+public fn sql_blob(b: List<Byte>) -> SqlValue { VBlob(b) }
 
 /// Build a SqlValue from UTF-16 code units — `sqlite3_bind_text16`
 /// analogue.  Returns VNull on decode failure (mismatched surrogate
 /// pair or invalid sequence).
-pub fn sql_text_from_utf16(units: &List<Int>) -> SqlValue {
+public fn sql_text_from_utf16(units: &List<Int>) -> SqlValue {
     let slice = units.as_slice();
     match Text.from_utf16(slice) {
         Ok(t)  => VText(t),

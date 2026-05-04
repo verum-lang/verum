@@ -51,14 +51,14 @@ mount core.database.sqlite.native.l6_session.schema_cache.table_meta_from_create
 // SchemaRowKind — discriminator from the type column
 // -----------------------------------------------------------------------------
 
-pub type SchemaRowKind is
+public type SchemaRowKind is
       SrkTable
     | SrkIndex
     | SrkView
     | SrkTrigger
     | SrkUnknown(Text);
 
-pub fn classify_row_type(type_text: &Text) -> SchemaRowKind {
+public fn classify_row_type(type_text: &Text) -> SchemaRowKind {
     if type_text == "table" { return SrkTable; }
     if type_text == "index" { return SrkIndex; }
     if type_text == "view"  { return SrkView; }
@@ -70,7 +70,7 @@ pub fn classify_row_type(type_text: &Text) -> SchemaRowKind {
 // SchemaRow — the typed view of one sqlite_schema row
 // -----------------------------------------------------------------------------
 
-pub type SchemaRow is {
+public type SchemaRow is {
     kind: SchemaRowKind,
     name: Text,
     tbl_name: Text,
@@ -78,7 +78,7 @@ pub type SchemaRow is {
     sql: Text,
 }
 
-pub type SchemaRowError is
+public type SchemaRowError is
       MissingColumn(Text)
     | WrongColumnType(column: Text, expected: Text)
     | UnknownRowKind(Text);
@@ -96,7 +96,7 @@ implement Display for SchemaRowError {
 /// Decode a 5-element register list into a typed SchemaRow.
 /// Layout: [type, name, tbl_name, rootpage, sql].  Missing columns
 /// or wrong types return `Err(SchemaRowError)`.
-pub fn decode_schema_row(row: &List<Register>) -> Result<SchemaRow, SchemaRowError> {
+public fn decode_schema_row(row: &List<Register>) -> Result<SchemaRow, SchemaRowError> {
     if row.len() < 5 {
         return Err(MissingColumn("sqlite_schema row needs 5 columns".clone()));
     }
@@ -146,7 +146,7 @@ pub fn decode_schema_row(row: &List<Register>) -> Result<SchemaRow, SchemaRowErr
 /// if the SQL fails to parse OR is not a CREATE TABLE statement
 /// (views legitimately fall here — `parse_one` handles only DML
 /// + CREATE TABLE / CREATE INDEX in v1).
-pub fn schema_row_to_table_meta(
+public fn schema_row_to_table_meta(
     row: &SchemaRow,
     schema_name: &Text,
 ) -> Result<TableMeta, SessionSchemaError> {
@@ -219,7 +219,7 @@ fn view_meta_default(schema_name: &Text, name: &Text, rootpage: Int) -> TableMet
 
 /// Convert a decoded SchemaRow into an IndexMeta when its kind is
 /// `SrkIndex`.
-pub fn schema_row_to_index_meta(
+public fn schema_row_to_index_meta(
     row: &SchemaRow,
     schema_name: &Text,
 ) -> Result<IndexMeta, SessionSchemaError> {
@@ -241,7 +241,7 @@ pub fn schema_row_to_index_meta(
 // Bulk loader — populate SchemaCache from a stream of rows
 // -----------------------------------------------------------------------------
 
-pub type LoadReport is {
+public type LoadReport is {
     tables_loaded: Int,
     indexes_loaded: Int,
     rows_skipped: Int,
@@ -252,7 +252,7 @@ pub type LoadReport is {
 /// `register_table` / `register_index` which both reject duplicates
 /// — callers reset the cache via `invalidate_schema` first when
 /// reloading after DDL.
-pub fn load_schema_from_rows(
+public fn load_schema_from_rows(
     cache: &mut SchemaCache,
     schema_name: &Text,
     rows: &List<List<Register>>,

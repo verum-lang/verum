@@ -42,31 +42,31 @@ public fn new_engine(readonly: Bool) -> VersionEngine {
 }
 
 implement VersionEngine {
-    pub fn schema_version(&self) -> Int { self.counters.schema_version }
-    pub fn user_version(&self) -> Int { self.counters.user_version }
-    pub fn application_id(&self) -> Int { self.counters.application_id }
+    public fn schema_version(&self) -> Int { self.counters.schema_version }
+    public fn user_version(&self) -> Int { self.counters.user_version }
+    public fn application_id(&self) -> Int { self.counters.application_id }
 
     /// Called by the DDL commit path — bumps schema_version. Returns
     /// the new value. No-op (and returns unchanged value) when read-only.
-    pub fn bump_schema_version(&mut self) -> Int {
+    public fn bump_schema_version(&mut self) -> Int {
         if self.readonly { return self.counters.schema_version; }
         self.counters.schema_version = self.counters.schema_version + 1;
         self.ddl_commits = self.ddl_commits + 1_i64;
         self.counters.schema_version
     }
 
-    pub fn set_user_version(&mut self, v: Int) -> SchemaVersionSetOutcome {
+    public fn set_user_version(&mut self, v: Int) -> SchemaVersionSetOutcome {
         if self.readonly { return SoReadOnly; }
         self.counters.user_version = v;
         SoOk
     }
 
-    pub fn set_application_id(&mut self, id: Int) -> SchemaVersionSetOutcome {
+    public fn set_application_id(&mut self, id: Int) -> SchemaVersionSetOutcome {
         if self.readonly { return SoReadOnly; }
         self.counters.application_id = id;
         SoOk
     }
 
-    pub fn upgrade_writable(&mut self) { self.readonly = false; }
-    pub fn downgrade_readonly(&mut self) { self.readonly = true; }
+    public fn upgrade_writable(&mut self) { self.readonly = false; }
+    public fn downgrade_readonly(&mut self) { self.readonly = true; }
 }

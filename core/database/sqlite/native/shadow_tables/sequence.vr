@@ -50,7 +50,7 @@ implement SequenceTable {
     /// Issue the next AUTOINCREMENT value for `table`. The value is
     /// `max(observed_max, last_seq) + 1`. Updates the row in place
     /// (creates one if missing).
-    pub fn next_for(&mut self, table: &Text, observed_max: Int64) -> Int64 {
+    public fn next_for(&mut self, table: &Text, observed_max: Int64) -> Int64 {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].name == *table {
@@ -72,7 +72,7 @@ implement SequenceTable {
 
     /// Read the current high-water mark for a table; `None` if the
     /// table has never received an AUTOINCREMENT value.
-    pub fn current_seq(&self, table: &Text) -> Maybe<Int64> {
+    public fn current_seq(&self, table: &Text) -> Maybe<Int64> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].name == *table { return Some(self.rows[i].seq); }
@@ -82,7 +82,7 @@ implement SequenceTable {
     }
 
     /// Drop the row for `table` (called when the table is dropped).
-    pub fn drop_for(&mut self, table: &Text) -> Bool {
+    public fn drop_for(&mut self, table: &Text) -> Bool {
         let mut new_rows: List<SequenceRow> = List.new();
         let mut found = false;
         let mut i: Int = 0;

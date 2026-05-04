@@ -60,12 +60,12 @@ public fn mask_all() -> TraceMask {
 }
 
 implement TraceMask {
-    pub fn include(mut self, e: SqliteTraceEvent) -> TraceMask {
+    public fn include(mut self, e: SqliteTraceEvent) -> TraceMask {
         self.bits = self.bits | event_bit(&e);
         self
     }
 
-    pub fn exclude(mut self, e: SqliteTraceEvent) -> TraceMask {
+    public fn exclude(mut self, e: SqliteTraceEvent) -> TraceMask {
         self.bits = self.bits & !event_bit(&e);
         self
     }

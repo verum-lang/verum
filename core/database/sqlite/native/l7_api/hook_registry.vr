@@ -67,7 +67,7 @@ public type HookKind is
     | HkAuthorizer
     | HkTrace;
 
-pub fn hook_kind_name(k: &HookKind) -> Text {
+public fn hook_kind_name(k: &HookKind) -> Text {
     match k {
         HkUpdate     => "update".clone(),
         HkPreUpdate  => "pre_update".clone(),
@@ -110,11 +110,11 @@ public type HookHandle is {
     kind: HookKind,
 };
 
-pub fn hook_handle_invalid() -> HookHandle {
+public fn hook_handle_invalid() -> HookHandle {
     HookHandle { id: -1, kind: HkUpdate }
 }
 
-pub fn hook_handle_is_valid(h: &HookHandle) -> Bool {
+public fn hook_handle_is_valid(h: &HookHandle) -> Bool {
     h.id >= 0
 }
 
@@ -204,7 +204,7 @@ public type affine HookHandleRegistry is {
     n_active: Int,
 };
 
-pub fn hook_handle_registry_new() -> HookHandleRegistry {
+public fn hook_handle_registry_new() -> HookHandleRegistry {
     HookHandleRegistry {
         slots: List.new(),
         next_id: 0,
@@ -213,8 +213,8 @@ pub fn hook_handle_registry_new() -> HookHandleRegistry {
 }
 
 implement HookHandleRegistry {
-    pub fn active_count(&self) -> Int { self.n_active }
-    pub fn capacity(&self) -> Int { self.slots.len() }
+    public fn active_count(&self) -> Int { self.n_active }
+    public fn capacity(&self) -> Int { self.slots.len() }
 
     /// Generic register — internal helper.  Returns a handle whose
     /// `id` indexes into `slots`.  All public `register_*` methods
@@ -233,7 +233,7 @@ implement HookHandleRegistry {
     /// to a live slot; `false` if it was already unregistered or
     /// out of range.  Does NOT shift other slots (handle IDs stay
     /// stable across unregister-of-other-slots).
-    pub fn unregister(&mut self, h: &HookHandle) -> Bool {
+    public fn unregister(&mut self, h: &HookHandle) -> Bool {
         if h.id < 0 || h.id >= self.slots.len() { return false; }
         let cur = &self.slots[h.id];
         match cur {
@@ -261,7 +261,7 @@ implement HookHandleRegistry {
     /// `true` iff the handle still references a live slot.  FFI
     /// callers can probe this before an `unregister` to avoid the
     /// false return on already-freed handles.
-    pub fn is_live(&self, h: &HookHandle) -> Bool {
+    public fn is_live(&self, h: &HookHandle) -> Bool {
         if h.id < 0 || h.id >= self.slots.len() { return false; }
         let cur = &self.slots[h.id];
         match cur {
@@ -274,39 +274,39 @@ implement HookHandleRegistry {
     // register_* — one entry per hook surface
     // -------------------------------------------------------------------------
 
-    pub fn register_update(&mut self, f: UpdateHookFn) -> HookHandle {
+    public fn register_update(&mut self, f: UpdateHookFn) -> HookHandle {
         self.register_internal(HsUpdate(f))
     }
 
-    pub fn register_pre_update(&mut self, f: UpdateHookFn) -> HookHandle {
+    public fn register_pre_update(&mut self, f: UpdateHookFn) -> HookHandle {
         self.register_internal(HsPreUpdate(f))
     }
 
-    pub fn register_commit(&mut self, f: CommitHookFn) -> HookHandle {
+    public fn register_commit(&mut self, f: CommitHookFn) -> HookHandle {
         self.register_internal(HsCommit(f))
     }
 
-    pub fn register_rollback(&mut self, f: RollbackHookFn) -> HookHandle {
+    public fn register_rollback(&mut self, f: RollbackHookFn) -> HookHandle {
         self.register_internal(HsRollback(f))
     }
 
-    pub fn register_wal(&mut self, f: WalHookFn) -> HookHandle {
+    public fn register_wal(&mut self, f: WalHookFn) -> HookHandle {
         self.register_internal(HsWal(f))
     }
 
-    pub fn register_busy(&mut self, f: BusyHandlerFn) -> HookHandle {
+    public fn register_busy(&mut self, f: BusyHandlerFn) -> HookHandle {
         self.register_internal(HsBusy(f))
     }
 
-    pub fn register_progress(&mut self, f: ProgressHandlerFn) -> HookHandle {
+    public fn register_progress(&mut self, f: ProgressHandlerFn) -> HookHandle {
         self.register_internal(HsProgress(f))
     }
 
-    pub fn register_authorizer(&mut self, f: AuthorizerFn) -> HookHandle {
+    public fn register_authorizer(&mut self, f: AuthorizerFn) -> HookHandle {
         self.register_internal(HsAuthorizer(f))
     }
 
-    pub fn register_trace(&mut self, f: TraceHookFn) -> HookHandle {
+    public fn register_trace(&mut self, f: TraceHookFn) -> HookHandle {
         self.register_internal(HsTrace(f))
     }
 
@@ -318,7 +318,7 @@ implement HookHandleRegistry {
     /// receive the same signature — distinct slots so the L4 VDBE
     /// can choose which one to fire from its Insert/Update/Delete
     /// opcodes vs the pre-update interceptor).
-    pub fn fire_update(&self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64) {
+    public fn fire_update(&self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64) {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
@@ -332,7 +332,7 @@ implement HookHandleRegistry {
         }
     }
 
-    pub fn fire_pre_update(&self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64) {
+    public fn fire_pre_update(&self, op: ExtUpdateOp, db: &Text, table: &Text, rowid: Int64) {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
@@ -349,7 +349,7 @@ implement HookHandleRegistry {
     /// Fire all commit hooks; returns `true` iff ANY hook vetoed.
     /// Matches SQLite semantics: any non-zero return from any
     /// commit_hook turns the commit into a forced rollback.
-    pub fn fire_commit(&self) -> Bool {
+    public fn fire_commit(&self) -> Bool {
         let mut vetoed: Bool = false;
         let mut i: Int = 0;
         while i < self.slots.len() {
@@ -367,7 +367,7 @@ implement HookHandleRegistry {
         vetoed
     }
 
-    pub fn fire_rollback(&self) {
+    public fn fire_rollback(&self) {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
@@ -384,7 +384,7 @@ implement HookHandleRegistry {
     /// Fire all WAL hooks; returns the FIRST non-zero return code
     /// (or 0 if all hooks returned 0).  Matches SQLite's
     /// "first error wins" convention for wal_hook.
-    pub fn fire_wal(&self, db_name: &Text, n_frames: Int) -> Int {
+    public fn fire_wal(&self, db_name: &Text, n_frames: Int) -> Int {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
@@ -405,7 +405,7 @@ implement HookHandleRegistry {
     /// Fire all busy handlers; returns `true` iff ALL hooks said
     /// retry (any single "give up" turns into give-up).  Matches
     /// SQLite's conservative retry semantics.
-    pub fn fire_busy(&self, retry_count: Int) -> Bool {
+    public fn fire_busy(&self, retry_count: Int) -> Bool {
         let mut have_any: Bool = false;
         let mut all_retry: Bool = true;
         let mut i: Int = 0;
@@ -428,7 +428,7 @@ implement HookHandleRegistry {
     /// Fire all progress handlers; returns `true` iff ANY hook
     /// requested interrupt.  Matches SQLite: any non-zero return
     /// from any progress_handler aborts the running statement.
-    pub fn fire_progress(&self) -> Bool {
+    public fn fire_progress(&self) -> Bool {
         let mut interrupt: Bool = false;
         let mut i: Int = 0;
         while i < self.slots.len() {
@@ -450,7 +450,7 @@ implement HookHandleRegistry {
     /// (Deny > Ignore > Allow).  Pre-fix the protocol API only
     /// supported one authorizer; the multi-subscriber registry
     /// composes them by taking the strictest verdict.
-    pub fn fire_authorize(&self, action: &AuthAction) -> AuthDecision {
+    public fn fire_authorize(&self, action: &AuthAction) -> AuthDecision {
         let mut decision: AuthDecision = AdAllow;
         let mut i: Int = 0;
         while i < self.slots.len() {
@@ -469,7 +469,7 @@ implement HookHandleRegistry {
         decision
     }
 
-    pub fn fire_trace(&self, sql: &Text) {
+    public fn fire_trace(&self, sql: &Text) {
         let mut i: Int = 0;
         while i < self.slots.len() {
             match &self.slots[i] {
@@ -485,7 +485,7 @@ implement HookHandleRegistry {
 
     /// Per-kind active count — useful for diagnostics + the
     /// `has_*_hook` shorthand functions in `l7_api/hooks.vr`.
-    pub fn active_count_of(&self, kind: &HookKind) -> Int {
+    public fn active_count_of(&self, kind: &HookKind) -> Int {
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < self.slots.len() {

@@ -35,11 +35,11 @@ public fn new_engine(spec: ReturningSpec, table_columns: Int) -> ReturningEngine
 implement ReturningEngine {
     /// Record one emitted row. Returns false if the supplied row's
     /// column count doesn't match the expected projection.
-    pub fn emit(&mut self, row: &ReturningRow) -> Bool {
+    public fn emit(&mut self, row: &ReturningRow) -> Bool {
         if row.cells.len() != self.column_count { return false; }
         self.rows_yielded = self.rows_yielded + 1_i64;
         true
     }
 
-    pub fn is_star_expansion(&self) -> Bool { self.spec.has_star }
+    public fn is_star_expansion(&self) -> Bool { self.spec.has_star }
 }

@@ -89,21 +89,21 @@ implement ParamIndex {
     public fn count(&self) -> Int { self.specs.len() }
 
     /// Add a `?` (anonymous). The new index is `count() + 1`.
-    pub fn add_anonymous(&mut self) -> Int {
+    public fn add_anonymous(&mut self) -> Int {
         let idx = self.specs.len() + 1;
         self.specs.push(param_spec(idx, PfAnonymous));
         idx
     }
 
     /// Add a `?N` (explicit numbered).
-    pub fn add_numbered(&mut self, n: Int) {
+    public fn add_numbered(&mut self, n: Int) {
         self.specs.push(param_spec(n, PfNumbered(n)));
     }
 
     /// Add a named parameter; if the name was already seen, return its
     /// previously-assigned index (SQLite's behaviour: `:foo` mentioned
     /// twice gets ONE binding slot).
-    pub fn add_named(&mut self, form: ParamForm) -> Int {
+    public fn add_named(&mut self, form: ParamForm) -> Int {
         match form_name(&form) {
             Some(name) => {
                 match self.find_by_name(&name) {
@@ -123,7 +123,7 @@ implement ParamIndex {
     }
 
     /// Look up by 1-based index.
-    pub fn lookup(&self, index: Int) -> Maybe<BindParamSpec> {
+    public fn lookup(&self, index: Int) -> Maybe<BindParamSpec> {
         let mut i: Int = 0;
         while i < self.specs.len() {
             if self.specs[i].index == index {
@@ -135,7 +135,7 @@ implement ParamIndex {
         None
     }
 
-    pub fn find_by_name(&self, full_name: &Text) -> Maybe<BindParamSpec> {
+    public fn find_by_name(&self, full_name: &Text) -> Maybe<BindParamSpec> {
         let mut i: Int = 0;
         while i < self.specs.len() {
             match form_name(&self.specs[i].form) {
@@ -151,7 +151,7 @@ implement ParamIndex {
     }
 
     /// Highest registered index — equivalent to sqlite3_bind_parameter_count.
-    pub fn highest_index(&self) -> Int {
+    public fn highest_index(&self) -> Int {
         let mut max: Int = 0;
         let mut i: Int = 0;
         while i < self.specs.len() {

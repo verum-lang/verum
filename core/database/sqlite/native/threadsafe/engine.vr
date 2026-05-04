@@ -41,13 +41,13 @@ fn rank(m: &TsMode) -> Int {
 }
 
 implement ThreadsafeEngine {
-    pub fn request(&mut self, requested: TsMode) -> Bool {
+    public fn request(&mut self, requested: TsMode) -> Bool {
         if rank(&requested) > rank(&self.compile_time) { return false; }
         self.effective = requested;
         true
     }
 
-    pub fn effective_numeric(&self) -> Int {
+    public fn effective_numeric(&self) -> Int {
         mode_numeric(&self.effective)
     }
 }

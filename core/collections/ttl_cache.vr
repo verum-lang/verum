@@ -171,8 +171,8 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
         self.order = [];
     }
 
-    pub fn len(&self) -> Int { self.store.len() }
-    pub fn is_empty(&self) -> Bool { self.store.len() == 0 }
+    public fn len(&self) -> Int { self.store.len() }
+    public fn is_empty(&self) -> Bool { self.store.len() == 0 }
 
     public fn stats(&self) -> TtlCacheStats {
         TtlCacheStats {

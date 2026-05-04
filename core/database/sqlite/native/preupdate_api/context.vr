@@ -33,30 +33,30 @@ public fn new_context(op: UpdateOp, n_columns: Int) -> PreupdateContext {
 }
 
 implement PreupdateContext {
-    pub fn enter_nested(&mut self) {
+    public fn enter_nested(&mut self) {
         self.depth = self.depth + 1;
     }
 
-    pub fn leave_nested(&mut self) {
+    public fn leave_nested(&mut self) {
         if self.depth > 0 { self.depth = self.depth - 1; }
     }
 
-    pub fn set_blobwrite(&mut self, column_index: Int) {
+    public fn set_blobwrite(&mut self, column_index: Int) {
         self.blobwrite_column = column_index;
     }
 
-    pub fn clear_blobwrite(&mut self) {
+    public fn clear_blobwrite(&mut self) {
         self.blobwrite_column = -1;
     }
 
-    pub fn has_old_values(&self) -> Bool {
+    public fn has_old_values(&self) -> Bool {
         match &self.op {
             UoUpdate | UoDelete => true,
             UoInsert => false,
         }
     }
 
-    pub fn has_new_values(&self) -> Bool {
+    public fn has_new_values(&self) -> Bool {
         match &self.op {
             UoInsert | UoUpdate => true,
             UoDelete => false,

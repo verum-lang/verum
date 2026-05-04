@@ -56,7 +56,7 @@ implement WalIndexState {
 
     /// Register a new WAL frame: bump headers + index it in the
     /// appropriate hash group.
-    pub fn register_frame(&mut self, frame_idx: Int, page_no: Int, db_size_after: Int) {
+    public fn register_frame(&mut self, frame_idx: Int, page_no: Int, db_size_after: Int) {
         let group_idx = self.ensure_group_for(frame_idx);
         let pos_in_group = frame_position_in_group(frame_idx);
         self.groups[group_idx].insert(pos_in_group, page_no);
@@ -69,7 +69,7 @@ implement WalIndexState {
     /// Find the most recent frame that wrote `page_no`. Walks groups
     /// in REVERSE order (latest group first) to ensure the answer is
     /// the most-recent occurrence. Returns frame_idx (1-based).
-    pub fn lookup_page(&self, page_no: Int) -> Maybe<Int> {
+    public fn lookup_page(&self, page_no: Int) -> Maybe<Int> {
         let mut g: Int = self.groups.len() - 1;
         while g >= 0 {
             match self.groups[g].lookup(page_no) {
@@ -86,7 +86,7 @@ implement WalIndexState {
 
     /// Sync the backup header to match the primary (called after an
     /// atomic update completes).
-    pub fn sync_backup(&mut self) {
+    public fn sync_backup(&mut self) {
         self.backup_header = WalIndexHeader {
             version: self.primary_header.version,
             change_counter: self.primary_header.change_counter,
@@ -104,7 +104,7 @@ implement WalIndexState {
         };
     }
 
-    pub fn dual_copies_consistent(&self) -> Bool {
+    public fn dual_copies_consistent(&self) -> Bool {
         dual_copies_agree(&self.primary_header, &self.backup_header)
     }
 }

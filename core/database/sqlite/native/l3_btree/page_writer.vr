@@ -63,23 +63,23 @@ mount core.database.sqlite.native.l3_btree.page_layout.{
 /// system uncoupled from per-shape cell layout — Split / Merge /
 /// Rotate operate on the cell list as a sequence; key comparison
 /// uses the existing `parse_cell` when needed.
-pub type MaterializedCell is {
+public type MaterializedCell is {
     raw_bytes: List<Byte>,
 }
 
-pub fn materialized_cell(bytes: List<Byte>) -> MaterializedCell {
+public fn materialized_cell(bytes: List<Byte>) -> MaterializedCell {
     MaterializedCell { raw_bytes: bytes }
 }
 
 implement MaterializedCell {
-    pub fn size(&self) -> Int { self.raw_bytes.len() }
+    public fn size(&self) -> Int { self.raw_bytes.len() }
 }
 
 // -----------------------------------------------------------------------------
 // MaterializedPage — header + ordered cell list + right_ptr
 // -----------------------------------------------------------------------------
 
-pub type MaterializedPage is {
+public type MaterializedPage is {
     kind: PageKind,
     cells: List<MaterializedCell>,
     /// Right child pointer (interior pages only).  0 for leaves.
@@ -92,7 +92,7 @@ pub type MaterializedPage is {
     db_header_offset: Int,
 }
 
-pub fn materialized_page(
+public fn materialized_page(
     kind: PageKind,
     right_ptr: UInt32,
     db_header_offset: Int,
@@ -106,9 +106,9 @@ pub fn materialized_page(
 }
 
 implement MaterializedPage {
-    pub fn cell_count(&self) -> Int { self.cells.len() }
+    public fn cell_count(&self) -> Int { self.cells.len() }
 
-    pub fn total_cell_bytes(&self) -> Int {
+    public fn total_cell_bytes(&self) -> Int {
         let mut sum: Int = 0;
         let mut i: Int = 0;
         while i < self.cells.len() {
@@ -121,16 +121,16 @@ implement MaterializedPage {
     /// Storage cost of `mp` if reserialized: header + 2·cell_count
     /// (pointer array) + sum of cell payloads.  Used by
     /// `has_room_for` checks during balance planning.
-    pub fn storage_cost(&self) -> Int {
+    public fn storage_cost(&self) -> Int {
         let hdr = page_kind_header_size(self.kind);
         hdr + 2 * self.cells.len() + self.total_cell_bytes()
     }
 
-    pub fn append_cell(&mut self, cell: MaterializedCell) {
+    public fn append_cell(&mut self, cell: MaterializedCell) {
         self.cells.push(cell);
     }
 
-    pub fn insert_cell_at(&mut self, idx: Int, cell: MaterializedCell) {
+    public fn insert_cell_at(&mut self, idx: Int, cell: MaterializedCell) {
         if idx >= self.cells.len() {
             self.cells.push(cell);
             return;
@@ -151,7 +151,7 @@ implement MaterializedPage {
         let _ = cell;
     }
 
-    pub fn remove_cell_at(&mut self, idx: Int) -> Maybe<MaterializedCell> {
+    public fn remove_cell_at(&mut self, idx: Int) -> Maybe<MaterializedCell> {
         if idx < 0 || idx >= self.cells.len() { return None; }
         let removed = clone_cell(&self.cells[idx]);
         let mut new_cells: List<MaterializedCell> = List.new();
@@ -168,7 +168,7 @@ implement MaterializedPage {
 
     /// Set right_ptr (interior pages).  No-op for leaves but the
     /// caller is expected to pass right_ptr=0 in that case.
-    pub fn set_right_ptr(&mut self, p: UInt32) {
+    public fn set_right_ptr(&mut self, p: UInt32) {
         self.right_ptr = p;
     }
 }
@@ -185,7 +185,7 @@ implement MaterializedPage {
 ///   2. Parse the cell-pointer array (N two-byte offsets).
 ///   3. For each pointer: parse the cell to find its size, then
 ///      copy the cell's bytes into a MaterializedCell.
-pub fn materialize_page(
+public fn materialize_page(
     bytes: &List<Byte>,
     db_header_offset: Int,
 ) -> Result<MaterializedPage, PageLayoutError> {
@@ -281,7 +281,7 @@ fn cell_size_table_interior(bytes: &List<Byte>, cell_off: Int) -> Int {
 /// Returns the new buffer + the cell_content_start offset (caller
 /// rarely needs it, but it's the single source of truth for
 /// "where did the packed content area begin").
-pub fn serialize_page(
+public fn serialize_page(
     mp: &MaterializedPage,
     page_size: Int,
 ) -> Result<List<Byte>, PageLayoutError> {

@@ -33,7 +33,7 @@ public fn recommended_safe_keep() -> KeepList {
 }
 
 implement KeepList {
-    pub fn contains(&self, name: &Text) -> Bool {
+    public fn contains(&self, name: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.names.len() {
             if self.names.get(i) == name { return true; }
@@ -42,11 +42,11 @@ implement KeepList {
         false
     }
 
-    pub fn add(&mut self, name: Text) -> Bool {
+    public fn add(&mut self, name: Text) -> Bool {
         if self.contains(&name) { return false; }
         self.names.push(name);
         true
     }
 
-    pub fn len(&self) -> Int { self.names.len() }
+    public fn len(&self) -> Int { self.names.len() }
 }

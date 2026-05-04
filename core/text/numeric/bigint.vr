@@ -99,7 +99,8 @@ public type BigInt is {
 public type BigIntError is
       ParseEmpty
     | ParseInvalidChar { byte_offset: Int, byte: Int }
-    | ParseInvalidShape { reason: Text };
+    | ParseInvalidShape { reason: Text }
+    | DivByZero;
 
 // =============================================================================
 // Constructors
@@ -195,6 +196,98 @@ implement BigInt {
         let result_sign = self.sign != other.sign;
         let prod = mul_magnitudes(&self.digits, &other.digits);
         BigInt { sign: result_sign, digits: prod }
+    }
+
+    /// Division with remainder.  Returns `(quotient, remainder)` such
+    /// that `self == quotient * other + remainder`.  Sign convention:
+    ///   * Quotient sign = sign(self) XOR sign(other) — standard
+    ///     multiplication-inverse rule.
+    ///   * Remainder sign = sign(self) — truncated-towards-zero
+    ///     division (consistent with C / Rust integer division;
+    ///     differs from mathematical Euclidean division which always
+    ///     yields a non-negative remainder).
+    ///
+    /// |self| < |other| ⇒ quotient=0, remainder=self.
+    ///
+    /// Algorithm:
+    ///   * Single-chunk divisor: simple long division (single-pass
+    ///     with running remainder, O(N) where N is dividend chunks).
+    ///   * Multi-chunk divisor: Knuth Algorithm D from TAOCP vol 2
+    ///     §4.3.1 — normalize, iterative quotient-digit estimation
+    ///     with multiplication-subtraction-and-add-back correction,
+    ///     denormalize remainder.  O(N×M) where N = dividend chunks
+    ///     and M = divisor chunks.
+    ///
+    /// Errors: `DivByZero` if `other` is zero.
+    public fn div_rem(&self, other: &BigInt) -> Result<(BigInt, BigInt), BigIntError> {
+        if other.is_zero() { return Err(BigIntError.DivByZero); }
+        if self.is_zero() {
+            return Ok((BigInt.zero(), BigInt.zero()));
+        }
+
+        let quot_sign = self.sign != other.sign;
+        let rem_sign = self.sign;
+
+        // |self| < |other| ⇒ quot=0, rem=self.
+        let mag_cmp = compare_magnitudes(&self.digits, &other.digits);
+        if matches_lt(mag_cmp) {
+            return Ok((
+                BigInt.zero(),
+                BigInt { sign: rem_sign, digits: clone_digits(&self.digits) },
+            ));
+        }
+
+        let n = other.digits.len() as Int;
+        if n == 1 {
+            // Single-chunk divisor — simple long division.
+            let (q_mag, r_chunk) = single_chunk_divmod(&self.digits, other.digits[0]);
+            let r_digits: List<Int> = if r_chunk == 0 {
+                List.new()
+            } else {
+                let mut d: List<Int> = List.new();
+                d.push(r_chunk);
+                d
+            };
+            let quot = if (q_mag.len() as Int) == 0 {
+                BigInt.zero()
+            } else {
+                BigInt { sign: quot_sign, digits: q_mag }
+            };
+            let rem = if (r_digits.len() as Int) == 0 {
+                BigInt.zero()
+            } else {
+                BigInt { sign: rem_sign, digits: r_digits }
+            };
+            return Ok((quot, rem));
+        }
+
+        // Multi-chunk divisor — Knuth Algorithm D.
+        let (q_mag, r_mag) = knuth_d(&self.digits, &other.digits);
+        let quot = if (q_mag.len() as Int) == 0 {
+            BigInt.zero()
+        } else {
+            BigInt { sign: quot_sign, digits: q_mag }
+        };
+        let rem = if (r_mag.len() as Int) == 0 {
+            BigInt.zero()
+        } else {
+            BigInt { sign: rem_sign, digits: r_mag }
+        };
+        Ok((quot, rem))
+    }
+
+    /// Quotient `self / other` (truncated towards zero).  Sugar for
+    /// `div_rem` discarding the remainder.
+    public fn div(&self, other: &BigInt) -> Result<BigInt, BigIntError> {
+        let (q, _) = self.div_rem(other)?;
+        Ok(q)
+    }
+
+    /// Remainder `self % other` (sign matches `self`).  Sugar for
+    /// `div_rem` discarding the quotient.
+    public fn rem(&self, other: &BigInt) -> Result<BigInt, BigIntError> {
+        let (_, r) = self.div_rem(other)?;
+        Ok(r)
     }
 
     // -------------------------------------------------------------------------
@@ -502,6 +595,184 @@ fn mul_magnitudes(a: &List<Int>, b: &List<Int>) -> List<Int> {
 }
 
 /// Compare two magnitudes (non-negative) → Ordering.
+/// Single-chunk long division.  Divides magnitude `a` (little-endian
+/// base-10^9 chunks) by single-chunk divisor `d` ∈ (0, BIGINT_BASE).
+/// Returns (quotient_magnitude, remainder_chunk).  Algorithm:
+/// walk from MS to LS, at each step combine running remainder with
+/// the next chunk and divide.
+fn single_chunk_divmod(a: &List<Int>, d: Int) -> (List<Int>, Int) {
+    let n = a.len() as Int;
+    let mut q: List<Int> = List.with_capacity(n);
+    // Initialise q with placeholder zeros so we can write in-order
+    // from MS to LS, then reverse at the end.
+    let mut k: Int = 0;
+    while k < n { q.push(0); k = k + 1; }
+
+    let mut rem: Int = 0;
+    let mut i: Int = n - 1;
+    while i >= 0 {
+        // combined = rem × BASE + a[i].  rem < d ≤ BASE-1 and
+        // a[i] < BASE ⇒ combined < BASE × BASE = 10^18 (fits i64).
+        let combined = rem * BIGINT_BASE + a[i];
+        q[i] = combined / d;
+        rem = combined - q[i] * d;
+        i = i - 1;
+    }
+    strip_leading_zeros(&mut q);
+    (q, rem)
+}
+
+/// Knuth Algorithm D — multi-chunk long division for divisors with
+/// 2+ chunks.  Reference: TAOCP vol 2 §4.3.1, "The Classical
+/// Algorithms".  Caller MUST ensure `b.len() ≥ 2` (single-chunk
+/// case has its own simpler path) and `compare_magnitudes(a, b) >=
+/// Equal` (otherwise quot=0, rem=a — handled at div_rem layer).
+///
+/// Steps:
+///   D1.  Normalize: shift both operands left so b's MS chunk ≥
+///        BASE/2.  Sharpens the quotient-digit estimate.
+///   D2-D7. For each quotient digit position from MS to LS:
+///     D3.  Estimate q_hat from top two digits of remaining
+///          dividend over top digit of divisor; cap at BASE-1.
+///          Adjust downward via two-digit "improvement" step.
+///     D4.  Multiply divisor by q_hat and subtract from the
+///          relevant slice of dividend.
+///     D5.  If subtraction underflowed, decrement q_hat and add
+///          divisor back (rare — at most twice across the loop
+///          per Knuth's bound).
+///   D8.  Denormalize remainder by reverse-shift.
+fn knuth_d(a: &List<Int>, b: &List<Int>) -> (List<Int>, List<Int>) {
+    let n = b.len() as Int;        // ≥ 2 by precondition
+    let m = (a.len() as Int) - n;  // quotient has m+1 chunks
+
+    // Step D1: Normalize.  d = floor(BASE / (b[n-1] + 1)).  After
+    // multiplying a and b by d, b's MS chunk is ≥ BASE/2.  Special-
+    // case b[n-1] = BASE-1 ⇒ d=1 (already normalised).
+    let d = BIGINT_BASE / (b[n - 1] + 1);
+
+    let mut u: List<Int> = mul_by_chunk(a, d);
+    let v: List<Int> = mul_by_chunk(b, d);
+    // After multiplication u may have grown by one chunk to a.len()+1.
+    // Pad explicitly to ensure len = a.len()+1 so u[m+n] is always
+    // a valid index.
+    while (u.len() as Int) < (a.len() as Int) + 1 { u.push(0); }
+
+    let mut q: List<Int> = List.with_capacity(m + 1);
+    let mut z: Int = 0;
+    while z <= m { q.push(0); z = z + 1; }
+
+    // Step D2-D7: iterate quotient digit positions from MS to LS.
+    let mut j: Int = m;
+    while j >= 0 {
+        // Step D3: Estimate q_hat.
+        let top = u[j + n] * BIGINT_BASE + u[j + n - 1];
+        let mut q_hat = top / v[n - 1];
+        let mut r_hat = top - q_hat * v[n - 1];
+        if q_hat == BIGINT_BASE {
+            q_hat = BIGINT_BASE - 1;
+            r_hat = r_hat + v[n - 1];
+        }
+        // Two-digit refinement: while q_hat × v[n-2] > BASE × r_hat
+        // + u[j+n-2] (and r_hat < BASE), decrement q_hat.  Bounded
+        // by 2 iterations per Knuth.
+        let mut keep_refining = true;
+        while keep_refining {
+            if r_hat >= BIGINT_BASE { keep_refining = false; }
+            else {
+                let lhs = q_hat * v[n - 2];
+                let rhs = BIGINT_BASE * r_hat + u[j + n - 2];
+                if lhs > rhs {
+                    q_hat = q_hat - 1;
+                    r_hat = r_hat + v[n - 1];
+                } else {
+                    keep_refining = false;
+                }
+            }
+        }
+
+        // Step D4: Multiply divisor by q_hat and subtract from
+        // u[j..=j+n].  Track the borrow as we walk; final borrow
+        // accounted against u[j+n].
+        let mut borrow: Int = 0;
+        let mut k: Int = 0;
+        while k < n {
+            let prod = q_hat * v[k] + borrow;
+            let prod_low = prod % BIGINT_BASE;
+            let prod_high = prod / BIGINT_BASE;
+            let diff = u[j + k] - prod_low;
+            if diff < 0 {
+                u[j + k] = diff + BIGINT_BASE;
+                borrow = prod_high + 1;
+            } else {
+                u[j + k] = diff;
+                borrow = prod_high;
+            }
+            k = k + 1;
+        }
+        let final_diff = u[j + n] - borrow;
+        let subtracted_too_much = final_diff < 0;
+        u[j + n] = if subtracted_too_much { final_diff + BIGINT_BASE } else { final_diff };
+
+        // Step D5: If we over-subtracted, decrement q_hat and add v
+        // back.  Final carry from add-back exactly cancels the
+        // borrow we made above; discard it.
+        if subtracted_too_much {
+            q_hat = q_hat - 1;
+            let mut carry: Int = 0;
+            let mut kk: Int = 0;
+            while kk < n {
+                let sum = u[j + kk] + v[kk] + carry;
+                if sum >= BIGINT_BASE {
+                    u[j + kk] = sum - BIGINT_BASE;
+                    carry = 1;
+                } else {
+                    u[j + kk] = sum;
+                    carry = 0;
+                }
+                kk = kk + 1;
+            }
+            // Discard the final carry (cancels the over-borrow).
+            u[j + n] = (u[j + n] + carry) % BIGINT_BASE;
+        }
+
+        q[j] = q_hat;
+        j = j - 1;
+    }
+
+    // Step D8: Denormalize.  Remainder = u[0..n] / d.
+    let mut r_unnormalised: List<Int> = List.with_capacity(n);
+    let mut x: Int = 0;
+    while x < n { r_unnormalised.push(u[x]); x = x + 1; }
+    let (r_mag, _) = single_chunk_divmod(&r_unnormalised, d);
+
+    let mut q_out = q;
+    strip_leading_zeros(&mut q_out);
+    (q_out, r_mag)
+}
+
+/// Multiply magnitude `a` by single-chunk `c` ∈ [0, BASE).  Returns
+/// the product as a magnitude list, possibly one chunk longer than
+/// `a`.  Helper for Knuth D normalization.
+fn mul_by_chunk(a: &List<Int>, c: Int) -> List<Int> {
+    if c == 0 { return List.new(); }
+    let n = a.len() as Int;
+    let mut out: List<Int> = List.with_capacity(n + 1);
+    let mut carry: Int = 0;
+    let mut i: Int = 0;
+    while i < n {
+        // a[i] × c + carry.  Both operands < BASE, so product <
+        // BASE^2 = 10^18 (fits i64); plus carry < BASE adds < 10^9
+        // which still fits.
+        let prod = a[i] * c + carry;
+        out.push(prod % BIGINT_BASE);
+        carry = prod / BIGINT_BASE;
+        i = i + 1;
+    }
+    if carry != 0 { out.push(carry); }
+    strip_leading_zeros(&mut out);
+    out
+}
+
 fn compare_magnitudes(a: &List<Int>, b: &List<Int>) -> Ordering {
     let la = a.len() as Int;
     let lb = b.len() as Int;

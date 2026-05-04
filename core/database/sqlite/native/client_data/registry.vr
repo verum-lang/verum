@@ -38,7 +38,7 @@ implement ClientDataRegistry {
 
     /// Install (or overwrite) the slot. If a previous entry existed
     /// and it had a destructor, bump the destructor counter.
-    pub fn sqlite3_set_clientdata(&mut self, name: Text, handle: Int64, has_destructor: Bool) {
+    public fn sqlite3_set_clientdata(&mut self, name: Text, handle: Int64, has_destructor: Bool) {
         let idx = self.find(&name);
         if idx >= 0 {
             if self.slots.get(idx).has_destructor {
@@ -51,14 +51,14 @@ implement ClientDataRegistry {
         self.slots.push(new_slot(name, handle, has_destructor));
     }
 
-    pub fn sqlite3_get_clientdata(&self, name: &Text) -> Int64 {
+    public fn sqlite3_get_clientdata(&self, name: &Text) -> Int64 {
         let idx = self.find(name);
         if idx < 0 { return 0 as Int64; }
         self.slots.get(idx).handle
     }
 
     /// Clear a slot (equivalent to set with handle==NULL + no destructor).
-    pub fn clear(&mut self, name: &Text) -> Bool {
+    public fn clear(&mut self, name: &Text) -> Bool {
         let idx = self.find(name);
         if idx < 0 { return false; }
         if self.slots.get(idx).has_destructor {
@@ -70,7 +70,7 @@ implement ClientDataRegistry {
 
     /// Connection-close path — fire every remaining destructor and
     /// drop all slots.
-    pub fn close(&mut self) {
+    public fn close(&mut self) {
         let mut fired: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < self.slots.len() {
@@ -81,5 +81,5 @@ implement ClientDataRegistry {
         self.slots = List.new();
     }
 
-    pub fn len(&self) -> Int { self.slots.len() }
+    public fn len(&self) -> Int { self.slots.len() }
 }

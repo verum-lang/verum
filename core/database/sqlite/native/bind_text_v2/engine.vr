@@ -37,7 +37,7 @@ public fn new_engine(n_params: Int) -> BindTextEngine {
 implement BindTextEngine {
     /// Returns SQLite code: 0 (OK), 25 (SQLITE_RANGE) on bad index,
     /// 1 (SQLITE_ERROR) on invalid spec shape.
-    pub fn sqlite3_bind_text(&mut self, index: Int, spec: BindTextSpec) -> Int {
+    public fn sqlite3_bind_text(&mut self, index: Int, spec: BindTextSpec) -> Int {
         if index <= 0 || index >= self.slots.len() {
             self.rejections = self.rejections + 1_i64;
             return 25;
@@ -50,13 +50,13 @@ implement BindTextEngine {
         0
     }
 
-    pub fn clear(&mut self, index: Int) -> Bool {
+    public fn clear(&mut self, index: Int) -> Bool {
         if index <= 0 || index >= self.slots.len() { return false; }
         self.slots.get_mut(index).spec = Maybe.None;
         true
     }
 
-    pub fn byte_len(&self, index: Int) -> Int64 {
+    public fn byte_len(&self, index: Int) -> Int64 {
         if index <= 0 || index >= self.slots.len() { return 0 as Int64; }
         match &self.slots.get(index).spec {
             Maybe.Some(s) => s.byte_len,

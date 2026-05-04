@@ -186,7 +186,7 @@ implement StatementCache {
     }
 
     /// Pin a cached entry — pinned entries are never evicted.
-    pub fn pin(&mut self, sql: &Text) -> Bool {
+    public fn pin(&mut self, sql: &Text) -> Bool {
         let key = key_for(sql);
         match self.find_idx(&key) {
             Some(i) => {
@@ -200,7 +200,7 @@ implement StatementCache {
         }
     }
 
-    pub fn unpin(&mut self, sql: &Text) -> Bool {
+    public fn unpin(&mut self, sql: &Text) -> Bool {
         let key = key_for(sql);
         match self.find_idx(&key) {
             Some(i) => {

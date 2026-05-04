@@ -47,29 +47,29 @@ public fn normalise(frac_day: Float64, jd_int: Int64) -> (Float64, DatetimeInsta
 
 implement DatetimeInstant {
     /// Render as REAL julian day (matches storage form).
-    pub fn julian_real(&self) -> Float64 {
+    public fn julian_real(&self) -> Float64 {
         (self.jd_int as Float64) + self.frac_day
     }
 
     /// Render as Unix epoch seconds.
     /// Unix epoch = JD 2440587.5 (1970-01-01 00:00:00 UTC).
-    pub fn unix_seconds(&self) -> Int64 {
+    public fn unix_seconds(&self) -> Int64 {
         let unix_jd_int: Int64 = 2440587 as Int64;
         let day_diff = self.jd_int - unix_jd_int;
         let secs_in_day = (self.frac_day * (86400.0 as Float64)) as Int64;
         day_diff * 86400_i64 + secs_in_day - 43200_i64
     }
 
-    pub fn ymd_view(&self) -> Ymd { julian_to_gregorian(self.jd_int) }
+    public fn ymd_view(&self) -> Ymd { julian_to_gregorian(self.jd_int) }
 
-    pub fn weekday(&self) -> Int { weekday_for(self.jd_int) }
+    public fn weekday(&self) -> Int { weekday_for(self.jd_int) }
 
     /// Add `delta_days` to the instant. Returns a fresh DatetimeInstant.
-    pub fn shift_days(&self, delta_days: Int64) -> DatetimeInstant {
+    public fn shift_days(&self, delta_days: Int64) -> DatetimeInstant {
         DatetimeInstant { jd_int: self.jd_int + delta_days, frac_day: self.frac_day }
     }
 
-    pub fn shift_seconds(&self, delta_secs: Int64) -> DatetimeInstant {
+    public fn shift_seconds(&self, delta_secs: Int64) -> DatetimeInstant {
         let added = (delta_secs as Float64) / (86400.0 as Float64);
         let raw_frac = self.frac_day + added;
         let (norm_frac, _i) = normalise(raw_frac, self.jd_int);

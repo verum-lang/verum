@@ -31,7 +31,7 @@ public fn new_registry() -> VfsApiRegistry {
 implement VfsApiRegistry {
     /// sqlite3_vfs_register: returns 0 on success, 1 on misuse
     /// (duplicate name).
-    pub fn sqlite3_vfs_register(&mut self, name: Text, handle: Int64, make_default: Bool) -> Int {
+    public fn sqlite3_vfs_register(&mut self, name: Text, handle: Int64, make_default: Bool) -> Int {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if entry_matches(self.entries.get(i), &name) {
@@ -49,7 +49,7 @@ implement VfsApiRegistry {
     }
 
     /// sqlite3_vfs_unregister: returns 0 if removed, 1 if not found.
-    pub fn sqlite3_vfs_unregister(&mut self, handle: Int64) -> Int {
+    public fn sqlite3_vfs_unregister(&mut self, handle: Int64) -> Int {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries.get(i).handle == handle {
@@ -69,7 +69,7 @@ implement VfsApiRegistry {
     }
 
     /// Passing `None` requests the default VFS.
-    pub fn sqlite3_vfs_find(&self, name: &Maybe<Text>) -> Int64 {
+    public fn sqlite3_vfs_find(&self, name: &Maybe<Text>) -> Int64 {
         match name {
             Maybe.None => self.default_handle,
             Maybe.Some(n) => {
@@ -85,5 +85,5 @@ implement VfsApiRegistry {
         }
     }
 
-    pub fn len(&self) -> Int { self.entries.len() }
+    public fn len(&self) -> Int { self.entries.len() }
 }

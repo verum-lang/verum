@@ -53,7 +53,7 @@ mount core.database.sqlite.native.l6_session.sql_value.{
 // StmtLifecycleError — augments StmtError with lifecycle-specific cases
 // -----------------------------------------------------------------------------
 
-pub type LifecycleError is
+public type LifecycleError is
       LeIndexOutOfRange(Int)
     | LeNoSuchParam(Text)
     | LeNotPositioned
@@ -76,7 +76,7 @@ implement Display for LifecycleError {
 // StepOutcome — the three terminal states of a step() call
 // -----------------------------------------------------------------------------
 
-pub type StepOutcome is
+public type StepOutcome is
       SoRowReady              // Result row available; call column_*
     | SoDone                  // Statement complete (no more rows)
     | SoErrored(Text);        // Runtime error; finalize / reset to recover
@@ -91,7 +91,7 @@ pub type StepOutcome is
 /// The supplied `Register` value is stored in the statement's
 /// `bindings.positional` table and consumed at execution time
 /// when the VDBE encounters a `Variable(reg_dst, idx)` opcode.
-pub fn bind_positional(
+public fn bind_positional(
     stmt: &mut PreparedStatement,
     index: Int,
     value: Register,
@@ -113,7 +113,7 @@ pub fn bind_positional(
 
 /// Bind a parameter by name (e.g. `:user_id` or `@token`).  Reads
 /// the name verbatim — the leading sigil is part of the key.
-pub fn bind_named(
+public fn bind_named(
     stmt: &mut PreparedStatement,
     name: Text,
     value: Register,
@@ -124,7 +124,7 @@ pub fn bind_named(
 
 /// Convenience: bind every parameter to NULL.  Used by reset()
 /// when the caller passes `clear_bindings=true`.
-pub fn clear_bindings(stmt: &mut PreparedStatement) {
+public fn clear_bindings(stmt: &mut PreparedStatement) {
     let n = stmt.bindings.positional.len();
     let mut i: Int = 0;
     while i < n {
@@ -146,7 +146,7 @@ pub fn clear_bindings(stmt: &mut PreparedStatement) {
 /// On `SoRowReady`, the row's `(reg_start, n_cols)` window is
 /// stamped into `stmt.last_row_start` / `stmt.last_row_cols` so
 /// `column_value` can read each column from the register file.
-pub fn step_one(stmt: &mut PreparedStatement) -> StepOutcome {
+public fn step_one(stmt: &mut PreparedStatement) -> StepOutcome {
     // Snapshot bindings into the interpreter state so the VDBE
     // sees the latest values for `Variable(reg_dst, idx)` opcodes.
     stmt.state.install_bindings(stmt.bindings.clone());
@@ -181,7 +181,7 @@ fn format_exec_error(code: Int, msg: &Text) -> Text {
 /// interpreter's register file + cursor positions but DOES NOT
 /// drop bindings (per SQLite semantics).  Pass
 /// `also_clear_bindings = true` to drop them too (sqlite3_clear_bindings).
-pub fn reset(stmt: &mut PreparedStatement, also_clear_bindings: Bool) -> Result<(), LifecycleError> {
+public fn reset(stmt: &mut PreparedStatement, also_clear_bindings: Bool) -> Result<(), LifecycleError> {
     // Re-create the VdbeState from the program — same shape as
     // the prepare-time initialiser.
     stmt.state = vdbe_state_new(&stmt.program);
@@ -199,7 +199,7 @@ pub fn reset(stmt: &mut PreparedStatement, also_clear_bindings: Bool) -> Result<
 /// next bind/step path checks the sentinel.  Real implementation
 /// drops the state entirely once Verum's affine analysis allows
 /// "leave a struct field in a documented dropped state".
-pub fn finalize(stmt: &mut PreparedStatement) -> Result<(), LifecycleError> {
+public fn finalize(stmt: &mut PreparedStatement) -> Result<(), LifecycleError> {
     // Foundation marker — re-initialise to a known-empty state.
     stmt.state = vdbe_state_new(&stmt.program);
     clear_bindings(stmt);
@@ -213,13 +213,13 @@ pub fn finalize(stmt: &mut PreparedStatement) -> Result<(), LifecycleError> {
 /// Number of columns in the result row.  Available even before
 /// the first step (returns the program's declared result-column
 /// count).  O(1).
-pub fn column_count(stmt: &PreparedStatement) -> Int {
+public fn column_count(stmt: &PreparedStatement) -> Int {
     stmt.program.result_column_count()
 }
 
 /// Column name at zero-based index `i`.  Returns the empty string
 /// for out-of-range indices to match SQLite's defensive behaviour.
-pub fn column_name(stmt: &PreparedStatement, i: Int) -> Text {
+public fn column_name(stmt: &PreparedStatement, i: Int) -> Text {
     if i < 0 || i >= stmt.program.result_column_count() {
         return "".clone();
     }
@@ -228,7 +228,7 @@ pub fn column_name(stmt: &PreparedStatement, i: Int) -> Text {
 
 /// Declared column type as text (e.g. "INTEGER", "TEXT").  Empty
 /// string for expressions without a declared type.
-pub fn column_declared_type(stmt: &PreparedStatement, i: Int) -> Text {
+public fn column_declared_type(stmt: &PreparedStatement, i: Int) -> Text {
     if i < 0 || i >= stmt.program.result_column_count() {
         return "".clone();
     }
@@ -242,7 +242,7 @@ pub fn column_declared_type(stmt: &PreparedStatement, i: Int) -> Text {
 /// Reads the register at `last_row_start + i` from the interpreter's
 /// register file.  `step_one` populates `last_row_start` /
 /// `last_row_cols` when it observes a `Row(start, n)` step result.
-pub fn column_value(stmt: &PreparedStatement, i: Int) -> Register {
+public fn column_value(stmt: &PreparedStatement, i: Int) -> Register {
     if i < 0 || i >= stmt.last_row_cols {
         return RNull;
     }
@@ -252,7 +252,7 @@ pub fn column_value(stmt: &PreparedStatement, i: Int) -> Register {
 
 /// Runtime kind of the column value (NULL / INTEGER / REAL / TEXT
 /// / BLOB).  Wraps `register_kind` over `column_value`.
-pub fn column_kind(stmt: &PreparedStatement, i: Int) -> RegisterKind {
+public fn column_kind(stmt: &PreparedStatement, i: Int) -> RegisterKind {
     register_kind(&column_value(stmt, i))
 }
 
@@ -265,7 +265,7 @@ pub fn column_kind(stmt: &PreparedStatement, i: Int) -> RegisterKind {
 /// `SqlValue`.  Out-of-range index → `VNull`, matching SQLite's
 /// defensive default.  `RRowId` from the L4 register folds into
 /// `VInt` (the rowid distinction is invisible at the API surface).
-pub fn column_sql_value(stmt: &PreparedStatement, i: Int) -> SqlValue {
+public fn column_sql_value(stmt: &PreparedStatement, i: Int) -> SqlValue {
     if i < 0 || i >= stmt.last_row_cols { return VNull; }
     let reg_idx = stmt.last_row_start + i;
     let r = stmt.state.regs.get(reg_idx);
@@ -273,58 +273,58 @@ pub fn column_sql_value(stmt: &PreparedStatement, i: Int) -> SqlValue {
 }
 
 /// `sqlite3_column_type` — return the column's storage class.
-pub fn column_type(stmt: &PreparedStatement, i: Int) -> ColumnType {
+public fn column_type(stmt: &PreparedStatement, i: Int) -> ColumnType {
     value_type(&column_sql_value(stmt, i))
 }
 
 /// `sqlite3_column_int64` — coerce the column to Int64.  NULL → 0,
 /// REAL → trunc(...), TEXT → parse_leading_decimal_int, BLOB → 0.
-pub fn column_int(stmt: &PreparedStatement, i: Int) -> Int64 {
+public fn column_int(stmt: &PreparedStatement, i: Int) -> Int64 {
     value_to_int(&column_sql_value(stmt, i))
 }
 
 /// `sqlite3_column_double` — coerce to Float64.  NULL → 0.0,
 /// INT → cast, TEXT → parse_leading_decimal_real, BLOB → 0.0.
-pub fn column_double(stmt: &PreparedStatement, i: Int) -> Float64 {
+public fn column_double(stmt: &PreparedStatement, i: Int) -> Float64 {
     value_to_real(&column_sql_value(stmt, i))
 }
 
 /// `sqlite3_column_text` — coerce to UTF-8 Text.  NULL → "",
 /// INT/REAL → decimal repr, TEXT → bytes, BLOB → "".
-pub fn column_text(stmt: &PreparedStatement, i: Int) -> Text {
+public fn column_text(stmt: &PreparedStatement, i: Int) -> Text {
     value_to_text(&column_sql_value(stmt, i))
 }
 
 /// `sqlite3_column_text16` — coerce to UTF-16 code units (each
 /// `Int` carries one 16-bit code unit; surrogate pairs naturally
 /// expanded for code points > U+FFFF).
-pub fn column_text16(stmt: &PreparedStatement, i: Int) -> List<Int> {
+public fn column_text16(stmt: &PreparedStatement, i: Int) -> List<Int> {
     value_to_text16(&column_sql_value(stmt, i))
 }
 
 /// `sqlite3_column_blob` — coerce to a Blob (List<Byte>).
 /// TEXT → UTF-8 bytes; INT/REAL/NULL → empty.
-pub fn column_blob(stmt: &PreparedStatement, i: Int) -> List<Byte> {
+public fn column_blob(stmt: &PreparedStatement, i: Int) -> List<Byte> {
     value_to_blob(&column_sql_value(stmt, i))
 }
 
 /// `sqlite3_column_bytes` — byte length of the column's storage
 /// representation (TEXT → UTF-8 byte count, BLOB → blob length,
 /// INT/REAL/NULL → 0).
-pub fn column_bytes(stmt: &PreparedStatement, i: Int) -> Int {
+public fn column_bytes(stmt: &PreparedStatement, i: Int) -> Int {
     value_bytes(&column_sql_value(stmt, i))
 }
 
 /// `sqlite3_column_bytes16` — byte length of the UTF-16 encoding
 /// (= 2 × number of UTF-16 code units).
-pub fn column_bytes16(stmt: &PreparedStatement, i: Int) -> Int {
+public fn column_bytes16(stmt: &PreparedStatement, i: Int) -> Int {
     value_bytes16(&column_sql_value(stmt, i))
 }
 
 /// Numeric column-type code matching the SQLite C constants
 /// (1 = INTEGER, 2 = FLOAT, 3 = TEXT, 4 = BLOB, 5 = NULL).
 /// Useful for FFI bindings + serialisation.
-pub fn column_type_int(stmt: &PreparedStatement, i: Int) -> Int {
+public fn column_type_int(stmt: &PreparedStatement, i: Int) -> Int {
     column_type_code(&column_type(stmt, i))
 }
 
@@ -335,7 +335,7 @@ pub fn column_type_int(stmt: &PreparedStatement, i: Int) -> Int {
 /// `sqlite3_bind_value` analogue — bind a positional parameter via
 /// the rich `SqlValue` type.  Lowers through the existing register
 /// table so all bind paths converge in `bind_positional`.
-pub fn bind_sql_value(
+public fn bind_sql_value(
     stmt: &mut PreparedStatement,
     idx: Int,
     v: SqlValue,
@@ -348,7 +348,7 @@ pub fn bind_sql_value(
 /// into UTF-8 Text and bind.  Returns `LeIndexOutOfRange` on bad
 /// indices; emits `VNull` for unrecoverable UTF-16 (mismatched
 /// surrogates) — matches SQLite's "best-effort" decode policy.
-pub fn bind_text16(
+public fn bind_text16(
     stmt: &mut PreparedStatement,
     idx: Int,
     units: &List<Int>,
@@ -362,7 +362,7 @@ pub fn bind_text16(
 // Execution convenience — step until done, collect rows
 // -----------------------------------------------------------------------------
 
-pub type ExecOutcome is {
+public type ExecOutcome is {
     rows: List<List<Register>>,
     error: Maybe<Text>,
 }
@@ -370,7 +370,7 @@ pub type ExecOutcome is {
 /// Run the statement to completion, collecting every result row
 /// into a `List<List<Register>>`.  Convenience wrapper; produces
 /// the same observable behaviour as a manual step-loop.
-pub fn execute_collect(stmt: &mut PreparedStatement) -> ExecOutcome {
+public fn execute_collect(stmt: &mut PreparedStatement) -> ExecOutcome {
     let mut out = ExecOutcome { rows: List.new(), error: None };
     let max_iter: Int = 1000000;
     let mut iter: Int = 0;

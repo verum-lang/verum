@@ -37,14 +37,14 @@ public fn new_engine() -> LogEngine {
 }
 
 implement LogEngine {
-    pub fn install_sink(&mut self, sink: Maybe<LogSink>) {
+    public fn install_sink(&mut self, sink: Maybe<LogSink>) {
         self.sink = sink;
     }
 
     /// Route a record per sink policy. Returns true if the sink
     /// accepted (and the record was pushed to the ring); false if the
     /// sink dropped or no sink is installed.
-    pub fn log(&mut self, errcode: Int, message: Text, timestamp_ns: Int64) -> Bool {
+    public fn log(&mut self, errcode: Int, message: Text, timestamp_ns: Int64) -> Bool {
         self.seq = self.seq + 1_i64;
         let rec = new_record(errcode, message, timestamp_ns, self.seq);
         match &self.sink {
@@ -69,6 +69,6 @@ implement LogEngine {
         }
     }
 
-    pub fn ring_len(&self) -> Int { self.recent.len() }
-    pub fn dropped_count(&self) -> Int64 { self.dropped }
+    public fn ring_len(&self) -> Int { self.recent.len() }
+    public fn dropped_count(&self) -> Int64 { self.dropped }
 }

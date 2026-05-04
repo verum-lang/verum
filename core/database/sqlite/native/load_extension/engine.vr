@@ -34,11 +34,11 @@ public fn new_registry() -> AutoExtensionRegistry {
 }
 
 implement AutoExtensionRegistry {
-    pub fn auto_extension(&mut self, entry: EntryPoint) {
+    public fn auto_extension(&mut self, entry: EntryPoint) {
         self.entries.push(entry);
     }
 
-    pub fn cancel_auto_extension(&mut self, file: &Text) -> Bool {
+    public fn cancel_auto_extension(&mut self, file: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries.get(i).file == *file {
@@ -50,11 +50,11 @@ implement AutoExtensionRegistry {
         false
     }
 
-    pub fn reset_auto_extension(&mut self) {
+    public fn reset_auto_extension(&mut self) {
         self.entries = List.new();
     }
 
-    pub fn len(&self) -> Int { self.entries.len() }
+    public fn len(&self) -> Int { self.entries.len() }
 }
 
 public type LoadEngine is {
@@ -74,7 +74,7 @@ public fn new_engine(policy: LoadExtPolicy) -> LoadEngine {
 implement LoadEngine {
     /// Gate the request through the per-db policy; returns LoDenied if
     /// the policy forbids it and bumps the counter.
-    pub fn gate(&mut self, _req: &LoadRequest) -> LoadOutcome {
+    public fn gate(&mut self, _req: &LoadRequest) -> LoadOutcome {
         if !allows_c_level(&self.policy) {
             self.loads_denied = self.loads_denied + 1_i64;
             return LoDenied("sqlite3_enable_load_extension is off".clone());

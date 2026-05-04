@@ -256,7 +256,7 @@ implement CidDecoder {
     /// works, `Err(InvalidConfigByte)` when the config byte's CR
     /// bit isn't set or the codepoint is unknown (treat the
     /// connection as un-routable; LB fans out to a default replica).
-    pub fn decode_server_id(&self, dcid: &[Byte]) -> Result<List<Byte>, LbCidError> {
+    public fn decode_server_id(&self, dcid: &[Byte]) -> Result<List<Byte>, LbCidError> {
         if dcid.len() < 1 {
             return Err(LbCidError.InvalidConfigByte);
         }

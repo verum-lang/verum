@@ -35,19 +35,19 @@ public fn new_engine() -> DeadlineEngine {
 }
 
 implement DeadlineEngine {
-    pub fn arm(&mut self, absolute_ns: Int64) {
+    public fn arm(&mut self, absolute_ns: Int64) {
         self.deadline = armed_at(absolute_ns);
         self.fired = false;
         self.ticks_observed = 0 as Int64;
     }
 
-    pub fn disarm(&mut self) {
+    public fn disarm(&mut self) {
         self.deadline.armed = false;
     }
 
     /// Observe a tick. Returns true iff this tick caused the deadline
     /// to fire for the first time.
-    pub fn tick(&mut self, now_ns: Int64, on_fire: fn()) -> Bool {
+    public fn tick(&mut self, now_ns: Int64, on_fire: fn()) -> Bool {
         self.ticks_observed = self.ticks_observed + 1_i64;
         if self.fired { return false; }
         if !has_elapsed(&self.deadline, now_ns) { return false; }
@@ -56,7 +56,7 @@ implement DeadlineEngine {
         true
     }
 
-    pub fn remaining_ns_at(&self, now_ns: Int64) -> Int64 {
+    public fn remaining_ns_at(&self, now_ns: Int64) -> Int64 {
         remaining_ns(&self.deadline, now_ns)
     }
 }

@@ -42,7 +42,7 @@ fn splitmix(z: &mut Int64) -> Int64 {
 
 implement DstSeed {
     /// Pull the next u64-shaped Int64 + advance state in place.
-    pub fn next_u64(&mut self) -> Int64 {
+    public fn next_u64(&mut self) -> Int64 {
         let result = rotl(self.s1 * 5_i64, 7) * 9_i64;
         let t = self.s1 << 17_i64;
         self.s2 = self.s2 ^ self.s0;
@@ -55,7 +55,7 @@ implement DstSeed {
     }
 
     /// Bounded draw in `[0, n)`. Caller passes `n > 0`.
-    pub fn next_below(&mut self, n: Int) -> Int {
+    public fn next_below(&mut self, n: Int) -> Int {
         if n <= 0 { return 0; }
         let v = self.next_u64();
         // Int.MIN-safe magnitude — `-v` for `v == Int64.MIN` wraps
@@ -70,12 +70,12 @@ implement DstSeed {
         ((mag as Int) % n)
     }
 
-    pub fn next_bool(&mut self) -> Bool {
+    public fn next_bool(&mut self) -> Bool {
         (self.next_u64() & 1_i64) != 0_i64
     }
 
     /// Bernoulli draw — true with `numerator/denominator` probability.
-    pub fn bernoulli(&mut self, numerator: Int, denominator: Int) -> Bool {
+    public fn bernoulli(&mut self, numerator: Int, denominator: Int) -> Bool {
         if denominator <= 0 { return false; }
         self.next_below(denominator) < numerator
     }

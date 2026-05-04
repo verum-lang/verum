@@ -36,7 +36,7 @@ public fn new_engine(floor_ms: Int) -> SleepEngine {
 implement SleepEngine {
     /// Returns the number of milliseconds actually slept (per
     /// sqlite3_sleep's return-value contract).
-    pub fn sqlite3_sleep(&mut self, req: &SleepRequest) -> Int {
+    public fn sqlite3_sleep(&mut self, req: &SleepRequest) -> Int {
         if is_noop(req) { return 0; }
         self.sleeps_taken = self.sleeps_taken + 1_i64;
         self.requested_ms = self.requested_ms + (req.milliseconds as Int64);

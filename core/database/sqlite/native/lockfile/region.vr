@@ -41,9 +41,9 @@ public fn shared_region_for_byte(offset_within: Int64) -> SqliteLockRegion {
 }
 
 implement SqliteLockRegion {
-    pub fn end_offset(&self) -> Int64 { self.offset + self.length }
+    public fn end_offset(&self) -> Int64 { self.offset + self.length }
 
-    pub fn overlaps(&self, other: &SqliteLockRegion) -> Bool {
+    public fn overlaps(&self, other: &SqliteLockRegion) -> Bool {
         let self_end = self.end_offset();
         let other_end = other.end_offset();
         self.offset < other_end && other.offset < self_end

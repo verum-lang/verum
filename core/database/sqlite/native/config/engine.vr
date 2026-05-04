@@ -37,10 +37,10 @@ public fn new_engine() -> ConfigEngine {
 }
 
 implement ConfigEngine {
-    pub fn mark_initialized(&mut self) { self.phase = EpRunning; }
-    pub fn mark_shutting_down(&mut self) { self.phase = EpShuttingDown; }
+    public fn mark_initialized(&mut self) { self.phase = EpRunning; }
+    public fn mark_shutting_down(&mut self) { self.phase = EpShuttingDown; }
 
-    pub fn accept_global(&mut self) -> Bool {
+    public fn accept_global(&mut self) -> Bool {
         match self.phase {
             EpPreInit => {
                 self.global_ops_applied = self.global_ops_applied + 1;
@@ -50,7 +50,7 @@ implement ConfigEngine {
         }
     }
 
-    pub fn accept_db(&mut self) -> Bool {
+    public fn accept_db(&mut self) -> Bool {
         match self.phase {
             EpShuttingDown => false,
             _ => {

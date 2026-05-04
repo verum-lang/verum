@@ -51,7 +51,7 @@ public fn bucket_new() -> CrashBucket { CrashBucket { entries: List.new() } }
 implement CrashBucket {
     public fn unique_count(&self) -> Int { self.entries.len() }
 
-    pub fn total_hits(&self) -> Int {
+    public fn total_hits(&self) -> Int {
         let mut sum: Int = 0;
         let mut i: Int = 0;
         while i < self.entries.len() { sum = sum + self.entries[i].hit_count; i = i + 1; }
@@ -60,7 +60,7 @@ implement CrashBucket {
 
     /// Record a crash. Returns true iff this is a previously-unseen
     /// signature (caller may want to persist these to disk).
-    pub fn record(&mut self, c: Crash) -> Bool {
+    public fn record(&mut self, c: Crash) -> Bool {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].signature == c.signature {
@@ -73,7 +73,7 @@ implement CrashBucket {
         true
     }
 
-    pub fn lookup(&self, signature: &Text) -> Maybe<Int> {
+    public fn lookup(&self, signature: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].signature == *signature {

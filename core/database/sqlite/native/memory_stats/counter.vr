@@ -32,14 +32,14 @@ public fn new_counter() -> MemoryCounter {
 }
 
 implement MemoryCounter {
-    pub fn on_alloc(&mut self, n: Int64) {
+    public fn on_alloc(&mut self, n: Int64) {
         self.bytes_used = self.bytes_used + n;
         if self.bytes_used > self.highwater {
             self.highwater = self.bytes_used;
         }
     }
 
-    pub fn on_free(&mut self, n: Int64) {
+    public fn on_free(&mut self, n: Int64) {
         if self.bytes_used >= n {
             self.bytes_used = self.bytes_used - n;
         } else {
@@ -47,27 +47,27 @@ implement MemoryCounter {
         }
     }
 
-    pub fn reset_highwater(&mut self) {
+    public fn reset_highwater(&mut self) {
         self.highwater = self.bytes_used;
     }
 
-    pub fn set_hard_limit(&mut self, n: Int64) -> Int64 {
+    public fn set_hard_limit(&mut self, n: Int64) -> Int64 {
         let prev = self.hard_limit;
         self.hard_limit = n;
         prev
     }
 
-    pub fn set_soft_limit(&mut self, n: Int64) -> Int64 {
+    public fn set_soft_limit(&mut self, n: Int64) -> Int64 {
         let prev = self.soft_limit;
         self.soft_limit = n;
         prev
     }
 
-    pub fn is_over_soft_limit(&self) -> Bool {
+    public fn is_over_soft_limit(&self) -> Bool {
         self.soft_limit > 0_i64 && self.bytes_used > self.soft_limit
     }
 
-    pub fn allocation_would_exceed_hard(&self, n: Int64) -> Bool {
+    public fn allocation_would_exceed_hard(&self, n: Int64) -> Bool {
         self.hard_limit > 0_i64 && (self.bytes_used + n) > self.hard_limit
     }
 }

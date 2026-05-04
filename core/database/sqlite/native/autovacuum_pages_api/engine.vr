@@ -45,17 +45,17 @@ public fn new_engine() -> AutoVacuumEngine {
 }
 
 implement AutoVacuumEngine {
-    pub fn sqlite3_autovacuum_pages(&mut self, slot: AutoVacuumSlot) {
+    public fn sqlite3_autovacuum_pages(&mut self, slot: AutoVacuumSlot) {
         self.slot = slot;
     }
 
-    pub fn clear(&mut self) {
+    public fn clear(&mut self) {
         self.slot = empty_slot();
     }
 
     /// Invoke the callback via the caller's closure; returns the
     /// number of pages the callback asked to reclaim.
-    pub fn invoke(&mut self, req: &AutoVacuumRequest, policy: fn(&AutoVacuumRequest) -> DecisionOutcome) -> Int64 {
+    public fn invoke(&mut self, req: &AutoVacuumRequest, policy: fn(&AutoVacuumRequest) -> DecisionOutcome) -> Int64 {
         self.invocations = self.invocations + 1_i64;
         let outcome = (policy)(req);
         let n = outcome_pages(&outcome);

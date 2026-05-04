@@ -3126,7 +3126,7 @@ fn emit_binary(
 /// the historical `emit_plan` path.  The output VdbeProgram is
 /// observationally equivalent to `codegen(&plan)` when no seek_plan
 /// is present — back-compat is preserved.
-pub fn codegen_annotated(
+public fn codegen_annotated(
     annotated: &CostAnnotatedPlan,
     sql: Text,
 ) -> Result<VdbeProgram, CodegenError> {

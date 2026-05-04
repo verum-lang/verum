@@ -39,8 +39,8 @@ public fn new_handle(
 }
 
 implement BackupHandle {
-    pub fn is_live(&self) -> Bool { !self.finished }
-    pub fn record_progress(&mut self, pages: Int) {
+    public fn is_live(&self) -> Bool { !self.finished }
+    public fn record_progress(&mut self, pages: Int) {
         if pages <= 0 { return; }
         if self.remaining_pages >= pages {
             self.remaining_pages = self.remaining_pages - pages;
@@ -48,7 +48,7 @@ implement BackupHandle {
             self.remaining_pages = 0;
         }
     }
-    pub fn finish(&mut self) { self.finished = true; }
+    public fn finish(&mut self) { self.finished = true; }
 }
 
 public fn progress_fraction_pct(h: &BackupHandle) -> Int {

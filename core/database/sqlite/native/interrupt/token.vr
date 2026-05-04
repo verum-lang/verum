@@ -44,26 +44,26 @@ public fn new_token() -> InterruptToken {
 
 implement InterruptToken {
     /// True iff the VDBE should abort the current statement.
-    pub fn is_pending(&self) -> Bool {
+    public fn is_pending(&self) -> Bool {
         match &self.state {
             ItFiring(_) => true,
             _ => false,
         }
     }
 
-    pub fn fire(&mut self, reason: InterruptReason) {
+    public fn fire(&mut self, reason: InterruptReason) {
         self.state = ItFiring(reason);
         self.fire_version = self.fire_version + 1_i64;
     }
 
     /// VDBE calls this once it has observed the firing and transitioned
     /// to the aborted state. Subsequent statements may re-arm.
-    pub fn acknowledge(&mut self, count_so_far: Int) {
+    public fn acknowledge(&mut self, count_so_far: Int) {
         self.state = ItServed(count_so_far);
     }
 
     /// Re-arm before running a new statement (normal lifecycle).
-    pub fn rearm(&mut self) {
+    public fn rearm(&mut self) {
         self.state = ItArmed;
     }
 }

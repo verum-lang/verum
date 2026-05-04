@@ -182,6 +182,91 @@ fn check_constants() {
     assert(BIGINT_DIGITS_PER_CHUNK == 9);
 }
 
+fn check_div_rem() -> Result<Bool, BigIntError> {
+    // Single-chunk divisor path.  100 / 7 = 14 rem 2.
+    let a = BigInt.from_int(100);
+    let b = BigInt.from_int(7);
+    let (q, r) = a.div_rem(&b)?;
+    assert(q.eq(&BigInt.from_int(14)));
+    assert(r.eq(&BigInt.from_int(2)));
+
+    // Sign rules: -100 / 7 = -14 rem -2 (truncated towards zero).
+    let neg_a = BigInt.from_int(-100);
+    let (q2, r2) = neg_a.div_rem(&b)?;
+    assert(q2.eq(&BigInt.from_int(-14)));
+    assert(r2.eq(&BigInt.from_int(-2)));
+
+    // 100 / -7 = -14 rem 2.
+    let neg_b = BigInt.from_int(-7);
+    let (q3, r3) = a.div_rem(&neg_b)?;
+    assert(q3.eq(&BigInt.from_int(-14)));
+    assert(r3.eq(&BigInt.from_int(2)));
+
+    // |a| < |b| ⇒ q=0, r=a.
+    let small = BigInt.from_int(3);
+    let big = BigInt.from_int(10);
+    let (q4, r4) = small.div_rem(&big)?;
+    assert(q4.is_zero());
+    assert(r4.eq(&BigInt.from_int(3)));
+
+    // Exact division: 1000 / 5 = 200 rem 0.
+    let thou = BigInt.from_int(1000);
+    let five = BigInt.from_int(5);
+    let (q5, r5) = thou.div_rem(&five)?;
+    assert(q5.eq(&BigInt.from_int(200)));
+    assert(r5.is_zero());
+
+    // div / rem convenience wrappers.
+    let qq = a.div(&b)?;
+    assert(qq.eq(&BigInt.from_int(14)));
+    let rr = a.rem(&b)?;
+    assert(rr.eq(&BigInt.from_int(2)));
+
+    Ok(true)
+}
+
+fn check_div_by_zero() {
+    let a = BigInt.from_int(10);
+    let z = BigInt.zero();
+    let result = match a.div_rem(&z) {
+        Err(BigIntError.DivByZero) => true,
+        _ => false,
+    };
+    assert(result);
+}
+
+fn check_div_multi_chunk() -> Result<Bool, BigIntError> {
+    // Multi-chunk divisor path (Knuth Algorithm D).  Build a value
+    // larger than 10^9 to force the multi-chunk branch.
+    //
+    // 5 × 10^18 = "5_000_000_000_000_000_000" — 19 decimal digits,
+    // spans 3 chunks: [0, 0, 5].
+    // 2 × 10^9 = "2_000_000_000" — 10 digits, spans 2 chunks: [0, 2].
+    //
+    // Quotient: 5×10^18 / 2×10^9 = 2.5×10^9 = "2_500_000_000".
+    // (Truncated integer ⇒ exact since 5/2 = 2 rem 1; aligned at
+    //  the 10^9 boundary that's 2_500_000_000 rem 0.)
+    //
+    // Remainder: 0.
+    let big_dividend = match parse_bigint(&"5000000000000000000".clone()) {
+        Ok(v)  => v,
+        Err(_) => BigInt.zero(),
+    };
+    let big_divisor = match parse_bigint(&"2000000000".clone()) {
+        Ok(v)  => v,
+        Err(_) => BigInt.zero(),
+    };
+    let (q, r) = big_dividend.div_rem(&big_divisor)?;
+    let expected_q = match parse_bigint(&"2500000000".clone()) {
+        Ok(v)  => v,
+        Err(_) => BigInt.zero(),
+    };
+    assert(q.eq(&expected_q));
+    assert(r.is_zero());
+
+    Ok(true)
+}
+
 fn main() {
     check_constructors();
     check_predicates();
@@ -191,4 +276,7 @@ fn main() {
     check_render();
     let _ = check_parse();
     check_constants();
+    let _ = check_div_rem();
+    check_div_by_zero();
+    let _ = check_div_multi_chunk();
 }

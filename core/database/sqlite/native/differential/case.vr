@@ -77,17 +77,17 @@ public fn differential_case(
 }
 
 implement DifferentialCase {
-    pub fn with_setup(mut self, action: SetupAction) -> DifferentialCase {
+    public fn with_setup(mut self, action: SetupAction) -> DifferentialCase {
         self.setup.push(action);
         self
     }
 
-    pub fn with_tag(mut self, tag: Text) -> DifferentialCase {
+    public fn with_tag(mut self, tag: Text) -> DifferentialCase {
         self.tags.push(tag);
         self
     }
 
-    pub fn has_tag(&self, want: &Text) -> Bool {
+    public fn has_tag(&self, want: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.tags.len() {
             if self.tags[i] == *want { return true; }

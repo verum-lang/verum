@@ -71,7 +71,7 @@ public fn plan_for(mode: CheckpointMode) -> CheckpointPlan {
 implement CheckpointPlan {
     public fn step_count(&self) -> Int { self.steps.len() }
 
-    pub fn includes_step(&self, want: &CheckpointStep) -> Bool {
+    public fn includes_step(&self, want: &CheckpointStep) -> Bool {
         let want_name = step_kind_name(want);
         let mut i: Int = 0;
         while i < self.steps.len() {

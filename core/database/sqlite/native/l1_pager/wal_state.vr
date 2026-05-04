@@ -190,7 +190,7 @@ implement WalState {
     /// Mark frames `[1 .. through_frame]` as checkpointed.  Called
     /// by `wal_writer::checkpoint_drain` after the frames have been
     /// flushed to the main DB file.
-    pub fn advance_backfill(&mut self, through_frame: Int) {
+    public fn advance_backfill(&mut self, through_frame: Int) {
         if through_frame > self.mx_frame { return; }
         if through_frame > self.n_backfill {
             self.n_backfill = through_frame;

@@ -86,7 +86,7 @@ fn live_set_is_live(s: &LiveSet, v: &ValueId) -> Bool {
 /// when no SSA value is consumed).  Terminators are always kept;
 /// stateful ops (ResultRow, AggStep, cursor mutations, transaction
 /// control) are kept too.
-pub fn has_side_effect(inst: &SsaInst) -> Bool {
+public fn has_side_effect(inst: &SsaInst) -> Bool {
     match inst {
         IBranch(_, _, _)        => true,
         IJump(_)                => true,
@@ -115,7 +115,7 @@ pub fn has_side_effect(inst: &SsaInst) -> Bool {
 // Public entry point
 // -----------------------------------------------------------------------------
 
-pub type DceReport is {
+public type DceReport is {
     instructions_before: Int,
     instructions_after: Int,
     removed: Int,
@@ -124,7 +124,7 @@ pub type DceReport is {
 
 /// Run mark-sweep DCE on `prog`.  Mutates the program in place;
 /// returns a report for diagnostics.
-pub fn run_dce(prog: &mut SsaProgram) -> DceReport {
+public fn run_dce(prog: &mut SsaProgram) -> DceReport {
     let before = prog.total_instr_count();
 
     // Phase 1: mark — seed + propagate.

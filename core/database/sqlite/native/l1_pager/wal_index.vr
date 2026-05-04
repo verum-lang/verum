@@ -155,7 +155,7 @@ public type WalIndexHdr is {
 public const WALINDEX_HDR_VERSION: Int = 3007000;
 
 /// Construct a fresh (uninitialised) WAL-index header.
-pub fn wal_index_hdr_new(page_size: Int) -> WalIndexHdr {
+public fn wal_index_hdr_new(page_size: Int) -> WalIndexHdr {
     WalIndexHdr {
         version: WALINDEX_HDR_VERSION as u32,
         change_count: 0 as u32,
@@ -214,7 +214,7 @@ public type WalCkptInfo is {
     read_lock: Int,
 };
 
-pub fn wal_ckpt_info_new() -> WalCkptInfo {
+public fn wal_ckpt_info_new() -> WalCkptInfo {
     let mut marks: List<WalReaderMark> = List.new();
     // Slot 0: always 0, refcount = 0.
     marks.push(WalReaderMark { mx_frame: 0, refcount: 0 });
@@ -261,7 +261,7 @@ public type WalIndexHashSection is {
     n_entries: Int,
 };
 
-pub fn hash_section_empty() -> WalIndexHashSection {
+public fn hash_section_empty() -> WalIndexHashSection {
     let mut frame_pages: List<u32> = List.new();
     let mut hash_slots: List<u16> = List.new();
     let mut i: Int = 0;
@@ -277,7 +277,7 @@ pub fn hash_section_empty() -> WalIndexHashSection {
 
 /// Hash function — `(page_no * 383) mod 8192`.  Matches SQLite
 /// `walHash` in wal.c.  Returns the slot index in `[0, HASHTABLE_NSLOT)`.
-pub fn wal_hash_slot(page_no: Int) -> Int {
+public fn wal_hash_slot(page_no: Int) -> Int {
     let h = (page_no * HASHTABLE_HASH_MUL) & (HASHTABLE_NSLOT - 1);
     h
 }
@@ -307,7 +307,7 @@ public type affine WalIndex is {
     sections: List<WalIndexHashSection>,
 };
 
-pub fn wal_index_new(page_size: Int) -> WalIndex {
+public fn wal_index_new(page_size: Int) -> WalIndex {
     let h = wal_index_hdr_new(page_size);
     WalIndex {
         hdr: clone_hdr(&h),
@@ -321,20 +321,20 @@ implement WalIndex {
     /// True iff the index has been initialised by a writer (vs
     /// freshly-created).  Readers attaching to `is_init=false`
     /// must trigger recovery.
-    pub fn is_initialised(&self) -> Bool { self.hdr.is_init }
+    public fn is_initialised(&self) -> Bool { self.hdr.is_init }
 
     /// Total frames represented.
-    pub fn mx_frame(&self) -> Int { self.hdr.mx_frame }
+    public fn mx_frame(&self) -> Int { self.hdr.mx_frame }
 
     /// Last-commit DB page count.
-    pub fn n_page(&self) -> Int { self.hdr.n_page as Int }
+    public fn n_page(&self) -> Int { self.hdr.n_page as Int }
 
     /// Frames already drained to the main DB.
-    pub fn n_backfill(&self) -> Int { self.ckpt.n_backfill }
+    public fn n_backfill(&self) -> Int { self.ckpt.n_backfill }
 
     /// Bytes the index would occupy on disk if serialised right now.
     /// Useful for capacity diagnostics.
-    pub fn size_bytes(&self) -> Int {
+    public fn size_bytes(&self) -> Int {
         // 48 (hdr) + 48 (backup hdr) + 40 (ckpt) + sections × 32 KiB.
         48 + 48 + 40 + self.sections.len() * (16384 + 16384)
     }
@@ -344,7 +344,7 @@ implement WalIndex {
     /// `None` when no such frame exists (caller falls back to the
     /// main DB read path).  Walks every section's hash chain; cheap
     /// because chains are short (load factor ≤ 0.5 by construction).
-    pub fn find_frame(
+    public fn find_frame(
         &self,
         page_no: Int,
         mx_frame_clamp: Int,
@@ -388,7 +388,7 @@ implement WalIndex {
     /// frame number crosses a `HASHTABLE_NPAGE` boundary.
     ///
     /// Frame numbers are 1-based.  Page numbers must be > 0.
-    pub fn append_frame(&mut self, page_no: Int, frame_no: Int) {
+    public fn append_frame(&mut self, page_no: Int, frame_no: Int) {
         if frame_no < 1 || page_no < 1 { return; }
         let section_idx = (frame_no - 1) / HASHTABLE_NPAGE;
         // Grow sections lazily.
@@ -420,7 +420,7 @@ implement WalIndex {
     /// 1, then fsyncs again — readers detect a torn-update by
     /// comparing the two copies.  In-memory backend updates both
     /// atomically.
-    pub fn commit_header(&mut self, mx_frame: Int, n_page: u32, salt1: u32, salt2: u32) {
+    public fn commit_header(&mut self, mx_frame: Int, n_page: u32, salt1: u32, salt2: u32) {
         self.hdr.mx_frame = mx_frame;
         self.hdr.n_page = n_page;
         self.hdr.salt1 = salt1;
@@ -434,7 +434,7 @@ implement WalIndex {
     /// Reset the index after a Restart/Truncate checkpoint.  Drops
     /// every hash section + zeroes mx_frame/n_backfill but PRESERVES
     /// the change_count (incremented) so readers detect the rotation.
-    pub fn reset_after_checkpoint(&mut self, new_salt1: u32, new_salt2: u32) {
+    public fn reset_after_checkpoint(&mut self, new_salt1: u32, new_salt2: u32) {
         self.hdr.mx_frame = 0;
         self.hdr.n_page = 0 as u32;
         self.hdr.salt1 = new_salt1;
@@ -469,7 +469,7 @@ implement WalIndex {
     ///      refcount = 1) and return.
     ///   4. Otherwise -1 (caller falls back to slot 0 = full WAL
     ///      scan, which is always safe but expensive).
-    pub fn try_acquire_reader_mark(&mut self) -> Int {
+    public fn try_acquire_reader_mark(&mut self) -> Int {
         let want = self.hdr.mx_frame;
         // Walk slots looking for a compatible mark.
         let mut i: Int = 1;
@@ -503,7 +503,7 @@ implement WalIndex {
     /// Release a reader mark (called by reader on close).  Decrements
     /// refcount; when refcount hits 0 the slot becomes UNUSED so
     /// future readers may claim it at a different mx_frame.
-    pub fn release_reader_mark(&mut self, slot: Int) {
+    public fn release_reader_mark(&mut self, slot: Int) {
         if slot < 1 || slot >= N_READER_MARK { return; }
         let m = &self.ckpt.read_marks[slot];
         if m.refcount <= 1 {
@@ -523,7 +523,7 @@ implement WalIndex {
     /// `READMARK_NOT_USED` when no slots are claimed.  The
     /// checkpointer must NOT advance n_backfill past this — doing so
     /// would invalidate an in-flight reader's snapshot.
-    pub fn min_active_reader_mark(&self) -> Int {
+    public fn min_active_reader_mark(&self) -> Int {
         let mut min: Int = READMARK_NOT_USED;
         let mut i: Int = 1;
         while i < N_READER_MARK {
@@ -539,7 +539,7 @@ implement WalIndex {
     /// Bump n_backfill — the checkpointer calls this after draining
     /// frames `[1, through_frame]` to the main DB.  Bounded by
     /// `min_active_reader_mark` to avoid invalidating readers.
-    pub fn advance_backfill(&mut self, through_frame: Int) -> Bool {
+    public fn advance_backfill(&mut self, through_frame: Int) -> Bool {
         let bound = self.min_active_reader_mark();
         let safe_max = if bound == READMARK_NOT_USED { through_frame } else { if through_frame < bound { through_frame } else { bound } };
         if safe_max > self.ckpt.n_backfill {

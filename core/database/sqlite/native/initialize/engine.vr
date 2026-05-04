@@ -35,11 +35,11 @@ public fn new_engine() -> InitEngine {
 }
 
 implement InitEngine {
-    pub fn is_ready(&self) -> Bool { is_ready(&self.phase) }
+    public fn is_ready(&self) -> Bool { is_ready(&self.phase) }
 
     /// Record the start of work on `sub`. Returns true iff the engine
     /// actually needs to do something; false if already running.
-    pub fn begin(&mut self, sub: Subsystem) -> Bool {
+    public fn begin(&mut self, sub: Subsystem) -> Bool {
         self.calls = self.calls + 1_i64;
         if self.is_ready() { return false; }
         self.phase = IpBringing(sub);
@@ -49,17 +49,17 @@ implement InitEngine {
     /// Record successful completion of the current subsystem. Caller
     /// bumps `completed` count and transitions to IpRunning when the
     /// last subsystem is finished.
-    pub fn finish_current(&mut self, is_last: Bool) {
+    public fn finish_current(&mut self, is_last: Bool) {
         self.completed = self.completed + 1;
         if is_last { self.phase = IpRunning; }
     }
 
-    pub fn fail(&mut self, reason: Text) {
+    public fn fail(&mut self, reason: Text) {
         self.phase = IpFailed(reason);
     }
 
     /// Total number of subsystems per init_order.
-    pub fn total_subsystems(&self) -> Int { init_order().len() }
+    public fn total_subsystems(&self) -> Int { init_order().len() }
 }
 
 /// Simulate a full bring-up starting from IpFresh. Returns the final

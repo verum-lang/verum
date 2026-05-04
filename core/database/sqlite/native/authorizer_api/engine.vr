@@ -43,19 +43,19 @@ public fn new_engine() -> AuthorizerEngine {
 }
 
 implement AuthorizerEngine {
-    pub fn sqlite3_set_authorizer(&mut self, slot: AuthSlot) {
+    public fn sqlite3_set_authorizer(&mut self, slot: AuthSlot) {
         self.slot = slot;
     }
 
-    pub fn clear(&mut self) {
+    public fn clear(&mut self) {
         self.slot = empty_slot();
     }
 
-    pub fn authorizer_installed(&self) -> Bool { is_installed(&self.slot) }
+    public fn authorizer_installed(&self) -> Bool { is_installed(&self.slot) }
 
     /// Observe an authorizer verdict — used by callers that feed raw
     /// xAuth return values through this engine.
-    pub fn observe(&mut self, d: &Decision) {
+    public fn observe(&mut self, d: &Decision) {
         self.calls_observed = self.calls_observed + 1_i64;
         match d {
             DDeny   => self.denies = self.denies + 1_i64,
@@ -64,7 +64,7 @@ implement AuthorizerEngine {
         }
     }
 
-    pub fn should_reject_prepare(&self, d: &Decision) -> Bool {
+    public fn should_reject_prepare(&self, d: &Decision) -> Bool {
         blocks_prepare(d)
     }
 }

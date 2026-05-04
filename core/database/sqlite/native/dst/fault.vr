@@ -72,10 +72,10 @@ public fn schedule_empty() -> FaultSchedule { FaultSchedule { entries: List.new(
 implement FaultSchedule {
     public fn len(&self) -> Int { self.entries.len() }
 
-    pub fn push(&mut self, e: ScheduledFault) { self.entries.push(e); }
+    public fn push(&mut self, e: ScheduledFault) { self.entries.push(e); }
 
     /// First fault at-or-after `op_idx`.
-    pub fn next_after(&self, op_idx: Int) -> Maybe<ScheduledFault> {
+    public fn next_after(&self, op_idx: Int) -> Maybe<ScheduledFault> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].at_op >= op_idx {
@@ -88,7 +88,7 @@ implement FaultSchedule {
 
     /// Op index at which the first terminal fault (PowerLoss) fires.
     /// `len()+1` if none scheduled.
-    pub fn terminal_at(&self) -> Int {
+    public fn terminal_at(&self) -> Int {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if is_terminal(&self.entries[i].fault) {

@@ -31,24 +31,24 @@ public fn new_engine() -> BusyEngine {
 }
 
 implement BusyEngine {
-    pub fn install_custom(&mut self, name: Text) {
+    public fn install_custom(&mut self, name: Text) {
         self.kind = BhCustom(name);
         self.attempts = 0;
     }
 
-    pub fn sqlite3_busy_timeout(&mut self, ms: Int) {
+    public fn sqlite3_busy_timeout(&mut self, ms: Int) {
         let req = new_request(ms);
         self.kind = if ms <= 0 { BhNone } else { BhTimeout(ms) };
         self.attempts = 0;
         let _ = req; // ms threaded through above
     }
 
-    pub fn clear(&mut self) {
+    public fn clear(&mut self) {
         self.kind = BhNone;
         self.attempts = 0;
     }
 
-    pub fn decide(&mut self, on_custom: fn(Int) -> BusyDecision) -> BusyDecision {
+    public fn decide(&mut self, on_custom: fn(Int) -> BusyDecision) -> BusyDecision {
         let decision = match &self.kind {
             BhNone => BdGiveUp,
             BhTimeout(ms) => {
@@ -62,7 +62,7 @@ implement BusyEngine {
         decision
     }
 
-    pub fn reset_counter(&mut self) {
+    public fn reset_counter(&mut self) {
         self.attempts = 0;
     }
 }

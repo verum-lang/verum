@@ -64,7 +64,7 @@ implement KeyRing {
     /// Install a new key, returning its assigned `key_id`. The new
     /// key becomes the current (active) key; the previous current
     /// key gets its `valid_to_ns` set to `now_ns`.
-    pub fn install(&mut self, material: List<Byte>, now_ns: Int64) -> Int {
+    public fn install(&mut self, material: List<Byte>, now_ns: Int64) -> Int {
         // Close the previous current key.
         let mut i: Int = 0;
         while i < self.entries.len() {
@@ -80,7 +80,7 @@ implement KeyRing {
     }
 
     /// Look up a key by id (used to decrypt an old-key page).
-    pub fn lookup(&self, key_id: Int) -> Maybe<KeyEntry> {
+    public fn lookup(&self, key_id: Int) -> Maybe<KeyEntry> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].key_id == key_id {
@@ -92,7 +92,7 @@ implement KeyRing {
     }
 
     /// The active (open-ended) key.
-    pub fn current(&self) -> Maybe<KeyEntry> {
+    public fn current(&self) -> Maybe<KeyEntry> {
         let mut i: Int = self.entries.len() - 1;
         while i >= 0 {
             if self.entries[i].valid_to_ns == 0_i64 {
@@ -105,7 +105,7 @@ implement KeyRing {
 
     /// Drop a historical key (after rotation completes). Returns
     /// true if the id was found AND was historical (not current).
-    pub fn retire(&mut self, key_id: Int) -> Bool {
+    public fn retire(&mut self, key_id: Int) -> Bool {
         let mut new_entries: List<KeyEntry> = List.new();
         let mut found: Bool = false;
         let mut i: Int = 0;

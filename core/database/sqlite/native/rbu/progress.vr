@@ -31,11 +31,11 @@ public fn new_progress() -> BpProgress {
 }
 
 implement BpProgress {
-    pub fn note_source(&mut self, n: Int64) {
+    public fn note_source(&mut self, n: Int64) {
         self.source_rows = self.source_rows + n;
     }
 
-    pub fn note_checkpoint(&mut self, n: Int64) {
+    public fn note_checkpoint(&mut self, n: Int64) {
         self.checkpoint_pages = self.checkpoint_pages + n;
     }
 }

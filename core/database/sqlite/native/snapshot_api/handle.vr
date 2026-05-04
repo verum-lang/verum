@@ -27,8 +27,8 @@ public fn new_handle(id: Int64, schema: Text, watermark: Int64) -> SnapshotHandl
 }
 
 implement SnapshotHandle {
-    pub fn free(&mut self) { self.freed = true; }
-    pub fn is_live(&self) -> Bool { !self.freed }
+    public fn free(&mut self) { self.freed = true; }
+    public fn is_live(&self) -> Bool { !self.freed }
 }
 
 /// -1 / 0 / +1 ordering by watermark — matches sqlite3_snapshot_cmp.

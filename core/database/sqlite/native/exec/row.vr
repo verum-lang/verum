@@ -41,8 +41,8 @@ public fn new_row() -> ExecRow {
 }
 
 implement ExecRow {
-    pub fn push(&mut self, name: Text, text: Text) {
+    public fn push(&mut self, name: Text, text: Text) {
         self.columns.push(exec_column(name, text));
     }
-    pub fn len(&self) -> Int { self.columns.len() }
+    public fn len(&self) -> Int { self.columns.len() }
 }

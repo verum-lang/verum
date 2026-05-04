@@ -81,7 +81,7 @@ implement HashGroup {
 
     /// Insert a (frame_in_group, page_no) record. `frame_in_group`
     /// is 1-based (matches SQLite's WAL frame numbering within group).
-    pub fn insert(&mut self, frame_in_group: Int, page_no: Int) {
+    public fn insert(&mut self, frame_in_group: Int, page_no: Int) {
         if frame_in_group <= 0 || frame_in_group > FRAMES_PER_GROUP { return; }
         self.frames[frame_in_group - 1] = frame_record(page_no);
         let mut slot = hash_for(page_no);
@@ -102,7 +102,7 @@ implement HashGroup {
     /// SQLite's lookup walks ALL collision-chain entries and keeps
     /// the maximum, since the same page may have been rewritten in
     /// successive frames within the same group.
-    pub fn lookup(&self, page_no: Int) -> Maybe<Int> {
+    public fn lookup(&self, page_no: Int) -> Maybe<Int> {
         let mut slot = hash_for(page_no);
         let mut best: Int = 0;
         let mut i: Int = 0;

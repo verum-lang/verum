@@ -25,7 +25,7 @@ mount core.database.sqlite.native.l4_vdbe.ssa.jump_threading.{
 // SsaOptimizerReport — composed report from one pipeline run
 // -----------------------------------------------------------------------------
 
-pub type SsaOptimizerReport is {
+public type SsaOptimizerReport is {
     iterations: Int,
     total_dce_removed: Int,
     total_jumps_threaded: Int,
@@ -48,7 +48,7 @@ fn empty_report() -> SsaOptimizerReport {
 /// Run the full SSA optimizer pipeline.  Iterates DCE → jump-threading
 /// until both report zero edits in a pass (max 4 iterations).  Returns
 /// a report aggregating per-pass metrics.
-pub fn optimize_ssa(prog: &mut SsaProgram) -> SsaOptimizerReport {
+public fn optimize_ssa(prog: &mut SsaProgram) -> SsaOptimizerReport {
     let mut report = empty_report();
     let max_iter: Int = 4;
     let mut iter: Int = 0;

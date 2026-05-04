@@ -32,9 +32,9 @@ public fn new_table() -> CollationTable {
 }
 
 implement CollationTable {
-    pub fn push(&mut self, e: ConstraintCollation) { self.entries.push(e); }
+    public fn push(&mut self, e: ConstraintCollation) { self.entries.push(e); }
 
-    pub fn lookup(&self, idx: Int) -> Maybe<Text> {
+    public fn lookup(&self, idx: Int) -> Maybe<Text> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries.get(i).constraint_index == idx {
@@ -45,5 +45,5 @@ implement CollationTable {
         Maybe.None
     }
 
-    pub fn len(&self) -> Int { self.entries.len() }
+    public fn len(&self) -> Int { self.entries.len() }
 }

@@ -85,27 +85,27 @@ implement IntegrityEngine {
         }
     }
 
-    pub fn fail(&mut self, reason: Text) {
+    public fn fail(&mut self, reason: Text) {
         self.phase = IpFailed(reason);
     }
 
     /// Step the engine one phase. The order is fixed; callers do their
     /// scan + record() between calls.
-    pub fn advance(&mut self) {
+    public fn advance(&mut self) {
         let next = next_phase_for(&self.mode, &self.phase);
         self.phase = next;
     }
 
     /// Record an error if it is in scope for the current mode; mode's
     /// `applies` predicate gates inclusion.
-    pub fn record(&mut self, err: IntegrityError) -> Bool {
+    public fn record(&mut self, err: IntegrityError) -> Bool {
         if applies(&self.mode, &err) {
             self.report.record(err);
             true
         } else { false }
     }
 
-    pub fn report_view(&self) -> &IntegrityReport { &self.report }
+    public fn report_view(&self) -> &IntegrityReport { &self.report }
 }
 
 fn next_phase_for(mode: &CheckMode, current: &IntegrityEnginePhase) -> IntegrityEnginePhase {

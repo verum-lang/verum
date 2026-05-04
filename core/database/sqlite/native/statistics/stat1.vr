@@ -52,7 +52,7 @@ public fn stat1_row(
 implement Stat1Row {
     /// Distinct keys for the first `n_cols` of the index.
     /// Distinct = total_rows / avg_dup
-    pub fn distinct_keys(&self, n_cols: Int) -> Int64 {
+    public fn distinct_keys(&self, n_cols: Int) -> Int64 {
         if n_cols <= 0 || n_cols > self.dup_per_prefix.len() {
             return self.total_rows;
         }
@@ -63,7 +63,7 @@ implement Stat1Row {
 
     /// True iff the first `n_cols` of the index are unique
     /// (avg_dup == 1).
-    pub fn is_unique_prefix(&self, n_cols: Int) -> Bool {
+    public fn is_unique_prefix(&self, n_cols: Int) -> Bool {
         if n_cols <= 0 || n_cols > self.dup_per_prefix.len() { return false; }
         self.dup_per_prefix[n_cols - 1] == 1_i64
     }
@@ -80,9 +80,9 @@ public fn stat1_table_new() -> Stat1Table { Stat1Table { rows: List.new() } }
 implement Stat1Table {
     public fn len(&self) -> Int { self.rows.len() }
 
-    pub fn add(&mut self, r: Stat1Row) { self.rows.push(r); }
+    public fn add(&mut self, r: Stat1Row) { self.rows.push(r); }
 
-    pub fn lookup_table(&self, table: &Text) -> Maybe<Int64> {
+    public fn lookup_table(&self, table: &Text) -> Maybe<Int64> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].table_name == *table {
@@ -96,7 +96,7 @@ implement Stat1Table {
         None
     }
 
-    pub fn lookup_index(&self, index: &Text) -> Maybe<Int64> {
+    public fn lookup_index(&self, index: &Text) -> Maybe<Int64> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             match &self.rows[i].index_name {

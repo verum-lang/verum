@@ -41,6 +41,6 @@ public fn new_callback_recover(id: Int64, source_schema: Text) -> Recover {
 }
 
 implement Recover {
-    pub fn finish(&mut self) { self.finished = true; }
-    pub fn is_live(&self) -> Bool { !self.finished }
+    public fn finish(&mut self) { self.finished = true; }
+    public fn is_live(&self) -> Bool { !self.finished }
 }

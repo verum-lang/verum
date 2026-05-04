@@ -104,7 +104,7 @@ public type affine DstWrappedPager is {
 /// when needed).  The fault schedule is derived deterministically
 /// from `seed` so the same seed reproduces the same fault
 /// sequence — that's the WHOLE POINT of DST.
-pub fn dst_wrapped_pager_open(
+public fn dst_wrapped_pager_open(
     seed: Int64,
     total_ops: Int,
     page_size: Int,
@@ -128,19 +128,19 @@ pub fn dst_wrapped_pager_open(
 }
 
 implement DstWrappedPager {
-    pub fn page_size(&self) -> Int { self.inner.page_size_view() }
-    pub fn op_count(&self) -> Int { self.op_counter }
-    pub fn is_crashed(&self) -> Bool { self.crashed }
-    pub fn injected_faults(&self) -> &List<DstFaultEvent> { &self.injected }
-    pub fn injected_count(&self) -> Int { self.injected.len() }
+    public fn page_size(&self) -> Int { self.inner.page_size_view() }
+    public fn op_count(&self) -> Int { self.op_counter }
+    public fn is_crashed(&self) -> Bool { self.crashed }
+    public fn injected_faults(&self) -> &List<DstFaultEvent> { &self.injected }
+    public fn injected_count(&self) -> Int { self.injected.len() }
 
     /// Snapshot the inner pager's dirty-count for oracle diff.
-    pub fn observed_dirty_count(&self) -> Int { self.inner.dirty_count_view() }
+    public fn observed_dirty_count(&self) -> Int { self.inner.dirty_count_view() }
 
     /// Drain the injection log — useful when the bridge wants to
     /// claim ownership of the events (oracle replay) without
     /// dropping the wrapper.
-    pub fn take_injected(&mut self) -> List<DstFaultEvent> {
+    public fn take_injected(&mut self) -> List<DstFaultEvent> {
         let mut out: List<DstFaultEvent> = List.new();
         let mut i: Int = 0;
         while i < self.injected.len() {
@@ -256,7 +256,7 @@ fn crashed_error() -> PagerError {
 /// Read a page through the wrapper.  Bumps the op counter, consults
 /// the schedule, either injects a fault OR delegates to
 /// `pager_read`.
-pub fn dst_pager_read(p: &mut DstWrappedPager, page_no: Int) -> Result<PageFrame, PagerError> {
+public fn dst_pager_read(p: &mut DstWrappedPager, page_no: Int) -> Result<PageFrame, PagerError> {
     if p.crashed { return Err(crashed_error()); }
     p.op_counter = p.op_counter + 1;
     match consult_schedule(p) {
@@ -271,7 +271,7 @@ pub fn dst_pager_read(p: &mut DstWrappedPager, page_no: Int) -> Result<PageFrame
 
 /// Write a page through the wrapper.  Same fault-check semantics
 /// as `dst_pager_read`.
-pub fn dst_pager_write(p: &mut DstWrappedPager, frame: &PageFrame) -> Result<(), PagerError> {
+public fn dst_pager_write(p: &mut DstWrappedPager, frame: &PageFrame) -> Result<(), PagerError> {
     if p.crashed { return Err(crashed_error()); }
     p.op_counter = p.op_counter + 1;
     match consult_schedule(p) {
@@ -285,7 +285,7 @@ pub fn dst_pager_write(p: &mut DstWrappedPager, frame: &PageFrame) -> Result<(),
 }
 
 /// Flush dirty pages through the wrapper.
-pub fn dst_pager_flush(p: &mut DstWrappedPager) -> Result<(), PagerError> {
+public fn dst_pager_flush(p: &mut DstWrappedPager) -> Result<(), PagerError> {
     if p.crashed { return Err(crashed_error()); }
     p.op_counter = p.op_counter + 1;
     match consult_schedule(p) {
@@ -299,7 +299,7 @@ pub fn dst_pager_flush(p: &mut DstWrappedPager) -> Result<(), PagerError> {
 }
 
 /// Commit through the wrapper.
-pub fn dst_pager_commit(p: &mut DstWrappedPager) -> Result<(), PagerError> {
+public fn dst_pager_commit(p: &mut DstWrappedPager) -> Result<(), PagerError> {
     if p.crashed { return Err(crashed_error()); }
     p.op_counter = p.op_counter + 1;
     match consult_schedule(p) {
@@ -315,7 +315,7 @@ pub fn dst_pager_commit(p: &mut DstWrappedPager) -> Result<(), PagerError> {
 /// Close the wrapped pager — delegates to `pager_close` and resets
 /// the wrapper state.  After close, the wrapper is unusable and
 /// must be discarded.
-pub fn dst_pager_close(p: &mut DstWrappedPager) -> Result<(), PagerError> {
+public fn dst_pager_close(p: &mut DstWrappedPager) -> Result<(), PagerError> {
     pager_close(&mut p.inner)
 }
 
@@ -330,7 +330,7 @@ pub fn dst_pager_close(p: &mut DstWrappedPager) -> Result<(), PagerError> {
 /// post-crash run continues to consult faults at the same op
 /// indices.  The op_counter is NOT reset (faults indexed by total
 /// ops across the run, including pre-crash and post-crash).
-pub fn dst_pager_reopen_after_crash(p: &mut DstWrappedPager, page_size: Int) -> Result<(), PagerError> {
+public fn dst_pager_reopen_after_crash(p: &mut DstWrappedPager, page_size: Int) -> Result<(), PagerError> {
     let _ = pager_close(&mut p.inner);
     let fresh = match pager_open_memory_with_size(page_size) {
         Ok(np) => np,

@@ -32,32 +32,32 @@ public fn limit_with(threshold: Int64) -> Limit {
 }
 
 implement Limit {
-    pub fn is_disabled(&self) -> Bool { self.threshold <= 0_i64 }
+    public fn is_disabled(&self) -> Bool { self.threshold <= 0_i64 }
 
     /// Increase used and adjust HWM.
-    pub fn add(&mut self, bytes: Int64) {
+    public fn add(&mut self, bytes: Int64) {
         self.used = self.used + bytes;
         if self.used > self.high_water { self.high_water = self.used; }
     }
 
-    pub fn sub(&mut self, bytes: Int64) {
+    public fn sub(&mut self, bytes: Int64) {
         self.used = self.used - bytes;
         if self.used < 0_i64 { self.used = 0 as Int64; }
     }
 
     /// True iff `used + delta` would exceed the threshold (when enabled).
-    pub fn would_exceed(&self, delta: Int64) -> Bool {
+    public fn would_exceed(&self, delta: Int64) -> Bool {
         if self.is_disabled() { return false; }
         (self.used + delta) > self.threshold
     }
 
-    pub fn set_threshold(&mut self, new_threshold: Int64) -> Int64 {
+    public fn set_threshold(&mut self, new_threshold: Int64) -> Int64 {
         let prev = self.threshold;
         self.threshold = new_threshold;
         prev
     }
 
-    pub fn reset_high_water(&mut self) { self.high_water = self.used; }
+    public fn reset_high_water(&mut self) { self.high_water = self.used; }
 
-    pub fn snapshot(&self) -> (Int64, Int64, Int64) { (self.threshold, self.used, self.high_water) }
+    public fn snapshot(&self) -> (Int64, Int64, Int64) { (self.threshold, self.used, self.high_water) }
 }

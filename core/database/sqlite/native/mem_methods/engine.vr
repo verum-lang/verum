@@ -32,14 +32,14 @@ public fn new_engine() -> MemMethodsEngine {
 implement MemMethodsEngine {
     /// Accept the override iff the method set is viable. Returns
     /// true on success.
-    pub fn install(&mut self, m: MethodSet) -> Bool {
+    public fn install(&mut self, m: MethodSet) -> Bool {
         if !is_viable(&m) { return false; }
         self.methods = m;
         self.installed = true;
         true
     }
 
-    pub fn is_installed(&self) -> Bool { self.installed }
+    public fn is_installed(&self) -> Bool { self.installed }
 }
 
 /// SQLite rounds requests up to the next multiple of 8 by default.

@@ -32,7 +32,7 @@ public fn new_engine(n_params: Int) -> BindPointerEngine {
 }
 
 implement BindPointerEngine {
-    pub fn sqlite3_bind_pointer(&mut self, index: Int, ptr: TypedPointer) -> Bool {
+    public fn sqlite3_bind_pointer(&mut self, index: Int, ptr: TypedPointer) -> Bool {
         if index <= 0 || index >= self.slots.len() { return false; }
         self.slots.get_mut(index).tag = ptr.tag;
         self.slots.get_mut(index).handle = ptr.handle;
@@ -40,12 +40,12 @@ implement BindPointerEngine {
         true
     }
 
-    pub fn sqlite3_value_pointer(&self, index: Int, want: &PointerTag) -> Int64 {
+    public fn sqlite3_value_pointer(&self, index: Int, want: &PointerTag) -> Int64 {
         if index <= 0 || index >= self.slots.len() { return 0 as Int64; }
         fetch_if_match(self.slots.get(index), want)
     }
 
-    pub fn clear(&mut self, index: Int) -> Bool {
+    public fn clear(&mut self, index: Int) -> Bool {
         if index <= 0 || index >= self.slots.len() { return false; }
         self.slots.get_mut(index).tag = new_tag("".clone());
         self.slots.get_mut(index).handle = 0 as Int64;
@@ -53,5 +53,5 @@ implement BindPointerEngine {
         true
     }
 
-    pub fn slot_count(&self) -> Int { self.slots.len() - 1 }
+    public fn slot_count(&self) -> Int { self.slots.len() - 1 }
 }

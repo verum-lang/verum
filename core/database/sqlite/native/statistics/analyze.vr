@@ -99,7 +99,7 @@ implement AnalyzeEngine {
 
     /// Step the state machine. Caller drives execution by feeding back
     /// the per-phase scan result via `record_stat1` / `record_stat4`.
-    pub fn advance(&mut self) {
+    public fn advance(&mut self) {
         match &self.phase {
             AeInit => {
                 if self.plan.tables.len() == 0 { self.phase = AeDone; }
@@ -120,15 +120,15 @@ implement AnalyzeEngine {
         }
     }
 
-    pub fn fail(&mut self, reason: Text) {
+    public fn fail(&mut self, reason: Text) {
         self.phase = AeFailed(reason);
     }
 
-    pub fn record_stat1(&mut self, row: Stat1Row) {
+    public fn record_stat1(&mut self, row: Stat1Row) {
         self.stat1.add(row);
     }
 
-    pub fn finished_stat1_count(&self) -> Int { self.stat1.len() }
+    public fn finished_stat1_count(&self) -> Int { self.stat1.len() }
 }
 
 fn clone_phase(p: &AnalyzePhase) -> AnalyzePhase {

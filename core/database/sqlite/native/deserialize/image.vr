@@ -23,12 +23,12 @@ public fn db_image(bytes: List<Byte>, page_size: Int) -> DbImage {
 }
 
 implement DbImage {
-    pub fn byte_count(&self) -> Int { self.bytes.len() }
+    public fn byte_count(&self) -> Int { self.bytes.len() }
 
-    pub fn is_empty(&self) -> Bool { self.bytes.len() == 0 }
+    public fn is_empty(&self) -> Bool { self.bytes.len() == 0 }
 
     /// Read one page (1-based index — SQLite convention).
-    pub fn read_page(&self, page_no: Int) -> List<Byte> {
+    public fn read_page(&self, page_no: Int) -> List<Byte> {
         if page_no < 1 || page_no > self.page_count { return List.new(); }
         let off = (page_no - 1) * self.page_size;
         let mut end = off + self.page_size;
@@ -40,7 +40,7 @@ implement DbImage {
 
     /// Append a page (used when re-serialising). Caller is responsible
     /// for keeping `page_count` in sync.
-    pub fn append_page(&mut self, page_bytes: List<Byte>) {
+    public fn append_page(&mut self, page_bytes: List<Byte>) {
         self.bytes.extend_from_slice(page_bytes.as_slice());
         self.page_count = self.page_count + 1;
     }

@@ -48,12 +48,12 @@ public fn registry_new() -> MetricRegistry {
 }
 
 implement MetricRegistry {
-    pub fn counter_count(&self) -> Int { self.counters.len() }
-    pub fn gauge_count(&self) -> Int { self.gauges.len() }
-    pub fn histogram_count(&self) -> Int { self.histograms.len() }
+    public fn counter_count(&self) -> Int { self.counters.len() }
+    public fn gauge_count(&self) -> Int { self.gauges.len() }
+    public fn histogram_count(&self) -> Int { self.histograms.len() }
 
     /// Get-or-create counter by name.
-    pub fn counter(&mut self, name: Text) -> Int {
+    public fn counter(&mut self, name: Text) -> Int {
         let mut i: Int = 0;
         while i < self.counters.len() {
             if self.counters[i].name == name { return i; }
@@ -63,7 +63,7 @@ implement MetricRegistry {
         self.counters.len() - 1
     }
 
-    pub fn gauge(&mut self, name: Text) -> Int {
+    public fn gauge(&mut self, name: Text) -> Int {
         let mut i: Int = 0;
         while i < self.gauges.len() {
             if self.gauges[i].name == name { return i; }
@@ -73,7 +73,7 @@ implement MetricRegistry {
         self.gauges.len() - 1
     }
 
-    pub fn histogram(&mut self, name: Text) -> Int {
+    public fn histogram(&mut self, name: Text) -> Int {
         let mut i: Int = 0;
         while i < self.histograms.len() {
             if self.histograms[i].name == name { return i; }
@@ -84,28 +84,28 @@ implement MetricRegistry {
     }
 
     /// Increment a counter by 1.
-    pub fn inc_counter(&mut self, name: Text) {
+    public fn inc_counter(&mut self, name: Text) {
         let idx = self.counter(name);
         self.counters[idx].inc();
     }
 
     /// Add to a counter.
-    pub fn add_counter(&mut self, name: Text, n: Int64) {
+    public fn add_counter(&mut self, name: Text, n: Int64) {
         let idx = self.counter(name);
         self.counters[idx].add(n);
     }
 
-    pub fn set_gauge(&mut self, name: Text, value: Int64) {
+    public fn set_gauge(&mut self, name: Text, value: Int64) {
         let idx = self.gauge(name);
         self.gauges[idx].set(value);
     }
 
-    pub fn observe(&mut self, name: Text, value_ns: Int64) {
+    public fn observe(&mut self, name: Text, value_ns: Int64) {
         let idx = self.histogram(name);
         self.histograms[idx].observe(value_ns);
     }
 
-    pub fn counter_value(&self, name: &Text) -> Maybe<Int64> {
+    public fn counter_value(&self, name: &Text) -> Maybe<Int64> {
         let mut i: Int = 0;
         while i < self.counters.len() {
             if self.counters[i].name == name { return Some(self.counters[i].get()); }
@@ -114,7 +114,7 @@ implement MetricRegistry {
         None
     }
 
-    pub fn gauge_value(&self, name: &Text) -> Maybe<Int64> {
+    public fn gauge_value(&self, name: &Text) -> Maybe<Int64> {
         let mut i: Int = 0;
         while i < self.gauges.len() {
             if self.gauges[i].name == name { return Some(self.gauges[i].get()); }
@@ -125,7 +125,7 @@ implement MetricRegistry {
 
     /// Renamed from `histogram_count` to avoid the collision with
     /// the catalogue-cardinality query above.
-    pub fn histogram_observations(&self, name: &Text) -> Maybe<Int64> {
+    public fn histogram_observations(&self, name: &Text) -> Maybe<Int64> {
         let mut i: Int = 0;
         while i < self.histograms.len() {
             if self.histograms[i].name == name { return Some(self.histograms[i].count()); }

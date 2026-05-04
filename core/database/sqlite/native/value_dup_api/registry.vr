@@ -29,7 +29,7 @@ public fn new_registry() -> DupRegistry {
 }
 
 implement DupRegistry {
-    pub fn sqlite3_value_dup(&mut self, source_id: Int64) -> Int64 {
+    public fn sqlite3_value_dup(&mut self, source_id: Int64) -> Int64 {
         let id = self.next_id;
         self.next_id = self.next_id + 1_i64;
         self.handles.push(new_handle(id, source_id));
@@ -45,7 +45,7 @@ implement DupRegistry {
         -1
     }
 
-    pub fn sqlite3_value_free(&mut self, id: Int64) -> Bool {
+    public fn sqlite3_value_free(&mut self, id: Int64) -> Bool {
         let idx = self.find(id);
         if idx < 0 { return false; }
         if !is_live(self.handles.get(idx)) {
@@ -56,7 +56,7 @@ implement DupRegistry {
         true
     }
 
-    pub fn outstanding_count(&self) -> Int {
+    public fn outstanding_count(&self) -> Int {
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < self.handles.len() {

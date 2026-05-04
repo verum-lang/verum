@@ -76,7 +76,7 @@ implement MyTxOpts {
     }
 
     /// Render the SQL clause that follows `START TRANSACTION`.
-    pub fn render_sql(&self) -> Text {
+    public fn render_sql(&self) -> Text {
         let mut out: Text = Text.new();
         match self.isolation {
             MyTkRepeatableRead   => { out.push_str(" ISOLATION LEVEL REPEATABLE READ"); }
@@ -113,11 +113,11 @@ implement MysqlTransaction {
 // -----------------------------------------------------------------------------
 
 /// Begin a transaction with default opts (REPEATABLE READ READ WRITE).
-pub fn begin_tx(conn: &mut MysqlConnection) -> Result<MysqlTransaction, DbError> {
+public fn begin_tx(conn: &mut MysqlConnection) -> Result<MysqlTransaction, DbError> {
     begin_tx_with(conn, my_tx_opts_default())
 }
 
-pub fn begin_tx_with(
+public fn begin_tx_with(
     conn: &mut MysqlConnection,
     opts: MyTxOpts,
 ) -> Result<MysqlTransaction, DbError> {
@@ -129,14 +129,14 @@ pub fn begin_tx_with(
     }
 }
 
-pub fn begin_tx_serializable(conn: &mut MysqlConnection)
+public fn begin_tx_serializable(conn: &mut MysqlConnection)
     -> Result<MysqlTransaction, DbError>
 {
     begin_tx_with(conn, my_tx_opts_default()
         .with_isolation(MyTkSerializable))
 }
 
-pub fn begin_tx_read_only(conn: &mut MysqlConnection)
+public fn begin_tx_read_only(conn: &mut MysqlConnection)
     -> Result<MysqlTransaction, DbError>
 {
     begin_tx_with(conn, my_tx_opts_default()
@@ -144,7 +144,7 @@ pub fn begin_tx_read_only(conn: &mut MysqlConnection)
 }
 
 /// Consume the transaction handle and COMMIT.
-pub fn commit_tx(
+public fn commit_tx(
     conn: &mut MysqlConnection,
     tx: MysqlTransaction,
 ) -> Result<(), DbError> {
@@ -156,7 +156,7 @@ pub fn commit_tx(
 }
 
 /// Consume the transaction handle and ROLLBACK.
-pub fn rollback_tx(
+public fn rollback_tx(
     conn: &mut MysqlConnection,
     tx: MysqlTransaction,
 ) -> Result<(), DbError> {
@@ -171,7 +171,7 @@ pub fn rollback_tx(
 // Savepoint helpers
 // -----------------------------------------------------------------------------
 
-pub fn savepoint(conn: &mut MysqlConnection, name: &Text) -> Result<(), DbError> {
+public fn savepoint(conn: &mut MysqlConnection, name: &Text) -> Result<(), DbError> {
     let mut sql: Text = "SAVEPOINT ".clone();
     sql.push_str(name);
     match conn.execute(&sql) {
@@ -180,7 +180,7 @@ pub fn savepoint(conn: &mut MysqlConnection, name: &Text) -> Result<(), DbError>
     }
 }
 
-pub fn release_savepoint(conn: &mut MysqlConnection, name: &Text)
+public fn release_savepoint(conn: &mut MysqlConnection, name: &Text)
     -> Result<(), DbError>
 {
     let mut sql: Text = "RELEASE SAVEPOINT ".clone();
@@ -191,7 +191,7 @@ pub fn release_savepoint(conn: &mut MysqlConnection, name: &Text)
     }
 }
 
-pub fn rollback_to_savepoint(conn: &mut MysqlConnection, name: &Text)
+public fn rollback_to_savepoint(conn: &mut MysqlConnection, name: &Text)
     -> Result<(), DbError>
 {
     let mut sql: Text = "ROLLBACK TO SAVEPOINT ".clone();
@@ -206,7 +206,7 @@ pub fn rollback_to_savepoint(conn: &mut MysqlConnection, name: &Text)
 // `with_transaction` callback combinator
 // -----------------------------------------------------------------------------
 
-pub fn with_transaction<R>(
+public fn with_transaction<R>(
     conn: &mut MysqlConnection,
     body: fn(&mut MysqlConnection) -> Result<R, DbError>,
 ) -> Result<R, DbError> {
@@ -226,7 +226,7 @@ pub fn with_transaction<R>(
     }
 }
 
-pub fn with_transaction_serializable<R>(
+public fn with_transaction_serializable<R>(
     conn: &mut MysqlConnection,
     body: fn(&mut MysqlConnection) -> Result<R, DbError>,
 ) -> Result<R, DbError> {

@@ -71,13 +71,13 @@ public fn page_store_new() -> PageStore {
 }
 
 implement PageStore {
-    pub fn install(&mut self, page_no: Int, bytes: List<Byte>) {
+    public fn install(&mut self, page_no: Int, bytes: List<Byte>) {
         self.pages.insert(page_no, bytes);
     }
 
     /// Fetch page bytes.  Returns `None` if the page is absent —
     /// caller surfaces this as `BtreeError::PageNotFound`.
-    pub fn fetch(&self, page_no: Int) -> Maybe<List<Byte>> {
+    public fn fetch(&self, page_no: Int) -> Maybe<List<Byte>> {
         match self.pages.get(&page_no) {
             Some(bs) => Some(clone_bytes(bs)),
             None => None,
@@ -108,7 +108,7 @@ public type SeekOutcome is
     | SoEmpty            // tree is empty; cursor is invalid
     | SoPastEnd;         // target > every key; cursor at_end
 
-pub fn outcome_name(o: &SeekOutcome) -> Text {
+public fn outcome_name(o: &SeekOutcome) -> Text {
     match o {
         SoExactMatch    => "ExactMatch".clone(),
         SoFoundLarger   => "FoundLarger".clone(),
@@ -134,7 +134,7 @@ pub fn outcome_name(o: &SeekOutcome) -> Text {
 ///        binary-search again to find the final position
 ///        adjust per `op` (Eq exact-only, Ge first ≥, Le last ≤, etc.)
 ///   4. Return SeekOutcome.
-pub fn cursor_seek(
+public fn cursor_seek(
     c: &mut BtreeCursor,
     pages: &PageStore,
     target: &SeekKey,
@@ -360,7 +360,7 @@ fn seek_outcome_from_bsr(bsr: &BinarySearchResult, op: SeekOp) -> SeekOutcome {
 /// Advance to the next cell in in-order traversal.  Returns `Ok(true)`
 /// if a fresh cell is now under the cursor; `Ok(false)` if we've
 /// fallen off the right end (cursor is now `at_end`).
-pub fn cursor_next(
+public fn cursor_next(
     c: &mut BtreeCursor,
     pages: &PageStore,
 ) -> Result<Bool, BtreeError> {
@@ -432,7 +432,7 @@ pub fn cursor_next(
 /// Symmetric backward step.  Foundation implements one-cell decrement
 /// + ascend-once; full implementation iterates the ascend until a
 /// real previous cell is found.
-pub fn cursor_prev(
+public fn cursor_prev(
     c: &mut BtreeCursor,
     pages: &PageStore,
 ) -> Result<Bool, BtreeError> {
@@ -484,7 +484,7 @@ fn descend_rightmost(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, Btr
 }
 
 /// Position cursor at the FIRST cell of the leftmost leaf.
-pub fn cursor_first(
+public fn cursor_first(
     c: &mut BtreeCursor,
     pages: &PageStore,
 ) -> Result<Bool, BtreeError> {
@@ -528,7 +528,7 @@ pub fn cursor_first(
 }
 
 /// Position cursor at the LAST cell of the rightmost leaf.
-pub fn cursor_last(
+public fn cursor_last(
     c: &mut BtreeCursor,
     pages: &PageStore,
 ) -> Result<Bool, BtreeError> {

@@ -45,7 +45,7 @@ public fn selectivity(ratio: Float64) -> Selectivity {
 }
 
 implement Selectivity {
-    pub fn estimate_rows(&self, total: Int64) -> Int64 {
+    public fn estimate_rows(&self, total: Int64) -> Int64 {
         ((total as Float64) * self.ratio) as Int64
     }
 }

@@ -89,7 +89,7 @@ public fn oracle_replay(stream: &OpStream, committed_until: Int) -> Oracle {
 implement Oracle {
     public fn row_count(&self) -> Int { self.rows.len() }
 
-    pub fn apply(&mut self, op: &DbOp) {
+    public fn apply(&mut self, op: &DbOp) {
         match op {
             OpInsert(id, name) => {
                 self.upsert(*id, name.clone());
@@ -128,7 +128,7 @@ implement Oracle {
         self.rows = new_rows;
     }
 
-    pub fn lookup(&self, id: Int) -> Maybe<Text> {
+    public fn lookup(&self, id: Int) -> Maybe<Text> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].id == id { return Some(self.rows[i].name.clone()); }
@@ -139,7 +139,7 @@ implement Oracle {
 
     /// True iff `other` (e.g. the database state observed after recovery)
     /// matches exactly: same set of ids, each id mapped to the same name.
-    pub fn matches(&self, other: &Oracle) -> Bool {
+    public fn matches(&self, other: &Oracle) -> Bool {
         if self.rows.len() != other.rows.len() { return false; }
         let mut i: Int = 0;
         while i < self.rows.len() {

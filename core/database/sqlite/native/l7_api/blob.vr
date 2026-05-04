@@ -169,7 +169,7 @@ fn resolve_location(
 /// Open an incremental BLOB handle on `(schema, table, column, rowid)`.
 /// Returns the engine-assigned `handle_id`. Pass it back to every
 /// subsequent `blob_*` call.
-pub fn blob_open(
+public fn blob_open(
     db: &mut Database,
     schema: &Text,
     table: &Text,
@@ -200,7 +200,7 @@ pub fn blob_open(
 
 /// Total size in bytes of the BLOB the handle was opened against.
 /// O(1) — answered from the cached size at open time.
-pub fn blob_bytes(db: &Database, handle_id: Int64) -> Result<Int, SqliteApiDbError> {
+public fn blob_bytes(db: &Database, handle_id: Int64) -> Result<Int, SqliteApiDbError> {
     let engine = db.conn_view_for_blob().blob_engine_view();
     match engine.lookup_size(handle_id) {
         Some(n) => Ok(n),
@@ -210,7 +210,7 @@ pub fn blob_bytes(db: &Database, handle_id: Int64) -> Result<Int, SqliteApiDbErr
 
 /// Read `length` bytes starting at `offset`. Bounds-checked against
 /// the size captured at open; out-of-range reads return `DbBindRange`.
-pub fn blob_read(
+public fn blob_read(
     db: &Database,
     handle_id: Int64,
     offset: Int,
@@ -262,7 +262,7 @@ pub fn blob_read(
 /// Write `data` into the BLOB starting at `offset`. Cannot grow the
 /// BLOB beyond its original size at open — matches SQLite. Returns
 /// `DbReadonly` if the handle was opened read-only.
-pub fn blob_write(
+public fn blob_write(
     db: &mut Database,
     handle_id: Int64,
     offset: Int,
@@ -332,7 +332,7 @@ pub fn blob_write(
 /// because the engine slot is reused. The new row must lie in the
 /// same (schema, table, column) — switching column requires a fresh
 /// `blob_open`.
-pub fn blob_reopen(
+public fn blob_reopen(
     db: &mut Database,
     handle_id: Int64,
     new_rowid: Int64,
@@ -354,7 +354,7 @@ pub fn blob_reopen(
 
 /// Close the handle. Subsequent operations on `handle_id` return
 /// `DbCannotOpen`. Closing an already-closed handle is a no-op.
-pub fn blob_close(db: &mut Database, handle_id: Int64) -> Result<(), SqliteApiDbError> {
+public fn blob_close(db: &mut Database, handle_id: Int64) -> Result<(), SqliteApiDbError> {
     let engine = db.conn_mut_for_blob().blob_engine_mut();
     let _ = engine.close(handle_id);
     Ok(())

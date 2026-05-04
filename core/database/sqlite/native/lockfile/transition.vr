@@ -144,5 +144,5 @@ fn derive_ops(from: &LockState, to: &LockState) -> List<LockOp> {
 }
 
 implement LockTransitionPlan {
-    pub fn op_count(&self) -> Int { self.ops.len() }
+    public fn op_count(&self) -> Int { self.ops.len() }
 }

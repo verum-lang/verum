@@ -182,7 +182,7 @@ public fn wal_writer_create(
 /// deterministic salts (that would re-introduce the
 /// reused-salts-after-crash hazard the rotation policy exists to
 /// prevent).
-pub fn wal_writer_create_with_random<V>(
+public fn wal_writer_create_with_random<V>(
     backend: WalBackend,
     page_size: Int,
     vfs: &V,
@@ -258,16 +258,16 @@ public fn wal_writer_open(
 }
 
 implement WalWriter {
-    pub fn page_size(&self) -> Int { self.state.page_size }
-    pub fn mx_frame(&self) -> Int { self.state.mx_frame }
-    pub fn n_backfill(&self) -> Int { self.state.n_backfill }
-    pub fn pending_frames(&self) -> Int { self.state.pending_frame_count() }
-    pub fn salts(&self) -> (u32, u32) { (self.state.salt1, self.state.salt2) }
-    pub fn checkpoint_seq(&self) -> u32 { self.state.checkpoint_seq }
+    public fn page_size(&self) -> Int { self.state.page_size }
+    public fn mx_frame(&self) -> Int { self.state.mx_frame }
+    public fn n_backfill(&self) -> Int { self.state.n_backfill }
+    public fn pending_frames(&self) -> Int { self.state.pending_frame_count() }
+    public fn salts(&self) -> (u32, u32) { (self.state.salt1, self.state.salt2) }
+    public fn checkpoint_seq(&self) -> u32 { self.state.checkpoint_seq }
 
     /// Borrow the state for read access (no mutation).  Used by
     /// the snapshot machinery and the pager's read fast path.
-    pub fn state(&self) -> &WalState { &self.state }
+    public fn state(&self) -> &WalState { &self.state }
 }
 
 // -----------------------------------------------------------------------------
@@ -283,7 +283,7 @@ implement WalWriter {
 /// to durably persist the txn.  Without the fsync the appended
 /// frames are visible to in-process readers but a crash will lose
 /// them.
-pub fn wal_writer_append_frame(
+public fn wal_writer_append_frame(
     w: &mut WalWriter,
     page_no: Int,
     page_data: &[Byte],
@@ -339,7 +339,7 @@ pub fn wal_writer_append_frame(
 /// `full=true` uses F_FULLFSYNC on Darwin (slower, true-durable);
 /// the default `sync_default()` uses fdatasync on Linux which is
 /// ~5-20× faster on rotational + datacenter SSDs.
-pub fn wal_writer_commit(
+public fn wal_writer_commit(
     w: &mut WalWriter,
     flags: SyncFlags,
 ) -> Result<(), PagerError> {
@@ -352,7 +352,7 @@ pub fn wal_writer_commit(
 /// Reset the WAL: rotate salts, rewrite the file header, drop the
 /// frame index.  Used by Restart and Truncate checkpoints AFTER
 /// the frames have been drained to the main DB.
-pub fn wal_writer_reset(
+public fn wal_writer_reset(
     w: &mut WalWriter,
     new_salt1: u32,
     new_salt2: u32,
@@ -402,7 +402,7 @@ pub fn wal_writer_reset(
 /// platform Vfs (#153).  Same `vfs.random_bytes(8)` contract as
 /// `wal_writer_create_with_random` — surfaces VfsError on failure
 /// and never falls back to deterministic salts.
-pub fn wal_writer_reset_with_random<V>(
+public fn wal_writer_reset_with_random<V>(
     w: &mut WalWriter,
     vfs: &V,
 ) -> Result<(), PagerError>
@@ -429,19 +429,19 @@ where V: SqliteVfs
 /// Without this seam the writer would re-start the chain from the
 /// file-header initial value — breaking integrity on the very next
 /// append after a reopen.
-pub fn wal_writer_set_running(w: &mut WalWriter, running: WalChecksum) {
+public fn wal_writer_set_running(w: &mut WalWriter, running: WalChecksum) {
     w.running = running;
 }
 
 /// Read-only view of the current rolling-checksum state.  Useful
 /// for testing + observability.
-pub fn wal_writer_running(w: &WalWriter) -> WalChecksum {
+public fn wal_writer_running(w: &WalWriter) -> WalChecksum {
     w.running.clone()
 }
 
 /// Truncate the WAL file to just the file header.  Used by
 /// Truncate checkpoint mode after `wal_writer_reset`.
-pub fn wal_writer_truncate(w: &mut WalWriter) -> Result<(), PagerError> {
+public fn wal_writer_truncate(w: &mut WalWriter) -> Result<(), PagerError> {
     match backend_truncate(&mut w.backend, file_header_size()) {
         Ok(_) => Ok(()),
         Err(e) => Err(io_error("wal truncate: ftruncate failed", e)),
@@ -563,7 +563,7 @@ fn encode_frame_header(h: &WalFrameHeader) -> List<Byte> {
     out
 }
 
-pub fn decode_frame_header(buf: &List<Byte>, offset: Int) -> WalFrameHeader {
+public fn decode_frame_header(buf: &List<Byte>, offset: Int) -> WalFrameHeader {
     let mut tmp: List<Byte> = List.new();
     let mut i: Int = 0;
     while i < frame_header_size() {
