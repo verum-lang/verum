@@ -20,13 +20,19 @@
 //      range types (int4range, numrange, tsrange, tstzrange), and
 //      the generic array<T> wire-format framer.
 //
-// Numeric (Decimal) and composite types are deferred — both depend
-// on follow-up work (`core.text.numeric.decimal` doesn't exist yet;
-// composite needs the field-walker integrated with the row-type
-// resolver). Documented as TODO and explicitly listed in the
-// per-type "supported" predicate below so a sql# query that touches
-// them produces a clean compile-time "unsupported" error rather
-// than silent decode garbage.
+// Composite and tsvector types are deferred — both depend on
+// follow-up work (composite needs the field-walker integrated with
+// the row-type resolver). Documented as TODO and explicitly listed
+// in the per-type "supported" predicate below so a sql# query that
+// touches them produces a clean compile-time "unsupported" error
+// rather than silent decode garbage.
+//
+// NUMERIC: V0 ships decode + integer-only encode (see
+// `decode_numeric` / `encode_numeric_from_int` below).
+// `PgNumeric.to_text` renders byte-identically to PG's text format.
+// Full text→binary encoding for arbitrary-precision NUMERIC literals
+// awaits `core.text.numeric.decimal` (V1); until then non-integer
+// parameter binds route through FmtText.
 //
 // All codec functions take an `ArenaWireBuf` for encoding (so the
 // hot path is bump-allocated out of the connection arena, no heap)
@@ -241,7 +247,8 @@ public fn supports_binary(oid: Int) -> Bool {
     else if oid == PG_TYPE_INTERVAL    { true }
     else if oid == PG_TYPE_INET        { true }
     else if oid == PG_TYPE_CIDR        { true }
-    // Numeric, tsvector, composite remain on the deferred list.
+    else if oid == PG_TYPE_NUMERIC     { true }
+    // tsvector and composite remain on the deferred list.
     else { false }
 }
 
@@ -748,4 +755,293 @@ public fn encode_inet(
     if !buf.put_u8(arena, if is_cidr { 1 } else { 0 }){ return false; }
     if !buf.put_u8(arena, nb)                         { return false; }
     buf.put_bytes(arena, addr)
+}
+
+// -----------------------------------------------------------------------------
+// NUMERIC (PG_TYPE_NUMERIC, oid 1700) — arbitrary-precision decimal.
+// -----------------------------------------------------------------------------
+//
+// Wire layout (src/backend/utils/adt/numeric.c, struct NumericVar):
+//
+//   ndigits  i16   number of base-10000 digits
+//   weight   i16   weight of most-significant digit (in base-10000)
+//   sign     u16   0x0000=POS, 0x4000=NEG, 0xC000=NaN, 0xD000=+Inf,
+//                  0xF000=-Inf
+//   dscale   u16   display scale (decimal digits after the point)
+//   digits   u16 × ndigits   each digit ∈ [0, 9999], MS first
+//
+// V0 surface — DECODE only:
+//   * `decode_numeric(slice) -> Result<PgNumeric, DbError>` — header
+//     + digit-array reader. Validates digit range + special-value sign
+//     codes; rejects malformed payloads with a precise DbError.
+//   * `PgNumeric.to_text(&self) -> Text` — render as decimal string
+//     matching PG's text-format output. Produces:
+//       - "NaN" / "Infinity" / "-Infinity" for special sign codes
+//       - integer-only output when dscale == 0 (e.g. "12345")
+//       - dscale-trailing-zero-padded fractional part (matches the
+//         server's text representation byte-for-byte)
+//
+// ENCODE V0 (encode_numeric_from_int): emits the wire form for a
+// signed-integer value, sufficient for parameter binding via
+// integer-typed arguments. Full text→numeric encoding (parsing
+// arbitrary decimal literals) is V1 — depends on `core.text.numeric.
+// decimal` which doesn't exist yet. Until then, callers that need
+// to bind a non-integer NUMERIC parameter route through PG's text
+// format (FmtText) at the parameter-binding layer instead.
+
+public const PG_NUMERIC_POS:  Int = 0x0000;
+public const PG_NUMERIC_NEG:  Int = 0x4000;
+public const PG_NUMERIC_NAN:  Int = 0xC000;
+public const PG_NUMERIC_PINF: Int = 0xD000;
+public const PG_NUMERIC_NINF: Int = 0xF000;
+
+/// Postgres NUMERIC value as a base-10000 digit array.
+///
+/// Wire-format-faithful: preserves `weight` + `dscale` exactly so a
+/// round-trip decode/encode produces byte-identical output. Arithmetic
+/// on `PgNumeric` is intentionally NOT exposed at this layer — it
+/// belongs in `core.text.numeric.decimal` (V1). Callers needing the
+/// value for display use `to_text`; callers needing a Float fallback
+/// can parse `to_text` via `Text.parse_float`.
+public type PgNumeric is {
+    /// Number of base-10000 digits in `digits` (0..=32767).
+    ndigits: Int,
+    /// Weight of the most-significant digit (in base-10000 units).
+    /// E.g. weight=2 means digit_0 represents the 10^8 column.
+    /// May be negative (e.g. 0.0001 → weight=-1).
+    weight: Int,
+    /// Sign code: PG_NUMERIC_{POS,NEG,NAN,PINF,NINF}.
+    sign: Int,
+    /// Display scale — number of decimal digits after the dot.
+    /// Forced to 0 for special values (NaN/±Inf).
+    dscale: Int,
+    /// Base-10000 digits, most significant first.  Each digit ∈ [0, 9999].
+    digits: List<Int>,
+};
+
+implement PgNumeric {
+    public fn is_nan(&self)      -> Bool { self.sign == PG_NUMERIC_NAN  }
+    public fn is_pos_inf(&self)  -> Bool { self.sign == PG_NUMERIC_PINF }
+    public fn is_neg_inf(&self)  -> Bool { self.sign == PG_NUMERIC_NINF }
+    public fn is_negative(&self) -> Bool { self.sign == PG_NUMERIC_NEG  }
+    public fn is_zero(&self)     -> Bool {
+        self.ndigits == 0 && (self.sign == PG_NUMERIC_POS || self.sign == PG_NUMERIC_NEG)
+    }
+
+    /// Render the value as a decimal string, byte-identical to PG's
+    /// own text-format output. Special-case sign codes ⇒ "NaN" /
+    /// "Infinity" / "-Infinity". Otherwise:
+    ///   * Negative ⇒ leading '-'
+    ///   * Integer part = digits 0..=weight (or "0" if weight < 0)
+    ///   * Fractional part = `dscale` digits drawn from digits at
+    ///     positions weight+1 onward, with leading zeros for missing
+    ///     positions, trailing-zero-padded to `dscale` width.
+    public fn to_text(&self) -> Text {
+        if self.is_nan()     { return "NaN".clone(); }
+        if self.is_pos_inf() { return "Infinity".clone(); }
+        if self.is_neg_inf() { return "-Infinity".clone(); }
+
+        // Zero: emit "0" or "0.000…0" depending on dscale.
+        if self.is_zero() {
+            if self.dscale <= 0 { return "0".clone(); }
+            let mut s = "0.".clone();
+            let mut k = 0;
+            while k < self.dscale {
+                s = s + "0";
+                k = k + 1;
+            }
+            return s;
+        }
+
+        let mut out = "".clone();
+        if self.is_negative() { out = out + "-"; }
+
+        // ---- Integer part ----
+        if self.weight < 0 {
+            out = out + "0";
+        } else {
+            let mut d = 0;
+            while d <= self.weight {
+                let digit = if d < self.ndigits { self.digits[d] } else { 0 };
+                if d == 0 {
+                    // No leading zeros on the most-significant digit.
+                    out = out + decimal4(digit, false);
+                } else {
+                    out = out + decimal4(digit, true);
+                }
+                d = d + 1;
+            }
+        }
+
+        // ---- Fractional part ----
+        if self.dscale <= 0 { return out; }
+        out = out + ".";
+
+        // Walk dscale positions; each position needs (dscale-pos)/4
+        // digits drawn from `digits[weight+1 + (pos/4)]`. We render
+        // 4 chars at a time, then trim/pad to exactly dscale chars.
+        let frac_capacity_groups = (self.dscale + 3) / 4;
+        let mut frac = "".clone();
+        let mut g = 0;
+        while g < frac_capacity_groups {
+            let idx = self.weight + 1 + g;
+            let digit = if idx >= 0 && idx < self.ndigits { self.digits[idx] } else { 0 };
+            frac = frac + decimal4(digit, true);
+            g = g + 1;
+        }
+
+        // Trim/pad frac to exactly dscale characters.
+        let frac_len = frac.len();
+        if frac_len >= self.dscale {
+            out = out + frac.substring(0, self.dscale);
+        } else {
+            out = out + frac;
+            let mut pad = self.dscale - frac_len;
+            while pad > 0 {
+                out = out + "0";
+                pad = pad - 1;
+            }
+        }
+        out
+    }
+}
+
+/// Render a base-10000 digit (0..=9999) as decimal, optionally with
+/// leading zeros to width 4 (used for non-leading positions).
+fn decimal4(d: Int, pad: Bool) -> Text {
+    let v = if d < 0 { 0 } else if d > 9999 { 9999 } else { d };
+    if !pad {
+        // Most-significant digit: no leading zeros.
+        if v == 0       { return "0".clone(); }
+        if v < 10       { return Text.from_int(v); }
+        if v < 100      { return Text.from_int(v); }
+        if v < 1000     { return Text.from_int(v); }
+        Text.from_int(v)
+    } else {
+        // Non-leading: zero-pad to 4.
+        let mut s = "".clone();
+        if v < 1000 { s = s + "0"; }
+        if v < 100  { s = s + "0"; }
+        if v < 10   { s = s + "0"; }
+        s + Text.from_int(v)
+    }
+}
+
+/// Decode a NUMERIC binary payload from an arena-borrowed slice.
+/// Validates header consistency (sign code in known set, digit count
+/// matches payload length, individual digits in [0, 9999]); surfaces
+/// malformed payloads as structured `DbError`. Special values (NaN /
+/// ±Inf) carry zero digits per PG convention — callers MUST consult
+/// `is_nan` / `is_pos_inf` / `is_neg_inf` before interpreting digits.
+public fn decode_numeric(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
+    if slice.len < 8 {
+        return Err(decode_fault("numeric: short header (need 8 bytes)".clone()));
+    }
+    let ndigits = slice_i16_be(slice, 0)?;
+    let weight  = slice_i16_be(slice, 2)?;
+    let sign    = slice_u16_be(slice, 4)?;
+    let dscale  = slice_u16_be(slice, 6)?;
+
+    // Validate sign — must be one of the known codes.
+    if sign != PG_NUMERIC_POS && sign != PG_NUMERIC_NEG
+       && sign != PG_NUMERIC_NAN && sign != PG_NUMERIC_PINF
+       && sign != PG_NUMERIC_NINF {
+        return Err(decode_fault(f"numeric: unknown sign code 0x{sign}"));
+    }
+
+    // Special values carry zero digits.
+    let is_special = sign == PG_NUMERIC_NAN || sign == PG_NUMERIC_PINF || sign == PG_NUMERIC_NINF;
+
+    if ndigits < 0 {
+        return Err(decode_fault(f"numeric: negative ndigits {ndigits}"));
+    }
+    if is_special && ndigits != 0 {
+        return Err(decode_fault(f"numeric: special value with non-zero ndigits {ndigits}"));
+    }
+
+    // Payload bytes = 8 + ndigits * 2.
+    let need = 8 + ndigits * 2;
+    if slice.len < need {
+        return Err(decode_fault(f"numeric: payload too short (have {slice.len}, need {need})"));
+    }
+
+    let mut digits: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < ndigits {
+        let d = slice_u16_be(slice, 8 + i * 2)?;
+        if d < 0 || d > 9999 {
+            return Err(decode_fault(f"numeric: digit out of range [0,9999]: {d}"));
+        }
+        digits.push(d);
+        i = i + 1;
+    }
+
+    Ok(PgNumeric {
+        ndigits: ndigits,
+        weight: weight,
+        sign: sign,
+        dscale: dscale,
+        digits: digits,
+    })
+}
+
+/// Read a 16-bit big-endian SIGNED integer at `off`.  Returns the
+/// sign-extended value or a decode fault if the slice is too short.
+fn slice_i16_be(s: &ArenaSlice, off: Int) -> Result<Int, DbError> {
+    let raw = slice_u16_be(s, off)?;
+    // Sign-extend from 16 bits.
+    if raw >= 0x8000 { Ok(raw - 0x10000) } else { Ok(raw) }
+}
+
+/// Encode an i64 value as a NUMERIC binary payload. Builds the
+/// minimal base-10000 digit representation, computes weight + dscale
+/// (always 0 for an integer), writes the 8-byte header followed by
+/// the digit array. Returns false on arena exhaustion.
+///
+/// V0 boundary: integer-only encode. For non-integer or arbitrary-
+/// precision NUMERIC parameters, route through the text-format path
+/// (FmtText) at the parameter-binding layer until `core.text.numeric.
+/// decimal` exists (V1).
+public fn encode_numeric_from_int(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, value: Int) -> Bool {
+    // Special-case zero: ndigits=0, weight=0, sign=POS, dscale=0.
+    if value == 0 {
+        if !buf.put_u16_be(arena, 0)              { return false; }   // ndigits
+        if !buf.put_u16_be(arena, 0)              { return false; }   // weight
+        if !buf.put_u16_be(arena, PG_NUMERIC_POS) { return false; }   // sign
+        if !buf.put_u16_be(arena, 0)              { return false; }   // dscale
+        return true;
+    }
+
+    let sign_code = if value < 0 { PG_NUMERIC_NEG } else { PG_NUMERIC_POS };
+    let mut abs_v: Int = if value < 0 { -value } else { value };
+
+    // Decompose abs_v into base-10000 digits, least significant first.
+    let mut rev_digits: List<Int> = List.new();
+    while abs_v > 0 {
+        rev_digits.push(abs_v % 10000);
+        abs_v = abs_v / 10000;
+    }
+
+    // Reverse to most-significant first.
+    let mut digits: List<Int> = List.new();
+    let mut i: Int = (rev_digits.len() as Int) - 1;
+    while i >= 0 {
+        digits.push(rev_digits[i]);
+        i = i - 1;
+    }
+
+    let ndigits = digits.len() as Int;
+    let weight = ndigits - 1;  // Most-significant digit's base-10000 weight.
+
+    if !buf.put_u16_be(arena, ndigits)   { return false; }
+    if !buf.put_u16_be(arena, weight)    { return false; }
+    if !buf.put_u16_be(arena, sign_code) { return false; }
+    if !buf.put_u16_be(arena, 0)         { return false; }  // dscale=0 for integer
+
+    let mut k: Int = 0;
+    while k < ndigits {
+        if !buf.put_u16_be(arena, digits[k]) { return false; }
+        k = k + 1;
+    }
+    true
 }
