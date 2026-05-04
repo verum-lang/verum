@@ -1430,15 +1430,37 @@ fn try_dispatch_intrinsic_by_name(
                 crate::interpreter::io_engine::async_accept(engine, listen_fd, timeout_ns),
             )))
         }
-        "__async_read_raw" | "__async_write_raw" => {
-            // Buffer-marshaling intrinsics — deferred to a
-            // follow-up task (VBC-IO-ENGINE-2).  The high-level
-            // Verum surface reaches read/write via the
-            // SocketAddr-aware tcp_recv_timeout / tcp_send_timeout
-            // path (already wired through reactor in VBC-NET-RT-2);
-            // these intrinsics target the lower-level
-            // buffer-pointer surface used by zero-copy paths.
-            Ok(Some(Value::from_i64(-1)))
+        "__async_read_raw" => {
+            // VBC-IO-ENGINE-2 — zero-copy async read. Caller
+            // supplies a raw buffer address + length (`buf` /
+            // `len`); we wait for fd readiness via the IoEngine
+            // and perform a single libc::read into the buffer.
+            // Surface declared in `core/io/engine.vr::IoEngine.read`.
+            let engine = get_i64_arg(state, 0);
+            let fd = get_i64_arg(state, 1);
+            let buf_addr = get_i64_arg(state, 2);
+            let len = get_i64_arg(state, 3);
+            let timeout_ns = get_i64_arg(state, 4);
+            Ok(Some(Value::from_i64(
+                crate::interpreter::io_engine::async_read(
+                    engine, fd, buf_addr, len, timeout_ns,
+                ),
+            )))
+        }
+        "__async_write_raw" => {
+            // VBC-IO-ENGINE-2 — zero-copy async write. Symmetric
+            // to async_read; libc::write from the caller's raw
+            // buffer once the fd reports writability.
+            let engine = get_i64_arg(state, 0);
+            let fd = get_i64_arg(state, 1);
+            let buf_addr = get_i64_arg(state, 2);
+            let len = get_i64_arg(state, 3);
+            let timeout_ns = get_i64_arg(state, 4);
+            Ok(Some(Value::from_i64(
+                crate::interpreter::io_engine::async_write(
+                    engine, fd, buf_addr, len, timeout_ns,
+                ),
+            )))
         }
 
         // --- TCP Networking (Tier-0 std-net backed; see handlers/net_runtime.rs) ---
