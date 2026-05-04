@@ -40,7 +40,7 @@
 
 mount core.collections.list.{List};
 mount core.collections.deque.{Deque};
-mount core.collections.heap.{Heap};
+mount core.collections.heap.{BinaryHeap};
 mount core.collections.map.{Map};
 mount core.collections.set.{Set};
 mount core.collections.btree.{BTreeMap, BTreeSet};

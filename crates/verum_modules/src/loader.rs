@@ -184,6 +184,26 @@ pub fn validate_module_headers_against_filesystem(
                 continue;
             }
 
+            // Simple-name self-header: a `mod.vr` whose parent directory
+            // matches the declared module name (e.g. `core/collections/mod.vr`
+            // declaring `module collections;`) is the canonical short-form
+            // file-header — same role as the dotted-path case above. The
+            // validator must not treat it as a forward declaration of a
+            // sibling, since no `core/collections/collections.vr` is
+            // expected to exist.
+            //
+            // Detection: when the current file is `<dir>/mod.vr` and
+            // `<dir>.file_name() == submodule_name`, the decl is positional
+            // metadata for *this* file, not a child-module promise.
+            if is_mod_file
+                && parent_dir
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|name| name == submodule_name.as_str())
+            {
+                continue;
+            }
+
             match &module_decl.items {
                 Maybe::None => {
                     // Forward decl. Check that at least one of the
