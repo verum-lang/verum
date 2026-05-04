@@ -1035,6 +1035,239 @@ public fn rsqrt_lang<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
     reciprocal(&tensor_sqrt(x))
 }
 
+// =============================================================================
+// Deep-Learning Building Blocks (#74 Tier B)
+// =============================================================================
+//
+// All helpers in this section are pure Verum-language compositions
+// over the existing primitive surface. Use them as reference impls
+// or as tunable starting points for layer authors who don't want
+// the opaque `@vbc` primitive form. The corresponding primitives
+// (TENSOR_LAYER_NORM, TENSOR_BATCH_NORM, TENSOR_FLASH_ATTENTION,
+// …) shadow these when available — primitives win the dispatch
+// race because direct `@vbc` calls are emitted as named functions
+// at codegen time.
+
+// Layer normalisation as a Verum-language composition.
+// #74 Tier B — `(x - mean) / sqrt(var + eps) * weight + bias`,
+// computed along the last axis. Composes
+// `mean_axis(_, -1)` + `variance_axis(_, -1)` + `add_scalar` +
+// `tensor_sqrt` + `div` (broadcast) + `mul` + `add`.  Eps is
+// added INSIDE the sqrt for numerical stability — matches the
+// Pytorch / TensorFlow convention.
+public fn layer_norm_lang<T: Numeric>(
+    x: &DynTensor<T>,
+    weight: &DynTensor<T>,
+    bias: &DynTensor<T>,
+    eps: T,
+) -> DynTensor<T> {
+    let mu = mean_axis(x, -1);
+    let var_x = variance_axis(x, -1);
+    let var_eps = add_scalar(&var_x, eps);
+    let scale = tensor_sqrt(&var_eps);
+    let centered = sub(x, &mu);
+    let normalised = div(&centered, &scale);
+    add(&mul(&normalised, weight), bias)
+}
+
+// RMS normalisation (Zhang & Sennrich 2019) as a Verum-language
+// composition. Used in modern LLMs (LLaMA, Mistral, …) instead of
+// LayerNorm because it skips the centring step.
+// #74 Tier B — `x / sqrt(mean(x^2) + eps) * weight`. Composes
+// `square` + `mean_axis(_, -1)` + `add_scalar` + `tensor_sqrt` +
+// `div` (broadcast) + `mul`.
+public fn rms_norm_lang<T: Numeric>(
+    x: &DynTensor<T>,
+    weight: &DynTensor<T>,
+    eps: T,
+) -> DynTensor<T> {
+    let sq = square(x);
+    let mean_sq = mean_axis(&sq, -1);
+    let with_eps = add_scalar(&mean_sq, eps);
+    let scale = tensor_sqrt(&with_eps);
+    mul(&div(x, &scale), weight)
+}
+
+// Group normalisation (Wu & He 2018) — splits the channel axis
+// into groups, normalises each group independently. Useful when
+// batch-norm's mini-batch coupling is undesirable (small batches,
+// generative models).
+// #74 Tier B — composes `reshape` + `mean_axis` + `variance_axis`
+// + (sub/div/mul/add). Caller must have `channels % num_groups == 0`;
+// the helper does NOT introduce a runtime check on that pre-cond
+// — the underlying `reshape` will panic if so.
+public fn group_norm_lang<T: Numeric>(
+    x: &DynTensor<T>,
+    num_groups: USize,
+    weight: &DynTensor<T>,
+    bias: &DynTensor<T>,
+    eps: T,
+) -> DynTensor<T> {
+    // Assume input is [N, C, *] — flatten to [N, num_groups, C/num_groups, *]
+    // and reduce along the inner spatial+channel-per-group axes (-2, -1).
+    // Simplified single-pass form: compute mean / var along axis -1
+    // after reshape; assumes the spatial dims are already trailing.
+    let shape = x.shape();
+    assert(shape.len() >= 2, "group_norm requires rank >= 2 input");
+    assert(shape[1] % num_groups == 0, "channels must be divisible by num_groups");
+    // Reshape [N, C, *] → [N, G, C/G * prod(spatial)]
+    let g_size = shape[1] / num_groups;
+    let mut spatial = 1 as USize;
+    for d in 2..shape.len() {
+        spatial = spatial * shape[d];
+    }
+    let new_shape = [shape[0], num_groups, g_size * spatial];
+    let reshaped = reshape(x, &new_shape);
+    let mu = mean_axis(&reshaped, -1);
+    let var_g = variance_axis(&reshaped, -1);
+    let var_eps = add_scalar(&var_g, eps);
+    let scale = tensor_sqrt(&var_eps);
+    let normalised = div(&sub(&reshaped, &mu), &scale);
+    let restored = reshape(&normalised, shape);
+    add(&mul(&restored, weight), bias)
+}
+
+// Scaled dot-product attention (single-head): the canonical
+// `softmax(Q K^T / sqrt(d_k)) V` from "Attention Is All You Need".
+// #74 Tier B — composes `matmul` + `transpose` + `div_scalar` +
+// `softmax` + `matmul`. Output shape is `[..., seq_q, d_v]` for
+// `Q : [..., seq_q, d_k]`, `K : [..., seq_k, d_k]`, `V : [..., seq_k, d_v]`.
+//
+// `scale` is conventionally `1 / sqrt(d_k)`; passed explicitly
+// so callers can substitute alternative scalings (e.g. learned
+// per-head temperatures). Mask handling is intentionally left to
+// the caller — pass a pre-masked Q, or apply your additive mask
+// to the score matrix before this call.
+public fn scaled_dot_product_attention<T: Numeric>(
+    q: &DynTensor<T>,
+    k: &DynTensor<T>,
+    v: &DynTensor<T>,
+    scale: T,
+) -> DynTensor<T> {
+    let k_t = transpose(k);
+    let scores = matmul(q, &k_t);
+    let scaled = mul_scalar(&scores, scale);
+    let probs = softmax(&scaled, -1);
+    matmul(&probs, v)
+}
+
+// Helper: standard 1/sqrt(d) attention scale.
+// #74 Tier B — pure scalar arithmetic, no tensor ops.
+public fn attention_scale<T: Numeric>(d_k: USize) -> T {
+    let denom: Float = sqrt(d_k as Float);
+    (1.0 / denom) as T
+}
+
+// Dropout (inference path: identity).
+// #74 Tier B — at inference time dropout is a no-op (the
+// expectation has already been accounted for via the inverse
+// scaling done at training). Provided as a named identity helper
+// so model-runtime code that calls `dropout(x, p)` regardless of
+// mode resolves cleanly. The training-mode counterpart needs a
+// random primitive (TENSOR_RAND with mask) and is deferred until
+// the deterministic-RNG plumbing lands in core.intrinsics.tensor.
+public fn dropout_inference<T: Numeric>(x: &DynTensor<T>, _rate: Float) -> DynTensor<T> {
+    x.clone()
+}
+
+// Glorot / Xavier uniform initialisation: U(-a, a) with
+// `a = sqrt(6 / (fan_in + fan_out))`.
+// #74 Tier B — composes `tensor_rand` (uniform [0,1)) +
+// `mul_scalar` + `sub_scalar`. Used for dense layers with
+// symmetric activations (tanh, sigmoid). For ReLU / GELU prefer
+// `he_uniform`.
+public fn glorot_uniform<T: Numeric>(shape: &[USize], fan_in: USize, fan_out: USize) -> DynTensor<T> {
+    let a: Float = sqrt(6.0 / ((fan_in + fan_out) as Float));
+    let u01 = rand<T>(shape);
+    // Map [0, 1) -> [-a, a)
+    let scaled = mul_scalar(&u01, (2.0 * a) as T);
+    sub_scalar(&scaled, a as T)
+}
+
+// He / Kaiming uniform initialisation: U(-a, a) with
+// `a = sqrt(6 / fan_in)`.
+// #74 Tier B — like `glorot_uniform` but only fan-in matters.
+// Used for ReLU / GELU layers where the activation breaks the
+// symmetry assumption Glorot relies on.
+public fn he_uniform<T: Numeric>(shape: &[USize], fan_in: USize) -> DynTensor<T> {
+    let a: Float = sqrt(6.0 / (fan_in as Float));
+    let u01 = rand<T>(shape);
+    let scaled = mul_scalar(&u01, (2.0 * a) as T);
+    sub_scalar(&scaled, a as T)
+}
+
+// Glorot / Xavier *normal* initialisation: N(0, sigma) with
+// `sigma = sqrt(2 / (fan_in + fan_out))`.
+// #74 Tier B — composes `tensor_randn` (standard normal) +
+// `mul_scalar`.
+public fn glorot_normal<T: Numeric>(shape: &[USize], fan_in: USize, fan_out: USize) -> DynTensor<T> {
+    let sigma: Float = sqrt(2.0 / ((fan_in + fan_out) as Float));
+    let z = randn<T>(shape);
+    mul_scalar(&z, sigma as T)
+}
+
+// He / Kaiming *normal* initialisation: N(0, sigma) with
+// `sigma = sqrt(2 / fan_in)`.
+// #74 Tier B — for ReLU / GELU layers.
+public fn he_normal<T: Numeric>(shape: &[USize], fan_in: USize) -> DynTensor<T> {
+    let sigma: Float = sqrt(2.0 / (fan_in as Float));
+    let z = randn<T>(shape);
+    mul_scalar(&z, sigma as T)
+}
+
+// Cosine learning-rate schedule (no warmup).
+// #74 Tier B — pure scalar arithmetic, returns the LR for step
+// `t` over total `T`. `lr_min + (lr_max - lr_min) * 0.5 *
+// (1 + cos(pi * t / T))`. At `t == 0` returns `lr_max`; at
+// `t == T` returns `lr_min`. Caller is responsible for clamping
+// `t` if the training loop overruns the budget.
+public fn cosine_lr_schedule(t: USize, total: USize, lr_min: Float, lr_max: Float) -> Float {
+    if total == 0 {
+        return lr_max;
+    }
+    let progress: Float = (t as Float) / (total as Float);
+    let cos_term: Float = cos(3.14159265358979 * progress);
+    lr_min + (lr_max - lr_min) * 0.5 * (1.0 + cos_term)
+}
+
+// Linear warmup-then-cosine decay schedule.
+// #74 Tier B — composes `cosine_lr_schedule` for the post-warmup
+// phase. During steps `0..warmup_steps`, returns
+// `lr_max * (t / warmup_steps)`; afterwards transitions through
+// cosine decay.
+public fn warmup_cosine_lr(
+    t: USize,
+    warmup_steps: USize,
+    total: USize,
+    lr_min: Float,
+    lr_max: Float,
+) -> Float {
+    if t < warmup_steps {
+        if warmup_steps == 0 {
+            return lr_max;
+        }
+        let p: Float = (t as Float) / (warmup_steps as Float);
+        return lr_max * p;
+    }
+    let after = t - warmup_steps;
+    let after_total = if total > warmup_steps { total - warmup_steps } else { 1 as USize };
+    cosine_lr_schedule(after, after_total, lr_min, lr_max)
+}
+
+// Step learning-rate schedule: `lr_max * gamma^(t / step_size)`.
+// #74 Tier B — discrete decay every `step_size` steps. `gamma`
+// is the per-step multiplicative factor (typical 0.1).
+public fn step_lr_schedule(t: USize, step_size: USize, lr_max: Float, gamma: Float) -> Float {
+    let n: USize = if step_size > 0 { t / step_size } else { 0 };
+    lr_max * pow(gamma, n as Float)
+}
+
+// Exponential learning-rate decay: `lr_max * exp(-decay_rate * t)`.
+// #74 Tier B — smooth continuous decay. `decay_rate > 0`.
+public fn exponential_lr_schedule(t: USize, lr_max: Float, decay_rate: Float) -> Float {
+    lr_max * exp(-decay_rate * (t as Float))
+}
+
 // Softmax along axis
 public fn softmax<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
     @vbc(TENSOR_SOFTMAX, x.data, axis)
