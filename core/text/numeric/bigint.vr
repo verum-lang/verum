@@ -399,6 +399,215 @@ implement BigInt {
         // None for that single edge case).
         if self.sign { Some(-acc) } else { Some(acc) }
     }
+
+    // -------------------------------------------------------------------------
+    // Byte-array interop (unsigned magnitude — crypto-style)
+    // -------------------------------------------------------------------------
+
+    /// Number of bits needed to represent the magnitude (sign
+    /// ignored).  Returns 0 for zero (matches the conventional
+    /// `bit_length(0) = 0`).  For non-zero values: `1 + ⌊log₂|n|⌋`.
+    public fn bit_length(&self) -> Int {
+        if self.is_zero() { return 0; }
+        let n = self.digits.len() as Int;
+        let top = self.digits[n - 1];
+        // Bits in the MS chunk: count up from 0 until the top bit
+        // is reached.  Each base-10^9 chunk has up to 30 bits
+        // (since 2^30 = 1_073_741_824 > 10^9 = BIGINT_BASE).
+        let mut bits_in_top: Int = 0;
+        let mut t = top;
+        while t > 0 {
+            bits_in_top = bits_in_top + 1;
+            t = t / 2;
+        }
+        // Lower chunks contribute log2(BIGINT_BASE) ≈ 29.897 bits
+        // EACH, but since chunks aren't bit-aligned we can't just
+        // multiply.  Use the approximation: each lower chunk
+        // contributes 30 bits maximum, but the actual contribution
+        // is the bit-length of BIGINT_BASE^(n-1) added to
+        // bit_length of top.  Easier: walk magnitude via div-by-2
+        // (correct, O(N²)).
+        //
+        // The simple correct impl: divide by 2 until zero, count
+        // iterations.  For small inputs this is fast enough; for
+        // huge inputs (RSA-4096 = ~70 chunks) it's O(N²) but still
+        // manageable.
+        bit_length_via_div(self)
+    }
+
+    /// Number of bytes needed to represent the magnitude (sign
+    /// ignored).  Returns 0 for zero.  For non-zero: `⌈bit_length / 8⌉`.
+    public fn byte_length(&self) -> Int {
+        let bl = self.bit_length();
+        if bl == 0 { return 0; }
+        (bl + 7) / 8
+    }
+
+    /// Render the magnitude as big-endian unsigned bytes (minimum
+    /// byte count — no padding).  Sign is IGNORED.  Zero ⇒ empty
+    /// list.  Algorithm: repeated div-by-256 on magnitude, LS-to-MS
+    /// remainder collection, then reverse.  O(N²) in byte count.
+    public fn to_unsigned_bytes_be(&self) -> List<Byte> {
+        let mag = self.abs();
+        let mut bytes_le: List<Byte> = List.new();
+        let two56 = BigInt.from_int(256);
+        let mut x = clone_digits_to_bigint(&mag);
+        while !x.is_zero() {
+            let (q, r) = match x.div_rem(&two56) {
+                Ok(t)  => t,
+                Err(_) => return List.new(),  // unreachable
+            };
+            let rb = match r.to_int() {
+                Some(v) => v,
+                None    => return List.new(),  // unreachable
+            };
+            bytes_le.push(rb as Byte);
+            x = q;
+        }
+        let n_bytes = bytes_le.len() as Int;
+        let mut bytes_be: List<Byte> = List.with_capacity(n_bytes);
+        let mut i: Int = n_bytes - 1;
+        while i >= 0 {
+            bytes_be.push(bytes_le[i]);
+            i = i - 1;
+        }
+        bytes_be
+    }
+
+    /// Render the magnitude as big-endian unsigned bytes,
+    /// left-padded with zeros to exactly `length` bytes.  Returns
+    /// empty list if the magnitude doesn't fit (caller checks via
+    /// `byte_length() <= length` beforehand).
+    public fn to_unsigned_bytes_be_padded(&self, length: Int) -> List<Byte> {
+        let bytes = self.to_unsigned_bytes_be();
+        let actual = bytes.len() as Int;
+        if actual > length { return List.new(); }
+        let pad = length - actual;
+        let mut out: List<Byte> = List.with_capacity(length);
+        let mut k: Int = 0;
+        while k < pad { out.push(0 as Byte); k = k + 1; }
+        let mut j: Int = 0;
+        while j < actual {
+            out.push(bytes[j]);
+            j = j + 1;
+        }
+        out
+    }
+
+    /// Little-endian counterpart of `to_unsigned_bytes_be`.
+    public fn to_unsigned_bytes_le(&self) -> List<Byte> {
+        let be = self.to_unsigned_bytes_be();
+        let n_bytes = be.len() as Int;
+        let mut le: List<Byte> = List.with_capacity(n_bytes);
+        let mut i: Int = n_bytes - 1;
+        while i >= 0 {
+            le.push(be[i]);
+            i = i - 1;
+        }
+        le
+    }
+
+    /// Little-endian counterpart of `to_unsigned_bytes_be_padded`.
+    /// Right-pads with zero bytes to reach `length`.
+    public fn to_unsigned_bytes_le_padded(&self, length: Int) -> List<Byte> {
+        let mut le = self.to_unsigned_bytes_le();
+        let actual = le.len() as Int;
+        if actual > length { return List.new(); }
+        let pad = length - actual;
+        let mut k: Int = 0;
+        while k < pad { le.push(0 as Byte); k = k + 1; }
+        le
+    }
+
+    // KNOWN COMPILER BUG (saved as memory entry):
+    //
+    // A method signature like `fn m(&self, x: Maybe<Int>) -> Maybe<
+    // List<Byte>>` triggers a type-inference bug at the call site:
+    // `value.m(None)` returns the WRONG inner type — `Some(v) => v`
+    // binds `v: Int` instead of `v: List<Byte>`.
+    //
+    // Bisection-isolated minimum trigger conditions (verified
+    // empirically against the V0 type checker, 2026-05-04):
+    //   * Must be a METHOD (free fn with same signature works).
+    //   * Param must be `Maybe<PRIMITIVE>` (Int seen; Bool param
+    //     works fine).
+    //   * Return must be `Maybe<COMPOUND>` where COMPOUND is a
+    //     parameterised type like `List<X>` or `Result<...>`.
+    //   * Inner types in param vs return must differ; same inner
+    //     type works fine (e.g. `Maybe<Int> -> Maybe<Int>`).
+    //   * `Maybe<List<Int>> -> Maybe<List<Byte>>` works, so it's
+    //     specifically the primitive-Int param + List-typed return
+    //     combination.
+    //
+    // Workaround applied here: split the API into two methods —
+    // one without the optional length parameter, one with a
+    // mandatory `length: Int` parameter.  Avoids the Maybe<Int>
+    // parameter shape entirely.  `to_unsigned_bytes_be` (no param)
+    // returns `List<Byte>` directly; `to_unsigned_bytes_be_padded
+    // (length: Int)` returns the padded `List<Byte>` (empty list
+    // sentinel for over-large values).
+    //
+    // The split is also arguably better API — callers either want
+    // raw minimum bytes or explicit-length padded bytes; the
+    // Maybe<Int> "either-or" was needless complexity.
+
+    /// Construct a BigInt from a big-endian unsigned byte sequence.
+    /// Sign is always positive (BigInt's canonical positive form).
+    /// Empty input ⇒ zero.
+    ///
+    /// Algorithm: walk MS-to-LS, accumulator = accumulator × 256 +
+    /// byte.  O(N²) where N is byte count.
+    public fn from_unsigned_bytes_be(bytes: &List<Byte>) -> BigInt {
+        let n = bytes.len() as Int;
+        if n == 0 { return BigInt.zero(); }
+        let two56 = BigInt.from_int(256);
+        let mut acc = BigInt.zero();
+        let mut i: Int = 0;
+        while i < n {
+            acc = acc.mul(&two56).add(&BigInt.from_int(bytes[i] as Int));
+            i = i + 1;
+        }
+        acc
+    }
+
+    /// Little-endian counterpart of `from_unsigned_bytes_be`.
+    public fn from_unsigned_bytes_le(bytes: &List<Byte>) -> BigInt {
+        let n = bytes.len() as Int;
+        if n == 0 { return BigInt.zero(); }
+        let two56 = BigInt.from_int(256);
+        let mut acc = BigInt.zero();
+        let mut i: Int = n - 1;
+        while i >= 0 {
+            acc = acc.mul(&two56).add(&BigInt.from_int(bytes[i] as Int));
+            i = i - 1;
+        }
+        acc
+    }
+}
+
+/// Internal helper: clone a BigInt's digit list into a fresh BigInt.
+/// Cheaper than the to_text/parse_bigint round-trip used by the
+/// public clone helpers in sibling modules.
+fn clone_digits_to_bigint(b: &BigInt) -> BigInt {
+    BigInt { sign: b.sign, digits: clone_digits(&b.digits) }
+}
+
+/// Compute bit length of a BigInt's magnitude via repeated div-by-2.
+/// O(N²) but correct.  V1: bit-aligned representation removes the
+/// quadratic factor.
+fn bit_length_via_div(b: &BigInt) -> Int {
+    if b.is_zero() { return 0; }
+    let two = BigInt.from_int(2);
+    let mut x = clone_digits_to_bigint(&b.abs());
+    let mut count: Int = 0;
+    while !x.is_zero() {
+        x = match x.div(&two) {
+            Ok(v)  => v,
+            Err(_) => BigInt.zero(),
+        };
+        count = count + 1;
+    }
+    count
 }
 
 // =============================================================================
