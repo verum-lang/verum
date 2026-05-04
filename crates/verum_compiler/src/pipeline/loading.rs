@@ -85,6 +85,10 @@ impl<'s> CompilationPipeline<'s> {
     pub(super) fn load_stdlib_modules(&mut self) -> Result<()> {
         let start = Instant::now();
         debug!("load_stdlib_modules called");
+        let trace = std::env::var("VERUM_TRACE_PHASES").is_ok();
+        if trace {
+            eprintln!("[phase] load_stdlib_modules: enter");
+        }
 
         // FAST PATH: Try to use cached fully-populated registry
         // This is the key optimization: deep_clone a cached registry (~1ms)
@@ -134,8 +138,20 @@ impl<'s> CompilationPipeline<'s> {
                     module_count,
                     elapsed.as_secs_f64() * 1000.0
                 );
+                if trace {
+                    eprintln!(
+                        "[phase] load_stdlib_modules: registry cache HIT {} modules in {:.2}ms",
+                        module_count,
+                        elapsed.as_secs_f64() * 1000.0
+                    );
+                }
                 return Ok(());
             }
+        }
+        if trace {
+            eprintln!(
+                "[phase] load_stdlib_modules: registry cache MISS — about to parse stdlib from source"
+            );
         }
 
         // SLOW PATH: No in-memory registry cache, load from source
@@ -279,6 +295,13 @@ impl<'s> CompilationPipeline<'s> {
                         module_count,
                         elapsed.as_secs_f64() * 1000.0
                     );
+                    if trace {
+                        eprintln!(
+                            "[phase] load_stdlib_modules: DISK-CACHE HIT {} modules in {:.2}ms",
+                            module_count,
+                            elapsed.as_secs_f64() * 1000.0
+                        );
+                    }
                     return Ok(());
                 }
             }
@@ -286,6 +309,11 @@ impl<'s> CompilationPipeline<'s> {
 
         // FULL LOAD: No cache available, parse everything from source
         debug!("No disk cache, performing full stdlib load");
+        if trace {
+            eprintln!(
+                "[phase] load_stdlib_modules: disk cache MISS, full SOURCE LOAD starting"
+            );
+        }
 
         // Try to use the process-level parsed stdlib cache.
         // This avoids re-parsing 166+ .vr files for every pipeline instance.
@@ -534,6 +562,13 @@ impl<'s> CompilationPipeline<'s> {
             registry_count,
             elapsed.as_secs_f64() * 1000.0
         );
+        if trace {
+            eprintln!(
+                "[phase] load_stdlib_modules: SOURCE-PARSED {} modules in {:.2}ms",
+                stdlib_count,
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
 
         // Cache the fully-populated registry for future pipeline instances.
         // This is the key optimization: subsequent loads will deep_clone this

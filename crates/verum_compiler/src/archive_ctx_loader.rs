@@ -443,6 +443,46 @@ mod tests {
         );
     }
 
+    /// Diagnostic: dump current_dir-related entries to verify
+    /// archive has the function under expected qualified name.
+    #[test]
+    #[ignore = "diagnostic only"]
+    fn diag_current_dir_lookup() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        for entry in &archive.index {
+            if entry.name.ends_with("io.fs") || entry.name == "core.io.fs" {
+                println!("Archive module: {}", entry.name);
+                let m = archive.load_module(&entry.name).unwrap();
+                for f in &m.functions {
+                    let n = m
+                        .strings
+                        .get(f.name)
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    if n == "current_dir" || n.contains("current_dir") {
+                        println!(
+                            "  fn `{}` params={} id={:?}",
+                            n,
+                            f.params.len(),
+                            f.id
+                        );
+                    }
+                }
+            }
+        }
+        let mut ctx = CodegenContext::new();
+        let _ = populate_ctx_from_archive(archive, &mut ctx).unwrap();
+        let exported = ctx.export_functions();
+        for k in exported.keys() {
+            if k.contains("current_dir") {
+                println!("ctx key: {}", k);
+            }
+        }
+    }
+
     /// Cache layer round-trip: first call builds, second clones.
     /// Both must produce identical ctx state.
     #[test]

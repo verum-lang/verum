@@ -294,134 +294,88 @@ impl<'s> CompilationPipeline<'s> {
             tier_start.elapsed().as_secs_f64()
         );
 
-        // Phase 6a (precompile-stdlib epic): detect whether the
-        // compiler binary embeds a precompiled stdlib VBC archive.
-        // Phase 6b will switch the codegen path to merge the embedded
-        // archive's modules directly instead of re-running stdlib
-        // codegen here; today the path still routes through
-        // `collect_imported_stdlib_modules` + per-module codegen, but
-        // this hook ensures the binary-side embed is actually
-        // wired and the archive is decodable at runtime — the lazy
-        // OnceLock initialiser fires on first call and surfaces any
-        // format mismatch as a `tracing::warn!` before user code runs.
-        if let Some(archive) = crate::embedded_stdlib_vbc::get_runtime_archive() {
-            tracing::debug!(
-                target: "compile_ast_to_vbc",
-                "precompiled stdlib archive available: {} modules ({} KB compressed). \
-                 Phase 6b will switch the codegen path to merge it directly.",
+        // Single-path archive-driven epic (T2): the embedded
+        // precompiled stdlib `VbcArchive` is the ONLY source of stdlib
+        // types and function info.  Source-driven codegen of stdlib
+        // is removed entirely — there are no alternative paths.
+        //
+        // Production builds embed the archive via `build.rs`.  If
+        // it's absent (only happens during compiler bootstrap before
+        // T3/T4 land), error out loudly: building user code without
+        // a stdlib archive is a configuration error, not a fallback
+        // we should silently paper over.
+        let archive = crate::embedded_stdlib_vbc::get_runtime_archive().ok_or_else(|| {
+            anyhow::anyhow!(
+                "no precompiled stdlib archive embedded in this verum binary — \
+                 single-path archive-driven codegen requires `target/precompiled-stdlib/runtime.vbca`. \
+                 Run `verum stdlib precompile` and rebuild verum to embed the archive."
+            )
+        })?;
+        if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
+            eprintln!(
+                "[compile_ast_to_vbc] archive-driven: {} modules, {} KB",
                 archive.module_count(),
                 crate::embedded_stdlib_vbc::embedded_size_bytes() / 1024,
             );
-        } else {
-            tracing::debug!(
-                target: "compile_ast_to_vbc",
-                "no precompiled stdlib archive embedded — using source-driven codegen"
-            );
         }
 
-        // Collect imported stdlib modules that need to be compiled alongside the main module.
-        // Without this, constants/functions from imported modules (e.g., CLOCK_REALTIME_ID
-        // from core.sys.darwin.time) would be unresolvable in the VBC codegen.
-        let imported_modules = self.collect_imported_stdlib_modules(module);
-        debug!(
-            "Collected {} imported stdlib module(s) for VBC compilation (from {} retained)",
-            imported_modules.len(),
-            self.modules.len()
+        // No source-driven imported_modules collection — stdlib
+        // types/functions come from the archive via T1 below.  The
+        // user module is the ONLY AST that goes through codegen.
+
+        // Archive-driven single-path: pre-populate codegen ctx from
+        // embedded archive (T1+T2), then compile ONLY the user
+        // module.  Stdlib types/functions come from the archive —
+        // no source-driven walk of stdlib `.vr` files anywhere.
+        codegen.initialize();
+        // Built-in core variants (Maybe.Some / Result.Ok /
+        // Ordering.Lt etc.) — compiler intrinsics with hardcoded
+        // tags, not part of the archive.  Run before archive
+        // population so any archive-side variant ctor with the same
+        // simple name yields to the built-in via first-wins.
+        codegen.register_builtin_variants();
+        codegen.register_stdlib_constants();
+        codegen.register_stdlib_intrinsics();
+        codegen.register_runtime_io_functions();
+
+        // T1+T2 archive → ctx in milliseconds (was 272s parse + walk
+        // for 2400 stdlib files in the deleted source-driven path).
+        let types_loaded = codegen.populate_types_from_archive(archive);
+        let ctx_stats = crate::archive_ctx_loader::populate_ctx_from_archive(
+            archive,
+            codegen.ctx_mut(),
+        )
+        .map_err(|e| anyhow::anyhow!("archive ctx load: {}", e))?;
+        tracing::debug!(
+            target: "compile_ast_to_vbc",
+            "archive pre-population: {} types, {} fn entries, {} variant ctors",
+            types_loaded,
+            ctx_stats.functions_registered,
+            ctx_stats.variant_ctors_resolved,
         );
 
-        let mut vbc_module = if imported_modules.is_empty() {
-            // Fast path: no imported modules, use simple single-module compilation
-            codegen
-                .compile_module(module)
-                .map_err(|e| anyhow::anyhow!("VBC codegen error: {}", e))?
-        } else {
-            // Multi-module compilation: register declarations from imported modules
-            // so their constants, type constructors, and function signatures are available
-            // when compiling the main module. Constants with literal values are inlined
-            // at call sites (via __const_val_N intrinsic naming), so imported module
-            // function bodies don't need to be compiled.
-            codegen.initialize();
-
-            // Cross-module two-phase collection to ensure protocols are registered
-            // before impl blocks that use them, regardless of file/module order.
-
-            // Pass 1a: Collect ALL protocol definitions from ALL modules first.
-            // This ensures protocols like Eq, Ord are available when processing
-            // impl blocks that implement them.
-            for imported_module in &imported_modules {
-                codegen.collect_protocol_definitions(imported_module);
-            }
-            codegen.collect_protocol_definitions(module);
-
-            // Pass 1b: Collect non-protocol declarations from main module FIRST.
-            // This ensures user-defined type IDs and field indices are stable
-            // (not shifted by auto-included stdlib types). The VBC codegen uses
-            // sequential counters for TypeId and field interning, so whichever
-            // module is registered first gets the lower IDs.
-            codegen
-                .collect_non_protocol_declarations(module)
-                .map_err(|e| {
-                    anyhow::anyhow!("VBC codegen error (main module declarations): {}", e)
-                })?;
-            codegen.mark_user_defined_types(module);
-
-            // Pass 1c: Collect all non-protocol declarations from imported modules.
-            // This registers constants (with inline values), type constructors,
-            // and function signatures from the imported stdlib modules.
-            // These get higher TypeIds than user types, which is correct.
-            // Enable prefer_existing_functions so stdlib FFI declarations
-            // (e.g., "pipe" from libsystem.vr) don't overwrite user-defined functions.
-            codegen.set_prefer_existing_functions(true);
-            for imported_module in &imported_modules {
-                codegen
-                    .collect_non_protocol_declarations(imported_module)
-                    .map_err(|e| {
-                        anyhow::anyhow!("VBC codegen error (imported module declarations): {}", e)
-                    })?;
-            }
-            codegen.set_prefer_existing_functions(false);
-
-            // Resolve pending cross-module imports (constants/functions that were
-            // deferred because they weren't registered yet when mount was processed)
-            codegen.resolve_pending_imports();
-
-            // Compile pending default protocol methods.
-            // These were registered during declaration collection but their bodies need to be
-            // compiled after all functions are registered (e.g., Iterator.advance_by uses `range`).
-            codegen
-                .compile_pending_default_methods()
-                .map_err(|e| anyhow::anyhow!("VBC codegen error (default methods): {}", e))?;
-
-            // Disable @test propagation for stdlib modules — only user code @test functions
-            // should be executed by the test runner.
-            codegen.set_propagate_test_attr(false);
-
-            // Pass 2a: Compile imported module function bodies (lenient).
-            // Functions from imported modules (e.g., is_retryable from core.sys.darwin.errno)
-            // need their bodies compiled into VBC so they can be called at runtime.
-            // Without this, only constants (which are inlined via __const_val_N) would work.
-            // Uses lenient compilation because imported modules may contain functions that
-            // reference FFI/external symbols not available in VBC (e.g., mach_timebase_info).
-            for imported_module in &imported_modules {
-                codegen
-                    .compile_module_items_lenient(imported_module)
-                    .map_err(|e| {
-                        anyhow::anyhow!("VBC codegen error (imported module bodies): {}", e)
-                    })?;
-            }
-
-            // Pass 2b: Compile the main module's function bodies.
-            // Re-enable @test propagation for user code.
-            codegen.set_propagate_test_attr(true);
-            codegen
-                .compile_module_items(module)
-                .map_err(|e| anyhow::anyhow!("VBC codegen error (main module bodies): {}", e))?;
-
-            // Build the final VBC module
-            codegen
-                .finalize_module()
-                .map_err(|e| anyhow::anyhow!("VBC codegen error (finalize): {}", e))?
-        };
+        // User module: protocols + declarations + bodies.  Stdlib
+        // walking is gone entirely.
+        codegen.collect_protocol_definitions(module);
+        codegen
+            .collect_non_protocol_declarations(module)
+            .map_err(|e| {
+                anyhow::anyhow!("VBC codegen error (user declarations): {}", e)
+            })?;
+        codegen.mark_user_defined_types(module);
+        codegen.resolve_pending_imports();
+        codegen
+            .compile_pending_default_methods()
+            .map_err(|e| {
+                anyhow::anyhow!("VBC codegen error (default methods): {}", e)
+            })?;
+        codegen.set_propagate_test_attr(true);
+        codegen
+            .compile_module_items(module)
+            .map_err(|e| anyhow::anyhow!("VBC codegen error (user bodies): {}", e))?;
+        let mut vbc_module = codegen
+            .finalize_module()
+            .map_err(|e| anyhow::anyhow!("VBC codegen error (finalize): {}", e))?;
 
         // Set source directory for FFI library path resolution
         // Use the parent directory of the input file, or current directory if none
