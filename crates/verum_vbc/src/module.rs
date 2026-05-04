@@ -158,6 +158,51 @@ pub struct VbcModule {
     /// Used by LLVM lowering to remap global field IDs to positional indices.
     #[serde(default)]
     pub type_field_layouts: std::collections::HashMap<String, Vec<String>>,
+
+    // ========================================================================
+    // Precompiled-stdlib archive extensions (Phase 3 of #precompile-stdlib).
+    //
+    // Single universal archive holds every platform's variants of cfg-
+    // conditional functions. The runtime / AOT loader builds a CfgKey
+    // from the active target triple and selects per-function variants
+    // through `function_variants`. Functions absent from
+    // `function_variants` are universal — `bytecode_offset/length` on
+    // their `FunctionDescriptor` is the only body, used regardless of
+    // target.
+    // ========================================================================
+    /// Deduplicated cfg-key table — referenced by `VbcVariant::cfg_key_id`.
+    /// Empty when the module has no target-conditional functions.
+    #[serde(default)]
+    pub cfg_keys: Vec<crate::cfg_key::CfgKey>,
+
+    /// Per-function variant tables — sparse list, only target-conditional
+    /// functions appear. The loader picks the first variant whose
+    /// `cfg_key_id` matches the active triple's CfgKey and overrides the
+    /// FunctionDescriptor's bytecode_offset/bytecode_length.
+    #[serde(default)]
+    pub function_variants: Vec<FunctionVariantSet>,
+
+    /// Theorem / axiom / lemma / corollary / tactic table. Items here
+    /// are the proof-layer-only artefacts the precompile-stdlib epic
+    /// keeps separate from runtime function bodies — they're only
+    /// loaded by `--verify formal`, audit, and replay tooling.
+    #[serde(default)]
+    pub theorems: Vec<TheoremEntry>,
+
+    /// `@framework(name, citation)` provenance edges and
+    /// `@framework_translate(src, tgt, citation)` bridge edges.
+    /// Loaded eagerly because the table is small (~1 KB) and audit
+    /// tooling consults it on every invocation.
+    #[serde(default)]
+    pub framework_provenance: FrameworkProvenance,
+
+    /// Discharge receipts for refinement obligations and theorems.
+    /// Each entry is a content-hash pointer into the per-binary
+    /// cert-store (`~/.verum/cert-store/<hash>`); the body of the
+    /// proof is never inlined into the archive — only its hash plus
+    /// the kernel rule that produced it.
+    #[serde(default)]
+    pub discharge_receipts: Vec<DischargeReceipt>,
 }
 
 impl Default for VbcModule {
@@ -207,7 +252,51 @@ impl VbcModule {
             type_field_layouts: std::collections::HashMap::new(),
             // User function start (defaults to 0 = all functions are user code)
             user_function_start: 0,
+            // Phase 3 (precompile-stdlib epic) — empty by default; only
+            // populated when the module is built by precompile-stdlib /
+            // precompile-cog or merged from a `.vbca` archive.
+            cfg_keys: Vec::new(),
+            function_variants: Vec::new(),
+            theorems: Vec::new(),
+            framework_provenance: FrameworkProvenance::default(),
+            discharge_receipts: Vec::new(),
         }
+    }
+
+    /// Resolve the bytecode region for `function_id` against the active
+    /// target `cfg`. Universal functions (no entry in
+    /// `function_variants`) return their descriptor's `bytecode_offset`
+    /// + `bytecode_length` directly. Multi-variant functions consult
+    /// the variant table; the first variant whose `cfg_key_id` matches
+    /// `cfg` wins.
+    ///
+    /// Returns `None` when the function exists but no variant matches
+    /// the active target — the loader treats this as "function elided
+    /// for this target" and surfaces a typed `FunctionNotFound` if a
+    /// caller tries to dispatch it.
+    pub fn resolve_bytecode_region(
+        &self,
+        function_id: FunctionId,
+        cfg: &crate::cfg_key::CfgKey,
+    ) -> Option<(u32, u32)> {
+        let desc = self.functions.get(function_id.0 as usize)?;
+        // Fast path: not in variant table → universal.
+        let Some(set) = self
+            .function_variants
+            .iter()
+            .find(|s| s.function_id == function_id)
+        else {
+            return Some((desc.bytecode_offset, desc.bytecode_length));
+        };
+        // Multi-variant: pick first matching cfg.
+        for variant in &set.variants {
+            let key = self.cfg_keys.get(variant.cfg_key_id as usize)?;
+            if key.matches(cfg) {
+                return Some((variant.bytecode_offset, variant.bytecode_length));
+            }
+        }
+        // No matching variant — function elided for this target.
+        None
     }
 
     /// Adds a string to the string table, returning its ID.
@@ -1696,5 +1785,429 @@ mod tests {
         assert_eq!(Constant::Int(0).tag(), 0x01);
         assert_eq!(Constant::Float(0.0).tag(), 0x02);
         assert_eq!(Constant::String(StringId(0)).tag(), 0x03);
+    }
+}
+
+// ============================================================================
+// Precompiled-stdlib archive extensions (Phase 3 of #precompile-stdlib).
+//
+// Multi-variant function bodies, theorem table, framework provenance,
+// and discharge receipts. Every type below is `#[serde(default)]`
+// optional on `VbcModule`; an unmodified VBC module emitted by today's
+// codegen has empty vectors here, so backward-compat with on-disk
+// caches and registry artefacts is automatic.
+// ============================================================================
+
+/// Per-function variant table — sparse, only target-conditional
+/// functions appear. The loader picks `variants[i]` whose
+/// `cfg_key_id`-indexed [`crate::cfg_key::CfgKey`] matches the active
+/// target triple's resolved key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionVariantSet {
+    /// Which function this set applies to. Sparse — most functions
+    /// have no entry in `VbcModule.function_variants` and use their
+    /// `FunctionDescriptor.bytecode_offset/length` directly.
+    pub function_id: FunctionId,
+    /// One entry per `#[cfg(...)]` arm in the source. The loader scans
+    /// in order and returns the first match; the precompiler emits
+    /// them sorted from most-specific to least-specific so a
+    /// `cfg(all(target_os = "macos", target_arch = "aarch64"))` arm
+    /// shadows a plain `cfg(target_os = "macos")` arm.
+    pub variants: SmallVec<[VbcVariant; 4]>,
+}
+
+/// One target-conditional bytecode region.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct VbcVariant {
+    /// Index into `VbcModule.cfg_keys`. The cfg-key table is
+    /// content-deduplicated — many variants of different functions
+    /// can share the same `cfg(target_os = "macos")` key by ID.
+    pub cfg_key_id: u16,
+    /// 16-bit pad keeps the struct 12 bytes aligned. Reserved for a
+    /// future `linkage / weak / inline` flag set without breaking
+    /// the on-disk layout.
+    #[serde(default)]
+    pub flags: u16,
+    /// Variant body offset within `VbcModule.bytecode` (or within the
+    /// archive's body region when read from `.vbca`).
+    pub bytecode_offset: u32,
+    /// Variant body length in bytes.
+    pub bytecode_length: u32,
+}
+
+/// Theorem / axiom / lemma / corollary / tactic entry — the
+/// proof-layer artefact preserved in VBC archives. The optimised
+/// processed representation lives here: typed predicate body
+/// (PropositionRef → FunctionId), per-backend translations, lifecycle
+/// status, ATS-V annotations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TheoremEntry {
+    /// Local index — stable within this VBC module.
+    pub id: TheoremId,
+
+    /// Theorem name (qualified: `core.math.giry.giry_left_identity`).
+    pub name: StringId,
+
+    /// Module path the theorem is declared in — used for downstream
+    /// audit output.
+    pub module_path: StringId,
+
+    /// Discriminator (theorem / lemma / corollary / axiom / tactic).
+    pub kind: TheoremKind,
+
+    /// Best-effort propositional text. Used as fallback when no
+    /// per-backend rendering is available; foreign tools that lack a
+    /// translation receive the text in a comment plus `Prop`.
+    pub propositional_text: StringId,
+
+    /// Per-backend rendered propositions (`coq` / `lean` / `agda` /
+    /// `isabelle` / `dedukti`). Stored as already-rendered text so
+    /// the cross-format export path is a HashMap lookup, not a
+    /// re-render.
+    #[serde(default)]
+    pub per_backend_propositions: SmallVec<[(StringId, StringId); 5]>,
+
+    /// Theorem parameters — name + per-backend type-text per
+    /// parameter (`Theorem foo (n : Z) : ...` etc.).
+    #[serde(default)]
+    pub params: SmallVec<[TheoremParamEntry; 4]>,
+
+    /// Generic type parameters (`<S: RichS>`-style). Emitted as
+    /// implicit arguments preceding the value parameters.
+    #[serde(default)]
+    pub generics: SmallVec<[TheoremGenericEntry; 2]>,
+
+    /// True iff the source carried a proof body. Statements without
+    /// a proof body are treated as axioms (postulates) by foreign
+    /// tools regardless of `kind`.
+    pub has_proof: bool,
+
+    /// `@framework(name, citation)` framework attribution. Empty when
+    /// the theorem is a native Verum statement (not citing an external
+    /// formal system).
+    #[serde(default)]
+    pub framework: Option<StringId>,
+    /// `@framework(name, "citation")` citation text.
+    #[serde(default)]
+    pub framework_citation: Option<StringId>,
+
+    /// ATS-V `Lifecycle` status marker — `[T]` Theorem / `[H]`
+    /// Hypothesis / `[D]` Discharged / `[C]` Conjecture / `[P]`
+    /// Pending / `[I]` Inert / `[✗]` Refuted. Encoded as a small
+    /// enum so the round-trip is stable.
+    #[serde(default)]
+    pub lifecycle: TheoremLifecycle,
+
+    /// Pointer to the predicate's compiled body (the same VBC function
+    /// that `requires`/`ensures` predicates compile to). `None` for
+    /// axioms without a runtime witness.
+    #[serde(default)]
+    pub proposition_body: Option<FunctionId>,
+
+    /// Pointers into `VbcModule.discharge_receipts` for every
+    /// successful kernel re-check / SMT discharge / Lean replay.
+    /// Empty for `[H]` / `[C]` / `[P]` lifecycle entries.
+    #[serde(default)]
+    pub discharged_by: SmallVec<[DischargeRef; 2]>,
+}
+
+/// Identifier for a [`TheoremEntry`] within a single [`VbcModule`].
+/// Kept distinct from [`FunctionId`] so the linker can dedup these
+/// independently when merging multiple archives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct TheoremId(pub u32);
+
+/// Theorem-shape discriminator — round-trips with stable string tags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TheoremKind {
+    Theorem,
+    Lemma,
+    Corollary,
+    Axiom,
+    Tactic,
+}
+
+/// Lifecycle status marker — mirrors the seven-symbol CVE alphabet
+/// (`[T]` / `[H]` / `[D]` / `[C]` / `[P]` / `[I]` / `[✗]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TheoremLifecycle {
+    /// `[T]` — discharged theorem, certificate available.
+    Theorem,
+    /// `[H]` — hypothesis pending discharge.
+    #[default]
+    Hypothesis,
+    /// `[D]` — defined / construction-only (no proof obligation).
+    Defined,
+    /// `[C]` — conjecture, no obligation set up.
+    Conjecture,
+    /// `[P]` — pending obligation, work in progress.
+    Pending,
+    /// `[I]` — inert / archived; carries history but is not load-
+    /// bearing for current proofs.
+    Inert,
+    /// `[✗]` — explicitly refuted (counterexample known).
+    Refuted,
+}
+
+/// One theorem parameter binding: `(name: T)` shape with per-backend
+/// `T` translations stored as already-rendered text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TheoremParamEntry {
+    pub name: StringId,
+    /// Per-backend type-text. `(backend_id, rendered_type_text)`.
+    /// Backend IDs match `per_backend_propositions` keys.
+    pub per_backend_type: SmallVec<[(StringId, StringId); 4]>,
+}
+
+/// One generic type-parameter binding: `<S: Bound>` shape with
+/// per-backend `Bound` translations. Bound is optional when the
+/// generic carries no protocol constraint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TheoremGenericEntry {
+    pub name: StringId,
+    /// Per-backend bound text. Empty when `<S>` has no `: Bound`.
+    pub per_backend_bound: SmallVec<[(StringId, StringId); 2]>,
+}
+
+/// Reference into [`VbcModule::discharge_receipts`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DischargeRef(pub u32);
+
+/// One discharge receipt — describes which kernel rule + which backend
+/// emitted a certificate for a theorem / refinement obligation. The
+/// certificate body itself is content-addressed (`cert_hash`) and
+/// stored externally in `~/.verum/cert-store/`; this entry is the
+/// *contract*, not the body.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DischargeReceipt {
+    /// Pointer to the theorem this receipt discharges.
+    pub theorem_id: TheoremId,
+    /// Backend that produced the certificate (`smt`, `smt_lemma`,
+    /// `lean`, `coq`, `agda`, `isabelle`, `dedukti`, …).
+    pub backend: StringId,
+    /// Backend version pin at discharge time. The kernel-recheck
+    /// pipeline refuses to trust a receipt whose backend version
+    /// drifted from the in-binary expectation.
+    pub backend_version: StringId,
+    /// Content hash of the certificate body — the cert-store key.
+    /// Blake3-encoded as 32 bytes for stability across compiler
+    /// versions.
+    pub cert_hash: [u8; 32],
+    /// Wall-clock timestamp at discharge (seconds since UNIX epoch).
+    /// Audit logs use this; the trust contract does not.
+    pub discharged_at_seconds: i64,
+    /// Kernel rule the discharge invoked (`K-Refine-omega` /
+    /// `K-Universe-Ascent` / etc.). Empty when the discharge is a
+    /// pure backend roundtrip without kernel involvement.
+    #[serde(default)]
+    pub kernel_rule: StringId,
+}
+
+/// `@framework(name, citation)` and
+/// `@framework_translate(src, tgt, citation)` provenance edges
+/// captured into the archive at precompile time.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FrameworkProvenance {
+    /// `@framework(name, citation)` markers — one entry per attribute.
+    pub citations: Vec<FrameworkCitation>,
+    /// `@framework_translate(src, tgt, citation)` bridge edges.
+    pub translations: Vec<FrameworkTranslation>,
+}
+
+/// One `@framework(name, citation)` attribute occurrence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrameworkCitation {
+    pub framework_name: StringId,
+    pub citation: StringId,
+    /// Theorem / function this citation decorates.
+    pub item_kind: ProvenanceItemKind,
+    /// Local item ID — interpretation depends on `item_kind`.
+    pub item_id: u32,
+}
+
+/// One `@framework_translate(src, tgt, citation)` bridge edge.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrameworkTranslation {
+    pub source_framework: StringId,
+    pub target_framework: StringId,
+    pub citation: StringId,
+    pub item_kind: ProvenanceItemKind,
+    pub item_id: u32,
+}
+
+/// Discriminator for the local item ID stored in
+/// [`FrameworkCitation`] / [`FrameworkTranslation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProvenanceItemKind {
+    /// `item_id` is a [`FunctionId`]'s u32 representation.
+    Function,
+    /// `item_id` is a [`TheoremId`]'s u32 representation.
+    Theorem,
+}
+
+#[cfg(test)]
+mod precompile_extension_tests {
+    use super::*;
+    use crate::cfg_key::{CfgKey, TargetArch, TargetOs};
+
+    fn make_module() -> VbcModule {
+        VbcModule::new("test".to_string())
+    }
+
+    #[test]
+    fn defaults_are_empty() {
+        let m = make_module();
+        assert!(m.cfg_keys.is_empty());
+        assert!(m.function_variants.is_empty());
+        assert!(m.theorems.is_empty());
+        assert!(m.discharge_receipts.is_empty());
+        assert!(m.framework_provenance.citations.is_empty());
+        assert!(m.framework_provenance.translations.is_empty());
+    }
+
+    #[test]
+    fn universal_function_resolves_via_descriptor() {
+        let mut m = make_module();
+        // Synthesise a function whose body is at offset 100, length 32.
+        let mut desc = FunctionDescriptor {
+            id: FunctionId(0),
+            name: m.intern_string("hello"),
+            parent_type: None,
+            type_params: SmallVec::new(),
+            params: SmallVec::new(),
+            return_type: crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT),
+            contexts: SmallVec::new(),
+            properties: crate::types::PropertySet::default(),
+            bytecode_offset: 100,
+            bytecode_length: 32,
+            locals_count: 0,
+            register_count: 0,
+            max_stack: 0,
+            is_inline_candidate: false,
+            is_generic: false,
+            visibility: crate::types::Visibility::Public,
+            is_generator: false,
+            yield_type: None,
+            suspend_point_count: 0,
+            calling_convention: Default::default(),
+            optimization_hints: Default::default(),
+            instructions: None,
+            func_id_base: 0,
+            debug_variables: Vec::new(),
+            is_test: false,
+            is_gpu_only: false,
+        };
+        // Backwards-compat field is filled with the existing layout.
+        let _ = &mut desc;
+        m.functions.push(desc);
+
+        let mut intern = |s: &str| m.strings.intern(s);
+        // Mutable borrow conflict — re-do via a counter so the test
+        // doesn't entangle borrows of `m` and `intern`.
+        let cfg = CfgKey {
+            os: Some(TargetOs::Darwin),
+            arch: Some(TargetArch::Aarch64),
+            ..CfgKey::default()
+        };
+        let _ = intern;
+        let region = m.resolve_bytecode_region(FunctionId(0), &cfg);
+        assert_eq!(region, Some((100, 32)));
+    }
+
+    #[test]
+    fn variant_table_overrides_descriptor() {
+        let mut m = make_module();
+        // One placeholder function so the variant lookup has a target.
+        let desc = FunctionDescriptor {
+            id: FunctionId(0),
+            name: m.intern_string("syscall_x"),
+            parent_type: None,
+            type_params: SmallVec::new(),
+            params: SmallVec::new(),
+            return_type: crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT),
+            contexts: SmallVec::new(),
+            properties: crate::types::PropertySet::default(),
+            bytecode_offset: 0,
+            bytecode_length: 0,
+            locals_count: 0,
+            register_count: 0,
+            max_stack: 0,
+            is_inline_candidate: false,
+            is_generic: false,
+            visibility: crate::types::Visibility::Public,
+            is_generator: false,
+            yield_type: None,
+            suspend_point_count: 0,
+            calling_convention: Default::default(),
+            optimization_hints: Default::default(),
+            instructions: None,
+            func_id_base: 0,
+            debug_variables: Vec::new(),
+            is_test: false,
+            is_gpu_only: false,
+        };
+        m.functions.push(desc);
+
+        // Two cfg keys: darwin and linux.
+        m.cfg_keys.push(CfgKey {
+            os: Some(TargetOs::Darwin),
+            ..CfgKey::default()
+        });
+        m.cfg_keys.push(CfgKey {
+            os: Some(TargetOs::Linux),
+            ..CfgKey::default()
+        });
+
+        m.function_variants.push(FunctionVariantSet {
+            function_id: FunctionId(0),
+            variants: SmallVec::from_vec(vec![
+                VbcVariant {
+                    cfg_key_id: 0,
+                    flags: 0,
+                    bytecode_offset: 100,
+                    bytecode_length: 16,
+                },
+                VbcVariant {
+                    cfg_key_id: 1,
+                    flags: 0,
+                    bytecode_offset: 200,
+                    bytecode_length: 24,
+                },
+            ]),
+        });
+
+        let darwin = CfgKey {
+            os: Some(TargetOs::Darwin),
+            arch: Some(TargetArch::Aarch64),
+            ..CfgKey::default()
+        };
+        let linux = CfgKey {
+            os: Some(TargetOs::Linux),
+            arch: Some(TargetArch::X86_64),
+            ..CfgKey::default()
+        };
+        let windows_active = CfgKey {
+            os: Some(TargetOs::Windows),
+            arch: Some(TargetArch::X86_64),
+            ..CfgKey::default()
+        };
+
+        assert_eq!(
+            m.resolve_bytecode_region(FunctionId(0), &darwin),
+            Some((100, 16))
+        );
+        assert_eq!(
+            m.resolve_bytecode_region(FunctionId(0), &linux),
+            Some((200, 24))
+        );
+        // No matching variant for Windows — function is elided for
+        // this target.
+        assert_eq!(
+            m.resolve_bytecode_region(FunctionId(0), &windows_active),
+            None
+        );
     }
 }

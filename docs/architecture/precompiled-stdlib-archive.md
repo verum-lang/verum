@@ -415,6 +415,157 @@ Multi-variant single archive **strictly dominates** the alternatives:
 This is the answer to user constraint (a): **no redundancy, all
 platforms in one binary, runtime selects.**
 
+## Multi-archive merge — VBC linker (interpreter + AOT)
+
+Production projects pull stdlib + N cog `.vbca` artifacts + their own
+user code into one execution unit. AOT and interpreter resolve this
+fundamentally differently, so the design must answer both:
+
+### AOT path — LLVM linker handles it
+
+For AOT compile (`verum build`), each `.vbca` is lowered to one `.o`
+through `verum_codegen::llvm::VbcToLlvmLowering`. The system linker
+(`ld` / `lld`) then merges the `.o` files into the final binary. Type
+deduplication, string-pool merging, and symbol-resolution are LLVM
+linker territory — Verum doesn't need a custom layer.
+
+The only Verum-side work is **per-cfg variant selection** at lowering
+time. For a function with `Variants(...)` body, the lowerer picks the
+arm matching `module.get_triple()` and emits LLVM IR for that arm only.
+Other arms are dropped. End result is identical to today's source-based
+AOT, just without the parse/typecheck/monomorphise client-side cost.
+
+### Interpreter path — explicit `VbcLinker`
+
+The interpreter takes a single `VbcModule` (function table, bytecode
+pool, string table, type table). Today `compile_ast_to_vbc` builds it
+from scratch by walking the user AST and re-codegening every reachable
+stdlib module. With pre-compiled archives, this becomes a **linker
+pass over already-compiled artefacts**:
+
+```rust
+// crates/verum_vbc/src/linker.rs — new module inside existing crate
+pub struct VbcLinker {
+    target_cfg: CfgKey,
+
+    // Linker-local ID space — fresh, monotonically increasing.
+    string_pool: StringInterner,
+    type_table:     Vec<TypeDescriptor>,
+    function_table: Vec<FunctionDescriptor>,
+    constant_pool:  Vec<Constant>,
+    bytecode:       Vec<u8>,
+    theorem_table:  Vec<TheoremEntry>,
+
+    // For each input archive: archive-local ID → linker ID. Built once
+    // per archive, used to remap bytecode-embedded IDs.
+    remap_tables:   Vec<RemapTable>,
+}
+
+pub struct RemapTable {
+    string_remap:   Vec<StringId>,        // archive_string_id → linker_string_id
+    type_remap:     Vec<TypeId>,
+    function_remap: Vec<FunctionId>,
+    constant_remap: Vec<ConstId>,
+}
+
+impl VbcLinker {
+    /// Build a fresh linker for `triple`. The cfg key is computed once
+    /// and cached — every variant selection during merge consults it.
+    pub fn new(triple: &str) -> Self;
+
+    /// Add an archive (stdlib or cog .vbca). Fast path:
+    ///   1. Read eager sections (string-pool, function-index, cfg-key
+    ///      table, variant tables) — ~1 ms.
+    ///   2. For each function with `Variants(_)`, pick the slot whose
+    ///      `cfg` matches `target_cfg`. Drop others.
+    ///   3. Allocate fresh linker IDs for active functions / types /
+    ///      strings; populate the archive's RemapTable.
+    ///   4. Append (renumbered) FunctionDescriptors / TypeDescriptors
+    ///      / Constants to the linker tables.
+    ///   5. Body bytes: defer until finalisation. The decoded /
+    ///      lazy-decompressed body region is appended at the end of
+    ///      linker.bytecode with a per-function offset; bytecode
+    ///      embedded IDs are rewritten through the RemapTable on
+    ///      first dispatch (or eagerly during finalize, configurable).
+    pub fn add_archive(&mut self, archive: &VbcArchive) -> Result<()>;
+
+    /// Add a freshly-codegen'd user module (`compile_ast_to_vbc` output
+    /// for the user's source files only — no stdlib).
+    pub fn add_user_module(&mut self, module: VbcModule) -> Result<()>;
+
+    /// Consume the linker, produce the consolidated runtime VbcModule.
+    /// The interpreter uses this directly. AOT also uses this when the
+    /// `--cross-target-via-vbc` mode is selected (default = direct
+    /// per-archive LLVM lowering).
+    pub fn finalize(self) -> VbcModule;
+}
+```
+
+**Performance contract for the linker hot path:**
+
+- Per-archive add: O(eager-section size) + O(variant table) + O(name
+  collision dedup). For the stdlib runtime archive (~5 K functions):
+  ~5 ms wall-clock.
+- N cog archives: each ~1-50 functions → ~0.5 ms each. 20 cogs ≈ 10 ms.
+- User module add: source codegen still happens, but only for user
+  functions (~10-100 typical). ~5 ms.
+- Finalize: O(total functions) for descriptor renumbering, O(total
+  bytecode) for ID rewriting. Both ~10 ms for medium project.
+
+**Total cold-start linker work**: ~30 ms for medium project (stdlib +
+20 cogs + user). vs ~25 min today for stdlib-from-source + user.
+**~50 000× speedup**.
+
+**Parallelism:**
+- Multiple archives can be **deserialised in parallel** (Rayon par_iter
+  over `archives` slice during `decode_eager_sections`).
+- ID allocation must be sequential (counter-based — single-threaded for
+  determinism).
+- Bytecode rewriting is **per-function parallel** at finalize time
+  (each function rewrite is independent given the RemapTable).
+- Net: 8-core machine completes the whole link in ~5-10 ms.
+
+### Deduplication policy
+
+Across N archives, the linker dedups by **content hash**:
+
+- **Strings**: identical UTF-8 byte sequences map to same linker StringId.
+- **Types**: identical `TypeDescriptor` (after recursive remap of
+  contained TypeIds) map to same linker TypeId. Critical for
+  `List<Int>` appearing in 10 cogs to consume one TypeId, not 10.
+- **Constants**: identical bit pattern + same TypeId → same ConstId.
+- **Functions**: NEVER deduped by name across archives. `cog_a.parse`
+  and `cog_b.parse` are distinct symbols at distinct qualified paths;
+  collision only on user-redeclared stdlib symbols, which is a hard
+  error.
+
+Dedup tables built per-archive add via `HashMap<ContentHash, LinkerID>`
+(amortised O(1) lookup). Dedup pays for itself when stdlib types
+appear across cogs — typical 30-50 % type-table reduction in real
+projects.
+
+### Backwards-compatibility with current `compile_ast_to_vbc`
+
+Phase 6 replaces today's flow:
+
+```
+old:  user_ast → typecheck → monomorphise stdlib + user → VbcModule
+new:  load embedded stdlib archive
+     + user_ast → typecheck (against stdlib archive's exports table)
+              → monomorphise user only (no stdlib touched)
+              → user_ast → VbcModule  // user-only
+     VbcLinker.new(triple)
+       .add_archive(stdlib)
+       .add_archive(cog_1) .. .add_archive(cog_N)
+       .add_user_module(user_module)
+       .finalize()  → final VbcModule for interpreter
+```
+
+The user's `compile_ast_to_vbc` API stays the same shape; the
+implementation changes from "re-codegen everything" to "link archives
++ codegen user-only". External callers (CLI, REPL, test runner) don't
+notice the swap.
+
 ## Phase 1 finding — item-level layers, not file-level split
 
 The Phase 1 classifier (`verum audit --stdlib-layers`) ran against the

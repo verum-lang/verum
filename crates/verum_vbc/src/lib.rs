@@ -64,6 +64,7 @@
 #![allow(clippy::doc_overindented_list_items)]
 
 pub mod archive;
+pub mod cfg_key;
 pub mod dtype;
 pub mod error;
 pub mod format;
