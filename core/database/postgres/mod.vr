@@ -65,6 +65,7 @@ public module async_pgoutput_buffered;
 public module async_pgoutput_typed;
 public module async_listener;
 public module composite_registry;
+public module composite_introspect;
 public module typed_row;
 public module pg_stmt_cache;
 public module pg_prepared_session;
@@ -88,6 +89,9 @@ public mount .typed_row.{
 public mount .composite_registry.{
     CompositeFieldDef, CompositeSchema, CompositeRegistry,
     field_index_by_name, field_by_name, field_value_by_name,
+};
+public mount .composite_introspect.{
+    populate_from_pg_type, populate_from_pg_type_async,
 };
 public mount .pg_stmt_cache.{
     PgStmtCache, PgCacheEntry, PgStmtCacheMetrics,

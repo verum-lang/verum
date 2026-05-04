@@ -1,0 +1,417 @@
+// =============================================================================
+// core/database/postgres/composite_introspect.vr — pg_type → CompositeRegistry
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.4 (typed wire / composite registry).
+// =============================================================================
+//
+// Discover the structure of a Postgres composite type at runtime via
+// `pg_type` + `pg_attribute`, build a `CompositeSchema`, and register
+// it on a caller-supplied `CompositeRegistry`. Closes the V1 follow-up
+// declared in `composite_registry.vr` lines 32-33.
+//
+// Surface:
+//   * populate_from_pg_type(registry, conn, type_name)
+//   * populate_from_pg_type_async(registry, conn, type_name)
+//
+// `type_name` may be unqualified ("smoke_pair" → resolved against
+// search_path, picking the first match) or schema-qualified
+// ("public.smoke_pair").
+//
+// Returns the registered schema (cloned). Subsequent calls to
+// `lookup_by_oid` / `lookup_by_name` will find it.
+//
+// V0 errors:
+//   * `PG_TYPE_NOT_FOUND`     — no row in pg_type for the name.
+//   * `PG_TYPE_NOT_COMPOSITE` — pg_type row exists but `typrelid = 0`
+//     (e.g. base type, domain over a base type).
+//   * `PG_INTROSPECT_BAD_OID` — atttypid couldn't be parsed as Int
+//     (catalog corruption — should never happen in practice).
+//
+// Lives in its own module so callers who only hand-register schemas
+// don't pull in the PgConnection / AsyncPgConnection dependencies.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.composite_introspect;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterSpecific, AdPostgres,
+};
+mount core.database.common.types.{WireValue, WvNull, WvPresent};
+mount core.database.postgres.connection.PgConnection;
+mount core.database.postgres.async_connection.AsyncPgConnection;
+mount core.database.postgres.composite_registry.{
+    CompositeFieldDef, CompositeSchema, CompositeRegistry,
+};
+
+// =============================================================================
+// Sync entry point
+// =============================================================================
+
+/// Discover composite layout for `type_name` via pg_type +
+/// pg_attribute and register it on `registry`. See module header
+/// for the error taxonomy.
+public fn populate_from_pg_type(
+    registry: &CompositeRegistry,
+    conn: &mut PgConnection,
+    type_name: &Text,
+) -> Result<CompositeSchema, DbError> {
+    let (schema_filter, name_only) = split_qualified(type_name);
+    let probe = probe_pg_type_sync(conn, &schema_filter, &name_only)?;
+    if probe.typrelid == 0 {
+        return Err(pg_error(
+            "PG_TYPE_NOT_COMPOSITE".clone(),
+            f"pg_type entry for {type_name} is not a composite (typrelid=0)",
+        ));
+    }
+    let fields = read_pg_attribute_sync(conn, probe.typrelid)?;
+    let schema = build_schema(probe.oid, probe.canonical_name, fields);
+    registry.register(clone_schema(&schema));
+    Ok(schema)
+}
+
+// =============================================================================
+// Async entry point
+// =============================================================================
+
+/// Async counterpart of `populate_from_pg_type`. Issues two
+/// `simple_query` round-trips through the actor.
+public async fn populate_from_pg_type_async(
+    registry: &CompositeRegistry,
+    conn: &AsyncPgConnection,
+    type_name: &Text,
+) -> Result<CompositeSchema, DbError> {
+    let (schema_filter, name_only) = split_qualified(type_name);
+    let probe = probe_pg_type_async(conn, &schema_filter, &name_only).await?;
+    if probe.typrelid == 0 {
+        return Err(pg_error(
+            "PG_TYPE_NOT_COMPOSITE".clone(),
+            f"pg_type entry for {type_name} is not a composite (typrelid=0)",
+        ));
+    }
+    let fields = read_pg_attribute_async(conn, probe.typrelid).await?;
+    let schema = build_schema(probe.oid, probe.canonical_name, fields);
+    registry.register(clone_schema(&schema));
+    Ok(schema)
+}
+
+// =============================================================================
+// Probe — pg_type lookup
+// =============================================================================
+
+type PgTypeProbe is {
+    oid: Int,
+    typrelid: Int,
+    /// Always schema-qualified — `nspname.typname`. Used as the
+    /// schema's `name` field for diagnostic logging and
+    /// `lookup_by_name` resolution.
+    canonical_name: Text,
+};
+
+fn probe_pg_type_sync(
+    conn: &mut PgConnection,
+    schema_filter: &Maybe<Text>,
+    name_only: &Text,
+) -> Result<PgTypeProbe, DbError> {
+    let sql = build_pg_type_sql(schema_filter, name_only);
+    match conn.query_first(&sql) {
+        Ok(opt)  => decode_pg_type_row(opt, name_only),
+        Err(e)   => Err(e),
+    }
+}
+
+async fn probe_pg_type_async(
+    conn: &AsyncPgConnection,
+    schema_filter: &Maybe<Text>,
+    name_only: &Text,
+) -> Result<PgTypeProbe, DbError> {
+    let sql = build_pg_type_sql(schema_filter, name_only);
+    match conn.simple_query(&sql).await {
+        Ok(result) => {
+            let opt = if (result.rows.len() as Int) == 0 {
+                None
+            } else {
+                Some(result.rows[0].clone())
+            };
+            decode_pg_type_row(opt, name_only)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn build_pg_type_sql(schema_filter: &Maybe<Text>, name_only: &Text) -> Text {
+    let mut sql: Text =
+        "SELECT t.oid::text, t.typrelid::text, n.nspname, t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname = ".clone();
+    sql.push_str(&quote_literal(name_only));
+    match schema_filter {
+        Some(s) => {
+            sql.push_str(&" AND n.nspname = ".clone());
+            sql.push_str(&quote_literal(s));
+        }
+        None => {
+            // Caller didn't qualify — restrict to namespaces on
+            // the active search_path so we don't resolve a stray
+            // shadowed type from an out-of-scope schema.
+            sql.push_str(
+                &" AND n.nspname = ANY (current_schemas(false))".clone(),
+            );
+        }
+    }
+    sql.push_str(&" ORDER BY n.nspname LIMIT 1".clone());
+    sql
+}
+
+fn decode_pg_type_row(
+    opt: Maybe<List<WireValue>>,
+    name_only: &Text,
+) -> Result<PgTypeProbe, DbError> {
+    let row = match opt {
+        Some(r) => r,
+        None    => {
+            return Err(pg_error(
+                "PG_TYPE_NOT_FOUND".clone(),
+                f"no pg_type entry for {name_only}",
+            ));
+        }
+    };
+    if (row.len() as Int) < 4 {
+        return Err(pg_error(
+            "PG_INTROSPECT_BAD_ROW".clone(),
+            "pg_type probe returned < 4 columns".clone(),
+        ));
+    }
+    let oid_text      = value_to_text(&row[0]);
+    let typrelid_text = value_to_text(&row[1]);
+    let nspname       = value_to_text(&row[2]);
+    let typname       = value_to_text(&row[3]);
+    let oid = match parse_int_text(&oid_text) {
+        Some(n) => n,
+        None    => {
+            return Err(pg_error(
+                "PG_INTROSPECT_BAD_OID".clone(),
+                f"unparseable pg_type.oid: {oid_text}",
+            ));
+        }
+    };
+    let typrelid = match parse_int_text(&typrelid_text) {
+        Some(n) => n,
+        None    => {
+            return Err(pg_error(
+                "PG_INTROSPECT_BAD_OID".clone(),
+                f"unparseable pg_type.typrelid: {typrelid_text}",
+            ));
+        }
+    };
+    let mut canonical = nspname;
+    canonical.push_str(&".".clone());
+    canonical.push_str(&typname);
+    Ok(PgTypeProbe {
+        oid: oid,
+        typrelid: typrelid,
+        canonical_name: canonical,
+    })
+}
+
+// =============================================================================
+// pg_attribute fan-out
+// =============================================================================
+
+fn read_pg_attribute_sync(
+    conn: &mut PgConnection,
+    typrelid: Int,
+) -> Result<List<CompositeFieldDef>, DbError> {
+    let sql = build_pg_attribute_sql(typrelid);
+    match conn.query_all(&sql) {
+        Ok(rows) => decode_pg_attribute_rows(rows),
+        Err(e)   => Err(e),
+    }
+}
+
+async fn read_pg_attribute_async(
+    conn: &AsyncPgConnection,
+    typrelid: Int,
+) -> Result<List<CompositeFieldDef>, DbError> {
+    let sql = build_pg_attribute_sql(typrelid);
+    match conn.simple_query(&sql).await {
+        Ok(result) => decode_pg_attribute_rows(result.rows),
+        Err(e)     => Err(e),
+    }
+}
+
+fn build_pg_attribute_sql(typrelid: Int) -> Text {
+    // attnum > 0 skips system columns (ctid / cmin / cmax / oid / etc).
+    // attisdropped = false skips soft-deleted columns left behind by
+    // ALTER TYPE … DROP ATTRIBUTE.
+    let mut sql: Text =
+        "SELECT a.attname, a.atttypid::text FROM pg_attribute a WHERE a.attrelid = ".clone();
+    sql.push_str(&int_to_text(typrelid));
+    sql.push_str(
+        &" AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum".clone(),
+    );
+    sql
+}
+
+fn decode_pg_attribute_rows(
+    rows: List<List<WireValue>>,
+) -> Result<List<CompositeFieldDef>, DbError> {
+    let mut out: List<CompositeFieldDef> = List.with_capacity(rows.len());
+    let mut i: Int = 0;
+    while i < (rows.len() as Int) {
+        let row = &rows[i];
+        if (row.len() as Int) < 2 {
+            return Err(pg_error(
+                "PG_INTROSPECT_BAD_ROW".clone(),
+                "pg_attribute row had < 2 columns".clone(),
+            ));
+        }
+        let name = value_to_text(&row[0]);
+        let oid_text = value_to_text(&row[1]);
+        let oid = match parse_int_text(&oid_text) {
+            Some(n) => n,
+            None    => {
+                return Err(pg_error(
+                    "PG_INTROSPECT_BAD_OID".clone(),
+                    f"unparseable pg_attribute.atttypid: {oid_text}",
+                ));
+            }
+        };
+        out.push(CompositeFieldDef { name: name, type_oid: oid });
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+// =============================================================================
+// Schema assembly
+// =============================================================================
+
+fn build_schema(
+    oid: Int,
+    canonical_name: Text,
+    fields: List<CompositeFieldDef>,
+) -> CompositeSchema {
+    let mut s = CompositeSchema.new(oid, canonical_name);
+    s.fields = fields;
+    s
+}
+
+fn clone_schema(s: &CompositeSchema) -> CompositeSchema {
+    let mut fields: List<CompositeFieldDef> = List.with_capacity(s.fields.len());
+    let mut i: Int = 0;
+    while i < (s.fields.len() as Int) {
+        fields.push(CompositeFieldDef {
+            name: s.fields[i].name.clone(),
+            type_oid: s.fields[i].type_oid,
+        });
+        i = i + 1;
+    }
+    CompositeSchema {
+        type_oid: s.type_oid,
+        name: s.name.clone(),
+        fields: fields,
+    }
+}
+
+// =============================================================================
+// Helpers — quoting / parsing / error wrap
+// =============================================================================
+
+/// Split a possibly-qualified type name into `(schema?, name)`.
+/// Splits on the FIRST '.' — multi-dot identifiers are unsupported
+/// (PG syntactically disallows them anyway).
+fn split_qualified(name: &Text) -> (Maybe<Text>, Text) {
+    let bytes = name.as_bytes();
+    let mut dot: Int = -1;
+    let mut i: Int = 0;
+    while i < (bytes.len() as Int) {
+        if (bytes[i] as Int) == ('.' as Int) { dot = i; break; }
+        i = i + 1;
+    }
+    if dot < 0 {
+        return (None, name.clone());
+    }
+    let schema = sub_text(name, 0, dot);
+    let only   = sub_text(name, dot + 1, bytes.len() as Int);
+    (Some(schema), only)
+}
+
+fn sub_text(s: &Text, start: Int, end: Int) -> Text {
+    let bytes = s.as_bytes();
+    let mut out: List<Byte> = List.new();
+    let mut i = start;
+    while i < end && i < (bytes.len() as Int) {
+        out.push(bytes[i]);
+        i = i + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+/// Standard SQL string-literal quoting: wrap in single quotes,
+/// double-up any embedded single quote. Sufficient for the
+/// catalog-name strings introspection passes.
+fn quote_literal(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out: List<Byte> = List.with_capacity(bytes.len() + 2);
+    out.push(0x27 as Byte);
+    let mut i: Int = 0;
+    while i < (bytes.len() as Int) {
+        let b = bytes[i];
+        if (b as Int) == 0x27 {
+            // Escape '\'' → '\'\''.
+            out.push(0x27 as Byte);
+            out.push(0x27 as Byte);
+        } else {
+            out.push(b);
+        }
+        i = i + 1;
+    }
+    out.push(0x27 as Byte);
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+fn int_to_text(n: Int) -> Text {
+    f"{n}"
+}
+
+fn parse_int_text(s: &Text) -> Maybe<Int> {
+    let bytes = s.as_bytes();
+    let mut i: Int = 0;
+    let n = bytes.len() as Int;
+    let mut neg = false;
+    if n > 0 && (bytes[0] as Int) == ('-' as Int) { neg = true; i = 1; }
+    if i >= n { return None; }
+    let mut acc: Int = 0;
+    while i < n {
+        let b = bytes[i] as Int;
+        if b < ('0' as Int) || b > ('9' as Int) { return None; }
+        acc = acc * 10 + (b - ('0' as Int));
+        i = i + 1;
+    }
+    Some(if neg { -acc } else { acc })
+}
+
+fn value_to_text(v: &WireValue) -> Text {
+    match v {
+        WvNull => "".clone(),
+        WvPresent { bytes, .. } => Text.from_bytes(bytes).unwrap_or("".clone()),
+    }
+}
+
+fn pg_error(code: Text, message: Text) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: code,
+        message: message,
+        retryable: false,
+    })
+}
