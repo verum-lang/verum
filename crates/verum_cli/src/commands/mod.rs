@@ -88,6 +88,10 @@ pub mod tactic;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
 // The stdlib.rs file is kept for reference but not exposed in the CLI.
 // pub mod stdlib;
+/// `verum stdlib precompile` — Phase 4 of the precompiled-stdlib epic.
+/// Drives `CompilationPipeline::compile_core` and writes a `.vbca`
+/// archive that the compiler binary embeds at build time (Phase 5).
+pub mod stdlib_precompile;
 pub mod fuzz;
 pub mod property;
 #[cfg(feature = "verification")]
