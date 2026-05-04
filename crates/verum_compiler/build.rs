@@ -133,29 +133,101 @@ fn main() {
     }
 
     // ========================================================================
-    // Precompiled-stdlib VBC archive (Phase 5 of #precompile-stdlib epic).
+    // Precompiled-stdlib VBC archive + CoreMetadata sidecar
+    // (T2/T3 of single-path archive-driven epic).
     //
-    // If `target/precompiled-stdlib/runtime.vbca` exists at compiler
-    // build time, embed it into the binary as the canonical
-    // serialised stdlib VBC. Phase 6 will switch
-    // `compile_ast_to_vbc` to deserialise this in <50 ms instead of
-    // re-running stdlib codegen every script invocation.
+    // Architecture: the embedded `runtime.vbca` + `runtime.core_metadata`
+    // are the single source of truth for stdlib at runtime — the
+    // typecheck and codegen phases consume them directly, no source-
+    // driven fallback.  This build step ensures both files are FRESH:
     //
-    // Refresh the archive with `verum stdlib precompile` (Phase 4).
-    // The build script does NOT auto-run that command itself: forcing
-    // a 7-min precompile inside every `cargo build` would be hostile
-    // to the inner-loop. Instead, when the archive is missing we
-    // embed an empty placeholder; Phase 6's runtime path detects
-    // that and falls back to source compile.
+    //   1. Compute blake3(core/**/*.vr) as a content-addressed key.
+    //   2. Compare against `target/precompiled-stdlib/runtime.vbca.checksum`.
+    //   3. Match → reuse existing artefacts (skip 7-min precompile).
+    //   4. Mismatch (or artefacts missing) → invoke
+    //      `cargo run -p verum_stdlib_precompiler --release` to refresh
+    //      both files, then write the new checksum.
     //
-    // Env var `STDLIB_RUNTIME_VBC_PATH` is consumed by
-    // `crates/verum_compiler/src/embedded_stdlib_vbc.rs` via
-    // `include_bytes!(env!("STDLIB_RUNTIME_VBC_PATH"))`.
+    // The verum_stdlib_precompiler binary (T4) breaks the
+    // chicken-and-egg cycle: build.rs runs as part of `cargo build verum_compiler`,
+    // and `cargo build verum_cli` (which would normally drive the
+    // precompile via `verum stdlib precompile`) depends on
+    // `verum_compiler`.  T4 doesn't depend on `verum_cli` so it can
+    // be invoked from this build script without recursion.
+    //
+    // Env vars consumed downstream:
+    //   * STDLIB_RUNTIME_VBC_PATH — `embedded_stdlib_vbc.rs`
+    //   * STDLIB_RUNTIME_CORE_METADATA_PATH — `embedded_stdlib_metadata.rs`
     // ========================================================================
     let precompile_archive = project_root
         .join("target")
         .join("precompiled-stdlib")
         .join("runtime.vbca");
+    let checksum_path = project_root
+        .join("target")
+        .join("precompiled-stdlib")
+        .join("runtime.vbca.checksum");
+
+    // T3: blake3 checksum + auto-refresh.
+    //
+    // Skip when CARGO_FEATURE_NO_AUTO_PRECOMPILE is set (release CI
+    // builds + downstream cargo install where auto-running another
+    // cargo build would deadlock on the package cache lock).
+    let auto_precompile_disabled =
+        std::env::var("VERUM_NO_AUTO_PRECOMPILE").is_ok()
+            || std::env::var("DOCS_RS").is_ok();
+    if !auto_precompile_disabled {
+        let current_hash = compute_core_blake3(&core_dir, &files);
+        let stored_hash = std::fs::read_to_string(&checksum_path)
+            .ok()
+            .map(|s| s.trim().to_string());
+        let needs_refresh = match &stored_hash {
+            Some(h) if h.as_str() == current_hash.as_str()
+                && precompile_archive.is_file() => false,
+            _ => true,
+        };
+        if needs_refresh {
+            println!(
+                "cargo:warning=Refreshing stdlib precompile artefacts (blake3 changed or archive missing)"
+            );
+            let status = std::process::Command::new("cargo")
+                .args(["run", "--release", "-p", "verum_stdlib_precompiler", "--"])
+                .arg(&project_root)
+                .current_dir(&project_root)
+                .env("VERUM_NO_AUTO_PRECOMPILE", "1") // prevent recursion
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    let _ = std::fs::create_dir_all(checksum_path.parent().unwrap());
+                    let _ = std::fs::write(&checksum_path, &current_hash);
+                    println!(
+                        "cargo:warning=Stdlib precompile refreshed; checksum updated to {}",
+                        &current_hash[..16]
+                    );
+                }
+                Ok(s) => {
+                    println!(
+                        "cargo:warning=verum_stdlib_precompiler exited with {} — \
+                         continuing with stale artefacts (typecheck/codegen will use last-good)",
+                        s
+                    );
+                }
+                Err(e) => {
+                    println!(
+                        "cargo:warning=verum_stdlib_precompiler invocation failed: {} — \
+                         continuing with stale artefacts",
+                        e
+                    );
+                }
+            }
+        } else {
+            println!(
+                "cargo:warning=Stdlib precompile cache HIT (blake3 {})",
+                &current_hash[..16]
+            );
+        }
+        println!("cargo:rerun-if-changed={}", checksum_path.display());
+    }
     let precompile_metadata = project_root
         .join("target")
         .join("precompiled-stdlib")
@@ -931,4 +1003,27 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
         total += extract_symbols(src).len();
     }
     total
+}
+
+/// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
+/// by relative path.  Stable across runs (sorted iteration), so two
+/// build script invocations on the same `core/` produce the same
+/// hex digest.  Used as the cache key for the `runtime.vbca` +
+/// `runtime.core_metadata` artefact pair — when this digest matches
+/// the stored value beside the archive, the artefacts are reused
+/// without invoking `verum_stdlib_precompiler`.
+fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
+    let _ = core_dir;
+    let mut hasher = blake3::Hasher::new();
+    let mut sorted: Vec<&(String, Vec<u8>)> = files.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    for (rel_path, bytes) in sorted {
+        // Path-prefix the content to avoid two files swapping
+        // names but keeping bytes producing the same digest.
+        hasher.update(rel_path.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(bytes);
+        hasher.update(b"\0");
+    }
+    hasher.finalize().to_hex().to_string()
 }

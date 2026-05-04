@@ -82,6 +82,7 @@ harness = false
 
 [build-dependencies]
 zstd = "0.13"
+blake3 = { workspace = true }
 
 [features]
 default = []
