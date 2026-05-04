@@ -220,7 +220,7 @@ implement Path {
     /// Convert to owned PathBuf.
     @inline(always)
     public fn to_path_buf(&self) -> PathBuf {
-        PathBuf { inner: self.inner.clone() }
+        PathBuf { path: Path { inner: self.inner.clone() } }
     }
 
     /// Check if the path is empty.
@@ -582,34 +582,40 @@ implement Display for Path {
 /// path.push("file.txt");
 /// assert_eq(path.as_path().to_str(), "/home/user/file.txt");
 /// ```
+// PathBuf embeds a Path so the #112 method-dispatch retry can walk
+// `Deref::Target = Path` transparently. The semantics match Rust's
+// PathBuf-Deref-Path pattern: every Path method is callable directly
+// on a PathBuf without an explicit `.as_path()` hop.
 public type PathBuf is {
-    inner: Text,
+    path: Path,
 };
 
 implement PathBuf {
     /// Create a new empty PathBuf.
     public fn new() -> PathBuf {
-        PathBuf { inner: Text.new() }
+        PathBuf { path: Path { inner: Text.new() } }
     }
 
     /// Create PathBuf with capacity.
     public fn with_capacity(capacity: Int) -> PathBuf {
-        PathBuf { inner: Text.with_capacity(capacity) }
+        PathBuf { path: Path { inner: Text.with_capacity(capacity) } }
     }
 
     /// Create PathBuf from a Text.
     public fn from(s: &Text) -> PathBuf {
-        PathBuf { inner: s.clone() }
+        PathBuf { path: Path { inner: s.clone() } }
     }
 
     /// Create PathBuf from a string literal.
     public fn from_str(s: &str) -> PathBuf {
-        PathBuf { inner: Text.from(s) }
+        PathBuf { path: Path { inner: Text.from(s) } }
     }
 
-    /// Get this as an immutable Path.
+    /// Get this as an immutable Path. Retained for explicit
+    /// disambiguation; identical to `&*pathbuf` via the Deref impl
+    /// below.
     public fn as_path(&self) -> Path {
-        Path { inner: self.inner.clone() }
+        Path { inner: self.path.inner.clone() }
     }
 
     /// Push a path component.
@@ -629,7 +635,7 @@ implement PathBuf {
     public fn push(&mut self, component: &Path) {
         if component.is_absolute() {
             // Replace entirely
-            self.inner = component.inner.clone();
+            self.path.inner = component.inner.clone();
             return;
         }
 
@@ -638,11 +644,11 @@ implement PathBuf {
         }
 
         // Add separator if needed
-        if !self.inner.is_empty() && !self.inner.ends_with_char(MAIN_SEPARATOR) {
-            self.inner.push(MAIN_SEPARATOR);
+        if !self.path.inner.is_empty() && !self.path.inner.ends_with_char(MAIN_SEPARATOR) {
+            self.path.inner.push(MAIN_SEPARATOR);
         }
 
-        self.inner.push_str(&component.inner);
+        self.path.inner.push_str(&component.inner);
     }
 
     /// Push a string component.
@@ -665,7 +671,7 @@ implement PathBuf {
     public fn pop(&mut self) -> Bool {
         match self.as_path().parent() {
             Some(parent) => {
-                self.inner = parent.inner;
+                self.path.inner = parent.inner;
                 true
             }
             None => false,
@@ -720,42 +726,42 @@ implement PathBuf {
 
     /// Clear the path.
     public fn clear(&mut self) {
-        self.inner.clear();
+        self.path.inner.clear();
     }
 
     /// Reserve capacity.
     public fn reserve(&mut self, additional: Int) {
-        self.inner.reserve(additional);
+        self.path.inner.reserve(additional);
     }
 
     /// Get the capacity.
     public fn capacity(&self) -> Int {
-        self.inner.capacity()
+        self.path.inner.capacity()
     }
 
     /// Check if empty.
     public fn is_empty(&self) -> Bool {
-        self.inner.is_empty()
+        self.path.inner.is_empty()
     }
 
     /// Get length in bytes.
     public fn len(&self) -> Int {
-        self.inner.len()
+        self.path.inner.len()
     }
 
     /// Convert to Text.
     public fn to_text(&self) -> Text {
-        self.inner.clone()
+        self.path.inner.clone()
     }
 
     /// Convert to str reference.
     public fn to_str(&self) -> &Text {
-        &self.inner
+        &self.path.inner
     }
 
     /// Into inner Text.
     public fn into_text(self) -> Text {
-        self.inner
+        self.path.inner
     }
 
     /// Check if this path exists.
@@ -774,9 +780,24 @@ implement PathBuf {
     }
 }
 
+// #112 / #118 — Deref<Target = Path> activates the method-dispatch
+// retry shipped in commit 56fa64d4 for PathBuf. Every Path method
+// (`is_absolute`, `parent`, `file_name`, `file_stem`, `extension`,
+// `join`, `join_str`, `with_extension`, `with_file_name`, `iter`,
+// `components`, `ancestors`, `strip_prefix`, …) is callable directly
+// on a PathBuf without `.as_path()`. The compiler-side retry walks
+// `PathBuf::Deref::Target = Path` and resolves the method against
+// Path's surface.
+implement Deref for PathBuf {
+    type Target is Path;
+    fn deref(&self) -> &Path {
+        &self.path
+    }
+}
+
 implement Clone for PathBuf {
     fn clone(&self) -> PathBuf {
-        PathBuf { inner: self.inner.clone() }
+        PathBuf { path: Path { inner: self.path.inner.clone() } }
     }
 }
 
@@ -788,25 +809,25 @@ implement Default for PathBuf {
 
 implement Eq for PathBuf {
     fn eq(&self, other: &PathBuf) -> Bool {
-        self.inner == other.inner
+        self.path.inner == other.path.inner
     }
 }
 
 implement Hash for PathBuf {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
-        self.inner.hash(hasher);
+        self.path.inner.hash(hasher);
     }
 }
 
 implement Debug for PathBuf {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"PathBuf({self.inner})")
+        f.write_str(f"PathBuf({self.path.inner})")
     }
 }
 
 implement Display for PathBuf {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.inner)
+        f.write_str(&self.path.inner)
     }
 }
 
