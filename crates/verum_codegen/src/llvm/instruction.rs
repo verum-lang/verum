@@ -116,22 +116,38 @@ fn checked_malloc_instr<'ctx>(
 ///
 
 /// See `docs/architecture/no-libc-architecture.md`.
-fn get_or_declare_internal_strtol<'ctx>(
+pub(crate) fn get_or_declare_internal_strtol<'ctx>(
     llvm_ctx: &'ctx verum_llvm::context::Context,
     module: &Module<'ctx>,
 ) -> verum_llvm::values::FunctionValue<'ctx> {
     let wrapper_name = "verum_internal_strtol";
-    if let Some(f) = module.get_function(wrapper_name) {
-        return f;
-    }
     let i8_type = llvm_ctx.i8_type();
     let i32_type = llvm_ctx.i32_type();
     let i64_type = llvm_ctx.i64_type();
     let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
 
-    let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into(), i32_type.into()], false);
-    let func = module.add_function(wrapper_name, fn_type, None);
-    func.set_linkage(verum_llvm::module::Linkage::Internal);
+    // Adopt-and-emit if a prior site declared this wrapper without
+    // a body — `runtime.rs::get_or_declare_strtol` forward-declares
+    // `verum_internal_strtol` so callers in runtime.rs can build
+    // calls into it before the body is emitted.  Returning the
+    // bodyless declaration here would leave the binary linked
+    // against an empty stub (LLVM's bodyless-decl synthesiser would
+    // emit `mov w0, #0; ret`) — silently zero-returning every call
+    // to strtol.  Distinguish via `count_basic_blocks`: > 0 means
+    // the body is already emitted (idempotent re-entry); == 0 means
+    // we still need to fill it.  Mirror of the strlen pattern at
+    // `runtime.rs::get_or_declare_strlen`.
+    let func = match module.get_function(wrapper_name) {
+        Some(f) if f.count_basic_blocks() > 0 => return f,
+        Some(f) => f,
+        None => {
+            let fn_type =
+                i64_type.fn_type(&[ptr_type.into(), ptr_type.into(), i32_type.into()], false);
+            let f = module.add_function(wrapper_name, fn_type, None);
+            f.set_linkage(verum_llvm::module::Linkage::Internal);
+            f
+        }
+    };
 
     let entry = llvm_ctx.append_basic_block(func, "entry");
     let skip_ws = llvm_ctx.append_basic_block(func, "skip_ws");

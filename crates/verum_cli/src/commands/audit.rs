@@ -13973,3 +13973,120 @@ pub fn audit_stdlib_layers_with_format(format: AuditFormat) -> Result<()> {
 
     Ok(())
 }
+
+// ============================================================================
+// `verum audit --proof-archive` — Phase 8 of the precompiled-stdlib epic.
+// ============================================================================
+
+/// Entry point for `verum audit --proof-archive [--format FORMAT]`.
+///
+/// Lazy-loads the embedded VBC archive's `theorems` table, runs the
+/// kernel-only re-check pass over each theorem's discharge receipts,
+/// and reports per-theorem verdicts. Cache lives in
+/// `~/.verum/replay-cache/<compiler-version>/`. Honest exit gate:
+/// non-zero on rejected or errored theorem verdicts; otherwise zero.
+pub fn audit_proof_archive_with_format(format: AuditFormat) -> Result<()> {
+    use verum_compiler::embedded_stdlib_vbc;
+    use verum_compiler::proof_archive_loader;
+    use verum_vbc::module::VbcModule;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Verifying proof archive (kernel-only re-check)");
+    }
+
+    // Resolve the embedded archive. When the binary was built without
+    // a precompiled archive, there's nothing to verify — emit a
+    // typed diagnostic and exit zero.
+    let archive = match embedded_stdlib_vbc::get_runtime_archive() {
+        Some(a) => a,
+        None => {
+            ui::warn(
+                "no precompiled stdlib archive embedded — Phase 8 audit \
+                 has no theorems to verify. Run `verum stdlib precompile` \
+                 to refresh the archive, then rebuild the binary.",
+            );
+            return Ok(());
+        }
+    };
+
+    // Materialise every contained module into a flat VbcModule so the
+    // proof_archive_loader can walk theorems uniformly. The same
+    // VbcLinker used by Phase 6b/6c provides this via the existing
+    // archive-merge path.
+    let triple = std::env::consts::ARCH.to_string() + "-" + std::env::consts::OS;
+    let mut linker = verum_vbc::linker::VbcLinker::new(&triple);
+    if let Err(e) = linker.add_archive(archive) {
+        return Err(crate::error::CliError::Custom(format!(
+            "failed to merge archive for proof verification: {e}"
+        ))
+        .into());
+    }
+    let merged: VbcModule = linker.finalize();
+
+    let report = match proof_archive_loader::verify_proof_archive(&merged) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(crate::error::CliError::Custom(format!(
+                "proof archive verification failed: {e:?}"
+            ))
+            .into());
+        }
+    };
+
+    // Write the JSON report to disk for downstream tooling, when a
+    // project manifest is present.
+    let report_paths: Option<(std::path::PathBuf, std::path::PathBuf)> =
+        Manifest::find_manifest_dir().ok().map(|manifest_dir| {
+            let report_dir = manifest_dir.join("target").join("audit-reports");
+            let _ = std::fs::create_dir_all(&report_dir);
+            (
+                report_dir.join("proof-archive.json"),
+                report_dir.join("proof-archive.md"),
+            )
+        });
+
+    if let Some((json_path, md_path)) = &report_paths {
+        if let Ok(json) = serde_json::to_string_pretty(&report) {
+            let _ = std::fs::write(json_path, json);
+        }
+        let _ = std::fs::write(md_path, proof_archive_loader::render_summary(&report));
+    }
+
+    match format {
+        AuditFormat::Json => {
+            let json = serde_json::to_string_pretty(&report).map_err(|e| {
+                crate::error::CliError::Custom(format!("JSON render: {e}"))
+            })?;
+            println!("{}", json);
+        }
+        AuditFormat::Plain => {
+            print!("{}", proof_archive_loader::render_summary(&report));
+            if let Some((json_path, _)) = &report_paths {
+                ui::detail("JSON report", &json_path.display().to_string());
+            }
+            if !report.is_clean() {
+                if report.rejected > 0 {
+                    ui::warn(&format!(
+                        "{} theorems rejected — kernel re-check failed",
+                        report.rejected
+                    ));
+                }
+                if report.body_missing > 0 {
+                    ui::warn(&format!(
+                        "{} discharge bodies missing from ~/.verum/cert-store/",
+                        report.body_missing
+                    ));
+                }
+                if report.errors > 0 {
+                    ui::warn(&format!(
+                        "{} theorem verifications errored — see proof-archive.json for details",
+                        report.errors
+                    ));
+                }
+                std::process::exit(1);
+            }
+        }
+    }
+
+    Ok(())
+}
