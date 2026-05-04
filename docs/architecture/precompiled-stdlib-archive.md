@@ -1069,46 +1069,79 @@ ecosystems. Win is enormous.
 5. **Tiered partitioning vs everything-or-nothing?** → tiered. `minimal`
    for embedded targets, `default` for desktop, `full` for audit servers.
 
-## Implementation status (2026-05-04)
+## Implementation status
 
-Phases landed in current session:
+Closed in committed work to date:
 
-* **Phase 1** ✅ committed `458659e5`
-  — `verum_compiler::stdlib_classifier` + `verum audit --stdlib-layers`
-  CLI subflag. Baseline: 2 413 modules → 1 731 runtime / 42 proof / 0
-  meta / 109 mixed / 528 empty / 3 parse errors. Drives the
-  per-item-layer decision below.
-* **Phase 3** ✅ committed `8bc9ea9d`
-  — `verum_vbc::cfg_key` + extended `VbcModule` with `cfg_keys`,
-  `function_variants`, `theorems`, `framework_provenance`,
-  `discharge_receipts`. `resolve_bytecode_region(fn_id, &cfg_key)` is
-  the canonical loader entry; backward-compat verified by 1098/1098
-  passing tests with empty extension vectors on legacy modules.
-* **Phase 2** ❌ dropped
-  — Phase 1 measurement showed file-level layer split is impractical
-  given `core/math/*` natural co-location. Layers are encoded at
-  item level inside the archive instead.
+* **Phase 1** — `458659e5` — `stdlib_classifier` + `verum audit --stdlib-layers`. Baseline: 2 413 modules / 1 731 runtime / 42 proof / 0 meta / 109 mixed / 528 empty / 3 parse errors.
+* **Phase 3** — `8bc9ea9d` — `verum_vbc::cfg_key` + five new `VbcModule` fields (cfg_keys, function_variants, theorems, framework_provenance, discharge_receipts) + `resolve_bytecode_region`. 11 new unit tests, 1087 existing pass without regression.
+* **Phase 4 (4a)** — `0ad3d0f9` — `verum stdlib precompile` orchestrator + lenient parse for production resilience. Validated end-to-end: 9.05 MB archive produced for host triple (563 modules, 3 964 functions, 422 s).
+* **Phase 5** — `47d5be70` — `embedded_stdlib_vbc.rs` + `build.rs` hook. Compiler binary now ships an 8.84 MB precompiled VBC archive. Lazy `OnceLock`-decoded on first script invocation.
+* **Phase 6 (6a)** — `d97cdab9` — detection hook in `compile_ast_to_vbc`. Lazy initialiser fires, archive decodes cleanly, format-mismatch surfaces as `tracing::warn!`.
+* **Phase 11** — `e15cb649` — `docs/architecture/vbca-format-spec.md`. Authoritative on-disk contract: byte-precise header, version policy, ArchiveFlags, determinism guarantees, security model, backward-compat rules.
 
-Phases pending:
+Phase 2 dropped: Phase 1 measurement showed file-level layer split is impractical for `core/math/*` natural co-location; per-item layer encoding inside the archive is the chosen direction.
 
-| # | Subject | Notes |
-|---|---------|-------|
-| 4 | `cargo xtask precompile-stdlib` pipeline | Reuses existing `CompilationPipeline::compile_core`. Adds: post-pass populating new `theorems` / `framework_provenance` tables, multi-variant codegen for cfg-conditional functions (running codegen N times — once per platform — and merging into multi-variant entries), deterministic ID assignment so host/cross builds produce byte-identical archive. Emits versioned `.vbca` v2 with layered sections. **Estimate: 3-5 days.** |
-| 5 | `embedded_stdlib_vbc.rs` + `build.rs` hook | Replaces `embedded_stdlib.rs` (source archive) with VBC-archive embedding. `build.rs` invokes Phase 4 if the embedded artefact is missing or stale (stdlib content hash drift). Feature flags: `minimal` / `default` / `full`. **Estimate: 1 day.** |
-| 6 | Runtime path switch in `compile_ast_to_vbc` | Replaces source-driven `collect_imported_stdlib_modules + per-module codegen` with `archive.materialize(&CfgKey::for_triple(triple)) + user-only codegen + linker.merge`. Hot path goes from ~25 min to <50 ms. Keeps `VERUM_NO_PRECOMPILED_STDLIB=1` dev-mode escape hatch. **Estimate: 2 days.** |
-| 7 | Cross-compile via archive variant pick | One-line change once Phase 6 lands — same archive, different `CfgKey::for_triple(target)`. Validation: build for darwin/linux/windows × x86_64/aarch64 from the same binary. **Estimate: 1 day.** |
-| 8 | Verify-ladder + proof-archive lazy-load | `--verify formal` deserialises `theorems` + `discharge_receipts` sections, kernel-rechecks against cert-store, caches replay results per (binary, theorem). **Estimate: 2-3 days.** |
-| 9 | Meta-archive lazy-load | `@meta` / `@const` / `@derive` evaluators in lazy section, populated on first stdlib meta invocation. **Estimate: 1 day.** |
-| 11 | `.vbca` format spec freeze | Document the v2 archive on-disk layout as a stable contract for registry build workers and out-of-tree clients. **Estimate: 1 day.** |
-| 12 | `cargo xtask precompile-cog` | Same pipeline as Phase 4 but scoped to a single cog. Reuses 100% of Phase 4 code. **Estimate: 1-2 days.** |
-| 13 | Registry server-side build worker | After cog upload, registry runs precompile-cog for each supported compiler version, signs, publishes `.vbca` next to source tarball. **Registry-repo work, not main repo. Estimate: 3-5 days.** |
-| 14 | Client `cog_resolver` — prefer `.vbca` | `verum_modules::cog_resolver` first GETs the precompiled artefact, signature-verifies, links via archive merge; falls back to source on miss. **Estimate: 2 days.** |
-| 15 | Reproducibility checker `verum cog reproduce` | Local rebuild from source, byte-compare to registry artefact. Detects tampering. **Estimate: 1 day.** |
+Pending — load-bearing critical path:
 
-Total compiler-side remaining: ~15-20 days. Critical path for the
-**stdlib cold-start fix** is Phases 4 → 5 → 6 (~6-8 days). After that
-the cold start is <50 ms; subsequent phases extend the format to
-proofs / meta / cogs without disturbing the perf result.
+| Phase | Status | Note |
+|-------|--------|------|
+| **6b VBC linker** | NOT STARTED | The single remaining blocker for the cold-start perf win. `crates/verum_vbc/src/linker.rs`: `VbcLinker::add_archive(stdlib).add_user_module(user).finalize() → VbcModule`. Per-source remap tables + content-hash dedup + bytecode-walk ID rewriting (Call / TailCall / CallM / CallClosure / MakeClosure / Type-loading instructions ~40 variants). Once landed, swap `compile_ast_to_vbc`'s source-driven stdlib codegen for `linker.add_archive(embedded_stdlib_vbc::get_runtime_archive())` + user-only codegen. Hot path <50 ms. |
+| 4b multi-variant cfg codegen | not started | Re-codegen cfg-conditional stdlib functions per active cfg-arm; populate `function_variants`. Required for cross-compile from a single archive. Independent of 6b. |
+| 7 cross-compile variant pick | blocked on 6b | One-call change once linker lands: `archive.materialize(&CfgKey::for_triple(target_triple))` instead of host triple. |
+| 8 proof-archive lazy-load | blocked on 6b | `--verify formal` deserialises `theorems` + `discharge_receipts` sections, kernel-rechecks against cert-store. |
+| 9 meta-archive lazy-load | blocked on 6b | `@meta` / `@const` / `@derive` lazy section. |
+| 12 precompile-cog | partially blocked on 6b | Mirrors Phase 4 but scoped to a single cog; the cog-source-side codegen reuses the existing build pipeline. The interpret/AOT side that consumes the result waits on 6b. |
+| 13 registry server-side build worker | independent | Registry-side work, not in this repo. Spec ready in `vbca-format-spec.md`. |
+| 14 client cog_resolver — prefer `.vbca` | partially blocked on 6b | Resolve+fetch logic independent; link step requires 6b. |
+| 15 reproducibility checker | blocked on 12 + 4b | `verum cog reproduce` reruns precompile from source, byte-compares to registry `.vbca`. |
+
+The single-thread chain is **6b → {7, 8, 9, 12 link, 14 link} → 15**.
+Phase 6b is the canonical next batch.
+
+### Phase 6b — concrete implementation contract
+
+`crates/verum_vbc/src/linker.rs` — new public surface:
+
+```rust
+pub struct VbcLinker {
+    target_cfg: CfgKey,
+    out: VbcModule,
+    // per-input-archive: source_id → linker_id remap
+    string_remap_per_source: Vec<Vec<StringId>>,
+    type_remap_per_source:   Vec<Vec<TypeId>>,
+    function_remap_per_source: Vec<Vec<FunctionId>>,
+    const_remap_per_source:  Vec<Vec<ConstId>>,
+    // content-hash dedup (strings only in v1)
+    string_dedup: HashMap<String, StringId>,
+}
+
+impl VbcLinker {
+    pub fn new(triple: &str) -> Self;
+    pub fn add_archive(&mut self, archive: &VbcArchive) -> Result<(), LinkError>;
+    pub fn add_user_module(&mut self, module: VbcModule) -> Result<(), LinkError>;
+    pub fn finalize(self) -> VbcModule;
+}
+```
+
+Implementation order, in commit batches:
+
+1. **Skeleton + string-table merge** (~200 lines) — easiest table, validates harness.
+2. **Type-table merge** (~150 lines) — TypeRef recursion, Box<TypeRef> rewriting.
+3. **Constant-pool merge** (~100 lines) — Constants embed StringId/TypeId; remap via tables built in 1+2.
+4. **Function-descriptor merge** (~200 lines) — embeds TypeRef, ContextRef, ParamDescriptor with TypeRef. Remap and append.
+5. **Bytecode rewriting** (~400 lines, the big one) — decode each function body's instructions, rewrite `func_id` / `type_id` / `string_id` / `const_id` operands through the remap table, re-encode. The instruction ID-bearing list is enumerable from `instruction.rs` — Call / TailCall / CallM / CallClosure / MakeClosure / LoadK / TypeOf / IsType / NewS / NewV / FfiCall / ~30 more variants.
+6. **`compile_ast_to_vbc` switch** (~100 lines) — when archive present, `let mut linker = VbcLinker::new(triple); linker.add_archive(archive)?; linker.add_user_module(user_vbc)?; linker.finalize()` instead of source-driven cross-module codegen.
+7. **Tests** (~300 lines) — round-trip `precompile_stdlib → embed → linker.add_archive → finalize`, verify function call from user code into stdlib resolves.
+
+Roughly 1500 lines of careful code total. The bytecode rewriter (step 5) is the largest single risk — every id-bearing instruction variant needs explicit handling. A round-trip test that exercises ~50 function calls from user code into stdlib catches missing rewrites quickly.
+
+Performance contract once 6b lands:
+
+- Cold script start: ~25 min today → <50 ms (5 ms zstd decode + 10 ms per-table merge + 30 ms bytecode rewrite + 5 ms interpret enter).
+- RAM peak: ~7 GB today → ~50-200 MB.
+- Function table at codegen: 83 K (all stdlib monomorphised) → ~5 K (mount-reachable + user) — reduction inherited from the embedded archive's pre-computed scope.
+- Cross-compile (Phase 7) is then a one-line override of the active CfgKey at link time. No filesystem cache, no per-target archive duplication.
 
 ## Decision points the user must approve
 
