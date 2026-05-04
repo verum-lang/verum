@@ -70,6 +70,9 @@ mount core.database.postgres.connection.{
     connect as sync_connect,
 };
 mount core.database.postgres.config.PgConfig;
+mount core.database.postgres.pg_stmt_cache.{
+    PgStmtCache, fingerprint as pg_stmt_fingerprint,
+};
 mount core.async.channel.{
     Sender, Receiver, OneshotSender, OneshotReceiver,
     bounded_channel, oneshot,
@@ -511,7 +514,7 @@ public async fn connect(
     let backend_key = conn.backend_key();
 
     let cap = if mailbox_capacity < 1 { 1 } else { mailbox_capacity };
-    let (tx, rx) = bounded_channel::<PgRequest>(cap);
+    let (tx, rx) = bounded_channel<PgRequest>(cap);
 
     let join = spawn_blocking(move || -> () {
         run_actor(conn, rx);
@@ -534,11 +537,29 @@ public async fn connect(
 /// the mailbox synchronously (futex-block per `Receiver.recv`),
 /// dispatches one at a time, sends the response back. Exits on
 /// `ReqShutdown` or when the mailbox drops (every `Sender` gone).
+///
+/// Carries an actor-local `PgStmtCache` (default cap 128) so
+/// `prepare(sql)` becomes idempotent: identical SQL returns the
+/// same `PgPreparedStatement` handle and avoids the wire round-
+/// trip + server-side slot allocation. Eviction (LRU) issues
+/// `Close S name` on the wire so server-side state stays bounded.
 fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
+    let mut cache = PgStmtCache.new();
     loop {
         let req = match rx.recv() {
             Some(r) => r,
-            None    => { break; }       // every sender dropped — shut down
+            None    => {
+                // Every sender dropped — shut down. Best-effort
+                // drain of cached statements before disposing the
+                // socket, mirroring the explicit `ReqShutdown` path.
+                let drained = cache.drain();
+                let mut k: Int = 0;
+                while k < (drained.len() as Int) {
+                    let _ = conn.close_prepared(&drained[k]);
+                    k = k + 1;
+                }
+                break;
+            }
         };
         match req {
             ReqSimpleQuery { sql, reply } => {
@@ -608,7 +629,23 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
                 run_copy_out_subloop(&mut conn, &sql, chunk_tx, ack);
             }
             ReqPrepare { sql, reply } => {
-                let r = conn.prepare(&sql);
+                let fp = pg_stmt_fingerprint(&sql);
+                let r = match cache.lookup(fp) {
+                    Some(cached) => Ok(cached),
+                    None => {
+                        match conn.prepare(&sql) {
+                            Ok(stmt) => {
+                                let evicted = cache.insert(fp, clone_prepared(&stmt));
+                                match evicted {
+                                    Some(e) => { let _ = conn.close_prepared(&e); }
+                                    None    => {}
+                                }
+                                Ok(stmt)
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                };
                 let _ = reply.send(r);
             }
             ReqExecutePrepared { stmt, params, reply } => {
@@ -620,10 +657,25 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
                 let _ = reply.send(r);
             }
             ReqClosePrepared { stmt, reply } => {
+                // Drop the cache slot so a subsequent `prepare(same sql)`
+                // re-prepares cleanly. Wire-level Close still goes
+                // through.
+                let fp = pg_stmt_fingerprint(&stmt.sql);
+                let _ = cache.invalidate(fp);
                 let r = conn.close_prepared(&stmt);
                 let _ = reply.send(r);
             }
             ReqShutdown { reply } => {
+                // Drain the cache + close every cached statement on
+                // the wire BEFORE closing the connection. Reduces
+                // server-side statement-count on graceful shutdown
+                // and plays nicely with pgbouncer-style proxies.
+                let drained = cache.drain();
+                let mut k: Int = 0;
+                while k < (drained.len() as Int) {
+                    let _ = conn.close_prepared(&drained[k]);
+                    k = k + 1;
+                }
                 // Clean wire shutdown — best-effort.
                 let r = conn.close();
                 let _ = reply.send(r);
@@ -740,4 +792,17 @@ fn actor_dropped(what: &str) -> DbError {
         message: f"async PG actor unavailable during {what}",
         retryable: false,
     })
+}
+
+/// Clone a `PgPreparedStatement` for the actor's stmt-cache flow.
+/// `name` / `sql` / `param_oids` / `row_description` clone cheaply
+/// (the heavy bits are heap-shared via the underlying List/Text
+/// reference-counting).
+fn clone_prepared(s: &PgPreparedStatement) -> PgPreparedStatement {
+    PgPreparedStatement {
+        name: s.name.clone(),
+        sql: s.sql.clone(),
+        param_oids: s.param_oids.clone(),
+        row_description: s.row_description.clone(),
+    }
 }
