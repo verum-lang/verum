@@ -39,12 +39,23 @@
 // (matches GeoJSON's CRS extension, RFC 7946 §4 — caller can
 // strip if their GIS doesn't accept it).
 //
+// V1 surface (this commit):
+//   * `decode_ewkb(bytes)` — PostGIS EWKB (high-bit type-code
+//     flags for SRID + Z + M).
+//   * 3D / 4D coordinate decoding — per-geometry coord arity
+//     derived from the type flags (XY / XYZ / XYM / XYZM).
+//   * ISO WKB Z/M codes (base+1000 / base+2000 / base+3000)
+//     also recognised — covers servers that emit ISO style
+//     instead of PostGIS high-bit flags.
+//
+// `decode_geometry_with_srid` (the MySQL prefixed entry point)
+// dispatches to either the legacy 4-byte-SRID-prefix path or the
+// EWKB path depending on whether the inner WKB body's type code
+// carries the EWKB SRID flag.
+//
 // OUT of V0:
-//   * WKB sub-types beyond the 7 standard (LinearRing 2.5, Triangle 17,
-//     TIN 16) — rare in production binlog.
-//   * EWKB extensions (PostGIS) — different SRID embedding.
-//   * 3D / 4D coordinate variants (XYZ, XYM, XYZM) — caller can
-//     post-process via the standard XY decoder + custom dispatch.
+//   * WKB sub-types beyond the 7 standard (LinearRing 2.5,
+//     Triangle 17, TIN 16) — rare in production binlog.
 // =============================================================================
 
 @arch_module(
@@ -83,6 +94,22 @@ public const WKB_GEOMETRY_COLLECTION:  Int = 7;
 public const WKB_BO_BIG_ENDIAN:    Int = 0;
 public const WKB_BO_LITTLE_ENDIAN: Int = 1;
 
+// EWKB high-bit flags (PostGIS extension). OR'd into the u32
+// type-code; mask off via `EWKB_BASE_TYPE_MASK` to recover the
+// 7-base WKB type.
+public const EWKB_FLAG_Z:         Int = 0x80000000;
+public const EWKB_FLAG_M:         Int = 0x40000000;
+public const EWKB_FLAG_SRID:      Int = 0x20000000;
+public const EWKB_BASE_TYPE_MASK: Int = 0x000000FF;
+
+// ISO WKB Z/M extension codes — base + 1000 / 2000 / 3000.
+// Servers outside PostGIS sometimes use this style instead of
+// the EWKB high-bit flags. Mutually exclusive with the EWKB
+// flag bits in well-formed input.
+public const ISO_WKB_Z_OFFSET:  Int = 1000;
+public const ISO_WKB_M_OFFSET:  Int = 2000;
+public const ISO_WKB_ZM_OFFSET: Int = 3000;
+
 // =============================================================================
 // Reader cursor — handles both byte orders
 // =============================================================================
@@ -94,11 +121,22 @@ type WkbReader is {
     /// each nested geometry (e.g. inside GeometryCollection) to
     /// carry its OWN byte-order byte; we re-read on each recurse.
     little_endian: Bool,
+    /// Coords-per-point for the CURRENT geometry — set by
+    /// `decode_geometry` after parsing the type-code flags. 2
+    /// = XY (legacy), 3 = XYZ or XYM, 4 = XYZM. Nested
+    /// geometries inside collections re-derive their own
+    /// arity on each recurse.
+    coord_arity: Int,
 };
 
 implement WkbReader {
     fn new(bytes: List<Byte>) -> WkbReader {
-        WkbReader { bytes: bytes, pos: 0, little_endian: true }
+        WkbReader {
+            bytes: bytes,
+            pos: 0,
+            little_endian: true,
+            coord_arity: 2,
+        }
     }
 
     fn read_u8(&mut self) -> Result<Int, DbError> {
@@ -170,6 +208,11 @@ implement WkbReader {
 ///   WKB body
 /// Returns a GeoJSON-compatible JsonValue. SRID surfaces as the
 /// optional `crs` field when non-zero.
+///
+/// The WKB body MAY itself carry an EWKB SRID flag (sourced from
+/// PostGIS-style writers). When that's the case we trust the
+/// inner SRID over the prefix — the prefix tends to be zero in
+/// PostGIS-emitted payloads.
 public fn decode_geometry_with_srid(bytes: List<Byte>)
     -> Result<JsonValue, DbError>
 {
@@ -189,17 +232,26 @@ public fn decode_geometry_with_srid(bytes: List<Byte>)
         i = i + 1;
     }
     let geom = decode_wkb(wkb_bytes)?;
-    if srid != 0 {
+    // If the EWKB body already attached `crs`, leave it alone.
+    if srid != 0 && !has_crs_member(&geom) {
         return Ok(attach_crs(geom, srid));
     }
     Ok(geom)
 }
 
-/// Decode a raw WKB buffer (no SRID prefix). Caller-friendly
-/// for tools that already have the SRID separated.
+/// Decode a raw WKB buffer (no SRID prefix). Recognises both
+/// strict WKB and EWKB (PostGIS) — the type-code flags drive
+/// dispatch automatically.
 public fn decode_wkb(bytes: List<Byte>) -> Result<JsonValue, DbError> {
     let mut r = WkbReader.new(bytes);
     decode_geometry(&mut r)
+}
+
+/// Explicit EWKB entry point — alias of `decode_wkb` for
+/// callers that want the intent in the call site. The decoder
+/// is unified; this is sugar.
+public fn decode_ewkb(bytes: List<Byte>) -> Result<JsonValue, DbError> {
+    decode_wkb(bytes)
 }
 
 // =============================================================================
@@ -218,21 +270,92 @@ fn decode_geometry(r: &mut WkbReader) -> Result<JsonValue, DbError> {
     } else {
         return Err(bad_wkb("unknown byte-order byte"));
     }
-    let typ = r.read_u32()?;
-    if typ == WKB_POINT             { return decode_point(r); }
-    if typ == WKB_LINE_STRING       { return decode_line_string(r); }
-    if typ == WKB_POLYGON           { return decode_polygon(r); }
-    if typ == WKB_MULTI_POINT       { return decode_multi_point(r); }
-    if typ == WKB_MULTI_LINE_STRING { return decode_multi_line_string(r); }
-    if typ == WKB_MULTI_POLYGON     { return decode_multi_polygon(r); }
-    if typ == WKB_GEOMETRY_COLLECTION { return decode_collection(r); }
-    Err(bad_wkb(&f"unknown WKB type {typ}"))
+    let raw_typ = r.read_u32()?;
+
+    // ---------------------------------------------------------------------
+    // Decode type flags. Two encodings co-exist in the wild:
+    //   * EWKB (PostGIS): high-bit flags on the u32 (Z = 0x80000000,
+    //     M = 0x40000000, SRID = 0x20000000); low byte = base type.
+    //   * ISO WKB: base + 1000 (Z) / + 2000 (M) / + 3000 (ZM); no
+    //     SRID flag.
+    // We probe EWKB high bits FIRST — they're disjoint from any
+    // valid ISO type code (which fits in u16).
+    // ---------------------------------------------------------------------
+    let is_ewkb = (raw_typ & (EWKB_FLAG_Z | EWKB_FLAG_M | EWKB_FLAG_SRID)) != 0;
+
+    let mut has_z = false;
+    let mut has_m = false;
+    let mut srid_in_body: Maybe<Int> = None;
+    let base_typ: Int;
+
+    if is_ewkb {
+        if (raw_typ & EWKB_FLAG_Z) != 0    { has_z = true; }
+        if (raw_typ & EWKB_FLAG_M) != 0    { has_m = true; }
+        if (raw_typ & EWKB_FLAG_SRID) != 0 {
+            // SRID follows the type word in EWKB.
+            let s = r.read_u32()?;
+            srid_in_body = Some(s);
+        }
+        base_typ = raw_typ & EWKB_BASE_TYPE_MASK;
+    } else {
+        // ISO WKB Z/M offsets.
+        if raw_typ >= ISO_WKB_ZM_OFFSET && raw_typ < ISO_WKB_ZM_OFFSET + 100 {
+            has_z = true;
+            has_m = true;
+            base_typ = raw_typ - ISO_WKB_ZM_OFFSET;
+        } else if raw_typ >= ISO_WKB_M_OFFSET && raw_typ < ISO_WKB_M_OFFSET + 100 {
+            has_m = true;
+            base_typ = raw_typ - ISO_WKB_M_OFFSET;
+        } else if raw_typ >= ISO_WKB_Z_OFFSET && raw_typ < ISO_WKB_Z_OFFSET + 100 {
+            has_z = true;
+            base_typ = raw_typ - ISO_WKB_Z_OFFSET;
+        } else {
+            base_typ = raw_typ;
+        }
+    }
+
+    // Update the reader's coord arity for this geometry. Nested
+    // sub-geometries reset their own arity inside `decode_geometry`
+    // when they recurse.
+    let mut arity: Int = 2;
+    if has_z { arity = arity + 1; }
+    if has_m { arity = arity + 1; }
+    r.coord_arity = arity;
+
+    let geom = if base_typ == WKB_POINT {
+        decode_point(r)?
+    } else if base_typ == WKB_LINE_STRING {
+        decode_line_string(r)?
+    } else if base_typ == WKB_POLYGON {
+        decode_polygon(r)?
+    } else if base_typ == WKB_MULTI_POINT {
+        decode_multi_point(r)?
+    } else if base_typ == WKB_MULTI_LINE_STRING {
+        decode_multi_line_string(r)?
+    } else if base_typ == WKB_MULTI_POLYGON {
+        decode_multi_polygon(r)?
+    } else if base_typ == WKB_GEOMETRY_COLLECTION {
+        decode_collection(r)?
+    } else {
+        return Err(bad_wkb(&f"unknown WKB type {raw_typ} (base {base_typ})"));
+    };
+
+    // Attach EWKB-embedded SRID at the geometry that carried it.
+    match srid_in_body {
+        Some(s) => {
+            if s != 0 {
+                Ok(attach_crs(geom, s))
+            } else {
+                Ok(geom)
+            }
+        }
+        None => Ok(geom),
+    }
 }
 
 fn decode_point(r: &mut WkbReader) -> Result<JsonValue, DbError> {
-    let x = r.read_f64()?;
-    let y = r.read_f64()?;
-    Ok(geo_object("Point", JsonArray(coords_pair(x, y))))
+    let coords = read_one_coord(r)?;
+    Ok(geo_object("Point", JsonArray(coords)))
 }
 
 fn decode_line_string(r: &mut WkbReader) -> Result<JsonValue, DbError> {
@@ -340,19 +463,36 @@ fn read_point_list(r: &mut WkbReader, n: Int) -> Result<List<JsonValue>, DbError
     let mut out: List<JsonValue> = List.with_capacity(n);
     let mut i: Int = 0;
     while i < n {
-        let x = r.read_f64()?;
-        let y = r.read_f64()?;
-        out.push(JsonArray(coords_pair(x, y)));
+        let coords = read_one_coord(r)?;
+        out.push(JsonArray(coords));
         i = i + 1;
     }
     Ok(out)
 }
 
-fn coords_pair(x: Float, y: Float) -> List<JsonValue> {
-    let mut out: List<JsonValue> = List.with_capacity(2);
-    out.push(JsonFloat(x));
-    out.push(JsonFloat(y));
-    out
+/// Read `r.coord_arity` floats — one coord-vector for one point.
+/// Honours the geometry's per-call arity (2/3/4) set by the
+/// header parser.
+fn read_one_coord(r: &mut WkbReader) -> Result<List<JsonValue>, DbError> {
+    let arity = r.coord_arity;
+    if arity < 2 || arity > 4 {
+        return Err(bad_wkb(&f"invalid coord arity {arity}"));
+    }
+    let mut out: List<JsonValue> = List.with_capacity(arity);
+    let mut k: Int = 0;
+    while k < arity {
+        let v = r.read_f64()?;
+        out.push(JsonFloat(v));
+        k = k + 1;
+    }
+    Ok(out)
+}
+
+fn has_crs_member(geom: &JsonValue) -> Bool {
+    match geom {
+        JsonObject(obj) => obj.contains_key(&"crs".clone()),
+        _ => false,
+    }
 }
 
 fn geo_object(typ: &str, coords: JsonValue) -> JsonValue {

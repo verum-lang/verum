@@ -194,9 +194,11 @@ public mount .async_load_data.{
     load_data_local_async_with_token,
 };
 public mount .wkb_decoder.{
-    decode_wkb, decode_geometry_with_srid,
+    decode_wkb, decode_ewkb, decode_geometry_with_srid,
     WKB_POINT, WKB_LINE_STRING, WKB_POLYGON,
     WKB_MULTI_POINT, WKB_MULTI_LINE_STRING, WKB_MULTI_POLYGON,
     WKB_GEOMETRY_COLLECTION,
     WKB_BO_BIG_ENDIAN, WKB_BO_LITTLE_ENDIAN,
+    EWKB_FLAG_Z, EWKB_FLAG_M, EWKB_FLAG_SRID, EWKB_BASE_TYPE_MASK,
+    ISO_WKB_Z_OFFSET, ISO_WKB_M_OFFSET, ISO_WKB_ZM_OFFSET,
 };
