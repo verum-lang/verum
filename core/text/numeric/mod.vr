@@ -5,25 +5,33 @@
 // =============================================================================
 //
 // Houses fixed/arbitrary-precision numeric types whose primary mode
-// of construction + display is via decimal text.  V0 ships:
+// of construction + display is via decimal text.  Modules:
 //
 //   * `decimal` — Decimal { coefficient: Int, scale: Int } with
-//     scale-aligning add/sub/mul, parse, render, comparison.
+//     scale-aligning add/sub/mul/div, parse, render, comparison
+//     + RoundingMode (HalfEven / HalfUp / HalfDown / Truncate).
+//   * `bigint`  — arbitrary-precision signed integer with
+//     base-10^9 little-endian digit storage.  Unblocks Decimal V1
+//     (> 18 significant digits) + crypto + scientific compute.
 //
 // Future modules (V1+):
-//   * `bigint`  — arbitrary-precision integer (unblocks Decimal V1
-//     with > 18 significant digits).
-//   * `rational` — exact-rational arithmetic.
+//   * `rational` — exact-rational arithmetic over BigInt.
 //
 // =============================================================================
 
 module core.text.numeric;
 
 public module decimal;
+public module bigint;
 
 public mount .decimal.{
     Decimal, DecimalError,
     RoundingMode, HalfEven, HalfUp, HalfDown, Truncate,
     MAX_SCALE,
     parse_decimal,
+};
+public mount .bigint.{
+    BigInt, BigIntError,
+    BIGINT_BASE, BIGINT_DIGITS_PER_CHUNK,
+    parse_bigint,
 };
