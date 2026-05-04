@@ -737,7 +737,11 @@ fn decode_one_tuple(
     Ok((DecodedRow { columns: values }, off - start))
 }
 
-fn decode_value_for_type(
+/// Per-column-type MySQL binary-protocol decoder. Used by the
+/// binlog ROW decoder AND by the typed-prepared-row decoder
+/// (`async_prepared_session.typed_prepared_row`) — both produce
+/// payloads in the same wire format.
+public fn decode_value_for_type(
     buf: &[Byte],
     off: Int,
     meta: &ColumnMeta,

@@ -66,6 +66,7 @@ plugin Spindle accepts in the safe path).
 | `t16_binlog_geometry.vr` | WKB → GeoJSON decoder: ST_GeomFromText('POINT(1 2)') decoded as `{"type":"Point","coordinates":[…]}` JSON text via binlog ROW event; SRID surfaced via GeoJSON `crs` member when non-zero (spec §6.3.7 GEOMETRY decode) |
 | `t17_async_cancel.vr` | server-side KILL QUERY from async MySQL: AsyncMysqlConnection caches connection_id at connect; spawn `SELECT SLEEP(10)` on the actor; from a separate task call cancel_running_query() → fresh side conn issues `KILL QUERY <id>` → query aborts within seconds with ER_QUERY_INTERRUPTED (spec §6.3.6 + §6.3.9) |
 | `t18_async_prepared.vr` | async prepared statements + PreparedSession LRU: direct prepare/execute_prepared/close_prepared round-trip; AsyncMysqlPreparedSession.prepare_cached double-call asserts cache hit + len stays 1; query_cached round-trip; drain_cache_on_close releases slot (spec §6.3.4) |
+| `t19_typed_prepared.vr` | typed prepared-row decoder + MysqlTypedRow lift: SELECT id/payload/big returns raw bytes → typed_prepared_rows → List<List<RowValue>> → rows_typed_my::<(Int, Text, Int)> tuples with exact-value match (spec §6.3.4 typed prepared) |
 
 ## Adding tests
 
