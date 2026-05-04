@@ -36,6 +36,12 @@ public type AsyncMysqlPoolConfig is {
     min_size: Int,
     max_size: Int,
     mailbox_capacity: Int,
+    /// SQL strings to prepare on every freshly-opened connection.
+    /// The actor's `MysqlStmtCache` (default cap 128) absorbs the
+    /// resulting handle, so subsequent caller `prepare(same sql)`
+    /// hits cache and skips the wire COM_STMT_PREPARE round-trip.
+    /// Empty list (default) → no warmup.
+    prepare_on_open: List<Text>,
 };
 
 implement AsyncMysqlPoolConfig {
@@ -44,6 +50,7 @@ implement AsyncMysqlPoolConfig {
             min_size: 2,
             max_size: 16,
             mailbox_capacity: 64,
+            prepare_on_open: List.new(),
         }
     }
 
@@ -55,6 +62,20 @@ implement AsyncMysqlPoolConfig {
 
     public fn with_mailbox_capacity(mut self, c: Int) -> AsyncMysqlPoolConfig {
         self.mailbox_capacity = c;
+        self
+    }
+
+    /// Replace the warmup SQL list. Each entry runs through
+    /// `conn.prepare(sql).await` on every freshly-opened
+    /// connection.
+    public fn with_prepare_on_open(mut self, sql_list: List<Text>) -> AsyncMysqlPoolConfig {
+        self.prepare_on_open = sql_list;
+        self
+    }
+
+    /// Append a single SQL string to the warmup list.
+    public fn add_warmup_sql(mut self, sql: Text) -> AsyncMysqlPoolConfig {
+        self.prepare_on_open.push(sql);
         self
     }
 }
@@ -73,12 +94,12 @@ implement AsyncMysqlPool {
         pool_cfg: AsyncMysqlPoolConfig,
     ) -> Result<AsyncMysqlPool, DbError> {
         let max = if pool_cfg.max_size < 1 { 1 } else { pool_cfg.max_size };
-        let (tx, rx) = bounded_channel::<AsyncMysqlConnection>(max);
+        let (tx, rx) = bounded_channel<AsyncMysqlConnection>(max);
 
         let mut opened: Int = 0;
         let mut i: Int = 0;
         while i < pool_cfg.min_size {
-            let h = async_connect(&config, pool_cfg.mailbox_capacity).await?;
+            let h = open_and_warm(&config, &pool_cfg).await?;
             match tx.send_async(h).await {
                 Ok(())  => { opened = opened + 1; }
                 Err(_)  => { return Err(pool_err("seat fresh connection failed")); }
@@ -111,7 +132,7 @@ implement AsyncMysqlPool {
 
         let cur = self.current.fetch_add(1, MemoryOrdering.AcqRel);
         if cur < self.pool_cfg.max_size {
-            match async_connect(&self.config, self.pool_cfg.mailbox_capacity).await {
+            match open_and_warm(&self.config, &self.pool_cfg).await {
                 Ok(h) => Ok(AsyncMysqlPoolGuard {
                     handle: Some(h),
                     available_tx: self.available_tx.clone(),
@@ -185,4 +206,24 @@ fn pool_err(what: &str) -> DbError {
         message: f"async MySQL pool error: {what}",
         retryable: false,
     })
+}
+
+/// Open a fresh `AsyncMysqlConnection` and run the warmup
+/// hot-list against it. The actor's stmt cache absorbs the
+/// resulting handles. Errors during warmup propagate; the
+/// caller is responsible for slot-reservation roll-back.
+async fn open_and_warm(
+    config: &MysqlConfig,
+    pool_cfg: &AsyncMysqlPoolConfig,
+) -> Result<AsyncMysqlConnection, DbError> {
+    let h = async_connect(config, pool_cfg.mailbox_capacity).await?;
+    let mut i: Int = 0;
+    while i < (pool_cfg.prepare_on_open.len() as Int) {
+        match h.prepare(&pool_cfg.prepare_on_open[i]).await {
+            Ok(_)  => {}
+            Err(e) => { return Err(e); }
+        }
+        i = i + 1;
+    }
+    Ok(h)
 }

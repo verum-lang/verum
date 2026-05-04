@@ -22,11 +22,15 @@
 //   * `ping()`            → Future<Result<(), …>>
 //   * `close()`           → Future<Result<(), …>>
 //
+// V1 surface (this commit + earlier):
+//   * Prepared statements via `prepare` / `execute_prepared` /
+//     `close_prepared`; actor-local `MysqlStmtCache` (default
+//     cap 128) makes `prepare(sql)` idempotent and reuses
+//     server-side statement_ids across callers.
+//   * Multi-statement results via `multi_query`.
+//
 // Out of V0 (each follow-up):
-//   * Prepared statements (PreparedSession lives caller-side; an
-//     async wrapper needs a per-actor cache).
 //   * MySQL X protocol (separate sub-protocol, separate actor).
-//   * Multi-statement results.
 // =============================================================================
 
 @arch_module(
@@ -48,6 +52,9 @@ mount core.database.mysql.connection.{
     MysqlConnection, MySimpleQueryResult,
     MysqlPreparedStatement, MysqlPreparedResult,
     connect as sync_connect,
+};
+mount core.database.mysql.stmt_cache.{
+    MysqlStmtCache, fingerprint as my_stmt_fingerprint,
 };
 mount core.database.mysql.wire.frontend.StmtParam;
 mount core.database.mysql.config.MysqlConfig;
@@ -452,7 +459,7 @@ public async fn connect(
     let connection_id = conn.connection_id();
 
     let cap = if mailbox_capacity < 1 { 1 } else { mailbox_capacity };
-    let (tx, rx) = bounded_channel::<MysqlRequest>(cap);
+    let (tx, rx) = bounded_channel<MysqlRequest>(cap);
 
     let join = spawn_blocking(move || -> () {
         run_actor(conn, rx);
@@ -470,11 +477,30 @@ public async fn connect(
 // Actor body
 // =============================================================================
 
+/// Owns the `MysqlConnection` for its lifetime. Carries an actor-
+/// local `MysqlStmtCache` (default cap 128) so `MyReqPrepare`
+/// becomes idempotent: identical SQL returns the cached
+/// `MysqlPreparedStatement` clone — no wire round-trip, no fresh
+/// COM_STMT_PREPARE / statement_id allocation. Eviction (LRU)
+/// issues `COM_STMT_CLOSE` so server-side state stays bounded.
+/// Mirrors the PG actor cache shipped at 9330582e.
 fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
+    let mut cache = MysqlStmtCache.new();
     loop {
         let req = match rx.recv() {
             Some(r) => r,
-            None    => { break; }
+            None    => {
+                // Every sender dropped — drain the cache + close
+                // each cached statement on the wire before disposing
+                // the socket. Mirrors the explicit MyReqShutdown path.
+                let drained = cache.drain();
+                let mut k: Int = 0;
+                while k < (drained.len() as Int) {
+                    let _ = conn.close_prepared(&drained[k]);
+                    k = k + 1;
+                }
+                break;
+            }
         };
         match req {
             MyReqSimpleQuery { sql, reply } => {
@@ -542,7 +568,23 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
                 run_load_data_subloop(&mut conn, &sql, chunk_rx, ack);
             }
             MyReqPrepare { sql, reply } => {
-                let r = conn.prepare(&sql);
+                let fp = my_stmt_fingerprint(&sql);
+                let r = match cache.lookup(fp) {
+                    Some(cached) => Ok(cached),
+                    None => {
+                        match conn.prepare(&sql) {
+                            Ok(stmt) => {
+                                let evicted = cache.insert(fp, clone_my_prepared(&stmt));
+                                match evicted {
+                                    Some(e) => { let _ = conn.close_prepared(&e); }
+                                    None    => {}
+                                }
+                                Ok(stmt)
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                };
                 let _ = reply.send(r);
             }
             MyReqExecutePrepared { stmt, params, reply } => {
@@ -550,10 +592,23 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
                 let _ = reply.send(r);
             }
             MyReqClosePrepared { stmt, reply } => {
+                // Drop the cache slot first so a subsequent
+                // MyReqPrepare(same sql) re-prepares cleanly.
+                let fp = my_stmt_fingerprint(&stmt.sql);
+                let _ = cache.invalidate(fp);
                 let r = conn.close_prepared(&stmt);
                 let _ = reply.send(r);
             }
             MyReqShutdown { reply } => {
+                // Drain + close every cached statement before
+                // the wire goes down. Reduces server-side
+                // statement count on graceful shutdown.
+                let drained = cache.drain();
+                let mut k: Int = 0;
+                while k < (drained.len() as Int) {
+                    let _ = conn.close_prepared(&drained[k]);
+                    k = k + 1;
+                }
                 let r = conn.close();
                 let _ = reply.send(r);
                 break;
@@ -621,4 +676,19 @@ fn actor_dropped(what: &str) -> DbError {
         message: f"async MySQL actor unavailable during {what}",
         retryable: false,
     })
+}
+
+/// Clone a `MysqlPreparedStatement` for the actor's stmt-cache
+/// flow. Param/column type vectors clone cheaply (List shares
+/// the underlying buffer via reference-counting); SQL is a Text
+/// clone for tracing parity.
+fn clone_my_prepared(s: &MysqlPreparedStatement) -> MysqlPreparedStatement {
+    MysqlPreparedStatement {
+        statement_id: s.statement_id,
+        num_params:   s.num_params,
+        num_columns:  s.num_columns,
+        param_types:  s.param_types.clone(),
+        column_types: s.column_types.clone(),
+        sql:          s.sql.clone(),
+    }
 }
