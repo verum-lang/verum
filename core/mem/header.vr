@@ -70,7 +70,12 @@ mount core.intrinsics.atomic.{
 // transition. When `cap_audit_is_enabled()` returns false (default
 // production state), each helper short-circuits with a relaxed-load +
 // branch (~1-2 ns) and the CBGR hot path stays within budget.
-mount super.cap_audit.{
+//
+// Source-of-truth note: the `record_*` writers live in
+// `core/mem/cap_audit_ring.vr`, NOT `core/mem/cap_audit.vr` — the
+// latter only declares the `CapEvent` payload type while the former
+// owns the producer-side ring buffer + every public writer.
+mount super.cap_audit_ring.{
     record_revoke,
     record_attenuate,
     record_ref_incr,

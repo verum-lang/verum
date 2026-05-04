@@ -19,7 +19,7 @@ module notification;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.{Block, Borders, BorderType};
-mount super.paragraph.{Line, Span};
+mount super.paragraph.{Line, TextSpan};
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
@@ -170,7 +170,7 @@ implement Widget for Notification {
         // Render message text in inner area
         let inner = toast_area.inner(block.inner_margin());
         if !inner.is_empty() {
-            let line = Line { spans: [Span.styled(self.message, self.style)] };
+            let line = Line { spans: [TextSpan.styled(self.message, self.style)] };
             let mut col = inner.x;
             for span in line.spans {
                 let bytes = span.content.as_bytes();

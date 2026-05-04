@@ -5,7 +5,7 @@ module barchart;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;
-mount super.paragraph.{Line, Span};
+mount super.paragraph.{Line, TextSpan};
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.layout.constraint.Direction;
@@ -308,7 +308,7 @@ fn render_vertical(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: Flo
                                 truncated.push(span.clone());
                                 w = w + span.content.len();
                             } else {
-                                truncated.push(Span.styled(span.content.slice(0, remaining_w), span.style));
+                                truncated.push(TextSpan.styled(span.content.slice(0, remaining_w), span.style));
                                 w = w + remaining_w;
                             }
                         }
