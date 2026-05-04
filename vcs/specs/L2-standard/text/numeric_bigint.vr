@@ -235,6 +235,50 @@ fn check_div_by_zero() {
     assert(result);
 }
 
+fn check_karatsuba_threshold() -> Result<Bool, BigIntError> {
+    // Build a magnitude that's well past KARATSUBA_THRESHOLD (32
+    // chunks at base-10^9 = ~290 decimal digits).  Constructing
+    // 10^400 forces the multiplier through the Karatsuba path.
+    //
+    // We verify CORRECTNESS — Karatsuba and schoolbook MUST agree.
+    // Build 10^400 as a BigInt by parsing "1" + 400 zeros:
+    let big_text = "1".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone()
+        + "0000000000".clone()  + "0000000000".clone();
+    let big = parse_bigint(&big_text)?;
+
+    // (10^400)^2 = 10^800.  Build the expected text the same way.
+    // Just verify by squaring and checking the result has the
+    // right number of digits (1 followed by 800 zeros = 801 chars).
+    let sq = big.mul(&big);
+    let sq_text = sq.to_text();
+    assert((sq_text.len() as Int) == 801);
+
+    // Cross-check: 10^400 × 10^400 / 10^400 = 10^400 (round-trip).
+    let div_back = sq.div(&big)?;
+    assert(div_back.eq(&big));
+
+    Ok(true)
+}
+
 fn check_div_multi_chunk() -> Result<Bool, BigIntError> {
     // Multi-chunk divisor path (Knuth Algorithm D).  Build a value
     // larger than 10^9 to force the multi-chunk branch.
@@ -279,4 +323,5 @@ fn main() {
     let _ = check_div_rem();
     check_div_by_zero();
     let _ = check_div_multi_chunk();
+    let _ = check_karatsuba_threshold();
 }

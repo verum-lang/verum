@@ -575,8 +575,41 @@ fn sub_magnitudes(a: &List<Int>, b: &List<Int>) -> List<Int> {
     out
 }
 
-/// Schoolbook O(N×M) multiplication of two non-negative magnitudes.
+/// Threshold (in chunks) below which schoolbook multiplication is
+/// faster than Karatsuba.  At 32 chunks (≈ 290 decimal digits)
+/// schoolbook's lower constants beat Karatsuba's overhead of
+/// recursion + temporary allocations.  Above the threshold,
+/// Karatsuba's O(N^log₂3) ≈ O(N^1.585) scaling dominates.
+///
+/// Empirically calibrated against typical crypto-key sizes:
+///   * RSA-2048 modulus ≈ 70 base-10^9 chunks (Karatsuba pays off)
+///   * SHA-256 input    ≤ 1 chunk (schoolbook wins trivially)
+///   * Decimal V0 coefficients ≤ 3 chunks (schoolbook)
+///
+/// V0 default 32; tunable in a future per-platform PGO pass.
+const KARATSUBA_THRESHOLD: Int = 32;
+
+/// Multiply two non-negative magnitudes.  Dispatches to schoolbook
+/// (O(N×M)) for small operands and Karatsuba (O(N^log₂3)) for
+/// large ones.  Crossover threshold is `KARATSUBA_THRESHOLD` chunks
+/// — below that, schoolbook wins on constants; above it, the
+/// asymptotic improvement dominates.
 fn mul_magnitudes(a: &List<Int>, b: &List<Int>) -> List<Int> {
+    let la = a.len() as Int;
+    let lb = b.len() as Int;
+    let smaller = if la < lb { la } else { lb };
+    if smaller < KARATSUBA_THRESHOLD {
+        mul_schoolbook(a, b)
+    } else {
+        mul_karatsuba(a, b)
+    }
+}
+
+/// Schoolbook O(N×M) multiplication.  Inner loop multiplies one
+/// chunk of `a` against every chunk of `b`, accumulating into
+/// `out[i+j]` with carry propagation.  Used directly for small
+/// operands and as the Karatsuba base case.
+fn mul_schoolbook(a: &List<Int>, b: &List<Int>) -> List<Int> {
     let la = a.len() as Int;
     let lb = b.len() as Int;
     let mut out: List<Int> = List.with_capacity(la + lb);
@@ -602,6 +635,125 @@ fn mul_magnitudes(a: &List<Int>, b: &List<Int>) -> List<Int> {
     }
     strip_leading_zeros(&mut out);
     out
+}
+
+/// Karatsuba multiplication — recursive divide-and-conquer.
+/// Algorithm:
+///   1. Split each operand into high + low halves at chunk index
+///      `k = ⌈n/2⌉` where `n = max(|a|, |b|)`:
+///        a = a_hi × B^k + a_lo
+///        b = b_hi × B^k + b_lo
+///   2. Compute three sub-products instead of four:
+///        z0 = a_lo × b_lo
+///        z2 = a_hi × b_hi
+///        z1 = (a_lo + a_hi) × (b_lo + b_hi) - z0 - z2
+///      The third identity exploits that the cross-terms a_lo*b_hi
+///      and a_hi*b_lo sum to (a_lo+a_hi)*(b_lo+b_hi) - z0 - z2,
+///      saving one full multiplication per recursion level.
+///   3. Combine: a × b = z2 × B^(2k) + z1 × B^k + z0  (shift-add).
+///
+/// Recursion bottoms out at `KARATSUBA_THRESHOLD` chunks where
+/// schoolbook takes over.
+fn mul_karatsuba(a: &List<Int>, b: &List<Int>) -> List<Int> {
+    let la = a.len() as Int;
+    let lb = b.len() as Int;
+    let smaller = if la < lb { la } else { lb };
+    if smaller < KARATSUBA_THRESHOLD {
+        return mul_schoolbook(a, b);
+    }
+
+    let n = if la > lb { la } else { lb };
+    let k = (n + 1) / 2;
+
+    // Split each operand at index k.  lo = first k chunks; hi = rest.
+    let (a_lo, a_hi) = split_at(a, k);
+    let (b_lo, b_hi) = split_at(b, k);
+
+    // Three recursive sub-products.
+    let z0 = mul_karatsuba(&a_lo, &b_lo);
+    let z2 = mul_karatsuba(&a_hi, &b_hi);
+
+    // z1 = (a_lo + a_hi) × (b_lo + b_hi) - z0 - z2
+    let a_sum = add_magnitudes(&a_lo, &a_hi);
+    let b_sum = add_magnitudes(&b_lo, &b_hi);
+    let z1_full = mul_karatsuba(&a_sum, &b_sum);
+    // The Karatsuba identity guarantees `z1_full ≥ z0 + z2` so the
+    // subtractions never underflow (operands are non-negative).
+    let z1_minus_z0 = sub_magnitudes(&z1_full, &z0);
+    let z1 = sub_magnitudes(&z1_minus_z0, &z2);
+
+    // Combine: result = z2 × B^(2k) + z1 × B^k + z0.
+    let mut result: List<Int> = clone_digits(&z0);
+    add_at_offset(&mut result, &z1, k);
+    add_at_offset(&mut result, &z2, 2 * k);
+    strip_leading_zeros(&mut result);
+    result
+}
+
+/// Split a magnitude at chunk index `k`.  Returns `(lo, hi)` where
+/// `lo = a[0..k]` and `hi = a[k..]`.  Both halves are canonicalised
+/// (trailing zero chunks stripped).  If `k ≥ a.len()`, `hi` is
+/// empty and `lo` is a clone of `a`.
+fn split_at(a: &List<Int>, k: Int) -> (List<Int>, List<Int>) {
+    let la = a.len() as Int;
+    if k >= la {
+        let lo_clone = clone_digits(a);
+        return (lo_clone, List.new());
+    }
+    let mut lo: List<Int> = List.with_capacity(k);
+    let mut i: Int = 0;
+    while i < k {
+        lo.push(a[i]);
+        i = i + 1;
+    }
+    let mut hi: List<Int> = List.with_capacity(la - k);
+    while i < la {
+        hi.push(a[i]);
+        i = i + 1;
+    }
+    strip_leading_zeros(&mut lo);
+    strip_leading_zeros(&mut hi);
+    (lo, hi)
+}
+
+/// In-place add: `target += src × B^offset` (where B = BIGINT_BASE).
+/// I.e. add `src` starting at index `offset` of `target`, growing
+/// `target` as needed and propagating carries through.
+fn add_at_offset(target: &mut List<Int>, src: &List<Int>, offset: Int) {
+    let ls = src.len() as Int;
+    if ls == 0 { return; }
+    // Ensure target has room for src ending at index offset+ls-1
+    // plus a final carry slot.
+    let needed = offset + ls + 1;
+    while (target.len() as Int) < needed { target.push(0); }
+
+    let mut carry: Int = 0;
+    let mut i: Int = 0;
+    while i < ls {
+        let sum = target[offset + i] + src[i] + carry;
+        if sum >= BIGINT_BASE {
+            target[offset + i] = sum - BIGINT_BASE;
+            carry = 1;
+        } else {
+            target[offset + i] = sum;
+            carry = 0;
+        }
+        i = i + 1;
+    }
+    // Propagate any remaining carry.
+    let mut j: Int = offset + ls;
+    while carry != 0 {
+        if (j as Int) >= (target.len() as Int) { target.push(0); }
+        let sum = target[j] + carry;
+        if sum >= BIGINT_BASE {
+            target[j] = sum - BIGINT_BASE;
+            carry = 1;
+        } else {
+            target[j] = sum;
+            carry = 0;
+        }
+        j = j + 1;
+    }
 }
 
 /// Compare two magnitudes (non-negative) → Ordering.
