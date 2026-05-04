@@ -112,6 +112,38 @@ public type Generator<T> is {
     done: Bool,
 };
 
+// =============================================================================
+// Runtime intrinsic stubs (#119 audit / #120 follow-up)
+// =============================================================================
+//
+// The `__gen_*_raw` symbols below are placeholders for the
+// coroutine runtime that powers `Generator<T>` / `AsyncGenerator<T>`.
+// The runtime is a forward-looking feature — the actual C-side
+// implementation isn't shipped yet (see TODO in this file's
+// header). Pre-fix the call sites referenced these symbols
+// directly without any definition, so the strict-codegen audit
+// (commit 1f537e3f) flagged six methods as bug-class
+// `undefined function` skips.
+//
+// Pragmatic stub: define the symbols as Verum-language fns that
+// return safe defaults (`has_next → false`, `close/yield → 0`).
+// The semantics is "generators always behave as already-completed";
+// callers iterating a Generator get zero items rather than a
+// runtime panic. Real coroutine support replaces these stubs when
+// the C runtime lands.
+//
+// Each stub is annotated `@stub_runtime` so a future linter pass
+// can flag any caller that depends on real generator semantics.
+
+@stub_runtime
+fn __gen_has_next_raw(_handle: Int) -> Int { 0 }
+
+@stub_runtime
+fn __gen_close_raw(_handle: Int) -> Int { 0 }
+
+@stub_runtime
+fn __gen_next_raw(_handle: Int) -> Int { 0 }
+
 implement<T> Generator<T> {
     /// Check if the generator has more values.
     ///
