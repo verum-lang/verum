@@ -227,18 +227,27 @@ pub struct LintConfig {
 
 impl Default for LintConfig {
     fn default() -> Self {
-        // Honour `VERUM_STRICT_CODEGEN=1` env var (#110). Matches the
-        // process-scoped pattern of `VERUM_FULL_STDLIB` (#109) and
-        // `VERUM_NO_PARALLEL_ANALYZE` so any entry point — single-file
-        // build, project build, vtest harness — picks up strict mode
-        // without requiring a per-call-site flag thread-through. The
-        // CLI `--strict-codegen` flag sets this env var before pipeline
-        // construction; CI / release scripts can set it directly.
-        let strict_codegen_env = std::env::var("VERUM_STRICT_CODEGEN").is_ok();
+        // #119 — strict-codegen default flipped to `true`. The audit
+        // pass over `vcs/specs/{L0,L1,L2,L3}-*` showed zero bug-class
+        // skips after the #122 alias-propagation fix and #117
+        // transitive-mount reachability fix landed. Keeping the lenient
+        // default would mask any new bug-class regression.
+        //
+        // Opt-outs (any one wins; explicit `false` always beats the
+        // env / manifest opt-in):
+        //
+        //   * `VERUM_LENIENT_CODEGEN=1` env var (debug, transitional)
+        //   * CLI `--lenient` flag on `build` / `run` / `check`
+        //   * `[build].lenient = true` in `Verum.toml`
+        //
+        // The pre-existing `VERUM_STRICT_CODEGEN=1` opt-in is now a
+        // no-op (always-on) but remains a legal env value for CI
+        // scripts that set it explicitly — avoids breaking CI configs.
+        let lenient_env = std::env::var("VERUM_LENIENT_CODEGEN").is_ok();
         Self {
             deny_warnings: false,
             strict_intrinsics: false,
-            strict_codegen: strict_codegen_env,
+            strict_codegen: !lenient_env,
             lint_levels: HashMap::new(),
         }
     }
