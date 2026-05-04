@@ -119,4 +119,36 @@ mod tests {
             assert!(!has_runtime_archive() || embedded_size_bytes() == 0);
         }
     }
+
+    /// End-to-end Phase 6b smoke test: deserialise the embedded
+    /// stdlib archive, hand it to a fresh `VbcLinker`, and verify
+    /// the merge succeeds without panicking. Skipped when the
+    /// compiler binary was built without a precompiled archive
+    /// (early bootstrap, minimal-features build).
+    #[test]
+    fn linker_round_trip_through_embedded_archive() {
+        use verum_vbc::linker::VbcLinker;
+
+        let archive = match get_runtime_archive() {
+            Some(a) => a,
+            None => return, // archive missing — minimal-features build
+        };
+
+        let mut linker = VbcLinker::new("aarch64-apple-darwin");
+        let added = linker.add_archive(archive).expect("add_archive");
+        assert!(added > 0, "expected at least one module merged from archive");
+
+        let merged = linker.finalize();
+        // Merged module should carry the union of every contained
+        // module's strings/types/functions. Lower bound: at least
+        // the count from archive.
+        assert!(
+            merged.strings.len() > 0,
+            "merged module has no strings — likely an integration regression"
+        );
+        assert!(
+            merged.functions.len() > 0,
+            "merged module has no functions — archive contained only empty modules?"
+        );
+    }
 }
