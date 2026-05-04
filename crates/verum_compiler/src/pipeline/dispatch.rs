@@ -285,18 +285,32 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     pub fn run_interpreter(&mut self, args: List<Text>) -> Result<()> {
+        let trace = std::env::var("VERUM_TRACE_PHASES").is_ok();
+        let t_total = std::time::Instant::now();
         // Load stdlib modules first (enables std.* imports)
+        let t = std::time::Instant::now();
         self.load_stdlib_modules()?;
+        if trace {
+            eprintln!("[run_interpreter] load_stdlib_modules: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
+        }
 
         // Load sibling project modules (enables cross-file mount imports)
+        let t = std::time::Instant::now();
         self.load_project_modules()?;
+        if trace { eprintln!("[run_interpreter] load_project_modules: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
+        let t = std::time::Instant::now();
         // Load externally-registered cogs (script-mode `dependencies`,
         // verum-add deps, etc.) using the same module-registration
         // machinery so cross-cog `mount foo.bar` resolves transparently.
         self.load_external_cog_modules()?;
+        if trace { eprintln!("[run_interpreter] load_external_cog_modules: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
+        let t = std::time::Instant::now();
         let file_id = self.phase_load_source()?;
+        if trace { eprintln!("[run_interpreter] phase_load_source: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
+        let t = std::time::Instant::now();
         let module = self.phase_parse(file_id)?;
+        if trace { eprintln!("[run_interpreter] phase_parse: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
         // Lazy-stdlib prune (#281, parity with run_native_compilation):
         // drop stdlib modules outside the user's mount tree + the
@@ -315,28 +329,43 @@ impl<'s> CompilationPipeline<'s> {
         // Safety-feature gates (unsafe, @ffi, etc.) ALWAYS run —
         // independent of verify_mode. Without this, `--verify runtime`
         // silently bypassed the user's `[safety]` configuration.
+        let t = std::time::Instant::now();
         self.phase_safety_gate(&module)?;
+        if trace { eprintln!("[run_interpreter] phase_safety_gate: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
         // Type check unless in runtime-only mode
         // Runtime mode skips static analysis for faster iteration
         if self.session.options().verify_mode != VerifyMode::Runtime {
+            let t = std::time::Instant::now();
             self.phase_type_check(&module)?;
+            if trace { eprintln!("[run_interpreter] phase_type_check: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
+            let t = std::time::Instant::now();
             // Dependency analysis (validates against target constraints)
             self.phase_dependency_analysis(&module)?;
+            if trace { eprintln!("[run_interpreter] phase_dependency_analysis: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
             // Verify refinements if enabled
             if self.session.options().verify_mode.use_smt() {
+                let t = std::time::Instant::now();
                 self.phase_verify(&module)?;
+                if trace { eprintln!("[run_interpreter] phase_verify: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
             }
 
+            let t = std::time::Instant::now();
             // CBGR analysis
             self.phase_cbgr_analysis(&module)?;
+            if trace { eprintln!("[run_interpreter] phase_cbgr_analysis: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
         }
 
         // Interpret and execute the module
         info!("Executing program...");
+        let t = std::time::Instant::now();
         self.phase_interpret_with_args(&module, args)?;
+        if trace {
+            eprintln!("[run_interpreter] phase_interpret_with_args: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
+            eprintln!("[run_interpreter] TOTAL: {:.2}ms", t_total.elapsed().as_secs_f64() * 1000.0);
+        }
 
         Ok(())
     }
