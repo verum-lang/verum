@@ -46,18 +46,47 @@ impl<'s> CompilationPipeline<'s> {
             self.session.options().input.display().to_string(),
         );
         debug!("Interpreting module via VBC-first architecture");
+        let trace = std::env::var("VERUM_TRACE_PHASES").is_ok();
+        let t_start = std::time::Instant::now();
 
         // Context system validation
         self.phase_context_validation(module);
+        if trace {
+            eprintln!(
+                "[phase_interpret] context_validation: {:.2}ms",
+                t_start.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        let t_ss = std::time::Instant::now();
 
         // Send/Sync compile-time enforcement
         self.phase_send_sync_validation(module);
+        if trace {
+            eprintln!(
+                "[phase_interpret] send_sync_validation: {:.2}ms",
+                t_ss.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        let t_ffi = std::time::Instant::now();
 
         // FFI boundary validation
         self.phase_ffi_validation(module)?;
+        if trace {
+            eprintln!(
+                "[phase_interpret] ffi_validation: {:.2}ms",
+                t_ffi.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        let t_codegen = std::time::Instant::now();
 
         // Step 1: Compile AST to VBC
         let vbc_module = self.compile_ast_to_vbc(module)?;
+        if trace {
+            eprintln!(
+                "[phase_interpret] compile_ast_to_vbc TOTAL: {:.2}ms",
+                t_codegen.elapsed().as_secs_f64() * 1000.0
+            );
+        }
 
         // Capture for the script-mode persistent cache. See the matching
         // capture in `phase_interpret_with_args` for the full rationale.

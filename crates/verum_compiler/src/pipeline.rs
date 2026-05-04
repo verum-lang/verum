@@ -1161,7 +1161,17 @@ impl<'s> CompilationPipeline<'s> {
             // branch and skips the AST-walking stdlib registration
             // block entirely.  No source parsing, no cache misses,
             // no fallback paths.
-            stdlib_metadata: crate::embedded_stdlib_metadata::get_runtime_metadata(),
+            stdlib_metadata: {
+                let t = std::time::Instant::now();
+                let m = crate::embedded_stdlib_metadata::get_runtime_metadata();
+                if std::env::var("VERUM_TRACE_PHASES").is_ok() {
+                    eprintln!(
+                        "[pipeline_new] embed metadata decode: {:.2}ms",
+                        t.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+                m
+            },
             deferred_verification_goals: verum_common::List::new(),
             // Stdlib bootstrap mode fields - empty for normal mode
             stdlib_resolver: None,
@@ -1986,11 +1996,25 @@ impl<'s> CompilationPipeline<'s> {
     /// verify_mode = Runtime + no user-requested gates), but even
     /// then the safety gate still fires.
     fn validate_module(&mut self, module: &Module, skip_type_check: bool) -> Result<()> {
+        let trace = std::env::var("VERUM_TRACE_PHASES").is_ok();
+        let t_start = std::time::Instant::now();
+        if trace {
+            eprintln!(
+                "[phase] validate_module: enter (skip_type_check={})",
+                skip_type_check
+            );
+        }
         // Safety gate ALWAYS runs. Independent of verify_mode AND of
         // continue_on_error — a safety violation is a HARD security
         // boundary; collecting more diagnostics past that point risks
         // running gate-bypassed analyses on unsafe code.
         self.phase_safety_gate(module)?;
+        if trace {
+            eprintln!(
+                "[phase] safety_gate: {:.2}ms",
+                t_start.elapsed().as_secs_f64() * 1000.0
+            );
+        }
 
         if skip_type_check {
             // Only the minimum gates that don't depend on typed AST.
@@ -2022,8 +2046,15 @@ impl<'s> CompilationPipeline<'s> {
             return self.session.abort_if_errors();
         }
 
+        let t_tc = std::time::Instant::now();
         let r = self.phase_type_check(module);
         self.session.collect_phase_error("type_check", r)?;
+        if trace {
+            eprintln!(
+                "[phase] type_check: {:.2}ms",
+                t_tc.elapsed().as_secs_f64() * 1000.0
+            );
+        }
 
         // ATS-V phase 6.5 — architectural type checking. Walks every
         // `@arch_module(...)` declaration, runs the canonical 32-pattern
