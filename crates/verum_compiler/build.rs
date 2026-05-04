@@ -131,6 +131,73 @@ fn main() {
     for (path, _) in &files {
         println!("cargo:rerun-if-changed={}", core_dir.join(path).display());
     }
+
+    // ========================================================================
+    // Precompiled-stdlib VBC archive (Phase 5 of #precompile-stdlib epic).
+    //
+    // If `target/precompiled-stdlib/runtime.vbca` exists at compiler
+    // build time, embed it into the binary as the canonical
+    // serialised stdlib VBC. Phase 6 will switch
+    // `compile_ast_to_vbc` to deserialise this in <50 ms instead of
+    // re-running stdlib codegen every script invocation.
+    //
+    // Refresh the archive with `verum stdlib precompile` (Phase 4).
+    // The build script does NOT auto-run that command itself: forcing
+    // a 7-min precompile inside every `cargo build` would be hostile
+    // to the inner-loop. Instead, when the archive is missing we
+    // embed an empty placeholder; Phase 6's runtime path detects
+    // that and falls back to source compile.
+    //
+    // Env var `STDLIB_RUNTIME_VBC_PATH` is consumed by
+    // `crates/verum_compiler/src/embedded_stdlib_vbc.rs` via
+    // `include_bytes!(env!("STDLIB_RUNTIME_VBC_PATH"))`.
+    // ========================================================================
+    let precompile_archive = project_root
+        .join("target")
+        .join("precompiled-stdlib")
+        .join("runtime.vbca");
+    let runtime_vbc_path = Path::new(&out_dir).join("stdlib_runtime.vbca");
+    if precompile_archive.is_file() {
+        match fs::read(&precompile_archive) {
+            Ok(bytes) => {
+                let _ = fs::write(&runtime_vbc_path, &bytes);
+                println!(
+                    "cargo:rustc-env=STDLIB_RUNTIME_VBC_PATH={}",
+                    runtime_vbc_path.display()
+                );
+                println!(
+                    "cargo:warning=Embedded precompiled stdlib VBC: {:.1}KB ({})",
+                    bytes.len() as f64 / 1024.0,
+                    precompile_archive.display()
+                );
+                println!("cargo:rerun-if-changed={}", precompile_archive.display());
+            }
+            Err(e) => {
+                let _ = fs::write(&runtime_vbc_path, &[] as &[u8]);
+                println!(
+                    "cargo:rustc-env=STDLIB_RUNTIME_VBC_PATH={}",
+                    runtime_vbc_path.display()
+                );
+                println!(
+                    "cargo:warning=precompiled stdlib archive at {} failed to read: {} — embedding placeholder, runtime will fall back to source compile",
+                    precompile_archive.display(),
+                    e
+                );
+            }
+        }
+    } else {
+        // No precompiled archive — embed an empty placeholder. Phase
+        // 6 detects empty bytes and falls back to source compile.
+        let _ = fs::write(&runtime_vbc_path, &[] as &[u8]);
+        println!(
+            "cargo:rustc-env=STDLIB_RUNTIME_VBC_PATH={}",
+            runtime_vbc_path.display()
+        );
+        println!(
+            "cargo:warning=No precompiled stdlib archive at {} — runtime will fall back to source compile. Run `verum stdlib precompile` to refresh.",
+            precompile_archive.display()
+        );
+    }
 }
 
 // =============================================================================

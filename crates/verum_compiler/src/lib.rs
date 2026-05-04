@@ -242,7 +242,8 @@ pub mod core_compiler;
 pub mod core_loader;
 pub mod core_source; // Unified stdlib source abstraction (embedded VFS / local FS)
 pub mod diagnostics_engine;
-pub mod embedded_stdlib; // Embedded stdlib archive (zstd-compressed core/*.vr in binary)
+pub mod embedded_stdlib; // Embedded stdlib source archive (zstd-compressed core/*.vr in binary)
+pub mod embedded_stdlib_vbc; // Embedded precompiled stdlib VBC archive (Phase 5 of #precompile-stdlib epic)
 pub mod graceful_fallback;
 pub mod hash; // Unified Blake3-based hashing infrastructure
 pub mod incremental_compiler;
