@@ -39,10 +39,14 @@
 // Sync wire path (`load_data_local_session_*` family on
 // MysqlConnection) canonical / unchanged. Pure layered wrapper.
 //
+// V1 surface (this commit):
+//   * `core.database.mysql.load_data_csv` — RFC 4180 CSV / MySQL
+//     TSV row formatter (default_csv / default_tsv configs +
+//     `format_row` / `format_rows`). Pair with the matching
+//     `FIELDS … LINES …` SQL clause when issuing the LOAD DATA.
+//
 // OUT of V0:
 //   * Per-chunk MAX_RATE shaping.
-//   * Built-in CSV / TSV row formatter (caller pre-formats the
-//     bytes to match the server's expected delimiter).
 //   * COM_QUERY_FIELDS for explicit column list.
 //   * Binary-format LOAD DATA LOCAL INFILE.
 // =============================================================================
@@ -98,7 +102,7 @@ implement AsyncMysqlInfileWriter {
                     self.metrics.record_cancellation();
                     let _ = self.chunk_tx.send_async(LdcCancel {
                         reason: "cancellation token fired".clone(),
-                        reply: oneshot::<Result<(), DbError>>().0,
+                        reply: oneshot<Result<(), DbError>>().0,
                     }).await;
                     return Err(cancelled_err("load_data.write"));
                 }
@@ -176,8 +180,8 @@ public async fn load_data_local_async_with_token(
     token: Maybe<core.async.cancellation.CancellationToken>,
 ) -> Result<AsyncMysqlInfileWriter, DbError> {
     let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
-    let (chunk_tx, chunk_rx) = bounded_channel::<LoadDataChunk>(cap);
-    let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
+    let (chunk_tx, chunk_rx) = bounded_channel<LoadDataChunk>(cap);
+    let (open_tx, open_rx) = oneshot<Result<(), DbError>>();
 
     match conn.tx_ref().send_async(MyReqLoadDataLocalOpen {
         sql: sql.clone(),

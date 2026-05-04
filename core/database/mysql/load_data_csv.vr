@@ -1,0 +1,251 @@
+// =============================================================================
+// core/database/mysql/load_data_csv.vr — CSV/TSV row formatter for LOAD DATA
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.2 (mysql adapter / LOAD DATA).
+// =============================================================================
+//
+// Closes the V0 follow-up declared in `async_load_data.vr` line 43:
+// "Built-in CSV / TSV row formatter (caller pre-formats the bytes
+// to match the server's expected delimiter)". Pre-fix every
+// production caller had to roll their own escaper — RFC 4180
+// double-quote handling, NULL sentinel, line termination — and
+// pair it carefully with their `FIELDS … LINES …` clauses or get
+// silently-misparsed rows on the server side.
+//
+// V1 surface — `core.database.mysql.load_data_csv`:
+//
+//   * `LoadDataCsvConfig { delimiter, line_term, quote_char,
+//                          null_sentinel, always_quote }` —
+//     matches the wire surface a `FIELDS TERMINATED BY ','
+//     OPTIONALLY ENCLOSED BY '"' LINES TERMINATED BY '\n'`
+//     SQL clause expects.
+//   * `default_csv()` — RFC 4180 (`,` / `"` / CRLF→LF, optional
+//     quoting).
+//   * `default_tsv()` — `\t` / no quote / `\n`. NULLs as `\\N`
+//     (the MySQL convention for tab-separated dumps).
+//   * `format_row(&self, cells: &List<Maybe<Text>>) -> List<Byte>`
+//     — formats one row with line terminator. `None` cell →
+//     `null_sentinel`.
+//   * `format_rows(&self, rows: &List<List<Maybe<Text>>>) -> List<Byte>`
+//     — concatenates many rows; useful for batch writes through
+//     `AsyncMysqlInfileWriter.write`.
+//
+// Quoting logic:
+//   * `always_quote = true`  → wrap every cell in `quote_char` +
+//     escape internal quotes (RFC 4180: double the char).
+//   * `always_quote = false` → wrap only when the cell contains
+//     `delimiter`, `quote_char`, `\r`, `\n`, OR equals
+//     `null_sentinel` (so the sentinel survives parser
+//     ambiguity).
+//
+// MySQL-side SQL example matching `default_csv()`:
+//
+//   ```sql
+//   LOAD DATA LOCAL INFILE '/dev/stdin'
+//     INTO TABLE t
+//     FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '"'
+//     LINES TERMINATED BY '\n'
+//   ```
+//
+// Out of V1:
+//   * Per-cell column type-aware formatting (integers / floats
+//     / dates) — caller handles via `f"{value}"` / `Int.to_text`.
+//   * Streaming-formatter (one-row-at-a-time without accumulating
+//     into List<Byte>) — `format_row` is already chunk-friendly;
+//     callers can write per-row to `AsyncMysqlInfileWriter` if
+//     they want streaming.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.load_data_csv;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+
+// =============================================================================
+// Config
+// =============================================================================
+
+public type LoadDataCsvConfig is {
+    delimiter: Byte,
+    line_term: List<Byte>,
+    quote_char: Byte,
+    null_sentinel: List<Byte>,
+    /// `true`  → wrap every cell in `quote_char`.
+    /// `false` → wrap only when the cell needs escaping.
+    always_quote: Bool,
+};
+
+implement LoadDataCsvConfig {
+    /// RFC 4180 — comma + double-quote + LF + `NULL` literal.
+    /// Pair with `FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED
+    /// BY '"' LINES TERMINATED BY '\n'`.
+    public fn default_csv() -> LoadDataCsvConfig {
+        let mut lt: List<Byte> = List.with_capacity(1);
+        lt.push(0x0A as Byte);   // '\n'
+        let mut nl: List<Byte> = List.with_capacity(4);
+        nl.push(0x4E as Byte);   // 'N'
+        nl.push(0x55 as Byte);   // 'U'
+        nl.push(0x4C as Byte);   // 'L'
+        nl.push(0x4C as Byte);   // 'L'
+        LoadDataCsvConfig {
+            delimiter: 0x2C as Byte,    // ','
+            line_term: lt,
+            quote_char: 0x22 as Byte,   // '"'
+            null_sentinel: nl,
+            always_quote: false,
+        }
+    }
+
+    /// MySQL TSV — tab + LF + `\N` NULL marker. Pair with
+    /// `FIELDS TERMINATED BY '\t' LINES TERMINATED BY '\n'`.
+    public fn default_tsv() -> LoadDataCsvConfig {
+        let mut lt: List<Byte> = List.with_capacity(1);
+        lt.push(0x0A as Byte);
+        let mut nl: List<Byte> = List.with_capacity(2);
+        nl.push(0x5C as Byte);   // '\\'
+        nl.push(0x4E as Byte);   // 'N'
+        LoadDataCsvConfig {
+            delimiter: 0x09 as Byte,    // '\t'
+            line_term: lt,
+            quote_char: 0x22 as Byte,
+            null_sentinel: nl,
+            always_quote: false,
+        }
+    }
+
+    public fn with_always_quote(mut self, on: Bool) -> LoadDataCsvConfig {
+        self.always_quote = on;
+        self
+    }
+}
+
+// =============================================================================
+// Row formatter
+// =============================================================================
+
+/// Format one row of cells into wire bytes. `None` cells emit the
+/// `null_sentinel`; non-None cells are quoted-or-not per the
+/// config's escape policy. Always appends `line_term`.
+public fn format_row(cfg: &LoadDataCsvConfig, cells: &List<Maybe<Text>>) -> List<Byte> {
+    // Heuristic capacity — 16 bytes per cell as a starting point;
+    // re-allocs are cheap on List<Byte>.
+    let mut out: List<Byte> = List.with_capacity((cells.len() as Int) * 16 + 8);
+    let mut i: Int = 0;
+    let n = cells.len() as Int;
+    while i < n {
+        if i > 0 {
+            out.push(cfg.delimiter);
+        }
+        match &cells[i] {
+            None => {
+                let mut k: Int = 0;
+                while k < (cfg.null_sentinel.len() as Int) {
+                    out.push(cfg.null_sentinel[k]);
+                    k = k + 1;
+                }
+            }
+            Some(t) => {
+                emit_cell(cfg, &mut out, t);
+            }
+        }
+        i = i + 1;
+    }
+    let mut k: Int = 0;
+    while k < (cfg.line_term.len() as Int) {
+        out.push(cfg.line_term[k]);
+        k = k + 1;
+    }
+    out
+}
+
+/// Format many rows back-to-back. Bulk-write friendly:
+/// `writer.write(format_rows(&cfg, &rows)).await`.
+public fn format_rows(cfg: &LoadDataCsvConfig, rows: &List<List<Maybe<Text>>>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < (rows.len() as Int) {
+        let row_bytes = format_row(cfg, &rows[i]);
+        let mut k: Int = 0;
+        while k < (row_bytes.len() as Int) {
+            out.push(row_bytes[k]);
+            k = k + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Internals
+// =============================================================================
+
+fn emit_cell(cfg: &LoadDataCsvConfig, out: &mut List<Byte>, cell: &Text) {
+    let bytes = cell.as_bytes();
+    let needs_quote = cfg.always_quote || cell_needs_quoting(cfg, bytes);
+    if needs_quote {
+        out.push(cfg.quote_char);
+        let mut i: Int = 0;
+        let n = bytes.len() as Int;
+        while i < n {
+            let b = bytes[i];
+            // RFC 4180: double internal quote_char to escape.
+            if b == cfg.quote_char {
+                out.push(cfg.quote_char);
+            }
+            out.push(b);
+            i = i + 1;
+        }
+        out.push(cfg.quote_char);
+    } else {
+        let mut i: Int = 0;
+        let n = bytes.len() as Int;
+        while i < n {
+            out.push(bytes[i]);
+            i = i + 1;
+        }
+    }
+}
+
+fn cell_needs_quoting(cfg: &LoadDataCsvConfig, bytes: &[Byte]) -> Bool {
+    let n = bytes.len() as Int;
+    // Empty cell — emit unquoted unless `always_quote` (handled
+    // by caller). MySQL parses empty unquoted as zero-length
+    // string for varchar / 0 for numeric.
+    if n == 0 { return false; }
+    // Cells equal to `null_sentinel` MUST be quoted so they
+    // survive the parser as literal text.
+    if bytes_equal(bytes, cfg.null_sentinel.as_slice()) { return true; }
+    let mut i: Int = 0;
+    while i < n {
+        let b = bytes[i];
+        if b == cfg.delimiter
+           || b == cfg.quote_char
+           || (b as Int) == 0x0A
+           || (b as Int) == 0x0D
+        {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+fn bytes_equal(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    let n = a.len() as Int;
+    while i < n {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
