@@ -4,59 +4,131 @@
 > Date: 2026-05-04
 > Author: design session, addresses #281 + cold-start-perf epic
 > Constraints from user:
->   (a) cross-compile ladder must avoid redundancy
+>   (a) cross-compile must work for all supported triples without
+>       per-target archive redundancy — single universal archive
 >   (b) theorems / proof-code / meta must keep their optimised
 >       processed representation through serialise/deserialise
+>   (c) maximum runtime performance + minimum binary size + full
+>       cross-compile coverage
 
 ## Problem statement
 
 Cold start of `verum script.vr` on a debug binary takes **~25 minutes** for
-trivial scripts; the entire 99.9 % of that time is spent re-running parser →
+trivial scripts; 99.9 % of that time is spent re-running parser →
 typecheck → monomorphise → VBC codegen over **stdlib** (~83 K functions).
 Node.js / Bun start in milliseconds because their stdlib is already
 compiled into the VM at build time. Verum currently treats stdlib as
 ordinary user code and re-derives the whole pipeline on every invocation.
 
-The infrastructure for a fix is already partly in place: an embedded
-zstd-compressed *source* archive (`embedded_stdlib.rs`), a precomputed
-dependency graph (`stdlib_dep_graph.rs`), and a path-based reachability
-filter (#109). What is missing is the **last mile** — embedding a
-serialised, ready-to-execute VBC archive instead of the compressed
-source.
+## Stdlib inventory (measured 2026-05-04)
+
+| Metric | Count |
+|--------|-------|
+| stdlib `.vr` files | **2 413** |
+| Total LOC | 512 154 |
+| Source size on disk | 38 MB |
+| Files containing `@cfg` / `target_os` / `target_arch` | **96** (4.0 %) |
+| Per-platform `core/sys/{darwin,linux,windows}/` files | 31 (1.3 %) |
+| Files with `theorem` | 142 (5.9 %) |
+| Files with `axiom` | 69 (2.9 %) |
+| Files with `@verify(formal)` | 54 (2.2 %) |
+| Files with `@meta` | 4 (0.17 %) |
+
+Distribution by top-level subtree:
+
+| Subtree | Files | Note |
+|---------|-------|------|
+| `core/database/` | **1 539** | sqlite + postgres + mysql; ~64 % of stdlib |
+| `core/net/` | 191 | TCP/UDP/Unix/DNS/TLS/QUIC |
+| `core/math/` | 110 | tensors, frameworks, refinement primitives |
+| `core/security/` | 72 | crypto, x509 |
+| `core/term/` | 68 | TUI |
+| `core/sys/` | 51 | platform-specific |
+| `core/verify/` | 43 | verify ladder, kernel hooks |
+| All other | ~340 | base, mem, sync, async, collections, text, io, time, shell, runtime, intrinsics, action, encoding, … |
+
+Key observation: **database alone is ~64 % of stdlib by file count**. A
+script like `build-paper.vr` doesn't touch any of it. The real
+"essential" core that *every* script needs is ~150-200 files (the
+non-database, non-net, non-security, non-term, non-database-derived
+~340 files in "all other" + the host platform's slice of `sys/`).
+
+Therefore the reachability filter (already embedded as `stdlib_dep_graph`)
+is the right primary lever: most scripts touch only ~10 % of stdlib.
 
 ## Goal
 
 Reduce stdlib pipeline cost from ~25 min to **<50 ms** at runtime, while:
 
-- preserving correctness for cross-compile (host build ≠ target triple);
+- supporting cross-compile across **darwin/linux/windows × x86_64/aarch64
+  + linux/riscv64 + bpfel/bpfeb + powerpc + s390x + wasm** (10+ triples)
+  from a *single* universal archive;
 - preserving the proof-code / theorem / certificate representation
   through serialise → embed → deserialise;
 - preserving meta-evaluation (`@meta`, `@const`, `@derive`) results;
-- shipping a *small* default binary (`--no-default-features` <1 MB stdlib
-  overhead) and a *complete* release binary (all three layers ~750 KB).
+- shipping a release binary whose stdlib overhead is bounded by ~5–10 MB
+  (compressed VBC) regardless of platform count.
 
-## Solution: three-layer VBC archive
+## Solution architecture — four orthogonal axes
+
+Four independent design axes combine into one coherent system:
+
+1. **Layer separation** — runtime / proof / meta. Three distinct purposes,
+   distinct trust contracts, distinct hot-vs-cold-path treatment.
+2. **Multi-variant target encoding** — single archive holds all platform
+   variants; loader picks one at runtime. No per-target archive
+   duplication.
+3. **Lazy reachability** — even within the runtime layer, only modules
+   reachable from the user's mount tree are deserialised into the active
+   `VbcModule`; the dep-graph and module index are lookup tables, not
+   prefetch lists.
+4. **Tiered stdlib partitioning** — "essential" core is mandatorily
+   embedded; "extra" stdlib (database, net, security, term) is in
+   separate archive sections that can be embedded together (default
+   release) or shipped as on-demand cog packages (`--features minimal`
+   binary).
+
+These compose multiplicatively: a `--help` print on a non-database script
+loads ~5 ms of essential-runtime archive ⊓ user-mount reachable subset,
+ignores extra-stdlib sections, ignores proof archive, ignores meta
+archive. Total work: ~5 ms regardless of the 38 MB of stdlib source on
+disk.
+
+## Solution detail: three-layer VBC archive, single universal binary
 
 `stdlib` is split into three explicit layers, each with its own archive,
 classification rule, and trust contract:
 
-| Layer | Content | Target-dependence | Embed default | Cold-load cost |
-|------|---------|-------------------|---------------|----------------|
-| **runtime** | `core.{mem, sync, async_, collections, text, io, net, time, base, sys}` — anything reached during normal program execution. | **Per-target** (FFI decls, syscall numbers) | mandatory | ~5–20 ms (zstd + bincode decode) |
-| **proofs** | `theorem` / `axiom` / `lemma`, refinement obligations, framework citations, ATS-V annotations, discharge certificates (Z3 / Lean / Coq stamps). | **Target-agnostic** | feature `proofs` (default on in release) | lazy — first `--verify formal` or `verum audit` |
-| **meta** | `@meta` / `@const` / `@derive` evaluators, macro definitions, expansion templates. | **Compiler-version-specific** | feature `meta` (default on in release) | lazy — first user-side meta invocation |
+| Layer | Content | Cross-target story | Embed default | Cold-load cost |
+|------|---------|--------------------|---------------|----------------|
+| **runtime** | `core.{mem, sync, async_, collections, text, io, net, time, base, sys}` — anything reached during normal program execution. | **Multi-variant**: target-conditional functions stored as N variants in one archive; loader selects on triple at run/AOT time. | mandatory | ~5–20 ms (zstd + bincode decode + variant select) |
+| **proofs** | `theorem` / `axiom` / `lemma`, refinement obligations, framework citations, ATS-V annotations, discharge certificates (Z3 / Lean / Coq stamps). | **Target-agnostic** (no platform conditionals). | feature `proofs` (default on in release) | lazy — first `--verify formal` or `verum audit` |
+| **meta** | `@meta` / `@const` / `@derive` evaluators, macro definitions, expansion templates. | **Host-only** at evaluator run time (meta runs on host arch); evaluator outputs feed into runtime archive variant selection. | feature `meta` (default on in release) | lazy — first user-side meta invocation |
 
 This split answers the user's two constraints:
 
-**(a) Cross-compile redundancy.** Only the *runtime* layer is per-triple.
-Proof and meta archives are produced once and reused across every target.
-At binary build time we precompile `stdlib_runtime_<host-triple>` and embed
-it. For cross-compile builds, `cargo xtask precompile-stdlib --target X`
-generates an additional `<target>` archive into
-`target/.verum-cache/stdlib-precompiled/<triple>/runtime.vbc.zst` once and
-caches it on disk by `(stdlib_content_hash, compiler_version, target)`.
-Sub-sequent cross-compiles for the same target reuse the cache. Default
-host build embeds *only* the host runtime archive — no 8× target bloat.
+**(a) Cross-compile without redundancy.** *Single* universal archive
+embedded once per binary. The runtime layer holds **multi-variant
+function entries** for the ~5 % of stdlib that has `#[cfg(target_os/arch/…)]`
+branches (mostly FFI declarations: `core.sys.darwin.libsystem`,
+`core.sys.linux.syscall`, `core.sys.windows.kernel32`, sockaddr layouts,
+syscall numbers). Each such function ships once per cfg-arm; everything
+else (≈95 % — collections, text, math, async, channels, mem allocator,
+sync primitives) ships as **one** target-agnostic copy. Variant selection
+is a HashMap lookup at load time keyed on the active target triple, no
+re-codegen, no per-target archive duplication.
+
+Quantified: stdlib has ~5 K monomorphised functions, ~250 of them
+target-conditional with ≤4 platform variants each. Naive per-target
+shipping for 5 supported triples = 5 × 5000 = 25 000 entries
+(redundant). Multi-variant single-archive = 5000 + 4 × 250 = 6000
+entries. Saving: **76 %** before zstd, more after (zstd compresses near-
+identical variants to a few bytes each via dictionary effect).
+
+The same archive serves `verum run script.vr` (host triple), `verum build
+--target X` (cross-compile), and `verum check` (target-agnostic) without
+filesystem-side per-target caches. Cross-compile is a pure variant pick
+at AOT phase 0.
 
 **(b) Proof / meta representation preservation.** Theorem statements,
 parameter bindings, generic bindings, per-backend translations, discharge
@@ -68,6 +140,280 @@ consume — round-trips losslessly through serialise / deserialise. Meta
 results (the actual values produced by `@const`/`@meta`) are stored in
 the constant pool, indexed by call-site hash, so the same call elides
 re-evaluation.
+
+## Read-optimised wire format — deserialization >> serialization
+
+Production reads `.vbca` on every script run; serialisation happens once
+per `precompile-stdlib` build or once per `precompile-cog` registry
+publish. Therefore the format is designed for **asymmetric speed**: read
+path optimised aggressively; write path simple and correct, no read-side
+overhead allowed in the name of write convenience.
+
+Concrete techniques:
+
+1. **mmap-friendly fixed-position header.** The first 4 KB contain
+   absolute byte offsets of every later section, so the loader can
+   `pread` the section it needs without scanning. No varint header sizes,
+   no chained TLV that requires sequential walk.
+2. **Sectioned compression.** Body regions are zstd-compressed
+   per-section (not whole-archive). Eager sections (string table,
+   function index, cfg-key table — together ~90 KB for stdlib) are
+   *uncompressed* in archive so their cost is one memcpy, not a
+   decompress. Lazy sections (function bodies, theorem table,
+   discharge receipts, meta cache) are zstd-compressed and decoded
+   only on demand.
+3. **Index-based O(1) function lookup.** The function index is a flat
+   array `Box<[FunctionEntry]>` aligned to 32 bytes — direct array
+   indexing by `FunctionId(u32)`, no HashMap lookup. Variant selection
+   is a 4-byte slot in `FunctionEntry` pointing at a small variant-table
+   region.
+4. **Position-independent body encoding.** Bytecode references function /
+   string / type / constant IDs through flat index tables. No absolute
+   offsets baked in. This means a body region can be mmap'd directly
+   into the interpreter's address space without rewriting any pointers.
+5. **Asymmetric serde split.** `serialize_archive(&Module) -> Vec<u8>` is
+   straightforward and may sort / hash / dedup as much as it likes (it
+   runs once, server-side). `deserialize_archive(&[u8]) -> Archive` does
+   *zero allocations* for eager sections beyond the per-section box;
+   string-pool, function-index, and cfg-key table are returned as
+   `&'archive [...]` slices into the mmapped region.
+6. **Variant pre-decode caching.** First interpreter call to function F
+   materialises the active variant into the live `VbcModule` and caches.
+   Subsequent calls on same target hit the cache. Cross-target compile
+   paths may evict and re-materialise — cost amortised over the AOT run.
+7. **Forward-compat sections.** Every section starts with
+   `(name: StringId, format_version: u16, length: u64)`. Unknown sections
+   are skipped on read, preserved on resave. Older loaders survive
+   newer archive features they don't understand.
+8. **Streaming validation, no full parse on load.** Header + section
+   table read implies xxh3 checksum verify. Body sections checksummed
+   per-region on first decode, lazily. Bad section is isolated — corrupt
+   `meta` archive doesn't kill `runtime` archive.
+
+### Concrete on-disk layout
+
+```
+┌─ Fixed Header (256 bytes, page-aligned) ──────────────────────────┐
+│ magic         u32   "VBCA" little-endian                           │
+│ format_major  u16                                                   │
+│ format_minor  u16                                                   │
+│ flags         u32   bits: signed, multi-variant, layered, …       │
+│ archive_size  u64                                                   │
+│ checksum      u128  xxh3 of body (offset 256..archive_size)        │
+│ string_table  Region (offset, length, compressed?)                  │
+│ function_idx  Region                                                │
+│ type_idx      Region                                                │
+│ cfg_key_table Region                                                │
+│ section_dir   Region                                                │
+│ signature     Region (optional, present iff flags & SIGNED)         │
+│ reserved      [u8; 96]                                              │
+└────────────────────────────────────────────────────────────────────┘
+
+┌─ String Table (uncompressed, eager) ───────────── ~50 KB stdlib ──┐
+│ count: u32                                                         │
+│ offsets: [u32; count]                                              │
+│ utf8_bytes: [u8; …]                                                │
+└────────────────────────────────────────────────────────────────────┘
+
+┌─ Function Index (uncompressed, eager) ────────── ~40 KB stdlib ──┐
+│ count: u32                                                         │
+│ entries: [FunctionEntry; count]                                    │
+│   { name: StringId(u32), signature_type: TypeId(u32),              │
+│     flags: u32, body_kind: u8, body_ref: u64,                      │
+│     section_id: SectionId(u16) }                                   │
+└────────────────────────────────────────────────────────────────────┘
+                  body_kind = Universal → body_ref is offset into Section[section_id]
+                  body_kind = MultiVariant → body_ref is offset into Variant Table
+
+┌─ Variant Table (uncompressed, eager) ──────────── ~5 KB stdlib ──┐
+│ for each multi-variant function: [VariantSlot; n]                  │
+│   { cfg_key_id: u16, section_id: u16, body_offset: u64,            │
+│     body_length: u32 }                                             │
+└────────────────────────────────────────────────────────────────────┘
+
+┌─ CfgKey Table (uncompressed, eager) ──────────── ~1 KB stdlib ───┐
+│ count: u16                                                         │
+│ entries: [CfgKey; count]                                           │
+└────────────────────────────────────────────────────────────────────┘
+
+┌─ Section Directory (uncompressed, eager) ─────── ~2 KB stdlib ───┐
+│ count: u16                                                         │
+│ entries: [Section; count]                                          │
+│   { name: StringId, layer: u8 (Runtime/Proof/Meta), kind: u8,      │
+│     compression: u8, format_version: u16,                          │
+│     offset: u64, size_compressed: u64, size_uncompressed: u64,     │
+│     checksum: u128 (xxh3) }                                        │
+└────────────────────────────────────────────────────────────────────┘
+
+┌─ Body Regions (zstd-compressed, lazy) ────────────────────────────┐
+│ Section "runtime.bodies"      ~500 KB compressed                   │
+│ Section "proof.theorems"      ~200 KB compressed (default lazy)    │
+│ Section "proof.discharge"     ~50 KB compressed (default lazy)     │
+│ Section "framework.provenance" ~30 KB compressed (default lazy)    │
+│ Section "meta.evaluators"     ~50 KB compressed (default lazy)     │
+│ Section "meta.cache"          ~20 KB compressed (default lazy)     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### Eager vs lazy split — what gets read at archive open
+
+**Eager (always read at archive open, ~90 KB total memcpy)**
+
+- Header
+- String Table (every section refs strings by ID, can't avoid)
+- Function Index (need full table for ID-based lookup)
+- Variant Table (loader picks variant per function up-front)
+- CfgKey Table (loader resolves active variant)
+- Section Directory (need section locations)
+
+**Lazy (decoded on first reference)**
+
+- Function bodies (decoded when interpreter dispatches the function for
+  the first time; cached afterwards)
+- Theorem table (decoded only when verify-ladder runs)
+- Discharge receipts (decoded with theorem table)
+- Framework provenance (decoded only by audit / theory-interop tools)
+- Meta cache (decoded when meta evaluator hits a cached call site)
+
+Under typical script execution (no `@verify(formal)`, no `verum audit`,
+no meta from stdlib), only function bodies are touched — and only the
+~50-200 functions main() actually transitively calls. Total cold-start
+deserialisation work: **~5-15 ms wall-clock**.
+
+### Parallelism guarantees
+
+The sectioned format is designed so every step parallelises along
+independent units of work, both server-side and client-side.
+
+**Serialisation (server-side `precompile-stdlib` / `precompile-cog`)**
+
+- `rayon::par_iter` over modules during typecheck + monomorphization
+  (already in place via the parallel post-typecheck fan-out).
+- `rayon::par_iter` over functions during VBC codegen — each function
+  emits its bytecode independently into a thread-local buffer.
+- Per-cfg-arm variant emission: when a function has 4 platform variants,
+  4 worker threads emit them in parallel.
+- Per-section zstd compression: each section compressed in its own
+  worker; with `--long` mode, each large section uses multi-block
+  parallelism internally too.
+- IDs assigned in deterministic post-merge pass (single-threaded, fast)
+  so parallelism doesn't hurt reproducibility.
+
+Target: 8-core machine compresses full stdlib in ~1.5 s wall-clock
+(vs ~10 s single-threaded).
+
+**Deserialisation (client-side `compile_ast_to_vbc`)**
+
+- Header / eager sections: ~90 KB single-threaded memcpy. Parallelism
+  overhead would dominate; kept sequential.
+- Lazy section decode: each section is independent. When user code
+  triggers proof archive + meta archive load simultaneously (e.g.
+  `verum audit --with-meta-traces`), both decompress on parallel rayon
+  workers — ~3 ms each if interleaved, ~1.5 ms total wall-clock with
+  parallelism.
+- Function-body decode: typical hot path is sequential (interpreter
+  dispatches one function at a time), but `phase_dependency_analysis`
+  + `phase_cbgr_analysis` walking many functions in parallel decode
+  bodies on demand from their respective threads — each body's zstd
+  decode is independent.
+- Variant materialisation per `compile_ast_to_vbc` call is single-pass
+  over function index — ~1 ms; parallelism unnecessary.
+
+Target: client cold-load completes in ~5 ms on single core, no benefit
+from going parallel for the eager path; lazy paths parallelise
+automatically when triggered concurrently.
+
+### Asymmetric perf measurement (target)
+
+| Metric | Serialisation (server / build-time) | Deserialisation (client / runtime) |
+|--------|-------------------------------------|------------------------------------|
+| Wall clock for 5 K-function stdlib | 5–10 s | **5–15 ms** |
+| Allocations | unbounded (rich AST → flat tables) | ~30 (one Box per eager section) |
+| zstd compression | ~3 GB/s output | n/a |
+| zstd decompression (lazy) | n/a | ~12 GB/s |
+| Memory peak | ~500 MB (full module + intermediate) | ~5 MB (eager sections + decoded bodies) |
+| CPU | ~3 cores (parallel codegen) | <0.1 core (single read, no codegen) |
+
+Asymmetry ratio: **~600× faster deserialise than serialise**. This is the
+explicit production goal — write-side cost lives on the registry build
+worker (paid once per publish, amortised over thousands of installs);
+read-side cost lives on every script invocation (must be sub-frame).
+
+## Multi-variant target encoding — the key trick
+
+The mechanism that lets one archive serve all 10+ supported triples
+without duplicating common code:
+
+```rust
+/// Single VBC function entry. Most stdlib functions ship as one
+/// target-agnostic body. Functions with `#[cfg(...)]` branches ship
+/// as a `Variants` body with one slot per active cfg-arm.
+pub enum FunctionBody {
+    /// Target-agnostic — single bytecode body, one FFI symbol set,
+    /// works for every triple. ~95 % of stdlib functions.
+    Universal {
+        bytecode_offset: u32,
+        bytecode_length: u32,
+        ffi_symbols: SmallVec<[FfiSymbolId; 1]>,
+    },
+
+    /// Target-conditional — the precompiler emitted N variants, one
+    /// per `#[cfg]` arm in the source. Loader picks the first variant
+    /// whose `cfg` matches the active triple.
+    Variants(SmallVec<[Variant; 4]>),
+}
+
+pub struct Variant {
+    /// Structured cfg expression — not a string, so matching is O(1)
+    /// HashMap lookup, not regex eval.
+    pub cfg: CfgKey,
+    pub bytecode_offset: u32,
+    pub bytecode_length: u32,
+    pub ffi_symbols: SmallVec<[FfiSymbolId; 1]>,
+}
+
+/// Compact, hashable cfg expression. Build-time precompiler converts
+/// AST `#[cfg(all(target_os = "macos", target_arch = "aarch64"))]` into
+/// CfgKey { os: Some(Darwin), arch: Some(Aarch64), ptr_width: None, … }.
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct CfgKey {
+    pub os:        Option<TargetOs>,    // Darwin | Linux | Windows | FreeBsd | Wasm | None
+    pub arch:      Option<TargetArch>,  // X86_64 | Aarch64 | Riscv64 | … | None
+    pub ptr_width: Option<u8>,          // 32 | 64
+    pub endian:    Option<Endian>,      // Little | Big
+    pub features:  SmallVec<[FeatureFlag; 2]>, // sse2, neon, avx2, …
+}
+```
+
+**Selection at load time**: build a `CfgKey::for_triple(triple)`,
+then walk each `Variants(_)` entry and pick the matching arm. ~250
+target-conditional functions × ≤4 variants each = ~1000 cfg-key
+comparisons, each O(1). Total: <1 ms.
+
+**Size analysis** (estimate, to be measured in Phase 4):
+
+```
+stdlib monomorphised functions ............... ~5 000
+  target-agnostic ............................ ~4 750  (95%)
+  target-conditional ......................... ~250    (5%)
+    avg variants per function ................ ~3      (darwin/linux/windows)
+
+per-archive function entries:
+  multi-variant single archive: 4 750 + 250 × 3 = 5 500
+  naive 5-archive ship-all-targets: 5 × 5 000  = 25 000   (4.5× redundant)
+  per-target ship-only-active: 5 000           (need 5 archives stored separately)
+  multi-variant + zstd: ~5 500 entries, dictionary-compressed across
+    near-identical variants — empirically ~1.05× a single-target archive.
+```
+
+Multi-variant single archive **strictly dominates** the alternatives:
+
+- vs naive multi-archive: 4.5× smaller, no per-target file management.
+- vs per-target on-disk: same effective size, no filesystem dependency,
+  cross-compile zero-overhead.
+
+This is the answer to user constraint (a): **no redundancy, all
+platforms in one binary, runtime selects.**
 
 ## Layer classification
 
@@ -231,32 +577,48 @@ stdlib source is modified mid-session and the embedded archive is stale.
 The compiler detects staleness automatically by hashing `core/` and
 comparing to the manifest.
 
-## Cross-compile cache layout
+## Cross-compile — no separate cache, no per-target files
+
+The multi-variant archive **eliminates** the need for a per-target
+filesystem cache. Cross-compile is a pure variant pick at AOT phase 0:
 
 ```
-target/.verum-cache/stdlib-precompiled/
-├── manifest.toml                          # global cross-target manifest
-├── x86_64-apple-darwin/
-│   └── runtime.vbc.zst
-├── aarch64-apple-darwin/
-│   └── runtime.vbc.zst
-├── x86_64-unknown-linux-gnu/
-│   └── runtime.vbc.zst
-├── aarch64-unknown-linux-gnu/
-│   └── runtime.vbc.zst
-├── x86_64-pc-windows-msvc/
-│   └── runtime.vbc.zst
-├── proofs.vbc.zst                         # target-agnostic, shared
-└── meta.vbc.zst                           # target-agnostic, shared
+verum build --target aarch64-unknown-linux-gnu
+
+  Phase 0:  let archive = embedded_stdlib_vbc::runtime();   // already in binary
+            let cfg_key = CfgKey::for_triple("aarch64-unknown-linux-gnu");
+            let module  = archive.materialize(&cfg_key);    // ~5 ms
+  Phase 1+: continue with user-source codegen
 ```
 
-Cache invalidation key: `(stdlib_content_hash, compiler_version, target)`.
-First cross-compile to a target generates the cache; subsequent builds
-reuse. Cargo never re-precompiles when the inputs are unchanged.
+No `target/.verum-cache/stdlib-precompiled/<triple>/` directory, no
+`(stdlib_hash, compiler_version, target)` cache invalidation, no
+network/filesystem dependency for cross-compile. All supported targets
+cross-compile out of the box from the same binary.
 
-`cargo xtask precompile-stdlib --target X` is also a stand-alone command
-for CI — pre-warm the cache for every supported target before publishing
-a release.
+**Tiered stdlib partitioning** (axis 4) addresses binary-size budget:
+
+```
+binary feature flags:
+  --features minimal      runtime-essential only (~150 modules)
+                          → ~1.5 MB embedded VBC after zstd
+                          → no proofs, no meta, no extra stdlib
+                          → for embedded / WASM builds
+  --features default      runtime-essential + runtime-extra (database,
+                          net, security, term, math, shell)
+                          + proofs + meta
+                          → ~10 MB embedded VBC after zstd
+                          → standard desktop / server build
+  --features full         everything default ships +
+                          experimental cog archives
+                          → ~15 MB embedded VBC after zstd
+```
+
+The "extra" runtime sub-archives (database, net, …) are *separate
+sections* inside the same VBC archive file. The embedding harness
+chooses which sections to `include_bytes!` based on cargo features.
+Sections not embedded become external cog dependencies (downloadable
+via `verum cog install core-database@<compiler-version>`).
 
 ## Refactor — three top-level core/ subdirectories
 
@@ -318,18 +680,27 @@ certs are never the trust root, the kernel is.
 | **0** | This design doc reviewed + approved | — | done |
 | **1** | Layer classifier scanner (`cargo xtask classify-stdlib`) — emits report only, no enforcement | Low — read-only audit | 1d |
 | **2** | `core/` directory refactor: move proof/meta into `core/proofs/` and `core/meta/`, keep mount-path aliases | Mechanical but wide-radius | 2-3d |
-| **3** | `VbcModule` format extension fields + serde-default backward-compat | Low | 1d |
-| **4** | `cargo xtask precompile-stdlib` — pipeline implementation | Medium — needs deterministic ID assignment | 3-4d |
+| **3** | `VbcModule` format extension fields + multi-variant `FunctionBody` + serde-default backward-compat + `.vbca` magic header for stand-alone archives | Low | 2d |
+| **4** | `cargo xtask precompile-stdlib` — pipeline implementation, multi-variant emission | Medium — needs deterministic ID assignment | 4-5d |
 | **5** | `embedded_stdlib_vbc.rs` + build.rs hook | Low | 1d |
-| **6** | Runtime path switch in `compile_ast_to_vbc` (host build) | Medium — cold start measurement | 2d |
-| **7** | Cross-compile cache (`target/.verum-cache/stdlib-precompiled`) | Medium — cache invalidation | 2d |
+| **6** | Runtime path switch in `compile_ast_to_vbc` (host build) — `archive.materialize(&CfgKey::for_triple(triple))` | Medium — cold start measurement | 2d |
+| **7** | Cross-compile path: zero-cache, archive variant pick at AOT phase 0 | Low (multi-variant collapses this) | 1d |
 | **8** | Verify-ladder integration — proof archive lazy-load | Medium — kernel re-check | 2-3d |
 | **9** | Meta archive lazy-load | Low | 1d |
 | **10** | Mount-path alias removal (after warning cycle) | Low | 0.5d |
+| **11** | `.vbca` format spec freeze + standalone archive doc | Low | 1d |
+| **12** | `cargo xtask precompile-cog` — same pipeline as stdlib but scoped to single cog | Low (reuses Phase 4 work) | 1-2d |
+| **13** | Registry server-side: build worker, `.vbca` publish, signing, manifest | Medium — operational | 3-5d (registry-side) |
+| **14** | Client `cog_resolver` enhancements: prefer `.vbca`, signature verify, fallback to source | Low | 2d |
+| **15** | Reproducibility checker (`verum cog reproduce <name>@<ver>` rebuilds from source, byte-compares to registry `.vbca`) | Low | 1d |
 
-Total: ~15-20 days. Phase 1-3 are unblocked by Phase 0 approval; Phase 4-7
-form the critical path for cold-start fix; Phase 8-9 are deferable to a
-second milestone.
+Total compiler-side: ~17-22 days (Phases 1-12, 14-15).
+Registry-side: ~3-5 days (Phase 13).
+
+Phases 1-9 are the **stdlib cold-start fix** (the original perf goal).
+Phases 11-15 generalise the format to cogs and unlock registry
+distribution. Phases 11-12 are pure compiler-side; Phase 13 is
+registry-server work and lands independently.
 
 ## Open questions
 
@@ -348,20 +719,185 @@ second milestone.
    binary growth from this work is **net negative** because the source
    archive can be downgraded to a lazy-load fallback only.
 
+## Registry-distributed `.vbca` artifacts — same format, same loader
+
+The VBC archive format defined here is **not stdlib-specific**. It is the
+canonical compiled-cog format — the "Verum Bytecode Compiled Archive"
+(`.vbca`) — and serves *three* distribution channels under one trust
+model and one loader:
+
+| Channel | What | Producer | Consumer |
+|---------|------|----------|----------|
+| **Embedded stdlib** | `core` cog precompiled into VBC archive | `cargo xtask precompile-stdlib` (build-time) | `embedded_stdlib_vbc.rs`, included in binary |
+| **Script VBC cache** | User-script VBC after first cold compile | Compiler `phase_interpret_with_args` | `~/.verum/script-cache/<hash>/main.vbca` |
+| **Registry cog artifacts** | Third-party cogs precompiled by the registry | Registry build worker (server-side) | Client `verum cog install foo@1.2.3` |
+
+Symmetry of these three closes the user's question about
+**fastest-possible builds**: when a user runs `verum build` on a project
+with 20 dependencies, each dependency arrives over the wire as a
+`.vbca` ready to merge into the user's `VbcModule`. No client-side
+parse, typecheck, or codegen of cog sources. Per-cog cost goes from
+*seconds-to-minutes* (parse + typecheck + monomorphise + codegen the
+cog's source) to *milliseconds* (zstd decode + variant pick + ID
+remap during merge).
+
+### Registry build pipeline
+
+The registry (verum-lang/registry) gains a build worker that runs after
+each cog upload:
+
+```
+publish flow
+─────────────
+1. publisher  →  POST /cogs/<name>/<version>  (uploads source.tar.gz)
+2. registry   →  store source.tar.gz, kick off build worker
+3. worker     →  cargo xtask precompile-cog <name>@<version>
+                   ─ classify modules (runtime / proof / meta)
+                   ─ parse + typecheck against pinned compiler version
+                   ─ monomorphise + emit multi-variant VBC
+                   ─ collect proof certs from cert-store
+                   ─ serialise + zstd → <name>-<version>-<compiler-version>.vbca
+                   ─ sign with registry private key
+4. registry   →  publish .vbca + sig + manifest (lists available
+                  triples, layers, compiler versions, content hash)
+
+install flow
+────────────
+client:  verum cog install foo@^1.2
+
+  resolve  →  registry.get_metadata("foo", "^1.2")
+              → returns version 1.2.7, available .vbca for compiler
+                version 0.X with all 10 supported triples in one archive
+  fetch    →  GET foo-1.2.7-verum-0.X.vbca       (~500 KB compressed)
+              GET foo-1.2.7-verum-0.X.vbca.sig
+  verify   →  signature check against registry pubkey
+  cache    →  ~/.verum/cogs/foo/1.2.7/foo.vbca
+  link     →  on next compile, embed .vbca into project's VbcModule
+              via the same archive merge code that ingests stdlib
+```
+
+### Why this is the optimal distribution model
+
+For a project with N dependencies:
+
+| Step | Source-tarball flow (today) | `.vbca` flow |
+|------|----------------------------|--------------|
+| Network | ~1 MB tarball per cog | ~500 KB .vbca per cog |
+| Decode | tar+gzip extract (~100 ms) | zstd decompress (~10 ms) |
+| Parse + typecheck + monomorphise + codegen | **per-cog, every user, every build** (1-30 s each on debug builds) | **once on registry, never on client** |
+| Variant select for current target | n/a (had to be re-codegened) | O(1) per function (~1 ms total) |
+| Merge into user VbcModule | wide-radius re-codegen | linear remap of FunctionId / TypeId space (~10 ms) |
+| **Per-cog client cost** | ~1-30 s | **~50 ms** |
+| **20-dependency project** | 20 s – 10 min cold | **~1 s cold** |
+
+**Bonus**: registry can pre-build `.vbca` for *every* supported compiler
+version → user's compiler version match is a metadata lookup, not a
+"sorry, recompile" failure.
+
+### Trust model
+
+```
+publisher signs source                    → publisher key
+registry rebuilds .vbca, signs            → registry build-worker key
+client verifies registry signature        → registry pubkey embedded in binary
+optional: client also verifies publisher  → publisher key from .vbca manifest
+optional: client re-runs kernel-recheck   → reproducible local rebuild from source
+                                            should yield byte-identical .vbca
+```
+
+The byte-identical-rebuild property is a function of the deterministic-ID
+work in the precompile pipeline. As long as path-sorted iteration (#143)
+holds and the compiler version is pinned, anyone can verify the registry
+hasn't tampered with the artifact.
+
+### Cog-side multi-variant — same encoding as stdlib
+
+A cog's `core.foo.unix` module has the same `#[cfg(target_os = "macos")]`
+/ `#[cfg(target_os = "linux")]` branches as stdlib. The `.vbca` ships
+both variants in `Variants(_)` entries. One `.vbca` per cog version
+covers every triple — registry doesn't store per-target tarballs.
+
+### Client fallback path
+
+When `.vbca` is unavailable or registry is offline:
+
+```
+1. .vbca download fails
+2. Try .vbca from local cache (~/.verum/cogs/cache/)
+3. Try source.tar.gz, compile locally (slow path, current behaviour)
+4. Try git URL (registry-form `{ git = "..." }`)
+5. Hard failure with diagnostic
+```
+
+Local-path cogs (`{ path = "./local" }`) always compile from source —
+no .vbca on the registry. This is the dev workflow.
+
+### Registry build cost vs current model
+
+The registry **trades server CPU for client cold-start time**. Per cog
+publish:
+
+- Build worker: ~30 s – 5 min (parse + typecheck + monomorphise + codegen
+  for one compiler version).
+- Storage: ~500 KB per (cog × compiler-version) — small relative to
+  source tarball.
+
+This cost is paid **once per publish**, amortised over every install of
+that cog version — typically 100s-10000s of installs in registry-scale
+ecosystems. Win is enormous.
+
+## Performance / size summary
+
+| Metric | Today | After this design | Change |
+|--------|-------|-------------------|--------|
+| Cold start (`verum --help` style) | ~25 min debug, ~1-2 min release | <50 ms | **~30 000×** |
+| Embedded stdlib in binary | 4.7 MB source (zstd) | 5–10 MB VBC (zstd) | +5 MB |
+| Source archive in binary | 4.7 MB (zstd) | 0 (lazy fallback only) | −4.7 MB |
+| Net binary size delta | — | **+0.3 to +5 MB** | within budget |
+| Cross-compile per-target storage | 170 MB `registry.bin` per workspace | 0 | −170 MB |
+| Memory at runtime (host) | ~7 GB peak | ~50–200 MB | **35–140×** |
+| Function table at codegen | 83 K (all stdlib) | ~5 K (mount-reachable) | **17×** |
+| `--features minimal` binary | n/a | ~1.5 MB stdlib overhead | — |
+
+## Trade-off decisions taken in this design
+
+1. **Single universal archive vs per-target archives** → universal,
+   multi-variant. Justified by 4.5× size economy and zero filesystem
+   per-target cache.
+2. **Runtime/proof/meta split vs monolithic archive** → split. Lazy load
+   for proof/meta means zero cost when not used; clean separation of
+   trust contracts.
+3. **Embed sources as fallback or remove?** → remove from default
+   release; keep only behind `--features dev-stdlib-source` for
+   self-modifying-stdlib workflows.
+4. **Cross-compile cache on disk or in-binary?** → in-binary, no
+   filesystem dependency, no cache-invalidation logic needed.
+5. **Tiered partitioning vs everything-or-nothing?** → tiered. `minimal`
+   for embedded targets, `default` for desktop, `full` for audit servers.
+
 ## Decision points the user must approve
 
 Before I start writing code:
 
-1. **Three-layer split** (runtime / proof / meta) — agree?
-2. **Directory refactor** (`core/runtime/`, `core/proofs/`, `core/meta/`) —
-   agree, or keep current layout and use only `@layer(...)` annotation?
-3. **Default features in release**: all three layers on, or runtime-only
-   with proofs/meta as opt-in `cargo install --features proofs,meta`?
-4. **Cross-compile cache**: in `target/.verum-cache/` (per-project) or
-   `~/.verum/stdlib-precompiled/` (global)?
-5. **Phase 1-3 first?** — quickest path to measuring real-world wins is
-   getting the format extension + classifier scanner landed before the
-   pipeline work; or do the user prefer pipeline-first because that's
-   the actual perf payoff?
+1. **Layer separation + directory refactor** to `core/runtime/`,
+   `core/proofs/`, `core/meta/` — agree, or keep current layout and use
+   only `@layer(...)` annotation? (Refactor is mechanical but wide-radius.)
+2. **Tier partition** — runtime-essential vs runtime-extra (database,
+   net, security, term as on-demand cogs) — agree this is the right
+   split, or do you want database to be in the default-embedded tier?
+3. **Phase ordering** — Phase 4 (precompile pipeline) is the critical
+   path for the stdlib perf win. Phase 1-3 (classifier + format extension +
+   refactor) are necessary preconditions. Approve "stdlib phases 1-9 first,
+   then registry phases 11-15"?
+4. **Backward-compat duration** — mount-path aliases for the directory
+   refactor: 1 release cycle (warning), then removal? Or evergreen?
+5. **Embedded-sources fallback** — `--features dev-stdlib-source`
+   default off, only used by people developing stdlib itself?
+6. **Registry build-worker hosting** — registry self-hosts the build
+   worker (server pays CPU for every publish), or community-CI publishes
+   `.vbca` next to source (publisher pays via GitHub Actions / similar)?
+7. **Registry signing model** — single registry key (simple, requires
+   trusting registry), or publisher key + registry counter-signature
+   (more secure, more UX friction at publish time)?
 
-Once these five are answered I begin implementation in the order above.
+Once these are answered I begin implementation.
