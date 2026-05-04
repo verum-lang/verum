@@ -338,24 +338,27 @@ impl<'s> CompilationPipeline<'s> {
         codegen.register_stdlib_intrinsics();
         codegen.register_runtime_io_functions();
 
-        // T1 archive → ctx in milliseconds.  Only FunctionInfo
-        // entries (and variant-ctor metadata) — the archive's type
-        // descriptors stay in the archive itself; the linker-merge
-        // step at the end of this function injects them into the
-        // final module.  Pre-loading types into codegen's
-        // `self.types` would collide with the pre-registered
-        // built-in types via differing TypeId allocations.
-        let ctx_stats = crate::archive_ctx_loader::populate_ctx_from_archive(
-            archive,
-            codegen.ctx_mut(),
-        )
-        .map_err(|e| anyhow::anyhow!("archive ctx load: {}", e))?;
+        // T1 archive → ctx via OnceLock-cached FunctionInfo table.
+        // First call pays the 565-module walk + descriptor → FunctionInfo
+        // conversion (~50-200ms); every subsequent call is `Arc::clone`
+        // + `import_functions` (HashMap copy, sub-millisecond).  Critical
+        // for REPL / test-runner / watch-mode where one process drives
+        // many compilations.
+        static CTX_CACHE: crate::archive_ctx_loader::ArchiveCtxCache =
+            crate::archive_ctx_loader::ArchiveCtxCache::new();
+        let t_pop = std::time::Instant::now();
+        CTX_CACHE.apply(archive, codegen.ctx_mut());
         tracing::debug!(
             target: "compile_ast_to_vbc",
-            "archive pre-population: {} fn entries, {} variant ctors",
-            ctx_stats.functions_registered,
-            ctx_stats.variant_ctors_resolved,
+            "archive pre-population (cached) in {:.2}ms",
+            t_pop.elapsed().as_secs_f64() * 1000.0,
         );
+        if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
+            eprintln!(
+                "[compile_ast_to_vbc] T1 cached apply: {:.2}ms",
+                t_pop.elapsed().as_secs_f64() * 1000.0
+            );
+        }
 
         // User module: protocols + declarations + bodies.  Stdlib
         // walking is gone entirely.
