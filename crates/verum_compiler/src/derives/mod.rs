@@ -50,6 +50,7 @@ pub mod default;
 pub mod deserialize;
 pub mod display;
 pub mod error;
+pub mod hash;
 pub mod partial_eq;
 pub mod serialize;
 pub mod shell_render;
@@ -72,6 +73,7 @@ pub use default::DeriveDefault;
 pub use deserialize::DeriveDeserialize;
 pub use display::DeriveDisplay;
 pub use error::DeriveError as DeriveErrorMacro;
+pub use hash::DeriveHash;
 pub use partial_eq::DerivePartialEq;
 pub use serialize::DeriveSerialize;
 pub use typed_row::DeriveTypedRow;
@@ -111,6 +113,9 @@ impl DeriveRegistry {
         // TypedRow — auto-generate `core.database.postgres.typed_row.TypedRow`
         // impl for record / newtype types.
         registry.register("TypedRow", Box::new(DeriveTypedRow));
+        // Hash — auto-generate `core.base.protocols.Hash` impl,
+        // closes the Eq+Hash pair (PartialEq exists since v0).
+        registry.register("Hash", Box::new(DeriveHash));
 
         registry
     }
@@ -306,6 +311,8 @@ mod tests {
         assert!(registry.get("Builder").is_some());
         // TypedRow derive for postgres typed-row protocol
         assert!(registry.get("TypedRow").is_some());
+        // Hash derive — completes the Eq+Hash pair
+        assert!(registry.get("Hash").is_some());
 
         // Unknown derives should return None
         assert!(registry.get("Unknown").is_none());
