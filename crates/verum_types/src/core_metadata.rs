@@ -7,6 +7,7 @@
 
 //! Stdlib type metadata definitions extracted from core .vr files during compilation pipeline.
 
+use serde::{Deserialize, Serialize};
 use verum_common::{List, Maybe, OrderedMap, Text};
 
 /// Metadata extracted from stdlib.vbc for type checking
@@ -20,7 +21,7 @@ use verum_common::{List, Maybe, OrderedMap, Text};
 /// deterministic iteration order. HashMap iteration order depends on the
 /// per-process random hash seed, causing non-deterministic type registration
 /// order and intermittent type resolution failures.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CoreMetadata {
     /// Type definitions (List<T>, Map<K,V>, Maybe<T>, etc.)
     ///
@@ -76,7 +77,7 @@ pub struct CoreMetadata {
 }
 
 /// Descriptor for a type definition in stdlib
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeDescriptor {
     /// Type name (e.g., "List", "Map", "Maybe")
     pub name: Text,
@@ -104,7 +105,7 @@ pub struct TypeDescriptor {
 }
 
 /// Generic parameter descriptor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericParam {
     /// Parameter name (e.g., "T", "K", "V")
     pub name: Text,
@@ -117,7 +118,7 @@ pub struct GenericParam {
 }
 
 /// Kind of type descriptor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeDescriptorKind {
     /// Record type (struct)
     Record { fields: List<FieldDescriptor> },
@@ -141,7 +142,7 @@ pub enum TypeDescriptorKind {
 }
 
 /// Field descriptor for record types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldDescriptor {
     pub name: Text,
     pub ty: Text,
@@ -149,14 +150,14 @@ pub struct FieldDescriptor {
 }
 
 /// Variant case descriptor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VariantCase {
     pub name: Text,
     pub payload: Maybe<VariantPayload>,
 }
 
 /// Variant payload type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VariantPayload {
     /// Tuple payload: Some(T)
     Tuple(List<Text>),
@@ -165,7 +166,7 @@ pub enum VariantPayload {
 }
 
 /// Associated type descriptor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssociatedTypeDescriptor {
     pub name: Text,
     pub bounds: List<Text>,
@@ -173,7 +174,7 @@ pub struct AssociatedTypeDescriptor {
 }
 
 /// Method signature descriptor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MethodSignature {
     pub name: Text,
     pub receiver: ReceiverKind,
@@ -184,7 +185,7 @@ pub struct MethodSignature {
 }
 
 /// Receiver kind for methods
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReceiverKind {
     None,
     SelfValue,
@@ -193,14 +194,14 @@ pub enum ReceiverKind {
 }
 
 /// Parameter descriptor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParamDescriptor {
     pub name: Text,
     pub ty: Text,
 }
 
 /// Protocol definition descriptor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtocolDescriptor {
     /// Protocol name
     pub name: Text,
@@ -225,7 +226,7 @@ pub struct ProtocolDescriptor {
 }
 
 /// Function definition descriptor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDescriptor {
     /// Function name
     pub name: Text,
@@ -256,7 +257,7 @@ pub struct FunctionDescriptor {
 }
 
 /// Implementation descriptor (impl Protocol for Type)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImplementationDescriptor {
     /// Protocol being implemented
     pub protocol: Text,
@@ -278,7 +279,7 @@ pub struct ImplementationDescriptor {
 }
 
 /// Pre-monomorphized type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonomorphizedType {
     /// Generic type name (e.g., "List")
     pub generic_name: Text,
