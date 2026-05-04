@@ -204,6 +204,13 @@ pub mod language_features;
 /// collection that walked 2400+ stdlib `.vr` files on every script
 /// invocation.
 pub mod archive_ctx_loader;
+/// T2-extended of single-path archive-driven epic — converts a
+/// precompiled stdlib `VbcArchive` into `verum_types::CoreMetadata`
+/// at PRECOMPILE time.  The resulting metadata is serialised to
+/// bincode and embedded next to `runtime.vbca`; runtime decodes
+/// once into `Arc<CoreMetadata>` and feeds the typecheck phase
+/// directly — no runtime AST walking, no source-driven fallback.
+pub mod archive_metadata;
 pub mod camg; // #103: Content-Addressed Module Graph — fundamental rewrite of module loading
 pub mod cfg_eval; // #106: pure cfg-predicate evaluation extracted from pipeline.rs
 pub mod compilation_metrics;
