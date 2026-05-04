@@ -1,0 +1,37 @@
+// =============================================================================
+// core/money/mod.vr — currency-aware monetary value
+// =============================================================================
+// Layer: 2 (Money)
+// =============================================================================
+//
+// `core.money` provides a `Money` type for financial applications,
+// built on the V0 numeric quartet (Decimal/BigInt/BigDecimal/Rational).
+//
+// Modules:
+//   * `currency` — Currency descriptor (ISO 4217 code + minor-units)
+//                  + ~25 predefined common currencies (USD, EUR,
+//                  JPY, BHD, ...).
+//   * `money`    — Money { amount: BigDecimal, currency: Currency }
+//                  with currency-correct arithmetic, fair split,
+//                  and cross-currency rejection at the type level.
+//
+// V0 OUT-of-scope (V1 follow-ups):
+//   * Currency conversion (depends on a rate-source abstraction).
+//   * Locale-aware formatting (current to_text emits ISO code only).
+//   * Runtime ISO 4217 lookup (currently const-only via predefined
+//     constructors).
+//
+// =============================================================================
+
+module core.money;
+
+public module currency;
+public module money;
+
+public mount .currency.{
+    Currency,
+    usd, eur, gbp, cad, aud, nzd, chf, cny, inr, brl, mxn, zar, sek, nok, dkk,
+    jpy, krw, vnd, clp, isk,
+    bhd, kwd, omr, jod, tnd,
+};
+public mount .money.{Money, MoneyError};

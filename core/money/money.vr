@@ -1,0 +1,351 @@
+// =============================================================================
+// core/money/money.vr — currency-aware monetary value (V0)
+// =============================================================================
+// Layer: 2 (Money)
+// =============================================================================
+//
+// `Money` pairs a `BigDecimal` amount with a `Currency` to enforce
+// currency-correct arithmetic.  The amount's scale is required to
+// match the currency's `minor_units` — e.g. USD amounts always carry
+// scale=2 (cents); JPY amounts always carry scale=0.  This invariant
+// is preserved by every arithmetic operation: scalar multiplication
+// rounds the result back to currency precision via the caller-
+// supplied `RoundingMode`; addition / subtraction preserve scale
+// because operands match.
+//
+// The library uses `BigDecimal` (not Decimal) for the amount so
+// large monetary values (billions × decimal cents) can't overflow
+// silently.  i64-fast-path users with small amounts can convert
+// down at the boundary via `BigDecimal.try_to_decimal`.
+//
+// Cross-currency arithmetic is REJECTED at the type level — any
+// `add` / `sub` / `compare` of operands with differing currencies
+// returns `MoneyError.CurrencyMismatch { left, right }`.  Currency
+// conversion is V1 (depends on a rate-source abstraction).
+//
+// V0 surface:
+//
+//   * Constructors: from_amount (validates scale matches currency),
+//                   from_minor_units (exact construction from
+//                   integer minor-unit count).
+//   * Predicates: is_zero / is_negative / is_positive / abs / neg.
+//   * Arithmetic: add / sub (currency must match), mul_scalar /
+//                 div_scalar (scalar BigDecimal × Money, with
+//                 caller-supplied RoundingMode for the precision-
+//                 normalisation step).
+//   * Distribution: split(n) — divide into N equal pieces with
+//                   fair remainder distribution (each of the first
+//                   `M % N` pieces gets one extra minor unit).
+//   * Comparison: compare (currency must match) → Result<Ordering,
+//                 MoneyError>.  Plus eq / lt / gt / le / ge with
+//                 the same currency-match contract.
+//   * Render: to_text — `"<amount> <CODE>"` (e.g. "12.34 USD",
+//             "100 JPY").
+// =============================================================================
+
+module core.money.money;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount collections.List;
+mount core.text.numeric.{
+    BigInt, BigDecimal, BigDecimalError,
+    RoundingMode, HalfEven,
+};
+mount core.money.currency.Currency;
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Currency-aware monetary value.  Invariants enforced at every
+/// public API entry:
+///   * `amount.scale == currency.minor_units` (e.g. USD amounts
+///     always carry scale=2 — `12.34` is stored as coefficient
+///     1234, scale 2).
+public type Money is {
+    amount: BigDecimal,
+    currency: Currency,
+};
+
+/// Errors surfaced by the Money API.
+public type MoneyError is
+      CurrencyMismatch { left: Text, right: Text }
+    | ScaleMismatch    { expected: Int, actual: Int }
+    | DivByZero
+    | InvalidSplit     { reason: Text }
+    | Underlying       { source: BigDecimalError };
+
+// =============================================================================
+// Constructors
+// =============================================================================
+
+implement Money {
+    /// Build a Money from a BigDecimal amount + Currency.  Validates
+    /// `amount.scale == currency.minor_units`.  Caller wanting
+    /// flexible scale-truncation should pre-process via `BigDecimal.
+    /// div_round` against `BigDecimal.one()` at `currency.minor_units`
+    /// precision.
+    public fn from_amount(amount: BigDecimal, currency: Currency)
+        -> Result<Money, MoneyError>
+    {
+        if amount.scale != currency.minor_units {
+            return Err(MoneyError.ScaleMismatch {
+                expected: currency.minor_units,
+                actual: amount.scale,
+            });
+        }
+        Ok(Money { amount: amount, currency: currency })
+    }
+
+    /// Build a Money from a count of minor units (cents for USD,
+    /// yen for JPY, fils for BHD, ...).  Always succeeds — the
+    /// minor-unit count IS the BigDecimal coefficient.
+    public fn from_minor_units(units: BigInt, currency: Currency) -> Money {
+        let amount = BigDecimal {
+            coefficient: units,
+            scale: currency.minor_units,
+        };
+        Money { amount: amount, currency: currency }
+    }
+
+    /// Zero amount in the given currency.
+    public fn zero(currency: Currency) -> Money {
+        Money.from_minor_units(BigInt.zero(), currency)
+    }
+
+    // -------------------------------------------------------------------------
+    // Predicates
+    // -------------------------------------------------------------------------
+
+    public fn is_zero(&self)     -> Bool { self.amount.is_zero() }
+    public fn is_negative(&self) -> Bool { self.amount.is_negative() }
+    public fn is_positive(&self) -> Bool { self.amount.is_positive() }
+
+    public fn abs(&self) -> Money {
+        Money { amount: self.amount.abs(), currency: clone_currency(&self.currency) }
+    }
+
+    public fn neg(&self) -> Money {
+        Money { amount: self.amount.neg(), currency: clone_currency(&self.currency) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Arithmetic
+    // -------------------------------------------------------------------------
+
+    /// Sum `self + other`.  Errors with `CurrencyMismatch` if
+    /// currencies differ.  No overflow (BigDecimal is unbounded);
+    /// scale stays = currency.minor_units because both operands
+    /// already match.
+    public fn add(&self, other: &Money) -> Result<Money, MoneyError> {
+        if !self.currency.eq(&other.currency) {
+            return Err(MoneyError.CurrencyMismatch {
+                left: self.currency.code.clone(),
+                right: other.currency.code.clone(),
+            });
+        }
+        match self.amount.add(&other.amount) {
+            Ok(sum) => Ok(Money { amount: sum, currency: clone_currency(&self.currency) }),
+            Err(e)  => Err(MoneyError.Underlying { source: e }),
+        }
+    }
+
+    /// Difference `self - other`.  Same currency-match contract as add.
+    public fn sub(&self, other: &Money) -> Result<Money, MoneyError> {
+        if !self.currency.eq(&other.currency) {
+            return Err(MoneyError.CurrencyMismatch {
+                left: self.currency.code.clone(),
+                right: other.currency.code.clone(),
+            });
+        }
+        match self.amount.sub(&other.amount) {
+            Ok(diff) => Ok(Money { amount: diff, currency: clone_currency(&self.currency) }),
+            Err(e)   => Err(MoneyError.Underlying { source: e }),
+        }
+    }
+
+    /// Multiply by a scalar (e.g. tax rate, percentage).  The raw
+    /// product's scale is `self.amount.scale + factor.scale`; we
+    /// round back to `currency.minor_units` via the caller's
+    /// `RoundingMode`.
+    public fn mul_scalar(
+        &self,
+        factor: &BigDecimal,
+        mode: RoundingMode,
+    ) -> Result<Money, MoneyError> {
+        let raw = match self.amount.mul(factor) {
+            Ok(p)  => p,
+            Err(e) => return Err(MoneyError.Underlying { source: e }),
+        };
+        let normalised = match round_to_currency_scale(&raw, &self.currency, mode) {
+            Ok(v)  => v,
+            Err(e) => return Err(e),
+        };
+        Ok(Money { amount: normalised, currency: clone_currency(&self.currency) })
+    }
+
+    /// Divide by a scalar.  Same precision-normalisation discipline
+    /// as mul_scalar — the BigDecimal `div` produces a result at the
+    /// requested precision (currency.minor_units), then we wrap
+    /// back as Money.
+    public fn div_scalar(
+        &self,
+        divisor: &BigDecimal,
+        mode: RoundingMode,
+    ) -> Result<Money, MoneyError> {
+        if divisor.is_zero() { return Err(MoneyError.DivByZero); }
+        let result = match self.amount.div(divisor, self.currency.minor_units, mode) {
+            Ok(q)  => q,
+            Err(e) => return Err(MoneyError.Underlying { source: e }),
+        };
+        Ok(Money { amount: result, currency: clone_currency(&self.currency) })
+    }
+
+    /// Split into `n` equal pieces with fair remainder distribution.
+    /// Algorithm:
+    ///   * Convert to integer minor units.
+    ///   * `base = total_minor / n`; `rem = total_minor % n`.
+    ///   * First `rem` pieces get `base + 1` minor units; remaining
+    ///     `n - rem` get `base`.  Each piece is exact (sum equals
+    ///     the original amount).
+    ///   * For negative amounts, the symmetric pattern: first `|rem|`
+    ///     pieces get `base - 1` (further from zero), rest get `base`.
+    ///
+    /// Errors if `n <= 0`.
+    public fn split(&self, n: Int) -> Result<List<Money>, MoneyError> {
+        if n <= 0 {
+            return Err(MoneyError.InvalidSplit {
+                reason: f"split count {n} must be positive",
+            });
+        }
+        let n_bi = BigInt.from_int(n);
+        let total_minor = clone_bigint(&self.amount.coefficient);
+        let (base, rem) = match total_minor.div_rem(&n_bi) {
+            Ok(t)  => t,
+            Err(_) => return Err(MoneyError.DivByZero),
+        };
+        // For negative remainders (negative dividend), magnitude of
+        // |rem| pieces should bump magnitude by one (away from zero).
+        let neg = total_minor.is_negative();
+        let abs_rem = rem.abs();
+        let bump = if neg {
+            BigInt.from_int(-1)  // bump away from zero ⇒ subtract 1
+        } else {
+            BigInt.one()         // bump up
+        };
+        let mut out: List<Money> = List.with_capacity(n);
+        let mut i: Int = 0;
+        let abs_rem_int = match abs_rem.to_int() {
+            Some(v) => v,
+            None    => return Err(MoneyError.InvalidSplit {
+                reason: "remainder magnitude exceeds i64 (defensive — n is i64)".clone(),
+            }),
+        };
+        while i < n {
+            let piece_minor = if i < abs_rem_int { base.add(&bump) } else { clone_bigint(&base) };
+            out.push(Money.from_minor_units(piece_minor, clone_currency(&self.currency)));
+            i = i + 1;
+        }
+        Ok(out)
+    }
+
+    // -------------------------------------------------------------------------
+    // Comparison
+    // -------------------------------------------------------------------------
+
+    /// Three-way comparison.  Errors with `CurrencyMismatch` if
+    /// currencies differ — comparing 100 USD against 100 JPY is
+    /// nonsensical without a conversion rate.
+    public fn compare(&self, other: &Money) -> Result<Ordering, MoneyError> {
+        if !self.currency.eq(&other.currency) {
+            return Err(MoneyError.CurrencyMismatch {
+                left: self.currency.code.clone(),
+                right: other.currency.code.clone(),
+            });
+        }
+        Ok(self.amount.compare(&other.amount))
+    }
+
+    public fn eq(&self, other: &Money) -> Result<Bool, MoneyError> {
+        Ok(matches_eq(self.compare(other)?))
+    }
+    public fn lt(&self, other: &Money) -> Result<Bool, MoneyError> {
+        Ok(matches_lt(self.compare(other)?))
+    }
+    public fn gt(&self, other: &Money) -> Result<Bool, MoneyError> {
+        Ok(matches_gt(self.compare(other)?))
+    }
+    public fn le(&self, other: &Money) -> Result<Bool, MoneyError> {
+        Ok(!matches_gt(self.compare(other)?))
+    }
+    public fn ge(&self, other: &Money) -> Result<Bool, MoneyError> {
+        Ok(!matches_lt(self.compare(other)?))
+    }
+
+    // -------------------------------------------------------------------------
+    // Render
+    // -------------------------------------------------------------------------
+
+    /// Render as `"<amount> <ISO_CODE>"` — e.g. "12.34 USD",
+    /// "100 JPY", "1.235 BHD", "-0.50 EUR".  Amount text is driven
+    /// by `BigDecimal.to_text` so trailing fractional zeros (per
+    /// currency.minor_units) are preserved.
+    public fn to_text(&self) -> Text {
+        let mut out = self.amount.to_text();
+        out = out + " ";
+        out = out + self.currency.code.clone();
+        out
+    }
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+/// Round a BigDecimal to the currency's minor-unit scale.  Uses the
+/// `BigDecimal.div(_, _, precision, mode)` machinery: divide by 1
+/// at the target precision, which forces the rounding policy to
+/// apply to the trailing digits.
+fn round_to_currency_scale(
+    value: &BigDecimal,
+    currency: &Currency,
+    mode: RoundingMode,
+) -> Result<BigDecimal, MoneyError> {
+    if value.scale == currency.minor_units {
+        return Ok(clone_bigdecimal(value));
+    }
+    let one = BigDecimal.one();
+    match value.div(&one, currency.minor_units, mode) {
+        Ok(v)  => Ok(v),
+        Err(e) => Err(MoneyError.Underlying { source: e }),
+    }
+}
+
+/// BigInt clone via to_text + parse_bigint round-trip.  Mirrors
+/// the helper in `bigdecimal.vr`.
+fn clone_bigint(b: &BigInt) -> BigInt {
+    let t = b.to_text();
+    match core.text.numeric.bigint.parse_bigint(&t) {
+        Ok(c)  => c,
+        Err(_) => BigInt.zero(),
+    }
+}
+
+/// BigDecimal clone — copy coefficient + scale.
+fn clone_bigdecimal(bd: &BigDecimal) -> BigDecimal {
+    BigDecimal {
+        coefficient: clone_bigint(&bd.coefficient),
+        scale: bd.scale,
+    }
+}
+
+/// Currency clone — Text is reference-counted so this is cheap.
+fn clone_currency(c: &Currency) -> Currency {
+    Currency { code: c.code.clone(), minor_units: c.minor_units }
+}
+
+fn matches_eq(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
+fn matches_lt(o: Ordering) -> Bool { match o { Less => true, _ => false } }
+fn matches_gt(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
