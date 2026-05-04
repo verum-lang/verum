@@ -182,6 +182,139 @@ fn check_constants() {
     assert(BIGINT_DIGITS_PER_CHUNK == 9);
 }
 
+fn check_bit_byte_length() {
+    assert(BigInt.zero().bit_length() == 0);
+    assert(BigInt.zero().byte_length() == 0);
+
+    // 1 → 1 bit, 1 byte.
+    assert(BigInt.one().bit_length() == 1);
+    assert(BigInt.one().byte_length() == 1);
+
+    // 255 → 8 bits, 1 byte.
+    assert(BigInt.from_int(255).bit_length() == 8);
+    assert(BigInt.from_int(255).byte_length() == 1);
+
+    // 256 → 9 bits, 2 bytes.
+    assert(BigInt.from_int(256).bit_length() == 9);
+    assert(BigInt.from_int(256).byte_length() == 2);
+
+    // 65535 → 16 bits, 2 bytes.
+    assert(BigInt.from_int(65535).bit_length() == 16);
+    assert(BigInt.from_int(65535).byte_length() == 2);
+}
+
+fn check_bytes_round_trip() -> Result<Bool, BigIntError> {
+    // Zero ⇒ empty bytes.
+    let zero = BigInt.zero();
+    let z_bytes: List<Byte> = match zero.to_be_bytes(None) {
+        Some(v) => v,
+        None    => return Err(BigIntError.ParseEmpty),
+    };
+    assert((z_bytes.len() as Int) == 0);
+
+    // Round-trip from empty bytes ⇒ zero.
+    let z_back = BigInt.from_be_bytes(&z_bytes);
+    assert(z_back.is_zero());
+
+    // 1 ⇒ [0x01].
+    let one_bytes = match BigInt.one().to_be_bytes(None) {
+        Some(v) => v,
+        None    => return Err(BigIntError.ParseEmpty),
+    };
+    assert((one_bytes.len() as Int) == 1);
+    assert(one_bytes[0] == 1);
+
+    // 256 ⇒ [0x01, 0x00].
+    let two56 = BigInt.from_int(256);
+    let bytes_256 = match two56.to_be_bytes(None) {
+        Some(v) => v,
+        None    => return Err(BigIntError.ParseEmpty),
+    };
+    assert((bytes_256.len() as Int) == 2);
+    assert(bytes_256[0] == 1);
+    assert(bytes_256[1] == 0);
+    let back_256 = BigInt.from_be_bytes(&bytes_256);
+    assert(back_256.eq(&two56));
+
+    // Large value: 0xCAFE_BABE = 3405691582.
+    let cafe = BigInt.from_int(3405691582);
+    let cafe_bytes = match cafe.to_be_bytes(None) {
+        Some(v) => v,
+        None    => return Err(BigIntError.ParseEmpty),
+    };
+    assert((cafe_bytes.len() as Int) == 4);
+    assert(cafe_bytes[0] == 0xCA);
+    assert(cafe_bytes[1] == 0xFE);
+    assert(cafe_bytes[2] == 0xBA);
+    assert(cafe_bytes[3] == 0xBE);
+    let cafe_back = BigInt.from_be_bytes(&cafe_bytes);
+    assert(cafe_back.eq(&cafe));
+
+    Ok(true)
+}
+
+fn check_bytes_padding() -> Result<Bool, BigIntError> {
+    // Pad 0x01 to 4 bytes ⇒ [0x00, 0x00, 0x00, 0x01].
+    let padded = match BigInt.one().to_be_bytes(Some(4)) {
+        Some(v) => v,
+        None    => return Err(BigIntError.ParseEmpty),
+    };
+    assert((padded.len() as Int) == 4);
+    assert(padded[0] == 0);
+    assert(padded[1] == 0);
+    assert(padded[2] == 0);
+    assert(padded[3] == 1);
+
+    // Length too small: 256 (needs 2 bytes) padded to 1 ⇒ None.
+    let too_small = match BigInt.from_int(256).to_be_bytes(Some(1)) {
+        Some(_) => false,
+        None    => true,
+    };
+    assert(too_small);
+
+    Ok(true)
+}
+
+fn check_bytes_le() -> Result<Bool, BigIntError> {
+    // 0xCAFE_BABE little-endian ⇒ [0xBE, 0xBA, 0xFE, 0xCA].
+    let cafe = BigInt.from_int(3405691582);
+    let le = match cafe.to_le_bytes(None) {
+        Some(v) => v,
+        None    => return Err(BigIntError.ParseEmpty),
+    };
+    assert((le.len() as Int) == 4);
+    assert(le[0] == 0xBE);
+    assert(le[1] == 0xBA);
+    assert(le[2] == 0xFE);
+    assert(le[3] == 0xCA);
+
+    let cafe_back = BigInt.from_bytes_le(&le);
+    assert(cafe_back.eq(&cafe));
+
+    Ok(true)
+}
+
+fn check_bytes_large() -> Result<Bool, BigIntError> {
+    // Value spanning multiple chunks: 10^20 + 1.
+    let huge = parse_bigint(&"100000000000000000001".clone())?;
+    let bytes_be = match huge.to_be_bytes(None) {
+        Some(v) => v,
+        None    => return Err(BigIntError.ParseEmpty),
+    };
+    let huge_back = BigInt.from_be_bytes(&bytes_be);
+    assert(huge_back.eq(&huge));
+
+    // Same via little-endian.
+    let bytes_le = match huge.to_le_bytes(None) {
+        Some(v) => v,
+        None    => return Err(BigIntError.ParseEmpty),
+    };
+    let huge_back_le = BigInt.from_bytes_le(&bytes_le);
+    assert(huge_back_le.eq(&huge));
+
+    Ok(true)
+}
+
 fn check_div_rem() -> Result<Bool, BigIntError> {
     // Single-chunk divisor path.  100 / 7 = 14 rem 2.
     let a = BigInt.from_int(100);
@@ -324,4 +457,9 @@ fn main() {
     check_div_by_zero();
     let _ = check_div_multi_chunk();
     let _ = check_karatsuba_threshold();
+    check_bit_byte_length();
+    let _ = check_bytes_round_trip();
+    let _ = check_bytes_padding();
+    let _ = check_bytes_le();
+    let _ = check_bytes_large();
 }

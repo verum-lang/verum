@@ -26,7 +26,7 @@ fn test_watch_like_shape() {
 
 // Config-hot-reload pattern: subscriber-fanout on configuration change.
 fn test_config_hot_reload_pattern() {
-    let (tx, rx) = broadcast_channel::<Text>(8);
+    let (tx, rx) = broadcast_channel<Text>(8);
     let _consumer_a = tx.subscribe();
     let _consumer_b = tx.subscribe();
     let _: Int = tx.receiver_count();   // 3 — initial rx + two subscribes

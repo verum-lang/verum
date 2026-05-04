@@ -26,7 +26,7 @@ fn typecheck_stream_poll_next<T>(
 
 // StreamExt auto-impls: .next() for manual iteration.
 async fn typecheck_stream_next() {
-    let (_tx, mut rx) = broadcast_channel::<Int>(8);
+    let (_tx, mut rx) = broadcast_channel<Int>(8);
     let _ = rx.next().await;
 }
 
@@ -34,7 +34,7 @@ async fn typecheck_stream_next() {
 async fn typecheck_cancellable_recv()
     -> Result<Result<Int, RecvError>, CancellationError>
 {
-    let (_tx, rx) = broadcast_channel::<Int>(4);
+    let (_tx, rx) = broadcast_channel<Int>(4);
     let source = CancellationTokenSource.new();
     let token = source.token();
     rx.recv_cancellable(&token).await
@@ -42,14 +42,14 @@ async fn typecheck_cancellable_recv()
 
 // Explicit BroadcastRecv future
 async fn typecheck_explicit_recv_future() -> Result<Int, RecvError> {
-    let (_tx, rx) = broadcast_channel::<Int>(4);
+    let (_tx, rx) = broadcast_channel<Int>(4);
     let _fut: BroadcastRecv<Int> = rx.recv();
     rx.recv().await
 }
 
 // Drop semantics: receiver decrement counts on drop.
 fn test_receiver_drop_shape() {
-    let (tx, rx) = broadcast_channel::<Int>(4);
+    let (tx, rx) = broadcast_channel<Int>(4);
     assert(tx.receiver_count() == 1, "initially 1 receiver");
     let _ = rx;
     // rx dropped — count decrements (async path; atomic decrement is eager).
@@ -57,7 +57,7 @@ fn test_receiver_drop_shape() {
 
 // Sender clone/drop — last drop closes channel.
 fn test_sender_lifecycle() {
-    let (tx, _rx) = broadcast_channel::<Int>(4);
+    let (tx, _rx) = broadcast_channel<Int>(4);
     let tx2 = tx.clone();
     assert(tx.sender_count() == 2, "2 senders after clone");
     let _ = tx2;

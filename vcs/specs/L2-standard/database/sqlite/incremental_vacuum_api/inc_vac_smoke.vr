@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.incremental_vacuum_api.step.{
-    Request, RqAll, RqAtMost,
+    IncrementalVacuumRequest, RqAll, RqAtMost,
     from_arg, target_page_count,
     IncrementalVacuumOutcome, OkReclaimed, ErrModeNotIncremental, ErrInTransaction, ErrCorrupt,
     outcome_name, is_ok, pages_reclaimed,
@@ -15,9 +15,9 @@ mount core.database.sqlite.native.incremental_vacuum_api.step.{
 mount base.{Bool, Int64};
 
 fn test_from_arg_branches() {
-    match from_arg0_i64   { RqAll       => {}, _ => assert(false) }
-    match from_arg-5_i64  { RqAll       => {}, _ => assert(false) }
-    match from_arg10_i64  {
+    match from_arg(0_i64)   { RqAll       => {}, _ => assert(false) }
+    match from_arg(-5_i64)  { RqAll       => {}, _ => assert(false) }
+    match from_arg(10_i64)  {
         RqAtMost(n) => assert_eq(n, 10 as Int64),
         _ => assert(false),
     }

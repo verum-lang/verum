@@ -10,7 +10,7 @@
 mount core.mesh.xds.{
     XdsError,
     TypeUrl, ResourceName, XdsNode, AdsConfig,
-    XdsListener, Cluster, RouteConfiguration, ClusterLoadAssignment, Resource,
+    XdsListener, Cluster, RouteConfiguration, ClusterLoadAssignment, XdsResource,
     AdsClient, XdsSubscription, DiscoveryResponse, DiscoveryDelta,
 };
 mount core.mesh.xds.types.{AdsAuth};

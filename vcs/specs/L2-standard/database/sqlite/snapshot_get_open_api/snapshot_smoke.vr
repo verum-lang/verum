@@ -9,7 +9,7 @@ mount core.database.sqlite.native.snapshot_get_open_api.snap.{
     WalSnapshot, new, schema_name, equal,
     CmpResult, CmLess, CmEqual, CmGreater, CmIncomparable,
     compare, cmp_to_int,
-    Op, OpGet, OpOpen, OpFree, OpCmp, OpRecover, op_name,
+    SnapshotOpenOp, OpGet, OpOpen, OpFree, OpCmp, OpRecover, op_name,
     SnapshotOpenOutcome, OkSnapshot, ErrNotWal, ErrNoTxn, ErrInUse, ErrCheckpointMoved,
     outcome_name, is_ok,
 };

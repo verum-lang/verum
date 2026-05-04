@@ -48,5 +48,5 @@ fn write_log<T>(value: T) using [Logger] -> Int {
 fn caller_missing_logger() -> Int {
     // This call should be rejected: write_log<Int> requires Logger,
     // but caller_missing_logger does not declare it.
-    write_log::<Int>(7)
+    write_log<Int>(7)
 }

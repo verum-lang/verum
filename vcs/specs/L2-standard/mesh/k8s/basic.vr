@@ -83,7 +83,7 @@ async fn typecheck_list_gateways(c: &KubeClient, opts: &ListOptions)
     -> Result<List<Gateway>, KubeError>
 {
     let ns = &"istio-system".into();
-    c.list::<Gateway>(
+    c.list<Gateway>(
         &"gateway.networking.k8s.io/v1".into(),
         &"gateways".into(),
         Some(ns),
@@ -93,7 +93,7 @@ async fn typecheck_list_gateways(c: &KubeClient, opts: &ListOptions)
 
 async fn typecheck_get_gateway(c: &KubeClient) -> Result<Gateway, KubeError> {
     let ns = &"istio-system".into();
-    c.get::<Gateway>(
+    c.get<Gateway>(
         &"gateway.networking.k8s.io/v1".into(),
         &"gateways".into(),
         Some(ns),
@@ -103,7 +103,7 @@ async fn typecheck_get_gateway(c: &KubeClient) -> Result<Gateway, KubeError> {
 
 async fn typecheck_patch_gateway(c: &KubeClient) -> Result<Gateway, KubeError> {
     let ns = &"istio-system".into();
-    c.patch::<Gateway>(
+    c.patch<Gateway>(
         &"gateway.networking.k8s.io/v1".into(),
         &"gateways".into(),
         Some(ns),
@@ -116,7 +116,7 @@ fn typecheck_watch_httproutes(c: &KubeClient, tok: &CancellationToken)
     -> WatchStream<HTTPRoute>
 {
     let ns = &"istio-system".into();
-    c.watch::<HTTPRoute>(
+    c.watch<HTTPRoute>(
         &"gateway.networking.k8s.io/v1".into(),
         &"httproutes".into(),
         Some(ns),

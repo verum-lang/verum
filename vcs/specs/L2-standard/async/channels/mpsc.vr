@@ -37,13 +37,13 @@ fn test_bounded_api() {
 }
 
 fn test_unbounded_alias() {
-    let (tx, rx) = unbounded_channel::<Text>();
+    let (tx, rx) = unbounded_channel<Text>();
     let _ = tx;
     let _ = rx;
 }
 
 fn test_bounded_alias() {
-    let (tx, rx) = bounded_channel::<Bool>(4);
+    let (tx, rx) = bounded_channel<Bool>(4);
     let _ = tx;
     let _ = rx;
 }

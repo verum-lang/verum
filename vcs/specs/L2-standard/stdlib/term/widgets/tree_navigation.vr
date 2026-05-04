@@ -17,23 +17,23 @@ fn node<T>(label: Text, children: List<TreeItem<T>>, data: T) -> TreeItem<T> {
 
 fn tree() -> List<TreeItem<Int>> {
     let mut inner = List.new();
-    inner.push(leaf::<Int>("child1", 11));
-    inner.push(leaf::<Int>("child2", 12));
+    inner.push(leaf<Int>("child1", 11));
+    inner.push(leaf<Int>("child2", 12));
     let mut root = List.new();
-    root.push(node::<Int>("A", inner, 1));
-    root.push(leaf::<Int>("B", 2));
+    root.push(node<Int>("A", inner, 1));
+    root.push(leaf<Int>("B", 2));
     root
 }
 
 fn test_leaf_has_no_children() {
-    let l = leaf::<Int>("x", 0);
+    let l = leaf<Int>("x", 0);
     assert(!l.has_children());
 }
 
 fn test_node_has_children() {
     let mut xs = List.new();
-    xs.push(leaf::<Int>("y", 1));
-    let n = node::<Int>("x", xs, 0);
+    xs.push(leaf<Int>("y", 1));
+    let n = node<Int>("x", xs, 0);
     assert(n.has_children());
 }
 

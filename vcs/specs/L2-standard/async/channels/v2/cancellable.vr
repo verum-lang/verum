@@ -17,7 +17,7 @@ mount core.async.cancellation.{
 
 // Shape: recv_cancellable resolves to Ok(Maybe<T>) or Err(CancellationError)
 async fn typecheck_recv_cancellable() -> Result<Maybe<Int>, CancellationError> {
-    let (_tx, mut rx) = bounded::<Int>(4);
+    let (_tx, mut rx) = bounded<Int>(4);
     let source = CancellationTokenSource.new();
     let token = source.token();
     rx.recv_cancellable(&token).await
@@ -25,7 +25,7 @@ async fn typecheck_recv_cancellable() -> Result<Maybe<Int>, CancellationError> {
 
 // Shape: send_cancellable resolves to Ok(()) or CancellableSendError<T>
 async fn typecheck_send_cancellable() -> Result<(), CancellableSendError<Int>> {
-    let (tx, _rx) = bounded::<Int>(4);
+    let (tx, _rx) = bounded<Int>(4);
     let source = CancellationTokenSource.new();
     let token = source.token();
     tx.send_cancellable(42, &token).await

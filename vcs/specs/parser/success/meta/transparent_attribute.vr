@@ -53,7 +53,7 @@ meta fn transparent_with_params(name: Ident, value: Int) -> TokenStream {
 // Transparent with generic parameters
 @transparent
 meta fn transparent_generic<T>() -> TokenStream {
-    quote { default::<T>() }
+    quote { default<T>() }
 }
 
 // =============================================================================
@@ -65,7 +65,7 @@ meta fn transparent_generic<T>() -> TokenStream {
 meta fn transparent_where<T>() -> TokenStream
     where T: Copy
 {
-    quote { copy::<T>() }
+    quote { copy<T>() }
 }
 
 // =============================================================================

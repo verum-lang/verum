@@ -9,14 +9,14 @@ module core.database.sqlite.native.pcache_methods.engine;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.pcache_methods.vtable.{
-    MethodSet, default_method_set, is_viable,
+    PcacheMethodSet, default_method_set, is_viable,
 };
 mount core.database.sqlite.native.pcache_methods.flags.{
     FetchDemand, FdNoAllocate, FdAllocateUnderLimit, FdAllocateAlways,
 };
 
 public type PCacheEngine is {
-    methods: MethodSet,
+    methods: PcacheMethodSet,
     installed: Bool,
     creates: Int64,
     fetches_allocated: Int64,
@@ -34,7 +34,7 @@ public fn new_engine() -> PCacheEngine {
 }
 
 implement PCacheEngine {
-    public fn install(&mut self, m: MethodSet) -> Bool {
+    public fn install(&mut self, m: PcacheMethodSet) -> Bool {
         if !is_viable(&m) { return false; }
         self.methods = m;
         self.installed = true;

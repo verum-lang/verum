@@ -20,7 +20,7 @@ async fn channel_as_async_iter() -> Maybe<Int> {
 
 // Concrete-type usage via BroadcastReceiver.
 async fn broadcast_as_async_iter() {
-    let (_tx, mut rx) = broadcast_channel::<Int>(8);
+    let (_tx, mut rx) = broadcast_channel<Int>(8);
     let _ = rx.next().await;
 }
 
