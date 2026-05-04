@@ -62,6 +62,8 @@ mount core.database.postgres.wire.codec.{
     PG_RANGE_FLAG_EMPTY, PG_RANGE_FLAG_LB_INC, PG_RANGE_FLAG_UB_INC,
     PG_RANGE_FLAG_LB_INF, PG_RANGE_FLAG_UB_INF,
     element_oid_for_array, range_element_oid,
+    PgComposite, PgCompositeField,
+    decode_composite as raw_decode_composite,
 };
 
 // =============================================================================
@@ -884,64 +886,48 @@ fn encode_composite(
 /// Decode a composite/record value from `slice`. Public so callers
 /// who know an "unknown" OID is actually a user-defined composite
 /// can dispatch it directly.
+///
+/// Composes the wire-level `decode_composite` from `core.database.
+/// postgres.wire.codec` (which handles the header + per-field length
+/// validation) with the per-field `decode_typed` dispatch.  Single-
+/// source-of-truth: any wire-format fix in `codec.vr` automatically
+/// reaches this path.  V0 caps composites at 4096 columns (a
+/// reasonable upper bound for typed-row use; raw `decode_composite`
+/// has no such cap for callers who manage their own dispatch).
 public fn decode_composite_at(
     slice: &ArenaSlice,
     arena: &SpindleArena,
 ) -> Result<TypedValue, DbError> {
-    let ncols = slice_i32_be_or_err(slice, 0, "composite.ncolumns")?;
-    if ncols < 0 || ncols > 4096 {
+    let raw = raw_decode_composite(slice)?;
+    let ncols = raw.field_count();
+    if ncols > 4096 {
         return Err(decode_fault(f"composite: ncolumns {ncols} out of range"));
     }
-    let mut off: Int = 4;
     let mut fields: List<TypedField> = List.with_capacity(ncols);
     let mut i: Int = 0;
     while i < ncols {
-        let oid = slice_i32_be_or_err(slice, off, "composite.field.oid")?;
-        off = off + 4;
-        let len = slice_i32_be_or_err(slice, off, "composite.field.len")?;
-        off = off + 4;
-        if len < 0 {
-            fields.push(TypedField { type_oid: oid, value: None });
-        } else {
-            let body = subslice_or_err(slice, off, len, "composite.field.body")?;
-            let v = decode_typed(oid, &body, arena)?;
-            fields.push(TypedField { type_oid: oid, value: Some(v) });
-            off = off + len;
-        }
+        let raw_field = &raw.fields[i];
+        let typed_field = match &raw_field.value {
+            None => TypedField { type_oid: raw_field.type_oid, value: None },
+            Some(body) => {
+                let v = decode_typed(raw_field.type_oid, body, arena)?;
+                TypedField { type_oid: raw_field.type_oid, value: Some(v) }
+            }
+        };
+        fields.push(typed_field);
         i = i + 1;
     }
     Ok(TvComposite(TypedComposite { fields: fields }))
 }
 
-fn slice_i32_be_or_err(slice: &ArenaSlice, off: Int, what: &str) -> Result<Int, DbError> {
-    if (slice.len < off + 4) {
-        return Err(decode_fault(f"{what} truncated"));
-    }
-    let p = slice.ptr + off;
-    let b0 = (load_byte(p)     & 0xFF) << 24;
-    let b1 = (load_byte(p + 1) & 0xFF) << 16;
-    let b2 = (load_byte(p + 2) & 0xFF) << 8;
-    let b3 = (load_byte(p + 3) & 0xFF);
-    let u = b0 | b1 | b2 | b3;
-    if (u & 0x80000000) != 0 {
-        Ok(u | (-1 ^ 0xFFFFFFFF))
-    } else {
-        Ok(u)
-    }
-}
-
-fn subslice_or_err(slice: &ArenaSlice, off: Int, n: Int, what: &str)
-    -> Result<ArenaSlice, DbError>
-{
-    if slice.len < off + n {
-        return Err(decode_fault(f"{what}: subslice out of range"));
-    }
-    Ok(ArenaSlice {
-        ptr: slice.ptr + off,
-        len: n,
-        generation: slice.generation,
-    })
-}
+// `slice_i32_be_or_err` and `subslice_or_err` were the inline wire-
+// walking helpers that `decode_composite_at` previously used.  After
+// the refactor that routes composite decoding through
+// `core.database.postgres.wire.codec.decode_composite` (single-source-
+// of-truth), both helpers are unused and have been removed.  If future
+// composite-shaped wire types need inline parsing, prefer adding the
+// helper to `codec.vr` so all dependents continue to share one
+// implementation.
 
 // =============================================================================
 // Range decoder — typed wrapper
