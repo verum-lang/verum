@@ -49,6 +49,12 @@
 // Core modules
 pub mod cache;
 pub mod error;
+/// Cross-run filesystem persistence for `MetaEvalCache` — Phase 9
+/// V0 of the precompiled-stdlib epic. Persists the primitive subset
+/// of `MetaValue` to `~/.verum/meta-cache/<compiler-version>/` so
+/// `@meta` / `@const` / `@derive` results survive across compiler
+/// runs.
+pub mod persistence;
 pub mod ir;
 pub mod metrics;
 pub mod reflection;
