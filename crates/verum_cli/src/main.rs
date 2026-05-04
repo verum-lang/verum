@@ -2708,6 +2708,55 @@ enum CogSub {
         #[clap(long)]
         verbose: bool,
     },
+
+    /// Verify a registry-distributed `.vbca` is byte-identical to
+    /// the output of locally precompiling its source (Phase 15 of
+    /// the precompiled-stdlib epic).  Detects registry tampering
+    /// and reproducibility regressions.
+    ///
+    /// Three modes:
+    ///
+    ///   1. Fully local: `--source-dir DIR --reference-vbca FILE`.
+    ///   2. Tarball-mode: `--source-tar PATH --reference-vbca FILE`.
+    ///   3. Remote: `<name>@<version> [--registry URL]` — fetch
+    ///      both the source tarball and reference VBCA from the
+    ///      registry, precompile locally, byte-compare.
+    Reproduce {
+        /// Cog spec `<name>@<version>`.  When set, missing source
+        /// or reference paths are fetched from the registry.
+        #[clap(value_name = "SPEC")]
+        spec: Option<String>,
+
+        /// Local pre-extracted source tree (must contain
+        /// `Verum.toml`).  Mutually exclusive with `--source-tar`.
+        #[clap(long, value_name = "DIR", conflicts_with = "source_tar")]
+        source_dir: Option<std::path::PathBuf>,
+
+        /// Local source tarball (`.tar.gz`) to extract before
+        /// precompiling.  Mutually exclusive with `--source-dir`.
+        #[clap(long, value_name = "TARBALL", conflicts_with = "source_dir")]
+        source_tar: Option<std::path::PathBuf>,
+
+        /// Reference `.vbca` archive to byte-compare against.
+        /// When omitted, falls through to the registry fetcher
+        /// using the spec.
+        #[clap(long, value_name = "FILE")]
+        reference_vbca: Option<std::path::PathBuf>,
+
+        /// Override the registry base URL (defaults to
+        /// `https://vcogs.io`).
+        #[clap(long, value_name = "URL")]
+        registry: Option<String>,
+
+        /// Keep the working directory after the check completes
+        /// (useful for post-mortem inspection).
+        #[clap(long)]
+        keep_workdir: bool,
+
+        /// Verbose progress output.
+        #[clap(long)]
+        verbose: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -4435,6 +4484,23 @@ fn run_command(cli: Cli) -> Result<()> {
                 target,
                 verbose,
             } => commands::cog_precompile::run(cog_dir, out, target, verbose),
+            CogSub::Reproduce {
+                spec,
+                source_dir,
+                source_tar,
+                reference_vbca,
+                registry,
+                keep_workdir,
+                verbose,
+            } => commands::cog_reproduce::run(
+                spec,
+                source_dir,
+                source_tar,
+                reference_vbca,
+                registry,
+                keep_workdir,
+                verbose,
+            ),
         },
 
         Commands::SmtInfo { json } => {
