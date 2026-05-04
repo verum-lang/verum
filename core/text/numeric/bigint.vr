@@ -149,6 +149,16 @@ implement BigInt {
         BigInt { sign: !self.sign, digits: clone_digits(&self.digits) }
     }
 
+    /// Parity check.  Since BIGINT_BASE = 10^9 is even, every chunk
+    /// at index ≥ 1 contributes an even value to the total — only
+    /// the LSB chunk's parity matters.  Zero is even.
+    public fn is_even(&self) -> Bool {
+        if self.is_zero() { return true; }
+        (self.digits[0] % 2) == 0
+    }
+
+    public fn is_odd(&self) -> Bool { !self.is_even() }
+
     // -------------------------------------------------------------------------
     // Arithmetic — add / sub / mul
     // -------------------------------------------------------------------------

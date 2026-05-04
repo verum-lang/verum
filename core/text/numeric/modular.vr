@@ -1,0 +1,337 @@
+// =============================================================================
+// core/text/numeric/modular.vr — modular arithmetic primitives (V0)
+// =============================================================================
+// Layer: 1 (Text — numeric subtree)
+// =============================================================================
+//
+// Number-theoretic primitives over BigInt.  Foundational building
+// blocks for cryptography (RSA-style modpow, modular inverse for
+// CRT recombination), constraint solving, hash-table parameter
+// generation, and any application doing math mod N for arbitrary N.
+//
+// V0 surface:
+//
+//   * `gcd(a, b)`              — greatest common divisor (Euclidean).
+//   * `lcm(a, b)`              — least common multiple via gcd.
+//   * `ext_gcd(a, b)`          — extended Euclidean: returns
+//                                (g, s, t) with a*s + b*t = g.
+//   * `mod_pow(base, exp, m)`  — `base^exp mod m` via square-and-
+//                                multiply.  Handles `exp = 0` (= 1
+//                                if m > 1, else 0) and zero base.
+//   * `mod_inverse(a, m)`      — multiplicative inverse via
+//                                extended Euclidean.  Errors with
+//                                NoInverse if gcd(a, m) ≠ 1.
+//   * `is_probable_prime(n,
+//                        witnesses)` — Miller-Rabin primality test
+//                                with caller-supplied witness list.
+//                                Deterministic (no random source);
+//                                caller picks witnesses appropriate
+//                                to their use case.  Returns
+//                                `true` iff `n` survives every
+//                                witness round.
+//
+// V0 OUT-of-scope (V1 follow-ups):
+//   * Random-witness Miller-Rabin (depends on crypto-grade RNG).
+//   * Tonelli-Shanks (modular square root).
+//   * Lucas / BPSW combined primality test.
+//   * Discrete logarithm.
+//   * Polynomial modular arithmetic.
+// =============================================================================
+
+module core.text.numeric.modular;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount collections.List;
+mount core.text.numeric.bigint.{BigInt, parse_bigint};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+/// Errors surfaced by the modular API.
+public type ModularError is
+      ZeroModulus
+    | NoInverse           { reason: Text }
+    | NegativeExponent    { reason: Text };
+
+// =============================================================================
+// GCD / LCM / Extended Euclidean
+// =============================================================================
+
+/// Greatest common divisor via Euclidean algorithm.  Result is
+/// always non-negative (sign of inputs is dropped via abs()).
+/// `gcd(0, b) = |b|`; `gcd(0, 0) = 0`.
+public fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
+    let mut x = a.abs();
+    let mut y = b.abs();
+    while !y.is_zero() {
+        let r = match x.rem(&y) {
+            Ok(v)  => v,
+            Err(_) => BigInt.zero(),  // unreachable — y != 0
+        };
+        x = y;
+        y = r.abs();  // BigInt.rem returns sign(self); we want |r|
+    }
+    x
+}
+
+/// Least common multiple via the identity `lcm(a, b) = |a*b| / gcd(a, b)`.
+/// Returns 0 if either operand is 0.  Result is always non-negative.
+public fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
+    if a.is_zero() || b.is_zero() { return BigInt.zero(); }
+    let g = gcd(a, b);
+    let prod = a.abs().mul(&b.abs());
+    match prod.div(&g) {
+        Ok(v)  => v,
+        Err(_) => BigInt.zero(),  // unreachable — g != 0 here
+    }
+}
+
+/// Extended Euclidean algorithm.  Returns `(g, s, t)` such that
+/// `a*s + b*t == g` where `g = gcd(|a|, |b|)`.  Used by
+/// `mod_inverse` for the modular multiplicative inverse.
+///
+/// Iterative form (avoids deep recursion on huge inputs).
+public fn ext_gcd(a: &BigInt, b: &BigInt) -> (BigInt, BigInt, BigInt) {
+    let mut old_r = clone_bigint(a);
+    let mut r     = clone_bigint(b);
+    let mut old_s = BigInt.one();
+    let mut s     = BigInt.zero();
+    let mut old_t = BigInt.zero();
+    let mut t     = BigInt.one();
+
+    while !r.is_zero() {
+        let q = match old_r.div(&r) {
+            Ok(v)  => v,
+            Err(_) => BigInt.zero(),
+        };
+        // (old_r, r) = (r, old_r - q*r)
+        let new_r = old_r.sub(&q.mul(&r));
+        old_r = r;
+        r = new_r;
+        // (old_s, s) = (s, old_s - q*s)
+        let new_s = old_s.sub(&q.mul(&s));
+        old_s = s;
+        s = new_s;
+        // (old_t, t) = (t, old_t - q*t)
+        let new_t = old_t.sub(&q.mul(&t));
+        old_t = t;
+        t = new_t;
+    }
+    (old_r, old_s, old_t)
+}
+
+// =============================================================================
+// Modular reduction helpers
+// =============================================================================
+
+/// `x mod m` with non-negative result (mathematical Euclidean
+/// modulus, not the truncated-towards-zero sign convention used
+/// by `BigInt.rem`).  Caller must pass `m > 0`.
+fn pos_mod(x: &BigInt, m: &BigInt) -> BigInt {
+    let r = match x.rem(m) {
+        Ok(v)  => v,
+        Err(_) => BigInt.zero(),
+    };
+    if r.is_negative() { r.add(m) } else { r }
+}
+
+// =============================================================================
+// Modular exponentiation
+// =============================================================================
+
+/// Compute `base^exp mod m` via square-and-multiply.
+///
+/// Special cases:
+///   * `m = 0`     ⇒ `ZeroModulus` error.
+///   * `m = 1`     ⇒ result is 0 (every value is congruent to 0 mod 1).
+///   * `exp < 0`   ⇒ `NegativeExponent` error.  Negative exponents
+///                   require modular inversion (`mod_inverse(base,
+///                   m)^|exp| mod m`); caller must do the
+///                   inversion explicitly to avoid silent failures
+///                   when `base` and `m` aren't coprime.
+///   * `exp = 0`   ⇒ result is 1 (mod m).
+///
+/// Square-and-multiply iterates over `exp`'s bits LSB-to-MSB:
+///   * If the bit is 1, multiply the running result by the current
+///     base accumulator (mod m).
+///   * Always square the base accumulator (mod m) for the next
+///     iteration.
+///   * Use BigInt's div/rem to halve `exp` per iteration (we don't
+///     have a bit-shift primitive in V0; div by 2 is equivalent).
+public fn mod_pow(
+    base: &BigInt,
+    exp: &BigInt,
+    m: &BigInt,
+) -> Result<BigInt, ModularError> {
+    if m.is_zero() { return Err(ModularError.ZeroModulus); }
+    if exp.is_negative() {
+        return Err(ModularError.NegativeExponent {
+            reason: "negative exponent requires explicit mod_inverse first".clone(),
+        });
+    }
+
+    let one = BigInt.one();
+    if m.eq(&one) { return Ok(BigInt.zero()); }
+
+    let two = BigInt.from_int(2);
+    let mut result = BigInt.one();
+    let mut base_acc = pos_mod(base, m);
+    let mut e = clone_bigint(exp);
+
+    while !e.is_zero() {
+        if e.is_odd() {
+            // result = (result * base_acc) mod m
+            let prod = result.mul(&base_acc);
+            result = pos_mod(&prod, m);
+        }
+        // base_acc = (base_acc * base_acc) mod m
+        let sq = base_acc.mul(&base_acc);
+        base_acc = pos_mod(&sq, m);
+        // e = e / 2  (effectively the bit-shift right step)
+        e = match e.div(&two) {
+            Ok(v)  => v,
+            Err(_) => BigInt.zero(),
+        };
+    }
+    Ok(result)
+}
+
+// =============================================================================
+// Modular multiplicative inverse
+// =============================================================================
+
+/// Compute `a^(-1) mod m` via extended Euclidean.  Returns the
+/// unique `x` in `[0, m)` such that `a*x ≡ 1 (mod m)`.
+///
+/// Errors:
+///   * `ZeroModulus` if `m = 0`.
+///   * `NoInverse` if `gcd(a, m) ≠ 1` — `a` and `m` must be
+///     coprime for the inverse to exist.
+public fn mod_inverse(a: &BigInt, m: &BigInt) -> Result<BigInt, ModularError> {
+    if m.is_zero() { return Err(ModularError.ZeroModulus); }
+    let one = BigInt.one();
+    if m.eq(&one) {
+        // Every value is congruent to 0 mod 1, and the inverse of
+        // anything is 0 (since 0*0 = 0 ≡ 1 mod 1).  Edge case but
+        // mathematically defined.
+        return Ok(BigInt.zero());
+    }
+
+    let a_reduced = pos_mod(a, m);
+    let (g, s, _t) = ext_gcd(&a_reduced, m);
+    if !g.eq(&one) {
+        return Err(ModularError.NoInverse {
+            reason: f"gcd({a_reduced.to_text()}, {m.to_text()}) = {g.to_text()} (must be 1)",
+        });
+    }
+    // Normalise s into [0, m).
+    Ok(pos_mod(&s, m))
+}
+
+// =============================================================================
+// Primality testing — Miller-Rabin
+// =============================================================================
+
+/// Miller-Rabin probabilistic primality test with CALLER-SUPPLIED
+/// witnesses.  Returns `true` iff `n` survives every witness round.
+///
+/// Witness selection:
+///   * For deterministic results below known thresholds, pick from
+///     the published witness sets.  E.g. witnesses {2, 3, 5, 7, 11,
+///     13, 17, 19, 23, 29, 31, 37} are deterministic for `n <
+///     3,317,044,064,679,887,385,961,981` (≈ 3.3 × 10^24).
+///   * For larger `n` or non-determinism-tolerant use cases, the
+///     caller should supply a longer list of random witnesses (V1
+///     adds an RNG-driven helper).
+///
+/// Returns `true` for `n ∈ {2, 3}` regardless of witnesses.
+/// Returns `false` for `n < 2`, even composites > 2, or if any
+/// witness rejects `n`.
+///
+/// The witness list MAY include values ≥ n (they're skipped — a
+/// witness must be in [2, n-2]).  Empty witness list returns
+/// `true` for n ≥ 2 (caller's choice; equivalent to "no test").
+public fn is_probable_prime(n: &BigInt, witnesses: &List<BigInt>) -> Bool {
+    let zero = BigInt.zero();
+    let one = BigInt.one();
+    let two = BigInt.from_int(2);
+    let three = BigInt.from_int(3);
+
+    if n.lt(&two) { return false; }
+    if n.eq(&two) || n.eq(&three) { return true; }
+    if n.is_even() { return false; }
+
+    // Write n-1 = 2^r * d with d odd.
+    let n_minus_one = n.sub(&one);
+    let mut d = clone_bigint(&n_minus_one);
+    let mut r: Int = 0;
+    while d.is_even() {
+        d = match d.div(&two) {
+            Ok(v)  => v,
+            Err(_) => zero.clone_via_text(),
+        };
+        r = r + 1;
+    }
+
+    let n_minus_two = n.sub(&two);
+
+    let nw = witnesses.len() as Int;
+    let mut wi: Int = 0;
+    while wi < nw {
+        let a = &witnesses[wi];
+        // Skip witnesses outside [2, n-2].
+        if a.lt(&two) || a.gt(&n_minus_two) {
+            wi = wi + 1;
+            continue;
+        }
+        // x = a^d mod n
+        let mut x = match mod_pow(a, &d, n) {
+            Ok(v)  => v,
+            Err(_) => return false,  // shouldn't happen — n > 1, d ≥ 0
+        };
+        if x.eq(&one) || x.eq(&n_minus_one) {
+            wi = wi + 1;
+            continue;
+        }
+
+        // Repeat r-1 times: x = x^2 mod n; if x == n-1, witness passes.
+        let mut composite = true;
+        let mut j: Int = 0;
+        while j < r - 1 {
+            let sq = x.mul(&x);
+            x = pos_mod(&sq, n);
+            if x.eq(&n_minus_one) {
+                composite = false;
+                break;
+            }
+            j = j + 1;
+        }
+        if composite { return false; }
+        wi = wi + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+fn clone_bigint(b: &BigInt) -> BigInt {
+    let t = b.to_text();
+    match parse_bigint(&t) {
+        Ok(c)  => c,
+        Err(_) => BigInt.zero(),
+    }
+}
+
+implement BigInt {
+    /// Inline clone helper (internal use within this module).
+    /// Mirrors `clone_bigint` but as a method so internal sites
+    /// can call `b.clone_via_text()` for readability.
+    fn clone_via_text(&self) -> BigInt {
+        clone_bigint(self)
+    }
+}

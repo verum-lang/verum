@@ -1,0 +1,178 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: text, numeric, modular, crypto, bigint
+// @timeout: 30000
+//
+// Type-check exercise for `core.text.numeric.modular` — the
+// number-theoretic primitives over BigInt.  Validates gcd / lcm /
+// ext_gcd / mod_pow / mod_inverse / is_probable_prime against
+// well-known small inputs whose answers are easy to verify.
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Bool};
+mount collections.List;
+mount core.text.numeric.{
+    BigInt, parse_bigint,
+    ModularError,
+    gcd, lcm, ext_gcd,
+    mod_pow, mod_inverse,
+    is_probable_prime,
+};
+
+fn check_gcd_lcm() {
+    // gcd(48, 18) = 6.
+    let g = gcd(&BigInt.from_int(48), &BigInt.from_int(18));
+    assert(g.eq(&BigInt.from_int(6)));
+
+    // gcd handles signs (returns positive).
+    let g_neg = gcd(&BigInt.from_int(-48), &BigInt.from_int(18));
+    assert(g_neg.eq(&BigInt.from_int(6)));
+
+    // gcd(0, b) = |b|.
+    let g0 = gcd(&BigInt.zero(), &BigInt.from_int(7));
+    assert(g0.eq(&BigInt.from_int(7)));
+
+    // gcd(0, 0) = 0.
+    let g00 = gcd(&BigInt.zero(), &BigInt.zero());
+    assert(g00.is_zero());
+
+    // lcm(4, 6) = 12.
+    let l = lcm(&BigInt.from_int(4), &BigInt.from_int(6));
+    assert(l.eq(&BigInt.from_int(12)));
+
+    // lcm(0, b) = 0.
+    let l0 = lcm(&BigInt.zero(), &BigInt.from_int(7));
+    assert(l0.is_zero());
+}
+
+fn check_ext_gcd() {
+    // ext_gcd(240, 46) = (2, -9, 47): 240*(-9) + 46*47 = -2160 + 2162 = 2.
+    let (g, s, t) = ext_gcd(&BigInt.from_int(240), &BigInt.from_int(46));
+    assert(g.eq(&BigInt.from_int(2)));
+    // Verify the Bezout identity: a*s + b*t = g.
+    let lhs = BigInt.from_int(240).mul(&s).add(&BigInt.from_int(46).mul(&t));
+    assert(lhs.eq(&g));
+}
+
+fn check_mod_pow() -> Result<Bool, ModularError> {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24.
+    let r1 = mod_pow(&BigInt.from_int(2), &BigInt.from_int(10), &BigInt.from_int(1000))?;
+    assert(r1.eq(&BigInt.from_int(24)));
+
+    // exp = 0: result is 1 (assuming m > 1).
+    let r2 = mod_pow(&BigInt.from_int(99), &BigInt.zero(), &BigInt.from_int(7))?;
+    assert(r2.eq(&BigInt.one()));
+
+    // m = 1: result is 0 (every value is 0 mod 1).
+    let r3 = mod_pow(&BigInt.from_int(7), &BigInt.from_int(3), &BigInt.one())?;
+    assert(r3.is_zero());
+
+    // m = 0: ZeroModulus.
+    let bad = match mod_pow(&BigInt.from_int(7), &BigInt.from_int(3), &BigInt.zero()) {
+        Err(ModularError.ZeroModulus) => true,
+        _ => false,
+    };
+    assert(bad);
+
+    // Negative exponent: NegativeExponent.
+    let neg_exp = match mod_pow(&BigInt.from_int(7), &BigInt.from_int(-1), &BigInt.from_int(11)) {
+        Err(ModularError.NegativeExponent { reason: _ }) => true,
+        _ => false,
+    };
+    assert(neg_exp);
+
+    // Larger exponent: 3^100 mod 7 — by Fermat (3^6 ≡ 1 mod 7),
+    // 3^100 = 3^(96+4) = (3^6)^16 * 3^4 ≡ 3^4 = 81 ≡ 4 (mod 7).
+    let r4 = mod_pow(&BigInt.from_int(3), &BigInt.from_int(100), &BigInt.from_int(7))?;
+    assert(r4.eq(&BigInt.from_int(4)));
+
+    Ok(true)
+}
+
+fn check_mod_inverse() -> Result<Bool, ModularError> {
+    // 3 * x ≡ 1 (mod 11) ⇒ x = 4 (since 3*4 = 12 ≡ 1 mod 11).
+    let inv = mod_inverse(&BigInt.from_int(3), &BigInt.from_int(11))?;
+    assert(inv.eq(&BigInt.from_int(4)));
+
+    // gcd(6, 9) = 3 ≠ 1 ⇒ no inverse.
+    let no_inv = match mod_inverse(&BigInt.from_int(6), &BigInt.from_int(9)) {
+        Err(ModularError.NoInverse { reason: _ }) => true,
+        _ => false,
+    };
+    assert(no_inv);
+
+    // m = 0: ZeroModulus.
+    let bad = match mod_inverse(&BigInt.from_int(3), &BigInt.zero()) {
+        Err(ModularError.ZeroModulus) => true,
+        _ => false,
+    };
+    assert(bad);
+
+    // Round-trip: a * mod_inverse(a, m) ≡ 1 (mod m).
+    let a = BigInt.from_int(7);
+    let m = BigInt.from_int(13);
+    let inv_a = mod_inverse(&a, &m)?;
+    let prod = a.mul(&inv_a);
+    let prod_mod_m = match prod.rem(&m) { Ok(v) => v, Err(_) => BigInt.zero() };
+    assert(prod_mod_m.eq(&BigInt.one()));
+
+    Ok(true)
+}
+
+fn check_primality() {
+    // Standard small-prime witness set (deterministic for n < 3.3e24).
+    let mut witnesses: List<BigInt> = List.new();
+    witnesses.push(BigInt.from_int(2));
+    witnesses.push(BigInt.from_int(3));
+    witnesses.push(BigInt.from_int(5));
+    witnesses.push(BigInt.from_int(7));
+    witnesses.push(BigInt.from_int(11));
+    witnesses.push(BigInt.from_int(13));
+    witnesses.push(BigInt.from_int(17));
+    witnesses.push(BigInt.from_int(19));
+    witnesses.push(BigInt.from_int(23));
+    witnesses.push(BigInt.from_int(29));
+    witnesses.push(BigInt.from_int(31));
+    witnesses.push(BigInt.from_int(37));
+
+    // Known primes.
+    assert(is_probable_prime(&BigInt.from_int(2), &witnesses));
+    assert(is_probable_prime(&BigInt.from_int(3), &witnesses));
+    assert(is_probable_prime(&BigInt.from_int(7), &witnesses));
+    assert(is_probable_prime(&BigInt.from_int(13), &witnesses));
+    assert(is_probable_prime(&BigInt.from_int(97), &witnesses));
+    assert(is_probable_prime(&BigInt.from_int(7919), &witnesses));   // 1000th prime
+
+    // Known composites.
+    assert(!is_probable_prime(&BigInt.from_int(0), &witnesses));
+    assert(!is_probable_prime(&BigInt.from_int(1), &witnesses));
+    assert(!is_probable_prime(&BigInt.from_int(4), &witnesses));
+    assert(!is_probable_prime(&BigInt.from_int(9), &witnesses));
+    assert(!is_probable_prime(&BigInt.from_int(15), &witnesses));
+    assert(!is_probable_prime(&BigInt.from_int(91), &witnesses));    // 7 × 13
+    assert(!is_probable_prime(&BigInt.from_int(7917), &witnesses));  // 3 × 2639
+
+    // Carmichael number 561 = 3 × 11 × 17 — fools naive Fermat
+    // tests but Miller-Rabin catches it.
+    assert(!is_probable_prime(&BigInt.from_int(561), &witnesses));
+}
+
+fn check_bigint_parity() {
+    assert(BigInt.zero().is_even());
+    assert(!BigInt.zero().is_odd());
+
+    assert(BigInt.from_int(2).is_even());
+    assert(BigInt.from_int(7).is_odd());
+    assert(BigInt.from_int(-4).is_even());
+    assert(BigInt.from_int(-5).is_odd());
+}
+
+fn main() {
+    check_gcd_lcm();
+    check_ext_gcd();
+    let _ = check_mod_pow();
+    let _ = check_mod_inverse();
+    check_primality();
+    check_bigint_parity();
+}
