@@ -1,0 +1,167 @@
+// =============================================================================
+// t30_composite_registry.vr — composite registry + named-field accessors
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.4 (typed wire / composite registry).
+// =============================================================================
+//
+// V0:
+//   1. CREATE TYPE smoke_named AS (n int4, s text, big int8).
+//   2. SELECT ROW(99, 'beta', 1234567890)::smoke_named.
+//   3. CompositeRegistry.register(schema for smoke_named — caller
+//      supplies field names + OIDs since V0 doesn't introspect
+//      pg_type yet).
+//   4. Use field_value_by_name(composite, schema, "n") /
+//      "s" / "big" to access values by name; assert each
+//      decodes to the expected TypedValue.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConnection, PgPreparedStatement, PgTypedQueryResult,
+    CompositeFieldDef, CompositeSchema, CompositeRegistry,
+    field_value_by_name, field_index_by_name,
+};
+mount core.database.postgres.wire.typed.{
+    TypedValue, TypedComposite,
+    TvNull, TvInt4, TvInt8, TvText, TvComposite,
+};
+mount core.database.postgres.wire.codec.{
+    PG_TYPE_INT4, PG_TYPE_INT8, PG_TYPE_TEXT, PG_TYPE_RECORD,
+};
+
+fn main() {
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Build the smoke_named composite type.
+    // -------------------------------------------------------------------------
+    let _ = conn.simple_query(&"DROP TYPE IF EXISTS smoke_named".clone());
+    expect_ok(
+        conn.simple_query(&
+            "CREATE TYPE smoke_named AS (n int4, s text, big int8)".clone()
+        ),
+        &"CREATE TYPE failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Cast to record so we hit the PG_TYPE_RECORD decode path —
+    // the user-defined OID would also work via decode_composite_at
+    // but record is simpler to test without pg_type lookup.
+    // -------------------------------------------------------------------------
+    let stmt = expect_ok(
+        conn.prepare(&
+            "SELECT ROW(99, 'beta', 1234567890::int8)::record AS r".clone()
+        ),
+        &"prepare failed".clone(),
+    );
+    let no_p: List<Maybe<TypedValue>> = List.new();
+    let result = expect_ok(
+        conn.execute_prepared_typed(&stmt, &no_p),
+        &"execute_prepared_typed failed".clone(),
+    );
+    expect_eq_int(result.rows.len() as Int, 1, &"row count".clone());
+
+    // Extract the composite value.
+    let composite: TypedComposite = match &result.rows[0][0] {
+        TvComposite(c) => c.clone(),
+        _ => {
+            expect(false, &"col not TvComposite".clone());
+            return;
+        }
+    };
+    expect_eq_int(composite.fields.len() as Int, 3,
+        &"composite arity".clone());
+
+    // -------------------------------------------------------------------------
+    // Build a registry + register the schema for ROW(int4, text, int8)
+    // using PG_TYPE_RECORD as the lookup key (anonymous record).
+    // -------------------------------------------------------------------------
+    let registry = CompositeRegistry.new();
+    registry.register(
+        CompositeSchema.new(PG_TYPE_RECORD, "smoke_named".clone())
+            .with_field("n".clone(),   PG_TYPE_INT4)
+            .with_field("s".clone(),   PG_TYPE_TEXT)
+            .with_field("big".clone(), PG_TYPE_INT8)
+    );
+
+    let schema = expect_ok(
+        registry.lookup_by_oid(PG_TYPE_RECORD).ok_or(
+            core.database.common.error.DbError.Adapter(
+                core.database.common.error.AdapterSpecific {
+                    adapter: core.database.common.error.AdPostgres,
+                    code: "TEST".clone(),
+                    message: "schema lookup failed".clone(),
+                    retryable: false,
+                }
+            )
+        ),
+        &"registry lookup".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Field-index probes.
+    // -------------------------------------------------------------------------
+    expect(
+        field_index_by_name(&schema, &"n".clone()).is_some(),
+        &"field n exists".clone(),
+    );
+    expect(
+        field_index_by_name(&schema, &"s".clone()).is_some(),
+        &"field s exists".clone(),
+    );
+    expect(
+        field_index_by_name(&schema, &"big".clone()).is_some(),
+        &"field big exists".clone(),
+    );
+    expect(
+        field_index_by_name(&schema, &"missing".clone()).is_none(),
+        &"missing field returns None".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Named-field value accessors.
+    // -------------------------------------------------------------------------
+    match field_value_by_name(&composite, &schema, &"n".clone()) {
+        Some(maybe_v) => {
+            match maybe_v {
+                Some(TvInt4(n)) => expect_eq_int(*n, 99,
+                    &"composite.n value".clone()),
+                _ => expect(false, &"composite.n not TvInt4(99)".clone()),
+            }
+        }
+        None => expect(false, &"composite.n lookup returned None".clone()),
+    }
+
+    match field_value_by_name(&composite, &schema, &"s".clone()) {
+        Some(maybe_v) => {
+            match maybe_v {
+                Some(TvText(s)) => expect_eq_int(s.len() as Int, 4,
+                    &"composite.s len".clone()),
+                _ => expect(false, &"composite.s not TvText".clone()),
+            }
+        }
+        None => expect(false, &"composite.s lookup returned None".clone()),
+    }
+
+    match field_value_by_name(&composite, &schema, &"big".clone()) {
+        Some(maybe_v) => {
+            match maybe_v {
+                Some(TvInt8(n)) => expect_eq_int(*n, 1234567890,
+                    &"composite.big value".clone()),
+                _ => expect(false, &"composite.big not TvInt8".clone()),
+            }
+        }
+        None => expect(false, &"composite.big lookup returned None".clone()),
+    }
+
+    let _ = conn.close_prepared(&stmt);
+    let _ = conn.simple_query(&"DROP TYPE IF EXISTS smoke_named".clone());
+
+    pass(&"t30_composite_registry".clone());
+}
