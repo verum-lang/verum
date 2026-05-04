@@ -66,6 +66,7 @@ public module async_pgoutput_typed;
 public module async_listener;
 public module composite_registry;
 public module composite_introspect;
+public module replication_tracker;
 public module typed_row;
 public module pg_stmt_cache;
 public module pg_prepared_session;
@@ -92,6 +93,13 @@ public mount .composite_registry.{
 };
 public mount .composite_introspect.{
     populate_from_pg_type, populate_from_pg_type_async,
+};
+public mount .replication_tracker.{
+    TrackedPosition, PositionStore, MemoryPositionStore,
+    StoreOutcome, SoStored, SoSkipped, SoFailed,
+    LsnTracker, LsnTrackerConfig,
+    attach_tracker, load_start_lsn,
+    DEFAULT_INTERVAL_MS as LSN_TRACKER_DEFAULT_INTERVAL_MS,
 };
 public mount .pg_stmt_cache.{
     PgStmtCache, PgCacheEntry, PgStmtCacheMetrics,
