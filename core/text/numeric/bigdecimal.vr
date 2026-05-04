@@ -1,0 +1,564 @@
+// =============================================================================
+// core/text/numeric/bigdecimal.vr — arbitrary-precision decimal (V0)
+// =============================================================================
+// Layer: 1 (Text — numeric subtree)
+// =============================================================================
+//
+// `BigDecimal` is the arbitrary-precision sibling of the V0 `Decimal`
+// type.  Same value semantics — `coefficient × 10^(-scale)` — but the
+// coefficient is `BigInt` instead of i64.  Use this when:
+//
+//   * You're building NUMERIC values that exceed i64 range (PG
+//     NUMERIC supports up to 131072 digits before the decimal point;
+//     MySQL DECIMAL supports up to 65 digits total).
+//   * You're doing precise arithmetic where intermediate values may
+//     overflow i64 even if the final result would fit (e.g. money ×
+//     percentage × inflator chains).
+//   * You want a single representation that handles both
+//     "small-magnitude fast path" and "arbitrary precision" without
+//     branching at every operation.
+//
+// `Decimal` (i64 coefficient) is preserved as a separate V0 type for
+// the common-case zero-allocation fast path.  Conversion methods on
+// both types let callers move freely between the two.
+//
+// V0 surface mirrors Decimal exactly:
+//   * Constructors: zero / one / from_int / from_bigint / from_decimal
+//                   / from_parts / parse_bigdecimal.
+//   * Predicates: is_zero / is_negative / is_positive / abs / neg.
+//   * Arithmetic: add / sub / mul (no overflow — BigInt is unbounded).
+//                 div (long-division on BigInt with explicit precision +
+//                 RoundingMode, mirroring Decimal.div).
+//   * Comparison: compare → Ordering + eq / lt / gt / le / ge.
+//   * Conversion: to_text (decimal text), try_to_decimal (Maybe<Decimal>
+//                 — Some if coefficient fits i64).
+//
+// Scale handling differs from Decimal in one important way: there's
+// NO cap on scale because BigInt can represent arbitrarily-large
+// scaled coefficients.  V0 does cap at `MAX_SCALE_BIG = 1024` to
+// prevent runaway memory growth from pathological multiplication
+// chains; this is generous (PG NUMERIC's max scale is 16383, but
+// real-world financial / scientific code rarely needs > 30).
+//
+// V0 OUT-of-scope (V1 follow-ups):
+//   * Square-root, transcendentals (need Newton-Raphson + extended
+//     precision discipline).
+//   * Mixed Decimal + BigDecimal arithmetic (callers convert
+//     manually via `BigDecimal.from_decimal`).
+// =============================================================================
+
+module core.text.numeric.bigdecimal;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount collections.List;
+mount core.text.numeric.bigint.{
+    BigInt, BigIntError,
+    BIGINT_BASE, BIGINT_DIGITS_PER_CHUNK,
+    parse_bigint,
+};
+mount core.text.numeric.decimal.{
+    Decimal,
+    RoundingMode, HalfEven, HalfUp, HalfDown, Truncate,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Generous upper bound on the fractional scale.  Beyond ~30 most
+/// real-world financial / scientific code is in the wrong domain;
+/// the cap exists primarily to bound memory growth from runaway
+/// multiplication chains (each `mul` sums scales).  Picked at 1024
+/// because that comfortably exceeds PG NUMERIC's documented working
+/// range (typically 6-30) while staying well below the hard
+/// pathological limit (16383).
+public const MAX_SCALE_BIG: Int = 1024;
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Arbitrary-precision decimal value.  Sibling of V0 `Decimal` —
+/// same `coefficient × 10^(-scale)` semantics, but the coefficient
+/// is `BigInt` (no i64 cap).  Sign embedded in the BigInt
+/// coefficient (BigInt's own canonical sign).
+public type BigDecimal is {
+    coefficient: BigInt,
+    scale: Int,
+};
+
+/// Errors surfaced by the BigDecimal API.
+public type BigDecimalError is
+      ParseEmpty
+    | ParseInvalidChar { byte_offset: Int, byte: Int }
+    | ParseInvalidShape { reason: Text }
+    | ScaleOutOfRange  { scale: Int }
+    | DivByZero;
+
+// =============================================================================
+// Constructors
+// =============================================================================
+
+implement BigDecimal {
+    /// The decimal value `0` (BigInt zero, scale 0).
+    public fn zero() -> BigDecimal {
+        BigDecimal { coefficient: BigInt.zero(), scale: 0 }
+    }
+
+    /// The decimal value `1`.
+    public fn one() -> BigDecimal {
+        BigDecimal { coefficient: BigInt.one(), scale: 0 }
+    }
+
+    /// Build from a plain Verum Int.  scale=0.
+    public fn from_int(n: Int) -> BigDecimal {
+        BigDecimal { coefficient: BigInt.from_int(n), scale: 0 }
+    }
+
+    /// Build from an existing BigInt.  scale=0.
+    public fn from_bigint(b: &BigInt) -> BigDecimal {
+        BigDecimal { coefficient: clone_bigint(b), scale: 0 }
+    }
+
+    /// Build from a V0 Decimal (i64-coefficient).  Always succeeds —
+    /// any Decimal value fits within BigDecimal trivially.
+    public fn from_decimal(d: &Decimal) -> BigDecimal {
+        BigDecimal {
+            coefficient: BigInt.from_int(d.coefficient),
+            scale: d.scale,
+        }
+    }
+
+    /// Build from explicit (coefficient, scale) parts.  Validates
+    /// `scale ∈ [0, MAX_SCALE_BIG]`.
+    public fn from_parts(coefficient: BigInt, scale: Int)
+        -> Result<BigDecimal, BigDecimalError>
+    {
+        if scale < 0 || scale > MAX_SCALE_BIG {
+            return Err(BigDecimalError.ScaleOutOfRange { scale: scale });
+        }
+        Ok(BigDecimal { coefficient: coefficient, scale: scale })
+    }
+
+    // -------------------------------------------------------------------------
+    // Predicates
+    // -------------------------------------------------------------------------
+
+    public fn is_zero(&self)     -> Bool { self.coefficient.is_zero() }
+    public fn is_negative(&self) -> Bool { self.coefficient.is_negative() }
+    public fn is_positive(&self) -> Bool { self.coefficient.is_positive() }
+
+    public fn abs(&self) -> BigDecimal {
+        BigDecimal { coefficient: self.coefficient.abs(), scale: self.scale }
+    }
+
+    public fn neg(&self) -> BigDecimal {
+        BigDecimal { coefficient: self.coefficient.neg(), scale: self.scale }
+    }
+
+    // -------------------------------------------------------------------------
+    // Arithmetic
+    // -------------------------------------------------------------------------
+
+    /// Sum `self + other`.  Aligns scales by multiplying the
+    /// smaller-scale operand's coefficient by 10^(scale_diff)
+    /// (computed via BigInt repeated multiplication — no i64
+    /// overflow risk since BigInt is unbounded).  Then BigInt-add.
+    public fn add(&self, other: &BigDecimal) -> Result<BigDecimal, BigDecimalError> {
+        let (a_coef, b_coef, scale) = align_scales(self, other);
+        Ok(BigDecimal { coefficient: a_coef.add(&b_coef), scale: scale })
+    }
+
+    public fn sub(&self, other: &BigDecimal) -> Result<BigDecimal, BigDecimalError> {
+        let (a_coef, b_coef, scale) = align_scales(self, other);
+        Ok(BigDecimal { coefficient: a_coef.sub(&b_coef), scale: scale })
+    }
+
+    /// Product `self * other`.  Coefficient = product of operand
+    /// coefficients (BigInt-mul, no overflow); scale = sum of
+    /// scales — capped at MAX_SCALE_BIG.
+    public fn mul(&self, other: &BigDecimal) -> Result<BigDecimal, BigDecimalError> {
+        let scale = self.scale + other.scale;
+        if scale > MAX_SCALE_BIG {
+            return Err(BigDecimalError.ScaleOutOfRange { scale: scale });
+        }
+        Ok(BigDecimal { coefficient: self.coefficient.mul(&other.coefficient), scale: scale })
+    }
+
+    /// Quotient `self / other` with caller-specified precision +
+    /// rounding mode.  Mirrors `Decimal.div` semantics exactly but
+    /// with BigInt arithmetic in the long-division loop.
+    ///
+    /// Algorithm:
+    ///   1. Validate divisor ≠ 0, precision ∈ [0, MAX_SCALE_BIG].
+    ///   2. Align scales so we're computing aligned_dividend /
+    ///      aligned_divisor (the common scale factor cancels).
+    ///   3. Multiply aligned dividend by 10^(precision + 1) to get
+    ///      one extra digit for rounding.
+    ///   4. BigInt.div_rem to extract quotient + remainder.
+    ///   5. Apply RoundingMode to the trailing digit (quot mod 10) +
+    ///      sticky bit (rem != 0).
+    ///   6. Return BigDecimal at scale=precision.
+    ///
+    /// Errors:
+    ///   * DivByZero          — divisor coefficient is zero.
+    ///   * ScaleOutOfRange    — precision outside [0, MAX_SCALE_BIG].
+    public fn div(
+        &self,
+        other: &BigDecimal,
+        precision: Int,
+        mode: RoundingMode,
+    ) -> Result<BigDecimal, BigDecimalError> {
+        if other.coefficient.is_zero() { return Err(BigDecimalError.DivByZero); }
+        if precision < 0 || precision > MAX_SCALE_BIG {
+            return Err(BigDecimalError.ScaleOutOfRange { scale: precision });
+        }
+
+        let (dividend, divisor, _common_scale) = align_scales(self, other);
+
+        // Multiply dividend by 10^(precision + 1) for the rounding bit.
+        let pow = bigint_pow10(precision + 1);
+        let scaled_dividend = dividend.mul(&pow);
+
+        // BigInt long division.
+        let (quot_full, rem) = match scaled_dividend.div_rem(&divisor) {
+            Ok(t)  => t,
+            Err(_) => return Err(BigDecimalError.DivByZero),
+        };
+
+        // Extract trailing digit + sticky bit, then drop the
+        // rounding digit by dividing by 10.
+        let ten = BigInt.from_int(10);
+        let (kept, round_digit_bi) = match quot_full.div_rem(&ten) {
+            Ok(t)  => t,
+            Err(_) => return Err(BigDecimalError.DivByZero),
+        };
+        let round_digit = match round_digit_bi.abs().to_int() {
+            Some(v) => v,
+            None    => 0,  // Shouldn't happen — round_digit fits in 0..=9
+        };
+        let sticky = !rem.is_zero();
+        let kept_is_neg = kept.is_negative();
+        let kept_abs = kept.abs();
+        let kept_last_digit_is_odd = match kept_abs.rem(&ten) {
+            Ok(d)  => match d.to_int() {
+                Some(v) => (v % 2) != 0,
+                None    => false,
+            },
+            Err(_) => false,
+        };
+
+        let bump_up = match mode {
+            HalfEven => {
+                if round_digit < 5 {
+                    false
+                } else if round_digit > 5 {
+                    true
+                } else if sticky {
+                    true
+                } else {
+                    kept_last_digit_is_odd
+                }
+            }
+            HalfUp => {
+                if round_digit < 5 { false } else { true }
+            }
+            HalfDown => {
+                if round_digit < 5 { false }
+                else if round_digit > 5 { true }
+                else { sticky }
+            }
+            Truncate => false,
+        };
+
+        // Apply bump.  For negative kept values, "bump up in
+        // magnitude" means "subtract one" (because kept is negative
+        // and we want |kept| → |kept|+1).
+        let final_coef = if !bump_up {
+            kept
+        } else if kept_is_neg {
+            kept.sub(&BigInt.one())
+        } else {
+            kept.add(&BigInt.one())
+        };
+
+        Ok(BigDecimal { coefficient: final_coef, scale: precision })
+    }
+
+    /// Convenience: divide with default banker's rounding (HalfEven).
+    public fn div_round(&self, other: &BigDecimal, precision: Int)
+        -> Result<BigDecimal, BigDecimalError>
+    {
+        self.div(other, precision, HalfEven)
+    }
+
+    /// Integer quotient (truncated towards zero, scale=0).
+    public fn div_trunc(&self, other: &BigDecimal) -> Result<BigDecimal, BigDecimalError> {
+        self.div(other, 0, Truncate)
+    }
+
+    // -------------------------------------------------------------------------
+    // Comparison
+    // -------------------------------------------------------------------------
+
+    public fn compare(&self, other: &BigDecimal) -> Ordering {
+        // Sign-fast-path: differing signs always order unambiguously.
+        if self.is_zero() && other.is_zero() { return Equal; }
+        if !self.coefficient.is_negative() && other.coefficient.is_negative() { return Greater; }
+        if self.coefficient.is_negative() && !other.coefficient.is_negative() { return Less; }
+
+        // Same sign: align scales and compare aligned coefficients.
+        let (a, b, _) = align_scales(self, other);
+        a.compare(&b)
+    }
+
+    public fn eq(&self, other: &BigDecimal) -> Bool { matches_eq(self.compare(other)) }
+    public fn lt(&self, other: &BigDecimal) -> Bool { matches_lt(self.compare(other)) }
+    public fn gt(&self, other: &BigDecimal) -> Bool { matches_gt(self.compare(other)) }
+    public fn le(&self, other: &BigDecimal) -> Bool { !matches_gt(self.compare(other)) }
+    public fn ge(&self, other: &BigDecimal) -> Bool { !matches_lt(self.compare(other)) }
+
+    // -------------------------------------------------------------------------
+    // Render
+    // -------------------------------------------------------------------------
+
+    /// Render as decimal text.  Same shape as `Decimal.to_text` but
+    /// driven by the BigInt coefficient digit text.
+    public fn to_text(&self) -> Text {
+        if self.coefficient.is_zero() {
+            if self.scale <= 0 { return "0".clone(); }
+            let mut s = "0.".clone();
+            let mut k = 0;
+            while k < self.scale {
+                s = s + "0";
+                k = k + 1;
+            }
+            return s;
+        }
+
+        let neg = self.coefficient.is_negative();
+        let abs_text = self.coefficient.abs().to_text();
+        let abs_bytes = abs_text.as_bytes();
+        let total_len = abs_bytes.len() as Int;
+
+        let mut out: Text = if neg { "-".clone() } else { "".clone() };
+
+        if self.scale == 0 {
+            out = out + abs_text;
+            return out;
+        }
+
+        if self.scale >= total_len {
+            // Pure-fractional value — emit "0." + leading zeros + digits.
+            out = out + "0.";
+            let mut pad = self.scale - total_len;
+            while pad > 0 {
+                out = out + "0";
+                pad = pad - 1;
+            }
+            out = out + abs_text;
+            return out;
+        }
+
+        // Mixed integer + fractional: split at total_len - scale.
+        let split = total_len - self.scale;
+        let int_part = bytes_subslice(&abs_bytes, 0, split);
+        let frac_part = bytes_subslice(&abs_bytes, split, total_len);
+        out = out + Text.from_bytes(&int_part).unwrap_or("".clone());
+        out = out + ".";
+        out = out + Text.from_bytes(&frac_part).unwrap_or("".clone());
+        out
+    }
+
+    /// Try to convert into a V0 `Decimal` (i64 coefficient).  Returns
+    /// `None` if the coefficient exceeds i64 range; `Some(d)` otherwise.
+    /// Useful for hot-path callers that optimistically expect the
+    /// result of arbitrary-precision arithmetic to fit i64.
+    public fn try_to_decimal(&self) -> Maybe<Decimal> {
+        match self.coefficient.to_int() {
+            Some(c) => Some(Decimal { coefficient: c, scale: self.scale }),
+            None    => None,
+        }
+    }
+}
+
+// =============================================================================
+// Parsing
+// =============================================================================
+
+/// Parse a decimal-text representation into a BigDecimal.  Same
+/// grammar as `parse_decimal`:
+///   * Optional whitespace + sign + integer digits + optional dot
+///     + fractional digits + trailing whitespace.
+///   * No scientific notation in V0 (rejected with ParseInvalidShape).
+///
+/// Errors mirror `BigDecimalError`.  No coefficient overflow possible
+/// (BigInt is unbounded), but ScaleOutOfRange fires if fractional
+/// digits exceed MAX_SCALE_BIG.
+public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
+    let bytes = text.as_bytes();
+    let n = bytes.len() as Int;
+    let mut i: Int = 0;
+
+    // Skip leading whitespace.
+    while i < n {
+        let b = bytes[i] as Int;
+        if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+            i = i + 1;
+        } else {
+            break;
+        }
+    }
+    if i >= n { return Err(BigDecimalError.ParseEmpty); }
+
+    // Optional sign.
+    let mut neg = false;
+    let first = bytes[i] as Int;
+    if first == ('+' as Int) {
+        i = i + 1;
+    } else if first == ('-' as Int) {
+        neg = true;
+        i = i + 1;
+    }
+    if i >= n {
+        return Err(BigDecimalError.ParseInvalidShape {
+            reason: "lone sign with no digits".clone(),
+        });
+    }
+
+    // Walk digits + optional decimal point.  Build a single digit
+    // string (sign-stripped) and track frac_count.
+    let mut digit_run: List<Byte> = List.new();
+    let mut frac_count: Int = 0;
+    let mut saw_dot = false;
+    let mut saw_digit = false;
+    while i < n {
+        let b = bytes[i] as Int;
+        if b >= ('0' as Int) && b <= ('9' as Int) {
+            digit_run.push(bytes[i]);
+            if saw_dot { frac_count = frac_count + 1; }
+            saw_digit = true;
+            i = i + 1;
+        } else if b == ('.' as Int) {
+            if saw_dot {
+                return Err(BigDecimalError.ParseInvalidShape {
+                    reason: "multiple decimal points".clone(),
+                });
+            }
+            saw_dot = true;
+            i = i + 1;
+        } else if b == ('e' as Int) || b == ('E' as Int) {
+            return Err(BigDecimalError.ParseInvalidShape {
+                reason: "scientific notation (e/E) not supported in V0".clone(),
+            });
+        } else if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+            // Trailing whitespace OK; non-whitespace after digits is invalid.
+            i = i + 1;
+            while i < n {
+                let bb = bytes[i] as Int;
+                if bb == 0x20 || bb == 0x09 || bb == 0x0A || bb == 0x0D {
+                    i = i + 1;
+                } else {
+                    return Err(BigDecimalError.ParseInvalidChar {
+                        byte_offset: i, byte: bb,
+                    });
+                }
+            }
+            break;
+        } else {
+            return Err(BigDecimalError.ParseInvalidChar {
+                byte_offset: i, byte: b,
+            });
+        }
+    }
+
+    if !saw_digit {
+        return Err(BigDecimalError.ParseInvalidShape {
+            reason: "no digits".clone(),
+        });
+    }
+    if frac_count > MAX_SCALE_BIG {
+        return Err(BigDecimalError.ScaleOutOfRange { scale: frac_count });
+    }
+
+    // Build the coefficient by re-stitching digit_run as a
+    // (signed) BigInt text and parsing.
+    let mut coef_text: Text = if neg { "-".clone() } else { "".clone() };
+    coef_text = coef_text + Text.from_bytes(&digit_run).unwrap_or("".clone());
+    let coef = match parse_bigint(&coef_text) {
+        Ok(b)  => b,
+        Err(_) => {
+            return Err(BigDecimalError.ParseInvalidShape {
+                reason: "digit run failed BigInt parse (defensive)".clone(),
+            });
+        }
+    };
+
+    Ok(BigDecimal { coefficient: coef, scale: frac_count })
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+/// Align two BigDecimals to a common scale (the larger of the two).
+/// Returns `(a_coef_aligned, b_coef_aligned, common_scale)`.  No
+/// overflow possible — BigInt arithmetic is unbounded.
+fn align_scales(a: &BigDecimal, b: &BigDecimal) -> (BigInt, BigInt, Int) {
+    if a.scale == b.scale {
+        return (clone_bigint(&a.coefficient), clone_bigint(&b.coefficient), a.scale);
+    }
+    if a.scale < b.scale {
+        let diff = b.scale - a.scale;
+        let mult = bigint_pow10(diff);
+        (a.coefficient.mul(&mult), clone_bigint(&b.coefficient), b.scale)
+    } else {
+        let diff = a.scale - b.scale;
+        let mult = bigint_pow10(diff);
+        (clone_bigint(&a.coefficient), b.coefficient.mul(&mult), a.scale)
+    }
+}
+
+/// `10^k` as a BigInt.  Caller must ensure `k >= 0`.  Implemented
+/// via repeated mul-by-10 — efficient enough for typical scale
+/// alignment (k typically < 30).
+fn bigint_pow10(k: Int) -> BigInt {
+    if k <= 0 { return BigInt.one(); }
+    let ten = BigInt.from_int(10);
+    let mut acc = BigInt.one();
+    let mut i: Int = 0;
+    while i < k {
+        acc = acc.mul(&ten);
+        i = i + 1;
+    }
+    acc
+}
+
+fn clone_bigint(b: &BigInt) -> BigInt {
+    // Round-trip through to_text + parse_bigint is the cleanest
+    // currently-available clone — BigInt doesn't expose a direct
+    // Clone protocol surface yet (V1: derive Clone).
+    let t = b.to_text();
+    match parse_bigint(&t) {
+        Ok(c)  => c,
+        Err(_) => BigInt.zero(),  // unreachable for well-formed BigInts
+    }
+}
+
+fn matches_eq(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
+fn matches_lt(o: Ordering) -> Bool { match o { Less => true, _ => false } }
+fn matches_gt(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
+
+/// Borrowed sub-slice [start, end) of a List<Byte>.  Mirrors the
+/// helper in `decimal.vr`.
+fn bytes_subslice(src: &List<Byte>, start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(end - start);
+    let mut i = start;
+    while i < end && i < (src.len() as Int) {
+        out.push(src[i]);
+        i = i + 1;
+    }
+    out
+}
