@@ -510,4 +510,43 @@ mod tests {
             index.len()
         );
     }
+
+    #[test]
+    fn collections_user_pulls_security_via_bloom() {
+        // Reproduces the failure mode that #119 strict-codegen audit
+        // surfaced for the canonical `audit_v3.vr` user file:
+        //
+        //  user mounts `core.collections.{Map, ...}`
+        //  → prelude/transitive walk pulls in `core.collections.bloom`
+        //  → bloom mounts `core.security.util.rng.{fill_secure}`
+        //  → rng MUST be reachable, otherwise BloomFilter.try_new
+        //    bug-class lenient-skips on `undefined function: fill_secure`.
+        //
+        // This is exactly the chain that fails in production right now.
+        let Some(_) = crate::stdlib_dep_graph::get_dep_graph() else {
+            return;
+        };
+        let m = user_module_with_mounts(vec![mount_decl(MountTreeKind::Nested {
+            prefix: path(&["core", "collections"]),
+            trees: vec![
+                MountTree {
+                    kind: MountTreeKind::Path(path(&["Map"])),
+                    alias: Maybe::None,
+                    span: dummy_span(),
+                },
+            ]
+            .into_iter()
+            .collect(),
+        })]);
+        let reachable = compute_reachable_stdlib_modules(&m).unwrap();
+        assert!(
+            reachable.contains("core.collections.bloom"),
+            "should include bloom (re-exported by collections/mod.vr)"
+        );
+        assert!(
+            reachable.contains("core.security.util.rng"),
+            "should include rng (mounted by bloom.vr) — \
+             missing this is what #119 strict-codegen audit currently bumps into"
+        );
+    }
 }

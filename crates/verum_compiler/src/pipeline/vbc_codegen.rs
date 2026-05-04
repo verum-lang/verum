@@ -1295,13 +1295,42 @@ impl<'s> CompilationPipeline<'s> {
             })
         };
 
+        // #117 — augment the user-mount-prefix retention with the
+        // *transitive-mount* reachability set computed by the stdlib
+        // dep graph. Without this, a stdlib module M2 that's mounted
+        // *indirectly* (via M1's `mount …M2` body, where the user
+        // only writes `mount …M1` themselves) gets pruned even though
+        // M1's compiled body references M2's symbols. The downstream
+        // symptom is `[lenient] SKIP method.X (bug-class): undefined
+        // function: <symbol>` for every M2 symbol M1 calls.
+        //
+        // The original failure shape that motivated this: user mounts
+        // `core.collections.{Map}` → `core.collections.bloom` is
+        // re-exported by `collections/mod.vr` and pulled into the
+        // compile set → bloom.vr's body mounts
+        // `core.security.util.rng.{fill_secure}` → rng was NOT in
+        // user_mount_prefixes (no user wrote `core.security`) so
+        // `clear_non_compilable_stdlib_modules` dropped its AST →
+        // BloomFilter.try_new lenient-SKIPs on every audit.
+        //
+        // The dep-graph reachability set already follows every
+        // transitive `mount` edge (#109's foundation). Use it as a
+        // SECOND retention oracle, unioned with the user-prefix one
+        // so we never prune a module the user transitively needs.
+        let reachable_stdlib: Option<std::collections::HashSet<String>> =
+            user_module.and_then(crate::stdlib_reachability::compute_reachable_stdlib_modules);
+
         let total_before = self.modules.len();
         let retained: Map<Text, Arc<Module>> = self
             .modules
             .drain()
             .filter(|(path, _module)| {
                 let p = path.as_str();
-                ALWAYS_INCLUDE.contains(&p) || retains_user_path(p)
+                ALWAYS_INCLUDE.contains(&p)
+                    || retains_user_path(p)
+                    || reachable_stdlib
+                        .as_ref()
+                        .is_some_and(|set| set.contains(p))
             })
             .collect();
 
