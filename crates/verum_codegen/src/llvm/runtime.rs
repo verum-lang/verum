@@ -4658,50 +4658,26 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // Format / Conversion LLVM IR Functions
     // =========================================================================
     //
+    // Libc-free format/conversion bridges. The whole AOT formatting +
+    // parsing surface is open-coded via the `verum_internal_*` family
+    // — see `instruction.rs::get_or_declare_internal_*`. These bridges
+    // forward through to the body emitters so callers in runtime.rs
+    // resolve to the libc-free wrappers without going through libc
+    // `snprintf` / `strtol` / `strtod`. Closes T-DEFER-AOT-NO-LIBC.
 
-    // These replace C runtime format/conversion stubs with LLVM IR that calls
-    // libc snprintf/strtol/strtod directly. They serve as fallback when
-    // compiled text.vr (Text.from_int, Text.from_float, Text.to_int, Text.to_float)
-    // is not available.
-
-    /// Get or declare snprintf(buf: ptr, size: i64, fmt: ptr, ...) -> i32
-    fn get_or_declare_snprintf(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("snprintf") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let i64_type = self.context.i64_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[ptr_type.into(), i64_type.into(), ptr_type.into()], true);
-        module.add_function("snprintf", fn_type, None)
-    }
-
-    /// Get or declare strtol(str: ptr, endptr: ptr, base: i32) -> i64
-    /// Forward-declare `verum_internal_strtol` (defined in
-    /// `instruction.rs::get_or_declare_internal_strtol`) so callers
-    /// in runtime.rs can resolve the libc-free wrapper. Same
-    /// signature as libc strtol — `(ptr, ptr, i32) -> i64`.
+    /// Materialize `verum_internal_strtol` (libc-free open-coded
+    /// strtol replacement) via `instruction.rs::
+    /// get_or_declare_internal_strtol`. Same bridge pattern as the
+    /// i64-to-decimal, strtod, and f64-to-decimal bridges — emits
+    /// FULL body on first call; idempotent thereafter. Pre-fix this
+    /// site only declared the wrapper bodyless and hoped some other
+    /// emit path would fill it — which it didn't for programs that
+    /// trigger `verum_text_parse_int` without also tripping the VBC
+    /// instruction-lowering path that calls into instruction.rs.
+    /// Result was a silent zero-returning stub via the bodyless-decl
+    /// synthesiser. Mirror of the strlen "adopt-and-emit" fix.
     fn get_or_declare_strtol(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        let name = "verum_internal_strtol";
-        if let Some(f) = module.get_function(name) {
-            return f;
-        }
-        let i64_type = self.context.i64_type();
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into(), i32_type.into()], false);
-        module.add_function(name, fn_type, None)
-    }
-
-    /// Get or declare strtod(str: ptr, endptr: ptr) -> f64
-    fn get_or_declare_strtod(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("strtod") {
-            return f;
-        }
-        let f64_type = self.context.f64_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = f64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-        module.add_function("strtod", fn_type, None)
+        super::instruction::get_or_declare_internal_strtol(self.context, module)
     }
 
     /// verum_int_to_text(value: i64) -> i64 (returns Text object pointer as i64)
