@@ -1,0 +1,365 @@
+// =============================================================================
+// core/database/mysql/decimal_codec.vr — MySQL DECIMAL binary codec
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: MySQL src/strings/decimal.c (canonical reference for the
+//       packed-decimal wire format).
+// =============================================================================
+//
+// MySQL's binary DECIMAL format is base-10^9 — each 4-byte big-endian
+// chunk holds 9 decimal digits.  The integer part splits into
+//
+//     leading_partial_group of (precision - scale) % 9 digits,
+//     N_int = (precision - scale) / 9 full 9-digit groups (4 bytes each).
+//
+// The fractional part splits into
+//
+//     N_frac = scale / 9 full 9-digit groups (4 bytes each),
+//     trailing_partial_group of scale % 9 digits.
+//
+// Partial-group byte width:
+//
+//     0 digits  → 0 bytes
+//     1-2       → 1 byte
+//     3-4       → 2 bytes
+//     5-6       → 3 bytes
+//     7-9       → 4 bytes (full group)
+//
+// Sign is the MSB of byte[0] AFTER on-the-wire transformation:
+//
+//     positive:  byte[0] has MSB SET, every other byte verbatim
+//     negative:  every byte XORed with 0xFF (yields MSB CLEAR on byte[0])
+//
+// Symmetric to the PG NUMERIC binary codec at
+// `core.database.postgres.wire.codec`; ships the same Decimal-based
+// surface so cross-adapter user code can round-trip decimal values
+// without going through Text.
+//
+// =============================================================================
+//
+// V0 surface:
+//
+//   * `mysql_decimal_byte_length(precision, scale) -> Int` — public
+//     accessor for the wire length given `(precision, scale)`.
+//     Mirrors the private helper already used inside binlog_rows;
+//     surfaces it for caller-side allocation sizing.
+//
+//   * `decode_mysql_decimal(buf, precision, scale) -> Result<Decimal,
+//     DbError>` — read a DECIMAL value from `buf` (which must hold at
+//     least `mysql_decimal_byte_length(precision, scale)` bytes) and
+//     produce a `core.text.numeric.decimal.Decimal`.  Composition:
+//     reuses the existing `decode_newdecimal_to_text` text path then
+//     pipes through `parse_decimal` — single source of truth for the
+//     wire format remains binlog_rows.vr.
+//
+//   * `encode_mysql_decimal(buf, arena, &Decimal, precision, scale)
+//     -> Bool` — write the wire form for `value` at the requested
+//     `(precision, scale)`.  Pads / truncates to fit:
+//       - Fractional digits beyond `scale` are truncated towards
+//         zero (caller wanting different rounding should use
+//         `Decimal.div_round` upstream then encode at the chosen
+//         scale).
+//       - Integer digits beyond `precision - scale` is an Overflow
+//         error (the value doesn't fit in the declared column).
+//     Returns false on arena exhaustion or representational
+//     overflow.  Symmetric with the PG `encode_numeric_from_decimal`
+//     codec — same algorithm, different chunk size (10^9 vs 10^4).
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.decimal_codec;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.intrinsics.runtime.mem_raw.store_byte;
+mount core.database.common.error.{DbError, EncodeFault};
+mount core.database.common.arena.SpindleArena;
+mount core.database.common.types.ArenaWireBuf;
+mount core.text.numeric.{Decimal, parse_decimal};
+mount core.database.mysql.binlog_rows.decode_newdecimal_to_text;
+
+// =============================================================================
+// Public — byte-length helper
+// =============================================================================
+
+/// Number of wire bytes for a DECIMAL value at the given declared
+/// `(precision, scale)`.  Mirrors MySQL's own `decimal_bin_size`.
+public fn mysql_decimal_byte_length(precision: Int, scale: Int) -> Int {
+    let intg = precision - scale;
+    let intg_full = intg / 9;
+    let intg_frac = intg - intg_full * 9;
+    let frac_full = scale / 9;
+    let frac_frac = scale - frac_full * 9;
+    intg_full * 4 + partial_bytes_for(intg_frac)
+        + frac_full * 4 + partial_bytes_for(frac_frac)
+}
+
+/// Wire-byte width for a partial group of `digits` decimal digits.
+/// 0 digits ⇒ 0 bytes, 1-2 ⇒ 1, 3-4 ⇒ 2, 5-6 ⇒ 3, 7-9 ⇒ 4.
+fn partial_bytes_for(digits: Int) -> Int {
+    if digits == 0 { 0 }
+    else if digits == 1 || digits == 2 { 1 }
+    else if digits == 3 || digits == 4 { 2 }
+    else if digits == 5 || digits == 6 { 3 }
+    else { 4 }
+}
+
+// =============================================================================
+// Public — decode
+// =============================================================================
+
+/// Decode a MySQL DECIMAL wire payload into a `Decimal` value.  V0
+/// reuses the existing `decode_newdecimal_to_text` text path then
+/// pipes the canonical decimal text through `parse_decimal` — keeps
+/// the wire-format implementation in one place (binlog_rows) so a
+/// fix to one path reaches both surfaces.
+public fn decode_mysql_decimal(
+    buf: &[Byte],
+    precision: Int,
+    scale: Int,
+) -> Result<Decimal, DbError> {
+    let needed = mysql_decimal_byte_length(precision, scale);
+    if (buf.len() as Int) < needed {
+        return Err(decode_err(
+            f"mysql DECIMAL: short payload (need {needed}b, have {buf.len() as Int}b)"
+        ));
+    }
+    let text = decode_newdecimal_to_text(buf, precision, scale);
+    match parse_decimal(&text) {
+        Ok(d)  => Ok(d),
+        Err(_) => Err(decode_err(
+            f"mysql DECIMAL: text->Decimal reparse failed for '{text}' (precision={precision}, scale={scale})"
+        )),
+    }
+}
+
+// =============================================================================
+// Public — encode
+// =============================================================================
+
+/// Write a Decimal value into the arena buffer using MySQL's binary
+/// DECIMAL format at the requested `(precision, scale)`.
+///
+/// Algorithm:
+///   1. Validate (precision, scale) ∈ valid MySQL range
+///      (precision ≤ 65, scale ≤ precision, but V0 caps at the
+///      coverage of i64 coefficient — see boundary below).
+///   2. Truncate value's fractional precision down to `scale` if
+///      value.scale > scale; pad with zeros if value.scale < scale.
+///   3. Render the (sign, abs digit string) of the adjusted value.
+///   4. Split digit string into integer (P-S digits) and fractional
+///      (S digits), padding LEFT/RIGHT with zeros as needed.
+///   5. Emit the wire form: leading partial integer chunk + N_int
+///      full integer chunks + N_frac full fractional chunks +
+///      trailing partial fractional chunk.
+///   6. Flip sign bit: positive ⇒ set MSB of byte[0]; negative ⇒
+///      XOR every byte with 0xFF.
+///
+/// V0 boundary: caller's Decimal coefficient is i64-bounded (~18
+/// digits).  For DECIMAL(P,S) with P > 18 the high-order digits
+/// will be zero (no information loss for any value representable
+/// in i64).  V1 extension: BigInt coefficient.
+///
+/// Returns false on:
+///   * Arena exhaustion.
+///   * Integer-part overflow (value's integer part has > P-S digits).
+///   * Negative `precision` or `scale`, or scale > precision.
+public fn encode_mysql_decimal(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    value: &Decimal,
+    precision: Int,
+    scale: Int,
+) -> Bool {
+    if precision <= 0 || scale < 0 || scale > precision { return false; }
+
+    // Adjust value's scale to match target.  Truncation is towards
+    // zero (not banker's rounding) — caller wanting half-even
+    // rounding should run `value.div_round` against Decimal.one() at
+    // `scale` precision before calling this encoder.
+    let intg_target = precision - scale;
+    let frac_target = scale;
+
+    let neg = value.is_negative();
+    let abs_value = value.abs();
+
+    // Render abs(coefficient) as MS-first decimal digits.
+    let coef_text = if abs_value.coefficient == 0 {
+        "0".clone()
+    } else {
+        Text.from_int(abs_value.coefficient)
+    };
+    let coef_bytes = coef_text.as_bytes();
+    let coef_len = coef_bytes.len() as Int;
+
+    // Position the implicit decimal point at `coef_len - value.scale`.
+    let value_int_len = if coef_len > value.scale { coef_len - value.scale } else { 0 };
+    let value_frac_lead_zeros = if value.scale > coef_len { value.scale - coef_len } else { 0 };
+    let value_frac_emitted = if value.scale > coef_len { coef_len } else { value.scale };
+
+    // Build full digit sequences for the target column.
+
+    // ---- Integer part: pad LEFT with zeros to intg_target digits ----
+    if value_int_len > intg_target {
+        // Doesn't fit in the column.
+        return false;
+    }
+    let int_pad_left = intg_target - value_int_len;
+    // int_digits[i] = digit at position i (MS first, length intg_target)
+    let mut int_digits: List<Int> = List.with_capacity(intg_target);
+    let mut z: Int = 0;
+    while z < int_pad_left {
+        int_digits.push(0);
+        z = z + 1;
+    }
+    let int_src_start = 0;  // integer digits start at coef_bytes[0]
+    let mut s: Int = 0;
+    while s < value_int_len {
+        let b = coef_bytes[int_src_start + s] as Int;
+        int_digits.push(b - ('0' as Int));
+        s = s + 1;
+    }
+
+    // ---- Fractional part: take from value's frac digits, pad RIGHT
+    //      with zeros to frac_target digits.  If value.scale > scale,
+    //      truncate (drop trailing digits beyond frac_target). ----
+    let mut frac_digits: List<Int> = List.with_capacity(frac_target);
+    // First, the leading-zero region of value's fractional part.
+    let mut emitted: Int = 0;
+    let mut lz: Int = 0;
+    while lz < value_frac_lead_zeros && emitted < frac_target {
+        frac_digits.push(0);
+        emitted = emitted + 1;
+        lz = lz + 1;
+    }
+    // Then the actual fractional digits of value (drawn from
+    // coef_bytes starting at value_int_len).
+    let mut fe: Int = 0;
+    while fe < value_frac_emitted && emitted < frac_target {
+        let b = coef_bytes[value_int_len + fe] as Int;
+        frac_digits.push(b - ('0' as Int));
+        emitted = emitted + 1;
+        fe = fe + 1;
+    }
+    // Right-pad with zeros up to frac_target.
+    while emitted < frac_target {
+        frac_digits.push(0);
+        emitted = emitted + 1;
+    }
+
+    // ---- Walk integer digits left-to-right, emitting:
+    //      leading partial group of (intg_target % 9) digits,
+    //      then `intg_target / 9` full groups of 9 digits.       ----
+    let intg_full = intg_target / 9;
+    let intg_frac = intg_target - intg_full * 9;
+
+    // Buffer the wire bytes locally before flushing — allows the
+    // sign-bit flip pass to walk the bytes once contiguously.
+    let mut wire: List<Int> = List.with_capacity(mysql_decimal_byte_length(precision, scale));
+
+    let mut idx: Int = 0;
+    if intg_frac > 0 {
+        let group_val = digits_to_int(&int_digits, idx, intg_frac);
+        let bytes_w = partial_bytes_for(intg_frac);
+        push_be(&mut wire, group_val, bytes_w);
+        idx = idx + intg_frac;
+    }
+    let mut g: Int = 0;
+    while g < intg_full {
+        let group_val = digits_to_int(&int_digits, idx, 9);
+        push_be(&mut wire, group_val, 4);
+        idx = idx + 9;
+        g = g + 1;
+    }
+
+    // ---- Fractional part: `frac_target / 9` full groups + trailing
+    //      partial group of (frac_target % 9) digits.            ----
+    let frac_full = frac_target / 9;
+    let frac_frac = frac_target - frac_full * 9;
+
+    let mut fidx: Int = 0;
+    let mut fg: Int = 0;
+    while fg < frac_full {
+        let group_val = digits_to_int(&frac_digits, fidx, 9);
+        push_be(&mut wire, group_val, 4);
+        fidx = fidx + 9;
+        fg = fg + 1;
+    }
+    if frac_frac > 0 {
+        let group_val = digits_to_int(&frac_digits, fidx, frac_frac);
+        let bytes_w = partial_bytes_for(frac_frac);
+        push_be(&mut wire, group_val, bytes_w);
+    }
+
+    // ---- Sign-bit flip ----
+    if (wire.len() as Int) == 0 {
+        // Pathological: precision=scale=0.  Nothing to write; PG/MySQL
+        // never produce zero-length DECIMAL payloads, but bail
+        // gracefully.
+        return true;
+    }
+    if neg {
+        let mut i: Int = 0;
+        while i < (wire.len() as Int) {
+            wire[i] = (wire[i] ^ 0xFF) & 0xFF;
+            i = i + 1;
+        }
+    } else {
+        // Positive: set the high bit on byte[0].
+        wire[0] = (wire[0] | 0x80) & 0xFF;
+    }
+
+    // ---- Flush to arena ----
+    let mut k: Int = 0;
+    while k < (wire.len() as Int) {
+        if !buf.put_u8(arena, wire[k]) { return false; }
+        k = k + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+/// Build a base-10 integer from `count` consecutive digits in
+/// `digits[start..]`.  MS-first.
+fn digits_to_int(digits: &List<Int>, start: Int, count: Int) -> Int {
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < count {
+        v = v * 10 + digits[start + i];
+        i = i + 1;
+    }
+    v
+}
+
+/// Append `value` as `bytes` big-endian bytes to `out`.
+fn push_be(out: &mut List<Int>, value: Int, bytes: Int) {
+    let mut shift = (bytes - 1) * 8;
+    let mut k: Int = 0;
+    while k < bytes {
+        out.push((value >> shift) & 0xFF);
+        shift = shift - 8;
+        k = k + 1;
+    }
+}
+
+fn decode_err(msg: Text) -> DbError {
+    DbError.DecodeFailed {
+        fault: core.database.common.error.DecodeFault {
+            column_index: -1,
+            column_name: "".clone(),
+            expected_type: "DECIMAL".clone(),
+            found_oid: -1,
+            detail: msg,
+        },
+    }
+}
