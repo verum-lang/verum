@@ -52988,6 +52988,35 @@ impl TypeChecker {
 
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested types.
     pub fn register_type_declaration(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
+        // #124 — primitive type names are reserved.
+        //
+        // A user (or stdlib) `type Unit is | UDays | UHours | …;` must not
+        // shadow the primitive `Unit` (= `()`). Pre-fix this declaration
+        // overwrote the canonical `define_type("Unit", Type::Unit)` from
+        // bootstrap, so any subsequent `-> Unit` annotation in user code
+        // resolved to the variant union and the type checker emitted
+        // nonsense diagnostics like
+        //   `expected 'UDays(Unit) | UHours(Unit) | …', found 'Unit'`
+        // for the primitive return position.
+        //
+        // The list mirrors the existing `wkt_names` + the historical
+        // grep-around for primitive names in this file (see line ~23668
+        // and ~38602). Adding a new primitive to the language is a
+        // language-level decision; any new entry here travels with the
+        // matching `Type::Foo` constructor in `verum_types::ty::Type`.
+        const PRIMITIVE_NAMES: &[&str] = &[
+            "Int", "Float", "Bool", "Char", "Text", "Unit", "Never", "Byte",
+        ];
+        let raw_name = type_decl.name.name.as_str();
+        if PRIMITIVE_NAMES.contains(&raw_name) {
+            tracing::warn!(
+                "type `{}` collides with primitive name and was skipped \
+                 — rename to e.g. `{}_` to keep the declaration",
+                raw_name,
+                raw_name
+            );
+            return Ok(());
+        }
         self.register_type_declaration_inner(type_decl)
     }
 
