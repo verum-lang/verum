@@ -53,6 +53,7 @@ public module async_load_data;
 public module wkb_decoder;
 public module async_prepared_session;
 public module typed_prepared;
+public module gtid;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -108,6 +109,12 @@ public mount .async_prepared_session.{
 };
 public mount .typed_prepared.{
     typed_prepared_row, typed_prepared_rows,
+};
+public mount .gtid.{
+    GnoInterval, GnoIntervalSet, GtidSet,
+    parse_gtid_set, format_gtid_set,
+    encode_wire as encode_gtid_wire,
+    decode_wire as decode_gtid_wire,
 };
 public mount .binlog_rows.decode_value_for_type as decode_mysql_binary_value;
 public mount .async_pool.{
