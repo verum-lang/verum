@@ -1,0 +1,245 @@
+// =============================================================================
+// core/database/postgres/composite_registry.vr — composite schema registry
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.4 (typed wire / composite registry).
+// =============================================================================
+//
+// TypedComposite carries POSITIONAL fields only — the binary wire
+// format is self-describing per `type_oid` but doesn't ship column
+// NAMES. User-defined composite consumers want `composite.field
+// ("amount")` access against a schema they supply.
+//
+// V0 surface — caller-managed registry:
+//
+//   * CompositeFieldDef { name, type_oid } — one per column.
+//   * CompositeSchema { type_oid, name, fields } — pg-type-OID-
+//     keyed; populated either manually via .register() or
+//     (V1 follow-up) via introspection from pg_type / pg_attribute.
+//   * CompositeRegistry — Shared<Mutex<List<CompositeSchema>>>;
+//     cloneable; cheap concurrent lookup_by_oid.
+//
+//   * field_index_by_name(schema, name) → Maybe<Int>
+//   * field_by_name(composite, schema, name) → Maybe<&TypedField>
+//   * field_value_by_name(composite, schema, name) →
+//        Maybe<&Maybe<TypedValue>>
+//
+// Free-function accessors rather than methods on TypedComposite
+// because the latter lives in wire/typed.vr and adding methods
+// across module boundaries is awkward; helpers compose freely.
+//
+// V0 OUT of scope:
+//   * Server-side introspection from pg_type / pg_attribute
+//     (V1 — adds populate_from_pg_type(conn, type_name)).
+//   * Composite-of-composites recursive helpers.
+//   * @derive(CompositeRow) macro for hand-written user structs.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*"))],
+    requires: [],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.composite_registry;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.postgres.wire.typed.{
+    TypedValue, TypedComposite, TypedField,
+};
+
+// =============================================================================
+// Schema definitions
+// =============================================================================
+
+public type CompositeFieldDef is {
+    /// Column name as defined in PG (matches `pg_attribute.attname`).
+    name: Text,
+    /// Field's PG type OID (matches `pg_attribute.atttypid`).
+    /// Same value the wire ships per-field for self-describing
+    /// composite encoding.
+    type_oid: Int,
+};
+
+/// One user-defined or anonymous composite schema. Consumers
+/// register one entry per composite type they care about; the
+/// registry's lookup_by_oid drives field-by-name resolution at
+/// decode time.
+public type CompositeSchema is {
+    /// PG-allocated outer OID (from `pg_type.oid`). Anonymous
+    /// records all share PG_TYPE_RECORD = 2249 — caller must
+    /// pick a sentinel registry key for each anon-record shape
+    /// they use.
+    type_oid: Int,
+    /// Type name (e.g. `"smoke_pair"`); informational, kept for
+    /// diagnostic logging.
+    name: Text,
+    /// Field definitions in declaration order. Position-aligned
+    /// with TypedComposite.fields after decode.
+    fields: List<CompositeFieldDef>,
+};
+
+implement CompositeSchema {
+    public fn new(type_oid: Int, name: Text) -> CompositeSchema {
+        CompositeSchema { type_oid: type_oid, name: name, fields: List.new() }
+    }
+
+    public fn with_field(mut self, name: Text, type_oid: Int) -> CompositeSchema {
+        self.fields.push(CompositeFieldDef { name: name, type_oid: type_oid });
+        self
+    }
+
+    /// Position of `field_name` in the schema's field list.
+    /// `None` if the schema doesn't declare such a field. O(N)
+    /// linear scan — typical schemas have ≤ 32 fields, so the
+    /// constant cost beats a HashMap.
+    public fn field_index(&self, field_name: &Text) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < (self.fields.len() as Int) {
+            if &self.fields[i].name == field_name {
+                return Some(i);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn arity(&self) -> Int { self.fields.len() as Int }
+}
+
+// =============================================================================
+// Registry
+// =============================================================================
+
+public type CompositeRegistry is {
+    inner: Shared<sync.mutex.Mutex<List<CompositeSchema>>>,
+};
+
+implement CompositeRegistry {
+    public fn new() -> CompositeRegistry {
+        CompositeRegistry {
+            inner: Shared.new(sync.mutex.Mutex.new(List.new())),
+        }
+    }
+
+    public fn clone(&self) -> CompositeRegistry {
+        CompositeRegistry { inner: self.inner.clone() }
+    }
+
+    /// Register `schema`. Replaces any existing entry with the
+    /// same `type_oid` (so callers can iteratively refine the
+    /// schema for the same OID — e.g. as new pg_type entries
+    /// appear during a long-running session).
+    public fn register(&self, schema: CompositeSchema) {
+        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let mut i: Int = 0;
+        while i < (guard.len() as Int) {
+            if guard[i].type_oid == schema.type_oid {
+                guard[i] = schema;
+                return;
+            }
+            i = i + 1;
+        }
+        guard.push(schema);
+    }
+
+    /// Look up a schema by its outer PG OID. Returns a clone so
+    /// the caller doesn't hold the registry lock across decode.
+    public fn lookup_by_oid(&self, type_oid: Int) -> Maybe<CompositeSchema> {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let mut i: Int = 0;
+        while i < (guard.len() as Int) {
+            if guard[i].type_oid == type_oid {
+                return Some(clone_schema(&guard[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Look up a schema by name (linear scan over registered
+    /// entries). Useful when caller only knows the type name
+    /// e.g. from a `format_type(typname)` round-trip.
+    public fn lookup_by_name(&self, name: &Text) -> Maybe<CompositeSchema> {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let mut i: Int = 0;
+        while i < (guard.len() as Int) {
+            if &guard[i].name == name {
+                return Some(clone_schema(&guard[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn len(&self) -> Int {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.len() as Int
+    }
+}
+
+fn clone_schema(s: &CompositeSchema) -> CompositeSchema {
+    let mut fields: List<CompositeFieldDef> = List.with_capacity(s.fields.len());
+    let mut i: Int = 0;
+    while i < (s.fields.len() as Int) {
+        fields.push(CompositeFieldDef {
+            name: s.fields[i].name.clone(),
+            type_oid: s.fields[i].type_oid,
+        });
+        i = i + 1;
+    }
+    CompositeSchema {
+        type_oid: s.type_oid,
+        name: s.name.clone(),
+        fields: fields,
+    }
+}
+
+// =============================================================================
+// Field-by-name accessors
+// =============================================================================
+
+/// Position of `field_name` in `schema`. None if the schema
+/// doesn't declare it.
+public fn field_index_by_name(schema: &CompositeSchema, field_name: &Text)
+    -> Maybe<Int>
+{
+    schema.field_index(field_name)
+}
+
+/// Borrow the named field from `composite` against `schema`.
+/// Returns None when:
+///   * The schema doesn't declare such a field, OR
+///   * The composite's arity doesn't match the schema's field
+///     count (defensive — schema/composite mismatch usually
+///     indicates a stale registry).
+public fn field_by_name<'a>(
+    composite: &'a TypedComposite,
+    schema: &CompositeSchema,
+    field_name: &Text,
+) -> Maybe<&'a TypedField> {
+    let idx = match schema.field_index(field_name) {
+        Some(i) => i,
+        None    => return None,
+    };
+    if (composite.fields.len() as Int) != schema.arity() {
+        return None;
+    }
+    Some(&composite.fields[idx])
+}
+
+/// Sugar — borrow just the value (skipping the type_oid wrapper).
+/// Returns `Some(&None)` for a present-but-NULL field.
+public fn field_value_by_name<'a>(
+    composite: &'a TypedComposite,
+    schema: &CompositeSchema,
+    field_name: &Text,
+) -> Maybe<&'a Maybe<TypedValue>> {
+    match field_by_name(composite, schema, field_name) {
+        Some(f) => Some(&f.value),
+        None    => None,
+    }
+}

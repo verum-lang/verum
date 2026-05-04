@@ -182,6 +182,11 @@ Test list per `internal/specs/database.md` follow-up:
   CancellationToken flip: attach_cancellation_token spawns a
   watcher; token.cancel() fires CancelRequest without caller
   intervention (spec §6.1.2 + §6.1.8 auto-wire)
+- `t30_composite_registry.vr` — CompositeRegistry + named-field
+  accessors: register schema for ROW(int4, text, int8); decode
+  ROW(99, 'beta', 1234567890)::record; field_value_by_name
+  pulls each cell by its declared name + asserts exact-value
+  match (spec §6.1.4 composite registry)
 
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags
