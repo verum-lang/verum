@@ -415,6 +415,49 @@ Multi-variant single archive **strictly dominates** the alternatives:
 This is the answer to user constraint (a): **no redundancy, all
 platforms in one binary, runtime selects.**
 
+## Phase 1 finding — item-level layers, not file-level split
+
+The Phase 1 classifier (`verum audit --stdlib-layers`) ran against the
+embedded archive (2 413 modules) and produced this baseline:
+
+| | Count | % |
+|--|--|--|
+| pure runtime | 1 731 | 71.7 % |
+| pure proof   | 42 | 1.7 % |
+| pure meta    | 0 | 0 % |
+| **mixed (proof+runtime)** | **109** | **4.5 %** |
+| parse errors | 3 | 0.1 % |
+| empty (re-export-only `mod.vr`) | 528 | 21.9 % |
+
+The 109 mixed-layer modules cluster in `core/math/*` (70 of them),
+`core/action/*` (12), `core/verify/*` (16) and a handful elsewhere.
+Files like `core/math/giry.vr` (31 runtime + 12 proof items),
+`core/math/algebra.vr` (27 runtime + 37 proof), `core/math/tactics.vr`
+(10 runtime + 75 proof) naturally interleave executable definitions
+with theorems *about* those definitions. Splitting them into separate
+files would (a) duplicate the type-context plumbing per file, (b) break
+the natural co-location idiom where `theorem foo_correct` sits next to
+the `fn foo` it proves, (c) inflate the directory-refactor blast radius
+to the point where Phase 2 becomes a multi-week mechanical sweep.
+
+**Decision (informed by data):** layers are encoded at the **item level**
+in the VBC archive, not the file level. The classifier's per-item tally
+is exactly what the Phase 4 precompile pipeline consumes: each emitted
+`FunctionEntry` / `TheoremEntry` / `MetaEntry` carries its own
+`section_id`, and the archive groups items into runtime / proof / meta
+sections regardless of which source file they came from.
+
+This means **Phase 2 (directory refactor) is no longer required**.
+`core/` keeps its current shape; the precompile pipeline reads source
+file authority, classifies per-item, and writes layered output. The
+classifier stays as the audit tool that surfaces stylistic
+inconsistencies (e.g. a module with one stray `theorem` may want to
+move that to a sibling file for readability), but it's no longer a
+pre-condition for Phase 4.
+
+Revised phase plan: skip Phase 2, fold any directory hygiene into a
+post-Phase-9 cleanup pass.
+
 ## Layer classification
 
 Three classification mechanisms, applied in priority order:

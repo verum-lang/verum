@@ -1507,6 +1507,18 @@ enum Commands {
         #[clap(long = "bridge-discharge")]
         bridge_discharge: bool,
 
+        /// Stdlib layer-classification audit (Phase 1 of the
+        /// precompiled-stdlib epic). Walks every `.vr` file in the
+        /// embedded stdlib archive, classifies each module as one of
+        /// `runtime` / `proof` / `meta` based on the items it declares,
+        /// and reports per-module + per-subtree counts plus a list of
+        /// mixed-layer modules that need explicit `@layer(...)` or a
+        /// file split before Phase 2 (directory refactor). Read-only
+        /// audit — does not modify any source. Output:
+        /// `target/audit-reports/stdlib-layers.{md,json}`.
+        #[clap(long = "stdlib-layers")]
+        stdlib_layers: bool,
+
  /// Run the runtime ν-monotonicity drive (task #139 / MSFS-L4.6).
  /// For every theorem-shaped item with a `@verify(<strategy>)`
  /// annotation, dispatches the obligation at every backbone
@@ -4081,6 +4093,7 @@ fn run_command(cli: Cli) -> Result<()> {
             arch_coverage,
             arch_corpus,
             bridge_discharge,
+            stdlib_layers,
             ladder_monotonicity,
             cross_format_roundtrip,
             docker,
@@ -4179,6 +4192,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_soundness_iou_with_format(output_format)
             } else if apply_graph {
                 commands::audit::audit_apply_graph_with_format(output_format)
+            } else if stdlib_layers {
+                commands::audit::audit_stdlib_layers_with_format(output_format)
             } else if framework_axioms {
                 commands::audit::audit_framework_axioms_with_format(output_format)
             } else if epsilon {
