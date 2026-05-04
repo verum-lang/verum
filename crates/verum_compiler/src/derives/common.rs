@@ -19,6 +19,50 @@ use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::ty::{GenericParam, GenericParamKind, Ident, Path, PathSegment, Type, TypeKind};
 use verum_common::{List, Text};
 
+/// Walk `ty` collecting any path-segment whose name matches a
+/// declared generic type-param (`param_names`). Recurses into
+/// generic args + reference / pointer inners. Used by
+/// `DeriveContext::generate_impl_with_field_bounds` to drive
+/// auto-bound emission. Conservative: unknown TypeKind variants
+/// (Function / Tuple / SigmaTuple / etc) are skipped — adding them
+/// is purely additive.
+pub(crate) fn collect_type_params(
+    ty: &Type,
+    param_names: &std::collections::HashSet<Text>,
+    out: &mut std::collections::BTreeSet<Text>,
+) {
+    match &ty.kind {
+        TypeKind::Path(path) => {
+            // A bare `T` is a single-segment path whose ident matches
+            // a declared param. Multi-segment paths are foreign types
+            // (e.g. `core.foo.Bar`) and don't contribute.
+            if path.segments.len() == 1 {
+                if let PathSegment::Name(ident) = &path.segments[0] {
+                    if param_names.contains(&ident.name) {
+                        out.insert(ident.name.clone());
+                    }
+                }
+            }
+        }
+        TypeKind::Generic { base, args } => {
+            collect_type_params(base, param_names, out);
+            for arg in args.iter() {
+                if let verum_ast::ty::GenericArg::Type(inner) = arg {
+                    collect_type_params(inner, param_names, out);
+                }
+            }
+        }
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. }
+        | TypeKind::Pointer { inner, .. }
+        | TypeKind::VolatilePointer { inner, .. } => {
+            collect_type_params(inner, param_names, out);
+        }
+        _ => {} // Other shapes don't carry naked type-params today.
+    }
+}
+
 /// Helper to create a Path from a dot-separated string like "Foo.Bar"
 pub fn path_from_str(s: &str, span: Span) -> Path {
     let segments: Vec<PathSegment> = s
@@ -479,8 +523,56 @@ impl DeriveContext {
         })
     }
 
-    /// Generate an impl block for a protocol
+    /// Generate an impl block for a protocol — no auto-bounds.
+    /// For derives whose generated method bodies don't field-call
+    /// the protocol (rare). Most derives want
+    /// `generate_impl_with_field_bounds` instead.
     pub fn generate_impl(&self, protocol: &str, methods: List<FunctionDecl>, span: Span) -> Item {
+        self.generate_impl_inner(protocol, methods, None, span)
+    }
+
+    /// Generate an impl block + auto-emit `where T: <protocol>` for
+    /// every type-parameter `T` that appears in any field of
+    /// `type_info`. This makes generic derives sound:
+    ///
+    /// ```text
+    /// @derive(P)
+    /// type Foo<T> is { val: T };
+    ///   ↓
+    /// implement<T> P for Foo<T> where T: P {
+    ///     // body that can call P methods on `val: T`
+    /// }
+    /// ```
+    ///
+    /// Without the bound the call `T::method(val)` inside the
+    /// generated body wouldn't resolve. Mirrors what Rust's
+    /// `#[derive(Trait)]` infers automatically.
+    ///
+    /// V0 walks `Path` / `Generic` / `Reference` /
+    /// `CheckedReference` / `UnsafeReference` / `Pointer` /
+    /// `VolatilePointer` type kinds — covers every common field
+    /// shape. Function-type / Tuple / SigmaTuple / Existential
+    /// shapes don't surface in derive contexts today; collected
+    /// only when those land. No-op for types with no generic
+    /// params (`generics.is_empty()`) — preserves the existing
+    /// `generate_impl` behaviour byte-for-byte.
+    pub fn generate_impl_with_field_bounds(
+        &self,
+        protocol: &str,
+        methods: List<FunctionDecl>,
+        span: Span,
+    ) -> Item {
+        let where_clause = self.infer_field_bounds(protocol, span);
+        self.generate_impl_inner(protocol, methods, where_clause, span)
+    }
+
+    fn generate_impl_inner(
+        &self,
+        protocol: &str,
+        methods: List<FunctionDecl>,
+        generic_where_clause: Option<verum_ast::ty::WhereClause>,
+        span: Span,
+    ) -> Item {
         let items: Vec<ImplItem> = methods
             .iter()
             .map(|m| ImplItem {
@@ -499,7 +591,7 @@ impl DeriveContext {
                 protocol_args: List::new(),
                 for_type: self.type_info.as_type(span),
             },
-            generic_where_clause: None,
+            generic_where_clause: generic_where_clause.into(),
             meta_where_clause: None,
             specialize_attr: None,
             items: items.into_iter().collect(),
@@ -507,6 +599,78 @@ impl DeriveContext {
         };
 
         Item::new(ItemKind::Impl(impl_decl), span)
+    }
+
+    /// Walk every field of every variant (or every record field)
+    /// and collect the names of type-params that appear inside.
+    /// Returns `None` if there's nothing to bound (no generics OR
+    /// no params used in any field).
+    fn infer_field_bounds(
+        &self,
+        protocol: &str,
+        span: Span,
+    ) -> Option<verum_ast::ty::WhereClause> {
+        use verum_ast::ty::{TypeBound, TypeBoundKind, WhereClause, WherePredicate, WherePredicateKind};
+
+        if self.type_info.generics.is_empty() {
+            return None;
+        }
+
+        // Build a lookup of type-param names declared on the type.
+        let mut param_names: std::collections::HashSet<Text> =
+            std::collections::HashSet::new();
+        for g in self.type_info.generics.iter() {
+            match &g.kind {
+                GenericParamKind::Type { name, .. } => {
+                    param_names.insert(name.name.clone());
+                }
+                _ => {} // Meta / Lifetime — skip, not Protocol-bounded.
+            }
+        }
+        if param_names.is_empty() {
+            return None;
+        }
+
+        // Collect params that appear in any field of any
+        // variant / record / newtype shape.
+        let mut used: std::collections::BTreeSet<Text> =
+            std::collections::BTreeSet::new();
+        let collect_field = |used: &mut std::collections::BTreeSet<Text>, ty: &Type| {
+            collect_type_params(ty, &param_names, used);
+        };
+        for f in self.type_info.fields.iter() {
+            collect_field(&mut used, &f.ty);
+        }
+        for v in self.type_info.variants.iter() {
+            for f in v.fields.iter() {
+                collect_field(&mut used, &f.ty);
+            }
+        }
+
+        if used.is_empty() {
+            return None;
+        }
+
+        // Emit one `T: <protocol>` predicate per used param.
+        let mut predicates: Vec<WherePredicate> = Vec::with_capacity(used.len());
+        for name in used.iter() {
+            let ty = Type::new(
+                TypeKind::Path(Path::single(Ident::new(name.as_str(), span))),
+                span,
+            );
+            let bound = TypeBound {
+                kind: TypeBoundKind::Protocol(Path::single(Ident::new(protocol, span))),
+                span,
+            };
+            predicates.push(WherePredicate {
+                kind: WherePredicateKind::Type {
+                    ty,
+                    bounds: List::from(vec![bound]),
+                },
+                span,
+            });
+        }
+        Some(WhereClause::new(List::from(predicates), span))
     }
 
     /// Create a method declaration
