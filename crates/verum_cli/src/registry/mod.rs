@@ -17,6 +17,7 @@ pub mod sat_resolver;
 pub mod security;
 pub mod signing;
 pub mod types;
+pub mod vbca_fetcher;
 pub mod workspace_manifest;
 
 pub use cache_manager::CacheManager;
@@ -32,8 +33,13 @@ pub use types::*;
 
 use crate::error::Result;
 
-/// Default Verum cog registry
-pub const DEFAULT_REGISTRY: &str = "https://packages.verum.lang";
+/// Default Verum cog registry — `https://vcogs.io`. Phase 13 build
+/// worker will live behind this domain; until it ships, the URL
+/// resolves to a placeholder that returns 404 for every cog
+/// download, which is fine: `resolve_registry_dep` falls through to
+/// other dependency kinds (path / git) and the script-side
+/// frontmatter UI surfaces the network failure with a typed error.
+pub const DEFAULT_REGISTRY: &str = "https://vcogs.io";
 
 /// Registry index URL
 pub fn registry_index_url(base: &str) -> String {

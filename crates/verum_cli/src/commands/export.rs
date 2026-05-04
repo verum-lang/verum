@@ -1935,12 +1935,10 @@ mod format_tests {
         let mut graph = Owl2Graph::default();
         graph.add_entity(Owl2Entity::new_class(
             Text::from("Animal"),
-            None,
             PathBuf::from("src/lib.vr"),
         ));
         graph.add_entity(Owl2Entity::new_class(
             Text::from("Mammal"),
-            None,
             PathBuf::from("src/lib.vr"),
         ));
         graph
@@ -1991,12 +1989,10 @@ mod format_tests {
         let mut graph = Owl2Graph::default();
         graph.add_entity(Owl2Entity::new_class(
             Text::from("Pizza"),
-            None,
             PathBuf::new(),
         ));
         graph.add_entity(Owl2Entity::new_class(
             Text::from("IceCream"),
-            None,
             PathBuf::new(),
         ));
         // Symmetrised pair — both orientations stored, but emitter
