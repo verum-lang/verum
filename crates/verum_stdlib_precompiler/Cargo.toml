@@ -1,0 +1,21 @@
+[package]
+name = "verum_stdlib_precompiler"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# T4 of the single-path archive-driven epic.  Standalone binary
+# that runs `verum_compiler::precompile::precompile_stdlib`
+# without depending on `verum_cli` — resolves the chicken-and-egg
+# build.rs dependency: build.rs needs to invoke the precompiler
+# during cargo build, but verum_cli depends on verum_compiler so
+# can't be invoked from verum_compiler/build.rs without infinite
+# recursion.  This crate breaks that cycle.
+
+[dependencies]
+verum_compiler = { workspace = true }
+anyhow = { workspace = true }
+
+[[bin]]
+name = "verum_stdlib_precompiler"
+path = "src/main.rs"
