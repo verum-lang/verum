@@ -148,6 +148,233 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
     Ok(result)
 }
 
+// ============================================================================
+// Phase 12: precompile-cog
+// ============================================================================
+
+/// Configuration for [`precompile_cog`] — the per-cog analogue of
+/// [`PrecompileConfig`].
+///
+/// A "cog" is any Verum project with a `Verum.toml` manifest: a
+/// user library, an internal company project, or a third-party
+/// package destined for the registry. The Phase 12 orchestrator
+/// drives the *same* `CompilationPipeline::compile_core` machinery
+/// used for stdlib (Phase 4) — `compile_core` is generic over the
+/// source-tree path and module-namespace prefix, so cogs reuse 100%
+/// of the bootstrap-mode codegen pipeline rather than spawning a
+/// parallel implementation.
+///
+/// The output `.vbca` follows the registry naming convention:
+/// `<name>-<version>-verum-<compiler-version>.vbca` (matches
+/// `vbca_fetcher::vbca_cache_path` so the same artifact paths
+/// flow through CI publish, on-disk cache, and registry download).
+#[derive(Debug, Clone)]
+pub struct PrecompileCogConfig {
+    /// Cog source root — directory containing `Verum.toml` and a
+    /// `src/` (or top-level) tree of `.vr` files. Resolved from
+    /// the manifest at construction time.
+    pub cog_dir: PathBuf,
+    /// Cog name — drives module-namespace prefixing and the output
+    /// filename. Read from `cog.name` in `Verum.toml`.
+    pub cog_name: String,
+    /// Cog version — drives the output filename. Read from
+    /// `cog.version` in `Verum.toml`.
+    pub cog_version: String,
+    /// Output `.vbca` path. Constructed as
+    /// `<cog_dir>/target/cog-vbca/<name>-<version>-verum-<compiler>.vbca`
+    /// when not overridden.
+    pub output_path: PathBuf,
+    /// Optional target-triple. `None` = host. Phase 12b cross-compile
+    /// matrix builds will iterate this axis.
+    pub target_triple: Option<String>,
+    /// Verbose progress reporting.
+    pub verbose: bool,
+}
+
+impl PrecompileCogConfig {
+    /// Build from a cog directory containing `Verum.toml`. Reads the
+    /// manifest, resolves cog name + version, computes the canonical
+    /// output path. Caller may override [`Self::output_path`] before
+    /// running the orchestrator.
+    pub fn for_cog(cog_dir: impl Into<PathBuf>) -> Result<Self> {
+        let cog_dir: PathBuf = cog_dir.into().canonicalize().context("canonicalize cog dir")?;
+        let manifest_path = cog_dir.join("Verum.toml");
+        if !manifest_path.is_file() {
+            anyhow::bail!(
+                "no Verum.toml at {} — not a Verum cog root",
+                manifest_path.display()
+            );
+        }
+        let (name, version) = read_cog_manifest_minimal(&manifest_path)?;
+        let compiler_version = env!("CARGO_PKG_VERSION");
+        let output_filename = format!("{}-{}-verum-{}.vbca", name, version, compiler_version);
+        let output_path = cog_dir.join("target").join("cog-vbca").join(output_filename);
+        Ok(Self {
+            cog_dir,
+            cog_name: name,
+            cog_version: version,
+            output_path,
+            target_triple: None,
+            verbose: false,
+        })
+    }
+
+    /// Override the default output path. The default lives at
+    /// `<cog_dir>/target/cog-vbca/<name>-<version>-verum-<compiler>.vbca`;
+    /// CI flows that want to upload the artifact straight to a
+    /// registry staging area set their own path.
+    pub fn with_output(mut self, path: impl Into<PathBuf>) -> Self {
+        self.output_path = path.into();
+        self
+    }
+}
+
+/// Read the minimum manifest fields the orchestrator needs:
+/// `cog.name` and `cog.version`. Matches the schema in
+/// `crates/verum_cli/src/config.rs`. We don't reuse the CLI's full
+/// `Manifest::from_file` parser to avoid dragging
+/// `verum_compiler` → `verum_cli` reverse-dep cycles; the cog
+/// section is small and stable.
+fn read_cog_manifest_minimal(path: &Path) -> Result<(String, String)> {
+    let bytes =
+        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    // Use toml::Value for forward-compat — every field after `cog.name`
+    // / `cog.version` is ignored.
+    let root: toml::Value = toml::from_str(&bytes)
+        .with_context(|| format!("parse {} as TOML", path.display()))?;
+    let cog = root
+        .get("cog")
+        .ok_or_else(|| anyhow::anyhow!("Verum.toml missing [cog] table at {}", path.display()))?;
+    let name = cog
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Verum.toml [cog].name is missing or not a string"))?
+        .to_string();
+    let version = cog
+        .get("version")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            anyhow::anyhow!("Verum.toml [cog].version is missing or not a string")
+        })?
+        .to_string();
+    Ok((name, version))
+}
+
+/// Run the cog precompile pipeline.
+///
+/// Steps:
+///   1. Validate the cog source tree — `Verum.toml` + at least one
+///      `.vr` file under the root.
+///   2. Build a [`CompilationPipeline`] in `StdlibBootstrap` mode
+///      pointing at the cog source root. The bootstrap mode's
+///      global type-registration phase is exactly what we want for
+///      a multi-file cog: every `.vr` file's types are registered
+///      before any function body is codegen'd, so cross-file
+///      references resolve cleanly.
+///   3. Drive `compile_core` to produce a single-target `.vbca` at
+///      the configured output path.
+///   4. Phase 12b TODO: post-pass for multi-variant cfg-conditional
+///      function bodies + theorem extraction (mirrors the Phase
+///      4b TODO on the stdlib path).
+///
+/// Reuses 100% of the existing precompile-stdlib infrastructure;
+/// no parallel codegen implementation, no new pipeline phases.
+pub fn precompile_cog(cfg: &PrecompileCogConfig) -> Result<StdlibCompilationResult> {
+    if cfg.verbose {
+        eprintln!(
+            "verum cog precompile: cog={} ({}), source={}, output={}, target={}",
+            cfg.cog_name,
+            cfg.cog_version,
+            cfg.cog_dir.display(),
+            cfg.output_path.display(),
+            cfg.target_triple.as_deref().unwrap_or("<host>")
+        );
+    }
+
+    if !cfg.cog_dir.is_dir() {
+        anyhow::bail!("cog directory does not exist: {}", cfg.cog_dir.display());
+    }
+    let manifest_path = cfg.cog_dir.join("Verum.toml");
+    if !manifest_path.is_file() {
+        anyhow::bail!(
+            "Verum.toml missing at {} — not a Verum cog root",
+            manifest_path.display()
+        );
+    }
+
+    if !has_any_vr_file(&cfg.cog_dir)? {
+        anyhow::bail!(
+            "cog at {} contains no .vr files — nothing to precompile",
+            cfg.cog_dir.display()
+        );
+    }
+
+    if let Some(parent) = cfg.output_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create output dir {}", parent.display()))?;
+    }
+
+    // Bootstrap-mode pipeline: cog source root replaces the stdlib
+    // path, the existing `compile_core` orchestrator handles
+    // discovery / parse / global-type-registration / codegen /
+    // archive write.
+    let core_config = CoreConfig::new(cfg.cog_dir.clone()).with_output(cfg.output_path.clone());
+    let core_config = if cfg.verbose {
+        let mut c = core_config;
+        c.verbose = true;
+        c
+    } else {
+        core_config
+    };
+
+    let mut session = Session::new(CompilerOptions::default());
+    let mut pipeline = CompilationPipeline::new_core(&mut session, core_config);
+    let result = pipeline.compile_core().with_context(|| {
+        format!(
+            "CompilationPipeline::compile_core failed during cog precompile (cog={})",
+            cfg.cog_name
+        )
+    })?;
+
+    if cfg.verbose {
+        eprintln!(
+            "verum cog precompile: {} modules, {} functions in {:?}, archive {} ({} bytes)",
+            result.modules_compiled,
+            result.functions_compiled,
+            result.total_time,
+            result.output_path.display(),
+            result.output_size,
+        );
+    }
+
+    Ok(result)
+}
+
+/// True iff the directory tree (recursive) contains at least one
+/// `.vr` file. Used as a fast pre-check before kicking off the full
+/// pipeline.
+fn has_any_vr_file(root: &Path) -> Result<bool> {
+    fn scan(dir: &Path) -> std::io::Result<bool> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            // Skip target/ directories — codegen output, not source.
+            if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                continue;
+            }
+            if path.is_dir() {
+                if scan(&path)? {
+                    return Ok(true);
+                }
+            } else if path.extension().and_then(|e| e.to_str()) == Some("vr") {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    scan(root).with_context(|| format!("scan {}", root.display()))
+}
+
 /// Walk up from `start`, returning the first directory that contains
 /// `core/mod.vr`. Mirrors the existing `find_workspace_root` helper
 /// in `pipeline/loading.rs` but is exposed here so callers outside
@@ -187,6 +414,115 @@ mod tests {
         let cfg = cfg.unwrap();
         assert!(cfg.stdlib_path.ends_with("core"));
         assert!(cfg.output_path.ends_with("runtime.vbca"));
+    }
+
+    #[test]
+    fn cog_manifest_minimal_extraction() {
+        let tmp = std::env::temp_dir().join(format!(
+            "verum-precompile-cog-manifest-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let manifest = tmp.join("Verum.toml");
+        let _ = std::fs::write(
+            &manifest,
+            r#"
+[cog]
+name = "json"
+version = "1.4.2"
+authors = ["alice"]
+description = "JSON helpers"
+
+[language]
+edition = "2026"
+"#,
+        );
+        let parsed = read_cog_manifest_minimal(&manifest);
+        assert!(parsed.is_ok(), "manifest parse: {:?}", parsed.err());
+        let (name, version) = parsed.unwrap();
+        assert_eq!(name, "json");
+        assert_eq!(version, "1.4.2");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn cog_config_for_cog_resolves_default_output() {
+        let tmp = std::env::temp_dir().join(format!(
+            "verum-precompile-cog-config-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let _ = std::fs::write(
+            tmp.join("Verum.toml"),
+            r#"
+[cog]
+name = "mycog"
+version = "0.3.0"
+"#,
+        );
+        // Need a .vr file for the directory to be a valid cog.
+        let _ = std::fs::write(tmp.join("lib.vr"), "fn main() {}\n");
+
+        let cfg = PrecompileCogConfig::for_cog(&tmp);
+        assert!(cfg.is_ok(), "for_cog: {:?}", cfg.err());
+        let cfg = cfg.unwrap();
+        assert_eq!(cfg.cog_name, "mycog");
+        assert_eq!(cfg.cog_version, "0.3.0");
+        // Output path: <tmp>/target/cog-vbca/mycog-0.3.0-verum-<v>.vbca
+        let compiler_v = env!("CARGO_PKG_VERSION");
+        let expected_filename = format!("mycog-0.3.0-verum-{}.vbca", compiler_v);
+        assert!(
+            cfg.output_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s == expected_filename)
+                .unwrap_or(false),
+            "expected output filename {} but got {}",
+            expected_filename,
+            cfg.output_path.display(),
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn cog_precompile_rejects_missing_manifest() {
+        let tmp = std::env::temp_dir().join(format!(
+            "verum-precompile-cog-no-manifest-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let result = PrecompileCogConfig::for_cog(&tmp);
+        assert!(result.is_err(), "expected error for missing manifest");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn cog_precompile_rejects_empty_cog() {
+        let tmp = std::env::temp_dir().join(format!(
+            "verum-precompile-cog-empty-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let _ = std::fs::write(
+            tmp.join("Verum.toml"),
+            r#"
+[cog]
+name = "empty"
+version = "0.1.0"
+"#,
+        );
+        // No .vr files — cog has no source to precompile.
+        let cfg = PrecompileCogConfig::for_cog(&tmp).expect("for_cog");
+        let result = precompile_cog(&cfg);
+        assert!(result.is_err(), "expected error for empty cog");
+        assert!(
+            result
+                .err()
+                .map(|e| format!("{e}").contains("no .vr files"))
+                .unwrap_or(false),
+            "error should mention missing .vr files"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

@@ -20,6 +20,11 @@ pub mod cert_replay;
 pub mod check;
 pub mod check_proof;
 pub mod clean;
+/// `verum cog precompile` — Phase 12 of the precompiled-stdlib
+/// archive epic. Wires `verum_compiler::precompile::precompile_cog`
+/// through the CLI surface to produce a `.vbca` artefact for a
+/// single cog directory ready for registry distribution.
+pub mod cog_precompile;
 /// `verum cog-registry` subcommand — interact with the cog
 /// distribution registry: publish / lookup / search / verify /
 /// multi-mirror consensus check.

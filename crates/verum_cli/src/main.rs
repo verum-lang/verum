@@ -2004,6 +2004,21 @@ enum Commands {
         #[clap(subcommand)]
         sub: StdlibSub,
     },
+
+ /// Cog precompile / inspection commands.
+ ///
+ /// `verum cog precompile` runs the precompile pipeline (Phase 12)
+ /// for a local Verum cog: parses every `.vr` file under the cog's
+ /// source root, compiles via the same global-registration
+ /// pipeline used for stdlib, and writes a `.vbca` archive
+ /// suitable for registry distribution. Output filename matches
+ /// the registry naming convention: `<name>-<version>-verum-
+ /// <compiler-version>.vbca`.
+    Cog {
+        #[clap(subcommand)]
+        sub: CogSub,
+    },
+
  /// Generate shell completion scripts for bash, zsh, fish, or PowerShell.
  ///
 
@@ -2654,6 +2669,38 @@ enum StdlibSub {
         /// Phase 4b will read this and emit per-target variants for
         /// cfg-conditional functions; today the value is recorded
         /// but selection is host-only.
+        #[clap(long, value_name = "TRIPLE")]
+        target: Option<String>,
+
+        /// Verbose progress output.
+        #[clap(long)]
+        verbose: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum CogSub {
+    /// Precompile a local Verum cog to a `.vbca` archive (Phase 12
+    /// of the precompiled-stdlib epic). Reads `Verum.toml` for cog
+    /// name + version, walks the source tree, runs the same global-
+    /// registration pipeline used for stdlib precompile, and writes
+    /// the archive to the canonical registry-naming-convention path
+    /// `<cog>/target/cog-vbca/<name>-<version>-verum-<compiler>.vbca`.
+    /// Override the output via `--out`.
+    Precompile {
+        /// Cog directory containing `Verum.toml`. Defaults to the
+        /// current working directory.
+        #[clap(long, value_name = "DIR")]
+        cog_dir: Option<std::path::PathBuf>,
+
+        /// Output `.vbca` path. Defaults to the canonical
+        /// `target/cog-vbca/<name>-<version>-verum-<compiler>.vbca`
+        /// inside the cog directory.
+        #[clap(long, short = 'o', value_name = "FILE")]
+        out: Option<std::path::PathBuf>,
+
+        /// Target triple to compile for. `None` = host triple.
+        /// Cross-compile matrix builds (Phase 12b) iterate this axis.
         #[clap(long, value_name = "TRIPLE")]
         target: Option<String>,
 
@@ -4379,6 +4426,15 @@ fn run_command(cli: Cli) -> Result<()> {
                 target,
                 verbose,
             } => commands::stdlib_precompile::run(stdlib_path, out, target, verbose),
+        },
+
+        Commands::Cog { sub } => match sub {
+            CogSub::Precompile {
+                cog_dir,
+                out,
+                target,
+                verbose,
+            } => commands::cog_precompile::run(cog_dir, out, target, verbose),
         },
 
         Commands::SmtInfo { json } => {
