@@ -1,0 +1,577 @@
+// =============================================================================
+// core/text/numeric/bigint.vr — arbitrary-precision integer (V0)
+// =============================================================================
+// Layer: 1 (Text — numeric subtree)
+// =============================================================================
+//
+// `BigInt` is a foundational arbitrary-precision signed integer
+// type.  Closes the "i64 coefficient" cap noted in the V0 Decimal
+// library and unblocks any caller that needs more than ~18
+// decimal digits of integer precision (large NUMERIC values, crypto,
+// scientific compute, big-O counters).
+//
+// Representation:
+//
+//     BigInt {
+//         sign:   Bool,        // true ⟺ negative; zero is sign=false
+//         digits: List<Int>,   // little-endian base-10^9, each in [0, 10^9)
+//     }
+//
+// Why base-10^9?
+//
+//   * Each chunk is exactly 9 decimal digits ⇒ text conversion is
+//     a trivial group-of-9 walk in either direction.
+//   * `chunk × chunk ≤ 10^18` and Verum `Int = i64` (max ≈ 9.2 ×
+//     10^18), so single-chunk multiplications fit without an i128
+//     intermediate (with a small headroom for carry).
+//   * Matches the MySQL DECIMAL wire chunk size (4 bytes / 9
+//     digits), making interop with `decimal_codec.vr` natural for
+//     a future BigInt-coefficient Decimal V1.
+//
+// Canonical form invariants (every public API entry preserves them):
+//
+//   * `digits` has NO leading zero chunks (i.e. `digits[len-1] != 0`
+//     for non-zero values).  Zero is represented as `digits = []`.
+//   * `digits[i] ∈ [0, 999_999_999]` for every index.
+//   * `sign = false` for zero (canonical "+0").
+//
+// V0 surface:
+//
+//   * Constructors: zero / one / from_int / from_text.
+//   * Predicates: is_zero / is_negative / is_positive / abs / neg.
+//   * Arithmetic: add / sub / mul.
+//   * Comparison: compare → Ordering, plus eq / lt / gt / le / ge.
+//   * Conversion: to_text (decimal), to_int (Maybe<Int>).
+//
+// V0 OUT-of-scope (V1 follow-ups):
+//
+//   * Division (Knuth Algorithm D — substantial; mul is sufficient
+//     for the immediate "Decimal V1 coefficient" motivation,
+//     because Decimal arithmetic only needs add/sub/mul on the
+//     coefficient).
+//   * Karatsuba / Toom-Cook multiplication (schoolbook O(N×M)
+//     suffices through ~10K digits; performance optimisation is V1).
+//   * Bitwise ops (and/or/xor/shift) — base-10^9 storage makes
+//     these awkward; need a base-2^N companion or in-place
+//     conversion.
+//   * Modular arithmetic, GCD, modpow — domain-specific helpers.
+//
+// =============================================================================
+
+module core.text.numeric.bigint;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount collections.List;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Base of the digit representation.  Each chunk holds 0..BIGINT_BASE-1.
+public const BIGINT_BASE: Int = 1_000_000_000;
+
+/// Number of decimal digits per chunk (log10(BIGINT_BASE)).  Used
+/// for text conversion grouping.
+public const BIGINT_DIGITS_PER_CHUNK: Int = 9;
+
+/// Pre-computed `10^k` for `k ∈ [0, 9]`.  Used by parse to compute
+/// padding factors.  Equivalent to the POW10 table in `decimal.vr`
+/// but bounded at 10^9 (BIGINT_BASE).
+const POW10_BIGINT: [Int; 10] = [
+    1, 10, 100, 1000, 10000,
+    100000, 1000000, 10000000, 100000000, 1000000000,
+];
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Arbitrary-precision signed integer.  See module header for the
+/// canonical-form invariants.
+public type BigInt is {
+    sign: Bool,
+    digits: List<Int>,
+};
+
+/// Errors surfaced by the BigInt API.
+public type BigIntError is
+      ParseEmpty
+    | ParseInvalidChar { byte_offset: Int, byte: Int }
+    | ParseInvalidShape { reason: Text };
+
+// =============================================================================
+// Constructors
+// =============================================================================
+
+implement BigInt {
+    /// Canonical zero: empty digit list, positive sign.
+    public fn zero() -> BigInt {
+        BigInt { sign: false, digits: List.new() }
+    }
+
+    /// Canonical one: digits = [1], positive.
+    public fn one() -> BigInt {
+        let mut d: List<Int> = List.new();
+        d.push(1);
+        BigInt { sign: false, digits: d }
+    }
+
+    /// Build a BigInt from a Verum Int (i64).
+    public fn from_int(n: Int) -> BigInt {
+        if n == 0 { return BigInt.zero(); }
+        let neg = n < 0;
+        let mut mag = abs_int(n);
+        let mut digits: List<Int> = List.new();
+        while mag > 0 {
+            digits.push(mag % BIGINT_BASE);
+            mag = mag / BIGINT_BASE;
+        }
+        BigInt { sign: neg, digits: digits }
+    }
+
+    // -------------------------------------------------------------------------
+    // Predicates
+    // -------------------------------------------------------------------------
+
+    public fn is_zero(&self) -> Bool { self.digits.len() == 0 }
+    public fn is_negative(&self) -> Bool { self.sign && self.digits.len() > 0 }
+    public fn is_positive(&self) -> Bool { !self.sign && self.digits.len() > 0 }
+
+    public fn abs(&self) -> BigInt {
+        BigInt { sign: false, digits: clone_digits(&self.digits) }
+    }
+
+    public fn neg(&self) -> BigInt {
+        if self.is_zero() { return BigInt.zero(); }
+        BigInt { sign: !self.sign, digits: clone_digits(&self.digits) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Arithmetic — add / sub / mul
+    // -------------------------------------------------------------------------
+
+    /// Sum `self + other`.  Routes to add_magnitudes or
+    /// sub_magnitudes per the operand signs:
+    ///   * Same sign     ⇒ add magnitudes; preserve common sign.
+    ///   * Differing     ⇒ sub smaller magnitude from larger;
+    ///                     result sign = sign of larger operand.
+    public fn add(&self, other: &BigInt) -> BigInt {
+        if self.is_zero() { return BigInt { sign: other.sign, digits: clone_digits(&other.digits) }; }
+        if other.is_zero() { return BigInt { sign: self.sign, digits: clone_digits(&self.digits) }; }
+
+        if self.sign == other.sign {
+            let sum = add_magnitudes(&self.digits, &other.digits);
+            return BigInt { sign: self.sign, digits: sum };
+        }
+        // Differing signs: subtract smaller magnitude from larger.
+        let cmp = compare_magnitudes(&self.digits, &other.digits);
+        match cmp {
+            Equal => BigInt.zero(),
+            Greater => {
+                let diff = sub_magnitudes(&self.digits, &other.digits);
+                BigInt { sign: self.sign, digits: diff }
+            }
+            Less => {
+                let diff = sub_magnitudes(&other.digits, &self.digits);
+                BigInt { sign: other.sign, digits: diff }
+            }
+        }
+    }
+
+    /// Difference `self - other` = `self + (-other)`.
+    public fn sub(&self, other: &BigInt) -> BigInt {
+        self.add(&other.neg())
+    }
+
+    /// Product `self * other`.  Schoolbook O(N×M) multiplication
+    /// — sufficient through ~10K digits.  Karatsuba / Toom-Cook
+    /// are V1 follow-ups; for current callers (Decimal V1
+    /// coefficient, financial workloads with ≤ 50 digit values)
+    /// schoolbook is well within budget.
+    public fn mul(&self, other: &BigInt) -> BigInt {
+        if self.is_zero() || other.is_zero() { return BigInt.zero(); }
+        let result_sign = self.sign != other.sign;
+        let prod = mul_magnitudes(&self.digits, &other.digits);
+        BigInt { sign: result_sign, digits: prod }
+    }
+
+    // -------------------------------------------------------------------------
+    // Comparison
+    // -------------------------------------------------------------------------
+
+    /// Three-way comparison.  Sign-based fast path; falls back to
+    /// magnitude compare with sign-inversion for negatives.
+    public fn compare(&self, other: &BigInt) -> Ordering {
+        if self.is_zero() && other.is_zero() { return Equal; }
+        if self.is_zero() {
+            return if other.sign { Greater } else { Less };
+        }
+        if other.is_zero() {
+            return if self.sign { Less } else { Greater };
+        }
+        if !self.sign && other.sign { return Greater; }
+        if self.sign && !other.sign { return Less; }
+        // Same sign — both positive or both negative.
+        let mag_cmp = compare_magnitudes(&self.digits, &other.digits);
+        if self.sign {
+            // Both negative: magnitude order is REVERSED.
+            match mag_cmp {
+                Less => Greater,
+                Greater => Less,
+                Equal => Equal,
+            }
+        } else {
+            mag_cmp
+        }
+    }
+
+    public fn eq(&self, other: &BigInt) -> Bool { matches_eq(self.compare(other)) }
+    public fn lt(&self, other: &BigInt) -> Bool { matches_lt(self.compare(other)) }
+    public fn gt(&self, other: &BigInt) -> Bool { matches_gt(self.compare(other)) }
+    public fn le(&self, other: &BigInt) -> Bool { !matches_gt(self.compare(other)) }
+    public fn ge(&self, other: &BigInt) -> Bool { !matches_lt(self.compare(other)) }
+
+    // -------------------------------------------------------------------------
+    // Conversion
+    // -------------------------------------------------------------------------
+
+    /// Render as decimal text.  Format: optional leading '-' for
+    /// negatives, then the most-significant chunk without leading
+    /// zeros, then each lower chunk zero-padded to 9 digits.
+    public fn to_text(&self) -> Text {
+        if self.is_zero() { return "0".clone(); }
+
+        let mut out: Text = if self.sign { "-".clone() } else { "".clone() };
+
+        // Most-significant chunk: no leading zeros.
+        let n = self.digits.len() as Int;
+        let ms_chunk = self.digits[n - 1];
+        out = out + Text.from_int(ms_chunk);
+
+        // Lower chunks: each zero-padded to 9 digits.
+        let mut i: Int = n - 2;
+        while i >= 0 {
+            out = out + pad_chunk_to_9(self.digits[i]);
+            i = i - 1;
+        }
+        out
+    }
+
+    /// Try to fit the BigInt into a Verum Int (i64).  Returns
+    /// `None` if the value exceeds i64 range; `Some(n)` with the
+    /// exact i64 otherwise.  Useful for hot-path callers that
+    /// optimistically expect i64-bounded values.
+    public fn to_int(&self) -> Maybe<Int> {
+        if self.is_zero() { return Some(0); }
+        let i64_max: Int = 9223372036854775807;
+        let n = self.digits.len() as Int;
+        // i64::MAX = 9_223_372_036_854_775_807 — three base-10^9
+        // chunks max for any i64-bounded magnitude.  Reject up
+        // front if more than three.
+        if n > 3 { return None; }
+
+        let mut acc: Int = 0;
+        let mut k: Int = n - 1;
+        while k >= 0 {
+            // acc * BIGINT_BASE + digit ≤ i64::MAX?  Each step:
+            //   acc_next = acc * BIGINT_BASE + digit
+            // With BIGINT_BASE = 10^9, acc * 10^9 must fit.  Bound:
+            //   acc ≤ i64::MAX / 10^9 ≈ 9.22 × 10^9
+            if acc > i64_max / BIGINT_BASE { return None; }
+            let scaled = acc * BIGINT_BASE;
+            let next = scaled + self.digits[k];
+            if next < scaled { return None; }  // Overflow
+            acc = next;
+            k = k - 1;
+        }
+        // For negatives, the magnitude must be ≤ -i64::MIN = i64::MAX + 1.
+        // We compute the magnitude as i64 (≤ i64::MAX), so the only
+        // edge case is `digits = [0, 0, 9_223_372_036]` magnitude
+        // 9_223_372_036_000_000_000 ≤ i64::MAX < 9_223_372_036_854_775_808.
+        // We accept any magnitude ≤ i64::MAX for both signs (i64::MIN
+        // representation requires magnitude i64::MAX + 1, which we
+        // cannot construct via this i64 accumulator — caller gets
+        // None for that single edge case).
+        if self.sign { Some(-acc) } else { Some(acc) }
+    }
+}
+
+// =============================================================================
+// Parsing
+// =============================================================================
+
+/// Parse a decimal-text representation into a BigInt.  Accepts:
+///   * Optional leading whitespace (' ', '\t', '\n', '\r').
+///   * Optional sign (+ / -).
+///   * Integer digits (≥ 1 required after sign / whitespace).
+///   * Optional trailing whitespace.
+///   * No decimal point, no exponent (V0 — those forms belong on
+///     `Decimal` via `parse_decimal`).
+///
+/// Errors:
+///   * `ParseEmpty`        — empty input or only whitespace + sign.
+///   * `ParseInvalidChar`  — non-digit character at `byte_offset`.
+///   * `ParseInvalidShape` — lone sign with no digits, etc.
+public fn parse_bigint(text: &Text) -> Result<BigInt, BigIntError> {
+    let bytes = text.as_bytes();
+    let n = bytes.len() as Int;
+    let mut i: Int = 0;
+
+    // Skip leading whitespace.
+    while i < n {
+        let b = bytes[i] as Int;
+        if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+            i = i + 1;
+        } else {
+            break;
+        }
+    }
+    if i >= n { return Err(BigIntError.ParseEmpty); }
+
+    // Optional sign.
+    let mut neg = false;
+    let first = bytes[i] as Int;
+    if first == ('+' as Int) {
+        i = i + 1;
+    } else if first == ('-' as Int) {
+        neg = true;
+        i = i + 1;
+    }
+
+    if i >= n {
+        return Err(BigIntError.ParseInvalidShape {
+            reason: "lone sign with no digits".clone(),
+        });
+    }
+
+    // Locate the digit run.
+    let digits_start = i;
+    while i < n {
+        let b = bytes[i] as Int;
+        if b >= ('0' as Int) && b <= ('9' as Int) {
+            i = i + 1;
+        } else {
+            break;
+        }
+    }
+    let digits_end = i;
+    let digit_count = digits_end - digits_start;
+    if digit_count == 0 {
+        return Err(BigIntError.ParseInvalidShape {
+            reason: "no digits after sign".clone(),
+        });
+    }
+
+    // Trailing whitespace allowed; non-whitespace after digits is invalid.
+    while i < n {
+        let b = bytes[i] as Int;
+        if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+            i = i + 1;
+        } else {
+            return Err(BigIntError.ParseInvalidChar {
+                byte_offset: i, byte: b,
+            });
+        }
+    }
+
+    // Skip leading zeros (within the digit run).
+    let mut start = digits_start;
+    while start < digits_end - 1 {
+        if (bytes[start] as Int) != ('0' as Int) { break; }
+        start = start + 1;
+    }
+    let effective_count = digits_end - start;
+    if effective_count == 1 && (bytes[start] as Int) == ('0' as Int) {
+        return Ok(BigInt.zero());
+    }
+
+    // Group digits into base-10^9 chunks, LEAST significant first.
+    // Walk from RIGHT in groups of 9.
+    let mut digits_out: List<Int> = List.new();
+    let mut end = digits_end;
+    while end > start {
+        let group_start = if end - start >= BIGINT_DIGITS_PER_CHUNK {
+            end - BIGINT_DIGITS_PER_CHUNK
+        } else {
+            start
+        };
+        let mut chunk_val: Int = 0;
+        let mut p = group_start;
+        while p < end {
+            chunk_val = chunk_val * 10 + ((bytes[p] as Int) - ('0' as Int));
+            p = p + 1;
+        }
+        digits_out.push(chunk_val);
+        end = group_start;
+    }
+    // Strip any leading-zero chunks we may have emitted (shouldn't
+    // happen given the leading-zero strip above, but defensive).
+    strip_leading_zeros(&mut digits_out);
+    if (digits_out.len() as Int) == 0 {
+        return Ok(BigInt.zero());
+    }
+    Ok(BigInt { sign: neg, digits: digits_out })
+}
+
+// =============================================================================
+// Internal helpers — magnitude arithmetic
+// =============================================================================
+
+/// Add two non-negative magnitudes (digit lists).  Result is canonical
+/// (leading-zero chunks stripped).
+fn add_magnitudes(a: &List<Int>, b: &List<Int>) -> List<Int> {
+    let la = a.len() as Int;
+    let lb = b.len() as Int;
+    let max_len = if la > lb { la } else { lb };
+    let mut out: List<Int> = List.with_capacity(max_len + 1);
+    let mut carry: Int = 0;
+    let mut i: Int = 0;
+    while i < max_len {
+        let av = if i < la { a[i] } else { 0 };
+        let bv = if i < lb { b[i] } else { 0 };
+        let sum = av + bv + carry;
+        if sum >= BIGINT_BASE {
+            out.push(sum - BIGINT_BASE);
+            carry = 1;
+        } else {
+            out.push(sum);
+            carry = 0;
+        }
+        i = i + 1;
+    }
+    if carry != 0 { out.push(carry); }
+    strip_leading_zeros(&mut out);
+    out
+}
+
+/// Subtract `b` from `a` assuming `a >= b` (caller MUST have
+/// verified via `compare_magnitudes`).  Result is canonical.
+fn sub_magnitudes(a: &List<Int>, b: &List<Int>) -> List<Int> {
+    let la = a.len() as Int;
+    let lb = b.len() as Int;
+    let mut out: List<Int> = List.with_capacity(la);
+    let mut borrow: Int = 0;
+    let mut i: Int = 0;
+    while i < la {
+        let av = a[i];
+        let bv = if i < lb { b[i] } else { 0 };
+        let diff = av - bv - borrow;
+        if diff < 0 {
+            out.push(diff + BIGINT_BASE);
+            borrow = 1;
+        } else {
+            out.push(diff);
+            borrow = 0;
+        }
+        i = i + 1;
+    }
+    // borrow must be 0 here per the precondition `a >= b`.
+    strip_leading_zeros(&mut out);
+    out
+}
+
+/// Schoolbook O(N×M) multiplication of two non-negative magnitudes.
+fn mul_magnitudes(a: &List<Int>, b: &List<Int>) -> List<Int> {
+    let la = a.len() as Int;
+    let lb = b.len() as Int;
+    let mut out: List<Int> = List.with_capacity(la + lb);
+    let mut k: Int = 0;
+    while k < la + lb { out.push(0); k = k + 1; }
+
+    let mut i: Int = 0;
+    while i < la {
+        let av = a[i];
+        let mut carry: Int = 0;
+        let mut j: Int = 0;
+        while j < lb {
+            // av × b[j] ≤ 10^18 (within i64 budget; see header note)
+            let prod = av * b[j] + out[i + j] + carry;
+            out[i + j] = prod % BIGINT_BASE;
+            carry = prod / BIGINT_BASE;
+            j = j + 1;
+        }
+        if carry != 0 {
+            out[i + lb] = out[i + lb] + carry;
+        }
+        i = i + 1;
+    }
+    strip_leading_zeros(&mut out);
+    out
+}
+
+/// Compare two magnitudes (non-negative) → Ordering.
+fn compare_magnitudes(a: &List<Int>, b: &List<Int>) -> Ordering {
+    let la = a.len() as Int;
+    let lb = b.len() as Int;
+    if la < lb { return Less; }
+    if la > lb { return Greater; }
+    // Same length: compare from MS to LS.
+    let mut i: Int = la - 1;
+    while i >= 0 {
+        if a[i] < b[i] { return Less; }
+        if a[i] > b[i] { return Greater; }
+        i = i - 1;
+    }
+    Equal
+}
+
+/// Strip trailing zero chunks (which are MS in little-endian
+/// storage) to keep canonical form.
+fn strip_leading_zeros(digits: &mut List<Int>) {
+    while (digits.len() as Int) > 0 {
+        let n = digits.len() as Int;
+        if digits[n - 1] != 0 { break; }
+        digits.pop();
+    }
+}
+
+fn clone_digits(src: &List<Int>) -> List<Int> {
+    let n = src.len() as Int;
+    let mut out: List<Int> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n { out.push(src[i]); i = i + 1; }
+    out
+}
+
+// =============================================================================
+// Internal helpers — text + ordering
+// =============================================================================
+
+/// Render a chunk in [0, BIGINT_BASE) as exactly 9 zero-padded
+/// decimal digits.
+fn pad_chunk_to_9(v: Int) -> Text {
+    let mut out: Text = "".clone();
+    let mut threshold: Int = 100_000_000;
+    while threshold > 1 {
+        if v < threshold { out = out + "0"; }
+        threshold = threshold / 10;
+    }
+    out = out + Text.from_int(v);
+    if v == 0 {
+        // Special-case: leading-zero pad emitted 8 zeros plus
+        // `Text.from_int(0) = "0"` ⇒ already 9 chars.  No fix-up
+        // needed because the loop terminates with threshold=1
+        // having pushed 8 zeros.
+    }
+    out
+}
+
+fn matches_eq(o: Ordering) -> Bool {
+    match o { Equal => true, _ => false }
+}
+fn matches_lt(o: Ordering) -> Bool {
+    match o { Less => true, _ => false }
+}
+fn matches_gt(o: Ordering) -> Bool {
+    match o { Greater => true, _ => false }
+}
+
+/// Absolute-value of an i64 with safe i64::MIN saturation.  Mirrors
+/// the helper in `decimal.vr`; duplicated here to keep this module
+/// self-contained.
+fn abs_int(x: Int) -> Int {
+    let i64_min: Int = -9223372036854775807 - 1;
+    if x == i64_min { 9223372036854775807 } else if x < 0 { -x } else { x }
+}

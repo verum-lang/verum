@@ -1,0 +1,194 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: text, numeric, bigint, arbitrary-precision
+// @timeout: 30000
+//
+// Type-check exercise for `core.text.numeric.bigint` — the
+// arbitrary-precision signed integer module.  Validates every
+// constructor / predicate / arithmetic op / comparison branch /
+// render shape / parse error variant.
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount core.text.numeric.{
+    BigInt, BigIntError,
+    BIGINT_BASE, BIGINT_DIGITS_PER_CHUNK,
+    parse_bigint,
+};
+
+fn check_constructors() {
+    let z = BigInt.zero();
+    assert(z.is_zero());
+    assert(!z.is_negative());
+    assert(!z.is_positive());
+
+    let o = BigInt.one();
+    assert(!o.is_zero());
+    assert(o.is_positive());
+
+    let n = BigInt.from_int(42);
+    assert(n.is_positive());
+
+    let neg = BigInt.from_int(-1234);
+    assert(neg.is_negative());
+
+    // Round-trip through to_int.
+    match neg.to_int() {
+        Some(v) => assert(v == -1234),
+        None => assert(false),
+    };
+}
+
+fn check_predicates() {
+    let pos = BigInt.from_int(5);
+    let neg = BigInt.from_int(-3);
+    let zero = BigInt.zero();
+
+    assert(pos.is_positive());
+    assert(neg.is_negative());
+    assert(zero.is_zero());
+
+    let abs_neg = neg.abs();
+    assert(abs_neg.is_positive());
+
+    let neg2 = pos.neg();
+    assert(neg2.is_negative());
+
+    // neg(0) is canonical zero.
+    let neg_zero = zero.neg();
+    assert(neg_zero.is_zero());
+}
+
+fn check_arith() {
+    let a = BigInt.from_int(100);
+    let b = BigInt.from_int(50);
+    let sum = a.add(&b);
+    let expected = BigInt.from_int(150);
+    assert(sum.eq(&expected));
+
+    let diff = a.sub(&b);
+    assert(diff.eq(&BigInt.from_int(50)));
+
+    let prod = a.mul(&b);
+    assert(prod.eq(&BigInt.from_int(5000)));
+
+    // Mixed signs: -100 + 30 = -70.
+    let neg_a = BigInt.from_int(-100);
+    let small = BigInt.from_int(30);
+    let mixed = neg_a.add(&small);
+    assert(mixed.eq(&BigInt.from_int(-70)));
+
+    // Negative * negative = positive.
+    let neg_b = BigInt.from_int(-50);
+    let pp = neg_a.mul(&neg_b);
+    assert(pp.eq(&BigInt.from_int(5000)));
+
+    // Subtracting larger from smaller flips the sign.
+    let small_minus_big = b.sub(&a);
+    assert(small_minus_big.eq(&BigInt.from_int(-50)));
+}
+
+fn check_arith_crosses_chunk_boundary() {
+    // Magnitudes that cross BIGINT_BASE = 10^9 to exercise carry.
+    let big = BigInt.from_int(999_999_999);  // = BIGINT_BASE - 1
+    let one = BigInt.one();
+    let plus_one = big.add(&one);
+    // Result should be 10^9 = BIGINT_BASE — fits in a single i64
+    // but spans 2 chunks in BigInt land (digits = [0, 1]).
+    match plus_one.to_int() {
+        Some(v) => assert(v == 1_000_000_000),
+        None => assert(false),
+    };
+}
+
+fn check_compare() {
+    let a = BigInt.from_int(5);
+    let b = BigInt.from_int(10);
+    let c = BigInt.from_int(5);
+    let neg = BigInt.from_int(-100);
+
+    assert(matches_less(a.compare(&b)));
+    assert(matches_equal(a.compare(&c)));
+    assert(matches_greater(b.compare(&a)));
+
+    // Negatives always less than positives (zero handled separately).
+    assert(matches_less(neg.compare(&a)));
+
+    // Negative ordering is REVERSED of magnitude.
+    let big_neg = BigInt.from_int(-1_000_000);
+    assert(matches_less(big_neg.compare(&neg)));
+}
+
+fn matches_equal(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
+fn matches_less(o: Ordering) -> Bool  { match o { Less => true,  _ => false } }
+fn matches_greater(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
+
+fn check_render() {
+    assert(BigInt.zero().to_text() == "0");
+    assert(BigInt.from_int(42).to_text() == "42");
+    assert(BigInt.from_int(-1234).to_text() == "-1234");
+
+    // Large value spanning multiple chunks: 1_000_000_000_000 has
+    // digits = [0, 1000] in base-10^9 ⇒ rendered as
+    // "1000" + "000000000" = "1000000000000".
+    let trillion = BigInt.from_int(1_000_000_000_000);
+    assert(trillion.to_text() == "1000000000000");
+}
+
+fn check_parse() -> Result<Bool, BigIntError> {
+    let a = parse_bigint(&"42".clone())?;
+    assert(a.eq(&BigInt.from_int(42)));
+
+    let b = parse_bigint(&"-1234".clone())?;
+    assert(b.eq(&BigInt.from_int(-1234)));
+
+    let c = parse_bigint(&"0".clone())?;
+    assert(c.is_zero());
+
+    // Large value beyond i64 range parses successfully.
+    let big = parse_bigint(&"123456789012345678901234567890".clone())?;
+    assert(!big.is_zero());
+    // Round-trip through to_text.
+    assert(big.to_text() == "123456789012345678901234567890");
+
+    // Empty input ⇒ ParseEmpty.
+    let empty = match parse_bigint(&"".clone()) {
+        Err(BigIntError.ParseEmpty) => true,
+        _ => false,
+    };
+    assert(empty);
+
+    // Lone sign ⇒ ParseInvalidShape.
+    let lone = match parse_bigint(&"-".clone()) {
+        Err(BigIntError.ParseInvalidShape { reason: _ }) => true,
+        _ => false,
+    };
+    assert(lone);
+
+    // Garbage character mid-input ⇒ ParseInvalidChar.
+    let garbage = match parse_bigint(&"12x34".clone()) {
+        Err(BigIntError.ParseInvalidChar { byte_offset: _, byte: _ }) => true,
+        _ => false,
+    };
+    assert(garbage);
+
+    Ok(true)
+}
+
+fn check_constants() {
+    assert(BIGINT_BASE == 1_000_000_000);
+    assert(BIGINT_DIGITS_PER_CHUNK == 9);
+}
+
+fn main() {
+    check_constructors();
+    check_predicates();
+    check_arith();
+    check_arith_crosses_chunk_boundary();
+    check_compare();
+    check_render();
+    let _ = check_parse();
+    check_constants();
+}
