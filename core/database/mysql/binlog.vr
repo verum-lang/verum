@@ -86,6 +86,9 @@ mount core.database.mysql.wire.backend.{
     SkOk, SkError, SkEof, SkResultSet,
 };
 mount core.database.mysql.connection.connect as mysql_connect;
+mount core.database.mysql.gtid.{
+    GtidSet, parse_gtid_set, encode_wire as encode_gtid_wire,
+};
 
 // =============================================================================
 // COM_* opcodes
@@ -128,7 +131,13 @@ public type BinlogChecksum is BcNone | BcCrc32;
 
 public type BinlogStartFrom is
       BfFilePosition { filename: Text, position: Int }
-    | BfGtidSet { gtid_set: Text };
+    /// Structured GTID set — wire-encoded via `encode_gtid_wire`
+    /// when the dump payload is built. Pre-V1 the variant carried
+    /// raw `Text` and shoved `.as_bytes()` into the COM_BINLOG_DUMP_GTID
+    /// payload — silently corrupt for any non-empty text since the
+    /// wire field is BINARY (16-byte SIDs + LE u64 counts), not the
+    /// printable form `SHOW MASTER STATUS` returns.
+    | BfGtidSet { gtid_set: GtidSet };
 
 public type BinlogConfig is {
     /// MUST be unique cluster-wide. Server uses it to route which
@@ -166,7 +175,43 @@ implement BinlogConfig {
         }
     }
 
+    /// Back-compat constructor that takes the textual form
+    /// (`uuid:1-100,200`) — parses via `parse_gtid_set`. Empty text
+    /// becomes the empty set (caller intent: "stream from the
+    /// server's notion of fresh"). Parse failures are SILENT and
+    /// fall back to empty — strict callers should use
+    /// `try_from_gtid_text` or hand a parsed `GtidSet` via
+    /// `from_gtid_set`.
     public fn from_gtid(server_id: Int, gtid_set: Text) -> BinlogConfig {
+        let parsed = if (gtid_set.len() as Int) == 0 {
+            GtidSet.new()
+        } else {
+            match parse_gtid_set(&gtid_set) {
+                Ok(s)  => s,
+                Err(_) => GtidSet.new(),
+            }
+        };
+        BinlogConfig.from_gtid_set(server_id, parsed)
+    }
+
+    /// Strict text parse — returns the parser error rather than
+    /// silently falling back to empty. Preferred constructor for
+    /// any production caller who reads a GTID from external state.
+    public fn try_from_gtid_text(server_id: Int, gtid_set: Text)
+        -> Result<BinlogConfig, DbError>
+    {
+        let parsed = if (gtid_set.len() as Int) == 0 {
+            GtidSet.new()
+        } else {
+            parse_gtid_set(&gtid_set)?
+        };
+        Ok(BinlogConfig.from_gtid_set(server_id, parsed))
+    }
+
+    /// Typed constructor — takes an already-built `GtidSet`. The
+    /// canonical entry point for consumers that hold the set in
+    /// structured form (e.g. position-tracker checkpointing).
+    public fn from_gtid_set(server_id: Int, gtid_set: GtidSet) -> BinlogConfig {
         BinlogConfig {
             server_id: server_id,
             heartbeat_period_ns: 30_000_000_000,
@@ -358,9 +403,11 @@ fn build_dump_payload(cfg: &BinlogConfig) -> List<Byte> {
             //   8 bytes: binlog_pos (start at 4 — first event
             //            after FORMAT_DESCRIPTION)
             //   4 bytes: data_size (size of gtid_data trailer)
-            //   N bytes: gtid_data (encoded GTID set)
+            //   N bytes: gtid_data — wire-encoded GtidSet:
+            //            n_sids:u64 LE || (sid:u8[16] || n_intervals:u64 LE
+            //            || (start:u64 LE || end_excl:u64 LE)^n_intervals)^n_sids
             let f = flags | BINLOG_THROUGH_GTID;
-            let gtid_bytes = gtid_set.as_bytes();
+            let gtid_bytes = encode_gtid_wire(gtid_set);
             let mut out: List<Byte> = List.with_capacity(23 + gtid_bytes.len());
             put_u8(&mut out, COM_BINLOG_DUMP_GTID);
             put_u16_le(&mut out, f);
@@ -368,7 +415,7 @@ fn build_dump_payload(cfg: &BinlogConfig) -> List<Byte> {
             put_u32_le(&mut out, 0);             // empty filename
             put_u64_le(&mut out, 4);             // pos = 4 (first real byte)
             put_u32_le(&mut out, gtid_bytes.len() as Int);
-            put_bytes(&mut out, gtid_bytes);
+            put_bytes(&mut out, gtid_bytes.as_slice());
             out
         }
     }
