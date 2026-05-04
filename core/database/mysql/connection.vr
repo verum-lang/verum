@@ -864,6 +864,117 @@ implement MysqlConnection {
     // The wire is single-direction streaming. The `binlog` module
     // owns the lifecycle; these hooks expose only what it needs.
 
+    /// Send COM_REGISTER_SLAVE (0x15). Required for semi-sync
+    /// replication where the master tracks per-slave registration
+    /// to enforce the wait-for-ack flow. Plain async replication
+    /// works without it on MySQL 5.7+; semi-sync requires it.
+    ///
+    /// Wire layout (per MySQL src/sql/rpl_master.cc):
+    ///
+    ///   1 byte:  0x15 (COM_REGISTER_SLAVE)
+    ///   4 bytes: server_id (LE)
+    ///   1 byte:  host length
+    ///   N bytes: host
+    ///   1 byte:  user length
+    ///   N bytes: user
+    ///   1 byte:  password length
+    ///   N bytes: password
+    ///   2 bytes: port (LE)
+    ///   4 bytes: replication_rank (LE) — informational; pass 0
+    ///   4 bytes: master_id (LE) — informational; pass 0
+    ///
+    /// Server replies with OK or ERR; this fn returns after the
+    /// reply is decoded and leaves the connection in `McsReady`
+    /// so a subsequent `binlog_send_command` can issue the dump.
+    public fn register_slave(
+        &mut self,
+        server_id: Int,
+        host: &Text,
+        user: &Text,
+        password: &Text,
+        port: Int,
+    ) -> Result<(), DbError> {
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "register_slave requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        let host_bytes = host.as_bytes();
+        let user_bytes = user.as_bytes();
+        let pw_bytes   = password.as_bytes();
+        if (host_bytes.len() as Int) > 255 {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "REGISTER_SLAVE_HOST_TOO_LONG".clone(),
+                message: f"host length {host_bytes.len()} > 255".clone(),
+                retryable: false,
+            }));
+        }
+        if (user_bytes.len() as Int) > 255 {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "REGISTER_SLAVE_USER_TOO_LONG".clone(),
+                message: f"user length {user_bytes.len()} > 255".clone(),
+                retryable: false,
+            }));
+        }
+        if (pw_bytes.len() as Int) > 255 {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "REGISTER_SLAVE_PW_TOO_LONG".clone(),
+                message: f"password length {pw_bytes.len()} > 255".clone(),
+                retryable: false,
+            }));
+        }
+        let mut payload: List<Byte> = List.with_capacity(
+            18 + host_bytes.len() + user_bytes.len() + pw_bytes.len(),
+        );
+        // Use the wire/frame helpers via fully-qualified path —
+        // connection.vr doesn't already mount them.
+        core.database.mysql.wire.frame.put_u8(&mut payload, 0x15);
+        core.database.mysql.wire.frame.put_u32_le(&mut payload, server_id);
+        core.database.mysql.wire.frame.put_u8(&mut payload, host_bytes.len() as Int);
+        core.database.mysql.wire.frame.put_bytes(&mut payload, host_bytes);
+        core.database.mysql.wire.frame.put_u8(&mut payload, user_bytes.len() as Int);
+        core.database.mysql.wire.frame.put_bytes(&mut payload, user_bytes);
+        core.database.mysql.wire.frame.put_u8(&mut payload, pw_bytes.len() as Int);
+        core.database.mysql.wire.frame.put_bytes(&mut payload, pw_bytes);
+        core.database.mysql.wire.frame.put_u16_le(&mut payload, port);
+        core.database.mysql.wire.frame.put_u32_le(&mut payload, 0);   // replication_rank
+        core.database.mysql.wire.frame.put_u32_le(&mut payload, 0);   // master_id
+
+        // COM_* always resets sequence.
+        self.sequence = 0;
+        send_packet(self, payload.as_slice())?;
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        let kind = classify(body.as_slice(), self.capabilities);
+        match kind {
+            SkError => {
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("ERR")); }
+                };
+                Err(dberr_from_mysql(err))
+            }
+            SkOk => {
+                // Decode for symmetry; ignore the OK contents.
+                let _ = parse_ok(body.as_slice(), self.capabilities);
+                Ok(())
+            }
+            _ => Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "REGISTER_SLAVE_BAD_REPLY".clone(),
+                message: "expected OK/ERR after COM_REGISTER_SLAVE".clone(),
+                retryable: false,
+            })),
+        }
+    }
+
     /// Send a raw command packet (resets sequence to 0 like every
     /// other COM_*). Returns to caller after the wire write — no
     /// reply consumption (binlog dump produces a stream, not an

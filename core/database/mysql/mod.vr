@@ -141,6 +141,7 @@ public mount .async_typed_database.{
 public mount .binlog.{
     BinlogConfig, BinlogChecksum, BcNone, BcCrc32,
     BinlogStartFrom, BfFilePosition, BfGtidSet,
+    RegisterSlaveInfo,
     BinlogStream, BinlogEventHeader,
     BinlogEvent, BeQuery, BeXid, BeRotate, BeFormatDescription,
     BeGtid, BeHeartbeat, BeOther,

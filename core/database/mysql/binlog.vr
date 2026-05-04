@@ -51,10 +51,12 @@
 //     encoding in `BfGtidSet`.
 //   * CRC32 verification fires automatically in `next_event`
 //     when `BinlogConfig.checksum == BcCrc32`.
+//   * COM_REGISTER_SLAVE auto-fires before COM_BINLOG_DUMP
+//     when `BinlogConfig.register_slave` is set — required
+//     for semi-sync replication.
 //
 // V0 OUT of scope (each follow-up):
-//   * COM_REGISTER_SLAVE — not strictly required (works without on
-//     MySQL 5.7+ unless `rpl_semi_sync_master_enabled=ON`).
+//   * (none — V1 surface is comprehensive for production CDC use.)
 // =============================================================================
 
 @arch_module(
@@ -131,6 +133,36 @@ public const ET_HEARTBEAT:               Int = 0x1B;
 
 public type BinlogChecksum is BcNone | BcCrc32;
 
+/// Optional COM_REGISTER_SLAVE payload for semi-sync replication
+/// flows. When `BinlogConfig.register_slave` is `Some(info)`, the
+/// `connect_binlog` constructor sends COM_REGISTER_SLAVE BEFORE
+/// COM_BINLOG_DUMP[_GTID] and waits for the OK reply. Async
+/// replication works without it on MySQL 5.7+; semi-sync requires
+/// it.
+public type RegisterSlaveInfo is {
+    /// Hostname the master records — informational; can be empty.
+    host: Text,
+    /// User the master records — informational; can be empty.
+    user: Text,
+    /// Password the master records — informational; can be empty.
+    /// CAUTION: sent in plaintext over the binlog wire; pair with
+    /// TLS in production.
+    password: Text,
+    /// Port the master records — informational; pass 0 if unknown.
+    port: Int,
+};
+
+implement RegisterSlaveInfo {
+    public fn empty() -> RegisterSlaveInfo {
+        RegisterSlaveInfo {
+            host: "".clone(),
+            user: "".clone(),
+            password: "".clone(),
+            port: 0,
+        }
+    }
+}
+
 public type BinlogStartFrom is
       BfFilePosition { filename: Text, position: Int }
     /// Structured GTID set — wire-encoded via `encode_gtid_wire`
@@ -165,6 +197,9 @@ public type BinlogConfig is {
     /// new events). Useful for one-shot snapshots; production CDC
     /// leaves it false.
     non_blocking: Bool,
+    /// Optional COM_REGISTER_SLAVE payload sent BEFORE the binlog
+    /// dump. Required for semi-sync replication; defaults to None.
+    register_slave: Maybe<RegisterSlaveInfo>,
 };
 
 implement BinlogConfig {
@@ -177,6 +212,7 @@ implement BinlogConfig {
             checksum: BcNone,
             start_from: BfFilePosition { filename: filename, position: position },
             non_blocking: false,
+            register_slave: None,
         }
     }
 
@@ -223,7 +259,17 @@ implement BinlogConfig {
             checksum: BcNone,
             start_from: BfGtidSet { gtid_set: gtid_set },
             non_blocking: false,
+            register_slave: None,
         }
+    }
+
+    /// Builder — attach COM_REGISTER_SLAVE info. Required for
+    /// semi-sync replication.
+    public fn with_register_slave(mut self, info: RegisterSlaveInfo)
+        -> BinlogConfig
+    {
+        self.register_slave = Some(info);
+        self
     }
 }
 
@@ -361,6 +407,21 @@ public fn connect_binlog(
         let ns = binlog_cfg.heartbeat_period_ns;
         let hb_sql = f"SET @master_heartbeat_period = {ns}";
         let _ = conn.execute(&hb_sql)?;
+    }
+
+    // Optional COM_REGISTER_SLAVE BEFORE the dump — required for
+    // semi-sync replication.
+    match &binlog_cfg.register_slave {
+        Some(info) => {
+            conn.register_slave(
+                binlog_cfg.server_id,
+                &info.host,
+                &info.user,
+                &info.password,
+                info.port,
+            )?;
+        }
+        None => {}
     }
 
     // Build the dump payload.
