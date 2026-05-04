@@ -198,22 +198,34 @@ public async fn rollback_to_savepoint_async(
 
 /// Run `body` inside a transaction; commits on Ok, rolls back on
 /// Err. Mirrors `core.database.postgres.transaction.with_transaction`.
-public async fn with_transaction_async<R>(
+///
+/// Body's signature follows the same pattern as
+/// `core.database.common.retry_run.run_with_retry` — the closure
+/// returns `Result<R, DbError>` synchronously from the function-type
+/// perspective; if the body internally awaits async operations, the
+/// `.await` happens inside the body's own block. The surrounding
+/// `with_transaction_async` itself is `async` so that begin/commit/
+/// rollback can use their async forms.
+public async fn with_transaction_async<R, F: fn(&AsyncPgConnection) -> Result<R, DbError>>(
     conn: &AsyncPgConnection,
     opts: PgTxOpts,
-    body: fn(&AsyncPgConnection) -> R,
-) -> Result<R, DbError>
-where R: Future<Output = Result<R::Output, DbError>>
-{
-    let tx = begin_tx_with_async(conn, opts).await?;
-    match body(conn).await {
+    body: F,
+) -> Result<R, DbError> {
+    let tx = match begin_tx_with_async(conn, opts).await {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+    match body(conn) {
         Ok(v) => {
-            commit_tx_async(conn, tx).await?;
-            Ok(v)
+            match commit_tx_async(conn, tx).await {
+                Ok(_)  => Ok(v),
+                Err(e) => Err(e),
+            }
         }
-        Err(e) => {
+        Err(body_err) => {
+            // Best-effort rollback — original body error wins.
             let _ = rollback_tx_async(conn, tx).await;
-            Err(e)
+            Err(body_err)
         }
     }
 }
