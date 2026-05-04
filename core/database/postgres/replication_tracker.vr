@@ -299,6 +299,26 @@ implement LsnTracker {
         self.store.save(&snap)
     }
 
+    /// Wire a CancellationToken — when it flips, automatically
+    /// call `shutdown()` so the watcher task exits + a final
+    /// standby-status fires + the underlying replication actor
+    /// unwinds. Spawns a one-shot background watcher.
+    ///
+    /// The token-watcher dies once the token fires; if the
+    /// caller calls `shutdown()` first, the token-watcher will
+    /// still wake and call `shutdown()` again — which is a no-op
+    /// (idempotent).
+    public fn attach_cancellation_token(
+        &self,
+        token: core.async.cancellation.CancellationToken,
+    ) {
+        let tracker_clone = self.clone();
+        let _ = spawn(async move {
+            let _ = token.cancelled().await;
+            let _ = tracker_clone.shutdown().await;
+        });
+    }
+
     /// Stop the watcher task, send a final standby-status with
     /// the latest tuple, and join the task. Idempotent — second
     /// call returns immediately.

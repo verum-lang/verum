@@ -42,11 +42,11 @@
 //
 // Sync replication.vr canonical / unchanged. Pure layered wrapper.
 //
+// V1 surface:
+//   * `attach_cancellation_token` — token.cancel() unwinds the
+//     replication actor automatically.
+//
 // OUT of V0:
-//   * Async pgoutput consumer with relation-cache lifecycle
-//     (caller wires that today via decode_pgoutput).
-//   * Async base_backup (separate actor tier — multi-stream).
-//   * Cancellation-token propagation through the actor.
 //   * Per-slot RTT estimator + adaptive heartbeat.
 // =============================================================================
 
@@ -166,6 +166,29 @@ implement AsyncPgReplicationConnection {
             msg_rx: self.msg_rx.clone(),
             join: self.join.clone(),
         }
+    }
+
+    /// Wire a CancellationToken — when it flips, automatically
+    /// fire `close()` so the replication actor unwinds without
+    /// caller intervention. Spawns a one-shot background watcher
+    /// task that awaits `token.cancelled().await`.
+    ///
+    /// The watcher exits naturally when the token fires; if the
+    /// connection closes first (caller-driven shutdown), the
+    /// close becomes a no-op (the actor's command channel is
+    /// already drained).
+    ///
+    /// Multiple tokens may be attached — each spawns its own
+    /// watcher; ANY one firing triggers shutdown.
+    public fn attach_cancellation_token(
+        &self,
+        token: core.async.cancellation.CancellationToken,
+    ) {
+        let conn_clone = self.clone();
+        let _ = core.async.task.spawn(async move {
+            let _ = token.cancelled().await;
+            let _ = conn_clone.close().await;
+        });
     }
 
     public async fn identify_system(&self)
@@ -339,9 +362,9 @@ public async fn connect_replication_async(
         Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
     };
 
-    let (cmd_tx, cmd_rx) = bounded_channel::<ReplRequest>(8);
-    let (status_tx, status_rx) = bounded_channel::<StandbyStatusUpdate>(DEFAULT_STATUS_CAPACITY);
-    let (msg_tx, msg_rx) = bounded_channel::<ReplActorEvent>(DEFAULT_MSG_CAPACITY);
+    let (cmd_tx, cmd_rx) = bounded_channel<ReplRequest>(8);
+    let (status_tx, status_rx) = bounded_channel<StandbyStatusUpdate>(DEFAULT_STATUS_CAPACITY);
+    let (msg_tx, msg_rx) = bounded_channel<ReplActorEvent>(DEFAULT_MSG_CAPACITY);
 
     let join = spawn_blocking(move || -> () {
         run_actor(conn, cmd_rx, status_rx, msg_tx);
