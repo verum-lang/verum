@@ -1148,7 +1148,7 @@ public fn access(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
 
 /// Fill `buf` with cryptographically secure random bytes. Returns
 /// `Err` only on real errors; partial fills are looped internally.
-pub fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
+public fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
     if buf.len() == 0 {
         return Ok(());
     }

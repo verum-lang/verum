@@ -192,7 +192,7 @@ public async fn connect_and_start_async(
     let tablespaces = session.tablespaces().clone();
 
     // Phase 2 — launch drain actor.
-    let (event_tx, event_rx) = bounded_channel::<BackupStreamEvent>(DEFAULT_EVENT_CAPACITY);
+    let (event_tx, event_rx) = bounded_channel<BackupStreamEvent>(DEFAULT_EVENT_CAPACITY);
 
     let join = spawn_blocking(move || -> () {
         run_drain(session, event_tx);
