@@ -578,6 +578,20 @@ impl<'s> CompilationPipeline<'s> {
             "core.net.tcp",
             "core.net.udp",
             "core.base.panic",
+            // #122 — `core.intrinsics.runtime.os` provides the
+            // `@intrinsic` extern declarations for `write_stderr`,
+            // `exit_process`, `__file_write_*`, etc. that
+            // `core.base.panic` (already in this list) and every
+            // `assert`/`unwrap`/runtime-check call site reference.
+            // Pre-fix the transitive mount walker missed this module
+            // (it sits at the leaf of the dep tree behind `panic.vr`'s
+            // mount) so its symbol declarations weren't in
+            // `imported_modules` → `compile_module_items_lenient`
+            // never registered them in `ctx.functions` → every panic
+            // call surfaced as `[lenient] SKIP fn panic_impl
+            // (bug-class): undefined function: write_stderr` under
+            // strict-codegen. Adding it here forces inclusion.
+            "core.intrinsics.runtime.os",
         ];
         const EXCLUDED_MODULES: &[&str] = &["core.base.maybe"];
         // Detect host platform for filtering platform-specific modules.
@@ -1133,6 +1147,13 @@ impl<'s> CompilationPipeline<'s> {
             // I/O — excluded from AOT retention: core.io.fs read()/write()
             // FFI declarations conflict with LLVM builtins (wrong arg count).
             // Included in the type-checking ALWAYS_INCLUDE list (list 1) above.
+            // #122 — see list 1 for the full rationale; this list governs
+            // which modules survive the post-typecheck cull, and panic.vr
+            // / runtime.os transitively must be retained for the codegen
+            // to register `write_stderr` / `exit_process` in
+            // ctx.functions for the user-side compile pass.
+            "core.base.panic",
+            "core.intrinsics.runtime.os",
         ];
 
         // Collect user-mounted module paths so their ASTs survive the cull.
