@@ -104,7 +104,7 @@ implement AsyncCopyInWriter {
                     self.metrics.record_cancellation();
                     let _ = self.chunk_tx.send_async(CicCancel {
                         reason: "cancellation token fired".clone(),
-                        reply: oneshot::<Result<(), DbError>>().0,
+                        reply: oneshot<Result<(), DbError>>().0,
                     }).await;
                     return Err(cancelled_err("copy_in.write"));
                 }
@@ -253,7 +253,7 @@ public async fn copy_in_async_with_token(
 ) -> Result<AsyncCopyInWriter, DbError> {
     let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
     let (chunk_tx, chunk_rx) = bounded_channel<CopyInChunk>(cap);
-    let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
+    let (open_tx, open_rx) = oneshot<Result<(), DbError>>();
 
     match conn.tx_ref().send_async(ReqCopyInOpen {
         sql: copy_sql.clone(),
@@ -285,7 +285,7 @@ public async fn copy_out_async(
 ) -> Result<AsyncCopyOutReader, DbError> {
     let cap = if chunk_capacity < 1 { 1 } else { chunk_capacity };
     let (chunk_tx, chunk_rx) = bounded_channel<CopyOutEvent>(cap);
-    let (open_tx, open_rx) = oneshot::<Result<(), DbError>>();
+    let (open_tx, open_rx) = oneshot<Result<(), DbError>>();
 
     match conn.tx_ref().send_async(ReqCopyOutOpen {
         sql: copy_sql.clone(),
