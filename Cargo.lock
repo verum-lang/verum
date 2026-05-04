@@ -5579,6 +5579,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "verum_stdlib_precompiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "verum_compiler",
+]
+
+[[package]]
 name = "verum_syntax"
 version = "0.1.0"
 dependencies = [

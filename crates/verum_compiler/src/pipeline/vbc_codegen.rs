@@ -338,9 +338,13 @@ impl<'s> CompilationPipeline<'s> {
         codegen.register_stdlib_intrinsics();
         codegen.register_runtime_io_functions();
 
-        // T1+T2 archive → ctx in milliseconds (was 272s parse + walk
-        // for 2400 stdlib files in the deleted source-driven path).
-        let types_loaded = codegen.populate_types_from_archive(archive);
+        // T1 archive → ctx in milliseconds.  Only FunctionInfo
+        // entries (and variant-ctor metadata) — the archive's type
+        // descriptors stay in the archive itself; the linker-merge
+        // step at the end of this function injects them into the
+        // final module.  Pre-loading types into codegen's
+        // `self.types` would collide with the pre-registered
+        // built-in types via differing TypeId allocations.
         let ctx_stats = crate::archive_ctx_loader::populate_ctx_from_archive(
             archive,
             codegen.ctx_mut(),
@@ -348,8 +352,7 @@ impl<'s> CompilationPipeline<'s> {
         .map_err(|e| anyhow::anyhow!("archive ctx load: {}", e))?;
         tracing::debug!(
             target: "compile_ast_to_vbc",
-            "archive pre-population: {} types, {} fn entries, {} variant ctors",
-            types_loaded,
+            "archive pre-population: {} fn entries, {} variant ctors",
             ctx_stats.functions_registered,
             ctx_stats.variant_ctors_resolved,
         );
