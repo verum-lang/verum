@@ -23,8 +23,13 @@
 //     `(T1, T2, T3, T4)`. Each element implements TypedRow itself
 //     (recursive composition).
 //
-// User-defined structs are out of V0 — they need either a derive
-// macro or hand-written impls. V1 will ship `@derive(TypedRow)`.
+// V1 surface (this commit): `@derive(TypedRow)` macro lives in
+// `crates/verum_compiler/src/derives/typed_row.rs` and emits
+// `implement TypedRow for <Type>` blocks for record + newtype
+// definitions. The generated code calls the public helpers
+// `expect_arity` + `decode_field` / `slice_one` defined below
+// (positional decode; `desc` threaded but not consumed for
+// column-name resolution in V0).
 // =============================================================================
 
 @arch_module(
@@ -181,7 +186,11 @@ implement<T: TypedRow> TypedRow for Maybe<T> {
 // can reuse the scalar TypedRow impl. `slice_one(row, idx)` builds
 // a List with the single value at position `idx`.
 
-fn slice_one(row: &List<TypedValue>, idx: Int) -> List<TypedValue> {
+/// Build a one-element row from `row[idx]`. Re-exported `public`
+/// so `@derive(TypedRow)` generated code (lives in user modules)
+/// can call it without the helper having to be inlined per call
+/// site.
+public fn slice_one(row: &List<TypedValue>, idx: Int) -> List<TypedValue> {
     let mut out: List<TypedValue> = List.with_capacity(1);
     out.push(row[idx].clone());
     out
@@ -243,7 +252,28 @@ implement<A: TypedRow, B: TypedRow, C: TypedRow, D: TypedRow>
 // Helpers
 // =============================================================================
 
-fn expect_arity(row: &List<TypedValue>, want: Int) -> Result<(), DbError> {
+/// One-call helper used by `@derive(TypedRow)` generated code
+/// — extracts a single cell at `idx` and decodes it through the
+/// field type's existing `TypedRow` impl. Avoids forcing every
+/// derive-using module to import both `expect_arity` and
+/// `slice_one`.
+///
+/// Type-parameter `T` is inferred from the call site's expected
+/// type — the derive emits `let f: FieldType = decode_field(...)?`
+/// so the compiler binds `T = FieldType` from the let
+/// annotation.
+public fn decode_field<T: TypedRow>(
+    row: &List<TypedValue>,
+    idx: Int,
+    desc: &Maybe<RowDescription>,
+) -> Result<T, DbError> {
+    T::from_typed_row(&slice_one(row, idx), desc)
+}
+
+/// Validate `row.len() == want`; produce a TypedRow arity error
+/// otherwise. Re-exported `public` so `@derive(TypedRow)`
+/// generated code can call it.
+public fn expect_arity(row: &List<TypedValue>, want: Int) -> Result<(), DbError> {
     let got = row.len() as Int;
     if got != want {
         return Err(DbError.Adapter(AdapterSpecific {
