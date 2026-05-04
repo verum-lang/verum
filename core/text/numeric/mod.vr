@@ -7,12 +7,18 @@
 // Houses fixed/arbitrary-precision numeric types whose primary mode
 // of construction + display is via decimal text.  Modules:
 //
-//   * `decimal` — Decimal { coefficient: Int, scale: Int } with
-//     scale-aligning add/sub/mul/div, parse, render, comparison
-//     + RoundingMode (HalfEven / HalfUp / HalfDown / Truncate).
-//   * `bigint`  — arbitrary-precision signed integer with
-//     base-10^9 little-endian digit storage.  Unblocks Decimal V1
-//     (> 18 significant digits) + crypto + scientific compute.
+//   * `decimal`    — Decimal { coefficient: Int, scale: Int } with
+//                    scale-aligning add/sub/mul/div, parse, render,
+//                    comparison + RoundingMode (HalfEven / HalfUp /
+//                    HalfDown / Truncate).  i64-bounded coefficient
+//                    (~18 sig digits); zero-allocation fast path.
+//   * `bigint`     — arbitrary-precision signed integer with base-10^9
+//                    little-endian digit storage.  Schoolbook add /
+//                    sub / mul + Knuth Algorithm D div_rem.
+//   * `bigdecimal` — arbitrary-precision decimal sibling of Decimal.
+//                    Same semantics, but coefficient is BigInt (no
+//                    i64 cap).  Use when intermediate values may
+//                    overflow i64 even if final fits.
 //
 // Future modules (V1+):
 //   * `rational` — exact-rational arithmetic over BigInt.
@@ -23,6 +29,7 @@ module core.text.numeric;
 
 public module decimal;
 public module bigint;
+public module bigdecimal;
 
 public mount .decimal.{
     Decimal, DecimalError,
@@ -34,4 +41,9 @@ public mount .bigint.{
     BigInt, BigIntError,
     BIGINT_BASE, BIGINT_DIGITS_PER_CHUNK,
     parse_bigint,
+};
+public mount .bigdecimal.{
+    BigDecimal, BigDecimalError,
+    MAX_SCALE_BIG,
+    parse_bigdecimal,
 };

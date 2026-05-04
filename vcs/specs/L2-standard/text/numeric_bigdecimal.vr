@@ -1,0 +1,250 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: text, numeric, bigdecimal, arbitrary-precision, decimal
+// @timeout: 30000
+//
+// Type-check exercise for `core.text.numeric.bigdecimal` —
+// arbitrary-precision decimal built on BigInt.  Validates the
+// constructor / predicate / arithmetic / comparison / render /
+// parse surface, plus interop conversions Decimal ⟷ BigDecimal.
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount core.text.numeric.{
+    BigDecimal, BigDecimalError, MAX_SCALE_BIG, parse_bigdecimal,
+    BigInt, parse_bigint,
+    Decimal, RoundingMode, HalfEven, HalfUp, HalfDown, Truncate,
+};
+
+fn check_constructors() -> Result<Bool, BigDecimalError> {
+    let z = BigDecimal.zero();
+    assert(z.is_zero());
+
+    let o = BigDecimal.one();
+    assert(o.is_positive());
+
+    let n = BigDecimal.from_int(42);
+    let _ = n;
+
+    let one_bi = BigInt.one();
+    let big = BigDecimal.from_bigint(&one_bi);
+    assert(big.is_positive());
+
+    let d = match Decimal.from_parts(12345, 2) {
+        Ok(v)  => v,
+        Err(_) => Decimal.zero(),
+    };
+    let bd_from_d = BigDecimal.from_decimal(&d);
+    assert(bd_from_d.scale == 2);
+
+    // Out-of-range scale → ScaleOutOfRange.
+    let oversized = match BigDecimal.from_parts(BigInt.one(), MAX_SCALE_BIG + 1) {
+        Ok(_)  => false,
+        Err(BigDecimalError.ScaleOutOfRange { scale: _ }) => true,
+        Err(_) => false,
+    };
+    assert(oversized);
+
+    Ok(true)
+}
+
+fn check_predicates() {
+    let pos = BigDecimal.from_int(5);
+    let neg = BigDecimal.from_int(-3);
+    let zero = BigDecimal.zero();
+
+    assert(pos.is_positive());
+    assert(neg.is_negative());
+    assert(zero.is_zero());
+
+    let abs_neg = neg.abs();
+    assert(abs_neg.is_positive());
+
+    let neg2 = pos.neg();
+    assert(neg2.is_negative());
+}
+
+fn check_arith() -> Result<Bool, BigDecimalError> {
+    let a = BigDecimal.from_int(100);
+    let b = BigDecimal.from_int(50);
+
+    let sum = a.add(&b)?;
+    assert(sum.eq(&BigDecimal.from_int(150)));
+
+    let diff = a.sub(&b)?;
+    assert(diff.eq(&BigDecimal.from_int(50)));
+
+    let prod = a.mul(&b)?;
+    assert(prod.eq(&BigDecimal.from_int(5000)));
+
+    Ok(true)
+}
+
+fn check_arith_beyond_i64() -> Result<Bool, BigDecimalError> {
+    // 10^20 + 1 — well beyond i64::MAX (~9.2 × 10^18).  V0 Decimal
+    // can't even REPRESENT this.
+    let huge = parse_bigdecimal(&"100000000000000000000".clone())?;
+    let one = BigDecimal.one();
+    let bigger = huge.add(&one)?;
+    let expected = parse_bigdecimal(&"100000000000000000001".clone())?;
+    assert(bigger.eq(&expected));
+
+    // Square: (10^20)^2 = 10^40.  Mul scale stays 0.
+    let sq = huge.mul(&huge)?;
+    let expected_sq = parse_bigdecimal(
+        &"10000000000000000000000000000000000000000".clone()
+    )?;
+    assert(sq.eq(&expected_sq));
+
+    Ok(true)
+}
+
+fn check_div() -> Result<Bool, BigDecimalError> {
+    // Exact division: 100 / 5 = 20 at precision=0.
+    let a = BigDecimal.from_int(100);
+    let b = BigDecimal.from_int(5);
+    let q = a.div(&b, 0, HalfEven)?;
+    assert(q.eq(&BigDecimal.from_int(20)));
+
+    // Inexact: 1 / 3 at precision=4 HalfEven ⇒ 0.3333.
+    let one = BigDecimal.one();
+    let three = BigDecimal.from_int(3);
+    let third = one.div(&three, 4, HalfEven)?;
+    let expected_third = match BigDecimal.from_parts(BigInt.from_int(3333), 4) {
+        Ok(v)  => v,
+        Err(_) => BigDecimal.zero(),
+    };
+    assert(third.eq(&expected_third));
+
+    // Halve a value that exceeds i64.  10^20 / 2 = 5 × 10^19.
+    let huge = parse_bigdecimal(&"100000000000000000000".clone())?;
+    let two = BigDecimal.from_int(2);
+    let half = huge.div(&two, 0, HalfEven)?;
+    let expected_half = parse_bigdecimal(&"50000000000000000000".clone())?;
+    assert(half.eq(&expected_half));
+
+    // Convenience wrappers.
+    let qq = a.div_round(&b, 0)?;
+    assert(qq.eq(&BigDecimal.from_int(20)));
+    let qt = a.div_trunc(&b)?;
+    assert(qt.eq(&BigDecimal.from_int(20)));
+
+    Ok(true)
+}
+
+fn check_div_by_zero() {
+    let a = BigDecimal.from_int(10);
+    let z = BigDecimal.zero();
+    let result = match a.div(&z, 2, HalfEven) {
+        Err(BigDecimalError.DivByZero) => true,
+        _ => false,
+    };
+    assert(result);
+}
+
+fn check_compare() {
+    let a = BigDecimal.from_int(5);
+    let b = BigDecimal.from_int(10);
+    let c = BigDecimal.from_int(5);
+
+    assert(matches_less(a.compare(&b)));
+    assert(matches_equal(a.compare(&c)));
+    assert(matches_greater(b.compare(&a)));
+
+    assert(a.lt(&b));
+    assert(b.gt(&a));
+    assert(a.eq(&c));
+}
+
+fn matches_equal(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
+fn matches_less(o: Ordering)  -> Bool { match o { Less => true,  _ => false } }
+fn matches_greater(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
+
+fn check_render() -> Result<Bool, BigDecimalError> {
+    let zero = BigDecimal.zero();
+    assert(zero.to_text() == "0");
+
+    let big = parse_bigdecimal(&"123456789012345678901234567890".clone())?;
+    assert(big.to_text() == "123456789012345678901234567890");
+
+    let neg_frac = parse_bigdecimal(&"-0.0001".clone())?;
+    assert(neg_frac.to_text() == "-0.0001");
+
+    let mixed = parse_bigdecimal(&"123.45".clone())?;
+    assert(mixed.to_text() == "123.45");
+
+    Ok(true)
+}
+
+fn check_parse() -> Result<Bool, BigDecimalError> {
+    let a = parse_bigdecimal(&"123.45".clone())?;
+    assert(a.scale == 2);
+
+    let b = parse_bigdecimal(&"-999999999999999999999.123456789".clone())?;
+    assert(b.scale == 9);
+    assert(b.is_negative());
+
+    // Empty input → ParseEmpty.
+    let empty = match parse_bigdecimal(&"".clone()) {
+        Err(BigDecimalError.ParseEmpty) => true,
+        _ => false,
+    };
+    assert(empty);
+
+    // Scientific notation rejected.
+    let sci = match parse_bigdecimal(&"1.5e3".clone()) {
+        Err(BigDecimalError.ParseInvalidShape { reason: _ }) => true,
+        _ => false,
+    };
+    assert(sci);
+
+    Ok(true)
+}
+
+fn check_interop() -> Result<Bool, BigDecimalError> {
+    // Decimal → BigDecimal (always succeeds).
+    let d = match Decimal.from_parts(12345, 2) {
+        Ok(v)  => v,
+        Err(_) => Decimal.zero(),
+    };
+    let bd = BigDecimal.from_decimal(&d);
+    assert(bd.scale == 2);
+
+    // BigDecimal → Decimal (Some when fits i64).
+    match bd.try_to_decimal() {
+        Some(d_back) => {
+            assert(d_back.coefficient == 12345);
+            assert(d_back.scale == 2);
+        }
+        None => assert(false),
+    }
+
+    // BigDecimal beyond i64 → try_to_decimal returns None.
+    let huge = parse_bigdecimal(&"100000000000000000000.5".clone())?;
+    match huge.try_to_decimal() {
+        Some(_) => assert(false),
+        None    => assert(true),
+    }
+
+    Ok(true)
+}
+
+fn check_constants() {
+    assert(MAX_SCALE_BIG == 1024);
+}
+
+fn main() {
+    let _ = check_constructors();
+    check_predicates();
+    let _ = check_arith();
+    let _ = check_arith_beyond_i64();
+    let _ = check_div();
+    check_div_by_zero();
+    check_compare();
+    let _ = check_render();
+    let _ = check_parse();
+    let _ = check_interop();
+    check_constants();
+}
