@@ -315,8 +315,9 @@ impl CompilationPhase for SemanticAnalysisPhase {
                     stdlib.protocols.len(),
                     stdlib.functions.len()
                 );
-                // Clone the metadata from Arc for TypeChecker (it takes ownership)
-                TypeChecker::new_with_core(stdlib.as_ref().clone())
+                // O(1) Arc clone — TypeChecker shares the metadata
+                // by reference rather than deep-copying ~3MB.
+                TypeChecker::new_with_core(std::sync::Arc::clone(stdlib))
             }
             None => {
                 // Compiling stdlib itself - use minimal context, types are registered

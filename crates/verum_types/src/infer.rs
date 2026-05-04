@@ -844,7 +844,12 @@ pub struct TypeChecker {
     /// Stdlib metadata loaded from stdlib.vbc.
     /// Contains type definitions, protocols, and methods for stdlib types.
     /// Used for type checking user code that uses stdlib types.
-    core_metadata: Maybe<crate::core_metadata::CoreMetadata>,
+    ///
+    /// Held as `Arc<CoreMetadata>` so production callers (which receive
+    /// `Arc<CoreMetadata>` from the pipeline's lazy embedded sidecar)
+    /// can hand it off without paying the 15ms cost of a 3MB deep
+    /// clone.  Reads dereference the `Arc` transparently.
+    core_metadata: Maybe<std::sync::Arc<crate::core_metadata::CoreMetadata>>,
     /// Lazy module resolver for on-demand module loading.
     /// When a module import fails because the module isn't in the registry,
     /// this resolver is called to load the module on-demand.
@@ -1283,7 +1288,9 @@ impl TypeChecker {
     /// This is the PREFERRED constructor for compiling user code.
     /// Types and methods are loaded from stdlib.vbca metadata, enabling
     /// type checking of stdlib types without parsing .vr source files.
-    pub fn new_with_core(metadata: crate::core_metadata::CoreMetadata) -> Self {
+    pub fn new_with_core(
+        metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
+    ) -> Self {
         // T2-extended-perf: defer eager `load_stdlib_from_metadata`
         // (~3.8s on release cold start, ~5.3s debug).  The
         // pipeline's `phase_type_check` calls
@@ -1296,6 +1303,10 @@ impl TypeChecker {
         // before the main typecheck pass.  Audit/corpus tooling
         // that needs the entire stdlib pre-registered upfront uses
         // [`new_with_core_eager`](Self::new_with_core_eager) instead.
+        //
+        // Takes `Arc<CoreMetadata>` so production callers (which
+        // hold an `Arc` from the pipeline's lazy embedded sidecar)
+        // hand off the metadata in O(1) — no 15ms 3MB deep clone.
         let mut checker = Self::with_minimal_context();
         checker.core_metadata = Maybe::Some(metadata);
         checker
@@ -1307,7 +1318,9 @@ impl TypeChecker {
     /// entire stdlib pre-registered regardless of what user code
     /// references.  Production `verum run` / `verum build` use the
     /// lazy [`new_with_core`](Self::new_with_core) path instead.
-    pub fn new_with_core_eager(metadata: crate::core_metadata::CoreMetadata) -> Self {
+    pub fn new_with_core_eager(
+        metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
+    ) -> Self {
         let mut checker = Self::with_minimal_context();
         checker.load_stdlib_from_metadata(&metadata);
         checker.core_metadata = Maybe::Some(metadata);
@@ -1393,6 +1406,80 @@ impl TypeChecker {
             if let Maybe::Some(default_text) = &gp.default {
                 pending.push(default_text.clone());
             }
+        }
+
+        // Inherent methods from `implement Type { ... }` blocks.
+        // Pre-fix: the source-driven typecheck registered these via
+        // `import_impl_blocks` / `register_inherent_blanket_impl`,
+        // walking the parsed AST.  The archive-driven path skipped
+        // it entirely — every `Text.with_capacity` style call
+        // failed `no method named ...` lookup despite the body
+        // existing in the precompiled VBC.
+        //
+        // The precompiler now stamps `parent_type` onto every
+        // function descriptor and mirrors the function name into
+        // its parent type's `methods` list.  Walk that list here
+        // and register each method as a TypeScheme on the
+        // type's inherent-method table — same structure
+        // `import_impl_blocks` populates from AST.
+        self.register_inherent_methods_from_metadata(name, &type_desc, &metadata);
+    }
+
+    /// Lazy counterpart of the AST-driven `import_impl_blocks` pass.
+    ///
+    /// Walks `type_desc.methods` (populated by
+    /// `archive_metadata::register_module_metadata` from VBC
+    /// `FunctionDescriptor.parent_type`) and registers each
+    /// `(method_name → method_type_scheme)` pair into the checker's
+    /// `inherent_methods` table — same structure the AST path
+    /// populates.  Without this step calls like
+    /// `Text.with_capacity(n)` would fail typecheck even though
+    /// the body is in the precompiled VBC archive.
+    ///
+    /// Idempotent: skips method names already present in
+    /// `inherent_methods[name]` so repeated
+    /// `ensure_stdlib_type_loaded` calls don't accumulate
+    /// duplicates.
+    fn register_inherent_methods_from_metadata(
+        &self,
+        type_name: &Text,
+        type_desc: &crate::core_metadata::TypeDescriptor,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) {
+        if type_desc.methods.is_empty() {
+            return;
+        }
+        let mut methods_guard = self.inherent_methods.write();
+        let bucket = methods_guard.entry(type_name.clone()).or_default();
+        for method_name in type_desc.methods.iter() {
+            if bucket.get(method_name).is_some() {
+                continue;
+            }
+            let fn_desc = match metadata.functions.get(method_name) {
+                Some(d) => d,
+                None => continue,
+            };
+            // Build the function type from the descriptor.  Param +
+            // return types are stored as bare type-name `Text`
+            // strings — the same shape
+            // `load_stdlib_from_metadata`'s protocol-method path
+            // uses (lines 1750-1789).  Generic instantiation is
+            // deferred to call sites; lookup-time we just need an
+            // approximate signature so method resolution succeeds.
+            let params: List<Type> = fn_desc
+                .params
+                .iter()
+                .map(|p| Type::Named {
+                    path: Self::text_to_path(&p.ty),
+                    args: List::new(),
+                })
+                .collect();
+            let return_ty = Type::Named {
+                path: Self::text_to_path(&fn_desc.return_type),
+                args: List::new(),
+            };
+            let fn_ty = Type::function(params, return_ty);
+            bucket.insert(method_name.clone(), TypeScheme::mono(fn_ty));
         }
     }
 
@@ -2088,7 +2175,10 @@ impl TypeChecker {
     /// Get the stdlib metadata (if loaded).
     /// Stdlib metadata is always loaded for user code compilation.
     pub fn core_metadata(&self) -> Option<&crate::core_metadata::CoreMetadata> {
-        self.core_metadata.as_ref()
+        match &self.core_metadata {
+            Maybe::Some(arc) => Some(arc.as_ref()),
+            Maybe::None => None,
+        }
     }
 
     /// Set the stdlib module loader for lazy loading.

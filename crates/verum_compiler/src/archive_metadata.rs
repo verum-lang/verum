@@ -253,6 +253,14 @@ fn register_module_metadata(
             continue;
         }
 
+        let parent_type = match fn_desc.parent_type {
+            Some(tid) => match type_id_to_name.get(&tid.0) {
+                Some(name) => Maybe::Some(Text::from(name.as_str())),
+                None => Maybe::None,
+            },
+            None => Maybe::None,
+        };
+
         let params: List<ParamDescriptor> = fn_desc
             .params
             .iter()
@@ -282,7 +290,21 @@ fn register_module_metadata(
                 .contains(verum_vbc::types::PropertySet::ASYNC),
             is_unsafe: false,
             intrinsic_id: Maybe::None,
+            parent_type: parent_type.clone(),
         };
+
+        // Mirror the function name into the parent type's `methods`
+        // list so the typechecker's lazy registration pass can
+        // discover inherent methods at type-load time without a
+        // second walk over `meta.functions`.
+        if let Maybe::Some(parent_name) = &parent_type {
+            if let Some(td) = meta.types.get_mut(parent_name) {
+                if !td.methods.iter().any(|m| m == &simple_name) {
+                    td.methods.push(simple_name.clone());
+                }
+            }
+        }
+
         meta.functions.insert(simple_name, descriptor);
     }
 }

@@ -907,13 +907,13 @@ impl<'s> CompilationPipeline<'s> {
         // Mode selection:
         // - NormalBuild (stdlib_metadata = Some): Use pre-compiled stdlib types
         // - StdlibBootstrap (stdlib_metadata = None): Use builtins only
-        let mut checker = match &self.stdlib_metadata {
+        let mut checker = match self.stdlib_metadata.get() {
             Some(metadata) => {
                 debug!(
                     "Using stdlib metadata for type checking ({} types)",
                     metadata.types.len()
                 );
-                TypeChecker::new_with_core(metadata.as_ref().clone())
+                TypeChecker::new_with_core(std::sync::Arc::clone(metadata))
             }
             None => {
                 // Compiling stdlib itself - use minimal context

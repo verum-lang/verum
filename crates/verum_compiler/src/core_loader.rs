@@ -534,6 +534,14 @@ fn convert_function_descriptor(
         })
         .collect();
 
+    let parent_type = match vbc_fn.parent_type {
+        Some(tid) => match module.types.get(tid.0 as usize) {
+            Some(parent) => Maybe::Some(get_string(&module.strings, parent.name)),
+            None => Maybe::None,
+        },
+        None => Maybe::None,
+    };
+
     Ok(FunctionDescriptor {
         name,
         module_path: module_path.clone(),
@@ -544,6 +552,7 @@ fn convert_function_descriptor(
         is_async: vbc_fn.properties.contains(PropertySet::ASYNC),
         is_unsafe: false, // Would need VBC metadata for this
         intrinsic_id: Maybe::None,
+        parent_type,
     })
 }
 

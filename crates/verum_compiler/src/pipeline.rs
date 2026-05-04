@@ -743,6 +743,63 @@ impl RunResult {
     }
 }
 
+/// State of the pipeline's `stdlib_metadata` slot.
+///
+/// `LazyEmbedded` defers the 5-12ms bincode decode of the embedded
+/// `runtime.core_metadata` blob until the first read.  Cached-VBC
+/// runs that bypass the frontend never trigger the read — saving the
+/// entire decode cost on warm-cache invocations.  `Eager` is the
+/// fall-back used in stdlib-bootstrap mode (no embedded blob exists
+/// yet) and after an explicit `set_stdlib_metadata` call.
+pub(crate) enum StdlibMetadataState {
+    /// Decode lazily on first access from the embedded
+    /// `runtime.core_metadata` sidecar.  Default for `NormalBuild`.
+    LazyEmbedded(
+        std::sync::OnceLock<
+            Option<std::sync::Arc<verum_types::core_metadata::CoreMetadata>>,
+        >,
+    ),
+    /// Eagerly held value (or `None` for "no metadata available").
+    /// Used in `StdlibBootstrap` mode and after `set_stdlib_metadata`.
+    Eager(Option<std::sync::Arc<verum_types::core_metadata::CoreMetadata>>),
+}
+
+impl StdlibMetadataState {
+    /// Resolve the stored metadata, lazily decoding the embedded
+    /// blob on first call when in `LazyEmbedded` state.
+    pub(crate) fn get(
+        &self,
+    ) -> Option<&std::sync::Arc<verum_types::core_metadata::CoreMetadata>> {
+        match self {
+            Self::LazyEmbedded(cell) => cell
+                .get_or_init(|| {
+                    let t = std::time::Instant::now();
+                    let m = crate::embedded_stdlib_metadata::get_runtime_metadata();
+                    if std::env::var("VERUM_TRACE_PHASES").is_ok() {
+                        eprintln!(
+                            "[stdlib_metadata] lazy embedded decode: {:.2}ms",
+                            t.elapsed().as_secs_f64() * 1000.0
+                        );
+                    }
+                    m
+                })
+                .as_ref(),
+            Self::Eager(opt) => opt.as_ref(),
+        }
+    }
+
+    pub(crate) fn is_some(&self) -> bool {
+        match self {
+            Self::LazyEmbedded(_) => crate::embedded_stdlib_metadata::has_runtime_metadata(),
+            Self::Eager(opt) => opt.is_some(),
+        }
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        !self.is_some()
+    }
+}
+
 pub struct CompilationPipeline<'s> {
     session: &'s mut Session,
 
@@ -818,7 +875,15 @@ pub struct CompilationPipeline<'s> {
     /// Pre-compiled stdlib type metadata from embedded stdlib.vbca archive.
     /// In NormalBuild mode, these types are loaded directly rather than re-parsing
     /// stdlib source, enabling fast compilation of user code.
-    stdlib_metadata: Option<std::sync::Arc<verum_types::core_metadata::CoreMetadata>>,
+    ///
+    /// `LazyEmbedded` is the default for NormalBuild and defers the
+    /// 5-12ms bincode decode of the embedded `runtime.core_metadata`
+    /// blob until the first read.  Cached-VBC runs that bypass the
+    /// frontend (e.g. `execute_cached_vbc`) never trigger the read at
+    /// all — saving the entire decode cost on warm-cache invocations.
+    /// `Eager` is used in StdlibBootstrap (no embedded blob to decode)
+    /// and after `set_stdlib_metadata` (caller-supplied metadata).
+    stdlib_metadata: StdlibMetadataState,
 
     /// Deferred verification goals drained from the type-checker
     /// after Phase 5. Consumed by the DependentVerifier in
@@ -1155,23 +1220,15 @@ impl<'s> CompilationPipeline<'s> {
             type_registry: None,
             // T2-extended single-path: when the compiler binary
             // embeds a precompiled stdlib `runtime.core_metadata`
-            // sidecar, prime `stdlib_metadata` directly from it.
-            // The typecheck phase then takes the
+            // sidecar, the typecheck phase prefers the
             // `Some(metadata) => TypeChecker::new_with_core(...)`
             // branch and skips the AST-walking stdlib registration
-            // block entirely.  No source parsing, no cache misses,
-            // no fallback paths.
-            stdlib_metadata: {
-                let t = std::time::Instant::now();
-                let m = crate::embedded_stdlib_metadata::get_runtime_metadata();
-                if std::env::var("VERUM_TRACE_PHASES").is_ok() {
-                    eprintln!(
-                        "[pipeline_new] embed metadata decode: {:.2}ms",
-                        t.elapsed().as_secs_f64() * 1000.0
-                    );
-                }
-                m
-            },
+            // block entirely.  Decoding is deferred to first read —
+            // cached-VBC fast paths that never typecheck don't pay
+            // the 5-12ms decode cost at all.
+            stdlib_metadata: StdlibMetadataState::LazyEmbedded(
+                std::sync::OnceLock::new(),
+            ),
             deferred_verification_goals: verum_common::List::new(),
             // Stdlib bootstrap mode fields - empty for normal mode
             stdlib_resolver: None,
@@ -1286,7 +1343,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_artifacts: None,
             collected_contexts: List::new(),
             type_registry: None,
-            stdlib_metadata: None,
+            stdlib_metadata: StdlibMetadataState::Eager(None),
             deferred_verification_goals: verum_common::List::new(), // Not used in bootstrap mode
             // Stdlib bootstrap mode fields - initialized
             stdlib_resolver: Some(resolver),
@@ -1358,7 +1415,7 @@ impl<'s> CompilationPipeline<'s> {
             metadata.protocols.len(),
             metadata.functions.len()
         );
-        self.stdlib_metadata = Some(metadata);
+        self.stdlib_metadata = StdlibMetadataState::Eager(Some(metadata));
     }
 
     /// Get a reference to the session (useful for accessing diagnostics after compilation)
@@ -1505,7 +1562,9 @@ impl<'s> CompilationPipeline<'s> {
 
                 // Convert cached metadata to TypeChecker-compatible format
                 let stdlib_meta = self.convert_cached_metadata_to_stdlib(&entry.metadata);
-                self.stdlib_metadata = Some(std::sync::Arc::new(stdlib_meta));
+                self.stdlib_metadata = StdlibMetadataState::Eager(Some(
+                    std::sync::Arc::new(stdlib_meta),
+                ));
 
                 let elapsed = start.elapsed();
                 info!(
@@ -1608,6 +1667,7 @@ impl<'s> CompilationPipeline<'s> {
                 } else {
                     Maybe::None
                 },
+                parent_type: Maybe::None,
             };
             metadata
                 .functions
