@@ -1,0 +1,412 @@
+// =============================================================================
+// core/database/postgres/replication_tracker.vr — LSN tracker + PositionStore
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (replication) + §6.1.8 (async).
+// =============================================================================
+//
+// Production-grade LSN tracker for logical-replication consumers.
+// Pre-fix every CDC consumer had to hand-wire (write, flush, apply)
+// LSN tracking + periodic standby-status writes + restart-position
+// persistence, despite all three concerns being architectural-
+// invariant rather than per-consumer logic.
+//
+// V0 surface — `core.database.postgres.replication_tracker`:
+//
+//   * `TrackedPosition { write, flush, apply }` — the LSN tuple
+//     PG's wire protocol surfaces on every Standby Status Update.
+//   * `StoreOutcome` — `SoStored` / `SoSkipped` (no-op store) /
+//     `SoFailed(reason)`.
+//   * `PositionStore` — pluggable persistence protocol; impl this
+//     to land checkpoints in a file / KV / SQL row / etc.
+//   * `MemoryPositionStore` — in-process `Shared<Mutex<...>>`
+//     default. Useful for tests + ephemeral consumers.
+//   * `LsnTracker` — wraps an `AsyncPgReplicationConnection` and
+//     manages the tuple + auto-fire periodic standby-status +
+//     persistence on flush confirm.
+//   * `attach_tracker(repl_conn, store, config) → LsnTracker` —
+//     spawns the watcher task; tracker handle is cloneable so
+//     multiple producer threads can advance the tuple
+//     concurrently.
+//   * `LsnTracker.update_received(lsn)` — call from the consumer
+//     loop on every XLogData; also auto-advances `write` so the
+//     server gets feedback the chunk was wire-acknowledged.
+//   * `LsnTracker.confirm_flush(lsn)` — call when the consumer
+//     durably persisted up through this LSN; persists via
+//     PositionStore if `persist_on_flush`.
+//   * `LsnTracker.confirm_apply(lsn)` — downstream applied.
+//   * `LsnTracker.checkpoint().await` — explicit save to the
+//     PositionStore (regardless of `persist_on_flush`).
+//   * `LsnTracker.snapshot()` — read the current tuple.
+//   * `LsnTracker.shutdown().await` — stops the watcher, sends
+//     a final standby-status, joins the spawned task.
+//   * `load_start_lsn(store) → Lsn` — restart helper; returns the
+//     persisted `flush` LSN (resume-after-flush) or `Lsn.zero()`.
+//
+// Architecture — single watcher task:
+//
+//   The watcher loops:
+//     1. await select( shutdown_rx.recv, sleep_ms(interval_ms) )
+//     2. If shutdown: snapshot tuple, send final standby-status,
+//        exit.
+//     3. If timer: snapshot tuple, send standby-status, loop.
+//
+//   Standby-status-update writes go through the existing
+//   `AsyncPgReplicationConnection.send_standby_status` actor —
+//   the watcher doesn't touch the wire directly. So this layer
+//   is a pure async coordinator on top of the actor channel +
+//   the shared LSN state.
+//
+// Reuses existing primitives:
+//   * `core.async.timer.sleep_ms`
+//   * `core.async.task.spawn` + `JoinHandle`
+//   * `core.async.channel.{bounded_channel, Sender, Receiver}`
+//   * `core.database.postgres.replication.Lsn` + `format`
+//   * `core.database.postgres.async_replication.AsyncPgReplicationConnection`
+//
+// Out of V0:
+//   * Cancellation-token integration (route token.cancel() →
+//     watcher shutdown).
+//   * Per-tracker metrics (status writes / flushes persisted /
+//     skipped intervals).
+//   * Adaptive interval based on observed wire RTT.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*"))],
+    requires: [Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.postgres.replication_tracker;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterSpecific, AdPostgres,
+};
+mount core.database.postgres.replication.Lsn;
+mount core.database.postgres.async_replication.AsyncPgReplicationConnection;
+mount core.async.channel.{
+    Sender, Receiver, bounded_channel,
+};
+mount core.async.task.{spawn, JoinHandle};
+mount core.async.timer.sleep_ms;
+
+// =============================================================================
+// Tunables
+// =============================================================================
+
+/// Default standby-status auto-fire interval. 10 s gives the
+/// server visibility into replica progress without saturating the
+/// wire. Default `wal_sender_timeout` is 60 s, so 10 s leaves
+/// plenty of headroom for transient stalls.
+public const DEFAULT_INTERVAL_MS: Int = 10_000;
+
+// =============================================================================
+// Public types
+// =============================================================================
+
+public type TrackedPosition is {
+    /// LSN we've received off the wire — the "I have observed this
+    /// position" claim. Always >= flush.
+    write: Lsn,
+    /// LSN we've durably persisted in our application's sink. The
+    /// server uses this to recycle WAL — anything before this is
+    /// safe to drop. Always >= apply.
+    flush: Lsn,
+    /// LSN that downstream consumers have actually applied. Some
+    /// consumers don't distinguish flush vs apply; default-equal
+    /// is fine.
+    apply: Lsn,
+};
+
+implement TrackedPosition {
+    public fn zero() -> TrackedPosition {
+        TrackedPosition {
+            write: Lsn.zero(),
+            flush: Lsn.zero(),
+            apply: Lsn.zero(),
+        }
+    }
+
+    public fn clone(&self) -> TrackedPosition {
+        TrackedPosition {
+            write: Lsn { value: self.write.value },
+            flush: Lsn { value: self.flush.value },
+            apply: Lsn { value: self.apply.value },
+        }
+    }
+}
+
+public type StoreOutcome is
+      SoStored
+    | SoSkipped
+    | SoFailed(Text);
+
+/// Pluggable persistence — implement to land checkpoints somewhere
+/// surviving process restart. The contract:
+///
+///   * `save` is called on every flush confirm (when
+///     `persist_on_flush` is set) plus on every explicit
+///     `checkpoint()` call. The implementer decides whether to
+///     debounce / batch.
+///   * `load` is called once at startup to recover the last
+///     known position. None → start fresh from `Lsn.zero()`.
+///
+/// Implementations MUST be thread-safe — `LsnTracker` clones
+/// the `Shared<dyn PositionStore>` across the watcher task and
+/// caller threads.
+public type PositionStore is protocol {
+    fn save(&self, pos: &TrackedPosition) -> StoreOutcome;
+    fn load(&self) -> Maybe<TrackedPosition>;
+};
+
+/// In-process default — keeps the last-saved tuple in a
+/// `Shared<Mutex<...>>`. Use for tests + ephemeral consumers
+/// that don't need restart safety.
+public type MemoryPositionStore is {
+    last: Shared<sync.mutex.Mutex<Maybe<TrackedPosition>>>,
+};
+
+implement MemoryPositionStore {
+    public fn new() -> MemoryPositionStore {
+        MemoryPositionStore {
+            last: Shared.new(sync.mutex.Mutex.new(None)),
+        }
+    }
+
+    public fn clone(&self) -> MemoryPositionStore {
+        MemoryPositionStore { last: self.last.clone() }
+    }
+}
+
+implement PositionStore for MemoryPositionStore {
+    fn save(&self, pos: &TrackedPosition) -> StoreOutcome {
+        let mut g = self.last.lock().unwrap_or_else(|p| p.into_inner());
+        *g = Some(pos.clone());
+        SoStored
+    }
+
+    fn load(&self) -> Maybe<TrackedPosition> {
+        let g = self.last.lock().unwrap_or_else(|p| p.into_inner());
+        match &*g {
+            Some(p) => Some(p.clone()),
+            None    => None,
+        }
+    }
+}
+
+public type LsnTrackerConfig is {
+    interval_ms: Int,
+    /// `true` (default) — `confirm_flush` auto-saves to the store.
+    /// `false` — store is only touched on explicit `checkpoint()`.
+    persist_on_flush: Bool,
+};
+
+implement LsnTrackerConfig {
+    public fn default() -> LsnTrackerConfig {
+        LsnTrackerConfig {
+            interval_ms: DEFAULT_INTERVAL_MS,
+            persist_on_flush: true,
+        }
+    }
+}
+
+public type LsnTracker is {
+    state: Shared<sync.mutex.Mutex<TrackedPosition>>,
+    store: Shared<dyn PositionStore>,
+    repl: AsyncPgReplicationConnection,
+    config: LsnTrackerConfig,
+    shutdown_tx: Sender<()>,
+    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+};
+
+implement LsnTracker {
+    public fn clone(&self) -> LsnTracker {
+        LsnTracker {
+            state: self.state.clone(),
+            store: self.store.clone(),
+            repl: self.repl.clone(),
+            config: LsnTrackerConfig {
+                interval_ms: self.config.interval_ms,
+                persist_on_flush: self.config.persist_on_flush,
+            },
+            shutdown_tx: self.shutdown_tx.clone(),
+            join: self.join.clone(),
+        }
+    }
+
+    /// Read the current LSN tuple. Cheap — clones a 24-byte
+    /// struct under the state lock.
+    public fn snapshot(&self) -> TrackedPosition {
+        let g = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        g.clone()
+    }
+
+    /// Bump `write` to `lsn` if `lsn > write`. Other components
+    /// stay put. Used by the consumer loop on every received
+    /// XLogData to keep the server informed of wire progress.
+    public fn update_received(&self, lsn: Lsn) {
+        let mut g = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if lsn.value > g.write.value {
+            g.write = lsn;
+        }
+    }
+
+    /// Mark `lsn` as durably persisted in the consumer's sink.
+    /// Bumps `flush` (and `apply` if it lagged behind), persists
+    /// via PositionStore when `persist_on_flush`. Returns the
+    /// store outcome — `SoSkipped` if persist_on_flush is false.
+    public async fn confirm_flush(&self, lsn: Lsn) -> StoreOutcome {
+        let snap_for_save = {
+            let mut g = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            if lsn.value > g.flush.value {
+                g.flush = Lsn { value: lsn.value };
+                if g.write.value < g.flush.value {
+                    g.write = Lsn { value: g.flush.value };
+                }
+                if g.apply.value < g.flush.value {
+                    g.apply = Lsn { value: g.flush.value };
+                }
+            }
+            g.clone()
+        };
+        if self.config.persist_on_flush {
+            self.store.save(&snap_for_save)
+        } else {
+            SoSkipped
+        }
+    }
+
+    /// Mark `lsn` as fully applied downstream. Pure tuple
+    /// advance — no persistence; the next periodic standby-status
+    /// will surface it to the server.
+    public fn confirm_apply(&self, lsn: Lsn) {
+        let mut g = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if lsn.value > g.apply.value {
+            g.apply = Lsn { value: lsn.value };
+        }
+    }
+
+    /// Force a checkpoint — saves the current tuple to the
+    /// PositionStore regardless of `persist_on_flush`. Useful
+    /// before a clean shutdown or on a manual sync trigger.
+    public fn checkpoint(&self) -> StoreOutcome {
+        let snap = self.snapshot();
+        self.store.save(&snap)
+    }
+
+    /// Stop the watcher task, send a final standby-status with
+    /// the latest tuple, and join the task. Idempotent — second
+    /// call returns immediately.
+    public async fn shutdown(&self) -> Result<(), DbError> {
+        // Best-effort send; channel may already be closed if
+        // shutdown was called twice.
+        let _ = self.shutdown_tx.send_async(()).await;
+        let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.take() {
+            Some(jh) => {
+                let _ = jh.join().await;
+            }
+            None => {}
+        }
+        // Final flush — write the current tuple to the wire.
+        let snap = self.snapshot();
+        let _ = self.repl.send_standby_status(
+            snap.write, snap.flush, snap.apply,
+            0,                  // client_time_us — server fills if needed
+            false,
+        ).await;
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+/// Wire a tracker around an open `AsyncPgReplicationConnection`.
+/// If `store.load()` returns `Some(pos)`, the tracker resumes
+/// from that tuple; otherwise it starts at `Lsn.zero()`.
+///
+/// Spawns one watcher task that ticks every `config.interval_ms`
+/// and pumps the latest tuple through `repl.send_standby_status`.
+public fn attach_tracker(
+    repl: AsyncPgReplicationConnection,
+    store: Shared<dyn PositionStore>,
+    config: LsnTrackerConfig,
+) -> LsnTracker {
+    let initial = match store.load() {
+        Some(p) => p,
+        None    => TrackedPosition.zero(),
+    };
+    let state = Shared.new(sync.mutex.Mutex.new(initial));
+    let (shutdown_tx, shutdown_rx) = bounded_channel<()>(1);
+
+    let state_for_watcher = state.clone();
+    let repl_for_watcher = repl.clone();
+    let interval = if config.interval_ms < 1 { 1 } else { config.interval_ms };
+    let join = spawn(run_watcher(
+        repl_for_watcher,
+        state_for_watcher,
+        shutdown_rx,
+        interval,
+    ));
+
+    LsnTracker {
+        state: state,
+        store: store,
+        repl: repl,
+        config: config,
+        shutdown_tx: shutdown_tx,
+        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+    }
+}
+
+/// Restart helper — convenience over `store.load()`. Returns the
+/// `flush` LSN (resume-after-flush) when present, `Lsn.zero()`
+/// otherwise. Pass directly to `start_logical(opts, start_lsn)`.
+public fn load_start_lsn(store: &Shared<dyn PositionStore>) -> Lsn {
+    match store.load() {
+        Some(p) => Lsn { value: p.flush.value },
+        None    => Lsn.zero(),
+    }
+}
+
+// =============================================================================
+// Watcher actor
+// =============================================================================
+
+async fn run_watcher(
+    repl: AsyncPgReplicationConnection,
+    state: Shared<sync.mutex.Mutex<TrackedPosition>>,
+    mut shutdown_rx: Receiver<()>,
+    interval_ms: Int,
+) {
+    loop {
+        // Race the timer against shutdown. The shutdown_rx is a
+        // bounded(1) channel — caller's send_async lands a single
+        // token that we drain here. Pre-fix the loop spun on a
+        // bare sleep — shutdown latency could be a full interval;
+        // racing the recv collapses it to ~zero.
+        let stop = select {
+            _ = sleep_ms(interval_ms).await => false,
+            _ = shutdown_rx.recv_async().await => true,
+        };
+        if stop {
+            return;
+        }
+        let snap = {
+            let g = state.lock().unwrap_or_else(|p| p.into_inner());
+            g.clone()
+        };
+        let _ = repl.send_standby_status(
+            snap.write, snap.flush, snap.apply,
+            0,
+            false,
+        ).await;
+    }
+}
