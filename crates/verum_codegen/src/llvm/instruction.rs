@@ -576,6 +576,402 @@ pub(crate) fn get_or_declare_internal_i64_to_decimal<'ctx>(
     func
 }
 
+/// Get or declare a libc-free `strtod` replacement —
+/// `verum_internal_strtod(nptr: ptr) -> f64`.
+///
+/// **Libc-free** (T-DEFER-AOT-NO-LIBC float-parse half):
+/// open-coded simple-precision strtod parser emitted as
+/// `verum_internal_strtod` (internal-linkage). Replaces the
+/// `strtod(nptr, NULL)` libc call in `runtime.rs::
+/// emit_verum_text_parse_float`.
+///
+/// Grammar accepted (subset of C99 strtod):
+///
+///   `[ws]* [+-]? digits* (. digits*)? ([eE] [+-]? digits+)?`
+///
+/// Out of V0:
+///   * Hex-float literals (`0x1.8p3` style).
+///   * `inf` / `nan` / `infinity` text literals.
+///   * Round-half-to-even bit-perfect rounding for very long
+///     mantissas (V0 accumulates as i64 + final f64 multiply;
+///     last-bit accuracy depends on the multiply chain — within
+///     ~1 ULP for 15-digit inputs, larger ULP for 18+ digit
+///     mantissas; Grisu/Ryū-grade is the V1 follow-up).
+///   * Endptr — caller passes NULL anyway; helper ignores.
+///
+/// Algorithm (~16 basic blocks):
+///   1. Skip leading whitespace (`' '` / `'\t'` / `'\n'` / `'\r'`).
+///   2. Parse optional `+`/`-` sign as `f64` ±1.0.
+///   3. Integer-part loop: accumulate digits into i64
+///      `mant_acc`.
+///   4. Optional `.` — switch to fractional digits, still
+///      accumulating into `mant_acc`, but counting digits in
+///      `frac_digits`.
+///   5. Optional `e`/`E` — parse exponent into i64 `exp_acc`
+///      with sign.
+///   6. Compute `final_exp = exp_acc - frac_digits`.
+///   7. `mant_f64 = sitofp(mant_acc)`.
+///   8. Multiply / divide by 10 in a loop bounded by
+///      `MAX_EXP_LOOPS = 400` (safely covers IEEE 754 f64
+///      range ±308; over-range → ±Inf / 0 by IEEE rules).
+///   9. Apply sign; return.
+///
+/// See `docs/architecture/no-libc-architecture.md`.
+pub(crate) fn get_or_declare_internal_strtod<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_strtod";
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
+    let i8_type = llvm_ctx.i8_type();
+    let i64_type = llvm_ctx.i64_type();
+    let f64_type = llvm_ctx.f64_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let fn_type = f64_type.fn_type(&[ptr_type.into()], false);
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let skip_ws = llvm_ctx.append_basic_block(func, "skip_ws");
+    let after_ws = llvm_ctx.append_basic_block(func, "after_ws");
+    let int_loop = llvm_ctx.append_basic_block(func, "int_loop");
+    let int_advance = llvm_ctx.append_basic_block(func, "int_advance");
+    let after_int = llvm_ctx.append_basic_block(func, "after_int");
+    let frac_loop = llvm_ctx.append_basic_block(func, "frac_loop");
+    let frac_advance = llvm_ctx.append_basic_block(func, "frac_advance");
+    let after_frac = llvm_ctx.append_basic_block(func, "after_frac");
+    let exp_after_e = llvm_ctx.append_basic_block(func, "exp_after_e");
+    let exp_loop = llvm_ctx.append_basic_block(func, "exp_loop");
+    let exp_advance = llvm_ctx.append_basic_block(func, "exp_advance");
+    let after_exp = llvm_ctx.append_basic_block(func, "after_exp");
+    let mul_setup = llvm_ctx.append_basic_block(func, "mul_setup");
+    let mul_pos_loop = llvm_ctx.append_basic_block(func, "mul_pos_loop");
+    let mul_neg_loop = llvm_ctx.append_basic_block(func, "mul_neg_loop");
+    let return_val = llvm_ctx.append_basic_block(func, "return_val");
+
+    let builder = llvm_ctx.create_builder();
+    let nptr = func.get_first_param().expect("nptr").into_pointer_value();
+
+    let zero_i64 = i64_type.const_zero();
+    let one_i64 = i64_type.const_int(1, false);
+    let ten_i64 = i64_type.const_int(10, false);
+    let max_exp_loops = i64_type.const_int(400, false);
+    let one_f64 = f64_type.const_float(1.0);
+    let neg_one_f64 = f64_type.const_float(-1.0);
+    let ten_f64 = f64_type.const_float(10.0);
+    let tenth_f64 = f64_type.const_float(0.1);
+    let zero_f64 = f64_type.const_float(0.0);
+
+    let zero_ch = i8_type.const_int(b'0' as u64, false);
+    let nine_ch = i8_type.const_int(b'9' as u64, false);
+    let dot_ch = i8_type.const_int(b'.' as u64, false);
+    let lower_e = i8_type.const_int(b'e' as u64, false);
+    let upper_e = i8_type.const_int(b'E' as u64, false);
+    let plus_ch = i8_type.const_int(b'+' as u64, false);
+    let minus_ch = i8_type.const_int(b'-' as u64, false);
+
+    // entry → skip_ws (i = 0)
+    builder.position_at_end(entry);
+    builder.build_unconditional_branch(skip_ws).expect("→ skip_ws");
+
+    // skip_ws: PHI(i); load nptr[i]; if ws → advance; else → after_ws
+    builder.position_at_end(skip_ws);
+    let ws_i = builder.build_phi(i64_type, "ws_i").expect("ws_i phi");
+    ws_i.add_incoming(&[(&zero_i64, entry)]);
+    let ws_iv = ws_i.as_basic_value().into_int_value();
+    let ws_ptr = unsafe { builder.build_gep(i8_type, nptr, &[ws_iv], "ws_p").expect("ws gep") };
+    let ws_c = builder.build_load(i8_type, ws_ptr, "ws_c").expect("ws ld").into_int_value();
+    let space_ch = i8_type.const_int(b' ' as u64, false);
+    let tab_ch = i8_type.const_int(b'\t' as u64, false);
+    let nl_ch = i8_type.const_int(b'\n' as u64, false);
+    let cr_ch = i8_type.const_int(b'\r' as u64, false);
+    let is_sp = builder.build_int_compare(verum_llvm::IntPredicate::EQ, ws_c, space_ch, "is_sp").expect("sp");
+    let is_tab = builder.build_int_compare(verum_llvm::IntPredicate::EQ, ws_c, tab_ch, "is_tab").expect("tab");
+    let is_nl = builder.build_int_compare(verum_llvm::IntPredicate::EQ, ws_c, nl_ch, "is_nl").expect("nl");
+    let is_cr = builder.build_int_compare(verum_llvm::IntPredicate::EQ, ws_c, cr_ch, "is_cr").expect("cr");
+    let is_ws_a = builder.build_or(is_sp, is_tab, "ws_a").expect("or1");
+    let is_ws_b = builder.build_or(is_nl, is_cr, "ws_b").expect("or2");
+    let is_ws = builder.build_or(is_ws_a, is_ws_b, "is_ws").expect("or3");
+    let advance_ws = llvm_ctx.append_basic_block(func, "advance_ws");
+    builder.build_conditional_branch(is_ws, advance_ws, after_ws).expect("ws cond");
+    builder.position_at_end(advance_ws);
+    let ws_next = builder.build_int_add(ws_iv, one_i64, "ws_next").expect("ws inc");
+    builder.build_unconditional_branch(skip_ws).expect("ws back");
+    ws_i.add_incoming(&[(&ws_next, advance_ws)]);
+
+    // after_ws: parse sign. Set sign_f64 + advance i past +/-.
+    builder.position_at_end(after_ws);
+    let i_after_ws = ws_i.as_basic_value().into_int_value();
+    let sign_ptr = unsafe { builder.build_gep(i8_type, nptr, &[i_after_ws], "sign_p").expect("sign gep") };
+    let sign_c = builder.build_load(i8_type, sign_ptr, "sign_c").expect("sign ld").into_int_value();
+    let is_minus = builder.build_int_compare(verum_llvm::IntPredicate::EQ, sign_c, minus_ch, "is_minus").expect("is_minus");
+    let is_plus = builder.build_int_compare(verum_llvm::IntPredicate::EQ, sign_c, plus_ch, "is_plus").expect("is_plus");
+    let is_sign = builder.build_or(is_minus, is_plus, "is_sign").expect("is_sign");
+    let i_after_sign_inc = builder.build_int_add(i_after_ws, one_i64, "i_inc").expect("i++");
+    let i_after_sign = builder.build_select(is_sign, i_after_sign_inc, i_after_ws, "i_after_sign").expect("sel i").into_int_value();
+    let sign_f64 = builder.build_select(is_minus, neg_one_f64, one_f64, "sign_f64").expect("sel sign").into_float_value();
+    builder.build_unconditional_branch(int_loop).expect("→ int");
+
+    // int_loop: PHI(i, mant_acc); read digit → int_advance else after_int
+    builder.position_at_end(int_loop);
+    let il_i = builder.build_phi(i64_type, "il_i").expect("il_i phi");
+    let il_acc = builder.build_phi(i64_type, "il_acc").expect("il_acc phi");
+    il_i.add_incoming(&[(&i_after_sign, after_ws)]);
+    il_acc.add_incoming(&[(&zero_i64, after_ws)]);
+    let il_iv = il_i.as_basic_value().into_int_value();
+    let il_av = il_acc.as_basic_value().into_int_value();
+    let il_p = unsafe { builder.build_gep(i8_type, nptr, &[il_iv], "il_p").expect("il gep") };
+    let il_c = builder.build_load(i8_type, il_p, "il_c").expect("il ld").into_int_value();
+    let il_ge0 = builder.build_int_compare(verum_llvm::IntPredicate::UGE, il_c, zero_ch, "il_ge0").expect("ge0");
+    let il_le9 = builder.build_int_compare(verum_llvm::IntPredicate::ULE, il_c, nine_ch, "il_le9").expect("le9");
+    let il_isd = builder.build_and(il_ge0, il_le9, "il_isd").expect("isd");
+    builder.build_conditional_branch(il_isd, int_advance, after_int).expect("il cond");
+
+    // int_advance: mant_acc = mant_acc * 10 + (c - '0'); i++
+    builder.position_at_end(int_advance);
+    let il_d_i64 = builder.build_int_z_extend(il_c, i64_type, "il_d_i64").expect("ext");
+    let zero_off = i64_type.const_int(b'0' as u64, false);
+    let il_dv = builder.build_int_sub(il_d_i64, zero_off, "il_dv").expect("dv");
+    let il_acc_x10 = builder.build_int_mul(il_av, ten_i64, "il_x10").expect("x10");
+    let il_acc_next = builder.build_int_add(il_acc_x10, il_dv, "il_acc_next").expect("acc+");
+    let il_i_next = builder.build_int_add(il_iv, one_i64, "il_i_next").expect("i++");
+    builder.build_unconditional_branch(int_loop).expect("loop");
+    il_i.add_incoming(&[(&il_i_next, int_advance)]);
+    il_acc.add_incoming(&[(&il_acc_next, int_advance)]);
+
+    // after_int: check '.'
+    builder.position_at_end(after_int);
+    let i_after_int = il_i.as_basic_value().into_int_value();
+    let acc_after_int = il_acc.as_basic_value().into_int_value();
+    let dot_p = unsafe { builder.build_gep(i8_type, nptr, &[i_after_int], "dot_p").expect("dot gep") };
+    let dot_c = builder.build_load(i8_type, dot_p, "dot_c").expect("dot ld").into_int_value();
+    let is_dot = builder.build_int_compare(verum_llvm::IntPredicate::EQ, dot_c, dot_ch, "is_dot").expect("is_dot");
+    let i_after_dot = builder.build_int_add(i_after_int, one_i64, "i_after_dot").expect("i++");
+    let i_into_frac = builder.build_select(is_dot, i_after_dot, i_after_int, "i_into_frac").expect("sel").into_int_value();
+    builder.build_conditional_branch(is_dot, frac_loop, after_frac).expect("dot cond");
+
+    // frac_loop: PHI(i, mant_acc, frac_digits)
+    builder.position_at_end(frac_loop);
+    let fl_i = builder.build_phi(i64_type, "fl_i").expect("fl_i phi");
+    let fl_acc = builder.build_phi(i64_type, "fl_acc").expect("fl_acc phi");
+    let fl_fd = builder.build_phi(i64_type, "fl_fd").expect("fl_fd phi");
+    fl_i.add_incoming(&[(&i_into_frac, after_int)]);
+    fl_acc.add_incoming(&[(&acc_after_int, after_int)]);
+    fl_fd.add_incoming(&[(&zero_i64, after_int)]);
+    let fl_iv = fl_i.as_basic_value().into_int_value();
+    let fl_av = fl_acc.as_basic_value().into_int_value();
+    let fl_fdv = fl_fd.as_basic_value().into_int_value();
+    let fl_p = unsafe { builder.build_gep(i8_type, nptr, &[fl_iv], "fl_p").expect("fl gep") };
+    let fl_c = builder.build_load(i8_type, fl_p, "fl_c").expect("fl ld").into_int_value();
+    let fl_ge0 = builder.build_int_compare(verum_llvm::IntPredicate::UGE, fl_c, zero_ch, "fl_ge0").expect("ge0");
+    let fl_le9 = builder.build_int_compare(verum_llvm::IntPredicate::ULE, fl_c, nine_ch, "fl_le9").expect("le9");
+    let fl_isd = builder.build_and(fl_ge0, fl_le9, "fl_isd").expect("isd");
+    builder.build_conditional_branch(fl_isd, frac_advance, after_frac).expect("fl cond");
+
+    // frac_advance: same as int_advance + frac_digits++
+    builder.position_at_end(frac_advance);
+    let fl_d_i64 = builder.build_int_z_extend(fl_c, i64_type, "fl_d_i64").expect("ext");
+    let fl_dv = builder.build_int_sub(fl_d_i64, zero_off, "fl_dv").expect("dv");
+    let fl_acc_x10 = builder.build_int_mul(fl_av, ten_i64, "fl_x10").expect("x10");
+    let fl_acc_next = builder.build_int_add(fl_acc_x10, fl_dv, "fl_acc_next").expect("acc+");
+    let fl_i_next = builder.build_int_add(fl_iv, one_i64, "fl_i_next").expect("i++");
+    let fl_fd_next = builder.build_int_add(fl_fdv, one_i64, "fl_fd_next").expect("fd++");
+    builder.build_unconditional_branch(frac_loop).expect("loop");
+    fl_i.add_incoming(&[(&fl_i_next, frac_advance)]);
+    fl_acc.add_incoming(&[(&fl_acc_next, frac_advance)]);
+    fl_fd.add_incoming(&[(&fl_fd_next, frac_advance)]);
+
+    // after_frac: PHI(i, acc, frac_digits) from after_int (no dot)
+    //             or fl_loop's exit. Then check 'e'/'E'.
+    builder.position_at_end(after_frac);
+    let af_i = builder.build_phi(i64_type, "af_i").expect("af_i phi");
+    let af_acc = builder.build_phi(i64_type, "af_acc").expect("af_acc phi");
+    let af_fd = builder.build_phi(i64_type, "af_fd").expect("af_fd phi");
+    af_i.add_incoming(&[(&i_after_int, after_int), (&fl_iv, frac_loop)]);
+    af_acc.add_incoming(&[(&acc_after_int, after_int), (&fl_av, frac_loop)]);
+    af_fd.add_incoming(&[(&zero_i64, after_int), (&fl_fdv, frac_loop)]);
+    let af_iv = af_i.as_basic_value().into_int_value();
+    let af_av = af_acc.as_basic_value().into_int_value();
+    let af_fdv = af_fd.as_basic_value().into_int_value();
+    let e_p = unsafe { builder.build_gep(i8_type, nptr, &[af_iv], "e_p").expect("e gep") };
+    let e_c = builder.build_load(i8_type, e_p, "e_c").expect("e ld").into_int_value();
+    let is_le = builder.build_int_compare(verum_llvm::IntPredicate::EQ, e_c, lower_e, "is_le").expect("le");
+    let is_ue = builder.build_int_compare(verum_llvm::IntPredicate::EQ, e_c, upper_e, "is_ue").expect("ue");
+    let is_exp = builder.build_or(is_le, is_ue, "is_exp").expect("is_exp");
+    let i_after_e = builder.build_int_add(af_iv, one_i64, "i_after_e").expect("i++");
+    builder.build_conditional_branch(is_exp, exp_after_e, mul_setup).expect("exp cond");
+
+    // exp_after_e: parse sign of exponent
+    builder.position_at_end(exp_after_e);
+    let exp_sign_p = unsafe { builder.build_gep(i8_type, nptr, &[i_after_e], "esp").expect("esp gep") };
+    let exp_sign_c = builder.build_load(i8_type, exp_sign_p, "esc").expect("esc ld").into_int_value();
+    let exp_is_minus = builder.build_int_compare(verum_llvm::IntPredicate::EQ, exp_sign_c, minus_ch, "exp_is_minus").expect("eim");
+    let exp_is_plus = builder.build_int_compare(verum_llvm::IntPredicate::EQ, exp_sign_c, plus_ch, "exp_is_plus").expect("eip");
+    let exp_is_sign = builder.build_or(exp_is_minus, exp_is_plus, "exp_is_sign").expect("eis");
+    let i_after_exp_sign_inc = builder.build_int_add(i_after_e, one_i64, "iaesi").expect("iaesi");
+    let i_after_exp_sign = builder.build_select(exp_is_sign, i_after_exp_sign_inc, i_after_e, "iaes").expect("sel").into_int_value();
+    let exp_sign_i64 = builder
+        .build_select(exp_is_minus, i64_type.const_int(u64::MAX, true) /* -1 */, one_i64, "exp_sign_i64")
+        .expect("esi64")
+        .into_int_value();
+    builder.build_unconditional_branch(exp_loop).expect("→ exp_loop");
+
+    // exp_loop: PHI(i, exp_acc); accumulate digits
+    builder.position_at_end(exp_loop);
+    let el_i = builder.build_phi(i64_type, "el_i").expect("el_i phi");
+    let el_acc = builder.build_phi(i64_type, "el_acc").expect("el_acc phi");
+    el_i.add_incoming(&[(&i_after_exp_sign, exp_after_e)]);
+    el_acc.add_incoming(&[(&zero_i64, exp_after_e)]);
+    let el_iv = el_i.as_basic_value().into_int_value();
+    let el_av = el_acc.as_basic_value().into_int_value();
+    let el_p = unsafe { builder.build_gep(i8_type, nptr, &[el_iv], "el_p").expect("el gep") };
+    let el_c = builder.build_load(i8_type, el_p, "el_c").expect("el ld").into_int_value();
+    let el_ge0 = builder.build_int_compare(verum_llvm::IntPredicate::UGE, el_c, zero_ch, "el_ge0").expect("ge0");
+    let el_le9 = builder.build_int_compare(verum_llvm::IntPredicate::ULE, el_c, nine_ch, "el_le9").expect("le9");
+    let el_isd = builder.build_and(el_ge0, el_le9, "el_isd").expect("isd");
+    builder.build_conditional_branch(el_isd, exp_advance, after_exp).expect("el cond");
+
+    // exp_advance
+    builder.position_at_end(exp_advance);
+    let el_d_i64 = builder.build_int_z_extend(el_c, i64_type, "el_d_i64").expect("ext");
+    let el_dv = builder.build_int_sub(el_d_i64, zero_off, "el_dv").expect("dv");
+    let el_acc_x10 = builder.build_int_mul(el_av, ten_i64, "el_x10").expect("x10");
+    let el_acc_next = builder.build_int_add(el_acc_x10, el_dv, "el_acc_next").expect("acc+");
+    let el_i_next = builder.build_int_add(el_iv, one_i64, "el_i_next").expect("i++");
+    builder.build_unconditional_branch(exp_loop).expect("loop");
+    el_i.add_incoming(&[(&el_i_next, exp_advance)]);
+    el_acc.add_incoming(&[(&el_acc_next, exp_advance)]);
+
+    // after_exp: signed_exp = exp_sign_i64 * el_av
+    builder.position_at_end(after_exp);
+    let signed_exp = builder.build_int_mul(exp_sign_i64, el_av, "signed_exp").expect("sexp");
+    builder.build_unconditional_branch(mul_setup).expect("→ mul");
+
+    // mul_setup: PHI(final_exp); compute mant_f64 = sitofp(af_av);
+    //            final_exp = signed_exp - af_fdv. Branch on sign.
+    builder.position_at_end(mul_setup);
+    let final_exp_phi = builder.build_phi(i64_type, "final_exp").expect("fe phi");
+    final_exp_phi.add_incoming(&[
+        // Came from after_frac (no exp parsed): final_exp = -af_fdv
+        (&builder.build_int_sub(zero_i64, af_fdv, "neg_fd").expect("nfd"), after_frac),
+        // Came from after_exp: final_exp = signed_exp - af_fdv
+        (&builder.build_int_sub(signed_exp, af_fdv, "fexp").expect("fexp"), after_exp),
+    ]);
+    let final_exp_v = final_exp_phi.as_basic_value().into_int_value();
+
+    let mant_f64 = builder
+        .build_signed_int_to_float(af_av, f64_type, "mant_f64")
+        .expect("sitofp");
+
+    let exp_is_pos = builder
+        .build_int_compare(verum_llvm::IntPredicate::SGT, final_exp_v, zero_i64, "exp_pos")
+        .expect("exp_pos");
+    let exp_is_neg = builder
+        .build_int_compare(verum_llvm::IntPredicate::SLT, final_exp_v, zero_i64, "exp_neg")
+        .expect("exp_neg");
+    let exp_is_nonzero = builder.build_or(exp_is_pos, exp_is_neg, "exp_nz").expect("nz");
+    builder
+        .build_conditional_branch(exp_is_nonzero,
+            // pick pos-loop or neg-loop based on exp_is_pos
+            // (we'll build a select below; use pos as the trampoline)
+            mul_pos_loop, return_val)
+        .expect("mul br");
+
+    // mul_pos_loop: PHI(remaining, mant). while remaining > 0:
+    //   mant *= 10.0; remaining--. Bounded by MAX_EXP_LOOPS to
+    //   protect against absurd inputs (exp = 10^18 etc.).
+    builder.position_at_end(mul_pos_loop);
+    let abs_exp = builder
+        .build_select(
+            exp_is_pos,
+            final_exp_v,
+            builder.build_int_sub(zero_i64, final_exp_v, "neg_fexp").expect("nfexp"),
+            "abs_exp",
+        )
+        .expect("abs sel")
+        .into_int_value();
+    let clamped_exp = builder
+        .build_select(
+            builder
+                .build_int_compare(verum_llvm::IntPredicate::SGT, abs_exp, max_exp_loops, "abs_too_big")
+                .expect("atb"),
+            max_exp_loops,
+            abs_exp,
+            "clamped_exp",
+        )
+        .expect("ce sel")
+        .into_int_value();
+
+    // Trampoline: pick step (10.0 or 0.1) via select; loop down from clamped_exp.
+    let step = builder
+        .build_select(exp_is_pos, ten_f64, tenth_f64, "step")
+        .expect("step sel")
+        .into_float_value();
+
+    // mul_pos_loop already emitted: jump into body_check.
+    let body_check = llvm_ctx.append_basic_block(func, "body_check");
+    let body_iter = llvm_ctx.append_basic_block(func, "body_iter");
+    let body_done_block = llvm_ctx.append_basic_block(func, "body_done");
+    builder.build_unconditional_branch(body_check).expect("→ body_check");
+
+    // body_check: PHI(remaining, mant). If remaining > 0 → body_iter;
+    //             else → body_done.
+    builder.position_at_end(body_check);
+    let body_i = builder.build_phi(i64_type, "body_i").expect("body_i phi");
+    let body_m = builder.build_phi(f64_type, "body_m").expect("body_m phi");
+    body_i.add_incoming(&[(&clamped_exp, mul_pos_loop)]);
+    body_m.add_incoming(&[(&mant_f64, mul_pos_loop)]);
+    let body_iv = body_i.as_basic_value().into_int_value();
+    let body_mv = body_m.as_basic_value().into_float_value();
+    let body_continue = builder
+        .build_int_compare(verum_llvm::IntPredicate::SGT, body_iv, zero_i64, "body_cont")
+        .expect("bc");
+    builder.build_conditional_branch(body_continue, body_iter, body_done_block).expect("body br");
+
+    // body_iter: mant *= step; remaining--; back to body_check.
+    builder.position_at_end(body_iter);
+    let body_m_next = builder.build_float_mul(body_mv, step, "body_m_next").expect("mul");
+    let body_i_next = builder.build_int_sub(body_iv, one_i64, "body_i--").expect("--");
+    builder.build_unconditional_branch(body_check).expect("loop back");
+    body_i.add_incoming(&[(&body_i_next, body_iter)]);
+    body_m.add_incoming(&[(&body_m_next, body_iter)]);
+
+    // body_done: branch to return_val.
+    builder.position_at_end(body_done_block);
+    builder.build_unconditional_branch(return_val).expect("→ ret");
+
+    // Suppress now-unused mul_neg_loop block — we accumulated it in
+    // the basic-block list but never positioned/terminated it. It's
+    // unreachable from any branch; LLVM verifier will reject if we
+    // leave it dangling. Plant an unreachable terminator so it's
+    // valid-but-dead; GlobalDCE strips it.
+    builder.position_at_end(mul_neg_loop);
+    builder.build_unreachable().expect("dead block terminator");
+
+    // return_val: PHI(mant) from mul_setup (exp == 0 path) or
+    //             body_done (multiplier applied). Apply sign.
+    //
+    // Note: `body_mv` is the body_check PHI value — at the point
+    // body_done is reached, body_mv carries the FINAL mantissa
+    // (the loop exited because remaining == 0). Use it as the
+    // body-done incoming.
+    builder.position_at_end(return_val);
+    let ret_phi = builder.build_phi(f64_type, "ret_m").expect("ret phi");
+    ret_phi.add_incoming(&[(&mant_f64, mul_setup), (&body_mv, body_done_block)]);
+    let ret_mv = ret_phi.as_basic_value().into_float_value();
+    let signed = builder.build_float_mul(ret_mv, sign_f64, "signed").expect("apply sign");
+    builder.build_return(Some(&signed)).expect("ret");
+
+    // Suppress unused-warnings for the constants we declared but
+    // don't reference in the simplified flow.
+    let _ = zero_f64;
+
+    func
+}
+
 /// Get or declare a libc-free `puts(s) -> i32` wrapper.
 ///
 
