@@ -24,8 +24,11 @@
 // composite + array type now has a binary codec at the wire layer.
 //
 // V0 boundaries (still work-in-progress areas, but not blocking):
-//   * NUMERIC encode covers integer-valued only (full text-encode
-//     awaits `core.text.numeric.decimal`).
+//   * NUMERIC text-encode now ships via `encode_numeric_from_text`
+//     and `encode_numeric_from_decimal` (closed against
+//     `core.text.numeric.decimal`).  The integer-only fast path
+//     `encode_numeric_from_int` remains as a zero-allocation
+//     shortcut for the common integer-valued case.
 //   * tsvector encode is V1 (most callers ship Text + let PG run
 //     `to_tsvector` server-side).
 //   * Composite encode requires the caller to supply pre-encoded
@@ -57,6 +60,7 @@ mount core.encoding.jsonb.{
     JsonbValue, JsonbError, JSONB_VERSION_1,
     JbeEmpty, JbeUnsupportedVersion, JbeBadUtf8,
 };
+mount core.text.numeric.{Decimal, DecimalError, parse_decimal};
 
 // -----------------------------------------------------------------------------
 // Canonical Postgres OID table (per src/include/catalog/pg_type.dat).
@@ -1176,6 +1180,225 @@ public fn encode_numeric_from_int(buf: &mut ArenaWireBuf, arena: &mut SpindleAre
         k = k + 1;
     }
     true
+}
+
+/// Encode an arbitrary fixed-precision `Decimal` value as PG NUMERIC
+/// binary.  V1 of the V0 follow-up declared in the codec header —
+/// closes the long-standing "non-integer NUMERIC params route through
+/// FmtText" boundary, now that `core.text.numeric.decimal` exists.
+///
+/// Algorithm:
+///   1. Get sign + abs(coefficient).  Special-case zero ⇒ ndigits=0,
+///      weight=0, dscale=Decimal.scale (preserves the user's declared
+///      precision in the wire form).
+///   2. Render abs(coefficient) as decimal digits.  The implicit
+///      decimal point sits at position `len - scale` from the left.
+///   3. Split digits into integer (left of point) and fractional
+///      (right of point) halves.  Pure-fractional values (scale ≥ len)
+///      have an empty integer half + leading-zero-padded fraction.
+///   4. Build base-10000 chunks:
+///        * Integer half: pad LEFT to multiple-of-4 length, group
+///          into 4-char chunks left-to-right (MS-first).
+///        * Fractional half: pad RIGHT to multiple-of-4 length, group
+///          into 4-char chunks left-to-right (MS-first relative to
+///          fractional position).
+///   5. Compute initial weight = (integer_chunk_count - 1).  For
+///      pure-fractional values weight starts at -1 and decrements
+///      for each leading zero chunk in the fractional half.
+///   6. Strip leading zero chunks from the front (each strip
+///      reduces ndigits but preserves weight — they're at higher
+///      magnitude than the actual MS digit).  Wait, that's NOT
+///      right either: stripping a leading zero CHUNK shifts the MS
+///      position DOWN, so weight DECREASES.  See PG numeric.c
+///      `strip_var` for the canonical handling.
+///   7. Strip trailing zero chunks from the back (no weight change;
+///      they sit at the least-significant end).
+///   8. Write the wire form: 8-byte header (ndigits, weight, sign,
+///      dscale) followed by ndigits × u16 digits.
+///
+/// Returns false on arena exhaustion.  Coefficient overflow can't
+/// occur here — the Decimal already fit in i64.
+public fn encode_numeric_from_decimal(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    value: &Decimal,
+) -> Bool {
+    let abs_d = value.abs();
+    let sign_code = if value.is_negative() { PG_NUMERIC_NEG } else { PG_NUMERIC_POS };
+    let dscale = value.scale;
+
+    // Special-case zero.  PG canonicalises 0 with the declared scale:
+    // ndigits=0, weight=0, sign=POS, dscale=user_scale.
+    if abs_d.coefficient == 0 {
+        if !buf.put_u16_be(arena, 0)              { return false; }
+        if !buf.put_u16_be(arena, 0)              { return false; }
+        if !buf.put_u16_be(arena, PG_NUMERIC_POS) { return false; }
+        if !buf.put_u16_be(arena, dscale)         { return false; }
+        return true;
+    }
+
+    // Render the magnitude as decimal-digit bytes (MS first).
+    let digits_text = decimal_magnitude_text(abs_d.coefficient);
+    let digits_bytes = digits_text.as_bytes();
+    let total_len = digits_bytes.len() as Int;
+
+    // Position the implicit decimal point at `total_len - scale`.
+    // If scale > total_len, the integer part is empty and the
+    // fractional part has (scale - total_len) leading zeros.
+    let int_len = if total_len > dscale { total_len - dscale } else { 0 };
+    let frac_leading_zeros = if dscale > total_len { dscale - total_len } else { 0 };
+    let frac_emitted = if dscale > total_len { total_len } else { dscale };
+
+    // ---- Integer half: pad LEFT to multiple-of-4, then chunk ----
+    let int_pad = (4 - (int_len % 4)) % 4;
+    let int_chunk_count = (int_len + int_pad) / 4;
+    let mut int_chunks: List<Int> = List.with_capacity(int_chunk_count);
+    let mut chunk_idx: Int = 0;
+    while chunk_idx < int_chunk_count {
+        let chunk_start = chunk_idx * 4 - int_pad;  // negative for LS-pad chunks
+        let mut chunk_val: Int = 0;
+        let mut p: Int = 0;
+        while p < 4 {
+            let abs_p = chunk_start + p;
+            let d = if abs_p >= 0 && abs_p < int_len {
+                (digits_bytes[abs_p] as Int) - ('0' as Int)
+            } else {
+                0
+            };
+            chunk_val = chunk_val * 10 + d;
+            p = p + 1;
+        }
+        int_chunks.push(chunk_val);
+        chunk_idx = chunk_idx + 1;
+    }
+
+    // ---- Fractional half: leading zeros + emitted digits, padded RIGHT ----
+    let frac_total = frac_leading_zeros + frac_emitted;
+    let frac_pad = (4 - (frac_total % 4)) % 4;
+    let frac_chunk_count = (frac_total + frac_pad) / 4;
+    let mut frac_chunks: List<Int> = List.with_capacity(frac_chunk_count);
+    let mut fc: Int = 0;
+    while fc < frac_chunk_count {
+        let chunk_start = fc * 4;
+        let mut chunk_val: Int = 0;
+        let mut p: Int = 0;
+        while p < 4 {
+            let abs_p = chunk_start + p;
+            // Map abs_p into either the leading-zero region or the
+            // emitted-digit region.  Positions [0, frac_leading_zeros)
+            // are zeros; [frac_leading_zeros, frac_total) are digits
+            // drawn from digits_bytes starting at `int_len`.
+            let d = if abs_p >= frac_total {
+                0  // right-pad zero
+            } else if abs_p < frac_leading_zeros {
+                0  // explicit leading zero
+            } else {
+                let src_idx = int_len + (abs_p - frac_leading_zeros);
+                (digits_bytes[src_idx] as Int) - ('0' as Int)
+            };
+            chunk_val = chunk_val * 10 + d;
+            p = p + 1;
+        }
+        frac_chunks.push(chunk_val);
+        fc = fc + 1;
+    }
+
+    // ---- Concatenate integer + fractional chunks ----
+    let mut all_chunks: List<Int> =
+        List.with_capacity(int_chunk_count + frac_chunk_count);
+    let mut ai: Int = 0;
+    while ai < int_chunk_count {
+        all_chunks.push(int_chunks[ai]);
+        ai = ai + 1;
+    }
+    let mut afi: Int = 0;
+    while afi < frac_chunk_count {
+        all_chunks.push(frac_chunks[afi]);
+        afi = afi + 1;
+    }
+
+    // ---- Compute weight and strip leading/trailing zero chunks ----
+    // Initial weight: position of the first (MS) chunk in 10000^k space.
+    //   * If integer chunks exist, MS is at 10000^(int_chunk_count - 1).
+    //   * If pure-fractional, MS is at 10000^-1 (the first fractional chunk).
+    let mut weight = if int_chunk_count > 0 {
+        int_chunk_count - 1
+    } else {
+        -1
+    };
+
+    // Strip leading zero chunks — each strip shifts the MS position
+    // DOWN, so weight DECREASES.
+    let mut start: Int = 0;
+    while start < (all_chunks.len() as Int) {
+        if all_chunks[start] != 0 { break; }
+        start = start + 1;
+        weight = weight - 1;
+    }
+
+    // Strip trailing zero chunks — no weight change (they're at the
+    // least-significant end).
+    let mut end: Int = all_chunks.len() as Int;
+    while end > start {
+        if all_chunks[end - 1] != 0 { break; }
+        end = end - 1;
+    }
+
+    let ndigits = end - start;
+
+    // If the value reduced to all-zero (shouldn't happen given the
+    // earlier zero-special-case, but guard for defensive correctness):
+    // emit canonical zero.
+    if ndigits <= 0 {
+        if !buf.put_u16_be(arena, 0)              { return false; }
+        if !buf.put_u16_be(arena, 0)              { return false; }
+        if !buf.put_u16_be(arena, PG_NUMERIC_POS) { return false; }
+        if !buf.put_u16_be(arena, dscale)         { return false; }
+        return true;
+    }
+
+    // ---- Write the wire form ----
+    if !buf.put_u16_be(arena, ndigits)   { return false; }
+    if !buf.put_u16_be(arena, weight)    { return false; }
+    if !buf.put_u16_be(arena, sign_code) { return false; }
+    if !buf.put_u16_be(arena, dscale)    { return false; }
+
+    let mut w: Int = start;
+    while w < end {
+        if !buf.put_u16_be(arena, all_chunks[w]) { return false; }
+        w = w + 1;
+    }
+    true
+}
+
+/// Encode a decimal text representation as PG NUMERIC binary.
+/// Convenience wrapper: parses `text` via `parse_decimal` then
+/// dispatches to `encode_numeric_from_decimal`.  Returns false on
+/// parse failure or arena exhaustion.
+///
+/// Closes the V0 boundary noted in `encode_numeric_from_int` —
+/// non-integer NUMERIC parameter binding no longer needs to fall
+/// back to PG's text format (FmtText).  Callers can now bind
+/// arbitrary decimal literals directly through the binary wire
+/// codec for the full performance win.
+public fn encode_numeric_from_text(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    text: &Text,
+) -> Bool {
+    match parse_decimal(text) {
+        Ok(d)  => encode_numeric_from_decimal(buf, arena, &d),
+        Err(_) => false,
+    }
+}
+
+/// Render an i64 magnitude (must be ≥ 0) as decimal-digit Text (MS
+/// first).  Caller pre-extracts abs() — sign handling lives upstream.
+fn decimal_magnitude_text(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    // Use the stdlib helper for the common case.  abs always fits
+    // in Int (Verum Int = i64) per Decimal's own coefficient invariant.
+    Text.from_int(n)
 }
 
 // -----------------------------------------------------------------------------
