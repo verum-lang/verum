@@ -13878,3 +13878,98 @@ mod bundle_gate_metric_tests {
         assert_eq!(bundle_gate_metric("apply_graph", &gates), "");
     }
 }
+
+// ============================================================================
+// `verum audit --stdlib-layers` — Phase 1 of the precompiled-stdlib epic.
+// ============================================================================
+
+/// Entry point for `verum audit --stdlib-layers [--format FORMAT]`.
+///
+/// Walks every `.vr` file in the embedded stdlib archive, classifies
+/// each module as `runtime` / `proof` / `meta`, and writes the report
+/// to `target/audit-reports/stdlib-layers.{md,json}`. Read-only —
+/// produces no source changes. The Markdown form mirrors the structure
+/// of the other `verum audit --foo` reports; the JSON form is the
+/// stable machine-readable contract that Phase 2 (directory refactor)
+/// + Phase 4 (precompile pipeline) consume to drive their work.
+pub fn audit_stdlib_layers_with_format(format: AuditFormat) -> Result<()> {
+    use verum_compiler::stdlib_classifier;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Classifying stdlib modules into runtime / proof / meta");
+    }
+
+    let report = stdlib_classifier::classify_stdlib().map_err(|e| {
+        crate::error::CliError::Custom(format!(
+            "stdlib classifier failed: {e}"
+        ))
+    })?;
+
+    // Try to write the JSON + Markdown reports to disk so the bundle
+    // dispatcher and Phase 2 / Phase 4 tooling can read them without
+    // re-running the classifier. Unlike the other `verum audit` gates,
+    // `--stdlib-layers` is a stdlib-scoped audit that doesn't need a
+    // user project — the classifier walks the embedded stdlib archive
+    // directly. So we look up the manifest dir best-effort and skip
+    // the report file write when no project is open.
+    let report_paths: Option<(std::path::PathBuf, std::path::PathBuf)> =
+        Manifest::find_manifest_dir().ok().map(|manifest_dir| {
+            let report_dir = manifest_dir.join("target").join("audit-reports");
+            let _ = std::fs::create_dir_all(&report_dir);
+            (
+                report_dir.join("stdlib-layers.json"),
+                report_dir.join("stdlib-layers.md"),
+            )
+        });
+
+    let md = stdlib_classifier::render_markdown(&report);
+    if let Some((json_path, md_path)) = &report_paths {
+        if let Ok(json) = stdlib_classifier::render_json(&report) {
+            let _ = std::fs::write(json_path, json);
+        }
+        let _ = std::fs::write(md_path, &md);
+    }
+
+    match format {
+        AuditFormat::Json => {
+            let json = stdlib_classifier::render_json(&report).map_err(|e| {
+                crate::error::CliError::Custom(format!(
+                    "failed to render JSON: {e}"
+                ))
+            })?;
+            println!("{}", json);
+        }
+        AuditFormat::Plain => {
+            print!("{}", md);
+            if let Some((json_path, md_path)) = &report_paths {
+                ui::detail("JSON report", &json_path.display().to_string());
+                ui::detail("Markdown report", &md_path.display().to_string());
+            } else {
+                ui::detail(
+                    "Reports",
+                    "(skipped — no Verum.toml manifest in cwd)",
+                );
+            }
+
+            // Exit-status gate: Phase 1 is observability-only — never
+            // fail the build. Phase 2 will add a stricter gate
+            // (`--stdlib-layers-strict`) that exits non-zero on any
+            // mixed-layer module remaining unannotated.
+            let s = &report.stats;
+            if s.mixed_count > 0 {
+                ui::warn(&format!(
+                    "{} mixed-layer modules need explicit @layer(...) or a file split before Phase 2",
+                    s.mixed_count
+                ));
+            }
+            if s.parse_error_count > 0 {
+                ui::warn(&format!(
+                    "{} modules failed to parse — see stdlib-layers.md for details",
+                    s.parse_error_count
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}

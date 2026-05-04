@@ -252,6 +252,7 @@ pub mod phases;
 pub mod profile_system;
 pub mod semantic_query; // Semantic query layer for content-addressed caching
 pub mod staged_pipeline; // N-level staged metaprogramming pipeline
+pub mod stdlib_classifier; // Read-only audit pass: classifies stdlib modules into runtime / proof / meta layers (Phase 1 of precompiled-stdlib epic)
 pub mod stdlib_dep_graph; // Pre-built mount-edge graph over the embedded stdlib (BFS reachability)
 pub mod stdlib_index; // Module-path index over the embedded stdlib (lazy loader keystone)
 pub mod stdlib_reachability; // AST-walking → reachable stdlib subset (Phase 2 of on-demand loader)
