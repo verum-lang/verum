@@ -1519,6 +1519,20 @@ enum Commands {
         #[clap(long = "stdlib-layers")]
         stdlib_layers: bool,
 
+        /// Proof-archive verification audit (Phase 8 of the
+        /// precompiled-stdlib epic). Decodes the embedded VBC
+        /// archive's `theorems` table, resolves each discharge
+        /// receipt to its body in `~/.verum/cert-store/`, runs the
+        /// kernel-only structural re-check (blake3 integrity +
+        /// schema-version gate), caches per-theorem verdicts in
+        /// `~/.verum/replay-cache/<compiler-version>/`, and prints
+        /// a per-theorem report. Read-only audit — does not modify
+        /// any source. Exits non-zero on `rejected` or `error`
+        /// theorem verdicts; `not_discharged` and `inconclusive`
+        /// are observability and don't fail the build.
+        #[clap(long = "proof-archive")]
+        proof_archive: bool,
+
  /// Run the runtime ν-monotonicity drive (task #139 / MSFS-L4.6).
  /// For every theorem-shaped item with a `@verify(<strategy>)`
  /// annotation, dispatches the obligation at every backbone
@@ -4136,6 +4150,7 @@ fn run_command(cli: Cli) -> Result<()> {
             arch_corpus,
             bridge_discharge,
             stdlib_layers,
+            proof_archive,
             ladder_monotonicity,
             cross_format_roundtrip,
             docker,
@@ -4234,6 +4249,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_soundness_iou_with_format(output_format)
             } else if apply_graph {
                 commands::audit::audit_apply_graph_with_format(output_format)
+            } else if proof_archive {
+                commands::audit::audit_proof_archive_with_format(output_format)
             } else if stdlib_layers {
                 commands::audit::audit_stdlib_layers_with_format(output_format)
             } else if framework_axioms {
