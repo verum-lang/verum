@@ -2343,6 +2343,175 @@ public fn index_select<T: Numeric>(
     @vbc(TENSOR_INDEX_SELECT, x.data, axis, indices.data)
 }
 
+// Take elements along axis 0 (PyTorch / NumPy convention).
+// #74 Tier B — `index_select(x, 0, indices)`. Useful for the
+// common case of selecting rows from a 2-D tensor or elements
+// from a 1-D tensor.
+public fn take<T: Numeric>(
+    x: &DynTensor<T>,
+    indices: &DynTensor<USize>,
+) -> DynTensor<T> {
+    index_select(x, 0, indices)
+}
+
+// Take elements along an arbitrary axis.
+// #74 Tier B — alias for `index_select` with the more familiar
+// NumPy name. `take_axis(x, indices, axis)` matches numpy's
+// `np.take(x, indices, axis=axis)`.
+public fn take_axis<T: Numeric>(
+    x: &DynTensor<T>,
+    indices: &DynTensor<USize>,
+    axis: ISize,
+) -> DynTensor<T> {
+    index_select(x, axis, indices)
+}
+
+// Narrow: select a contiguous range along `axis` from `start` for
+// `length` elements (PyTorch-style).
+// #74 Tier B — convenience over `tensor_slice_axis` from batch 3.
+// Equivalent to `tensor_slice_axis(x, axis, start, start + length)`.
+public fn narrow<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: ISize,
+    start: USize,
+    length: USize,
+) -> DynTensor<T> {
+    tensor_slice_axis(x, axis, start, start + length)
+}
+
+// Argwhere: indices of all true elements (rank-2 output [N, ndim]
+// where N is the count of true entries).
+// #74 Tier B — alias for the existing `nonzero` primitive but
+// with the NumPy name. The naming distinction matches numpy's
+// own (`argwhere` vs `nonzero` differ slightly in shape
+// convention; this wrapper picks the unambiguous "indices of
+// true entries" semantics).
+public fn argwhere<T: Numeric>(x: &DynTensor<T>) -> DynTensor<USize> {
+    nonzero(x)
+}
+
+// Repeat each element along axis `repeats` times.
+// #74 Tier B — `[a, b, c]` repeated 2× along axis 0 →
+// `[a, a, b, b, c, c]`. Differs from `tile` (which repeats the
+// whole tensor): repeat_interleave repeats each element in place.
+// Composes `unsqueeze` (insert size-1 axis) + `expand` (broadcast
+// over `repeats`) + `reshape` (flatten the inserted axis into
+// the original).
+public fn repeat_interleave<T: Numeric>(
+    x: &DynTensor<T>,
+    repeats: USize,
+    axis: ISize,
+) -> DynTensor<T> {
+    if repeats == 0 {
+        // Empty result along axis. Build a zero-length view by
+        // narrowing to length 0 — matches numpy's behaviour.
+        return narrow(x, axis, 0, 0);
+    }
+    if repeats == 1 {
+        return x.clone();
+    }
+    let target = normalize_axis(axis, x.rank());
+    // Insert a size-1 axis right after `axis`, broadcast it to
+    // `repeats`, then reshape to merge the new axis back into
+    // the original.
+    let unsq = unsqueeze(x, (target as ISize) + 1);
+    // Build expanded shape: same as unsq except slot (target+1) = repeats.
+    let mut shape: List<USize> = List.with_capacity(unsq.rank());
+    for d in 0..unsq.rank() {
+        if d == target + 1 {
+            shape.push(repeats);
+        } else {
+            shape.push(unsq.dim(d));
+        }
+    }
+    let expanded = expand(&unsq, &shape);
+    // Reshape: collapse axes (target, target+1) → (target * repeats).
+    let mut new_shape: List<USize> = List.with_capacity(x.rank());
+    for d in 0..x.rank() {
+        if d == target {
+            new_shape.push(x.dim(d) * repeats);
+        } else {
+            new_shape.push(x.dim(d));
+        }
+    }
+    reshape(&expanded, &new_shape)
+}
+
+// Clip: alias for `tensor_clamp` (NumPy / TF / JAX naming).
+// #74 Tier B — `clip(x, min, max)` matches numpy.clip exactly.
+// The scalar clamp matches the existing primitive's signature.
+public fn clip<T: Numeric>(x: &DynTensor<T>, min_val: T, max_val: T) -> DynTensor<T> {
+    tensor_clamp(x, min_val, max_val)
+}
+
+// Clip below: `max(x, min_val)`. Floor-clamping only.
+// #74 Tier B — composes `maximum` + `full_like(x, min_val)`.
+public fn clip_below<T: Numeric>(x: &DynTensor<T>, min_val: T) -> DynTensor<T> {
+    maximum(x, &full_like(x, min_val))
+}
+
+// Clip above: `min(x, max_val)`. Ceiling-clamping only.
+// #74 Tier B — composes `minimum` + `full_like(x, max_val)`.
+public fn clip_above<T: Numeric>(x: &DynTensor<T>, max_val: T) -> DynTensor<T> {
+    minimum(x, &full_like(x, max_val))
+}
+
+// Element-wise tensor `lerp` with a tensor `t` parameter (vs the
+// existing scalar-`t` `lerp` from batch 1).
+// #74 Tier B — `a + t * (b - a)`. Tensor `t` allows per-element
+// blending weights (image alpha-blending, attention-weight
+// mixing). All three inputs must broadcast.
+public fn lerp_tensor<T: Numeric>(
+    a: &DynTensor<T>,
+    b: &DynTensor<T>,
+    t: &DynTensor<T>,
+) -> DynTensor<T> {
+    let diff = sub(b, a);
+    let scaled = mul(&diff, t);
+    add(a, &scaled)
+}
+
+// `sign_nonzero(x)`: returns -1 if x < 0, +1 if x > 0, 0 only
+// where x is exactly 0 (matches numpy's `np.sign` for non-NaN
+// inputs). Composes `gt`/`lt` + `where_tensor` (3-way select).
+// #74 Tier B — distinguished from `sign_lang` (batch 3) by being
+// guaranteed-monotone ignoring zeros, useful in optimisation
+// where the zero-derivative case at x=0 matters.
+public fn sign_nonzero<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let zeros = full_like(x, 0 as T);
+    let plus = full_like(x, 1 as T);
+    let minus = full_like(x, -(1 as T));
+    let pos = gt(x, &zeros);
+    let neg = lt(x, &zeros);
+    let with_pos = where_tensor(&pos, &plus, &zeros);
+    where_tensor(&neg, &minus, &with_pos)
+}
+
+// Element-wise step function: `1 if x >= threshold else 0`.
+// #74 Tier B — discontinuous activation; useful in DSP /
+// signal processing. Composes `ge` + `where_tensor`.
+public fn step<T: Numeric>(x: &DynTensor<T>, threshold: T) -> DynTensor<T> {
+    let thr = full_like(x, threshold);
+    let cond = ge(x, &thr);
+    let ones = full_like(x, 1 as T);
+    let zeros = full_like(x, 0 as T);
+    where_tensor(&cond, &ones, &zeros)
+}
+
+// Element-wise heaviside step: `0 if x < 0, 0.5 if x == 0, 1 if x > 0`.
+// #74 Tier B — three-way step matching numpy's `np.heaviside(x, 0.5)`.
+// Composes `gt` / `lt` / `where_tensor`.
+public fn heaviside<T: Numeric>(x: &DynTensor<T>, half_value: T) -> DynTensor<T> {
+    let zeros = full_like(x, 0 as T);
+    let half_t = full_like(x, half_value);
+    let ones = full_like(x, 1 as T);
+    let zeros_t = full_like(x, 0 as T);
+    let pos = gt(x, &zeros);
+    let neg = lt(x, &zeros);
+    let with_pos = where_tensor(&pos, &ones, &half_t);
+    where_tensor(&neg, &zeros_t, &with_pos)
+}
+
 // Gather values along axis
 public fn gather<T: Numeric>(
     x: &DynTensor<T>,
