@@ -44,8 +44,13 @@ impl DeriveMacro for DeriveSerialize {
         // Create the serialize method
         let serialize_method = self.create_serialize_method(ctx, body, span);
 
-        // Generate impl block
-        Ok(ctx.generate_impl("Serialize", List::from(vec![serialize_method]), span))
+        // Generate impl block — auto-emit `where T: Serialize` for
+        // every field-used type param.
+        Ok(ctx.generate_impl_with_field_bounds(
+            "Serialize",
+            List::from(vec![serialize_method]),
+            span,
+        ))
     }
 
     fn doc_comment(&self) -> &'static str {

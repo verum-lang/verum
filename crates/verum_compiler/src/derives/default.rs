@@ -50,7 +50,14 @@ impl DeriveMacro for DeriveDefault {
         let default_method = self.create_default_method(ctx, body, span);
 
         // Generate impl block
-        Ok(ctx.generate_impl("Default", List::from(vec![default_method]), span))
+        // Auto-emit `where T: Default` for every field-used type
+        // param. Generic records like `type Pair<A, B>` get the
+        // bound automatically; non-generic types are no-op.
+        Ok(ctx.generate_impl_with_field_bounds(
+            "Default",
+            List::from(vec![default_method]),
+            span,
+        ))
     }
 
     fn doc_comment(&self) -> &'static str {

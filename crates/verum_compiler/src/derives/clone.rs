@@ -46,8 +46,14 @@ impl DeriveMacro for DeriveClone {
         // Create the clone method
         let clone_method = self.create_clone_method(ctx, body, span);
 
-        // Generate impl block
-        Ok(ctx.generate_impl("Clone", List::from(vec![clone_method]), span))
+        // Generate impl block — auto-emit `where T: Clone` for
+        // every field-used type param. Sound for generic records
+        // / sum types; no-op for non-generic types.
+        Ok(ctx.generate_impl_with_field_bounds(
+            "Clone",
+            List::from(vec![clone_method]),
+            span,
+        ))
     }
 
     fn doc_comment(&self) -> &'static str {

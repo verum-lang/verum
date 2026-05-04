@@ -44,8 +44,13 @@ impl DeriveMacro for DeriveDebug {
         // Create the fmt method
         let fmt_method = self.create_fmt_method(ctx, body, span);
 
-        // Generate impl block
-        Ok(ctx.generate_impl("Debug", List::from(vec![fmt_method]), span))
+        // Generate impl block — auto-emit `where T: Debug` for
+        // every field-used type param.
+        Ok(ctx.generate_impl_with_field_bounds(
+            "Debug",
+            List::from(vec![fmt_method]),
+            span,
+        ))
     }
 
     fn doc_comment(&self) -> &'static str {
