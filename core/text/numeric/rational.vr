@@ -1,0 +1,481 @@
+// =============================================================================
+// core/text/numeric/rational.vr — exact-rational arithmetic (V0)
+// =============================================================================
+// Layer: 1 (Text — numeric subtree)
+// =============================================================================
+//
+// `Rational` is exact-rational arithmetic — values are stored as
+// `numerator / denominator` where both are `BigInt`.  Unlike Decimal
+// (which loses precision on division like 1/3), every Rational
+// operation is exact and never rounds.  Use this when:
+//
+//   * You need arithmetic that NEVER loses precision (e.g. financial
+//     reconciliation algorithms that must sum to exact zero).
+//   * You're chaining many divisions and want to defer all rounding
+//     to a single approximation step at display time.
+//   * You need exact equality on values that arose from division
+//     (1/3 + 1/3 + 1/3 == 1 only in Rational — not in Decimal /
+//     BigDecimal at any finite precision).
+//
+// Representation:
+//
+//     Rational {
+//         numerator:   BigInt,   // sign embedded here
+//         denominator: BigInt,   // always positive, gcd(num, den) = 1
+//     }
+//
+// Canonical-form invariants (every public API entry preserves):
+//
+//   * `denominator > 0` (the sign convention puts the sign in the
+//     numerator).
+//   * `gcd(|numerator|, denominator) == 1` (reduced form — there's
+//     exactly one canonical representation per rational value).
+//   * Zero: `numerator = 0`, `denominator = 1` (the canonical zero).
+//
+// V0 surface:
+//
+//   * Constructors: zero / one / from_int / from_bigint / from_decimal
+//                   / from_bigdecimal / from_parts.
+//   * Predicates: is_zero / is_negative / is_positive / abs / neg /
+//                 reciprocal.
+//   * Arithmetic: add / sub / mul / div (all exact — no rounding,
+//                 no precision parameter).
+//   * Comparison: compare → Ordering + eq / lt / gt / le / ge.
+//   * Render: to_text — "num/den" or just "num" if denominator=1.
+//   * Approximation: to_decimal(precision, mode) — when the caller
+//                    is ready to commit to a finite scale + rounding
+//                    mode.  Returns BigDecimal (full precision); use
+//                    the existing BigDecimal.try_to_decimal for an
+//                    i64-fast-path follow-up.
+//   * Parse: parse_rational — accepts "num/den", "num", or "num.frac"
+//                             (the last via parse_bigdecimal then
+//                             from_bigdecimal).
+//
+// V0 OUT-of-scope (V1 follow-ups):
+//
+//   * Continued-fraction approximations.
+//   * Stern-Brocot mediant search (best-rational-under-bound).
+//   * Mixed-number rendering ("1 1/3" instead of "4/3").
+//
+// =============================================================================
+
+module core.text.numeric.rational;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount base.ordering.{Ordering, Less, Equal, Greater};
+mount collections.List;
+mount core.text.numeric.bigint.{BigInt, BigIntError, parse_bigint};
+mount core.text.numeric.decimal.{
+    Decimal,
+    RoundingMode, HalfEven, HalfUp, HalfDown, Truncate,
+};
+mount core.text.numeric.bigdecimal.{
+    BigDecimal, BigDecimalError, parse_bigdecimal,
+};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Exact-rational value.  See module header for the canonical-form
+/// invariants.  Both fields are `BigInt`, so there's no precision
+/// limit beyond available memory.
+public type Rational is {
+    numerator: BigInt,
+    denominator: BigInt,
+};
+
+/// Errors surfaced by the Rational API.
+public type RationalError is
+      DenominatorIsZero
+    | ParseEmpty
+    | ParseInvalidShape { reason: Text }
+    | ParseInvalidChar { byte_offset: Int, byte: Int };
+
+// =============================================================================
+// Constructors
+// =============================================================================
+
+implement Rational {
+    /// Canonical zero: numerator=0, denominator=1.
+    public fn zero() -> Rational {
+        Rational { numerator: BigInt.zero(), denominator: BigInt.one() }
+    }
+
+    /// Canonical one: numerator=1, denominator=1.
+    public fn one() -> Rational {
+        Rational { numerator: BigInt.one(), denominator: BigInt.one() }
+    }
+
+    /// Build from a Verum Int (i64).  denominator=1.
+    public fn from_int(n: Int) -> Rational {
+        Rational { numerator: BigInt.from_int(n), denominator: BigInt.one() }
+    }
+
+    /// Build from a BigInt.  denominator=1.
+    public fn from_bigint(b: &BigInt) -> Rational {
+        Rational { numerator: clone_bigint(b), denominator: BigInt.one() }
+    }
+
+    /// Build from a Decimal.  Numerator = Decimal.coefficient (as
+    /// BigInt); denominator = 10^Decimal.scale.  Always exact.
+    public fn from_decimal(d: &Decimal) -> Rational {
+        let num = BigInt.from_int(d.coefficient);
+        let den = bigint_pow10(d.scale);
+        // Reduce to canonical form — the constructed (num, den) may
+        // share factors of 10 (e.g. Decimal { c=10, s=1 } = 10/10
+        // reduces to 1/1).
+        normalize(num, den)
+    }
+
+    /// Build from a BigDecimal.  Same shape as `from_decimal` but
+    /// over BigInt coefficient (no i64 cap).
+    public fn from_bigdecimal(bd: &BigDecimal) -> Rational {
+        let num = clone_bigint(&bd.coefficient);
+        let den = bigint_pow10(bd.scale);
+        normalize(num, den)
+    }
+
+    /// Build from explicit (num, den) parts.  Validates `den ≠ 0`,
+    /// then normalizes (sign-flips so den > 0; reduces by gcd).
+    public fn from_parts(num: BigInt, den: BigInt)
+        -> Result<Rational, RationalError>
+    {
+        if den.is_zero() { return Err(RationalError.DenominatorIsZero); }
+        Ok(normalize(num, den))
+    }
+
+    // -------------------------------------------------------------------------
+    // Predicates
+    // -------------------------------------------------------------------------
+
+    public fn is_zero(&self)     -> Bool { self.numerator.is_zero() }
+    public fn is_negative(&self) -> Bool { self.numerator.is_negative() }
+    public fn is_positive(&self) -> Bool { self.numerator.is_positive() }
+
+    public fn abs(&self) -> Rational {
+        Rational {
+            numerator: self.numerator.abs(),
+            denominator: clone_bigint(&self.denominator),
+        }
+    }
+
+    public fn neg(&self) -> Rational {
+        Rational {
+            numerator: self.numerator.neg(),
+            denominator: clone_bigint(&self.denominator),
+        }
+    }
+
+    /// Reciprocal `1 / self`.  Errors if `self` is zero.
+    public fn reciprocal(&self) -> Result<Rational, RationalError> {
+        if self.is_zero() { return Err(RationalError.DenominatorIsZero); }
+        // Swap num/den; preserve sign by absorbing it into the new
+        // numerator (since the new denominator must be positive).
+        if self.numerator.is_negative() {
+            Ok(Rational {
+                numerator: self.denominator.neg(),
+                denominator: self.numerator.abs(),
+            })
+        } else {
+            Ok(Rational {
+                numerator: clone_bigint(&self.denominator),
+                denominator: clone_bigint(&self.numerator),
+            })
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Arithmetic — all exact, no rounding
+    // -------------------------------------------------------------------------
+
+    /// Sum `self + other` = `(a*d + b*c) / (b*d)`, reduced to
+    /// canonical form.
+    public fn add(&self, other: &Rational) -> Rational {
+        let ad = self.numerator.mul(&other.denominator);
+        let bc = self.denominator.mul(&other.numerator);
+        let num = ad.add(&bc);
+        let den = self.denominator.mul(&other.denominator);
+        normalize(num, den)
+    }
+
+    /// Difference `self - other` = `(a*d - b*c) / (b*d)`, reduced.
+    public fn sub(&self, other: &Rational) -> Rational {
+        let ad = self.numerator.mul(&other.denominator);
+        let bc = self.denominator.mul(&other.numerator);
+        let num = ad.sub(&bc);
+        let den = self.denominator.mul(&other.denominator);
+        normalize(num, den)
+    }
+
+    /// Product `self * other` = `(a*c) / (b*d)`, reduced.
+    public fn mul(&self, other: &Rational) -> Rational {
+        let num = self.numerator.mul(&other.numerator);
+        let den = self.denominator.mul(&other.denominator);
+        normalize(num, den)
+    }
+
+    /// Quotient `self / other` = `(a*d) / (b*c)`, reduced.  Errors if
+    /// `other` is zero.
+    public fn div(&self, other: &Rational) -> Result<Rational, RationalError> {
+        if other.is_zero() { return Err(RationalError.DenominatorIsZero); }
+        let num = self.numerator.mul(&other.denominator);
+        let den_signed = self.denominator.mul(&other.numerator);
+        // den_signed may be negative if other.numerator is negative.
+        // Push the sign to the numerator inside `normalize`.
+        Ok(normalize(num, den_signed))
+    }
+
+    // -------------------------------------------------------------------------
+    // Comparison
+    // -------------------------------------------------------------------------
+
+    /// Three-way comparison via cross-multiplication.  Both
+    /// denominators are positive (canonical-form invariant), so
+    /// `a/b < c/d ⟺ a*d < b*c` directly (no sign-flip needed).
+    public fn compare(&self, other: &Rational) -> Ordering {
+        let ad = self.numerator.mul(&other.denominator);
+        let bc = self.denominator.mul(&other.numerator);
+        ad.compare(&bc)
+    }
+
+    public fn eq(&self, other: &Rational) -> Bool { matches_eq(self.compare(other)) }
+    public fn lt(&self, other: &Rational) -> Bool { matches_lt(self.compare(other)) }
+    public fn gt(&self, other: &Rational) -> Bool { matches_gt(self.compare(other)) }
+    public fn le(&self, other: &Rational) -> Bool { !matches_gt(self.compare(other)) }
+    public fn ge(&self, other: &Rational) -> Bool { !matches_lt(self.compare(other)) }
+
+    // -------------------------------------------------------------------------
+    // Render
+    // -------------------------------------------------------------------------
+
+    /// Render as `"num/den"` (or just `"num"` if den=1).  Sign always
+    /// in the numerator per canonical form.
+    public fn to_text(&self) -> Text {
+        let num_text = self.numerator.to_text();
+        // den == 1 is checked by comparing canonical-form structure:
+        // BigInt.one().eq(self.denominator).
+        let one = BigInt.one();
+        if self.denominator.eq(&one) {
+            return num_text;
+        }
+        let mut out = num_text;
+        out = out + "/";
+        out = out + self.denominator.to_text();
+        out
+    }
+
+    // -------------------------------------------------------------------------
+    // Approximation
+    // -------------------------------------------------------------------------
+
+    /// Approximate `self` as a `BigDecimal` at the requested
+    /// precision (number of fractional digits) using the requested
+    /// `RoundingMode`.  Routes through `BigDecimal.div` so all
+    /// rounding semantics are inherited from the decimal layer.
+    /// Errors only if precision is out-of-range (delegated to
+    /// `BigDecimal.div`'s validation).
+    public fn to_bigdecimal(
+        &self,
+        precision: Int,
+        mode: RoundingMode,
+    ) -> Result<BigDecimal, BigDecimalError> {
+        let bd_num = BigDecimal.from_bigint(&self.numerator);
+        let bd_den = BigDecimal.from_bigint(&self.denominator);
+        bd_num.div(&bd_den, precision, mode)
+    }
+}
+
+// =============================================================================
+// Parsing
+// =============================================================================
+
+/// Parse a rational text representation.  Accepts:
+///   * Optional whitespace + signed integer + "/" + positive integer
+///     (e.g. "3/4", "-22/7").  Slash form.
+///   * A plain integer ("42", "-7") — parses via parse_bigint, sets
+///     denominator=1.
+///   * A decimal text ("1.5", "-0.001") — parses via parse_bigdecimal
+///     and converts via from_bigdecimal.
+///
+/// Errors: surface the underlying parse failure or DenominatorIsZero
+/// for "x/0".
+public fn parse_rational(text: &Text) -> Result<Rational, RationalError> {
+    let bytes = text.as_bytes();
+    let n = bytes.len() as Int;
+    if n == 0 { return Err(RationalError.ParseEmpty); }
+
+    // Find slash index, if any.
+    let mut slash_idx: Int = -1;
+    let mut dot_idx: Int = -1;
+    let mut i: Int = 0;
+    while i < n {
+        let b = bytes[i] as Int;
+        if b == ('/' as Int) {
+            if slash_idx >= 0 {
+                return Err(RationalError.ParseInvalidShape {
+                    reason: "multiple '/' separators".clone(),
+                });
+            }
+            slash_idx = i;
+        } else if b == ('.' as Int) {
+            if dot_idx >= 0 {
+                return Err(RationalError.ParseInvalidShape {
+                    reason: "multiple decimal points".clone(),
+                });
+            }
+            dot_idx = i;
+        }
+        i = i + 1;
+    }
+
+    if slash_idx >= 0 && dot_idx >= 0 {
+        return Err(RationalError.ParseInvalidShape {
+            reason: "decimal point and '/' both present".clone(),
+        });
+    }
+
+    if slash_idx >= 0 {
+        // Slash form.  Split at slash.
+        let num_text = sub_text(text, 0, slash_idx);
+        let den_text = sub_text(text, slash_idx + 1, n);
+        let num = match parse_bigint(&num_text) {
+            Ok(v)  => v,
+            Err(e) => return Err(map_bigint_error(e)),
+        };
+        let den = match parse_bigint(&den_text) {
+            Ok(v)  => v,
+            Err(e) => return Err(map_bigint_error(e)),
+        };
+        if den.is_zero() { return Err(RationalError.DenominatorIsZero); }
+        return Ok(normalize(num, den));
+    }
+
+    if dot_idx >= 0 {
+        // Decimal form.  Route through parse_bigdecimal.
+        let bd = match parse_bigdecimal(text) {
+            Ok(v)  => v,
+            Err(e) => return Err(map_bigdecimal_error(e)),
+        };
+        return Ok(Rational.from_bigdecimal(&bd));
+    }
+
+    // Plain integer.
+    let bi = match parse_bigint(text) {
+        Ok(v)  => v,
+        Err(e) => return Err(map_bigint_error(e)),
+    };
+    Ok(Rational.from_bigint(&bi))
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+/// Reduce `(num, den)` to canonical form: ensure `den > 0` (push
+/// sign to num if needed), then divide both by gcd(|num|, den).
+fn normalize(num: BigInt, den: BigInt) -> Rational {
+    // Flip signs so denominator is positive.
+    let (n_signed, d_pos) = if den.is_negative() {
+        (num.neg(), den.neg())
+    } else {
+        (num, den)
+    };
+
+    // Zero special-case: canonical zero has den=1.
+    if n_signed.is_zero() {
+        return Rational { numerator: BigInt.zero(), denominator: BigInt.one() };
+    }
+
+    // Reduce by gcd.  gcd is computed on absolute values; the result
+    // is always non-negative.
+    let g = gcd(&n_signed.abs(), &d_pos);
+    let one = BigInt.one();
+    if g.eq(&one) {
+        return Rational { numerator: n_signed, denominator: d_pos };
+    }
+    let n_reduced = match n_signed.div(&g) { Ok(v) => v, Err(_) => n_signed };
+    let d_reduced = match d_pos.div(&g)    { Ok(v) => v, Err(_) => d_pos };
+    Rational { numerator: n_reduced, denominator: d_reduced }
+}
+
+/// Greatest common divisor via Euclidean algorithm.  Caller passes
+/// non-negative values (Rational `normalize` already takes abs() of
+/// the numerator).  Returns a non-negative BigInt.
+fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
+    let mut x = clone_bigint(a);
+    let mut y = clone_bigint(b);
+    while !y.is_zero() {
+        let r = match x.rem(&y) {
+            Ok(v)  => v,
+            Err(_) => BigInt.zero(),  // unreachable for non-zero y
+        };
+        x = y;
+        y = r.abs();  // BigInt.rem returns sign(self); we want |r|
+    }
+    x
+}
+
+/// `10^k` as a BigInt.  Mirrors the helper in `bigdecimal.vr`;
+/// duplicated here to keep this module self-contained.
+fn bigint_pow10(k: Int) -> BigInt {
+    if k <= 0 { return BigInt.one(); }
+    let ten = BigInt.from_int(10);
+    let mut acc = BigInt.one();
+    let mut i: Int = 0;
+    while i < k {
+        acc = acc.mul(&ten);
+        i = i + 1;
+    }
+    acc
+}
+
+fn clone_bigint(b: &BigInt) -> BigInt {
+    let t = b.to_text();
+    match parse_bigint(&t) {
+        Ok(c)  => c,
+        Err(_) => BigInt.zero(),
+    }
+}
+
+fn sub_text(s: &Text, start: Int, end: Int) -> Text {
+    let bytes = s.as_bytes();
+    let mut out: List<Byte> = List.new();
+    let mut i = start;
+    while i < end && i < (bytes.len() as Int) {
+        out.push(bytes[i]);
+        i = i + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+fn matches_eq(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
+fn matches_lt(o: Ordering) -> Bool { match o { Less => true, _ => false } }
+fn matches_gt(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
+
+fn map_bigint_error(e: BigIntError) -> RationalError {
+    match e {
+        BigIntError.ParseEmpty             => RationalError.ParseEmpty,
+        BigIntError.ParseInvalidShape { reason } =>
+            RationalError.ParseInvalidShape { reason: reason },
+        BigIntError.ParseInvalidChar { byte_offset, byte } =>
+            RationalError.ParseInvalidChar { byte_offset: byte_offset, byte: byte },
+        BigIntError.DivByZero              => RationalError.DenominatorIsZero,
+    }
+}
+
+fn map_bigdecimal_error(e: BigDecimalError) -> RationalError {
+    match e {
+        BigDecimalError.ParseEmpty         => RationalError.ParseEmpty,
+        BigDecimalError.ParseInvalidShape { reason } =>
+            RationalError.ParseInvalidShape { reason: reason },
+        BigDecimalError.ParseInvalidChar { byte_offset, byte } =>
+            RationalError.ParseInvalidChar { byte_offset: byte_offset, byte: byte },
+        BigDecimalError.ScaleOutOfRange { scale } =>
+            RationalError.ParseInvalidShape {
+                reason: f"BigDecimal scale {scale} exceeds MAX_SCALE_BIG"
+            },
+        BigDecimalError.DivByZero          => RationalError.DenominatorIsZero,
+    }
+}
