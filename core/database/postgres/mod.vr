@@ -97,7 +97,7 @@ public mount .composite_introspect.{
 public mount .replication_tracker.{
     TrackedPosition, PositionStore, MemoryPositionStore,
     StoreOutcome, SoStored, SoSkipped, SoFailed,
-    LsnTracker, LsnTrackerConfig,
+    LsnTracker, LsnTrackerConfig, LsnTrackerMetrics,
     attach_tracker, load_start_lsn,
     DEFAULT_INTERVAL_MS as LSN_TRACKER_DEFAULT_INTERVAL_MS,
 };

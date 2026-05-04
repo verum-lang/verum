@@ -206,6 +206,52 @@ public type LsnTrackerConfig is {
     persist_on_flush: Bool,
 };
 
+/// Per-tracker counters surfaced via `LsnTracker.metrics()`.
+/// All counters are monotonic — useful for diff-over-window
+/// monitoring (e.g. status_writes per second).
+public type LsnTrackerMetrics is {
+    /// Standby-status update messages successfully queued via
+    /// the actor's `send_standby_status`. Each watcher tick + every
+    /// shutdown contributes one.
+    status_writes: Int,
+    /// Successful `PositionStore.save` calls (SoStored outcome).
+    /// `confirm_flush` with `persist_on_flush=true` and
+    /// every `checkpoint()` contribute.
+    flushes_persisted: Int,
+    /// `PositionStore.save` calls that returned `SoFailed`. Diff
+    /// from `flushes_persisted` plus `flushes_skipped` gives
+    /// total save attempts.
+    save_failures: Int,
+    /// `confirm_flush` calls that hit the `persist_on_flush=false`
+    /// path (`SoSkipped`).
+    flushes_skipped: Int,
+    /// Wall-clock micros at last status write. Lets observability
+    /// detect a wedged watcher (no tick in N intervals).
+    last_status_us: Int,
+};
+
+implement LsnTrackerMetrics {
+    public fn zero() -> LsnTrackerMetrics {
+        LsnTrackerMetrics {
+            status_writes: 0,
+            flushes_persisted: 0,
+            save_failures: 0,
+            flushes_skipped: 0,
+            last_status_us: 0,
+        }
+    }
+
+    public fn clone(&self) -> LsnTrackerMetrics {
+        LsnTrackerMetrics {
+            status_writes: self.status_writes,
+            flushes_persisted: self.flushes_persisted,
+            save_failures: self.save_failures,
+            flushes_skipped: self.flushes_skipped,
+            last_status_us: self.last_status_us,
+        }
+    }
+}
+
 implement LsnTrackerConfig {
     public fn default() -> LsnTrackerConfig {
         LsnTrackerConfig {
@@ -222,6 +268,9 @@ public type LsnTracker is {
     config: LsnTrackerConfig,
     shutdown_tx: Sender<()>,
     join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    /// Counter state — separate mutex from `state` so a metrics
+    /// snapshot doesn't contend with the LSN tuple under load.
+    metrics: Shared<sync.mutex.Mutex<LsnTrackerMetrics>>,
 };
 
 implement LsnTracker {
@@ -236,7 +285,17 @@ implement LsnTracker {
             },
             shutdown_tx: self.shutdown_tx.clone(),
             join: self.join.clone(),
+            metrics: self.metrics.clone(),
         }
+    }
+
+    /// Snapshot of monotonic counters. Cheap (clones a 5-int
+    /// struct under the metrics mutex). Safe to call from
+    /// observability code on a separate task — never blocks
+    /// the LSN tuple write path.
+    public fn metrics(&self) -> LsnTrackerMetrics {
+        let g = self.metrics.lock().unwrap_or_else(|p| p.into_inner());
+        g.clone()
     }
 
     /// Read the current LSN tuple. Cheap — clones a 24-byte
@@ -274,11 +333,13 @@ implement LsnTracker {
             }
             g.clone()
         };
-        if self.config.persist_on_flush {
+        let outcome = if self.config.persist_on_flush {
             self.store.save(&snap_for_save)
         } else {
             SoSkipped
-        }
+        };
+        record_flush_outcome(&self.metrics, &outcome);
+        outcome
     }
 
     /// Mark `lsn` as fully applied downstream. Pure tuple
@@ -296,7 +357,9 @@ implement LsnTracker {
     /// before a clean shutdown or on a manual sync trigger.
     public fn checkpoint(&self) -> StoreOutcome {
         let snap = self.snapshot();
-        self.store.save(&snap)
+        let outcome = self.store.save(&snap);
+        record_flush_outcome(&self.metrics, &outcome);
+        outcome
     }
 
     /// Wire a CancellationToken — when it flips, automatically
@@ -364,14 +427,17 @@ public fn attach_tracker(
         None    => TrackedPosition.zero(),
     };
     let state = Shared.new(sync.mutex.Mutex.new(initial));
+    let metrics = Shared.new(sync.mutex.Mutex.new(LsnTrackerMetrics.zero()));
     let (shutdown_tx, shutdown_rx) = bounded_channel<()>(1);
 
     let state_for_watcher = state.clone();
+    let metrics_for_watcher = metrics.clone();
     let repl_for_watcher = repl.clone();
     let interval = if config.interval_ms < 1 { 1 } else { config.interval_ms };
     let join = spawn(run_watcher(
         repl_for_watcher,
         state_for_watcher,
+        metrics_for_watcher,
         shutdown_rx,
         interval,
     ));
@@ -383,6 +449,7 @@ public fn attach_tracker(
         config: config,
         shutdown_tx: shutdown_tx,
         join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        metrics: metrics,
     }
 }
 
@@ -403,6 +470,7 @@ public fn load_start_lsn(store: &Shared<dyn PositionStore>) -> Lsn {
 async fn run_watcher(
     repl: AsyncPgReplicationConnection,
     state: Shared<sync.mutex.Mutex<TrackedPosition>>,
+    metrics: Shared<sync.mutex.Mutex<LsnTrackerMetrics>>,
     mut shutdown_rx: Receiver<()>,
     interval_ms: Int,
 ) {
@@ -428,5 +496,32 @@ async fn run_watcher(
             0,
             false,
         ).await;
+        bump_status_write(&metrics);
     }
+}
+
+// =============================================================================
+// Metrics helpers
+// =============================================================================
+
+fn bump_status_write(metrics: &Shared<sync.mutex.Mutex<LsnTrackerMetrics>>) {
+    let mut g = metrics.lock().unwrap_or_else(|p| p.into_inner());
+    g.status_writes = g.status_writes + 1;
+    g.last_status_us = wall_clock_us();
+}
+
+fn record_flush_outcome(
+    metrics: &Shared<sync.mutex.Mutex<LsnTrackerMetrics>>,
+    outcome: &StoreOutcome,
+) {
+    let mut g = metrics.lock().unwrap_or_else(|p| p.into_inner());
+    match outcome {
+        SoStored      => { g.flushes_persisted = g.flushes_persisted + 1; }
+        SoSkipped     => { g.flushes_skipped   = g.flushes_skipped + 1; }
+        SoFailed(_)   => { g.save_failures     = g.save_failures + 1; }
+    }
+}
+
+fn wall_clock_us() -> Int {
+    core.time.system_time.SystemTime.now().timestamp_micros()
 }
