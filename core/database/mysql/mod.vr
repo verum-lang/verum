@@ -54,6 +54,7 @@ public module wkb_decoder;
 public module async_prepared_session;
 public module typed_prepared;
 public module gtid;
+public module load_data_csv;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -115,6 +116,11 @@ public mount .gtid.{
     parse_gtid_set, format_gtid_set,
     encode_wire as encode_gtid_wire,
     decode_wire as decode_gtid_wire,
+};
+public mount .load_data_csv.{
+    LoadDataCsvConfig,
+    format_row as format_csv_row,
+    format_rows as format_csv_rows,
 };
 public mount .binlog_rows.decode_value_for_type as decode_mysql_binary_value;
 public mount .async_pool.{
