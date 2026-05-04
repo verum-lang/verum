@@ -208,6 +208,31 @@ impl<'s> CompilationPipeline<'s> {
 
         let mut codegen = VbcCodegen::with_config(config);
 
+        // #122 — bridge stdlib-prep registry into the user-side codegen.
+        //
+        // Pre-fix the user-side `VbcCodegen` started with an empty
+        // `ctx.functions` HashMap. Stdlib functions registered in the
+        // earlier `Phase0CoreCompiler::compile_core` pass (which uses
+        // its own `VbcCodegen` instance, exports to
+        // `pipeline.global_function_registry`) were invisible to user
+        // code's compile_call lookups — every user call to a stdlib
+        // intrinsic (`write_stderr`, `random_bytes`, `exit_process`,
+        // etc.) surfaced as `[lenient] SKIP fn caller (bug-class):
+        // undefined function: write_stderr`.
+        //
+        // The fix is to feed the global function registry the same
+        // way stdlib_bootstrap.rs:919 does for cross-stdlib-module
+        // compilation. After this call every symbol that any earlier
+        // codegen instance registered (including `@intrinsic` extern
+        // declarations and `mount X.Y as Z` aliases) is visible to
+        // the user-side compile_item / compile_call path.
+        if !self.global_function_registry.is_empty() {
+            codegen.import_functions(&self.global_function_registry);
+        }
+        if !self.global_protocol_registry.is_empty() {
+            codegen.import_protocols(&self.global_protocol_registry);
+        }
+
         // Run CBGR tier analysis: escape analysis → tier determination
         // → RefChecked/RefUnsafe emission. Promotes non-escaping refs
         // from Tier 0 (~15ns) to Tier 1 (0ns).
@@ -268,6 +293,31 @@ impl<'s> CompilationPipeline<'s> {
             "tier analysis in compile_ast_to_vbc took {:.2}s",
             tier_start.elapsed().as_secs_f64()
         );
+
+        // Phase 6a (precompile-stdlib epic): detect whether the
+        // compiler binary embeds a precompiled stdlib VBC archive.
+        // Phase 6b will switch the codegen path to merge the embedded
+        // archive's modules directly instead of re-running stdlib
+        // codegen here; today the path still routes through
+        // `collect_imported_stdlib_modules` + per-module codegen, but
+        // this hook ensures the binary-side embed is actually
+        // wired and the archive is decodable at runtime — the lazy
+        // OnceLock initialiser fires on first call and surfaces any
+        // format mismatch as a `tracing::warn!` before user code runs.
+        if let Some(archive) = crate::embedded_stdlib_vbc::get_runtime_archive() {
+            tracing::debug!(
+                target: "compile_ast_to_vbc",
+                "precompiled stdlib archive available: {} modules ({} KB compressed). \
+                 Phase 6b will switch the codegen path to merge it directly.",
+                archive.module_count(),
+                crate::embedded_stdlib_vbc::embedded_size_bytes() / 1024,
+            );
+        } else {
+            tracing::debug!(
+                target: "compile_ast_to_vbc",
+                "no precompiled stdlib archive embedded — using source-driven codegen"
+            );
+        }
 
         // Collect imported stdlib modules that need to be compiled alongside the main module.
         // Without this, constants/functions from imported modules (e.g., CLOCK_REALTIME_ID
