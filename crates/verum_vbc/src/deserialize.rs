@@ -438,6 +438,16 @@ impl<'a> Deserializer<'a> {
  field_id_to_name: Vec::new(),
  type_field_layouts: std::collections::HashMap::new(),
  user_function_start: 0,
+ // Phase 3 (precompile-stdlib epic) — empty by default; the
+ // legacy binary deserializer doesn't yet read the new sections.
+ // Phase 4/5 add a parallel `.vbca` deserializer that populates
+ // these via a sectioned format. Until then, legacy `.vbc` files
+ // round-trip as universal-only.
+ cfg_keys: Vec::new(),
+ function_variants: Vec::new(),
+ theorems: Vec::new(),
+ framework_provenance: crate::module::FrameworkProvenance::default(),
+ discharge_receipts: Vec::new(),
  })
  }
 
