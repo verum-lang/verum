@@ -2023,6 +2023,252 @@ public fn expand<T: Numeric>(x: &DynTensor<T>, new_shape: &[USize]) -> DynTensor
     @vbc(TENSOR_EXPAND, x.data, new_shape)
 }
 
+// =============================================================================
+// Padding helpers (#74 Tier B)
+// =============================================================================
+
+// Pad constant: add `pad_before` and `pad_after` slabs of `value`
+// along `axis`. Composes `full` (build the pad slabs) + `cat`
+// (along `axis`). Output shape grows along `axis` by
+// `pad_before + pad_after`.
+//
+// #74 Tier B — pre-fix callers had to manually construct the pad
+// tensors. This wrapper picks up the receiver's shape and dtype.
+public fn pad_constant<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: ISize,
+    pad_before: USize,
+    pad_after: USize,
+    value: T,
+) -> DynTensor<T> {
+    let target = normalize_axis(axis, x.rank());
+    if pad_before == 0 && pad_after == 0 {
+        return x.clone();
+    }
+    // Build per-dim shapes for the pad slabs: same as `x` except on `axis`.
+    let mut before_shape: List<USize> = List.with_capacity(x.rank());
+    let mut after_shape: List<USize> = List.with_capacity(x.rank());
+    for d in 0..x.rank() {
+        if d == target {
+            before_shape.push(pad_before);
+            after_shape.push(pad_after);
+        } else {
+            before_shape.push(x.dim(d));
+            after_shape.push(x.dim(d));
+        }
+    }
+    let mut parts: List<&DynTensor<T>> = List.with_capacity(3);
+    let before = full(&before_shape, value);
+    let after = full(&after_shape, value);
+    if pad_before > 0 {
+        parts.push(&before);
+    }
+    parts.push(x);
+    if pad_after > 0 {
+        parts.push(&after);
+    }
+    cat(&parts, axis)
+}
+
+// Convenience: pad with zeros.
+// #74 Tier B — `pad_constant` with `value = 0`.
+public fn pad_zeros<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: ISize,
+    pad_before: USize,
+    pad_after: USize,
+) -> DynTensor<T> {
+    pad_constant(x, axis, pad_before, pad_after, 0 as T)
+}
+
+// Symmetric pad with same value on both sides.
+// #74 Tier B — common shape for keeping the centred-output
+// convention in convolution.
+public fn pad_same<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: ISize,
+    pad_each_side: USize,
+    value: T,
+) -> DynTensor<T> {
+    pad_constant(x, axis, pad_each_side, pad_each_side, value)
+}
+
+// =============================================================================
+// Masked aggregations (#74 Tier B)
+// =============================================================================
+
+// Masked sum: `sum(x[mask])`. Composes `where_tensor` (pick the
+// elements where mask is true, else 0) + `sum`. The mask must
+// broadcast with `x`.
+public fn masked_sum<T: Numeric>(
+    x: &DynTensor<T>,
+    mask: &DynTensor<Bool>,
+) -> T {
+    let zeros = full_like(x, 0 as T);
+    let masked = where_tensor(mask, x, &zeros);
+    sum(&masked)
+}
+
+// Masked mean: `sum(x[mask]) / count(mask)`. When the mask has
+// no true entries, returns 0 to avoid division-by-zero (callers
+// should pre-check via `count_nonzero(mask_as_int)` if 0/0 vs
+// "actually zero" matters for the use case).
+public fn masked_mean<T: Numeric>(
+    x: &DynTensor<T>,
+    mask: &DynTensor<Bool>,
+) -> T {
+    let zeros = full_like(x, 0 as T);
+    let masked = where_tensor(mask, x, &zeros);
+    let mask_int: DynTensor<USize> = mask.cast();
+    let count = sum(&mask_int);
+    if count == 0 { 0 as T } else { sum(&masked) / (count as T) }
+}
+
+// Masked max: `max(x[mask])`. When the mask has no true entries,
+// returns the minimum-representable value of T. Composes
+// `where_tensor` (replace masked-out slots with -∞) + `tensor_max`.
+public fn masked_max<T: Numeric>(
+    x: &DynTensor<T>,
+    mask: &DynTensor<Bool>,
+) -> T {
+    // Use a very small sentinel for masked-out positions so they
+    // never win the max. T::MIN would be ideal but Numeric doesn't
+    // expose it; this works for IEEE float and most signed ints.
+    let neg_inf = full_like(x, -((1 as T) << ((T.size as Int) * 8 - 2)));
+    let masked = where_tensor(mask, x, &neg_inf);
+    tensor_max(&masked)
+}
+
+// Masked min: dual of `masked_max`.
+public fn masked_min<T: Numeric>(
+    x: &DynTensor<T>,
+    mask: &DynTensor<Bool>,
+) -> T {
+    let pos_inf = full_like(x, (1 as T) << ((T.size as Int) * 8 - 2));
+    let masked = where_tensor(mask, x, &pos_inf);
+    tensor_min(&masked)
+}
+
+// =============================================================================
+// Window / rolling aggregations (#74 Tier B)
+// =============================================================================
+
+// Rolling mean over a fixed window along `axis`. Output has the
+// same length as input along `axis`; the first `window-1` entries
+// are computed against a partial cumulative sum (numpy "valid"
+// vs "same" mode equivalence — this is "same" with leading partial
+// windows, matching pandas / TF-Decision-Forests convention).
+//
+// #74 Tier B — composes `cumsum` + `pad_zeros` + `sub` + `div_scalar`.
+// Mathematical identity:
+//   rolling_mean(x, w)[i] = (cumsum(x)[i] - cumsum(x)[i - w]) / w
+// for `i >= w`, else `cumsum(x)[i] / (i + 1)`.
+public fn rolling_mean<T: Numeric>(
+    x: &DynTensor<T>,
+    window: USize,
+    axis: ISize,
+) -> DynTensor<T> {
+    assert(window >= 1, "rolling_mean requires window >= 1");
+    if window == 1 {
+        return x.clone();
+    }
+    let cs = cumsum(x, axis);
+    // Shift cs by `window` along `axis` (pad `window` zeros at the start).
+    let shifted = pad_zeros(&cs, axis, window, 0);
+    let n = x.dim(normalize_axis(axis, x.rank()));
+    // Drop the trailing `window` to align lengths.
+    let aligned = tensor_slice_axis(&shifted, axis, 0, n);
+    let diff = sub(&cs, &aligned);
+    div_scalar(&diff, window as T)
+}
+
+// Rolling sum over a fixed window along `axis`.
+// #74 Tier B — same shape as `rolling_mean` but without the
+// final scalar division. Useful when callers want to fold the
+// window-size factor into a downstream computation.
+public fn rolling_sum<T: Numeric>(
+    x: &DynTensor<T>,
+    window: USize,
+    axis: ISize,
+) -> DynTensor<T> {
+    assert(window >= 1, "rolling_sum requires window >= 1");
+    if window == 1 {
+        return x.clone();
+    }
+    let cs = cumsum(x, axis);
+    let shifted = pad_zeros(&cs, axis, window, 0);
+    let n = x.dim(normalize_axis(axis, x.rank()));
+    let aligned = tensor_slice_axis(&shifted, axis, 0, n);
+    sub(&cs, &aligned)
+}
+
+// =============================================================================
+// Boolean axis-aware reductions (#74 Tier B)
+// =============================================================================
+
+// Reduce-any along axis: returns true if any element along `axis`
+// is true. Composes `cast` to integer + `sum_axis` + comparison.
+// #74 Tier B — convenience over `TENSOR_REDUCE.Any` when callers
+// want axis-collapsed boolean output rather than scalar.
+public fn any_axis(x: &DynTensor<Bool>, axis: ISize) -> DynTensor<Bool> {
+    let as_int: DynTensor<USize> = x.cast();
+    let counts: DynTensor<USize> = @vbc(TENSOR_REDUCE, as_int.data, ReduceOp.Sum, axis);
+    let zeros = full_like(&counts, 0 as USize);
+    gt(&counts, &zeros)
+}
+
+// Reduce-all along axis: returns true if every element along `axis`
+// is true. Composes via `cast` + `sum_axis` + count-equals-axis-len.
+public fn all_axis(x: &DynTensor<Bool>, axis: ISize) -> DynTensor<Bool> {
+    let target = normalize_axis(axis, x.rank());
+    let n = x.dim(target);
+    let as_int: DynTensor<USize> = x.cast();
+    let counts: DynTensor<USize> = @vbc(TENSOR_REDUCE, as_int.data, ReduceOp.Sum, axis);
+    let n_tensor = full_like(&counts, n);
+    eq(&counts, &n_tensor)
+}
+
+// =============================================================================
+// Numerical integration (#74 Tier B)
+// =============================================================================
+
+// Trapezoidal rule integration of `y` along `axis` with uniform
+// step `dx`: `dx * (sum(y) - 0.5 * (y[0] + y[-1]))`.
+// #74 Tier B — composes `sum` + `tensor_slice_axis` + scalar
+// arithmetic. Output is a scalar of T (axis collapsed completely).
+// For rank-1 input on the default axis this matches numpy's
+// `trapz(y, dx=dx)`.
+public fn trapz<T: Numeric>(y: &DynTensor<T>, axis: ISize, dx: T) -> T {
+    let n = y.dim(normalize_axis(axis, y.rank()));
+    assert(n >= 2, "trapz requires axis size >= 2");
+    let total = sum(y);
+    // Subtract half of the endpoints (the trapezoid correction).
+    let first_slice = tensor_slice_axis(y, axis, 0, 1);
+    let last_slice = tensor_slice_axis(y, axis, n - 1, n);
+    let endpoints = add(&first_slice, &last_slice);
+    let half_endpoints = mul_scalar(&endpoints, (0.5 as Float) as T);
+    (total - sum(&half_endpoints)) * dx
+}
+
+// Cumulative trapezoidal integration along `axis` with uniform
+// step `dx`. Output has the same shape as input.
+// #74 Tier B — composes `pad_zeros` + `add` + `cumsum` +
+// `mul_scalar`. Identity:
+//   cumtrapz(y)[i] = dx * cumsum((y[0..=i] + y[1..=i+1]) / 2)
+public fn cumtrapz<T: Numeric>(y: &DynTensor<T>, axis: ISize, dx: T) -> DynTensor<T> {
+    let n = y.dim(normalize_axis(axis, y.rank()));
+    assert(n >= 1, "cumtrapz requires axis size >= 1");
+    if n == 1 {
+        return zeros_like(y);
+    }
+    // y[i] + y[i-1] over the axis: sum of y and y shifted left by 1.
+    let shifted = pad_zeros(y, axis, 1, 0);
+    let truncated = tensor_slice_axis(&shifted, axis, 0, n);
+    let pair_sum = add(y, &truncated);
+    let half = mul_scalar(&pair_sum, ((0.5 as Float) * (dx as Float)) as T);
+    cumsum(&half, axis)
+}
+
 // Concatenate tensors along axis
 public fn cat<T: Numeric>(tensors: &[&DynTensor<T>], axis: ISize) -> DynTensor<T> {
     assert(!tensors.is_empty(), "cat requires at least one tensor");
