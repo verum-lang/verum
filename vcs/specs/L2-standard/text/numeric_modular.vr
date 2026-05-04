@@ -16,8 +16,9 @@ mount core.text.numeric.{
     BigInt, parse_bigint,
     ModularError,
     gcd, lcm, ext_gcd,
-    mod_pow, mod_inverse,
+    mod_pow, mod_inverse, mod_sqrt,
     is_probable_prime,
+    crt, crt2,
 };
 
 fn check_gcd_lcm() {
@@ -158,6 +159,104 @@ fn check_primality() {
     assert(!is_probable_prime(&BigInt.from_int(561), &witnesses));
 }
 
+fn check_crt() -> Result<Bool, ModularError> {
+    // Classic CRT example: x ≡ 2 (mod 3), x ≡ 3 (mod 5), x ≡ 2 (mod 7)
+    //   ⇒ x ≡ 23 (mod 105)
+    let mut residues: List<BigInt> = List.new();
+    residues.push(BigInt.from_int(2));
+    residues.push(BigInt.from_int(3));
+    residues.push(BigInt.from_int(2));
+    let mut moduli: List<BigInt> = List.new();
+    moduli.push(BigInt.from_int(3));
+    moduli.push(BigInt.from_int(5));
+    moduli.push(BigInt.from_int(7));
+    let x = crt(&residues, &moduli)?;
+    assert(x.eq(&BigInt.from_int(23)));
+
+    // crt2 convenience: x ≡ 1 (mod 4), x ≡ 2 (mod 9) ⇒ x ≡ 29 (mod 36)
+    let x2 = crt2(
+        &BigInt.from_int(1), &BigInt.from_int(4),
+        &BigInt.from_int(2), &BigInt.from_int(9),
+    )?;
+    assert(x2.eq(&BigInt.from_int(29)));
+
+    // LengthMismatch: 2 residues, 3 moduli.
+    let mut bad_r: List<BigInt> = List.new();
+    bad_r.push(BigInt.from_int(1));
+    bad_r.push(BigInt.from_int(2));
+    let mut bad_m: List<BigInt> = List.new();
+    bad_m.push(BigInt.from_int(3));
+    bad_m.push(BigInt.from_int(5));
+    bad_m.push(BigInt.from_int(7));
+    let mismatch = match crt(&bad_r, &bad_m) {
+        Err(ModularError.LengthMismatch { residues_len: 2, moduli_len: 3 }) => true,
+        _ => false,
+    };
+    assert(mismatch);
+
+    // NotCoprime: gcd(4, 6) = 2.
+    let not_coprime = match crt2(
+        &BigInt.from_int(1), &BigInt.from_int(4),
+        &BigInt.from_int(1), &BigInt.from_int(6),
+    ) {
+        Err(ModularError.NotCoprime { reason: _ }) => true,
+        _ => false,
+    };
+    assert(not_coprime);
+
+    Ok(true)
+}
+
+fn check_mod_sqrt() -> Result<Bool, ModularError> {
+    // p ≡ 3 (mod 4) fast path: 4 mod 7 ⇒ root is ±2.
+    // mod_sqrt returns one root; verify by squaring.
+    let r1 = mod_sqrt(&BigInt.from_int(4), &BigInt.from_int(7))?;
+    let r1_sq = r1.mul(&r1);
+    let r1_sq_mod = match r1_sq.rem(&BigInt.from_int(7)) {
+        Ok(v)  => v,
+        Err(_) => BigInt.zero(),
+    };
+    assert(r1_sq_mod.eq(&BigInt.from_int(4)));
+
+    // p ≡ 1 (mod 4) general path: 2 mod 17 (since 2 is QR mod 17).
+    // 6² = 36 ≡ 2 (mod 17), so root is 6 (or 11).
+    let r2 = mod_sqrt(&BigInt.from_int(2), &BigInt.from_int(17))?;
+    let r2_sq = r2.mul(&r2);
+    let r2_sq_mod = match r2_sq.rem(&BigInt.from_int(17)) {
+        Ok(v)  => v,
+        Err(_) => BigInt.zero(),
+    };
+    assert(r2_sq_mod.eq(&BigInt.from_int(2)));
+
+    // a ≡ 0: root is 0.
+    let r0 = mod_sqrt(&BigInt.zero(), &BigInt.from_int(7))?;
+    assert(r0.is_zero());
+
+    // 3 is NOT a QR mod 7 (QRs mod 7: {1, 2, 4}).  Expect
+    // NotQuadraticResidue.
+    let nqr = match mod_sqrt(&BigInt.from_int(3), &BigInt.from_int(7)) {
+        Err(ModularError.NotQuadraticResidue { reason: _ }) => true,
+        _ => false,
+    };
+    assert(nqr);
+
+    // p < 3 → NotPrime.
+    let np = match mod_sqrt(&BigInt.one(), &BigInt.from_int(2)) {
+        Err(ModularError.NotPrime { reason: _ }) => true,
+        _ => false,
+    };
+    assert(np);
+
+    // p even → NotPrime.
+    let np2 = match mod_sqrt(&BigInt.one(), &BigInt.from_int(8)) {
+        Err(ModularError.NotPrime { reason: _ }) => true,
+        _ => false,
+    };
+    assert(np2);
+
+    Ok(true)
+}
+
 fn check_bigint_parity() {
     assert(BigInt.zero().is_even());
     assert(!BigInt.zero().is_odd());
@@ -174,5 +273,7 @@ fn main() {
     let _ = check_mod_pow();
     let _ = check_mod_inverse();
     check_primality();
+    let _ = check_crt();
+    let _ = check_mod_sqrt();
     check_bigint_parity();
 }

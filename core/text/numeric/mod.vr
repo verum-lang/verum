@@ -58,6 +58,7 @@ public mount .rational.{
 public mount .modular.{
     ModularError,
     gcd, lcm, ext_gcd,
-    mod_pow, mod_inverse,
+    mod_pow, mod_inverse, mod_sqrt,
     is_probable_prime,
+    crt, crt2,
 };
