@@ -69,6 +69,19 @@ pub struct CodegenContext {
     /// the variant whose parent type matches the function's return type.
     pub current_return_type_name: Option<String>,
 
+    /// Inner generic args of the current function's return type, when
+    /// known.  For `fn f() -> Result<T, ConnectionError>` this carries
+    /// `vec!["T", "ConnectionError"]`; the variant disambiguator
+    /// consults each entry as a candidate parent type when the simple
+    /// name collides across modules.
+    ///
+    /// Without this list, `current_return_type_name` strips to
+    /// `"Result"` and the disambiguator can't see that
+    /// `ConnectionError.IoError(Text)` is the right pick over a
+    /// same-named unit variant elsewhere — closing the
+    /// "IoError arity expected 0 found 1" class of stdlib lenient SKIPs.
+    pub current_return_type_inner: Option<Vec<String>>,
+
     /// Constant pool for current module.
     pub constants: Vec<ConstantEntry>,
 
@@ -909,6 +922,7 @@ impl CodegenContext {
             in_function: false,
             return_type: None,
             current_return_type_name: None,
+            current_return_type_inner: None,
             constants: Vec::new(),
             strings: Vec::new(),
             string_intern: HashMap::new(),
@@ -1716,6 +1730,7 @@ impl CodegenContext {
         self.in_function = false;
         self.return_type = None;
         self.current_return_type_name = None;
+        self.current_return_type_inner = None;
 
         (
             std::mem::take(&mut self.instructions),
@@ -1730,6 +1745,39 @@ impl CodegenContext {
     /// for all named variables (locals + parameters).
     pub fn collect_debug_variables(&self) -> Vec<(String, u16, bool, u16)> {
         self.registers.collect_debug_variables()
+    }
+
+    /// Atomically save+override the variant-disambiguation context
+    /// `(current_return_type_name, current_return_type_inner)`,
+    /// returning the old pair so a caller can restore it.
+    ///
+    /// Single-source-of-truth helper for the half-dozen
+    /// expression-compile sites that temporarily override the
+    /// disambiguation context (let-binding annotations, call-arg type
+    /// hints, assert_eq's first-arg-drives-second pattern, closure
+    /// returns, etc.).  Without it, sites that update only one field
+    /// leave the other stale, which can mis-resolve a same-name
+    /// variant when the surrounding return type's inner generics
+    /// happen to point at the same family.
+    pub fn push_disambig_context(
+        &mut self,
+        new_name: Option<String>,
+    ) -> (Option<String>, Option<Vec<String>>) {
+        let prev_name = self.current_return_type_name.take();
+        let prev_inner = self.current_return_type_inner.take();
+        self.current_return_type_name = new_name;
+        // The new override is unrelated to the surrounding function's
+        // return type, so its inner generics don't apply here.
+        self.current_return_type_inner = None;
+        (prev_name, prev_inner)
+    }
+
+    /// Restore the variant-disambiguation context saved by
+    /// [`push_disambig_context`](Self::push_disambig_context).
+    pub fn pop_disambig_context(&mut self, saved: (Option<String>, Option<Vec<String>>)) {
+        let (name, inner) = saved;
+        self.current_return_type_name = name;
+        self.current_return_type_inner = inner;
     }
 
     /// Registers a function for lookup.
@@ -1894,6 +1942,23 @@ impl CodegenContext {
                     }
                 }
             }
+            // Inner-generic check: when we're in `fn f() -> Result<X, E>`,
+            // a variant whose parent matches `E` is a valid pick — the
+            // variant is being constructed as the Err payload.  Without
+            // this, `Err(IoError(...))` inside a `Result<_, ConnectionError>`
+            // returner can't disambiguate between
+            // `ConnectionError.IoError(Text)` and a same-named unit variant
+            // elsewhere.  Closes the IoError-arity stdlib bug class.
+            if let Some(ref inner) = self.current_return_type_inner {
+                for inner_name in inner {
+                    let base = inner_name.split('<').next().unwrap_or(inner_name.as_str());
+                    for info in &matches {
+                        if info.parent_type_name.as_deref() == Some(base) {
+                            return Some(info);
+                        }
+                    }
+                }
+            }
             // Also try the match_scrutinee_type for pattern matching context
             if let Some(ref scrutinee_type) = self.match_scrutinee_type {
                 let base = scrutinee_type
@@ -1959,6 +2024,22 @@ impl CodegenContext {
                 for (tag, parent) in &matches {
                     if parent.as_deref() == Some(base) {
                         return Some(*tag);
+                    }
+                }
+            }
+            // Inner-generic check: cover `Err(IoError(msg))` inside
+            // `fn f() -> Result<X, ConnectionError>` — the variant we want
+            // (`ConnectionError.IoError(Text)`) has its parent appear as
+            // an inner generic of the return type, not as the return type
+            // itself.  Tries each inner name in declaration order; first
+            // match wins.  Closes the IoError-arity stdlib bug class.
+            if let Some(ref inner) = self.current_return_type_inner {
+                for inner_name in inner {
+                    let base = inner_name.split('<').next().unwrap_or(inner_name.as_str());
+                    for (tag, parent) in &matches {
+                        if parent.as_deref() == Some(base) {
+                            return Some(*tag);
+                        }
                     }
                 }
             }
@@ -2629,5 +2710,139 @@ mod tests {
 
         assert_eq!(dst.get_tier(span), CbgrTier::Tier0);
         assert_eq!(dst.get_tier0_reason(span), Some(Tier0Reason::Escapes));
+    }
+
+    /// Construct a minimal variant-constructor `FunctionInfo` for
+    /// disambiguator tests.  Only the fields the disambiguator
+    /// actually consults (param_count, variant_tag, parent_type_name)
+    /// need to be meaningful; everything else uses `Default`.
+    fn variant_info(parent: &str, tag: u32, arity: usize) -> FunctionInfo {
+        FunctionInfo {
+            param_count: arity,
+            variant_tag: Some(tag),
+            parent_type_name: Some(parent.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// Reproduces the `IoError` collision documented in the bug class
+    /// for `Connection.commit_tx`: two `IoError` variants exist —
+    /// `VfsErrorKind.IoError` (unit) and `ConnectionError.IoError(Text)`.
+    /// Without inner-generic context, the disambiguator can only see
+    /// `current_return_type_name = "Result"` and gives up.  With the
+    /// fix, `current_return_type_inner = ["X", "ConnectionError"]`
+    /// drives the right pick.
+    #[test]
+    fn variant_disambig_uses_inner_generic_args() {
+        let mut ctx = CodegenContext::new();
+
+        // Two same-name variants, different parents and arities.
+        ctx.register_function(
+            "VfsErrorKind.IoError".to_string(),
+            variant_info("VfsErrorKind", 5, 0),
+        );
+        ctx.register_function(
+            "ConnectionError.IoError".to_string(),
+            variant_info("ConnectionError", 4, 1),
+        );
+
+        // Outer return type is `Result` with `ConnectionError` as the
+        // second generic. The disambiguator's inner-generic check
+        // must steer to ConnectionError.IoError(Text) for arity 1.
+        ctx.current_return_type_name = Some("Result".to_string());
+        ctx.current_return_type_inner =
+            Some(vec!["X".to_string(), "ConnectionError".to_string()]);
+
+        let tag = ctx.find_variant_by_suffix_and_args("IoError", 1);
+        assert_eq!(
+            tag,
+            Some(4),
+            "disambiguator must pick ConnectionError.IoError(Text), not VfsErrorKind.IoError"
+        );
+    }
+
+    /// Mirror test for `find_function_by_suffix` — the same
+    /// inner-generic resolution must apply to the function-suffix
+    /// path so callers like `compile_variant_constructor` and
+    /// `compile_call_function` agree.
+    #[test]
+    fn find_function_by_suffix_uses_inner_generic_args() {
+        let mut ctx = CodegenContext::new();
+
+        ctx.register_function(
+            "VfsErrorKind.IoError".to_string(),
+            variant_info("VfsErrorKind", 5, 0),
+        );
+        ctx.register_function(
+            "ConnectionError.IoError".to_string(),
+            variant_info("ConnectionError", 4, 1),
+        );
+
+        ctx.current_return_type_name = Some("Result".to_string());
+        ctx.current_return_type_inner =
+            Some(vec!["Unit".to_string(), "ConnectionError".to_string()]);
+
+        let info = ctx.find_function_by_suffix(".IoError");
+        assert!(info.is_some(), "must resolve via inner-generic path");
+        assert_eq!(
+            info.unwrap().parent_type_name.as_deref(),
+            Some("ConnectionError"),
+            "must pick the variant whose parent appears as an inner generic"
+        );
+    }
+
+    /// Without the inner-generic list (as before this fix), the
+    /// disambiguator falls back to None for ambiguous matches with
+    /// no other context — confirming the test above is exercising
+    /// the new code path, not an unrelated tiebreaker.
+    #[test]
+    fn variant_disambig_returns_none_without_inner_when_ambiguous() {
+        let mut ctx = CodegenContext::new();
+        ctx.register_function(
+            "FooError.IoError".to_string(),
+            variant_info("FooError", 1, 1),
+        );
+        ctx.register_function(
+            "BarError.IoError".to_string(),
+            variant_info("BarError", 2, 1),
+        );
+
+        // Outer name is "Result" — neither parent matches.
+        // No inner-generic context — disambiguator must fall back
+        // to None (ambiguous, no signal).
+        ctx.current_return_type_name = Some("Result".to_string());
+        ctx.current_return_type_inner = None;
+
+        let tag = ctx.find_variant_by_suffix_and_args("IoError", 1);
+        assert!(
+            tag.is_none(),
+            "ambiguous matches with no resolution signal must return None"
+        );
+    }
+
+    /// `push_disambig_context` / `pop_disambig_context` must carry
+    /// both fields atomically — sites that previously saved only the
+    /// name field could leak inner-generic state from an outer
+    /// context into an inner override.
+    #[test]
+    fn push_pop_disambig_context_round_trips_both_fields() {
+        let mut ctx = CodegenContext::new();
+        ctx.current_return_type_name = Some("Result".to_string());
+        ctx.current_return_type_inner =
+            Some(vec!["Int".to_string(), "ConnectionError".to_string()]);
+
+        let saved = ctx.push_disambig_context(Some("Maybe".to_string()));
+        assert_eq!(ctx.current_return_type_name.as_deref(), Some("Maybe"));
+        assert!(
+            ctx.current_return_type_inner.is_none(),
+            "push must clear inner — a different override doesn't inherit the outer's generics"
+        );
+
+        ctx.pop_disambig_context(saved);
+        assert_eq!(ctx.current_return_type_name.as_deref(), Some("Result"));
+        assert_eq!(
+            ctx.current_return_type_inner.as_deref(),
+            Some(vec!["Int".to_string(), "ConnectionError".to_string()].as_slice())
+        );
     }
 }

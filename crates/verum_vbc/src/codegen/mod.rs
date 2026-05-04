@@ -9191,6 +9191,12 @@ impl VbcCodegen {
         // When a variant name collides (e.g., "Lt" in both user's "Ordering" and
         // stdlib's "GeneralCategory"), this allows preferring the correct parent type.
         self.ctx.current_return_type_name = func_info.return_type_name.clone();
+        // Inner generics of the return type drive variant disambiguation
+        // for `Err(InnerVariant(...))` inside `Result<_, E>` returners
+        // and the equivalent `Some(InnerVariant(...))` inside
+        // `Maybe<E>` — without this list the disambiguator only sees
+        // the wrapper base name.
+        self.ctx.current_return_type_inner = func_info.return_type_inner.clone();
 
         // Stash the full AST return type + function name so that
         // explicit `return expr;` statements compiled inside the body
