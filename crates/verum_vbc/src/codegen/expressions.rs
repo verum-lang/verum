@@ -2257,16 +2257,14 @@ impl VbcCodegen {
         };
         let saved_assign_rt = target_type_hint.map(|hint| {
             let base = hint.split('<').next().unwrap_or(&hint).to_string();
-            let prev = self.ctx.current_return_type_name.clone();
-            self.ctx.current_return_type_name = Some(base);
-            prev
+            self.ctx.push_disambig_context(Some(base))
         });
         // Evaluate value first
         let value_reg = self
             .compile_expr(value)?
             .ok_or_else(|| CodegenError::internal("assignment value has no value"))?;
-        if let Some(prev) = saved_assign_rt {
-            self.ctx.current_return_type_name = prev;
+        if let Some(saved) = saved_assign_rt {
+            self.ctx.pop_disambig_context(saved);
         }
 
         // Handle different assignment targets
@@ -3769,15 +3767,13 @@ impl VbcCodegen {
                                 .next()
                                 .unwrap_or(type_name.as_str())
                                 .to_string();
-                            let prev = self.ctx.current_return_type_name.clone();
-                            self.ctx.current_return_type_name = Some(base);
-                            prev
+                            self.ctx.push_disambig_context(Some(base))
                         });
                     let arg_val = self
                         .compile_expr(arg)?
                         .ok_or_else(|| CodegenError::internal("call arg has no value"))?;
                     if let Some(saved) = saved {
-                        self.ctx.current_return_type_name = saved;
+                        self.ctx.pop_disambig_context(saved);
                     }
                     arg_results.push(arg_val);
                 }
@@ -4425,17 +4421,15 @@ impl VbcCodegen {
                         .next()
                         .unwrap_or(type_name.as_str())
                         .to_string();
-                    let prev = self.ctx.current_return_type_name.clone();
-                    self.ctx.current_return_type_name = Some(base);
-                    Some(prev)
+                    Some(self.ctx.push_disambig_context(Some(base)))
                 } else {
                     None
                 };
                 let right_reg = self
                     .compile_expr(&args[1])?
                     .ok_or_else(|| CodegenError::internal("assert_eq right has no value"))?;
-                if let Some(prev) = saved_assert_rt {
-                    self.ctx.current_return_type_name = prev;
+                if let Some(saved) = saved_assert_rt {
+                    self.ctx.pop_disambig_context(saved);
                 }
 
                 // Compare values using generic equality (works for all types)
@@ -12597,18 +12591,27 @@ impl VbcCodegen {
     /// With the field's declared type provided as context,
     /// `find_function_by_suffix` can pick the variant whose
     /// `parent_type_name` matches, eliminating the ambiguity.
-    fn push_field_type_context(&mut self, type_name: &str, field_name: &str) -> Option<String> {
-        let saved = self.ctx.current_return_type_name.clone();
+    fn push_field_type_context(
+        &mut self,
+        type_name: &str,
+        field_name: &str,
+    ) -> (Option<String>, Option<Vec<String>>) {
         if let Some(ft) = self.field_type_name(type_name, field_name) {
             // Strip any generic args — variants register under the base name.
             let base = ft.split('<').next().unwrap_or(ft).to_string();
-            self.ctx.current_return_type_name = Some(base);
+            self.ctx.push_disambig_context(Some(base))
+        } else {
+            // Field type unknown — keep existing context as-is (no
+            // override, no disturbance to `current_return_type_inner`).
+            (
+                self.ctx.current_return_type_name.clone(),
+                self.ctx.current_return_type_inner.clone(),
+            )
         }
-        saved
     }
 
-    fn pop_field_type_context(&mut self, saved: Option<String>) {
-        self.ctx.current_return_type_name = saved;
+    fn pop_field_type_context(&mut self, saved: (Option<String>, Option<Vec<String>>)) {
+        self.ctx.pop_disambig_context(saved);
     }
 
     /// Compiles a record (struct) creation.
@@ -15264,14 +15267,12 @@ impl VbcCodegen {
         //  happens to be at a return-position) — still correct.
         // Clearing threw all three away. Restoring on exit retains
         // isolation between sibling closures.
-        let saved_closure_rtn_wp = {
-            let prev = self.ctx.current_return_type_name.clone();
-            if let Some(ty) = return_type_ast {
-                let rt_name = self.type_to_simple_name(ty);
-                let base = rt_name.split('<').next().unwrap_or(&rt_name).to_string();
-                self.ctx.current_return_type_name = Some(base);
-            }
-            prev
+        let saved_closure_rtn_wp = if let Some(ty) = return_type_ast {
+            let rt_name = self.type_to_simple_name(ty);
+            let base = rt_name.split('<').next().unwrap_or(&rt_name).to_string();
+            Some(self.ctx.push_disambig_context(Some(base)))
+        } else {
+            None
         };
         // Bind complex patterns to extract variables
         // For each complex pattern, get the register for the synthetic param and bind
@@ -15290,7 +15291,9 @@ impl VbcCodegen {
 
         // Compile the body expression
         let result = self.compile_expr(body)?;
-        self.ctx.current_return_type_name = saved_closure_rtn_wp;
+        if let Some(saved) = saved_closure_rtn_wp {
+            self.ctx.pop_disambig_context(saved);
+        }
 
         // Emit return
         if let Some(reg) = result {
