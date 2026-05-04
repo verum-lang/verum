@@ -29,6 +29,7 @@ mount core.database.postgres.wire.codec.{
     PgNumeric,
     decode_numeric,
     encode_numeric_from_int,
+    encode_numeric_from_decimal, encode_numeric_from_text,
     supports_binary,
     PG_TYPE_NUMERIC, PG_TYPE_TSVECTOR, PG_TYPE_RECORD,
     PG_NUMERIC_POS, PG_NUMERIC_NEG,
@@ -39,6 +40,7 @@ mount core.database.postgres.wire.codec.{
     PgComposite, PgCompositeField,
     decode_composite, encode_composite,
 };
+mount core.text.numeric.Decimal;
 
 fn check_decode_signature(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
     decode_numeric(slice)
@@ -58,6 +60,14 @@ fn check_predicates(n: &PgNumeric) -> Bool {
 
 fn check_encode(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, value: Int) -> Bool {
     encode_numeric_from_int(buf, arena, value)
+}
+
+fn check_encode_decimal(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, d: &Decimal) -> Bool {
+    encode_numeric_from_decimal(buf, arena, d)
+}
+
+fn check_encode_text(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, t: &Text) -> Bool {
+    encode_numeric_from_text(buf, arena, t)
 }
 
 fn check_decode_tsvector(slice: &ArenaSlice) -> Result<PgTsVector, DbError> {
