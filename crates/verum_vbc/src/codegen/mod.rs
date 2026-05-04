@@ -3188,6 +3188,25 @@ impl VbcCodegen {
                 self.ctx.const_generic_params.clear();
                 let _ = self.compile_pattern_as_function(pat_decl);
             }
+            // #122 — process imported modules' Mount items so their
+            // aliases (`mount X.Y as Z`) get registered in
+            // ctx.functions. Without this, every alias-bearing
+            // mount in a stdlib module surfaced as bug-class lenient
+            // SKIP at the consumer's call site (the symptom that
+            // motivated #119 audit pass 1). The strict-mode
+            // semantics here mirror compile_item: any failure
+            // becomes the strict error if classified BugClass.
+            ItemKind::Mount(import_decl) => {
+                if let Err(e) = self.register_import_aliases(import_decl) {
+                    let class = e.skip_class();
+                    if self.config.strict_codegen
+                        && class == SkipClass::BugClass
+                        && first_strict_err.is_none()
+                    {
+                        first_strict_err = Some(e);
+                    }
+                }
+            }
             _ => {}
         }
         match first_strict_err {
@@ -5597,11 +5616,37 @@ impl VbcCodegen {
     /// This processes imports like `import sys.linux.syscall.{write as sys_write}` and
     /// registers `sys_write` as pointing to `sys.linux.syscall.write`.
     fn register_import_aliases(&mut self, import: &MountDecl) -> CodegenResult<()> {
-        self.process_import_tree(&import.tree, &[])
+        // #122 — propagate the OUTER `MountDecl.alias` into the tree
+        // walker. The grammar admits two surfaces for `as <alias>`:
+        //
+        //   * simple-path form: `mount core.X.Y.fn as alias;`
+        //     parser stores the alias on `MountDecl.alias`,
+        //     `MountTree.alias` is `None` — see
+        //     verum_fast_parser/src/decl.rs:5663-5670 vs :5816-5820.
+        //   * nested form:      `mount core.X.{fn as alias, ...};`
+        //     parser stores the alias on each inner `MountTree.alias`,
+        //     `MountDecl.alias` is `None`.
+        //
+        // Pre-fix `process_import_tree` only inspected `tree.alias`,
+        // so every simple-path alias was silently dropped — the
+        // alias key never landed in `ctx.functions`. This was the
+        // remaining 20% of #122 that the cross-instance ctx bridge
+        // (commit 83b8a3f3) couldn't paper over: the alias name
+        // wasn't even *attempted* on either codegen instance.
+        let outer_alias = match &import.alias {
+            verum_common::Maybe::Some(ident) => Some(ident),
+            verum_common::Maybe::None => None,
+        };
+        self.process_import_tree(&import.tree, &[], outer_alias)
     }
 
     /// Recursively processes an import tree to register function aliases.
-    fn process_import_tree(&mut self, tree: &MountTree, prefix: &[String]) -> CodegenResult<()> {
+    fn process_import_tree(
+        &mut self,
+        tree: &MountTree,
+        prefix: &[String],
+        outer_alias: Option<&verum_ast::ty::Ident>,
+    ) -> CodegenResult<()> {
         match &tree.kind {
             MountTreeKind::Path(path) => {
                 // Build the full qualified name by combining prefix and path
@@ -5628,10 +5673,16 @@ impl VbcCodegen {
                     None => return Ok(()),
                 };
 
-                // The alias is either explicit or defaults to the function name
+                // Alias precedence: per-tree alias (nested form
+                // `mount X.{fn as alias}`) wins; falling back to the
+                // outer-decl alias (simple form `mount X.fn as alias;`),
+                // then to the function name itself.
                 let alias_name = match &tree.alias {
                     verum_common::Maybe::Some(alias) => alias.name.to_string(),
-                    verum_common::Maybe::None => func_name.clone(),
+                    verum_common::Maybe::None => match outer_alias {
+                        Some(ident) => ident.name.to_string(),
+                        None => func_name.clone(),
+                    },
                 };
 
                 // Try to look up the function in the registry with various qualified names
@@ -5676,6 +5727,29 @@ impl VbcCodegen {
                     let simplified_qualified = format!("{}.{}", module_name, func_name);
                     if let Some(func_info) =
                         self.ctx.lookup_function(&simplified_qualified).cloned()
+                    {
+                        if should_register(&alias_name, &func_info) {
+                            self.ctx.register_function(alias_name.clone(), func_info);
+                        }
+                        return Ok(());
+                    }
+                }
+
+                // #122 — Try WITHOUT "core." prefix (mount uses
+                // `core.X.Y.fn` but functions register under their
+                // source-module's `module X.Y;` declaration which
+                // omits the `core.` prefix). This is the inverse of
+                // the with-prefix retry below; needed when the user
+                // writes the canonical form `mount core.sys.common.X
+                // as Y` and the function was registered at
+                // `module=sys.common`. Without this branch, every
+                // alias mount of a `core.*`-canonical-path function
+                // bug-class lenient SKIPs.
+                if full_path.first().map(|s| s.as_str()) == Some("core") && full_path.len() >= 2 {
+                    let stripped: Vec<String> = full_path[1..].to_vec();
+                    let stripped_qualified = stripped.join(".");
+                    if let Some(func_info) =
+                        self.ctx.lookup_function(&stripped_qualified).cloned()
                     {
                         if should_register(&alias_name, &func_info) {
                             self.ctx.register_function(alias_name.clone(), func_info);
@@ -5837,9 +5911,14 @@ impl VbcCodegen {
                     }
                 }
 
-                // Process each nested tree with the accumulated prefix
+                // Process each nested tree with the accumulated prefix.
+                // Nested-form does not propagate the outer-decl alias to
+                // children: an outer `as ALIAS` on `mount X.{a, b, c}`
+                // is grammatically ambiguous (which child gets it?)
+                // and is treated as a no-op for codegen — children use
+                // their own per-tree alias if any.
                 for sub_tree in trees.iter() {
-                    self.process_import_tree(sub_tree, &new_prefix)?;
+                    self.process_import_tree(sub_tree, &new_prefix, None)?;
                 }
 
                 Ok(())
@@ -5923,6 +6002,26 @@ impl VbcCodegen {
                 let module_name = &full_path[0];
                 let simplified_qualified = format!("{}.{}", module_name, func_name);
                 if let Some(func_info) = self.ctx.lookup_function(&simplified_qualified).cloned() {
+                    if should_register(&self.ctx, &alias_name, &func_info) {
+                        self.ctx.register_function(alias_name, func_info);
+                    }
+                    continue;
+                }
+            }
+
+            // #122 — Try WITHOUT "core." prefix in deferred-resolution path
+            // (mirror of the same retry in `register_import_aliases`). The
+            // canonical mount form `mount core.sys.common.X as Y`
+            // resolves through this branch when the function got
+            // registered under `module=sys.common` (without the
+            // `core.` prefix because `current_source_module` records
+            // the file's own `module sys.common;` declaration).
+            if full_path.first().map(|s| s.as_str()) == Some("core") && full_path.len() >= 2 {
+                let stripped: Vec<String> = full_path[1..].to_vec();
+                let stripped_qualified = stripped.join(".");
+                if let Some(func_info) =
+                    self.ctx.lookup_function(&stripped_qualified).cloned()
+                {
                     if should_register(&self.ctx, &alias_name, &func_info) {
                         self.ctx.register_function(alias_name, func_info);
                     }
