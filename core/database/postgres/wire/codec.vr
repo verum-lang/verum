@@ -20,19 +20,18 @@
 //      range types (int4range, numrange, tsrange, tstzrange), and
 //      the generic array<T> wire-format framer.
 //
-// Composite and tsvector types are deferred — both depend on
-// follow-up work (composite needs the field-walker integrated with
-// the row-type resolver). Documented as TODO and explicitly listed
-// in the per-type "supported" predicate below so a sql# query that
-// touches them produces a clean compile-time "unsupported" error
-// rather than silent decode garbage.
+// codec.vr deferred list is closed — every PG built-in scalar +
+// composite + array type now has a binary codec at the wire layer.
 //
-// NUMERIC: V0 ships decode + integer-only encode (see
-// `decode_numeric` / `encode_numeric_from_int` below).
-// `PgNumeric.to_text` renders byte-identically to PG's text format.
-// Full text→binary encoding for arbitrary-precision NUMERIC literals
-// awaits `core.text.numeric.decimal` (V1); until then non-integer
-// parameter binds route through FmtText.
+// V0 boundaries (still work-in-progress areas, but not blocking):
+//   * NUMERIC encode covers integer-valued only (full text-encode
+//     awaits `core.text.numeric.decimal`).
+//   * tsvector encode is V1 (most callers ship Text + let PG run
+//     `to_tsvector` server-side).
+//   * Composite encode requires the caller to supply pre-encoded
+//     field payloads; auto-encoding from a Verum record value
+//     (deriving each field's type_oid + per-field encoder) is V1
+//     and depends on row-resolver integration.
 //
 // All codec functions take an `ArenaWireBuf` for encoding (so the
 // hot path is bump-allocated out of the connection arena, no heap)
@@ -249,7 +248,12 @@ public fn supports_binary(oid: Int) -> Bool {
     else if oid == PG_TYPE_CIDR        { true }
     else if oid == PG_TYPE_NUMERIC     { true }
     else if oid == PG_TYPE_TSVECTOR    { true }
-    // composite remains on the deferred list.
+    else if oid == PG_TYPE_RECORD      { true }
+    // codec.vr deferred list is empty — every PG built-in scalar +
+    // composite type now has a binary codec.  User-defined composite
+    // types (oid varies per database) decode through the same
+    // `decode_composite` path; the row-resolver picks the per-field
+    // decoder using the same dispatch sql# uses for top-level columns.
     else { false }
 }
 
@@ -1170,6 +1174,156 @@ public fn encode_numeric_from_int(buf: &mut ArenaWireBuf, arena: &mut SpindleAre
     while k < ndigits {
         if !buf.put_u16_be(arena, digits[k]) { return false; }
         k = k + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Composite / record (PG_TYPE_RECORD oid 2249, plus user-defined composite
+// types) — anonymous tuple of typed fields.
+// -----------------------------------------------------------------------------
+//
+// Wire layout (src/backend/utils/adt/rowtypes.c, function record_send):
+//
+//   fieldcount  i32   number of fields
+//   per field:
+//     type_oid  i32   PG type OID for this field
+//     length    i32   payload length (-1 for SQL NULL; payload omitted)
+//     payload   bytes (length bytes, omitted if NULL)
+//
+// V0 surface — DECODE only:
+//   * `decode_composite(slice) -> Result<PgComposite, DbError>` — header
+//     reader + per-field walker. Each field surfaces as
+//     `PgCompositeField { type_oid, value: Maybe<ArenaSlice> }` so the
+//     caller can dispatch to the per-OID decoder of its choice (the
+//     same dispatch table sql# already uses for top-level columns).
+//   * `PgComposite.field_count(&self) -> Int`, `field(&self, idx) ->
+//     Maybe<&PgCompositeField>` — convenience accessors.
+//
+// ENCODE V0 (encode_composite): takes a pre-built field list with each
+// field as `(type_oid, Maybe<ArenaSlice>)`.  Sufficient for parameter
+// binding when the caller already has each field's binary payload.
+// Field-walker integration with the row-type resolver (auto-deriving
+// the per-field decoder from a record-type schema) is V1 — depends on
+// `pg_type` introspection and a generic Decoder dispatch table.
+
+/// One field inside a composite/record value — type OID + arena-borrowed
+/// binary payload. `value` is `None` for SQL NULL fields.
+public type PgCompositeField is {
+    /// Postgres type OID for this field (per `pg_type.oid`).
+    type_oid: Int,
+    /// Arena-borrowed binary payload, or `None` for SQL NULL.
+    value: Maybe<ArenaSlice>,
+};
+
+/// Decoded composite value as an ordered list of typed fields.  Fields
+/// are emitted in declaration order (matching the composite type's
+/// `attnum` ordering in `pg_attribute`).
+public type PgComposite is {
+    fields: List<PgCompositeField>,
+};
+
+implement PgComposite {
+    public fn field_count(&self) -> Int {
+        self.fields.len()
+    }
+}
+
+/// Decode a composite/record binary payload from an arena-borrowed
+/// slice.  Validates header consistency (fieldcount non-negative, every
+/// field's payload length fits within the slice, NULL fields have
+/// length=-1) and surfaces malformed payloads as structured `DbError`.
+public fn decode_composite(slice: &ArenaSlice) -> Result<PgComposite, DbError> {
+    if slice.len < 4 {
+        return Err(decode_fault("composite: short header (need 4 bytes)".clone()));
+    }
+    let nfields = slice_i32_be(slice, 0)?;
+    if nfields < 0 {
+        return Err(decode_fault(f"composite: negative fieldcount {nfields}"));
+    }
+
+    let mut off: Int = 4;
+    let mut fields: List<PgCompositeField> = List.new();
+    let mut i: Int = 0;
+    while i < nfields {
+        // Each field header is 8 bytes: type_oid i32 + length i32.
+        if off + 8 > slice.len {
+            return Err(decode_fault(
+                f"composite: field {i} header truncated (off={off}, len={slice.len})"
+            ));
+        }
+        let type_oid = slice_i32_be(slice, off)?;
+        let length   = slice_i32_be(slice, off + 4)?;
+        off = off + 8;
+
+        // length == -1 ⇒ NULL field, no payload follows.
+        let value: Maybe<ArenaSlice> = if length == -1 {
+            None
+        } else if length < 0 {
+            return Err(decode_fault(
+                f"composite: field {i} negative non-NULL length {length}"
+            ));
+        } else {
+            if off + length > slice.len {
+                return Err(decode_fault(
+                    f"composite: field {i} payload truncated (need {length}b, have {slice.len - off}b)"
+                ));
+            }
+            let payload = subslice(slice, off, length)?;
+            off = off + length;
+            Some(payload)
+        };
+
+        fields.push(PgCompositeField { type_oid: type_oid, value: value });
+        i = i + 1;
+    }
+
+    Ok(PgComposite { fields: fields })
+}
+
+/// Encode a composite/record value into the arena buffer. Each field is
+/// supplied as `(type_oid, payload)` where `payload == None` represents
+/// SQL NULL.  Returns false on arena exhaustion or if any payload is
+/// invalid (length > i32::MAX is rejected here even though i32 is signed
+/// — PG's wire protocol caps each field at 1 GiB).
+///
+/// V0 boundary: callers supply pre-encoded field payloads.  Encoding a
+/// composite from a Verum record value (auto-discovering each field's
+/// type_oid + per-field encoder) is V1 — depends on the row-resolver +
+/// per-OID encoder dispatch table.
+public fn encode_composite(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    fields: &List<PgCompositeField>,
+) -> Bool {
+    let nfields = fields.len() as Int;
+    if !buf.put_i32_be(arena, nfields) { return false; }
+
+    let mut i: Int = 0;
+    while i < nfields {
+        let f = &fields[i];
+        if !buf.put_i32_be(arena, f.type_oid) { return false; }
+        match &f.value {
+            None => {
+                if !buf.put_i32_be(arena, -1) { return false; }
+            }
+            Some(payload) => {
+                let plen = payload.len;
+                if plen < 0 { return false; }
+                if !buf.put_i32_be(arena, plen) { return false; }
+                // Walk the arena-borrowed slice byte-by-byte into the
+                // output buffer.  ArenaSlice doesn't expose a raw
+                // `&[Byte]` view, so we copy explicitly via load_byte.
+                let mut k: Int = 0;
+                while k < plen {
+                    if !buf.put_u8(arena, load_byte(payload.ptr + k) & 0xFF) {
+                        return false;
+                    }
+                    k = k + 1;
+                }
+            }
+        }
+        i = i + 1;
     }
     true
 }
