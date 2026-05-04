@@ -1160,6 +1160,155 @@ public fn variance_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<
     mean_axis(&squared, axis)
 }
 
+// Sample variance (Bessel-corrected, divides by N-1).
+// #74 Tier B — wrapper over `variance` that applies Bessel
+// correction. Use for inference / statistical estimation where
+// the sample is drawn from a larger population. For descriptive
+// statistics over the full population, prefer `variance` (denom N).
+public fn sample_variance<T: Numeric>(x: &DynTensor<T>) -> T {
+    let n: T = x.numel() as T;
+    let pop_var = variance(x);
+    pop_var * n / (n - (1 as T))
+}
+
+// Sample standard deviation (Bessel-corrected).
+// #74 Tier B — sqrt(sample_variance(x)).
+public fn sample_std_dev<T: Numeric>(x: &DynTensor<T>) -> T {
+    let v: Float = sample_variance(x) as Float;
+    sqrt(v) as T
+}
+
+// Cumulative sum along axis: `out[i] = sum(x[..=i])` along `axis`.
+// #74 Tier B — wrapper over the `tensor_cumulative` primitive
+// with a clear name. Output has the same shape as `x`.
+public fn cumsum<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_CUMULATIVE, x.data, ReduceOp.Sum, axis)
+}
+
+// Cumulative product along axis: `out[i] = prod(x[..=i])` along `axis`.
+// #74 Tier B — wrapper over `tensor_cumulative`. Useful for
+// running-products, geometric path computations.
+public fn cumprod<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_CUMULATIVE, x.data, ReduceOp.Prod, axis)
+}
+
+// Count non-zero elements (any rank).
+// #74 Tier B — composes `ne` (element-wise inequality vs zero) +
+// boolean `cast` to numeric + `sum`. Result is a scalar count.
+// Avoids needing `tensor_nonzero` which returns indices.
+public fn count_nonzero<T: Numeric>(x: &DynTensor<T>) -> USize {
+    let zeros = full_like(x, 0 as T);
+    let mask = ne(x, &zeros);
+    // bool tensor → numeric via cast; sum gives the count.
+    let counts = cast(&mask, dtype_of::<USize>());
+    sum(&counts)
+}
+
+// Where with scalar branches: `select(cond, true_val, false_val)`
+// returns a tensor of the broadcast shape with `true_val` at
+// positions where `cond` is true and `false_val` elsewhere.
+// #74 Tier B — wraps `where_tensor` with full_like-broadcast
+// scalars so callers can write `where_scalar(mask, 1.0, 0.0)`
+// directly without manually constructing the branch tensors.
+public fn where_scalar<T: Numeric>(
+    condition: &DynTensor<Bool>,
+    true_val: T,
+    false_val: T,
+    shape_like: &DynTensor<T>,
+) -> DynTensor<T> {
+    let t = full_like(shape_like, true_val);
+    let f = full_like(shape_like, false_val);
+    where_tensor(condition, &t, &f)
+}
+
+// First-order discrete difference along axis: `out[i] = x[i+1] - x[i]`.
+// #74 Tier B — composes `tensor_slice` (drop first / drop last)
+// + `sub`. Output shape has `axis` reduced by 1. Common
+// preprocessing for time-series derivatives or rate-of-change
+// signals.
+//
+// Note: when `axis` shrinks to 0 (input length 1), the result is
+// an empty tensor along that axis.
+public fn diff<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    let n = x.dim(normalize_axis(axis, x.rank()));
+    assert(n >= 1, "diff requires axis size >= 1");
+    let head = tensor_slice_axis(x, axis, 0, n - 1);
+    let tail = tensor_slice_axis(x, axis, 1, n);
+    sub(&tail, &head)
+}
+
+// Slice along single axis: `out = x[..., start..end, ...]`.
+// #74 Tier B — convenience wrapper around `tensor_slice`. Builds
+// the per-dim ranges with `0..dim(d)` for non-target axes and
+// `start..end` for the target. Used internally by `diff`.
+public fn tensor_slice_axis<T: Numeric>(
+    x: &DynTensor<T>,
+    axis: ISize,
+    start: USize,
+    end: USize,
+) -> DynTensor<T> {
+    let target = normalize_axis(axis, x.rank());
+    let mut ranges: List<(USize, USize)> = List.with_capacity(x.rank());
+    for d in 0..x.rank() {
+        if d == target {
+            ranges.push((start, end));
+        } else {
+            ranges.push((0, x.dim(d)));
+        }
+    }
+    @vbc(TENSOR_SLICE, x.data, ranges)
+}
+
+// Mean of two tensors element-wise: `(a + b) / 2`.
+// #74 Tier B — convenience for averaging predictions from two
+// models, midpoint computations, or symmetric blends. Composes
+// `add` + `div_scalar`.
+public fn mean_of2<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> {
+    div_scalar(&add(a, b), 2 as T)
+}
+
+// Element-wise median of three (per-element majority vote-ish).
+// #74 Tier B — useful in noise-robust pipelines (drop the
+// outlier of three estimates). Composes `minimum` + `maximum`
+// twice: median(a, b, c) = max(min(a,b), min(max(a,b), c)).
+public fn median_of3<T: Numeric>(
+    a: &DynTensor<T>,
+    b: &DynTensor<T>,
+    c: &DynTensor<T>,
+) -> DynTensor<T> {
+    let lo_ab = minimum(a, b);
+    let hi_ab = maximum(a, b);
+    maximum(&lo_ab, &minimum(&hi_ab, c))
+}
+
+// Triangular wave activation: `1 - |x|` clamped to [0, 1].
+// #74 Tier B — useful as a smooth-but-bounded test activation,
+// or as a soft mask. Composes `tensor_abs` + `rsub_scalar` +
+// `relu` (which gives the lower bound) + `tensor_clamp` for
+// the upper. Output is in [0, 1] for any input.
+public fn triangular<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let abs_x = tensor_abs(x);
+    let raw = rsub_scalar(1 as T, &abs_x);
+    tensor_clamp(&raw, 0 as T, 1 as T)
+}
+
+// Element-wise sign: -1 / 0 / +1 as a tensor of T.
+// #74 Tier B — already exists at line 719 as `sign`, but the
+// existing impl uses `@vbc(TENSOR_UNOP, ..., UnaryOp.Sign)`.
+// This Verum-language reference impl is provided for minimal
+// builds without the primitive — composes via comparison +
+// where_tensor. The primitive shadows this when present.
+public fn sign_lang<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let zeros = full_like(x, 0 as T);
+    let pos = gt(x, &zeros);
+    let neg = lt(x, &zeros);
+    let plus = full_like(x, 1 as T);
+    let minus = full_like(x, -(1 as T));
+    let zero = full_like(x, 0 as T);
+    let with_pos = where_tensor(&pos, &plus, &zero);
+    where_tensor(&neg, &minus, &with_pos)
+}
+
 // Standard deviation along axis.
 // #74 Tier B — Verum-language composition. Element-wise sqrt over
 // `variance_axis(...)`.
