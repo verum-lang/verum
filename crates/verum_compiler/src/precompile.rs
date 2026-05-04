@@ -162,12 +162,12 @@ fn write_core_metadata_alongside_archive(
     archive_path: &Path,
     verbose: bool,
 ) -> Result<()> {
-    let archive_bytes = std::fs::read(archive_path)
-        .with_context(|| format!("read freshly-written archive {}", archive_path.display()))?;
-    let archive: verum_vbc::archive::VbcArchive =
-        bincode::deserialize(&archive_bytes).with_context(|| {
+    // Archive uses the verum_vbc custom binary format (with `write_archive`
+    // / `read_archive`), not bincode — so use the canonical reader.
+    let archive = verum_vbc::archive::read_archive_from_file(archive_path)
+        .with_context(|| {
             format!(
-                "decode freshly-written archive {} for metadata extraction",
+                "read freshly-written archive {} for metadata extraction",
                 archive_path.display()
             )
         })?;
