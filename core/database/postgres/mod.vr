@@ -196,7 +196,8 @@ public mount .async_pgoutput.{
 public mount .async_pgoutput_buffered.{
     AsyncPgoutputBufferedConsumer, BufferedChange,
     BcRegular, BcStreamedTx, BcStreamedAbort, BcTerminated, BcClosed,
-    buffered, buffered_with_cap,
+    buffered, buffered_with_cap, buffered_with_caps_and_sink,
+    SpillSink, NoSpillSink, SpillOutcome, SoSpilled, SoDrop, SoFail,
     DEFAULT_TX_ROW_CAP,
 };
 public mount .async_pgoutput_typed.{

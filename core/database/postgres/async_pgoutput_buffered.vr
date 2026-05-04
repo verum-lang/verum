@@ -116,7 +116,64 @@ public type BufferedChange is
 /// `buffers` map keyed by `xid`.
 type BufferedTx is {
     changes: List<PgoutputChange>,
+    /// Coarse byte-size estimate. Counts TupleColumn payload
+    /// + key bytes + relation metadata. Compared against
+    /// `byte_cap` to decide when to fire SpillSink.
+    bytes_estimate: Int,
 };
+
+// =============================================================================
+// SpillSink — pluggable overflow handler
+// =============================================================================
+//
+// Production CDC consumers handling huge transactions need a
+// hook to offload buffered changes when they exceed RAM caps.
+// Spindle ships the byte accounting + the hook protocol;
+// consumers ship the storage backend (disk / S3 / Kafka /
+// in-process queue) by implementing SpillSink.
+
+public type SpillOutcome is
+    /// Spill handled — consumer has the changes safely stored.
+    /// AsyncPgoutputBufferedConsumer drops them from in-memory
+    /// buffer and continues accumulating new events for this
+    /// xid (next overflow fires the sink again with the FRESH
+    /// changes only — the sink owns the historical batch).
+      SoSpilled
+    /// Drop the in-flight tx. Consumer logs / discards.
+    /// Subsequent events for this xid are also dropped until
+    /// StreamCommit / StreamAbort.
+    | SoDrop
+    /// No spill backend wired — surface BcTerminated to the
+    /// caller. Default behaviour for `NoSpillSink`.
+    | SoFail;
+
+public type SpillSink is protocol {
+    /// Called when an in-flight tx exceeds `byte_cap`. Receives
+    /// the xid, the accumulated changes since last spill, and
+    /// the current byte estimate. Returns SpillOutcome telling
+    /// the buffered consumer how to proceed.
+    fn on_overflow(
+        &self,
+        xid: Int,
+        changes: List<PgoutputChange>,
+        bytes_estimate: Int,
+    ) -> SpillOutcome;
+};
+
+/// Default sink — fails-fast on overflow. Preserves V0
+/// behaviour exactly (`buffered()` uses this).
+public type NoSpillSink is {};
+
+implement SpillSink for NoSpillSink {
+    fn on_overflow(
+        &self,
+        _xid: Int,
+        _changes: List<PgoutputChange>,
+        _bytes_estimate: Int,
+    ) -> SpillOutcome {
+        SoFail
+    }
+}
 
 public type AsyncPgoutputBufferedConsumer is {
     inner: AsyncPgoutputConsumer,
@@ -129,6 +186,17 @@ public type AsyncPgoutputBufferedConsumer is {
     /// StreamStop). `None` outside a segment.
     current_xid: Shared<sync.mutex.Mutex<Maybe<Int>>>,
     row_cap: Int,
+    /// Per-tx soft cap on bytes_estimate. When a tx's estimate
+    /// crosses this, the spill sink is invoked. 0 = disabled
+    /// (row_cap is the only check).
+    byte_cap: Int,
+    /// Pluggable overflow handler. Default `NoSpillSink` fails
+    /// fast — production consumers wire their own implementation
+    /// for spill-to-disk / spill-to-S3 / spill-to-Kafka.
+    spill_sink: Shared<dyn SpillSink>,
+    /// Per-xid set of "drop further events" markers — populated
+    /// by SoDrop outcomes; cleared on StreamCommit/StreamAbort.
+    dropped_xids: Shared<sync.mutex.Mutex<List<Int>>>,
 };
 
 implement AsyncPgoutputBufferedConsumer {
@@ -138,6 +206,9 @@ implement AsyncPgoutputBufferedConsumer {
             buffers: self.buffers.clone(),
             current_xid: self.current_xid.clone(),
             row_cap: self.row_cap,
+            byte_cap: self.byte_cap,
+            spill_sink: self.spill_sink.clone(),
+            dropped_xids: self.dropped_xids.clone(),
         }
     }
 
@@ -188,19 +259,23 @@ implement AsyncPgoutputBufferedConsumer {
                     match cur {
                         Some(xid) => {
                             if self.is_dml(&other) {
-                                let cap_hit = self.append_to_xid(xid, other);
-                                if cap_hit {
-                                    return Some(BcTerminated(
-                                        DbError.Adapter(AdapterSpecific {
-                                            adapter: AdPostgres,
-                                            code: "PGOUTPUT_TX_BUFFER_OVERFLOW".clone(),
-                                            message: f"streamed tx xid={xid} exceeded row cap {self.row_cap}",
-                                            retryable: false,
-                                        })
-                                    ));
+                                let outcome = self.append_to_xid(xid, other);
+                                match outcome {
+                                    AppendOk | AppendSpilled | AppendDropped => {
+                                        // No delivery — buffered (or spilled
+                                        // by sink, or silently dropped).
+                                    }
+                                    AppendOverflow => {
+                                        return Some(BcTerminated(
+                                            DbError.Adapter(AdapterSpecific {
+                                                adapter: AdPostgres,
+                                                code: "PGOUTPUT_TX_BUFFER_OVERFLOW".clone(),
+                                                message: f"streamed tx xid={xid} exceeded cap (rows={self.row_cap}, bytes={self.byte_cap})",
+                                                retryable: false,
+                                            })
+                                        ));
+                                    }
                                 }
-                                // Don't deliver — buffered until
-                                // commit.
                             } else {
                                 // Non-DML inside a streaming
                                 // segment (e.g. RelationOnly) —
@@ -272,6 +347,9 @@ implement AsyncPgoutputBufferedConsumer {
     }
 
     fn handle_stream_commit(&self, c: &StreamCommitMessage) -> BufferedChange {
+        // Clear dropped marker if present.
+        self.clear_dropped(c.xid);
+
         let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
         let mut idx: Int = -1;
         let mut i: Int = 0;
@@ -289,19 +367,8 @@ implement AsyncPgoutputBufferedConsumer {
             };
         }
         let popped = bufs[idx].1.changes.clone();
-        // Remove the entry.
-        let mut new_bufs: List<(Int, BufferedTx)> =
-            List.with_capacity((bufs.len() as Int) - 1);
-        let mut k: Int = 0;
-        while k < (bufs.len() as Int) {
-            if k != idx {
-                new_bufs.push((bufs[k].0, BufferedTx {
-                    changes: bufs[k].1.changes.clone(),
-                }));
-            }
-            k = k + 1;
-        }
-        *bufs = new_bufs;
+        // Remove the entry (preserves bytes_estimate alongside).
+        let _ = remove_xid(&mut bufs, c.xid);
         drop(bufs);
         BcStreamedTx {
             xid: c.xid,
@@ -311,27 +378,10 @@ implement AsyncPgoutputBufferedConsumer {
     }
 
     fn handle_stream_abort(&self, a: &StreamAbortMessage) {
+        // Clear dropped marker if present.
+        self.clear_dropped(a.xid);
         let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
-        let mut idx: Int = -1;
-        let mut i: Int = 0;
-        while i < (bufs.len() as Int) {
-            if bufs[i].0 == a.xid { idx = i; break; }
-            i = i + 1;
-        }
-        if idx >= 0 {
-            let mut new_bufs: List<(Int, BufferedTx)> =
-                List.with_capacity((bufs.len() as Int) - 1);
-            let mut k: Int = 0;
-            while k < (bufs.len() as Int) {
-                if k != idx {
-                    new_bufs.push((bufs[k].0, BufferedTx {
-                        changes: bufs[k].1.changes.clone(),
-                    }));
-                }
-                k = k + 1;
-            }
-            *bufs = new_bufs;
-        }
+        let _ = remove_xid(&mut bufs, a.xid);
         drop(bufs);
         // Clear current_xid if it matched.
         let mut cur = self.current_xid.lock().unwrap_or_else(|p| p.into_inner());
@@ -341,26 +391,134 @@ implement AsyncPgoutputBufferedConsumer {
         }
     }
 
-    /// Returns `true` if the cap was hit (caller should surface
-    /// BcTerminated).
-    fn append_to_xid(&self, xid: Int, change: PgoutputChange) -> Bool {
+    /// Append a change to the xid's buffer. Returns:
+    ///   AppendOk        — change accumulated.
+    ///   AppendDropped   — xid is on the dropped list (prior
+    ///                     overflow returned SoDrop); silently
+    ///                     swallow this and future events for
+    ///                     the xid until commit/abort.
+    ///   AppendOverflow  — caps exceeded and SpillSink returned
+    ///                     SoFail; caller surfaces BcTerminated.
+    ///   AppendSpilled   — SpillSink returned SoSpilled;
+    ///                     historical changes are now with the
+    ///                     sink, in-memory buffer reset to hold
+    ///                     this new change only.
+    fn append_to_xid(&self, xid: Int, change: PgoutputChange) -> AppendOutcome {
+        // First — is this xid on the dropped list?
+        if self.is_dropped(xid) {
+            return AppendDropped;
+        }
+
+        let change_bytes = estimate_change_bytes(&change);
         let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
         let mut i: Int = 0;
         while i < (bufs.len() as Int) {
             if bufs[i].0 == xid {
-                if (bufs[i].1.changes.len() as Int) >= self.row_cap {
-                    return true;
+                let new_rows = (bufs[i].1.changes.len() as Int) + 1;
+                let new_bytes = bufs[i].1.bytes_estimate + change_bytes;
+                let row_overflow = new_rows > self.row_cap;
+                let byte_overflow =
+                    self.byte_cap > 0 && new_bytes > self.byte_cap;
+
+                if row_overflow || byte_overflow {
+                    // Take historical buffer + ask the sink.
+                    let drained = take_buffer(&mut bufs[i].1);
+                    let bytes_so_far = drained.bytes_seen;
+                    drop(bufs);
+                    let outcome = self.spill_sink.on_overflow(
+                        xid, drained.changes, bytes_so_far,
+                    );
+                    return self.handle_spill_outcome(xid, change, outcome);
                 }
+
                 bufs[i].1.changes.push(change);
-                return false;
+                bufs[i].1.bytes_estimate = new_bytes;
+                return AppendOk;
             }
             i = i + 1;
         }
         // No buffer — defensive create.
-        let mut new_buf = BufferedTx { changes: List.new() };
+        let mut new_buf = BufferedTx { changes: List.new(), bytes_estimate: 0 };
         new_buf.changes.push(change);
+        new_buf.bytes_estimate = change_bytes;
         bufs.push((xid, new_buf));
+        AppendOk
+    }
+
+    fn handle_spill_outcome(
+        &self,
+        xid: Int,
+        new_change: PgoutputChange,
+        outcome: SpillOutcome,
+    ) -> AppendOutcome {
+        match outcome {
+            SoSpilled => {
+                // Sink owns historical batch — start a fresh
+                // in-memory buffer holding ONLY the new change.
+                let new_bytes = estimate_change_bytes(&new_change);
+                let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
+                let mut i: Int = 0;
+                while i < (bufs.len() as Int) {
+                    if bufs[i].0 == xid {
+                        bufs[i].1.changes = List.new();
+                        bufs[i].1.changes.push(new_change);
+                        bufs[i].1.bytes_estimate = new_bytes;
+                        return AppendSpilled;
+                    }
+                    i = i + 1;
+                }
+                let mut nb = BufferedTx {
+                    changes: List.new(),
+                    bytes_estimate: new_bytes,
+                };
+                nb.changes.push(new_change);
+                bufs.push((xid, nb));
+                AppendSpilled
+            }
+            SoDrop => {
+                // Mark xid dropped + remove buffer entry.
+                self.mark_dropped(xid);
+                let mut bufs = self.buffers.lock().unwrap_or_else(|p| p.into_inner());
+                let _ = remove_xid(&mut bufs, xid);
+                AppendDropped
+            }
+            SoFail => {
+                AppendOverflow
+            }
+        }
+    }
+
+    fn is_dropped(&self, xid: Int) -> Bool {
+        let g = self.dropped_xids.lock().unwrap_or_else(|p| p.into_inner());
+        let mut i: Int = 0;
+        while i < (g.len() as Int) {
+            if g[i] == xid { return true; }
+            i = i + 1;
+        }
         false
+    }
+
+    fn mark_dropped(&self, xid: Int) {
+        let mut g = self.dropped_xids.lock().unwrap_or_else(|p| p.into_inner());
+        g.push(xid);
+    }
+
+    fn clear_dropped(&self, xid: Int) {
+        let mut g = self.dropped_xids.lock().unwrap_or_else(|p| p.into_inner());
+        let mut i: Int = 0;
+        while i < (g.len() as Int) {
+            if g[i] == xid {
+                let mut new_g: List<Int> = List.with_capacity((g.len() as Int) - 1);
+                let mut k: Int = 0;
+                while k < (g.len() as Int) {
+                    if k != i { new_g.push(g[k]); }
+                    k = k + 1;
+                }
+                *g = new_g;
+                return;
+            }
+            i = i + 1;
+        }
     }
 
     fn read_current_xid(&self) -> Maybe<Int> {
@@ -388,11 +546,147 @@ public fn buffered_with_cap(
     inner: AsyncPgoutputConsumer,
     row_cap: Int,
 ) -> AsyncPgoutputBufferedConsumer {
-    let cap = if row_cap < 1 { 1 } else { row_cap };
+    buffered_with_caps_and_sink(inner, row_cap, 0,
+        Shared.new(NoSpillSink {}) as Shared<dyn SpillSink>)
+}
+
+/// Full-control constructor: row cap + byte cap + pluggable
+/// SpillSink. `byte_cap = 0` disables byte accounting (only the
+/// row cap fires). The sink's on_overflow runs when EITHER cap
+/// is exceeded.
+public fn buffered_with_caps_and_sink(
+    inner: AsyncPgoutputConsumer,
+    row_cap: Int,
+    byte_cap: Int,
+    spill_sink: Shared<dyn SpillSink>,
+) -> AsyncPgoutputBufferedConsumer {
+    let rcap = if row_cap < 1 { 1 } else { row_cap };
+    let bcap = if byte_cap < 0 { 0 } else { byte_cap };
     AsyncPgoutputBufferedConsumer {
         inner: inner,
         buffers: Shared.new(sync.mutex.Mutex.new(List.new())),
         current_xid: Shared.new(sync.mutex.Mutex.new(None)),
-        row_cap: cap,
+        row_cap: rcap,
+        byte_cap: bcap,
+        spill_sink: spill_sink,
+        dropped_xids: Shared.new(sync.mutex.Mutex.new(List.new())),
     }
+}
+
+// =============================================================================
+// Internal append-result discriminator
+// =============================================================================
+
+type AppendOutcome is
+      AppendOk
+    | AppendDropped
+    | AppendOverflow
+    | AppendSpilled;
+
+/// Drain a BufferedTx — returns the changes list + recorded
+/// bytes_estimate, leaves the BufferedTx empty in place. Used by
+/// the spill path to hand historical changes to the sink without
+/// cloning.
+type DrainedTx is {
+    changes: List<PgoutputChange>,
+    bytes_seen: Int,
+};
+
+fn take_buffer(tx: &mut BufferedTx) -> DrainedTx {
+    let bytes = tx.bytes_estimate;
+    let mut out: List<PgoutputChange> = List.new();
+    let n = tx.changes.len() as Int;
+    let mut i: Int = 0;
+    while i < n {
+        out.push(tx.changes[i].clone());
+        i = i + 1;
+    }
+    tx.changes = List.new();
+    tx.bytes_estimate = 0;
+    DrainedTx { changes: out, bytes_seen: bytes }
+}
+
+fn remove_xid(bufs: &mut List<(Int, BufferedTx)>, xid: Int) -> Bool {
+    let mut idx: Int = -1;
+    let mut i: Int = 0;
+    while i < (bufs.len() as Int) {
+        if bufs[i].0 == xid { idx = i; break; }
+        i = i + 1;
+    }
+    if idx < 0 { return false; }
+    let mut new_bufs: List<(Int, BufferedTx)> =
+        List.with_capacity((bufs.len() as Int) - 1);
+    let mut k: Int = 0;
+    while k < (bufs.len() as Int) {
+        if k != idx {
+            new_bufs.push((bufs[k].0, BufferedTx {
+                changes: bufs[k].1.changes.clone(),
+                bytes_estimate: bufs[k].1.bytes_estimate,
+            }));
+        }
+        k = k + 1;
+    }
+    *bufs = new_bufs;
+    true
+}
+
+// =============================================================================
+// Coarse byte-size estimator
+// =============================================================================
+//
+// Counts bytes that travel on the wire for the change's payload
+// (TupleColumn bytes + relation columns + key bytes). Doesn't
+// re-serialise — purpose is back-pressure + spill thresholding,
+// not exact accounting. Off-by-fixed-constant is fine.
+
+fn estimate_change_bytes(change: &PgoutputChange) -> Int {
+    match change {
+        CdcInsert { relation, new_tuple } => {
+            estimate_relation_bytes(relation) + estimate_tuple_bytes(new_tuple)
+        }
+        CdcUpdate { relation, old_tuple, new_tuple } => {
+            let old_bytes = match old_tuple {
+                Some(o) => match o {
+                    OtvKey(t) | OtvOld(t) => estimate_tuple_bytes(t),
+                },
+                None => 0,
+            };
+            estimate_relation_bytes(relation)
+                + old_bytes
+                + estimate_tuple_bytes(new_tuple)
+        }
+        CdcDelete { relation, old_tuple, .. } => {
+            estimate_relation_bytes(relation) + estimate_tuple_bytes(old_tuple)
+        }
+        CdcRelationOnly(rel) => estimate_relation_bytes(rel),
+        // Begin/Commit/StreamStart/StreamStop/StreamCommit/
+        // StreamAbort all have small fixed payloads.
+        _ => 32,
+    }
+}
+
+fn estimate_relation_bytes(rel: &core.database.postgres.pgoutput.RelationMessage) -> Int {
+    let mut bytes: Int = (rel.namespace.len() as Int) + (rel.name.len() as Int);
+    let mut i: Int = 0;
+    while i < (rel.columns.len() as Int) {
+        bytes = bytes + (rel.columns[i].name.len() as Int) + 8;     // 8 ≈ oid + flags
+        i = i + 1;
+    }
+    bytes
+}
+
+fn estimate_tuple_bytes(tup: &core.database.postgres.pgoutput.TupleData) -> Int {
+    let mut bytes: Int = 0;
+    let mut i: Int = 0;
+    while i < (tup.columns.len() as Int) {
+        match &tup.columns[i] {
+            core.database.postgres.pgoutput.TcText(b)
+                | core.database.postgres.pgoutput.TcBinary(b) => {
+                bytes = bytes + (b.len() as Int);
+            }
+            _ => { bytes = bytes + 1; }
+        }
+        i = i + 1;
+    }
+    bytes
 }
