@@ -211,6 +211,13 @@ pub mod archive_ctx_loader;
 /// once into `Arc<CoreMetadata>` and feeds the typecheck phase
 /// directly — no runtime AST walking, no source-driven fallback.
 pub mod archive_metadata;
+/// T2-extended runtime decoder for the embedded stdlib
+/// `CoreMetadata` sidecar.  Pairs with `archive_metadata` (which
+/// builds the data at precompile time) and with the `build.rs`
+/// `STDLIB_RUNTIME_CORE_METADATA_PATH` plumbing (which embeds the
+/// bytes).  Single source of truth for `pipeline.stdlib_metadata`
+/// in archive-driven mode.
+pub mod embedded_stdlib_metadata;
 pub mod camg; // #103: Content-Addressed Module Graph — fundamental rewrite of module loading
 pub mod cfg_eval; // #106: pure cfg-predicate evaluation extracted from pipeline.rs
 pub mod compilation_metrics;

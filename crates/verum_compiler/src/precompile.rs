@@ -137,15 +137,60 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
         );
     }
 
-    // Phase-4b TODO: open `result.output_path`, walk archived
-    // VbcModules in parallel, populate `theorems` /
-    // `framework_provenance` / `function_variants` from source AST,
-    // re-serialise. Today the archive has empty Phase-3 extension
-    // tables on every module — Phase 5/6 don't need them populated
-    // to embed and switch the runtime path; they're populated when
-    // Phase 8/9 (verify-ladder + meta lazy-load) come online.
+    // T2-extended: produce `runtime.core_metadata` alongside the
+    // `runtime.vbca` archive.  The metadata bytes hold the typecheck-
+    // ready stdlib metadata (CoreMetadata) — at runtime
+    // `embedded_stdlib_metadata::get_runtime_metadata()` decodes them
+    // once via bincode and feeds the typechecker directly via
+    // `pipeline.set_stdlib_metadata`.  Replaces the slow
+    // `load_stdlib_modules` parse + walk path entirely.
+    write_core_metadata_alongside_archive(&result.output_path, cfg.verbose)?;
 
     Ok(result)
+}
+
+/// Open the freshly-written `runtime.vbca`, convert it to
+/// `CoreMetadata`, bincode-serialise, and write
+/// `runtime.core_metadata` next to it.  Build.rs picks both files
+/// up via parallel `include_bytes!` calls.
+///
+/// Failures are propagated — the precompile is meaningless without
+/// the metadata sidecar.  Single point where the typecheck data
+/// lifecycle is materialised; replacing the source-driven path
+/// requires this sidecar to land on disk.
+fn write_core_metadata_alongside_archive(
+    archive_path: &Path,
+    verbose: bool,
+) -> Result<()> {
+    let archive_bytes = std::fs::read(archive_path)
+        .with_context(|| format!("read freshly-written archive {}", archive_path.display()))?;
+    let archive: verum_vbc::archive::VbcArchive =
+        bincode::deserialize(&archive_bytes).with_context(|| {
+            format!(
+                "decode freshly-written archive {} for metadata extraction",
+                archive_path.display()
+            )
+        })?;
+
+    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
+    let bytes = bincode::serialize(&metadata)
+        .context("bincode serialise CoreMetadata for sidecar emit")?;
+
+    let sidecar = archive_path.with_extension("core_metadata");
+    std::fs::write(&sidecar, &bytes)
+        .with_context(|| format!("write metadata sidecar {}", sidecar.display()))?;
+
+    if verbose {
+        eprintln!(
+            "verum stdlib precompile: emitted typecheck metadata sidecar {} ({} bytes; {} types, {} functions, {} protocols)",
+            sidecar.display(),
+            bytes.len(),
+            metadata.types.len(),
+            metadata.functions.len(),
+            metadata.protocols.len(),
+        );
+    }
+    Ok(())
 }
 
 // ============================================================================

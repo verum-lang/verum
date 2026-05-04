@@ -1153,7 +1153,15 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_artifacts: None,
             collected_contexts: List::new(),
             type_registry: None,
-            stdlib_metadata: None,
+            // T2-extended single-path: when the compiler binary
+            // embeds a precompiled stdlib `runtime.core_metadata`
+            // sidecar, prime `stdlib_metadata` directly from it.
+            // The typecheck phase then takes the
+            // `Some(metadata) => TypeChecker::new_with_core(...)`
+            // branch and skips the AST-walking stdlib registration
+            // block entirely.  No source parsing, no cache misses,
+            // no fallback paths.
+            stdlib_metadata: crate::embedded_stdlib_metadata::get_runtime_metadata(),
             deferred_verification_goals: verum_common::List::new(),
             // Stdlib bootstrap mode fields - empty for normal mode
             stdlib_resolver: None,
