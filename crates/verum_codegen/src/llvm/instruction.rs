@@ -323,6 +323,259 @@ fn get_or_declare_internal_strtol<'ctx>(
     func
 }
 
+/// Get or declare a libc-free `i64 → ASCII decimal` writer.
+///
+/// **Libc-free**: open-coded i64 → decimal-bytes emission as
+/// `verum_internal_i64_to_decimal` (internal-linkage). Replaces
+/// `snprintf(buf, _, "%ld", value)` for the integer-formatting
+/// path used by `verum_int_to_text` (Text.from_int).
+///
+/// Signature: `(buf: ptr, value: i64) -> i64`
+///   * Caller supplies `buf` — must hold at least 21 bytes
+///     (the longest i64 is `-9223372036854775808` = 20 chars
+///     + 1 defensive). No NUL terminator written; caller adds
+///     if needed.
+///   * Returns: number of bytes written.
+///
+/// Algorithm (~10 LLVM basic blocks):
+///   1. Special-case `0` → write `'0'`, return `1`.
+///   2. `neg = value < 0`; `mag_u64 = (0 - value) as u64` for
+///      negatives (correct even for `i64::MIN` because
+///      `0 - i64::MIN` wraps in i64 to itself, and the bit
+///      pattern reinterpreted as u64 is the magnitude
+///      `0x8000000000000000`).
+///   3. Forward-emit digits via mod-10 / div-10 loop into the
+///      buffer (LSB-first → digits land in REVERSE order).
+///   4. If `neg`, append `'-'` (still in reverse).
+///   5. Reverse the buffer in-place to canonicalise the order.
+///   6. Return total length.
+///
+/// See `docs/architecture/no-libc-architecture.md`.
+pub(crate) fn get_or_declare_internal_i64_to_decimal<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_i64_to_decimal";
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
+    let i8_type = llvm_ctx.i8_type();
+    let i64_type = llvm_ctx.i64_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let zero_branch = llvm_ctx.append_basic_block(func, "zero");
+    let nonzero_branch = llvm_ctx.append_basic_block(func, "nonzero");
+    let neg_branch = llvm_ctx.append_basic_block(func, "neg");
+    let pos_branch = llvm_ctx.append_basic_block(func, "pos");
+    let digit_loop = llvm_ctx.append_basic_block(func, "digit_loop");
+    let after_digits = llvm_ctx.append_basic_block(func, "after_digits");
+    let prepend_minus = llvm_ctx.append_basic_block(func, "prepend_minus");
+    let reverse_setup = llvm_ctx.append_basic_block(func, "reverse_setup");
+    let reverse_loop = llvm_ctx.append_basic_block(func, "reverse_loop");
+    let reverse_swap = llvm_ctx.append_basic_block(func, "reverse_swap");
+    let return_val = llvm_ctx.append_basic_block(func, "return_val");
+
+    let builder = llvm_ctx.create_builder();
+
+    let buf_param = func.get_first_param().expect("buf").into_pointer_value();
+    let val_param = func.get_nth_param(1).expect("value").into_int_value();
+
+    let zero_i64 = i64_type.const_zero();
+    let one_i64 = i64_type.const_int(1, false);
+    let ten_i64 = i64_type.const_int(10, false);
+    let zero_ch = i8_type.const_int(b'0' as u64, false);
+    let minus_ch = i8_type.const_int(b'-' as u64, false);
+
+    // entry: branch on value == 0
+    builder.position_at_end(entry);
+    let is_zero = builder
+        .build_int_compare(
+            verum_llvm::IntPredicate::EQ,
+            val_param,
+            zero_i64,
+            "is_zero",
+        )
+        .expect("is_zero");
+    builder
+        .build_conditional_branch(is_zero, zero_branch, nonzero_branch)
+        .expect("zero br");
+
+    // zero: buf[0] = '0'; return 1.
+    builder.position_at_end(zero_branch);
+    builder
+        .build_store(buf_param, zero_ch)
+        .expect("store zero");
+    builder.build_return(Some(&one_i64)).expect("ret 1");
+
+    // nonzero: branch on sign.
+    builder.position_at_end(nonzero_branch);
+    let is_neg = builder
+        .build_int_compare(verum_llvm::IntPredicate::SLT, val_param, zero_i64, "is_neg")
+        .expect("is_neg");
+    builder
+        .build_conditional_branch(is_neg, neg_branch, pos_branch)
+        .expect("sign br");
+
+    // neg: mag_u64 = 0 - value (i64 wrap; reinterpret as u64).
+    //      Even for i64::MIN this gives the right unsigned magnitude.
+    builder.position_at_end(neg_branch);
+    let neg_mag = builder
+        .build_int_sub(zero_i64, val_param, "neg_mag")
+        .expect("neg sub");
+    builder
+        .build_unconditional_branch(digit_loop)
+        .expect("neg → loop");
+
+    // pos: mag = value (already non-negative).
+    builder.position_at_end(pos_branch);
+    builder
+        .build_unconditional_branch(digit_loop)
+        .expect("pos → loop");
+
+    // digit_loop: PHI(mag, i); buf[i] = '0' + (mag % 10);
+    //             mag /= 10; i++; while mag != 0.
+    //             Treat mag as UNSIGNED — use unsigned div/rem
+    //             to get correct digits even for the i64::MIN
+    //             case (where signed mag is negative but the
+    //             u64 reinterpretation is positive).
+    builder.position_at_end(digit_loop);
+    let mag_phi = builder.build_phi(i64_type, "mag").expect("mag phi");
+    let i_phi = builder.build_phi(i64_type, "i").expect("i phi");
+    mag_phi.add_incoming(&[(&neg_mag, neg_branch), (&val_param, pos_branch)]);
+    i_phi.add_incoming(&[(&zero_i64, neg_branch), (&zero_i64, pos_branch)]);
+    let mag_v = mag_phi.as_basic_value().into_int_value();
+    let i_v = i_phi.as_basic_value().into_int_value();
+
+    let digit = builder
+        .build_int_unsigned_rem(mag_v, ten_i64, "digit")
+        .expect("rem");
+    let digit_i8 = builder
+        .build_int_truncate(digit, i8_type, "digit_i8")
+        .expect("trunc");
+    let digit_ch = builder
+        .build_int_add(digit_i8, zero_ch, "digit_ch")
+        .expect("digit add");
+    let buf_i = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[i_v], "buf_i")
+            .expect("gep")
+    };
+    builder
+        .build_store(buf_i, digit_ch)
+        .expect("store digit");
+    let mag_next = builder
+        .build_int_unsigned_div(mag_v, ten_i64, "mag_next")
+        .expect("div");
+    let i_next = builder
+        .build_int_add(i_v, one_i64, "i_next")
+        .expect("i++");
+    let cont = builder
+        .build_int_compare(verum_llvm::IntPredicate::NE, mag_next, zero_i64, "cont")
+        .expect("cont");
+    builder
+        .build_conditional_branch(cont, digit_loop, after_digits)
+        .expect("loop br");
+    mag_phi.add_incoming(&[(&mag_next, digit_loop)]);
+    i_phi.add_incoming(&[(&i_next, digit_loop)]);
+
+    // after_digits: if neg → prepend_minus; else → reverse_setup.
+    builder.position_at_end(after_digits);
+    builder
+        .build_conditional_branch(is_neg, prepend_minus, reverse_setup)
+        .expect("post-digit br");
+
+    // prepend_minus: buf[i_next] = '-'; len = i_next + 1.
+    builder.position_at_end(prepend_minus);
+    let buf_minus = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[i_next], "buf_minus")
+            .expect("gep")
+    };
+    builder
+        .build_store(buf_minus, minus_ch)
+        .expect("store minus");
+    let len_with_minus = builder
+        .build_int_add(i_next, one_i64, "len_minus")
+        .expect("len+1");
+    builder
+        .build_unconditional_branch(reverse_setup)
+        .expect("→ reverse");
+
+    // reverse_setup: PHI(len from neg/pos branches); lo = 0;
+    //                hi = len - 1; → reverse_loop.
+    builder.position_at_end(reverse_setup);
+    let len_phi = builder.build_phi(i64_type, "len").expect("len phi");
+    len_phi.add_incoming(&[(&len_with_minus, prepend_minus), (&i_next, after_digits)]);
+    let len_v = len_phi.as_basic_value().into_int_value();
+    let hi_init = builder
+        .build_int_sub(len_v, one_i64, "hi_init")
+        .expect("hi-1");
+    builder
+        .build_unconditional_branch(reverse_loop)
+        .expect("→ rev loop");
+
+    // reverse_loop: PHI(lo, hi); if lo < hi → swap; else → return.
+    builder.position_at_end(reverse_loop);
+    let lo_phi = builder.build_phi(i64_type, "lo").expect("lo phi");
+    let hi_phi = builder.build_phi(i64_type, "hi").expect("hi phi");
+    lo_phi.add_incoming(&[(&zero_i64, reverse_setup)]);
+    hi_phi.add_incoming(&[(&hi_init, reverse_setup)]);
+    let lo_v = lo_phi.as_basic_value().into_int_value();
+    let hi_v = hi_phi.as_basic_value().into_int_value();
+    let need_swap = builder
+        .build_int_compare(verum_llvm::IntPredicate::SLT, lo_v, hi_v, "need_swap")
+        .expect("lo<hi");
+    builder
+        .build_conditional_branch(need_swap, reverse_swap, return_val)
+        .expect("rev br");
+
+    // reverse_swap: tmp = buf[lo]; buf[lo] = buf[hi]; buf[hi] = tmp;
+    //               lo++; hi--; back.
+    builder.position_at_end(reverse_swap);
+    let buf_lo = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[lo_v], "buf_lo")
+            .expect("gep lo")
+    };
+    let buf_hi = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[hi_v], "buf_hi")
+            .expect("gep hi")
+    };
+    let tmp = builder
+        .build_load(i8_type, buf_lo, "tmp")
+        .expect("load lo")
+        .into_int_value();
+    let other = builder
+        .build_load(i8_type, buf_hi, "other")
+        .expect("load hi")
+        .into_int_value();
+    builder.build_store(buf_lo, other).expect("store lo");
+    builder.build_store(buf_hi, tmp).expect("store hi");
+    let lo_next = builder
+        .build_int_add(lo_v, one_i64, "lo_next")
+        .expect("lo++");
+    let hi_next = builder
+        .build_int_sub(hi_v, one_i64, "hi_next")
+        .expect("hi--");
+    builder
+        .build_unconditional_branch(reverse_loop)
+        .expect("rev back");
+    lo_phi.add_incoming(&[(&lo_next, reverse_swap)]);
+    hi_phi.add_incoming(&[(&hi_next, reverse_swap)]);
+
+    // return_val: return len.
+    builder.position_at_end(return_val);
+    builder.build_return(Some(&len_v)).expect("ret len");
+
+    func
+}
+
 /// Get or declare a libc-free `puts(s) -> i32` wrapper.
 ///
 

@@ -4707,8 +4707,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// verum_int_to_text(value: i64) -> i64 (returns Text object pointer as i64)
     ///
 
-    /// Converts integer to Text using snprintf(buf, 32, "%ld", value).
-    /// Allocates a new Text object with the result.
+    /// **Libc-free** (T-DEFER-AOT-NO-LIBC V0): converts integer
+    /// to Text via the open-coded `verum_internal_i64_to_decimal`
+    /// emitted in `instruction.rs`. Eliminates the snprintf("%ld")
+    /// dep that the AOT path previously linked to. Allocates a
+    /// new Text object with the result.
     fn emit_verum_int_to_text(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_int_to_text") {
             if f.count_basic_blocks() > 0 {
@@ -4718,8 +4721,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         let func = module
@@ -4735,53 +4736,49 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_internal("missing param 0")?
             .into_int_value();
 
-        // Stack buffer for snprintf
-        let buf_size: u64 = 32;
+        // Stack buffer — 24 bytes is comfortably above the 20-char
+        // worst case (`-9223372036854775808`).
+        let buf_size: u64 = 24;
         let buf = builder
             .build_array_alloca(ctx.i8_type(), i64_type.const_int(buf_size, false), "buf")
             .or_llvm_err()?;
 
-        // snprintf(buf, 32, "%ld", value)
-        let snprintf_fn = self.get_or_declare_snprintf(module);
-        let fmt = builder
-            .build_global_string_ptr("%ld", "int_fmt")
-            .or_llvm_err()?;
-        let written = builder
-            .build_call(
-                snprintf_fn,
-                &[
-                    buf.into(),
-                    i64_type.const_int(buf_size, false).into(),
-                    fmt.as_pointer_value().into(),
-                    value.into(),
-                ],
-                "written",
-            )
+        // verum_internal_i64_to_decimal(buf, value) -> i64 length.
+        // Forward-declared by `get_or_declare_internal_i64_to_decimal`
+        // below; body lives in
+        // `instruction.rs::get_or_declare_internal_i64_to_decimal` and
+        // is materialized whenever this site emits.
+        let to_dec_fn = self.get_or_declare_internal_i64_to_decimal(module);
+        let len = builder
+            .build_call(to_dec_fn, &[buf.into(), value.into()], "len")
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .or_internal("call returned void")?
             .into_int_value();
 
-        // len = snprintf return value (i32 → i64)
-        let len = builder
-            .build_int_s_extend(written, i64_type, "len")
-            .or_llvm_err()?;
-
-        // Allocate new buffer: malloc(len + 1)
+        // Allocate new heap buffer + 1 for trailing NUL (the
+        // verum_text_alloc convention expects a NUL-terminated body
+        // even though `len` excludes it).
         let len_plus1 = builder
             .build_int_add(len, i64_type.const_int(1, false), "len1")
             .or_llvm_err()?;
         let new_buf = self.emit_checked_malloc(&builder, module, len_plus1, "newbuf")?;
 
-        // memcpy(new_buf, buf, len + 1)
+        // memcpy(new_buf, buf, len) — copy the digits we wrote.
         let memcpy_fn = self.get_or_declare_memcpy(module);
         builder
-            .build_call(
-                memcpy_fn,
-                &[new_buf.into(), buf.into(), len_plus1.into()],
-                "",
-            )
+            .build_call(memcpy_fn, &[new_buf.into(), buf.into(), len.into()], "")
+            .or_llvm_err()?;
+
+        // Stamp NUL at new_buf[len].
+        let nul_ptr = unsafe {
+            builder
+                .build_gep(ctx.i8_type(), new_buf, &[len], "nul_p")
+                .or_llvm_err()?
+        };
+        builder
+            .build_store(nul_ptr, ctx.i8_type().const_zero())
             .or_llvm_err()?;
 
         // Allocate Text object: verum_text_alloc(new_buf, len, len)
@@ -4801,6 +4798,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
+    }
+
+    /// Materialize `verum_internal_i64_to_decimal` directly via
+    /// `instruction.rs::get_or_declare_internal_i64_to_decimal`.
+    /// This emits the FULL body (basic blocks + IR), not just a
+    /// forward declaration — so the AOT path doesn't need a
+    /// separate trigger from the bytecode lowering layer.
+    /// Idempotent — second call returns the same FunctionValue.
+    fn get_or_declare_internal_i64_to_decimal(
+        &self,
+        module: &Module<'ctx>,
+    ) -> FunctionValue<'ctx> {
+        super::instruction::get_or_declare_internal_i64_to_decimal(self.context, module)
     }
 
     /// verum_float_to_text(value: f64) -> i64 (returns Text object pointer as i64)
