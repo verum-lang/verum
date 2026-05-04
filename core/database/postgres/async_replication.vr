@@ -45,9 +45,12 @@
 // V1 surface:
 //   * `attach_cancellation_token` — token.cancel() unwinds the
 //     replication actor automatically.
-//
-// OUT of V0:
-//   * Per-slot RTT estimator + adaptive heartbeat.
+//   * Per-slot RTT estimator — `rtt_estimate_us()` /
+//     `rtt_samples()`. Pairs every `send_standby_status` write
+//     with the next observed `RmKeepalive`; EWMA-smoothed
+//     (α = 1/8 per RFC 6298 §2). Adaptive heartbeat is the
+//     caller's policy decision (e.g. interval = max(1s,
+//     min(30s, rtt * 3))) — V0 surfaces the raw estimate.
 // =============================================================================
 
 @arch_module(
@@ -156,6 +159,17 @@ public type AsyncPgReplicationConnection is {
     status_tx: Sender<StandbyStatusUpdate>,
     msg_rx: Shared<sync.mutex.Mutex<Receiver<ReplActorEvent>>>,
     join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    /// EWMA-smoothed wire round-trip time in microseconds.
+    /// Sampled by pairing every `send_standby_status` write with
+    /// the next observed `RmKeepalive` recv. `0` until the first
+    /// sample lands. See `rtt_estimate_us()` for the public read.
+    /// (P-PROD-PG-REPL-RTT-V0).
+    rtt_estimate_us: Shared<AtomicInt>,
+    /// Total RTT samples observed since the actor started. Lets
+    /// observability detect a wedged stream: if `rtt_samples`
+    /// stops advancing while `wal_sender_timeout` looms, the
+    /// keepalive flow is stuck.
+    rtt_samples: Shared<AtomicInt>,
 };
 
 implement AsyncPgReplicationConnection {
@@ -165,7 +179,32 @@ implement AsyncPgReplicationConnection {
             status_tx: self.status_tx.clone(),
             msg_rx: self.msg_rx.clone(),
             join: self.join.clone(),
+            rtt_estimate_us: self.rtt_estimate_us.clone(),
+            rtt_samples: self.rtt_samples.clone(),
         }
+    }
+
+    /// Current EWMA-smoothed wire RTT estimate in microseconds.
+    /// Returns `Maybe.None` until the first sample lands;
+    /// otherwise `Maybe.Some(estimate)`. The estimate updates
+    /// on every PrimaryKeepalive received from the server, paired
+    /// against the most recent `send_standby_status` send. Caller
+    /// can use this to drive adaptive heartbeat intervals (e.g.
+    /// `interval = max(1s, min(30s, rtt * 3))`) — V0 surfaces
+    /// the raw estimate; the policy decision is the caller's.
+    public fn rtt_estimate_us(&self) -> Maybe<Int> {
+        if self.rtt_samples.load(MemoryOrdering.Acquire) == 0 {
+            None
+        } else {
+            Some(self.rtt_estimate_us.load(MemoryOrdering.Acquire))
+        }
+    }
+
+    /// Total RTT samples observed since the actor started.
+    /// Diagnostic; non-monotonic-progress signals a wedged
+    /// keepalive flow.
+    public fn rtt_samples(&self) -> Int {
+        self.rtt_samples.load(MemoryOrdering.Acquire)
     }
 
     /// Wire a CancellationToken — when it flips, automatically
@@ -366,8 +405,18 @@ public async fn connect_replication_async(
     let (status_tx, status_rx) = bounded_channel<StandbyStatusUpdate>(DEFAULT_STATUS_CAPACITY);
     let (msg_tx, msg_rx) = bounded_channel<ReplActorEvent>(DEFAULT_MSG_CAPACITY);
 
+    // RTT atoms — shared across actor + caller. Actor writes;
+    // callers read via `rtt_estimate_us()` / `rtt_samples()`.
+    let rtt_estimate = Shared.new(AtomicInt.new(0));
+    let rtt_samples = Shared.new(AtomicInt.new(0));
+    let rtt_estimate_for_actor = rtt_estimate.clone();
+    let rtt_samples_for_actor = rtt_samples.clone();
+
     let join = spawn_blocking(move || -> () {
-        run_actor(conn, cmd_rx, status_rx, msg_tx);
+        run_actor(
+            conn, cmd_rx, status_rx, msg_tx,
+            rtt_estimate_for_actor, rtt_samples_for_actor,
+        );
     });
 
     Ok(AsyncPgReplicationConnection {
@@ -375,6 +424,8 @@ public async fn connect_replication_async(
         status_tx: status_tx,
         msg_rx: Shared.new(sync.mutex.Mutex.new(msg_rx)),
         join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        rtt_estimate_us: rtt_estimate,
+        rtt_samples: rtt_samples,
     })
 }
 
@@ -387,7 +438,14 @@ fn run_actor(
     mut cmd_rx: Receiver<ReplRequest>,
     mut status_rx: Receiver<StandbyStatusUpdate>,
     msg_tx: Sender<ReplActorEvent>,
+    rtt_estimate_us: Shared<AtomicInt>,
+    rtt_samples: Shared<AtomicInt>,
 ) {
+    // Wall-clock time of the most recent `send_standby_status`
+    // write — paired against the next observed RmKeepalive to
+    // produce one RTT sample. `Maybe.None` until the first
+    // status write lands.
+    let mut last_status_send_us: Maybe<Int> = None;
     // Setup phase — process commands until START arrives. The
     // wire is in regular sync mode (no streaming), so we use
     // blocking recv on cmd_rx.
@@ -448,7 +506,16 @@ fn run_actor(
                         s.client_time_us, s.reply_requested,
                     );
                     match r {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            // Stamp the send time for RTT pairing.
+                            // Latest write wins — if the consumer
+                            // bursts multiple statuses without a
+                            // keepalive arriving in between, only
+                            // the most recent send is paired
+                            // (correct: RTT measures the freshest
+                            // round-trip, not stale ones).
+                            last_status_send_us = Some(wall_clock_us());
+                        }
                         Err(e) => {
                             let _ = msg_tx.send(ReaTerminated(e));
                             return;
@@ -488,6 +555,33 @@ fn run_actor(
         // Try to read a frame within the timeout.
         match conn.try_next_message() {
             Ok(Some(msg)) => {
+                // RTT sampling — pair the keepalive with the
+                // last outgoing standby-status. Other message
+                // shapes (XLogData, etc.) don't carry RTT
+                // information; only PrimaryKeepalive is the
+                // server's "I heard you" round-trip closer.
+                match &msg {
+                    RmKeepalive(_) => {
+                        match last_status_send_us {
+                            Some(send_us) => {
+                                let now_us = wall_clock_us();
+                                let sample = now_us - send_us;
+                                if sample >= 0 {
+                                    update_rtt_ewma(
+                                        &rtt_estimate_us,
+                                        &rtt_samples,
+                                        sample,
+                                    );
+                                }
+                                // Consume the pairing — next
+                                // sample needs a fresh send.
+                                last_status_send_us = None;
+                            }
+                            None => {}
+                        }
+                    }
+                    _ => {}
+                }
                 match msg_tx.send(ReaEvent(msg)) {
                     Ok(())  => {}
                     Err(_)  => {
@@ -528,4 +622,44 @@ fn bad_state(what: &str) -> DbError {
         message: f"async replication actor: {what}",
         retryable: false,
     })
+}
+
+// =============================================================================
+// RTT estimation helpers (P-PROD-PG-REPL-RTT-V0)
+// =============================================================================
+
+/// Wall-clock micros since the unix epoch. Routes through the
+/// canonical `core.time.system_time.SystemTime.now()` accessor
+/// (clock_gettime(CLOCK_REALTIME) on Linux/macOS).
+fn wall_clock_us() -> Int {
+    core.time.system_time.SystemTime.now().timestamp_micros()
+}
+
+/// EWMA update for the RTT estimate. Standard exponential
+/// smoothing with α = 1/8 (matches TCP's SRTT smoothing
+/// constant per RFC 6298 §2). On the FIRST sample (samples ==
+/// 0) we seed the estimate with the raw value so callers don't
+/// see a transient zero estimate before the smoothing warms
+/// up. Increments `rtt_samples` after every update.
+///
+/// Formula:
+///   * First sample : `rtt = sample`
+///   * Subsequent   : `rtt = (7 * rtt + sample) / 8`
+///
+/// Integer arithmetic only — no floats. Sample is in
+/// microseconds (always non-negative when called).
+fn update_rtt_ewma(
+    rtt_estimate: &Shared<AtomicInt>,
+    rtt_samples: &Shared<AtomicInt>,
+    sample_us: Int,
+) {
+    let prior_samples = rtt_samples.load(MemoryOrdering.Acquire);
+    let next_estimate = if prior_samples == 0 {
+        sample_us
+    } else {
+        let prior = rtt_estimate.load(MemoryOrdering.Acquire);
+        (prior * 7 + sample_us) / 8
+    };
+    rtt_estimate.store(next_estimate, MemoryOrdering.Release);
+    let _ = rtt_samples.fetch_add(1, MemoryOrdering.AcqRel);
 }
