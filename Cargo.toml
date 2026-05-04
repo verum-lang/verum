@@ -30,6 +30,12 @@ members = [
     "crates/verum_dap",
     # VBC (Verum Bytecode) - unified IR for interpreter/JIT/AOT
     "crates/verum_vbc",
+    # T4 of single-path archive-driven epic — standalone binary
+    # that drives `verum_compiler::precompile::precompile_stdlib`
+    # without depending on `verum_cli`.  Used by `verum_compiler/build.rs`
+    # (T3) to refresh `runtime.vbca` + `runtime.core_metadata` when
+    # the blake3 checksum of `core/` invalidates the cached output.
+    "crates/verum_stdlib_precompiler",
     # LLVM/MLIR infrastructure (universal bindings)
     "crates/llvm/verum_llvm_sys",
     "crates/llvm/verum_llvm_derive",
