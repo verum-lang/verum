@@ -20,7 +20,10 @@
 mount core.*;
 mount base.{Result, Ok, Err, Text, Bool};
 mount base.ordering.{Ordering, Less, Equal, Greater};
-mount core.text.numeric.{Decimal, DecimalError, MAX_SCALE, parse_decimal};
+mount core.text.numeric.{
+    Decimal, DecimalError, MAX_SCALE, parse_decimal,
+    RoundingMode, HalfEven, HalfUp, HalfDown, Truncate,
+};
 
 fn check_constructors() {
     let z = Decimal.zero();
@@ -174,6 +177,110 @@ fn check_constants() {
     assert(MAX_SCALE == 18);
 }
 
+fn check_div() -> Result<Bool, DecimalError> {
+    // Exact division: 100 / 5 = 20.000 (precision=3 just verifies the
+    // surface; the result simplifies)
+    let a = Decimal.from_int(100);
+    let b = Decimal.from_int(5);
+    let q = a.div(&b, 0, HalfEven)?;
+    assert(q.eq(&Decimal.from_int(20)));
+
+    // Inexact division: 1 / 3 at precision=4 with HalfEven ⇒ 0.3333
+    let one = Decimal.one();
+    let three = Decimal.from_int(3);
+    let third = one.div(&three, 4, HalfEven)?;
+    let expected_third = match Decimal.from_parts(3333, 4) {
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    assert(third.eq(&expected_third));
+
+    // 2 / 3 at precision=4 with HalfEven ⇒ 0.6667 (round half-up
+    // since round_digit=6 with sticky bit)
+    let two = Decimal.from_int(2);
+    let two_thirds = two.div(&three, 4, HalfEven)?;
+    let expected_2_3 = match Decimal.from_parts(6667, 4) {
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    assert(two_thirds.eq(&expected_2_3));
+
+    // div_round convenience (defaults to HalfEven)
+    let half_round = one.div_round(&three, 4)?;
+    assert(half_round.eq(&expected_third));
+
+    // div_trunc: 7 / 2 = 3 (integer truncation)
+    let seven = Decimal.from_int(7);
+    let two_dec = Decimal.from_int(2);
+    let trunc = seven.div_trunc(&two_dec)?;
+    assert(trunc.eq(&Decimal.from_int(3)));
+
+    // Negative division: -7 / 2 at precision=1 HalfEven ⇒ -3.5
+    let neg_seven = Decimal.from_int(-7);
+    let neg_half = neg_seven.div(&two_dec, 1, HalfEven)?;
+    let expected_neg_3_5 = match Decimal.from_parts(-35, 1) {
+        Ok(d)  => d,
+        Err(_) => Decimal.zero(),
+    };
+    assert(neg_half.eq(&expected_neg_3_5));
+
+    Ok(true)
+}
+
+fn check_div_by_zero() {
+    let a = Decimal.from_int(10);
+    let z = Decimal.zero();
+    let result = match a.div(&z, 2, HalfEven) {
+        Err(DecimalError.DivByZero) => true,
+        _ => false,
+    };
+    assert(result);
+}
+
+fn check_rounding_modes() -> Result<Bool, DecimalError> {
+    // 5 / 4 at precision=0:
+    //   exact value = 1.25
+    //   HalfEven on 1.25 (round_digit=2, sticky=true after div)
+    //     wait: 5/4 = 1.25 exactly, precision=0 means we want integer.
+    //     long-div: rem=5, step1: rem*10=50, digit=12, rem=2; step2 (round bit):
+    //                rem*10=20, digit=5, rem=0. quot=125. round_digit=5,
+    //                kept=12, sticky=false.
+    //     HalfEven on exact-half ties to even: kept=12 even ⇒ no bump ⇒ 12.
+    //     Wait that's wrong — we want integer (precision=0), so we should
+    //     get 1, not 12. Let me reconsider.
+    //   Actually precision=0 with one extra digit: total_steps=1.
+    //     step1: rem=5, rem*10=50, digit=12 (since 50/4=12), rem=2.
+    //     quot=12. round_digit = 12%10 = 2. kept = 12/10 = 1. sticky = (2 != 0) = true.
+    //   HalfEven on round_digit=2: 2 < 5 ⇒ no bump ⇒ kept = 1. ✓
+    let five = Decimal.from_int(5);
+    let four = Decimal.from_int(4);
+    let r1 = five.div(&four, 0, HalfEven)?;
+    assert(r1.eq(&Decimal.from_int(1)));
+
+    // 5 / 2 at precision=0 with HalfEven:
+    //   rem=5, rem*10=50, digit=25 (50/2), rem=0. quot=25.
+    //   round_digit = 5, kept = 2, sticky = false.
+    //   HalfEven on exact-half (round_digit=5, sticky=false): kept=2 even ⇒
+    //     no bump ⇒ result = 2 (rounds to even).
+    let two_dec = Decimal.from_int(2);
+    let r2 = five.div(&two_dec, 0, HalfEven)?;
+    assert(r2.eq(&Decimal.from_int(2)));
+
+    // Same with HalfUp ⇒ always rounds halves up ⇒ 3.
+    let r3 = five.div(&two_dec, 0, HalfUp)?;
+    assert(r3.eq(&Decimal.from_int(3)));
+
+    // Same with HalfDown ⇒ rounds halves towards zero ⇒ 2 (sticky=false).
+    let r4 = five.div(&two_dec, 0, HalfDown)?;
+    assert(r4.eq(&Decimal.from_int(2)));
+
+    // Same with Truncate ⇒ 2.
+    let r5 = five.div(&two_dec, 0, Truncate)?;
+    assert(r5.eq(&Decimal.from_int(2)));
+
+    Ok(true)
+}
+
 fn main() {
     check_constructors();
     check_predicates();
@@ -182,4 +289,7 @@ fn main() {
     check_render();
     let _ = check_parse();
     check_constants();
+    let _ = check_div();
+    check_div_by_zero();
+    let _ = check_rounding_modes();
 }

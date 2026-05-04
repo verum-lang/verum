@@ -23,6 +23,7 @@ public module decimal;
 
 public mount .decimal.{
     Decimal, DecimalError,
+    RoundingMode, HalfEven, HalfUp, HalfDown, Truncate,
     MAX_SCALE,
     parse_decimal,
 };
