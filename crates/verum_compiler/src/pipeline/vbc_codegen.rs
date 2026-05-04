@@ -435,6 +435,52 @@ impl<'s> CompilationPipeline<'s> {
         };
         vbc_module.source_dir = source_dir;
 
+        // Phase 6d: optional linker-merge with the embedded
+        // precompiled stdlib archive. Gated on
+        // `VERUM_LINKER_MERGE=1` for opt-in testing — production
+        // default-on switch follows once we've validated end-to-end
+        // dispatch on a script that exercises the merge boundary.
+        // The linker round-trips deterministically and is verified
+        // by `crates/verum_compiler::embedded_stdlib_vbc::tests::
+        // linker_round_trip_through_embedded_archive`.
+        if std::env::var("VERUM_LINKER_MERGE").is_ok() {
+            if let Some(archive) = crate::embedded_stdlib_vbc::get_runtime_archive() {
+                let target_triple = self
+                    .session
+                    .options()
+                    .target_triple
+                    .as_ref()
+                    .map(|t| t.as_str().to_string())
+                    .unwrap_or_else(|| std::env::consts::ARCH.to_string()
+                        + "-"
+                        + std::env::consts::OS);
+                let mut linker = verum_vbc::linker::VbcLinker::new(&target_triple);
+                if let Err(e) = linker.add_archive(archive) {
+                    tracing::warn!(
+                        target: "compile_ast_to_vbc",
+                        "VERUM_LINKER_MERGE: archive merge failed ({}); falling back to source-driven codegen",
+                        e
+                    );
+                } else if let Err(e) = linker.add_user_module(vbc_module.clone()) {
+                    tracing::warn!(
+                        target: "compile_ast_to_vbc",
+                        "VERUM_LINKER_MERGE: user module merge failed ({}); falling back to source-driven codegen",
+                        e
+                    );
+                } else {
+                    let merged = linker.finalize();
+                    tracing::info!(
+                        target: "compile_ast_to_vbc",
+                        "VERUM_LINKER_MERGE: merged {} stdlib modules + user module — {} functions, {} types",
+                        archive.module_count(),
+                        merged.functions.len(),
+                        merged.types.len(),
+                    );
+                    return Ok(std::sync::Arc::new(merged));
+                }
+            }
+        }
+
         Ok(std::sync::Arc::new(vbc_module))
     }
 
@@ -1154,6 +1200,18 @@ impl<'s> CompilationPipeline<'s> {
             // ctx.functions for the user-side compile pass.
             "core.base.panic",
             "core.intrinsics.runtime.os",
+            // #122 — `core.sys.common` hosts `random_bytes` /
+            // `read` / `write` / `pread` / `pwrite` / locking / sync
+            // primitives used as aliased mounts across the stdlib
+            // (Ed25519/X25519/ULID/nanoid/backoff CSPRNG seeding,
+            // io.fs writers, sync.condvar). Pre-fix the post-
+            // typecheck retention culled this module → its function
+            // bodies never compiled → `register_import_aliases` for
+            // any consumer's `mount core.sys.common.random_bytes
+            // as sys_random_bytes` couldn't resolve the qualified
+            // target → alias never registered → bug-class lenient
+            // SKIP for every fill_random / OS-syscall site.
+            "core.sys.common",
         ];
 
         // Collect user-mounted module paths so their ASTs survive the cull.
