@@ -197,6 +197,13 @@ pub mod api;
 pub mod language_features;
 
 // Core modules
+/// T1 of single-path archive-driven epic — converts a precompiled
+/// stdlib `VbcArchive` into VBC codegen ctx entries (FunctionInfo
+/// table, variant-tag recovery from TypeDescriptor.variants) without
+/// parsing source files. Replaces the slow `imported_modules`
+/// collection that walked 2400+ stdlib `.vr` files on every script
+/// invocation.
+pub mod archive_ctx_loader;
 pub mod camg; // #103: Content-Addressed Module Graph — fundamental rewrite of module loading
 pub mod cfg_eval; // #106: pure cfg-predicate evaluation extracted from pipeline.rs
 pub mod compilation_metrics;
