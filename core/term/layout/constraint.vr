@@ -1,7 +1,7 @@
 // =============================================================================
-// constraint.vr - LayoutConstraint types and TermLayout solver
+// constraint.vr - Constraint types and TermLayout solver
 // =============================================================================
-// LayoutConstraint-based layout splitting for terminal areas. Supports exact lengths,
+// Constraint-based layout splitting for terminal areas. Supports exact lengths,
 // min/max bounds, percentages, ratios, and weighted fill. The solver uses a
 // greedy 5-pass algorithm with priority: Length > Min/Max > Percentage > Ratio > Fill.
 //
@@ -13,8 +13,8 @@ module constraint;
 
 mount super.rect.{Rect, Margin};
 
-/// LayoutConstraint on a single dimension (width or height).
-public type LayoutConstraint is
+/// Constraint on a single dimension (width or height).
+public type Constraint is
     | Length(Int)        // Exact size in cells
     | Min(Int)          // Minimum size
     | Max(Int)          // Maximum size
@@ -37,7 +37,7 @@ public type Flex is
 /// Supports builder-pattern configuration.
 public type TermLayout is {
     direction: Direction,
-    constraints: List<LayoutConstraint>,
+    constraints: List<Constraint>,
     margin: Margin,
     flex: Flex,
     spacing: Int,
@@ -67,7 +67,7 @@ implement TermLayout {
     }
 
     /// Set the constraints for this layout.
-    public fn constraints(self, constraints: List<LayoutConstraint>) -> TermLayout {
+    public fn constraints(self, constraints: List<Constraint>) -> TermLayout {
         TermLayout { constraints: constraints, ..self }
     }
 
@@ -133,7 +133,7 @@ implement TermLayout {
 
 /// Resolve constraints using a greedy 5-pass algorithm.
 /// Priority order: Length -> Min/Max -> Percentage -> Ratio -> Fill.
-fn resolve_constraints(constraints: &List<LayoutConstraint>, available: Int) -> List<Int> {
+fn resolve_constraints(constraints: &List<Constraint>, available: Int) -> List<Int> {
     let n = constraints.len();
     let mut sizes = List.with_capacity(n);
     for _ in 0..n { sizes.push(0); }
