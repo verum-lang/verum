@@ -80,7 +80,7 @@ fn first_registered_in_declaration_order_owns_variant_signature() {
     // Pre-fix this would have been broken by alphabetical sort: AltResult (A)
     // would come before CanonicalResult (C) and steal the Ok|Err signature.
     let metadata = make_metadata(&["CanonicalResult", "AltResult"]);
-    let checker = TypeChecker::new_with_core(metadata);
+    let checker = TypeChecker::new_with_core_eager(std::sync::Arc::new(metadata));
 
     let owner = checker
         .protocol_checker
@@ -102,7 +102,7 @@ fn reversing_declaration_order_reverses_signature_ownership() {
     // ordering comes purely from `type_declaration_order`, not from a list of
     // "well-known" stdlib names baked into the compiler.
     let metadata = make_metadata(&["AltResult", "CanonicalResult"]);
-    let checker = TypeChecker::new_with_core(metadata);
+    let checker = TypeChecker::new_with_core_eager(std::sync::Arc::new(metadata));
 
     let owner = checker
         .protocol_checker
@@ -129,7 +129,7 @@ fn types_missing_from_declaration_order_still_register_alphabetically() {
         .insert(Text::from("Orphan"), variant_type_with_ok_err("Orphan"));
     // Note: NOT pushed to type_declaration_order.
 
-    let checker = TypeChecker::new_with_core(metadata);
+    let checker = TypeChecker::new_with_core_eager(std::sync::Arc::new(metadata));
 
     let owner = checker
         .protocol_checker

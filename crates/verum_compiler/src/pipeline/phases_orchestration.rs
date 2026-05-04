@@ -138,13 +138,13 @@ impl<'s> CompilationPipeline<'s> {
         // Mode selection:
         // - NormalBuild (stdlib_metadata = Some): Use pre-compiled stdlib types
         // - StdlibBootstrap (stdlib_metadata = None): Use builtins only
-        let mut checker = match &self.stdlib_metadata {
+        let mut checker = match self.stdlib_metadata.get() {
             Some(metadata) => {
                 debug!(
                     "Phase 3: Using stdlib metadata for type checking ({} types)",
                     metadata.types.len()
                 );
-                TypeChecker::new_with_core(metadata.as_ref().clone())
+                TypeChecker::new_with_core(std::sync::Arc::clone(metadata))
             }
             None => {
                 // Compiling stdlib itself - use minimal context
@@ -326,7 +326,7 @@ impl<'s> CompilationPipeline<'s> {
         // (gpu.vr) isn't explicitly loaded. The context names were
         // extracted during stdlib bootstrap and cached in the
         // embedded stdlib archive.
-        if let Some(metadata) = &self.stdlib_metadata {
+        if let Some(metadata) = self.stdlib_metadata.get() {
             for ctx_name in &metadata.context_declarations {
                 if !self.collected_contexts.contains(ctx_name) {
                     checker.register_protocol_as_context(ctx_name.clone());
@@ -341,7 +341,7 @@ impl<'s> CompilationPipeline<'s> {
         {
             let has_metadata_contexts = self
                 .stdlib_metadata
-                .as_ref()
+                .get()
                 .map(|m| !m.context_declarations.is_empty())
                 .unwrap_or(false);
             if !has_metadata_contexts {

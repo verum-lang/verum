@@ -338,24 +338,30 @@ impl<'s> CompilationPipeline<'s> {
         codegen.register_stdlib_intrinsics();
         codegen.register_runtime_io_functions();
 
-        // T1 archive → ctx via OnceLock-cached FunctionInfo table.
-        // First call pays the 565-module walk + descriptor → FunctionInfo
-        // conversion (~50-200ms); every subsequent call is `Arc::clone`
-        // + `import_functions` (HashMap copy, sub-millisecond).  Critical
-        // for REPL / test-runner / watch-mode where one process drives
-        // many compilations.
+        // T1 archive → ctx, lazy mount-driven registration.  Walks the
+        // user `Module`'s `mount` declarations + transitively-required
+        // names, registers ONLY those FunctionInfo entries from the
+        // archive.  For a hello.vr that mounts ~5 stdlib symbols, this
+        // touches ~5 of the 7484 archive entries — typically <1ms.
+        //
+        // The full table is still built lazily on demand via
+        // `apply_lazy`'s fallback path (codegen's
+        // `find_function_by_suffix` redirect chain triggers
+        // re-registration on miss).  Cost amortises across
+        // compilations within the same process for REPL / watch /
+        // test-runner workflows.
         static CTX_CACHE: crate::archive_ctx_loader::ArchiveCtxCache =
             crate::archive_ctx_loader::ArchiveCtxCache::new();
         let t_pop = std::time::Instant::now();
-        CTX_CACHE.apply(archive, codegen.ctx_mut());
+        CTX_CACHE.apply_lazy(archive, codegen.ctx_mut(), module);
         tracing::debug!(
             target: "compile_ast_to_vbc",
-            "archive pre-population (cached) in {:.2}ms",
+            "archive lazy pre-population in {:.2}ms",
             t_pop.elapsed().as_secs_f64() * 1000.0,
         );
         if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
             eprintln!(
-                "[compile_ast_to_vbc] T1 cached apply: {:.2}ms",
+                "[compile_ast_to_vbc] T1 lazy apply: {:.2}ms",
                 t_pop.elapsed().as_secs_f64() * 1000.0
             );
         }

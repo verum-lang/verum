@@ -9643,6 +9643,23 @@ impl VbcCodegen {
         descriptor.register_count = register_count;
         descriptor.locals_count = params_with_mutability.len() as u16;
         descriptor.optimization_hints.is_pure = func.is_pure;
+
+        // Propagate `parent_type` for inherent methods.  Without
+        // this, archive-driven typecheck cannot recover the
+        // `Type.method` membership relation from the precompiled
+        // VBC archive — calls like `Text.with_capacity(n)` fail
+        // method lookup despite the body being present.
+        // `type_name_to_id` carries every locally-defined +
+        // built-in type; an unresolved name (e.g. impl target is
+        // a generic parameter or a trait object) leaves
+        // `parent_type` at None, which is the correct fallback.
+        if let Some(type_name) = impl_type_name {
+            descriptor.parent_type = self
+                .type_name_to_id
+                .get(type_name.as_str())
+                .copied()
+                .or_else(|| self.get_well_known_type_id(type_name));
+        }
         // Set return type from function info (default is UNIT)
         if let Some(ref ret_type) = func_info.return_type {
             descriptor.return_type = ret_type.clone();

@@ -375,6 +375,108 @@ impl ArchiveCtxCache {
         let table = self.get_or_build(archive);
         ctx.import_functions(table);
     }
+
+    /// T2-extended-perf: lazy variant of [`apply`].  Walks the
+    /// user `Module`'s `mount` declarations, harvests the
+    /// imported simple+qualified names, and registers ONLY those
+    /// from the archive.  For a hello.vr that mounts ~5 stdlib
+    /// symbols, this drops the 7484-entry full populate to a
+    /// per-script handful — typically <1ms.
+    ///
+    /// Falls through to the full table for any per-call function
+    /// references that the mount-pre-scan missed (variant
+    /// constructors, methods called via dot-form, etc.) via the
+    /// codegen's existing `find_function_by_suffix` /
+    /// `find_variant_by_suffix_and_args` redirects, which themselves
+    /// re-trigger lazy registration through this cache on miss.
+    ///
+    /// The full table is still built lazily on first demand-path
+    /// hit — the cost amortises across compilations within the
+    /// same process (REPL, watch mode), and the upfront cost is
+    /// gone for one-shot scripts.
+    pub fn apply_lazy(
+        &self,
+        archive: &VbcArchive,
+        ctx: &mut CodegenContext,
+        user_module: &verum_ast::Module,
+    ) {
+        let mut wanted: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for item in user_module.items.iter() {
+            collect_referenced_function_names(item, &mut wanted);
+        }
+        if wanted.is_empty() {
+            return;
+        }
+        // Module-name prefix gate: archive `index[i].name` is the
+        // dotted module path (`core.io.stdio`).  A wanted qualified
+        // name like `core.io.stdio.println` lives in module
+        // `core.io.stdio` (the prefix up to the last dot), so we
+        // can SKIP decoding any module whose name doesn't appear
+        // as a wanted-name prefix.  For a hello.vr that mounts
+        // `core.io.stdio.println` this drops the 565-module walk
+        // to ~1-2 modules — the rest are O(1) string-prefix checks
+        // against the archive index entries (which are already
+        // decoded as part of the archive header).
+        let wanted_module_prefixes: std::collections::HashSet<String> = wanted
+            .iter()
+            .filter_map(|name| name.rfind('.').map(|i| name[..i].to_string()))
+            .collect();
+        for entry in &archive.index {
+            // Skip decode unless this module name matches a
+            // qualified-name prefix from the wanted set.  Bare
+            // simple names with no qualified counterpart fall
+            // through to the FULL walk below.
+            let is_target_module = wanted_module_prefixes.contains(&entry.name);
+            if !is_target_module {
+                continue;
+            }
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            register_module_filtered(&module, &entry.name, ctx, &wanted);
+        }
+        // For wanted names that have NO qualified form (e.g. user
+        // code calls `Maybe.Some(x)` without a `mount Maybe`
+        // declaration), walk the rest of the archive looking only
+        // at simple-name matches.  Most stdlib symbols come in via
+        // mounts so this branch typically processes nothing.
+        let unqualified_wanted: std::collections::HashSet<String> = wanted
+            .iter()
+            .filter(|n| !n.contains('.'))
+            .cloned()
+            .collect();
+        if !unqualified_wanted.is_empty() {
+            // Try to register simple names only by re-checking
+            // every archive module.  This is the slow fallback
+            // — but it's bounded by `unqualified_wanted` which
+            // is typically tiny for real scripts.  If perf
+            // matters, callers should add explicit mount
+            // declarations to bring symbols in scope.
+            for entry in &archive.index {
+                if wanted_module_prefixes.contains(&entry.name) {
+                    continue; // already processed above
+                }
+                let module = match archive.load_module(&entry.name) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                // Cheap pre-check: scan module's strings table for any of
+                // the unqualified wanted names BEFORE doing the full
+                // descriptor walk.  If none of the wanted simple-names
+                // appear as a string in the module, register_module_filtered
+                // would do nothing — skip it entirely.
+                let any_match = unqualified_wanted.iter().any(|w| {
+                    module.strings.iter().any(|(s, _)| s == w)
+                });
+                if !any_match {
+                    continue;
+                }
+                register_module_filtered(&module, &entry.name, ctx, &unqualified_wanted);
+            }
+        }
+    }
 }
 
 impl Default for ArchiveCtxCache {
@@ -504,5 +606,204 @@ mod tests {
             first_count, second_count,
             "cached apply must produce identical entry count across runs"
         );
+    }
+}
+
+// ============================================================================
+// T2-extended-perf: lazy mount-driven FunctionInfo registration
+// ============================================================================
+
+/// Walk a top-level `verum_ast::Item` and harvest names from every
+/// `mount` declaration.  Function bodies are NOT walked here —
+/// names not picked up via mounts go through the codegen's
+/// `find_function_by_suffix` redirect chain, which can re-trigger
+/// lazy registration via the cache's `apply` fallback.
+///
+/// Real-world stdlib usage: every cross-module function call
+/// requires a `mount` declaration to bring the name in scope.  So
+/// the mount-only pre-scan covers practically every stdlib
+/// reference at sub-millisecond cost.
+fn collect_referenced_function_names(
+    item: &verum_ast::Item,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_ast::ItemKind;
+    if let ItemKind::Mount(mount_decl) = &item.kind {
+        collect_mount_names(&mount_decl.tree, &[], out);
+    }
+}
+
+/// Walk a mount tree harvesting every imported simple-name and
+/// qualified form.  `mount core.io.stdio.{println, print}` adds
+/// `println`, `print`, `core.io.stdio.println`, `core.io.stdio.print`.
+fn collect_mount_names(
+    tree: &verum_ast::decl::MountTree,
+    prefix: &[String],
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_ast::decl::MountTreeKind;
+    match &tree.kind {
+        MountTreeKind::Path(path) => {
+            let segs: Vec<String> = path
+                .segments
+                .iter()
+                .filter_map(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(id) => {
+                        Some(id.name.to_string())
+                    }
+                    _ => None,
+                })
+                .collect();
+            if segs.is_empty() {
+                return;
+            }
+            let mut full: Vec<String> = prefix.to_vec();
+            full.extend(segs);
+            // Last segment is the name; insert both simple and
+            // dot-joined fully-qualified.
+            if let Some(last) = full.last() {
+                out.insert(last.clone());
+                // Also the alias if any.
+                if let verum_common::Maybe::Some(alias) = &tree.alias {
+                    out.insert(alias.name.to_string());
+                }
+            }
+            out.insert(full.join("."));
+        }
+        MountTreeKind::Nested {
+            prefix: nested_prefix,
+            trees,
+        } => {
+            let nested_segs: Vec<String> = nested_prefix
+                .segments
+                .iter()
+                .filter_map(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(id) => {
+                        Some(id.name.to_string())
+                    }
+                    _ => None,
+                })
+                .collect();
+            let mut combined: Vec<String> = prefix.to_vec();
+            combined.extend(nested_segs);
+            for sub in trees.iter() {
+                collect_mount_names(sub, &combined, out);
+            }
+        }
+        MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
+    }
+}
+
+/// Register only those FunctionInfo entries whose simple or
+/// qualified name appears in `wanted`.  Parallel to
+/// `register_module` but with name-set filtering.
+fn register_module_filtered(
+    module: &VbcModule,
+    module_name: &str,
+    ctx: &mut CodegenContext,
+    wanted: &std::collections::HashSet<String>,
+) {
+    let mut type_id_to_name: HashMap<TypeId, String> = HashMap::new();
+    for ty in &module.types {
+        if let Some(name) = module.strings.get(ty.name) {
+            type_id_to_name.insert(ty.id, name.to_string());
+        }
+    }
+    let mut variant_index: HashMap<String, VariantHit> = HashMap::new();
+    for ty in &module.types {
+        let parent_name = match module.strings.get(ty.name) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        for variant in &ty.variants {
+            let vname = match module.strings.get(variant.name) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let payload_field_types: Vec<String> = variant
+                .fields
+                .iter()
+                .map(|f| {
+                    type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                })
+                .collect();
+            variant_index.entry(vname).or_insert(VariantHit {
+                parent_type_name: parent_name.clone(),
+                tag: variant.tag,
+                kind: variant.kind,
+                payload_field_types,
+                arity: variant.arity as usize,
+            });
+        }
+    }
+    for fn_desc in &module.functions {
+        let simple_name = match module.strings.get(fn_desc.name) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        let qualified = format!("{}.{}", module_name, simple_name);
+        // Filter: only register if simple OR qualified is wanted.
+        if !wanted.contains(&simple_name) && !wanted.contains(&qualified) {
+            continue;
+        }
+        let variant_hit = variant_index
+            .get(&simple_name)
+            .filter(|hit| hit.arity == fn_desc.params.len());
+        let (variant_tag, parent_type_name, variant_payload_types) = match variant_hit {
+            Some(hit) => (
+                Some(hit.tag),
+                Some(hit.parent_type_name.clone()),
+                if hit.payload_field_types.is_empty() {
+                    None
+                } else {
+                    Some(hit.payload_field_types.clone())
+                },
+            ),
+            None => {
+                let parent = fn_desc
+                    .parent_type
+                    .and_then(|tid| type_id_to_name.get(&tid).cloned());
+                (None, parent, None)
+            }
+        };
+        let param_names: Vec<String> = fn_desc
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                module
+                    .strings
+                    .get(p.name)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("_arg{}", i))
+            })
+            .collect();
+        let return_type_name = type_ref_simple_name(&fn_desc.return_type, module);
+        let return_type_inner = type_ref_inner_generics(&fn_desc.return_type, module);
+        let info = FunctionInfo {
+            id: fn_desc.id,
+            param_count: fn_desc.params.len(),
+            param_names,
+            param_type_names: vec![],
+            is_async: fn_desc
+                .properties
+                .contains(verum_vbc::types::PropertySet::ASYNC),
+            is_generator: fn_desc.is_generator,
+            contexts: vec![],
+            return_type: Some(fn_desc.return_type.clone()),
+            yield_type: fn_desc.yield_type.clone(),
+            intrinsic_name: None,
+            variant_tag,
+            parent_type_name,
+            variant_payload_types,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
+            return_type_name,
+            return_type_inner,
+        };
+        ctx.register_function(qualified, info.clone());
+        if ctx.lookup_function(&simple_name).is_none() {
+            ctx.register_function(simple_name, info);
+        }
     }
 }

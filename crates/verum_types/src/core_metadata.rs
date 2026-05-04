@@ -254,6 +254,21 @@ pub struct FunctionDescriptor {
 
     /// Intrinsic ID (if compiler intrinsic)
     pub intrinsic_id: Maybe<u32>,
+
+    /// Parent type name when this function is an inherent method
+    /// (declared inside `implement Type { ... }`).  `None` for free
+    /// functions and protocol-impl methods (the latter are tracked
+    /// via [`ImplementationDescriptor`]).
+    ///
+    /// Carrying this through the precompiled metadata closes the
+    /// gap that previously made `Text.with_capacity`-style calls
+    /// fail typecheck: the source-driven path registered inherent
+    /// methods by walking `implement Type {}` AST blocks; the
+    /// archive-driven path skipped that step entirely.  The
+    /// typechecker now consults `parent_type` when populating its
+    /// per-type inherent-method registry from metadata.
+    #[serde(default)]
+    pub parent_type: Maybe<Text>,
 }
 
 /// Implementation descriptor (impl Protocol for Type)
