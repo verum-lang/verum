@@ -4813,6 +4813,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::instruction::get_or_declare_internal_i64_to_decimal(self.context, module)
     }
 
+    /// Materialize `verum_internal_strtod` (libc-free open-coded
+    /// strtod replacement) via `instruction.rs::
+    /// get_or_declare_internal_strtod`. Same pattern as the
+    /// i64-to-decimal bridge — emits FULL body on first call;
+    /// idempotent thereafter.
+    fn get_or_declare_internal_strtod(
+        &self,
+        module: &Module<'ctx>,
+    ) -> FunctionValue<'ctx> {
+        super::instruction::get_or_declare_internal_strtod(self.context, module)
+    }
+
     /// verum_float_to_text(value: f64) -> i64 (returns Text object pointer as i64)
     ///
 
@@ -5009,12 +5021,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_conditional_branch(is_null, ret_zero, do_parse)
             .or_llvm_err()?;
 
-        // do_parse: strtod(str, NULL)
+        // do_parse: verum_internal_strtod(str)
+        // **Libc-free** (T-DEFER-AOT-NO-LIBC float-parse half):
+        // route through the open-coded simple-precision parser
+        // emitted in `instruction.rs::get_or_declare_internal_strtod`.
+        // Eliminates the libc strtod dep that the AOT path
+        // previously linked to. `null_ptr` is unused — the
+        // internal helper takes only `nptr` (no endptr).
         builder.position_at_end(do_parse);
-        let strtod_fn = self.get_or_declare_strtod(module);
-        let null_ptr = ptr_type.const_null();
+        let _ = ptr_type;
+        let strtod_fn = self.get_or_declare_internal_strtod(module);
         let f64_result = builder
-            .build_call(strtod_fn, &[str_ptr.into(), null_ptr.into()], "parsed")
+            .build_call(strtod_fn, &[str_ptr.into()], "parsed")
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
