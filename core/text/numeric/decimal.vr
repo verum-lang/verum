@@ -108,7 +108,30 @@ public type DecimalError is
     | ParseInvalidChar { byte_offset: Int, byte: Int }
     | ParseInvalidShape { reason: Text }
     | ScaleOutOfRange  { scale: Int }
-    | Overflow         { op: Text };
+    | Overflow         { op: Text }
+    | DivByZero;
+
+/// Rounding policy for `div` (and any future inexact operation).
+///
+/// `HalfEven` (banker's rounding) is the IEEE 754 / financial default
+/// — when the exact result lies exactly halfway between two
+/// representable values, round towards the value whose last digit is
+/// even.  Eliminates the systematic bias that plain HalfUp introduces
+/// over many operations.
+///
+/// `HalfUp` always rounds halves away from zero.  Common in casual
+/// arithmetic but introduces +0.5 bias on average.
+///
+/// `HalfDown` always rounds halves towards zero.  Symmetric mirror of
+/// HalfUp.
+///
+/// `Truncate` discards the rounding digit unconditionally.  Equivalent
+/// to truncation towards zero.  No rounding.
+public type RoundingMode is
+      HalfEven
+    | HalfUp
+    | HalfDown
+    | Truncate;
 
 // =============================================================================
 // Constructors
@@ -212,6 +235,169 @@ implement Decimal {
             None    => return Err(DecimalError.Overflow { op: "mul".clone() }),
         };
         Ok(Decimal { coefficient: prod, scale: scale })
+    }
+
+    /// Quotient `self / other` with caller-specified output scale and
+    /// rounding policy.  This is the inexact-arithmetic operation in
+    /// the V0 surface — division is the one piece that can't always
+    /// be represented at any finite scale (e.g. 1/3), so the caller
+    /// MUST specify how much precision they want and how to round
+    /// the discarded remainder.
+    ///
+    /// Algorithm (textbook long division on i64 coefficients):
+    ///   1. Validate divisor ≠ 0 and `precision ∈ [0, MAX_SCALE]`.
+    ///   2. Align both operand scales (so the division reduces to
+    ///      `aligned_dividend / aligned_divisor`, ignoring the
+    ///      cancelled scale factor).
+    ///   3. Compute sign of result + absolute values.
+    ///   4. Iterate `precision + 1` long-division steps to extract
+    ///      one digit per step into the quotient accumulator.  The
+    ///      extra +1 digit is the rounding bit; the post-loop
+    ///      remainder tracks "is the exact quotient strictly
+    ///      greater than the partial quotient" (sticky bit).
+    ///   5. Apply the requested `RoundingMode` to the trailing
+    ///      digit + sticky bit, dividing by 10 to drop the rounding
+    ///      bit.  HalfEven inspects the parity of the kept last
+    ///      digit on exact-half ties.
+    ///   6. Re-apply sign to the rounded coefficient and return.
+    ///
+    /// Errors:
+    ///   * `DivByZero`        — divisor coefficient is zero.
+    ///   * `ScaleOutOfRange`  — `precision` outside [0, MAX_SCALE].
+    ///   * `Overflow`         — long-division step exceeds i64
+    ///                          (typically when both operands are
+    ///                          near i64::MAX magnitude AND the
+    ///                          requested precision is large).
+    public fn div(
+        &self,
+        other: &Decimal,
+        precision: Int,
+        mode: RoundingMode,
+    ) -> Result<Decimal, DecimalError> {
+        if other.coefficient == 0 { return Err(DecimalError.DivByZero); }
+        if precision < 0 || precision > MAX_SCALE {
+            return Err(DecimalError.ScaleOutOfRange { scale: precision });
+        }
+
+        // Align scales — after alignment, both operands share the
+        // same scale factor 10^(-common), which cancels in the
+        // division.  Aligned dividend / aligned divisor IS the
+        // exact rational value (modulo precision/rounding).
+        let (dividend, divisor, _common_scale) = match align_scales(self, other) {
+            Ok(t)  => t,
+            Err(e) => return Err(e),
+        };
+
+        // Sign result.  XOR of operand signs.
+        let neg = (dividend < 0) != (divisor < 0);
+        let abs_d = abs_int(dividend);
+        let abs_v = abs_int(divisor);
+
+        // Long division loop.  Extract `precision + 1` quotient
+        // digits.  Each iteration:
+        //   digit = (rem × 10) / abs_v
+        //   rem   = (rem × 10) % abs_v
+        //   quot  = quot × 10 + digit
+        let mut quot: Int = 0;
+        let mut rem: Int = abs_d;
+        let mut step: Int = 0;
+        let total_steps = precision + 1;
+        while step < total_steps {
+            let rem10 = match checked_mul(rem, 10) {
+                Some(v) => v,
+                None    => return Err(DecimalError.Overflow { op: "div".clone() }),
+            };
+            let digit = rem10 / abs_v;
+            rem = rem10 - digit * abs_v;
+            let q10 = match checked_mul(quot, 10) {
+                Some(v) => v,
+                None    => return Err(DecimalError.Overflow { op: "div".clone() }),
+            };
+            quot = match checked_add(q10, digit) {
+                Some(v) => v,
+                None    => return Err(DecimalError.Overflow { op: "div".clone() }),
+            };
+            step = step + 1;
+        }
+
+        // The trailing digit + sticky remainder drive rounding.
+        //   round_digit: the (precision+1)-th digit (the one we
+        //                want to drop, possibly bumping the kept
+        //                quotient).
+        //   sticky:      true iff exact quotient is strictly
+        //                greater than `quot / 10` (i.e. there's
+        //                non-zero residue beyond the round digit).
+        let round_digit = quot % 10;
+        let mut kept = quot / 10;
+        let sticky = rem != 0;
+
+        let bump_up = match mode {
+            HalfEven => {
+                if round_digit < 5 {
+                    false
+                } else if round_digit > 5 {
+                    true
+                } else if sticky {
+                    // Exactly-half-plus-residue ⇒ strictly more
+                    // than half ⇒ round up.
+                    true
+                } else {
+                    // Exact half ⇒ round to even (bump if kept odd).
+                    (kept % 2) != 0
+                }
+            }
+            HalfUp => {
+                if round_digit < 5 {
+                    false
+                } else if round_digit > 5 {
+                    true
+                } else {
+                    // round_digit == 5: bump up if sticky OR
+                    // unconditionally per HalfUp policy.
+                    true
+                }
+            }
+            HalfDown => {
+                if round_digit < 5 {
+                    false
+                } else if round_digit > 5 {
+                    true
+                } else {
+                    // round_digit == 5: bump up only if sticky
+                    // (the exact result is > half).
+                    sticky
+                }
+            }
+            Truncate => false,
+        };
+
+        if bump_up {
+            kept = match checked_add(kept, 1) {
+                Some(v) => v,
+                None    => return Err(DecimalError.Overflow { op: "div".clone() }),
+            };
+        }
+
+        let signed = if neg { -kept } else { kept };
+        Ok(Decimal { coefficient: signed, scale: precision })
+    }
+
+    /// Convenience: divide with default banker's rounding (HalfEven).
+    /// Most financial / scientific code wants this.
+    public fn div_round(
+        &self,
+        other: &Decimal,
+        precision: Int,
+    ) -> Result<Decimal, DecimalError> {
+        self.div(other, precision, HalfEven)
+    }
+
+    /// Integer quotient: `floor_towards_zero(self / other)`.
+    /// Returns a Decimal at scale=0.  Equivalent to
+    /// `self.div(other, 0, Truncate)` but skips the rounding
+    /// branch for clarity.
+    public fn div_trunc(&self, other: &Decimal) -> Result<Decimal, DecimalError> {
+        self.div(other, 0, Truncate)
     }
 
     // -------------------------------------------------------------------------
@@ -456,6 +642,17 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
 /// Align two decimals to a common scale (the larger of the two).
 /// Returns `(a_coef_aligned, b_coef_aligned, common_scale)` or
 /// Overflow if the alignment multiplication exceeds i64 range.
+/// Absolute value of an i64 with safe handling of i64::MIN.  The
+/// canonical `-x` of i64::MIN overflows back to itself; for div's
+/// magnitude extraction we need a graceful path.  V0 saturates at
+/// i64::MAX in the degenerate i64::MIN case — div with i64::MIN
+/// dividend would already overflow at the `× 10` step anyway, so
+/// this saturation is unobservable in practice.
+fn abs_int(x: Int) -> Int {
+    let i64_min: Int = -9223372036854775807 - 1;
+    if x == i64_min { 9223372036854775807 } else if x < 0 { -x } else { x }
+}
+
 fn align_scales(a: &Decimal, b: &Decimal) -> Result<(Int, Int, Int), DecimalError> {
     if a.scale == b.scale {
         return Ok((a.coefficient, b.coefficient, a.scale));
