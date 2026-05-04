@@ -206,11 +206,57 @@ impl<'s> CompilationPipeline<'s> {
         let src_root = src_root.to_path_buf();
 
         while let Some((current_module, current_path)) = work_queue.pop() {
-            // Extract import paths from the module
+            // Collect every module path this file pulls in transitively:
+            //
+            //   1. `mount foo.bar`              → extract via mount-tree walker
+            //   2. `public module X;`           → sibling file at same dir
+            //      (or `module X;` — visibility doesn't matter for loading;
+            //       any sibling declaration triggers a load so the
+            //       single-file checker can resolve cross-module types
+            //       declared via `module X;` in mod.vr).  Inline modules
+            //       (`module X { ... }`) carry their own items and don't
+            //       need a separate file load.
+            //
+            // Without (2) the single-file `verum check` mode would miss
+            // every type declared in a sibling module that the entry
+            // file's mod.vr just registers — surfaces as phantom
+            // "type not found" diagnostics for any signature
+            // referencing those types.  Closes the long-standing
+            // single-file resolver gap (see feedback memory
+            // `feedback_verum_check_single_file_2026-05-04.md`).
+            let mut pending_imports: Vec<String> = Vec::new();
             for item in &current_module.items {
-                if let ItemKind::Mount(import) = &item.kind {
-                    // Extract the base module path from the import
-                    let import_path = self.extract_import_module_path(&import.tree.kind);
+                match &item.kind {
+                    ItemKind::Mount(import) => {
+                        pending_imports
+                            .push(self.extract_import_module_path(&import.tree.kind));
+                    }
+                    ItemKind::Module(module_decl) if module_decl.items.is_none() => {
+                        // Sibling-module declaration: synthesise its
+                        // dotted path by appending the declared name
+                        // to the current file's module path.
+                        let name = module_decl.name.name.as_str();
+                        let sibling_path = if current_path.is_empty() {
+                            name.to_string()
+                        } else {
+                            format!("{}.{}", current_path, name)
+                        };
+                        pending_imports.push(sibling_path);
+                    }
+                    _ => {}
+                }
+            }
+
+            // Process each pending import path: resolve to a file,
+            // parse, register exports/contexts, and queue for transitive
+            // resolution.
+            for import_path in pending_imports {
+                {
+                    // Block scope keeps the diff to existing code minimal:
+                    // the original loop body is preserved verbatim, only
+                    // the source of `import_path` changed (was extracted
+                    // from `import.tree.kind` per Mount item, now drawn
+                    // from the unified `pending_imports` list).
 
                     // Determine the base directory for the import
                     // Determine if this is a stdlib import by checking if the
