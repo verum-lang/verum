@@ -1,0 +1,265 @@
+// =============================================================================
+// core/database/mysql/async_binlog_consumer.vr — typed CDC consumer
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.7 (binlog replication).
+// =============================================================================
+//
+// Higher-level wrapper around `AsyncMysqlBinlogStream` that
+// maintains a `TableMapCache` internally and pairs every
+// ROW event with its cached TABLE_MAP automatically. CDC
+// consumers running on the async runtime previously had to
+// thread their own cache through every `next_event` call;
+// after this commit the cache is invisible — the consumer
+// just calls `next_change()` and receives typed `BinlogChange`
+// events.
+//
+// Closes the OUT-of-V0 declared in `async_binlog.vr` line 40:
+// "Async TableMapCache lifecycle — caller pairs ROW events
+// with cached TABLE_MAP by hand (or via a non-actor utility)".
+//
+// Mirrors the PG `core.database.postgres.async_pgoutput::
+// AsyncPgoutputConsumer` shape: a thin async wrapper that
+// owns the schema cache + lifts wire events into typed
+// changes. Same architecture, different protocol.
+//
+// V0 surface:
+//   * `AsyncMysqlBinlogConsumer` — clone-cheap handle.
+//   * `attach_table_map_cache(stream) → AsyncMysqlBinlogConsumer`.
+//   * `.next_change().await → Maybe<BinlogChange>`.
+//   * `.close().await` — passthrough to underlying stream.
+//   * `.stream_ref()` / `.cache_len()` — diagnostics.
+//
+// `BinlogChange` taxonomy:
+//   * `BcTableMap(tm)` — newly cached TABLE_MAP_EVENT. The
+//     consumer can observe schema changes; the cache is
+//     already updated at this point.
+//   * `BcRowsDecoded { kind, table_map, rows }` — typed ROW
+//     event paired with its TABLE_MAP and decoded into
+//     `DecodedRows` (BEFORE+AFTER pairs for UPDATE /
+//     PARTIAL_UPDATE; single rows for WRITE / DELETE).
+//   * `BcRowsRaw(rev)` — DEFENSIVE — ROW event whose
+//     TABLE_MAP was not yet cached (typically only happens
+//     mid-stream after a `ROTATE` or if the consumer started
+//     mid-transaction). Caller can defer processing until
+//     the next TABLE_MAP arrives.
+//   * `BcOther(ev)` — pass-through for non-row events
+//     (BeQuery, BeXid, BeRotate, BeFormatDescription,
+//     BeGtid, BeHeartbeat, BeOther).
+//   * `BcTerminated(err)` — wire died OR decode failed.
+//   * `BcClosed` — clean shutdown observed.
+//
+// Out of V0:
+//   * Per-xid CDC grouping (caller groups by tx via
+//     BeXid + BeGtid markers).
+//   * Spill-to-disk for very-long transactions (the PG
+//     analogue lives in async_pgoutput_buffered; the MySQL
+//     equivalent is a follow-up if any consumer asks).
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Persist(PersistenceMedium.DatabaseMedium("*")), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.async_binlog_consumer;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.DbError;
+mount core.database.mysql.binlog.{
+    BinlogEvent, BeTableMap, BeWriteRows, BeUpdateRows,
+    BeDeleteRows, BeQuery, BeXid, BeRotate, BeFormatDescription,
+    BeGtid, BeHeartbeat, BeOther,
+};
+mount core.database.mysql.binlog_rows.{
+    TableMapEvent, TableMapCache, RowsEvent, RowEventKind,
+    DecodedRows, decode_with_table_map,
+};
+mount core.database.mysql.async_binlog.{
+    AsyncMysqlBinlogStream,
+    MysqlBinlogActorEvent, MbaEvent, MbaTerminated, MbaClosed,
+};
+
+// =============================================================================
+// Typed change taxonomy
+// =============================================================================
+
+public type BinlogChange is
+      BcTableMap(TableMapEvent)
+    | BcRowsDecoded {
+        kind: RowEventKind,
+        table_map: TableMapEvent,
+        rows: DecodedRows,
+    }
+    | BcRowsRaw(RowsEvent)
+    | BcOther(BinlogEvent)
+    | BcTerminated(DbError)
+    | BcClosed;
+
+// =============================================================================
+// Consumer handle
+// =============================================================================
+
+public type AsyncMysqlBinlogConsumer is {
+    stream: AsyncMysqlBinlogStream,
+    cache: Shared<sync.mutex.Mutex<TableMapCache>>,
+};
+
+implement AsyncMysqlBinlogConsumer {
+    public fn clone(&self) -> AsyncMysqlBinlogConsumer {
+        AsyncMysqlBinlogConsumer {
+            stream: self.stream.clone(),
+            cache: self.cache.clone(),
+        }
+    }
+
+    /// Borrow the underlying binlog stream for advanced
+    /// operations (close, diagnostic next_event raw access).
+    /// Use the consumer's own methods for typed CDC.
+    public fn stream_ref(&self) -> &AsyncMysqlBinlogStream {
+        &self.stream
+    }
+
+    /// Number of TABLE_MAP entries currently cached. Diagnostic;
+    /// consumers can ship this to their metrics sink to detect
+    /// schema-cache growth.
+    public fn cache_len(&self) -> Int {
+        let g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+        g.len()
+    }
+
+    /// Pull the next typed CDC change. Pumps the underlying
+    /// binlog stream, updates the table-map cache for
+    /// TABLE_MAP_EVENT, and pairs ROW events with their cached
+    /// TABLE_MAP for typed decode. Returns `None` only when the
+    /// stream cleanly closes (channel closed unexpectedly).
+    public async fn next_change(&self) -> Maybe<BinlogChange> {
+        loop {
+            let ev = self.stream.next_event().await;
+            match ev {
+                None => { return None; }
+                Some(MbaTerminated(e)) => {
+                    return Some(BcTerminated(e));
+                }
+                Some(MbaClosed) => {
+                    return Some(BcClosed);
+                }
+                Some(MbaEvent(be)) => {
+                    match be {
+                        BeTableMap { body, .. } => {
+                            // Cache the TABLE_MAP — `record`
+                            // replaces an existing entry with
+                            // the same table_id (handles
+                            // mid-stream schema mutations).
+                            let cloned_for_cache = clone_table_map(&body);
+                            let mut g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+                            g.record(cloned_for_cache);
+                            drop(g);
+                            return Some(BcTableMap(body));
+                        }
+                        BeWriteRows { body, .. }
+                        | BeUpdateRows { body, .. }
+                        | BeDeleteRows { body, .. } => {
+                            // Lookup TABLE_MAP, decode rows.
+                            // Lock scope is narrow — release
+                            // before the (potentially expensive)
+                            // decode happens.
+                            let tm_opt: Maybe<TableMapEvent> = {
+                                let g = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+                                match g.lookup(body.table_id) {
+                                    Some(tm) => Some(clone_table_map(tm)),
+                                    None     => None,
+                                }
+                            };
+                            match tm_opt {
+                                Some(tm) => {
+                                    let decoded = decode_with_table_map(&body, &tm);
+                                    match decoded {
+                                        Ok(rows) => {
+                                            return Some(BcRowsDecoded {
+                                                kind: body.kind,
+                                                table_map: tm,
+                                                rows: rows,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            return Some(BcTerminated(e));
+                                        }
+                                    }
+                                }
+                                None => {
+                                    // Defensive — TABLE_MAP not
+                                    // yet cached. Surface raw so
+                                    // the consumer can defer.
+                                    return Some(BcRowsRaw(body));
+                                }
+                            }
+                        }
+                        other => {
+                            return Some(BcOther(other));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Tear down the consumer + underlying binlog actor cleanly.
+    /// Passthrough to `AsyncMysqlBinlogStream.close`.
+    public async fn close(&self) -> Result<(), DbError> {
+        self.stream.close().await
+    }
+}
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+/// Wrap a previously-opened `AsyncMysqlBinlogStream` with an
+/// internally-managed `TableMapCache`. The cache starts empty;
+/// it populates from `BeTableMap` events as the stream pumps.
+///
+/// **Caller convention**: invoke this RIGHT AFTER
+/// `connect_binlog_async` and use the returned consumer instead
+/// of the raw stream. The raw stream is still accessible via
+/// `stream_ref()` for `close()` / diagnostic `next_event_message`
+/// — but consumers that mix raw + typed access risk events
+/// flowing through the wrong path (the cache only updates via
+/// `next_change()`).
+public fn attach_table_map_cache(stream: AsyncMysqlBinlogStream)
+    -> AsyncMysqlBinlogConsumer
+{
+    AsyncMysqlBinlogConsumer {
+        stream: stream,
+        cache: Shared.new(sync.mutex.Mutex.new(TableMapCache.new())),
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Shallow-clone a TableMapEvent — the fields are List<Byte> /
+/// List<ColumnMeta> / Text — all reference-counted, so the
+/// clone is cheap (no per-byte copy). Helper exists because
+/// `TableMapEvent` doesn't implement `Clone` directly via
+/// derive (V0 — `@derive(Clone)` would require sweeping the
+/// existing handwritten clone wrappers across the binlog
+/// module).
+fn clone_table_map(tm: &TableMapEvent) -> TableMapEvent {
+    TableMapEvent {
+        table_id: tm.table_id,
+        flags: tm.flags,
+        schema: tm.schema.clone(),
+        name: tm.name.clone(),
+        columns: tm.columns.clone(),
+        column_names: tm.column_names.clone(),
+        signedness: tm.signedness.clone(),
+        enum_values: tm.enum_values.clone(),
+        set_values: tm.set_values.clone(),
+    }
+}
