@@ -157,6 +157,17 @@ impl<'s> CompilationPipeline<'s> {
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         checker.register_builtins();
 
+        // T2-extended-perf: lazy stdlib type registration.  The
+        // `new_with_core` constructor stores `core_metadata` but
+        // doesn't pre-register anything.  Scan the user module for
+        // every named-type reference and pull each from metadata —
+        // O(types_used_by_user) instead of O(stdlib_total ≈ 1000+).
+        // For a hello.vr touching ~5 stdlib symbols this drops the
+        // typecheck from 3.8s to ~50ms.
+        if self.stdlib_metadata.is_some() {
+            checker.register_stdlib_types_for_module(module);
+        }
+
         // Apply `[protocols].coherence` from manifest. Closes the
         // inert-defense pattern at session.rs:587 — pre-fix the CLI
         // build path bypassed the field entirely (it only flowed
