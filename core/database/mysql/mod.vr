@@ -52,6 +52,7 @@ public module json_binary;
 public module async_load_data;
 public module wkb_decoder;
 public module async_prepared_session;
+public module typed_prepared;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -105,6 +106,10 @@ public mount .async_prepared_session.{
     AsyncMysqlPreparedSession,
     MY_ER_UNKNOWN_STMT_HANDLER as ASYNC_MY_ER_UNKNOWN_STMT_HANDLER,
 };
+public mount .typed_prepared.{
+    typed_prepared_row, typed_prepared_rows,
+};
+public mount .binlog_rows.decode_value_for_type as decode_mysql_binary_value;
 public mount .async_pool.{
     AsyncMysqlPool, AsyncMysqlPoolConfig, AsyncMysqlPoolGuard,
 };
