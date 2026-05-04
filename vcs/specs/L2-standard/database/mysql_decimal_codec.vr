@@ -23,11 +23,11 @@ mount collections.List;
 mount core.database.common.error.DbError;
 mount core.database.common.types.ArenaWireBuf;
 mount core.database.common.arena.SpindleArena;
-mount core.text.numeric.Decimal;
+mount core.text.numeric.{Decimal, BigDecimal};
 mount core.database.mysql.{
     mysql_decimal_byte_length,
-    decode_mysql_decimal,
-    encode_mysql_decimal,
+    decode_mysql_decimal, decode_mysql_decimal_to_bigdecimal,
+    encode_mysql_decimal, encode_mysql_decimal_from_bigdecimal,
 };
 
 fn check_byte_length() {
@@ -67,6 +67,24 @@ fn check_encode_signature(
     scale: Int,
 ) -> Bool {
     encode_mysql_decimal(buf, arena, value, precision, scale)
+}
+
+fn check_encode_bigdecimal_signature(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    value: &BigDecimal,
+    precision: Int,
+    scale: Int,
+) -> Bool {
+    encode_mysql_decimal_from_bigdecimal(buf, arena, value, precision, scale)
+}
+
+fn check_decode_to_bigdecimal_signature(
+    buf: &[Byte],
+    precision: Int,
+    scale: Int,
+) -> Result<BigDecimal, DbError> {
+    decode_mysql_decimal_to_bigdecimal(buf, precision, scale)
 }
 
 fn main() {

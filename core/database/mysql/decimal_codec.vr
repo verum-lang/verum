@@ -82,7 +82,7 @@ mount core.intrinsics.runtime.mem_raw.store_byte;
 mount core.database.common.error.{DbError, EncodeFault};
 mount core.database.common.arena.SpindleArena;
 mount core.database.common.types.ArenaWireBuf;
-mount core.text.numeric.{Decimal, parse_decimal};
+mount core.text.numeric.{Decimal, parse_decimal, BigDecimal, parse_bigdecimal};
 mount core.database.mysql.binlog_rows.decode_newdecimal_to_text;
 
 // =============================================================================
@@ -178,6 +178,83 @@ public fn encode_mysql_decimal(
     precision: Int,
     scale: Int,
 ) -> Bool {
+    let coef_text = if value.coefficient == 0 {
+        "0".clone()
+    } else {
+        Text.from_int(value.abs().coefficient)
+    };
+    encode_mysql_decimal_from_parts(
+        buf, arena,
+        value.is_negative(), &coef_text, value.scale,
+        precision, scale,
+    )
+}
+
+/// Encode an arbitrary-precision `BigDecimal` value as MySQL DECIMAL
+/// binary at the requested `(precision, scale)`.  Removes the i64
+/// coefficient cap from `encode_mysql_decimal` — supports the full
+/// MySQL DECIMAL range (precision up to 65 per MySQL's documented
+/// bound).  Composes through the shared `encode_mysql_decimal_from_
+/// parts` (single source of truth).
+public fn encode_mysql_decimal_from_bigdecimal(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    value: &BigDecimal,
+    precision: Int,
+    scale: Int,
+) -> Bool {
+    let coef_text = if value.is_zero() {
+        "0".clone()
+    } else {
+        value.coefficient.abs().to_text()
+    };
+    encode_mysql_decimal_from_parts(
+        buf, arena,
+        value.is_negative(), &coef_text, value.scale,
+        precision, scale,
+    )
+}
+
+/// Decode a MySQL DECIMAL wire payload into an arbitrary-precision
+/// `BigDecimal` value.  V0 reuses the existing `decode_newdecimal_
+/// to_text` text path then pipes the canonical decimal text through
+/// `parse_bigdecimal`.  Single-source-of-truth: a fix to either
+/// the wire decoder or the text path reaches this entry
+/// automatically.
+public fn decode_mysql_decimal_to_bigdecimal(
+    buf: &[Byte],
+    precision: Int,
+    scale: Int,
+) -> Result<BigDecimal, DbError> {
+    let needed = mysql_decimal_byte_length(precision, scale);
+    if (buf.len() as Int) < needed {
+        return Err(decode_err(
+            f"mysql DECIMAL: short payload (need {needed}b, have {buf.len() as Int}b)"
+        ));
+    }
+    let text = decode_newdecimal_to_text(buf, precision, scale);
+    match parse_bigdecimal(&text) {
+        Ok(bd) => Ok(bd),
+        Err(_) => Err(decode_err(
+            f"mysql DECIMAL: text->BigDecimal reparse failed for '{text}' (precision={precision}, scale={scale})"
+        )),
+    }
+}
+
+/// Shared MySQL DECIMAL wire-form encoder driven by `(neg, coef_text,
+/// value_scale, precision, target_scale)`.  Both `encode_mysql_decimal`
+/// (i64 coefficient) and `encode_mysql_decimal_from_bigdecimal` (BigInt
+/// coefficient) converge here — the only upstream difference is HOW
+/// the magnitude digit text is rendered.
+fn encode_mysql_decimal_from_parts(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    neg: Bool,
+    coef_text: &Text,
+    value_scale: Int,
+    precision: Int,
+    scale: Int,
+) -> Bool {
     if precision <= 0 || scale < 0 || scale > precision { return false; }
 
     // Adjust value's scale to match target.  Truncation is towards
@@ -187,22 +264,13 @@ public fn encode_mysql_decimal(
     let intg_target = precision - scale;
     let frac_target = scale;
 
-    let neg = value.is_negative();
-    let abs_value = value.abs();
-
-    // Render abs(coefficient) as MS-first decimal digits.
-    let coef_text = if abs_value.coefficient == 0 {
-        "0".clone()
-    } else {
-        Text.from_int(abs_value.coefficient)
-    };
     let coef_bytes = coef_text.as_bytes();
     let coef_len = coef_bytes.len() as Int;
 
-    // Position the implicit decimal point at `coef_len - value.scale`.
-    let value_int_len = if coef_len > value.scale { coef_len - value.scale } else { 0 };
-    let value_frac_lead_zeros = if value.scale > coef_len { value.scale - coef_len } else { 0 };
-    let value_frac_emitted = if value.scale > coef_len { coef_len } else { value.scale };
+    // Position the implicit decimal point at `coef_len - value_scale`.
+    let value_int_len = if coef_len > value_scale { coef_len - value_scale } else { 0 };
+    let value_frac_lead_zeros = if value_scale > coef_len { value_scale - coef_len } else { 0 };
+    let value_frac_emitted = if value_scale > coef_len { coef_len } else { value_scale };
 
     // Build full digit sequences for the target column.
 
