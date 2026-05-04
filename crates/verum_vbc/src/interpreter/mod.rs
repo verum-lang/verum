@@ -71,6 +71,7 @@ mod registers;
 mod stack;
 mod state;
 pub mod tensor;
+pub mod worker_pool;
 
 pub use registers::RegisterFile;
 pub use stack::{CallFrame, CallStack};
@@ -107,6 +108,9 @@ pub use dispatch_table::{
     DispatchResult, dispatch_loop_table, dispatch_loop_table_with_entry_depth,
 };
 pub use heap::{Heap, HeapStats, OBJECT_HEADER_SIZE, Object, ObjectFlags, ObjectHeader};
+// Tier-0 work-stealing thread pool — `T-DEFER-VBC-EXEC-MT` V0
+// foundation; see `worker_pool.rs` module-level docs.
+pub use worker_pool::{SubmitError, WorkItem, WorkerPool};
 // Permission router for intrinsic gating (#12 / P3.2).
 pub use permission::{
     PermissionDecision, PermissionRouter, PermissionRouterStats, PermissionScope,
