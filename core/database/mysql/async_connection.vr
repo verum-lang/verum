@@ -45,8 +45,11 @@ mount core.database.common.error.{
     DbError, AdapterId, AdMysql, AdapterSpecific,
 };
 mount core.database.mysql.connection.{
-    MysqlConnection, MySimpleQueryResult, connect as sync_connect,
+    MysqlConnection, MySimpleQueryResult,
+    MysqlPreparedStatement, MysqlPreparedResult,
+    connect as sync_connect,
 };
+mount core.database.mysql.wire.frontend.StmtParam;
 mount core.database.mysql.config.MysqlConfig;
 mount core.async.channel.{
     Sender, Receiver, OneshotSender,
@@ -109,6 +112,24 @@ public type MysqlRequest is
         sql: Text,
         chunk_rx: Receiver<LoadDataChunk>,
         ack: OneshotSender<Result<(), DbError>>,
+    }
+    /// COM_STMT_PREPARE — server-side prepared statement.
+    /// Reply carries the handle (statement_id + param/column
+    /// metadata). Caller passes via execute_prepared.
+    | MyReqPrepare {
+        sql: Text,
+        reply: OneshotSender<Result<MysqlPreparedStatement, DbError>>,
+    }
+    /// COM_STMT_EXECUTE.
+    | MyReqExecutePrepared {
+        stmt: MysqlPreparedStatement,
+        params: List<StmtParam>,
+        reply: OneshotSender<Result<MysqlPreparedResult, DbError>>,
+    }
+    /// COM_STMT_CLOSE — frees the server-side statement_id.
+    | MyReqClosePrepared {
+        stmt: MysqlPreparedStatement,
+        reply: OneshotSender<Result<(), DbError>>,
     }
     | MyReqShutdown {
         reply: OneshotSender<Result<(), DbError>>,
@@ -324,6 +345,87 @@ implement AsyncMysqlConnection {
         }
         Ok(())
     }
+
+    /// COM_STMT_PREPARE — server-side prepared statement.
+    /// Returns a handle that's valid for the lifetime of this
+    /// connection; caller MUST `close_prepared` to release the
+    /// server-side slot before the connection ends.
+    public async fn prepare(&self, sql: &Text)
+        -> Result<AsyncMysqlPreparedStatement, DbError>
+    {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(MyReqPrepare {
+            sql: sql.clone(),
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("prepare")); }
+        }
+        match rr.await {
+            Ok(Ok(stmt)) => Ok(AsyncMysqlPreparedStatement { inner: stmt }),
+            Ok(Err(e))   => Err(e),
+            Err(_)       => Err(actor_dropped("prepare reply")),
+        }
+    }
+
+    /// COM_STMT_EXECUTE — bind params + run. Returns the
+    /// binary-protocol payload (rows + affected_rows).
+    public async fn execute_prepared(
+        &self,
+        stmt: &AsyncMysqlPreparedStatement,
+        params: List<StmtParam>,
+    ) -> Result<MysqlPreparedResult, DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(MyReqExecutePrepared {
+            stmt: stmt.inner.clone(),
+            params: params,
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("execute_prepared")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("execute_prepared reply")),
+        }
+    }
+
+    /// COM_STMT_CLOSE — frees the server-side slot.
+    public async fn close_prepared(&self, stmt: AsyncMysqlPreparedStatement)
+        -> Result<(), DbError>
+    {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(MyReqClosePrepared {
+            stmt: stmt.inner,
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("close_prepared")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("close_prepared reply")),
+        }
+    }
+}
+
+// =============================================================================
+// Async prepared-statement handle
+// =============================================================================
+
+/// Async wrapper over the sync MysqlPreparedStatement. Holds the
+/// server-allocated statement_id + descriptor so the actor can
+/// dispatch execute/close requests by value. Plain (not affine)
+/// — caller MUST call `close_prepared` to free the slot.
+public type AsyncMysqlPreparedStatement is {
+    inner: MysqlPreparedStatement,
+};
+
+implement AsyncMysqlPreparedStatement {
+    public fn inner(&self) -> &MysqlPreparedStatement { &self.inner }
+    public fn statement_id(&self) -> Int { self.inner.statement_id }
+    public fn num_params(&self) -> Int { self.inner.num_params }
+    public fn num_columns(&self) -> Int { self.inner.num_columns }
 }
 
 // =============================================================================
@@ -438,6 +540,18 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
             }
             MyReqLoadDataLocalOpen { sql, chunk_rx, ack } => {
                 run_load_data_subloop(&mut conn, &sql, chunk_rx, ack);
+            }
+            MyReqPrepare { sql, reply } => {
+                let r = conn.prepare(&sql);
+                let _ = reply.send(r);
+            }
+            MyReqExecutePrepared { stmt, params, reply } => {
+                let r = conn.execute_prepared(&stmt, &params);
+                let _ = reply.send(r);
+            }
+            MyReqClosePrepared { stmt, reply } => {
+                let r = conn.close_prepared(&stmt);
+                let _ = reply.send(r);
             }
             MyReqShutdown { reply } => {
                 let r = conn.close();

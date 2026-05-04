@@ -51,6 +51,7 @@ public module typed_row;
 public module json_binary;
 public module async_load_data;
 public module wkb_decoder;
+public module async_prepared_session;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -97,8 +98,12 @@ public mount .transaction.{
     with_transaction, with_transaction_serializable,
 };
 public mount .async_connection.{
-    AsyncMysqlConnection,
+    AsyncMysqlConnection, AsyncMysqlPreparedStatement,
     connect as async_mysql_connect,
+};
+public mount .async_prepared_session.{
+    AsyncMysqlPreparedSession,
+    MY_ER_UNKNOWN_STMT_HANDLER as ASYNC_MY_ER_UNKNOWN_STMT_HANDLER,
 };
 public mount .async_pool.{
     AsyncMysqlPool, AsyncMysqlPoolConfig, AsyncMysqlPoolGuard,

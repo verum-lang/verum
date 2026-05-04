@@ -1,0 +1,223 @@
+// =============================================================================
+// core/database/mysql/async_prepared_session.vr — async LRU prepared session
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.4 (binary protocol prepared cache).
+// =============================================================================
+//
+// Mirror of `core/database/postgres/pg_prepared_session.vr` for
+// MySQL. Sync `prepared.vr::PreparedSession` already wraps the
+// MysqlStmtCache LRU; this module's job is to provide the same
+// shape over the async actor surface and dispatch through the
+// AsyncMysqlConnection.
+//
+// State lives caller-side (per AsyncMysqlConnection — server-side
+// statement_id is session-scoped). Caller is expected to
+// `drain_cache_on_close(conn).await` before connection close to
+// release server-side slots; otherwise they leak until session
+// end.
+//
+// Auto-invalidate-and-retry:
+//   On MySQL ER_UNKNOWN_STMT_HANDLER (1243) — the server forgot
+//   the slot (e.g. after stmt-cache eviction on the server side
+//   or DDL invalidating a plan) — drop the cache entry, re-
+//   prepare, and retry the execute once. Mirror of sync
+//   PreparedSession::query_cached recovery.
+// =============================================================================
+
+@arch_module(
+    exposes: [Capability.Read(ResourceTag.Database("*")), Capability.Write(ResourceTag.Database("*"))],
+    requires: [Capability.Network(NetProtocol.Tcp, NetDirection.Bidirectional)],
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.database.mysql.async_prepared_session;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.connection.{
+    MysqlPreparedStatement, MysqlPreparedResult,
+};
+mount core.database.mysql.async_connection.{
+    AsyncMysqlConnection, AsyncMysqlPreparedStatement,
+};
+mount core.database.mysql.wire.frontend.StmtParam;
+mount core.database.mysql.stmt_cache.{
+    MysqlStmtCache, MysqlStmtCacheMetrics,
+    DEFAULT_MYSQL_STMT_CACHE_CAP,
+    fingerprint as compute_fingerprint,
+};
+
+// =============================================================================
+// MySQL ER_UNKNOWN_STMT_HANDLER constant
+// =============================================================================
+
+/// Server-side prepared statement vanished (e.g. after stmt-cache
+/// eviction on the server side or DDL invalidating a plan).
+/// Maps to MySQL errno 1243. Cache entry must be dropped and
+/// the call retried with a fresh prepare.
+public const MY_ER_UNKNOWN_STMT_HANDLER: Int = 1243;
+
+// =============================================================================
+// Async session
+// =============================================================================
+
+public type AsyncMysqlPreparedSession is {
+    cache: MysqlStmtCache,
+};
+
+implement AsyncMysqlPreparedSession {
+    public fn new() -> AsyncMysqlPreparedSession {
+        AsyncMysqlPreparedSession { cache: MysqlStmtCache.new() }
+    }
+
+    public fn with_cache_cap(cap: Int) -> AsyncMysqlPreparedSession {
+        AsyncMysqlPreparedSession { cache: MysqlStmtCache.with_cap(cap) }
+    }
+
+    public fn cache_metrics(&self) -> MysqlStmtCacheMetrics {
+        self.cache.metrics()
+    }
+
+    public fn cache_len(&self) -> Int { self.cache.len() }
+    public fn cache_cap(&self) -> Int { self.cache.cap() }
+
+    /// Cache-aware prepare. On miss invokes `conn.prepare`; on
+    /// cap overflow Closes the evicted statement on the wire.
+    public async fn prepare_cached(
+        &mut self,
+        conn: &AsyncMysqlConnection,
+        sql: &Text,
+    ) -> Result<AsyncMysqlPreparedStatement, DbError> {
+        let fp = compute_fingerprint(sql);
+        match self.cache.lookup(fp) {
+            Some(stmt) => Ok(AsyncMysqlPreparedStatement { inner: stmt }),
+            None => {
+                let astmt = conn.prepare(sql).await?;
+                let evicted = self.cache.insert(fp, clone_stmt(astmt.inner()));
+                match evicted {
+                    Some(old) => {
+                        let evicted_handle = AsyncMysqlPreparedStatement { inner: old };
+                        let _ = conn.close_prepared(evicted_handle).await;
+                    }
+                    None => {}
+                }
+                Ok(astmt)
+            }
+        }
+    }
+
+    /// Cache-aware execute. On ER_UNKNOWN_STMT_HANDLER (1243)
+    /// drops cache entry + retries once with a fresh prepare.
+    public async fn query_cached(
+        &mut self,
+        conn: &AsyncMysqlConnection,
+        sql: &Text,
+        params: List<StmtParam>,
+    ) -> Result<MysqlPreparedResult, DbError> {
+        let fp = compute_fingerprint(sql);
+        let stmt = self.prepare_cached(conn, sql).await?;
+        let params_clone = params.clone();
+        match conn.execute_prepared(&stmt, params).await {
+            Ok(r)  => Ok(r),
+            Err(e) => {
+                if is_unknown_stmt_handler(&e) {
+                    let _ = self.cache.invalidate(fp);
+                    let fresh = self.prepare_cached(conn, sql).await?;
+                    conn.execute_prepared(&fresh, params_clone).await
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    public fn invalidate(&mut self, sql: &Text) -> Bool {
+        let fp = compute_fingerprint(sql);
+        self.cache.invalidate(fp).is_some()
+    }
+
+    public fn clear_cache_no_close(&mut self) {
+        let _ = self.cache.drain();
+    }
+
+    /// Close every cached statement on the wire BEFORE COM_QUIT.
+    /// Reduces server-side `Com_stmt_count` immediately + releases
+    /// per-statement memory before TCP close-wait. Returns the
+    /// count of statements closed.
+    public async fn drain_cache_on_close(
+        &mut self,
+        conn: &AsyncMysqlConnection,
+    ) -> Int {
+        let drained = self.cache.drain();
+        let mut closed: Int = 0;
+        let mut i: Int = 0;
+        while i < (drained.len() as Int) {
+            let h = AsyncMysqlPreparedStatement { inner: drained[i].clone() };
+            let _ = conn.close_prepared(h).await;
+            closed = closed + 1;
+            i = i + 1;
+        }
+        closed
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn clone_stmt(s: &MysqlPreparedStatement) -> MysqlPreparedStatement {
+    MysqlPreparedStatement {
+        statement_id: s.statement_id,
+        num_params: s.num_params,
+        num_columns: s.num_columns,
+        param_types: s.param_types.clone(),
+        column_types: s.column_types.clone(),
+        sql: s.sql.clone(),
+    }
+}
+
+/// Detect MySQL's ER_UNKNOWN_STMT_HANDLER (1243). Mirror of sync
+/// PreparedSession::is_unknown_stmt_handler — probes the
+/// adapter-specific error text since DbError doesn't carry an
+/// errno field.
+fn is_unknown_stmt_handler(e: &DbError) -> Bool {
+    match e {
+        DbError.QueryFailed { message, .. } => {
+            text_contains_errno(message, MY_ER_UNKNOWN_STMT_HANDLER)
+        }
+        DbError.Adapter(a) => {
+            text_contains_errno(&a.message, MY_ER_UNKNOWN_STMT_HANDLER)
+        }
+        _ => false,
+    }
+}
+
+fn text_contains_errno(t: &Text, code: Int) -> Bool {
+    let needle = f"Error {code}";
+    let bytes = t.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let n = bytes.len() as Int;
+    let m = needle_bytes.len() as Int;
+    if m == 0 || m > n { return false; }
+    let mut i: Int = 0;
+    while i + m <= n {
+        let mut j: Int = 0;
+        let mut all_match: Bool = true;
+        while j < m {
+            if bytes[i + j] != needle_bytes[j] {
+                all_match = false;
+                break;
+            }
+            j = j + 1;
+        }
+        if all_match { return true; }
+        i = i + 1;
+    }
+    false
+}
