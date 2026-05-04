@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: database, mysql, spindle, codec, decimal
+// @timeout: 30000
+//
+// Type-check exercise for the MySQL DECIMAL binary codec — the
+// symmetric counterpart to PG NUMERIC.  Validates:
+//
+//   * `mysql_decimal_byte_length(precision, scale) -> Int` —
+//     wire-byte width helper.
+//   * `decode_mysql_decimal(&[Byte], precision, scale) ->
+//     Result<Decimal, DbError>` — wire → Decimal.
+//   * `encode_mysql_decimal(buf, arena, &Decimal, precision, scale)
+//     -> Bool` — Decimal → wire.
+//   * Composition with `core.text.numeric.decimal.Decimal` (same
+//     Decimal value type used by the PG NUMERIC codec — cross-
+//     adapter user code can round-trip without going through Text).
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Bool};
+mount collections.List;
+mount core.database.common.error.DbError;
+mount core.database.common.types.ArenaWireBuf;
+mount core.database.common.arena.SpindleArena;
+mount core.text.numeric.Decimal;
+mount core.database.mysql.{
+    mysql_decimal_byte_length,
+    decode_mysql_decimal,
+    encode_mysql_decimal,
+};
+
+fn check_byte_length() {
+    // DECIMAL(10, 3): integer = 7 digits, fractional = 3 digits.
+    //   intg_full = 0, intg_frac = 7 ⇒ 4 bytes (7-9 digit partial)
+    //   frac_full = 0, frac_frac = 3 ⇒ 2 bytes (3-4 digit partial)
+    //   total = 6 bytes
+    assert(mysql_decimal_byte_length(10, 3) == 6);
+
+    // DECIMAL(18, 9): integer = 9 digits, fractional = 9 digits.
+    //   intg_full = 1, intg_frac = 0 ⇒ 4 bytes
+    //   frac_full = 1, frac_frac = 0 ⇒ 4 bytes
+    //   total = 8 bytes
+    assert(mysql_decimal_byte_length(18, 9) == 8);
+
+    // DECIMAL(20, 0): pure integer, 20 digits.
+    //   intg_full = 2, intg_frac = 2 ⇒ 1 + 8 = 9 bytes
+    //   frac_full = 0, frac_frac = 0 ⇒ 0 bytes
+    //   total = 9 bytes
+    assert(mysql_decimal_byte_length(20, 0) == 9);
+
+    // DECIMAL(1, 0): single digit integer.
+    //   intg_full = 0, intg_frac = 1 ⇒ 1 byte
+    //   total = 1 byte
+    assert(mysql_decimal_byte_length(1, 0) == 1);
+}
+
+fn check_decode_signature(buf: &[Byte], precision: Int, scale: Int) -> Result<Decimal, DbError> {
+    decode_mysql_decimal(buf, precision, scale)
+}
+
+fn check_encode_signature(
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+    value: &Decimal,
+    precision: Int,
+    scale: Int,
+) -> Bool {
+    encode_mysql_decimal(buf, arena, value, precision, scale)
+}
+
+fn main() {
+    check_byte_length();
+}

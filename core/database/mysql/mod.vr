@@ -56,6 +56,7 @@ public module async_prepared_session;
 public module typed_prepared;
 public module gtid;
 public module load_data_csv;
+public module decimal_codec;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -222,4 +223,9 @@ public mount .wkb_decoder.{
     WKB_BO_BIG_ENDIAN, WKB_BO_LITTLE_ENDIAN,
     EWKB_FLAG_Z, EWKB_FLAG_M, EWKB_FLAG_SRID, EWKB_BASE_TYPE_MASK,
     ISO_WKB_Z_OFFSET, ISO_WKB_M_OFFSET, ISO_WKB_ZM_OFFSET,
+};
+public mount .decimal_codec.{
+    mysql_decimal_byte_length,
+    decode_mysql_decimal,
+    encode_mysql_decimal,
 };
