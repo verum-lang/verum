@@ -982,10 +982,11 @@ fn resolve_script_dependencies(
             }
             DepSpec::Long(long) => {
                 let entry = resolve_registry_dep(long.name.as_str(), long.version.as_deref())?;
-                resolver.register_cog(
+                register_resolved_cog(
+                    &mut resolver,
                     long.name.as_str(),
                     entry.version.as_str(),
-                    entry.root.clone(),
+                    &entry,
                 );
                 locked.push(entry.locked);
                 registry_count += 1;
@@ -997,7 +998,12 @@ fn resolve_script_dependencies(
                     ))
                 })?;
                 let entry = resolve_registry_dep(name.as_str(), version_req.as_deref())?;
-                resolver.register_cog(name.as_str(), entry.version.as_str(), entry.root.clone());
+                register_resolved_cog(
+                    &mut resolver,
+                    name.as_str(),
+                    entry.version.as_str(),
+                    &entry,
+                );
                 locked.push(entry.locked);
                 registry_count += 1;
             }
@@ -1061,7 +1067,7 @@ fn resolve_registry_dep(
     name: &str,
     version_req: Option<&str>,
 ) -> Result<ResolvedDepEntry, CliError> {
-    use crate::registry::{cache_manager::CacheManager, client::RegistryClient};
+    use crate::registry::{cache_manager::CacheManager, client::RegistryClient, vbca_fetcher};
 
     let client = RegistryClient::from_manifest()?;
     let cache_dir = crate::registry::cache_dir()?;
@@ -1084,6 +1090,39 @@ fn resolve_registry_dep(
             }
         }
     };
+
+    // Phase 14: VBCA fast-path. When the registry exposes a
+    // precompiled `.vbca` for `(name, version, compiler-version)`,
+    // download it and skip the source-extraction round-trip
+    // entirely. The fetcher is opt-in via `VERUM_PREFER_VBCA=1`
+    // until the registry's build worker (Phase 13) ships and starts
+    // emitting artefacts; with the gate off the call short-circuits
+    // to None and the legacy source path runs unchanged. When the
+    // gate is on AND the registry has a `.vbca`, we get the binary
+    // artefact in one HTTP round-trip, write it to
+    // `~/.verum/cogs/<name>/<version>/<name>-<version>-verum-<compiler>.vbca`,
+    // and return its path as the cog root. The CogResolver-side
+    // dispatcher (`register_cog_vbca`) keys downstream pipeline
+    // selection on this artefact-kind tag.
+    if let Some(vbca_path) = vbca_fetcher::try_resolve_registry_vbca(
+        &cache_dir,
+        crate::registry::DEFAULT_REGISTRY,
+        name,
+        &version,
+    ) {
+        let integrity = compute_vbca_integrity(&vbca_path);
+        let locked = crate::script::lockfile::LockedDep {
+            name: name.to_string(),
+            version: version.clone(),
+            source: format!("registry-vbca+{}", crate::registry::DEFAULT_REGISTRY),
+            integrity,
+        };
+        return Ok(ResolvedDepEntry {
+            root: vbca_path,
+            version,
+            locked,
+        });
+    }
 
     let extracted_root = cache_dir.join(name).join(&version);
     let archive_path = extracted_root.join(format!("{}-{}.tar.gz", name, version));
@@ -1115,6 +1154,50 @@ fn resolve_registry_dep(
         version,
         locked,
     })
+}
+
+/// Dispatch the right `CogResolver::register_*` call based on the
+/// resolved artefact kind — VBCA artefacts (single `.vbca` file
+/// path) go through `register_cog_vbca`; source artefacts (extracted
+/// directory of `.vr` files) go through `register_cog`. The
+/// downstream pipeline checks `CogLocation.artifact_kind` to decide
+/// between source codegen and `VbcLinker::add_archive`.
+fn register_resolved_cog(
+    resolver: &mut verum_modules::cog_resolver::CogResolver,
+    name: &str,
+    version: &str,
+    entry: &ResolvedDepEntry,
+) {
+    let is_vbca = entry.locked.source.starts_with("registry-vbca+")
+        || entry
+            .root
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.eq_ignore_ascii_case("vbca"))
+            .unwrap_or(false);
+    if is_vbca {
+        resolver.register_cog_vbca(name, version, entry.root.clone());
+    } else {
+        resolver.register_cog(name, version, entry.root.clone());
+    }
+}
+
+/// Compute the integrity hash for a VBCA cog artefact — single
+/// file blake3, distinct from the directory-walk hash used for
+/// source-tarball cogs (`compute_path_cog_integrity`).
+fn compute_vbca_integrity(vbca_path: &std::path::Path) -> String {
+    use std::io::Read;
+    let mut hasher = blake3::Hasher::new();
+    if let Ok(mut f) = std::fs::File::open(vbca_path) {
+        let mut buf = [0u8; 64 * 1024];
+        while let Ok(n) = f.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+    }
+    format!("blake3-vbca-{}", hasher.finalize().to_hex())
 }
 
 /// Resolve a git-form dependency: clone into the git cache (skip if

@@ -41,6 +41,25 @@ pub struct CogLocation {
     /// For path cogs: the relative/absolute path from Verum.toml
     /// For git cogs: ~/.verum/git/http-<rev>/src/
     pub root_path: PathBuf,
+    /// Artifact kind — Source means `root_path` points at a directory
+    /// of `.vr` files (current default behaviour); Vbca means
+    /// `root_path` points at a single `.vbca` archive file produced
+    /// by Phase 12 `verum cog precompile` and downloaded from the
+    /// registry. The compile pipeline dispatches differently per
+    /// kind: `Source` goes through the existing AST-codegen path;
+    /// `Vbca` goes through `VbcLinker::add_archive` (Phase 6b/6c).
+    #[doc(hidden)]
+    pub artifact_kind: CogArtifactKind,
+}
+
+/// Discriminator for [`CogLocation::artifact_kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CogArtifactKind {
+    /// `root_path` is a directory containing the cog's `.vr` source.
+    Source,
+    /// `root_path` is a single `.vbca` archive file (Phase 14
+    /// — registry-distributed precompiled cog).
+    Vbca,
 }
 
 /// Resolves external cog names to their filesystem locations.
@@ -60,7 +79,10 @@ impl CogResolver {
         Self { cogs: Map::new() }
     }
 
-    /// Register an external cog with its filesystem root.
+    /// Register an external cog with its filesystem root. The root
+    /// is treated as source — a directory of `.vr` files. Use
+    /// [`Self::register_cog_vbca`] for a registry-distributed
+    /// precompiled cog whose root is a single `.vbca` archive file.
     pub fn register_cog(
         &mut self,
         name: impl Into<Text>,
@@ -74,8 +96,40 @@ impl CogResolver {
                 name,
                 version: version.into(),
                 root_path,
+                artifact_kind: CogArtifactKind::Source,
             },
         );
+    }
+
+    /// Register an external cog whose artifact is a precompiled
+    /// `.vbca` archive (Phase 14). The compile pipeline picks this
+    /// up during `compile_ast_to_vbc` and merges via
+    /// `VbcLinker::add_archive` instead of running source codegen.
+    pub fn register_cog_vbca(
+        &mut self,
+        name: impl Into<Text>,
+        version: impl Into<Text>,
+        vbca_path: PathBuf,
+    ) {
+        let name = name.into();
+        self.cogs.insert(
+            name.clone(),
+            CogLocation {
+                name,
+                version: version.into(),
+                root_path: vbca_path,
+                artifact_kind: CogArtifactKind::Vbca,
+            },
+        );
+    }
+
+    /// Returns `true` when the registered cog is a precompiled
+    /// `.vbca` archive (Phase 14). Source-form cogs return `false`.
+    pub fn is_vbca(&self, name: &str) -> bool {
+        self.cogs
+            .get(&Text::from(name))
+            .map(|loc| matches!(loc.artifact_kind, CogArtifactKind::Vbca))
+            .unwrap_or(false)
     }
 
     /// Check if a name refers to a registered external cog.
