@@ -45,15 +45,16 @@
 //            so callers can dispatch new variants without
 //            rev-locking this module.
 //
+// V1 surface (this commit + earlier):
+//   * Row-based DML decoder lives in `binlog_rows.vr`.
+//   * GTID set algebra lives in `gtid.vr` + structured wire
+//     encoding in `BfGtidSet`.
+//   * CRC32 verification fires automatically in `next_event`
+//     when `BinlogConfig.checksum == BcCrc32`.
+//
 // V0 OUT of scope (each follow-up):
-//   * TABLE_MAP_EVENT (0x13) + WRITE_ROWS_V2 (0x1E) + UPDATE_ROWS_V2
-//     (0x1F) + DELETE_ROWS_V2 (0x20) — the actual row-based DML
-//     payload (hundreds of LOC for the type-aware tuple decoder).
-//   * Binlog checksum CRC32 verification (we tell the server
-//     `@master_binlog_checksum='NONE'` to side-step it).
 //   * COM_REGISTER_SLAVE — not strictly required (works without on
 //     MySQL 5.7+ unless `rpl_semi_sync_master_enabled=ON`).
-//   * GTID set algebra (we surface gtid bytes opaque).
 // =============================================================================
 
 @arch_module(
@@ -89,6 +90,7 @@ mount core.database.mysql.connection.connect as mysql_connect;
 mount core.database.mysql.gtid.{
     GtidSet, parse_gtid_set, encode_wire as encode_gtid_wire,
 };
+mount core.security.hash.crc32.crc32 as crc32_compute;
 
 // =============================================================================
 // COM_* opcodes
@@ -151,8 +153,11 @@ public type BinlogConfig is {
     heartbeat_period_ns: Int,
     /// Server checksum mode — must match the server's
     /// `@@global.binlog_checksum` setting OR we ask the server to
-    /// disable checksums per-connection via SET. V0 always asks
-    /// for `NONE` so we don't need to verify CRC32; V1 verifies.
+    /// disable checksums per-connection via SET. Defaults are
+    /// per-`from_*` constructor — `BcNone` for tests / dev,
+    /// `BcCrc32` for production. CRC32 verification fires on
+    /// every event in `next_event` and surfaces mismatches as
+    /// `BINLOG_CRC32_MISMATCH`.
     checksum: BinlogChecksum,
     /// Where to start streaming.
     start_from: BinlogStartFrom,
@@ -467,13 +472,50 @@ implement BinlogStream {
             return Err(bad_binlog("unexpected binlog packet status byte"));
         }
 
+        // ---------------------------------------------------------------------
+        // Optional CRC32 trailer verification. When the session's
+        // `@master_binlog_checksum` is `'CRC32'`, every event after
+        // FORMAT_DESCRIPTION (and FORMAT_DESCRIPTION itself in 5.6.6+)
+        // carries a 4-byte CRC32 trailer covering header + body. The
+        // CRC is the standard IEEE 802.3 polynomial (0xedb88320 reversed),
+        // matching `core.security.hash.crc32`. We trim the trailer
+        // before handing the body to the event decoder; mismatch
+        // surfaces as `BINLOG_CRC32_MISMATCH` so DBA-side flips of
+        // checksum mode + dropped wire bytes are loud.
+        // ---------------------------------------------------------------------
+        let mut event_end: Int = payload.len() as Int;
+        match self.config.checksum {
+            BcCrc32 => {
+                if event_end < 1 + 19 + 4 {
+                    return Err(bad_binlog(&"CRC32 mode but packet < header+trailer".clone()));
+                }
+                let crc_off: Int = event_end - 4;
+                let expected = ((payload[crc_off]     as Int) & 0xFF)
+                             | (((payload[crc_off + 1] as Int) & 0xFF) << 8)
+                             | (((payload[crc_off + 2] as Int) & 0xFF) << 16)
+                             | (((payload[crc_off + 3] as Int) & 0xFF) << 24);
+                // CRC covers (header + body) — bytes [1, event_end - 4).
+                let covered = match read_bytes(payload.as_slice(), 1, crc_off - 1) {
+                    Ok(b)  => b,
+                    Err(_) => { return Err(bad_binlog(&"CRC32 covered slice truncated".clone())); }
+                };
+                let actual = crc32_compute(covered.as_slice()) as Int;
+                if (actual & 0xFFFFFFFF) != (expected & 0xFFFFFFFF) {
+                    return Err(crc_mismatch_error(expected, actual));
+                }
+                // Trim the trailer so the event-body decoder doesn't
+                // accidentally consume it.
+                event_end = crc_off;
+            }
+            BcNone => {}
+        }
+
         // Decode header (19 bytes, starting at offset 1).
         let header = decode_event_header(payload.as_slice(), 1)?;
 
-        // Body starts at offset 1 + 19 = 20; runs to end of packet.
+        // Body starts at offset 1 + 19 = 20; runs to event_end.
         let body_start: Int = 20;
-        let body_end: Int = payload.len() as Int;
-        let body = match read_bytes(payload.as_slice(), body_start, body_end - body_start) {
+        let body = match read_bytes(payload.as_slice(), body_start, event_end - body_start) {
             Ok(b)  => b,
             Err(_) => { return Err(bad_binlog("event body truncated")); }
         };
@@ -810,6 +852,17 @@ fn bad_binlog(what: &str) -> DbError {
         adapter: AdMysql,
         code: "BINLOG_PROTOCOL".clone(),
         message: f"binlog protocol error: {what}",
+        retryable: false,
+    })
+}
+
+fn crc_mismatch_error(expected: Int, actual: Int) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "BINLOG_CRC32_MISMATCH".clone(),
+        message: f"binlog CRC32 mismatch: expected={expected & 0xFFFFFFFF} actual={actual & 0xFFFFFFFF}",
+        // Not retryable — wire is corrupt; caller should reconnect
+        // from the last-known-good GTID/position.
         retryable: false,
     })
 }
