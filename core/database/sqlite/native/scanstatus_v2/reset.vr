@@ -31,7 +31,7 @@ public fn new_engine() -> ResetEngine {
 }
 
 implement ResetEngine {
-    pub fn sqlite3_stmt_scanstatus_reset(&mut self, scope: &ResetScope) {
+    public fn sqlite3_stmt_scanstatus_reset(&mut self, scope: &ResetScope) {
         match scope {
             RsAll => {
                 self.reset_all_count = self.reset_all_count + 1_i64;
@@ -42,7 +42,7 @@ implement ResetEngine {
         }
     }
 
-    pub fn total_resets(&self) -> Int64 {
+    public fn total_resets(&self) -> Int64 {
         self.reset_all_count + self.reset_op_count
     }
 }

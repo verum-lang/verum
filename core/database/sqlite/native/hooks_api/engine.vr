@@ -43,7 +43,7 @@ public fn new_engine() -> HooksEngine {
 implement HooksEngine {
     /// Install `reg` into the slot indicated by its kind. Returns the
     /// previous handle (0 if nothing was installed).
-    pub fn install(&mut self, reg: HookRegistration) -> Int64 {
+    public fn install(&mut self, reg: HookRegistration) -> Int64 {
         match &reg.kind {
             HkCommit => {
                 let prev = self.commit.handle;
@@ -78,7 +78,7 @@ implement HooksEngine {
         }
     }
 
-    pub fn any_installed(&self) -> Bool {
+    public fn any_installed(&self) -> Bool {
         is_installed(&self.commit)
             || is_installed(&self.rollback)
             || is_installed(&self.update)

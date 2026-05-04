@@ -81,9 +81,9 @@ public fn master_table_new() -> MasterTable { MasterTable { rows: List.new() } }
 implement MasterTable {
     public fn len(&self) -> Int { self.rows.len() }
 
-    pub fn add(&mut self, r: MasterRow) { self.rows.push(r); }
+    public fn add(&mut self, r: MasterRow) { self.rows.push(r); }
 
-    pub fn drop_by_name(&mut self, name: &Text) -> Bool {
+    public fn drop_by_name(&mut self, name: &Text) -> Bool {
         let mut new_rows: List<MasterRow> = List.new();
         let mut found = false;
         let mut i: Int = 0;
@@ -96,7 +96,7 @@ implement MasterTable {
         found
     }
 
-    pub fn lookup(&self, name: &Text) -> Maybe<MasterRow> {
+    public fn lookup(&self, name: &Text) -> Maybe<MasterRow> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].name == *name {
@@ -108,7 +108,7 @@ implement MasterTable {
     }
 
     /// Rows of a particular kind, in insertion order.
-    pub fn by_kind(&self, kind: &MasterRowKind) -> List<MasterRow> {
+    public fn by_kind(&self, kind: &MasterRowKind) -> List<MasterRow> {
         let want = kind_text(kind);
         let mut out: List<MasterRow> = List.new();
         let mut i: Int = 0;
@@ -120,7 +120,7 @@ implement MasterTable {
     }
 
     /// Indexes attached to `table_name`.
-    pub fn indexes_for(&self, table_name: &Text) -> List<MasterRow> {
+    public fn indexes_for(&self, table_name: &Text) -> List<MasterRow> {
         let mut out: List<MasterRow> = List.new();
         let mut i: Int = 0;
         while i < self.rows.len() {

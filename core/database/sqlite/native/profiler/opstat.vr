@@ -78,12 +78,12 @@ implement OpStatTable {
         self.entries.len() - 1
     }
 
-    pub fn record(&mut self, opcode: &Text, ns: Int64) {
+    public fn record(&mut self, opcode: &Text, ns: Int64) {
         let idx = self.ensure(opcode);
         self.entries[idx].record(ns);
     }
 
-    pub fn lookup(&self, opcode: &Text) -> Maybe<OpStat> {
+    public fn lookup(&self, opcode: &Text) -> Maybe<OpStat> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].opcode == *opcode {
@@ -100,7 +100,7 @@ implement OpStatTable {
         None
     }
 
-    pub fn total_dispatches(&self) -> Int64 {
+    public fn total_dispatches(&self) -> Int64 {
         let mut sum: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < self.entries.len() {
@@ -110,7 +110,7 @@ implement OpStatTable {
         sum
     }
 
-    pub fn total_time_ns(&self) -> Int64 {
+    public fn total_time_ns(&self) -> Int64 {
         let mut sum: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < self.entries.len() {

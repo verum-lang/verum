@@ -81,32 +81,32 @@ mount core.net.quic.recovery.cc.{
 // =============================================================================
 
 /// Pacing-gain for Startup — 2/ln(2). Exponential growth.
-pub const HIGH_GAIN: Float            = 2.885_f64;
+public const HIGH_GAIN: Float            = 2.885_f64;
 /// Drain gain — 1/HIGH_GAIN. Flush the queue built in Startup.
-pub const DRAIN_GAIN: Float           = 0.346_f64;
+public const DRAIN_GAIN: Float           = 0.346_f64;
 /// Cruise gain in ProbeBW — plain 1.0× bottleneck_bw.
-pub const CRUISE_GAIN: Float          = 1.0_f64;
+public const CRUISE_GAIN: Float          = 1.0_f64;
 /// Probe-up gain — +25% for one RTT to test for new bandwidth.
-pub const PROBE_UP_GAIN: Float        = 1.25_f64;
+public const PROBE_UP_GAIN: Float        = 1.25_f64;
 /// Probe-down gain — -25% for one RTT to drain what probe-up
 /// injected.
-pub const PROBE_DOWN_GAIN: Float      = 0.75_f64;
+public const PROBE_DOWN_GAIN: Float      = 0.75_f64;
 
 /// Startup exit trigger: three consecutive RTTs without >25% bw growth.
-pub const STARTUP_FULL_BW_THRESH: Float = 1.25_f64;
-pub const STARTUP_FULL_BW_COUNT: UInt32 = 3_u32;
+public const STARTUP_FULL_BW_THRESH: Float = 1.25_f64;
+public const STARTUP_FULL_BW_COUNT: UInt32 = 3_u32;
 
 /// ProbeRTT cadence — re-measure min_rtt at least every 10 seconds.
-pub const PROBE_RTT_INTERVAL: Duration = Duration.from_secs(10);
+public const PROBE_RTT_INTERVAL: Duration = Duration.from_secs(10);
 /// ProbeRTT dwell time — hold tiny cwnd this long before promoting.
-pub const PROBE_RTT_DURATION: Duration = Duration.from_millis(200);
+public const PROBE_RTT_DURATION: Duration = Duration.from_millis(200);
 /// Min-RTT filter window — samples older than this expire.
-pub const MIN_RTT_WINDOW:      Duration = Duration.from_secs(10);
+public const MIN_RTT_WINDOW:      Duration = Duration.from_secs(10);
 
 /// BBRv2: cap inflight below BDP if lost-bytes-per-RTT exceed this
 /// fraction.
-pub const LOSS_THRESH_NUM: UInt32 = 2_u32;
-pub const LOSS_THRESH_DEN: UInt32 = 100_u32;
+public const LOSS_THRESH_NUM: UInt32 = 2_u32;
+public const LOSS_THRESH_DEN: UInt32 = 100_u32;
 
 // =============================================================================
 // State machine
@@ -141,13 +141,13 @@ type BandwidthFilter is {
 };
 
 implement BandwidthFilter {
-    pub fn new() -> BandwidthFilter {
+    public fn new() -> BandwidthFilter {
         BandwidthFilter { samples: [], window_rtts: 10_u32 }
     }
 
     /// Insert a new (bw bytes/sec, time) sample. Updates the filter's
     /// internal accumulators + expires samples older than the window.
-    pub fn update(&mut self, bw: Float, now: Instant) {
+    public fn update(&mut self, bw: Float, now: Instant) {
         // Drop samples dominated by `bw` (new sample is larger).
         let mut retained: List<(Float, Instant)> = [];
         let mut i: Int = 0;
@@ -161,7 +161,7 @@ implement BandwidthFilter {
         self.samples = retained;
     }
 
-    pub fn value(&self) -> Float {
+    public fn value(&self) -> Float {
         let mut best: Float = 0.0;
         let mut i: Int = 0;
         while i < self.samples.len() {
@@ -184,7 +184,7 @@ type RttFilter is {
 };
 
 implement RttFilter {
-    pub fn new() -> RttFilter {
+    public fn new() -> RttFilter {
         RttFilter {
             min_rtt:        Duration.from_secs(0),
             min_rtt_stamp:  Instant.now(),
@@ -192,7 +192,7 @@ implement RttFilter {
         }
     }
 
-    pub fn update(&mut self, rtt: Duration, now: Instant) {
+    public fn update(&mut self, rtt: Duration, now: Instant) {
         let expired = self.min_rtt_valid
             && now.duration_since(self.min_rtt_stamp.clone())
                 .unwrap_or_else(|| Duration.from_secs(0)) > MIN_RTT_WINDOW;
@@ -203,9 +203,9 @@ implement RttFilter {
         }
     }
 
-    pub fn value(&self) -> Duration { self.min_rtt.clone() }
-    pub fn stamp(&self) -> Instant   { self.min_rtt_stamp.clone() }
-    pub fn valid(&self) -> Bool      { self.min_rtt_valid }
+    public fn value(&self) -> Duration { self.min_rtt.clone() }
+    public fn stamp(&self) -> Instant   { self.min_rtt_stamp.clone() }
+    public fn valid(&self) -> Bool      { self.min_rtt_valid }
 }
 
 // =============================================================================
@@ -247,7 +247,7 @@ public type Bbr is {
 };
 
 implement Bbr {
-    pub fn new() -> Bbr {
+    public fn new() -> Bbr {
         Bbr {
             phase:            BbrPhase.Startup,
             cwnd:             INITIAL_WINDOW_BYTES,
@@ -488,7 +488,7 @@ implement CongestionCtrl for Bbr {
 }
 
 implement Bbr {
-    pub fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
+    public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
         match self.recovery_start {
             Some(rs) => {
                 if acked_time_sent >= rs {
@@ -499,7 +499,7 @@ implement Bbr {
         }
     }
 
-    pub fn phase(&self) -> BbrPhase { self.phase.clone() }
-    pub fn estimated_bandwidth(&self) -> Float { self.bw.value() }
-    pub fn estimated_min_rtt(&self) -> Duration { self.rtt.value() }
+    public fn phase(&self) -> BbrPhase { self.phase.clone() }
+    public fn estimated_bandwidth(&self) -> Float { self.bw.value() }
+    public fn estimated_min_rtt(&self) -> Duration { self.rtt.value() }
 }

@@ -63,12 +63,12 @@ public fn engine_default() -> RestoreEngine {
 }
 
 implement RestoreEngine {
-    pub fn lenient(mut self) -> RestoreEngine {
+    public fn lenient(mut self) -> RestoreEngine {
         self.abort_on_failure = false;
         self
     }
 
-    pub fn apply(
+    public fn apply(
         &self,
         dump: &Text,
         runner: fn(&Text) -> Maybe<Text>,

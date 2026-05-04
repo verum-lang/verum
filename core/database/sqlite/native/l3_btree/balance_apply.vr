@@ -57,12 +57,12 @@ mount core.database.sqlite.native.l3_btree.page_writer.{
 // PageBuf — caller-supplied input + output buffer
 // -----------------------------------------------------------------------------
 
-pub type PageBuf is {
+public type PageBuf is {
     page_no: Int,
     bytes: List<Byte>,
 }
 
-pub fn page_buf(page_no: Int, bytes: List<Byte>) -> PageBuf {
+public fn page_buf(page_no: Int, bytes: List<Byte>) -> PageBuf {
     PageBuf { page_no: page_no, bytes: bytes }
 }
 
@@ -70,13 +70,13 @@ pub fn page_buf(page_no: Int, bytes: List<Byte>) -> PageBuf {
 // ApplyOutcome — rebuilt pages + ripple hint
 // -----------------------------------------------------------------------------
 
-pub type ApplyOutcome is {
+public type ApplyOutcome is {
     updated_pages: List<PageBuf>,
     freed_pages: List<Int>,
     ripple: Maybe<RippleHint>,
 }
 
-pub type RippleHint is {
+public type RippleHint is {
     parent_page: Int,
     parent_cell_idx: Int,
     parent_grew: Bool,
@@ -94,7 +94,7 @@ fn outcome_empty() -> ApplyOutcome {
 // Top-level dispatch
 // -----------------------------------------------------------------------------
 
-pub fn apply_balance_decision(
+public fn apply_balance_decision(
     decision: &BalanceDecision,
     pages_in: &List<PageBuf>,
     ctx: &BalanceContext,

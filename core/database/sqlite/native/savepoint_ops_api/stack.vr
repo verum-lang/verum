@@ -51,7 +51,7 @@ implement SavepointStack {
         -1
     }
 
-    pub fn apply(&mut self, op: &SavepointOp) -> SavepointOutcome {
+    public fn apply(&mut self, op: &SavepointOp) -> SavepointOutcome {
         match op {
             SoBegin(n) => {
                 self.names.push(n.clone());
@@ -81,7 +81,7 @@ implement SavepointStack {
         }
     }
 
-    pub fn depth(&self) -> Int { self.names.len() }
+    public fn depth(&self) -> Int { self.names.len() }
 
-    pub fn is_empty(&self) -> Bool { self.names.len() == 0 }
+    public fn is_empty(&self) -> Bool { self.names.len() == 0 }
 }

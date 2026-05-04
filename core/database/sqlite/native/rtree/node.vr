@@ -75,7 +75,7 @@ public fn is_leaf(n: &RNode) -> Bool {
 }
 
 /// Compute the MBB that covers every entry in this node.
-pub fn cover_mbb(n: &RNode) -> BoundingBox {
+public fn cover_mbb(n: &RNode) -> BoundingBox {
     match n {
         RnInterior(_, es) => {
             if es.len() == 0 { return bbox_new(0); }

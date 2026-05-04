@@ -89,7 +89,7 @@ implement DstHarness {
     public fn current_op(&self) -> Int { self.op_idx }
     public fn is_terminated(&self) -> Bool { self.terminated }
 
-    pub fn next_step(&self) -> Maybe<StepPlan> {
+    public fn next_step(&self) -> Maybe<StepPlan> {
         if self.terminated || self.op_idx >= self.stream.len() { return None; }
         let op = clone_op(&self.stream.ops[self.op_idx]);
         let mut fault: Maybe<Fault> = None;
@@ -112,7 +112,7 @@ implement DstHarness {
         })
     }
 
-    pub fn advance(&mut self) {
+    public fn advance(&mut self) {
         match self.next_step() {
             Some(plan) => {
                 if plan.terminate { self.terminated = true; }
@@ -123,14 +123,14 @@ implement DstHarness {
     }
 
     /// Compute the oracle state at the durability cut.
-    pub fn expected_state(&self) -> Oracle {
+    public fn expected_state(&self) -> Oracle {
         let cut = self.durability_cut();
         oracle_replay(&self.stream, cut)
     }
 
     /// Op index of the last successful Commit before the terminal fault.
     /// Equivalent to "highest committed prefix at recovery time".
-    pub fn durability_cut(&self) -> Int {
+    public fn durability_cut(&self) -> Int {
         let limit = self.schedule.terminal_at();
         let cap = if limit < self.stream.len() { limit } else { self.stream.len() };
         let mut last_commit: Int = -1;

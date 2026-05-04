@@ -149,7 +149,7 @@ public fn op_to_sql(op: &DbOp) -> Maybe<Text> {
 // Production callers pass a closure that captures `&mut Database`;
 // tests pass a closure that records into an in-memory map.
 
-pub fn drive(
+public fn drive(
     h: &mut DstHarness,
     step_runner: fn(&DbOp) -> Result<(), Text>,
 ) -> DstReport {

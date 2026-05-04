@@ -145,7 +145,7 @@ implement StreamProducer {
     }
 
     /// Append a frame to every replica's outbox.
-    pub fn enqueue_frame(&mut self, header: ReplicationFrameHeader, payload: List<Byte>) -> Int64 {
+    public fn enqueue_frame(&mut self, header: ReplicationFrameHeader, payload: List<Byte>) -> Int64 {
         let seq = self.next_seq;
         self.next_seq = seq + 1_i64;
         let mut i: Int = 0;
@@ -162,7 +162,7 @@ implement StreamProducer {
 
     /// Drain the outbox for a replica. Returns the batch + clears
     /// the producer-side queue.
-    pub fn drain(&mut self, replica_id: &Text) -> Maybe<FrameBatch> {
+    public fn drain(&mut self, replica_id: &Text) -> Maybe<FrameBatch> {
         let mut i: Int = 0;
         while i < self.tracks.len() {
             if self.tracks[i].replica_id == replica_id {
@@ -177,7 +177,7 @@ implement StreamProducer {
 
     /// Replica acks up to `position` — drop frames with position
     /// ≤ position from the outbox + bump acked_position.
-    pub fn ack(&mut self, replica_id: &Text, position: Int64) -> Bool {
+    public fn ack(&mut self, replica_id: &Text, position: Int64) -> Bool {
         let mut i: Int = 0;
         while i < self.tracks.len() {
             if self.tracks[i].replica_id == replica_id {
@@ -193,7 +193,7 @@ implement StreamProducer {
 
     /// Bump epoch — on primary failover the new primary calls this
     /// then begins emitting frames at seq 0.
-    pub fn advance_epoch(&mut self) {
+    public fn advance_epoch(&mut self) {
         self.epoch = self.epoch + 1_i64;
         self.next_seq = 0 as Int64;
     }

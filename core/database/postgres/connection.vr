@@ -353,7 +353,7 @@ implement PgConnection {
     public fn backend_key(&self) -> Maybe<(Int, Int)> { self.backend_key.clone() }
 
     /// Look up a server parameter (e.g. "server_version", "DateStyle").
-    pub fn parameter(&self, name: &Text) -> Maybe<Text> {
+    public fn parameter(&self, name: &Text) -> Maybe<Text> {
         let mut i = 0;
         while i < self.parameters.len() as Int {
             let (ref k, ref v) = self.parameters[i];

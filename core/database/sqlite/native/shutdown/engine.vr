@@ -49,7 +49,7 @@ implement ShutdownEngine {
 
     public fn is_done(&self) -> Bool { is_terminal(&self.phase) }
 
-    pub fn fail(&mut self, reason: Text) {
+    public fn fail(&mut self, reason: Text) {
         self.phase = SpFailed(reason);
     }
 
@@ -59,7 +59,7 @@ implement ShutdownEngine {
     ///  SpInit → SpDraining(order[0])
     ///  SpDraining(s) → SpClosing(s)
     ///  SpClosing(s) → SpDraining(next) or SpDone
-    pub fn advance(&mut self) {
+    public fn advance(&mut self) {
         match &self.phase {
             SpInit => {
                 if self.order.len() == 0 {
@@ -82,7 +82,7 @@ implement ShutdownEngine {
     }
 
     /// Drive the engine to completion in one call (for tests).
-    pub fn drive_to_completion(&mut self, max_steps: Int) -> Int {
+    public fn drive_to_completion(&mut self, max_steps: Int) -> Int {
         let mut taken: Int = 0;
         while !self.is_done() && taken < max_steps {
             self.advance();

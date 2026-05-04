@@ -40,7 +40,7 @@ implement HashTable {
     }
 
     /// Inserts (or overwrites). Returns the previous value or 0.
-    pub fn insert(&mut self, key: Text, value: Int64) -> Int64 {
+    public fn insert(&mut self, key: Text, value: Int64) -> Int64 {
         let idx = self.find(&key);
         if idx >= 0 {
             let prev = self.entries.get(idx).value;
@@ -52,13 +52,13 @@ implement HashTable {
         0 as Int64
     }
 
-    pub fn find_value(&self, key: &Text) -> Maybe<Int64> {
+    public fn find_value(&self, key: &Text) -> Maybe<Int64> {
         let idx = self.find(key);
         if idx < 0 { return Maybe.None; }
         Maybe.Some(self.entries.get(idx).value)
     }
 
-    pub fn remove(&mut self, key: &Text) -> Maybe<Int64> {
+    public fn remove(&mut self, key: &Text) -> Maybe<Int64> {
         let idx = self.find(key);
         if idx < 0 { return Maybe.None; }
         let prev = self.entries.get(idx).value;
@@ -67,5 +67,5 @@ implement HashTable {
         Maybe.Some(prev)
     }
 
-    pub fn count(&self) -> Int { self.entries.len() }
+    public fn count(&self) -> Int { self.entries.len() }
 }

@@ -60,7 +60,7 @@ fn clamp(requested: Int, hard_max: Int) -> Int {
 }
 
 implement LimitBudget {
-    pub fn get(&self, c: &LimitCategory) -> Int {
+    public fn get(&self, c: &LimitCategory) -> Int {
         match c {
             LcLength             => self.length,
             LcSqlLength          => self.sql_length,
@@ -79,7 +79,7 @@ implement LimitBudget {
 
     /// Matches sqlite3_limit: negative `n` queries, non-negative sets
     /// after clamping. Returns the PREVIOUS value.
-    pub fn sqlite3_limit(&mut self, c: &LimitCategory, n: Int) -> Int {
+    public fn sqlite3_limit(&mut self, c: &LimitCategory, n: Int) -> Int {
         let prev = self.get(c);
         if n < 0 { return prev; }
         let hard = default_hard_max(c);

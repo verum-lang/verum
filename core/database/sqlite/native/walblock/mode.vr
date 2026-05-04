@@ -42,7 +42,7 @@ public fn parse_mode(text: &Text) -> Maybe<CheckpointMode> {
 }
 
 /// True iff the mode waits for active writers before proceeding.
-pub fn waits_for_writers(m: &CheckpointMode) -> Bool {
+public fn waits_for_writers(m: &CheckpointMode) -> Bool {
     match m {
         CmPassive => false,
         _         => true,
@@ -50,7 +50,7 @@ pub fn waits_for_writers(m: &CheckpointMode) -> Bool {
 }
 
 /// True iff the mode requires waiting for readers (i.e. no shared lock holders).
-pub fn waits_for_readers(m: &CheckpointMode) -> Bool {
+public fn waits_for_readers(m: &CheckpointMode) -> Bool {
     match m {
         CmRestart | CmTruncate => true,
         _                       => false,
@@ -58,7 +58,7 @@ pub fn waits_for_readers(m: &CheckpointMode) -> Bool {
 }
 
 /// True iff the WAL file is restarted (frame numbering resets to 1).
-pub fn restarts_wal(m: &CheckpointMode) -> Bool {
+public fn restarts_wal(m: &CheckpointMode) -> Bool {
     match m {
         CmRestart | CmTruncate => true,
         _                       => false,
@@ -66,7 +66,7 @@ pub fn restarts_wal(m: &CheckpointMode) -> Bool {
 }
 
 /// True iff the WAL file is truncated to zero bytes after checkpoint.
-pub fn truncates_wal(m: &CheckpointMode) -> Bool {
+public fn truncates_wal(m: &CheckpointMode) -> Bool {
     match m {
         CmTruncate => true,
         _          => false,

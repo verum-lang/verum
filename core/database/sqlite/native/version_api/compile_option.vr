@@ -38,20 +38,20 @@ public fn default_registry() -> OptionRegistry {
 }
 
 implement OptionRegistry {
-    pub fn add(&mut self, flag: Text) {
+    public fn add(&mut self, flag: Text) {
         self.flags.push(flag);
     }
 
-    pub fn get(&self, index: Int) -> Maybe<Text> {
+    public fn get(&self, index: Int) -> Maybe<Text> {
         if index < 0 || index >= self.flags.len() { return Maybe.None; }
         Maybe.Some(self.flags.get(index).clone())
     }
 
-    pub fn len(&self) -> Int { self.flags.len() }
+    public fn len(&self) -> Int { self.flags.len() }
 
     /// Match with the same case-insensitive, optional-"SQLITE_"-prefix
     /// logic as sqlite3_compileoption_used.
-    pub fn used(&self, needle: &Text) -> Bool {
+    public fn used(&self, needle: &Text) -> Bool {
         let stripped = strip_sqlite_prefix(needle);
         let mut i: Int = 0;
         while i < self.flags.len() {

@@ -41,7 +41,7 @@ mount core.database.sqlite.native.l1_pager.pager.{
 /// Which VFS to mount.  Enum extension is forward-compatible —
 /// adding a new backend lands as a new variant + a new arm in
 /// `pager_open_with_vfs`.
-pub type VfsInjection is
+public type VfsInjection is
       ViMemory                     // MemDbVfs — Phase 1 default
     | ViPosixFile(path: Text, flags: OpenFlags)
                                     // Production file-backed (POSIX)
@@ -58,7 +58,7 @@ pub type VfsInjection is
 /// Open a pager with the named VFS.  Returns the same `Pager` shape
 /// as the legacy `pager_open_*` functions; `WalPager` callers wrap
 /// it via `wal_pager_new`.
-pub fn pager_open_with_vfs(
+public fn pager_open_with_vfs(
     vfs: VfsInjection,
     page_size: Int,
 ) -> Result<Pager, PagerError> {
@@ -88,6 +88,6 @@ pub fn pager_open_with_vfs(
 }
 
 /// Default-page-size convenience.
-pub fn pager_open_with_vfs_default(vfs: VfsInjection) -> Result<Pager, PagerError> {
+public fn pager_open_with_vfs_default(vfs: VfsInjection) -> Result<Pager, PagerError> {
     pager_open_with_vfs(vfs, PAGE_SIZE_DEFAULT)
 }

@@ -36,7 +36,7 @@ public fn state_unheld(class_kind: MutexClass) -> MutexState {
 implement MutexState {
     public fn is_held(&self) -> Bool { self.held_count > 0 }
 
-    pub fn enter(&mut self, thread_id: Int64) -> Bool {
+    public fn enter(&mut self, thread_id: Int64) -> Bool {
         if self.is_held() && self.owner_thread_id != thread_id {
             return false;    // contended — caller must wait
         }
@@ -49,13 +49,13 @@ implement MutexState {
     }
 
     /// Returns true if a try-lock would succeed.
-    pub fn would_acquire(&self, thread_id: Int64) -> Bool {
+    public fn would_acquire(&self, thread_id: Int64) -> Bool {
         if !self.is_held() { return true; }
         if self.owner_thread_id == thread_id && is_recursive(&self.class_kind) { return true; }
         false
     }
 
-    pub fn leave(&mut self, thread_id: Int64) -> Bool {
+    public fn leave(&mut self, thread_id: Int64) -> Bool {
         if !self.is_held() { return false; }
         if self.owner_thread_id != thread_id { return false; }
         self.held_count = self.held_count - 1;
@@ -63,7 +63,7 @@ implement MutexState {
         true
     }
 
-    pub fn held_by(&self, thread_id: Int64) -> Bool {
+    public fn held_by(&self, thread_id: Int64) -> Bool {
         self.is_held() && self.owner_thread_id == thread_id
     }
 }

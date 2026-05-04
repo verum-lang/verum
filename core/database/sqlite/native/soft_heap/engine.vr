@@ -66,21 +66,21 @@ public fn engine_new() -> SoftHeapEngine {
 }
 
 implement SoftHeapEngine {
-    pub fn set_soft_limit(&mut self, threshold: Int64) -> Int64 {
+    public fn set_soft_limit(&mut self, threshold: Int64) -> Int64 {
         let prev = self.soft.set_threshold(threshold);
         prev
     }
 
-    pub fn set_hard_limit(&mut self, threshold: Int64) -> Int64 {
+    public fn set_hard_limit(&mut self, threshold: Int64) -> Int64 {
         let prev = self.hard.set_threshold(threshold);
         prev
     }
 
-    pub fn used_bytes(&self) -> Int64 { self.soft.used }
+    public fn used_bytes(&self) -> Int64 { self.soft.used }
 
     /// Plan an allocation. The host applies the returned reclaim hint
     /// and re-invokes if necessary.
-    pub fn plan(&self, bytes: Int64) -> SoftHeapAllocOutcome {
+    public fn plan(&self, bytes: Int64) -> SoftHeapAllocOutcome {
         if self.soft.would_exceed(bytes) {
             if self.hard.would_exceed(bytes) {
                 return AoRefusedHard;
@@ -91,25 +91,25 @@ implement SoftHeapEngine {
     }
 
     /// Apply a reclaim — the soft+hard limits drop their `used` by N.
-    pub fn note_reclaim(&mut self, bytes: Int64) {
+    public fn note_reclaim(&mut self, bytes: Int64) {
         self.soft.sub(bytes);
         self.hard.sub(bytes);
     }
 
     /// Commit an allocation — both limits' `used` rises.
-    pub fn note_allocation(&mut self, bytes: Int64) {
+    public fn note_allocation(&mut self, bytes: Int64) {
         self.soft.add(bytes);
         self.hard.add(bytes);
     }
 
-    pub fn note_free(&mut self, bytes: Int64) {
+    public fn note_free(&mut self, bytes: Int64) {
         self.soft.sub(bytes);
         self.hard.sub(bytes);
     }
 
     /// Convenience: whole try-with-reclaim pipeline. Returns the outcome
     /// + bytes reclaimed during the attempt.
-    pub fn try_allocate(&mut self, bytes: Int64, reclaim_callback: fn(&PressureEvent) -> Int64) -> SoftHeapAllocOutcome {
+    public fn try_allocate(&mut self, bytes: Int64, reclaim_callback: fn(&PressureEvent) -> Int64) -> SoftHeapAllocOutcome {
         match self.plan(bytes) {
             AoGranted => {
                 self.note_allocation(bytes);

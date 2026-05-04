@@ -92,7 +92,7 @@ public fn uri_params_default() -> UriParams {
 }
 
 implement UriParams {
-    pub fn merge(&mut self, key: &Text, value: &Text) {
+    public fn merge(&mut self, key: &Text, value: &Text) {
         if *key == "vfs".clone()     { self.vfs = Some(value.clone()); return; }
         if *key == "mode".clone()    { self.mode = parse_mode(value); return; }
         if *key == "cache".clone()   { self.cache = parse_cache(value); return; }
@@ -102,7 +102,7 @@ implement UriParams {
         self.extra.push(query_param(key.clone(), value.clone()));
     }
 
-    pub fn known_key_count(&self) -> Int {
+    public fn known_key_count(&self) -> Int {
         let mut n: Int = 0;
         match &self.vfs       { Some(_) => { n = n + 1; } None => {} }
         match &self.mode      { Some(_) => { n = n + 1; } None => {} }

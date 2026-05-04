@@ -46,14 +46,14 @@ mount core.database.sqlite.native.l4_vdbe.ssa.program.SsaProgram;
 // Public entry point
 // -----------------------------------------------------------------------------
 
-pub type JumpThreadReport is {
+public type JumpThreadReport is {
     threaded_jumps: Int,
     folded_branches: Int,
     iterations: Int,
 }
 
 /// Run jump threading + branch folding to fixed point (max 8 iter).
-pub fn run_jump_threading(prog: &mut SsaProgram) -> JumpThreadReport {
+public fn run_jump_threading(prog: &mut SsaProgram) -> JumpThreadReport {
     let mut report = JumpThreadReport {
         threaded_jumps: 0,
         folded_branches: 0,

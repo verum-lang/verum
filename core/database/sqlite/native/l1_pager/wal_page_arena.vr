@@ -73,7 +73,7 @@ public fn page_handle_invalid() -> PageHandle {
     PageHandle { slot_idx: -1, generation: -1 }
 }
 
-pub fn page_handle_is_valid(h: &PageHandle) -> Bool {
+public fn page_handle_is_valid(h: &PageHandle) -> Bool {
     h.slot_idx >= 0 && h.generation >= 0
 }
 
@@ -137,7 +137,7 @@ public type affine PageSlab is {
 /// each.  All slots start in the freelist; `n_allocated == 0`.
 /// Per-slot `data` lists are pre-grown to `page_size` zero bytes
 /// — eliminates allocator pressure on the first miss-per-slot.
-pub fn page_slab_new(page_size: Int, capacity: Int) -> PageSlab {
+public fn page_slab_new(page_size: Int, capacity: Int) -> PageSlab {
     let cap = if capacity < 1 { 1 } else { capacity };
     let psz = if page_size < 1 { 1 } else { page_size };
     let mut slots: List<PageSlot> = List.new();
@@ -169,15 +169,15 @@ pub fn page_slab_new(page_size: Int, capacity: Int) -> PageSlab {
 }
 
 implement PageSlab {
-    pub fn page_size(&self) -> Int { self.page_size }
-    pub fn capacity(&self) -> Int { self.capacity }
-    pub fn allocated(&self) -> Int { self.n_allocated }
-    pub fn free_count(&self) -> Int { self.free_list.len() }
-    pub fn total_allocs(&self) -> Int { self.total_allocs }
-    pub fn total_frees(&self) -> Int { self.total_frees }
+    public fn page_size(&self) -> Int { self.page_size }
+    public fn capacity(&self) -> Int { self.capacity }
+    public fn allocated(&self) -> Int { self.n_allocated }
+    public fn free_count(&self) -> Int { self.free_list.len() }
+    public fn total_allocs(&self) -> Int { self.total_allocs }
+    public fn total_frees(&self) -> Int { self.total_frees }
 
     /// `true` iff every slot is checked out — alloc would fail.
-    pub fn is_full(&self) -> Bool {
+    public fn is_full(&self) -> Bool {
         self.free_list.len() == 0
     }
 
@@ -185,7 +185,7 @@ implement PageSlab {
     /// the slab is full (caller must `free` an existing handle
     /// before retrying).  The returned handle captures the slot's
     /// current generation; future reads/writes verify it.
-    pub fn alloc(&mut self) -> Maybe<PageHandle> {
+    public fn alloc(&mut self) -> Maybe<PageHandle> {
         if self.free_list.len() == 0 { return None; }
         let last = self.free_list.len() - 1;
         let slot_idx = self.free_list[last];
@@ -207,7 +207,7 @@ implement PageSlab {
     /// Verify a handle's generation matches the slot's current
     /// generation AND the slot is in_use.  Foundation of every
     /// read/write op.
-    pub fn handle_is_live(&self, h: &PageHandle) -> Bool {
+    public fn handle_is_live(&self, h: &PageHandle) -> Bool {
         if h.slot_idx < 0 || h.slot_idx >= self.slots.len() { return false; }
         let s = &self.slots[h.slot_idx];
         s.in_use && s.generation == h.generation
@@ -218,7 +218,7 @@ implement PageSlab {
     /// Idempotent: free of an already-freed handle is a no-op
     /// (handle's generation won't match the now-bumped slot
     /// generation, so `handle_is_live` returns false).
-    pub fn free(&mut self, h: PageHandle) {
+    public fn free(&mut self, h: PageHandle) {
         if !self.handle_is_live(&h) { return; }
         let s = &mut self.slots[h.slot_idx];
         s.in_use = false;
@@ -237,7 +237,7 @@ implement PageSlab {
     /// `false` on handle mismatch (caller observed a use-after-free
     /// — slot was reallocated).  Truncates / pads to `page_size` so
     /// every slot is always exactly `page_size` bytes long.
-    pub fn write(&mut self, h: &PageHandle, bytes: &[Byte]) -> Bool {
+    public fn write(&mut self, h: &PageHandle, bytes: &[Byte]) -> Bool {
         if !self.handle_is_live(h) { return false; }
         let s = &mut self.slots[h.slot_idx];
         let n = bytes.len();
@@ -261,7 +261,7 @@ implement PageSlab {
     /// Returns `None` on handle mismatch.  The cloned bytes
     /// survive a subsequent `free + alloc` of the same slot (the
     /// CBGR generation guarantee).
-    pub fn read_copy(&self, h: &PageHandle) -> Maybe<List<Byte>> {
+    public fn read_copy(&self, h: &PageHandle) -> Maybe<List<Byte>> {
         if !self.handle_is_live(h) { return None; }
         let s = &self.slots[h.slot_idx];
         let mut out: List<Byte> = List.new();
@@ -274,7 +274,7 @@ implement PageSlab {
     /// for hot-path readers that don't need a full page copy
     /// (e.g. record header probe).  Returns `None` on handle
     /// mismatch OR out-of-range offset.
-    pub fn read_byte(&self, h: &PageHandle, byte_offset: Int) -> Maybe<Byte> {
+    public fn read_byte(&self, h: &PageHandle, byte_offset: Int) -> Maybe<Byte> {
         if !self.handle_is_live(h) { return None; }
         if byte_offset < 0 || byte_offset >= self.page_size { return None; }
         let s = &self.slots[h.slot_idx];
@@ -287,7 +287,7 @@ implement PageSlab {
     /// outstanding handle in one O(N) sweep.  Used on checkpoint
     /// drain when the WAL is fully consumed and the cache can
     /// safely drop everything.
-    pub fn reset(&mut self) {
+    public fn reset(&mut self) {
         let mut i: Int = 0;
         let mut new_free: List<Int> = List.new();
         while i < self.capacity {
@@ -323,7 +323,7 @@ public type affine PageHandleMap is {
     index: Map<Int, PageHandle>,
 };
 
-pub fn page_handle_map_new(page_size: Int, capacity: Int) -> PageHandleMap {
+public fn page_handle_map_new(page_size: Int, capacity: Int) -> PageHandleMap {
     PageHandleMap {
         slab: page_slab_new(page_size, capacity),
         index: Map.new(),
@@ -334,7 +334,7 @@ implement PageHandleMap {
     /// Insert (or overwrite) page bytes for `page_no`.  Returns
     /// `false` when the slab is full AND `page_no` isn't already
     /// in the map (caller must evict before retry).
-    pub fn put(&mut self, page_no: Int, bytes: &[Byte]) -> Bool {
+    public fn put(&mut self, page_no: Int, bytes: &[Byte]) -> Bool {
         // If page_no is already in the map, overwrite its slot
         // in place — no alloc/free churn, no generation bump.
         if self.index.contains_key(&page_no) {
@@ -355,7 +355,7 @@ implement PageHandleMap {
     /// Lookup page bytes by page_no.  Returns owned bytes (clones
     /// from the slab) so the caller's reference outlives any
     /// subsequent eviction.
-    pub fn get(&self, page_no: Int) -> Maybe<List<Byte>> {
+    public fn get(&self, page_no: Int) -> Maybe<List<Byte>> {
         if !self.index.contains_key(&page_no) { return None; }
         let h = self.index.get(&page_no);
         self.slab.read_copy(&h)
@@ -363,7 +363,7 @@ implement PageHandleMap {
 
     /// Evict a page — frees its slab slot + drops the map entry.
     /// Returns `true` when an eviction actually happened.
-    pub fn evict(&mut self, page_no: Int) -> Bool {
+    public fn evict(&mut self, page_no: Int) -> Bool {
         if !self.index.contains_key(&page_no) { return false; }
         let h = self.index.get(&page_no);
         self.slab.free(h);
@@ -372,12 +372,12 @@ implement PageHandleMap {
     }
 
     /// Number of pages currently mapped.
-    pub fn len(&self) -> Int { self.index.len() }
+    public fn len(&self) -> Int { self.index.len() }
 
     /// `true` when the slab can't accept another fresh allocation.
-    pub fn is_full(&self) -> Bool { self.slab.is_full() }
+    public fn is_full(&self) -> Bool { self.slab.is_full() }
 
     /// Underlying slab — for diagnostics + advanced callers that
     /// want direct handle-based access.
-    pub fn slab_ref(&self) -> &PageSlab { &self.slab }
+    public fn slab_ref(&self) -> &PageSlab { &self.slab }
 }

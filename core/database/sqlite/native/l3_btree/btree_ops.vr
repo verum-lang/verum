@@ -121,7 +121,7 @@ fn empty_log() -> RebalanceLog {
 /// Seat the cursor at the cell matching `(target, op)`.  Foundation
 /// uses the in-memory `PageStore` abstraction; production wraps a
 /// `WalPager` via `page_store_from_pager` (a one-line follow-up).
-pub fn btree_seek(
+public fn btree_seek(
     cursor: &mut BtreeCursor,
     pages: &PageStore,
     target: &SeekKey,
@@ -150,7 +150,7 @@ pub fn btree_seek(
 /// the caller writes the leaf with the new cell appended; when
 /// it returns `Split` etc. the applier produces the rebalanced
 /// page set.
-pub fn btree_insert_at_cursor(
+public fn btree_insert_at_cursor(
     cursor: &mut BtreeCursor,
     pages: &mut PageStore,
     ctx: &BalanceContext,
@@ -246,7 +246,7 @@ pub fn btree_insert_at_cursor(
 /// under-fill ripple: if the leaf falls below the minimum, the
 /// planner emits `Merge` or `Rotate`; the applier mutates the
 /// pages; the ripple continues at the parent.
-pub fn btree_delete_at_cursor(
+public fn btree_delete_at_cursor(
     cursor: &mut BtreeCursor,
     pages: &mut PageStore,
     ctx: &BalanceContext,

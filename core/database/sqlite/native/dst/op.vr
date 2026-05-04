@@ -71,11 +71,11 @@ public fn op_stream_empty() -> DstOpStream { DstOpStream { ops: List.new() } }
 implement DstOpStream {
     public fn len(&self) -> Int { self.ops.len() }
 
-    pub fn push(&mut self, o: DbOp) { self.ops.push(o); }
+    public fn push(&mut self, o: DbOp) { self.ops.push(o); }
 
     /// Take the prefix `[0, n)` — used by the harness to compute "what
     /// was committed before the simulated power loss".
-    pub fn prefix(&self, n: Int) -> List<DbOp> {
+    public fn prefix(&self, n: Int) -> List<DbOp> {
         let mut out: List<DbOp> = List.new();
         let cap = if n < self.ops.len() { n } else { self.ops.len() };
         let mut i: Int = 0;
@@ -87,7 +87,7 @@ implement DstOpStream {
     /// durably persisted given the supplied `committed_until`.
     /// "Durable" means the op precedes the most recent OpCommit
     /// at-or-before `committed_until`.
-    pub fn last_durable_index(&self, committed_until: Int) -> Int {
+    public fn last_durable_index(&self, committed_until: Int) -> Int {
         let cap = if committed_until < self.ops.len() { committed_until } else { self.ops.len() };
         let mut last_commit: Int = -1;
         let mut i: Int = 0;

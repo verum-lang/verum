@@ -34,11 +34,11 @@ public fn new_registry() -> OverloadRegistry {
 }
 
 implement OverloadRegistry {
-    pub fn overload(&mut self, name: Text, n_arg: Int) {
+    public fn overload(&mut self, name: Text, n_arg: Int) {
         self.decls.push(new_decl(name, n_arg));
     }
 
-    pub fn contains(&self, name: &Text, n_arg: Int) -> Bool {
+    public fn contains(&self, name: &Text, n_arg: Int) -> Bool {
         let mut i: Int = 0;
         while i < self.decls.len() {
             let d = self.decls.get(i);
@@ -50,5 +50,5 @@ implement OverloadRegistry {
         false
     }
 
-    pub fn len(&self) -> Int { self.decls.len() }
+    public fn len(&self) -> Int { self.decls.len() }
 }

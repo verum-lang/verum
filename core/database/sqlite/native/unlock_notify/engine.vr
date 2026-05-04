@@ -71,7 +71,7 @@ implement UnlockNotifyEngine {
     }
 
     /// Returns 0 on success, 6 (SQLITE_LOCKED) on deadlock.
-    pub fn sqlite3_unlock_notify(&mut self, req: &RegistrationRequest) -> Int {
+    public fn sqlite3_unlock_notify(&mut self, req: &RegistrationRequest) -> Int {
         self.clear_for(req.blocked);
         if is_cancellation(req) { return 0; }
         if self.would_deadlock(req.blocked, req.blocker) {
@@ -99,7 +99,7 @@ implement UnlockNotifyEngine {
 
     /// Fire + drain every registration that was waiting for `blocker`.
     /// Returns the number of notifications delivered.
-    pub fn blocker_released(&mut self, blocker: Int64) -> Int {
+    public fn blocker_released(&mut self, blocker: Int64) -> Int {
         let mut out = List.new();
         let mut i: Int = 0;
         while i < self.pending.len() {
@@ -115,5 +115,5 @@ implement UnlockNotifyEngine {
         fired
     }
 
-    pub fn pending_count(&self) -> Int { self.pending.len() }
+    public fn pending_count(&self) -> Int { self.pending.len() }
 }

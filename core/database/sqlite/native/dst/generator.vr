@@ -74,10 +74,10 @@ public fn generator_new(seed: DstSeed, mix: OpMix) -> DstGenerator {
 }
 
 implement DstGenerator {
-    pub fn live_count(&self) -> Int { self.live_keys.len() }
+    public fn live_count(&self) -> Int { self.live_keys.len() }
 
     /// Emit `n` ops into a fresh OpStream.
-    pub fn emit(&mut self, n: Int) -> OpStream {
+    public fn emit(&mut self, n: Int) -> OpStream {
         let mut s = op_stream_empty();
         let mut i: Int = 0;
         while i < n {

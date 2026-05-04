@@ -118,7 +118,7 @@ public type AccessPlan is {
 };
 
 /// Default plan: full scan with the entire predicate residual.
-pub fn full_scan_plan(residual: Maybe<Expr>) -> AccessPlan {
+public fn full_scan_plan(residual: Maybe<Expr>) -> AccessPlan {
     AccessPlan {
         method: AmFullScan,
         seek_keys: List.new(),
@@ -237,7 +237,7 @@ fn column_name_of(e: &Expr) -> Maybe<Text> {
 /// list when the caller is happy with `covers_projection = false` for
 /// every plan (common for "I just want the right access method, I'll
 /// always go to the base table").
-pub fn plan_access(
+public fn plan_access(
     predicate: Maybe<&Expr>,
     table: &TableMeta,
     indices: &List<IndexMeta>,

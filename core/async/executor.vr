@@ -832,7 +832,7 @@ implement WorkerPool {
     /// peer X is likely to steal from X again). On steal failure,
     /// `steal_hint` advances to (X+1) so the next attempt
     /// rotates.
-    pub fn try_steal_for(&self, thief_id: Int) -> Maybe<Heap<TaskEntry>> {
+    public fn try_steal_for(&self, thief_id: Int) -> Maybe<Heap<TaskEntry>> {
         let n = self.slots.len();
         if n <= 1 {
             return Maybe.None; // nobody to steal from.
@@ -2061,7 +2061,7 @@ implement AsyncRuntime {
     /// Pre-fix every timer-bound poll burned ~1000 polls/sec on
     /// the brief_sleep loop; with this entry the runtime parks
     /// for the exact remaining duration.
-    pub fn register_timer(&self, deadline_ns: UInt64, waker: Waker) {
+    public fn register_timer(&self, deadline_ns: UInt64, waker: Waker) {
         let mut queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
         // Sorted insert by deadline_ns ascending. Linear scan from
         // the end is O(n) worst-case but the queue is typically
@@ -2088,7 +2088,7 @@ implement AsyncRuntime {
     /// returns `Some(deadline_ns)` when at least one timer is
     /// queued, `None` otherwise (in which case the loop falls back
     /// to the default `enable_io ? 1ms : brief_sleep_100us`).
-    pub fn next_timer_deadline(&self) -> Maybe<UInt64> {
+    public fn next_timer_deadline(&self) -> Maybe<UInt64> {
         let queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
         match queue.get(0) {
             Some(entry) => Some(entry.deadline_ns),

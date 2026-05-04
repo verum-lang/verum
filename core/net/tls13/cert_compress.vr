@@ -131,7 +131,7 @@ implement Eq for CompressCertificateError {
     }
 }
 
-pub fn encode_compress_certificate(ext: &CompressCertificate, out: &mut List<Byte>)
+public fn encode_compress_certificate(ext: &CompressCertificate, out: &mut List<Byte>)
     -> Result<(), CompressCertificateError>
 {
     // RFC 8879 §5: algorithms field is length-prefixed u8, and the
@@ -151,7 +151,7 @@ pub fn encode_compress_certificate(ext: &CompressCertificate, out: &mut List<Byt
     Ok(())
 }
 
-pub fn decode_compress_certificate(buf: &[Byte])
+public fn decode_compress_certificate(buf: &[Byte])
     -> Result<CompressCertificate, CompressCertificateError>
 {
     if buf.len() < 1 { return Err(CompressCertificateError.Truncated); }
@@ -190,7 +190,7 @@ public type CompressedCertificate is {
     compressed_message:     List<Byte>,
 };
 
-pub fn encode_compressed_certificate(
+public fn encode_compressed_certificate(
     msg: &CompressedCertificate,
     out: &mut List<Byte>,
 ) {
@@ -216,7 +216,7 @@ pub fn encode_compressed_certificate(
     }
 }
 
-pub fn decode_compressed_certificate(buf: &[Byte])
+public fn decode_compressed_certificate(buf: &[Byte])
     -> Result<CompressedCertificate, CompressCertificateError>
 {
     if buf.len() < 2 + 3 + 3 { return Err(CompressCertificateError.Truncated); }

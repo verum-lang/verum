@@ -57,7 +57,7 @@ implement InvertedIndex {
 
     /// Index one (term, posting) into the buffer. The buffer is kept
     /// sorted by term so flush can be O(N).
-    pub fn add_posting(&mut self, term: Text, p: Posting) {
+    public fn add_posting(&mut self, term: Text, p: Posting) {
         let mut i: Int = 0;
         while i < self.buffer.len() {
             if self.buffer[i].term == term {
@@ -85,7 +85,7 @@ implement InvertedIndex {
     }
 
     /// Materialise the buffer as a fresh L0 segment.
-    pub fn flush(&mut self) -> Int64 {
+    public fn flush(&mut self) -> Int64 {
         let id = self.next_segment_id;
         self.next_segment_id = id + 1_i64;
         let mut seg = segment_new(id, L0);
@@ -102,7 +102,7 @@ implement InvertedIndex {
 
     /// Lookup `term`. Returns the union of postings across the buffer
     /// and every segment.
-    pub fn lookup(&self, term: &Text) -> PostingList {
+    public fn lookup(&self, term: &Text) -> PostingList {
         let mut out = posting_list_empty();
         // Buffer first
         let mut i: Int = 0;
@@ -128,7 +128,7 @@ implement InvertedIndex {
     }
 
     /// Count of segments at the given level.
-    pub fn segments_at(&self, level: &SegmentLevel) -> Int {
+    public fn segments_at(&self, level: &SegmentLevel) -> Int {
         let want = level_index(level);
         let mut n: Int = 0;
         let mut i: Int = 0;

@@ -62,7 +62,7 @@ public fn detach_is_ok(o: &DetachOutcome) -> Bool {
 }
 
 implement AttachEngine {
-    pub fn set_max_attached(&mut self, n: Int) -> Bool {
+    public fn set_max_attached(&mut self, n: Int) -> Bool {
         if n < 0 { return false; }
         self.max_attached = n;
         true
@@ -77,7 +77,7 @@ implement AttachEngine {
         -1
     }
 
-    pub fn attach(&mut self, d: &AttachDirective) -> AttachOutcome {
+    public fn attach(&mut self, d: &AttachDirective) -> AttachOutcome {
         if is_reserved_alias(&d.alias) { return AoReservedAlias; }
         if self.find(&d.alias) >= 0 { return AoDuplicateAlias; }
         if self.schemas.len() >= self.max_attached { return AoAtLimit; }
@@ -89,7 +89,7 @@ implement AttachEngine {
         AoOk
     }
 
-    pub fn detach(&mut self, d: &DetachDirective) -> DetachOutcome {
+    public fn detach(&mut self, d: &DetachDirective) -> DetachOutcome {
         if is_reserved_alias(&d.alias) { return DoReservedAlias; }
         let idx = self.find(&d.alias);
         if idx < 0 { return DoUnknownAlias; }
@@ -98,5 +98,5 @@ implement AttachEngine {
         DoOk
     }
 
-    pub fn len(&self) -> Int { self.schemas.len() }
+    public fn len(&self) -> Int { self.schemas.len() }
 }

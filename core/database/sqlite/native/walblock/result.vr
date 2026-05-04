@@ -40,12 +40,12 @@ public fn checkpoint_result(
 
 implement CheckpointResult {
     /// True iff every frame in the WAL has been written back.
-    pub fn is_fully_caught_up(&self) -> Bool {
+    public fn is_fully_caught_up(&self) -> Bool {
         self.frames_in_wal == self.frames_checkpointed
     }
 
     /// Frames remaining un-checkpointed.
-    pub fn frames_remaining(&self) -> Int {
+    public fn frames_remaining(&self) -> Int {
         if self.frames_in_wal > self.frames_checkpointed {
             self.frames_in_wal - self.frames_checkpointed
         } else {

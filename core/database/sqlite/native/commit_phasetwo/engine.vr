@@ -46,7 +46,7 @@ public fn new_engine() -> CommitEngine {
 }
 
 implement CommitEngine {
-    pub fn start_phase_one(&mut self) -> Bool {
+    public fn start_phase_one(&mut self) -> Bool {
         match &self.phase {
             CpIdle => { self.phase = CpPhaseOne; true }
             _ => false,
@@ -56,7 +56,7 @@ implement CommitEngine {
     /// Returns the FCNTL opcode the caller must send to the VFS
     /// (SQLITE_FCNTL_COMMIT_PHASETWO). Caller integrates with
     /// file_control to actually invoke it.
-    pub fn enter_phase_two(&mut self) -> Int {
+    public fn enter_phase_two(&mut self) -> Int {
         match &self.phase {
             CpPhaseOne => {
                 self.phase = CpPhaseTwo;
@@ -67,7 +67,7 @@ implement CommitEngine {
         }
     }
 
-    pub fn finish(&mut self) -> Bool {
+    public fn finish(&mut self) -> Bool {
         match &self.phase {
             CpPhaseTwo => {
                 self.phase = CpDone;
@@ -78,14 +78,14 @@ implement CommitEngine {
         }
     }
 
-    pub fn rollback(&mut self, reason: Text) {
+    public fn rollback(&mut self, reason: Text) {
         self.phase = CpRollback(reason);
         self.rollbacks_observed = self.rollbacks_observed + 1_i64;
     }
 
-    pub fn reset(&mut self) {
+    public fn reset(&mut self) {
         if is_terminal(&self.phase) { self.phase = CpIdle; }
     }
 
-    pub fn is_in_flight(&self) -> Bool { is_committing(&self.phase) }
+    public fn is_in_flight(&self) -> Bool { is_committing(&self.phase) }
 }

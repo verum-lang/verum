@@ -51,7 +51,7 @@ fn append_bytes(dst: &mut Text, bs: List<u8>) {
 }
 
 implement SqliteStr {
-    pub fn sqlite3_str_appendall(&mut self, s: &Text) {
+    public fn sqlite3_str_appendall(&mut self, s: &Text) {
         let total = self.buffer.len() + s.len();
         if self.max_len > 0 && total > self.max_len {
             self.overflow = true;
@@ -73,7 +73,7 @@ implement SqliteStr {
         }
     }
 
-    pub fn sqlite3_str_append(&mut self, s: &Text, n: Int) {
+    public fn sqlite3_str_append(&mut self, s: &Text, n: Int) {
         let bytes = s.as_bytes();
         let take = if n < 0 || n > bytes.len() { bytes.len() } else { n };
         let mut slice: List<u8> = List.new();
@@ -83,16 +83,16 @@ implement SqliteStr {
         self.sqlite3_str_appendall(&snip);
     }
 
-    pub fn sqlite3_str_length(&self) -> Int { self.buffer.len() }
-    pub fn sqlite3_str_value(&self) -> Text { self.buffer.clone() }
+    public fn sqlite3_str_length(&self) -> Int { self.buffer.len() }
+    public fn sqlite3_str_value(&self) -> Text { self.buffer.clone() }
 
-    pub fn sqlite3_str_reset(&mut self) {
+    public fn sqlite3_str_reset(&mut self) {
         self.buffer = "".clone();
         self.overflow = false;
         self.nomem = false;
     }
 
-    pub fn is_healthy(&self) -> Bool { !self.overflow && !self.nomem }
+    public fn is_healthy(&self) -> Bool { !self.overflow && !self.nomem }
 }
 
 fn text_from_bytes(bytes: List<u8>) -> Text {

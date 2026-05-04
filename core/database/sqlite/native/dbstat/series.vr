@@ -62,7 +62,7 @@ implement SeriesCursor {
 
     public fn current_value(&self) -> Int64 { self.current }
 
-    pub fn next(&mut self) {
+    public fn next(&mut self) {
         if self.eof { return; }
         let n = self.current + self.params.step;
         self.current = n;
@@ -75,7 +75,7 @@ implement SeriesCursor {
 
     /// Drain the cursor into a List<Int64> — bounded by `cap` to
     /// avoid runaway when stop=MAX_INT.
-    pub fn collect(self_in: SeriesCursor, cap: Int) -> List<Int64> {
+    public fn collect(self_in: SeriesCursor, cap: Int) -> List<Int64> {
         let mut s = self_in;
         let mut out: List<Int64> = List.new();
         let mut i: Int = 0;

@@ -135,26 +135,26 @@ public fn span_start(name: Text, kind: ObservabilitySpanKind, ctx: &TraceCtx, sp
 }
 
 implement TracingSpan {
-    pub fn set_attribute(&mut self, attr: SpanAttribute) {
+    public fn set_attribute(&mut self, attr: SpanAttribute) {
         self.attributes.push(attr);
     }
 
-    pub fn end(&mut self, now_ns: Int64) {
+    public fn end(&mut self, now_ns: Int64) {
         self.ended_ns = now_ns;
         match &self.status { SsUnset => { self.status = SsOk; }, _ => {} }
     }
 
-    pub fn end_with_error(&mut self, now_ns: Int64, err: Text) {
+    public fn end_with_error(&mut self, now_ns: Int64, err: Text) {
         self.ended_ns = now_ns;
         self.status = SsError(err);
     }
 
-    pub fn duration_ns(&self) -> Int64 {
+    public fn duration_ns(&self) -> Int64 {
         if self.ended_ns == 0_i64 { return 0 as Int64; }
         self.ended_ns - self.started_ns
     }
 
-    pub fn is_ended(&self) -> Bool { self.ended_ns != 0_i64 }
+    public fn is_ended(&self) -> Bool { self.ended_ns != 0_i64 }
 }
 
 // -----------------------------------------------------------------------------

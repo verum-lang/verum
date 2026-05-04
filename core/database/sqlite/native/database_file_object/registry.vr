@@ -22,7 +22,7 @@ public fn new_registry() -> FileObjectRegistry {
 }
 
 implement FileObjectRegistry {
-    pub fn register(&mut self, h: FileObjectHandle) -> Bool {
+    public fn register(&mut self, h: FileObjectHandle) -> Bool {
         let mut i: Int = 0;
         while i < self.handles.len() {
             if self.handles.get(i).schema == h.schema { return false; }
@@ -32,7 +32,7 @@ implement FileObjectRegistry {
         true
     }
 
-    pub fn unregister(&mut self, schema: &Text) -> Bool {
+    public fn unregister(&mut self, schema: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.handles.len() {
             if self.handles.get(i).schema == *schema {
@@ -45,7 +45,7 @@ implement FileObjectRegistry {
     }
 
     /// Returns a null handle if the schema is unknown or is memdb.
-    pub fn sqlite3_database_file_object(&self, schema: &Text) -> FileObjectHandle {
+    public fn sqlite3_database_file_object(&self, schema: &Text) -> FileObjectHandle {
         let mut i: Int = 0;
         while i < self.handles.len() {
             if self.handles.get(i).schema == *schema {
@@ -60,5 +60,5 @@ implement FileObjectRegistry {
         null_handle()
     }
 
-    pub fn len(&self) -> Int { self.handles.len() }
+    public fn len(&self) -> Int { self.handles.len() }
 }

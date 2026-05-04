@@ -39,13 +39,13 @@ public fn new_registry() -> TagRegistry {
 }
 
 implement TagRegistry {
-    pub fn register(&mut self, name: Text) -> Bool {
+    public fn register(&mut self, name: Text) -> Bool {
         if self.contains(&name) { return false; }
         self.tags.push(new_tag(name));
         true
     }
 
-    pub fn contains(&self, name: &Text) -> Bool {
+    public fn contains(&self, name: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.tags.len() {
             if self.tags.get(i).name == *name { return true; }
@@ -54,5 +54,5 @@ implement TagRegistry {
         false
     }
 
-    pub fn len(&self) -> Int { self.tags.len() }
+    public fn len(&self) -> Int { self.tags.len() }
 }

@@ -37,7 +37,7 @@ public fn new_engine(n_params: Int) -> ZeroBlobBindEngine {
 implement ZeroBlobBindEngine {
     /// Returns sqlite3 code: 0 (OK), 18 (SQLITE_TOOBIG) if spec is
     /// invalid, 25 (SQLITE_RANGE) if index is out of range.
-    pub fn sqlite3_bind_zeroblob(&mut self, index: Int, spec: ZeroBlobSpec) -> Int {
+    public fn sqlite3_bind_zeroblob(&mut self, index: Int, spec: ZeroBlobSpec) -> Int {
         if index <= 0 || index >= self.slots.len() {
             self.rejections = self.rejections + 1_i64;
             return 25;
@@ -50,13 +50,13 @@ implement ZeroBlobBindEngine {
         0
     }
 
-    pub fn clear(&mut self, index: Int) -> Bool {
+    public fn clear(&mut self, index: Int) -> Bool {
         if index <= 0 || index >= self.slots.len() { return false; }
         self.slots.get_mut(index).spec = Maybe.None;
         true
     }
 
-    pub fn slot_size(&self, index: Int) -> Int64 {
+    public fn slot_size(&self, index: Int) -> Int64 {
         if index <= 0 || index >= self.slots.len() { return 0 as Int64; }
         match &self.slots.get(index).spec {
             Maybe.Some(s) => s.size_bytes,

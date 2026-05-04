@@ -188,7 +188,7 @@ public fn apply_engine() -> ApplyEngine { ApplyEngine { unit: true } }
 /// dispatch. The companion `apply_to_connection` (in
 /// `l7_api/session_apply.vr`, follow-up) wires both callbacks to
 /// a real `Connection`.
-pub fn apply(
+public fn apply(
     cs: &ChangeSet,
     resolver: &mut Heap<dyn ConflictResolver>,
     mut target_check: fn(&Change) -> Maybe<Conflict>,

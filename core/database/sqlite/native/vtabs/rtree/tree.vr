@@ -54,12 +54,12 @@ public fn rtree_new(n_dims: Int) -> VtabRTree {
 }
 
 implement VtabRTree {
-    pub fn dimensions(&self) -> Int { self.n_dims }
-    pub fn node_count(&self) -> Int { self.nodes.len() }
-    pub fn root(&self) -> Int { self.root_id }
+    public fn dimensions(&self) -> Int { self.n_dims }
+    public fn node_count(&self) -> Int { self.nodes.len() }
+    public fn root(&self) -> Int { self.root_id }
 
     /// Insert a `(rowid, bbox)` entry. Returns the leaf node id.
-    pub fn insert(&mut self, rowid: Int64, bbox: BBox) -> Int {
+    public fn insert(&mut self, rowid: Int64, bbox: BBox) -> Int {
         let leaf_id = self.choose_leaf(self.root_id, &bbox);
         self.add_to_leaf(leaf_id, LeafEntry { rowid: rowid, bbox: bbox });
         if node_is_full(&self.nodes[leaf_id]) {
@@ -69,7 +69,7 @@ implement VtabRTree {
     }
 
     /// Search returns every leaf-entry whose bbox overlaps `query`.
-    pub fn search(&self, query: &BBox) -> List<Int64> {
+    public fn search(&self, query: &BBox) -> List<Int64> {
         let mut out: List<Int64> = List.new();
         self.search_node(self.root_id, query, &mut out);
         out
@@ -100,7 +100,7 @@ implement VtabRTree {
     }
 
     /// Delete a (rowid, bbox) entry. Returns true on success.
-    pub fn delete(&mut self, rowid: Int64) -> Bool {
+    public fn delete(&mut self, rowid: Int64) -> Bool {
         let leaf = self.find_leaf_with(self.root_id, rowid);
         match leaf {
             Some(idx) => {

@@ -97,7 +97,7 @@ implement ImpactReport {
 
     public fn affected_count(&self) -> Int { self.affected.len() }
 
-    pub fn affects_kind(&self, kind_name: &Text) -> Int {
+    public fn affects_kind(&self, kind_name: &Text) -> Int {
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < self.affected.len() {

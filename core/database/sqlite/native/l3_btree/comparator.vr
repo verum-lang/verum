@@ -92,7 +92,7 @@ public fn reverse_ordering(o: &KeyOrdering) -> KeyOrdering {
 
 /// Compare two `Int64` values.  Used for rowid keys + integer
 /// columns inside records.
-pub fn cmp_int64(a: Int64, b: Int64) -> KeyOrdering {
+public fn cmp_int64(a: Int64, b: Int64) -> KeyOrdering {
     if a < b { KoLess }
     else if a > b { KoGreater }
     else { KoEqual }
@@ -101,7 +101,7 @@ pub fn cmp_int64(a: Int64, b: Int64) -> KeyOrdering {
 /// Lex-compare two byte sequences.  Used as the BINARY collation
 /// for index records and for blob columns.  Shorter sequence is
 /// less when prefixes are equal — standard memcmp semantics.
-pub fn cmp_bytes(a: &List<Byte>, b: &List<Byte>) -> KeyOrdering {
+public fn cmp_bytes(a: &List<Byte>, b: &List<Byte>) -> KeyOrdering {
     let an = a.len();
     let bn = b.len();
     let n = if an < bn { an } else { bn };
@@ -140,7 +140,7 @@ public type CellKey is
 /// `RecordSchema` — that path is what index seeks should drive.
 /// This entry remains for table-scan / rowid-only paths and as
 /// fallback for legacy callers without a schema.
-pub fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<KeyOrdering, Text> {
+public fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<KeyOrdering, Text> {
     match target {
         SkRowId(t) => match cell {
             CkRowId(c)  => Ok(cmp_int64(t, c)),
@@ -170,7 +170,7 @@ pub fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<KeyOrdering, Text> {
 ///   * `KoGreater` — cell at `index` is the first key > target;
 ///                   for interior pages descend via the LEFT child;
 ///                   for leaves position the cursor BEFORE this cell
-pub type BinarySearchResult is {
+public type BinarySearchResult is {
     index: Int,
     ordering: KeyOrdering,
 };
@@ -184,7 +184,7 @@ pub type BinarySearchResult is {
 /// cell strictly greater than target (or `cell_count` if all are
 /// less).  Caller interprets this against `SeekOp` to decide the
 /// final cursor position.
-pub fn binary_search_cells<F>(
+public fn binary_search_cells<F>(
     cell_count: Int,
     target: &SeekKey,
     cell_at: F,

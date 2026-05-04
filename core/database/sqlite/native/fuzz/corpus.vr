@@ -74,7 +74,7 @@ public fn corpus_new() -> Corpus {
 implement Corpus {
     public fn len(&self) -> Int { self.entries.len() }
 
-    pub fn add(
+    public fn add(
         &mut self,
         bytes: List<Byte>,
         origin: Maybe<MutationKind>,
@@ -86,7 +86,7 @@ implement Corpus {
         id
     }
 
-    pub fn mark_crashed(&mut self, id: Int) -> Bool {
+    public fn mark_crashed(&mut self, id: Int) -> Bool {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].id == id {
@@ -100,7 +100,7 @@ implement Corpus {
 
     /// Bump every entry's age + drop the stale ones (no coverage hits
     /// AND not crash-bearing AND age past max_age).
-    pub fn age_step(&mut self) -> Int {
+    public fn age_step(&mut self) -> Int {
         let mut survivors: List<CorpusEntry> = List.new();
         let mut dropped: Int = 0;
         let mut i: Int = 0;
@@ -128,7 +128,7 @@ implement Corpus {
         dropped
     }
 
-    pub fn pick(&self, idx: Int) -> Maybe<CorpusEntry> {
+    public fn pick(&self, idx: Int) -> Maybe<CorpusEntry> {
         if idx < 0 || idx >= self.entries.len() { return None; }
         let e = &self.entries[idx];
         Some(CorpusEntry {

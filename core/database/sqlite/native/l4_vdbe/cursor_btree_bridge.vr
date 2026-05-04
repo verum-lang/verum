@@ -76,7 +76,7 @@ mount core.database.sqlite.native.l4_vdbe.cursor_table.{
 // CursorBridgeError — composed error type for opcode dispatch
 // -----------------------------------------------------------------------------
 
-pub type CursorBridgeError is
+public type CursorBridgeError is
       BeBtree(BtreeError)
     | BeInvalidCursor(Text)
     | BePageNotFound(Int)
@@ -102,7 +102,7 @@ implement Display for CursorBridgeError {
 /// Mirror of L4 `OpenRead(cursor_id, root_page, n_cols)` opcode.
 /// Returns a fresh `BtreeCursor` seated at the root of `root_page`.
 /// Caller installs the cursor into the cursor table at `cursor_id`.
-pub fn op_open_read(
+public fn op_open_read(
     root_page: Int,
     page_size: Int,
     reserved_bytes: Int,
@@ -127,7 +127,7 @@ pub fn op_open_read(
 /// the destination register.  Schema-typed columns return their
 /// declared type; SkAny columns return based on the cell's payload
 /// kind (foundation: returns RBlob with the local payload bytes).
-pub fn op_column(
+public fn op_column(
     c: &BtreeCursor,
     pages: &PageStore,
     col_idx: Int,
@@ -380,28 +380,28 @@ fn bytes_to_utf8_text(buf: &List<Byte>) -> Text {
 /// `Ok(true)` if advancing succeeded (cursor now on a fresh row);
 /// `Ok(false)` if the cursor fell off the end (the interpreter
 /// then jumps to `jump_target`).
-pub fn op_next(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
+public fn op_next(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
     match bt_cursor_next(c, pages) {
         Ok(b)  => Ok(b),
         Err(e) => Err(BeBtree(e)),
     }
 }
 
-pub fn op_prev(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
+public fn op_prev(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
     match bt_cursor_prev(c, pages) {
         Ok(b)  => Ok(b),
         Err(e) => Err(BeBtree(e)),
     }
 }
 
-pub fn op_rewind(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
+public fn op_rewind(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
     match bt_cursor_first(c, pages) {
         Ok(b)  => Ok(b),
         Err(e) => Err(BeBtree(e)),
     }
 }
 
-pub fn op_last(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
+public fn op_last(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
     match bt_cursor_last(c, pages) {
         Ok(b)  => Ok(b),
         Err(e) => Err(BeBtree(e)),
@@ -415,7 +415,7 @@ pub fn op_last(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBri
 /// Generic seek dispatch.  Mirror of L4 `SeekGE / SeekGT / SeekLE /
 /// SeekLT` opcodes — converted to a single function with the
 /// `SeekOp` enum because the dispatch is identical apart from the op.
-pub fn op_seek(
+public fn op_seek(
     c: &mut BtreeCursor,
     pages: &PageStore,
     target: &SeekKey,
@@ -435,7 +435,7 @@ pub fn op_seek(
 /// Caller has already encoded the cell payload (header + key + data)
 /// per `l2_record::encode_cell`.  This bridge function then drives
 /// `btree_insert_at_cursor` which handles the full ripple.
-pub fn op_insert(
+public fn op_insert(
     c: &mut BtreeCursor,
     pages: &mut PageStore,
     page_size: Int,
@@ -450,7 +450,7 @@ pub fn op_insert(
 }
 
 /// Mirror of L4 `Delete(cursor_id)` opcode.
-pub fn op_delete(
+public fn op_delete(
     c: &mut BtreeCursor,
     pages: &mut PageStore,
     page_size: Int,
@@ -470,7 +470,7 @@ pub fn op_delete(
 /// Mirror of L4 `RowIdOp(cursor_id, reg_dst)`.  Returns the rowid
 /// of the current cell as `Int64`.  Only valid for table-btree
 /// cursors; index cursors return `Err(BeUnsupportedOp)`.
-pub fn op_rowid(
+public fn op_rowid(
     c: &BtreeCursor,
     pages: &PageStore,
 ) -> Result<Int64, CursorBridgeError> {

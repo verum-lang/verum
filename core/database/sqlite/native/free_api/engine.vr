@@ -41,14 +41,14 @@ public fn new_engine() -> FreeEngine {
 }
 
 implement FreeEngine {
-    pub fn set_hard_limit(&mut self, n: Int64) { self.hard_limit = n; }
+    public fn set_hard_limit(&mut self, n: Int64) { self.hard_limit = n; }
 
     fn reject_oom(&self, size: Int64) -> Bool {
         self.hard_limit > 0_i64
             && (self.outstanding_bytes + size) > self.hard_limit
     }
 
-    pub fn sqlite3_malloc(&mut self, n: Int) -> OpaqueHandle {
+    public fn sqlite3_malloc(&mut self, n: Int) -> OpaqueHandle {
         if n <= 0 { return null_handle(); }
         let size = n as Int64;
         if self.reject_oom(size) { return null_handle(); }
@@ -59,7 +59,7 @@ implement FreeEngine {
         new_handle(id, size)
     }
 
-    pub fn sqlite3_malloc64(&mut self, n: Int64) -> OpaqueHandle {
+    public fn sqlite3_malloc64(&mut self, n: Int64) -> OpaqueHandle {
         if n <= 0_i64 { return null_handle(); }
         if self.reject_oom(n) { return null_handle(); }
         let id = self.next_id;
@@ -69,7 +69,7 @@ implement FreeEngine {
         new_handle(id, n)
     }
 
-    pub fn sqlite3_free(&mut self, h: &OpaqueHandle) {
+    public fn sqlite3_free(&mut self, h: &OpaqueHandle) {
         if is_null(h) { return; }
         if self.outstanding_bytes >= h.size {
             self.outstanding_bytes = self.outstanding_bytes - h.size;
@@ -81,7 +81,7 @@ implement FreeEngine {
 
     /// Classical realloc semantics: free(old) + malloc(new). On OOM
     /// return NULL *without* freeing the old handle (C-library contract).
-    pub fn sqlite3_realloc(&mut self, old: &OpaqueHandle, new_size: Int) -> OpaqueHandle {
+    public fn sqlite3_realloc(&mut self, old: &OpaqueHandle, new_size: Int) -> OpaqueHandle {
         if new_size <= 0 { self.sqlite3_free(old); return null_handle(); }
         let size = new_size as Int64;
         let delta = if size > old.size { size - old.size } else { 0 as Int64 };
@@ -93,7 +93,7 @@ implement FreeEngine {
         new_handle(id, size)
     }
 
-    pub fn sqlite3_msize(&self, h: &OpaqueHandle) -> Int64 {
+    public fn sqlite3_msize(&self, h: &OpaqueHandle) -> Int64 {
         h.size
     }
 }

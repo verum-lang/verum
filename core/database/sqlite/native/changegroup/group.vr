@@ -32,11 +32,11 @@ public fn new_group(id: Int64) -> Changegroup {
 }
 
 implement Changegroup {
-    pub fn attach_schema(&mut self, db: Int64) {
+    public fn attach_schema(&mut self, db: Int64) {
         self.schema_db = Maybe.Some(db);
     }
 
-    pub fn note_table(&mut self, table: Text) {
+    public fn note_table(&mut self, table: Text) {
         let mut i: Int = 0;
         while i < self.tables.len() {
             if self.tables.get(i) == &table { return; }
@@ -45,12 +45,12 @@ implement Changegroup {
         self.tables.push(table);
     }
 
-    pub fn note_bytes(&mut self, delta: Int64) {
+    public fn note_bytes(&mut self, delta: Int64) {
         self.output_bytes_estimate = self.output_bytes_estimate + delta;
     }
 
-    pub fn release(&mut self) { self.released = true; }
-    pub fn has_schema(&self) -> Bool {
+    public fn release(&mut self) { self.released = true; }
+    public fn has_schema(&self) -> Bool {
         match &self.schema_db {
             Maybe.Some(_) => true,
             Maybe.None => false,

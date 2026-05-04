@@ -70,7 +70,7 @@ implement StmtCursor {
 
     /// Drive one step. The supplied closure performs the real work
     /// (calling into the L4 interpreter) + returns the raw outcome.
-    pub fn step(&mut self, step_fn: fn(Int64) -> StepOutcome) -> StepOutcome {
+    public fn step(&mut self, step_fn: fn(Int64) -> StepOutcome) -> StepOutcome {
         if self.is_done() {
             return SoOther(self.stmt_id as Int);
         }
@@ -95,7 +95,7 @@ implement StmtCursor {
 
     /// Poll until the cursor stops returning ROW. Returns the count
     /// of rows yielded.
-    pub fn drain(&mut self, step_fn: fn(Int64) -> StepOutcome, on_row: fn(Int64)) -> Int64 {
+    public fn drain(&mut self, step_fn: fn(Int64) -> StepOutcome, on_row: fn(Int64)) -> Int64 {
         let mut yielded: Int64 = 0 as Int64;
         loop {
             let o = self.step(step_fn);

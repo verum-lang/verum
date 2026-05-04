@@ -244,7 +244,7 @@ implement OtlpExporter {
     /// protobuf body. The encoder is a hand-rolled deterministic
     /// serializer — no codegen dependency, no schema drift, byte-
     /// for-byte stable across runs given identical inputs.
-    pub fn encode_snapshot(&self) -> List<Byte> {
+    public fn encode_snapshot(&self) -> List<Byte> {
         let mut buf: List<Byte> = [];
         // Field 1, ResourceMetrics (LEN-delimited message).
         let rm = self.encode_resource_metrics();

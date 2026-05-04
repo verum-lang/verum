@@ -54,11 +54,11 @@ fn ci_eq(a: &Text, b: &Text) -> Bool {
 }
 
 implement UriParameters {
-    pub fn add(&mut self, name: Text, value: Text) {
+    public fn add(&mut self, name: Text, value: Text) {
         self.params.push(param(name, value));
     }
 
-    pub fn parameter(&self, name: &Text) -> Maybe<Text> {
+    public fn parameter(&self, name: &Text) -> Maybe<Text> {
         let mut i: Int = 0;
         while i < self.params.len() {
             if self.params.get(i).name == *name {
@@ -69,12 +69,12 @@ implement UriParameters {
         Maybe.None
     }
 
-    pub fn key(&self, index: Int) -> Maybe<Text> {
+    public fn key(&self, index: Int) -> Maybe<Text> {
         if index < 0 || index >= self.params.len() { return Maybe.None; }
         Maybe.Some(self.params.get(index).name.clone())
     }
 
-    pub fn len(&self) -> Int { self.params.len() }
+    public fn len(&self) -> Int { self.params.len() }
 }
 
 /// Interpret a value as a boolean per the SQLite URI rules.

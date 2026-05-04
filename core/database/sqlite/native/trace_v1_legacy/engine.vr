@@ -44,27 +44,27 @@ public fn new_engine() -> LegacyTraceEngine {
 }
 
 implement LegacyTraceEngine {
-    pub fn sqlite3_trace(&mut self, slot: LegacySlot) {
+    public fn sqlite3_trace(&mut self, slot: LegacySlot) {
         self.trace = slot;
     }
 
-    pub fn sqlite3_profile(&mut self, slot: LegacySlot) {
+    public fn sqlite3_profile(&mut self, slot: LegacySlot) {
         self.profile = slot;
     }
 
-    pub fn fire_begin(&mut self) -> Bool {
+    public fn fire_begin(&mut self) -> Bool {
         if !is_installed(&self.trace) { return false; }
         self.trace_calls = self.trace_calls + 1_i64;
         true
     }
 
-    pub fn fire_end(&mut self) -> Bool {
+    public fn fire_end(&mut self) -> Bool {
         if !is_installed(&self.profile) { return false; }
         self.profile_calls = self.profile_calls + 1_i64;
         true
     }
 
-    pub fn any_installed(&self) -> Bool {
+    public fn any_installed(&self) -> Bool {
         is_installed(&self.trace) || is_installed(&self.profile)
     }
 }

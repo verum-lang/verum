@@ -73,7 +73,7 @@ implement DifferentialOracle {
     }
 
     /// Run the comparator + record a `CaseReport`.
-    pub fn observe(&mut self, c: &DifferentialCase, loom: &RunResult, csqlite: &RunResult) -> DiffOutcome {
+    public fn observe(&mut self, c: &DifferentialCase, loom: &RunResult, csqlite: &RunResult) -> DiffOutcome {
         let outcome = compare(loom, csqlite, &c.mode);
         let matched = is_match(&outcome);
         if matched { self.matched = self.matched + 1; }
@@ -89,7 +89,7 @@ implement DifferentialOracle {
     }
 
     /// First report that did NOT match — useful for failing-fast in CI.
-    pub fn first_mismatch(&self) -> Maybe<CaseReport> {
+    public fn first_mismatch(&self) -> Maybe<CaseReport> {
         let mut i: Int = 0;
         while i < self.reports.len() {
             if !is_match(&self.reports[i].outcome) {
@@ -107,7 +107,7 @@ implement DifferentialOracle {
     }
 
     /// One-line summary suitable for CI output.
-    pub fn summary(&self) -> Text {
+    public fn summary(&self) -> Text {
         let mut s = "differential: ".clone();
         push_int(&mut s, self.matched);
         push(&mut s, &"/".clone());

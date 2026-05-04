@@ -46,13 +46,13 @@ public fn new_registry() -> Fts5Registry {
 }
 
 implement Fts5Registry {
-    pub fn register_tokenizer(&mut self, d: TokenizerDecl) -> Bool {
+    public fn register_tokenizer(&mut self, d: TokenizerDecl) -> Bool {
         if self.find_tokenizer(&d.name) >= 0 { return false; }
         self.tokenizers.push(d);
         true
     }
 
-    pub fn find_tokenizer(&self, name: &Text) -> Int {
+    public fn find_tokenizer(&self, name: &Text) -> Int {
         let mut i: Int = 0;
         while i < self.tokenizers.len() {
             if self.tokenizers.get(i).name == *name { return i; }
@@ -61,13 +61,13 @@ implement Fts5Registry {
         -1
     }
 
-    pub fn register_aux(&mut self, d: AuxFnDecl) -> Bool {
+    public fn register_aux(&mut self, d: AuxFnDecl) -> Bool {
         if self.find_aux(&d.name) >= 0 { return false; }
         self.aux_fns.push(d);
         true
     }
 
-    pub fn find_aux(&self, name: &Text) -> Int {
+    public fn find_aux(&self, name: &Text) -> Int {
         let mut i: Int = 0;
         while i < self.aux_fns.len() {
             if self.aux_fns.get(i).name == *name { return i; }

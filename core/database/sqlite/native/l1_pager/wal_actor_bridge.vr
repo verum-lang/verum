@@ -46,7 +46,7 @@ mount core.database.sqlite.native.l1_pager.wal_pager.{
 // WalPagerActor — owns a WalPager + serves PagerRequest
 // -----------------------------------------------------------------------------
 
-pub type affine WalPagerActor is {
+public type affine WalPagerActor is {
     wal_pager: WalPager,
     /// Pending writes since the last commit.  Pure stat for
     /// observability — the WalPager itself buffers via
@@ -54,7 +54,7 @@ pub type affine WalPagerActor is {
     pending_writes: Int,
 }
 
-pub fn wal_actor_new(wal_pager: WalPager) -> WalPagerActor {
+public fn wal_actor_new(wal_pager: WalPager) -> WalPagerActor {
     WalPagerActor {
         wal_pager: wal_pager,
         pending_writes: 0,
@@ -62,9 +62,9 @@ pub fn wal_actor_new(wal_pager: WalPager) -> WalPagerActor {
 }
 
 implement WalPagerActor {
-    pub fn pending(&self) -> Int { self.pending_writes }
-    pub fn mx_frame(&self) -> Int { self.wal_pager.mx_frame() }
-    pub fn n_backfill(&self) -> Int { self.wal_pager.n_backfill() }
+    public fn pending(&self) -> Int { self.pending_writes }
+    public fn mx_frame(&self) -> Int { self.wal_pager.mx_frame() }
+    public fn n_backfill(&self) -> Int { self.wal_pager.n_backfill() }
 }
 
 // -----------------------------------------------------------------------------
@@ -75,7 +75,7 @@ implement WalPagerActor {
 /// legacy `pager_apply` shape so callers can swap the actor type
 /// without changing dispatch.  Reads/writes go through the WAL
 /// frame index; commits append + fsync; checkpoints drain.
-pub fn wal_pager_apply(
+public fn wal_pager_apply(
     actor: &mut WalPagerActor,
     req: PagerRequest,
 ) -> PagerReply {
@@ -134,7 +134,7 @@ fn translate_mode(m: PagerCheckpointMode) -> CheckpointMode {
 // Batch dispatch — same convenience as actor.vr's pager_apply_batch
 // -----------------------------------------------------------------------------
 
-pub fn wal_pager_apply_batch(
+public fn wal_pager_apply_batch(
     actor: &mut WalPagerActor,
     reqs: List<PagerRequest>,
 ) -> List<PagerReply> {

@@ -60,13 +60,13 @@ mount core.database.sqlite.native.l5_sql.planner.{
 /// One planner pass.  Takes a PlanNode by value (consume), returns
 /// `(rewritten_plan, n_edits)`.  `n_edits == 0` signals "no
 /// rewrite happened, this pass is at fixed point".
-pub type PlanPassFn = fn(PlanNode) -> (PlanNode, Int);
+public type PlanPassFn = fn(PlanNode) -> (PlanNode, Int);
 
 // -----------------------------------------------------------------------------
 // PlanPassReport — pipeline observability
 // -----------------------------------------------------------------------------
 
-pub type PlanPassReport is {
+public type PlanPassReport is {
     iterations: Int,
     total_edits: Int,
     passes_run: Int,
@@ -84,7 +84,7 @@ fn empty_report() -> PlanPassReport {
 /// `max_iter` to defend against pathological cycles in user-
 /// supplied passes (the built-in passes are all idempotent and
 /// converge in 1-3 iterations on real workloads).
-pub fn run_plan_passes(
+public fn run_plan_passes(
     plan: PlanNode,
     passes: List<PlanPassFn>,
     max_iter: Int,
@@ -117,7 +117,7 @@ pub fn run_plan_passes(
 /// canonical passes in dependency order: flatten projects first
 /// (creates more filter-chain opportunities), then merge filters,
 /// then push limit past project, then unwrap useless distincts.
-pub fn standard_pipeline() -> List<PlanPassFn> {
+public fn standard_pipeline() -> List<PlanPassFn> {
     let mut out: List<PlanPassFn> = List.new();
     out.push(flatten_project_chains);
     out.push(merge_filter_chains);
@@ -134,7 +134,7 @@ pub fn standard_pipeline() -> List<PlanPassFn> {
 /// `PnProject(child, outer_cols)`.  The outer column list always
 /// wins — it expresses what the caller wants.  The inner Project
 /// becomes redundant once flattened.
-pub fn flatten_project_chains(plan: PlanNode) -> (PlanNode, Int) {
+public fn flatten_project_chains(plan: PlanNode) -> (PlanNode, Int) {
     let mut edits: Int = 0;
     let new_plan = walk_flatten_project(plan, &mut edits);
     (new_plan, edits)
@@ -195,7 +195,7 @@ fn walk_flatten_project(plan: PlanNode, edits: &mut Int) -> PlanNode {
 /// `PnFilter(PnFilter(child, p_inner), p_outer)` →
 /// `PnFilter(child, p_outer AND p_inner)`.  Reduces predicate
 /// dispatch overhead at codegen.
-pub fn merge_filter_chains(plan: PlanNode) -> (PlanNode, Int) {
+public fn merge_filter_chains(plan: PlanNode) -> (PlanNode, Int) {
     let mut edits: Int = 0;
     let new_plan = walk_merge_filter(plan, &mut edits);
     (new_plan, edits)
@@ -260,7 +260,7 @@ fn walk_merge_filter(plan: PlanNode, edits: &mut Int) -> PlanNode {
 /// Does NOT push past PnSort (LIMIT semantics depend on order),
 /// PnDistinct (Limit-then-Distinct ≠ Distinct-then-Limit),
 /// PnGroupBy (similar), or set-ops.
-pub fn limit_pushdown_unsorted(plan: PlanNode) -> (PlanNode, Int) {
+public fn limit_pushdown_unsorted(plan: PlanNode) -> (PlanNode, Int) {
     let mut edits: Int = 0;
     let new_plan = walk_limit_pushdown(plan, &mut edits);
     (new_plan, edits)
@@ -324,7 +324,7 @@ fn walk_limit_pushdown(plan: PlanNode, edits: &mut Int) -> PlanNode {
 /// Other patterns are conservative — we don't have schema-aware
 /// uniqueness analysis at this layer (that lives with the cost
 /// model and index metadata in #142/#143 follow-ups).
-pub fn unwrap_distinct_unique(plan: PlanNode) -> (PlanNode, Int) {
+public fn unwrap_distinct_unique(plan: PlanNode) -> (PlanNode, Int) {
     let mut edits: Int = 0;
     let new_plan = walk_unwrap_distinct(plan, &mut edits);
     (new_plan, edits)

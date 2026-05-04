@@ -72,7 +72,7 @@ implement Stat4Histogram {
     public fn bucket_count(&self) -> Int { self.buckets.len() }
 
     /// Estimate the count of rows with `key == probe`.
-    pub fn estimate_eq(&self, probe: &SampleKey) -> Int64 {
+    public fn estimate_eq(&self, probe: &SampleKey) -> Int64 {
         let mut i: Int = 0;
         while i < self.buckets.len() {
             if key_compare(&self.buckets[i].key, probe) == 0 {
@@ -87,7 +87,7 @@ implement Stat4Histogram {
     }
 
     /// Estimate the count of rows with `key < probe`.
-    pub fn estimate_lt(&self, probe: &SampleKey) -> Int64 {
+    public fn estimate_lt(&self, probe: &SampleKey) -> Int64 {
         let mut last: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < self.buckets.len() {
@@ -101,7 +101,7 @@ implement Stat4Histogram {
     }
 
     /// Estimate count with `lo ≤ key < hi`.
-    pub fn estimate_range(&self, lo: &SampleKey, hi: &SampleKey) -> Int64 {
+    public fn estimate_range(&self, lo: &SampleKey, hi: &SampleKey) -> Int64 {
         let upper = self.estimate_lt(hi);
         let lower = self.estimate_lt(lo);
         if upper > lower { upper - lower } else { 0 as Int64 }

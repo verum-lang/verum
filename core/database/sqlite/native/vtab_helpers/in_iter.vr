@@ -31,7 +31,7 @@ public fn new_iterator(values: List<Int64>) -> InIterator {
 }
 
 implement InIterator {
-    pub fn sqlite3_vtab_in_first(&mut self) -> Int {
+    public fn sqlite3_vtab_in_first(&mut self) -> Int {
         match &self.state {
             IisStart => {
                 if self.values.len() == 0 {
@@ -45,7 +45,7 @@ implement InIterator {
         }
     }
 
-    pub fn sqlite3_vtab_in_next(&mut self) -> Int {
+    public fn sqlite3_vtab_in_next(&mut self) -> Int {
         match &self.state {
             IisMore(i) => {
                 let next = *i;
@@ -60,7 +60,7 @@ implement InIterator {
         }
     }
 
-    pub fn is_done(&self) -> Bool {
+    public fn is_done(&self) -> Bool {
         match &self.state {
             IisDone => true,
             _ => false,

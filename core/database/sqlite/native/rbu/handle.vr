@@ -41,19 +41,19 @@ public fn new_rbu(id: Int64, target_db: Text, rbu_db: Text) -> Rbu {
 }
 
 implement Rbu {
-    pub fn with_state_db(&mut self, path: Text) {
+    public fn with_state_db(&mut self, path: Text) {
         self.state_db = Maybe.Some(path);
     }
 
-    pub fn advance_to(&mut self, stage: RbuStage) {
+    public fn advance_to(&mut self, stage: RbuStage) {
         self.stage = stage;
     }
 
-    pub fn note_step(&mut self) {
+    public fn note_step(&mut self) {
         self.steps_taken = self.steps_taken + 1_i64;
     }
 
-    pub fn close(&mut self) { self.closed = true; }
+    public fn close(&mut self) { self.closed = true; }
 
-    pub fn is_live(&self) -> Bool { !self.closed }
+    public fn is_live(&self) -> Bool { !self.closed }
 }

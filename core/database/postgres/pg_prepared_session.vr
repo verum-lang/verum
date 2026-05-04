@@ -280,7 +280,7 @@ implement AsyncPgPreparedSession {
         }
     }
 
-    pub fn invalidate(&mut self, sql: &Text) -> Bool {
+    public fn invalidate(&mut self, sql: &Text) -> Bool {
         let fp = compute_fingerprint(sql);
         self.cache.invalidate(fp).is_some()
     }

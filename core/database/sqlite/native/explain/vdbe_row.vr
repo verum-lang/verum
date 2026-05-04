@@ -52,10 +52,10 @@ public fn vdbe_table_new() -> VdbeExplainTable {
 implement VdbeExplainTable {
     public fn len(&self) -> Int { self.rows.len() }
 
-    pub fn add(&mut self, r: VdbeExplainRow) { self.rows.push(r); }
+    public fn add(&mut self, r: VdbeExplainRow) { self.rows.push(r); }
 
     /// True iff `addr` was registered.
-    pub fn contains_addr(&self, addr: Int) -> Bool {
+    public fn contains_addr(&self, addr: Int) -> Bool {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].addr == addr { return true; }
@@ -65,7 +65,7 @@ implement VdbeExplainTable {
     }
 
     /// First occurrence of an opcode by name — useful for sniff-tests.
-    pub fn find_opcode(&self, want: &Text) -> Maybe<Int> {
+    public fn find_opcode(&self, want: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].opcode == *want { return Some(i); }

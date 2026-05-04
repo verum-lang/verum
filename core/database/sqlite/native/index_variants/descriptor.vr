@@ -78,7 +78,7 @@ implement IndexDescriptor {
 
     public fn arity(&self) -> Int { self.columns.len() }
 
-    pub fn covers_columns(&self, requested: &List<Text>) -> Bool {
+    public fn covers_columns(&self, requested: &List<Text>) -> Bool {
         let mut i: Int = 0;
         while i < requested.len() {
             let mut found = false;

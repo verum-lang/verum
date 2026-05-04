@@ -37,16 +37,16 @@ public fn new_session(id: Int64, schema: Text) -> SessionHandle {
 }
 
 implement SessionHandle {
-    pub fn enable(&mut self, on: Bool) { self.enabled = on; }
-    pub fn set_indirect(&mut self, on: Bool) { self.indirect = on; }
+    public fn enable(&mut self, on: Bool) { self.enabled = on; }
+    public fn set_indirect(&mut self, on: Bool) { self.indirect = on; }
 
-    pub fn attach(&mut self, table: Text) -> Bool {
+    public fn attach(&mut self, table: Text) -> Bool {
         if self.has_table(&table) { return false; }
         self.attached_tables.push(table);
         true
     }
 
-    pub fn has_table(&self, table: &Text) -> Bool {
+    public fn has_table(&self, table: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.attached_tables.len() {
             if self.attached_tables.get(i) == table { return true; }
@@ -55,7 +55,7 @@ implement SessionHandle {
         false
     }
 
-    pub fn release(&mut self) { self.released = true; }
+    public fn release(&mut self) { self.released = true; }
 
-    pub fn is_empty(&self) -> Bool { self.attached_tables.len() == 0 }
+    public fn is_empty(&self) -> Bool { self.attached_tables.len() == 0 }
 }

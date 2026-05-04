@@ -36,12 +36,12 @@ public type FlagSet is { bits: Int }
 public fn flag_set_empty() -> FlagSet { FlagSet { bits: 0 } }
 
 implement FlagSet {
-    pub fn include(mut self, f: DeserializeFlag) -> FlagSet {
+    public fn include(mut self, f: DeserializeFlag) -> FlagSet {
         self.bits = self.bits | flag_bit(&f);
         self
     }
 
-    pub fn exclude(mut self, f: DeserializeFlag) -> FlagSet {
+    public fn exclude(mut self, f: DeserializeFlag) -> FlagSet {
         self.bits = self.bits & !flag_bit(&f);
         self
     }

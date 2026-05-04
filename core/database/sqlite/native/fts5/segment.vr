@@ -76,12 +76,12 @@ public fn segment_new(id: Int64, level: SegmentLevel) -> Segment {
 implement Segment {
     public fn term_count(&self) -> Int { self.entries.len() }
 
-    pub fn append(&mut self, e: SegmentEntry) {
+    public fn append(&mut self, e: SegmentEntry) {
         self.total_postings = self.total_postings + e.postings.len();
         self.entries.push(e);
     }
 
-    pub fn lookup(&self, term: &Text) -> Maybe<Int> {
+    public fn lookup(&self, term: &Text) -> Maybe<Int> {
         // Binary search assumes sorted entries.
         let mut lo: Int = 0;
         let mut hi: Int = self.entries.len();
@@ -94,5 +94,5 @@ implement Segment {
         None
     }
 
-    pub fn mark_persisted(&mut self) { self.persisted = true; }
+    public fn mark_persisted(&mut self) { self.persisted = true; }
 }

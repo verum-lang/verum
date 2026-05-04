@@ -75,7 +75,7 @@ implement LimitTracker {
 
     /// Configure (or reconfigure) one dimension. Idempotent — calling
     /// twice with different policy/cap replaces the existing entry.
-    pub fn configure(&mut self, cfg: PolicyConfig) {
+    public fn configure(&mut self, cfg: PolicyConfig) {
         let dim_name = dimension_name(&cfg.dimension);
         let mut i: Int = 0;
         while i < self.states.len() {
@@ -107,7 +107,7 @@ implement LimitTracker {
 
     /// Check `current_value` against the cap for `dimension`. Records
     /// the value, fires a breach + decision when needed.
-    pub fn check(
+    public fn check(
         &mut self,
         dim: LimitDimension,
         current_value: Int64,
@@ -127,7 +127,7 @@ implement LimitTracker {
         decide(&policy, prior)
     }
 
-    pub fn current_value(&self, dim: &LimitDimension) -> Maybe<Int64> {
+    public fn current_value(&self, dim: &LimitDimension) -> Maybe<Int64> {
         let dim_name = dimension_name(dim);
         let mut i: Int = 0;
         while i < self.states.len() {
@@ -139,7 +139,7 @@ implement LimitTracker {
         None
     }
 
-    pub fn breach_count(&self, dim: &LimitDimension) -> Int {
+    public fn breach_count(&self, dim: &LimitDimension) -> Int {
         let dim_name = dimension_name(dim);
         let mut i: Int = 0;
         while i < self.states.len() {
@@ -153,7 +153,7 @@ implement LimitTracker {
 
     /// Reset only the running totals — leaves cap, policy, and
     /// breach_count alone. Called between queries.
-    pub fn reset_running_values(&mut self) {
+    public fn reset_running_values(&mut self) {
         let mut i: Int = 0;
         while i < self.states.len() {
             self.states[i].current = 0 as Int64;
@@ -163,7 +163,7 @@ implement LimitTracker {
 
     /// Reset breach counts (used by SoftWarn re-arm after a query
     /// completes successfully).
-    pub fn rearm_soft_warn(&mut self) {
+    public fn rearm_soft_warn(&mut self) {
         let mut i: Int = 0;
         while i < self.states.len() {
             match &self.states[i].policy {

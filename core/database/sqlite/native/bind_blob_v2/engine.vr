@@ -38,7 +38,7 @@ implement BindBlobEngine {
     /// SQLite codes: 0 (OK), 25 (SQLITE_RANGE) on bad index,
     /// 21 (SQLITE_MISUSE) on negative size, 18 (SQLITE_TOOBIG) on
     /// v1 size > INT32_MAX.
-    pub fn sqlite3_bind_blob(&mut self, index: Int, spec: BindBlobSpec) -> Int {
+    public fn sqlite3_bind_blob(&mut self, index: Int, spec: BindBlobSpec) -> Int {
         if index <= 0 || index >= self.slots.len() {
             self.rejections = self.rejections + 1_i64;
             return 25;
@@ -55,7 +55,7 @@ implement BindBlobEngine {
         0
     }
 
-    pub fn clear(&mut self, index: Int) -> Bool {
+    public fn clear(&mut self, index: Int) -> Bool {
         if index <= 0 || index >= self.slots.len() { return false; }
         self.slots.get_mut(index).spec = Maybe.None;
         true

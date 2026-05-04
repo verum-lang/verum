@@ -63,7 +63,7 @@ mount core.database.sqlite.native.l4_vdbe.cursor_btree_bridge.{
 
 /// Result of a column read.  Carries either the typed Register
 /// (success) or a sentinel RNull (slot closed / B-tree error).
-pub type ColumnResult is {
+public type ColumnResult is {
     value: Register,
     /// `true` when the value came from a real B-tree read; `false`
     /// when it came from the row-store path or a fallback.
@@ -72,7 +72,7 @@ pub type ColumnResult is {
 
 /// Result of an advance/rewind operation.  `still_has_row` matches
 /// the existing `CursorTable.advance` semantics.
-pub type AdvanceResult is {
+public type AdvanceResult is {
     still_has_row: Bool,
     via_btree: Bool,
 }
@@ -85,7 +85,7 @@ pub type AdvanceResult is {
 /// CskBtree AND `pages` is Some, routes through cursor_btree_bridge::
 /// op_column.  Otherwise falls back to CursorTable's row-store path
 /// (peek_cell).  RNull on any error path.
-pub fn dispatch_column(
+public fn dispatch_column(
     table: &mut CursorTable,
     pages: Maybe<&PageStore>,
     cursor_id: Int,
@@ -120,7 +120,7 @@ pub fn dispatch_column(
 /// Dispatch a Next(cursor_id) opcode.  CskBtree path uses
 /// op_next + writes back the advanced cursor; row-store path uses
 /// CursorTable.advance.
-pub fn dispatch_next(
+public fn dispatch_next(
     table: &mut CursorTable,
     pages: Maybe<&PageStore>,
     cursor_id: Int,
@@ -160,7 +160,7 @@ pub fn dispatch_next(
 
 /// Dispatch a Rewind(cursor_id) opcode.  Returns `still_has_row`
 /// after positioning at first cell.
-pub fn dispatch_rewind(
+public fn dispatch_rewind(
     table: &mut CursorTable,
     pages: Maybe<&PageStore>,
     cursor_id: Int,
@@ -203,7 +203,7 @@ pub fn dispatch_rewind(
 
 /// Dispatch a RowIdOp(cursor_id) opcode.  Returns the rowid as
 /// Int64 (0 on error / non-table cursor).
-pub fn dispatch_rowid(
+public fn dispatch_rowid(
     table: &mut CursorTable,
     pages: Maybe<&PageStore>,
     cursor_id: Int,

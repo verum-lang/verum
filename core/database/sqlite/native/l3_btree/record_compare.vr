@@ -87,7 +87,7 @@ public fn record_schema_binary(n: Int) -> RecordSchema {
 /// Build a schema from per-column collation choices (text columns)
 /// and direction flags.  Columns beyond `len(collations)` default
 /// to BINARY-ascending.
-pub fn record_schema_from_choices(
+public fn record_schema_from_choices(
     collations: &List<CollationKind>,
     descs: &List<Bool>,
     n_cols: Int,
@@ -374,7 +374,7 @@ public type RecordCompareError is
 /// `registry` is `Some` when the connection has registered named
 /// collations the schema may reference via `UserDefined(name)`.
 /// `None` is acceptable for paths that only use built-ins.
-pub fn cmp_records_with_schema(
+public fn cmp_records_with_schema(
     a: &List<Byte>,
     b: &List<Byte>,
     schema: &RecordSchema,
@@ -452,7 +452,7 @@ const DEFAULT_COL_SCHEMA: ColumnSchema = ColumnSchema {
 /// defaults to BINARY-ascending).  Callers that have a schema in
 /// hand (index seek, ORDER BY codegen, sorter with COLLATE) pass
 /// it through; legacy table-scan paths can pass an empty schema.
-pub fn cmp_byte_records(
+public fn cmp_byte_records(
     a: &List<Byte>,
     b: &List<Byte>,
     schema: &RecordSchema,

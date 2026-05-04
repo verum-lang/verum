@@ -34,31 +34,31 @@ public fn new_view(original: Text) -> SqlView {
 }
 
 implement SqlView {
-    pub fn sqlite3_sql(&self) -> Text { self.original.clone() }
+    public fn sqlite3_sql(&self) -> Text { self.original.clone() }
 
-    pub fn sqlite3_expanded_sql(&self) -> Maybe<Text> {
+    public fn sqlite3_expanded_sql(&self) -> Maybe<Text> {
         match &self.expanded {
             Maybe.Some(t) => Maybe.Some(t.clone()),
             Maybe.None => Maybe.None,
         }
     }
 
-    pub fn sqlite3_normalized_sql(&self) -> Maybe<Text> {
+    public fn sqlite3_normalized_sql(&self) -> Maybe<Text> {
         match &self.normalized {
             Maybe.Some(t) => Maybe.Some(t.clone()),
             Maybe.None => Maybe.None,
         }
     }
 
-    pub fn record_expansion(&mut self, expanded: Text) {
+    public fn record_expansion(&mut self, expanded: Text) {
         self.expanded = Maybe.Some(expanded);
     }
 
-    pub fn record_normalization(&mut self, normalized: Text) {
+    public fn record_normalization(&mut self, normalized: Text) {
         self.normalized = Maybe.Some(normalized);
     }
 
-    pub fn has_expansion(&self) -> Bool {
+    public fn has_expansion(&self) -> Bool {
         match &self.expanded { Maybe.Some(_) => true, Maybe.None => false }
     }
 }

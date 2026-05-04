@@ -89,7 +89,7 @@ implement AlterEngine {
     ///
 
     ///  while !engine.is_terminal() { engine.step(snap, runner); }
-    pub fn step(
+    public fn step(
         &mut self,
         snap: &AlterSchemaSnapshot,
         sql_runner: fn(&Text) -> Maybe<Text>,
@@ -125,7 +125,7 @@ implement AlterEngine {
         }
     }
 
-    pub fn delta(&self) -> Maybe<SchemaDelta> {
+    public fn delta(&self) -> Maybe<SchemaDelta> {
         match &self.phase {
             EpDone(d)          => Some(clone_delta(d)),
             EpApplyingDelta(d) => Some(clone_delta(d)),

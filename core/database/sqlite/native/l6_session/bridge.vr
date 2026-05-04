@@ -99,7 +99,7 @@ public fn writeback_cursors_to_connection(
 /// Separated from writeback so callers that want write-through-
 /// without-hook semantics (e.g. internal schema bootstrap) can
 /// invoke the row apply step alone.
-pub fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut Connection) {
+public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut Connection) {
     // Bail out of the hot path before grabbing the hook reference.
     if !conn.registry_view().has_update_hook() {
         return;

@@ -42,26 +42,26 @@ public fn new_counter() -> ChangeCounter {
 implement ChangeCounter {
     /// Called by the VDBE at the end of a DML statement. Overwrites
     /// statement_changes, folds into total_changes, bumps version.
-    pub fn record_statement(&mut self, changes: Int64) {
+    public fn record_statement(&mut self, changes: Int64) {
         self.statement_changes = changes;
         self.total_changes = self.total_changes + changes;
         self.version = self.version + 1_i64;
     }
 
     /// Called by the VDBE when an INSERT into a rowid table commits.
-    pub fn record_insert(&mut self, rowid: Int64) {
+    public fn record_insert(&mut self, rowid: Int64) {
         self.last_insert_rowid = rowid;
         self.version = self.version + 1_i64;
     }
 
     /// Explicit override — matches sqlite3_set_last_insert_rowid.
-    pub fn override_last_insert_rowid(&mut self, rowid: Int64) {
+    public fn override_last_insert_rowid(&mut self, rowid: Int64) {
         self.last_insert_rowid = rowid;
         self.version = self.version + 1_i64;
     }
 
     /// Reset statement-local counter at the start of a new statement.
-    pub fn start_statement(&mut self) {
+    public fn start_statement(&mut self) {
         self.statement_changes = 0 as Int64;
     }
 }

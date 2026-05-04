@@ -96,7 +96,7 @@ public fn plan_for(from_mode: JournalMode, to_mode: JournalMode) -> TransitionPl
 implement TransitionPlan {
     public fn step_count(&self) -> Int { self.steps.len() }
 
-    pub fn includes_step(&self, want: &TransitionStep) -> Bool {
+    public fn includes_step(&self, want: &TransitionStep) -> Bool {
         let want_name = step_kind_name(want);
         let mut i: Int = 0;
         while i < self.steps.len() {

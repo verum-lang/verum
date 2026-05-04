@@ -23,13 +23,13 @@ public fn new_list() -> StmtList {
 }
 
 implement StmtList {
-    pub fn register(&mut self, id: Int64) -> Bool {
+    public fn register(&mut self, id: Int64) -> Bool {
         if self.contains(id) { return false; }
         self.ids.push(id);
         true
     }
 
-    pub fn finalize(&mut self, id: Int64) -> Bool {
+    public fn finalize(&mut self, id: Int64) -> Bool {
         let mut i: Int = 0;
         while i < self.ids.len() {
             if *self.ids.get(i) == id {
@@ -41,7 +41,7 @@ implement StmtList {
         false
     }
 
-    pub fn contains(&self, id: Int64) -> Bool {
+    public fn contains(&self, id: Int64) -> Bool {
         let mut i: Int = 0;
         while i < self.ids.len() {
             if *self.ids.get(i) == id { return true; }
@@ -50,5 +50,5 @@ implement StmtList {
         false
     }
 
-    pub fn len(&self) -> Int { self.ids.len() }
+    public fn len(&self) -> Int { self.ids.len() }
 }

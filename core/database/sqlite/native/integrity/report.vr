@@ -52,30 +52,30 @@ implement IntegrityReport {
     public fn error_count(&self) -> Int { self.errors.len() }
     public fn is_clean(&self) -> Bool { self.errors.len() == 0 }
 
-    pub fn record(&mut self, e: IntegrityError) {
+    public fn record(&mut self, e: IntegrityError) {
         self.errors.push(e);
     }
 
-    pub fn note_page_visited(&mut self) {
+    public fn note_page_visited(&mut self) {
         self.pages_checked = self.pages_checked + 1_i64;
     }
 
-    pub fn note_row_visited(&mut self) {
+    public fn note_row_visited(&mut self) {
         self.rows_checked = self.rows_checked + 1_i64;
     }
 
-    pub fn start(&mut self, when_ns: Int64) {
+    public fn start(&mut self, when_ns: Int64) {
         self.started_at_ns = when_ns;
         self.finished_at_ns = when_ns;
     }
 
-    pub fn finish(&mut self, when_ns: Int64) {
+    public fn finish(&mut self, when_ns: Int64) {
         self.finished_at_ns = when_ns;
     }
 
-    pub fn elapsed_ns(&self) -> Int64 { self.finished_at_ns - self.started_at_ns }
+    public fn elapsed_ns(&self) -> Int64 { self.finished_at_ns - self.started_at_ns }
 
-    pub fn count_by_class(&self, want: &ErrorClass) -> Int {
+    public fn count_by_class(&self, want: &ErrorClass) -> Int {
         let want_name = class_name(want);
         let mut n: Int = 0;
         let mut i: Int = 0;
@@ -86,7 +86,7 @@ implement IntegrityReport {
         n
     }
 
-    pub fn summary(&self) -> Text {
+    public fn summary(&self) -> Text {
         let mut s = check_mode_name(&self.mode);
         push_text(&mut s, &": ".clone());
         if self.is_clean() {

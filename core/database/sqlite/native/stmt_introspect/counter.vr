@@ -70,7 +70,7 @@ public fn new_counters() -> StmtCounters {
 }
 
 implement StmtCounters {
-    pub fn read(&mut self, op: &StmtCounterOp, reset: Bool) -> Int64 {
+    public fn read(&mut self, op: &StmtCounterOp, reset: Bool) -> Int64 {
         let v = match op {
             ScFullscanStep => self.fullscan_step,
             ScSort         => self.sort,

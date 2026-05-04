@@ -46,7 +46,7 @@ public fn new_registry() -> RtreeGeomRegistry {
 }
 
 implement RtreeGeomRegistry {
-    pub fn register(&mut self, d: Decl) -> Bool {
+    public fn register(&mut self, d: Decl) -> Bool {
         let mut i: Int = 0;
         while i < self.decls.len() {
             let existing = self.decls.get(i);
@@ -60,7 +60,7 @@ implement RtreeGeomRegistry {
         true
     }
 
-    pub fn find(&self, name: &Text, kind: &GeomKind) -> Int {
+    public fn find(&self, name: &Text, kind: &GeomKind) -> Int {
         let want = kind_name(kind);
         let mut i: Int = 0;
         while i < self.decls.len() {
@@ -71,5 +71,5 @@ implement RtreeGeomRegistry {
         -1
     }
 
-    pub fn len(&self) -> Int { self.decls.len() }
+    public fn len(&self) -> Int { self.decls.len() }
 }

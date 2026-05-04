@@ -28,7 +28,7 @@ public fn new_table(metadata_enabled: Bool) -> ColumnOriginTable {
 }
 
 implement ColumnOriginTable {
-    pub fn push(&mut self, info: ColumnOriginInfo) {
+    public fn push(&mut self, info: ColumnOriginInfo) {
         self.columns.push(info);
     }
 
@@ -45,21 +45,21 @@ implement ColumnOriginTable {
         }
     }
 
-    pub fn sqlite3_column_database_name(&self, col: Int) -> Text {
+    public fn sqlite3_column_database_name(&self, col: Int) -> Text {
         self.fetch(col).database
     }
 
-    pub fn sqlite3_column_table_name(&self, col: Int) -> Text {
+    public fn sqlite3_column_table_name(&self, col: Int) -> Text {
         self.fetch(col).table
     }
 
-    pub fn sqlite3_column_origin_name(&self, col: Int) -> Text {
+    public fn sqlite3_column_origin_name(&self, col: Int) -> Text {
         self.fetch(col).origin
     }
 
-    pub fn sqlite3_column_decltype(&self, col: Int) -> Text {
+    public fn sqlite3_column_decltype(&self, col: Int) -> Text {
         self.fetch(col).decltype
     }
 
-    pub fn len(&self) -> Int { self.columns.len() }
+    public fn len(&self) -> Int { self.columns.len() }
 }

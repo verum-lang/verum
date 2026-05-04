@@ -136,11 +136,11 @@ public fn lag_tracker_new() -> LagTracker {
 implement LagTracker {
     public fn replica_count(&self) -> Int { self.states.len() }
 
-    pub fn set_thresholds(&mut self, th: LagThresholds) {
+    public fn set_thresholds(&mut self, th: LagThresholds) {
         self.thresholds = th;
     }
 
-    pub fn record_primary_commit(&mut self, position: Int64) {
+    public fn record_primary_commit(&mut self, position: Int64) {
         let mut i: Int = 0;
         while i < self.states.len() {
             if self.states[i].last_primary_position < position {
@@ -150,7 +150,7 @@ implement LagTracker {
         }
     }
 
-    pub fn record_replica_ack(&mut self, replica_id: &Text, position: Int64, now_ns: Int64) {
+    public fn record_replica_ack(&mut self, replica_id: &Text, position: Int64, now_ns: Int64) {
         let mut i: Int = 0;
         while i < self.states.len() {
             if self.states[i].replica_id == replica_id {
@@ -167,7 +167,7 @@ implement LagTracker {
         self.states.push(s);
     }
 
-    pub fn snapshot(&self, replica_id: &Text, now_ns: Int64) -> Maybe<LagSnapshot> {
+    public fn snapshot(&self, replica_id: &Text, now_ns: Int64) -> Maybe<LagSnapshot> {
         let mut i: Int = 0;
         while i < self.states.len() {
             if self.states[i].replica_id == replica_id {
@@ -186,7 +186,7 @@ implement LagTracker {
     }
 
     /// Snapshot every known replica's lag at `now_ns`.
-    pub fn snapshot_all(&self, now_ns: Int64) -> List<LagSnapshot> {
+    public fn snapshot_all(&self, now_ns: Int64) -> List<LagSnapshot> {
         let mut out: List<LagSnapshot> = List.new();
         let mut i: Int = 0;
         while i < self.states.len() {

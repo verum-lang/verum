@@ -103,10 +103,10 @@ public fn fk_list_set(table: Text) -> ForeignKeyListSet {
 implement ForeignKeyListSet {
     public fn len(&self) -> Int { self.rows.len() }
 
-    pub fn add(&mut self, r: ForeignKeyRow) { self.rows.push(r); }
+    public fn add(&mut self, r: ForeignKeyRow) { self.rows.push(r); }
 
     /// Count distinct FK groups (each `id` represents one CONSTRAINT).
-    pub fn fk_group_count(&self) -> Int {
+    public fn fk_group_count(&self) -> Int {
         let mut seen_ids: List<Int> = List.new();
         let mut i: Int = 0;
         while i < self.rows.len() {

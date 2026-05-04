@@ -32,7 +32,7 @@ implement Arc4State {
     /// Mix `seed_bytes` into the permutation (KSA — key-scheduling).
     /// Equivalent to RC4 `KSA(K)` but accepts any-length key by
     /// repeating it across the 256 slots.
-    pub fn mix(&mut self, seed_bytes: &List<Byte>) {
+    public fn mix(&mut self, seed_bytes: &List<Byte>) {
         if seed_bytes.len() == 0 { return; }
         let mut j: Int = 0;
         let mut i: Int = 0;
@@ -49,7 +49,7 @@ implement Arc4State {
     }
 
     /// Pull one byte from the keystream + advance state.
-    pub fn step(&mut self) -> Byte {
+    public fn step(&mut self) -> Byte {
         self.i = (self.i + 1) % 256;
         self.j = (self.j + (self.s[self.i] as Int)) % 256;
         let tmp = self.s[self.i];
@@ -60,7 +60,7 @@ implement Arc4State {
     }
 
     /// Pull `n` bytes from the keystream.
-    pub fn step_n(&mut self, n: Int) -> List<Byte> {
+    public fn step_n(&mut self, n: Int) -> List<Byte> {
         let mut out: List<Byte> = List.new();
         let mut k: Int = 0;
         while k < n { out.push(self.step()); k = k + 1; }

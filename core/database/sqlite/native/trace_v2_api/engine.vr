@@ -33,7 +33,7 @@ public fn new_engine() -> TraceEngine {
 
 implement TraceEngine {
     /// Matches sqlite3_trace_v2: mask == 0 or spec.is_null ⇒ disable.
-    pub fn sqlite3_trace_v2(&mut self, mask: TraceEventMask, spec: CallbackSpec) {
+    public fn sqlite3_trace_v2(&mut self, mask: TraceEventMask, spec: CallbackSpec) {
         if is_empty(&mask) || is_null(&spec) {
             self.mask = empty_mask();
             self.callback = null_spec();
@@ -43,13 +43,13 @@ implement TraceEngine {
         self.callback = spec;
     }
 
-    pub fn is_enabled(&self) -> Bool {
+    public fn is_enabled(&self) -> Bool {
         !is_empty(&self.mask) && !is_null(&self.callback)
     }
 
     /// Record an event delivery / drop. `bit` is a single SQLITE_TRACE_*
     /// constant.
-    pub fn note_event(&mut self, bit: Int) -> Bool {
+    public fn note_event(&mut self, bit: Int) -> Bool {
         if !self.is_enabled() {
             self.events_dropped = self.events_dropped + 1_i64;
             return false;

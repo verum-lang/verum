@@ -37,17 +37,17 @@ public fn new_engine() -> ProgressEngine {
 }
 
 implement ProgressEngine {
-    pub fn install(&mut self, h: Maybe<ProgressHandler>) {
+    public fn install(&mut self, h: Maybe<ProgressHandler>) {
         self.handler = h;
     }
 
-    pub fn tick(&mut self) {
+    public fn tick(&mut self) {
         self.acc.observe_op();
     }
 
     /// Returns the decision from the callback. If no handler is
     /// installed or this is not a consultation tick, returns Continue.
-    pub fn consult(&mut self, cb: fn() -> ProgressDecision) -> ProgressDecision {
+    public fn consult(&mut self, cb: fn() -> ProgressDecision) -> ProgressDecision {
         match &self.handler {
             Maybe.Some(h) => {
                 if !handler_is_enabled(h) { return PdContinue; }
@@ -59,5 +59,5 @@ implement ProgressEngine {
         }
     }
 
-    pub fn consultations(&self) -> Int64 { self.acc.consultations }
+    public fn consultations(&self) -> Int64 { self.acc.consultations }
 }

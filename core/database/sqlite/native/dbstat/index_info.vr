@@ -91,7 +91,7 @@ public fn index_info_set(index_name: Text) -> IndexInfoSet {
 
 implement IndexInfoSet {
     public fn len(&self) -> Int { self.rows.len() }
-    pub fn add(&mut self, r: IndexInfoRow) { self.rows.push(r); }
+    public fn add(&mut self, r: IndexInfoRow) { self.rows.push(r); }
 }
 
 // -----------------------------------------------------------------------------
@@ -106,9 +106,9 @@ public fn index_list_set(table: Text) -> IndexListSet {
 
 implement IndexListSet {
     public fn len(&self) -> Int { self.rows.len() }
-    pub fn add(&mut self, r: IndexListRow) { self.rows.push(r); }
+    public fn add(&mut self, r: IndexListRow) { self.rows.push(r); }
 
-    pub fn unique_count(&self) -> Int {
+    public fn unique_count(&self) -> Int {
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < self.rows.len() {

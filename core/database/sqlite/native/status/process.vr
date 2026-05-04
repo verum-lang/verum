@@ -42,7 +42,7 @@ public fn process_status_new() -> ProcessStatus {
 
 implement ProcessStatus {
     /// Mirror of sqlite3_status64(op, *p, *pHwm, resetFlag).
-    pub fn read(&self, kind: &ProcessKind) -> (Int64, Int64) {
+    public fn read(&self, kind: &ProcessKind) -> (Int64, Int64) {
         match kind {
             PsMemoryUsed         => self.memory_used.snapshot(),
             PsPagecacheUsed      => self.pagecache_used.snapshot(),
@@ -55,7 +55,7 @@ implement ProcessStatus {
         }
     }
 
-    pub fn reset_high_water(&mut self, kind: &ProcessKind) {
+    public fn reset_high_water(&mut self, kind: &ProcessKind) {
         match kind {
             PsMemoryUsed         => self.memory_used.reset_high_water(),
             PsPagecacheUsed      => self.pagecache_used.reset_high_water(),
@@ -69,7 +69,7 @@ implement ProcessStatus {
     }
 
     /// Allocation tracking — bumps both memory_used and malloc_count.
-    pub fn note_allocation(&mut self, bytes: Int64) {
+    public fn note_allocation(&mut self, bytes: Int64) {
         self.memory_used.add(bytes);
         self.malloc_count.add1_i64;
         if bytes > self.malloc_size.current {
@@ -77,7 +77,7 @@ implement ProcessStatus {
         }
     }
 
-    pub fn note_free(&mut self, bytes: Int64) {
+    public fn note_free(&mut self, bytes: Int64) {
         self.memory_used.sub(bytes);
     }
 }

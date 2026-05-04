@@ -71,7 +71,7 @@ implement RTree {
 
     /// Insert a leaf entry. Caller is responsible for choosing a
     /// `mbb` of the right dimension.
-    pub fn insert(&mut self, rowid: Int64, mbb: BoundingBox) {
+    public fn insert(&mut self, rowid: Int64, mbb: BoundingBox) {
         // Naive insertion: append directly into root if root is leaf
         // and has room. Full insert path (descend, split, propagate)
         // is left to a future runtime pass — the catalogue provides
@@ -87,7 +87,7 @@ implement RTree {
     }
 
     /// Search every leaf and return rowids whose MBB intersects `query`.
-    pub fn search(&self, query: &BoundingBox) -> List<Int64> {
+    public fn search(&self, query: &BoundingBox) -> List<Int64> {
         let mut out: List<Int64> = List.new();
         let mut i: Int = 0;
         while i < self.nodes.len() {
@@ -109,7 +109,7 @@ implement RTree {
     }
 
     /// Remove the entry with the given rowid from any leaf containing it.
-    pub fn delete(&mut self, rowid: Int64) -> Bool {
+    public fn delete(&mut self, rowid: Int64) -> Bool {
         let mut found = false;
         let mut i: Int = 0;
         while i < self.nodes.len() {

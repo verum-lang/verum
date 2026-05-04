@@ -108,14 +108,14 @@ public fn runner_new(mode: RunMode) -> MigrationRunner {
 }
 
 implement MigrationRunner {
-    pub fn disable_rollback(mut self) -> MigrationRunner {
+    public fn disable_rollback(mut self) -> MigrationRunner {
         self.auto_rollback = false;
         self
     }
 
     /// Compute the runner's decision per migration WITHOUT executing.
     /// Used to render a deployment-time preview.
-    pub fn plan_decisions(&self, plan: &MigrationPlan, journal: &MigrationJournal) -> List<RunDecision> {
+    public fn plan_decisions(&self, plan: &MigrationPlan, journal: &MigrationJournal) -> List<RunDecision> {
         let mut out: List<RunDecision> = List.new();
         let mut i: Int = 0;
         while i < plan.ordered.len() {
@@ -144,7 +144,7 @@ implement MigrationRunner {
     /// returns `None` on success or `Some(error_message)` on failure.
     /// We hand SQL strings, not parsed statements — the closure is
     /// responsible for parsing + executing per its connection mode.
-    pub fn execute(
+    public fn execute(
         &self,
         plan: &MigrationPlan,
         journal: &mut MigrationJournal,

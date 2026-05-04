@@ -39,7 +39,7 @@ public fn stmt_status_new() -> StmtStatus {
 }
 
 implement StmtStatus {
-    pub fn read(&self, kind: &SqliteStatStmtKind) -> (Int64, Int64) {
+    public fn read(&self, kind: &SqliteStatStmtKind) -> (Int64, Int64) {
         match kind {
             SsFullscanStep => self.fullscan_step.snapshot(),
             SsSort         => self.sort.snapshot(),
@@ -52,7 +52,7 @@ implement StmtStatus {
         }
     }
 
-    pub fn reset_high_water(&mut self, kind: &SqliteStatStmtKind) {
+    public fn reset_high_water(&mut self, kind: &SqliteStatStmtKind) {
         match kind {
             SsFullscanStep => self.fullscan_step.reset_high_water(),
             SsSort         => self.sort.reset_high_water(),
@@ -65,18 +65,18 @@ implement StmtStatus {
         }
     }
 
-    pub fn note_full_scan_step(&mut self) { self.fullscan_step.add1_i64; }
-    pub fn note_sort(&mut self) { self.sort.add1_i64; }
-    pub fn note_autoindex(&mut self) { self.autoindex.add1_i64; }
-    pub fn note_vm_step(&mut self) { self.vm_step.add1_i64; }
-    pub fn note_reprepare(&mut self) { self.reprepare.add1_i64; }
-    pub fn note_run(&mut self) { self.run.add1_i64; }
-    pub fn note_filter_hit(&mut self) { self.filter_hit.add1_i64; }
-    pub fn note_filter_miss(&mut self) { self.filter_miss.add1_i64; }
+    public fn note_full_scan_step(&mut self) { self.fullscan_step.add1_i64; }
+    public fn note_sort(&mut self) { self.sort.add1_i64; }
+    public fn note_autoindex(&mut self) { self.autoindex.add1_i64; }
+    public fn note_vm_step(&mut self) { self.vm_step.add1_i64; }
+    public fn note_reprepare(&mut self) { self.reprepare.add1_i64; }
+    public fn note_run(&mut self) { self.run.add1_i64; }
+    public fn note_filter_hit(&mut self) { self.filter_hit.add1_i64; }
+    public fn note_filter_miss(&mut self) { self.filter_miss.add1_i64; }
 
     /// Cheap "did this statement spend more time in scans than indexed
     /// access" predicate.
-    pub fn is_scan_heavy(&self) -> Bool {
+    public fn is_scan_heavy(&self) -> Bool {
         self.fullscan_step.current > (self.vm_step.current / 10_i64)
     }
 }

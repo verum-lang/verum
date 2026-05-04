@@ -46,7 +46,7 @@ mount core.database.sqlite.native.l1_pager.pager.{PagerError, PagerErrorKind};
 
 /// Byte offset of frame `frame_no` within the WAL file.  Frame 1
 /// starts immediately after the 32-byte file header.
-pub fn frame_offset(frame_no: Int, page_size: Int) -> Int {
+public fn frame_offset(frame_no: Int, page_size: Int) -> Int {
     if frame_no < 1 { return file_header_size(); }
     file_header_size() + (frame_no - 1) * (frame_header_size() + page_size)
 }
@@ -55,7 +55,7 @@ pub fn frame_offset(frame_no: Int, page_size: Int) -> Int {
 // RecoveryReport — result of walking an existing WAL
 // -----------------------------------------------------------------------------
 
-pub type RecoveryReport is {
+public type RecoveryReport is {
     /// Total frames found in the file (whether valid or trailing).
     raw_frame_count: Int,
     /// Frames accepted into the rebuilt frame_index — those with
@@ -100,7 +100,7 @@ fn recovery_report_empty() -> RecoveryReport {
 ///
 /// Returns a `RecoveryReport` for diagnostics + EXPLAIN-style
 /// observability.
-pub fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerError> {
+public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerError> {
     let mut report = recovery_report_empty();
     let page_size = writer.state.page_size;
     let frame_stride = frame_header_size() + page_size;
@@ -171,7 +171,7 @@ pub fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerErro
 // Single-frame read
 // -----------------------------------------------------------------------------
 
-pub type WalFrameRead is {
+public type WalFrameRead is {
     header: WalFrameHeader,
     payload: List<Byte>,
 };
@@ -181,7 +181,7 @@ pub type WalFrameRead is {
 /// against the writer's current state (recovery already does
 /// this; foreground page reads short-circuit when the
 /// `WalReaderSnapshot` index already says "this frame is mine").
-pub fn read_frame(
+public fn read_frame(
     writer: &mut WalWriter,
     frame_no: Int,
 ) -> Result<WalFrameRead, PagerError> {

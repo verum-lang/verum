@@ -158,7 +158,7 @@ public type LiftResult is {
 /// Lift `vdbe` to an SSA program (pass 1 only — pending phis must be
 /// resolved by `phi_insertion::resolve_pending_phis(...)` before the
 /// SSA program is consumed by the optimizer).
-pub fn lift_vdbe_to_ssa(vdbe: &VdbeProgram) -> LiftResult {
+public fn lift_vdbe_to_ssa(vdbe: &VdbeProgram) -> LiftResult {
     // Build CFG skeleton (block boundaries).
     let skeleton = build_cfg_skeleton(&vdbe.instructions);
 
