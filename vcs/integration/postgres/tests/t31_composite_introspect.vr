@@ -1,0 +1,151 @@
+// =============================================================================
+// t31_composite_introspect.vr — populate_from_pg_type live introspection
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.4 (typed wire / composite registry).
+// =============================================================================
+//
+// V0 closes the runtime composite-introspection gap declared in
+// `composite_registry.vr` lines 32-33. This test exercises:
+//
+//   1. CREATE TYPE smoke_introspect AS (n int4, s text, big int8).
+//   2. populate_from_pg_type(registry, conn, "smoke_introspect")
+//      drives pg_type + pg_attribute and registers the schema.
+//   3. lookup_by_oid(returned schema's type_oid) matches; arity = 3.
+//   4. Field-by-name probes for "n" / "s" / "big" / "missing".
+//   5. Schema-qualified form ("public.smoke_introspect") resolves
+//      identically.
+//   6. Unknown type → DbError.Adapter("PG_TYPE_NOT_FOUND").
+//   7. Non-composite type ("int4") → DbError.Adapter
+//      ("PG_TYPE_NOT_COMPOSITE").
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConnection,
+    CompositeFieldDef, CompositeSchema, CompositeRegistry,
+    field_index_by_name,
+    populate_from_pg_type,
+};
+mount core.database.common.error.{DbError};
+
+fn main() {
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Build the composite type.
+    // -------------------------------------------------------------------------
+    let _ = conn.simple_query(&"DROP TYPE IF EXISTS smoke_introspect".clone());
+    expect_ok(
+        conn.simple_query(&
+            "CREATE TYPE smoke_introspect AS (n int4, s text, big int8)".clone()
+        ),
+        &"CREATE TYPE failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Unqualified introspection — picks up search_path's public schema.
+    // -------------------------------------------------------------------------
+    let registry = CompositeRegistry.new();
+    let schema = expect_ok(
+        populate_from_pg_type(&registry, &mut conn, &"smoke_introspect".clone()),
+        &"populate_from_pg_type unqualified".clone(),
+    );
+
+    expect_eq_int(schema.fields.len() as Int, 3,
+        &"discovered arity".clone());
+
+    // canonical_name has the form "<schema>.<typname>".
+    expect(
+        schema.name.len() > "public.smoke_introspect".len() - 1,
+        &"canonical_name non-empty".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Registry round-trip — lookup by the discovered OID.
+    // -------------------------------------------------------------------------
+    match registry.lookup_by_oid(schema.type_oid) {
+        Some(s) => expect_eq_int(s.fields.len() as Int, 3,
+            &"lookup_by_oid arity".clone()),
+        None    => expect(false, &"lookup_by_oid returned None".clone()),
+    }
+
+    // -------------------------------------------------------------------------
+    // Field-name probes against the discovered schema.
+    // -------------------------------------------------------------------------
+    expect(
+        field_index_by_name(&schema, &"n".clone()).is_some(),
+        &"discovered: n".clone(),
+    );
+    expect(
+        field_index_by_name(&schema, &"s".clone()).is_some(),
+        &"discovered: s".clone(),
+    );
+    expect(
+        field_index_by_name(&schema, &"big".clone()).is_some(),
+        &"discovered: big".clone(),
+    );
+    expect(
+        field_index_by_name(&schema, &"missing".clone()).is_none(),
+        &"missing field returns None".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Schema-qualified form must resolve to the same OID. register()
+    // replaces the earlier entry under the same OID — registry length
+    // stays unchanged.
+    // -------------------------------------------------------------------------
+    let len_before = registry.len();
+    let qualified = expect_ok(
+        populate_from_pg_type(&registry, &mut conn,
+            &"public.smoke_introspect".clone()),
+        &"populate_from_pg_type qualified".clone(),
+    );
+    expect_eq_int(qualified.type_oid, schema.type_oid,
+        &"qualified OID matches unqualified".clone());
+    expect_eq_int(registry.len(), len_before,
+        &"register() replaces same-OID entry".clone());
+
+    // -------------------------------------------------------------------------
+    // Unknown type → PG_TYPE_NOT_FOUND.
+    // -------------------------------------------------------------------------
+    match populate_from_pg_type(&registry, &mut conn,
+        &"this_type_does_not_exist_xyz_42".clone())
+    {
+        Ok(_) => expect(false, &"missing type erroneously succeeded".clone()),
+        Err(e) => match e {
+            DbError.Adapter(spec) => {
+                expect(
+                    spec.code == "PG_TYPE_NOT_FOUND",
+                    &"missing type returns PG_TYPE_NOT_FOUND".clone(),
+                );
+            }
+            _ => expect(false, &"missing type returned wrong error".clone()),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Non-composite type (int4) → PG_TYPE_NOT_COMPOSITE.
+    // -------------------------------------------------------------------------
+    match populate_from_pg_type(&registry, &mut conn, &"int4".clone()) {
+        Ok(_) => expect(false, &"int4 erroneously registered".clone()),
+        Err(e) => match e {
+            DbError.Adapter(spec) => {
+                expect(
+                    spec.code == "PG_TYPE_NOT_COMPOSITE",
+                    &"int4 returns PG_TYPE_NOT_COMPOSITE".clone(),
+                );
+            }
+            _ => expect(false, &"int4 returned wrong error".clone()),
+        }
+    }
+
+    let _ = conn.simple_query(&"DROP TYPE IF EXISTS smoke_introspect".clone());
+
+    pass(&"t31_composite_introspect".clone());
+}

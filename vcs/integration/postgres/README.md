@@ -187,6 +187,12 @@ Test list per `internal/specs/database.md` follow-up:
   ROW(99, 'beta', 1234567890)::record; field_value_by_name
   pulls each cell by its declared name + asserts exact-value
   match (spec §6.1.4 composite registry)
+- `t31_composite_introspect.vr` — populate_from_pg_type live
+  introspection: CREATE TYPE smoke_introspect(n int4, s text,
+  big int8) → populate_from_pg_type drives pg_type+pg_attribute
+  → registry resolves field-by-name; schema-qualified form
+  collides on OID; unknown type → PG_TYPE_NOT_FOUND; int4 →
+  PG_TYPE_NOT_COMPOSITE (spec §6.1.4 composite registry V1)
 
 Note on pgoutput streaming-tx variants ('S'/'E'/'c'/'A',
 proto_version 2+): the decoder now recognises these tags
