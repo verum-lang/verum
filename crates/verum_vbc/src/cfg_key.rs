@@ -198,7 +198,18 @@ fn parse_os(triple: &str, intern: &mut dyn FnMut(&str) -> StringId) -> TargetOs 
         // Pull the OS slot out of the triple — it's the third
         // dash-separated token by convention (`arch-vendor-os-env`).
         let token = triple.split('-').nth(2).unwrap_or(triple);
-        TargetOs::Other(intern(token))
+        // Phase 7 (#precompile-stdlib epic): freestanding triples
+        // (`wasm32-unknown-unknown`, `bpfel-unknown-unknown`,
+        // `<arch>-unknown-none`, etc.) must resolve to the
+        // canonical `TargetOs::None` rather than the pool-local
+        // `TargetOs::Other(StringId)` — StringIds are interned per
+        // module/archive, so cross-archive cfg_key matching breaks
+        // unless freestanding triples land on the canonical None.
+        if token == "unknown" || token == "none" {
+            TargetOs::None
+        } else {
+            TargetOs::Other(intern(token))
+        }
     }
 }
 

@@ -443,7 +443,19 @@ impl<'s> CompilationPipeline<'s> {
         // The linker round-trips deterministically and is verified
         // by `crates/verum_compiler::embedded_stdlib_vbc::tests::
         // linker_round_trip_through_embedded_archive`.
-        if std::env::var("VERUM_LINKER_MERGE").is_ok() {
+        //
+        // Phase 7 (#precompile-stdlib epic): cross-compile path.
+        // When `--target X` is explicitly set, the embedded archive
+        // already carries per-target variants (cfg_keys +
+        // function_variants), so route through the linker for archive-
+        // wide variant pick instead of the source-driven path. This
+        // is the "no per-target filesystem cache" property — same
+        // embedded archive serves every triple via cfg_key matching.
+        // Auto-trigger when a target triple is set; opt-in
+        // VERUM_LINKER_MERGE=1 still works for host-target testing.
+        let cross_compile = self.session.options().target_triple.is_some();
+        let linker_merge = std::env::var("VERUM_LINKER_MERGE").is_ok() || cross_compile;
+        if linker_merge {
             if let Some(archive) = crate::embedded_stdlib_vbc::get_runtime_archive() {
                 let target_triple = self
                     .session

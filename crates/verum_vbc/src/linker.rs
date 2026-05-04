@@ -1036,6 +1036,135 @@ mod tests {
         assert_eq!(cfg.arch, Some(crate::cfg_key::TargetArch::X86_64));
     }
 
+    /// Phase 7 of the precompiled-stdlib epic: cross-compile via
+    /// archive variant pick. Confirms that every triple in the
+    /// supported matrix resolves to a stable, well-formed
+    /// `CfgKey` via `VbcLinker::new`. Matrix:
+    ///   darwin / linux / windows × x86_64 / aarch64
+    ///   plus riscv64 / wasm32 / bpfel single-OS combos
+    /// One archive serves every triple via `CfgKey::matches`.
+    #[test]
+    fn cross_compile_matrix_resolves() {
+        use crate::cfg_key::{Endian, PtrWidth, TargetArch, TargetOs};
+
+        // (triple, expected_os, expected_arch, expected_ptr_width, expected_endian)
+        let matrix: &[(&str, TargetOs, TargetArch, PtrWidth, Endian)] = &[
+            // darwin × { x86_64, aarch64 }
+            (
+                "x86_64-apple-darwin",
+                TargetOs::Darwin,
+                TargetArch::X86_64,
+                PtrWidth::Bits64,
+                Endian::Little,
+            ),
+            (
+                "aarch64-apple-darwin",
+                TargetOs::Darwin,
+                TargetArch::Aarch64,
+                PtrWidth::Bits64,
+                Endian::Little,
+            ),
+            // linux × { x86_64, aarch64 }
+            (
+                "x86_64-unknown-linux-gnu",
+                TargetOs::Linux,
+                TargetArch::X86_64,
+                PtrWidth::Bits64,
+                Endian::Little,
+            ),
+            (
+                "aarch64-unknown-linux-gnu",
+                TargetOs::Linux,
+                TargetArch::Aarch64,
+                PtrWidth::Bits64,
+                Endian::Little,
+            ),
+            // windows × { x86_64, aarch64 }
+            (
+                "x86_64-pc-windows-msvc",
+                TargetOs::Windows,
+                TargetArch::X86_64,
+                PtrWidth::Bits64,
+                Endian::Little,
+            ),
+            (
+                "aarch64-pc-windows-msvc",
+                TargetOs::Windows,
+                TargetArch::Aarch64,
+                PtrWidth::Bits64,
+                Endian::Little,
+            ),
+            // exotic ISAs — single canonical triple each
+            (
+                "riscv64gc-unknown-linux-gnu",
+                TargetOs::Linux,
+                TargetArch::Riscv64,
+                PtrWidth::Bits64,
+                Endian::Little,
+            ),
+            (
+                "wasm32-unknown-unknown",
+                TargetOs::None,
+                TargetArch::Wasm32,
+                PtrWidth::Bits32,
+                Endian::Little,
+            ),
+            (
+                "bpfel-unknown-none",
+                TargetOs::None,
+                TargetArch::Bpfel,
+                PtrWidth::Bits32,
+                Endian::Little,
+            ),
+        ];
+
+        for (triple, want_os, want_arch, want_ptr, want_endian) in matrix {
+            let linker = VbcLinker::new(triple);
+            let cfg = linker.target_cfg();
+            assert_eq!(cfg.os, Some(*want_os), "os mismatch for {}", triple);
+            assert_eq!(cfg.arch, Some(*want_arch), "arch mismatch for {}", triple);
+            assert_eq!(
+                cfg.ptr_width,
+                Some(*want_ptr),
+                "ptr_width mismatch for {}",
+                triple
+            );
+            assert_eq!(
+                cfg.endian,
+                Some(*want_endian),
+                "endian mismatch for {}",
+                triple
+            );
+        }
+    }
+
+    /// Phase 7: a "darwin-only" stored variant must NOT match a
+    /// linux active triple (cross-compile target mismatch
+    /// rejection). This is the cfg_key invariant that lets one
+    /// archive carry multiple per-OS variants without ambiguity.
+    #[test]
+    fn cross_compile_variant_rejection() {
+        use crate::cfg_key::{CfgKey, TargetOs};
+
+        let darwin_linker = VbcLinker::new("aarch64-apple-darwin");
+        let linux_linker = VbcLinker::new("x86_64-unknown-linux-gnu");
+
+        // Stored constraint: "this variant is darwin-only"
+        let darwin_only = CfgKey {
+            os: Some(TargetOs::Darwin),
+            ..CfgKey::default()
+        };
+
+        assert!(
+            darwin_only.matches(darwin_linker.target_cfg()),
+            "darwin-only variant should match darwin active triple"
+        );
+        assert!(
+            !darwin_only.matches(linux_linker.target_cfg()),
+            "darwin-only variant must NOT match linux active triple"
+        );
+    }
+
     #[test]
     fn add_empty_user_module_succeeds() {
         let mut linker = VbcLinker::new("aarch64-apple-darwin");
