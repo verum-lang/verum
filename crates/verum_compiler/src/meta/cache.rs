@@ -536,6 +536,12 @@ impl Default for MetaCacheConfig {
 
 /// Caches results of pure meta function calls and deterministic builtin
 /// function calls to speed up incremental compilation.
+///
+/// Optionally backed by a filesystem persistence layer
+/// ([`crate::meta::persistence::MetaCachePersistence`]) — Phase 9 of
+/// the precompiled-stdlib epic — which preserves the primitive subset
+/// of `MetaValue` results across compiler runs. Configure via
+/// [`MetaEvalCache::with_persistence`].
 pub struct MetaEvalCache {
     /// Meta function call cache
     meta_calls: Arc<RwLock<MetaCallCacheInner>>,
@@ -543,6 +549,10 @@ pub struct MetaEvalCache {
     builtin_calls: Arc<RwLock<BuiltinCallCacheInner>>,
     /// Whether caching is enabled
     enabled: bool,
+    /// Optional cross-run filesystem persistence layer for the
+    /// meta-call cache.  When `Some`, FS reads back-fill in-memory
+    /// misses and FS writes happen alongside in-memory inserts.
+    persistence: Option<Arc<crate::meta::persistence::MetaCachePersistence>>,
 }
 
 impl MetaEvalCache {
@@ -562,7 +572,27 @@ impl MetaEvalCache {
                 config.builtin_call_max_size,
             ))),
             enabled: config.enabled,
+            persistence: None,
         }
+    }
+
+    /// Attach a cross-run filesystem persistence layer.  Reads use it
+    /// to back-fill in-memory misses; writes go through to disk
+    /// alongside in-memory inserts.  Phase 9 V0 — primitive
+    /// `MetaValue` subset only; AST-bearing variants stay in-memory
+    /// only.
+    ///
+    /// Use this in conjunction with
+    /// [`get_meta_call_with_source_hash`](Self::get_meta_call_with_source_hash)
+    /// — the plain [`get_meta_call`](Self::get_meta_call) path bypasses
+    /// the persistence layer because it has no source_hash to validate
+    /// against.
+    pub fn with_persistence(
+        mut self,
+        persistence: Arc<crate::meta::persistence::MetaCachePersistence>,
+    ) -> Self {
+        self.persistence = Some(persistence);
+        self
     }
 
     /// Look up a cached meta function call result.
@@ -589,9 +619,62 @@ impl MetaEvalCache {
             return;
         }
         let key = MetaCallKey::new(function_name, args);
+        // Write to filesystem persistence (best-effort) BEFORE
+        // moving `result` into the in-memory cache.  Skipped for
+        // AST-bearing MetaValue variants by `MetaCachePersistence::put`.
+        if let Some(p) = self.persistence.as_ref() {
+            p.put(
+                function_name.as_str(),
+                key.function_hash,
+                key.args_hash,
+                source_hash,
+                &result,
+            );
+        }
         if let Ok(mut cache) = self.meta_calls.write() {
             cache.insert(key, result, source_hash);
         }
+    }
+
+    /// Source-hash-aware lookup that consults the cross-run
+    /// filesystem persistence layer on in-memory miss.  Returns
+    /// `Maybe::Some(value)` for in-memory hit, on-disk hit (with
+    /// matching source hash), or `Maybe::None` otherwise.
+    ///
+    /// On disk hit, the value is also re-populated into the in-memory
+    /// cache so subsequent lookups within the same run hit the fast
+    /// path.
+    pub fn get_meta_call_with_source_hash(
+        &self,
+        function_name: &Text,
+        args: &[MetaValue],
+        source_hash: u64,
+    ) -> Maybe<MetaValue> {
+        if !self.enabled {
+            return Maybe::None;
+        }
+        let key = MetaCallKey::new(function_name, args);
+        // 1. In-memory fast path.
+        if let Ok(mut cache) = self.meta_calls.write() {
+            if let Maybe::Some(value) = cache.get(&key) {
+                return Maybe::Some(value);
+            }
+        }
+        // 2. Filesystem fallback.
+        let persistence = match self.persistence.as_ref() {
+            Some(p) => p,
+            None => return Maybe::None,
+        };
+        let value = match persistence.get(key.function_hash, key.args_hash, source_hash) {
+            Some(v) => v,
+            None => return Maybe::None,
+        };
+        // 3. Back-fill in-memory cache so the second lookup of the
+        //    same call within this run takes the hot path.
+        if let Ok(mut cache) = self.meta_calls.write() {
+            cache.insert(key, value.clone(), source_hash);
+        }
+        Maybe::Some(value)
     }
 
     /// Look up a cached builtin function call result.
@@ -699,6 +782,7 @@ impl Clone for MetaEvalCache {
             meta_calls: Arc::clone(&self.meta_calls),
             builtin_calls: Arc::clone(&self.builtin_calls),
             enabled: self.enabled,
+            persistence: self.persistence.as_ref().map(Arc::clone),
         }
     }
 }
@@ -725,6 +809,68 @@ mod tests {
         let cached = cache.get_meta_call(&func_name, &args);
         assert!(cached.is_some());
         assert_eq!(cached.unwrap(), result);
+    }
+
+    /// Phase 9 V0: cross-run filesystem persistence. Two separate
+    /// `MetaEvalCache` instances pointing at the same on-disk
+    /// directory simulate two compiler runs.  The first writes; the
+    /// second reads back (in-memory empty, FS hit).
+    #[test]
+    fn fs_persistence_survives_cache_drop() {
+        use crate::meta::persistence::MetaCachePersistence;
+
+        let dir = tempfile::tempdir().unwrap();
+        let persistence = Arc::new(MetaCachePersistence::new(
+            dir.path().to_path_buf(),
+            "compiler-test-1.0.0".to_string(),
+        ));
+        let func_name = Text::from("compute_layout");
+        let args = vec![MetaValue::Int(64)];
+        let result = MetaValue::Int(128);
+        let source_hash: u64 = 0xdead_beef;
+
+        // Run #1: insert.
+        let cache1 = MetaEvalCache::new().with_persistence(Arc::clone(&persistence));
+        cache1.insert_meta_call(&func_name, &args, result.clone(), source_hash);
+
+        // Run #2: fresh cache, same persistence layer.  In-memory
+        // is empty; FS fallback should hit.
+        drop(cache1);
+        let cache2 = MetaEvalCache::new().with_persistence(persistence);
+        let got = cache2.get_meta_call_with_source_hash(&func_name, &args, source_hash);
+        assert!(got.is_some(), "FS fallback should hit on second run");
+        assert_eq!(got.unwrap(), result);
+
+        // Subsequent same-key lookup hits in-memory directly (back-fill).
+        let got2 = cache2.get_meta_call(&func_name, &args);
+        assert!(got2.is_some(), "in-memory back-fill should serve repeat lookup");
+    }
+
+    /// Stale source_hash on the FS layer must miss — the cache
+    /// can't return a value computed against an obsolete source.
+    #[test]
+    fn fs_persistence_stale_source_hash_misses() {
+        use crate::meta::persistence::MetaCachePersistence;
+
+        let dir = tempfile::tempdir().unwrap();
+        let persistence = Arc::new(MetaCachePersistence::new(
+            dir.path().to_path_buf(),
+            "compiler-test-1.0.0".to_string(),
+        ));
+        let func_name = Text::from("f");
+        let args = vec![MetaValue::Int(1)];
+
+        let cache1 = MetaEvalCache::new().with_persistence(Arc::clone(&persistence));
+        cache1.insert_meta_call(&func_name, &args, MetaValue::Int(99), 1);
+
+        let cache2 = MetaEvalCache::new().with_persistence(persistence);
+        // Different source hash — source has been edited.
+        assert!(
+            cache2
+                .get_meta_call_with_source_hash(&func_name, &args, 2)
+                .is_none(),
+            "stale source_hash must miss"
+        );
     }
 
     #[test]
