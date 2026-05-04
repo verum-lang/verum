@@ -156,7 +156,12 @@ fn main() {
         .join("target")
         .join("precompiled-stdlib")
         .join("runtime.vbca");
+    let precompile_metadata = project_root
+        .join("target")
+        .join("precompiled-stdlib")
+        .join("runtime.core_metadata");
     let runtime_vbc_path = Path::new(&out_dir).join("stdlib_runtime.vbca");
+    let runtime_metadata_path = Path::new(&out_dir).join("stdlib_runtime.core_metadata");
     if precompile_archive.is_file() {
         match fs::read(&precompile_archive) {
             Ok(bytes) => {
@@ -196,6 +201,54 @@ fn main() {
         println!(
             "cargo:warning=No precompiled stdlib archive at {} — runtime will fall back to source compile. Run `verum stdlib precompile` to refresh.",
             precompile_archive.display()
+        );
+    }
+
+    // T2-extended: embed runtime.core_metadata sidecar produced by
+    // `verum stdlib precompile` alongside the VBCA.  Carries the
+    // typecheck-ready CoreMetadata that lets pipeline init bypass
+    // the slow `load_stdlib_modules` path entirely.  Empty
+    // placeholder when the sidecar is missing — runtime detects the
+    // empty case and re-falls-through to legacy source-driven
+    // typecheck (only relevant on freshly-built compilers before
+    // the first `stdlib precompile` run).
+    if precompile_metadata.is_file() {
+        match fs::read(&precompile_metadata) {
+            Ok(bytes) => {
+                let _ = fs::write(&runtime_metadata_path, &bytes);
+                println!(
+                    "cargo:rustc-env=STDLIB_RUNTIME_CORE_METADATA_PATH={}",
+                    runtime_metadata_path.display()
+                );
+                println!(
+                    "cargo:warning=Embedded precompiled stdlib core metadata: {:.1}KB ({})",
+                    bytes.len() as f64 / 1024.0,
+                    precompile_metadata.display()
+                );
+                println!("cargo:rerun-if-changed={}", precompile_metadata.display());
+            }
+            Err(e) => {
+                let _ = fs::write(&runtime_metadata_path, &[] as &[u8]);
+                println!(
+                    "cargo:rustc-env=STDLIB_RUNTIME_CORE_METADATA_PATH={}",
+                    runtime_metadata_path.display()
+                );
+                println!(
+                    "cargo:warning=precompiled stdlib metadata at {} failed to read: {} — embedding placeholder",
+                    precompile_metadata.display(),
+                    e
+                );
+            }
+        }
+    } else {
+        let _ = fs::write(&runtime_metadata_path, &[] as &[u8]);
+        println!(
+            "cargo:rustc-env=STDLIB_RUNTIME_CORE_METADATA_PATH={}",
+            runtime_metadata_path.display()
+        );
+        println!(
+            "cargo:warning=No precompiled stdlib metadata at {} — typecheck will fall back to source-driven path.  Run `verum stdlib precompile` to refresh.",
+            precompile_metadata.display()
         );
     }
 }

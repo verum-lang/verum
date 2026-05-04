@@ -90,6 +90,32 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!("[phase] load_stdlib_modules: enter");
         }
 
+        // T2-extended single-path: when the precompile metadata
+        // sidecar is embedded, the typecheck phase consumes it
+        // directly via `self.stdlib_metadata` (set at pipeline
+        // construction).  Stdlib AST is no longer load-bearing —
+        // skip the parse-and-walk path entirely.  This eliminates
+        // the ~9.6s `disk-cache HIT 2444 modules` cold-start cost
+        // that dominated runtime before T2.
+        //
+        // Only the bootstrap path (no embedded metadata) still
+        // walks stdlib source — covered by a separate explicit
+        // mode, not a fallback.
+        if crate::embedded_stdlib_metadata::has_runtime_metadata()
+            && self.stdlib_metadata.is_some()
+        {
+            if trace {
+                eprintln!(
+                    "[phase] load_stdlib_modules: SKIPPED (embedded core_metadata sidecar present)"
+                );
+            }
+            tracing::debug!(
+                target: "load_stdlib_modules",
+                "skipped: typecheck consumes embedded CoreMetadata directly"
+            );
+            return Ok(());
+        }
+
         // FAST PATH: Try to use cached fully-populated registry
         // This is the key optimization: deep_clone a cached registry (~1ms)
         // instead of re-registering ~166 modules (~500ms).
