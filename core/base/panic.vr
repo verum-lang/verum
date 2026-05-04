@@ -19,6 +19,15 @@ module panic;
 // panicking diagnostic surface.
 mount core.intrinsics.{spin_hint, unreachable as intrinsic_unreachable, catch_unwind};
 
+// `write_stderr` and `exit_process` were originally mounted mid-file,
+// but the codegen-side mount processing for `panic_impl` (which calls
+// `write_stderr` at line 56) needs the symbols registered BEFORE the
+// function body is compiled. Hoisted to module top so call-sites
+// resolve at codegen time. (#119 audit pass 3 — surfaced as
+// `[lenient] SKIP top-level fn panic_impl (bug-class):
+// undefined function: write_stderr` under VERUM_STRICT_CODEGEN=1.)
+mount core.intrinsics.runtime.os.{write_stderr, exit_process};
+
 // =============================================================================
 // I/O and Process Exit
 // =============================================================================
@@ -72,10 +81,6 @@ fn panic_impl(msg: Text, file: Text, line: Int, column: Int) -> ! {
     exit_process(101)
 }
 
-/// Write a string to stderr — centralised in
-/// `core/intrinsics/runtime/os.vr` (#65 Phase 1.5).
-mount core.intrinsics.runtime.os.{write_stderr};
-
 /// Write an integer to stderr.
 ///
 
@@ -119,9 +124,8 @@ fn write_int_stderr(n: Int) {
     write_stderr(&digit_str);
 }
 
-/// Exit the process — centralised in
-/// `core/intrinsics/runtime/os.vr` (#65 Phase 1.5).
-mount core.intrinsics.runtime.os.{exit_process};
+// (write_stderr + exit_process mounts hoisted to module top — see
+// the lengthy explanation there on the codegen ordering issue.)
 
 /// Panic with a formatted message.
 public fn panic_fmt(args: FormatArgs) -> ! {
