@@ -57,8 +57,13 @@ impl DeriveMacro for DeriveDeserialize {
         // Create the deserialize method
         let deserialize_method = self.create_deserialize_method(ctx, body, span);
 
-        // Generate impl block
-        Ok(ctx.generate_impl("Deserialize", List::from(vec![deserialize_method]), span))
+        // Generate impl block — auto-emit `where T: Deserialize`
+        // for every field-used type param.
+        Ok(ctx.generate_impl_with_field_bounds(
+            "Deserialize",
+            List::from(vec![deserialize_method]),
+            span,
+        ))
     }
 
     fn doc_comment(&self) -> &'static str {
