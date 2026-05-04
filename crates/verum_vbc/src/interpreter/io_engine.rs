@@ -733,6 +733,161 @@ pub fn async_accept(_engine: i64, _listen_fd: i64, _timeout_ns: i64) -> i64 {
 }
 
 // ============================================================================
+// VBC-IO-ENGINE-2 — zero-copy async_read / async_write
+// ============================================================================
+//
+// Closes the deferred follow-up declared in
+// `project_vbc_io_engine_2026-05-01.md`. Pre-fix the
+// `__async_read_raw` / `__async_write_raw` intrinsics returned -1
+// (stub). Now they wait for fd readiness through the IoEngine
+// (submit FLAG_READ/WRITE → poll → take_ready → remove), then
+// perform a single libc::read / libc::write into the caller-
+// supplied raw buffer.
+//
+// **The buffer is a raw address.** The Verum-side surface
+// (`core/io/engine.vr::IoEngine.{read, write}`) accepts
+// `buf: Int` — the caller is in unsafe territory and is
+// responsible for keeping the buffer alive across the call.
+// We validate the obvious safety invariants (non-zero address,
+// non-negative length) and treat the address as opaque past that.
+//
+// Returns:
+//   * `>= 0`  — bytes read / written.
+//   * `0`     — EOF (read) / nothing-to-send (write); also the
+//               trivial-case `len == 0` short-circuit.
+//   * `NET_STATUS_TIMEOUT` — poll timed out before the fd became
+//                            ready.
+//   * `NET_STATUS_REACTOR_ERROR` — submit/poll failed; the engine
+//                                  handle was bad.
+//   * `NET_STATUS_IO_ERROR` — the libc::read/write itself failed,
+//                             OR a precondition (bad fd / bad
+//                             buffer / bad len) tripped.
+//
+// Cross-platform: Unix-only via libc::read / libc::write. The
+// non-unix stub returns -1 to match the existing `async_accept`
+// pattern.
+#[cfg(unix)]
+pub fn async_read(engine: i64, fd: i64, buf_addr: i64, len: i64, timeout_ns: i64) -> i64 {
+    use super::dispatch_table::handlers::net_runtime;
+    if fd < 0 || buf_addr == 0 || len < 0 {
+        return net_runtime::NET_STATUS_IO_ERROR;
+    }
+    if len == 0 {
+        return 0;
+    }
+    if !await_ready(engine, fd, FLAG_READ as i64, timeout_ns) {
+        // `await_ready` returns false on TIMEOUT *or* REACTOR_ERROR;
+        // disambiguate via the engine-validity probe.
+        return classify_wait_failure(engine);
+    }
+    let n = unsafe {
+        libc::read(
+            fd as libc::c_int,
+            buf_addr as *mut libc::c_void,
+            len as libc::size_t,
+        )
+    };
+    if n < 0 {
+        net_runtime::NET_STATUS_IO_ERROR
+    } else {
+        n as i64
+    }
+}
+#[cfg(not(unix))]
+pub fn async_read(_engine: i64, _fd: i64, _buf_addr: i64, _len: i64, _timeout_ns: i64) -> i64 {
+    -1
+}
+
+#[cfg(unix)]
+pub fn async_write(engine: i64, fd: i64, buf_addr: i64, len: i64, timeout_ns: i64) -> i64 {
+    use super::dispatch_table::handlers::net_runtime;
+    if fd < 0 || buf_addr == 0 || len < 0 {
+        return net_runtime::NET_STATUS_IO_ERROR;
+    }
+    if len == 0 {
+        return 0;
+    }
+    if !await_ready(engine, fd, FLAG_WRITE as i64, timeout_ns) {
+        return classify_wait_failure(engine);
+    }
+    let n = unsafe {
+        libc::write(
+            fd as libc::c_int,
+            buf_addr as *const libc::c_void,
+            len as libc::size_t,
+        )
+    };
+    if n < 0 {
+        net_runtime::NET_STATUS_IO_ERROR
+    } else {
+        n as i64
+    }
+}
+#[cfg(not(unix))]
+pub fn async_write(_engine: i64, _fd: i64, _buf_addr: i64, _len: i64, _timeout_ns: i64) -> i64 {
+    -1
+}
+
+/// Mirror of the submit / poll / take_ready / remove choreography
+/// used by `async_accept`. Returns `true` iff the fd became
+/// ready within the timeout. False outcomes (timeout vs. reactor
+/// error) are disambiguated by the caller via
+/// `classify_wait_failure`.
+#[cfg(unix)]
+fn await_ready(engine: i64, fd: i64, flags: i64, timeout_ns: i64) -> bool {
+    if submit(engine, fd, flags) != 0 {
+        // Mark ENGINE_SUBMIT_FAILED via a side channel so the caller
+        // can disambiguate. We use a thread-local because the
+        // existing surface returns plain bool; threading an enum
+        // through every call site is over-engineering for one use.
+        WAIT_LAST_FAILURE.with(|c| c.set(WaitFailure::ReactorError));
+        return false;
+    }
+    let n = poll(engine, 16, timeout_ns);
+    if n < 0 {
+        let _ = remove(engine, fd);
+        WAIT_LAST_FAILURE.with(|c| c.set(WaitFailure::ReactorError));
+        return false;
+    }
+    if n == 0 {
+        let _ = remove(engine, fd);
+        WAIT_LAST_FAILURE.with(|c| c.set(WaitFailure::Timeout));
+        return false;
+    }
+    let _ = take_ready(engine, fd, flags);
+    let _ = remove(engine, fd);
+    true
+}
+
+/// Translate the thread-local wait-failure marker into the
+/// canonical NET_STATUS_*. Always called on the false path of
+/// `await_ready`; defaults to `NET_STATUS_IO_ERROR` if the marker
+/// was somehow not set (defensive — should never happen).
+#[cfg(unix)]
+fn classify_wait_failure(_engine: i64) -> i64 {
+    use super::dispatch_table::handlers::net_runtime;
+    WAIT_LAST_FAILURE.with(|c| match c.get() {
+        WaitFailure::Timeout => net_runtime::NET_STATUS_TIMEOUT,
+        WaitFailure::ReactorError => net_runtime::NET_STATUS_REACTOR_ERROR,
+        WaitFailure::None => net_runtime::NET_STATUS_IO_ERROR,
+    })
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+enum WaitFailure {
+    None,
+    Timeout,
+    ReactorError,
+}
+
+#[cfg(unix)]
+thread_local! {
+    static WAIT_LAST_FAILURE: std::cell::Cell<WaitFailure> =
+        const { std::cell::Cell::new(WaitFailure::None) };
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -848,6 +1003,129 @@ mod tests {
         assert_eq!(r, NET_STATUS_TIMEOUT);
         assert!(elapsed >= Duration::from_millis(80) && elapsed < Duration::from_secs(2));
         assert_eq!(tcp_close(listen_fd), 0);
+        assert_eq!(engine_destroy(h), 0);
+    }
+
+    /// VBC-IO-ENGINE-2 — `async_read` end-to-end. Bind a
+    /// listener, accept a connection, kick the peer to send 13
+    /// bytes, then drive `async_read` against the server-side
+    /// TcpStream's raw fd — verify the bytes land in the
+    /// caller-supplied buffer.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn async_read_end_to_end_via_io_engine() {
+        let h = engine_new(8);
+        assert!(h > 0);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Background: connect + send 13 bytes.
+        let bg = std::thread::spawn(move || {
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            std::thread::sleep(Duration::from_millis(20));
+            use std::io::Write;
+            s.write_all(b"hello, world!").unwrap();
+            std::thread::sleep(Duration::from_millis(80));
+        });
+
+        // Accept the connection synchronously to get the server-
+        // side raw fd.
+        let (stream, _) = listener.accept().unwrap();
+        let server_fd = stream.as_raw_fd() as i64;
+        // Drop the std wrapper but keep the raw fd alive — the
+        // caller (us) now owns the fd lifecycle for the test.
+        std::mem::forget(stream);
+
+        let mut buf = [0u8; 32];
+        let n = async_read(
+            h,
+            server_fd,
+            buf.as_mut_ptr() as i64,
+            buf.len() as i64,
+            1_000_000_000, // 1s
+        );
+        assert_eq!(n, 13, "expected 13 bytes, got {n}");
+        assert_eq!(&buf[..13], b"hello, world!");
+
+        bg.join().unwrap();
+        unsafe { libc::close(server_fd as libc::c_int) };
+        assert_eq!(engine_destroy(h), 0);
+    }
+
+    /// VBC-IO-ENGINE-2 — `async_write` end-to-end. Symmetric to
+    /// the read test: server writes via `async_write`, peer reads
+    /// the bytes synchronously.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn async_write_end_to_end_via_io_engine() {
+        let h = engine_new(8);
+        assert!(h > 0);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Background: connect + read 7 bytes.
+        let bg = std::thread::spawn(move || {
+            use std::io::Read;
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let mut got = [0u8; 7];
+            s.read_exact(&mut got).unwrap();
+            assert_eq!(&got, b"VERUM!\n");
+        });
+
+        let (stream, _) = listener.accept().unwrap();
+        let server_fd = stream.as_raw_fd() as i64;
+        std::mem::forget(stream);
+
+        let payload: &[u8] = b"VERUM!\n";
+        let n = async_write(
+            h,
+            server_fd,
+            payload.as_ptr() as i64,
+            payload.len() as i64,
+            1_000_000_000, // 1s
+        );
+        assert_eq!(n, 7, "expected 7 bytes written, got {n}");
+
+        bg.join().unwrap();
+        unsafe { libc::close(server_fd as libc::c_int) };
+        assert_eq!(engine_destroy(h), 0);
+    }
+
+    /// VBC-IO-ENGINE-2 — `async_read` with `len = 0` short-
+    /// circuits to 0 without touching the engine. Pin the
+    /// trivial-case behaviour.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn async_read_zero_len_returns_zero() {
+        let h = engine_new(2);
+        // Use any positive fd — won't be touched.
+        let n = async_read(h, 99999, 0x1000_0000, 0, 100_000_000);
+        assert_eq!(n, 0);
+        assert_eq!(engine_destroy(h), 0);
+    }
+
+    /// VBC-IO-ENGINE-2 — bad inputs (negative fd / null buffer /
+    /// negative length) surface as IO_ERROR.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn async_read_bad_inputs_return_io_error() {
+        use super::super::dispatch_table::handlers::net_runtime::NET_STATUS_IO_ERROR;
+        let h = engine_new(2);
+        assert_eq!(
+            async_read(h, -1, 0x1000_0000, 8, 100_000_000),
+            NET_STATUS_IO_ERROR,
+            "negative fd"
+        );
+        assert_eq!(
+            async_read(h, 1, 0, 8, 100_000_000),
+            NET_STATUS_IO_ERROR,
+            "null buffer"
+        );
+        assert_eq!(
+            async_read(h, 1, 0x1000_0000, -1, 100_000_000),
+            NET_STATUS_IO_ERROR,
+            "negative length"
+        );
         assert_eq!(engine_destroy(h), 0);
     }
 
