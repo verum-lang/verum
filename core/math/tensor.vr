@@ -967,32 +967,15 @@ public fn sum_squared_error_axis<T: Numeric>(
     @vbc(TENSOR_REDUCE, square_diff(pred, target).data, ReduceOp.Sum, axis)
 }
 
-// Smooth L1 loss (Huber loss with delta=1): quadratic for small
-// errors, linear for large. Used in object-detection regression.
-// #74 Tier B — `0.5 * d^2` for `|d| <= delta`, else
-// `delta * (|d| - 0.5 * delta)` where `d = pred - target`.
-// Composes `sub` + `tensor_abs` + `square` + element-wise
-// `where_tensor` + `mean`.
-public fn huber_loss<T: Numeric>(
-    pred: &DynTensor<T>,
-    target: &DynTensor<T>,
-    delta: T,
-) -> T {
-    let d = sub(pred, target);
-    let abs_d = tensor_abs(&d);
-    let half = mul_scalar(&square(&d), (0.5 as Float) as T);
-    let linear_term = sub_scalar(&abs_d, (0.5 as Float) as T * delta);
-    let linear = mul_scalar(&linear_term, delta);
-    let mask = le(&abs_d, &full_like(&abs_d, delta));
-    mean(&where_tensor(&mask, &half, &linear))
-}
-
-// Smooth-L1 loss with delta=1.
-// #74 Tier B — convenience wrapper for the canonical
-// detection-paper choice.
-public fn smooth_l1_loss<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
-    huber_loss(pred, target, 1 as T)
-}
+// Smooth L1 loss / Huber loss: quadratic for small errors, linear for large.
+// Used in object-detection regression. For `|d| <= delta`: `0.5 * d^2`,
+// else: `delta * (|d| - 0.5 * delta)` where `d = pred - target`.
+//
+// **Disabled pending #74 parser-quirk fix** — the `(0.5 as Float) as T`
+// chained-cast form needed for generic-T scalar arithmetic confuses
+// the recursive-descent parser when the result is multiplied by another
+// generic-T scalar. Tracked as a separate parser issue. The MSE / SSE
+// loss families above cover the common regression-loss surface.
 
 // Cosine-similarity loss: `1 - cosine_similarity(a, b)`.
 // #74 Tier B — drives embeddings to alignment when used as a loss.
@@ -2819,6 +2802,175 @@ public fn flip<T: Numeric>(x: &DynTensor<T>, axes: &[USize]) -> DynTensor<T> {
 /// (the last chunk may be smaller).
 public fn chunk<T: Numeric>(x: &DynTensor<T>, chunk_size: USize, dim: USize) -> List<DynTensor<T>> {
     @vbc(TENSOR_CHUNK, x, chunk_size, dim)
+}
+
+// =============================================================================
+// Convolution + pooling wrappers (#74 Tier B)
+// =============================================================================
+//
+// Verum-language thin wrappers over the existing TENSOR_CONV /
+// TENSOR_CONV2D / TENSOR_POOL primitives. The primitives accept
+// per-call `(stride, padding)` tuples; these wrappers expose the
+// canonical PyTorch / TF call shape.
+
+/// 1-D convolution: input `[N, C_in, L]`, kernel `[C_out, C_in, K]`
+/// → output `[N, C_out, L_out]`. Stride and padding default to
+/// 1 and 0 (PyTorch defaults).
+/// #74 Tier B — direct wrapper over `tensor_conv` primitive
+/// (TENSOR_CONV). Kept as a Verum-language helper so call sites
+/// can pass canonical shapes without indexing the @vbc directly.
+public fn conv1d<T: Numeric>(input: &DynTensor<T>, kernel: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_CONV, input.data, kernel.data)
+}
+
+/// 2-D convolution: input `[N, C_in, H, W]`, kernel `[C_out, C_in, kH, kW]`
+/// → output `[N, C_out, H_out, W_out]`. Implementation uses the
+/// TENSOR_CONV2D primitive's defaults (stride=1, padding=0).
+/// #74 Tier B — wrapper over `tensor_conv2d` primitive.
+public fn conv2d<T: Numeric>(input: &DynTensor<T>, kernel: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_CONV2D, input.data, kernel.data)
+}
+
+/// Max-pooling 2D over `[N, C, H, W]` input with given kernel
+/// size, stride, and padding (per spatial axis).
+/// #74 Tier B — wrapper over `tensor_pool2d` primitive with
+/// `PoolOp.Max`.
+public fn max_pool2d<T: Numeric>(
+    input: &DynTensor<T>,
+    kernel_size: (USize, USize),
+    stride: (USize, USize),
+    padding: (USize, USize),
+) -> DynTensor<T> {
+    @vbc(TENSOR_POOL, 0, input.data, &[kernel_size.0, kernel_size.1],
+         &[stride.0, stride.1], &[padding.0, padding.1])
+}
+
+/// Average-pooling 2D.
+/// #74 Tier B — wrapper over `tensor_pool2d` with `PoolOp.Avg`.
+public fn avg_pool2d<T: Numeric>(
+    input: &DynTensor<T>,
+    kernel_size: (USize, USize),
+    stride: (USize, USize),
+    padding: (USize, USize),
+) -> DynTensor<T> {
+    @vbc(TENSOR_POOL, 1, input.data, &[kernel_size.0, kernel_size.1],
+         &[stride.0, stride.1], &[padding.0, padding.1])
+}
+
+/// Sum-pooling 2D.
+/// #74 Tier B — wrapper over `tensor_pool2d` with `PoolOp.Sum`.
+public fn sum_pool2d<T: Numeric>(
+    input: &DynTensor<T>,
+    kernel_size: (USize, USize),
+    stride: (USize, USize),
+    padding: (USize, USize),
+) -> DynTensor<T> {
+    @vbc(TENSOR_POOL, 2, input.data, &[kernel_size.0, kernel_size.1],
+         &[stride.0, stride.1], &[padding.0, padding.1])
+}
+
+/// Global average pooling: reduce all spatial dimensions to a
+/// single value per channel. Output shape `[N, C]` for a `[N, C, *]`
+/// input. Used as the canonical "neck" between feature extractor
+/// and classifier head in modern CNNs (ResNet, EfficientNet).
+/// #74 Tier B — composes per-axis `mean_axis` reductions over the
+/// trailing spatial dims (rank - 2 of them).
+public fn global_avg_pool<T: Numeric>(input: &DynTensor<T>) -> DynTensor<T> {
+    let rank = input.rank();
+    assert(rank >= 3, "global_avg_pool requires rank >= 3");
+    // Reduce from innermost axis backwards so axis numbering stays
+    // consistent at each step.
+    let mut out = mean_axis(input, -1);
+    let mut remaining = rank - 3;
+    while remaining > 0 {
+        out = mean_axis(&out, -1);
+        remaining -= 1;
+    }
+    out
+}
+
+/// Global max pooling: reduce all spatial dimensions to a single
+/// max per channel.
+/// #74 Tier B — composes per-axis `max_axis` reductions.
+public fn global_max_pool<T: Numeric>(input: &DynTensor<T>) -> DynTensor<T> {
+    let rank = input.rank();
+    assert(rank >= 3, "global_max_pool requires rank >= 3");
+    let mut out = max_axis(input, -1);
+    let mut remaining = rank - 3;
+    while remaining > 0 {
+        out = max_axis(&out, -1);
+        remaining -= 1;
+    }
+    out
+}
+
+// =============================================================================
+// Gradient / optimisation utilities (#74 Tier B)
+// =============================================================================
+
+/// Gradient clipping by L2 norm: scales `g` so its Euclidean
+/// norm doesn't exceed `max_norm`. Standard technique to stabilise
+/// RNN / Transformer training.
+/// #74 Tier B — composes `square` + `sum` + `sqrt` + `mul_scalar`.
+/// If the current norm <= `max_norm`, returns `g` unchanged.
+public fn clip_grad_norm<T: Numeric>(g: &DynTensor<T>, max_norm: T) -> DynTensor<T> {
+    let n_sq: Float = sum(&square(g)) as Float;
+    let cur_norm: T = sqrt(n_sq) as T;
+    if cur_norm <= max_norm {
+        return g.clone();
+    }
+    let scale: T = max_norm / cur_norm;
+    mul_scalar(g, scale)
+}
+
+/// Gradient clipping by element-wise value: clamps each element
+/// to `[-max_val, max_val]`.
+/// #74 Tier B — alias for `tensor_clamp(g, -max_val, max_val)`.
+public fn clip_grad_value<T: Numeric>(g: &DynTensor<T>, max_val: T) -> DynTensor<T> {
+    tensor_clamp(g, -max_val, max_val)
+}
+
+/// Polynomial: `c0 + c1*x + c2*x^2 + … + cn*x^n` evaluated using
+/// Horner's method (numerically stable, n multiplications).
+/// `coeffs` is `[c0, c1, …, cn]` from low to high degree.
+/// #74 Tier B — composes `mul_scalar` + `add_scalar` in a loop.
+/// Returns a tensor of the same shape as `x`.
+public fn polyval<T: Numeric>(x: &DynTensor<T>, coeffs: &[T]) -> DynTensor<T> {
+    assert(!coeffs.is_empty(), "polyval requires at least one coefficient");
+    // Horner: start from the highest degree and fold downwards.
+    let n = coeffs.len();
+    let mut acc = full_like(x, coeffs[n - 1]);
+    let mut i = n - 1;
+    while i > 0 {
+        i -= 1;
+        acc = add_scalar(&mul(&acc, x), coeffs[i]);
+    }
+    acc
+}
+
+/// Sigmoid-derivative: `sigmoid(x) * (1 - sigmoid(x))`.
+/// #74 Tier B — common in backprop hand-written kernels. Composes
+/// `sigmoid` + `rsub_scalar` + `mul`.
+public fn sigmoid_derivative<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let s = sigmoid(x);
+    let one_minus_s = rsub_scalar(1 as T, &s);
+    mul(&s, &one_minus_s)
+}
+
+/// Tanh-derivative: `1 - tanh(x)^2`.
+/// #74 Tier B — composes `tensor_tanh` + `square` + `rsub_scalar`.
+public fn tanh_derivative<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let t = tensor_tanh(x);
+    rsub_scalar(1 as T, &square(&t))
+}
+
+/// ReLU-derivative: `1 if x > 0 else 0`.
+/// #74 Tier B — composes `gt` + `where_tensor`.
+public fn relu_derivative<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    let zeros = full_like(x, 0 as T);
+    let cond = gt(x, &zeros);
+    let ones = full_like(x, 1 as T);
+    where_tensor(&cond, &ones, &zeros)
 }
 
 // =============================================================================
