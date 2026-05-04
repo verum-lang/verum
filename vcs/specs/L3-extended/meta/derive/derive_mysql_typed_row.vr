@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, mysql_typed_row, database
+
+/// `@derive(MysqlTypedRow)` — symmetric to `@derive(TypedRow)`
+/// but targets the MySQL-side
+/// `core.database.mysql.typed_row.MysqlTypedRow` protocol.
+///
+/// Differences from PG TypedRow:
+///   * Method name `from_mysql_row` (not `from_typed_row`).
+///   * Row type `&List<RowValue>` (not `&List<TypedValue>`).
+///   * No `desc` parameter.
+///
+/// Otherwise identical: bound inference enabled (generic
+/// records get `where T: MysqlTypedRow`), sum types rejected.
+
+mount core.database.mysql.{MysqlTypedRow};
+mount core.database.mysql.binlog_rows.RowValue;
+
+// ============================================================
+// RECORD TYPES
+// ============================================================
+
+@derive(MysqlTypedRow)
+type User is {
+    id: Int,
+    name: Text,
+    age: Int,
+};
+
+@derive(MysqlTypedRow)
+type Profile is {
+    user_id: Int,
+    bio: Maybe<Text>,
+    score: Maybe<Float>,
+};
+
+// ============================================================
+// NEWTYPE
+// ============================================================
+
+@derive(MysqlTypedRow)
+type UserId is (Int);
+
+@derive(MysqlTypedRow)
+type Email is (Text);
+
+// ============================================================
+// GENERIC — auto-emits `where T: MysqlTypedRow`
+// ============================================================
+
+@derive(MysqlTypedRow)
+type Container<T> is {
+    id: Int,
+    val: T,
+};
+
+// ============================================================
+// USAGE
+// ============================================================
+
+fn smoke() {
+    let u = User { id: 1, name: "alice".clone(), age: 30 };
+    let p = Profile { user_id: 1, bio: None, score: Some(0.5) };
+    let uid = UserId(42);
+    let em  = Email("a@b.c".clone());
+    let c: Container<Int> = Container { id: 1, val: 42 };
+}
+
+fn main() {
+    smoke();
+}

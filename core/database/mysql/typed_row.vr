@@ -138,10 +138,29 @@ implement<T: MysqlTypedRow> MysqlTypedRow for Maybe<T> {
 // Tuple implementations — (T1,) / (T1, T2) / (T1, T2, T3) / (T1..T4)
 // =============================================================================
 
-fn slice_one(row: &List<RowValue>, idx: Int) -> List<RowValue> {
+/// Build a one-element row from `row[idx]`. Re-exported `public`
+/// so `@derive(MysqlTypedRow)` generated code (lives in user
+/// modules) can call it without inlining per call site. Mirror
+/// of the PG `typed_row.slice_one`.
+public fn slice_one(row: &List<RowValue>, idx: Int) -> List<RowValue> {
     let mut out: List<RowValue> = List.with_capacity(1);
     out.push(row[idx].clone());
     out
+}
+
+/// One-call helper used by `@derive(MysqlTypedRow)` generated
+/// code — extracts a single cell at `idx` and decodes via the
+/// field type's existing `MysqlTypedRow` impl. Avoids forcing
+/// every derive-using module to mount both `expect_arity` and
+/// `slice_one`. Mirror of PG `typed_row.decode_field`.
+///
+/// Type parameter `T` is inferred from the call-site let
+/// binding (`let f: FieldType = decode_field(row, i)?`).
+public fn decode_field<T: MysqlTypedRow>(
+    row: &List<RowValue>,
+    idx: Int,
+) -> Result<T, DbError> {
+    T::from_mysql_row(&slice_one(row, idx))
 }
 
 implement<A: MysqlTypedRow> MysqlTypedRow for (A,) {
@@ -221,7 +240,10 @@ public fn rows_typed_my<R: MysqlTypedRow>(
 // Helpers
 // =============================================================================
 
-fn expect_arity(row: &List<RowValue>, want: Int) -> Result<(), DbError> {
+/// Validate `row.len() == want`; produce a MysqlTypedRow arity
+/// error otherwise. Re-exported `public` so `@derive(MysqlTypedRow)`
+/// generated code can call it. Mirror of PG `typed_row.expect_arity`.
+public fn expect_arity(row: &List<RowValue>, want: Int) -> Result<(), DbError> {
     let got = row.len() as Int;
     if got != want {
         return Err(DbError.Adapter(AdapterSpecific {

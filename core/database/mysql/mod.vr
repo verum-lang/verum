@@ -199,6 +199,9 @@ public mount .async_binlog_consumer.{
 };
 public mount .typed_row.{
     MysqlTypedRow, rows_typed_my,
+    expect_arity as mysql_typed_row_expect_arity,
+    slice_one as mysql_typed_row_slice_one,
+    decode_field as mysql_typed_row_decode_field,
 };
 public mount .json_binary.{
     decode_json_binary,

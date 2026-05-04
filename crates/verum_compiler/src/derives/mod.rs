@@ -51,6 +51,7 @@ pub mod deserialize;
 pub mod display;
 pub mod error;
 pub mod hash;
+pub mod mysql_typed_row;
 pub mod partial_eq;
 pub mod serialize;
 pub mod shell_render;
@@ -74,6 +75,7 @@ pub use deserialize::DeriveDeserialize;
 pub use display::DeriveDisplay;
 pub use error::DeriveError as DeriveErrorMacro;
 pub use hash::DeriveHash;
+pub use mysql_typed_row::DeriveMysqlTypedRow;
 pub use partial_eq::DerivePartialEq;
 pub use serialize::DeriveSerialize;
 pub use typed_row::DeriveTypedRow;
@@ -116,6 +118,10 @@ impl DeriveRegistry {
         // Hash — auto-generate `core.base.protocols.Hash` impl,
         // closes the Eq+Hash pair (PartialEq exists since v0).
         registry.register("Hash", Box::new(DeriveHash));
+        // MysqlTypedRow — symmetric to TypedRow but targets the
+        // MySQL-side `core.database.mysql.typed_row.MysqlTypedRow`
+        // protocol (different method name, different cell type).
+        registry.register("MysqlTypedRow", Box::new(DeriveMysqlTypedRow));
 
         registry
     }
@@ -313,6 +319,8 @@ mod tests {
         assert!(registry.get("TypedRow").is_some());
         // Hash derive — completes the Eq+Hash pair
         assert!(registry.get("Hash").is_some());
+        // MysqlTypedRow derive — symmetric to TypedRow
+        assert!(registry.get("MysqlTypedRow").is_some());
 
         // Unknown derives should return None
         assert!(registry.get("Unknown").is_none());
